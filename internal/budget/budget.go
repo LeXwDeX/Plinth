@@ -136,6 +136,7 @@ type PlanCheck struct {
 	// distance over the bbox diagonal, a fraction of the triangles).
 	MaximumRatio *float64 `json:"maximum_ratio,omitempty"`
 	// Required makes a boolean property mandatory (UV, watertight, skin).
+	// For y_up it marks an upright subject, so a lying model fails (#280).
 	Required bool `json:"required,omitempty"`
 }
 

@@ -130,30 +130,10 @@ func evaluate(report modelinspect.Report, check budget.PlanCheck) Result {
 		}
 		return Result{Check: check.Check, Status: status, Actual: actual}
 	case CheckYUp:
-		if check.MaximumRatio == nil || readError || longestEdge(report) <= 0 {
+		if check.MaximumRatio == nil || readError {
 			return Result{Check: check.Check, Status: StatusUnknown, Actual: ""}
 		}
-		actual := "flat"
-		if shortestEdge(report) > *check.MaximumRatio*longestEdge(report) {
-			size := report.BBox.Size
-			switch {
-			case size[1] >= size[0] && size[1] >= size[2]:
-				actual = "y"
-			case size[0] >= size[2]:
-				actual = "x"
-			default:
-				actual = "z"
-			}
-		}
-		status := StatusPass
-		if actual != "y" {
-			// A flat box cannot say which way is up; x/z is a failure.
-			if actual == "flat" {
-				status = StatusUnknown
-			} else {
-				status = StatusFail
-			}
-		}
+		status, actual := YUp(report.BBox.Size, *check.MaximumRatio, check.Required)
 		return Result{Check: check.Check, Status: status, Actual: actual}
 	case CheckPlausibleScale:
 		actual := longestEdge(report)
@@ -171,6 +151,42 @@ func evaluate(report modelinspect.Report, check budget.PlanCheck) Result {
 		return ratio(report, check, report.Topology.DegenerateTriangles)
 	}
 	return Result{Check: check.Check, Status: StatusUnknown, Detail: "unknown_check"}
+}
+
+// YUp judges the up axis from a bounding box (#280). The box alone cannot
+// tell a lying humanoid from a standing quadruped, a car or a table: all of
+// them are wider than tall. So the rule depends on what the purpose says about
+// the subject:
+//
+//   - Y is the longest edge: pass.
+//   - The shortest edge is at most flatRatio of the longest: the box is flat
+//     and has no readable up axis, unknown ("flat").
+//   - upright (the purpose's subject stands, such as a humanoid character) and
+//     Y is strictly the shortest edge: the subject lies on its back or front,
+//     fail.
+//   - Otherwise unknown: a wide subject is a normal shape, not an error.
+//
+// actual names the longest axis ("x", "y" or "z"), "flat", or "" when the box
+// is empty.
+func YUp(size [3]float64, flatRatio float64, upright bool) (string, string) {
+	longest := max(size[0], max(size[1], size[2]))
+	if longest <= 0 {
+		return StatusUnknown, ""
+	}
+	if min(size[0], min(size[1], size[2])) <= flatRatio*longest {
+		return StatusUnknown, "flat"
+	}
+	actual := "z"
+	switch {
+	case size[1] >= size[0] && size[1] >= size[2]:
+		return StatusPass, "y"
+	case size[0] >= size[2]:
+		actual = "x"
+	}
+	if upright && size[1] < size[0] && size[1] < size[2] {
+		return StatusFail, actual
+	}
+	return StatusUnknown, actual
 }
 
 func boolean(report modelinspect.Report, check budget.PlanCheck, actual, required bool) Result {

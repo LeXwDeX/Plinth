@@ -41,7 +41,10 @@ const record = (overrides: Partial<SelfCheckRecord> = {}): SelfCheckRecord => ({
     } }),
     check({ kind: 'render', tool: 'render_model_views', views: ['front', 'back'], handles: ['@img2'] }),
   ],
-  conclusion: { status: 'passed', summary: 'matches the reference', findings: ['outline ok'], fixes: ['none'], remaining: [], at: '' },
+  conclusion: {
+    status: 'passed', summary: 'matches the reference', findings: ['outline ok'], fixes: ['none'], remaining: [],
+    waiver: '', purposeLabel: '', at: '',
+  },
   updatedAt: '',
   ...overrides,
 });
@@ -71,12 +74,41 @@ describe('the persisted self-check card (#246)', () => {
 
   it('renders the issues state as a warning, never as passed', () => {
     const view = render(<SelfCheckRecordCard records={[record({
-      status: 'has_issues', conclusion: { status: 'has_issues', summary: 'one crack', findings: ['crack'], fixes: [], remaining: ['crack on the back'], at: '' },
+      status: 'has_issues', conclusion: {
+        status: 'has_issues', summary: 'one crack', findings: ['crack'], fixes: [], remaining: ['crack on the back'],
+        waiver: '', purposeLabel: '', at: '',
+      },
     })]} renders={renders} defaultOpen />);
     const badge = view.getByTestId('chat-self-check-status');
     expect(badge.textContent).toBe(messages['ui.chat.self_check.status_has_issues']);
     expect(badge.getAttribute('data-role')).toBe('issues');
     expect(view.getByTestId('chat-self-check-record-item').textContent).toContain('crack on the back');
+  });
+
+  it('names the judged purpose and an accepted waiver on the conclusion (#281)', () => {
+    const view = render(<SelfCheckRecordCard records={[record({
+      conclusion: {
+        status: 'passed', summary: 'ok', findings: [], fixes: [], remaining: [],
+        waiver: '用户接受面数略超', purposeLabel: '展示/渲染', at: '',
+      },
+    })]} renders={renders} defaultOpen />);
+    expect(view.getByTestId('chat-self-check-purpose').textContent).toBe(
+      messages['ui.chat.self_check.purpose'].replace('{purpose}', '展示/渲染'),
+    );
+    expect(view.getByTestId('chat-self-check-waiver').textContent).toContain('用户接受面数略超');
+  });
+
+  it('shows the uncheckable state apart from passed and issues (#281)', () => {
+    const view = render(<SelfCheckRecordCard records={[record({
+      status: 'not_inspectable', conclusion: {
+        status: 'not_inspectable', summary: 'too large', findings: [], fixes: [], remaining: [],
+        waiver: '', purposeLabel: '', at: '',
+      },
+    })]} renders={renders} defaultOpen />);
+    const badge = view.getByTestId('chat-self-check-status');
+    expect(badge.getAttribute('data-role')).toBe('uncheckable');
+    expect(badge.textContent).not.toBe(messages['ui.chat.self_check.status_passed']);
+    expect(view.queryByTestId('chat-self-check-waiver')).toBeNull();
   });
 
   it('degrades an unknown stored status to the declared unchecked state', () => {

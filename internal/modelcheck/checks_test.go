@@ -98,3 +98,34 @@ func TestFailedOnlyCountsFails(t *testing.T) {
 		t.Fatal("a fail must block")
 	}
 }
+
+// TestEvaluateYUpFailsOnlyALyingUprightSubject is #280 at a plan checkpoint:
+// Required marks a purpose whose subject stands, and only then a box whose Y
+// edge is the shortest fails; a wide quadruped or vehicle stays unknown and
+// never pauses the plan.
+func TestEvaluateYUpFailsOnlyALyingUprightSubject(t *testing.T) {
+	cases := []struct {
+		name     string
+		size     [3]float64
+		upright  bool
+		want     string
+		wantAxis string
+	}{
+		{"standing humanoid", [3]float64{0.6, 1.8, 0.3}, true, StatusPass, "y"},
+		{"lying humanoid", [3]float64{0.6, 0.3, 1.8}, true, StatusFail, "z"},
+		{"lying humanoid on a wide purpose", [3]float64{0.6, 0.3, 1.8}, false, StatusUnknown, "z"},
+		{"quadruped", [3]float64{0.4, 0.9, 1.5}, true, StatusUnknown, "z"},
+		{"vehicle", [3]float64{1.8, 1.5, 4.5}, false, StatusUnknown, "z"},
+		{"table", [3]float64{1.5, 0.75, 0.8}, false, StatusUnknown, "x"},
+		{"flat sheet", [3]float64{1, 0.01, 1}, true, StatusUnknown, "flat"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			report := modelinspect.Report{BBox: modelinspect.BBoxReport{Size: test.size}}
+			results := Evaluate(report, []budget.PlanCheck{{Check: CheckYUp, MaximumRatio: bound(0.05), Required: test.upright}})
+			if results[0].Status != test.want || results[0].Actual != test.wantAxis {
+				t.Fatalf("y_up = %+v, want %s/%s", results[0], test.want, test.wantAxis)
+			}
+		})
+	}
+}

@@ -76,8 +76,12 @@ type ProjectAgentSchema struct {
 	UnknownAssetTemplate string `json:"unknown_asset_template"`
 	ListLimitTemplate    string `json:"list_limit_template"`
 	StylePromptTemplate  string `json:"style_prompt_template"`
-	HandlePrefix         string `json:"handle_prefix"`
-	ListLimit            int    `json:"list_limit"`
+	// PalettePromptTemplate is the provider-prompt suffix that carries the
+	// project palette ({palette}) into a 2D generation of a project-source
+	// turn (#288). Empty keeps the palette out of provider prompts.
+	PalettePromptTemplate string `json:"palette_prompt_template,omitempty"`
+	HandlePrefix          string `json:"handle_prefix"`
+	ListLimit             int    `json:"list_limit"`
 }
 
 // ProjectAuditSchema declares the product-audit actions a project operation
@@ -117,8 +121,11 @@ type ProjectMessagesSchema struct {
 	// ConventionsEmpty and AssetsEmpty fill their own context placeholders.
 	StyleGuideEmpty          string `json:"style_guide_empty"`
 	StyleGuideReferencesOnly string `json:"style_guide_references_only"`
-	ConventionsEmpty         string `json:"conventions_empty"`
-	AssetsEmpty              string `json:"assets_empty"`
+	// StyleGuidePalette appends the enabled guide's palette ({palette}) to
+	// {style} in the Agent's project block (#288).
+	StyleGuidePalette string `json:"style_guide_palette,omitempty"`
+	ConventionsEmpty  string `json:"conventions_empty"`
+	AssetsEmpty       string `json:"assets_empty"`
 }
 
 // PublicProjectSchema is the browser-visible part of application.project.

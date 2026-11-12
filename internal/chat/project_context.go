@@ -28,6 +28,8 @@ type ProjectStyleGuideContext struct {
 	Enabled    bool
 	Text       string
 	References []string
+	// Palette is the guide's #RRGGBB colours in their stored order (#288).
+	Palette []string
 }
 
 // ProjectConventionsContext is the project's production defaults. Brief uses
@@ -63,7 +65,8 @@ func (context *ProjectContext) ProjectStyleSource() bool {
 		return false
 	}
 	return context.StyleGuide.Enabled &&
-		(strings.TrimSpace(context.StyleGuide.Text) != "" || len(context.StyleGuide.References) > 0)
+		(strings.TrimSpace(context.StyleGuide.Text) != "" || len(context.StyleGuide.References) > 0 ||
+			len(context.StyleGuide.Palette) > 0)
 }
 
 // ProjectAssetByHandle finds the frozen asset a @projectN token names.
@@ -97,6 +100,7 @@ func cloneProjectContext(context *ProjectContext) *ProjectContext {
 	}
 	cloned := *context
 	cloned.StyleGuide.References = append([]string(nil), context.StyleGuide.References...)
+	cloned.StyleGuide.Palette = append([]string(nil), context.StyleGuide.Palette...)
 	if context.Conventions.Brief != nil {
 		cloned.Conventions.Brief = make(ProductionBrief, len(context.Conventions.Brief))
 		for name, value := range context.Conventions.Brief {
@@ -147,6 +151,7 @@ func effectiveStyleLock(stored StyleLock, projectContext *ProjectContext) StyleL
 			effective.Enabled = true
 			effective.Text = strings.TrimSpace(projectContext.StyleGuide.Text)
 			effective.ProjectReferences = append([]string(nil), projectContext.StyleGuide.References...)
+			effective.ProjectPalette = append([]string(nil), projectContext.StyleGuide.Palette...)
 			effective.ProjectName = projectContext.Name
 			effective.ProjectID = projectContext.ID
 		}

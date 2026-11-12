@@ -907,7 +907,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		}
 		toolNames[tool.Name] = struct{}{}
 	}
-	if err := validateCraftPrompts(schema.Agent.CraftPrompts, toolNames, maxPromptCharacters); err != nil {
+	if err := validateCraftPrompts(schema.Agent.CraftPrompts, toolNames, maxPromptCharacters, schema.Model3DUsage.Brief.Fields); err != nil {
 		return err
 	}
 	if err := validateCraftPromptOfferings(schema.Agent.CraftPrompts, capabilityDomains); err != nil {
@@ -3190,7 +3190,7 @@ func validateSelfCheck(schema ChatSchema) error {
 			return errors.New("chat.self_check.statuses 的 id 与 label 不能为空")
 		}
 		switch status.Role {
-		case "unchecked", "passed", "issues":
+		case "unchecked", "passed", "issues", "uncheckable":
 		default:
 			return fmt.Errorf("chat.self_check.statuses 含未知 role %q", status.Role)
 		}
@@ -3297,6 +3297,27 @@ func validateSelfCheck(schema ChatSchema) error {
 		{"reference_no_reference", selfCheck.Texts.ReferenceNoReference, nil},
 		{"caveats", selfCheck.Texts.Caveats, nil},
 	}
+	if selfCheck.RequiredChecks.UsageClean {
+		texts = append(texts,
+			struct {
+				name     string
+				value    string
+				required []string
+			}{"record_usage_failed", selfCheck.Texts.RecordUsageFailed, []string{"{checks}"}},
+			struct {
+				name     string
+				value    string
+				required []string
+			}{"record_default_purpose", selfCheck.Texts.RecordDefaultPurpose, []string{"{purpose}"}},
+		)
+	}
+	if roles["uncheckable"] {
+		texts = append(texts, struct {
+			name     string
+			value    string
+			required []string
+		}{"record_uncheckable_unproven", selfCheck.Texts.RecordUncheckableUnproven, []string{"{status}"}})
+	}
 	for _, text := range texts {
 		if strings.TrimSpace(text.value) == "" {
 			return fmt.Errorf("chat.self_check.texts.%s 不能为空", text.name)
@@ -3347,7 +3368,7 @@ func validateModelReview(schema ChatSchema, capabilityPresentations []Capability
 		review.Inspect.MaxListedParts <= 0 {
 		return errors.New("chat.model_review.inspect 的限额、比例与部件上限必须为正数")
 	}
-	if err := validateModelInspectProduction(review.Inspect.Production, capabilityPresentations); err != nil {
+	if err := validateModelInspectProduction(review.Inspect.Production, schema.Model3DUsage, capabilityPresentations); err != nil {
 		return err
 	}
 
@@ -3465,6 +3486,7 @@ func validateModelReview(schema ChatSchema, capabilityPresentations []Capability
 // placeholder the executor would leave behind.
 func validateModelInspectProduction(
 	production ChatModelInspectProductionSchema,
+	usage ChatModel3DUsageSchema,
 	capabilityPresentations []CapabilityPresentation,
 ) error {
 	if production.PivotBottomCenterRatio <= 0 || production.PivotBottomCenterRatio > 1 {
@@ -3472,6 +3494,20 @@ func validateModelInspectProduction(
 	}
 	if production.YUpFlatRatio <= 0 || production.YUpFlatRatio >= 1 {
 		return errors.New("chat.model_review.inspect.production.y_up_flat_ratio 必须在 (0, 1) 内")
+	}
+	uprightProfiles := make(map[string]bool, len(production.YUpUprightProfiles))
+	for _, id := range production.YUpUprightProfiles {
+		declared := false
+		for _, profile := range usage.Profiles {
+			declared = declared || profile.ID == id
+		}
+		if !declared {
+			return fmt.Errorf("chat.model_review.inspect.production.y_up_upright_profiles 含未声明的用途 %q", id)
+		}
+		if uprightProfiles[id] {
+			return fmt.Errorf("chat.model_review.inspect.production.y_up_upright_profiles 中 %q 重复", id)
+		}
+		uprightProfiles[id] = true
 	}
 	if production.DebrisRatio < 0 || production.DebrisRatio > 1 {
 		return errors.New("chat.model_review.inspect.production.debris_ratio 必须在 [0, 1] 内")

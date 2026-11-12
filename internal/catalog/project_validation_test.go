@@ -65,6 +65,12 @@ func TestProjectValidationRejectsIncompleteOrUnknownDeclarations(t *testing.T) {
 		"invalid palette pattern": func(app *catalog.ApplicationSchema) {
 			app.Project.StyleGuide.PaletteColorPattern = "["
 		},
+		"palette prompt without placeholder": func(app *catalog.ApplicationSchema) {
+			app.Project.Agent.PalettePromptTemplate = "Project palette."
+		},
+		"palette message without placeholder": func(app *catalog.ApplicationSchema) {
+			app.Project.Messages.StyleGuidePalette = "色板"
+		},
 		"agent tool not declared": func(app *catalog.ApplicationSchema) {
 			app.Project.Agent = &catalog.ProjectAgentSchema{
 				ToolName: "list_project_assets", HandlePrefix: "@project", ListLimit: 20,

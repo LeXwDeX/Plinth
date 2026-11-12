@@ -113,7 +113,8 @@ func TestPublicSelfCheckProjectionKeepsOnlyTheBrowserContract(t *testing.T) {
 			t.Fatalf("the public projection leaks %q: %s", hidden, encoded)
 		}
 	}
-	if len(public.Chat.SelfCheck.Statuses) != 3 || public.Chat.SelfCheck.Limits.MaxRoundsPerResult <= 0 {
+	// #281 adds the uncheckable state to unchecked, passed and issues.
+	if len(public.Chat.SelfCheck.Statuses) != 4 || public.Chat.SelfCheck.Limits.MaxRoundsPerResult <= 0 {
 		t.Fatalf("public self_check = %+v", public.Chat.SelfCheck)
 	}
 	// #246: the plan card renders the declared label, so the checkpoint ids

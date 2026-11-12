@@ -2383,8 +2383,10 @@ type ChatSelfCheckLimitsSchema struct {
 	MaxRendersPerRound      int `json:"max_renders_per_round"`
 }
 
-// ChatSelfCheckStatusSchema is one delivery state. Role is unchecked, passed
-// or issues; id is what a stored conclusion names.
+// ChatSelfCheckStatusSchema is one delivery state. Role is unchecked, passed,
+// issues or the optional uncheckable (the latest inspection was refused, for
+// example above the inspection limit, #281); id is what a stored conclusion
+// names.
 type ChatSelfCheckStatusSchema struct {
 	ID    string `json:"id"`
 	Role  string `json:"role"`
@@ -2395,6 +2397,10 @@ type ChatSelfCheckStatusSchema struct {
 type ChatSelfCheckRequiredSchema struct {
 	Inspect           bool `json:"inspect"`
 	RenderOrReference bool `json:"render_or_reference"`
+	// UsageClean makes a passed conclusion also require that the latest
+	// successful inspect_model judged no purpose check as failed, unless the
+	// conclusion carries a waiver reason (#281).
+	UsageClean bool `json:"usage_clean,omitempty"`
 }
 
 // ChatSelfCheckConclusionSchema bounds the written conclusion.
@@ -2459,10 +2465,17 @@ type ChatSelfCheckTextsSchema struct {
 	RecordTooLong            string `json:"record_too_long"`
 	RecordInvalidArguments   string `json:"record_invalid_arguments"`
 	RecordUnknownTask        string `json:"record_unknown_task"`
-	ReferenceReady           string `json:"reference_ready"`
-	ReferenceUnreadable      string `json:"reference_unreadable"`
-	ReferenceNoReference     string `json:"reference_no_reference"`
-	Caveats                  string `json:"caveats"`
+	// RecordUsageFailed refuses a passed conclusion over failed purpose
+	// checks ({checks}); RecordUncheckableUnproven refuses the uncheckable
+	// status ({status}) without a refused inspection; RecordDefaultPurpose
+	// tells the Agent the checks used the default purpose ({purpose}) (#281).
+	RecordUsageFailed         string `json:"record_usage_failed,omitempty"`
+	RecordUncheckableUnproven string `json:"record_uncheckable_unproven,omitempty"`
+	RecordDefaultPurpose      string `json:"record_default_purpose,omitempty"`
+	ReferenceReady            string `json:"reference_ready"`
+	ReferenceUnreadable       string `json:"reference_unreadable"`
+	ReferenceNoReference      string `json:"reference_no_reference"`
+	Caveats                   string `json:"caveats"`
 }
 
 // ChatSelfCheckCheckpointSchema is one checkpoint a plan step may declare.
@@ -2735,9 +2748,15 @@ type ChatModelInspectProductionSchema struct {
 	PivotBottomCenterRatio float64 `json:"pivot_bottom_center_ratio"`
 	// YUpFlatRatio marks a bbox as flat (and therefore its up axis unknown)
 	// when its shortest edge is at most this fraction of its longest edge.
-	YUpFlatRatio    float64 `json:"y_up_flat_ratio"`
-	DebrisRatio     float64 `json:"debris_ratio"`
-	DegenerateRatio float64 `json:"degenerate_ratio"`
+	YUpFlatRatio float64 `json:"y_up_flat_ratio"`
+	// YUpUprightProfiles lists the model3d_usage purposes whose subject
+	// stands upright (a humanoid character). Only for them a box whose Y edge
+	// is the shortest fails the y_up check as lying; for every other purpose a
+	// wide box (a quadruped, a vehicle, a table, a sword) is unknown, because
+	// the box alone cannot tell its orientation (#280).
+	YUpUprightProfiles []string `json:"y_up_upright_profiles,omitempty"`
+	DebrisRatio        float64  `json:"debris_ratio"`
+	DegenerateRatio    float64  `json:"degenerate_ratio"`
 	// DefaultPurposeText explains that the session has no usable brief
 	// purpose ({purpose}); BriefPurposeText names the brief purpose
 	// ({purpose}); TriangleOverrideText records the brief's triangle budget

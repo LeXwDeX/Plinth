@@ -324,7 +324,8 @@ func (policy *ProductionPlanPolicy) planCheck(check string, profile catalog.Chat
 		return budget.PlanCheck{Check: check, MaximumRatio: &ratio}, true
 	case modelcheck.CheckYUp:
 		ratio := policy.Production.YUpFlatRatio
-		return budget.PlanCheck{Check: check, MaximumRatio: &ratio}, true
+		upright := slices.Contains(policy.Production.YUpUprightProfiles, profile.ID)
+		return budget.PlanCheck{Check: check, MaximumRatio: &ratio, Required: upright}, true
 	case modelcheck.CheckPlausibleScale:
 		if profile.ScaleRangeM == nil {
 			return budget.PlanCheck{Check: check}, true

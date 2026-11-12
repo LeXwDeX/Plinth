@@ -160,12 +160,18 @@ func TestProposeProductionPlanFreezesCheckpointThresholdsAndContingencies(t *tes
 	brief := chat.ProductionBrief{"purpose": json.RawMessage(`"game_character"`)}
 	arguments := `{"title":"角色","steps":[{"capability":"image-to-3d","purpose":"生成角色"},{"capability":"remesh","purpose":"减面"}],` +
 		`"budgets":[{"unit":"legacy.credits","amount":20}],` +
-		`"checkpoints":[{"after_capability":"remesh","checks":["triangles","pivot_bottom_center"]}],` +
+		`"checkpoints":[{"after_capability":"remesh","checks":["triangles","pivot_bottom_center","y_up"]}],` +
 		`"contingencies":[{"id":"pivot","trigger":["pivot_bottom_center"],"step":{"capability":"resize","purpose":"把原点移到底部中心"}}]}`
 	plan, content := propose(t, service, store, planCommandWithBrief(arguments, brief))
 	if len(plan.Checkpoints) != 1 || plan.Checkpoints[0].AfterCapability != "remesh" ||
-		len(plan.Checkpoints[0].Checks) != 2 {
+		len(plan.Checkpoints[0].Checks) != 3 {
 		t.Fatalf("checkpoints = %+v", plan.Checkpoints)
+	}
+	// #280: a game character stands upright, so the frozen y_up check fails a
+	// lying model; the flat ratio still comes from the Schema.
+	if yUp := plan.Checkpoints[0].Checks[2]; yUp.Check != "y_up" || !yUp.Required ||
+		yUp.MaximumRatio == nil || *yUp.MaximumRatio <= 0 {
+		t.Fatalf("y_up threshold = %+v", yUp)
 	}
 	triangles := plan.Checkpoints[0].Checks[0]
 	if triangles.Check != "triangles" || triangles.Maximum == nil || *triangles.Maximum != 60000 {

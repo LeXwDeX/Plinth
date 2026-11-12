@@ -30,6 +30,9 @@ const (
 	SelfCheckRoleUnchecked = "unchecked"
 	SelfCheckRolePassed    = "passed"
 	SelfCheckRoleIssues    = "issues"
+	// SelfCheckRoleUncheckable is the optional state for a model the latest
+	// inspect_model could not read, for example above the limit (#281).
+	SelfCheckRoleUncheckable = "uncheckable"
 )
 
 // SelfCheckMetrics is the deterministic reference comparison a
@@ -57,20 +60,36 @@ type SelfCheckCheck struct {
 	Views   []string          `json:"views,omitempty"`
 	Handles []string          `json:"handles,omitempty"`
 	Metrics *SelfCheckMetrics `json:"metrics,omitempty"`
-	OK      bool              `json:"ok"`
-	Error   string            `json:"error,omitempty"`
-	At      time.Time         `json:"at"`
+	// UsageFailed lists the purpose checks a successful inspect judged as
+	// failed; Purpose, PurposeLabel and PurposeSource name the purpose it
+	// judged against (#281). A check without a usage_check leaves them empty.
+	UsageFailed   []string  `json:"usage_failed,omitempty"`
+	Purpose       string    `json:"purpose,omitempty"`
+	PurposeLabel  string    `json:"purpose_label,omitempty"`
+	PurposeSource string    `json:"purpose_source,omitempty"`
+	OK            bool      `json:"ok"`
+	Error         string    `json:"error,omitempty"`
+	At            time.Time `json:"at"`
 }
 
 // SelfCheckConclusion is what the Agent wrote. Status is a declared status id;
 // the server derives the delivery state from its role.
 type SelfCheckConclusion struct {
-	Status    string    `json:"status"`
-	Summary   string    `json:"summary"`
-	Findings  []string  `json:"findings"`
-	Fixes     []string  `json:"fixes"`
-	Remaining []string  `json:"remaining"`
-	At        time.Time `json:"at"`
+	Status    string   `json:"status"`
+	Summary   string   `json:"summary"`
+	Findings  []string `json:"findings"`
+	Fixes     []string `json:"fixes"`
+	Remaining []string `json:"remaining"`
+	// Waiver is the Agent's reason for passing despite failed purpose checks;
+	// it is kept with the conclusion so the exemption stays visible (#281).
+	Waiver string `json:"waiver,omitempty"`
+	// Purpose, PurposeLabel and PurposeSource are copied by the server from
+	// the latest successful inspection, so the conclusion says which purpose
+	// it was judged against (#281).
+	Purpose       string    `json:"purpose,omitempty"`
+	PurposeLabel  string    `json:"purpose_label,omitempty"`
+	PurposeSource string    `json:"purpose_source,omitempty"`
+	At            time.Time `json:"at"`
 }
 
 // SelfCheckRecord is the persisted record. Revision is the store's
@@ -266,9 +285,26 @@ func SelfCheckRequiredSatisfied(schema catalog.ChatSelfCheckSchema, record SelfC
 	return true
 }
 
+// SelfCheckLatestInspect returns the record's last inspect check and the last
+// successful one. Either may be absent.
+func SelfCheckLatestInspect(record SelfCheckRecord) (latest, latestOK *SelfCheckCheck) {
+	for index := range record.Checks {
+		check := &record.Checks[index]
+		if check.Kind != SelfCheckKindInspect {
+			continue
+		}
+		latest = check
+		if check.OK {
+			latestOK = check
+		}
+	}
+	return latest, latestOK
+}
+
 // SelfCheckConclusionError names a refused conclusion. Kind is one of
-// unknown_status, not_writable, needs_check, remaining_required,
-// remaining_forbidden or too_long.
+// unknown_status, not_writable, needs_check, usage_failed,
+// uncheckable_unproven, remaining_required, remaining_forbidden or too_long.
+// For usage_failed, Field lists the failed checks.
 type SelfCheckConclusionError struct {
 	Kind    string
 	Status  string
@@ -298,6 +334,16 @@ func ValidateSelfCheckConclusion(
 	if status.Role == SelfCheckRolePassed && !SelfCheckRequiredSatisfied(schema, record) {
 		return &SelfCheckConclusionError{Kind: "needs_check", Status: conclusion.Status}
 	}
+	latest, latestOK := SelfCheckLatestInspect(record)
+	if status.Role == SelfCheckRolePassed && schema.RequiredChecks.UsageClean && latestOK != nil &&
+		len(latestOK.UsageFailed) > 0 && strings.TrimSpace(conclusion.Waiver) == "" {
+		return &SelfCheckConclusionError{
+			Kind: "usage_failed", Status: conclusion.Status, Field: strings.Join(latestOK.UsageFailed, ", "),
+		}
+	}
+	if status.Role == SelfCheckRoleUncheckable && (latest == nil || latest.OK) {
+		return &SelfCheckConclusionError{Kind: "uncheckable_unproven", Status: conclusion.Status}
+	}
 	if status.Role == SelfCheckRolePassed && len(conclusion.Remaining) > 0 {
 		return &SelfCheckConclusionError{Kind: "remaining_forbidden", Status: conclusion.Status}
 	}
@@ -305,6 +351,9 @@ func ValidateSelfCheckConclusion(
 		return &SelfCheckConclusionError{Kind: "remaining_required", Status: conclusion.Status}
 	}
 	limit := schema.Conclusion
+	if length := utf8.RuneCountInString(strings.TrimSpace(conclusion.Waiver)); length > limit.MaxItemCharacters {
+		return &SelfCheckConclusionError{Kind: "too_long", Field: "waiver", Length: length, Maximum: limit.MaxItemCharacters}
+	}
 	if length := utf8.RuneCountInString(strings.TrimSpace(conclusion.Summary)); length > limit.MaxSummaryCharacters {
 		return &SelfCheckConclusionError{Kind: "too_long", Field: "summary", Length: length, Maximum: limit.MaxSummaryCharacters}
 	}

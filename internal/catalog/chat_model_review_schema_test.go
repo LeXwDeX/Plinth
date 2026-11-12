@@ -162,6 +162,12 @@ func TestModelReviewDeclarationsAreValidated(t *testing.T) {
 		{"flat ratio one", func(a *catalog.ApplicationSchema) {
 			a.Chat.ModelReview.Inspect.Production.YUpFlatRatio = 1
 		}, "y_up_flat_ratio"},
+		{"upright profile not declared", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.YUpUprightProfiles = []string{"dragon_rider"}
+		}, "y_up_upright_profiles"},
+		{"upright profile repeated", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.YUpUprightProfiles = []string{"game_character", "game_character"}
+		}, "y_up_upright_profiles"},
 		{"negative debris ratio", func(a *catalog.ApplicationSchema) {
 			a.Chat.ModelReview.Inspect.Production.DebrisRatio = -0.1
 		}, "debris_ratio"},

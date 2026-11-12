@@ -148,6 +148,9 @@ func validateProject(
 			return fmt.Errorf("project.messages.%s 不能为空", name)
 		}
 	}
+	if template := messages.StyleGuidePalette; strings.TrimSpace(template) != "" && !strings.Contains(template, "{palette}") {
+		return errors.New("project.messages.style_guide_palette 必须包含 {palette}")
+	}
 	return validateProjectRoutes(runtime.HTTP.Routes, project)
 }
 
@@ -232,6 +235,9 @@ func validateProjectAgent(agent ProjectAgentSchema, chat ChatSchema, runtime Run
 		if !strings.Contains(template, placeholder) {
 			return fmt.Errorf("project.agent.style_prompt_template 必须包含 %s", placeholder)
 		}
+	}
+	if template := agent.PalettePromptTemplate; strings.TrimSpace(template) != "" && !strings.Contains(template, "{palette}") {
+		return errors.New("project.agent.palette_prompt_template 必须包含 {palette}")
 	}
 	if strings.TrimSpace(agent.HandlePrefix) == "" {
 		return errors.New("project.agent.handle_prefix 不能为空")

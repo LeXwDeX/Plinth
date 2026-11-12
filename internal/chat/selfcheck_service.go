@@ -183,6 +183,7 @@ func (service *SelfCheckService) RecordConclusion(ctx context.Context, owner, se
 	conclusion.Findings = selfCheckTrimmed(conclusion.Findings)
 	conclusion.Fixes = selfCheckTrimmed(conclusion.Fixes)
 	conclusion.Remaining = selfCheckTrimmed(conclusion.Remaining)
+	conclusion.Waiver = strings.TrimSpace(conclusion.Waiver)
 	var validation *SelfCheckConclusionError
 	record, err := service.mutate(ctx, owner, session, taskID, modelAssetID, func(record *SelfCheckRecord) error {
 		validation = ValidateSelfCheckConclusion(service.schema, *record, conclusion)
@@ -193,6 +194,14 @@ func (service *SelfCheckService) RecordConclusion(ctx context.Context, owner, se
 			conclusion.At = service.now().UTC()
 		}
 		next := conclusion
+		if status, found := SelfCheckStatus(service.schema, next.Status); !found || status.Role != SelfCheckRolePassed {
+			// A waiver only explains a pass; other states list remaining items.
+			next.Waiver = ""
+		}
+		next.Purpose, next.PurposeLabel, next.PurposeSource = "", "", ""
+		if _, latestOK := SelfCheckLatestInspect(*record); latestOK != nil {
+			next.Purpose, next.PurposeLabel, next.PurposeSource = latestOK.Purpose, latestOK.PurposeLabel, latestOK.PurposeSource
+		}
 		record.Conclusion = &next
 		return nil
 	})

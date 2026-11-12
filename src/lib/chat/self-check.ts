@@ -47,6 +47,10 @@ export interface SelfCheckConclusion {
   findings: string[];
   fixes: string[];
   remaining: string[];
+  /** The reason a pass was accepted despite failed purpose checks (#281). */
+  waiver: string;
+  /** The purpose the conclusion was judged against (#281). */
+  purposeLabel: string;
   at: string;
 }
 
@@ -123,6 +127,8 @@ function parseConclusion(value: unknown): SelfCheckConclusion | null {
     findings: strings(item.findings),
     fixes: strings(item.fixes),
     remaining: strings(item.remaining),
+    waiver: text(item.waiver),
+    purposeLabel: text(item.purpose_label),
     at: text(item.at),
   };
 }

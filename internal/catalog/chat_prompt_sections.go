@@ -43,6 +43,11 @@ type ChatAgentCraftPrompt struct {
 	// tool sets are both offered in auto scope are not injected together
 	// (#239). Empty keeps the historical behavior.
 	WhenDomain string `json:"when_domain,omitempty"`
+	// WhenBriefAny names production brief fields; when the frozen brief sets
+	// any of them (a non-empty text or a true flag), the brief is injected
+	// even on a turn of the other workspace domain, so a 2D stage turn of a
+	// session headed for 3D still gets the 3D craft (#285).
+	WhenBriefAny []string `json:"when_brief_any,omitempty"`
 	// OfferingCapabilities selects the Offerings whose knowledge fills
 	// {offering_tradeoffs} (#249). Empty keeps a historical CraftPrompt
 	// literal.
@@ -122,7 +127,8 @@ func (schema ChatSchema) WithoutInactivePromptText(active CapabilityActive) Chat
 // trigger names a registered tool, and every text is non-empty and within the
 // same character bound as the editable system prompt. toolNames holds both the
 // Agent tools and the generation tools, because describe() offers both.
-func validateCraftPrompts(prompts []ChatAgentCraftPrompt, toolNames map[string]struct{}, maxPromptCharacters int) error {
+func validateCraftPrompts(prompts []ChatAgentCraftPrompt, toolNames map[string]struct{}, maxPromptCharacters int,
+	briefFields []ChatProductionBriefField) error {
 	seen := make(map[string]bool, len(prompts))
 	for _, prompt := range prompts {
 		id := strings.TrimSpace(prompt.ID)
@@ -141,6 +147,20 @@ func validateCraftPrompts(prompts []ChatAgentCraftPrompt, toolNames map[string]s
 		for _, tool := range prompt.WhenToolsAny {
 			if _, known := toolNames[tool]; !known {
 				return fmt.Errorf("chat.agent.craft_prompts %q 引用了未注册工具 %q", prompt.ID, tool)
+			}
+		}
+		for _, name := range prompt.WhenBriefAny {
+			declared := false
+			for _, field := range briefFields {
+				if field.Name == name {
+					switch field.Type {
+					case "profile", "image_profile", "text", "boolean":
+						declared = true
+					}
+				}
+			}
+			if !declared {
+				return fmt.Errorf("chat.agent.craft_prompts %q 的 when_brief_any 含未声明或不支持的简报字段 %q", prompt.ID, name)
 			}
 		}
 		if strings.TrimSpace(prompt.Text) == "" {

@@ -87,6 +87,12 @@ func (executor *Executor) applyStyleLockPrompt(command chat.ToolCommand, offerin
 		}
 		prompt += strings.NewReplacer("{style}", text, "{text}", text, "{project}", project).Replace(template)
 	}
+	if lock.Source == chat.StyleLockSourceProject && len(lock.ProjectPalette) > 0 &&
+		executor.project != nil && executor.project.Agent != nil {
+		if template := executor.project.Agent.PalettePromptTemplate; strings.TrimSpace(template) != "" {
+			prompt += strings.ReplaceAll(template, "{palette}", strings.Join(lock.ProjectPalette, ", "))
+		}
+	}
 	if offering.Capability == generation.ImageToImage {
 		if template := executor.chat.StyleLock.EditScopeTemplate; template != "" {
 			prompt += template

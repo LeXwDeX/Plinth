@@ -145,3 +145,47 @@ func TestProjectStyleSourcesNameAssetsOnlyWhenTheirPictureWasInjected(t *testing
 		t.Fatalf("guide picture style sources = %v", names)
 	}
 }
+
+// TestProjectPaletteJoinsTheProviderPromptOfAProjectTurn is #288: a
+// project-source turn writes the guide's palette into the 2D prompt as a
+// colour constraint; a session-source or off turn never carries it.
+func TestProjectPaletteJoinsTheProviderPromptOfAProjectTurn(t *testing.T) {
+	executor, command := projectTestExecutor(t)
+	if strings.TrimSpace(executor.project.Agent.PalettePromptTemplate) == "" {
+		t.Fatal("default catalog must declare project.agent.palette_prompt_template")
+	}
+	offering := generation.Offering{Capability: generation.TextToImage}
+	command.Options.StyleLock = chat.StyleLock{
+		Enabled: true, Source: chat.StyleLockSourceProject, Text: "warm ink",
+		ProjectName: "Star Harbor", ProjectPalette: []string{"#112233", "#AABBCC"},
+	}
+	prompt := executor.applyStyleLockPrompt(command, offering, "draw an icon")
+	if !strings.Contains(prompt, "#112233, #AABBCC") || !strings.Contains(prompt, "warm ink") {
+		t.Fatalf("project prompt lacks the palette: %q", prompt)
+	}
+	if strings.Contains(prompt, "{palette}") {
+		t.Fatalf("palette placeholder left behind: %q", prompt)
+	}
+
+	// A guide with only a palette still constrains the colours.
+	command.Options.StyleLock.Text = ""
+	if prompt := executor.applyStyleLockPrompt(command, offering, "draw"); !strings.Contains(prompt, "#112233") {
+		t.Fatalf("palette-only guide prompt = %q", prompt)
+	}
+
+	command.Options.StyleLock = chat.StyleLock{Enabled: true, Source: chat.StyleLockSourceSession, Text: "session ink",
+		ProjectPalette: []string{"#112233"}}
+	if prompt := executor.applyStyleLockPrompt(command, offering, "draw"); strings.Contains(prompt, "#112233") {
+		t.Fatalf("session source must not carry the project palette: %q", prompt)
+	}
+	command.Options.StyleLock = chat.StyleLock{Source: chat.StyleLockSourceProject, ProjectPalette: []string{"#112233"}}
+	if prompt := executor.applyStyleLockPrompt(command, offering, "draw"); prompt != "draw" {
+		t.Fatalf("a disabled guide must inject nothing: %q", prompt)
+	}
+	command.Options.StyleLock = chat.StyleLock{Enabled: true, Source: chat.StyleLockSourceProject,
+		ProjectPalette: []string{"#112233"}}
+	command.Options.StyleLockSkipped = true
+	if prompt := executor.applyStyleLockPrompt(command, offering, "draw"); prompt != "draw" {
+		t.Fatalf("a skipped turn must inject nothing: %q", prompt)
+	}
+}

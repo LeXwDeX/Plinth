@@ -140,6 +140,16 @@ function SelfCheckRecordBlock({
       {record.conclusion && (
         <div className="flex flex-col gap-1 text-[11px] leading-relaxed" data-testid="chat-self-check-conclusion">
           {record.conclusion.summary && <p className="text-foreground/90">{record.conclusion.summary}</p>}
+          {record.conclusion.purposeLabel && (
+            <p className="text-muted-foreground" data-testid="chat-self-check-purpose">
+              {text('ui.chat.self_check.purpose').replaceAll('{purpose}', record.conclusion.purposeLabel)}
+            </p>
+          )}
+          {record.conclusion.waiver && (
+            <p className="text-warning" data-testid="chat-self-check-waiver">
+              {text('ui.chat.self_check.waiver').replaceAll('{waiver}', record.conclusion.waiver)}
+            </p>
+          )}
           <ConclusionList schema={schema} labelKey="ui.chat.self_check.findings"
             emptyKey="ui.chat.self_check.no_findings" values={record.conclusion.findings} />
           <ConclusionList schema={schema} labelKey="ui.chat.self_check.fixes"

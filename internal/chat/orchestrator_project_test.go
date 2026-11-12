@@ -110,3 +110,51 @@ func TestProjectPromptListsOnlyTheSchemaLimitAndSaysWhenTruncated(t *testing.T) 
 		t.Fatalf("limit note missing: %s", prompt)
 	}
 }
+
+// TestProjectPromptShowsTheGuidePaletteAndFreezesItWithTheLock is #288: the
+// enabled guide's palette reaches the Agent's project block and the frozen
+// project-source lock; a disabled guide or a session source carries none.
+func TestProjectPromptShowsTheGuidePaletteAndFreezesItWithTheLock(t *testing.T) {
+	orchestrator := projectPromptOrchestrator(t)
+	if !strings.Contains(orchestrator.project.Messages.StyleGuidePalette, "{palette}") {
+		t.Fatal("default catalog must declare project.messages.style_guide_palette with {palette}")
+	}
+	context := &ProjectContext{
+		ID: "prj_1", Name: "Star Harbor",
+		StyleGuide: ProjectStyleGuideContext{Enabled: true, Text: "warm ink", Palette: []string{"#112233", "#AABBCC"}},
+	}
+	options := TurnOptions{StyleLock: StyleLock{Source: StyleLockSourceProject}, ProjectContext: context}
+	prompt := orchestrator.projectPrompt(options)
+	if !strings.Contains(prompt, "warm ink") || !strings.Contains(prompt, "#112233, #AABBCC") {
+		t.Fatalf("project block lacks the palette: %s", prompt)
+	}
+	// A palette-only guide replaces the empty copy instead of joining it.
+	context.StyleGuide.Text = ""
+	prompt = orchestrator.projectPrompt(options)
+	if !strings.Contains(prompt, "#112233") || strings.Contains(prompt, orchestrator.project.Messages.StyleGuideEmpty+"\n") {
+		t.Fatalf("palette-only project block = %s", prompt)
+	}
+	if !context.ProjectStyleSource() {
+		t.Fatal("a palette-only guide is a project style source")
+	}
+
+	lock := effectiveStyleLock(StyleLock{Source: StyleLockSourceProject}, context)
+	if len(lock.ProjectPalette) != 2 || lock.ProjectPalette[0] != "#112233" {
+		t.Fatalf("frozen lock palette = %v", lock.ProjectPalette)
+	}
+	cloned := cloneProjectContext(context)
+	cloned.StyleGuide.Palette[0] = "#000000"
+	if context.StyleGuide.Palette[0] != "#112233" {
+		t.Fatal("cloning the project context shares the palette")
+	}
+	if lock := effectiveStyleLock(StyleLock{Source: StyleLockSourceSession, Enabled: true, Text: "s"}, context); len(lock.ProjectPalette) != 0 {
+		t.Fatalf("session source carries the project palette: %v", lock.ProjectPalette)
+	}
+	context.StyleGuide.Enabled = false
+	if lock := effectiveStyleLock(StyleLock{Source: StyleLockSourceProject}, context); len(lock.ProjectPalette) != 0 || lock.Enabled {
+		t.Fatalf("a disabled guide froze %+v", lock)
+	}
+	if prompt := orchestrator.projectPrompt(options); strings.Contains(prompt, "#112233") {
+		t.Fatalf("a disabled guide showed its palette: %s", prompt)
+	}
+}

@@ -380,10 +380,8 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 		UsageCheck:     usageCheck,
 		PartsTotal:     total,
 		PartsTruncated: truncated,
-		SelfCheck: executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
-			Kind: chat.SelfCheckKindInspect, Tool: command.Call.Name,
-			AssetID: string(source.asset.ID), Views: []string{}, OK: true,
-		}),
+		SelfCheck: executor.appendSelfCheckCheck(ctx, command, source, inspectSelfCheckCheck(
+			command.Call.Name, string(source.asset.ID), usageCheck)),
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
