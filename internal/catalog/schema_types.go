@@ -2735,9 +2735,15 @@ type ChatModelInspectProductionSchema struct {
 	PivotBottomCenterRatio float64 `json:"pivot_bottom_center_ratio"`
 	// YUpFlatRatio marks a bbox as flat (and therefore its up axis unknown)
 	// when its shortest edge is at most this fraction of its longest edge.
-	YUpFlatRatio    float64 `json:"y_up_flat_ratio"`
-	DebrisRatio     float64 `json:"debris_ratio"`
-	DegenerateRatio float64 `json:"degenerate_ratio"`
+	YUpFlatRatio float64 `json:"y_up_flat_ratio"`
+	// YUpUprightProfiles lists the model3d_usage purposes whose subject
+	// stands upright (a humanoid character). Only for them a box whose Y edge
+	// is the shortest fails the y_up check as lying; for every other purpose a
+	// wide box (a quadruped, a vehicle, a table, a sword) is unknown, because
+	// the box alone cannot tell its orientation (#280).
+	YUpUprightProfiles []string `json:"y_up_upright_profiles,omitempty"`
+	DebrisRatio        float64  `json:"debris_ratio"`
+	DegenerateRatio    float64  `json:"degenerate_ratio"`
 	// DefaultPurposeText explains that the session has no usable brief
 	// purpose ({purpose}); BriefPurposeText names the brief purpose
 	// ({purpose}); TriangleOverrideText records the brief's triangle budget

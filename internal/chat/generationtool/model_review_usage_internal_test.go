@@ -91,6 +91,7 @@ func usageItem(t *testing.T, check *modelReviewUsageCheck, id string) modelRevie
 // unknown (without a hint).
 func TestModelReviewUsageChecksReportPassFailAndUnknown(t *testing.T) {
 	production := usageProduction(t)
+	production.YUpUprightProfiles = []string{"game"}
 	allAvailable := func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true }
 	tests := []struct {
 		name   string
@@ -207,15 +208,22 @@ func TestModelReviewUsageChecksReportPassFailAndUnknown(t *testing.T) {
 		},
 		{name: "Y is the highest axis", check: catalog.ModelReviewUsageCheckYUp, want: modelReviewUsageStatusPass},
 		{
-			name: "X is the highest axis", check: catalog.ModelReviewUsageCheckYUp,
+			name: "an upright subject lying down", check: catalog.ModelReviewUsageCheckYUp,
 			want: modelReviewUsageStatusFail,
+			mutate: func(report *modelinspect.Report, _ *catalog.ChatModel3DUsageSchema) {
+				report.BBox.Size = [3]float64{0.5, 0.3, 1.8}
+			},
+		},
+		{
+			name: "X is the highest axis but Y is not the shortest", check: catalog.ModelReviewUsageCheckYUp,
+			want: modelReviewUsageStatusUnknown,
 			mutate: func(report *modelinspect.Report, _ *catalog.ChatModel3DUsageSchema) {
 				report.BBox.Size = [3]float64{2, 1, 0.5}
 			},
 		},
 		{
-			name: "Z is the highest axis", check: catalog.ModelReviewUsageCheckYUp,
-			want: modelReviewUsageStatusFail,
+			name: "Z is the highest axis but Y is not the shortest", check: catalog.ModelReviewUsageCheckYUp,
+			want: modelReviewUsageStatusUnknown,
 			mutate: func(report *modelinspect.Report, _ *catalog.ChatModel3DUsageSchema) {
 				report.BBox.Size = [3]float64{0.5, 1, 2}
 			},
@@ -506,4 +514,53 @@ func TestModelReviewUsageFixHintNamesOnlyAvailableCapabilities(t *testing.T) {
 			t.Fatalf("hint = %q, want the static template", hint)
 		}
 	})
+}
+
+// TestModelReviewUsageYUpJudgesTheSubjectByPurpose is the #280 fixture set:
+// a box wider than tall is a normal quadruped, vehicle, sword or table, so it
+// never fails; only a purpose whose subject stands upright fails a box whose
+// Y edge is the shortest (a lying humanoid). A failure names no capability,
+// because no enabled tool rotates a model.
+func TestModelReviewUsageYUpJudgesTheSubjectByPurpose(t *testing.T) {
+	production := usageProduction(t)
+	production.YUpUprightProfiles = []string{"game"}
+	allAvailable := func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true }
+	fixtures := []struct {
+		name    string
+		purpose string
+		size    [3]float64
+		want    string
+	}{
+		{"standing humanoid", "game", [3]float64{0.6, 1.8, 0.3}, modelReviewUsageStatusPass},
+		{"standing humanoid in a wide T-pose", "game", [3]float64{1.85, 1.8, 0.3}, modelReviewUsageStatusUnknown},
+		{"humanoid lying on its back", "game", [3]float64{0.6, 0.3, 1.8}, modelReviewUsageStatusFail},
+		{"quadruped character", "game", [3]float64{0.4, 0.9, 1.5}, modelReviewUsageStatusUnknown},
+		{"quadruped prop", "prop", [3]float64{0.4, 0.9, 1.5}, modelReviewUsageStatusUnknown},
+		{"vehicle", "prop", [3]float64{1.8, 1.5, 4.5}, modelReviewUsageStatusUnknown},
+		{"sword lying flat", "prop", [3]float64{0.25, 0.08, 1.1}, modelReviewUsageStatusUnknown},
+		{"table", "prop", [3]float64{1.5, 0.75, 0.8}, modelReviewUsageStatusUnknown},
+		{"standing prop", "prop", [3]float64{0.3, 1.2, 0.3}, modelReviewUsageStatusPass},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			report := usageBaseReport()
+			report.BBox.Size = fixture.size
+			brief := chat.ProductionBrief{"purpose": []byte(`"` + fixture.purpose + `"`)}
+			check := newModelReviewUsageCheck(report, usageBaseUsage(), production, brief, usageIdentityText, allAvailable)
+			item := usageItem(t, check, catalog.ModelReviewUsageCheckYUp)
+			if item.Status != fixture.want {
+				t.Fatalf("y_up = %q (actual %v), want %q", item.Status, item.Actual, fixture.want)
+			}
+			if fixture.want == modelReviewUsageStatusFail {
+				if strings.Contains(item.FixHint, "{") || strings.TrimSpace(item.FixHint) == "" {
+					t.Fatalf("lying fix hint = %q", item.FixHint)
+				}
+			} else if item.FixHint != "" {
+				t.Fatalf("a %s y_up check carries a fix hint: %q", fixture.want, item.FixHint)
+			}
+			if upright := item.Budget["upright"]; upright != (fixture.purpose == "game") {
+				t.Fatalf("budget.upright = %v for purpose %q", upright, fixture.purpose)
+			}
+		})
+	}
 }

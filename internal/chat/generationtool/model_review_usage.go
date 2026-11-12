@@ -3,12 +3,14 @@ package generationtool
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/modelcheck"
 	"github.com/LeXwDeX/Plinth/internal/modelinspect"
 )
 
@@ -78,7 +80,7 @@ func newModelReviewUsageCheck(
 		modelReviewUsageSkinCheck(report, budget),
 		modelReviewUsageTextureSizeCheck(report, budget),
 		modelReviewUsagePivotCheck(report, production),
-		modelReviewUsageYUpCheck(report, production),
+		modelReviewUsageYUpCheck(report, production, profile),
 		modelReviewUsageScaleCheck(report, profile),
 		modelReviewUsageDebrisCheck(report, production),
 		modelReviewUsageDegenerateCheck(report, production),
@@ -337,32 +339,18 @@ func modelReviewUsagePivotCheck(
 func modelReviewUsageYUpCheck(
 	report modelinspect.Report,
 	production catalog.ChatModelInspectProductionSchema,
+	profile catalog.ChatModel3DUsageProfile,
 ) modelReviewUsageCheckItem {
+	upright := slices.Contains(production.YUpUprightProfiles, profile.ID)
 	values := map[string]any{
 		"axis":       "y",
 		"flat_ratio": production.YUpFlatRatio,
+		"upright":    upright,
 	}
-	actual := ""
-	status := modelReviewUsageStatusUnknown
-	longest := modelReviewUsageLongestEdge(report)
-	if !modelReviewUsageReadError(report) && longest > 0 {
-		if modelReviewUsageShortestEdge(report) <= production.YUpFlatRatio*longest {
-			actual = "flat"
-		} else {
-			size := report.BBox.Size
-			switch {
-			case size[1] >= size[0] && size[1] >= size[2]:
-				actual = "y"
-				status = modelReviewUsageStatusPass
-			case size[0] >= size[2]:
-				actual = "x"
-				status = modelReviewUsageStatusFail
-			default:
-				actual = "z"
-				status = modelReviewUsageStatusFail
-			}
-		}
+	if modelReviewUsageReadError(report) {
+		return modelReviewUsageItem(catalog.ModelReviewUsageCheckYUp, modelReviewUsageStatusUnknown, "", values)
 	}
+	status, actual := modelcheck.YUp(report.BBox.Size, production.YUpFlatRatio, upright)
 	return modelReviewUsageItem(catalog.ModelReviewUsageCheckYUp, status, actual, values)
 }
 

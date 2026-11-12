@@ -6308,6 +6308,7 @@
           "production": {
             "pivot_bottom_center_ratio": 0.01,
             "y_up_flat_ratio": 0.05,
+            "y_up_upright_profiles": ["game_character"],
             "debris_ratio": 0.01,
             "degenerate_ratio": 0.001,
             "default_purpose_text": "会话没有可用的制作简报用途，按默认用途「{purpose}」判定。",
@@ -6360,7 +6361,7 @@
               },
               {
                 "check": "y_up",
-                "template": "模型最高轴不是 Y；请重新生成或在上游把模型调整为 Y 轴朝上。",
+                "template": "直立用途的模型呈躺倒朝向（Y 是包围盒最短边）。当前没有调整朝向的处理能力：请重新生成，或在 DCC 软件中把模型旋转为 Y 轴朝上后重新上传。",
                 "options": []
               },
               {
