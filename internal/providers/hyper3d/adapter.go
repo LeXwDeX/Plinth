@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"reflect"
 	"strings"
 	"time"
 
@@ -314,6 +315,34 @@ func ValidateOffering(offering generation.Offering) error {
 	}
 	if !hasPrompt || offering.Capability == generation.ImageTo3D && !hasImages {
 		return fmt.Errorf("Rodin Offering 缺少 prompt 或 images 输入映射")
+	}
+	return validateTemplateParameters(offering, template)
+}
+
+// validateTemplateParameters checks the parameters that share a wire name with
+// a request_template field. Such a parameter takes the field's place in the
+// request (imagewire.EncodeMultipart), so the template value is the display
+// baseline: the parameter's default must be that value, which keeps the default
+// request exactly what the template alone sent and stops the two from
+// drifting apart. The parameter's value reaches the wire as it is, so a
+// wire_values or wire_template mapping would break the comparison and is refused.
+func validateTemplateParameters(offering generation.Offering, template map[string]any) error {
+	for _, parameter := range offering.Parameters {
+		wireName := effectiveWireName(parameter)
+		templateValue, inTemplate := template[wireName]
+		if !inTemplate || parameter.Type == "asset" || parameter.Type == "asset-array" {
+			continue
+		}
+		if len(parameter.WireValues) > 0 || len(parameter.WireTemplate) > 0 {
+			return fmt.Errorf("Rodin 参数 %q 与 request_template 字段同名，不得再声明 wire_values 或 wire_template", parameter.Name)
+		}
+		if len(parameter.Default) == 0 {
+			continue
+		}
+		var defaultValue any
+		if json.Unmarshal(parameter.Default, &defaultValue) != nil || !reflect.DeepEqual(defaultValue, templateValue) {
+			return fmt.Errorf("Rodin 参数 %q 的默认值必须等于同名 request_template 字段 %q 的值", parameter.Name, wireName)
+		}
 	}
 	return nil
 }

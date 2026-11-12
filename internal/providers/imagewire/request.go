@@ -22,7 +22,10 @@ type Protocol = generation.ImageProtocol
 
 // EncodeMultipart 按 Offering 声明生成 multipart/form-data 请求体。
 // 标量参数写为表单字段，资产参数写为文件分片；编码方式只来自 Schema，
-// 不按模型或能力分支。返回的 reader 为管道，本地资产错误会中断写入并
+// 不按模型或能力分支。request_template 字段先写（按名称排序）；与模板
+// 字段同名的标量参数以自己的值顶替模板值并保持该字段的位置（参数缺席或
+// 被 omit_when 省略时仍发模板值），其余参数按声明顺序随后写出（#279）。
+// 返回的 reader 为管道，本地资产错误会中断写入并
 // 通过 CloseWithError 传播，使 httpjson 在上游提交前失败。
 // 每个文件分片的文件名在返回前按资产已核验的媒体类型确定；无可靠扩展名
 // 的资产在此同步拒绝（错误包裹 uploadname.ErrNoReliableExtension），
@@ -77,7 +80,25 @@ func writeMultipartForm(
 		fields = append(fields, field)
 	}
 	sort.Strings(fields)
+	// A scalar parameter whose wire name is a template field takes that field's
+	// place, and its position in the body, with its own value: the JSON
+	// projection (Build) already lets a parameter overwrite a template key, and
+	// a fixed position keeps a Schema that turns a template field into a
+	// parameter from reordering the request. The template value is what is sent
+	// while the parameter is absent or omitted (omit_when).
+	placed := map[string]bool{}
 	for _, field := range fields {
+		if p, ok := templateParameter(request.Offering, input, field); ok {
+			text, err := scalarFieldText(p, input[p.Name])
+			if err != nil {
+				return err
+			}
+			if err := form.WriteField(field, text); err != nil {
+				return err
+			}
+			placed[p.Name] = true
+			continue
+		}
 		value := expand(template[field], map[string]any{"$model": request.Offering.ModelID})
 		text, err := formScalar(value)
 		if err != nil {
@@ -89,7 +110,7 @@ func writeMultipartForm(
 	}
 	for _, p := range request.Offering.Parameters {
 		value, exists := input[p.Name]
-		if !exists || p.Name == request.Offering.ExtraConsentParameter() || generation.ParameterOmitted(p, input) {
+		if !exists || placed[p.Name] || p.Name == request.Offering.ExtraConsentParameter() || generation.ParameterOmitted(p, input) {
 			continue
 		}
 		field := p.WireName
@@ -137,26 +158,59 @@ func writeMultipartForm(
 			}
 			continue
 		}
-		if mapped, ok := p.WireValues[fmt.Sprint(value)]; ok {
-			if err := json.Unmarshal(mapped, &value); err != nil {
-				return err
-			}
-		} else if len(p.WireTemplate) > 0 {
-			var template any
-			if err := json.Unmarshal(p.WireTemplate, &template); err != nil {
-				return err
-			}
-			value = expand(template, map[string]any{"$value": value})
-		}
-		text, err := formScalar(value)
+		text, err := scalarFieldText(p, value)
 		if err != nil {
-			return fmt.Errorf("参数 %s: %w", p.Name, err)
+			return err
 		}
 		if err := form.WriteField(field, text); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// scalarFieldText is the form text of a scalar parameter value after its
+// wire_values or wire_template mapping.
+func scalarFieldText(p generation.Parameter, value any) (string, error) {
+	if mapped, ok := p.WireValues[fmt.Sprint(value)]; ok {
+		if err := json.Unmarshal(mapped, &value); err != nil {
+			return "", err
+		}
+	} else if len(p.WireTemplate) > 0 {
+		var template any
+		if err := json.Unmarshal(p.WireTemplate, &template); err != nil {
+			return "", err
+		}
+		value = expand(template, map[string]any{"$value": value})
+	}
+	text, err := formScalar(value)
+	if err != nil {
+		return "", fmt.Errorf("参数 %s: %w", p.Name, err)
+	}
+	return text, nil
+}
+
+// templateParameter finds the scalar parameter that writes field in place of
+// the template value: it has the field as its wire name, a value in the input
+// and no omission.
+func templateParameter(offering generation.Offering, input map[string]any, field string) (generation.Parameter, bool) {
+	for _, p := range offering.Parameters {
+		if p.Type == "asset" || p.Type == "asset-array" || p.Name == offering.ExtraConsentParameter() ||
+			generation.ParameterOmitted(p, input) {
+			continue
+		}
+		if _, exists := input[p.Name]; !exists {
+			continue
+		}
+		wire := p.WireName
+		if wire == "" {
+			wire = p.Name
+		}
+		if wire == field {
+			return p, true
+		}
+	}
+	return generation.Parameter{}, false
 }
 
 // checkUploadFilenames names every file part the form will carry before any

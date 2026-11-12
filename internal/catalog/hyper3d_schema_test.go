@@ -113,7 +113,9 @@ func TestHyper3DNativeQuotesMatchWireCandidates(t *testing.T) {
 		if !o.Enabled || !o.CreditsMetered || o.NativePricing == nil || o.NativePricing.Unit != "hyper3d.credit" || o.EstimatedCredits != 0 || o.Cost != nil {
 			t.Fatalf("invalid enabled native price contract: %+v", o)
 		}
-		q, err := o.EvaluateNativeQuote(json.RawMessage(`{"authorize_extra_credits":true}`))
+		// The default selection: Rodin's texture price depends on the texture
+		// mode (#279), so the quote needs the Schema defaults filled in.
+		q, err := o.DefaultNativeQuote(json.RawMessage(`{"authorize_extra_credits":true}`))
 		if err != nil {
 			t.Fatal(err)
 		}

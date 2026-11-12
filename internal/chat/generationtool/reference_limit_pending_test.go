@@ -680,8 +680,11 @@ func TestAutoApprovedImageTo3DFreezesTheSourceFact(t *testing.T) {
 // declares for the person (not hidden, fixed, read-only-without-advice, asset
 // or prompt parameters), so the Agent recommends from them instead of the
 // provider's other knobs. Expected lists were checked against each Offering's
-// declared parameters (meshy-7.1-multiview and Rodin Gen-2.5 declare no target
-// face count; Rodin declares no user setting at all, so it gets no sentence).
+// declared parameters (meshy-7.1-multiview declares no target face count; Rodin
+// Gen-2.5 declares topology, face count, texture quality, T/A pose, normal bake
+// and seed since #279, so it too gets a sentence). An Offering without any such
+// setting gets none: TestDeclaredSettingNamesAreEmptyWithoutUserSettings covers
+// that case.
 func TestToolDescriptionListsOnlyDeclaredSettings(t *testing.T) {
 	tool, executor := toolDescriptionNoteFixture(t)
 	template := tool.ReferenceCapacityNote.Settings
@@ -695,16 +698,10 @@ func TestToolDescriptionListsOnlyDeclaredSettings(t *testing.T) {
 	}{
 		"meshy-7.1":           {"Meshy 7.1", "Geometry resolution, Topology type, Target face count, " + common},
 		"meshy-7.1-multiview": {"Meshy 7.1 multi-view", "Geometry resolution, Topology type, " + common},
-		"rodin-gen-2.5":       {"Rodin Gen-2.5", ""},
+		"rodin-gen-2.5":       {"Rodin Gen-2.5", "Topology type, Target face count, Texture quality, T/A pose, Normal map baking, Random seed"},
 	} {
 		t.Run(model, func(t *testing.T) {
 			note := executor.ToolDescriptionNote(tool, chat.TurnOptions{ExplicitModel3D: model, CreativeDomain: "model-3d", Locale: "en"})
-			if test.settings == "" {
-				if strings.Contains(note, "offers only these settings") {
-					t.Fatalf("a settings sentence for an Offering without user settings: %s", note)
-				}
-				return
-			}
 			sentence := strings.NewReplacer("{model}", test.label, "{settings}", test.settings).Replace(template)
 			if !strings.HasSuffix(note, " "+sentence) {
 				t.Fatalf("note does not end with the settings sentence %q:\n%s", sentence, note)

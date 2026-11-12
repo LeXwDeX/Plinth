@@ -9553,11 +9553,13 @@
             "recommended_offerings": {
               "text-to-3d": [
                 "meshy/meshy-t2.5/text-to-3d",
-                "tripo/tripo-p2/text-to-3d"
+                "tripo/tripo-p2/text-to-3d",
+                "hyper3d/rodin-gen-2.5/text-to-3d"
               ],
               "image-to-3d": [
                 "meshy/meshy-t2.5/image-to-3d",
-                "tripo/tripo-p2/image-to-3d"
+                "tripo/tripo-p2/image-to-3d",
+                "hyper3d/rodin-gen-2.5/image-to-3d"
               ],
               "multiview-to-3d": [
                 "tripo/tripo-v3.1-multiview/image-to-3d",
@@ -9589,9 +9591,23 @@
               "meshy/meshy-t2.5/image-to-3d": {
                 "target_polycount": 20000,
                 "pose_mode": "a-pose"
+              },
+              "hyper3d/rodin-gen-2.5/text-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 10000,
+                "texture_mode": "high",
+                "TAPose": true,
+                "quad_normal": true
+              },
+              "hyper3d/rodin-gen-2.5/image-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 10000,
+                "texture_mode": "high",
+                "TAPose": true,
+                "quad_normal": true
               }
             },
-            "reason": "角色用于实时渲染，需要受控面数与 UV；先用成本更低的 Meshy T2.5，P2 作为可设置低面数的备选。",
+            "reason": "角色用于实时渲染，需要受控面数与 UV；先用成本更低的 Meshy T2.5，P2 作为可设置低面数的备选，Rodin Gen-2.5 作为需要四边面与 T/A 姿态时的第三选择。",
             "pipeline": [
               {
                 "capability": "rigging"
@@ -9617,11 +9633,13 @@
             "recommended_offerings": {
               "text-to-3d": [
                 "meshy/meshy-t2.5/text-to-3d",
-                "tripo/tripo-p2/text-to-3d"
+                "tripo/tripo-p2/text-to-3d",
+                "hyper3d/rodin-gen-2.5/text-to-3d"
               ],
               "image-to-3d": [
                 "meshy/meshy-t2.5/image-to-3d",
-                "tripo/tripo-p2/image-to-3d"
+                "tripo/tripo-p2/image-to-3d",
+                "hyper3d/rodin-gen-2.5/image-to-3d"
               ],
               "multiview-to-3d": [
                 "tripo/tripo-v3.1-multiview/image-to-3d",
@@ -9649,9 +9667,21 @@
               },
               "meshy/meshy-t2.5/image-to-3d": {
                 "target_polycount": 8000
+              },
+              "hyper3d/rodin-gen-2.5/text-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 4000,
+                "texture_mode": "high",
+                "quad_normal": true
+              },
+              "hyper3d/rodin-gen-2.5/image-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 4000,
+                "texture_mode": "high",
+                "quad_normal": true
               }
             },
-            "reason": "道具与场景件的面数预算更低；先用 Meshy T2.5，P2 作为自适应低模的备选。",
+            "reason": "道具与场景件的面数预算更低；先用 Meshy T2.5，P2 作为自适应低模的备选，Rodin Gen-2.5 可出四边面并烘焙法线贴图。",
             "pipeline": [
               {
                 "capability": "mesh-segmentation"
@@ -9888,7 +9918,7 @@
           {
             "semantic": "texture-size",
             "bound": "max_texture_size",
-            "option_values": {"2k": 2048, "4k": 4096, "8k": 8192},
+            "option_values": {"2k": 2048, "4k": 4096, "8k": 8192, "high": 2048, "extreme-high": 6144},
             "item_template": "{model} 的「{parameter}」为 {value}（贴图边长 {amount} 像素），超过用途「{purpose}」的贴图边长上限 {maximum} 像素"
           }
         ],
@@ -19034,10 +19064,10 @@
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
             "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
             "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
-            "chat.model3d_usage.profiles[id=game_character].reason": "A character rendered in real time needs a controlled triangle count and UVs; Meshy T2.5 comes first for its lower cost, with P2 as the alternative that can set a low face limit.",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character rendered in real time needs a controlled triangle count and UVs; Meshy T2.5 comes first for its lower cost, with P2 as the alternative that can set a low face limit and Rodin Gen-2.5 as the third choice when quad faces and a T or A pose are wanted.",
             "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
             "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
-            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces have a lower triangle budget; Meshy T2.5 comes first, with P2 as the adaptive low-poly alternative.",
+            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces have a lower triangle budget; Meshy T2.5 comes first, with P2 as the adaptive low-poly alternative and Rodin Gen-2.5 for quad faces with a baked normal map.",
             "chat.model3d_usage.profiles[id=web_ar].label": "Web / AR display",
             "chat.model3d_usage.profiles[id=web_ar].description": "A model shown live on the web or in AR; the triangle count is controlled and UVs are kept.",
             "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; Meshy 7.1's low triangle count and 2K textures come first, with P2 as an alternative.",
@@ -19436,6 +19466,10 @@
             "Mask 精炼": "Mask refinement",
             "Matting 下载返回 HTTP {status}": "Matting download returned HTTP {status}",
             "Matting 产物定位符无效": "The Matting output locator is invalid.",
+            "T/A 姿态": "T/A pose",
+            "三角面 (Raw)": "Triangles (Raw)",
+            "固定种子有助于复现相近的几何与贴图结果，范围 0 到 65535；不填则由上游随机。": "A fixed seed helps reproduce similar geometry and textures, from 0 to 65535; when empty the upstream picks one at random.",
+            "把高精度几何细节烘焙到法线贴图，面数较低时也能保留细节；默认关闭。": "Bakes high-resolution geometry detail into a normal map so a lower face count keeps its detail; off by default.",
             "拆分方式": "Split method",
             "拆解模型": "Split model",
             "按图元": "By primitive",
@@ -19444,6 +19478,9 @@
             "按连通块": "By connected component",
             "按节点、图元、材质或网格连通块拆分；默认按连通块。": "Split by node, primitive, material, or connected mesh component; connected component is the default.",
             "最小部件占比": "Minimum part ratio",
+            "极致 (extreme-high，6K)": "Extreme (6K)",
+            "法线贴图烘焙": "Normal map baking",
+            "让人形主体按 T 姿态或 A 姿态生成，便于绑骨和动画；关闭时保持输入中的姿态。非人形主体不建议开启。": "Generates a human-like subject in a T-pose or A-pose, which suits rigging and animation; when off, the pose of the input is kept. Not advised for non-humanoid subjects.",
             "面数占比低于此值的碎片并入包围盒中心最近的部件。": "Fragments below this triangle ratio are merged into the part whose bounding-box center is nearest.",
             "最大部件数": "Maximum parts",
             "超出时按面数保留最大的部件，其余合并为一个 rest 部件。": "Above this count, the largest parts by triangles are kept and the rest merge into one rest part.",
@@ -19655,6 +19692,8 @@
             "后空翻接勾拳 (Backflip_and_Hooks)": "Backflip and hooks",
             "后空翻起身 (Backflip_and_Rise)": "Backflip and rise",
             "后空翻跳 (Backflip_Jump)": "Backflip jump",
+            "高 (high，2K)": "High (2K)",
+            "默认使用最高的极致档：官方表中不加 HighPack 时为 6K 贴图，较高档额外 +2 Hyper3D credits；高档为 2K 贴图，不加价。会话用途规定了贴图上限（如 2048）时，Agent 发起的生成按上限取值。": "The default is the highest, extreme tier: 6K textures without HighPack in the official table, +2 Hyper3D credits over the high tier. The high tier gives 2K textures at no extra charge. When the session purpose sets a texture limit (such as 2048), steps started by the Agent take a value within it.",
             "默认使用最高纹理分辨率 8K；会话用途规定了更低的贴图上限时，Agent 发起的换贴图按上限取值。": "Defaults to the highest texture resolution, 8K; when the session's purpose sets a lower texture limit, a retexture the Agent starts uses that limit.",
             "后端固定从预览开始，预览完成后自动提交精细化，交付带贴图的最高质量模型。精细化阶段由适配器内部提交。": "The backend always starts with a preview and submits refinement automatically once the preview completes, delivering the highest-quality textured model. The refine stage is submitted internally by the adapter.",
             "后退射击 (Walk_Backward_While_Shooting)": "Walk backward while shooting",
@@ -20483,7 +20522,9 @@
             "默认关闭重拓扑以保留最高质量的原始几何；需要更规整网格时可说明理由启用。": "Remesh is off by default to preserve the highest-quality original geometry. Enable it with a stated reason when you need a cleaner mesh.",
             "默认启用 PBR 材质，并启用纹理。": "PBR materials are enabled by default, along with textures.",
             "默认建议三角面：Meshy 的 8K 纹理不支持四边面。": "Triangle faces are recommended by default: Meshy's 8K texture does not support quad faces.",
+            "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。": "Triangles are the recommended default. With quad faces the target face count is in quads, up to 200000; the exported GLB holds only triangles, each quad split in two, so its triangle count is about twice the chosen count.",
             "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。": "The default is triangles: Meshy 8K textures don't support quad faces.",
+            "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。": "The recommended default is the 2,000,000 ceiling; quad faces allow at most 200,000. When no count is given, the default is brought into the range of the current topology; when the session purpose sets a face budget, steps started by the Agent take a value within it.",
             "默认建议为上限 300000；需要控制面数时用独立的重拓扑。": "The default is the 300000 upper limit; use a separate remesh when you need to control the face count.",
             "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。": "Applies only when auto remesh is on. By default no remesh runs, for the highest quality, so the face count follows the geometry resolution and the model itself (at 4K, measured at about 250 thousand to 7.9 million faces, with single formats up to several hundred MB). To control the face count or delivery size, turn on auto remesh or use a separate remesh.",
             "默认建议为最高几何分辨率 4K。": "The default is the highest geometry resolution, 4K.",
@@ -36404,7 +36445,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/text-to-3d",
-      "revision": "2026-10-20.188.1",
+      "revision": "2026-11-12.279.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -36521,6 +36562,118 @@
           "semantic": "prompt"
         },
         {
+          "name": "mesh_mode",
+          "label": "拓扑类型",
+          "type": "select",
+          "default": "Raw",
+          "options": [
+            {
+              "value": "Raw",
+              "label": "三角面 (Raw)"
+            },
+            {
+              "value": "Quad",
+              "label": "四边面 (Quad)"
+            }
+          ],
+          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "quality_override",
+          "label": "目标面数",
+          "type": "number",
+          "integer": true,
+          "default": 2000000,
+          "minimum": 500,
+          "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "mesh_mode", "operator": "equals", "value": "Quad"},
+              "maximum": 200000
+            }
+          ],
+          "semantic": "polycount",
+          "description": "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "number",
+            "step": 1000
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "texture_mode",
+          "label": "纹理质量",
+          "type": "select",
+          "default": "extreme-high",
+          "options": [
+            {
+              "value": "high",
+              "label": "高 (high，2K)"
+            },
+            {
+              "value": "extreme-high",
+              "label": "极致 (extreme-high，6K)"
+            }
+          ],
+          "semantic": "texture-size",
+          "description": "默认使用最高的极致档：官方表中不加 HighPack 时为 6K 贴图，较高档额外 +2 Hyper3D credits；高档为 2K 贴图，不加价。会话用途规定了贴图上限（如 2048）时，Agent 发起的生成按上限取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "TAPose",
+          "label": "T/A 姿态",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "TAPose", "operator": "falsy"}
+          ],
+          "description": "让人形主体按 T 姿态或 A 姿态生成，便于绑骨和动画；关闭时保持输入中的姿态。非人形主体不建议开启。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "quad_normal",
+          "label": "法线贴图烘焙",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "quad_normal", "operator": "falsy"}
+          ],
+          "description": "把高精度几何细节烘焙到法线贴图，面数较低时也能保留细节；默认关闭。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "label": "随机种子",
+          "type": "number",
+          "integer": true,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "固定种子有助于复现相近的几何与贴图结果，范围 0 到 65535；不填则由上游随机。",
+          "presentation": {
+            "surface": "provider",
+            "control": "number"
+          }
+        },
+        {
           "name": "authorize_extra_credits",
           "label": "同意完整原生报价",
           "type": "boolean",
@@ -36547,7 +36700,8 @@
           {
             "id": "extreme_texture",
             "label": "Extreme High 纹理",
-            "amount": "2"
+            "amount": "2",
+            "when": {"parameter": "texture_mode", "operator": "equals", "value": "extreme-high"}
           }
         ],
         "consent_parameter": "authorize_extra_credits",
@@ -36556,7 +36710,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/image-to-3d",
-      "revision": "2026-10-20.188.1",
+      "revision": "2026-11-12.279.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -36692,6 +36846,118 @@
           "semantic": "prompt"
         },
         {
+          "name": "mesh_mode",
+          "label": "拓扑类型",
+          "type": "select",
+          "default": "Raw",
+          "options": [
+            {
+              "value": "Raw",
+              "label": "三角面 (Raw)"
+            },
+            {
+              "value": "Quad",
+              "label": "四边面 (Quad)"
+            }
+          ],
+          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "quality_override",
+          "label": "目标面数",
+          "type": "number",
+          "integer": true,
+          "default": 2000000,
+          "minimum": 500,
+          "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "mesh_mode", "operator": "equals", "value": "Quad"},
+              "maximum": 200000
+            }
+          ],
+          "semantic": "polycount",
+          "description": "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "number",
+            "step": 1000
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "texture_mode",
+          "label": "纹理质量",
+          "type": "select",
+          "default": "extreme-high",
+          "options": [
+            {
+              "value": "high",
+              "label": "高 (high，2K)"
+            },
+            {
+              "value": "extreme-high",
+              "label": "极致 (extreme-high，6K)"
+            }
+          ],
+          "semantic": "texture-size",
+          "description": "默认使用最高的极致档：官方表中不加 HighPack 时为 6K 贴图，较高档额外 +2 Hyper3D credits；高档为 2K 贴图，不加价。会话用途规定了贴图上限（如 2048）时，Agent 发起的生成按上限取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "TAPose",
+          "label": "T/A 姿态",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "TAPose", "operator": "falsy"}
+          ],
+          "description": "让人形主体按 T 姿态或 A 姿态生成，便于绑骨和动画；关闭时保持输入中的姿态。非人形主体不建议开启。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "quad_normal",
+          "label": "法线贴图烘焙",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "quad_normal", "operator": "falsy"}
+          ],
+          "description": "把高精度几何细节烘焙到法线贴图，面数较低时也能保留细节；默认关闭。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "label": "随机种子",
+          "type": "number",
+          "integer": true,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "固定种子有助于复现相近的几何与贴图结果，范围 0 到 65535；不填则由上游随机。",
+          "presentation": {
+            "surface": "provider",
+            "control": "number"
+          }
+        },
+        {
           "name": "authorize_extra_credits",
           "label": "同意完整原生报价",
           "type": "boolean",
@@ -36718,7 +36984,8 @@
           {
             "id": "extreme_texture",
             "label": "Extreme High 纹理",
-            "amount": "2"
+            "amount": "2",
+            "when": {"parameter": "texture_mode", "operator": "equals", "value": "extreme-high"}
           }
         ],
         "consent_parameter": "authorize_extra_credits",

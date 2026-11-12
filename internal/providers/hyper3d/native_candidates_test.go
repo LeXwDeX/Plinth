@@ -85,7 +85,9 @@ func TestNativeRodinCandidatesUseHighestFrozenWireAndOrderedImages(t *testing.T)
 				input["reference_assets"] = ids
 			}
 			raw, _ := json.Marshal(input)
-			q, err := step.EvaluateNativeQuote(raw)
+			// The default selection: the price follows the texture mode (#279), so
+			// the Schema defaults are filled in before it is evaluated.
+			q, err := step.DefaultNativeQuote(raw)
 			if err != nil || q.TotalAmount != "3" || q.ExtraAmount != "2.5" {
 				t.Fatalf("quote=%+v err=%v", q, err)
 			}
