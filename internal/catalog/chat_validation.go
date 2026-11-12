@@ -1914,7 +1914,13 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	if err := validateThreeViewSubjectTypes(schema, *recipe, agentTools); err != nil {
 		return err
 	}
-	if err := validateThreeViewConsistency(schema); err != nil {
+	if err := validateThreeViewConsistency(schema, *recipe); err != nil {
+		return err
+	}
+	if err := validateThreeViewFrame(schema); err != nil {
+		return err
+	}
+	if err := validateThreeViewReview(schema, *recipe); err != nil {
 		return err
 	}
 	return validateThreeViewMultiview(schema.Multiview, *recipe, tools)
@@ -2033,18 +2039,6 @@ func recipeUsesSourceChain(recipe ChatSkillRecipeSchema) bool {
 		}
 	}
 	return false
-}
-
-// validateThreeViewConsistency checks the automatic check's bounds (#243).
-func validateThreeViewConsistency(schema ChatThreeViewSchema) error {
-	consistency := schema.Consistency
-	if consistency.MaxSubjectRatioDelta < 0 || consistency.MaxBackgroundSpread < 0 || consistency.MaxBBoxHeightDelta < 0 {
-		return errors.New("three_view.consistency 的阈值不能为负")
-	}
-	if schema.Continuation.Enabled && consistency.MaxAttemptsPerView < 1 {
-		return errors.New("three_view.consistency.max_attempts_per_view 必须为正")
-	}
-	return nil
 }
 
 // validateThreeViewMultiview checks the binding to the multiview tool (#65):

@@ -3665,6 +3665,11 @@ type ChatThreeViewSchema struct {
 	// Continuation lets the server finish the required views of one group
 	// inside an approved budget plan, without a card per view (#243).
 	Continuation ChatThreeViewContinuationSchema `json:"continuation,omitempty"`
+	// Frame makes the views' frame follow the source subject's shape instead
+	// of the Offering's default (#283).
+	Frame ChatThreeViewFrameSchema `json:"frame,omitzero"`
+	// Review is the Agent's visual checklist for the finished views (#283).
+	Review ChatThreeViewReviewSchema `json:"review,omitzero"`
 }
 
 // ChatThreeViewSubjectType is one subject class of the three-view recipe. The
@@ -3675,6 +3680,14 @@ type ChatThreeViewSubjectType struct {
 	Label            string `json:"label"`
 	FrontConstraints string `json:"front_constraints"`
 	ViewConstraints  string `json:"view_constraints"`
+	// FrameMinimumRatio and FrameMaximumRatio bound the frame's width over
+	// height for this class (#283). The pose the front view is asked for can be
+	// wider than the source (a humanoid asked for an A-pose from a picture with
+	// the arms down), and a side view can be wider than the front view (a
+	// quadruped), so the frame never follows the source outside these bounds.
+	// Zero leaves a bound open.
+	FrameMinimumRatio float64 `json:"frame_minimum_ratio,omitempty"`
+	FrameMaximumRatio float64 `json:"frame_maximum_ratio,omitempty"`
 }
 
 // ChatThreeViewConsistencySchema declares how a finished later view is judged
@@ -3686,6 +3699,124 @@ type ChatThreeViewConsistencySchema struct {
 	MaxBackgroundSpread  float64 `json:"max_background_spread"`
 	MaxBBoxHeightDelta   float64 `json:"max_bbox_height_delta"`
 	MaxAttemptsPerView   int     `json:"max_attempts_per_view"`
+	// Front is how the front view, which has no earlier view to be compared
+	// with, is accepted (#283).
+	Front ChatThreeViewFrontSchema `json:"front,omitzero"`
+	// Appearance compares what a later view looks like with the front view:
+	// dominant colours, detached parts and mirrored sides (#283).
+	Appearance ChatThreeViewAppearanceSchema `json:"appearance,omitzero"`
+	// Reasons words each failed check for the Agent, keyed by the check name.
+	// Fields: {actual} (what was measured), {expected} (the bound) and, for a
+	// mirror check, {partner} (the other view). A check without a declared
+	// reason is reported by its name and measurement. The words fill the
+	// {reasons} of messages.consistency_retry and consistency_failed, joined by
+	// ReasonSeparator.
+	Reasons         map[string]string `json:"reasons,omitempty"`
+	ReasonSeparator string            `json:"reason_separator,omitempty"`
+}
+
+// ChatThreeViewFrontSchema declares how the front view is accepted (#283). A
+// character with a floating weapon or a pet is one subject in several pieces,
+// so the piece count is a Schema bound instead of being fixed at one; several
+// figures side by side are still refused by the main-piece share.
+type ChatThreeViewFrontSchema struct {
+	// MaxComponents bounds the pieces of the subject; zero leaves it open.
+	MaxComponents int `json:"max_components"`
+	// MinMainComponentRatio is the share of the subject the largest piece must
+	// hold; zero disables the check.
+	MinMainComponentRatio float64 `json:"min_main_component_ratio"`
+}
+
+// ChatThreeViewAppearanceSchema declares the appearance comparison of a later
+// view with the accepted front view (#283). Every bound is deterministic pixel
+// arithmetic; the Agent's own visual review (Review) covers what the numbers
+// cannot see.
+type ChatThreeViewAppearanceSchema struct {
+	// SubjectThreshold is the colour distance from the background that makes a
+	// pixel part of the subject (the measure of model_review.reference).
+	SubjectThreshold float64                    `json:"subject_threshold"`
+	Palette          ChatThreeViewPaletteSchema `json:"palette"`
+	Parts            ChatThreeViewPartsSchema   `json:"parts"`
+	Mirror           ChatThreeViewMirrorSchema  `json:"mirror"`
+}
+
+// ChatThreeViewPaletteSchema bounds the dominant-colour difference. MaxDistance
+// is the weighted nearest-colour distance on a 0..1 scale (zero disables);
+// Colours, MinShare and MergeDistance say how the palette is read: at most
+// Colours colours of at least MinShare of the subject, colours closer than
+// MergeDistance (RGB) counting as one.
+type ChatThreeViewPaletteSchema struct {
+	MaxDistance   float64 `json:"max_distance"`
+	Colours       int     `json:"colours"`
+	MinShare      float64 `json:"min_share"`
+	MergeDistance float64 `json:"merge_distance"`
+}
+
+// ChatThreeViewPartsSchema bounds the difference in the number of detached
+// parts (accessories) of the subject. MaxCountDelta zero disables it; a piece
+// needs MinShare of the subject's pixels to count as a part.
+type ChatThreeViewPartsSchema struct {
+	MaxCountDelta int     `json:"max_count_delta"`
+	MinShare      float64 `json:"min_share"`
+}
+
+// ChatThreeViewMirrorSchema lists the pairs of views whose silhouettes must be
+// mirror images (#283). NormalizedSide is the edge of the square the
+// silhouettes are scaled to.
+type ChatThreeViewMirrorSchema struct {
+	NormalizedSide int                             `json:"normalized_side"`
+	Pairs          []ChatThreeViewMirrorPairSchema `json:"pairs,omitempty"`
+}
+
+// ChatThreeViewMirrorPairSchema is one pair of opposite views (recipe step
+// keys). The check runs on the view that finishes later, against the other
+// when it is already accepted; an optional view that was never made is skipped.
+// MinOverlap is the least overlap of the mirrored silhouettes and
+// MaxOrientationMargin the most the unmirrored silhouettes may overlap better
+// (a view that faces the same way as the other has its sides swapped). Zero
+// disables the bound.
+type ChatThreeViewMirrorPairSchema struct {
+	Views                []string `json:"views"`
+	MinOverlap           float64  `json:"min_overlap"`
+	MaxOrientationMargin float64  `json:"max_orientation_margin"`
+}
+
+// ChatThreeViewFrameSchema makes the frame of a new group follow its source
+// (#283). The server measures the source's subject, adds MarginRatio of its
+// longer side on every side, and gives each output-size parameter the legal
+// value closest to that shape (the rule of the canvas and the reference
+// picture, #284/#296) at the Offering's own long edge. A source whose subject
+// cannot be told from its background (under MinSubjectRatio of the picture)
+// is measured as a whole picture; a failure to measure keeps the Offering's
+// default frame.
+type ChatThreeViewFrameSchema struct {
+	Enabled          bool    `json:"enabled"`
+	SubjectThreshold float64 `json:"subject_threshold"`
+	MinSubjectRatio  float64 `json:"min_subject_ratio"`
+	MarginRatio      float64 `json:"margin_ratio"`
+}
+
+// ChatThreeViewReviewSchema is the Agent's visual checklist for the finished
+// views (#283): the automatic checks compare silhouettes and colours, not
+// meaning, so the Agent compares each view with the front view item by item.
+// It reaches the Agent through the {checklist} field of messages.agent_completed.
+type ChatThreeViewReviewSchema struct {
+	// ChecklistTemplate fields: {views} (the finished views other than the
+	// front, joined by multiview.view_separator), {items} and {view_notes}.
+	ChecklistTemplate string `json:"checklist_template,omitempty"`
+	// ItemTemplate renders one item ({text}); the items are joined by lines.
+	ItemTemplate string                    `json:"item_template,omitempty"`
+	Items        []ChatThreeViewReviewItem `json:"items,omitempty"`
+	// ViewNoteTemplate renders the note of one finished view ({view}, {note});
+	// ViewNotes are keyed by view key.
+	ViewNoteTemplate string            `json:"view_note_template,omitempty"`
+	ViewNotes        map[string]string `json:"view_notes,omitempty"`
+}
+
+// ChatThreeViewReviewItem is one thing to compare with the front view.
+type ChatThreeViewReviewItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // ChatThreeViewContinuationSchema enables the budget continuation (#243).
@@ -3741,13 +3872,15 @@ type ChatThreeViewMessages struct {
 	ModelSourceNotYet string `json:"model_source_not_yet"`
 	ReferenceRequired string `json:"reference_required"`
 	// AgentCompleted is the receipt once every required view of the group is
-	// accepted; {run}, {views}, {group} and {model_source} are filled (#243).
+	// accepted; {run}, {views}, {group} and {model_source} are filled (#243),
+	// and {checklist} is the Agent's visual checklist (Review, #283).
 	AgentCompleted string `json:"agent_completed,omitempty"`
 	// AgentPaused says the budget continuation stopped without finishing the
 	// group and what the person can do. Fields: {run}, {view}, {reason}.
 	AgentPaused string `json:"agent_paused,omitempty"`
 	// ConsistencyRetry reports one automatically redrawn view: {view},
-	// {attempt}, {maximum}, {reasons}.
+	// {attempt}, {maximum}, {reasons}. The reasons are worded by
+	// consistency.reasons, one per failed check (#283).
 	ConsistencyRetry string `json:"consistency_retry,omitempty"`
 	// ConsistencyFailed reports a view that stayed inconsistent; the group
 	// waits for a person. Fields: {view}, {reasons}.

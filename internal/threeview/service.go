@@ -164,7 +164,8 @@ type AssetReader interface {
 
 // Config wires the service. Assets and Review enable the automatic consistency
 // check (#243); without them a finished view is accepted as before and the
-// budget continuation cannot redraw it.
+// budget continuation cannot redraw it. They also let a new group measure its
+// source picture to choose the frame (#283).
 type Config struct {
 	Runtime  *skillrun.Runtime
 	Sessions Sessions

@@ -129,16 +129,22 @@ func (g *continuationGateway) Get(ctx context.Context, owner generation.OwnerID,
 }
 
 // continuationAssets serves the deterministic fake pictures. A view whose
-// asset is in bad gets a tiny off-center subject instead.
+// asset is in bad gets a tiny off-center subject instead (or whatever picture
+// the test put there); an input asset in owned is served as that picture.
 type continuationAssets struct {
-	good []byte
-	bad  map[generation.AssetID][]byte
+	good  []byte
+	bad   map[generation.AssetID][]byte
+	owned map[generation.AssetID][]byte
 }
 
-func (a continuationAssets) OpenOwned(context.Context, generation.OwnerID,
-	generation.AssetID,
+func (a continuationAssets) OpenOwned(_ context.Context, _ generation.OwnerID,
+	asset generation.AssetID,
 ) (generation.InputAsset, io.ReadCloser, error) {
-	return generation.InputAsset{ID: "input"}, io.NopCloser(bytes.NewReader(a.good)), nil
+	data := a.good
+	if picture, found := a.owned[asset]; found {
+		data = picture
+	}
+	return generation.InputAsset{ID: "input"}, io.NopCloser(bytes.NewReader(data)), nil
 }
 
 func (a continuationAssets) OpenAsset(_ context.Context, _ generation.OwnerID, _ generation.TaskID,
@@ -179,6 +185,21 @@ type continuationFixture struct {
 	assets  continuationAssets
 	views   *threeview.Service
 	run     skillrun.Run
+	schema  catalog.ChatThreeViewSchema
+	review  catalog.ChatImageReviewSchema
+}
+
+// useSchema rebuilds the fixture's service with a changed Schema, over the
+// same runtime and pictures.
+func (f *continuationFixture) useSchema(t *testing.T, change func(*catalog.ChatThreeViewSchema)) {
+	t.Helper()
+	change(&f.schema)
+	views, err := threeview.New(threeview.Config{Runtime: f.runtime, Sessions: ownsSessions{f.repo},
+		Schema: f.schema, Assets: f.assets, Review: f.review})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.views = views
 }
 
 func newContinuationFixture(t *testing.T, withPlan bool) *continuationFixture {
@@ -220,7 +241,8 @@ func newContinuationFixtureWithMode(t *testing.T, withPlan bool, mode string) *c
 	if err != nil {
 		t.Fatal(err)
 	}
-	assets := continuationAssets{good: good.Data, bad: map[generation.AssetID][]byte{}}
+	assets := continuationAssets{good: good.Data, bad: map[generation.AssetID][]byte{},
+		owned: map[generation.AssetID][]byte{}}
 	schema := catalog.ChatThreeViewSchema{RecipeID: recipe.ID, ModelSourceStepKey: "front",
 		Label: "views", MaximumListed: 5, ModelSourceNote: "front",
 		DefaultSubjectType: "generic", SubjectArgument: "subject_type",
@@ -246,9 +268,10 @@ func newContinuationFixtureWithMode(t *testing.T, withPlan bool, mode string) *c
 		},
 		Multiview: catalog.ChatThreeViewMultiviewSchema{ViewOrder: []string{"front", "left", "back", "right"},
 			ViewSeparator: " / "}}
+	review := catalog.ChatImageReviewSchema{
+		Limits: catalog.ImageInspectLimitsSchema{MaxBytes: 1 << 20, MaxPixels: 1 << 20}}
 	views, err := threeview.New(threeview.Config{Runtime: runtime, Sessions: ownsSessions{repo},
-		Schema: schema, Assets: assets, Review: catalog.ChatImageReviewSchema{
-			Limits: catalog.ImageInspectLimitsSchema{MaxBytes: 1 << 20, MaxPixels: 1 << 20}}})
+		Schema: schema, Assets: assets, Review: review})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +300,7 @@ func newContinuationFixtureWithMode(t *testing.T, withPlan bool, mode string) *c
 		t.Fatal(err)
 	}
 	return &continuationFixture{repo: repo, runtime: runtime, gateway: gateway, assets: assets,
-		views: views, run: run}
+		views: views, run: run, schema: schema, review: review}
 }
 
 func budgetContinuationPolicy() approvalpolicy.Policy {

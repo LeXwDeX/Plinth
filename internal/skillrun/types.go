@@ -116,6 +116,12 @@ type CreateCommand struct {
 	// SubjectType picks the recipe's subject constraint template (#243). An
 	// empty value lets the resolver use its declared default.
 	SubjectType string `json:"subject_type,omitempty"`
+	// StaticInput is frozen into every step of the run next to the recipe's own
+	// static input, before the recipe is hashed (#283): the three-view frame
+	// follows the source picture, which only the run's creator knows. A key a
+	// step already declares, or that names its prompt or source parameter, is
+	// refused (ErrInvalid), so the recipe's own fields cannot be replaced.
+	StaticInput map[string]json.RawMessage `json:"static_input,omitempty"`
 }
 
 type StepCommand struct {

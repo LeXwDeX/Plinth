@@ -119,12 +119,21 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if revision == "" {
 			return chat.ToolResult{NoSubmission: true}, skillrun.ErrInvalid
 		}
+		// The frame of every view follows the source subject's shape instead
+		// of the Offering's default square (#283). It is frozen with the run;
+		// nothing here can fail the run, a source that cannot be measured keeps
+		// the default frame.
+		var frame map[string]json.RawMessage
+		if e.threeViewService != nil {
+			frame = e.threeViewService.FrameInput(ctx, generation.OwnerID(command.OwnerID), selected, subjectType, assets[0])
+		}
 		run, err = e.skillRuntime.Create(ctx, skillrun.CreateCommand{
 			Harness: threeViewHarnessBinding(command),
 			OwnerID: generation.OwnerID(command.OwnerID), SessionID: command.SessionID,
 			RecipeID: threeViewRecipeID, ExpectedRevision: revision,
 			SelectedOfferingID: selected.ID, SourceAssetID: assets[0],
 			IdempotencyKey: threeViewRunKey(command), SubjectType: subjectType,
+			StaticInput: frame,
 		})
 		if err != nil {
 			return chat.ToolResult{NoSubmission: true}, err
@@ -434,8 +443,47 @@ func (e *Executor) continueThreeView(ctx context.Context, command chat.ToolComma
 		return chat.ToolResult{AgentContent: content, Pictures: pictures}, nil
 	}
 	content := strings.NewReplacer("{run}", run.ID, "{views}", e.threeViewViewLabels(result),
-		"{group}", run.ID, "{model_source}", e.threeView.ModelSourceStepKey).Replace(messages.AgentCompleted)
+		"{group}", run.ID, "{model_source}", e.threeView.ModelSourceStepKey,
+		"{checklist}", e.threeViewChecklist(result)).Replace(messages.AgentCompleted)
 	return chat.ToolResult{AgentContent: content, Pictures: pictures}, nil
+}
+
+// threeViewChecklist is the Agent's visual checklist for the finished views
+// (#283), worded by Schema three_view.review. The automatic check compares
+// silhouettes and colours; the Agent compares each view other than the front
+// view with the front view, item by item, in the pictures it receives with
+// the receipt. Empty when the Schema declares none or only the front view
+// finished.
+func (e *Executor) threeViewChecklist(result threeview.ContinuationResult) string {
+	review := e.threeView.Review
+	if len(review.Items) == 0 {
+		return ""
+	}
+	views := make([]string, 0, len(result.Completed))
+	notes := make([]string, 0, len(result.Completed))
+	for _, view := range result.Completed {
+		if view.Key == e.threeView.ModelSourceStepKey {
+			continue // the front view is what the others are compared with
+		}
+		label := e.threeViewSlotLabel(result, view.Key)
+		views = append(views, label)
+		if note := review.ViewNotes[view.Key]; note != "" {
+			notes = append(notes, strings.NewReplacer("{view}", label, "{note}", note).Replace(review.ViewNoteTemplate))
+		}
+	}
+	if len(views) == 0 {
+		return ""
+	}
+	items := make([]string, 0, len(review.Items))
+	for _, item := range review.Items {
+		items = append(items, strings.ReplaceAll(review.ItemTemplate, "{text}", item.Text))
+	}
+	separator := e.threeView.Multiview.ViewSeparator
+	if separator == "" {
+		separator = " / "
+	}
+	return strings.NewReplacer("{views}", strings.Join(views, separator),
+		"{items}", strings.Join(items, "\n"), "{view_notes}", strings.Join(notes, "")).Replace(review.ChecklistTemplate)
 }
 
 func (e *Executor) threeViewSlotLabel(result threeview.ContinuationResult, key string) string {

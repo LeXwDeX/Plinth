@@ -1138,6 +1138,17 @@ def _prepared_reference_assets(payload):
     return normalized.get("reference_assets") or [] if isinstance(normalized, dict) else []
 
 
+def _prepared_size(payload):
+    """The frozen output size of a prepared image step ("WxH"), or ""."""
+    normalized = payload.get("normalized_input")
+    if isinstance(normalized, str):
+        try:
+            normalized = json.loads(normalized)
+        except ValueError:
+            return ""
+    return normalized.get("size") or "" if isinstance(normalized, dict) else ""
+
+
 def _send_chat(api, session, body, seconds=45):
     """Sends one chat message, retrying while a continuation turn still owns it."""
     end = time.time() + seconds
@@ -1154,8 +1165,11 @@ def scenario_three_view(work, api, offerings):
     """#243: an approved budget finishes front, left and back without a click,
     feeds the front output into the later views and submits a P2 multiview 3D
     step; manual mode starts only the front view until the person asks for the
-    next one."""
-    picture = upload_asset(api, "reference.png", make_png(), "image/png")
+    next one. #283: the reference is a tall character (32x144 in a 96x192
+    picture), so the frozen size of every view is a portrait one instead of the
+    model's default square."""
+    picture = upload_asset(api, "reference.png",
+                           make_picture(96, 192, (255, 255, 255), [((32, 24, 64, 168), (52, 58, 70))]), "image/png")
     if not picture:
         record("three-view: upload the reference picture", False, "upload refused")
         return
@@ -1235,6 +1249,22 @@ def scenario_three_view(work, api, offerings):
     record("three-view: left and back frozen inputs use the front output as their source",
            fed_front.get("left") and fed_front.get("back") and bool(front_asset),
            f"front asset {front_asset or 'none'}, left/back fed front {fed_front}")
+    sizes = {}
+    for needle, key in (("clean, neutral front view", "front"), ("clean left view", "left"),
+                        ("clean back view", "back")):
+        match = next((item for item in prepared
+                      if needle in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+        sizes[key] = _prepared_size(match) if match else ""
+
+    def portrait(size):
+        try:
+            width, height = (int(part) for part in size.split("x"))
+        except ValueError:
+            return False
+        return 0 < width < height
+
+    record("three-view: a tall character's views are framed as portraits, not the default square",
+           all(portrait(size) for size in sizes.values()), f"frozen sizes {sizes}")
     run_id = (group or {}).get("run_id") or ""
 
     # The accepted group feeds the multiview 3D step of the same plan.
