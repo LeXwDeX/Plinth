@@ -72,7 +72,7 @@ func TestCraftPromptTradeoffsComeFromOfferingKnowledge(t *testing.T) {
 		t.Fatal("a disabled Offering appeared in the tradeoff lines")
 	}
 
-	block := orchestrator.craftPrompt(registry, "3d", "model-3d")
+	block := orchestrator.craftPrompt(registry, "3d", "model-3d", nil)
 	if strings.Contains(block, "{offering_tradeoffs}") {
 		t.Fatal("craft prompt kept the unresolved placeholder")
 	}
@@ -85,7 +85,7 @@ func TestCraftPromptTradeoffsComeFromOfferingKnowledge(t *testing.T) {
 
 func TestCraftPromptDropsTheTradeoffBlockWhenNoOfferingSourceExists(t *testing.T) {
 	orchestrator, registry, _ := craftPromptFixture(t, nil, nil)
-	block := orchestrator.craftPrompt(registry, "3d", "model-3d")
+	block := orchestrator.craftPrompt(registry, "3d", "model-3d", nil)
 	if strings.Contains(block, "{offering_tradeoffs}") {
 		t.Fatal("craft prompt kept the unresolved placeholder")
 	}
@@ -94,5 +94,36 @@ func TestCraftPromptDropsTheTradeoffBlockWhenNoOfferingSourceExists(t *testing.T
 	}
 	if !strings.Contains(block, "【3D 制作要领】") {
 		t.Fatal("the rest of the craft prompt disappeared")
+	}
+}
+
+// TestCraftPromptFollowsABriefHeadedFor3DOnA2DStage is #285: on a 2D stage
+// turn of auto scope the 3D craft is left out, unless the frozen brief already
+// chose a 3D purpose or marked the picture as a 3D input.
+func TestCraftPromptFollowsABriefHeadedFor3DOnA2DStage(t *testing.T) {
+	orchestrator, registry, _ := craftPromptFixture(t, nil, nil)
+	const marker = "【3D 制作要领】"
+	if block := orchestrator.craftPrompt(registry, "auto", "image", nil); strings.Contains(block, marker) {
+		t.Fatal("a 2D stage turn without a brief got the 3D craft")
+	}
+	for name, brief := range map[string]ProductionBrief{
+		"3D purpose":     {"purpose": []byte(`"game_character"`)},
+		"3D input image": {"image_for_3d": []byte(`true`)},
+	} {
+		if block := orchestrator.craftPrompt(registry, "auto", "image", brief); !strings.Contains(block, marker) {
+			t.Fatalf("%s: a 2D stage turn of a session headed for 3D lacks the 3D craft", name)
+		}
+	}
+	for name, brief := range map[string]ProductionBrief{
+		"2D only":          {"image_use": []byte(`"icon"`)},
+		"3D input not set": {"image_for_3d": []byte(`false`), "purpose": []byte(`""`)},
+	} {
+		if block := orchestrator.craftPrompt(registry, "auto", "image", brief); strings.Contains(block, marker) {
+			t.Fatalf("%s: the 3D craft was injected into a 2D turn", name)
+		}
+	}
+	// The 3D tools must still be offered: a 2D-only scope never gets it.
+	if block := orchestrator.craftPrompt(registry, "2d", "image", ProductionBrief{"purpose": []byte(`"render"`)}); strings.Contains(block, marker) {
+		t.Fatal("a 2D-scope turn got the 3D craft")
 	}
 }

@@ -907,7 +907,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		}
 		toolNames[tool.Name] = struct{}{}
 	}
-	if err := validateCraftPrompts(schema.Agent.CraftPrompts, toolNames, maxPromptCharacters); err != nil {
+	if err := validateCraftPrompts(schema.Agent.CraftPrompts, toolNames, maxPromptCharacters, schema.Model3DUsage.Brief.Fields); err != nil {
 		return err
 	}
 	if err := validateCraftPromptOfferings(schema.Agent.CraftPrompts, capabilityDomains); err != nil {

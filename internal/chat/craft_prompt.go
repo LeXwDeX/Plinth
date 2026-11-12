@@ -13,8 +13,10 @@ import (
 // turn and the 2D craft only on a 2D turn even when auto scope offers both tool
 // sets (#239). The offered list is the same describe() list the model gets, so
 // a tool withheld by the session's Agent scope, a disabled Offering or a bound
-// harness never triggers its brief.
-func (orchestrator *Orchestrator) craftPrompt(registry *toolRegistry, scope, domain string) string {
+// harness never triggers its brief. A brief whose WhenBriefAny field is set in
+// the frozen production brief ignores the domain filter: a session whose brief
+// already chose a 3D purpose gets the 3D craft on a 2D stage turn too (#285).
+func (orchestrator *Orchestrator) craftPrompt(registry *toolRegistry, scope, domain string, brief ProductionBrief) string {
 	prompts := orchestrator.schema.Agent.CraftPrompts
 	if len(prompts) == 0 || registry == nil {
 		return ""
@@ -28,7 +30,7 @@ func (orchestrator *Orchestrator) craftPrompt(registry *toolRegistry, scope, dom
 		if strings.TrimSpace(prompt.Text) == "" {
 			continue
 		}
-		if prompt.WhenDomain != "" && domain != "" && prompt.WhenDomain != domain {
+		if prompt.WhenDomain != "" && domain != "" && prompt.WhenDomain != domain && !briefSetsAny(brief, prompt.WhenBriefAny) {
 			continue
 		}
 		matched := false
@@ -127,4 +129,15 @@ func withoutEmptyLines(text string) string {
 		kept = append(kept, line)
 	}
 	return strings.Join(kept, "\n")
+}
+
+// briefSetsAny reports whether the brief sets any named field: a non-empty
+// text (profile ids are text) or a true flag.
+func briefSetsAny(brief ProductionBrief, names []string) bool {
+	for _, name := range names {
+		if brief.Text(name) != "" || brief.Flag(name) {
+			return true
+		}
+	}
+	return false
 }

@@ -1980,7 +1980,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		// A craft brief comes before the scope block: it teaches how to work in
 		// a domain, while the scope only says which tools this turn offers. The
 		// selection and the framed session notes stay at the end of the prompt.
-		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain))
+		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain, options.ProductionBrief))
 		sections.add("concept_directions", orchestrator.conceptDirectionsPrompt(registry, scope))
 		sections.add("candidates", orchestrator.candidatesPrompt(registry, scope))
 		sections.add("scope", orchestrator.scopePrompt(registry, scope))
