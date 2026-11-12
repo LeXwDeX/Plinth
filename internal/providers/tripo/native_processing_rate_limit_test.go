@@ -304,7 +304,11 @@ func TestNativeExportRateLimitCheckpointFailsClosed(t *testing.T) {
 	formats := options.NativeConversion.Formats
 	units := nativeConversionProgressUnits(len(formats))
 	request := func(format string) json.RawMessage {
-		raw, _ := json.Marshal(nativeConversionBody(options.NativeConversion, "https://assets.example/original.glb", format))
+		body, err := nativeConversionBody(r.Offering, options.NativeConversion, r.Input, "https://assets.example/original.glb", format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(body)
 		return raw
 	}
 	ledger := func(items map[string]conversionItem, progressUnits int) nativeConversionLedger {
@@ -315,7 +319,7 @@ func TestNativeExportRateLimitCheckpointFailsClosed(t *testing.T) {
 		return l
 	}
 	valid := ledger(map[string]conversionItem{"FBX": {Status: conversionItemDone, RemoteID: "child_fbx", Locator: "https://assets.example/fbx"}, "OBJ": {Status: conversionItemRateLimited, RateLimitRetries: 2}}, units)
-	if err := nativeConversionCheckpoint(valid, options); err != nil {
+	if err := nativeConversionCheckpoint(valid, r.Offering, r.Input, options); err != nil {
 		t.Fatalf("valid rate-limited ledger rejected: %v", err)
 	}
 	budget := units - 2*len(formats)
@@ -329,7 +333,7 @@ func TestNativeExportRateLimitCheckpointFailsClosed(t *testing.T) {
 		"forged progress units":        ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 1}}, units+1),
 	}
 	for name, l := range cases {
-		if nativeConversionCheckpoint(l, options) == nil {
+		if nativeConversionCheckpoint(l, r.Offering, r.Input, options) == nil {
 			t.Errorf("%s accepted", name)
 		}
 	}

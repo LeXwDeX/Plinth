@@ -286,7 +286,9 @@ func nativeProcessingInput(offering generation.Offering, raw json.RawMessage) (g
 		if err != nil {
 			return source, "", nil, options, nativeProcessingParameterError(offering, p, err)
 		}
-		if nativeConversionControl(offering, options, p.Name) {
+		// The format selection and the consent are private platform decisions, and
+		// a parameter bound to the exports (#292) is written only into them.
+		if nativeConversionControl(offering, options, p.Name) || conversionBoundParameter(options, p.Name) {
 			continue
 		}
 		if p.Name == source.Name {
@@ -310,6 +312,15 @@ func nativeProcessingInput(offering generation.Offering, raw json.RawMessage) (g
 	if options.NativeConversion != nil {
 		if err := planPostSuccessConversion(offering, raw); err != nil {
 			return source, "", nil, options, err
+		}
+		// The export options are checked now, before the paid job: a value the
+		// exports cannot be written with would only fail after the model exists.
+		if len(options.NativeConversion.Bindings) > 0 {
+			for _, format := range options.NativeConversion.Formats {
+				if _, err := conversionBoundValues(offering, options.NativeConversion, raw, format.Format); err != nil {
+					return source, "", nil, options, nativeProcessingInputError()
+				}
+			}
 		}
 	}
 	return source, sourceID, body, options, nil
@@ -388,7 +399,7 @@ func nativeProcessingCheckpoint(offering generation.Offering, input, opaque json
 	if err != nil || strictUploadedJSON(opaque, &state) != nil || state.Version != 1 || state.Kind != nativeProcessingKind || state.TaskID != taskID || state.AttemptID != attemptID || taskID == "" || attemptID == "" || state.OwnerID == "" || state.SubmissionKey == "" || state.OfferingID != offering.ID || state.OfferingRevision != offering.Revision || state.OfferingSHA256 != nativeOfferingDigest(offering) || state.InputSHA256 != uploadedDigest(input) || state.SourceTaskID != id || !uploadedTokenValid(state.SourceRemoteID) {
 		return state, options, nativeProcessingProtocolError()
 	}
-	if err := nativeConversionCheckpoint(state.nativeConversionLedger, options, state.RemoteID, state.SourceRemoteID); err != nil {
+	if err := nativeConversionCheckpoint(state.nativeConversionLedger, offering, input, options, state.RemoteID, state.SourceRemoteID); err != nil {
 		return state, options, err
 	}
 	return state, options, nil

@@ -23,7 +23,7 @@ func TestTripoRigV3EnabledKeepsAcceptedRigAvailable(t *testing.T) {
 	if !ok {
 		t.Fatal("missing explicit latest Rig candidate")
 	}
-	if !candidate.Enabled || candidate.Capability != schema.Rigging || candidate.Revision != "2026-11-12.277.1" || candidate.EstimateTotalCredits(json.RawMessage(`{"source_task":"source","output_formats":["FBX"],"authorize_extra_credits":true}`)) != 35 {
+	if !candidate.Enabled || candidate.Capability != schema.Rigging || candidate.Revision != "2026-11-12.292.1" || candidate.EstimateTotalCredits(json.RawMessage(`{"source_task":"source","output_formats":["FBX"],"authorize_extra_credits":true}`)) != 35 {
 		t.Fatalf("Rig v3 availability or quote changed: %+v", candidate)
 	}
 	var wire struct {

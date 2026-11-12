@@ -30,7 +30,8 @@ func TestTripoSmartSegmentOfferingsAreDistinctAndEnabled(t *testing.T) {
 	} {
 		t.Run(test.segType, func(t *testing.T) {
 			o, ok := c.Get(generation.OfferingID(test.id))
-			if !ok || !o.Enabled || o.Default || string(o.Capability) != test.capability || o.EstimatedCredits != test.credits || o.Revision != "2026-10-22.185.5" {
+			// 185.5 declared the exports; #292 binds their texture size to the purpose.
+			if !ok || !o.Enabled || o.Default || string(o.Capability) != test.capability || o.EstimatedCredits != test.credits || o.Revision != "2026-11-12.292.1" {
 				t.Fatalf("incorrect Smart Segmentation Offering %s: %+v", test.id, o)
 			}
 			var options struct {
@@ -40,9 +41,10 @@ func TestTripoSmartSegmentOfferingsAreDistinctAndEnabled(t *testing.T) {
 				ObserveEndpoint  string `json:"observe_endpoint"`
 				ConvertEndpoint  string `json:"convert_endpoint"`
 				NativeConversion struct {
-					SourceAlias    string         `json:"source_alias"`
-					MaxSourceBytes int64          `json:"max_source_bytes"`
-					Parameters     map[string]any `json:"parameters"`
+					SourceAlias    string           `json:"source_alias"`
+					MaxSourceBytes int64            `json:"max_source_bytes"`
+					Parameters     map[string]any   `json:"parameters"`
+					Bindings       []map[string]any `json:"bindings"`
 					Formats        []struct {
 						Format, Role, Variant, MediaType string
 					} `json:"formats"`
@@ -52,10 +54,12 @@ func TestTripoSmartSegmentOfferingsAreDistinctAndEnabled(t *testing.T) {
 				t.Fatalf("incorrect Smart Segmentation route %s: %+v, %v", test.id, options, err)
 			}
 			// Exports consume the segmented GLB URL with the same fixed advanced
-			// parameters as the other #185 geometry candidates.
+			// parameters as the other #185 geometry candidates; the texture size is
+			// the one the purpose bounds (#292), bound to a public parameter.
 			nc := options.NativeConversion
-			wantParameters := map[string]any{"texture_size": float64(8192), "texture_format": "PNG", "with_animation": false, "bake": true, "fbx_preset": "blender"}
-			if nc.SourceAlias != "seg_model_url" || nc.MaxSourceBytes != 150000000 || !reflect.DeepEqual(nc.Parameters, wantParameters) || len(nc.Formats) != 5 {
+			wantParameters := map[string]any{"texture_format": "PNG", "with_animation": false, "bake": true, "fbx_preset": "blender"}
+			wantBindings := []map[string]any{{"parameter": "export_texture_size", "wire": "texture_size"}}
+			if nc.SourceAlias != "seg_model_url" || nc.MaxSourceBytes != 150000000 || !reflect.DeepEqual(nc.Parameters, wantParameters) || !reflect.DeepEqual(nc.Bindings, wantBindings) || len(nc.Formats) != 5 {
 				t.Fatalf("%s native export declaration: %+v", test.id, nc)
 			}
 			var fixedType bool

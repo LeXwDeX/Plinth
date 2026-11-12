@@ -65,9 +65,11 @@ type nativeConversionOptions struct {
 	MaxSourceBytes int64                      `json:"max_source_bytes"`
 	Parameters     map[string]json.RawMessage `json:"parameters"`
 	Formats        []nativeConversionFormat   `json:"formats"`
-	// Bindings is the generation Offerings' addition (conversion_parameters.go):
-	// public parameters forwarded to every export request. A processing Offering
-	// declares none.
+	// Bindings (conversion_parameters.go) forward public parameters of the frozen
+	// input to the export requests. The generation Offerings declare them for
+	// their export options (#278); a processing Offering declares them for the
+	// options a session purpose bounds (#292), the texture size, and keeps the
+	// rest of its export fixed in Parameters.
 	Bindings []nativeConversionBinding `json:"bindings,omitempty"`
 }
 type nativeConversionFormat struct {
@@ -117,7 +119,7 @@ func nativeConversionDeclaration(o generation.Offering, options providerOptions)
 		}
 		return matched, nil
 	}
-	if o.PostSuccess != nil || o.Cost == nil || o.Cost.ExtraCredits <= 0 || o.Cost.SelectionParameter == "" || o.Cost.ConsentParameter == "" || o.Cost.SelectionParameter == o.Cost.ConsentParameter || o.CostPolicy == nil || !validRigCheckRoute(options.ConvertEndpoint, false) || c.MaxSourceBytes <= 0 || c.MaxSourceBytes > maximumTripoModelBytes || len(c.Formats) == 0 || len(c.Formats) > maximumNativeConversionFormats || len(c.Parameters) == 0 || len(c.Bindings) != 0 {
+	if o.PostSuccess != nil || o.Cost == nil || o.Cost.ExtraCredits <= 0 || o.Cost.SelectionParameter == "" || o.Cost.ConsentParameter == "" || o.Cost.SelectionParameter == o.Cost.ConsentParameter || o.CostPolicy == nil || !validRigCheckRoute(options.ConvertEndpoint, false) || c.MaxSourceBytes <= 0 || c.MaxSourceBytes > maximumTripoModelBytes || len(c.Formats) == 0 || len(c.Formats) > maximumNativeConversionFormats || len(c.Parameters) == 0 {
 		return nil, nativeProcessingProtocolError()
 	}
 	sourceFound := false
@@ -151,11 +153,13 @@ func nativeConversionDeclaration(o generation.Offering, options providerOptions)
 		}
 	}
 	seen := map[string]bool{}
+	exportFormats := make([]string, 0, len(c.Formats))
 	for _, f := range c.Formats {
 		if !uploadedTokenValid(f.Format) || seen[f.Format] || f.Role == "" || f.Variant == "" || f.MediaType == "" {
 			return nil, nativeProcessingProtocolError()
 		}
 		seen[f.Format] = true
+		exportFormats = append(exportFormats, f.Format)
 		index := -1
 		for i, out := range o.Outputs {
 			if out.Role == f.Role && out.Variant == f.Variant {
@@ -172,6 +176,12 @@ func nativeConversionDeclaration(o generation.Offering, options providerOptions)
 			return nil, nativeProcessingProtocolError()
 		}
 		matched[index] = true
+	}
+	// The bound parameters are public parameters of the Offering that a purpose
+	// sets (#292); the export request writes them, the processing request never
+	// does. A binding that cannot be written is refused with the declaration.
+	if detail := conversionBindingsDetail(o, c, exportFormats); detail != "" {
+		return nil, failure(generation.FailureProtocol, false, "Tripo 原生处理转换声明无效: "+detail)
 	}
 	selection, consent := false, false
 	for _, p := range o.Parameters {
@@ -207,18 +217,35 @@ func nativeConversionDeclaration(o generation.Offering, options providerOptions)
 	return matched, nil
 }
 
-func nativeConversionBody(c *nativeConversionOptions, locator, format string) map[string]any {
+// nativeConversionBody is the models/convert request of one export: the source
+// and the format, the declaration's constants and the values the bindings read
+// from the frozen input (the texture size a purpose bounds, #292). An Offering
+// without bindings never reads the input, so its request is exactly the constant
+// one every Task frozen before the bindings existed was accepted with.
+func nativeConversionBody(o generation.Offering, c *nativeConversionOptions, input json.RawMessage, locator, format string) (map[string]any, error) {
 	body := map[string]any{"input": locator, "format": format}
 	for key, raw := range c.Parameters {
 		var v any
 		_ = json.Unmarshal(raw, &v)
 		body[key] = v
 	}
-	return body
+	if len(c.Bindings) == 0 {
+		return body, nil
+	}
+	bound, err := conversionBoundValues(o, c, input, format)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range bound {
+		body[key] = value
+	}
+	return body, nil
 }
 
-// reserved lists upstream IDs that a private export child can never reuse.
-func nativeConversionCheckpoint(s nativeConversionLedger, options providerOptions, reserved ...string) error {
+// reserved lists upstream IDs that a private export child can never reuse. The
+// recorded requests are checked against the frozen Offering and input, so a
+// ledger cannot carry an export the Task was not accepted with.
+func nativeConversionCheckpoint(s nativeConversionLedger, o generation.Offering, input json.RawMessage, options providerOptions, reserved ...string) error {
 	c := options.NativeConversion
 	if len(s.Conversions) == 0 {
 		if s.ConversionSource != nil || len(s.ConversionRequests) != 0 || s.ProgressUnits != 0 {
@@ -290,7 +317,10 @@ func nativeConversionCheckpoint(s nativeConversionLedger, options providerOption
 		}
 		locator, ok := request["input"].(string)
 		parsed, err := url.Parse(locator)
-		if !ok || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || !reflect.DeepEqual(request, nativeConversionBody(c, locator, f.Format)) {
+		if !ok || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+			return nativeProcessingProtocolError()
+		}
+		if want, err := nativeConversionBody(o, c, input, locator, f.Format); err != nil || !reflect.DeepEqual(request, want) {
 			return nativeProcessingProtocolError()
 		}
 	}
@@ -502,7 +532,10 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 			return generation.Observation{}, failure(generation.FailureIntegrity, false, "Tripo 处理产物字节与冻结转换来源不一致")
 		}
 		s.ConversionSource = &binding
-		body := nativeConversionBody(c, source.Locator, f.Format)
+		body, err := nativeConversionBody(request.Offering, c, request.Input, source.Locator, f.Format)
+		if err != nil {
+			return generation.Observation{}, err
+		}
 		s.ConversionRequests[f.Format], _ = json.Marshal(body)
 		s.Conversions[f.Format] = conversionItem{Status: conversionItemDispatching, RateLimitRetries: retries}
 		permit, err := generation.PrivateDispatchPermit(ctx, generation.DispatchIntent{Bytes: run.encode()})
