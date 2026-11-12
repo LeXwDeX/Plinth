@@ -55,9 +55,14 @@ func framePixels(parameter generation.Parameter, ratio float64) (int, int) {
 		if text, ok := declared.(string); ok {
 			// A declared default is a real picture size; a value beyond any image
 			// model's output is ignored rather than converted unchecked.
-			if size, ok := parseSizeValue(text); ok && size.Width > 0 && size.Height > 0 &&
-				max(size.Width, size.Height) <= frameMaximumDeclaredSide {
-				longest = int(max(size.Width, size.Height))
+			if size, ok := parseSizeValue(text); ok && size.Width > 0 && size.Height > 0 {
+				side := size.Width
+				if size.Height > side {
+					side = size.Height
+				}
+				if side <= frameMaximumDeclaredSide {
+					longest = int(side)
+				}
 			}
 		}
 	}
