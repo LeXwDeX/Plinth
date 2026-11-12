@@ -153,12 +153,14 @@ export function panelShortcutTabs(schema: ProductSchema): Array<{ id: PanelTabId
   return entries;
 }
 
-/** The tab a roving-focus key moves to: Left / Right step (wrapping), Home / End jump. Null for any other key. */
+/** The tab a roving-focus key moves to: Up / Down and Left / Right step (wrapping), Home / End jump. Null for any other key. */
 export function steppedPanelTab(ids: readonly PanelTabId[], current: PanelTabId, key: string): PanelTabId | null {
   if (ids.length === 0) return null;
   const index = Math.max(0, ids.indexOf(current));
   switch (key) {
+    case 'ArrowDown':
     case 'ArrowRight': return ids[(index + 1) % ids.length];
+    case 'ArrowUp':
     case 'ArrowLeft': return ids[(index - 1 + ids.length) % ids.length];
     case 'Home': return ids[0];
     case 'End': return ids[ids.length - 1];

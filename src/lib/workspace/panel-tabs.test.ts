@@ -234,6 +234,12 @@ describe('moving between tabs with the keyboard', () => {
     expect(steppedPanelTab(ids, 'parts', 'ArrowLeft')).toBe('formats');
   });
 
+  it('steps with Up and Down on the vertical rail and wraps', () => {
+    expect(steppedPanelTab(ids, 'process', 'ArrowDown')).toBe('formats');
+    expect(steppedPanelTab(ids, 'details', 'ArrowDown')).toBe('operations');
+    expect(steppedPanelTab(ids, 'operations', 'ArrowUp')).toBe('details');
+  });
+
   it('jumps with Home and End and ignores every other key', () => {
     expect(steppedPanelTab(ids, 'parts', 'Home')).toBe('operations');
     expect(steppedPanelTab(ids, 'parts', 'End')).toBe('details');
