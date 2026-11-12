@@ -361,8 +361,11 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 	if label == "" {
 		label = identity.TaskID
 	}
-	usageCheck := newModelReviewUsageCheck(
+	// A processing result's exports the purpose sized are what its texture budget
+	// judges; the inspected file is reported beside them (#292).
+	usageCheck := newModelReviewUsageCheckFor(
 		report,
+		executor.sizedDeliverable(source.task, source.asset),
 		executor.chat.Model3DUsage,
 		review.Inspect.Production,
 		command.Options.ProductionBrief,

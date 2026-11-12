@@ -1,13 +1,23 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
+
+// noReferences resolves no pictures: the executor below only reads Schema tables.
+type noReferences struct{}
+
+func (noReferences) Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error) {
+	return nil, nil
+}
 
 // #292: the files a Tripo processing step exports follow the session purpose. The
 // whole stack runs against the fake upstream (the real Catalog, the kernel, the
@@ -55,6 +65,14 @@ func TestGamePurposeRiggingAndDecimationExportPNGAtThePurposeTextureSize(t *test
 			sourceTask := harness.runUntilTerminal(t, "owner-acme", source.TaskID)
 			if sourceTask.State != generation.TaskSucceeded {
 				t.Fatalf("source state = %s, failure = %#v", sourceTask.State, sourceTask.Failure)
+			}
+
+			// The executor inspect_model and the plan checkpoints judge with.
+			executor, err := generationtool.New(generationtool.Config{
+				Gateway: harness.module, References: noReferences{}, Chat: chatSchema,
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
 
 			for _, step := range []struct {
@@ -113,6 +131,22 @@ func TestGamePurposeRiggingAndDecimationExportPNGAtThePurposeTextureSize(t *test
 					if variant := map[string]string{"FBX": "fbx", "OBJ": "obj", "STL": "stl", "USDZ": "usdz", "3MF": "3mf"}[format]; !delivered[role+":"+variant] {
 						t.Errorf("%s did not deliver the %s export: %v", step.offering, format, delivered)
 					}
+				}
+				// The Task the kernel froze carries the declaration and the size: the
+				// resolver that inspect_model and the plan checkpoints share names the
+				// export edge the purpose gave, for the GLB they read, whatever
+				// resolution the upstream wrote that file at.
+				var glb generation.AssetID
+				for _, asset := range task.Assets {
+					if asset.Role == "model" && asset.Variant == "glb" {
+						glb = asset.ID
+					}
+				}
+				if glb == "" {
+					t.Fatalf("%s delivered no GLB: %v", step.offering, delivered)
+				}
+				if edge := executor.SizedTextureEdge(task, glb); float64(edge) != tc.size {
+					t.Errorf("%s: the sized export edge = %d, want %v", step.offering, edge, tc.size)
 				}
 			}
 		})

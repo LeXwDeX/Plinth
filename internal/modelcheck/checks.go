@@ -75,18 +75,45 @@ func Failed(results []Result) bool {
 	return false
 }
 
+// DetailSized marks a texture_size result judged on a deliverable the purpose
+// sized rather than on the inspected file (#292).
+const DetailSized = "sized_export"
+
+// TextureEdge is the texture edge the purpose's texture budget judges. sized is
+// the edge of a deliverable whose textures the Offering's frozen input sized (an
+// export a session purpose bounds, #292), or 0 when the Task has none. That
+// deliverable is what the purpose chose, so the budget judges it; the inspected
+// file, which the upstream wrote at its own resolution, is reported as native
+// beside it: neither a pass nor a failure of the budget. Without a sized
+// deliverable the inspected file's largest texture decides, as it always did.
+func TextureEdge(report modelinspect.Report, sized int) (judged, native int, bySize bool) {
+	native = maxTextureEdge(report)
+	if sized > 0 {
+		return sized, native, true
+	}
+	return native, native, false
+}
+
 // Evaluate judges report against the frozen checks. A check without a usable
 // bound, or a report that could not read the model, is unknown rather than a
 // pass, so infrastructure trouble is visible and never blocks the plan.
 func Evaluate(report modelinspect.Report, checks []budget.PlanCheck) []Result {
+	return EvaluateSized(report, checks, 0)
+}
+
+// EvaluateSized is Evaluate for a Task that has a deliverable the purpose sized
+// (sized is its texture edge in pixels, 0 for none): the texture_size check
+// judges that deliverable (TextureEdge), so a checkpoint and inspect_model
+// reach the same verdict about the same Task.
+func EvaluateSized(report modelinspect.Report, checks []budget.PlanCheck, sized int) []Result {
 	results := make([]Result, 0, len(checks))
 	for _, check := range checks {
-		results = append(results, evaluate(report, check))
+		results = append(results, evaluate(report, check, sized))
 	}
 	return results
 }
 
-func evaluate(report modelinspect.Report, check budget.PlanCheck) Result {
+func evaluate(report modelinspect.Report, check budget.PlanCheck, sized int) Result {
 	readError := warned(report, "read_error")
 	switch check.Check {
 	case CheckTriangles:
@@ -109,15 +136,19 @@ func evaluate(report modelinspect.Report, check budget.PlanCheck) Result {
 	case CheckSkin:
 		return boolean(report, check, len(report.Skins) > 0, check.Required)
 	case CheckTextureSize:
-		actual := maxTextureEdge(report)
+		actual, _, bySize := TextureEdge(report, sized)
+		detail := ""
+		if bySize {
+			detail = DetailSized
+		}
 		if check.Maximum == nil {
-			return Result{Check: check.Check, Status: StatusUnknown, Actual: actual}
+			return Result{Check: check.Check, Status: StatusUnknown, Actual: actual, Detail: detail}
 		}
 		status := StatusPass
 		if float64(actual) > *check.Maximum {
 			status = StatusFail
 		}
-		return Result{Check: check.Check, Status: status, Actual: actual}
+		return Result{Check: check.Check, Status: status, Actual: actual, Detail: detail}
 	case CheckPivotBottomCenter:
 		if check.MaximumRatio == nil || readError || bboxDiagonal(report) <= 0 {
 			return Result{Check: check.Check, Status: StatusUnknown, Actual: 0.0}

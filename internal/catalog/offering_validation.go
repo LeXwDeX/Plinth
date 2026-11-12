@@ -1051,6 +1051,15 @@ func validateOfferingOutputs(offering schemacontract.Offering) error {
 				return fmt.Errorf("%s的 required_when 必须引用 text 参数（present）或 select 参数的声明选项（equals），并限定精确 required 槽位", at)
 			}
 		}
+		// A sized output names the parameter that sets the edge of its textures
+		// (#292): a texture-size select of the Offering, on one exact variant.
+		if output.TextureSizeParameter != "" {
+			parameter, exists := offeringParameter(offering.Parameters, output.TextureSizeParameter)
+			if !exists || parameter.Type != "select" || parameter.Semantic != schemacontract.SemanticTextureSize ||
+				output.Variant == "" || output.VariantPrefix != "" || output.VariantFrom != "" {
+				return fmt.Errorf("%s的 texture_size_parameter 必须引用带 texture-size 语义的 select 参数，并限定精确变体", at)
+			}
+		}
 		// minimum 语义（§3.2 规则 5）：旧语义缺省等效 1，显式值保持
 		// 既有严格性；显式 delivery 必须显式且满足各自下界。
 		if output.Delivery == "" {

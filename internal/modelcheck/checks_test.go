@@ -129,3 +129,53 @@ func TestEvaluateYUpFailsOnlyALyingUprightSubject(t *testing.T) {
 		})
 	}
 }
+
+// #292: the deliverable a purpose sized is what the texture budget judges; the
+// native file, written at the upstream's own resolution, is neither judged nor a
+// pass. Without a sized deliverable the file decides, as before.
+func TestTextureSizeJudgesTheSizedDeliverableNotTheNativeFile(t *testing.T) {
+	native := modelinspect.Report{Materials: []modelinspect.MaterialReport{{Slots: []modelinspect.MaterialSlotReport{
+		{Present: true, Width: 8192, Height: 8192}, {Present: true, Width: 4096, Height: 4096},
+	}}}}
+	check := []budget.PlanCheck{{Check: CheckTextureSize, Maximum: bound(2048)}}
+
+	// The file alone: 8192 against 2048 fails.
+	if results := Evaluate(native, check); results[0].Status != StatusFail || results[0].Actual != 8192 || results[0].Detail != "" {
+		t.Fatalf("native file: %+v", results)
+	}
+	// An export sized to 2048: the budget is met by the deliverable, and the
+	// result says so.
+	results := EvaluateSized(native, check, 2048)
+	if results[0].Status != StatusPass || results[0].Actual != 2048 || results[0].Detail != DetailSized {
+		t.Fatalf("sized export within the bound: %+v", results)
+	}
+	// A deliverable sized over the bound fails as itself.
+	if results := EvaluateSized(native, check, 4096); results[0].Status != StatusFail || results[0].Actual != 4096 {
+		t.Fatalf("sized export over the bound: %+v", results)
+	}
+	// No bound: unknown, with the basis still named.
+	if results := EvaluateSized(native, []budget.PlanCheck{{Check: CheckTextureSize}}, 2048); results[0].Status != StatusUnknown || results[0].Detail != DetailSized {
+		t.Fatalf("sized export without a bound: %+v", results)
+	}
+	// Zero means no sized deliverable: EvaluateSized is Evaluate.
+	if results := EvaluateSized(native, check, 0); results[0].Status != StatusFail || results[0].Actual != 8192 {
+		t.Fatalf("no sized deliverable: %+v", results)
+	}
+	// Only texture_size reads the sized edge.
+	other := EvaluateSized(modelinspect.Report{Triangles: 10}, []budget.PlanCheck{{Check: CheckTriangles, Maximum: bound(20)}}, 2048)
+	if other[0].Status != StatusPass || other[0].Detail != "" {
+		t.Fatalf("triangles with a sized deliverable: %+v", other)
+	}
+}
+
+func TestTextureEdgeReportsBothEdges(t *testing.T) {
+	report := modelinspect.Report{Materials: []modelinspect.MaterialReport{{Slots: []modelinspect.MaterialSlotReport{
+		{Present: true, Width: 1024, Height: 512}, {Present: false, Width: 9999, Height: 9999},
+	}}}}
+	if judged, native, bySize := TextureEdge(report, 0); judged != 1024 || native != 1024 || bySize {
+		t.Fatalf("file only: %d %d %v", judged, native, bySize)
+	}
+	if judged, native, bySize := TextureEdge(report, 2048); judged != 2048 || native != 1024 || !bySize {
+		t.Fatalf("sized larger than the file: %d %d %v", judged, native, bySize)
+	}
+}

@@ -50,6 +50,10 @@ type modelReviewUsageCheckItem struct {
 	Actual  any            `json:"actual"`
 	Budget  map[string]any `json:"budget"`
 	FixHint string         `json:"fix_hint,omitempty"`
+	// Note says what the item was judged on when that is not the inspected file:
+	// the deliverable the purpose sized, with the file's own texture edge beside it
+	// (#292).
+	Note string `json:"note,omitempty"`
 }
 
 // modelReviewUsageText localizes a Schema template and fills its placeholders.
@@ -73,6 +77,22 @@ func newModelReviewUsageCheck(
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
 ) *modelReviewUsageCheck {
+	return newModelReviewUsageCheckFor(report, nil, usage, production, brief, text, available)
+}
+
+// newModelReviewUsageCheckFor is newModelReviewUsageCheck for a Task that has a
+// deliverable the purpose sized (#292): the texture_size item judges that
+// deliverable and reports the inspected file's own texture edge beside it. A nil
+// sized judges the inspected file, as before.
+func newModelReviewUsageCheckFor(
+	report modelinspect.Report,
+	sized *sizedDeliverable,
+	usage catalog.ChatModel3DUsageSchema,
+	production catalog.ChatModelInspectProductionSchema,
+	brief chat.ProductionBrief,
+	text modelReviewUsageText,
+	available modelReviewFixAvailability,
+) *modelReviewUsageCheck {
 	profile, source, platform, found := modelReviewUsageProfile(usage, brief)
 	if !found {
 		return nil
@@ -84,7 +104,7 @@ func newModelReviewUsageCheck(
 		modelReviewUsageUVCheck(report, budget),
 		modelReviewUsageWatertightCheck(report, budget),
 		modelReviewUsageSkinCheck(report, budget),
-		modelReviewUsageTextureSizeCheck(report, budget),
+		modelReviewUsageTextureSizeCheck(report, budget, sized, production, text),
 		modelReviewUsagePivotCheck(report, production),
 		modelReviewUsageYUpCheck(report, production, profile),
 		modelReviewUsageScaleCheck(report, profile),
@@ -104,6 +124,13 @@ func newModelReviewUsageCheck(
 			continue
 		}
 		checks[index].FixHint = modelReviewUsageFixHint(fix, profile, production, text, available)
+		// A sized deliverable that is over the bound is fixed by sizing it again,
+		// not by the general fix for the inspected file (#292).
+		if checks[index].Check == catalog.ModelReviewUsageCheckTextureSize && sized != nil &&
+			production.ExportTextureFixText != "" && budget.MaxTextureSize != nil {
+			checks[index].FixHint = text(production.ExportTextureFixText, "{formats}", sized.formats(),
+				"{export}", strconv.Itoa(sized.Edge), "{maximum}", strconv.Itoa(*budget.MaxTextureSize))
+		}
 	}
 	result := &modelReviewUsageCheck{
 		Purpose:       profile.ID,
@@ -290,21 +317,24 @@ func modelReviewUsageSkinCheck(
 	)
 }
 
+// modelReviewUsageTextureSizeCheck judges the texture edge the purpose's
+// budget bounds: the deliverable the purpose sized when the Task has one, else
+// the largest texture of the inspected file (modelcheck.TextureEdge, the rule the
+// plan checkpoints use too). When the item is judged on the deliverable and the
+// file's own edge differs, the note says both, so the native result is never
+// taken for a pass and never counted as a failure of the budget (#292).
 func modelReviewUsageTextureSizeCheck(
 	report modelinspect.Report,
 	budget catalog.ChatModel3DUsageBudget,
+	sized *sizedDeliverable,
+	production catalog.ChatModelInspectProductionSchema,
+	text modelReviewUsageText,
 ) modelReviewUsageCheckItem {
-	actual := 0
-	for _, material := range report.Materials {
-		for _, slot := range material.Slots {
-			if !slot.Present {
-				continue
-			}
-			if longest := max(slot.Width, slot.Height); longest > actual {
-				actual = longest
-			}
-		}
+	edge := 0
+	if sized != nil {
+		edge = sized.Edge
 	}
+	actual, native, bySize := modelcheck.TextureEdge(report, edge)
 	values := map[string]any{}
 	status := modelReviewUsageStatusUnknown
 	if budget.MaxTextureSize != nil {
@@ -314,7 +344,12 @@ func modelReviewUsageTextureSizeCheck(
 			status = modelReviewUsageStatusFail
 		}
 	}
-	return modelReviewUsageItem(catalog.ModelReviewUsageCheckTextureSize, status, actual, values)
+	item := modelReviewUsageItem(catalog.ModelReviewUsageCheckTextureSize, status, actual, values)
+	if bySize && native != actual && production.ExportTextureText != "" && text != nil {
+		item.Note = text(production.ExportTextureText, "{native}", strconv.Itoa(native),
+			"{formats}", sized.formats(), "{export}", strconv.Itoa(actual))
+	}
+	return item
 }
 
 func modelReviewUsageBBoxDiagonal(report modelinspect.Report) float64 {

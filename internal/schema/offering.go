@@ -67,6 +67,14 @@ type AssetRequirement struct {
 	VariantFrom string `json:"variant_from,omitempty"`
 	// VariantCase 声明选中值到变体的大小写规范化：""（原样）/"lower"/"upper"。
 	VariantCase string `json:"variant_case,omitempty"`
+	// TextureSizeParameter names the select parameter (of the texture-size
+	// semantic) of the Offering whose frozen value is the edge, in pixels, of the
+	// textures this exact output is written with (#292). An output that declares
+	// it is one the session purpose sized, such as an export the purpose bounds;
+	// one that does not carries the resolution the upstream gave it, which only
+	// its file can tell. The purpose's texture budget judges the sized output, and
+	// the inspected file is reported beside it, never as a pass.
+	TextureSizeParameter string `json:"texture_size_parameter,omitempty"`
 }
 
 // 变体大小写规范化枚举（VariantCase 的合法取值）。

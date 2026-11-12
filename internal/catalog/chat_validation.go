@@ -3618,6 +3618,20 @@ func validateModelInspectProduction(
 			required []string
 		}{"platform_budget_text", production.PlatformBudgetText, []string{"{platform}"}})
 	}
+	// The sentences about a deliverable the purpose sized are optional (#292);
+	// one that is declared names exactly its own placeholders.
+	for _, optional := range []struct {
+		name     string
+		value    string
+		required []string
+	}{
+		{"export_texture_text", production.ExportTextureText, []string{"{native}", "{formats}", "{export}"}},
+		{"export_texture_fix_text", production.ExportTextureFixText, []string{"{formats}", "{export}", "{maximum}"}},
+	} {
+		if strings.TrimSpace(optional.value) != "" {
+			texts = append(texts, optional)
+		}
+	}
 	for _, text := range texts {
 		if strings.TrimSpace(text.value) == "" {
 			return fmt.Errorf("chat.model_review.inspect.production.%s 不能为空", text.name)

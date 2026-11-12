@@ -2866,6 +2866,15 @@ type ChatModelInspectProductionSchema struct {
 	// field). It is added only when the purpose has a variant for the
 	// session's platform (#275).
 	PlatformBudgetText string `json:"platform_budget_text,omitempty"`
+	// ExportTextureText is the note of a texture_size item judged on a
+	// deliverable the purpose sized (#292): {native} is the largest texture of
+	// the inspected file, {formats} the sized deliverables and {export} their
+	// edge. ExportTextureFixText replaces the texture_size fix hint when that
+	// deliverable is over the purpose's bound ({formats}, {export}, {maximum}).
+	// Both are optional: a Catalog without them states no note and keeps the
+	// general fix.
+	ExportTextureText    string `json:"export_texture_text,omitempty"`
+	ExportTextureFixText string `json:"export_texture_fix_text,omitempty"`
 	// NoCapabilityText replaces a fix hint when no enabled Offering of the
 	// declared capability is available.
 	NoCapabilityText string `json:"no_capability_text"`

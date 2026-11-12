@@ -255,6 +255,9 @@ type Service struct {
 	// modelReport evaluates a checkpoint against a saved model (#251). Without
 	// it a plan may declare no checkpoint.
 	modelReport ModelReport
+	// sizedTextureEdge names the deliverables a purpose sized, which a
+	// checkpoint's texture_size judges instead of the native file (#292).
+	sizedTextureEdge SizedTextureEdge
 }
 
 // WithGrants enables approval by session policy for plan steps. The grant is

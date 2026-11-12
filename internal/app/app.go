@@ -1597,6 +1597,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// #251: checkpoints read the saved model through the review tool's bounded,
 	// owner-scoped cache; a read failure is recorded as unknown, not a pass.
 	processingService.WithModelReport(toolExecutor.ModelReport)
+	// #292: texture_size is judged on the deliverables the purpose sized (the
+	// exports), as inspect_model judges it, not on the native file.
+	processingService.WithSizedTextureEdge(toolExecutor.SizedTextureEdge)
 	toolExecutor.SetProcessing(processingService, processingCatalog{Catalog: taskCatalog, module: module})
 	var modelDeliveryService *modeldelivery.Service
 	if !applicationSchema.ModelDelivery.Disabled() {

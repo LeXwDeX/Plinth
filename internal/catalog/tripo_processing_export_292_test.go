@@ -1,9 +1,11 @@
 package catalog
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -221,5 +223,121 @@ func TestProcessingExportsAgreeWithTheGenerationExportOfTheSamePurpose(t *testin
 		if string(fitted) != string(generationSize) {
 			t.Fatalf("%s: the generation export is %s, the processing export %s", profile.ID, generationSize, fitted)
 		}
+	}
+}
+
+// The outputs the purpose sizes are declared on the Offering: the exports that
+// carry textures, never the native GLB (its resolution is the upstream's), the
+// untextured STL and 3MF, the mask or the thumbnail.
+func TestTripoProcessingExportsDeclareTheOutputsThePurposeSizes(t *testing.T) {
+	c, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range processingExportOfferings {
+		t.Run(test.id, func(t *testing.T) {
+			o, ok := c.Get(generation.OfferingID(test.id))
+			if !ok {
+				t.Fatalf("missing %s", test.id)
+			}
+			sized := map[string]bool{}
+			for _, output := range o.Outputs {
+				if output.TextureSizeParameter == "" {
+					continue
+				}
+				if output.TextureSizeParameter != "export_texture_size" || output.Variant == "" {
+					t.Fatalf("output %s/%s declares %q", output.Role, output.Variant, output.TextureSizeParameter)
+				}
+				sized[output.Variant] = true
+			}
+			want := map[string]bool{"fbx": true, "obj": true, "usdz": true}
+			if test.id == "tripo/processing/rigging" || test.id == "tripo/processing/rigging-v3" {
+				want = map[string]bool{"fbx": true}
+			}
+			if !reflect.DeepEqual(sized, want) {
+				t.Fatalf("sized outputs = %v, want %v", sized, want)
+			}
+		})
+	}
+}
+
+// A sized output names a texture-size select of its own Offering, or the Schema
+// does not load: the purpose would otherwise judge a deliverable by a value that
+// is not its size.
+func TestSizedOutputDeclarationFailsClosed(t *testing.T) {
+	cases := map[string]string{
+		"unknown parameter":        "no_such_parameter",
+		"select without semantic":  "rig_type",
+		"a task, not a size":       "source_task",
+		"a boolean, not a size":    "authorize_extra_credits",
+		"the fixed output formats": "output_formats",
+	}
+	for name, parameter := range cases {
+		t.Run(name, func(t *testing.T) {
+			var document map[string]any
+			if err := json.Unmarshal(defaultCatalog, &document); err != nil {
+				t.Fatal(err)
+			}
+			var fbx map[string]any
+			for _, raw := range document["offerings"].([]any) {
+				offering := raw.(map[string]any)
+				if offering["id"] != "tripo/processing/rigging-v3" {
+					continue
+				}
+				for _, rawOutput := range offering["outputs"].([]any) {
+					if output := rawOutput.(map[string]any); output["variant"] == "fbx" {
+						fbx = output
+					}
+				}
+			}
+			if fbx == nil {
+				t.Fatal("the rigging FBX output is missing")
+			}
+			fbx["texture_size_parameter"] = parameter
+			raw, _ := json.Marshal(document)
+			if _, err := Load(bytes.NewReader(raw)); err == nil {
+				t.Fatalf("a sized output naming %q was accepted", parameter)
+			}
+		})
+	}
+}
+
+// The sentences the usage check says about a sized deliverable name exactly
+// their own placeholders.
+func TestExportTextureSentencesNameTheirPlaceholders(t *testing.T) {
+	c, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	production := c.Application().Chat.ModelReview.Inspect.Production
+	for _, want := range []string{"{native}", "{formats}", "{export}"} {
+		if !strings.Contains(production.ExportTextureText, want) {
+			t.Fatalf("export_texture_text %q lacks %s", production.ExportTextureText, want)
+		}
+	}
+	for _, want := range []string{"{formats}", "{export}", "{maximum}"} {
+		if !strings.Contains(production.ExportTextureFixText, want) {
+			t.Fatalf("export_texture_fix_text %q lacks %s", production.ExportTextureFixText, want)
+		}
+	}
+	for name, mutate := range map[string]func(map[string]any){
+		"a note without the native edge": func(p map[string]any) {
+			p["export_texture_text"] = "已按用途导出为 {export} 像素（{formats}）。"
+		},
+		"a note with a stranger":           func(p map[string]any) { p["export_texture_text"] = production.ExportTextureText + "{purpose}" },
+		"a fix without the bound":          func(p map[string]any) { p["export_texture_fix_text"] = "{formats} 的 {export} 像素太大。" },
+		"a fix with a placeholder to fill": func(p map[string]any) { p["export_texture_fix_text"] = production.ExportTextureFixText + "{native}" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var document map[string]any
+			if err := json.Unmarshal(defaultCatalog, &document); err != nil {
+				t.Fatal(err)
+			}
+			mutate(productionDocument(document))
+			raw, _ := json.Marshal(document)
+			if _, err := Load(bytes.NewReader(raw)); err == nil {
+				t.Fatal("an invalid sentence was accepted")
+			}
+		})
 	}
 }

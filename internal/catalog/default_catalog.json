@@ -6353,6 +6353,8 @@
             "brief_purpose_text": "按制作简报的用途「{purpose}」判定。",
             "triangle_override_text": "三角面上限采用制作简报的 triangle_budget：{value}。",
             "platform_budget_text": "按制作简报的目标平台「{platform}」的预算判定。",
+            "export_texture_text": "原生 GLB 贴图为 {native} 像素，交付用 {formats} 已按用途导出为 {export} 像素；贴图项按导出判定（边长取自冻结的步骤参数，没有读取导出文件里的贴图）。",
+            "export_texture_fix_text": "交付用 {formats} 的导出贴图 {export} 像素超过用途的上限 {maximum} 像素：把「导出贴图尺寸」调小后重做这一步，不必重新生成模型。",
             "no_capability_text": "当前 Catalog 没有可用于修复这一项的已启用能力。",
             "capability_joiner": " → ",
             "option_separator": " 或 ",
@@ -39914,6 +39916,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -39925,6 +39928,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -39945,6 +39949,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -40276,6 +40281,7 @@
         {
           "role": "model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -40611,6 +40617,7 @@
         {
           "role": "model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45227,6 +45234,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45238,6 +45246,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45258,6 +45267,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45572,6 +45582,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45583,6 +45594,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45603,6 +45615,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45904,6 +45917,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45915,6 +45929,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45935,6 +45950,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46217,6 +46233,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46228,6 +46245,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46248,6 +46266,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46530,6 +46549,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46541,6 +46561,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46561,6 +46582,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46748,10 +46770,10 @@
       ],
       "outputs": [
         {"role": "model", "variant": "glb", "delivery": "required", "minimum": 1, "media_types": ["model/gltf-binary"], "max_bytes": 150000000},
-        {"role": "converted_model", "variant": "fbx", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
-        {"role": "converted_model", "variant": "obj", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "fbx", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
+        {"role": "converted_model", "variant": "obj", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "stl", "delivery": "required", "minimum": 1, "media_types": ["model/stl"], "max_bytes": 1073741824},
-        {"role": "converted_model", "variant": "usdz", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "usdz", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "3mf", "delivery": "required", "minimum": 1, "media_types": ["model/3mf"], "max_bytes": 1073741824, "delivery_profile": "3mf-package-v1"},
         {"role": "mask", "variant": "png", "delivery": "required", "minimum": 1, "media_types": ["image/png"], "max_bytes": 50000000}
       ],
@@ -46818,10 +46840,10 @@
       ],
       "outputs": [
         {"role": "model", "variant": "glb", "delivery": "required", "minimum": 1, "media_types": ["model/gltf-binary"], "max_bytes": 150000000},
-        {"role": "converted_model", "variant": "fbx", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
-        {"role": "converted_model", "variant": "obj", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "fbx", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
+        {"role": "converted_model", "variant": "obj", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "stl", "delivery": "required", "minimum": 1, "media_types": ["model/stl"], "max_bytes": 1073741824},
-        {"role": "converted_model", "variant": "usdz", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "usdz", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "3mf", "delivery": "required", "minimum": 1, "media_types": ["model/3mf"], "max_bytes": 1073741824, "delivery_profile": "3mf-package-v1"},
         {"role": "mask", "variant": "png", "delivery": "required", "minimum": 0, "media_types": ["image/png"], "max_bytes": 50000000}
       ],
