@@ -197,6 +197,47 @@ func TestEveryProcessingExportWritesTheFrozenTextureSize(t *testing.T) {
 	}
 }
 
+// A Task frozen before the size was a parameter keeps the Offering it was
+// accepted with: the export size is a constant of that snapshot, its input has
+// no export_texture_size, and the declaration, the requests and the checkpoint
+// are the ones it always had. The snapshot is the shipped rigging taken back to
+// the shape of revision 2026-11-12.277.1.
+func TestTaskFrozenBeforeTheSizeWasAParameterKeepsItsConstantExport(t *testing.T) {
+	r := shippedRigging(t, "tripo/processing/rigging-v3", map[string]any{"export_texture_size": "2k"})
+	legacy := r.Offering
+	legacy.Revision = "2026-11-12.277.1"
+	legacy.Parameters = nil
+	for _, parameter := range r.Offering.Parameters {
+		if parameter.Name != "export_texture_size" {
+			legacy.Parameters = append(legacy.Parameters, parameter)
+		}
+	}
+	var options map[string]any
+	if err := json.Unmarshal(r.Offering.ProviderOptions, &options); err != nil {
+		t.Fatal(err)
+	}
+	native := options["native_conversion"].(map[string]any)
+	delete(native, "bindings")
+	native["parameters"].(map[string]any)["texture_size"] = 8192
+	legacy.ProviderOptions, _ = json.Marshal(options)
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(r.Input, &values); err != nil {
+		t.Fatal(err)
+	}
+	delete(values, "export_texture_size")
+	r.Offering = legacy
+	r.Input, _ = json.Marshal(values)
+	if err := ValidateOffering(legacy); err != nil {
+		t.Fatalf("the snapshot's declaration is refused: %v", err)
+	}
+	run := driveExports(t, r, "animations/rig")
+	raw, _ := json.Marshal(run.converts["FBX"])
+	want := `{"bake":true,"fbx_preset":"blender","format":"FBX","input":"https://assets.example/processed.glb","texture_format":"PNG","texture_size":8192,"with_animation":true}`
+	if string(raw) != want {
+		t.Fatalf("the snapshot's export = %s, want %s", raw, want)
+	}
+}
+
 // The default size is the request the exports had before the size became a
 // public parameter: 8192, PNG, bake, the Blender preset and the declared
 // animation flag, byte for byte, whatever the format.
