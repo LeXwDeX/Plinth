@@ -364,6 +364,26 @@ func (executor *Executor) profileOffering(command chat.ToolCommand, capability g
 	return generation.Offering{}, purposeProfile{}, false
 }
 
+// recommendedWorkspaceOffering finds the workspace pick among the purpose's
+// recommendations for this call's input shape, available and accepting the
+// input; false when the pick is not one of them.
+func (executor *Executor) recommendedWorkspaceOffering(
+	command chat.ToolCommand,
+	capability generation.Capability,
+	input modelInput,
+	profile purposeProfile,
+	workspace string,
+) (generation.Offering, bool) {
+	candidates := executor.availableOfferings(capability)
+	for _, name := range profile.RecommendedOfferings[executor.modelShape(command, capability)] {
+		offering, matched := matchOffering(candidates, name)
+		if matched && modelMatches(offering, workspace) && executor.acceptsModelInput(offering, input) {
+			return offering, true
+		}
+	}
+	return generation.Offering{}, false
+}
+
 // chooseOffering selects the Offering of a generation tool call by the
 // model-choice layers: the person's explicit pick for the tool's workspace
 // domain, the Agent's model argument, the purpose recommendation, the
@@ -422,6 +442,13 @@ func (executor *Executor) chooseOffering(
 		// asks the person to confirm the switch (#103 review C1).
 		workspace := strings.TrimSpace(executor.userModel(command))
 		if workspace != "" && !modelMatches(offering, workspace) {
+			// The visible pick is itself one of the purpose's recommendations:
+			// run it instead of asking. Nothing is replaced silently, and the 2D
+			// delivery check still names a model that reaches the purpose's
+			// resolution when this one falls short (#282).
+			if recommended, ok := executor.recommendedWorkspaceOffering(command, capability, input, profile, workspace); ok {
+				return offeringChoice{Offering: recommended, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
+			}
 			if text := executor.modelWorkspaceConflictText(command, workspace, offering, profile); text != "" {
 				return offeringChoice{Refusal: text}, nil
 			}

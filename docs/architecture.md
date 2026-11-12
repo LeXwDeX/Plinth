@@ -1731,7 +1731,7 @@ Chat Agent 通过三个只读工具直接查看本会话（分支会话含祖先
 
 贴图优先无损输出（#287）：压缩块会在法线、粗糙度这类数据贴图上变成瑕疵，所以 PNG 的 GPT Image 2 首推，Seedream 4.5 只在没有其他可用模型时使用；`texture_asset` 的 `prompt_guidance` 把“正面平视、均匀漫射光、整幅无单一视觉焦点、图案越过每条边继续”写进制作简报，Agent 写提示词时直接看到。
 
-**一个已知的使用后果。** 默认用途（`concept_art`）和 `illustration` 的首推现在是 Gemini 3 Pro Image，而 Meshy Nano Banana Pro 是文生图的默认 Offering（`default: true`）。工作区选择器仍停在 Nano Banana Pro 的会话里，Agent 第一次生成会按既有的 #103 C1 规则（用途推荐与工作区所选不同必须先确认，不静默替换）先请用户确认；用户显式锁定的模型不受影响，仍照办。若要避免这一问，需要单独决定是否把文生图默认模型改为 Gemini，本次未改。
+**工作区所选模型在用途推荐里时直接使用。** 默认用途（`concept_art`）和 `illustration` 的首推是 Gemini 3 Pro Image，而 Meshy Nano Banana Pro 仍是文生图的默认 Offering（`default: true`），也在这两个用途的推荐列表里。`chooseOffering` 在用途推荐与工作区所选不同时，先看所选是否就是该用途（当前输入形态下）的推荐之一：是则直接运行它（`model_choice.source=profile`），既不静默替换，也不要求确认；实际像素若低于用途最小短边，2D 交付检查的 `short_edge` 提示会点名能达到的推荐模型。只有所选不在推荐里时，才按 #103 C1 规则先请用户确认（`modelWorkspaceConflictText`）。全局默认模型没有改动。验证：`generationtool/model_choice_test.go` 的 `TestChooseOfferingRunsAWorkspaceModelThePurposeRecommends` 与原有的 `TestChooseOfferingDoesNotSilentlyReplaceTheWorkspaceModel`。
 
 **账本。** `inspect_image` 的 summary 在 `checks` 里多一个 `unknown` 计数，并带 `failed_checks`（检查名、实测值、`fix` 代码）；会话账本据此把 `unknown` 单列、把失败项作为“遗留”写进下一回合的系统上下文，不再只有通过/失败计数。
 
