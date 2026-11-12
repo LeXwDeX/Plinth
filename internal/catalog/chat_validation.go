@@ -3190,7 +3190,7 @@ func validateSelfCheck(schema ChatSchema) error {
 			return errors.New("chat.self_check.statuses 的 id 与 label 不能为空")
 		}
 		switch status.Role {
-		case "unchecked", "passed", "issues":
+		case "unchecked", "passed", "issues", "uncheckable":
 		default:
 			return fmt.Errorf("chat.self_check.statuses 含未知 role %q", status.Role)
 		}
@@ -3296,6 +3296,27 @@ func validateSelfCheck(schema ChatSchema) error {
 		{"reference_unreadable", selfCheck.Texts.ReferenceUnreadable, []string{"{handle}", "{reason}"}},
 		{"reference_no_reference", selfCheck.Texts.ReferenceNoReference, nil},
 		{"caveats", selfCheck.Texts.Caveats, nil},
+	}
+	if selfCheck.RequiredChecks.UsageClean {
+		texts = append(texts,
+			struct {
+				name     string
+				value    string
+				required []string
+			}{"record_usage_failed", selfCheck.Texts.RecordUsageFailed, []string{"{checks}"}},
+			struct {
+				name     string
+				value    string
+				required []string
+			}{"record_default_purpose", selfCheck.Texts.RecordDefaultPurpose, []string{"{purpose}"}},
+		)
+	}
+	if roles["uncheckable"] {
+		texts = append(texts, struct {
+			name     string
+			value    string
+			required []string
+		}{"record_uncheckable_unproven", selfCheck.Texts.RecordUncheckableUnproven, []string{"{status}"}})
 	}
 	for _, text := range texts {
 		if strings.TrimSpace(text.value) == "" {

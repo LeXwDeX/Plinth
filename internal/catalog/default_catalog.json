@@ -3196,6 +3196,8 @@
         "ui.chat.self_check.remaining": "剩余问题",
         "ui.chat.self_check.no_findings": "没有记录发现",
         "ui.chat.self_check.no_remaining": "没有遗留问题",
+        "ui.chat.self_check.purpose": "判定用途：{purpose}",
+        "ui.chat.self_check.waiver": "豁免：{waiver}",
         "ui.chat.self_check.record_empty": "还没有自检记录",
         "ui.chat.self_check.check_count": "{count} 项检查记录",
         "ui.chat.self_check.check_count_one": "{count} 项检查记录",
@@ -6495,11 +6497,13 @@
         "statuses": [
           {"id": "unchecked", "role": "unchecked", "label": "未自检"},
           {"id": "passed", "role": "passed", "label": "已自检通过"},
-          {"id": "has_issues", "role": "issues", "label": "已自检有遗留问题"}
+          {"id": "has_issues", "role": "issues", "label": "已自检有遗留问题"},
+          {"id": "not_inspectable", "role": "uncheckable", "label": "未能检查"}
         ],
         "required_checks": {
           "inspect": true,
-          "render_or_reference": true
+          "render_or_reference": true,
+          "usage_clean": true
         },
         "conclusion": {
           "max_items": 8,
@@ -6541,6 +6545,9 @@
           "record_too_long": "The conclusion is not saved: {field} has {length} characters, over the limit of {maximum}. Shorten it and call the tool again.",
           "record_invalid_arguments": "The self-check arguments were rejected: {detail}. Nothing was saved.",
           "record_unknown_task": "No finished 3D model with a saved model file matches {model} in this session. Nothing was saved.",
+          "record_usage_failed": "A passed conclusion is refused: the latest inspect_model judged these purpose checks as failed: {checks}. Fix them and inspect again, record has_issues with the remaining items, or, only when the person accepted them, pass waiver with that reason.",
+          "record_uncheckable_unproven": "The status {status} only applies when the latest inspect_model of this model was refused, for example because the file is above the inspection limit. Inspect the model first.",
+          "record_default_purpose": "No production brief chose a purpose, so the checks judged the model as {purpose}. Say so when you report the result, and confirm the purpose with the person before calling it ready for another use.",
           "reference_ready": "Compared {model} with {image} in view {view}: silhouette IoU {iou}.",
           "reference_unreadable": "Reference picture {handle} cannot be read: {reason}. Nothing was compared for that view.",
           "reference_no_reference": "This task has no frozen reference picture. Pass image (a picture of this session) or pairs to compare against, or use inspect_model and render_model_views instead.",
@@ -7246,7 +7253,7 @@
         {
           "name": "record_self_check",
           "execution": {"implementation_key":"self_check.record","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
-          "description": "Write the conclusion of one finished 3D model's self-check into its persisted record. The server has already appended a check for every real inspect_model, render_model_views, compare_models and compare_model_reference call of this session; use only those calls as evidence, never claim a check you did not make. status is a delivery state declared by the Product Schema: passed means no remaining issue, has_issues means the result is delivered with remaining issues listed in remaining. A passed conclusion requires at least one real inspect check and one render, compare or reference check. summary, findings, fixes and remaining are the Agent's words, bounded by the Schema; an over-long text is refused, never silently cut. The record persists across turns and context compaction and appears in the conversation as a folded card. This tool never creates a Task, charges credits or changes the Task's terminal state; an unchecked result stays downloadable but must never be reported as checked.",
+          "description": "Write the conclusion of one finished 3D model's self-check into its persisted record. The server has already appended a check for every real inspect_model, render_model_views, compare_models and compare_model_reference call of this session; use only those calls as evidence, never claim a check you did not make. status is a delivery state declared by the Product Schema: passed means no remaining issue, has_issues means the result is delivered with remaining issues listed in remaining. A passed conclusion requires at least one real inspect check and one render, compare or reference check, and no failed purpose check in the latest inspect_model unless waiver gives the reason the person accepted it. not_inspectable is only for a model the latest inspect_model refused. The saved conclusion names the purpose it was judged against. summary, findings, fixes and remaining are the Agent's words, bounded by the Schema; an over-long text is refused, never silently cut. The record persists across turns and context compaction and appears in the conversation as a folded card. This tool never creates a Task, charges credits or changes the Task's terminal state; an unchecked result stays downloadable but must never be reported as checked.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -7256,8 +7263,8 @@
               },
               "status": {
                 "type": "string",
-                "enum": ["passed", "has_issues"],
-                "description": "The delivery state being recorded: passed (no remaining issue) or has_issues (delivered with remaining issues)."
+                "enum": ["passed", "has_issues", "not_inspectable"],
+                "description": "The delivery state being recorded: passed (no remaining issue), has_issues (delivered with remaining issues) or not_inspectable (the latest inspect_model of this model was refused, for example above the inspection limit, so it could not be checked)."
               },
               "summary": {
                 "type": "string",
@@ -7277,6 +7284,10 @@
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Unfixed issues; required for has_issues and must be empty for passed."
+              },
+              "waiver": {
+                "type": "string",
+                "description": "Only for passed when the latest inspect_model still reports failed purpose checks: the reason the person accepted them. It is shown with the conclusion. Never use it to hide a failure the person did not accept."
               }
             },
             "required": ["status", "summary"],
@@ -15766,6 +15777,8 @@
             "ui.chat.self_check.remaining": "Remaining issues",
             "ui.chat.self_check.no_findings": "No findings recorded",
             "ui.chat.self_check.no_remaining": "No remaining issues",
+            "ui.chat.self_check.purpose": "Judged as: {purpose}",
+            "ui.chat.self_check.waiver": "Waived: {waiver}",
             "ui.chat.self_check.record_empty": "No self-check record yet",
             "ui.chat.self_check.check_count": "{count} checks recorded",
             "ui.chat.self_check.check_count_one": "{count} check recorded",

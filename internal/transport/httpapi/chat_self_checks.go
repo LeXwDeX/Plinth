@@ -42,7 +42,11 @@ type chatSelfCheckConclusionWire struct {
 	Findings  []string `json:"findings"`
 	Fixes     []string `json:"fixes"`
 	Remaining []string `json:"remaining"`
-	At        string   `json:"at,omitempty"`
+	// Waiver and PurposeLabel make an exempted pass and the judged purpose
+	// visible on the card (#281).
+	Waiver       string `json:"waiver,omitempty"`
+	PurposeLabel string `json:"purpose_label,omitempty"`
+	At           string `json:"at,omitempty"`
 }
 
 // chatSelfChecksWire renders the session's records with the response field
@@ -82,7 +86,8 @@ func (s *Server) chatSelfChecksWire(sessionID string, schema catalog.ChatSelfChe
 				Status: record.Conclusion.Status, Summary: record.Conclusion.Summary,
 				Findings: record.Conclusion.Findings, Fixes: record.Conclusion.Fixes,
 				Remaining: record.Conclusion.Remaining,
-				At:        record.Conclusion.At.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
+				Waiver:    record.Conclusion.Waiver, PurposeLabel: record.Conclusion.PurposeLabel,
+				At: record.Conclusion.At.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 			}
 		}
 		items = append(items, map[string]any{

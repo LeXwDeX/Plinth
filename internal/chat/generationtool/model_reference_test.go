@@ -321,8 +321,15 @@ func TestSelfCheckLimitsRefuseMoreRoundsAndRendersButAllowTheConclusion(t *testi
 		t.Fatalf("second render = %+v err=%v", secondRender, err)
 	}
 
-	recorded, err := executor.RecordSelfCheck(ctx, reviewCommand("record_self_check",
+	// #281: the fixture's pivot fails its purpose check, so a bare pass is
+	// refused and names the check; the person's accepted waiver lets it pass.
+	bare, err := executor.RecordSelfCheck(ctx, reviewCommand("record_self_check",
 		`{"model":"task-a","status":"passed","summary":"checked front and geometry"}`))
+	if err != nil || !strings.Contains(bare.Error, "pivot_bottom_center") {
+		t.Fatalf("bare pass over a failed purpose check = %+v err=%v", bare, err)
+	}
+	recorded, err := executor.RecordSelfCheck(ctx, reviewCommand("record_self_check",
+		`{"model":"task-a","status":"passed","summary":"checked front and geometry","waiver":"the person keeps the source origin"}`))
 	if err != nil || recorded.Error != "" || len(recorded.Summary) == 0 {
 		t.Fatalf("conclusion = %+v err=%v", recorded, err)
 	}
@@ -330,7 +337,8 @@ func TestSelfCheckLimitsRefuseMoreRoundsAndRendersButAllowTheConclusion(t *testi
 	if err != nil || !found {
 		t.Fatalf("record = %+v err=%v", record, err)
 	}
-	if record.Conclusion == nil || record.Conclusion.Status != "passed" || len(record.Checks) != 2 {
+	if record.Conclusion == nil || record.Conclusion.Status != "passed" || len(record.Checks) != 2 ||
+		record.Conclusion.Waiver == "" || record.Conclusion.PurposeLabel == "" {
 		t.Fatalf("stored conclusion = %+v checks=%d", record.Conclusion, len(record.Checks))
 	}
 	counters := chat.SelfCheckCounts(executorSelfCheckSchema(t), record)

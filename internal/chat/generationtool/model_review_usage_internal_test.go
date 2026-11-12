@@ -564,3 +564,24 @@ func TestModelReviewUsageYUpJudgesTheSubjectByPurpose(t *testing.T) {
 		})
 	}
 }
+
+// TestInspectSelfCheckCheckKeepsThePurposeAndFailedChecks is #281: the inspect
+// evidence carries the judged purpose and every failed purpose check.
+func TestInspectSelfCheckCheckKeepsThePurposeAndFailedChecks(t *testing.T) {
+	report := usageBaseReport()
+	report.Triangles = 99
+	report.UV.AllHaveUV = false
+	usage := newModelReviewUsageCheck(report, usageBaseUsage(), usageProduction(t), chat.ProductionBrief{},
+		usageIdentityText, func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true })
+	check := inspectSelfCheckCheck("inspect_model", "asset-1", usage)
+	if !check.OK || check.Kind != chat.SelfCheckKindInspect || check.Purpose != "game" ||
+		check.PurposeSource != modelReviewUsageSourceDefault {
+		t.Fatalf("inspect evidence = %+v", check)
+	}
+	if strings.Join(check.UsageFailed, ",") != "triangles,uv" {
+		t.Fatalf("failed checks = %v", check.UsageFailed)
+	}
+	if bare := inspectSelfCheckCheck("inspect_model", "asset-1", nil); len(bare.UsageFailed) != 0 || bare.Purpose != "" {
+		t.Fatalf("no usage check must add no purpose: %+v", bare)
+	}
+}

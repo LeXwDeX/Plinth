@@ -343,3 +343,87 @@ func TestSelfCheckCorrectionCountsAKeyedPaidStepOnce(t *testing.T) {
 		t.Fatalf("foreign correction found=%v err=%v", found, err)
 	}
 }
+
+// TestSelfCheckPassRequiresACleanPurposeCheckOrAWaiver is #281: "passed" is
+// refused while the latest successful inspection still has failed purpose
+// checks, unless the conclusion records why the person accepted them; the
+// uncheckable status needs a refused latest inspection; the saved conclusion
+// names the purpose it was judged against.
+func TestSelfCheckPassRequiresACleanPurposeCheckOrAWaiver(t *testing.T) {
+	schema := testSelfCheckSchema(t)
+	if !schema.RequiredChecks.UsageClean {
+		t.Fatal("default catalog must require a clean purpose check for a pass")
+	}
+	failing := chat.SelfCheckRecord{Checks: []chat.SelfCheckCheck{
+		{Kind: chat.SelfCheckKindInspect, OK: true, UsageFailed: []string{"triangles", "uv"},
+			Purpose: "render", PurposeLabel: "展示/渲染", PurposeSource: "default_profile"},
+		{Kind: chat.SelfCheckKindRender, OK: true},
+	}}
+	failure := chat.ValidateSelfCheckConclusion(schema, failing, chat.SelfCheckConclusion{Status: "passed", Summary: "x"})
+	if failure == nil || failure.Kind != "usage_failed" || failure.Field != "triangles, uv" {
+		t.Fatalf("failed purpose checks: %+v", failure)
+	}
+	if failure := chat.ValidateSelfCheckConclusion(schema, failing,
+		chat.SelfCheckConclusion{Status: "passed", Summary: "x", Waiver: "用户接受面数略超"}); failure != nil {
+		t.Fatalf("a waived pass was refused: %+v", failure)
+	}
+	if failure := chat.ValidateSelfCheckConclusion(schema, failing,
+		chat.SelfCheckConclusion{Status: "has_issues", Summary: "x", Remaining: []string{"面数超预算"}}); failure != nil {
+		t.Fatalf("issues with failed checks was refused: %+v", failure)
+	}
+	// A later clean inspection replaces the failed one.
+	fixed := failing
+	fixed.Checks = append(append([]chat.SelfCheckCheck(nil), failing.Checks...),
+		chat.SelfCheckCheck{Kind: chat.SelfCheckKindInspect, OK: true})
+	if failure := chat.ValidateSelfCheckConclusion(schema, fixed, chat.SelfCheckConclusion{Status: "passed", Summary: "x"}); failure != nil {
+		t.Fatalf("a clean re-inspection was refused: %+v", failure)
+	}
+	if failure := chat.ValidateSelfCheckConclusion(schema, failing,
+		chat.SelfCheckConclusion{Status: "passed", Summary: "x", Waiver: strings.Repeat("设", schema.Conclusion.MaxItemCharacters+1)}); failure == nil ||
+		failure.Kind != "too_long" || failure.Field != "waiver" {
+		t.Fatalf("over-long waiver: %+v", failure)
+	}
+
+	uncheckable := ""
+	for _, status := range schema.Statuses {
+		if status.Role == chat.SelfCheckRoleUncheckable {
+			uncheckable = status.ID
+		}
+	}
+	if uncheckable == "" {
+		t.Fatal("default catalog must declare an uncheckable status")
+	}
+	if failure := chat.ValidateSelfCheckConclusion(schema, fixed,
+		chat.SelfCheckConclusion{Status: uncheckable, Summary: "x"}); failure == nil || failure.Kind != "uncheckable_unproven" {
+		t.Fatalf("uncheckable after a readable inspection: %+v", failure)
+	}
+	refused := chat.SelfCheckRecord{Checks: []chat.SelfCheckCheck{
+		{Kind: chat.SelfCheckKindInspect, OK: false, Error: "too large"},
+	}}
+	if failure := chat.ValidateSelfCheckConclusion(schema, refused,
+		chat.SelfCheckConclusion{Status: uncheckable, Summary: "超出检查上限"}); failure != nil {
+		t.Fatalf("uncheckable after a refused inspection was refused: %+v", failure)
+	}
+	if failure := chat.ValidateSelfCheckConclusion(schema, refused, chat.SelfCheckConclusion{Status: "passed", Summary: "x"}); failure == nil ||
+		failure.Kind != "needs_check" {
+		t.Fatalf("a refused inspection must never pass: %+v", failure)
+	}
+
+	store := newMemorySelfCheckStore()
+	service := chat.NewSelfCheckService(store, schema)
+	ctx := context.Background()
+	for _, check := range failing.Checks {
+		if _, err := service.AppendCheck(ctx, "o", "s", "t", "a", check); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved, err := service.RecordConclusion(ctx, "o", "s", "t", "a",
+		chat.SelfCheckConclusion{Status: "passed", Summary: "ok", Waiver: " 用户接受 ", Purpose: "forged"})
+	if err != nil || saved.Conclusion == nil {
+		t.Fatalf("waived pass = %+v err=%v", saved, err)
+	}
+	if got := saved.Conclusion; got.Waiver != "用户接受" || got.Purpose != "render" ||
+		got.PurposeLabel != "展示/渲染" || got.PurposeSource != "default_profile" {
+		t.Fatalf("saved conclusion = %+v", got)
+	}
+}

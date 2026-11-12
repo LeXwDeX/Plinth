@@ -164,6 +164,7 @@ func (executor *Executor) RecordSelfCheck(ctx context.Context, command chat.Tool
 		Findings  []string `json:"findings"`
 		Fixes     []string `json:"fixes"`
 		Remaining []string `json:"remaining"`
+		Waiver    string   `json:"waiver"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(command.Call.Arguments)))
 	decoder.DisallowUnknownFields()
@@ -189,6 +190,7 @@ func (executor *Executor) RecordSelfCheck(ctx context.Context, command chat.Tool
 		string(source.task.ID), string(source.asset.ID), chat.SelfCheckConclusion{
 			Status: arguments.Status, Summary: arguments.Summary,
 			Findings: arguments.Findings, Fixes: arguments.Fixes, Remaining: arguments.Remaining,
+			Waiver: arguments.Waiver,
 		})
 	if err != nil {
 		var validation *chat.SelfCheckConclusionError
@@ -202,9 +204,14 @@ func (executor *Executor) RecordSelfCheck(ctx context.Context, command chat.Tool
 	if label == "" {
 		label = source.task.Offering.ModelID
 	}
+	message := executor.localized(command, texts.RecordSaved)
+	if conclusion := record.Conclusion; conclusion != nil && conclusion.PurposeSource == modelReviewUsageSourceDefault &&
+		strings.TrimSpace(texts.RecordDefaultPurpose) != "" {
+		message += " " + executor.fillText(command, texts.RecordDefaultPurpose, "{purpose}", conclusion.PurposeLabel)
+	}
 	result := map[string]any{
 		"ok":           true,
-		"message":      executor.localized(command, texts.RecordSaved),
+		"message":      message,
 		"task_id":      string(source.task.ID),
 		"asset_id":     string(source.asset.ID),
 		"model":        label,
@@ -246,6 +253,12 @@ func (executor *Executor) selfCheckConclusionRefusal(command chat.ToolCommand,
 			"{status}", validation.Status, "{statuses}", strings.Join(executor.selfChecks.WritableStatuses(), ", ")))
 	case "needs_check":
 		return executor.modelReviewRefusal(command, executor.localized(command, texts.RecordNeedsCheck))
+	case "usage_failed":
+		return executor.modelReviewRefusal(command, executor.fillText(command, texts.RecordUsageFailed,
+			"{checks}", validation.Field))
+	case "uncheckable_unproven":
+		return executor.modelReviewRefusal(command, executor.fillText(command, texts.RecordUncheckableUnproven,
+			"{status}", validation.Status))
 	case "remaining_required":
 		return executor.modelReviewRefusal(command, executor.localized(command, texts.RecordRemainingRequired))
 	case "remaining_forbidden":

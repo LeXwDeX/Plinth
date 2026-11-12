@@ -551,3 +551,23 @@ func modelReviewParameterDefaultMatches(parameter generation.Parameter, value st
 		return false
 	}
 }
+
+// inspectSelfCheckCheck is the self-check evidence of one successful
+// inspection: besides "the call finished" it keeps which purpose the model was
+// judged against and which purpose checks failed, so a passed conclusion can be
+// refused over them (#281).
+func inspectSelfCheckCheck(tool, assetID string, usage *modelReviewUsageCheck) chat.SelfCheckCheck {
+	check := chat.SelfCheckCheck{
+		Kind: chat.SelfCheckKindInspect, Tool: tool, AssetID: assetID, Views: []string{}, OK: true,
+	}
+	if usage == nil {
+		return check
+	}
+	check.Purpose, check.PurposeLabel, check.PurposeSource = usage.Purpose, usage.PurposeLabel, usage.PurposeSource
+	for _, item := range usage.Checks {
+		if item.Status == modelReviewUsageStatusFail {
+			check.UsageFailed = append(check.UsageFailed, item.Check)
+		}
+	}
+	return check
+}
