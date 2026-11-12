@@ -176,7 +176,7 @@ func conversionExtras(
 	if json.Unmarshal(input, &values) != nil {
 		return nil, failure(generation.FailureInvalidInput, false, "规范化输入不是 JSON 对象")
 	}
-	extras := make(map[string]any, len(c.Parameters)+len(c.Bindings))
+	extras := make(map[string]any, len(c.Parameters))
 	for name, raw := range c.Parameters {
 		extras[name], _ = conversionScalar(raw)
 	}

@@ -114,7 +114,7 @@ func withStaticInput(recipe Recipe, extra map[string]json.RawMessage) (Recipe, e
 	}
 	steps := make([]StepSpec, len(recipe.Steps))
 	for index, step := range recipe.Steps {
-		merged := make(map[string]json.RawMessage, len(step.StaticInput)+len(extra))
+		merged := make(map[string]json.RawMessage, len(step.StaticInput))
 		for key, value := range step.StaticInput {
 			merged[key] = value
 		}

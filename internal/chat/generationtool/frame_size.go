@@ -43,6 +43,9 @@ func FrameOutputSizes(offering generation.Offering, ratio float64) map[string]st
 	return values
 }
 
+// frameMaximumDeclaredSide bounds the default size a frame is derived from.
+const frameMaximumDeclaredSide = 1 << 15
+
 // framePixels is a picture of the given shape whose longer side is the longer
 // side of the parameter's default size.
 func framePixels(parameter generation.Parameter, ratio float64) (int, int) {
@@ -50,7 +53,10 @@ func framePixels(parameter generation.Parameter, ratio float64) (int, int) {
 	var declared any
 	if len(parameter.Default) > 0 && json.Unmarshal(parameter.Default, &declared) == nil {
 		if text, ok := declared.(string); ok {
-			if size, ok := parseSizeValue(text); ok && size.Width > 0 {
+			// A declared default is a real picture size; a value beyond any image
+			// model's output is ignored rather than converted unchecked.
+			if size, ok := parseSizeValue(text); ok && size.Width > 0 && size.Height > 0 &&
+				max(size.Width, size.Height) <= frameMaximumDeclaredSide {
 				longest = int(max(size.Width, size.Height))
 			}
 		}
