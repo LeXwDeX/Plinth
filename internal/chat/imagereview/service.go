@@ -1,8 +1,9 @@
 // Package imagereview implements the read-only inspect_image Agent tool (#245).
 // It resolves one picture of the command's session through the same handle
 // policy as every other tool, reads its bytes only for the command's owner, and
-// reports deterministic facts plus a Schema-declared checklist. It never creates
-// a Task, spends credits or changes the session.
+// reports deterministic facts plus a Schema-declared checklist. The delivery
+// checklist also judges the picture against the session's 2D purpose (#282,
+// #284, #287). It never creates a Task, spends credits or changes the session.
 package imagereview
 
 import (
@@ -36,20 +37,35 @@ type Config struct {
 	Review  catalog.ChatImageReviewSchema
 	Inputs  InputAssetReader
 	Tasks   TaskAssetReader
+	// Usage and Brief locate the session's 2D purpose: Usage declares the
+	// purposes (application.chat.image2d_usage) and Brief the production brief
+	// field that names one. Without Review.Usage they are unused and the
+	// delivery checklist stays the historical one.
+	Usage catalog.ChatImage2DUsageSchema
+	Brief catalog.ChatProductionBriefSchema
+	// Offerings names the models that reach a purpose's minimum short edge in
+	// the hint of a failed resolution check. Nil names none.
+	Offerings OfferingLookup
 }
 
 type Service struct {
-	context catalog.ChatContextSchema
-	review  catalog.ChatImageReviewSchema
-	inputs  InputAssetReader
-	tasks   TaskAssetReader
+	context    catalog.ChatContextSchema
+	review     catalog.ChatImageReviewSchema
+	inputs     InputAssetReader
+	tasks      TaskAssetReader
+	usage      catalog.ChatImage2DUsageSchema
+	imageField string
+	offerings  OfferingLookup
 }
 
 func New(config Config) (*Service, error) {
 	if config.Inputs == nil && config.Tasks == nil {
 		return nil, errors.New("image review: no asset reader")
 	}
-	return &Service{context: config.Context, review: config.Review, inputs: config.Inputs, tasks: config.Tasks}, nil
+	return &Service{
+		context: config.Context, review: config.Review, inputs: config.Inputs, tasks: config.Tasks,
+		usage: config.Usage, imageField: config.Brief.FieldNameOfType("image_profile"), offerings: config.Offerings,
+	}, nil
 }
 
 // Inspect executes one inspect_image call.
@@ -182,10 +198,22 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 			})
 		}
 	}
-	report, err := imageinspect.Inspect(data, imageinspect.Limits{
+	// The purpose checks judge the whole delivered picture. A region crop is a
+	// part of it (its short edge, seams and edge are not the picture's), and
+	// the 3D input checklist has its own gate, so neither is judged against the
+	// purpose.
+	var judgement *purposeJudgement
+	if checklistName == "delivery" && !regionRequested {
+		judgement = service.judgement(command.Options.ProductionBrief)
+	}
+	var requirements imageinspect.Requirements
+	if judgement != nil {
+		requirements = judgement.requirements
+	}
+	report, err := imageinspect.InspectFor(data, imageinspect.Limits{
 		MaxBytes:  service.review.Limits.MaxBytes,
 		MaxPixels: service.review.Limits.MaxPixels,
-	})
+	}, requirements)
 	if err != nil {
 		message := strings.NewReplacer("{handle}", picture.Attachment.Handle, "{reason}", err.Error()).
 			Replace(service.review.UnreadableTemplate)
@@ -212,32 +240,55 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 		pictures = append([]chat.ToolPicture{original}, pictures...)
 	}
 	checks := report.Review(checklist)
+	usageCheck := map[string]any{"checklist": checklistName, "checklist_text": checklistText}
+	if judgement != nil {
+		purposeChecks := report.ReviewRequirements(judgement.requirements)
+		service.addHints(purposeChecks, judgement)
+		checks = append(checks, purposeChecks...)
+		usageCheck["purpose"] = judgement.profile.ID
+		usageCheck["purpose_label"] = judgement.profile.Label
+		usageCheck["purpose_source"] = judgement.source
+		usageCheck["note"] = service.note(judgement)
+	}
+	usageCheck["checks"] = checks
 	result := map[string]any{
-		"ok":     true,
-		"image":  imageFacts,
-		"report": report,
-		"usage_check": map[string]any{
-			"checklist": checklistName, "checklist_text": checklistText, "checks": checks,
-		},
+		"ok":               true,
+		"image":            imageFacts,
+		"report":           report,
+		"usage_check":      usageCheck,
 		"rounds_remaining": max(0, service.review.MaxRounds-used-1),
 	}
 	content, err := json.Marshal(result)
 	if err != nil {
 		return chat.ToolResult{Error: "image inspection failed", NoSubmission: true}, nil
 	}
-	passed, failed := 0, 0
+	// A check the picture cannot show is counted apart from the passed ones: an
+	// unjudged check must not read as a passed one (the ledger's rule for
+	// inspect_model).
+	passed, failed, unknown := 0, 0, 0
+	var failedChecks []map[string]string
 	for _, check := range checks {
-		if check.Status == imageinspect.StatusPass {
+		switch check.Status {
+		case imageinspect.StatusPass:
 			passed++
-		} else {
+		case imageinspect.StatusUnknown:
+			unknown++
+		default:
 			failed++
+			failedChecks = append(failedChecks, map[string]string{
+				"check": check.Name, "actual": truncate(check.Actual, 120), "fix": check.Fix,
+			})
 		}
 	}
-	summary, _ := json.Marshal(map[string]any{
+	summaryFacts := map[string]any{
 		"tool": "inspect_image", "handle": picture.Attachment.Handle,
 		"width": report.Width, "height": report.Height,
-		"checks": map[string]int{"passed": passed, "failed": failed},
-	})
+		"checks": map[string]int{"passed": passed, "failed": failed, "unknown": unknown},
+	}
+	if len(failedChecks) > 0 {
+		summaryFacts["failed_checks"] = failedChecks
+	}
+	summary, _ := json.Marshal(summaryFacts)
 	return chat.ToolResult{
 		AgentContent: string(content), Summary: summary, Pictures: pictures,
 		NoSubmission: true,
@@ -342,6 +393,14 @@ func (service *Service) unreadable(picture chat.ResolvedAttachment, err error) s
 		"{handle}", picture.Attachment.Handle,
 		"{reason}", err.Error(),
 	).Replace(service.review.UnreadableTemplate)
+}
+
+// truncate bounds a measured value kept in the persisted summary.
+func truncate(text string, limit int) string {
+	if runes := []rune(text); len(runes) > limit {
+		return string(runes[:limit])
+	}
+	return text
 }
 
 func jsonEqualNull(value json.RawMessage) bool {

@@ -1588,14 +1588,35 @@ def scenario_image_purpose(api, offerings, work):
         used = task.get("offering_id")
         contents = _checkpoint_completed_contents(work, "main", session)
         reported = any('"model_choice"' in content and '"profile"' in content for content in contents)
-        ok = (task.get("state") == "SUCCEEDED" and used == "meshy/nano-banana-pro/text-to-image"
-              and normalized.get("aspect_ratio") == "3:4"
+        ok = (task.get("state") == "SUCCEEDED" and used == "gemini/gemini-3-pro-image/text-to-image"
+              and normalized.get("aspect_ratio") == "3:4" and normalized.get("image_size") == "4K"
               and (prepared.get("model_choice") or {}).get("source") == "profile"
               and (prepared.get("model_choice") or {}).get("profile") == "illustration"
               and reported)
         record("#239 2D purpose-driven generation", ok,
                f"offering={used} state={task.get('state')} aspect_ratio={normalized.get('aspect_ratio')} "
                f"model_choice={prepared.get('model_choice')} result_model_choice={reported}")
+
+    # (c2) #282: the fake picture is 64x64, far below the 1536 short edge of the
+    # illustration purpose, so the delivery checklist fails short_edge, keeps the
+    # failed check for the ledger and names a model that can reach it.
+    handles = image_handles(api, session)
+    if not handles:
+        record("#282 delivery checklist judges the purpose", False, "no generated image handle")
+    else:
+        handle = handles[-1]
+        inspect = '[[fake:tool:inspect_image {"image":"' + handle + '"}]]'
+        if not _image_message(api, session, "交付前检查 " + inspect):
+            record("#282 delivery checklist judges the purpose", False, "turn did not finish")
+        else:
+            summaries = _image_self_check_summaries(api, session)
+            summary = next((item for item in reversed(summaries) if item.get("handle") == handle), None) or {}
+            failed = [item.get("check") for item in summary.get("failed_checks") or []]
+            contents = _checkpoint_completed_contents(work, "main", session)
+            named = any('"check":"short_edge"' in content and "Gemini 3 Pro" in content
+                        and '"purpose":"illustration"' in content for content in contents)
+            record("#282 delivery checklist judges the purpose", "short_edge" in failed and named,
+                   f"handle={handle} failed={failed} model_named={named} summary={summary}")
 
     # (d) the explicit 2D lock wins: a different named model is refused before
     # submission, and a later call without a model runs the locked one.
@@ -1679,7 +1700,7 @@ def scenario_image_purpose(api, offerings, work):
         normalized = prepared.get("normalized_input") or {}
         model_choice = prepared.get("model_choice") or {}
         ok = (task.get("state") == "SUCCEEDED"
-              and task.get("offering_id") == "meshy/nano-banana-pro/text-to-image"
+              and task.get("offering_id") == "gemini/gemini-3-pro-image/text-to-image"
               and normalized.get("aspect_ratio") == "16:9"
               and model_choice.get("source") == "profile"
               and model_choice.get("profile") == "concept_art")

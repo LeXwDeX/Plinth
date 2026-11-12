@@ -2511,6 +2511,78 @@ type ChatImageReviewSchema struct {
 	// is returned once the budget is spent.
 	MaxRounds               int    `json:"max_rounds"`
 	RoundsExhaustedTemplate string `json:"rounds_exhausted_template"`
+	// Usage declares the 2D purpose checks of the delivery checklist: the
+	// session's purpose (image2d_usage) sets a minimum resolution, seamless
+	// tiling and a transparent background, and these are the thresholds and
+	// words that judge a picture against them (#282, #284, #287). Nil keeps the
+	// historical delivery checklist.
+	Usage *ChatImageUsageReviewSchema `json:"usage,omitempty"`
+}
+
+// ChatImageUsageReviewSchema is application.chat.image_review.usage. Every
+// number is a threshold of a deterministic measurement made by
+// internal/imageinspect; every text is read by the Agent.
+type ChatImageUsageReviewSchema struct {
+	// TransparentField names the production brief boolean that records the
+	// person asked for a transparent background. When it is true the alpha
+	// check demands a real alpha channel whatever the purpose accepts. Empty
+	// leaves the purpose alone to decide.
+	TransparentField string `json:"transparent_field,omitempty"`
+	// BriefPurposeNote and DefaultPurposeNote say which purpose judged the
+	// picture ({purpose}); the second is used when the brief names none and
+	// the Schema's default purpose applies, so the Agent can tell the person.
+	BriefPurposeNote   string `json:"brief_purpose_note"`
+	DefaultPurposeNote string `json:"default_purpose_note"`
+	// Tiling, Alpha and EdgeFringe are the thresholds of the seamless, alpha
+	// and edge_fringe checks.
+	Tiling     ChatImageTilingReviewSchema `json:"tiling"`
+	Alpha      ChatImageAlphaReviewSchema  `json:"alpha"`
+	EdgeFringe ChatImageFringeReviewSchema `json:"edge_fringe"`
+	// Hints is the Agent's next step for each failed check, by check name
+	// (short_edge, seamless, alpha, edge_fringe). Placeholders: {actual},
+	// {expected}, {purpose}, {minimum} (the purpose's minimum short edge) and
+	// {models} (the purpose's recommended models that can reach it). The
+	// short_edge hint must carry {models}: a failed resolution always names a
+	// way out and never switches the model silently.
+	Hints map[string]string `json:"hints"`
+	// ModelsTemplate renders the models of {models} ({models} is their names
+	// joined by ModelsSeparator); NoModelsText stands in for it when no
+	// recommendation can be shown to reach the minimum.
+	ModelsTemplate  string `json:"models_template"`
+	ModelsSeparator string `json:"models_separator"`
+	NoModelsText    string `json:"no_models_text"`
+}
+
+// ChatImageTilingReviewSchema judges the seam measurement. A stretch of a seam
+// is broken when its edge difference is at least MinSeamDelta (0..255) and more
+// than MaxSeamRatio times the difference between neighbouring pixels inside
+// it. Segments is how many stretches each seam is divided into, so a break is
+// reported with its position.
+type ChatImageTilingReviewSchema struct {
+	Segments     int     `json:"segments"`
+	MaxSeamRatio float64 `json:"max_seam_ratio"`
+	MinSeamDelta float64 `json:"min_seam_delta"`
+}
+
+// ChatImageAlphaReviewSchema judges the alpha channel. MinTransparentRatio is
+// the share of fully transparent pixels a channel must show to count as real;
+// MaxBackgroundSpread is the border colour spread up to which an opaque
+// background counts as plain where the purpose takes a solid background too.
+type ChatImageAlphaReviewSchema struct {
+	MinTransparentRatio float64 `json:"min_transparent_ratio"`
+	MaxBackgroundSpread float64 `json:"max_background_spread"`
+}
+
+// ChatImageFringeReviewSchema judges the light rim along a transparent edge.
+// BandRatio is the edge band width as a share of the picture's longer edge;
+// an edge pixel is rim when its luma is at least LightLuma and LumaGap above
+// the subject next to it; MaxRatio is the largest accepted share of the edge
+// that is rim.
+type ChatImageFringeReviewSchema struct {
+	BandRatio float64 `json:"band_ratio"`
+	LightLuma float64 `json:"light_luma"`
+	LumaGap   float64 `json:"luma_gap"`
+	MaxRatio  float64 `json:"max_ratio"`
 }
 
 // ChatSelectionMaskPreviewSchema bounds and styles the server-composed
@@ -3248,9 +3320,25 @@ type ChatImage2DUsageSchema struct {
 	// image purpose; it is what the Agent falls back to for an open question.
 	DefaultProfile string                    `json:"default_profile"`
 	Profiles       []ChatImage2DUsageProfile `json:"profiles"`
+	// OutputResolutions declares, by Offering ID, how a resolution tier
+	// parameter turns into pixels, for the Offerings whose frame parameter is
+	// an aspect ratio. Together with an explicit WxH frame value it is the only
+	// proof that a recommended Offering reaches a purpose's minimum short edge
+	// (#282); an Offering with neither cannot be shown to reach it.
+	OutputResolutions map[string]ChatImage2DOutputResolution `json:"output_resolutions,omitempty"`
 	// RequirementsNote renders one purpose's delivery requirements into the
 	// brief and the Agent's context.
 	RequirementsNote ChatImage2DRequirementsNote `json:"requirements_note"`
+}
+
+// ChatImage2DOutputResolution maps the options of one select parameter (a
+// resolution tier such as 1K, 2K, 4K) to the total pixel count the tier
+// delivers. Pixels is a lower bound over every frame the Offering offers: the
+// short edge of a frame is then at least sqrt(pixels x short / long), so a
+// requirement proven against it holds for any frame at least that large.
+type ChatImage2DOutputResolution struct {
+	Parameter string           `json:"parameter"`
+	Pixels    map[string]int64 `json:"pixels"`
 }
 
 // ChatImage2DUsageProfile is one 2D production purpose.
@@ -3270,6 +3358,17 @@ type ChatImage2DUsageProfile struct {
 	// Reason explains the purpose once; every adjusted parameter frozen from
 	// this purpose carries it and source "profile:<id>".
 	Reason string `json:"reason"`
+	// PromptGuidance is how to write the prompt for this purpose (for a
+	// texture: flat-on view, even light, no single focal point). It is rendered
+	// into the production brief beside the requirements (#287).
+	PromptGuidance string `json:"prompt_guidance,omitempty"`
+	// ResolutionUnverifiedOfferings lists the first recommendation of a shape
+	// whose resolution cannot be shown from the Schema (no frame size and no
+	// resolution tier declaration) and that the purpose accepts anyway, because
+	// no recommendation that can express the purpose's other requirements (the
+	// pose, say) can. The delivered picture is still checked against the
+	// minimum short edge by inspect_image (#282).
+	ResolutionUnverifiedOfferings []string `json:"resolution_unverified_offerings,omitempty"`
 }
 
 // ChatImage2DRequirements is what the delivered image must satisfy for the
@@ -3286,6 +3385,9 @@ type ChatImage2DRequirements struct {
 	Subjects string `json:"subjects"`
 	// Pose is empty, a-pose or t-pose.
 	Pose string `json:"pose"`
+	// Tileable demands that the picture tiles seamlessly: its opposite edges
+	// continue into each other (#287).
+	Tileable bool `json:"tileable,omitempty"`
 }
 
 // ChatImage2DRequirementsNote renders the purpose requirements as one text
@@ -3302,6 +3404,10 @@ type ChatImage2DRequirementsNote struct {
 	BackgroundTexts          map[string]string `json:"background_texts"`
 	SubjectsTexts            map[string]string `json:"subjects_texts"`
 	PoseTexts                map[string]string `json:"pose_texts"`
+	// TileableText is the item a tileable purpose adds; GuidanceTemplate wraps
+	// the purpose's PromptGuidance ({value}) as one more item (#287).
+	TileableText     string `json:"tileable_text,omitempty"`
+	GuidanceTemplate string `json:"guidance_template,omitempty"`
 }
 
 // ChatModel3DUsageBudgetLimit bounds the parameters of one semantic by one

@@ -985,7 +985,8 @@ func workResults(task generation.Task, attachments map[string][]Attachment) []Wo
 
 // workSelfChecks attributes the persisted tool summaries to the steps they
 // inspected. inspect_model contributes its pass, unknown and fail counts plus
-// the failed checks' fix hints; inspect_image contributes pass/fail counts;
+// the failed checks' fix hints; inspect_image contributes pass, unknown and
+// fail counts plus the failed checks' names and fix codes (#282);
 // render, compare, compare_model_reference and record_self_check contribute
 // their failed views or the Agent's remaining issues. A summary whose model
 // token names no step handle, Task ID or attachment handle is not attached to
@@ -1053,9 +1054,17 @@ func workSelfChecks(
 				StatusRole string   `json:"status_role"`
 				Remaining  []string `json:"remaining"`
 				Checks     struct {
-					Passed int `json:"passed"`
-					Failed int `json:"failed"`
+					Passed  int `json:"passed"`
+					Unknown int `json:"unknown"`
+					Failed  int `json:"failed"`
 				} `json:"checks"`
+				// failed_checks names what inspect_image judged as failed, with
+				// the fix code of each, so the next turn's ledger keeps it.
+				FailedChecks []struct {
+					Check  string `json:"check"`
+					Actual string `json:"actual"`
+					Fix    string `json:"fix"`
+				} `json:"failed_checks"`
 				Views       []string `json:"views"`
 				FailedViews []string `json:"failed_views"`
 				Usage       *struct {
@@ -1103,9 +1112,16 @@ func workSelfChecks(
 				update(taskID, check)
 			case "inspect_image":
 				taskID := workTaskOfHandle(summary.Handle, attachmentsByAsset, attachmentsByTask)
-				update(taskID, WorkSelfCheck{
-					Tool: "inspect_image", Passed: summary.Checks.Passed, Failed: summary.Checks.Failed,
-				})
+				check := WorkSelfCheck{
+					Tool: "inspect_image", Passed: summary.Checks.Passed,
+					Unknown: summary.Checks.Unknown, Failed: summary.Checks.Failed,
+				}
+				for _, item := range summary.FailedChecks {
+					check.Leftovers = append(check.Leftovers, WorkLeftover{
+						Check: item.Check, Actual: item.Actual, FixHint: item.Fix,
+					})
+				}
+				update(taskID, check)
 			case "render":
 				taskID := summary.TaskID
 				if taskID == "" {

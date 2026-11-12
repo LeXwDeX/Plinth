@@ -85,7 +85,10 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		handler,
 		http.MethodPost,
 		"/api/chat/sessions/"+sessionID+"/messages",
-		`{"content":"configured picture request","ai_model":"nano-banana-pro","creative_domain":"image"}`,
+		// The session has no brief, so the default 2D purpose applies and its
+		// first recommendation is the model the workspace picker must show:
+		// a different pick makes the Agent ask before switching (#103 C1).
+		`{"content":"configured picture request","ai_model":"gemini-3-pro-image","creative_domain":"image"}`,
 	)
 	if send.Code != http.StatusAccepted {
 		t.Fatalf("send status=%d body=%s", send.Code, send.Body)

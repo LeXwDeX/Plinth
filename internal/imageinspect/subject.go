@@ -22,28 +22,36 @@ import (
 // Decode reads a picture within the byte and pixel limits. It returns the
 // pixels in NRGBA form so every caller measures the same bytes.
 func Decode(data []byte, limits Limits) (*image.NRGBA, error) {
+	picture, _, err := decodeNRGBA(data, limits)
+	return picture, err
+}
+
+// decodeNRGBA is Decode that also names the container format ("png", "jpeg",
+// "webp"), so Inspect and the standalone decoder share one set of limits and
+// one set of refusal messages.
+func decodeNRGBA(data []byte, limits Limits) (*image.NRGBA, string, error) {
 	if limits.MaxBytes > 0 && int64(len(data)) > limits.MaxBytes {
-		return nil, fmt.Errorf("image is %d bytes, over the %d-byte limit", len(data), limits.MaxBytes)
+		return nil, "", fmt.Errorf("image is %d bytes, over the %d-byte limit", len(data), limits.MaxBytes)
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("decode image header: %w", err)
+		return nil, "", fmt.Errorf("decode image header: %w", err)
 	}
 	if config.Width <= 0 || config.Height <= 0 {
-		return nil, errors.New("image has no pixels")
+		return nil, "", errors.New("image has no pixels")
 	}
 	pixels := int64(config.Width) * int64(config.Height)
 	if limits.MaxPixels > 0 && pixels > limits.MaxPixels {
-		return nil, fmt.Errorf("image is %d pixels, over the %d-pixel limit", pixels, limits.MaxPixels)
+		return nil, "", fmt.Errorf("image is %d pixels, over the %d-pixel limit", pixels, limits.MaxPixels)
 	}
-	decoded, _, err := image.Decode(bytes.NewReader(data))
+	decoded, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("decode image: %w", err)
+		return nil, "", fmt.Errorf("decode image: %w", err)
 	}
 	bounds := decoded.Bounds()
 	nrgba := image.NewNRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 	draw.Draw(nrgba, nrgba.Bounds(), decoded, bounds.Min, draw.Src)
-	return nrgba, nil
+	return nrgba, format, nil
 }
 
 // Subject is one picture's deterministic subject facts.

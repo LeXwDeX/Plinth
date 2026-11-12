@@ -527,7 +527,7 @@ func (orchestrator *Orchestrator) productionBriefText(
 			value := imageUse
 			if profile, found := image2DUsageProfile(orchestrator.schema.Image2DUsage, imageUse); found {
 				value = profile.Label
-				if requirements := image2DRequirementsText(profile.Requirements, orchestrator.schema.Image2DUsage.RequirementsNote, briefSchema.ImageRequirementSeparator); requirements != "" {
+				if requirements := image2DRequirementsText(profile, orchestrator.schema.Image2DUsage.RequirementsNote, briefSchema.ImageRequirementSeparator); requirements != "" {
 					if briefSchema.ImageRequirementsTemplate != "" {
 						requirements = strings.ReplaceAll(briefSchema.ImageRequirementsTemplate, "{items}", requirements)
 					}
@@ -573,14 +573,17 @@ func image2DUsageProfile(usage catalog.ChatImage2DUsageSchema, id string) (catal
 }
 
 // image2DRequirementsText renders one 2D purpose's delivery requirements with
-// the Schema's own words, so no enum literal reaches the Agent (#239).
-func image2DRequirementsText(requirements catalog.ChatImage2DRequirements, note catalog.ChatImage2DRequirementsNote, separator string) string {
+// the Schema's own words, so no enum literal reaches the Agent (#239). A
+// tileable purpose adds its tiling requirement and a purpose with prompt
+// guidance adds how to write the prompt (#287).
+func image2DRequirementsText(profile catalog.ChatImage2DUsageProfile, note catalog.ChatImage2DRequirementsNote, separator string) string {
 	if strings.TrimSpace(note.Template) == "" {
 		return ""
 	}
 	if separator == "" {
 		separator = note.Separator
 	}
+	requirements := profile.Requirements
 	items := []string{
 		strings.ReplaceAll(note.AspectRatioTemplate, "{value}", requirements.AspectRatio),
 		strings.ReplaceAll(note.MinimumShortEdgeTemplate, "{value}", strconv.Itoa(requirements.MinimumShortEdge)),
@@ -591,6 +594,12 @@ func image2DRequirementsText(requirements catalog.ChatImage2DRequirements, note 
 		if text := note.PoseTexts[requirements.Pose]; text != "" {
 			items = append(items, strings.ReplaceAll(note.PoseTemplate, "{value}", text))
 		}
+	}
+	if requirements.Tileable {
+		items = append(items, note.TileableText)
+	}
+	if guidance := strings.TrimSpace(profile.PromptGuidance); guidance != "" {
+		items = append(items, strings.ReplaceAll(note.GuidanceTemplate, "{value}", guidance))
 	}
 	kept := items[:0]
 	for _, item := range items {

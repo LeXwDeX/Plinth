@@ -6046,7 +6046,7 @@
               "create_multiview_images",
               "edit_multiview_images"
             ],
-            "text": "【2D 自检】\n2D 结果也要在交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付；自检与修正轮数有上限，到上限就停下并如实说明剩余问题。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）检查输入图：应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。不通过时先修图再提交；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。\n可用图像模型（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每张图的提示词前先读【偏好摘要】。已选用方向要逐字沿用其画风、构图与身份细节；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
+            "text": "【2D 自检】\n2D 结果也要在交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付；自检与修正轮数有上限，到上限就停下并如实说明剩余问题。\ndelivery 清单还会按制作简报的 2D 用途核对：最小短边（不达标时 hint 会点名能达到的推荐模型，换模型前先告诉用户，不要静默替换）、贴图是否可无缝平铺（接缝位置写在结果里，可用 region 放大看）、要透明底时是否有真正的 alpha 通道和干净的边缘（白边会被标出）。unknown 表示这张图无法判断，不是通过。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）检查输入图：应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。不通过时先修图再提交；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。\n可用图像模型（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每张图的提示词前先读【偏好摘要】。已选用方向要逐字沿用其画风、构图与身份细节；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
             "offering_capabilities": ["text-to-image", "image-to-image"],
             "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
             "tradeoff_separator": "\n"
@@ -6065,7 +6065,7 @@
             "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求。用途推荐的参数会进入冻结输入；用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认，不要静默替换。工具结果里的 model_choice 说明模型来源（用户锁定、你指定、用途推荐或默认），按实告诉用户。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，主体完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图要单主体、完整、纯色或透明背景，角色用 A-pose 或 T-pose，四肢和手指分开。\n角色设定表与系列：同一角色的多张图先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用；三视图或多视角只改变视角，不改身份和画风。\n修图还是重画：换颜色、换背景、去背景、局部修改用图生图或 remove_background；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动，达到自检与修正上限就停下说明。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时，按用途推荐选择；带理由偏离时把理由写进参数说明。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）确认输入图满足要求，不通过先修图。"
           }
         ],
-        "system_prompt": "你是 Plinth 的美术总监，同时负责 2D 图像与 3D 模型。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要图或要模型、而会话还没有制作简报时，先用 ask_choice 请用户选用途：3D 用 kind=usage_profile，2D 用 kind=image_usage_profile；2D 的引导要更轻，需求已经说清或用户说随便时不要出卡，直接用默认用途开始。需要风格、平台、画幅、透明背景或是否作为 3D 输入时，再用一两句话问清，然后用 update_production_brief 记下。一次最多一张选择卡，不要一次问一长串；简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。2D 与 3D 用同一套四层优先级：用户在本会话锁定的模型 > 你带理由指定的模型 > 用途推荐 > 默认。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换；用途推荐与用户所选冲突时先确认，不静默覆盖。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出推荐模型与参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说；批准卡也会带来源与理由。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 2D 结果交付前，用 inspect_image（checklist=delivery）看尺寸、透明通道、背景、主体占比与贴边，再看图检查主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性；作为 3D 输入图时用 checklist=3d_input 检查单主体、完整不贴边、纯色或透明背景与姿势。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式；有参考图时用 compare_model_reference 按视角并排对照。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。检查后用 record_self_check 写结论（passed 或 has_issues），列出发现、处理与剩余问题；记录由服务端按真实工具调用生成并持久保存，未自检的结果不得说成已检查。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 每次写生成提示词、选模型前，先读系统上下文里的偏好摘要：已选用方向逐字沿用；已否决方向及其原因不要换个说法重复提交，除非用户明确要求。重新生成、局部重绘或改词重发留下的“未确认”信号不算确认，先问清方向再批量出图。\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 每个模型的具体写法（语言、描述式或关键词式、长度、是否读取文本、反向提示词、参考图作用）以工具描述和 list_offerings 中该 Offering 的 prompt guidance 为准；guidance 与这里的通用基线冲突时，以 guidance 为准。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要；服务端会把本会话的风格锚（风格锁定的原文与参考图）逐字注入系统上下文，直接照用。改写已有步骤时，先用 get_production_step 按 @stepN 或任务 ID 取回该步的完整提示词，只改用户要求的局部并保留其余原文；基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n- 工具结果里的 final_prompt 是服务端实际提交的提示词，prompt_note 列出套用的模板、风格锁、默认反向提示词和截断；有改写或拒绝时按结果如实说明。提示词超过模型上限会被拒绝且不会扣费，按提示的差额缩写后重新调用。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
+        "system_prompt": "你是 Plinth 的美术总监，同时负责 2D 图像与 3D 模型。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要图或要模型、而会话还没有制作简报时，先用 ask_choice 请用户选用途：3D 用 kind=usage_profile，2D 用 kind=image_usage_profile；2D 的引导要更轻，需求已经说清或用户说随便时不要出卡，直接用默认用途开始。需要风格、平台、画幅、透明背景或是否作为 3D 输入时，再用一两句话问清，然后用 update_production_brief 记下。一次最多一张选择卡，不要一次问一长串；简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。2D 与 3D 用同一套四层优先级：用户在本会话锁定的模型 > 你带理由指定的模型 > 用途推荐 > 默认。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换；用途推荐与用户所选冲突时先确认，不静默覆盖。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出推荐模型与参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说；批准卡也会带来源与理由。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 2D 结果交付前，用 inspect_image（checklist=delivery）看尺寸、透明通道、背景、主体占比与贴边，以及制作简报用途要求的最小短边、贴图平铺和透明底边缘，再看图检查主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性；作为 3D 输入图时用 checklist=3d_input 检查单主体、完整不贴边、纯色或透明背景与姿势。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式；有参考图时用 compare_model_reference 按视角并排对照。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。检查后用 record_self_check 写结论（passed 或 has_issues），列出发现、处理与剩余问题；记录由服务端按真实工具调用生成并持久保存，未自检的结果不得说成已检查。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 每次写生成提示词、选模型前，先读系统上下文里的偏好摘要：已选用方向逐字沿用；已否决方向及其原因不要换个说法重复提交，除非用户明确要求。重新生成、局部重绘或改词重发留下的“未确认”信号不算确认，先问清方向再批量出图。\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 每个模型的具体写法（语言、描述式或关键词式、长度、是否读取文本、反向提示词、参考图作用）以工具描述和 list_offerings 中该 Offering 的 prompt guidance 为准；guidance 与这里的通用基线冲突时，以 guidance 为准。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要；服务端会把本会话的风格锚（风格锁定的原文与参考图）逐字注入系统上下文，直接照用。改写已有步骤时，先用 get_production_step 按 @stepN 或任务 ID 取回该步的完整提示词，只改用户要求的局部并保留其余原文；基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n- 工具结果里的 final_prompt 是服务端实际提交的提示词，prompt_note 列出套用的模板、风格锁、默认反向提示词和截断；有改写或拒绝时按结果如实说明。提示词超过模型上限会被拒绝且不会扣费，按提示的差额缩写后重新调用。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -6569,7 +6569,24 @@
         "override_note": "已按用户要求照原图提交，理由：{reason}。",
         "unreadable_template": "图片 {handle} 无法检查：{reason}。不要猜测它的内容。",
         "max_rounds": 3,
-        "rounds_exhausted_template": "本回合的 inspect_image 次数已用完（{maximum} 次）；停止自检，直接如实汇报剩余问题。"
+        "rounds_exhausted_template": "本回合的 inspect_image 次数已用完（{maximum} 次）；停止自检，直接如实汇报剩余问题。",
+        "usage": {
+          "transparent_field": "image_transparent",
+          "brief_purpose_note": "delivery 清单已按制作简报里的 2D 用途「{purpose}」核对最小短边、平铺和透明底。",
+          "default_purpose_note": "制作简报没有写 2D 用途，delivery 清单按默认用途「{purpose}」核对。向用户汇报结果时说明这一点；要按别的用途判断，先和用户确认再更新制作简报。",
+          "tiling": {"segments": 8, "max_seam_ratio": 2.5, "min_seam_delta": 6},
+          "alpha": {"min_transparent_ratio": 0.005, "max_background_spread": 32},
+          "edge_fringe": {"band_ratio": 0.002, "light_luma": 225, "luma_gap": 60, "max_ratio": 0.12},
+          "hints": {
+            "short_edge": "实际 {actual}，低于用途「{purpose}」要求的短边 {minimum} 像素。{models}不要静默换模型：先告诉用户这张图的分辨率不够，再带理由改用能达到的模型重新生成；用户锁定了模型时，如实说明并让用户决定。",
+            "seamless": "对边接不上：{actual}。按可平铺贴图重写提示词（seamless tileable texture，正面平视，均匀漫射光，整幅没有单一视觉焦点，图案越过每条边继续）后重画，或换更擅长重复图案的模型；可用 region 放大看接缝处。不要把有接缝的图说成可平铺。",
+            "alpha": "没有真正的透明通道：{actual}。要透明底时，先对这张图用 remove_background，或重新生成时选支持透明背景的参数，再自检。不要把不透明的图说成透明底。",
+            "edge_fringe": "透明边缘残留浅色边：{actual}。放到深色或彩色界面会露出白边。对这张图重新 remove_background，必要时换背景更干净的源图；用 region 放大边缘确认干净后再交付。"
+          },
+          "models_template": "该用途推荐里能达到的模型：{models}。",
+          "models_separator": "、",
+          "no_models_text": "该用途的推荐模型里没有一个在 Schema 里能证明达到这个分辨率，请如实告诉用户，不要承诺能达到。"
+        }
       },
       "image_mask": {
         "tool": "create_selection_mask",
@@ -7000,7 +7017,7 @@
         {
           "name": "inspect_image",
           "execution": {"implementation_key":"image.inspect","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
-          "description": "Read-only deterministic inspection of one picture of this session. Pass an image handle such as @img3 (generated results and history lookups both report their handles) or @selected for the currently selected picture. The result reports the picture's size and aspect, whether it has a transparent channel, how transparent it is, the border/background colour spread, the subject's pixel share and box, whether the subject touches an edge, and how many separate subject components there are. A checklist (delivery, the default, or 3d_input) turns those facts into pass/fail checks with a fix hint. Use it to self-check a generated 2D result before delivering it, or to check an input picture before image-to-3D. It never creates a Task, charges credits or changes the session; a look at a picture that is not readable is refused with the reason.",
+          "description": "Read-only deterministic inspection of one picture of this session. Pass an image handle such as @img3 (generated results and history lookups both report their handles) or @selected for the currently selected picture. The result reports the picture's size and aspect, whether it has a transparent channel, how transparent it is, the border/background colour spread, the subject's pixel share and box, whether the subject touches an edge, and how many separate subject components there are. A checklist (delivery, the default, or 3d_input) turns those facts into pass/fail checks with a fix hint. The delivery checklist also judges the picture against the session's 2D purpose from the production brief (or the default purpose, and says which): the purpose's minimum short edge in pixels, seamless tiling for textures (a broken seam is reported with its position), and, when a transparent background is wanted, a real alpha channel and clean edges with no light rim. A failed check carries a hint with the next step; a check that cannot be judged is unknown, not passed. Use it to self-check a generated 2D result before delivering it, or to check an input picture before image-to-3D. It never creates a Task, charges credits or changes the session; a look at a picture that is not readable is refused with the reason.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -9796,19 +9813,19 @@
             "description": "游戏、影视或产品前期的概念设定图，允许多主体与场景，重视构图、氛围和叙事。",
             "recommended_offerings": {
               "text-to-image": [
-                "meshy/nano-banana-pro/text-to-image",
-                "gemini/gemini-3-pro-image/text-to-image"
+                "gemini/gemini-3-pro-image/text-to-image",
+                "meshy/nano-banana-pro/text-to-image"
               ],
               "image-to-image": [
-                "meshy/nano-banana-pro/image-to-image",
-                "gemini/gemini-3-pro-image/image-to-image"
+                "gemini/gemini-3-pro-image/image-to-image",
+                "meshy/nano-banana-pro/image-to-image"
               ]
             },
             "parameter_overrides": {
+              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "16:9", "image_size": "4K"},
+              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "16:9", "image_size": "4K"},
               "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "16:9"},
-              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "16:9"},
-              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "16:9"},
-              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "16:9"}
+              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "16:9"}
             },
             "requirements": {
               "aspect_ratio": "16:9",
@@ -9817,7 +9834,7 @@
               "subjects": "multiple",
               "pose": ""
             },
-            "reason": "概念设定要交代场景与多主体关系，优先提示词遵循和构图稳定的模型；宽画幅更接近概念图的常用比例。"
+            "reason": "概念设定要交代场景与多主体关系，优先提示词遵循和构图稳定、且能出到所需分辨率的模型；宽画幅更接近概念图的常用比例。"
           },
           {
             "id": "illustration",
@@ -9825,19 +9842,19 @@
             "description": "单角色立绘、宣传插画或封面；主体突出，画幅便于排版和裁切。",
             "recommended_offerings": {
               "text-to-image": [
-                "meshy/nano-banana-pro/text-to-image",
-                "gemini/gemini-3-pro-image/text-to-image"
+                "gemini/gemini-3-pro-image/text-to-image",
+                "meshy/nano-banana-pro/text-to-image"
               ],
               "image-to-image": [
-                "meshy/nano-banana-pro/image-to-image",
-                "gemini/gemini-3-pro-image/image-to-image"
+                "gemini/gemini-3-pro-image/image-to-image",
+                "meshy/nano-banana-pro/image-to-image"
               ]
             },
             "parameter_overrides": {
+              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "3:4", "image_size": "4K"},
+              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "3:4", "image_size": "4K"},
               "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "3:4"},
-              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "3:4"},
-              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "3:4"},
-              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "3:4"}
+              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "3:4"}
             },
             "requirements": {
               "aspect_ratio": "3:4",
@@ -9846,7 +9863,7 @@
               "subjects": "single",
               "pose": ""
             },
-            "reason": "立绘以单角色为主体，需要稳定的身份与细节表现；竖画幅便于排版，优先提示词遵循与角色一致性好的模型。"
+            "reason": "立绘以单角色为主体，需要稳定的身份与细节表现；竖画幅便于排版，优先提示词遵循与角色一致性好、且能出到所需分辨率的模型。"
           },
           {
             "id": "icon_prop",
@@ -9854,19 +9871,19 @@
             "description": "图标、道具图或 UI 素材；单主体、方形构图，背景干净或透明，便于裁切和合成。",
             "recommended_offerings": {
               "text-to-image": [
-                "meshy/nano-banana-pro/text-to-image",
-                "openai/gpt-image-2/text-to-image"
+                "openai/gpt-image-2/text-to-image",
+                "meshy/nano-banana-pro/text-to-image"
               ],
               "image-to-image": [
-                "meshy/nano-banana-pro/image-to-image",
-                "openai/gpt-image-2/image-to-image"
+                "openai/gpt-image-2/image-to-image",
+                "meshy/nano-banana-pro/image-to-image"
               ]
             },
             "parameter_overrides": {
-              "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "1:1", "remove_background": true},
-              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "1:1", "remove_background": true},
               "openai/gpt-image-2/text-to-image": {"size": "2048x2048", "background": "transparent"},
-              "openai/gpt-image-2/image-to-image": {"size": "2048x2048", "background": "transparent"}
+              "openai/gpt-image-2/image-to-image": {"size": "2048x2048", "background": "transparent"},
+              "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "1:1", "remove_background": true},
+              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "1:1", "remove_background": true}
             },
             "requirements": {
               "aspect_ratio": "1:1",
@@ -9875,7 +9892,7 @@
               "subjects": "single",
               "pose": ""
             },
-            "reason": "图标和道具图要单主体、方形、背景可去除；优先能稳定出单一主体并支持透明背景的模型。"
+            "reason": "图标和道具图要单主体、方形、背景可去除；优先能稳定出单一主体、直接支持透明背景并能出到要求分辨率的模型。"
           },
           {
             "id": "texture_asset",
@@ -9883,15 +9900,19 @@
             "description": "可平铺的材质贴图或表面纹理；方形、均匀光、弱透视，供 3D 或平面使用。",
             "recommended_offerings": {
               "text-to-image": [
+                "openai/gpt-image-2/text-to-image",
                 "meshy/nano-banana-2/text-to-image",
                 "jimeng/seedream-4-5/text-to-image"
               ],
               "image-to-image": [
+                "openai/gpt-image-2/image-to-image",
                 "meshy/nano-banana-2/image-to-image",
                 "jimeng/seedream-4-5/image-to-image"
               ]
             },
             "parameter_overrides": {
+              "openai/gpt-image-2/text-to-image": {"size": "2048x2048"},
+              "openai/gpt-image-2/image-to-image": {"size": "2048x2048"},
               "meshy/nano-banana-2/text-to-image": {"aspect_ratio": "1:1"},
               "meshy/nano-banana-2/image-to-image": {"aspect_ratio": "1:1"},
               "jimeng/seedream-4-5/text-to-image": {"size": "4096x4096"},
@@ -9902,9 +9923,11 @@
               "minimum_short_edge": 1024,
               "background": "any",
               "subjects": "single",
-              "pose": ""
+              "pose": "",
+              "tileable": true
             },
-            "reason": "贴图要方形、均匀、无强透视；优先成本低、适合批量变体的模型，需要更高分辨率时用高分辨率模型。"
+            "reason": "贴图要方形、均匀、无强透视，还要能无缝平铺；有损压缩的块状噪点会在法线、粗糙度这类数据贴图上变成明显瑕疵，所以优先无损（PNG）输出的模型。即梦 Seedream 4.5 固定输出 JPEG，只在没有其他可用模型时使用。",
+            "prompt_guidance": "按可平铺贴图写提示词：写明 seamless tileable texture；正面平视、无透视；均匀漫射光，没有投影、渐晕和高光热点；整幅细节密度一致，没有单一视觉焦点，也没有边框；图案越过每条边继续，不要把物体摆在边缘。"
           },
           {
             "id": "model3d_input",
@@ -9920,6 +9943,7 @@
               "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "1:1", "pose_mode": "a-pose", "remove_background": true},
               "meshy/nano-banana-2/text-to-image": {"aspect_ratio": "1:1", "pose_mode": "a-pose", "remove_background": true}
             },
+            "resolution_unverified_offerings": ["meshy/nano-banana-pro/text-to-image"],
             "requirements": {
               "aspect_ratio": "1:1",
               "minimum_short_edge": 1024,
@@ -9930,6 +9954,10 @@
             "reason": "3D 输入图必须单主体、完整、背景干净并保持角色姿势；优先能固定姿势并直接去背景的模型，产出后用 inspect_image 的 3d_input 自检。"
           }
         ],
+        "output_resolutions": {
+          "gemini/gemini-3-pro-image/text-to-image": {"parameter": "image_size", "pixels": {"1K": 1048576, "2K": 4194304, "4K": 16777216}},
+          "gemini/gemini-3-pro-image/image-to-image": {"parameter": "image_size", "pixels": {"1K": 1048576, "2K": 4194304, "4K": 16777216}}
+        },
         "requirements_note": {
           "template": "{items}",
           "separator": "；",
@@ -9951,7 +9979,9 @@
           "pose_texts": {
             "a-pose": "A-pose",
             "t-pose": "T-pose"
-          }
+          },
+          "tileable_text": "必须可无缝平铺",
+          "guidance_template": "提示词要点：{value}"
         }
       },
       "context_compaction": {
@@ -18790,16 +18820,17 @@
             "chat.reroll.messages.idempotency_required": "Reroll requires an Idempotency-Key so a repeated request cannot charge twice.",
             "chat.image2d_usage.profiles[id=concept_art].label": "Concept art",
             "chat.image2d_usage.profiles[id=concept_art].description": "Concept art for games, film or product development; several subjects and a scene are allowed, with emphasis on composition, mood and narrative.",
-            "chat.image2d_usage.profiles[id=concept_art].reason": "Concept art explains a scene and the relationships between subjects; prefer models that follow prompts and hold a stable composition, and a wide frame close to the usual concept-art ratio.",
+            "chat.image2d_usage.profiles[id=concept_art].reason": "Concept art explains a scene and the relationships between subjects; prefer models that follow prompts, hold a stable composition and can reach the required resolution, and a wide frame close to the usual concept-art ratio.",
             "chat.image2d_usage.profiles[id=illustration].label": "Character illustration / key art",
             "chat.image2d_usage.profiles[id=illustration].description": "A single-character illustration, key art or cover; a prominent subject and a frame that is easy to lay out and crop.",
-            "chat.image2d_usage.profiles[id=illustration].reason": "Illustration is built around one character and needs stable identity and detail; a portrait frame is easy to lay out, and prompt-following models with good character consistency come first.",
+            "chat.image2d_usage.profiles[id=illustration].reason": "Illustration is built around one character and needs stable identity and detail; a portrait frame is easy to lay out, and prompt-following models with good character consistency that can reach the required resolution come first.",
             "chat.image2d_usage.profiles[id=icon_prop].label": "Icon / prop image",
             "chat.image2d_usage.profiles[id=icon_prop].description": "An icon, prop image or UI asset; one subject in a square frame with a clean or transparent background, easy to crop and composite.",
-            "chat.image2d_usage.profiles[id=icon_prop].reason": "Icons and prop images need one subject, a square frame and a removable background; prefer models that hold a single subject and support transparency.",
+            "chat.image2d_usage.profiles[id=icon_prop].reason": "Icons and prop images need one subject, a square frame and a removable background; prefer models that hold a single subject, support transparency directly and reach the required resolution.",
             "chat.image2d_usage.profiles[id=texture_asset].label": "Texture asset",
             "chat.image2d_usage.profiles[id=texture_asset].description": "A tileable material texture or surface pattern; square, evenly lit and weakly perspective, for 3D or graphic use.",
-            "chat.image2d_usage.profiles[id=texture_asset].reason": "A texture must be square, even and without strong perspective; prefer low-cost models that suit batches of variants, and a high-resolution model when more detail is needed.",
+            "chat.image2d_usage.profiles[id=texture_asset].reason": "A texture must be square, even, without strong perspective and tile seamlessly; lossy compression blocks become visible flaws on data textures such as normal and roughness maps, so lossless (PNG) models come first. Jimeng Seedream 4.5 always delivers JPEG and is used only when no other model is available.",
+            "chat.image2d_usage.profiles[id=texture_asset].prompt_guidance": "Write the prompt for a tileable texture: say seamless tileable texture; flat-on view with no perspective; even diffuse light without cast shadows, vignette or highlight hot spots; the same detail density across the whole frame, with no single focal point and no border; the pattern continues across every edge, so keep objects away from the edges.",
             "chat.image2d_usage.profiles[id=model3d_input].label": "3D input image",
             "chat.image2d_usage.profiles[id=model3d_input].description": "A single-subject concept image used to generate a 3D model; solid or transparent background, complete and not cropped, characters in A-pose or T-pose, checked by the 3D input gate of #245.",
             "chat.image2d_usage.profiles[id=model3d_input].reason": "A 3D input image must show one complete subject with a clean background and a stable pose; prefer models that can pin the pose and remove the background, then self-check with inspect_image checklist=3d_input.",
@@ -18818,6 +18849,8 @@
             "chat.image2d_usage.requirements_note.subjects_texts.multiple": "multiple allowed",
             "chat.image2d_usage.requirements_note.pose_texts.a-pose": "A-pose",
             "chat.image2d_usage.requirements_note.pose_texts.t-pose": "T-pose",
+            "chat.image2d_usage.requirements_note.tileable_text": "must tile seamlessly",
+            "chat.image2d_usage.requirements_note.guidance_template": "prompt tips: {value}",
             "chat.model3d_usage.profiles[id=render].label": "Display / rendering",
             "chat.model3d_usage.profiles[id=render].description": "A model for display, preview or promotion; not aimed at real-time use or printing.",
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",

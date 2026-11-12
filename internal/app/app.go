@@ -737,6 +737,14 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Review:  applicationSchema.Chat.ImageReview,
 		Inputs:  inputAssetService,
 		Tasks:   module,
+		// #282/#284/#287: the delivery checklist judges a picture against the
+		// session's 2D purpose, and names the Offerings that can reach its
+		// minimum resolution from the Catalog.
+		Usage: applicationSchema.Chat.Image2DUsage,
+		Brief: applicationSchema.Chat.Model3DUsage.Brief,
+		Offerings: func(id string) (generation.Offering, bool) {
+			return taskCatalog.Get(generation.OfferingID(id))
+		},
 	})
 	if err != nil {
 		return nil, err

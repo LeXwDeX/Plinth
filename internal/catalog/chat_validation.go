@@ -3018,6 +3018,83 @@ func validateImageReview(schema ChatSchema) error {
 		strings.TrimSpace(review.DeliveryChecklist) == "" || strings.TrimSpace(review.Input3DChecklist) == "" {
 		return errors.New("chat.image_review 的自检轮数、放行参数或文案不完整")
 	}
+	return validateImageUsageReview(schema)
+}
+
+// imageUsageReviewChecks are the checks the 2D purpose adds to the delivery
+// checklist (#282, #284, #287). Each needs a hint for the Agent.
+var imageUsageReviewChecks = []string{"short_edge", "seamless", "alpha", "edge_fringe"}
+
+// imageUsageHintPlaceholder finds the braces a hint can carry; any other brace
+// left in a hint would reach the Agent verbatim.
+var imageUsageHintPlaceholder = regexp.MustCompile(`\{[a-z_]+\}`)
+
+// validateImageUsageReview checks application.chat.image_review.usage: the
+// thresholds of the purpose checks and the words of their next steps. A Schema
+// that declares 2D purposes must declare it, so a purpose's minimum resolution,
+// tiling and transparency are never promised without a check; a Schema with no
+// purposes may omit it (historical Catalogs).
+func validateImageUsageReview(schema ChatSchema) error {
+	usage := schema.ImageReview.Usage
+	if usage == nil {
+		if len(schema.Image2DUsage.Profiles) > 0 {
+			return errors.New("chat.image_review.usage 必须声明：application.chat.image2d_usage 已声明 2D 用途")
+		}
+		return nil
+	}
+	tiling, alpha, fringe := usage.Tiling, usage.Alpha, usage.EdgeFringe
+	if tiling.Segments < 1 || tiling.Segments > 64 || tiling.MaxSeamRatio <= 1 ||
+		tiling.MinSeamDelta < 0 || tiling.MinSeamDelta > 255 {
+		return errors.New("chat.image_review.usage.tiling 的分段数需在 1..64、max_seam_ratio 需大于 1、min_seam_delta 需在 0..255")
+	}
+	if alpha.MinTransparentRatio < 0 || alpha.MinTransparentRatio >= 1 || alpha.MaxBackgroundSpread < 0 {
+		return errors.New("chat.image_review.usage.alpha 的透明占比需在 [0,1)、背景扩散上限不能为负")
+	}
+	if fringe.BandRatio <= 0 || fringe.BandRatio > 0.05 || fringe.LightLuma <= 0 || fringe.LightLuma > 255 ||
+		fringe.LumaGap < 0 || fringe.LumaGap > 255 || fringe.MaxRatio < 0 || fringe.MaxRatio >= 1 {
+		return errors.New("chat.image_review.usage.edge_fringe 的 band_ratio 需在 (0,0.05]、亮度阈值需在 0..255、max_ratio 需在 [0,1)")
+	}
+	for _, name := range []string{usage.BriefPurposeNote, usage.DefaultPurposeNote} {
+		if !strings.Contains(name, "{purpose}") {
+			return errors.New("chat.image_review.usage 的 brief_purpose_note 与 default_purpose_note 必须包含 {purpose}")
+		}
+	}
+	if strings.TrimSpace(usage.ModelsSeparator) == "" || strings.TrimSpace(usage.NoModelsText) == "" ||
+		!strings.Contains(usage.ModelsTemplate, "{models}") {
+		return errors.New("chat.image_review.usage 的 models_template（含 {models}）、models_separator 与 no_models_text 不能为空")
+	}
+	allowed := map[string]bool{"{actual}": true, "{expected}": true, "{purpose}": true, "{minimum}": true, "{models}": true}
+	for _, name := range imageUsageReviewChecks {
+		hint := usage.Hints[name]
+		if strings.TrimSpace(hint) == "" {
+			return fmt.Errorf("chat.image_review.usage.hints.%s 不能为空", name)
+		}
+		for _, placeholder := range imageUsageHintPlaceholder.FindAllString(hint, -1) {
+			if !allowed[placeholder] {
+				return fmt.Errorf("chat.image_review.usage.hints.%s 含未知占位符 %s", name, placeholder)
+			}
+		}
+	}
+	for name := range usage.Hints {
+		if !containsString(imageUsageReviewChecks, name) {
+			return fmt.Errorf("chat.image_review.usage.hints 含未知检查 %q", name)
+		}
+	}
+	if !strings.Contains(usage.Hints["short_edge"], "{models}") {
+		return errors.New("chat.image_review.usage.hints.short_edge 必须包含 {models}：分辨率不达标时要点名可行的模型")
+	}
+	if field := usage.TransparentField; field != "" {
+		declared := false
+		for _, candidate := range schema.Model3DUsage.Brief.Fields {
+			if candidate.Name == field && candidate.Type == "boolean" {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return fmt.Errorf("chat.image_review.usage.transparent_field %q 不是制作简报里声明的 boolean 字段", field)
+		}
+	}
 	return nil
 }
 
