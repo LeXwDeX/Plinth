@@ -19,6 +19,9 @@ type Checklist struct {
 	// MaxComponents bounds the number of subject components (1 means a single
 	// subject); zero disables the check.
 	MaxComponents int `json:"max_components,omitempty"`
+	// MinMainComponentRatio, when positive, adds the main_component check: the
+	// largest piece must hold at least this share of the subject.
+	MinMainComponentRatio float64 `json:"min_main_component_ratio,omitempty"`
 }
 
 // Check is one deterministic verdict. Status is "pass", "fail" or "unknown"
@@ -77,6 +80,9 @@ func (r Report) Review(checklist Checklist) []Check {
 		checks = append(checks, Check{Name: "components", Status: status(r.ComponentCount <= checklist.MaxComponents),
 			Actual:   fmt.Sprintf("%d component(s)", r.ComponentCount),
 			Expected: fmt.Sprintf("<= %d", checklist.MaxComponents), Fix: "single_subject"})
+	}
+	if checklist.MinMainComponentRatio > 0 {
+		checks = append(checks, MainComponentCheck(r, checklist.MinMainComponentRatio))
 	}
 	return checks
 }

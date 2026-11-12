@@ -355,6 +355,7 @@ func checklistFromSchema(schema catalog.ChatImageChecklistSchema) imageinspect.C
 		MaxSubjectRatio:        schema.MaxSubjectRatio,
 		RequireEdgeClear:       schema.RequireEdgeClear,
 		MaxComponents:          schema.MaxComponents,
+		MinMainComponentRatio:  schema.MinMainComponentRatio,
 	}
 }
 

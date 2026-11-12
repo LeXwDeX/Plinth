@@ -315,8 +315,11 @@ func TestShippedInput3DChecklistDeclaresVisualItems(t *testing.T) {
 			t.Errorf("the 3d_input checklist text omits %q", want)
 		}
 	}
-	// The deterministic report is unchanged: these are not pixel checks.
-	if review.Input3D.RequirePlainBackground != true || review.Input3D.MaxComponents != 1 {
+	// The visual items are not pixel checks. The deterministic component rule is
+	// the three-view front rule (#291 review): a main piece plus accessories.
+	front := app.Chat.ThreeView.Consistency.Front
+	if review.Input3D.RequirePlainBackground != true || review.Input3D.MaxComponents != front.MaxComponents ||
+		review.Input3D.MinMainComponentRatio != front.MinMainComponentRatio {
 		t.Fatalf("the deterministic 3d_input checklist changed: %+v", review.Input3D)
 	}
 }

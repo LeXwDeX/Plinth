@@ -163,3 +163,32 @@ func TestReview(t *testing.T) {
 		t.Fatal("a busy background passed the plain-background check")
 	}
 }
+
+// The 3D input checklist uses the three-view front rule (#291 review): a figure
+// with detached accessories passes when its main piece holds most of the
+// subject; a sheet of several equal figures does not.
+func TestChecklistMainComponentRule(t *testing.T) {
+	checklist := Checklist{MaxComponents: 6, MinMainComponentRatio: 0.6}
+	find := func(checks []Check) Check {
+		for _, check := range checks {
+			if check.Name == CheckMainComponent {
+				return check
+			}
+		}
+		t.Fatal("no main_component check")
+		return Check{}
+	}
+	figure := Report{ComponentCount: 3, LargestComponentRatio: 0.82}
+	if check := find(figure.Review(checklist)); check.Status != StatusPass {
+		t.Fatalf("figure with accessories = %+v", check)
+	}
+	sheet := Report{ComponentCount: 2, LargestComponentRatio: 0.5}
+	if check := find(sheet.Review(checklist)); check.Status != StatusFail {
+		t.Fatalf("two figures = %+v", check)
+	}
+	for _, check := range sheet.Review(Checklist{MaxComponents: 1}) {
+		if check.Name == CheckMainComponent {
+			t.Fatal("a checklist without the ratio added the main_component check")
+		}
+	}
+}

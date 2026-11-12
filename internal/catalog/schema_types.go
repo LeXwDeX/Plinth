@@ -2771,6 +2771,10 @@ type ChatImageChecklistSchema struct {
 	MaxSubjectRatio        float64 `json:"max_subject_ratio"`
 	RequireEdgeClear       bool    `json:"require_edge_clear"`
 	MaxComponents          int     `json:"max_components"`
+	// MinMainComponentRatio, when positive, demands the largest piece hold at
+	// least this share of the subject, so a figure with a detached weapon or pet
+	// passes while a sheet of several figures fails (the three-view front rule).
+	MinMainComponentRatio float64 `json:"min_main_component_ratio,omitempty"`
 }
 
 // ChatModelReviewLimits bounds what Parse may accept before any topology is

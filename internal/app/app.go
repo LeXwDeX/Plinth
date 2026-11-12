@@ -742,8 +742,14 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// minimum resolution from the Catalog.
 		Usage: applicationSchema.Chat.Image2DUsage,
 		Brief: applicationSchema.Chat.Model3DUsage.Brief,
+		// Only Offerings the runtime can run are named as a fix: a declared
+		// but unconfigured model would be refused again (AGENTS.md).
 		Offerings: func(id string) (generation.Offering, bool) {
-			return taskCatalog.Get(generation.OfferingID(id))
+			offering, found := taskCatalog.Get(generation.OfferingID(id))
+			if !found || !module.OfferingAvailable(offering.ID) {
+				return generation.Offering{}, false
+			}
+			return offering, true
 		},
 	})
 	if err != nil {

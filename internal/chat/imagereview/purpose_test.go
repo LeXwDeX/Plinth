@@ -391,3 +391,28 @@ func TestDeliveryChecklistIsUnchangedWithoutPurposeChecks(t *testing.T) {
 		t.Fatalf("purpose checks appeared without a Schema: %+v", payload.UsageCheck)
 	}
 }
+
+// A model the runtime cannot run is never named as the fix: the application
+// lookup leaves unavailable Offerings out, and with none left the hint says so
+// instead of sending the Agent to a model that would be refused (#291 review).
+func TestResolutionHintNamesOnlyRunnableModels(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := product.Application().Chat
+	service, err := New(Config{
+		Context: schema.Context, Review: schema.ImageReview,
+		Inputs: fakeInputs{data: pngOf(t, 128, 128, subjectPicture(128, 128))},
+		Usage:  schema.Image2DUsage, Brief: schema.Model3DUsage.Brief,
+		Offerings: func(string) (generation.Offering, bool) { return generation.Offering{}, false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _, _ := inspectWith(t, service, `{"image":"@img1"}`, briefOf(t, map[string]any{"image_use": "illustration"}))
+	status, _, hint, _ := payload.check(t, "short_edge")
+	if status != "fail" || strings.Contains(hint, "Gemini") || !strings.Contains(hint, schema.ImageReview.Usage.NoModelsText) {
+		t.Fatalf("short_edge = %s, hint %q", status, hint)
+	}
+}

@@ -2995,7 +2995,8 @@ func validateImageReview(schema ChatSchema) error {
 	}
 	for name, checklist := range map[string]ChatImageChecklistSchema{"delivery": review.Delivery, "input_3d": review.Input3D} {
 		if checklist.MaxBackgroundSpread < 0 || checklist.MinSubjectRatio < 0 || checklist.MaxSubjectRatio < 0 ||
-			checklist.MinSubjectRatio > 1 || checklist.MaxSubjectRatio > 1 || checklist.MaxComponents < 0 {
+			checklist.MinSubjectRatio > 1 || checklist.MaxSubjectRatio > 1 || checklist.MaxComponents < 0 ||
+			checklist.MinMainComponentRatio < 0 || checklist.MinMainComponentRatio > 1 {
 			return fmt.Errorf("chat.image_review.%s 的比例或范围不合法", name)
 		}
 		if checklist.MaxSubjectRatio > 0 && checklist.MinSubjectRatio > checklist.MaxSubjectRatio {

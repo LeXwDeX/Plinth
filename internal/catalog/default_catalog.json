@@ -6591,7 +6591,7 @@
       "image_review": {
         "limits": {"max_bytes": 33554432, "max_pixels": 40000000},
         "delivery": {"require_alpha": false, "require_plain_background": false, "max_background_spread": 0, "min_subject_ratio": 0.01, "max_subject_ratio": 0.99, "require_edge_clear": false, "max_components": 0},
-        "input_3d": {"require_alpha": false, "require_plain_background": true, "max_background_spread": 32, "min_subject_ratio": 0.05, "max_subject_ratio": 0.95, "require_edge_clear": true, "max_components": 1},
+        "input_3d": {"require_alpha": false, "require_plain_background": true, "max_background_spread": 32, "min_subject_ratio": 0.05, "max_subject_ratio": 0.95, "require_edge_clear": true, "max_components": 6, "min_main_component_ratio": 0.6},
         "delivery_checklist": "【2D 交付自检】对照用户要求和制作简报检查：主体是否正确、构图与画面比例、肢体与手部、文字与水印、与参考图或风格锁的一致性。先用 inspect_image 看确定性事实，再看图判断“像不像、对不对”；发现问题先修再交付。",
         "input_3d_checklist": "【3D 输入图自检】用于图生 3D 的图片应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。inspect_image 的确定性结果不通过时，先修图（去背景、裁切、重画）再提交。确定性检查看不出姿态、透视和投影阴影：结果里的 visual_items 列出这些要你看图判断的项（用 show_picture 看图），逐项用 visual_review 写出 pass、fail 或 not_applicable 和一句看到了什么，服务端会把它们记入自检记录；任何一项 fail 都先修图再提交。",
         "refused_template": "这些输入图不适合作为 3D 源：{reasons}。先修图（去背景、裁切、改成单主体或补全主体）再提交；如果用户明确要求照原图做，请在 {override_argument} 里写明理由后重试。",
