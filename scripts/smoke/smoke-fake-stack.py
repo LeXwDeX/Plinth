@@ -664,6 +664,15 @@ def scenario_chain(api, offerings):
                    {"source_task": gen["id"], "authorize_extra_credits": True}, session)
     if rig and rig.get("state") == "SUCCEEDED":
         run_step(api, offerings, "tripo animation", ANIMATION, "animation", {"source_task": rig["id"]}, session)
+        # #277: another preset of the biped rig, and a quadruped skeleton with its own preset (the request
+        # values are constructed from the official pages; the fake does not tell a quadruped model apart).
+        run_step(api, offerings, "tripo animation (run)", ANIMATION, "animation",
+                 {"source_task": rig["id"], "animation_action": "preset:run"}, session)
+    quad = run_step(api, offerings, "tripo rigging (quadruped)", RIGGING, "rigging",
+                    {"source_task": gen["id"], "rig_type": "quadruped", "authorize_extra_credits": True}, session)
+    if quad and quad.get("state") == "SUCCEEDED":
+        run_step(api, offerings, "tripo animation (quadruped walk)", ANIMATION, "animation",
+                 {"source_task": quad["id"], "animation_action": "preset:quadruped:walk"}, session)
     run_step(api, offerings, "tripo texture", TRIPO_TEXTURE, "retexture",
              {"source_task": gen["id"], "prompt": "plain matte grey", "authorize_extra_credits": True}, session)
     seg = run_step(api, offerings, "tripo segment", SEGMENT, "mesh-segmentation",

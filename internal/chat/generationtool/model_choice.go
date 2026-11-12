@@ -168,37 +168,75 @@ func (executor *Executor) profileParameterValues(command chat.ToolCommand, offer
 func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offering generation.Offering,
 	current map[string]json.RawMessage) (purposeProfile, map[string]json.RawMessage) {
 	profile, found := executor.purposeOf(command)
-	if !found {
-		return purposeProfile{}, nil
-	}
-	overrides := profile.ParameterOverrides[string(offering.ID)]
-	values := make(map[string]json.RawMessage, len(overrides))
-	for name, value := range overrides {
-		declared := false
-		for _, parameter := range offering.Parameters {
-			if parameter.Name != name {
-				continue
-			}
-			declared = offering.AgentParameterAllowed(parameter)
-			break
-		}
-		if declared {
-			values[name] = value
-		}
-	}
-	// The triangle and texture budget belongs to 3D purposes (#129); a 2D
-	// purpose contributes only its declared parameter overrides.
-	if toolDomain(command) != string(generation.DomainImage) {
-		if model3d, ok := executor.briefPurpose(command); ok {
-			for name, value := range executor.budgetValues(command, model3d, offering, values, current) {
+	values := map[string]json.RawMessage{}
+	if found {
+		overrides := profile.ParameterOverrides[string(offering.ID)]
+		for name, value := range overrides {
+			if publicAgentParameter(offering, name) {
 				values[name] = value
 			}
 		}
+		// The triangle and texture budget belongs to 3D purposes (#129); a 2D
+		// purpose contributes only its declared parameter overrides.
+		if toolDomain(command) != string(generation.DomainImage) {
+			if model3d, ok := executor.briefPurpose(command); ok {
+				for name, value := range executor.budgetValues(command, model3d, offering, values, current) {
+					values[name] = value
+				}
+			}
+		}
+	}
+	// What a select field of the brief gives the Offering (#277) is the person's
+	// own, more specific choice than the purpose's generic values, and holds with
+	// or without a purpose.
+	for name, value := range executor.briefDefaultValues(command, offering) {
+		values[name] = value
 	}
 	if len(values) == 0 {
 		return profile, nil
 	}
 	return profile, values
+}
+
+// publicAgentParameter reports whether an Offering declares name as a
+// parameter the Agent may set: the rule every value a layer gives an Offering
+// on its own must pass (the Catalog checked it at load time; this repeats it so
+// a hand-built Executor cannot apply a value the Offering does not expose).
+func publicAgentParameter(offering generation.Offering, name string) bool {
+	for _, parameter := range offering.Parameters {
+		if parameter.Name == name {
+			return offering.AgentParameterAllowed(parameter)
+		}
+	}
+	return false
+}
+
+// briefDefaultValues are the values the session brief's select fields give an
+// Offering through the Schema's brief.parameter_defaults (#277): the target
+// engine picks the skeleton naming of a rigging step. They fill only what the
+// step left unset (applyPurposeValues), so a value the person or the Agent set
+// for the step stays theirs.
+func (executor *Executor) briefDefaultValues(command chat.ToolCommand, offering generation.Offering) map[string]json.RawMessage {
+	brief := command.Options.ProductionBrief
+	if brief.Empty() {
+		return nil
+	}
+	var values map[string]json.RawMessage
+	for _, entry := range executor.chat.Model3DUsage.Brief.ParameterDefaults {
+		if brief.Text(entry.Field) != entry.Value {
+			continue
+		}
+		for name, value := range entry.ParameterOverrides[string(offering.ID)] {
+			if !publicAgentParameter(offering, name) {
+				continue
+			}
+			if values == nil {
+				values = map[string]json.RawMessage{}
+			}
+			values[name] = value
+		}
+	}
+	return values
 }
 
 // modelShape is the recommended_offerings key of this call. For an image call

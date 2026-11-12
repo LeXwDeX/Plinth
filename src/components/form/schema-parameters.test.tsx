@@ -239,6 +239,27 @@ it('lists only the Retexture style picture formats the Schema declares', () => {
   expect(html).not.toContain('BMP');
 });
 
+it('shows the forced value of a parameter its condition locks, not a choice made before (#277)', () => {
+  vi.stubGlobal('React', React);
+  const parameters: ParamSchema[] = [
+    { name: 'rig_type', label: '骨架类型', type: 'select', default: 'biped', options: [{ value: 'biped', label: '双足' }, { value: 'quadruped', label: '四足' }] },
+    {
+      name: 'spec', label: '骨架命名', type: 'select', default: 'tripo',
+      options: [{ value: 'tripo', label: 'Tripo' }, { value: 'unreal', label: 'Unreal Engine' }],
+      disabled_when: [{ parameter: 'rig_type', operator: 'not-equals', value: 'biped' }],
+      forced_when: [{ when: { parameter: 'rig_type', operator: 'not-equals', value: 'biped' }, value: 'tripo' }],
+    } as ParamSchema,
+  ];
+  // Unreal was chosen while the skeleton was a biped; a quadruped is rigged with Tripo naming.
+  const quadruped = renderToStaticMarkup(<SchemaParameters parameters={parameters} values={{ rig_type: 'quadruped', spec: 'unreal' }} onChange={() => {}} />);
+  expect(quadruped).toMatch(/data-testid="parameter-locked-value">Tripo</);
+  expect(quadruped).not.toMatch(/data-testid="parameter-locked-value">Unreal Engine</);
+  expect(schemaParameterValues(parameters, { rig_type: 'quadruped', spec: 'unreal' })).toEqual({ rig_type: 'quadruped' });
+  const biped = renderToStaticMarkup(<SchemaParameters parameters={parameters} values={{ rig_type: 'biped', spec: 'unreal' }} onChange={() => {}} />);
+  expect(biped).not.toContain('parameter-locked-value');
+  expect(schemaParameterValues(parameters, { rig_type: 'biped', spec: 'unreal' })).toEqual({ rig_type: 'biped', spec: 'unreal' });
+});
+
 it('says why a parameter is locked by the current settings with the shared unavailable notice', () => {
   vi.stubGlobal('React', React);
   const parameters: ParamSchema[] = [

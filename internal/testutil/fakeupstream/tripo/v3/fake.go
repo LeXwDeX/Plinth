@@ -107,7 +107,7 @@ var kinds = []kind{
 	{Path: "/generation/text-to-model", Type: "text_to_model", Base: "text_to_model", Required: []string{"model", "prompt"}, Real: true, DocPage: "generation-text-to-model/standard"},
 	{Path: "/animations/rig-check", Type: "animate_prerigcheck", Base: "animate_prerigcheck", Required: []string{"input"}, Real: true, DocPage: "animations-rig-check"},
 	{Path: "/animations/rig", Type: "animate_rig", Base: "animate_rig", Required: []string{"input", "model"}, Real: true, DocPage: "animations-rig"},
-	{Path: "/animations/retarget", Type: "animate_retarget", Base: "animate_retarget", Required: []string{"input", "animation"}, Real: true, DocPage: "animations-retarget"},
+	{Path: "/animations/retarget", Type: "animate_retarget", Base: "animate_retarget", Required: []string{"input"}, Real: true, DocPage: "animations-retarget"},
 	{Path: "/mesh/segment", Type: "mesh_segmentation", Base: "mesh_segmentation", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-segment"},
 	{Path: "/mesh/complete", Type: "mesh_completion", Base: "mesh_completion", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-complete"},
 	{Path: "/models/convert", Type: "convert_model", Base: "convert_model", Required: []string{"input", "format"}, Real: true, DocPage: "models-convert"},
@@ -134,6 +134,8 @@ var realKindNotes = map[string]string{
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
 	"/models/texture":                "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url",
 	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url",
+	"/animations/rig":                "the response is captured (rig_type biped, spec tripo, both v2.5 and v3.0); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: rig_type (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic, others), spec (tripo, mixamo, actorcore, unity, unreal, vrm), out_format, which of them exist only under v3.0, and a spec having no effect on a non-biped rig; a poll repeats spec, out_format and the rig type (named topology, as captured)",
+	"/animations/retarget":           "the response is captured (preset:walk on a v3.0 biped rig; a v2 rig ended failed, code 1004); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: animation XOR animations (at most 5), the 11 v3.0 biped presets, the five creature presets (quadruped walk, hexapod walk, octopod walk, serpentine march, aquatic march) and the v1.0 preset:biped: names; a preset that does not fit its rig ends failed with code 1004 like the captured v2 case, which is an assumption",
 	"/mesh/smartsegment":             "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id",
 }
 
@@ -210,7 +212,10 @@ type task struct {
 	parent        string
 	model         string
 	format        string
-	polls         int
+	// request is the accepted create body; a rig or retarget poll echoes parts
+	// of it and a retarget is checked against the rig's.
+	request map[string]any
+	polls   int
 	// failCode and failMessage are set when the task ends in "failed".
 	failCode    int
 	failMessage string
@@ -534,7 +539,19 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
-		t := &task{id: h.newID(), kind: k, typ: k.Type, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		// The rig and retarget values are constructed from the official pages (rig.go).
+		message := ""
+		switch k.Path {
+		case "/animations/rig":
+			message = rigRequestError(body)
+		case "/animations/retarget":
+			message = retargetRequestError(body)
+		}
+		if message != "" {
+			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
+			return
+		}
+		t := &task{id: h.newID(), kind: k, typ: k.Type, request: body, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
 		t.terminal = terminalStatus(r)
 		if k.Path == "/mesh/smartsegment" {
 			switch segType, _ := body["seg_type"].(string); segType {
@@ -587,8 +604,10 @@ func (h *handler) create(k kind) http.HandlerFunc {
 					return
 				}
 				// Observed once (2026-10-29): retargeting a rig built with a v2 rig
-				// model ends "failed", error 1004 "Invalid input parameter".
-				if k.Type == "animate_retarget" && strings.HasPrefix(source.model, "v2") {
+				// model ends "failed", error 1004 "Invalid input parameter". The other
+				// pairings of preset and rig are constructed from the retarget page
+				// the same way (retargetFits).
+				if presets, _ := retargetPresets(body); k.Type == "animate_retarget" && !retargetFits(source, presets) {
 					t.failCode, t.failMessage = 1004, "Invalid input parameter"
 				}
 			}
@@ -744,6 +763,7 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 				input[field] = t.parentID()
 			}
 		}
+		t.echoedInput(input)
 	}
 	if status == statusFailed {
 		data["error_code"], data["error_message"] = json.Number(fmt.Sprint(t.failCode)), t.failMessage

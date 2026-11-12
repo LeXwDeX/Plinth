@@ -1,5 +1,5 @@
 import type { OfferingWire } from '@/lib/agent-offerings';
-import { parameterDisabled, parameterVisible } from '@/lib/product-schema';
+import { parameterConditionMatches, parameterDisabled, parameterVisible } from '@/lib/product-schema';
 import type { ParamSchema } from '@/lib/providers/types';
 import { isSourceParameter } from '@/lib/workspace/processing-source';
 import { dataAddressBlob, isDataAddress, uploadFilename } from '@/lib/data-address';
@@ -19,6 +19,14 @@ export function inputRuleViolations(offering: OfferingWire, input: Record<string
   const sources = new Set(offering.parameters.filter(isSourceParameter).map((parameter) => parameter.name));
   const violations: string[][] = [];
   for (const rule of offering.input_rules ?? []) {
+    // A forbidden_when rule (#277: finger bones with a texture image) is broken when every one of its conditions
+    // holds; it names the parameters those conditions read.
+    if (rule.forbidden_when?.length) {
+      if (rule.forbidden_when.every((condition) => parameterConditionMatches(condition, input))) {
+        violations.push(rule.forbidden_when.map((condition) => condition.parameter));
+      }
+      continue;
+    }
     if (rule.parameters.some((name) => sources.has(name))) continue;
     const present = rule.parameters.filter((name) => filled(input[name])).length;
     if (present < rule.minimum || present > rule.maximum) violations.push(rule.parameters);

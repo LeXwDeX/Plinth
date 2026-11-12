@@ -481,7 +481,7 @@ func (m *Module) resolveTaskDependencies(
 					return nil, err
 				}
 			}
-			binding, err = resolver.ResolveDependencyBinding(DependencyBindingRequest{Offering: aggregate.Task.Offering, TaskID: aggregate.Task.ID, AttemptID: aggregate.CurrentAttempt.ID, Job: job, Claims: aggregate.Claims, Assets: aggregate.Task.Assets})
+			binding, err = resolver.ResolveDependencyBinding(DependencyBindingRequest{Offering: aggregate.Task.Offering, TaskID: aggregate.Task.ID, AttemptID: aggregate.CurrentAttempt.ID, Job: job, Claims: aggregate.Claims, Assets: aggregate.Task.Assets, Input: append(json.RawMessage(nil), aggregate.Task.Input...)})
 			if err == nil {
 				binding, err = CanonicalDependencyBinding(binding)
 			}

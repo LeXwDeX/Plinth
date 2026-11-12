@@ -22,6 +22,9 @@ type DependencyBindingRequest struct {
 	Job       UpstreamJob
 	Claims    []ArtifactClaim
 	Assets    []Asset
+	// Input is the source Task's frozen, normalized input: what a choice the
+	// Offering leaves open (a Rig's skeleton type, #277) was frozen with.
+	Input json.RawMessage
 }
 
 // CanonicalDependencyBinding bounds private Provider evidence before it enters

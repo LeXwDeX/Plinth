@@ -4705,7 +4705,7 @@
         "ui.studio.stage.action.process_hint.mesh-segmentation": "识别模型部件并生成分件结果。",
         "ui.studio.stage.action.process_hint.mesh-completion": "补全同会话原生 Tripo 分割结果中的全部部件。",
         "ui.studio.stage.action.process_hint.retexture": "保留模型形状，按描述或参考图重新生成整套贴图。",
-        "ui.studio.stage.action.process_hint.rigging": "给人形模型加上骨骼，之后才能做动作。",
+        "ui.studio.stage.action.process_hint.rigging": "给模型加上骨骼，之后才能做动作；人形、四足等骨架类型按绑骨检查的结果选择。",
         "ui.studio.stage.action.process_hint.rig-check": "检查原生 Tripo 模型是否适合绑骨，只返回报告，不执行绑骨。",
         "ui.studio.stage.action.process_hint.uv-unwrap": "为静态模型重新展开 UV，原贴图不会保留。",
         "ui.studio.stage.action.process_hint.resize": "按指定高度或最长边缩放模型，并设置底部或中心原点。",
@@ -8121,7 +8121,7 @@
             "cancellation": "task",
             "agent_scope": "3d"
           },
-          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -8175,10 +8175,30 @@
                 "type": "number",
                 "description": "rigging only: character height in meters."
               },
+              "rig_type": {
+                "type": "string",
+                "description": "rigging only, for a service that declares it (Tripo Rigging): the skeleton type. Take it from the rig-check report of this model (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic); run rig-check first when the character is not a plain biped humanoid, and use others only when the check fits no type. Omit it for a biped humanoid. list_offerings names the types each service takes."
+              },
+              "spec": {
+                "type": "string",
+                "description": "rigging only, for a biped skeleton of Tripo Rigging v3.0: the skeleton naming, one of the values list_offerings lists. Omit it and the target engine in the production brief decides (Unity and Unreal Engine have their own naming), otherwise Tripo naming applies; say why when you choose one yourself. Only a skeleton with Tripo naming can be animated with Tripo animation. Other skeleton types always use Tripo naming."
+              },
+              "skeleton_template": {
+                "type": "string",
+                "description": "rigging only, for Meshy Rigging: the skeleton template, one of the values list_offerings lists. Omit it and the target engine in the production brief decides (Unity and Unreal Engine have their own template), otherwise Meshy's own skeleton applies; say why when you choose one yourself."
+              },
+              "include_fingers": {
+                "type": "boolean",
+                "description": "rigging only, for Meshy Rigging: add finger bones. Only when the person wants fingers; it cannot go with a texture image and a quad-topology source is not supported."
+              },
               "action_id": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "animation only (required): action ID from list_offerings; a long choice list there is options_compact, comma-separated value:Name entries such as 4:Attack."
+                "description": "animation only (Meshy, required): action ID from list_offerings; a long choice list there is options_compact, comma-separated value:Name entries such as 4:Attack."
+              },
+              "animation_action": {
+                "type": "string",
+                "description": "animation only (Tripo): the preset from list_offerings, for example preset:idle, preset:run, preset:jump or preset:quadruped:walk. It must fit the rig type of the source rigging task (biped presets for a biped rig, the matching creature preset for a creature rig); a mismatch is refused before anything is paid. Omit it for the default walk."
               },
               "source_asset_id": {
                 "type": "string",
@@ -8303,7 +8323,12 @@
               "resize_height": "resize_height",
               "auto_size": "auto_size",
               "height_meters": "height_meters",
+              "rig_type": "rig_type",
+              "spec": "spec",
+              "skeleton_template": "skeleton_template",
+              "include_fingers": "include_fingers",
               "action_id": "action_id",
+              "animation_action": "animation_action",
               "resize_longest_side": "resize_longest_side",
               "origin_at": "origin_at",
               "printer_type": "printer_type",
@@ -8389,7 +8414,7 @@
             "retexture",
             "format-conversion"
           ],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -9945,6 +9970,32 @@
               "maximum_characters": 1000,
               "multiline": true,
               "placeholder": "记录限制、排除项和参考方向。"
+            }
+          ],
+          "parameter_defaults": [
+            {
+              "field": "target_engine",
+              "value": "unity",
+              "parameter_overrides": {
+                "tripo/processing/rigging-v3": {
+                  "spec": "unity"
+                },
+                "meshy/processing/rigging": {
+                  "skeleton_template": "unity_humanoid"
+                }
+              }
+            },
+            {
+              "field": "target_engine",
+              "value": "unreal",
+              "parameter_overrides": {
+                "tripo/processing/rigging-v3": {
+                  "spec": "unreal"
+                },
+                "meshy/processing/rigging": {
+                  "skeleton_template": "ue5_mannequin"
+                }
+              }
             }
           ],
           "context_template": "\n\n【制作简报】{brief}\n这是本会话的制作简报：用途决定质量与默认参数；用户明确锁定的事项必须遵守，未锁定的事项由你按用途决定并说明理由。没有写入的字段不代表用户锁定。目标引擎、目标平台和是否绑骨只有用户知道，不能替用户决定：游戏或实时用途里它们没写入时，先用一两句话问清并记入简报，再开始制作。",
@@ -17598,7 +17649,7 @@
             "ui.studio.stage.action.process_hint.mesh-segmentation": "Identify the model's parts and generate a segmented result.",
             "ui.studio.stage.action.process_hint.mesh-completion": "Complete all parts of a native Tripo Segment result from this session.",
             "ui.studio.stage.action.process_hint.retexture": "Keep the model's shape and regenerate the entire texture set from a description or reference image.",
-            "ui.studio.stage.action.process_hint.rigging": "Add a skeleton to a humanoid model so it can be animated afterward.",
+            "ui.studio.stage.action.process_hint.rigging": "Add a skeleton to a model so it can be animated afterward; choose the skeleton type (biped, quadruped and so on) as the rig check reports.",
             "ui.studio.stage.action.process_hint.rig-check": "Check whether a native Tripo model is suitable for rigging; returns a report only and doesn't rig.",
             "ui.studio.stage.action.process_hint.uv-unwrap": "Re-unwrap UVs for a static model; the original texture is not kept.",
             "ui.studio.stage.action.process_hint.resize": "Scale the model to a given height or longest side, and set a bottom or center origin.",
@@ -19464,8 +19515,8 @@
             "chat.agent.refetch_unavailable_content.repeated_failure": "fetching this result again already failed for exactly the same reason as the task itself ({cause}). A refetch reuses the settings the task was generated with and the same provider result, so another try would fail the same way; it is no longer offered. Tell the user plainly why the result cannot be recovered; a new generation would charge again and needs their explicit decision. Do not call recover_task_result again for this task",
             "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task or observe_task on it), and do not call recover_task_result again for this task",
             "chat.agent_scope.mock_refusal": "The current mode does not allow this request (it needs {tool}); this step is currently unavailable and cannot be done.",
-            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
-            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=refine_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",
@@ -20144,7 +20195,6 @@
             "本人已保存或上传的 GLB；在原始资产坐标中以单位矩阵处理。": "A GLB you saved or uploaded. It is processed with the identity matrix in the original asset coordinates.",
             "本人已成功的平台任务保存的静态 GLB；不接受直接上传的文件。": "The static GLB saved by one of your successful platform tasks. Directly uploaded files are not accepted.",
             "本人拥有、已经成功交付的同模板 Meshy API 设计预览任务。": "A Meshy API design preview task of the same template that you own and that has been delivered successfully.",
-            "本人拥有且已成功的原生 Tripo Rig v3.0（v3.0-20260909）双足 Tripo 骨架绑骨任务；不接受 v2.5 绑骨、原始生成模型、其他骨架或上传文件。": "A native Tripo Rig v3.0 (v3.0-20260909) biped Tripo skeleton rigging task that you own and that has completed successfully. v2.5 rigging, original generated models, other skeletons, and uploaded files are not accepted.",
             "本人拥有且已成功的原生 Tripo 文生或图生 3D 模型；不接收检查报告、上传文件或其他服务模型。": "A native Tripo text-to-3D or image-to-3D model that you own and that has completed successfully. Check reports, uploaded files, and models from other services are not accepted.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。每边至少 32 像素，总像素不超过 178,956,970。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes. Each side must be at least 32 pixels, and the total pixel count must not exceed 178,956,970.",
@@ -20571,6 +20621,48 @@
             "骄傲阔步·原地 (Proud_Strut_inplace)": "Proud strut (in place)",
             "骨架命名": "Skeleton naming",
             "骨架类型": "Skeleton type",
+            "Blender Rigify 基础人形": "Blender Rigify basic human",
+            "Character Creator 5 HD 中性基础体": "Character Creator 5 HD neutral base",
+            "Meshy 默认骨架": "Meshy default skeleton",
+            "八足": "Octopod",
+            "八足行走": "Octopod walk",
+            "六足": "Hexapod",
+            "六足行走": "Hexapod walk",
+            "其他": "Other",
+            "其他生物骨架": "Other creature skeletons",
+            "动作必须与来源骨架的类型相符：双足骨架用双足动作，四足、六足、八足、蛇形、水生骨架用对应的生物动作。": "The action must fit the type of the source skeleton: a biped skeleton takes the biped actions; a quadruped, hexapod, octopod, serpentine or aquatic skeleton takes the matching creature action.",
+            "包含手指骨骼": "Include finger bones",
+            "双足": "Biped",
+            "双足骨架": "Biped skeleton",
+            "受击": "Hurt",
+            "只有双足骨架可以选骨架命名，其他类型固定使用 Tripo 命名。选了 Tripo 以外的命名，这个骨架就不能再用 Tripo 动画生成预设动作。": "Only a biped skeleton can choose its naming; every other type always uses Tripo naming. A skeleton with any naming other than Tripo can no longer be given preset motions by Tripo animation.",
+            "四足": "Quadruped",
+            "四足行走": "Quadruped walk",
+            "奔跑": "Run",
+            "射击": "Shoot",
+            "带手指骨骼的绑骨不能同时指定纹理参考图。": "Rigging with finger bones cannot also take a texture reference image.",
+            "待机": "Idle",
+            "扑跃": "Dive",
+            "挥砍": "Slash",
+            "攀爬": "Climb",
+            "本人拥有且已成功的原生 Tripo Rigging v3.0（v3.0-20260909）绑骨任务，骨架命名须是 Tripo；双足以及四足、六足、八足、蛇形、水生骨架各有对应动作。不接受 v2.5 绑骨、其他骨架命名、原始生成模型或上传文件。": "A native Tripo Rigging v3.0 (v3.0-20260909) rigging task that you own and that has completed successfully, with Tripo skeleton naming; biped, quadruped, hexapod, octopod, serpentine and aquatic skeletons each have matching actions. v2.5 rigging, other skeleton namings, original generated models and uploaded files are not accepted.",
+            "水生": "Aquatic",
+            "水生前行": "Aquatic march",
+            "绑骨检查会给出建议的骨骼类型，请按报告选择。": "The rig check recommends a skeleton type; choose the one in its report.",
+            "绑骨检查会给出建议的骨骼类型，请按报告选择；只有检查归不进任何一类的生物才选「其他」。": "The rig check recommends a skeleton type; choose the one in its report, and choose Other only for a creature the check cannot place in any type.",
+            "给 Meshy 生成的人形角色绑骨，只支持人形。可以选骨架模板，让骨骼命名与目标引擎或建模软件一致（Unreal Engine 5 Mannequin、Unity Humanoid、Mixamo 等），也可以加上手指骨骼；选了非默认模板或加了手指骨骼后，文件单位为米。制作简报写明了目标引擎、你又没指定时，骨架模板默认跟随目标引擎。": "Rigs a humanoid character generated by Meshy; humanoids only. You can choose a skeleton template so the bone naming matches the target engine or modeling software (Unreal Engine 5 Mannequin, Unity Humanoid, Mixamo and others), and you can add finger bones; with a non-default template or with finger bones the files are in meters. When the production brief names a target engine and you have not chosen, the skeleton template follows the target engine.",
+            "给 Tripo 生成的模型绑骨，支持双足人形，也支持四足、六足、八足、鸟类、蛇形、水生等生物。先做绑骨检查，骨架类型按报告的建议选择；检查归不进任何一类的生物才选「其他」。双足骨架还可以选骨架命名（Tripo、Mixamo、ActorCore、Unity、Unreal Engine、VRM）：要放进游戏引擎的角色按目标引擎选，制作简报写明了目标引擎、你又没指定时默认跟随目标引擎；其他类型固定用 Tripo 命名。只有 Tripo 命名的骨架可以继续用 Tripo 动画生成预设动作。": "Rigs a model generated by Tripo. Supports biped humanoids as well as quadruped, hexapod, octopod, avian, serpentine and aquatic creatures. Run a rig check first and choose the skeleton type the report recommends; choose Other only for a creature the check cannot place in any type. A biped skeleton can also choose its naming (Tripo, Mixamo, ActorCore, Unity, Unreal Engine, VRM): for a character headed into a game engine choose by the target engine, and when the production brief names a target engine and you have not chosen, it follows the target engine. Every other type always uses Tripo naming. Only a skeleton with Tripo naming can go on to Tripo animation for preset motions.",
+            "给 Tripo 生成的模型绑骨，适合四足、六足、八足、鸟类、蛇形、水生等非人形生物，骨架类型按绑骨检查报告的建议选择。绑出的骨架不能继续做 Tripo 动画，也不能选引擎骨架命名：要人形骨架、引擎骨架命名或后续动画，请用 Tripo Rigging v3.0。": "Rigs a model generated by Tripo; suited to non-humanoid creatures (quadruped, hexapod, octopod, avian, serpentine, aquatic), with the skeleton type chosen as the rig check report recommends. A skeleton rigged here cannot go on to Tripo animation and cannot choose an engine skeleton naming: for a biped skeleton, an engine skeleton naming or animation afterward, use Tripo Rigging v3.0.",
+            "给 Tripo Rigging v3.0 绑好骨的模型套用预设动作，交付带动画的 GLB。双足骨架可选待机、行走、奔跑、扑跃、攀爬、跳跃、挥砍、射击、受击、跌倒、转身；四足、六足、八足、蛇形、水生骨架各有一个行走或前行动作；鸟类和「其他」骨架暂无预设动作。动作必须与骨架类型相符，不相符的组合在提交前就被拒绝；骨架命名不是 Tripo（如 Unity、Unreal Engine）的骨架不能用本服务做动画。": "Applies a preset motion to a model rigged by Tripo Rigging v3.0 and delivers a GLB with the animation. A biped skeleton can take idle, walk, run, dive, climb, jump, slash, shoot, hurt, fall and turn; quadruped, hexapod, octopod, serpentine and aquatic skeletons each have one walk or march motion; avian and Other skeletons have no preset motion yet. The motion must fit the skeleton type, and a mismatched pair is refused before submission; a skeleton whose naming is not Tripo (Unity, Unreal Engine and so on) cannot be animated by this service.",
+            "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持；手部无法加指骨时任务会失败，可关闭此项重试。": "Adds finger bones to the hands at no extra credits, and the files are in meters. It cannot be combined with a texture reference image, and a source model with quad topology is not supported; if the hands cannot be given finger bones the task fails, so turn this off and retry.",
+            "蛇形": "Serpentine",
+            "蛇形前行": "Serpentine march",
+            "跌倒": "Fall",
+            "跳跃": "Jump",
+            "转身": "Turn",
+            "骨架模板": "Skeleton template",
+            "鸟类": "Avian",
+            "默认的 Meshy 骨架适合直接预览和 Meshy 动画；选了引擎或建模软件的骨架模板，骨骼命名就与该软件一致，文件单位为米。": "The default Meshy skeleton suits direct preview and Meshy animation; with a template for an engine or modeling software the bones are named as that software expects and the files are in meters.",
             "高尔夫开球 (golf_drive)": "Golf drive",
             "高质量": "High quality",
             "高踢 (High_Kick)": "High kick",
@@ -32445,13 +32537,14 @@
     },
     {
       "id": "meshy/processing/rigging",
-      "revision": "2026-10-29.121.1",
+      "revision": "2026-11-12.277.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
       "model_id": "meshy-processing",
       "model_name": "Meshy Rigging",
       "capability": "rigging",
+      "description": "给 Meshy 生成的人形角色绑骨，只支持人形。可以选骨架模板，让骨骼命名与目标引擎或建模软件一致（Unreal Engine 5 Mannequin、Unity Humanoid、Mixamo 等），也可以加上手指骨骼；选了非默认模板或加了手指骨骼后，文件单位为米。制作简报写明了目标引擎、你又没指定时，骨架模板默认跟随目标引擎。",
       "adapter_key": "meshy.v2",
       "enabled": true,
       "recommended": false,
@@ -32528,6 +32621,79 @@
           "name": "texture_image_url",
           "label": "纹理参考图",
           "type": "text"
+        },
+        {
+          "name": "skeleton_template",
+          "label": "骨架模板",
+          "type": "select",
+          "default": "meshyrig",
+          "presentation": {
+            "surface": "provider",
+            "control": "select"
+          },
+          "description": "默认的 Meshy 骨架适合直接预览和 Meshy 动画；选了引擎或建模软件的骨架模板，骨骼命名就与该软件一致，文件单位为米。",
+          "options": [
+            {
+              "value": "meshyrig",
+              "label": "Meshy 默认骨架"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "ue5_mannequin",
+              "label": "Unreal Engine 5 Mannequin"
+            },
+            {
+              "value": "unity_humanoid",
+              "label": "Unity Humanoid"
+            },
+            {
+              "value": "max_biped",
+              "label": "3ds Max Biped"
+            },
+            {
+              "value": "maya_human_ik",
+              "label": "Maya HumanIK"
+            },
+            {
+              "value": "blender_rigify_basic_human",
+              "label": "Blender Rigify 基础人形"
+            },
+            {
+              "value": "cc5_hd_neutral_base",
+              "label": "Character Creator 5 HD 中性基础体"
+            },
+            {
+              "value": "daz_genesis9",
+              "label": "DAZ Genesis 9"
+            }
+          ],
+          "omit_when": [
+            {
+              "parameter": "skeleton_template",
+              "operator": "equals",
+              "value": "meshyrig"
+            }
+          ]
+        },
+        {
+          "name": "include_fingers",
+          "label": "包含手指骨骼",
+          "type": "boolean",
+          "default": false,
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          },
+          "description": "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持；手部无法加指骨时任务会失败，可关闭此项重试。",
+          "omit_when": [
+            {
+              "parameter": "include_fingers",
+              "operator": "falsy"
+            }
+          ]
         }
       ],
       "input_rules": [
@@ -32539,6 +32705,20 @@
           ],
           "minimum": 1,
           "maximum": 1
+        },
+        {
+          "parameters": [],
+          "forbidden_when": [
+            {
+              "parameter": "include_fingers",
+              "operator": "truthy"
+            },
+            {
+              "parameter": "texture_image_url",
+              "operator": "present"
+            }
+          ],
+          "message": "带手指骨骼的绑骨不能同时指定纹理参考图。"
         }
       ],
       "outputs": [
@@ -39191,13 +39371,14 @@
     },
     {
       "id": "tripo/processing/rigging",
-      "revision": "2026-10-16.3",
+      "revision": "2026-11-12.277.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-rigging",
       "model_name": "Tripo Rigging",
       "capability": "rigging",
+      "description": "给 Tripo 生成的模型绑骨，适合四足、六足、八足、鸟类、蛇形、水生等非人形生物，骨架类型按绑骨检查报告的建议选择。绑出的骨架不能继续做 Tripo 动画，也不能选引擎骨架命名：要人形骨架、引擎骨架命名或后续动画，请用 Tripo Rigging v3.0。",
       "domain": "processing",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -39242,38 +39423,38 @@
           "type": "select",
           "default": "biped",
           "presentation": {
-            "surface": "readonly",
+            "surface": "provider",
             "control": "select"
           },
-          "fixed": true,
+          "description": "绑骨检查会给出建议的骨骼类型，请按报告选择。",
           "options": [
             {
               "value": "biped",
-              "label": "biped"
+              "label": "双足"
             },
             {
               "value": "quadruped",
-              "label": "quadruped"
+              "label": "四足"
             },
             {
               "value": "hexapod",
-              "label": "hexapod"
+              "label": "六足"
             },
             {
               "value": "octopod",
-              "label": "octopod"
+              "label": "八足"
             },
             {
               "value": "avian",
-              "label": "avian"
+              "label": "鸟类"
             },
             {
               "value": "serpentine",
-              "label": "serpentine"
+              "label": "蛇形"
             },
             {
               "value": "aquatic",
-              "label": "aquatic"
+              "label": "水生"
             }
           ]
         },
@@ -39452,13 +39633,14 @@
     },
     {
       "id": "tripo/processing/rigging-v3",
-      "revision": "2026-10-20.1",
+      "revision": "2026-11-12.277.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-rigging-v3",
       "model_name": "Tripo Rigging v3.0",
       "capability": "rigging",
+      "description": "给 Tripo 生成的模型绑骨，支持双足人形，也支持四足、六足、八足、鸟类、蛇形、水生等生物。先做绑骨检查，骨架类型按报告的建议选择；检查归不进任何一类的生物才选「其他」。双足骨架还可以选骨架命名（Tripo、Mixamo、ActorCore、Unity、Unreal Engine、VRM）：要放进游戏引擎的角色按目标引擎选，制作简报写明了目标引擎、你又没指定时默认跟随目标引擎；其他类型固定用 Tripo 命名。只有 Tripo 命名的骨架可以继续用 Tripo 动画生成预设动作。",
       "domain": "processing",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -39503,38 +39685,42 @@
           "type": "select",
           "default": "biped",
           "presentation": {
-            "surface": "readonly",
+            "surface": "provider",
             "control": "select"
           },
-          "fixed": true,
+          "description": "绑骨检查会给出建议的骨骼类型，请按报告选择；只有检查归不进任何一类的生物才选「其他」。",
           "options": [
             {
               "value": "biped",
-              "label": "biped"
+              "label": "双足"
             },
             {
               "value": "quadruped",
-              "label": "quadruped"
+              "label": "四足"
             },
             {
               "value": "hexapod",
-              "label": "hexapod"
+              "label": "六足"
             },
             {
               "value": "octopod",
-              "label": "octopod"
+              "label": "八足"
             },
             {
               "value": "avian",
-              "label": "avian"
+              "label": "鸟类"
             },
             {
               "value": "serpentine",
-              "label": "serpentine"
+              "label": "蛇形"
             },
             {
               "value": "aquatic",
-              "label": "aquatic"
+              "label": "水生"
+            },
+            {
+              "value": "others",
+              "label": "其他"
             }
           ]
         },
@@ -39544,10 +39730,17 @@
           "type": "select",
           "default": "tripo",
           "presentation": {
-            "surface": "readonly",
-            "control": "select"
+            "surface": "provider",
+            "control": "select",
+            "disabled_when": [
+              {
+                "parameter": "rig_type",
+                "operator": "not-equals",
+                "value": "biped"
+              }
+            ]
           },
-          "fixed": true,
+          "description": "只有双足骨架可以选骨架命名，其他类型固定使用 Tripo 命名。选了 Tripo 以外的命名，这个骨架就不能再用 Tripo 动画生成预设动作。",
           "options": [
             {
               "value": "tripo",
@@ -39556,6 +39749,32 @@
             {
               "value": "mixamo",
               "label": "Mixamo"
+            },
+            {
+              "value": "actorcore",
+              "label": "ActorCore"
+            },
+            {
+              "value": "unity",
+              "label": "Unity"
+            },
+            {
+              "value": "unreal",
+              "label": "Unreal Engine"
+            },
+            {
+              "value": "vrm",
+              "label": "VRM"
+            }
+          ],
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "rig_type",
+                "operator": "not-equals",
+                "value": "biped"
+              },
+              "value": "tripo"
             }
           ]
         },
@@ -39713,13 +39932,14 @@
     },
     {
       "id": "tripo/processing/animation",
-      "revision": "2026-10-20.2",
+      "revision": "2026-11-12.277.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-animation",
       "model_name": "Tripo Animation",
       "capability": "animation",
+      "description": "给 Tripo Rigging v3.0 绑好骨的模型套用预设动作，交付带动画的 GLB。双足骨架可选待机、行走、奔跑、扑跃、攀爬、跳跃、挥砍、射击、受击、跌倒、转身；四足、六足、八足、蛇形、水生骨架各有一个行走或前行动作；鸟类和「其他」骨架暂无预设动作。动作必须与骨架类型相符，不相符的组合在提交前就被拒绝；骨架命名不是 Tripo（如 Unity、Unreal Engine）的骨架不能用本服务做动画。",
       "domain": "processing",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -39755,7 +39975,7 @@
             "tripo/processing/rigging-v3"
           ],
           "task_source_binding": "provider",
-          "description": "本人拥有且已成功的原生 Tripo Rig v3.0（v3.0-20260909）双足 Tripo 骨架绑骨任务；不接受 v2.5 绑骨、原始生成模型、其他骨架或上传文件。"
+          "description": "本人拥有且已成功的原生 Tripo Rigging v3.0（v3.0-20260909）绑骨任务，骨架命名须是 Tripo；双足以及四足、六足、八足、蛇形、水生骨架各有对应动作。不接受 v2.5 绑骨、其他骨架命名、原始生成模型或上传文件。"
         },
         {
           "name": "animation_action",
@@ -39768,10 +39988,87 @@
           },
           "options": [
             {
+              "value": "preset:idle",
+              "label": "待机",
+              "group": "双足骨架"
+            },
+            {
               "value": "preset:walk",
-              "label": "行走"
+              "label": "行走",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:run",
+              "label": "奔跑",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:dive",
+              "label": "扑跃",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:climb",
+              "label": "攀爬",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:jump",
+              "label": "跳跃",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:slash",
+              "label": "挥砍",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:shoot",
+              "label": "射击",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:hurt",
+              "label": "受击",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:fall",
+              "label": "跌倒",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:turn",
+              "label": "转身",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:quadruped:walk",
+              "label": "四足行走",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:hexapod:walk",
+              "label": "六足行走",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:octopod:walk",
+              "label": "八足行走",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:serpentine:march",
+              "label": "蛇形前行",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:aquatic:march",
+              "label": "水生前行",
+              "group": "其他生物骨架"
             }
           ],
+          "description": "动作必须与来源骨架的类型相符：双足骨架用双足动作，四足、六足、八足、蛇形、水生骨架用对应的生物动作。",
           "required": true,
           "semantic": "action",
           "wire_name": "animation"
@@ -39846,11 +40143,66 @@
       "provider_options": {
         "endpoint": "animations/retarget",
         "observe_endpoint": "tasks/{task_id}",
-        "source_rig": {
-          "model": "v3.0-20260909",
-          "rig_type": "biped",
-          "spec": "tripo"
-        },
+        "source_rigs": [
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "biped",
+            "spec": "tripo",
+            "animations": [
+              "preset:idle",
+              "preset:walk",
+              "preset:run",
+              "preset:dive",
+              "preset:climb",
+              "preset:jump",
+              "preset:slash",
+              "preset:shoot",
+              "preset:hurt",
+              "preset:fall",
+              "preset:turn"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "quadruped",
+            "spec": "tripo",
+            "animations": [
+              "preset:quadruped:walk"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "hexapod",
+            "spec": "tripo",
+            "animations": [
+              "preset:hexapod:walk"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "octopod",
+            "spec": "tripo",
+            "animations": [
+              "preset:octopod:walk"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "serpentine",
+            "spec": "tripo",
+            "animations": [
+              "preset:serpentine:march"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "aquatic",
+            "spec": "tripo",
+            "animations": [
+              "preset:aquatic:march"
+            ]
+          }
+        ],
         "response_aliases": [
           {
             "key": "model_url",

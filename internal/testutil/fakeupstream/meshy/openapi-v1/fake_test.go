@@ -191,6 +191,47 @@ func TestRiggingOfAnOversizedModelFailsTheTask(t *testing.T) {
 	}
 }
 
+// The rigging request of #277, checked as https://docs.meshy.ai/en/api/rigging-and-animation
+// (read 2026-11-12) documents it. No real request backs these values yet.
+func TestRiggingAcceptsEverySkeletonTemplateAndFingers(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := f.source()
+	for _, template := range []string{"meshyrig", "mixamo", "ue5_mannequin", "max_biped", "unity_humanoid", "maya_human_ik", "blender_rigify_basic_human", "cc5_hd_neutral_base", "daz_genesis9"} {
+		rig := f.create("/rigging", map[string]any{"input_task_id": source, "skeleton_template": template, "include_fingers": true, "height_meters": 1.8})
+		if statuses, _ := f.finish("/rigging", rig, key); statuses[len(statuses)-1] != core.StatusSucceeded {
+			t.Fatalf("%s: flow = %v", template, statuses)
+		}
+	}
+	// include_fingers false may go with a texture image; both options default.
+	f.create("/rigging", map[string]any{"input_task_id": source, "include_fingers": false, "texture_image_url": "https://example.test/skin.png"})
+	f.create("/rigging", map[string]any{"input_task_id": source})
+}
+
+func TestRiggingRefusesWhatTheDocumentationRefuses(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := f.source()
+	for name, body := range map[string]map[string]any{
+		"an unknown template":             {"input_task_id": source, "skeleton_template": "godot_humanoid"},
+		"a template that is not a string": {"input_task_id": source, "skeleton_template": 3},
+		"fingers that are not a boolean":  {"input_task_id": source, "include_fingers": "true"},
+		"fingers with a texture image":    {"input_task_id": source, "include_fingers": true, "texture_image_url": "https://example.test/skin.png"},
+		"a negative height":               {"input_task_id": source, "height_meters": -1},
+		"a height that is not a number":   {"input_task_id": source, "height_meters": "tall"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, response := f.Do("POST", f.v1("/rigging"), key, body)
+			if status != http.StatusBadRequest {
+				t.Fatalf("status %d body %v", status, response)
+			}
+			if _, ok := response["message"].(string); !ok || len(response) != 1 {
+				t.Fatalf("error body must be {message}: %v", response)
+			}
+		})
+	}
+	// Another kind ignores the rigging fields.
+	f.create("/remesh", map[string]any{"input_task_id": source, "skeleton_template": "godot_humanoid"})
+}
+
 // The documented terminal status the samples do not hold: a canceled task
 // stops without artifacts and can be deleted.
 func TestCanceledTaskStopsWithoutArtifacts(t *testing.T) {

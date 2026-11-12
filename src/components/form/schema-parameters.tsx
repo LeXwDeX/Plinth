@@ -2,7 +2,7 @@
 
 import { useId, type ReactNode } from 'react';
 import type { ParamSchema } from '@/lib/providers/types';
-import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterNotices, parameterVisible, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterForcedValue, parameterNotices, parameterVisible, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useProductSchema } from '@/components/product-schema-provider';
@@ -71,6 +71,9 @@ export function SchemaParameters({ parameters, values, onChange, disabled, readO
     const value = values[parameter.name];
     // A locked parameter is not a control: it shows its value (or why it has none) as plain text (#94, #180).
     const locked = disabled || readOnly || parameterDisabled(parameter, values);
+    // A parameter its own condition locks is not submitted: the server applies the Schema's forced value, else the
+    // default. Show that, not a choice made before the condition held (#277: a skeleton naming only a biped can pick).
+    const forced = locked && !disabled && !readOnly ? parameterForcedValue(parameter, values) : { found: false };
     const fieldId = `${id}-${parameter.name}`;
     const validation = parameter.validation;
     const notices = parameterNotices(parameter, values);
@@ -98,7 +101,7 @@ export function SchemaParameters({ parameters, values, onChange, disabled, readO
     const lockedDisplay = !locked ? '' : (readOnly && lockedHint)
       || (parameter.type === 'asset'
         ? assetCount > 0 ? schemaCountMessage(schema, 'ui.studio.params.files_selected', assetCount, { count: assetCount }) : ''
-        : parameterLockedText(parameter, value, separator, { on: schemaText(schema, 'ui.studio.params.on'), off: schemaText(schema, 'ui.studio.params.off') }))
+        : parameterLockedText(parameter, forced.found ? forced.value : value, separator, { on: schemaText(schema, 'ui.studio.params.on'), off: schemaText(schema, 'ui.studio.params.off') }))
       || schemaText(schema, 'ui.studio.params.not_set');
 
     return <Field key={parameter.name} id={fieldId} label={parameter.label} help={help} group={group} required={parameter.required} meta={parameterMeta?.(parameter)} layout={parameter.type === 'boolean' && !choice && !locked ? 'inline' : 'stacked'}>

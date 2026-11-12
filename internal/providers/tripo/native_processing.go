@@ -104,12 +104,16 @@ func nativeProcessingDeclaration(offering generation.Offering) (generation.Param
 	sourceCount := 0
 	names := map[string]bool{}
 	wires := map[string]any{"model": true}
+	// forced_when is applied by the Catalog's normalization before an input reaches
+	// this adapter (a Rig's naming is Tripo whenever the skeleton is not a biped,
+	// #277), so the wire never sees it; omit_when and wire_template change the wire
+	// and stay refused.
 	for _, p := range offering.Parameters {
 		wire := p.WireName
 		if wire == "" {
 			wire = p.Name
 		}
-		if p.Name == "" || p.Name == "model" || names[p.Name] || !setNativeWire(wires, wire, true) || len(p.WireTemplate) > 0 || len(p.OmitWhen) > 0 || len(p.ForcedWhen) > 0 {
+		if p.Name == "" || p.Name == "model" || names[p.Name] || !setNativeWire(wires, wire, true) || len(p.WireTemplate) > 0 || len(p.OmitWhen) > 0 {
 			return source, options, nativeProcessingProtocolError()
 		}
 		names[p.Name] = true
@@ -322,12 +326,28 @@ func nativeProcessingSource(request generation.InputValidationRequest) (generati
 	if !ok || len(request.TaskDependencies) != 1 || len(request.InputAssets) != 0 || source.TaskID != id || source.ProviderID != request.Offering.ProviderID || source.UpstreamJob.ProviderID != source.ProviderID || !uploadedTokenValid(source.UpstreamJob.RemoteID) || !slices.Contains(parameter.TaskOfferings, source.OfferingID) || !slices.Contains(parameter.TaskCapabilities, source.Capability) {
 		return source, nil, options, nativeProcessingSourceMismatch(request.Offering)
 	}
-	if err := verifyNativeSourceRig(request.Offering, options, source); err != nil {
+	if err := verifyNativeSourceRig(request.Offering, options, source, nativeActionValue(request.Offering, body)); err != nil {
 		return source, nil, options, err
 	}
 	body[parameter.WireName] = source.UpstreamJob.RemoteID
 	return source, body, options, nil
 }
+
+// nativeActionValue is the wire value of the Offering's action parameter in a
+// built request body ("" when the Offering declares none or the body holds none).
+func nativeActionValue(offering generation.Offering, body map[string]any) string {
+	action, ok := nativeActionParameter(offering)
+	if !ok {
+		return ""
+	}
+	wire := action.WireName
+	if wire == "" {
+		wire = action.Name
+	}
+	value, _ := body[wire].(string)
+	return value
+}
+
 func (a *Adapter) startNativeProcessing(ctx context.Context, request generation.StartRequest) (generation.Observation, error) {
 	source, body, options, err := nativeProcessingSource(generation.InputValidationRequest{OwnerID: request.OwnerID, Offering: request.Offering, Input: request.Input, InputAssets: request.InputAssets, TaskDependencies: request.TaskDependencies})
 	if err != nil {

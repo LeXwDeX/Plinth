@@ -10,7 +10,7 @@ import { useProcessingPlanResume } from '@/hooks/use-processing-plan-resume';
 import { offeringFixedValues } from '@/lib/agent-offerings';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
-import { faceBudgetDefaults, prerequisiteRefusal, processingPrerequisite, processingSourceLabel, processingSourceSteps, actionParameter, panelFields, sourceRefusals, type ProcessingSourceAsset, type ProcessingSourceTask } from '@/lib/workspace/processing-source';
+import { faceBudgetDefaults, prerequisiteRefusal, processingPrerequisite, processingSourceLabel, processingSourceSteps, actionParameter, actionValue, panelFields, sourceRefusals, type ProcessingSourceAsset, type ProcessingSourceTask } from '@/lib/workspace/processing-source';
 import { partsKeyOf } from '@/lib/workspace/model-parts';
 import { processingUnavailableNotice } from '@/lib/workspace/processing-refusals';
 import { offeringQuoteText } from '@/lib/workspace/processing-cost';
@@ -127,7 +127,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
     const key = formKey(step.capability, step.offering.id);
     const input = { ...offeringFixedValues(step.offering), ...schemaParameterValues(parameters, { ...defaults, ...values[key] }) };
     const action = actionParameter(step.offering);
-    if (action && actions[key]) input[action.name] = Number(actions[key]);
+    if (action && actions[key]) input[action.name] = actionValue(action, actions[key]);
     return [step.capability, input];
   })), [steps, values, actions, budgets]);
   // Required inputs still empty (a reference image, say): confirm stays disabled and the step names them (#321).

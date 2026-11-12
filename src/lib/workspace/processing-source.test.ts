@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfferingWire } from '@/lib/agent-offerings';
-import { actionParameter, chooseProcessingSource, faceBudgetDefaults, chooseProjectedProcessingSource, prerequisiteRefusal, processingPrerequisite, processingSourceSteps, sourceRefusals, inputImageParameter, isActionParameter, isSourceParameter, sourceParameterRole, consentField, panelFields, visibleOfferingFields, type ProcessingSourceTask } from './processing-source';
+import { actionParameter, actionValue, chooseProcessingSource, faceBudgetDefaults, chooseProjectedProcessingSource, prerequisiteRefusal, processingPrerequisite, processingSourceSteps, sourceRefusals, inputImageParameter, isActionParameter, isSourceParameter, sourceParameterRole, consentField, panelFields, visibleOfferingFields, type ProcessingSourceTask } from './processing-source';
 
 const asset = { id: 'asset-a', role: 'model', variant: 'glb', delivery: 'required', ordinal: 0, mediaType: 'model/gltf-binary', size: 100, url: '/assets/a', kind: 'model' as const };
 const task: ProcessingSourceTask = { id: 'task-a', capability: 'text-to-3d', provider_id: 'provider-a', state: 'SUCCEEDED', assets: [asset] };
@@ -53,6 +53,11 @@ describe('chooseProcessingSource', () => {
     expect(actionParameter({ ...wire, parameters: [{ name: 'action_id', label: '动作', type: 'number' }] })?.name).toBe('action_id');
     expect(actionParameter({ ...wire, parameters: [{ name: 'topology', label: '拓扑', type: 'select' }] })).toBeUndefined();
     expect(actionParameter({ ...wire, parameters: [{ name: 'action_id', label: '动作', type: 'number' }, { name: 'move', label: '动作', type: 'number', semantic: 'action' }] })?.name).toBe('move');
+  });
+  it('submits a numeric action as a number and a named preset as the string it is (#277)', () => {
+    expect(actionValue({ type: 'number' }, '14')).toBe(14);
+    expect(actionValue({ type: 'select' }, 'preset:quadruped:walk')).toBe('preset:quadruped:walk');
+    expect(actionValue({ type: 'select' }, 'preset:walk')).toBe('preset:walk');
   });
 });
 

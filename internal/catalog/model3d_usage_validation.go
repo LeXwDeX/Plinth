@@ -26,8 +26,8 @@ var model3dUsageShapes = []string{"text-to-3d", "image-to-3d", "multiview-to-3d"
 func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []CapabilityPresentation) error {
 	usage := schema.Model3DUsage
 	if len(usage.Profiles) == 0 {
-		if strings.TrimSpace(usage.DefaultProfile) != "" || len(usage.Brief.Fields) > 0 || len(usage.BudgetLimits) > 0 ||
-			strings.TrimSpace(usage.PlatformField) != "" {
+		if strings.TrimSpace(usage.DefaultProfile) != "" || len(usage.Brief.Fields) > 0 || len(usage.Brief.ParameterDefaults) > 0 ||
+			len(usage.BudgetLimits) > 0 || strings.TrimSpace(usage.PlatformField) != "" {
 			return fmt.Errorf("model3d_usage.profiles 不能为空")
 		}
 		return validateChoiceKinds(schema)
@@ -100,6 +100,9 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 		return err
 	}
 	if err := validateUsagePlatforms(usage); err != nil {
+		return err
+	}
+	if err := validateBriefParameterDefaultsShape(usage.Brief); err != nil {
 		return err
 	}
 	if err := validateBudgetLimits(usage); err != nil {
@@ -365,6 +368,64 @@ func validateBriefSelectOptions(field ChatProductionBriefField) error {
 	return nil
 }
 
+// validateBriefParameterDefaultsShape checks the parts of
+// brief.parameter_defaults that need no Offering (#277): each entry names a
+// select field of the brief and one of its options, once, and holds at least one
+// Offering with at least one value.
+func validateBriefParameterDefaultsShape(brief ChatProductionBriefSchema) error {
+	declared := make(map[string]ChatProductionBriefField, len(brief.Fields))
+	for _, field := range brief.Fields {
+		declared[field.Name] = field
+	}
+	seen := map[string]bool{}
+	for index, entry := range brief.ParameterDefaults {
+		field, exists := declared[entry.Field]
+		if !exists || field.Type != "select" {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].field %q 不是简报的 select 字段", index, entry.Field)
+		}
+		if _, exists := field.OptionByID(entry.Value); !exists {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].value %q 不是字段 %q 的选项", index, entry.Value, entry.Field)
+		}
+		key := entry.Field + "\x00" + entry.Value
+		if seen[key] {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults 中 %s=%s 重复", entry.Field, entry.Value)
+		}
+		seen[key] = true
+		if len(entry.ParameterOverrides) == 0 {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides 不能为空", index)
+		}
+		for offering, values := range entry.ParameterOverrides {
+			if strings.TrimSpace(offering) == "" || len(values) == 0 {
+				return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides 含空 Offering ID 或空参数表", index)
+			}
+		}
+	}
+	return nil
+}
+
+// validateBriefParameterDefaultsOfferings checks the Offerings and values of
+// brief.parameter_defaults once the Offerings are built (#277). Each value is
+// frozen the way a real submission would freeze it, as a purpose override is.
+func validateBriefParameterDefaultsOfferings(brief ChatProductionBriefSchema, byID generationMap) error {
+	for index, entry := range brief.ParameterDefaults {
+		ids := make([]string, 0, len(entry.ParameterOverrides))
+		for id := range entry.ParameterOverrides {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			offering, exists := byID[schemacontract.OfferingID(id)]
+			if !exists {
+				return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides 的 Offering %q 不存在", index, id)
+			}
+			if err := simulateProfileParameters(offering, entry.ParameterOverrides[id]); err != nil {
+				return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides[%q]: %w", index, id, err)
+			}
+		}
+	}
+	return nil
+}
+
 // validateBriefSelectParameters keeps the brief tool's parameters and the
 // brief's select options one declaration (#286). The Agent writes a select
 // value through update_production_brief, whose parameter enum is the list the
@@ -600,6 +661,9 @@ func declaredToolParameters(schema ChatSchema, name string) (map[string]any, boo
 func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generationMap, viewsArgument string) error {
 	if len(usage.Profiles) == 0 {
 		return nil
+	}
+	if err := validateBriefParameterDefaultsOfferings(usage.Brief, byID); err != nil {
+		return err
 	}
 	if err := validateBudgetLimitParameters(usage, byID); err != nil {
 		return err
@@ -985,6 +1049,35 @@ func simulateProfileParameters(offering schemacontract.Offering, overrides map[s
 			return err
 		}
 		simulated[parameter.Name] = placeholder
+	}
+	// An Offering whose input is "one of these sources" (a counted input rule,
+	// none of the sources required on its own) gets the first one of the rule as
+	// a placeholder, so the missing source does not mask the override check.
+	for _, rule := range offering.InputRules {
+		if len(rule.ForbiddenWhen) > 0 || rule.MaxTotalItems > 0 || rule.Minimum <= 0 {
+			continue
+		}
+		present := 0
+		for _, name := range rule.Parameters {
+			if _, exists := simulated[name]; exists {
+				present++
+			}
+		}
+		for _, name := range rule.Parameters {
+			if present >= rule.Minimum {
+				break
+			}
+			parameter, exists := offeringParameter(offering.Parameters, name)
+			if !exists || parameter.Fixed {
+				continue
+			}
+			placeholder, err := requiredParameterPlaceholder(parameter)
+			if err != nil {
+				return err
+			}
+			simulated[name] = placeholder
+			present++
+		}
 	}
 	if consent := offering.ExtraConsentParameter(); consent != "" {
 		simulated[consent] = json.RawMessage(`true`)

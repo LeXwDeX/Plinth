@@ -3559,6 +3559,11 @@ type ChatModel3DUsageBudget struct {
 // brief is replaced as a whole by the Agent tool and by the session API.
 type ChatProductionBriefSchema struct {
 	Fields []ChatProductionBriefField `json:"fields"`
+	// ParameterDefaults give Offerings parameter values by the option a select
+	// field of the brief holds (#277: the target engine picks the skeleton
+	// naming of a rigging step). They are server-only: the browser reads the
+	// fields, not what an option does.
+	ParameterDefaults []ChatProductionBriefDefault `json:"parameter_defaults,omitempty"`
 	// ContextTemplate adds the brief to the system prompt ({brief}); a session
 	// without a brief adds EmptyText in its place.
 	ContextTemplate string `json:"context_template"`
@@ -3644,6 +3649,20 @@ type ChatProductionBriefField struct {
 type ChatProductionBriefOption struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
+}
+
+// ChatProductionBriefDefault is what one option of a select brief field gives
+// the Offerings (#277): public parameter values a step that did not set them
+// takes while the brief holds that option. Like a purpose's parameter_overrides,
+// every value must be a public Agent parameter and pass the same normalization
+// as a real submission; a value the person or the Agent set for the step itself
+// always wins over it.
+type ChatProductionBriefDefault struct {
+	// Field names a select field of the brief and Value one of its option ids.
+	Field string `json:"field"`
+	Value string `json:"value"`
+	// ParameterOverrides maps an Offering ID to the parameter values.
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides"`
 }
 
 // OptionByID returns the declared option of a select field with that id.

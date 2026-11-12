@@ -76,6 +76,7 @@ type providerOptions struct {
 	ResponseAliases  []generation.ResponseAlias `json:"response_aliases,omitempty"`
 	NativeConversion *nativeConversionOptions   `json:"native_conversion,omitempty"`
 	SourceRig        *nativeSourceRig           `json:"source_rig,omitempty"`
+	SourceRigs       []nativeSourceRigRule      `json:"source_rigs,omitempty"`
 	Transform        []float64                  `json:"transform,omitempty"`
 	// ReferenceWire selects a non-default reference image wire for
 	// image-to-3d; "multiview_inputs" sends view-key `inputs` (multiview_model.go).

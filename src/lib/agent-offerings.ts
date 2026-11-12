@@ -109,7 +109,8 @@ export interface OfferingWire {
   /** 承载"同意额外积分消耗"的布尔参数名；只公开参数名，不公开金额。 */
   extra_credit_consent_parameter?: string;
   parameters: OfferingParameterWire[];
-  input_rules?: Array<{ parameters: string[]; minimum: number; maximum: number }>;
+  /** forbidden_when (#277): the rule is broken when every condition holds; `message` is the Schema's reason. */
+  input_rules?: Array<{ parameters: string[]; minimum: number; maximum: number; forbidden_when?: ParamCondition[]; message?: string }>;
   outputs?: unknown[];
   /** The most triangles this step takes from its source model (#93); the server rechecks it. */
   source_model_limit?: { max_triangles: number; count_basis: string };

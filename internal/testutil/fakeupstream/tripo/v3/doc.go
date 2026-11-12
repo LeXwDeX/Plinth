@@ -41,6 +41,22 @@
 //     X-RateLimit-Remaining and X-RateLimit-Reset; a full concurrency pool
 //     (creation only) is the distinct 429/code 2000 with Retry-After.
 //
+// Rig and retarget requests (#277). The samples hold one request of each (rig_type
+// biped, spec tripo, preset:walk). The fake also checks the values the official
+// pages read on 2026-11-12 list (https://developers.tripo3d.ai/en/docs/animations-rig,
+// .../animations-retarget, .../animations-rig-check) and refuses others with the
+// create envelope of the samples (400/code 1004): model, rig_type (the seven rig
+// check types plus others, which exists only under v3.0), spec (actorcore, unity,
+// unreal and vrm exist only under v3.0; a spec has no effect on a non-biped rig and
+// is not refused), out_format, and animation XOR animations (at most 5). A poll
+// repeats the accepted spec, out_format and rig type (named topology, as captured)
+// and the retarget's presets and switches. A retarget whose preset does not fit the
+// source rig (the 11 v3.0 biped presets need a v3.0 biped rig, a creature preset a
+// rig of its type built with v2.5 or v3.0) ends "failed" with code 1004, the one
+// failure that was captured (a retarget of a v2 rig); that every other mismatch
+// fails the same way is an assumption. None of these values has been requested from
+// the real API: they are constructed, not observed.
+//
 // Balance scenarios. insufficient-balance and key-quota are credit refusals of
 // task creation, so they never apply to POST /files; the files page defines no
 // such refusal for an upload.

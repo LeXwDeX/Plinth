@@ -2,7 +2,9 @@ package meshyopenapiv1
 
 import (
 	"embed"
+	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
@@ -59,7 +61,8 @@ var kinds = []core.Kind{
 	{Path: "/convert", Type: "convert", Need: [][]string{{"input_task_id", "model_url"}, {"target_formats"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
 		Textured: func(map[string]any) bool { return true }},
-	{Path: "/rigging", Type: "rig", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Fidelity: "skeleton", Real: true},
+	{Path: "/rigging", Type: "rig", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Fidelity: "skeleton", Real: true,
+		Validate: riggingRequestError},
 	{Path: "/animations", Type: "animate", Need: [][]string{{"rig_task_id"}, {"action_id", "action_ids", "motion_task_id"}}, Sources: []string{"rig_task_id", "motion_task_id"}, Fidelity: "animation", Real: true},
 	{Path: "/uv-unwrap", Type: "uv-unwrap", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/resize", Type: "resize", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
@@ -67,6 +70,50 @@ var kinds = []core.Kind{
 		Patch: patchPrintAnalyze},
 	{Path: "/print/multi-color", Type: "print-multi-color", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/text-to-motion", Type: "text-to-motion", Need: [][]string{{"prompt"}, {"duration"}}, Fidelity: "animation", Real: true},
+}
+
+// rigSkeletonTemplates are the skeleton_template values of the Rigging page
+// (https://docs.meshy.ai/en/api/rigging-and-animation, read 2026-11-12); meshyrig is
+// the default.
+var rigSkeletonTemplates = []string{
+	"meshyrig", "mixamo", "ue5_mannequin", "max_biped", "unity_humanoid", "maya_human_ik",
+	"blender_rigify_basic_human", "cc5_hd_neutral_base", "daz_genesis9",
+}
+
+// riggingRequestError checks the documented rigging fields (#277). The page
+// read on 2026-11-12 says: height_meters below zero answers 400; skeleton_template
+// takes one of the nine values above and any other answers 400; include_fingers is a
+// boolean, and true together with texture_image_url answers 400. Both options also
+// need a biped rig, which the fake cannot judge (no pose estimation), and the two 422
+// refusals for a model that can only be rigged with the default skeleton or without
+// fingers are not modelled. None of this has been requested from the real API.
+func riggingRequestError(request map[string]any) string {
+	if value, present := request["height_meters"]; present {
+		number, isNumber := value.(json.Number)
+		height, err := number.Float64()
+		if !isNumber || err != nil {
+			return "height_meters must be a number"
+		}
+		if height < 0 {
+			return "height_meters must not be negative"
+		}
+	}
+	if value, present := request["skeleton_template"]; present {
+		template, isString := value.(string)
+		if !isString || !slices.Contains(rigSkeletonTemplates, template) {
+			return "skeleton_template must be one of " + strings.Join(rigSkeletonTemplates, ", ")
+		}
+	}
+	if value, present := request["include_fingers"]; present {
+		fingers, isBool := value.(bool)
+		if !isBool {
+			return "include_fingers must be a boolean"
+		}
+		if texture, _ := request["texture_image_url"].(string); fingers && strings.TrimSpace(texture) != "" {
+			return "include_fingers cannot be combined with texture_image_url"
+		}
+	}
+	return ""
 }
 
 // patchPrintAnalyze adds the keys the sanitizer cannot hold in a committed
@@ -107,7 +154,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		note := ""
 		switch kind.Path {
 		case "/rigging":
-			note = "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs)"
+			note = "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs); the request values skeleton_template (nine templates), include_fingers (not with texture_image_url) and height_meters (not negative) are checked as the page read on 2026-11-12 documents them, which has not been requested from the real API (riggingRequestError)"
 		case "/print/analyze":
 			note = "the report's printability._version key cannot be held by the sample sanitizer; the fake adds it back"
 		case "/image-to-3d", "/multi-image-to-3d", "/retexture":

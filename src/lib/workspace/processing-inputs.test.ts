@@ -32,6 +32,27 @@ describe('inputRuleViolations', () => {
   });
 });
 
+describe('inputRuleViolations: forbidden_when (#277)', () => {
+  const rigging: OfferingWire = {
+    ...retexture, id: 'meshy/processing/rigging', capability: 'rigging',
+    parameters: [
+      { name: 'include_fingers', label: '包含手指骨骼', type: 'boolean' },
+      { name: 'texture_image_url', label: '纹理参考图', type: 'text' },
+    ],
+    input_rules: [{
+      parameters: [], minimum: 0, maximum: 0, message: '带手指骨骼的绑骨不能同时指定纹理参考图。',
+      forbidden_when: [{ parameter: 'include_fingers', operator: 'truthy' }, { parameter: 'texture_image_url', operator: 'present' }],
+    }],
+  };
+  it('flags the step only while every condition holds and names the parameters involved', () => {
+    expect(inputRuleViolations(rigging, { include_fingers: true, texture_image_url: 'https://example.test/skin.png' })).toEqual([['include_fingers', 'texture_image_url']]);
+    expect(inputRuleViolations(rigging, { include_fingers: false, texture_image_url: 'https://example.test/skin.png' })).toEqual([]);
+    expect(inputRuleViolations(rigging, { include_fingers: true })).toEqual([]);
+    expect(inputRuleViolations(rigging, { include_fingers: true, texture_image_url: '' })).toEqual([]);
+    expect(inputRuleViolations(rigging, {})).toEqual([]);
+  });
+});
+
 describe('uploadAssetInputs', () => {
   it('uploads data URIs once and passes platform asset IDs through', async () => {
     const upload = vi.fn(async (_blob: Blob, _name: string) => 'asset-style');

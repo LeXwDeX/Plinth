@@ -23,7 +23,7 @@ func TestTripoRigV3EnabledKeepsAcceptedRigAvailable(t *testing.T) {
 	if !ok {
 		t.Fatal("missing explicit latest Rig candidate")
 	}
-	if !candidate.Enabled || candidate.Capability != schema.Rigging || candidate.Revision != "2026-10-20.1" || candidate.EstimateTotalCredits(json.RawMessage(`{"source_task":"source","output_formats":["FBX"],"authorize_extra_credits":true}`)) != 35 {
+	if !candidate.Enabled || candidate.Capability != schema.Rigging || candidate.Revision != "2026-11-12.277.1" || candidate.EstimateTotalCredits(json.RawMessage(`{"source_task":"source","output_formats":["FBX"],"authorize_extra_credits":true}`)) != 35 {
 		t.Fatalf("Rig v3 availability or quote changed: %+v", candidate)
 	}
 	var wire struct {
@@ -45,10 +45,16 @@ func TestTripoRigV3EnabledKeepsAcceptedRigAvailable(t *testing.T) {
 	if !source.SameProvider || source.TaskSourceKind != schema.TaskSourceUpstreamJob || !slices.Equal(source.TaskOfferings, []schema.OfferingID{"tripo/tripo-v3.1-full/text-to-3d", "tripo/tripo-v3.1-full/image-to-3d"}) {
 		t.Fatalf("latest Rig source widened: %+v", source)
 	}
+	// The output format stays frozen; the skeleton type and naming are the user's
+	// choice since #277 and default to the historical biped / Tripo.
 	for name, value := range map[string]string{"rig_type": "biped", "spec": "tripo", "out_format": "glb"} {
 		p, ok := offeringParameter(candidate.Parameters, name)
-		if !ok || !p.Fixed || p.Presentation == nil || p.Presentation.Surface != "readonly" || string(p.Default) != `"`+value+`"` {
-			t.Fatalf("%s is not frozen to %s: %+v", name, value, p)
+		if !ok || string(p.Default) != `"`+value+`"` {
+			t.Fatalf("%s does not default to %s: %+v", name, value, p)
+		}
+		frozen := name == "out_format"
+		if p.Fixed != frozen || p.Presentation == nil || (p.Presentation.Surface == "readonly") != frozen {
+			t.Fatalf("%s fixed=%v surface=%+v: %+v", name, p.Fixed, p.Presentation, p)
 		}
 	}
 	if len(candidate.Outputs) != 3 || candidate.Outputs[0].Fidelity != "skeleton" || candidate.Outputs[1].Fidelity != "skeleton" || candidate.Outputs[1].DeliveryProfile != "binary-fbx-v1" {

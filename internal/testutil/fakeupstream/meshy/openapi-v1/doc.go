@@ -17,6 +17,14 @@
 //   - ScenarioTaskCanceled ends a task CANCELED (documented status enum).
 //   - X-Fake-Task-Error selects a documented task_error type (invalid_input,
 //     timeout, service_unavailable, server_error).
+//   - The rigging request is checked against the page read on 2026-11-12
+//     (https://docs.meshy.ai/en/api/rigging-and-animation, #277): skeleton_template
+//     is one of the nine documented templates, include_fingers a boolean that
+//     cannot go with texture_image_url, height_meters not negative; a violation
+//     answers 400 {message}. The page also requires a biped rig for the two
+//     options and answers 422 for a model that can only be rigged with the default
+//     skeleton or without fingers; the fake judges no rig type and models neither
+//     422. None of it has been requested from the real API.
 //   - PENDING, CANCELED and non-rigging FAILED poll bodies follow the field
 //     documentation of each task object; texture_urls and PBR maps follow the
 //     request's should_texture/enable_pbr options.

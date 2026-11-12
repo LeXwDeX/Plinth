@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,8 +38,8 @@ func shippedOffering(t *testing.T, id generation.OfferingID) generation.Offering
 	return o
 }
 
-// The expected body is the current Retarget contract qualified on a v3.0 Rig
-// source: walk only, no Retarget model, and no deprecated bake_animation.
+// The expected body is the current Retarget contract on a v3.0 Rig source: a
+// documented preset, no Retarget model, and no deprecated bake_animation.
 func TestRetargetCatalogSendsQualifiedWalkWire(t *testing.T) {
 	r := nativeProcessingFixture(generation.Animation)
 	r.Offering = shippedOffering(t, "tripo/processing/animation")
@@ -60,7 +61,8 @@ func TestRetargetCatalogSendsQualifiedWalkWire(t *testing.T) {
 		t.Fatalf("Retarget create failed: %+v posts=%d err=%v", accepted, posts, err)
 	}
 	for _, forbidden := range []string{
-		`{"source_task":"source","animation_action":"preset:idle","out_format":"glb","export_with_geometry":true,"animate_in_place":false}`,
+		`{"source_task":"source","animation_action":"preset:moonwalk","out_format":"glb","export_with_geometry":true,"animate_in_place":false}`,
+		`{"source_task":"source","animation_action":"preset:biped:walk","out_format":"glb","export_with_geometry":true,"animate_in_place":false}`,
 		`{"source_task":"source","animation_action":"preset:walk","out_format":"glb","bake_animation":true,"export_with_geometry":true,"animate_in_place":false}`,
 	} {
 		if _, _, _, _, err := nativeProcessingInput(r.Offering, json.RawMessage(forbidden)); err == nil {
@@ -126,10 +128,11 @@ func TestRetargetRejectsWrongRigSourceBeforeDispatch(t *testing.T) {
 func rigBindingRequest(t *testing.T, id generation.OfferingID) generation.DependencyBindingRequest {
 	t.Helper()
 	o := shippedOffering(t, id)
-	return generation.DependencyBindingRequest{Offering: o, TaskID: "rig", AttemptID: "rig-attempt", Job: generation.UpstreamJob{ProviderID: "tripo", RemoteID: "rig-native"}, Assets: []generation.Asset{
-		{ID: "glb", TaskID: "rig", AttemptID: "rig-attempt", Role: "model", Variant: "glb", Required: true, Size: 10, SHA256: testAssetSHA},
-		{ID: "fbx", TaskID: "rig", AttemptID: "rig-attempt", Role: "model", Variant: "fbx", Required: true, Size: 10, SHA256: testAssetSHA},
-	}}
+	return generation.DependencyBindingRequest{Offering: o, TaskID: "rig", AttemptID: "rig-attempt", Job: generation.UpstreamJob{ProviderID: "tripo", RemoteID: "rig-native"},
+		Input: json.RawMessage(`{"source_task":"source","rig_type":"biped","spec":"tripo","out_format":"glb"}`), Assets: []generation.Asset{
+			{ID: "glb", TaskID: "rig", AttemptID: "rig-attempt", Role: "model", Variant: "glb", Required: true, Size: 10, SHA256: testAssetSHA},
+			{ID: "fbx", TaskID: "rig", AttemptID: "rig-attempt", Role: "model", Variant: "fbx", Required: true, Size: 10, SHA256: testAssetSHA},
+		}}
 }
 
 func TestNativeRigDependencyBindingProjectsFrozenRigConfiguration(t *testing.T) {
@@ -186,13 +189,20 @@ func TestNativeRigDependencyBindingProjectsFrozenRigConfiguration(t *testing.T) 
 		"bad hash":        func(q *generation.DependencyBindingRequest) { q.Assets[0].SHA256 = "x" },
 		"missing attempt": func(q *generation.DependencyBindingRequest) { q.AttemptID = "" },
 		"other provider":  func(q *generation.DependencyBindingRequest) { q.Job.ProviderID = "meshy" },
-		"unfixed skeleton": func(q *generation.DependencyBindingRequest) {
-			for i := range q.Offering.Parameters {
-				if q.Offering.Parameters[i].Name == "rig_type" {
-					q.Offering.Parameters[i].Fixed = false
-				}
-			}
+		// The skeleton choice is read from the frozen input (#277); an Offering that
+		// leaves it open and an input that holds none or a value it does not declare
+		// bind nothing.
+		"no frozen skeleton choice": func(q *generation.DependencyBindingRequest) { q.Input = nil },
+		"skeleton type not declared": func(q *generation.DependencyBindingRequest) {
+			q.Input = json.RawMessage(`{"source_task":"source","rig_type":"humanoid","spec":"tripo"}`)
 		},
+		"skeleton naming not declared": func(q *generation.DependencyBindingRequest) {
+			q.Input = json.RawMessage(`{"source_task":"source","rig_type":"biped","spec":"godot"}`)
+		},
+		"skeleton naming not a string": func(q *generation.DependencyBindingRequest) {
+			q.Input = json.RawMessage(`{"source_task":"source","rig_type":"biped","spec":3}`)
+		},
+		"input not an object": func(q *generation.DependencyBindingRequest) { q.Input = json.RawMessage(`[]`) },
 		"no model": func(q *generation.DependencyBindingRequest) {
 			var options map[string]json.RawMessage
 			json.Unmarshal(q.Offering.ProviderOptions, &options)
@@ -215,8 +225,44 @@ func TestNativeSourceRigDeclarationIsExclusiveToBoundRetarget(t *testing.T) {
 		"binding without source rig": func(o *generation.Offering) {
 			var options map[string]json.RawMessage
 			json.Unmarshal(o.ProviderOptions, &options)
-			delete(options, "source_rig")
+			delete(options, "source_rigs")
 			o.ProviderOptions, _ = json.Marshal(options)
+		},
+		"both declaration forms": func(o *generation.Offering) {
+			var options map[string]json.RawMessage
+			json.Unmarshal(o.ProviderOptions, &options)
+			options["source_rig"] = json.RawMessage(`{"model":"v3.0-20260909","rig_type":"biped","spec":"tripo"}`)
+			o.ProviderOptions, _ = json.Marshal(options)
+		},
+		"an action that is no option": func(o *generation.Offering) {
+			o.ProviderOptions = json.RawMessage(strings.Replace(string(o.ProviderOptions), `"preset:idle"`, `"preset:moonwalk"`, 1))
+		},
+		"a configuration twice": func(o *generation.Offering) {
+			var options struct {
+				Rules []nativeSourceRigRule `json:"source_rigs"`
+			}
+			json.Unmarshal(o.ProviderOptions, &options)
+			var all map[string]json.RawMessage
+			json.Unmarshal(o.ProviderOptions, &all)
+			all["source_rigs"], _ = json.Marshal(append(options.Rules, options.Rules[0]))
+			o.ProviderOptions, _ = json.Marshal(all)
+		},
+		"a configuration without actions": func(o *generation.Offering) {
+			var options struct {
+				Rules []nativeSourceRigRule `json:"source_rigs"`
+			}
+			json.Unmarshal(o.ProviderOptions, &options)
+			options.Rules[1].Animations = nil
+			var all map[string]json.RawMessage
+			json.Unmarshal(o.ProviderOptions, &all)
+			all["source_rigs"], _ = json.Marshal(options.Rules)
+			o.ProviderOptions, _ = json.Marshal(all)
+		},
+		"an action listed twice": func(o *generation.Offering) {
+			o.ProviderOptions = json.RawMessage(strings.Replace(string(o.ProviderOptions), `"preset:idle"`, `"preset:walk"`, 1))
+		},
+		"no action parameter": func(o *generation.Offering) {
+			o.Parameters = slices.DeleteFunc(slices.Clone(o.Parameters), func(p generation.Parameter) bool { return p.Semantic == generation.SemanticAction })
 		},
 		"source rig without binding": func(o *generation.Offering) { o.Parameters[0].TaskSourceBinding = "" },
 		"retarget model": func(o *generation.Offering) {
