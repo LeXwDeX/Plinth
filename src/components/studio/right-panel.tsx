@@ -280,8 +280,8 @@ function ModelPanel({ object, sessionId }: { object: CurrentObject; sessionId: s
  * The right panel (Schema `canvas.frontend.panel_tabs`), one panel for every kind of thing on the stage.
  * Function settings are available for every stage context, including an empty board. The remaining tabs
  * still describe or arrange the stage object. Its content column has the Schema width; clicking the active
- * tab folds it to the tab rail (remembered by this browser), and choosing any tab opens it again. The tab
- * last chosen is kept for this visit (one for 2D, one for 3D).
+ * tab folds it to the tab rail, and choosing any tab opens it again. Both the fold and the last chosen tab
+ * are kept for this visit only (one tab per family for 2D and 3D), never written to storage.
  */
 export function RightPanel() {
   const sessionId = useChatStore((state) => state.activeSessionId);

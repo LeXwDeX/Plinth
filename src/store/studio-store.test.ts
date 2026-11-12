@@ -55,7 +55,7 @@ describe('chat column width', () => {
   it('ignores a damaged stored value', () => {
     const data = stubStorage();
     data.set(STUDIO_PREFS_KEY, '{"chatWidth":"wide","inspector":"sideways"}');
-    expect(readStudioPrefs()).toEqual({ chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false, panelCollapsed: false });
+    expect(readStudioPrefs()).toEqual({ chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false });
   });
 });
 
@@ -74,10 +74,10 @@ describe('stage rail expansion', () => {
     useStudioStore.getState().setChatWidth(400);
     useStudioStore.getState().setRailExpanded(true);
     expect(useStudioStore.getState().railExpanded).toBe(true);
-    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: true, panelCollapsed: false });
+    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: true });
     expect(readStudioPrefs().railExpanded).toBe(true);
     useStudioStore.getState().setRailExpanded(false);
-    expect(readStudioPrefs()).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: false, panelCollapsed: false });
+    expect(readStudioPrefs()).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: false });
   });
 
   it('keeps the other prefs when only the rail changes, and the rail when only they change', () => {
@@ -85,7 +85,7 @@ describe('stage rail expansion', () => {
     useStudioStore.getState().setChatCollapsed(true);
     useStudioStore.getState().setRailExpanded(true);
     useStudioStore.getState().setChatWidth(480);
-    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 480, chatCollapsed: true, railExpanded: true, panelCollapsed: false });
+    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}')).toEqual({ chatWidth: 480, chatCollapsed: true, railExpanded: true });
   });
 
   it('reads a stored true only, and treats anything else as collapsed', () => {
@@ -121,7 +121,7 @@ describe('right panel tab memory', () => {
   it('is kept for this visit only: nothing about it reaches local storage', () => {
     const data = stubStorage();
     data.set(STUDIO_PREFS_KEY, '{"chatWidth":400,"inspector":"closed","panelTab2d":"history"}');
-    expect(readStudioPrefs()).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: false, panelCollapsed: false });
+    expect(readStudioPrefs()).toEqual({ chatWidth: 400, chatCollapsed: false, railExpanded: false });
     data.clear();
     useStudioStore.getState().setPanelTab('image', 'history');
     useStudioStore.getState().setPanelTab('model', 'parts');
@@ -223,13 +223,13 @@ describe('right panel folding', () => {
     useStudioStore.setState({ chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false, panelCollapsed: false, panelTab2d: null, panelTab3d: null });
   });
 
-  it('starts open and remembers a fold in the studio prefs', () => {
+  it('starts open and keeps a fold for this visit only: nothing about it reaches local storage', () => {
     const data = stubStorage();
-    expect(readStudioPrefs().panelCollapsed).toBe(false);
+    expect(useStudioStore.getState().panelCollapsed).toBe(false);
     useStudioStore.getState().setPanelCollapsed(true);
     expect(useStudioStore.getState().panelCollapsed).toBe(true);
-    expect(JSON.parse(data.get(STUDIO_PREFS_KEY) ?? '{}').panelCollapsed).toBe(true);
-    expect(readStudioPrefs().panelCollapsed).toBe(true);
+    expect(data.get(STUDIO_PREFS_KEY) ?? '').not.toContain('panelCollapsed');
+    expect(readStudioPrefs()).not.toHaveProperty('panelCollapsed');
   });
 
   it('opens again when a tab is chosen or a processing step is shown', () => {
@@ -237,7 +237,6 @@ describe('right panel folding', () => {
     useStudioStore.getState().setPanelCollapsed(true);
     useStudioStore.getState().setPanelTab('image', 'details');
     expect(useStudioStore.getState().panelCollapsed).toBe(false);
-    expect(readStudioPrefs().panelCollapsed).toBe(false);
     useStudioStore.getState().setPanelCollapsed(true);
     useStudioStore.getState().showProcess(null);
     expect(useStudioStore.getState().panelCollapsed).toBe(false);

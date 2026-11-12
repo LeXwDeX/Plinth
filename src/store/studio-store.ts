@@ -53,8 +53,6 @@ interface StudioPrefs {
   chatCollapsed: boolean;
   /** The stage's left rail (2D tools, 3D views) shows names beside the icons; one setting for both. Collapsed by default. */
   railExpanded: boolean;
-  /** The right panel shows only its tab rail (the content column is folded away). Open by default. */
-  panelCollapsed: boolean;
 }
 
 export const STUDIO_PREFS_KEY = 'art-ai-studio-prefs';
@@ -65,7 +63,7 @@ export function clampChatWidth(width: number): number {
 }
 
 export function readStudioPrefs(): StudioPrefs {
-  const fallback: StudioPrefs = { chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false, panelCollapsed: false };
+  const fallback: StudioPrefs = { chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false };
   try {
     if (typeof localStorage === 'undefined') return fallback;
     const raw = localStorage.getItem(STUDIO_PREFS_KEY);
@@ -77,7 +75,6 @@ export function readStudioPrefs(): StudioPrefs {
       chatWidth: typeof value.chatWidth === 'number' ? clampChatWidth(value.chatWidth) : fallback.chatWidth,
       chatCollapsed: value.chatCollapsed === true,
       railExpanded: value.railExpanded === true,
-      panelCollapsed: value.panelCollapsed === true,
     };
   } catch {
     return fallback;
@@ -155,9 +152,11 @@ interface StudioState extends StudioPrefs {
   setChatCollapsed: (collapsed: boolean) => void;
   /** Expands or collapses the stage's left rail (2D tools and 3D views share it); remembered by this browser. */
   setRailExpanded: (expanded: boolean) => void;
+  /** The right panel shows only its tab rail (the content column is folded away). Open by default; kept for this visit only, never written to storage. */
+  panelCollapsed: boolean;
   /** Chooses a right-panel tab for a kind of object; 2D kinds and 3D each keep their own choice. Opens a folded panel. */
   setPanelTab: (kind: PanelKind, tab: PanelTabId) => void;
-  /** Folds the right panel to its tab rail or opens it again; remembered by this browser. */
+  /** Folds the right panel to its tab rail or opens it again; kept for this visit only, never written to storage. */
   setPanelCollapsed: (collapsed: boolean) => void;
   setTaskDrawerOpen: (open: boolean) => void;
   setAllOutputsOpen: (open: boolean) => void;
@@ -203,11 +202,12 @@ interface StudioState extends StudioPrefs {
 
 export const useStudioStore = create<StudioState>()((set, get) => {
   const persist = (patch: Partial<StudioPrefs>) => {
-    const { chatWidth, chatCollapsed, railExpanded, panelCollapsed } = get();
-    writeStudioPrefs({ chatWidth, chatCollapsed, railExpanded, panelCollapsed, ...patch });
+    const { chatWidth, chatCollapsed, railExpanded } = get();
+    writeStudioPrefs({ chatWidth, chatCollapsed, railExpanded, ...patch });
   };
   return {
     ...readStudioPrefs(),
+    panelCollapsed: false,
     panelTab2d: null,
     panelTab3d: null,
     styleLockRequest: null,
@@ -249,12 +249,8 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     },
     setPanelTab: (kind, tab) => {
       set(panelFamilyOf(kind) === '3d' ? { panelTab3d: tab, panelCollapsed: false } : { panelTab2d: tab, panelCollapsed: false });
-      persist({ panelCollapsed: false });
     },
-    setPanelCollapsed: (panelCollapsed) => {
-      set({ panelCollapsed });
-      persist({ panelCollapsed });
-    },
+    setPanelCollapsed: (panelCollapsed) => set({ panelCollapsed }),
     requestStyleLock: () => set((state) => ({ styleLockRequest: { seq: (state.styleLockRequest?.seq ?? 0) + 1 }, styleLockOpen: true })),
     consumeStyleLockRequest: (seq) => set((state) => (state.styleLockRequest?.seq === seq ? { styleLockRequest: null } : {})),
     setStyleLockOpen: (styleLockOpen) => set({ styleLockOpen }),
@@ -282,10 +278,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     setSelectedPart: (selectedPart) => set({ selectedPart }),
     requestPartExport: (key, id) => set((state) => ({ partExportRequest: { key, id, seq: (state.partExportRequest?.seq ?? 0) + 1 } })),
     clearPartExportRequest: () => set({ partExportRequest: null }),
-    showProcess: (capability) => {
-      set({ panelTab3d: 'process', processPreset: capability, panelCollapsed: false });
-      persist({ panelCollapsed: false });
-    },
+    showProcess: (capability) => set({ panelTab3d: 'process', processPreset: capability, panelCollapsed: false }),
     clearProcessPreset: () => set({ processPreset: null }),
     requestImageCommand: (kind) => set((state) => ({ imageCommand: { kind, seq: (state.imageCommand?.seq ?? 0) + 1 } })),
     clearImageCommand: () => set({ imageCommand: null }),
