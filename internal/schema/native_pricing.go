@@ -46,7 +46,23 @@ type NativePriceSelection struct {
 	Amount    string `json:"amount"`
 	Parameter string `json:"parameter"`
 	MaxItems  int    `json:"max_items"`
+	// Upgrade raises the amount of every chosen item while any of its conditions
+	// holds (#278: a Tripo conversion becomes an advanced one as soon as one export
+	// option is off its upstream default, and then every chosen conversion carries
+	// it). A component cannot express this: its amount does not grow with the
+	// number of chosen items.
+	Upgrade *NativePriceUpgrade `json:"upgrade,omitempty"`
 }
+
+// NativePriceUpgrade is the per-item amount of a selection while at least one of
+// WhenAny holds. Amount must exceed the selection's own amount.
+type NativePriceUpgrade struct {
+	Amount  string               `json:"amount"`
+	WhenAny []ParameterCondition `json:"when_any"`
+}
+
+const maxNativeUpgradeConditions = 4
+
 type NativeCharge struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
@@ -172,6 +188,20 @@ func (p NativePricing) Validate() error {
 		if e != nil || n <= 0 || n > maxNativeJobAmount/int64(s.MaxItems) {
 			return errors.New("invalid native selection unit amount")
 		}
+		// The bound has to cover the dearest per-item amount the selection can reach.
+		if u := s.Upgrade; u != nil {
+			upgraded, e := ParseNativeAmount(u.Amount)
+			if e != nil || upgraded <= n || upgraded > maxNativeJobAmount/int64(s.MaxItems) ||
+				len(u.WhenAny) == 0 || len(u.WhenAny) > maxNativeUpgradeConditions {
+				return errors.New("invalid native selection upgrade")
+			}
+			for _, condition := range u.WhenAny {
+				if condition.Parameter == "" || !validNativeOperator(condition.Operator) {
+					return errors.New("invalid native selection upgrade condition")
+				}
+			}
+			n = upgraded
+		}
 		maximum, e = AddNativeAmounts(maximum, n*int64(s.MaxItems))
 		if e != nil || maximum > maxNativeJobAmount {
 			return errors.New("native job price exceeds bound")
@@ -237,6 +267,21 @@ func (o Offering) EvaluateNativeQuote(input json.RawMessage) (*NativeQuote, erro
 		}
 		if count > 0 {
 			per, _ := ParseNativeAmount(p.Selection.Amount)
+			if u := p.Selection.Upgrade; u != nil {
+				// Like a component condition, an upgrade condition on an input that is
+				// not there never silently prices the plain amount.
+				for _, condition := range u.WhenAny {
+					if _, exists := values[condition.Parameter]; !exists {
+						return nil, fmt.Errorf("native price input %q unavailable", condition.Parameter)
+					}
+				}
+				for _, condition := range u.WhenAny {
+					if ConditionMatches(condition, values) {
+						per, _ = ParseNativeAmount(u.Amount)
+						break
+					}
+				}
+			}
 			amount := per * int64(count)
 			extra, err = AddNativeAmounts(extra, amount)
 			if err != nil {
@@ -456,6 +501,12 @@ func (o Offering) UpperNativeQuote() (*NativeQuote, error) {
 	o.NativePricing = &p
 	values := map[string]any{}
 	if p.Selection != nil {
+		// The upper bound prices every chosen item at its dearest amount.
+		if p.Selection.Upgrade != nil {
+			selection := *p.Selection
+			selection.Amount, selection.Upgrade = selection.Upgrade.Amount, nil
+			p.Selection = &selection // o.NativePricing already points at p
+		}
 		items := make([]any, 0, p.Selection.MaxItems)
 		for _, parameter := range o.Parameters {
 			if parameter.Name == p.Selection.Parameter {

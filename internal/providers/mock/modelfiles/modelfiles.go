@@ -407,6 +407,14 @@ func fbxFloats(values []float32) []byte {
 	return fbxArray('f', len(values), raw)
 }
 
+// fbxRaw writes a raw binary property ('R'), the type FBX exporters use for an
+// embedded image.
+func fbxRaw(data []byte) []byte {
+	out := []byte{'R'}
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(data)))
+	return append(out, data...)
+}
+
 func fbxInt64s(values []int64) []byte {
 	raw := make([]byte, 8*len(values))
 	for i, v := range values {
@@ -464,6 +472,24 @@ func writeFBXNode(body *bytes.Buffer, node fbxNode) {
 // 文件。fidelity 为 skeleton/animation 时与 GLB 相同地加入单骨骼蒙皮与两帧
 // 动画（见 addFBXFidelity），绑骨与动画产物才能通过声明的结构检查（#265）。
 func BuildFBX(mesh Mesh, label string, fidelity ...string) []byte {
+	return buildFBX(mesh, label, nil, fidelity...)
+}
+
+// BuildTexturedFBX writes BuildFBX's static model with one image embedded the
+// way FBX exporters embed textures: a Video object whose Content property holds
+// the image bytes and whose RelativeFilename names the file. The test upstream
+// uses it to deliver a conversion whose texture format is the one requested, so
+// the format can be read back from the delivered bytes.
+func BuildTexturedFBX(mesh Mesh, label, filename string, image []byte) []byte {
+	return buildFBX(mesh, label, &fbxEmbeddedImage{filename: filename, data: image})
+}
+
+type fbxEmbeddedImage struct {
+	filename string
+	data     []byte
+}
+
+func buildFBX(mesh Mesh, label string, image *fbxEmbeddedImage, fidelity ...string) []byte {
 	vertices := make([]float64, len(mesh.Position))
 	for i, v := range mesh.Position {
 		vertices[i] = float64(v)
@@ -486,6 +512,22 @@ func BuildFBX(mesh Mesh, label string, fidelity ...string) []byte {
 	}
 	if len(fidelity) > 0 {
 		nodes = addFBXFidelity(nodes, mesh.VertexCount(), fidelity[0])
+	}
+	if image != nil {
+		for i := range nodes {
+			if nodes[i].name != "Objects" {
+				continue
+			}
+			nodes[i].children = append(nodes[i].children, fbxNode{
+				name:       "Video",
+				properties: [][]byte{fbxInt64(5000), fbxString("Texture\x00\x01Video"), fbxString("Clip")},
+				children: []fbxNode{
+					{name: "Type", properties: [][]byte{fbxString("Clip")}},
+					{name: "RelativeFilename", properties: [][]byte{fbxString(image.filename)}},
+					{name: "Content", properties: [][]byte{fbxRaw(image.data)}},
+				},
+			})
+		}
 	}
 	var body bytes.Buffer
 	body.WriteString("Kaydara FBX Binary  \x00\x1a\x00")

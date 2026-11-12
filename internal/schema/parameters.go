@@ -202,6 +202,12 @@ type Parameter struct {
 	// route instead and the kernel refuses the dependency before dispatch.
 	// 0 declares no limit. Only valid on a type "task" upstream_job parameter.
 	UpstreamJobMaxAgeSeconds int64 `json:"upstream_job_max_age_seconds,omitempty"`
+	// RequiredItems lists options every valid selection of a string-array
+	// parameter holds, so a smaller choice than the full set stays legal without
+	// dropping what the platform itself needs (Tripo's GLTF conversion delivers
+	// the self-contained GLB of the model role). A selection without one is
+	// refused where the input is normalized, before anything is quoted or paid.
+	RequiredItems []string `json:"required_items,omitempty"`
 }
 
 type ParameterOption struct {

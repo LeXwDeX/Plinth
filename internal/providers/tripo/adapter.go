@@ -217,6 +217,11 @@ func (a *Adapter) Start(
 			"Tripo Offering 缺少 model 或 endpoint",
 		)
 	}
+	// The export options are checked now, before the paid generation: a
+	// declaration that cannot be written would only fail after the model exists.
+	if _, err := generationConversion(request.Offering, options); err != nil {
+		return generation.Observation{}, err
+	}
 	multiviewWire := request.Offering.Capability == generation.ImageTo3D &&
 		options.ReferenceWire == referenceWireMultiviewInputs
 	var views []string
@@ -246,6 +251,11 @@ func (a *Adapter) Start(
 		// Format selection and consent are private platform decisions. Their
 		// authorized conversion jobs run only after the base model succeeds.
 		if name == request.Offering.PriceSelectionParameter() {
+			continue
+		}
+		// Export options (texture size, pivot, FBX preset) belong to the
+		// conversion jobs, not to the generation request.
+		if conversionBoundParameter(options, name) {
 			continue
 		}
 		body[name] = value

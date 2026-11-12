@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-10.246-self-check.1",
+    "revision": "2026-11-12.278-delivery-by-purpose.1",
     "terminology": {
       "user_facing": [
         {
@@ -9616,7 +9616,11 @@
                 "face_limit": 10000,
                 "quad": true,
                 "smart_low_poly": true,
-                "texture_quality": "standard"
+                "texture_quality": "standard",
+                "output_formats": ["GLTF", "FBX"],
+                "export_texture_format": "PNG",
+                "export_texture_size": "2k",
+                "export_pivot_bottom_center": true
               },
               "meshy/meshy-t2.5/text-to-3d": {
                 "target_polycount": 20000,
@@ -9641,7 +9645,7 @@
                 "quad_normal": true
               }
             },
-            "reason": "角色要做表情和关节变形，需要四边面布线：优先使用支持四边面输出的模型并默认开启四边面。文生、图生先用 Tripo P2；Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后。四边面的真实拓扑质量尚未用真实上游样本核对。",
+            "reason": "角色要做表情和关节变形，需要四边面布线：优先使用支持四边面输出的模型并默认开启四边面。文生、图生先用 Tripo P2；Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后。四边面的真实拓扑质量尚未用真实上游样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
             "platforms": [
               {
                 "ids": ["mobile", "web", "xr"],
@@ -9731,7 +9735,11 @@
               "tripo/tripo-v3.1-multiview/image-to-3d": {
                 "face_limit": 20000,
                 "smart_low_poly": true,
-                "texture_quality": "standard"
+                "texture_quality": "standard",
+                "output_formats": ["GLTF", "FBX"],
+                "export_texture_format": "PNG",
+                "export_texture_size": "2k",
+                "export_pivot_bottom_center": true
               },
               "meshy/meshy-t2.5/text-to-3d": {
                 "target_polycount": 8000
@@ -9752,7 +9760,7 @@
                 "quad_normal": true
               }
             },
-            "reason": "道具与场景件不需要变形，目录里的 Offering 自述把 Meshy T2.5 与 Tripo P2 都写成适合游戏与实时资产的低模、干净拓扑，没有可依据的质量差异；质量相同时才按成本排先后，所以报价较低的 T2.5 在前、P2 在后；Rodin Gen-2.5 可出四边面并烘焙法线贴图（2K 贴图），排第三。面数预算更低，P2 不设面数覆盖，按其自适应低模。两者的真实输出质量尚未用真实上游样本核对。",
+            "reason": "道具与场景件不需要变形，目录里的 Offering 自述把 Meshy T2.5 与 Tripo P2 都写成适合游戏与实时资产的低模、干净拓扑，没有可依据的质量差异；质量相同时才按成本排先后，所以报价较低的 T2.5 在前、P2 在后；Rodin Gen-2.5 可出四边面并烘焙法线贴图（2K 贴图），排第三。面数预算更低，P2 不设面数覆盖，按其自适应低模。两者的真实输出质量尚未用真实上游样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
             "platforms": [
               {
                 "ids": ["mobile", "web", "xr"],
@@ -9865,11 +9873,17 @@
             },
             "overrides_not_needed": [
               "meshy/meshy-7.1/text-to-3d",
-              "tripo/tripo-v3.1-full/text-to-3d",
-              "meshy/meshy-7.1/image-to-3d",
-              "tripo/tripo-v3.1-full/image-to-3d"
+              "meshy/meshy-7.1/image-to-3d"
             ],
-            "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。",
+            "parameter_overrides": {
+              "tripo/tripo-v3.1-full/text-to-3d": {
+                "output_formats": ["GLTF", "STL", "3MF"]
+              },
+              "tripo/tripo-v3.1-full/image-to-3d": {
+                "output_formats": ["GLTF", "STL", "3MF"]
+              }
+            },
+            "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。Tripo 只导出 GLB、STL 与 3MF 三种格式，其余格式打印用不到，转换保持基础价。",
             "pipeline": [
               {
                 "capability": "analyze-printability"
@@ -19185,16 +19199,16 @@
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
             "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
             "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
-            "chat.model3d_usage.profiles[id=game_character].reason": "A character has to deform for expressions and joints, which needs quad topology: models that can output quads come first, and quads are turned on by default. For text and single-image input Tripo P2 comes first; Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality. The real topology quality of the quads has not been checked against real upstream samples.",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character has to deform for expressions and joints, which needs quad topology: models that can output quads come first, and quads are turned on by default. For text and single-image input Tripo P2 comes first; Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality. The real topology quality of the quads has not been checked against real upstream samples. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
             "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
             "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
-            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces do not deform. The catalog's own notes describe both Meshy T2.5 and Tripo P2 as low-poly, clean-topology models for games and real-time assets, so there is no documented quality difference to rank by; cost only orders models of equal quality, so the lower-quoted T2.5 comes first and P2 follows; Rodin Gen-2.5 comes third for quad faces with a baked normal map and 2K textures. The triangle budget is lower; P2 sets no face limit so it can choose its own adaptive low-poly count. The real output quality of both has not been checked against real upstream samples.",
+            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces do not deform. The catalog's own notes describe both Meshy T2.5 and Tripo P2 as low-poly, clean-topology models for games and real-time assets, so there is no documented quality difference to rank by; cost only orders models of equal quality, so the lower-quoted T2.5 comes first and P2 follows; Rodin Gen-2.5 comes third for quad faces with a baked normal map and 2K textures. The triangle budget is lower; P2 sets no face limit so it can choose its own adaptive low-poly count. The real output quality of both has not been checked against real upstream samples. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
             "chat.model3d_usage.profiles[id=web_ar].label": "Web / AR display",
             "chat.model3d_usage.profiles[id=web_ar].description": "A model shown live on the web or in AR; the triangle count is controlled and UVs are kept.",
             "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; Meshy 7.1's low triangle count and 2K textures come first, with P2 as an alternative.",
             "chat.model3d_usage.profiles[id=print].label": "3D printing",
             "chat.model3d_usage.profiles[id=print].description": "A solid model for 3D printing; full detail is kept and a watertight mesh is required so it can be sliced.",
-            "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1.",
+            "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1. Tripo exports only GLB, STL and 3MF; printing has no use for the other formats, and the conversions stay at the basic price.",
             "chat.model3d_usage.brief.fields[name=purpose].label": "Purpose",
             "chat.model3d_usage.brief.fields[name=image_use].label": "2D purpose",
             "chat.model3d_usage.brief.fields[name=image_transparent].label": "Transparent background",
@@ -20209,7 +20223,25 @@
             "只重建网格几何（拓扑类型和目标面数），请按不保留贴图规划：上传或其他服务生成的模型重拓扑后实测是白模，Meshy 自己生成的模型也不保证贴图完好。重拓扑没有保持尺寸的选项，结果尺寸可能与源模型不同。需要贴图时，能用就先选带烘焙的减面；已重拓扑的模型要贴图就接换贴图，要原尺寸就接精确尺寸并按源模型高度设置。": "Rebuilds the mesh geometry only (topology type and target face count); plan for lost textures: uploaded models and models from other services came back untextured (white) after remesh in testing, and textures on Meshy's own models are not guaranteed either. Remesh has no option to keep the size, so the result may differ in size from the source. When textures matter, prefer a decimation that bakes textures when one is available; to texture a remeshed model, follow with retexture, and to restore its size, follow with exact resize set to the source model's height.",
             "带烘焙的减面：固定把源模型的贴图烘焙到减面后的三角面模型上并同步展开 UV，用于把高细节模型降到用途面数预算内且保留贴图。来源只能是本人已成功的 Tripo H3 v3.1 文生或单图生 3D 模型，不接多视图结果、上传文件或其他服务的模型。": "Decimation with baking: always bakes the source model's textures onto the decimated triangle model and unwraps its UVs, to bring a high-detail model within the purpose's face budget while keeping its textures. The source must be your own successful Tripo H3 v3.1 text-to-3D or single-image-to-3D model; multiview results, uploaded files and models from other services are not accepted.",
             "本服务固定请求并保存全部六种官方格式，其中 3MF 必须显式请求。": "This service always requests and saves all six official formats; 3MF must be requested explicitly.",
-            "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。": "This service requests all six verified conversion formats; each costs an extra 5 credits and is authorized by the session approval policy for this frozen input.",
+            "导出贴图尺寸": "Export texture size",
+            "2K（2048 像素）": "2K (2048 pixels)",
+            "4K（4096 像素）": "4K (4096 pixels)",
+            "8K（8192 像素）": "8K (8192 pixels)",
+            "导出原点移到底部中心": "Move the export origin to the bottom center",
+            "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。": "The default keeps the upstream origin; when the model should stand on its feet in an engine, the purpose or the Agent turns it on with a stated reason.",
+            "FBX 导出预设": "FBX export preset",
+            "烘焙缩放": "Bake scale",
+            "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。": "The default follows the upstream default preset; when the target software clearly needs another preset, the Agent adjusts it with a stated reason.",
+            "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。": "The verified conversion formats to request; six by default. Each conversion costs an extra 5 credits; when the texture format is not JPEG, the texture size is not 4K, or the origin is moved to the bottom center, the conversions are advanced ones and cost 10 credits each. Authorized by the session approval policy for this frozen input. The GLTF conversion delivers the self-contained GLB main model and must be selected; the other formats are chosen by purpose, and every selected format is a required deliverable.",
+            "导出贴图格式": "Export texture format",
+            "JPEG（有损，上游默认）": "JPEG (lossy, the upstream default)",
+            "PNG（无损）": "PNG (lossless)",
+            "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。": "The texture format the format conversions export. JPEG is small but lossy and is the upstream default, which keeps the conversion at the basic price; PNG is lossless, so normal maps show no compression blocks, but the conversion is priced as an advanced one.",
+            "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs lossless textures (a game, for example) chooses PNG in its own declaration, and the Agent may also choose it with a stated reason.",
+            "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。": "Side length of the diffuse texture the format conversions export. The default is 4K, the upstream default, which keeps the conversion at the basic price; any other value makes it an advanced conversion. The highest generated texture tier is advertised as 8K (native and exported textures measured 4096 on 2026-10-19); choose 8K to stay at or above it.",
+            "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs smaller or larger textures says so in its own declaration, and the Agent may also adjust it to another legal value with a stated reason.",
+            "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。": "Moves the model origin to the bottom center during format conversion (off by default upstream; turning it on makes the conversion an advanced one). Game and real-time purposes turn it on so the model is easy to place and scale in an engine; display purposes keep the upstream default.",
+            "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。": "The export preset of FBX conversions (the upstream default is Blender; another preset does not change the price). The official page only says that Bake scale bakes the scale transform into the geometry; the differences between the other presets are not stated, and which preset suits which engine is not verified, so the default is used until a target-engine field exists. Used for FBX conversions only.",
             "本服务请求并保存全部六种官方格式。": "This service requests and saves all six official formats.",
             "本入口支持至少 0.001 米（1 毫米），这是本入口的有界范围，不是上游公布的尺寸下限。": "This entry point supports a minimum of 0.001 m (1 mm). This is the entry point's own bound, not a minimum size published by the upstream.",
             "平台处理": "Platform processing",
@@ -26713,7 +26745,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/text-to-3d",
-      "revision": "2026-11-06.139.1",
+      "revision": "2026-11-12.278.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -27156,7 +27188,7 @@
               "label": "3MF"
             }
           ],
-          "description": "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。",
+          "description": "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。",
           "presentation": {
             "surface": "readonly",
             "control": "multi-select"
@@ -27170,9 +27202,111 @@
             "3MF"
           ],
           "required": true,
-          "min_items": 6,
+          "min_items": 1,
+          "required_items": [
+            "GLTF"
+          ],
           "adjustment_policy": "advised",
           "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "export_texture_format",
+          "label": "导出贴图格式",
+          "type": "select",
+          "default": "JPEG",
+          "options": [
+            {
+              "value": "JPEG",
+              "label": "JPEG（有损，上游默认）"
+            },
+            {
+              "value": "PNG",
+              "label": "PNG（无损）"
+            }
+          ],
+          "description": "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。"
+        },
+        {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "default": "4k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。"
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": false,
+          "description": "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。"
+        },
+        {
+          "name": "export_fbx_preset",
+          "label": "FBX 导出预设",
+          "type": "select",
+          "default": "blender",
+          "options": [
+            {
+              "value": "blender",
+              "label": "Blender"
+            },
+            {
+              "value": "3dsmax",
+              "label": "3ds Max"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "bake_scale",
+              "label": "烘焙缩放"
+            }
+          ],
+          "description": "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。"
         },
         {
           "name": "authorize_extra_credits",
@@ -27209,6 +27343,11 @@
           "variant": "converted.usdz",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "USDZ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -27216,6 +27355,11 @@
           "variant": "converted.fbx",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "FBX"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -27223,6 +27367,11 @@
           "variant": "converted.obj",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "OBJ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -27230,6 +27379,11 @@
           "variant": "converted.stl",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "STL"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -27237,6 +27391,11 @@
           "variant": "converted.3mf",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "3MF"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -27336,10 +27495,29 @@
           "label": "附加导出格式转换",
           "amount": "5",
           "parameter": "output_formats",
-          "max_items": 6
+          "max_items": 6,
+          "upgrade": {
+            "amount": "10",
+            "when_any": [
+              {
+                "parameter": "export_texture_format",
+                "operator": "not-equals",
+                "value": "JPEG"
+              },
+              {
+                "parameter": "export_texture_size",
+                "operator": "not-equals",
+                "value": "4k"
+              },
+              {
+                "parameter": "export_pivot_bottom_center",
+                "operator": "truthy"
+              }
+            ]
+          }
         },
         "consent_parameter": "authorize_extra_credits",
-        "max_authorized_extra_amount": "125"
+        "max_authorized_extra_amount": "155"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -27350,6 +27528,33 @@
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "native_conversion": {
+          "bindings": [
+            {
+              "parameter": "export_texture_format",
+              "wire": "texture_format",
+              "upstream_default": "JPEG"
+            },
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size",
+              "upstream_default": 4096
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "upstream_default": false
+            },
+            {
+              "parameter": "export_fbx_preset",
+              "wire": "fbx_preset",
+              "formats": [
+                "FBX"
+              ],
+              "upstream_default": "blender"
+            }
+          ]
+        },
         "response_aliases": [
           {
             "key": "model_url",
@@ -28069,7 +28274,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/image-to-3d",
-      "revision": "2026-11-06.139.1",
+      "revision": "2026-11-12.278.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -28588,7 +28793,7 @@
               "label": "3MF"
             }
           ],
-          "description": "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。",
+          "description": "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。",
           "presentation": {
             "surface": "readonly",
             "control": "multi-select"
@@ -28602,9 +28807,111 @@
             "3MF"
           ],
           "required": true,
-          "min_items": 6,
+          "min_items": 1,
+          "required_items": [
+            "GLTF"
+          ],
           "adjustment_policy": "advised",
           "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "export_texture_format",
+          "label": "导出贴图格式",
+          "type": "select",
+          "default": "JPEG",
+          "options": [
+            {
+              "value": "JPEG",
+              "label": "JPEG（有损，上游默认）"
+            },
+            {
+              "value": "PNG",
+              "label": "PNG（无损）"
+            }
+          ],
+          "description": "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。"
+        },
+        {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "default": "4k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。"
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": false,
+          "description": "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。"
+        },
+        {
+          "name": "export_fbx_preset",
+          "label": "FBX 导出预设",
+          "type": "select",
+          "default": "blender",
+          "options": [
+            {
+              "value": "blender",
+              "label": "Blender"
+            },
+            {
+              "value": "3dsmax",
+              "label": "3ds Max"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "bake_scale",
+              "label": "烘焙缩放"
+            }
+          ],
+          "description": "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。"
         },
         {
           "name": "authorize_extra_credits",
@@ -28641,6 +28948,11 @@
           "variant": "converted.usdz",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "USDZ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28648,6 +28960,11 @@
           "variant": "converted.fbx",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "FBX"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28655,6 +28972,11 @@
           "variant": "converted.obj",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "OBJ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28662,6 +28984,11 @@
           "variant": "converted.stl",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "STL"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28669,6 +28996,11 @@
           "variant": "converted.3mf",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "3MF"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28768,10 +29100,29 @@
           "label": "附加导出格式转换",
           "amount": "5",
           "parameter": "output_formats",
-          "max_items": 6
+          "max_items": 6,
+          "upgrade": {
+            "amount": "10",
+            "when_any": [
+              {
+                "parameter": "export_texture_format",
+                "operator": "not-equals",
+                "value": "JPEG"
+              },
+              {
+                "parameter": "export_texture_size",
+                "operator": "not-equals",
+                "value": "4k"
+              },
+              {
+                "parameter": "export_pivot_bottom_center",
+                "operator": "truthy"
+              }
+            ]
+          }
         },
         "consent_parameter": "authorize_extra_credits",
-        "max_authorized_extra_amount": "125"
+        "max_authorized_extra_amount": "155"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -28782,6 +29133,33 @@
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "native_conversion": {
+          "bindings": [
+            {
+              "parameter": "export_texture_format",
+              "wire": "texture_format",
+              "upstream_default": "JPEG"
+            },
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size",
+              "upstream_default": 4096
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "upstream_default": false
+            },
+            {
+              "parameter": "export_fbx_preset",
+              "wire": "fbx_preset",
+              "formats": [
+                "FBX"
+              ],
+              "upstream_default": "blender"
+            }
+          ]
+        },
         "upload_endpoint": "files",
         "response_aliases": [
           {
@@ -28840,7 +29218,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-multiview/image-to-3d",
-      "revision": "2026-11-06.139.1",
+      "revision": "2026-11-12.278.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -29363,7 +29741,7 @@
               "label": "3MF"
             }
           ],
-          "description": "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。",
+          "description": "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。",
           "presentation": {
             "surface": "readonly",
             "control": "multi-select"
@@ -29377,9 +29755,111 @@
             "3MF"
           ],
           "required": true,
-          "min_items": 6,
+          "min_items": 1,
+          "required_items": [
+            "GLTF"
+          ],
           "adjustment_policy": "advised",
           "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "export_texture_format",
+          "label": "导出贴图格式",
+          "type": "select",
+          "default": "JPEG",
+          "options": [
+            {
+              "value": "JPEG",
+              "label": "JPEG（有损，上游默认）"
+            },
+            {
+              "value": "PNG",
+              "label": "PNG（无损）"
+            }
+          ],
+          "description": "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。"
+        },
+        {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "default": "4k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。"
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": false,
+          "description": "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。"
+        },
+        {
+          "name": "export_fbx_preset",
+          "label": "FBX 导出预设",
+          "type": "select",
+          "default": "blender",
+          "options": [
+            {
+              "value": "blender",
+              "label": "Blender"
+            },
+            {
+              "value": "3dsmax",
+              "label": "3ds Max"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "bake_scale",
+              "label": "烘焙缩放"
+            }
+          ],
+          "description": "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。"
         },
         {
           "name": "authorize_extra_credits",
@@ -29416,6 +29896,11 @@
           "variant": "converted.usdz",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "USDZ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29423,6 +29908,11 @@
           "variant": "converted.fbx",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "FBX"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29430,6 +29920,11 @@
           "variant": "converted.obj",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "OBJ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29437,6 +29932,11 @@
           "variant": "converted.stl",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "STL"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29444,6 +29944,11 @@
           "variant": "converted.3mf",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "3MF"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29543,10 +30048,29 @@
           "label": "附加导出格式转换",
           "amount": "5",
           "parameter": "output_formats",
-          "max_items": 6
+          "max_items": 6,
+          "upgrade": {
+            "amount": "10",
+            "when_any": [
+              {
+                "parameter": "export_texture_format",
+                "operator": "not-equals",
+                "value": "JPEG"
+              },
+              {
+                "parameter": "export_texture_size",
+                "operator": "not-equals",
+                "value": "4k"
+              },
+              {
+                "parameter": "export_pivot_bottom_center",
+                "operator": "truthy"
+              }
+            ]
+          }
         },
         "consent_parameter": "authorize_extra_credits",
-        "max_authorized_extra_amount": "125"
+        "max_authorized_extra_amount": "155"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -29557,6 +30081,33 @@
         "endpoint": "generation/multiview-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "native_conversion": {
+          "bindings": [
+            {
+              "parameter": "export_texture_format",
+              "wire": "texture_format",
+              "upstream_default": "JPEG"
+            },
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size",
+              "upstream_default": 4096
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "upstream_default": false
+            },
+            {
+              "parameter": "export_fbx_preset",
+              "wire": "fbx_preset",
+              "formats": [
+                "FBX"
+              ],
+              "upstream_default": "blender"
+            }
+          ]
+        },
         "upload_endpoint": "files",
         "response_aliases": [
           {

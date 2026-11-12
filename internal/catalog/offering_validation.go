@@ -1181,15 +1181,17 @@ func offeringParameter(
 	return schemacontract.Parameter{}, false
 }
 
-// validRequiredWhenCondition admits the two condition shapes whose truth is
-// fully decided by the frozen input: a text parameter being present, or a
-// single-value select equal to one of its declared string options (an
-// output format that decides which exact slot the upstream returns).
+// validRequiredWhenCondition admits the condition shapes whose truth is fully
+// decided by the frozen input: a text parameter being present, a single-value
+// select equal to one of its declared string options (an output format that
+// decides which exact slot the upstream returns), or a multi-select holding one
+// of its declared options (a delivered format the selection asks for).
 func validRequiredWhenCondition(parameter schemacontract.Parameter, condition schemacontract.ParameterCondition) bool {
 	switch {
 	case parameter.Type == "text":
 		return condition.Operator == "present"
-	case parameter.Type == "select" && condition.Operator == "equals":
+	case parameter.Type == "select" && condition.Operator == "equals",
+		parameter.Type == "string-array" && condition.Operator == "contains":
 		var value string
 		if err := json.Unmarshal(condition.Value, &value); err != nil || value == "" {
 			return false
@@ -1201,6 +1203,42 @@ func validRequiredWhenCondition(parameter schemacontract.Parameter, condition sc
 		}
 	}
 	return false
+}
+
+// validateRequiredItems checks a parameter's required_items: only a string-array
+// with options can hold them, each is a distinct declared option, they fit the
+// item limit, and the default selection already holds them all (otherwise the
+// Schema's own default would be refused).
+func validateRequiredItems(parameter schemacontract.Parameter) error {
+	if len(parameter.RequiredItems) == 0 {
+		return nil
+	}
+	if parameter.Type != "string-array" || len(parameter.Options) == 0 {
+		return fmt.Errorf("参数 %q 的 required_items 只能用于带 options 的 string-array", parameter.Name)
+	}
+	if parameter.MaxItems > 0 && len(parameter.RequiredItems) > parameter.MaxItems {
+		return fmt.Errorf("参数 %q 的 required_items 超过 max_items", parameter.Name)
+	}
+	seen := make(map[string]bool, len(parameter.RequiredItems))
+	for _, required := range parameter.RequiredItems {
+		if seen[required] || !optionAllowed(parameter.Options, required) {
+			return fmt.Errorf("参数 %q 的 required_items 含重复或未声明的选项 %q", parameter.Name, required)
+		}
+		seen[required] = true
+	}
+	if len(bytes.TrimSpace(parameter.Default)) == 0 {
+		return nil
+	}
+	var defaults []string
+	if err := json.Unmarshal(parameter.Default, &defaults); err != nil {
+		return fmt.Errorf("参数 %q 的默认值不是字符串数组", parameter.Name)
+	}
+	for _, required := range parameter.RequiredItems {
+		if !slices.Contains(defaults, required) {
+			return fmt.Errorf("参数 %q 的默认值缺少 required_items 中的 %q", parameter.Name, required)
+		}
+	}
+	return nil
 }
 
 func validateParameterCondition(
@@ -1342,6 +1380,9 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 	if schema.MinItems < 0 || schema.MaxItems < 0 ||
 		(schema.MaxItems > 0 && schema.MinItems > schema.MaxItems) {
 		return schema, fmt.Errorf("参数 %q 的数组数量约束无效", schema.Name)
+	}
+	if err := validateRequiredItems(schema); err != nil {
+		return schema, err
 	}
 	if schema.MaxBytes < 0 {
 		return schema, fmt.Errorf("参数 %q 的 max_bytes 不能为负数", schema.Name)

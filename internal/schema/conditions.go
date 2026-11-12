@@ -37,6 +37,16 @@ func ConditionMatches(condition ParameterCondition, values map[string]any) bool 
 		return equal
 	case "not-equals":
 		return !equal
+	case "contains":
+		// A string-array parameter (a multi-select) holds the expected string.
+		// It decides which exact output slots a frozen selection requires.
+		items, _ := value.([]any)
+		for _, item := range items {
+			if reflect.DeepEqual(item, expected) {
+				return true
+			}
+		}
+		return false
 	case "present":
 		return present
 	case "absent":

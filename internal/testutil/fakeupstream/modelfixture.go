@@ -8,6 +8,7 @@ import (
 	"image/png"
 
 	"github.com/LeXwDeX/Plinth/internal/providers/mock/modelfiles"
+	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
 
 // smallModelFiles builds one small, fixed humanoid in every model container the delivery checks know
@@ -56,19 +57,27 @@ func smallModelFiles() (map[string]File, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, jpeg, err := wirefixture.SyntheticMedia("jpeg-1x1")
+	if err != nil {
+		return nil, err
+	}
 	return map[string]File{
 		"glb":           {"model/gltf-binary", glb},
 		"glb:skeleton":  {"model/gltf-binary", glbSkeleton},
 		"glb:animation": {"model/gltf-binary", glbAnimation},
 		"fbx:skeleton":  {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "skeleton")},
 		"fbx:animation": {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE", "animation")},
-		"gltf":          {"model/gltf+json", gltf},
-		"fbx":           {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE")},
-		"obj":           {"application/zip", objZip},
-		"stl":           {"model/stl", modelfiles.BuildSTL(mesh)},
-		"usdz":          {"model/vnd.usdz+zip", usdz},
-		"3mf":           {"model/3mf", threeMF},
-		"png":           {"image/png", texture},
+		// A conversion of a textured model carries the texture in the format the
+		// request asked for (the official default is JPEG), embedded in the FBX.
+		"fbx:texture-png":  {"model/fbx", modelfiles.BuildTexturedFBX(mesh, "FIXTURE", "texture.png", texture)},
+		"fbx:texture-jpeg": {"model/fbx", modelfiles.BuildTexturedFBX(mesh, "FIXTURE", "texture.jpg", jpeg)},
+		"gltf":             {"model/gltf+json", gltf},
+		"fbx":              {"model/fbx", modelfiles.BuildFBX(mesh, "FIXTURE")},
+		"obj":              {"application/zip", objZip},
+		"stl":              {"model/stl", modelfiles.BuildSTL(mesh)},
+		"usdz":             {"model/vnd.usdz+zip", usdz},
+		"3mf":              {"model/3mf", threeMF},
+		"png":              {"image/png", texture},
 	}, nil
 }
 

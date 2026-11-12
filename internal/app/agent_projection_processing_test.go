@@ -215,8 +215,10 @@ func TestAgentProjectionCompactsLargeOptionLists(t *testing.T) {
 	// 80 KiB; the full default projection was 69,783 bytes on 2026-10-22.
 	// #192 enabled the three Tripo P2 low-poly Offerings (92,373 bytes on 2026-11-08).
 	// #249 projects Offering knowledge (104,876 bytes on 2026-11-10), so the
-	// budget moves to 112 KiB.
-	if len(raw) > 112*1024 {
+	// budget moved to 112 KiB. The game-asset batch (#277 skeleton specs and
+	// animation presets, #278 export parameters, #279 Rodin game parameters)
+	// brings it to 117,559 bytes on 2026-11-12, so the budget moves to 120 KiB.
+	if len(raw) > 120*1024 {
 		t.Fatalf("agent list_offerings projection = %d bytes", len(raw))
 	}
 }
@@ -342,8 +344,9 @@ func TestAgentOfferingProjectionStatesReferenceImageCapacity(t *testing.T) {
 			t.Errorf("%s declares reference_image_max without a reference-image list: %s", id, offering["reference_image_max"])
 		}
 	}
-	// #249 moved the budget to 112 KiB when Offering knowledge joined the projection.
-	if len(raw) > 112*1024 {
+	// #249 moved the budget to 112 KiB when Offering knowledge joined the
+	// projection; the game-asset batch (#277, #278, #279) moved it to 120 KiB.
+	if len(raw) > 120*1024 {
 		t.Fatalf("agent list_offerings projection = %d bytes", len(raw))
 	}
 }

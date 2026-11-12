@@ -490,6 +490,10 @@ func (a *Adapter) observePostSuccessConversion(
 			}
 			return a.postSuccessCompletion(base, request, state, selections), nil
 		}
+		extras, err := conversionExtras(request.Offering, options, request.Input, format)
+		if err != nil {
+			return generation.Observation{}, err
+		}
 		retries := state.Conversions[format].RateLimitRetries
 		state.Conversions[format] = conversionItem{Status: conversionItemDispatching, RateLimitRetries: retries}
 		submissionKey := string(request.AttemptID) + ":convert:" + format
@@ -508,7 +512,7 @@ func (a *Adapter) observePostSuccessConversion(
 			//（下一轮按 1) 保守 abandoned）。
 			return generation.Observation{}, err
 		}
-		remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey)
+		remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
 		if err != nil {
 			// 明确的 HTTP 429 是上游拒绝（未受理）：以 not_dispatched 结算
 			// 许可，按 Retry-After 或退避稍后以新许可重发同一格式；预算用尽
@@ -867,22 +871,30 @@ func sortedFormats(conversions map[string]conversionItem) []string {
 	return formats
 }
 
-// convertModel 发送一次格式转换（一次 ack 至多一次 HTTP，§4.3）。
+// convertModel 发送一次格式转换（一次 ack 至多一次 HTTP，§4.3）。extras 是
+// Offering 声明的其余请求字段（贴图格式、贴图尺寸、原点、FBX 预设，见
+// conversion_parameters.go）；没有声明的 Offering 与旧冻结任务仍只发送
+// input 和 format。
 func (a *Adapter) convertModel(
 	ctx context.Context,
 	endpoint string,
 	sourceRemoteID string,
 	format string,
 	submissionKey string,
+	extras map[string]any,
 ) (string, error) {
 	var response envelope[struct {
 		TaskID string `json:"task_id"`
 	}]
+	body := map[string]any{"input": sourceRemoteID, "format": format}
+	for name, value := range extras {
+		body[name] = value
+	}
 	if err := a.client.DoJSON(
 		ctx,
 		http.MethodPost,
 		endpoint,
-		map[string]any{"input": sourceRemoteID, "format": format},
+		body,
 		submissionKey,
 		&response,
 		true,

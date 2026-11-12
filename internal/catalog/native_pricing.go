@@ -21,11 +21,15 @@ func validateNativePricing(o schema.Offering) error {
 			conditions = []schema.ParameterCondition{*c.When}
 		}
 		for _, condition := range conditions {
-			parameter, ok := offeringParameter(o.Parameters, condition.Parameter)
-			if !ok || !o.AgentParameterAllowed(parameter) || (parameter.Type != "text" && parameter.Type != "select" && parameter.Type != "boolean" && parameter.Type != "number") || parameter.Semantic == schema.SemanticPrompt || len(parameter.Default) == 0 {
-				return fmt.Errorf("native price condition parameter %q invalid", condition.Parameter)
+			if err := validateNativePriceCondition(o, condition); err != nil {
+				return err
 			}
-			if err := validateParameterCondition(condition, parameter); err != nil {
+		}
+	}
+	// An upgrade condition reads the same kind of input a component condition does.
+	if p.Selection != nil && p.Selection.Upgrade != nil {
+		for _, condition := range p.Selection.Upgrade.WhenAny {
+			if err := validateNativePriceCondition(o, condition); err != nil {
 				return err
 			}
 		}
@@ -47,6 +51,18 @@ func validateNativePricing(o schema.Offering) error {
 	}
 	return nil
 }
+
+// validateNativePriceCondition requires a price condition to read a public
+// scalar parameter of the Offering that has a default (so the default quote can
+// always be evaluated) and to be a well-formed condition on it.
+func validateNativePriceCondition(o schema.Offering, condition schema.ParameterCondition) error {
+	parameter, ok := offeringParameter(o.Parameters, condition.Parameter)
+	if !ok || !o.AgentParameterAllowed(parameter) || (parameter.Type != "text" && parameter.Type != "select" && parameter.Type != "boolean" && parameter.Type != "number") || parameter.Semantic == schema.SemanticPrompt || len(parameter.Default) == 0 {
+		return fmt.Errorf("native price condition parameter %q invalid", condition.Parameter)
+	}
+	return validateParameterCondition(condition, parameter)
+}
+
 func authorizeNativeQuote(o schema.Offering, raw json.RawMessage) (*schema.NativeQuote, error) {
 	q, err := o.EvaluateNativeQuote(raw)
 	if err != nil {

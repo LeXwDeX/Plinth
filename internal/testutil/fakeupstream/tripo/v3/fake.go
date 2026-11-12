@@ -225,6 +225,9 @@ type task struct {
 	// sourceFidelity is the fidelity an export inherits from the task whose
 	// artifact URL it was asked to convert.
 	sourceFidelity string
+	// convert is the documented parameters of a convert request (convert.go),
+	// echoed under input by the task poll and deciding what the export carries.
+	convert map[string]any
 }
 
 type handler struct {
@@ -539,19 +542,25 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
-		// The rig and retarget values are constructed from the official pages (rig.go).
+		// The rig, retarget and convert values are constructed from the official
+		// pages (rig.go, convert.go).
 		message := ""
 		switch k.Path {
 		case "/animations/rig":
 			message = rigRequestError(body)
 		case "/animations/retarget":
 			message = retargetRequestError(body)
+		case "/models/convert":
+			message = convertRequestError(body)
 		}
 		if message != "" {
 			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
 			return
 		}
 		t := &task{id: h.newID(), kind: k, typ: k.Type, request: body, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		if k.Path == "/models/convert" {
+			t.convert = convertEcho(body)
+		}
 		t.terminal = terminalStatus(r)
 		if k.Path == "/mesh/smartsegment" {
 			switch segType, _ := body["seg_type"].(string); segType {
@@ -764,6 +773,19 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 			}
 		}
 		t.echoedInput(input)
+		// A convert task shows the request it ran: the committed sample lists the
+		// request's format, texture_format, texture_size, bake, fbx_preset and
+		// with_animation next to original_model_id, and nothing else.
+		if t.convert != nil {
+			for name := range input {
+				if name != "original_model_id" {
+					delete(input, name)
+				}
+			}
+			for name, value := range t.convert {
+				input[name] = value
+			}
+		}
 	}
 	if status == statusFailed {
 		data["error_code"], data["error_message"] = json.Number(fmt.Sprint(t.failCode)), t.failMessage
@@ -849,7 +871,7 @@ func (t *task) artifactName(field string) string {
 		return "model.splat"
 	}
 	if t.kind.Type == "convert_model" {
-		switch strings.ToUpper(t.format) {
+		switch strings.ToUpper(t.convertFormat()) {
 		case "FBX":
 			return "model.fbx"
 		case "OBJ":
@@ -867,11 +889,16 @@ func (t *task) artifactName(field string) string {
 	return "model.glb"
 }
 
-// artifactFile returns the fixed bytes of an artifact name.
-func artifactFile(name, fidelity string) (fakeupstream.File, error) {
+// artifactFile returns the fixed bytes of an artifact name. texture names the
+// image a converted FBX embeds ("png" or "jpeg", convert.go); a rig or animation
+// export keeps its fidelity fixture and no texture.
+func artifactFile(name, fidelity, texture string) (fakeupstream.File, error) {
 	model := func(format string) (fakeupstream.File, error) {
 		if fidelity != "" && (format == "glb" || format == "fbx") {
 			return fakeupstream.ModelFile(format + ":" + fidelity)
+		}
+		if format == "fbx" && texture != "" {
+			return fakeupstream.ModelFile("fbx:texture-" + texture)
 		}
 		return fakeupstream.ModelFile(format)
 	}
@@ -928,7 +955,7 @@ func (h *handler) getArtifact(w http.ResponseWriter, r *http.Request) {
 		writeExpired(w)
 		return
 	}
-	file, err := artifactFile(r.PathValue("name"), t.fidelity())
+	file, err := artifactFile(r.PathValue("name"), t.fidelity(), t.convertTexture())
 	if err != nil {
 		http.NotFound(w, r)
 		return

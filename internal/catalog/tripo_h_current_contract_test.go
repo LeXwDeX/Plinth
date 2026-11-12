@@ -117,7 +117,9 @@ func TestTripoHCurrentPriceBranchesAndConsent(t *testing.T) {
 		`{"prompt":"compass"}`,
 		`{"prompt":"compass","authorize_extra_credits":false}`,
 		`{"prompt":"compass","authorize_extra_credits":true,"geometry_quality":"extreme"}`,
-		`{"prompt":"compass","authorize_extra_credits":true,"output_formats":["GLTF"]}`,
+		// The GLTF conversion delivers the model-role GLB: no selection may omit it.
+		`{"prompt":"compass","authorize_extra_credits":true,"output_formats":["FBX"]}`,
+		`{"prompt":"compass","authorize_extra_credits":true,"output_formats":[]}`,
 		`{"prompt":"compass","authorize_extra_credits":true,"output_formats":["GLTF","GLTF","USDZ","FBX","OBJ","STL"]}`,
 		`{"prompt":"compass","authorize_extra_credits":true,"output_formats":["GLTF","USDZ","FBX","OBJ","STL","XYZ"]}`,
 	} {
@@ -129,10 +131,12 @@ func TestTripoHCurrentPriceBranchesAndConsent(t *testing.T) {
 	if _, err := o.EvaluateNativeQuote(json.RawMessage(`{"output_formats":[]}`)); err == nil {
 		t.Fatal("direct quote accepted an empty required format selection")
 	}
-	if o.NativePricing == nil || o.NativePricing.MaxAuthorizedExtraAmount != "125" {
+	// The bound covers the dearest case: every conversion advanced (10 credits,
+	// #278) next to every other add-on, which no default or purpose reaches.
+	if o.NativePricing == nil || o.NativePricing.MaxAuthorizedExtraAmount != "155" {
 		t.Fatalf("conservative frozen extra bound missing: %+v", o.NativePricing)
 	}
-	if q, err := o.UpperNativeQuote(); err != nil || q == nil || q.TotalAmount != "135" {
+	if q, err := o.UpperNativeQuote(); err != nil || q == nil || q.TotalAmount != "165" {
 		t.Fatalf("upper quote=%+v err=%v", q, err)
 	}
 }

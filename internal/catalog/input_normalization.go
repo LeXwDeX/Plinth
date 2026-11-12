@@ -316,6 +316,11 @@ func validateValue(schema schemacontract.Parameter, value any) (any, error) {
 		if schema.MinItems > 0 && len(result) < schema.MinItems {
 			return nil, fmt.Errorf("参数 %q 至少需要 %d 个元素", schema.Name, schema.MinItems)
 		}
+		for _, required := range schema.RequiredItems {
+			if _, held := seen[required]; !held {
+				return nil, fmt.Errorf("参数 %q 必须包含 %q", schema.Name, required)
+			}
+		}
 		if schema.MaxItems > 0 && len(result) > schema.MaxItems {
 			return nil, &arrayLimitError{parameter: schema, actual: len(result)}
 		}

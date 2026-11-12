@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // New fixed-format Offerings hold the public task in RUNNING until every
@@ -47,22 +48,43 @@ func preCompletionOutput(offering generation.Offering, format string) (generatio
 	return matched, found
 }
 
-func validatePreCompletionInput(offering generation.Offering, input json.RawMessage) ([]string, error) {
-	var values map[string]json.RawMessage
-	if json.Unmarshal(input, &values) != nil || offering.PriceSelectionParameter() == "" {
-		return nil, failure(generation.FailureInvalidInput, false, "Tripo 全格式输入无效")
-	}
-	var formats []string
-	if json.Unmarshal(values[offering.PriceSelectionParameter()], &formats) != nil {
-		return nil, failure(generation.FailureInvalidInput, false, "Tripo 全格式输入无效")
-	}
+// requiredConvertedOutputs counts the converted-model slots the frozen input
+// requires: an unconditional required slot always, a required_when slot only when
+// its condition holds for the input (the kernel pins the same decision into the
+// Task's Offering as minimum 0, so a pinned and an unpinned Offering agree).
+func requiredConvertedOutputs(offering generation.Offering, values map[string]any) int {
 	required := 0
 	for _, output := range offering.Outputs {
 		if output.Role == "converted_model" && output.Delivery == generation.AssetDeliveryRequired &&
-			output.Variant != "" && output.Minimum != nil && *output.Minimum == 1 {
+			output.Variant != "" && output.Minimum != nil && *output.Minimum == 1 &&
+			(output.RequiredWhen == nil || schema.ConditionMatches(*output.RequiredWhen, values)) {
 			required++
 		}
 	}
+	return required
+}
+
+// validatePreCompletionInput reads the frozen format selection and checks that
+// it is exactly the set of conversions the Offering's required slots need: no
+// format whose slot is not required, none missing, none repeated or unknown.
+func validatePreCompletionInput(offering generation.Offering, input json.RawMessage) ([]string, error) {
+	var values map[string]any
+	if json.Unmarshal(input, &values) != nil || offering.PriceSelectionParameter() == "" {
+		return nil, failure(generation.FailureInvalidInput, false, "Tripo 全格式输入无效")
+	}
+	items, isList := values[offering.PriceSelectionParameter()].([]any)
+	if !isList {
+		return nil, failure(generation.FailureInvalidInput, false, "Tripo 全格式输入无效")
+	}
+	formats := make([]string, 0, len(items))
+	for _, item := range items {
+		format, isText := item.(string)
+		if !isText {
+			return nil, failure(generation.FailureInvalidInput, false, "Tripo 全格式输入无效")
+		}
+		formats = append(formats, format)
+	}
+	required := requiredConvertedOutputs(offering, values)
 	if required == 0 || len(formats) != required {
 		return nil, failure(generation.FailureInvalidInput, false, "Tripo 必须请求全部声明的转换格式")
 	}
@@ -76,8 +98,18 @@ func validatePreCompletionInput(offering generation.Offering, input json.RawMess
 			return nil, failure(generation.FailureProtocol, false, "Tripo 转换输出契约不完整")
 		}
 	}
+	// The model role is fulfilled by this conversion's self-contained GLB (see
+	// observePreCompletionFormats); a selection without it would end with no
+	// model claim after the paid generation, so it is refused before any spend.
+	if !seen[primaryModelConversion] {
+		return nil, failure(generation.FailureInvalidInput, false, "Tripo 必须请求 "+primaryModelConversion+" 转换以交付自包含 GLB 主模型")
+	}
 	return formats, nil
 }
+
+// primaryModelConversion is the export whose binary glTF replaces the source
+// GLB (which can carry upstream addresses) as the model-role claim.
+const primaryModelConversion = "GLTF"
 
 func conversionSelectionDeclared(offering generation.Offering, format string) bool {
 	for _, parameter := range offering.Parameters {
@@ -150,6 +182,12 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 			return generation.Observation{}, err
 		}
 		format := remaining[0]
+		// The export options come from the frozen declaration and input; a
+		// declaration that cannot be written stops here, before any checkpoint.
+		extras, err := conversionExtras(request.Offering, options, request.Input, format)
+		if err != nil {
+			return generation.Observation{}, err
+		}
 		retries := state.Conversions[format].RateLimitRetries
 		state.Conversions[format] = conversionItem{Status: conversionItemDispatching, RateLimitRetries: retries}
 		submissionKey := string(request.AttemptID) + ":convert:" + format
@@ -164,7 +202,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 		if err != nil {
 			return generation.Observation{}, err
 		}
-		remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey)
+		remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
 		if err != nil {
 			// An explicit 429 refused the child: settle the permit as not
 			// dispatched and resend the same format after Retry-After or the
@@ -239,7 +277,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 			Locator:   locator,
 			MediaType: modelMediaType(locator),
 		})
-		if format == "GLTF" {
+		if format == primaryModelConversion {
 			primaryModel.Locator = locator
 			primaryModel.MediaType = modelMediaType(locator)
 			base.Artifacts = append(base.Artifacts, primaryModel)

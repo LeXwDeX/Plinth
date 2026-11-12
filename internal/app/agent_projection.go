@@ -140,6 +140,10 @@ type agentInputView struct {
 	Supply     string   `json:"supply,omitempty"`
 	MediaTypes []string `json:"media_types,omitempty"`
 	MaxBytes   int64    `json:"max_bytes,omitempty"`
+	// RequiredItems are the options every selection of a multi-select holds (for
+	// example the GLTF conversion that delivers the model-role GLB), so the Agent
+	// narrows a choice without dropping them (#278).
+	RequiredItems []string `json:"required_items,omitempty"`
 }
 
 // agentCompactOptionThreshold is the largest option list the Agent projection
@@ -353,7 +357,8 @@ func agentInputViews(offering generation.Offering) []agentInputView {
 		}
 		view := agentInputView{ImageSize: parameter.ImageSize, Integer: parameter.Integer, Name: parameter.Name, Label: parameter.Label, Type: parameter.Type,
 			Required: parameter.Required, Minimum: parameter.Minimum, Maximum: parameter.Maximum, MaximumWhen: parameter.MaximumWhen,
-			MaxLength: parameter.MaxLength, Default: parameter.Default, AdjustmentPolicy: parameter.AdjustmentPolicy, AdjustmentReason: parameter.AdjustmentReason, MinItems: parameter.MinItems, MaxItems: parameter.MaxItems}
+			MaxLength: parameter.MaxLength, Default: parameter.Default, AdjustmentPolicy: parameter.AdjustmentPolicy, AdjustmentReason: parameter.AdjustmentReason, MinItems: parameter.MinItems, MaxItems: parameter.MaxItems,
+			RequiredItems: append([]string(nil), parameter.RequiredItems...)}
 		if compact, ok := compactAgentOptions(parameter.Options); ok {
 			view.OptionsCompact = compact
 		} else {
