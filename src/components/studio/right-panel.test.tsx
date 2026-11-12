@@ -110,7 +110,8 @@ describe('nothing on the stage and an empty board', () => {
     expect(html).toContain('data-testid="stub-preferences" data-session="s1"');
     expect(html.indexOf('stub-style-lock')).toBeLessThan(html.indexOf('stub-preferences'));
     expect(html.indexOf('stub-preferences')).toBeLessThan(html.indexOf('stub-operations'));
-    expect(html.indexOf('right-panel-tabs')).toBeLessThan(html.indexOf('stub-style-lock'));
+    // The tab rail sits to the right of the content, after it in the markup.
+    expect(html.indexOf('stub-operations')).toBeLessThan(html.indexOf('right-panel-tabs'));
     expect(html).toContain('role="tablist"');
     expect(html).toContain('data-tab="operations"');
     expect(html).toMatch(/id="right-panel-tab-layers"[^>]*aria-disabled="true"/);
@@ -214,6 +215,9 @@ describe('function settings on the bare board', () => {
   });
 });
 
+/** The tab body's markup: from the tab panel to the tab rail that follows it. */
+const tabBody = (html: string) => html.slice(html.indexOf('id="right-panel-body"'), html.indexOf('role="tablist"'));
+
 describe('the 功能 tab scroll container (#254)', () => {
   beforeEach(() => {
     mock.object = picture;
@@ -233,14 +237,16 @@ describe('the 功能 tab scroll container (#254)', () => {
     expect(classes).toContain('[scrollbar-gutter:stable]');
     // Both sections scroll together, in order: 风格锁定 first, then the operation groups and save bar.
     expect(html.indexOf('stub-style-lock')).toBeLessThan(html.indexOf('stub-operations'));
-    expect(html.match(/overflow-y-auto/g)).toHaveLength(1);
-    expect(html.match(/\[scrollbar-gutter:stable\]/g)).toHaveLength(1);
+    // The tab rail scrolls on its own in a very short window; only the tab body counts here.
+    const scrollBody = tabBody(html);
+    expect(scrollBody.match(/overflow-y-auto/g)).toHaveLength(1);
+    expect(scrollBody.match(/\[scrollbar-gutter:stable\]/g)).toHaveLength(1);
   });
 
   it('stays the only scrollport in a 600px-high window: the children keep their content height', () => {
     const html = render();
     // The section bodies must not add a second scrollbar when the window is short; the tab scrolls instead.
-    expect(html.match(/overflow-y-auto/g)).toHaveLength(1);
+    expect(tabBody(html).match(/overflow-y-auto/g)).toHaveLength(1);
     expect(html.match(/max-h-/g) ?? []).toHaveLength(0);
   });
 });
@@ -300,28 +306,32 @@ describe('the tab bar', () => {
   beforeEach(() => { mock.object = model; });
   const html = () => render();
 
-  it('is a 44px tab list named by the Schema, with an icon and the name on each tab', () => {
+  it('is a vertical tab rail named by the Schema, with an icon and the full name on each tab', () => {
     const markup = html();
-    expect(markup).toMatch(/role="tablist"[^>]*aria-label="右侧栏标签"/);
+    expect(markup).toMatch(/role="tablist"[^>]*aria-label="右侧栏标签"[^>]*aria-orientation="vertical"/);
     expect(markup).toContain('right-panel-tabs');
-    expect(markup).toMatch(/class="flex h-11 shrink-0 border-b/);
+    expect(markup).toMatch(/class="flex w-9 shrink-0 flex-col/);
     const tabs = markup.match(/<button[^>]*role="tab"[\s\S]*?<\/button>/g) ?? [];
     expect(tabs).toHaveLength(6);
     for (const tab of tabs) {
       expect(tab).toContain('<svg');
-      expect(tab).toContain('h-11');
+      expect(tab).not.toContain('truncate');
     }
-    const labels = tabs.map((tab) => tab.match(/<span class="truncate">([^<]+)<\/span>/)?.[1]);
+    const labels = tabs.map((tab) => tab.match(/<span class="[^"]*writing-mode:vertical-rl[^"]*">([^<]+)<\/span>/)?.[1]);
     expect(labels).toEqual(['功能', '加工', '格式', '部件', '详情', '项目']);
   });
 
-  it('underlines the active tab only, 2px', () => {
+  it('puts the rail after the content, at the panel\'s right edge', () => {
     const markup = html();
-    expect(markup.match(/data-testid="right-panel-underline"/g)).toHaveLength(1);
-    expect(markup).toMatch(/class="absolute inset-x-1 bottom-0 h-0\.5 bg-foreground"/);
-    const active = markup.match(/<button[^>]*aria-selected="true"[\s\S]*?<\/button>/)?.[0] ?? '';
-    expect(active).toContain('right-panel-underline');
-    expect(active).toContain('right-panel-tab-operations');
+    expect(markup.indexOf('id="right-panel-body"')).toBeLessThan(markup.indexOf('data-testid="right-panel-tabs"'));
+  });
+
+  it('fills and outlines the active tab only', () => {
+    const markup = html();
+    const tabs = markup.match(/<button[^>]*role="tab"[^>]*>/g) ?? [];
+    const filled = tabs.filter((tab) => /border-border bg-accent text-foreground/.test(tab));
+    expect(filled).toHaveLength(1);
+    expect(filled[0]).toContain('right-panel-tab-operations');
   });
 
   it('keeps one tab in the tab order and links each tab to the one body', () => {

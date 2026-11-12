@@ -65,7 +65,8 @@ export function HintBubble({ name, shortcut, reason, hint, target, cost }: HintC
  * The hover hint of a control (R16): opens after the pointer rests 350ms and at once when the keyboard
  * focuses the control; closes on leave, click and Esc. Below the control with an 8px gap, flipping above
  * when there is no room and staying inside the window; at most 260px wide. A vertical rail passes
- * `side="right"` so the hint does not cover the buttons under the one it describes.
+ * `side="right"` (or `side="left"` when it sits on the window's right edge) so the hint does not cover the
+ * buttons under the one it describes.
  *
  * The control is wrapped in a span that carries the hover and focus listeners, so a disabled button
  * (which receives no pointer events) still shows its hint; the first line then says why it is disabled.
@@ -83,7 +84,7 @@ export function HintTooltip({
   passive = false,
   ...content
 }: HintContent & {
-  children: ReactNode; className?: string; side?: 'bottom' | 'right'; triggerProps?: HTMLAttributes<HTMLSpanElement>; reopenOnKeyboardFocus?: boolean
+  children: ReactNode; className?: string; side?: 'bottom' | 'right' | 'left'; triggerProps?: HTMLAttributes<HTMLSpanElement>; reopenOnKeyboardFocus?: boolean
   /** While true the hint stays closed and does not open (a picker whose own panel just closed and handed focus back, #324). */
   suppressed?: boolean
   /** The bubble never takes the pointer: it does not stay open when hovered and clicks pass through it to the controls below (#324). */

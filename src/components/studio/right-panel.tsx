@@ -46,9 +46,10 @@ interface PanelTabBarProps {
 }
 
 /**
- * The 44px tab bar: an icon and the name on each tab, a 2px underline under the active one, and the hover
- * hint (name, shortcut, one line of what it is for) from the Schema. Left / Right / Home / End move between
- * the tabs the way a tab list does; the active tab is the one in the tab order.
+ * The vertical tab rail on the panel's right edge (36px): each tab is a rounded pill with its icon and the
+ * name written top to bottom, so names are never cut off however many tabs a kind has; the active pill is
+ * filled and outlined. The hover hint (name, shortcut, one line of what it is for) comes from the Schema.
+ * Up / Down (and Left / Right) / Home / End move between the tabs; the active tab is the one in the tab order.
  */
 export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: PanelTabBarProps) {
   const { schema } = useProductSchema();
@@ -62,13 +63,13 @@ export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: P
     buttons.current.get(next)?.focus();
   };
   return (
-    <div role="tablist" aria-label={label} className="flex h-11 shrink-0 border-b border-border" data-testid="right-panel-tabs">
+    <div role="tablist" aria-label={label} aria-orientation="vertical" className="flex w-9 shrink-0 flex-col gap-1 overflow-y-auto border-l border-border px-1 py-2" data-testid="right-panel-tabs">
       {views.map((view) => {
         const Icon = iconByName(view.icon);
         const selected = view.id === active;
         const isDisabled = disabled.includes(view.id);
         return (
-          <HintTooltip key={view.id} {...panelTabHintContent(schema, view)} reason={isDisabled ? schemaText(schema, 'ui.unavailable.reason.stage.board_empty') : undefined} className="min-w-0 flex-1">
+          <HintTooltip key={view.id} {...panelTabHintContent(schema, view)} reason={isDisabled ? schemaText(schema, 'ui.unavailable.reason.stage.board_empty') : undefined} side="left" className="w-full shrink-0">
             <button
               type="button"
               role="tab"
@@ -85,14 +86,13 @@ export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: P
               onClick={() => { if (!isDisabled) onSelect(view.id); }}
               onKeyDown={(event) => onKeyDown(event, view.id)}
               className={cn(
-                'relative flex h-11 w-full min-w-0 items-center justify-center gap-1 px-1 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50',
-                selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                'flex w-full flex-col items-center gap-1 rounded-md border px-0.5 py-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50',
+                selected ? 'border-border bg-accent text-foreground' : 'border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
                 isDisabled && 'cursor-not-allowed opacity-50 hover:text-muted-foreground',
               )}
             >
-              <Icon aria-hidden className="size-4 shrink-0" />
-              <span className="truncate">{view.label}</span>
-              {selected ? <span aria-hidden className="absolute inset-x-1 bottom-0 h-0.5 bg-foreground" data-testid="right-panel-underline" /> : null}
+              <Icon aria-hidden className="size-3.5 shrink-0" />
+              <span className="leading-none tracking-wider [writing-mode:vertical-rl]">{view.label}</span>
             </button>
           </HintTooltip>
         );
@@ -179,7 +179,9 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
     // No cleanup: consuming the request re-runs this effect with null, and the frame must still land after
     // the 功能 tab and its open section have rendered.
   }, [styleLockRequest, context, setPanelTab, consumeStyleLockRequest]);
-  const aside = 'flex min-h-0 shrink-0 flex-col border-l border-border bg-card';
+  // The content column keeps the Schema width; the tab rail sits to its right.
+  const aside = 'flex min-h-0 shrink-0 flex-row border-l border-border bg-card';
+  const column = 'flex min-h-0 min-w-0 flex-col';
   const width = { width: panelWidth(schema) };
   const title = schemaText(schema, 'ui.studio.panel.title');
 
@@ -192,53 +194,57 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
       ? remembered
       : null;
     const active = requested ?? defaultPanelTab(schema, 'board', { unavailable: disabled }) ?? 'operations';
-      return (
-        <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} style={width} className={aside}>
-          <PanelTabBar
+    return (
+      <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} className={aside}>
+        <div style={width} className={column}>
+          {active === 'operations' ? (
+            <div data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs">
+              <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.board_empty'))} detail={schemaText(schema, 'ui.studio.panel.board_empty')} />
+            </div>
+          ) : null}
+          <div
+            role="tabpanel"
+            id={BODY_ID}
+            aria-labelledby={tabDomId(active)}
+            data-testid={`right-panel-${active}`}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <PanelBody tab={active} object={null} sessionId={sessionId} />
+          </div>
+        </div>
+        <PanelTabBar
           views={views}
           active={active}
           onSelect={(id) => setPanelTab('board', id)}
           label={schemaText(schema, 'ui.studio.panel.tabs')}
           disabled={disabled}
         />
-        {active === 'operations' ? (
-          <div data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs">
-            <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.board_empty'))} detail={schemaText(schema, 'ui.studio.panel.board_empty')} />
-          </div>
-        ) : null}
-        <div
-          role="tabpanel"
-          id={BODY_ID}
-          aria-labelledby={tabDomId(active)}
-          data-testid={`right-panel-${active}`}
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          <PanelBody tab={active} object={null} sessionId={sessionId} />
-        </div>
       </aside>
     );
   }
   const views = panelTabViews(schema, context);
   const active = activePanelTab(schema, context, remembered, availability);
   return (
-    <aside aria-label={title} data-testid="right-panel" data-kind={context} data-tab={active ?? undefined} style={width} className={aside}>
+    <aside aria-label={title} data-testid="right-panel" data-kind={context} data-tab={active ?? undefined} className={aside}>
+      <div style={width} className={column}>
+        {active ? (
+          <div
+            role="tabpanel"
+            id={BODY_ID}
+            aria-labelledby={tabDomId(active)}
+            data-testid={`right-panel-${active}`}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <PanelBody tab={active} object={object} sessionId={sessionId} />
+          </div>
+        ) : null}
+      </div>
       <PanelTabBar
         views={views}
         active={active}
         onSelect={(id) => setPanelTab(context, id)}
         label={schemaText(schema, 'ui.studio.panel.tabs')}
       />
-      {active ? (
-        <div
-          role="tabpanel"
-          id={BODY_ID}
-          aria-labelledby={tabDomId(active)}
-          data-testid={`right-panel-${active}`}
-          className="flex min-h-0 flex-1 flex-col"
-        >
-          <PanelBody tab={active} object={object} sessionId={sessionId} />
-        </div>
-      ) : null}
     </aside>
   );
 }
