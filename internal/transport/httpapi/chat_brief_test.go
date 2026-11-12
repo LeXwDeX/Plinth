@@ -91,6 +91,43 @@ func TestChatSessionBriefRejectsUndeclaredFieldsAndOutOfBoundsValues(t *testing.
 	}
 }
 
+// #286: the shipped brief takes the target engine and platform as selects. The
+// stored value is the option id; text that is no option is refused with the
+// Schema's wording, which lists the ids, and changes nothing.
+func TestChatSessionBriefTakesEngineAndPlatformAsSelectOptions(t *testing.T) {
+	t.Parallel()
+	handler, cookie, sessionID := grantTestBrowser(t)
+	put := grantTestRequest(t, handler, cookie, http.MethodPut, briefPath(sessionID),
+		`{"brief":{"purpose":"game_character","target_engine":" unity ","target_platform":"mobile","needs_rig":true}}`, "")
+	if put.Code != http.StatusOK {
+		t.Fatalf("write: %d %s", put.Code, put.Body.String())
+	}
+	stored := decodeBrief(t, put.Body.String())
+	if string(stored["target_engine"]) != `"unity"` || string(stored["target_platform"]) != `"mobile"` {
+		t.Fatalf("stored brief = %v", stored)
+	}
+	for _, body := range []string{
+		`{"brief":{"target_engine":"Unity"}}`,
+		`{"brief":{"target_platform":"手机"}}`,
+		`{"brief":{"target_platform":"mobile phone"}}`,
+		`{"brief":{"target_engine":4}}`,
+	} {
+		response := grantTestRequest(t, handler, cookie, http.MethodPut, briefPath(sessionID), body, "")
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %.60q status=%d %s", body, response.Code, response.Body.String())
+		}
+	}
+	refused := grantTestRequest(t, handler, cookie, http.MethodPut, briefPath(sessionID),
+		`{"brief":{"target_platform":"tablet"}}`, "")
+	if !strings.Contains(refused.Body.String(), "mobile, pc_console, web, xr") || strings.Contains(refused.Body.String(), "tablet") {
+		t.Fatalf("refusal = %s", refused.Body.String())
+	}
+	read := grantTestRequest(t, handler, cookie, http.MethodGet, briefPath(sessionID), "", "")
+	if got := decodeBrief(t, read.Body.String()); string(got["target_platform"]) != `"mobile"` {
+		t.Fatalf("a rejected edit changed the brief: %s", read.Body.String())
+	}
+}
+
 func TestChatSessionBriefIsOwnerScoped(t *testing.T) {
 	t.Parallel()
 	module, handler, cookie, _ := grantTestBrowserWithApplication(t, nil, []string{"user"})

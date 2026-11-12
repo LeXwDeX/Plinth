@@ -537,6 +537,18 @@ func (orchestrator *Orchestrator) productionBriefText(
 				}
 			}
 			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
+		case "select":
+			// A stored option id reads as its label; a value outside the
+			// options (free text written before the field became a select)
+			// is kept and shown as it was written (#286).
+			value := brief.Text(field.Name)
+			if value == "" {
+				continue
+			}
+			if option, found := field.OptionByID(value); found {
+				value = option.Label
+			}
+			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
 		case "text":
 			value := brief.Text(field.Name)
 			if value == "" {

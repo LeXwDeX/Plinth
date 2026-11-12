@@ -78,12 +78,29 @@ func (err *BriefError) Error() string { return err.Reason }
 // declared fields and returns the normalized object. Unknown members are
 // refused instead of dropped, so a typo cannot silently lose a locked choice.
 // Empty text and null clear a field. A profile field must name a declared
-// profile. The refusal wording comes from the Schema's messages, with the
-// built-in sentence as the fallback for a historical Catalog (#103 review C3).
+// profile and a select field one of its options. The refusal wording comes
+// from the Schema's messages, with the built-in sentence as the fallback for a
+// historical Catalog (#103 review C3).
 func ValidateProductionBrief(
 	schema catalog.ChatProductionBriefSchema,
 	profiles []catalog.ChatModel3DUsageProfile,
 	imageProfiles []catalog.ChatImage2DUsageProfile,
+	raw map[string]json.RawMessage,
+) (ProductionBrief, error) {
+	return ValidateProductionBriefChange(schema, profiles, imageProfiles, nil, raw)
+}
+
+// ValidateProductionBriefChange validates a write over the brief a session
+// already holds. It differs from ValidateProductionBrief in one rule: a select
+// field may keep the exact value it already stores even when that value is no
+// longer one of its options, so a free-text value written before the field
+// became a select (a target platform typed as "手机") survives an edit of any
+// other field. A new or changed select value must be an option id (#286).
+func ValidateProductionBriefChange(
+	schema catalog.ChatProductionBriefSchema,
+	profiles []catalog.ChatModel3DUsageProfile,
+	imageProfiles []catalog.ChatImage2DUsageProfile,
+	previous ProductionBrief,
 	raw map[string]json.RawMessage,
 ) (ProductionBrief, error) {
 	declared := make(map[string]catalog.ChatProductionBriefField, len(schema.Fields))
@@ -135,6 +152,22 @@ func ValidateProductionBrief(
 				return nil, &BriefError{Reason: briefMessage(messages.ProfileUndeclared, `用途 "{value}" 未声明`, "{value}", purpose)}
 			}
 			normalized[name] = mustJSON(purpose)
+		case "select":
+			var choice string
+			if json.Unmarshal(value, &choice) != nil {
+				return nil, &BriefError{Reason: briefMessage(messages.NotString, `字段 "{field}" 必须是字符串`, "{field}", name)}
+			}
+			choice = strings.TrimSpace(choice)
+			if choice == "" {
+				continue
+			}
+			if _, declared := field.OptionByID(choice); !declared && previous.Text(name) != choice {
+				return nil, &BriefError{Reason: briefMessage(
+					messages.SelectUndeclared, `字段 "{field}" 只能取这些值之一：{options}`,
+					"{field}", name, "{options}", strings.Join(field.OptionIDs(), ", "),
+				)}
+			}
+			normalized[name] = mustJSON(choice)
 		case "text":
 			var text string
 			if json.Unmarshal(value, &text) != nil {

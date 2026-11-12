@@ -31,7 +31,7 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "game_character",
-              "target_platform": "Unity",
+              "target_engine": "unity",
               "needs_rig": true,
               "style": "cyberpunk"
             }
@@ -153,7 +153,7 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "game_prop",
-              "target_platform": "Unreal",
+              "target_engine": "unreal",
               "style": "low-poly hard surface"
             }
           }
@@ -274,7 +274,7 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "game_prop",
-              "target_platform": "Unity",
+              "target_engine": "unity",
               "style": "stylized hand-painted"
             }
           }
@@ -395,7 +395,7 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "render",
-              "target_platform": "Web",
+              "target_platform": "web",
               "style": "bioluminescent organic"
             }
           }
@@ -516,7 +516,6 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "print",
-              "target_platform": "3D print",
               "notes": "15 cm tall, watertight"
             }
           }
@@ -665,7 +664,7 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "web_ar",
-              "target_platform": "Web and AR",
+              "target_platform": "web",
               "style": "clean product photo"
             }
           }
@@ -1323,7 +1322,7 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "game_character",
-              "target_platform": "Unity",
+              "target_engine": "unity",
               "needs_rig": true,
               "style": "stylized realistic"
             }
@@ -1736,7 +1735,7 @@
             "name": "update_production_brief",
             "arguments": {
               "purpose": "game_prop",
-              "target_platform": "Unreal",
+              "target_engine": "unreal",
               "style": "sci-fi energy rifle"
             }
           }

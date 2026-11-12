@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -1067,7 +1068,15 @@ func workSelfChecks(
 				} `json:"failed_checks"`
 				Views       []string `json:"views"`
 				FailedViews []string `json:"failed_views"`
-				Usage       *struct {
+				// visual is the inspect_image summary's record of the Agent's
+				// own verdicts on the checklist's visual items (#286).
+				Visual []struct {
+					Item    string `json:"item"`
+					Verdict string `json:"verdict"`
+					Note    string `json:"note"`
+					FixHint string `json:"fix_hint"`
+				} `json:"visual"`
+				Usage *struct {
 					Checks []struct {
 						Check   string         `json:"check"`
 						Status  string         `json:"status"`
@@ -1120,6 +1129,16 @@ func workSelfChecks(
 					check.Leftovers = append(check.Leftovers, WorkLeftover{
 						Check: item.Check, Actual: item.Actual, FixHint: item.Fix,
 					})
+				}
+				// A visual item the Agent judged failed stays on the step as a
+				// leftover, so the next turn sees which item (a pose, a
+				// perspective, a cast shadow) the picture failed (#286).
+				for _, item := range summary.Visual {
+					if item.Verdict == catalog.ImageVisualFail {
+						check.Leftovers = append(check.Leftovers, WorkLeftover{
+							Check: item.Item, Actual: truncateRunes(item.Note, 200), FixHint: item.FixHint,
+						})
+					}
 				}
 				update(taskID, check)
 			case "render":

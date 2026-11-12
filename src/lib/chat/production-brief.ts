@@ -7,9 +7,15 @@ import type { ChatModel3DBriefFieldSchema, ProductSchema } from '@/lib/product-s
  */
 export type ProductionBrief = Record<string, unknown>;
 
+/** One choice of a select field (#286): the brief stores `id`, people read `label`. */
+export interface ProductionBriefOption {
+  id: string;
+  label: string;
+}
+
 export interface ProductionBriefField {
   name: string;
-  /** 'profile' (a model3d profile id), 'text', 'boolean' or 'integer'. */
+  /** 'profile' (a model3d profile id), 'image_profile', 'select' (one of `options`), 'text', 'boolean' or 'integer'. */
   type: string;
   label: string;
   maximumCharacters?: number;
@@ -19,6 +25,8 @@ export interface ProductionBriefField {
   placeholder?: string;
   minimum?: number;
   maximum?: number;
+  /** The choices of a select field, in display order. */
+  options?: ProductionBriefOption[];
 }
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -34,6 +42,7 @@ export function productionBriefFields(schema: ProductSchema): ProductionBriefFie
     ...(typeof field.placeholder === 'string' && field.placeholder !== '' ? { placeholder: field.placeholder } : {}),
     ...(typeof field.minimum === 'number' ? { minimum: field.minimum } : {}),
     ...(typeof field.maximum === 'number' ? { maximum: field.maximum } : {}),
+    ...(Array.isArray(field.options) ? { options: field.options.map(({ id, label }) => ({ id, label })) } : {}),
   }));
 }
 
@@ -75,6 +84,16 @@ export function briefValueText(value: unknown, yes: string, no: string): string 
   if (typeof value === 'boolean') return value ? yes : no;
   if (typeof value === 'number') return String(value);
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * A select value as people read it (#286): the option's label. A stored value
+ * that is no option (text written before the field became a select) reads as
+ * it was written, so an old brief is never shown blank.
+ */
+export function briefSelectText(field: Pick<ProductionBriefField, 'options'>, value: unknown): string {
+  if (typeof value !== 'string' || value === '') return '';
+  return field.options?.find((option) => option.id === value)?.label ?? value;
 }
 
 export function briefRoute(schema: ProductSchema, sessionId: string): string | null {

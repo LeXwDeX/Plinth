@@ -109,6 +109,11 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 	if !ok {
 		return chat.ToolResult{Error: "unknown checklist", NoSubmission: true}, nil
 	}
+	visualItems := service.visualItems(checklistName)
+	verdicts, validVisual := service.visualVerdicts(raw, visualItems)
+	if !validVisual {
+		return chat.ToolResult{Error: "invalid visual review", NoSubmission: true}, nil
+	}
 	used := 0
 	for _, call := range command.EarlierCalls {
 		if call.Name == "inspect_image" {
@@ -251,6 +256,10 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 		usageCheck["note"] = service.note(judgement)
 	}
 	usageCheck["checks"] = checks
+	// The Agent's verdicts on the checklist's visual items (#286) join the
+	// deterministic checks in the result and in the counts the summary keeps.
+	visual := newVisualOutcome(visualItems, verdicts)
+	visual.attach(usageCheck)
 	result := map[string]any{
 		"ok":               true,
 		"image":            imageFacts,
@@ -265,7 +274,7 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 	// A check the picture cannot show is counted apart from the passed ones: an
 	// unjudged check must not read as a passed one (the ledger's rule for
 	// inspect_model).
-	passed, failed, unknown := 0, 0, 0
+	passed, failed, unknown := visual.Passed, visual.Failed, 0
 	var failedChecks []map[string]string
 	for _, check := range checks {
 		switch check.Status {
@@ -284,6 +293,9 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 		"tool": "inspect_image", "handle": picture.Attachment.Handle,
 		"width": report.Width, "height": report.Height,
 		"checks": map[string]int{"passed": passed, "failed": failed, "unknown": unknown},
+	}
+	if len(visual.Checks) > 0 {
+		summaryFacts["visual"] = visual.Checks
 	}
 	if len(failedChecks) > 0 {
 		summaryFacts["failed_checks"] = failedChecks

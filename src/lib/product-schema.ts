@@ -1882,6 +1882,12 @@ export interface ChatModel3DProfileSchema {
   description?: string;
 }
 
+/** #286: one choice of a select brief field; the brief stores `id`, people read `label`. */
+export interface ChatModel3DBriefOptionSchema {
+  id: string;
+  label: string;
+}
+
 export interface ChatModel3DBriefFieldSchema {
   name: string;
   type: string;
@@ -1895,6 +1901,8 @@ export interface ChatModel3DBriefFieldSchema {
   /** type 为 integer 时的取值范围。 */
   minimum?: number;
   maximum?: number;
+  /** #286: type 为 select 时的可选项，按显示顺序。 */
+  options?: ChatModel3DBriefOptionSchema[];
 }
 
 export interface ChatModel3DUsageSchema {

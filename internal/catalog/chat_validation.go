@@ -3012,6 +3012,9 @@ func validateImageReview(schema ChatSchema) error {
 		strings.TrimSpace(review.DeliveryChecklist) == "" || strings.TrimSpace(review.Input3DChecklist) == "" {
 		return errors.New("chat.image_review 的自检轮数、放行参数或文案不完整")
 	}
+	if err := validateImageVisualItems(schema); err != nil {
+		return err
+	}
 	return validateImageUsageReview(schema)
 }
 

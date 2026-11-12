@@ -2517,6 +2517,27 @@ type ChatImageReviewSchema struct {
 	// words that judge a picture against them (#282, #284, #287). Nil keeps the
 	// historical delivery checklist.
 	Usage *ChatImageUsageReviewSchema `json:"usage,omitempty"`
+	// Input3DVisualItems are the checks of the 3d_input checklist only a look
+	// at the picture can judge: pose, perspective, cast shadows (#286). The
+	// tool lists them with the checklist; the Agent's verdicts come back in
+	// VisualReviewArgument and are recorded beside the deterministic checks.
+	// They are judged by the Agent, never by a pixel algorithm.
+	Input3DVisualItems []ChatImageVisualItem `json:"input_3d_visual_items,omitempty"`
+	// VisualReviewArgument is the inspect_image argument carrying those
+	// verdicts, and VisualNoteMaxCharacters bounds the note of each. Both are
+	// required once visual items are declared.
+	VisualReviewArgument    string `json:"visual_review_argument,omitempty"`
+	VisualNoteMaxCharacters int    `json:"visual_note_max_characters,omitempty"`
+}
+
+// ChatImageVisualItem is one Agent-judged item of a picture checklist (#286).
+// Instruction tells the Agent what to look at and when the item does not
+// apply; FixHint is what to do about a failed one.
+type ChatImageVisualItem struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Instruction string `json:"instruction"`
+	FixHint     string `json:"fix_hint"`
 }
 
 // ChatImageUsageReviewSchema is application.chat.image_review.usage. Every
@@ -3550,8 +3571,9 @@ func (brief ChatProductionBriefSchema) FieldNameOfType(fieldType string) string 
 // ChatProductionBriefField declares one brief member and its bound.
 type ChatProductionBriefField struct {
 	Name string `json:"name"`
-	// Type is profile, image_profile, text, boolean or integer. A profile names
-	// a 3D purpose and an image_profile a 2D purpose (#239).
+	// Type is profile, image_profile, select, text, boolean or integer. A
+	// profile names a 3D purpose and an image_profile a 2D purpose (#239); a
+	// select names one of its own Options (#286).
 	Type  string `json:"type"`
 	Label string `json:"label"`
 	// MaximumCharacters bounds a text field; Minimum and Maximum bound an
@@ -3564,6 +3586,38 @@ type ChatProductionBriefField struct {
 	// here so the panel keeps no name-based heuristics (#103 review F11/F7).
 	Multiline   bool   `json:"multiline,omitempty"`
 	Placeholder string `json:"placeholder,omitempty"`
+	// Options are the choices of a select field, in display order (#286). A
+	// stored value outside them (a free-text value written before the field
+	// became a select) still reads and is kept unchanged on write-back, but a
+	// new value must be an option id.
+	Options []ChatProductionBriefOption `json:"options,omitempty"`
+}
+
+// ChatProductionBriefOption is one choice of a select brief field: a stable
+// id the brief stores and the Agent writes, and the label people and the Agent
+// read (#286).
+type ChatProductionBriefOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// OptionByID returns the declared option of a select field with that id.
+func (field ChatProductionBriefField) OptionByID(id string) (ChatProductionBriefOption, bool) {
+	for _, option := range field.Options {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return ChatProductionBriefOption{}, false
+}
+
+// OptionIDs lists a select field's option ids in declaration order.
+func (field ChatProductionBriefField) OptionIDs() []string {
+	ids := make([]string, 0, len(field.Options))
+	for _, option := range field.Options {
+		ids = append(ids, option.ID)
+	}
+	return ids
 }
 
 // ChatProductionBriefMessages are the Agent-facing refusals of a brief write.
@@ -3586,6 +3640,10 @@ type ChatProductionBriefMessages struct {
 	OutOfRange string `json:"out_of_range"`
 	// UnsupportedType: {field}, {type}.
 	UnsupportedType string `json:"unsupported_type"`
+	// SelectUndeclared refuses a select value that is none of the field's
+	// option ids: {field}, {options} (#286). Required once a Schema declares
+	// both a select field and any other refusal wording.
+	SelectUndeclared string `json:"select_undeclared,omitempty"`
 }
 
 // ChatAgentScopeSchema is application.chat.agent_scope. The scope of a session

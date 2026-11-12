@@ -118,34 +118,37 @@ func TestProfileParameterSimulationAcceptsAPublicValue(t *testing.T) {
 	}
 }
 
+// briefSchemaWith is a minimal valid brief declaration around the given fields.
+func briefSchemaWith(fields ...ChatProductionBriefField) ChatProductionBriefSchema {
+	return ChatProductionBriefSchema{
+		Fields:                    fields,
+		ContextTemplate:           "{brief}",
+		EmptyText:                 "none",
+		FieldTemplate:             "{label}: {value}",
+		FlagTemplate:              "{label}",
+		Separator:                 "; ",
+		PurposeTemplate:           "{label} ({budget})",
+		BudgetTemplate:            "{minimum}-{maximum}{requirements}",
+		OpenBudgetTemplate:        "{maximum}{requirements}",
+		OverrideBudgetTemplate:    "{value}{requirements}",
+		RequirementsTemplate:      "{items}",
+		RequirementSeparator:      ", ",
+		ImagePurposeTemplate:      "{label} ({requirements})",
+		ImageRequirementsTemplate: "{items}",
+		ImageRequirementSeparator: ", ",
+		UVText:                    "uv",
+		WatertightText:            "watertight",
+		SkinText:                  "skin",
+		SavedMessage:              "saved",
+		InvalidTemplate:           "invalid: {reason}",
+	}
+}
+
 // #103 review C3: the service locates the purpose and the triangle override by
 // field type, so the validator must accept renamed fields and refuse only the
 // shapes the service cannot serve.
 func TestProductionBriefValidationLocatesFieldsByType(t *testing.T) {
-	brief := func(fields ...ChatProductionBriefField) ChatProductionBriefSchema {
-		return ChatProductionBriefSchema{
-			Fields:                    fields,
-			ContextTemplate:           "{brief}",
-			EmptyText:                 "none",
-			FieldTemplate:             "{label}: {value}",
-			FlagTemplate:              "{label}",
-			Separator:                 "; ",
-			PurposeTemplate:           "{label} ({budget})",
-			BudgetTemplate:            "{minimum}-{maximum}{requirements}",
-			OpenBudgetTemplate:        "{maximum}{requirements}",
-			OverrideBudgetTemplate:    "{value}{requirements}",
-			RequirementsTemplate:      "{items}",
-			RequirementSeparator:      ", ",
-			ImagePurposeTemplate:      "{label} ({requirements})",
-			ImageRequirementsTemplate: "{items}",
-			ImageRequirementSeparator: ", ",
-			UVText:                    "uv",
-			WatertightText:            "watertight",
-			SkinText:                  "skin",
-			SavedMessage:              "saved",
-			InvalidTemplate:           "invalid: {reason}",
-		}
-	}
+	brief := briefSchemaWith
 	profile := ChatProductionBriefField{Name: "use", Type: "profile", Label: "Use"}
 	text := ChatProductionBriefField{Name: "look", Type: "text", Label: "Look", MaximumCharacters: 20}
 	flag := ChatProductionBriefField{Name: "animate", Type: "boolean", Label: "Animate"}
@@ -197,21 +200,137 @@ func TestProductionBriefMessagesAreCompleteAndPlaceheld(t *testing.T) {
 		OutOfRange:        `"{field}" must be {minimum}-{maximum}`,
 		UnsupportedType:   `"{field}" has unsupported type "{type}"`,
 	}
-	if err := validateProductionBriefMessages(valid); err != nil {
+	if err := validateProductionBriefMessages(valid, false); err != nil {
 		t.Fatalf("valid messages refused: %v", err)
 	}
 	missing := valid
 	missing.OutOfRange = ""
-	if err := validateProductionBriefMessages(missing); err == nil || !strings.Contains(err.Error(), "out_of_range") {
+	if err := validateProductionBriefMessages(missing, false); err == nil || !strings.Contains(err.Error(), "out_of_range") {
 		t.Fatalf("a partially declared set = %v", err)
 	}
 	badPlaceholder := valid
 	badPlaceholder.TextTooLong = `"{field}" is too long`
-	if err := validateProductionBriefMessages(badPlaceholder); err == nil || !strings.Contains(err.Error(), "maximum") {
+	if err := validateProductionBriefMessages(badPlaceholder, false); err == nil || !strings.Contains(err.Error(), "maximum") {
 		t.Fatalf("a missing placeholder = %v", err)
 	}
-	if err := validateProductionBriefMessages(ChatProductionBriefMessages{}); err != nil {
+	if err := validateProductionBriefMessages(ChatProductionBriefMessages{}, false); err != nil {
 		t.Fatalf("a historical Catalog without messages was refused: %v", err)
+	}
+	// #286: a select field adds one more refusal to word. A Catalog that
+	// declares messages must word it once it declares a select; a historical
+	// Catalog without messages still needs none.
+	if err := validateProductionBriefMessages(ChatProductionBriefMessages{}, true); err != nil {
+		t.Fatalf("a select field with no messages was refused: %v", err)
+	}
+	if err := validateProductionBriefMessages(valid, true); err == nil || !strings.Contains(err.Error(), "select_undeclared") {
+		t.Fatalf("a select field without its refusal wording = %v", err)
+	}
+	withSelect := valid
+	withSelect.SelectUndeclared = `"{field}" must be one of {options}`
+	if err := validateProductionBriefMessages(withSelect, true); err != nil {
+		t.Fatalf("complete select messages refused: %v", err)
+	}
+	withSelect.SelectUndeclared = `"{field}" is not an option`
+	if err := validateProductionBriefMessages(withSelect, true); err == nil || !strings.Contains(err.Error(), "{options}") {
+		t.Fatalf("a select refusal without the options list = %v", err)
+	}
+	onlySelect := ChatProductionBriefMessages{SelectUndeclared: `"{field}" is not an option`}
+	if err := validateProductionBriefMessages(onlySelect, false); err == nil {
+		t.Fatal("a Catalog declaring only the select refusal must declare the rest too")
+	}
+}
+
+// #286: a select field declares its own choices as stable ids; the validator
+// refuses every shape the brief could not serve, and a field that is not a
+// select cannot carry options.
+func TestProductionBriefSelectFieldsAreValidated(t *testing.T) {
+	profile := ChatProductionBriefField{Name: "use", Type: "profile", Label: "Use"}
+	integer := ChatProductionBriefField{Name: "faces", Type: "integer", Label: "Faces", Minimum: 100, Maximum: 1000}
+	engine := ChatProductionBriefField{Name: "engine", Type: "select", Label: "Engine", Options: []ChatProductionBriefOption{
+		{ID: "unity", Label: "Unity"}, {ID: "web", Label: "Web"},
+	}}
+	if err := validateProductionBrief(briefSchemaWith(profile, engine, integer), false); err != nil {
+		t.Fatalf("a select with options refused: %v", err)
+	}
+	with := func(mutate func(*ChatProductionBriefField)) ChatProductionBriefSchema {
+		field := engine
+		field.Options = append([]ChatProductionBriefOption(nil), engine.Options...)
+		mutate(&field)
+		return briefSchemaWith(profile, field, integer)
+	}
+	for _, test := range []struct {
+		name  string
+		brief ChatProductionBriefSchema
+		want  string
+	}{
+		{"a select without options", with(func(f *ChatProductionBriefField) { f.Options = nil }), "options"},
+		{"a duplicate option id", with(func(f *ChatProductionBriefField) {
+			f.Options = append(f.Options, ChatProductionBriefOption{ID: "unity", Label: "Again"})
+		}), "重复"},
+		{"an option id that is a sentence", with(func(f *ChatProductionBriefField) {
+			f.Options[0].ID = "Unity Engine"
+		}), "小写标识"},
+		{"an option id starting with a digit", with(func(f *ChatProductionBriefField) {
+			f.Options[0].ID = "3d"
+		}), "小写标识"},
+		{"an option without a label", with(func(f *ChatProductionBriefField) { f.Options[1].Label = " " }), "label"},
+		{"options on a text field", briefSchemaWith(profile, integer, ChatProductionBriefField{
+			Name: "look", Type: "text", Label: "Look", MaximumCharacters: 20,
+			Options: []ChatProductionBriefOption{{ID: "x", Label: "X"}},
+		}), "不是 select"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateProductionBrief(test.brief, false)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want mention of %q", err, test.want)
+			}
+		})
+	}
+}
+
+// #286: the Agent writes a select through update_production_brief, whose
+// parameter enum is what the model is offered. The two declarations must stay
+// one list.
+func TestBriefSelectParametersFollowTheOptions(t *testing.T) {
+	engine := ChatProductionBriefField{Name: "engine", Type: "select", Label: "Engine", Options: []ChatProductionBriefOption{
+		{ID: "unity", Label: "Unity"}, {ID: "web", Label: "Web"},
+	}}
+	schema := func(parameters string) ChatSchema {
+		return ChatSchema{
+			AgentTools: []ChatAgentToolSchema{{
+				Name:       "update_production_brief",
+				Execution:  ChatToolExecutionSchema{ImplementationKey: "session.brief"},
+				Parameters: json.RawMessage(parameters),
+			}},
+			Model3DUsage: ChatModel3DUsageSchema{Brief: ChatProductionBriefSchema{Fields: []ChatProductionBriefField{engine}}},
+		}
+	}
+	if err := validateBriefSelectParameters(schema(
+		`{"type":"object","properties":{"engine":{"type":"string","enum":["unity","web"]}}}`)); err != nil {
+		t.Fatalf("matching enum refused: %v", err)
+	}
+	for _, test := range []struct {
+		name       string
+		parameters string
+		want       string
+	}{
+		{"no parameter", `{"type":"object","properties":{}}`, "字符串参数"},
+		{"not a string", `{"type":"object","properties":{"engine":{"type":"integer"}}}`, "字符串参数"},
+		{"no enum", `{"type":"object","properties":{"engine":{"type":"string"}}}`, "一一对应"},
+		{"a shorter enum", `{"type":"object","properties":{"engine":{"type":"string","enum":["unity"]}}}`, "一一对应"},
+		{"a different value", `{"type":"object","properties":{"engine":{"type":"string","enum":["unity","godot"]}}}`, `"web"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateBriefSelectParameters(schema(test.parameters))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want mention of %q", err, test.want)
+			}
+		})
+	}
+	// Nothing to compare without the brief tool or without a select.
+	if err := validateBriefSelectParameters(ChatSchema{Model3DUsage: ChatModel3DUsageSchema{
+		Brief: ChatProductionBriefSchema{Fields: []ChatProductionBriefField{engine}}}}); err != nil {
+		t.Fatalf("a Schema without the brief tool was refused: %v", err)
 	}
 }
 

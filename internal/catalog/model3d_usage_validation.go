@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -93,6 +94,9 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 	if err := validateProductionBrief(usage.Brief, len(schema.Image2DUsage.Profiles) > 0); err != nil {
 		return err
 	}
+	if err := validateBriefSelectParameters(schema); err != nil {
+		return err
+	}
 	if err := validateBudgetLimits(usage); err != nil {
 		return err
 	}
@@ -149,7 +153,7 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 		return fmt.Errorf("model3d_usage.brief.fields 不能为空")
 	}
 	declared := map[string]ChatProductionBriefField{}
-	profiles, imageProfiles, integers := 0, 0, 0
+	profiles, imageProfiles, integers, selects := 0, 0, 0, 0
 	for index, field := range brief.Fields {
 		if _, exists := declared[field.Name]; exists {
 			return fmt.Errorf("model3d_usage.brief.fields 中 %q 重复", field.Name)
@@ -158,6 +162,9 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 		if strings.TrimSpace(field.Label) == "" {
 			return fmt.Errorf("model3d_usage.brief.fields[%d].label 不能为空", index)
 		}
+		if field.Type != "select" && len(field.Options) > 0 {
+			return fmt.Errorf("model3d_usage.brief.fields[%s] 不是 select，不能声明 options", field.Name)
+		}
 		switch field.Type {
 		case "profile":
 			profiles++
@@ -165,6 +172,11 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 			imageProfiles++
 		case "boolean":
 			// A boolean field has no other declaration.
+		case "select":
+			selects++
+			if err := validateBriefSelectOptions(field); err != nil {
+				return err
+			}
 		case "integer":
 			integers++
 			if field.Minimum <= 0 || field.Maximum <= 0 || field.Minimum > field.Maximum {
@@ -241,14 +253,84 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 			}
 		}
 	}
-	return validateProductionBriefMessages(brief.Messages)
+	return validateProductionBriefMessages(brief.Messages, selects > 0)
+}
+
+// briefOptionID is the shape of a select option id: a lowercase identifier the
+// brief stores and the Agent writes, never a sentence (#286).
+var briefOptionID = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// validateBriefSelectOptions checks the choices of one select field: at least
+// one, each with a unique identifier id and a label people can read (#286).
+func validateBriefSelectOptions(field ChatProductionBriefField) error {
+	if len(field.Options) == 0 {
+		return fmt.Errorf("model3d_usage.brief.fields[%s] 必须是带 options 的 select", field.Name)
+	}
+	seen := make(map[string]bool, len(field.Options))
+	for index, option := range field.Options {
+		if !briefOptionID.MatchString(option.ID) {
+			return fmt.Errorf("model3d_usage.brief.fields[%s].options[%d].id 必须为小写标识: %q", field.Name, index, option.ID)
+		}
+		if seen[option.ID] {
+			return fmt.Errorf("model3d_usage.brief.fields[%s].options 中 %q 重复", field.Name, option.ID)
+		}
+		seen[option.ID] = true
+		if strings.TrimSpace(option.Label) == "" {
+			return fmt.Errorf("model3d_usage.brief.fields[%s].options[%d].label 不能为空", field.Name, index)
+		}
+	}
+	return nil
+}
+
+// validateBriefSelectParameters keeps the brief tool's parameters and the
+// brief's select options one declaration (#286). The Agent writes a select
+// value through update_production_brief, whose parameter enum is the list the
+// model sees; a drift between the two would offer a value the brief refuses or
+// hide one it accepts. A Schema without a select field, or without the brief
+// tool, has nothing to compare.
+func validateBriefSelectParameters(schema ChatSchema) error {
+	var tool *ChatAgentToolSchema
+	for index := range schema.AgentTools {
+		if schema.AgentTools[index].Execution.ImplementationKey == "session.brief" {
+			tool = &schema.AgentTools[index]
+			break
+		}
+	}
+	if tool == nil {
+		return nil
+	}
+	var properties map[string]any
+	if parameters, found := declaredToolParameters(schema, tool.Name); found && parameters != nil {
+		properties, _ = parameters["properties"].(map[string]any)
+	}
+	for _, field := range schema.Model3DUsage.Brief.Fields {
+		if field.Type != "select" {
+			continue
+		}
+		property, ok := properties[field.Name].(map[string]any)
+		if !ok || property["type"] != "string" {
+			return fmt.Errorf("%s 必须把 select 字段 %q 声明为字符串参数", tool.Name, field.Name)
+		}
+		values, ok := property["enum"].([]any)
+		ids := field.OptionIDs()
+		if !ok || len(values) != len(ids) {
+			return fmt.Errorf("%s.%s 的 enum 必须与简报 select 字段的 options 一一对应", tool.Name, field.Name)
+		}
+		for index, value := range values {
+			if value != ids[index] {
+				return fmt.Errorf("%s.%s 的 enum 第 %d 项必须是 %q", tool.Name, field.Name, index+1, ids[index])
+			}
+		}
+	}
+	return nil
 }
 
 // validateProductionBriefMessages checks the refusal wording of the brief
 // write. A historical Catalog may declare none of it; a Catalog that declares
 // any of it must declare all of it, so no refusal silently falls back to a
-// hardcoded sentence in one language (#103 review C3).
-func validateProductionBriefMessages(messages ChatProductionBriefMessages) error {
+// hardcoded sentence in one language (#103 review C3). A Catalog with a select
+// field must also word the refusal of an undeclared option (#286).
+func validateProductionBriefMessages(messages ChatProductionBriefMessages, hasSelect bool) error {
 	all := map[string]string{
 		"unknown_field":      messages.UnknownField,
 		"not_object":         messages.NotObject,
@@ -259,6 +341,9 @@ func validateProductionBriefMessages(messages ChatProductionBriefMessages) error
 		"text_too_long":      messages.TextTooLong,
 		"out_of_range":       messages.OutOfRange,
 		"unsupported_type":   messages.UnsupportedType,
+	}
+	if hasSelect || strings.TrimSpace(messages.SelectUndeclared) != "" {
+		all["select_undeclared"] = messages.SelectUndeclared
 	}
 	any := false
 	for _, value := range all {
@@ -284,10 +369,15 @@ func validateProductionBriefMessages(messages ChatProductionBriefMessages) error
 		"text_too_long":      {"{field}", "{maximum}"},
 		"out_of_range":       {"{field}", "{minimum}", "{maximum}"},
 		"unsupported_type":   {"{field}", "{type}"},
+		"select_undeclared":  {"{field}", "{options}"},
 	}
 	for name, required := range placeholders {
+		text, declared := all[name]
+		if !declared {
+			continue
+		}
 		for _, placeholder := range required {
-			if !strings.Contains(all[name], placeholder) {
+			if !strings.Contains(text, placeholder) {
 				return fmt.Errorf("model3d_usage.brief.messages.%s 必须包含 %s", name, placeholder)
 			}
 		}
