@@ -203,8 +203,10 @@ func TestModelReviewDeclarationsAreValidated(t *testing.T) {
 			modelReviewFix(a, "triangles").Template = "可用能力降低面数。"
 		}, "{capabilities}"},
 		{"static fix with a capability placeholder", func(a *catalog.ApplicationSchema) {
-			fix := modelReviewFix(a, "texture_size")
-			fix.Template = "可用 {capabilities} 降低贴图。"
+			// y_up is the one fix left without options (texture_size names a
+			// downsample capability since #275).
+			fix := modelReviewFix(a, "y_up")
+			fix.Template = "可用 {capabilities} 调整朝向。"
 		}, "{capabilities}"},
 		{"fix option without capabilities", func(a *catalog.ApplicationSchema) {
 			modelReviewFix(a, "triangles").Options[0].Capabilities = nil

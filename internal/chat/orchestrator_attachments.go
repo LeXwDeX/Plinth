@@ -508,6 +508,10 @@ func (orchestrator *Orchestrator) productionBriefText(
 			value := purposeID
 			budget := ""
 			if found {
+				// The budget the Agent plans against is the one for the brief's
+				// target platform when the purpose has a variant for it (#275);
+				// the platform itself is rendered as its own field.
+				profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
 				value = profile.Label
 				budget = productionBriefBudgetText(profile.Budget, override, hasOverride, briefSchema)
 			}

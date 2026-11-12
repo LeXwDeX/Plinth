@@ -2857,6 +2857,11 @@ type ChatModelInspectProductionSchema struct {
 	DefaultPurposeText   string `json:"default_purpose_text"`
 	BriefPurposeText     string `json:"brief_purpose_text"`
 	TriangleOverrideText string `json:"triangle_override_text"`
+	// PlatformBudgetText says which target platform's budget the purpose was
+	// judged against ({platform}, the option label of the brief's platform
+	// field). It is added only when the purpose has a variant for the
+	// session's platform (#275).
+	PlatformBudgetText string `json:"platform_budget_text,omitempty"`
 	// NoCapabilityText replaces a fix hint when no enabled Offering of the
 	// declared capability is available.
 	NoCapabilityText string `json:"no_capability_text"`
@@ -2875,6 +2880,12 @@ type ChatModelInspectFixSchema struct {
 	Check    string                            `json:"check"`
 	Template string                            `json:"template"`
 	Options  []ChatModelInspectFixOptionSchema `json:"options"`
+	// UnavailableTemplate is the hint when Options are declared but none is
+	// available, in place of the global NoCapabilityText. It lets a fix keep
+	// the path that needs no capability (regenerate) while the capability is
+	// disabled, and the capability appears in Template by itself once it is
+	// enabled (#275). It needs Options and carries no {capabilities}.
+	UnavailableTemplate string `json:"unavailable_template,omitempty"`
 }
 
 // ChatModelInspectFixOptionSchema is one way to fix a failed check. Every
@@ -2884,7 +2895,9 @@ type ChatModelInspectFixOptionSchema struct {
 }
 
 // ChatModelInspectFixCapabilitySchema names a capability and, optionally, the
-// public parameter value that makes it fix this check.
+// public parameter value that makes it fix this check. A texture_size fix may
+// write the purpose's texture bound as {maximum} in Value (a number
+// parameter), so one declaration serves every platform budget (#275).
 type ChatModelInspectFixCapabilitySchema struct {
 	Capability string `json:"capability"`
 	Parameter  string `json:"parameter,omitempty"`
@@ -3333,6 +3346,11 @@ type ChatModel3DUsageSchema struct {
 	// the purpose adjusts it: parameters in ParameterOverrides or an explicit
 	// OverridesNotNeeded entry (#249). Off keeps historical Catalogs valid.
 	OverrideCoverageRequired bool `json:"override_coverage_required,omitempty"`
+	// PlatformField names the brief select field that holds the target
+	// platform (#275). Its option ids are the keys of every profile's
+	// Platforms; the service reads the platform through this name, never a
+	// fixed one. Empty means the Catalog has no platform budgets.
+	PlatformField string `json:"platform_field,omitempty"`
 }
 
 // ChatImage2DUsageSchema is application.chat.image2d_usage (#239).
@@ -3480,9 +3498,36 @@ type ChatModel3DUsageProfile struct {
 	// purpose, in order. It is never executed automatically.
 	Pipeline []ChatModel3DUsagePipelineStep `json:"pipeline,omitempty"`
 	Budget   ChatModel3DUsageBudget         `json:"budget"`
+	// Platforms are the variants of Budget and ParameterOverrides for the
+	// target platforms a session can name (#275). A session without a platform,
+	// or with one no entry covers, keeps Budget and ParameterOverrides as they
+	// are, so a historical session is judged exactly as before.
+	Platforms []ChatModel3DUsagePlatform `json:"platforms,omitempty"`
 	// ScaleRangeM is the plausible longest-edge range in metres. Nil means
 	// the purpose does not judge scale (render).
 	ScaleRangeM *ChatModel3DUsageScaleRange `json:"scale_range_m,omitempty"`
+}
+
+// ChatModel3DUsagePlatform is one platform variant of a purpose (#275). IDs
+// are option ids of the platform brief field that share this variant, so
+// platforms of the same class (a phone, a browser and a standalone headset)
+// are declared once. Budget names the bounds that differ from the purpose's;
+// every bound it leaves out is the purpose's. ParameterOverrides are merged
+// over the purpose's, Offering by Offering and parameter by parameter, so a
+// platform states only the face counts its budget changes.
+type ChatModel3DUsagePlatform struct {
+	IDs                []string                              `json:"ids"`
+	Budget             ChatModel3DUsagePlatformBudget        `json:"budget"`
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+}
+
+// ChatModel3DUsagePlatformBudget is the part of the purpose budget a platform
+// changes. The delivery requirements (UV, watertight, skin) belong to the
+// purpose and never vary by platform.
+type ChatModel3DUsagePlatformBudget struct {
+	MinTriangles   *int `json:"min_triangles,omitempty"`
+	MaxTriangles   *int `json:"max_triangles,omitempty"`
+	MaxTextureSize *int `json:"max_texture_size,omitempty"`
 }
 
 // ChatModel3DUsageScaleRange is a closed longest-edge range in metres.

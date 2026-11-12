@@ -3602,6 +3602,15 @@ func validateModelInspectProduction(
 		{"capability_joiner", production.CapabilityJoiner, nil},
 		{"option_separator", production.OptionSeparator, nil},
 	}
+	// A Catalog with platform budgets must say which platform a check was
+	// judged against; one without them may omit the sentence (#275).
+	if strings.TrimSpace(usage.PlatformField) != "" || strings.TrimSpace(production.PlatformBudgetText) != "" {
+		texts = append(texts, struct {
+			name     string
+			value    string
+			required []string
+		}{"platform_budget_text", production.PlatformBudgetText, []string{"{platform}"}})
+	}
 	for _, text := range texts {
 		if strings.TrimSpace(text.value) == "" {
 			return fmt.Errorf("chat.model_review.inspect.production.%s 不能为空", text.name)
@@ -3642,18 +3651,37 @@ func validateModelInspectProduction(
 				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 {capabilities}", fix.Check)
 			}
 		}
+		// The purpose bounds a fix may name, in the order its template must
+		// contain them: the scale range of plausible_scale and, since #275,
+		// the texture side of texture_size.
+		var boundNames []string
 		if fix.Check == ModelReviewUsageCheckPlausibleScale && len(fix.Options) > 0 {
-			allowed["{minimum}"] = true
-			allowed["{maximum}"] = true
-			for _, placeholder := range []string{"{minimum}", "{maximum}"} {
-				if !strings.Contains(fix.Template, placeholder) {
-					return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 %s", fix.Check, placeholder)
-				}
+			boundNames = []string{"{minimum}", "{maximum}"}
+		}
+		if fix.Check == ModelReviewUsageCheckTextureSize && len(fix.Options) > 0 {
+			boundNames = []string{"{maximum}"}
+		}
+		bounds := make(map[string]bool, len(boundNames))
+		for _, placeholder := range boundNames {
+			bounds[placeholder] = true
+			allowed[placeholder] = true
+			if !strings.Contains(fix.Template, placeholder) {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 %s", fix.Check, placeholder)
 			}
 		}
 		for _, placeholder := range modelReviewPlaceholder.FindAllString(fix.Template, -1) {
 			if !allowed[placeholder] {
 				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 含未填充的占位符 %s", fix.Check, placeholder)
+			}
+		}
+		if strings.TrimSpace(fix.UnavailableTemplate) != "" {
+			if len(fix.Options) == 0 {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].unavailable_template 需要声明 options", fix.Check)
+			}
+			for _, placeholder := range modelReviewPlaceholder.FindAllString(fix.UnavailableTemplate, -1) {
+				if !bounds[placeholder] {
+					return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].unavailable_template 含未填充的占位符 %s", fix.Check, placeholder)
+				}
 			}
 		}
 		for optionIndex, option := range fix.Options {
@@ -3672,6 +3700,17 @@ func validateModelInspectProduction(
 						"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的 parameter 与 value 必须同时为空或同时非空",
 						fix.Check, optionIndex, candidateIndex,
 					)
+				}
+				// A value may name a purpose bound as a placeholder so one
+				// declaration serves every platform budget; only a bound the
+				// fix declares is filled, and only as the whole value (#275).
+				for _, placeholder := range modelReviewPlaceholder.FindAllString(candidate.Value, -1) {
+					if !bounds[placeholder] || candidate.Value != placeholder {
+						return fmt.Errorf(
+							"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的 value 含未填充的占位符 %s",
+							fix.Check, optionIndex, candidateIndex, placeholder,
+						)
+					}
 				}
 			}
 		}

@@ -69,15 +69,20 @@ type modelInput struct {
 
 // briefPurpose returns the 3D purpose profile the session's production brief
 // selects. A session without a brief has none: nothing is recommended or
-// overridden by a purpose.
+// overridden by a purpose. The profile is already the variant for the brief's
+// target platform when the purpose declares one (#275), so its budget and
+// parameter overrides are what every later layer reads; a session without a
+// platform gets the purpose as declared.
 func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatModel3DUsageProfile, bool) {
 	usage := executor.chat.Model3DUsage
 	if len(usage.Profiles) == 0 || command.Options.ProductionBrief.Empty() {
 		return catalog.ChatModel3DUsageProfile{}, false
 	}
-	id := command.Options.ProductionBrief.Text(briefFieldOfType(usage.Brief, "profile"))
+	brief := command.Options.ProductionBrief
+	id := brief.Text(briefFieldOfType(usage.Brief, "profile"))
 	for _, profile := range usage.Profiles {
 		if profile.ID == id {
+			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
 			return profile, true
 		}
 	}

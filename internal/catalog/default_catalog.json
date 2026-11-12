@@ -6343,6 +6343,7 @@
             "default_purpose_text": "会话没有可用的制作简报用途，按默认用途「{purpose}」判定。",
             "brief_purpose_text": "按制作简报的用途「{purpose}」判定。",
             "triangle_override_text": "三角面上限采用制作简报的 triangle_budget：{value}。",
+            "platform_budget_text": "按制作简报的目标平台「{platform}」的预算判定。",
             "no_capability_text": "当前 Catalog 没有可用于修复这一项的已启用能力。",
             "capability_joiner": " → ",
             "option_separator": " 或 ",
@@ -6377,8 +6378,11 @@
               },
               {
                 "check": "texture_size",
-                "template": "贴图超过用途上限；请重新生成并降低贴图尺寸。",
-                "options": []
+                "template": "贴图超过用途的上限 {maximum} 像素；可用 {capabilities} 把贴图降采样到上限以内，不必重新生成。",
+                "unavailable_template": "贴图超过用途的上限 {maximum} 像素；当前没有已启用的贴图降采样能力，只能重新生成并降低贴图尺寸。",
+                "options": [
+                  {"capabilities": [{"capability": "format-conversion", "parameter": "texture_size", "value": "{maximum}"}]}
+                ]
               },
               {
                 "check": "pivot_bottom_center",
@@ -9508,6 +9512,7 @@
       "model3d_usage": {
         "default_profile": "render",
         "override_coverage_required": true,
+        "platform_field": "target_platform",
         "profiles": [
           {
             "id": "render",
@@ -9552,13 +9557,13 @@
             "description": "游戏或实时应用中的角色；控制面数并保留 UV，便于绑骨、动画与引擎导入。",
             "recommended_offerings": {
               "text-to-3d": [
-                "meshy/meshy-t2.5/text-to-3d",
                 "tripo/tripo-p2/text-to-3d",
+                "meshy/meshy-t2.5/text-to-3d",
                 "hyper3d/rodin-gen-2.5/text-to-3d"
               ],
               "image-to-3d": [
-                "meshy/meshy-t2.5/image-to-3d",
                 "tripo/tripo-p2/image-to-3d",
+                "meshy/meshy-t2.5/image-to-3d",
                 "hyper3d/rodin-gen-2.5/image-to-3d"
               ],
               "multiview-to-3d": [
@@ -9568,19 +9573,23 @@
             },
             "parameter_overrides": {
               "tripo/tripo-p2/text-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2/image-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2-multiview/image-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "texture_quality": "standard"
               },
               "tripo/tripo-v3.1-multiview/image-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "smart_low_poly": true,
                 "texture_quality": "standard"
               },
@@ -9607,7 +9616,44 @@
                 "quad_normal": true
               }
             },
-            "reason": "角色用于实时渲染，需要受控面数与 UV；先用成本更低的 Meshy T2.5，P2 作为可设置低面数的备选，Rodin Gen-2.5 作为需要四边面与 T/A 姿态时的第三选择。",
+            "reason": "角色要做表情和关节变形，需要四边面布线：优先使用支持四边面输出的模型并默认开启四边面。文生、图生先用 Tripo P2；Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后。四边面的真实拓扑质量尚未用真实上游样本核对。",
+            "platforms": [
+              {
+                "ids": ["mobile", "web", "xr"],
+                "budget": {
+                  "max_triangles": 20000,
+                  "max_texture_size": 2048
+                }
+              },
+              {
+                "ids": ["pc_console"],
+                "budget": {
+                  "max_triangles": 100000,
+                  "max_texture_size": 4096
+                },
+                "parameter_overrides": {
+                  "tripo/tripo-p2/text-to-3d": {
+                    "face_limit": 25000
+                  },
+                  "tripo/tripo-p2/image-to-3d": {
+                    "face_limit": 25000
+                  },
+                  "tripo/tripo-p2-multiview/image-to-3d": {
+                    "face_limit": 25000
+                  },
+                  "tripo/tripo-v3.1-multiview/image-to-3d": {
+                    "face_limit": 50000,
+                    "smart_low_poly": false
+                  },
+                  "meshy/meshy-t2.5/text-to-3d": {
+                    "target_polycount": 30000
+                  },
+                  "meshy/meshy-t2.5/image-to-3d": {
+                    "target_polycount": 30000
+                  }
+                }
+              }
+            ],
             "pipeline": [
               {
                 "capability": "rigging"
@@ -9681,7 +9727,31 @@
                 "quad_normal": true
               }
             },
-            "reason": "道具与场景件的面数预算更低；先用 Meshy T2.5，P2 作为自适应低模的备选，Rodin Gen-2.5 可出四边面并烘焙法线贴图。",
+            "reason": "道具与场景件不需要变形，目录里的 Offering 自述把 Meshy T2.5 与 Tripo P2 都写成适合游戏与实时资产的低模、干净拓扑，没有可依据的质量差异；质量相同时才按成本排先后，所以报价较低的 T2.5 在前、P2 在后；Rodin Gen-2.5 可出四边面并烘焙法线贴图（2K 贴图），排第三。面数预算更低，P2 不设面数覆盖，按其自适应低模。两者的真实输出质量尚未用真实上游样本核对。",
+            "platforms": [
+              {
+                "ids": ["mobile", "web", "xr"],
+                "budget": {
+                  "max_triangles": 8000,
+                  "max_texture_size": 2048
+                },
+                "parameter_overrides": {
+                  "tripo/tripo-p2-multiview/image-to-3d": {
+                    "face_limit": 8000
+                  },
+                  "tripo/tripo-v3.1-multiview/image-to-3d": {
+                    "face_limit": 8000
+                  }
+                }
+              },
+              {
+                "ids": ["pc_console"],
+                "budget": {
+                  "max_triangles": 40000,
+                  "max_texture_size": 4096
+                }
+              }
+            ],
             "pipeline": [
               {
                 "capability": "mesh-segmentation"
@@ -19064,10 +19134,10 @@
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
             "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
             "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
-            "chat.model3d_usage.profiles[id=game_character].reason": "A character rendered in real time needs a controlled triangle count and UVs; Meshy T2.5 comes first for its lower cost, with P2 as the alternative that can set a low face limit and Rodin Gen-2.5 as the third choice when quad faces and a T or A pose are wanted.",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character has to deform for expressions and joints, which needs quad topology: models that can output quads come first, and quads are turned on by default. For text and single-image input Tripo P2 comes first; Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality. The real topology quality of the quads has not been checked against real upstream samples.",
             "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
             "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
-            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces have a lower triangle budget; Meshy T2.5 comes first, with P2 as the adaptive low-poly alternative and Rodin Gen-2.5 for quad faces with a baked normal map.",
+            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces do not deform. The catalog's own notes describe both Meshy T2.5 and Tripo P2 as low-poly, clean-topology models for games and real-time assets, so there is no documented quality difference to rank by; cost only orders models of equal quality, so the lower-quoted T2.5 comes first and P2 follows; Rodin Gen-2.5 comes third for quad faces with a baked normal map and 2K textures. The triangle budget is lower; P2 sets no face limit so it can choose its own adaptive low-poly count. The real output quality of both has not been checked against real upstream samples.",
             "chat.model3d_usage.profiles[id=web_ar].label": "Web / AR display",
             "chat.model3d_usage.profiles[id=web_ar].description": "A model shown live on the web or in AR; the triangle count is controlled and UVs are kept.",
             "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; Meshy 7.1's low triangle count and 2K textures come first, with P2 as an alternative.",
