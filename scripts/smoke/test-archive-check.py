@@ -193,6 +193,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(checker.MISSING_HEADING, readme["missing_heading"])
         self.assertEqual(checker.DEPENDENCY_HEADING, readme["dependency_heading"])
         self.assertEqual(checker.OTHER_HEADING, readme["other_heading"])
+        self.assertEqual(checker.SAME_HEADING, readme["same_heading"])
         self.assertEqual(
             checker.MISSING_REFERENCE_NOTE,
             readme["dependency_missing_line"].replace("- {path}", ""),
@@ -206,6 +207,34 @@ class ArchiveTests(unittest.TestCase):
         obj = next(f for f in schema["formats"] if f["id"] == "obj")
         self.assertEqual(checker.OBJ_LABEL, obj["label"])
         self.assertEqual(checker.OTHER_DIRECTORY, schema["archive"]["other_directory"])
+
+    def test_same_file_section_names_no_archive_entry(self):
+        # #293: a slot whose bytes an included entry already holds is left out of
+        # the ZIP and named in its own README section. Its line says which entry
+        # has the bytes; it is neither a listed path nor an entry to describe.
+        readme = (
+            "已包含的格式：\n- GLB：model.glb\n- FBX：model.fbx\n\n"
+            "内容相同的文件：\n- converted.gltf 与 model.glb 内容相同，只收录一份\n"
+        ).encode()
+        self.assertEqual(
+            [(path, kind) for path, kind, _ in checker.listed_paths(readme)],
+            [("model.glb", "model"), ("model.fbx", "model")],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "archive.zip"
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                z.writestr("README.txt", readme)
+                z.writestr("model.glb", b"glb")
+                z.writestr("model.fbx", b"fbx")
+            checker.check_full(path)
+            # The omitted slot must not also be packed: every entry is described once.
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                z.writestr("README.txt", readme)
+                z.writestr("model.glb", b"glb")
+                z.writestr("model.fbx", b"fbx")
+                z.writestr("other/converted_model-converted.gltf.glb", b"glb")
+            with self.assertRaisesRegex(ValueError, "not described by the README"):
+                checker.check_full(path)
 
     def test_layout_rejects_unsafe_and_unknown_readme_paths(self):
         for path in ("../model.glb", "/etc/model.glb", "glb\\model.glb", "C:model.glb", "glb//model.glb"):

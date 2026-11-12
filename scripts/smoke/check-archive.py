@@ -16,10 +16,14 @@ INCLUDED_HEADING = "已包含的格式："
 MISSING_HEADING = "未包含的格式："
 DEPENDENCY_HEADING = "OBJ 的材质与贴图（与 OBJ 放在同一文件夹）："
 OTHER_HEADING = "其他文件："
+# #293: a file whose bytes an included entry already holds is left out and named
+# here, so its lines are not archive entries.
+SAME_HEADING = "内容相同的文件："
 SECTIONS = {
     INCLUDED_HEADING: "model",
     DEPENDENCY_HEADING: "dependency",
     OTHER_HEADING: "other",
+    SAME_HEADING: "same",
     MISSING_HEADING: "missing",
 }
 # The dependency_missing_line suffix: a file the OBJ references but the task
@@ -92,7 +96,9 @@ def listed_paths(readme):
     the ZIP holds), "attachment" (a file under other/) or "reference" (a
     dependency the OBJ names but the task never saved); label is the format
     label for a model line. The section heading decides the kind; punctuation
-    inside a file name is kept verbatim.
+    inside a file name is kept verbatim. The "same" section (a file left out
+    because an included entry holds the same bytes) and the missing-format
+    section name no archive entry, so they yield no path.
     """
     section = ""
     paths = []

@@ -196,6 +196,12 @@ type ModelArchiveReadmeSchema struct {
 	OtherLine             string `json:"other_line"`
 	CompleteNote          string `json:"complete_note"`
 	IncompleteNote        string `json:"incomplete_note"`
+	// SameHeading and SameLine name the attachments the ZIP leaves out because
+	// an included file has the same bytes (#293): {label} is the omitted slot,
+	// {path} the entry that holds the bytes. They are declared together; without
+	// them every attachment is packed.
+	SameHeading string `json:"same_heading,omitempty"`
+	SameLine    string `json:"same_line,omitempty"`
 	// ConvertedObjNote is written, with {path} replaced by the OBJ path, when
 	// the OBJ is a conversion result without material library or textures.
 	ConvertedObjNote string `json:"converted_obj_note,omitempty"`
@@ -432,6 +438,10 @@ func validateModelDelivery(schema ApplicationSchema) error {
 		strings.TrimSpace(readme.OtherHeading) == "" || strings.TrimSpace(readme.CompleteNote) == "" ||
 		strings.TrimSpace(readme.IncompleteNote) == "" {
 		return fmt.Errorf("archive.readme 不完整")
+	}
+	if heading, line := strings.TrimSpace(readme.SameHeading), strings.TrimSpace(readme.SameLine); (heading == "") != (line == "") ||
+		(line != "" && (!strings.Contains(line, "{label}") || !strings.Contains(line, "{path}"))) {
+		return fmt.Errorf("archive.readme.same_heading 与 same_line 须同时声明，same_line 需要 {label} 与 {path}")
 	}
 	audit := archive.Audit
 	if strings.TrimSpace(audit.Action) == "" || strings.TrimSpace(audit.ResourceType) == "" ||

@@ -1,13 +1,16 @@
 package httpapi_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -109,5 +112,36 @@ func TestSlotsSharingOneBlobDownloadIndependently(t *testing.T) {
 		if foreign := modelDeliveryRequest(handler, http.MethodGet, target, "owner-b"); foreign.Code != http.StatusNotFound || bytes.Contains(foreign.Body.Bytes(), shared) {
 			t.Fatalf("%s/%s foreign read = %d", asset.Role, asset.Variant, foreign.Code)
 		}
+	}
+
+	// The one-click ZIP holds the shared file once, under the GLB format's name, and
+	// the README says a slot repeats it. Which of the two records the GLB row names is
+	// the kernel's order, so the README line is checked without its label.
+	archive := modelDeliveryRequest(handler, http.MethodGet, "/api/v1/tasks/"+string(task.ID)+"/archive", "owner-a")
+	if archive.Code != http.StatusOK {
+		t.Fatalf("archive = %d %s", archive.Code, archive.Body)
+	}
+	reader, err := zip.NewReader(bytes.NewReader(archive.Body.Bytes()), int64(archive.Body.Len()))
+	if err != nil {
+		t.Fatalf("response is not a ZIP: %v", err)
+	}
+	entries := map[string][]byte{}
+	for _, file := range reader.File {
+		if strings.HasPrefix(file.Name, "other/") {
+			t.Fatalf("the ZIP repeats a file under %s", file.Name)
+		}
+		handle, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries[file.Name], _ = io.ReadAll(handle)
+		handle.Close()
+	}
+	if !bytes.Equal(entries["model.glb"], shared) {
+		t.Fatalf("model.glb is not the shared file: %d bytes", len(entries["model.glb"]))
+	}
+	readme := string(entries["README.txt"])
+	if !strings.Contains(readme, "内容相同的文件：\n- ") || !strings.Contains(readme, " 与 model.glb 内容相同，只收录一份\n") {
+		t.Fatalf("README does not name the repeated slot:\n%s", readme)
 	}
 }

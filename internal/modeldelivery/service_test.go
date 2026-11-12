@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -255,6 +257,8 @@ func (f *fixture) ValidateOfferingInput(ctx context.Context, owner generation.Ow
 type assetSpec struct {
 	role, variant, mediaType string
 	body                     string
+	// noDigest leaves the record without a SHA-256, as a historical asset is.
+	noDigest bool
 }
 
 // addTask stores a succeeded task of provider/capability with the given
@@ -274,11 +278,16 @@ func (f *fixture) addTask(id, owner, providerID string, capability generation.Ca
 		if mediaType == "" {
 			mediaType = "application/octet-stream"
 		}
-		task.Assets = append(task.Assets, generation.Asset{
+		asset := generation.Asset{
 			ID: assetID, TaskID: task.ID, Role: spec.role, Variant: spec.variant, Ordinal: index,
 			StorageKey: "key-" + string(assetID), MediaType: mediaType, Size: int64(len(body)),
 			CreatedAt: time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC),
-		})
+		}
+		if !spec.noDigest {
+			digest := sha256.Sum256([]byte(body))
+			asset.SHA256 = hex.EncodeToString(digest[:])
+		}
+		task.Assets = append(task.Assets, asset)
 	}
 	f.tasks[task.ID] = task
 	return task
