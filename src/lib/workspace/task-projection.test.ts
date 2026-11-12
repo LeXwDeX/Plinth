@@ -361,3 +361,26 @@ describe('projectNativeTaskDetail queue_notice', () => {
     }
   });
 });
+
+describe('projectNativeTaskDetail notices', () => {
+  const project = (extra: Record<string, unknown>) => projectNativeTaskDetail(nativeDetail({ state: 'SUCCEEDED', ...extra }), states, 100);
+
+  it('服务端给出 notices 时原样投影 code 与整句 detail（位置已在句子里）', () => {
+    const detail = '第 2 张、第 4 张没有处理成功，其余已完成。';
+    const projected = project({ notices: [{ code: 'partial_inputs', detail, inputs: [2, 4] }] });
+    expect(projected?.notices).toEqual([{ code: 'partial_inputs', detail }]);
+    expect(projected?.state).toBe('SUCCEEDED');
+  });
+
+  it('没有 notices 时不带该字段', () => {
+    expect(project({})).not.toHaveProperty('notices');
+    expect(project({ notices: [] })).not.toHaveProperty('notices');
+  });
+
+  it('形状不对或 detail 为空的条目忽略，其余保留', () => {
+    expect(project({ notices: 'x' })).not.toHaveProperty('notices');
+    expect(project({ notices: [null, 3, 'x', {}, { code: 'a' }, { code: 'b', detail: '  ' }, { code: 'c', detail: 5 }] })).not.toHaveProperty('notices');
+    expect(project({ notices: [{ code: 'a' }, { code: 'partial_inputs', detail: '有图片没有处理成功。' }] })?.notices)
+      .toEqual([{ code: 'partial_inputs', detail: '有图片没有处理成功。' }]);
+  });
+});

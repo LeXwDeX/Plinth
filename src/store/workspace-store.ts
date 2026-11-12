@@ -8,6 +8,7 @@ import type {
   TrackedAsset,
   TrackedResource,
   TrackedTaskFailure,
+  TrackedNotice,
   TrackedQueueNotice,
   TrackedTaskProjection,
 } from '@/lib/workspace/task-projection';
@@ -76,6 +77,8 @@ export interface TrackedTask {
   resourcesPending: boolean;
   /** 因上游限流等原因排队时的说明（服务端已解析文案）；离开排队状态后随详情刷新清除。 */
   queueNotice?: TrackedQueueNotice;
+  /** 已成功但没有交付全部内容时的说明（服务端已解析文案，#284）。 */
+  notices?: TrackedNotice[];
   notFound: boolean;
   updatedAt: number;
   /** Known once the server's task detail has arrived. */
@@ -350,6 +353,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         resources: projection.resources,
         resourcesPending: projection.resourcesPending,
         queueNotice: projection.queueNotice,
+        notices: projection.notices,
         startedAt: projection.createdAt ?? task.startedAt,
         offeringId: projection.offeringId || task.offeringId,
         modelId: projection.modelId || task.modelId,

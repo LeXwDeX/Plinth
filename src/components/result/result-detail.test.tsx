@@ -118,6 +118,23 @@ describe('ResultDetail', () => {
     expect(html).toContain('上游排队中（前方约 1313 个任务）');
   });
 
+  it('says which pictures a succeeded task did not deliver, without changing its state (#284)', () => {
+    const detail = '第 2 张、第 4 张没有处理成功，其余已完成。';
+    state.task = ready({ notices: [{ code: 'partial_inputs', detail, inputs: [2, 4] }] });
+    const html = renderToStaticMarkup(<ResultDetail target={target} />);
+    expect(html).toContain('data-status="ready"');
+    expect(html).toContain('data-testid="result-detail-notice"');
+    expect(html).toContain('data-notice-code="partial_inputs"');
+    expect(html).toContain(detail);
+    expect(html).not.toContain('result-detail-failure');
+    // A task that delivered everything, or one that failed, shows no notice.
+    state.task = ready({});
+    expect(renderToStaticMarkup(<ResultDetail target={target} />)).not.toContain('result-detail-notice');
+    state.task = ready({ state: 'FAILED', session_id: 's1', assets: [], failure: { class: 'x', retryable: false, detail: '上游拒绝了请求' },
+      notices: [{ code: 'partial_inputs', detail }] });
+    expect(renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'failed' }} />)).not.toContain('result-detail-notice');
+  });
+
   it('shows the failure reason of a failed task', () => {
     state.task = ready({ state: 'FAILED', session_id: 's1', assets: [], failure: { class: 'x', retryable: false, detail: '上游拒绝了请求' } });
     const html = renderToStaticMarkup(<ResultDetail target={{ ...target, url: '', status: 'failed' }} />);
