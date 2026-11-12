@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-import { cn } from '@/lib/utils';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 
 /**
  * The stage header's action row. It takes the room the identity group leaves and scrolls sideways inside the
@@ -44,9 +44,11 @@ export function StageActionStrip({
   return (
     <div className="flex min-w-0 flex-1 items-center justify-end" data-testid="stage-action-strip">
       {edges.previous ? (
-        <button type="button" className={arrow} aria-label={previousLabel} title={previousLabel} onClick={() => page(-1)} data-testid="stage-actions-previous">
-          <ChevronLeft aria-hidden className="size-4" />
-        </button>
+        <HintTooltip name={previousLabel} className="shrink-0">
+          <button type="button" className={arrow} aria-label={previousLabel} onClick={() => page(-1)} data-testid="stage-actions-previous">
+            <ChevronLeft aria-hidden className="size-4" />
+          </button>
+        </HintTooltip>
       ) : null}
       <div
         ref={rowRef}
@@ -57,9 +59,11 @@ export function StageActionStrip({
         {children}
       </div>
       {edges.next ? (
-        <button type="button" className={cn(arrow)} aria-label={nextLabel} title={nextLabel} onClick={() => page(1)} data-testid="stage-actions-next">
-          <ChevronRight aria-hidden className="size-4" />
-        </button>
+        <HintTooltip name={nextLabel} className="shrink-0">
+          <button type="button" className={arrow} aria-label={nextLabel} onClick={() => page(1)} data-testid="stage-actions-next">
+            <ChevronRight aria-hidden className="size-4" />
+          </button>
+        </HintTooltip>
       ) : null}
     </div>
   );
