@@ -250,7 +250,7 @@ func TestWorkflowChainSucceedsAndDeliversValidFiles(t *testing.T) {
 
 	formats := []struct{ format, variant, media string }{
 		{"FBX", "fbx", "model/fbx"}, {"OBJ", "obj", "application/zip"}, {"STL", "stl", "model/stl"},
-		{"USDZ", "usdz", "model/vnd.usdz+zip"}, {"3MF", "3mf", "model/3mf"}, {"GLTF", "gltf", "model/gltf+json"},
+		{"USDZ", "usdz", "model/vnd.usdz+zip"}, {"3MF", "3mf", "model/3mf"}, {"GLTF", "gltf", "model/gltf-binary"},
 	}
 	for _, c := range formats {
 		convert := f.create("/models/convert", map[string]any{"input": f.outputURL(segDone, "model_url"), "format": c.format}, key)
@@ -262,6 +262,35 @@ func TestWorkflowChainSucceedsAndDeliversValidFiles(t *testing.T) {
 		if err := deliveryErr(t, data, "converted_model", c.variant, c.media); err != nil {
 			t.Errorf("%s export rejected by the delivery check: %v", c.format, err)
 		}
+	}
+}
+
+// #293: Tripo returns the GLTF export as a binary GLB. The dev-test check of
+// 2026-11-12 read the converted.gltf file and the task's model (which is that
+// file) as the same bytes, and the model was a GLB. The fake used to deliver a glTF
+// JSON here, which hid that the two slots of a Plinth task hold one file.
+func TestGltfExportIsTheBinaryGlbTheGenerationDelivers(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	gen := f.create("/generation/text-to-model", textBody(), key)
+	_, done := f.finish(gen, key)
+	_, _, model := f.download(f.outputURL(done, "model_url"))
+
+	convert := f.create("/models/convert", map[string]any{"input": f.outputURL(done, "model_url"), "format": "GLTF"}, key)
+	_, body := f.finish(convert, key)
+	exportURL := f.outputURL(body, "model_url")
+	// Plinth keys the media type on the extension of the URL: a .glb is model/gltf-binary.
+	if !strings.HasSuffix(strings.Split(exportURL, "?")[0], "/model.glb") {
+		t.Fatalf("the GLTF export is delivered as %q, want a model.glb", exportURL)
+	}
+	status, contentType, data := f.download(exportURL)
+	if status != http.StatusOK || contentType != ArtifactContentType {
+		t.Fatalf("GLTF export: %d %q", status, contentType)
+	}
+	if err := deliveryErr(t, data, "converted_model", "converted.gltf", "model/gltf-binary"); err != nil {
+		t.Fatalf("the GLTF export is not a GLB the delivery check accepts: %v", err)
+	}
+	if !bytes.Equal(data, model) {
+		t.Fatalf("the GLTF export differs from the model GLB: %d and %d bytes", len(data), len(model))
 	}
 }
 

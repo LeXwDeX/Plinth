@@ -706,8 +706,9 @@ def scenario_tripo_images(api, offerings):
     step(api, offerings, "tripo smartsegment (picture)", TRIPO_SMARTSEGMENT_IMAGE, "image-to-3d", {"image": picture}, session)
     if gen and gen.get("state") == "SUCCEEDED":
         step(api, offerings, "tripo decimate (triangle)", TRIPO_DECIMATE, "remesh", {"source_task": gen["id"]}, session)
-        # Smart Segmentation of a model takes a library model file. Tripo's own image-to-3D delivers
-        # glTF text by default, so the binary GLB comes from a Meshy text-to-3D and is uploaded.
+        # Smart Segmentation of a model takes a library model file, so a binary GLB is uploaded:
+        # the Meshy text-to-3D delivers one (the Tripo fake's GLTF export is a GLB too since #293,
+        # but this step does not depend on which task it came from).
         source = step(api, offerings, "tripo smartsegment (model): source GLB from meshy text-to-3d", MESHY_TEXT_TO_3D, "text-to-3d",
                       {"prompt": "a plain cube"}, session)
         model = next((a for a in (source or {}).get("assets") or [] if a.get("role") == "model" and a.get("variant") == "glb"), None)

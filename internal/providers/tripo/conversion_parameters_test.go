@@ -233,7 +233,7 @@ func TestGamePurposeExportsOnlyItsFormatsWithTheAdvancedOptions(t *testing.T) {
 	// The two exports are the only conversion claims; the GLB of the model role is
 	// the GLTF export.
 	variants := map[string]int{}
-	var primary generation.ArtifactClaim
+	var primary, gltf generation.ArtifactClaim
 	for _, claim := range observation.Artifacts {
 		if claim.Role != "model" && claim.Role != "converted_model" {
 			continue // the thumbnails the base task returns
@@ -242,12 +242,21 @@ func TestGamePurposeExportsOnlyItsFormatsWithTheAdvancedOptions(t *testing.T) {
 		if claim.Role == "model" {
 			primary = claim
 		}
+		if claim.Variant == "converted.gltf" {
+			gltf = claim
+		}
 	}
 	if variants["converted_model/converted.gltf"] != 1 || variants["converted_model/converted.fbx"] != 1 || variants["model/"] != 1 || len(variants) != 3 {
 		t.Fatalf("claims = %v, want the model, converted.gltf and converted.fbx", variants)
 	}
-	if !strings.HasSuffix(strings.Split(primary.Locator, "?")[0], ".gltf") {
-		t.Fatalf("the model claim must be the GLTF conversion, got %s", primary.Locator)
+	// One locator fulfils both slots, and it is the GLTF export: Tripo returns it as
+	// a binary GLB (the fake does since #293), so both claims are typed by its .glb.
+	if primary.Locator == "" || primary.Locator != gltf.Locator {
+		t.Fatalf("the model claim must be the GLTF conversion: model %s, converted.gltf %s", primary.Locator, gltf.Locator)
+	}
+	if !strings.HasSuffix(strings.Split(primary.Locator, "?")[0], "/model.glb") ||
+		primary.MediaType != "model/gltf-binary" || gltf.MediaType != "model/gltf-binary" {
+		t.Fatalf("the GLTF export must be a GLB: model %s (%s), converted.gltf %s (%s)", primary.Locator, primary.MediaType, gltf.Locator, gltf.MediaType)
 	}
 	// The FBX preset stays on its upstream default, so it is not sent.
 	want := map[string]any{"texture_format": "PNG", "texture_size": float64(2048), "pivot_to_center_bottom": true}
