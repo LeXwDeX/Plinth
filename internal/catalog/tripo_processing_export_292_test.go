@@ -72,10 +72,12 @@ func TestTripoProcessingExportsBindTheTextureSizeToThePurposeBudget(t *testing.T
 			}
 			// A public, selectable choice the purpose budget fits: the Agent's plan
 			// steps, the direct task API and the 加工 panel all carry it, because it
-			// is not an advised parameter and not hidden or fixed.
+			// is not an advised parameter and not hidden or fixed. The panel leaves it
+			// out until the person picks a size, so it follows the session purpose.
 			if size.Type != "select" || size.Semantic != schema.SemanticTextureSize || string(size.Default) != `"8k"` ||
 				size.Fixed || size.AdjustmentPolicy != "" || size.WireName != "" || size.Required ||
-				size.Presentation == nil || size.Presentation.Surface != schema.SurfaceProvider {
+				size.Presentation == nil || size.Presentation.Surface != schema.SurfaceProvider ||
+				!size.Presentation.FollowsPurpose {
 				t.Fatalf("export texture size declaration: %+v", size)
 			}
 			if !o.AgentParameterAllowed(*size) || !o.UserParameterAllowed(*size) {

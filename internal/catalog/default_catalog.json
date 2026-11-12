@@ -4797,6 +4797,7 @@
         "ui.studio.params.capability": "适用操作",
         "ui.studio.params.readonly": "固定配置",
         "ui.studio.params.not_set": "未设置",
+        "ui.studio.params.follows_purpose": "按会话用途",
         "ui.studio.params.on": "开",
         "ui.studio.params.off": "关",
         "ui.studio.params.files_selected": "已选择 {count} 个文件",
@@ -17821,6 +17822,7 @@
             "ui.studio.params.capability": "Applies to",
             "ui.studio.params.readonly": "Fixed configuration",
             "ui.studio.params.not_set": "Not set",
+            "ui.studio.params.follows_purpose": "Follow the session purpose",
             "ui.studio.params.on": "On",
             "ui.studio.params.off": "Off",
             "ui.studio.params.files_selected": "Selected {count} files",
@@ -20316,7 +20318,7 @@
             "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs lossless textures (a game, for example) chooses PNG in its own declaration, and the Agent may also choose it with a stated reason.",
             "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。": "Side length of the diffuse texture the format conversions export. The default is 4K, the upstream default, which keeps the conversion at the basic price; any other value makes it an advanced conversion. The highest generated texture tier is advertised as 8K (native and exported textures measured 4096 on 2026-10-19); choose 8K to stay at or above it.",
             "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs smaller or larger textures says so in its own declaration, and the Agent may also adjust it to another legal value with a stated reason.",
-            "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。": "Side length of the texture the exports (FBX and other formats that carry textures) are written with; the texture is always lossless PNG. The default is 8K. When the session's purpose sets a lower texture limit, a step the Agent starts takes that limit. It applies only to the exported formats; the GLB the step returns directly keeps Tripo's original textures. Exports are always priced as advanced conversions (PNG is not the upstream default format), so changing the size does not change the price.",
+            "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。": "Side length of the texture the exports (FBX and other formats that carry textures) are written with; the texture is always lossless PNG. The default is 8K. When no size is chosen (you leave this field as it is, or the Agent starts the step), the texture limit of the purpose in the session's production brief applies, and 8K when the purpose sets none; a size you choose yourself is used as chosen. It applies only to the exported formats; the GLB the step returns directly keeps Tripo's original textures. Exports are always priced as advanced conversions (PNG is not the upstream default format), so changing the size does not change the price.",
             "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。":"Moves the model origin to the bottom center during format conversion (off by default upstream; turning it on makes the conversion an advanced one). Game and real-time purposes turn it on so the model is easy to place and scale in an engine; display purposes keep the upstream default.",
             "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。": "The export preset of FBX conversions (the upstream default is Blender; another preset does not change the price). The official page only says that Bake scale bakes the scale transform into the geometry; the differences between the other presets are not stated, and which preset suits which engine is not verified, so the default is used until a target-engine field exists. Used for FBX conversions only.",
             "本服务请求并保存全部六种官方格式。": "This service requests and saves all six official formats.",
@@ -39843,10 +39845,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -40227,10 +40230,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -40563,10 +40567,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -45161,10 +45166,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -45509,10 +45515,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -45844,10 +45851,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -46160,10 +46168,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -46476,10 +46485,11 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
-            "control": "select"
+            "control": "select",
+            "follows_purpose": true
           }
         },
         {
@@ -46764,7 +46774,7 @@
         {"name": "seg_type", "label": "分割输入", "type": "select", "required": true, "fixed": true, "default": "image", "options": [{"value": "image", "label": "图片"}], "wire_name": "seg_type", "presentation": {"surface": "readonly", "control": "select"}},
         {"name": "granularity", "label": "分件粒度", "type": "select", "wire_name": "granularity", "default": "medium", "options": [{"value": "coarse", "label": "粗"}, {"value": "medium", "label": "中"}, {"value": "fine", "label": "细"}], "presentation": {"surface": "provider", "control": "select"}},
         {"name": "hint", "label": "部件提示", "type": "text", "wire_name": "hint", "max_length": 1024, "presentation": {"surface": "provider", "control": "text"}},
-        {"name": "export_texture_size", "label": "导出贴图尺寸", "type": "select", "semantic": "texture-size", "default": "8k", "options": [{"value": "2k", "label": "2K（2048 像素）"}, {"value": "4k", "label": "4K（4096 像素）"}, {"value": "8k", "label": "8K（8192 像素）"}], "wire_values": {"2k": 2048, "4k": 4096, "8k": 8192}, "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。", "presentation": {"surface": "provider", "control": "select"}},
+        {"name": "export_texture_size", "label": "导出贴图尺寸", "type": "select", "semantic": "texture-size", "default": "8k", "options": [{"value": "2k", "label": "2K（2048 像素）"}, {"value": "4k", "label": "4K（4096 像素）"}, {"value": "8k", "label": "8K（8192 像素）"}], "wire_values": {"2k": 2048, "4k": 4096, "8k": 8192}, "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。", "presentation": {"surface": "provider", "control": "select", "follows_purpose": true}},
         {"name": "output_formats", "label": "完整附加导出格式", "type": "string-array", "required": true, "default": ["FBX", "OBJ", "STL", "USDZ", "3MF"], "fixed": true, "min_items": 5, "max_items": 5, "options": [{"value": "FBX", "label": "FBX"}, {"value": "OBJ", "label": "OBJ"}, {"value": "STL", "label": "STL"}, {"value": "USDZ", "label": "USDZ"}, {"value": "3MF", "label": "3MF"}], "presentation": {"surface": "readonly", "control": "multi-select"}, "description": "本服务固定交付所列全部附加格式；格式与额外费用在原生处理开始前一并批准。"},
         {"name": "authorize_extra_credits", "label": "同意附加格式费用", "type": "boolean", "presentation": {"surface": "hidden", "control": "boolean"}}
       ],
@@ -46834,7 +46844,7 @@
         {"name": "seg_type", "label": "分割输入", "type": "select", "required": true, "fixed": true, "default": "model", "options": [{"value": "model", "label": "模型"}], "wire_name": "seg_type", "presentation": {"surface": "readonly", "control": "select"}},
         {"name": "granularity", "label": "分件粒度", "type": "select", "wire_name": "granularity", "default": "medium", "options": [{"value": "coarse", "label": "粗"}, {"value": "medium", "label": "中"}, {"value": "fine", "label": "细"}], "presentation": {"surface": "provider", "control": "select"}},
         {"name": "hint", "label": "部件提示", "type": "text", "wire_name": "hint", "max_length": 1024, "presentation": {"surface": "provider", "control": "text"}},
-        {"name": "export_texture_size", "label": "导出贴图尺寸", "type": "select", "semantic": "texture-size", "default": "8k", "options": [{"value": "2k", "label": "2K（2048 像素）"}, {"value": "4k", "label": "4K（4096 像素）"}, {"value": "8k", "label": "8K（8192 像素）"}], "wire_values": {"2k": 2048, "4k": 4096, "8k": 8192}, "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。会话用途规定了更低的贴图上限时，Agent 发起的加工按上限取值。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。", "presentation": {"surface": "provider", "control": "select"}},
+        {"name": "export_texture_size", "label": "导出贴图尺寸", "type": "select", "semantic": "texture-size", "default": "8k", "options": [{"value": "2k", "label": "2K（2048 像素）"}, {"value": "4k", "label": "4K（4096 像素）"}, {"value": "8k", "label": "8K（8192 像素）"}], "wire_values": {"2k": 2048, "4k": 4096, "8k": 8192}, "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。", "presentation": {"surface": "provider", "control": "select", "follows_purpose": true}},
         {"name": "output_formats", "label": "完整附加导出格式", "type": "string-array", "required": true, "default": ["FBX", "OBJ", "STL", "USDZ", "3MF"], "fixed": true, "min_items": 5, "max_items": 5, "options": [{"value": "FBX", "label": "FBX"}, {"value": "OBJ", "label": "OBJ"}, {"value": "STL", "label": "STL"}, {"value": "USDZ", "label": "USDZ"}, {"value": "3MF", "label": "3MF"}], "presentation": {"surface": "readonly", "control": "multi-select"}, "description": "本服务固定交付所列全部附加格式；格式与额外费用在原生处理开始前一并批准。"},
         {"name": "authorize_extra_credits", "label": "同意附加格式费用", "type": "boolean", "presentation": {"surface": "hidden", "control": "boolean"}}
       ],

@@ -373,6 +373,20 @@ func validateOffering(
 		if parameter.Presentation == nil {
 			continue
 		}
+		// #292: a parameter that follows the session purpose is one the person
+		// may leave untouched while the purpose fills it. A form can show that
+		// state only for an optional select the person edits themselves (not an
+		// advised one, whose value needs a reason a form cannot give), and the
+		// Offering's own default must stand when no purpose gives a value.
+		if parameter.Presentation.FollowsPurpose &&
+			(!offering.UserParameterAllowed(parameter) || parameter.Presentation.Surface != schemacontract.SurfaceProvider ||
+				parameter.Type != "select" || parameter.Required || len(bytes.TrimSpace(parameter.Default)) == 0) {
+			return fmt.Errorf(
+				"Offering %q 参数 %q 声明 follows_purpose 时必须是本人可设置、非必填且有 default 的 select，presentation.surface 为 provider",
+				offering.ID,
+				parameter.Name,
+			)
+		}
 		for _, condition := range parameter.Presentation.DisabledWhen {
 			target, exists := offeringParameter(offering.Parameters, condition.Parameter)
 			if !exists {

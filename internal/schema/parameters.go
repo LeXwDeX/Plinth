@@ -52,6 +52,14 @@ type ParameterPresentation struct {
 	DisabledWhen []ParameterCondition `json:"disabled_when,omitempty"`
 	VisibleWhen  []ParameterCondition `json:"visible_when,omitempty"`
 	Notices      []ParameterNotice    `json:"notices,omitempty"`
+	// FollowsPurpose declares that the value the session's production brief gives
+	// this parameter (the purpose's override or the fit of its budget) is the value
+	// the parameter has until the person picks one (#292). A form that submits the
+	// Offering must leave the parameter out while it is untouched and show it as
+	// following the purpose; the server fills it from the brief when the request
+	// omits it, and the Offering's default applies when no purpose gives a value.
+	// A value the request sets is always the request's own.
+	FollowsPurpose bool `json:"follows_purpose,omitempty"`
 }
 
 // ForcedValue 声明参数的强制取值：当 When 条件命中时，服务端规范化
