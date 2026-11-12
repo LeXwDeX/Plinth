@@ -230,11 +230,13 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
   }).filter((entry) => entry.nodes.length > 0);
 
   const actions = (
-    <div className="flex shrink-0 items-center" data-testid="stage-actions">
+    // The actions shrink before they overflow: when the stage is narrower than all of them they scroll sideways
+    // inside the header (no scrollbar drawn) and never paint over the right panel. The groups keep their width.
+    <div className="flex min-w-0 items-center overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="stage-actions">
       {actionGroups.map((entry, index) => (
         <Fragment key={entry.name}>
           {index > 0 ? <span aria-hidden className="mx-2 h-5 w-px shrink-0 bg-border" data-testid="stage-group-rule" /> : null}
-          <div role="group" aria-label={text(`ui.studio.stage.group.${entry.name}`)} data-group={entry.name} className="flex items-center gap-1">{entry.nodes}</div>
+          <div role="group" aria-label={text(`ui.studio.stage.group.${entry.name}`)} data-group={entry.name} className="flex shrink-0 items-center gap-1">{entry.nodes}</div>
         </Fragment>
       ))}
     </div>

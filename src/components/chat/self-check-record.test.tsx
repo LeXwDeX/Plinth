@@ -53,7 +53,7 @@ afterEach(cleanup);
 
 describe('the persisted self-check card (#246)', () => {
   it('shows the three-state badge, the counters and the written conclusion', () => {
-    const view = render(<SelfCheckRecordCard records={[record()]} renders={renders} />);
+    const view = render(<SelfCheckRecordCard records={[record()]} renders={renders} defaultOpen />);
     const item = view.getByTestId('chat-self-check-record-item');
     const badge = within(item).getByTestId('chat-self-check-status');
     expect(badge.textContent).toBe(messages['ui.chat.self_check.status_passed']);
@@ -72,7 +72,7 @@ describe('the persisted self-check card (#246)', () => {
   it('renders the issues state as a warning, never as passed', () => {
     const view = render(<SelfCheckRecordCard records={[record({
       status: 'has_issues', conclusion: { status: 'has_issues', summary: 'one crack', findings: ['crack'], fixes: [], remaining: ['crack on the back'], at: '' },
-    })]} renders={renders} />);
+    })]} renders={renders} defaultOpen />);
     const badge = view.getByTestId('chat-self-check-status');
     expect(badge.textContent).toBe(messages['ui.chat.self_check.status_has_issues']);
     expect(badge.getAttribute('data-role')).toBe('issues');
@@ -80,14 +80,14 @@ describe('the persisted self-check card (#246)', () => {
   });
 
   it('degrades an unknown stored status to the declared unchecked state', () => {
-    const view = render(<SelfCheckRecordCard records={[record({ status: 'mystery', conclusion: null })]} renders={[]} />);
+    const view = render(<SelfCheckRecordCard records={[record({ status: 'mystery', conclusion: null })]} renders={[]} defaultOpen />);
     const badge = view.getByTestId('chat-self-check-status');
     expect(badge.getAttribute('data-role')).toBe('unchecked');
     expect(badge.textContent).toBe(messages['ui.chat.self_check.status_unchecked']);
   });
 
   it('folds the card, opens the evidence lines and binds each check to its handle', () => {
-    const view = render(<SelfCheckRecordCard records={[record()]} renders={renders} />);
+    const view = render(<SelfCheckRecordCard records={[record()]} renders={renders} defaultOpen />);
     expect(view.queryByTestId('chat-self-check-details')).toBeNull();
     fireEvent.click(view.getByTestId('chat-self-check-expand'));
     const lines = view.getAllByTestId('chat-self-check-line');
@@ -107,13 +107,22 @@ describe('the persisted self-check card (#246)', () => {
     expect(view.queryByTestId('chat-self-check-record-item')).toBeNull();
   });
 
+  it('starts folded to its one title line and opens on click', () => {
+    const view = render(<SelfCheckRecordCard records={[record()]} renders={renders} />);
+    const toggle = view.getByTestId('chat-self-check-record-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(view.queryByTestId('chat-self-check-record-item')).toBeNull();
+    fireEvent.click(toggle);
+    expect(view.getByTestId('chat-self-check-record-item')).toBeTruthy();
+  });
+
   it('renders nothing when the reply has no record', () => {
     const view = render(<SelfCheckRecordCard records={[]} renders={[]} />);
     expect(view.queryByTestId('chat-self-check-record')).toBeNull();
   });
 
   it('shows an empty record without inventing evidence', () => {
-    const view = render(<SelfCheckRecordCard records={[record({ status: 'unchecked', checks: [], conclusion: null })]} renders={[]} />);
+    const view = render(<SelfCheckRecordCard records={[record({ status: 'unchecked', checks: [], conclusion: null })]} renders={[]} defaultOpen />);
     expect(view.queryByTestId('chat-self-check-expand')).toBeNull();
     expect(view.queryByTestId('chat-self-check-conclusion')).toBeNull();
   });

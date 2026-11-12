@@ -152,8 +152,12 @@ interface StudioState extends StudioPrefs {
   setChatCollapsed: (collapsed: boolean) => void;
   /** Expands or collapses the stage's left rail (2D tools and 3D views share it); remembered by this browser. */
   setRailExpanded: (expanded: boolean) => void;
-  /** Chooses a right-panel tab for a kind of object; 2D kinds and 3D each keep their own choice. */
+  /** The right panel shows only its tab rail (the content column is folded away). Open by default; kept for this visit only, never written to storage. */
+  panelCollapsed: boolean;
+  /** Chooses a right-panel tab for a kind of object; 2D kinds and 3D each keep their own choice. Opens a folded panel. */
   setPanelTab: (kind: PanelKind, tab: PanelTabId) => void;
+  /** Folds the right panel to its tab rail or opens it again; kept for this visit only, never written to storage. */
+  setPanelCollapsed: (collapsed: boolean) => void;
   setTaskDrawerOpen: (open: boolean) => void;
   setAllOutputsOpen: (open: boolean) => void;
   openResultDetail: (target: ResultTarget) => void;
@@ -203,6 +207,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
   };
   return {
     ...readStudioPrefs(),
+    panelCollapsed: false,
     panelTab2d: null,
     panelTab3d: null,
     styleLockRequest: null,
@@ -242,7 +247,10 @@ export const useStudioStore = create<StudioState>()((set, get) => {
       set({ railExpanded });
       persist({ railExpanded });
     },
-    setPanelTab: (kind, tab) => set(panelFamilyOf(kind) === '3d' ? { panelTab3d: tab } : { panelTab2d: tab }),
+    setPanelTab: (kind, tab) => {
+      set(panelFamilyOf(kind) === '3d' ? { panelTab3d: tab, panelCollapsed: false } : { panelTab2d: tab, panelCollapsed: false });
+    },
+    setPanelCollapsed: (panelCollapsed) => set({ panelCollapsed }),
     requestStyleLock: () => set((state) => ({ styleLockRequest: { seq: (state.styleLockRequest?.seq ?? 0) + 1 }, styleLockOpen: true })),
     consumeStyleLockRequest: (seq) => set((state) => (state.styleLockRequest?.seq === seq ? { styleLockRequest: null } : {})),
     setStyleLockOpen: (styleLockOpen) => set({ styleLockOpen }),
@@ -270,7 +278,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     setSelectedPart: (selectedPart) => set({ selectedPart }),
     requestPartExport: (key, id) => set((state) => ({ partExportRequest: { key, id, seq: (state.partExportRequest?.seq ?? 0) + 1 } })),
     clearPartExportRequest: () => set({ partExportRequest: null }),
-    showProcess: (capability) => set({ panelTab3d: 'process', processPreset: capability }),
+    showProcess: (capability) => set({ panelTab3d: 'process', processPreset: capability, panelCollapsed: false }),
     clearProcessPreset: () => set({ processPreset: null }),
     requestImageCommand: (kind) => set((state) => ({ imageCommand: { kind, seq: (state.imageCommand?.seq ?? 0) + 1 } })),
     clearImageCommand: () => set({ imageCommand: null }),

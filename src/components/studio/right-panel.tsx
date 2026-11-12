@@ -43,6 +43,8 @@ interface PanelTabBarProps {
   label: string;
   /** Tabs shown but not selectable (no object or board content for them yet). */
   disabled?: readonly PanelTabId[];
+  /** The panel is folded to this rail: the active tab is outlined, not filled, and its body is hidden. */
+  collapsed?: boolean;
 }
 
 /**
@@ -50,8 +52,9 @@ interface PanelTabBarProps {
  * name written top to bottom, so names are never cut off however many tabs a kind has; the active pill is
  * filled and outlined. The hover hint (name, shortcut, one line of what it is for) comes from the Schema.
  * Up / Down (and Left / Right) / Home / End move between the tabs; the active tab is the one in the tab order.
+ * Clicking the active tab folds the panel to this rail; clicking any tab of a folded panel opens it there.
  */
-export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: PanelTabBarProps) {
+export function PanelTabBar({ views, active, onSelect, label, disabled = [], collapsed = false }: PanelTabBarProps) {
   const { schema } = useProductSchema();
   const buttons = useRef(new Map<PanelTabId, HTMLButtonElement>());
   const ids = views.map((view) => view.id).filter((id) => !disabled.includes(id));
@@ -75,6 +78,7 @@ export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: P
               role="tab"
               id={tabDomId(view.id)}
               aria-selected={selected}
+              aria-expanded={selected ? !collapsed : undefined}
               aria-disabled={isDisabled || undefined}
               aria-controls={BODY_ID}
               tabIndex={selected ? 0 : -1}
@@ -87,7 +91,9 @@ export function PanelTabBar({ views, active, onSelect, label, disabled = [] }: P
               onKeyDown={(event) => onKeyDown(event, view.id)}
               className={cn(
                 'flex w-full flex-col items-center gap-1 rounded-md border px-0.5 py-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50',
-                selected ? 'border-border bg-accent text-foreground' : 'border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                selected && !collapsed && 'border-border bg-accent text-foreground',
+                selected && collapsed && 'border-border text-foreground hover:bg-accent/50',
+                !selected && 'border-transparent text-muted-foreground hover:bg-accent/50 hover:text-foreground',
                 isDisabled && 'cursor-not-allowed opacity-50 hover:text-muted-foreground',
               )}
             >
@@ -163,6 +169,8 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const { schema } = useProductSchema();
   const remembered = useStudioStore((state) => (context === 'model' ? state.panelTab3d : state.panelTab2d));
   const setPanelTab = useStudioStore((state) => state.setPanelTab);
+  const collapsed = useStudioStore((state) => state.panelCollapsed);
+  const setPanelCollapsed = useStudioStore((state) => state.setPanelCollapsed);
   const styleLockRequest = useStudioStore((state) => state.styleLockRequest);
   const consumeStyleLockRequest = useStudioStore((state) => state.consumeStyleLockRequest);
   // The composer's style-lock chip asks the panel to open 功能 and the section it holds. Consuming the request
@@ -184,6 +192,11 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const column = 'flex min-h-0 min-w-0 flex-col';
   const width = { width: panelWidth(schema) };
   const title = schemaText(schema, 'ui.studio.panel.title');
+  // The active tab folds an open panel; any tab of a folded panel opens it on that tab (setPanelTab opens).
+  const choose = (kind: 'board' | PanelContext, current: PanelTabId | null) => (id: PanelTabId) => {
+    if (id === current && !collapsed) setPanelCollapsed(true);
+    else setPanelTab(kind === 'none' ? 'board' : kind, id);
+  };
 
   // Empty board and nothing selected: the board's tabs (Schema). Layers and history have nothing to show
   // yet; function settings and the session's production brief stay available.
@@ -195,8 +208,8 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
       : null;
     const active = requested ?? defaultPanelTab(schema, 'board', { unavailable: disabled }) ?? 'operations';
     return (
-      <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} className={aside}>
-        <div style={width} className={column}>
+      <aside aria-label={title} data-testid="right-panel" data-kind="none" data-tab={active} data-collapsed={collapsed || undefined} className={aside}>
+        <div style={width} className={cn(column, collapsed && 'hidden')}>
           {active === 'operations' ? (
             <div data-testid="right-panel-board-empty" className="shrink-0 border-b border-border px-3 py-2 text-xs">
               <UnavailableNotice label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.stage.board_empty'))} detail={schemaText(schema, 'ui.studio.panel.board_empty')} />
@@ -215,9 +228,10 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
         <PanelTabBar
           views={views}
           active={active}
-          onSelect={(id) => setPanelTab('board', id)}
+          onSelect={choose('board', active)}
           label={schemaText(schema, 'ui.studio.panel.tabs')}
           disabled={disabled}
+          collapsed={collapsed}
         />
       </aside>
     );
@@ -225,8 +239,8 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
   const views = panelTabViews(schema, context);
   const active = activePanelTab(schema, context, remembered, availability);
   return (
-    <aside aria-label={title} data-testid="right-panel" data-kind={context} data-tab={active ?? undefined} className={aside}>
-      <div style={width} className={column}>
+    <aside aria-label={title} data-testid="right-panel" data-kind={context} data-tab={active ?? undefined} data-collapsed={collapsed || undefined} className={aside}>
+      <div style={width} className={cn(column, collapsed && 'hidden')}>
         {active ? (
           <div
             role="tabpanel"
@@ -242,8 +256,9 @@ function PanelFrame({ context, object, sessionId, availability }: PanelFrameProp
       <PanelTabBar
         views={views}
         active={active}
-        onSelect={(id) => setPanelTab(context, id)}
+        onSelect={choose(context, active)}
         label={schemaText(schema, 'ui.studio.panel.tabs')}
+        collapsed={collapsed}
       />
     </aside>
   );
@@ -264,8 +279,9 @@ function ModelPanel({ object, sessionId }: { object: CurrentObject; sessionId: s
 /**
  * The right panel (Schema `canvas.frontend.panel_tabs`), one panel for every kind of thing on the stage.
  * Function settings are available for every stage context, including an empty board. The remaining tabs
- * still describe or arrange the stage object. It always has its width: no
- * collapse button, no remembered width. The tab last chosen is kept for this visit (one for 2D, one for 3D).
+ * still describe or arrange the stage object. Its content column has the Schema width; clicking the active
+ * tab folds it to the tab rail, and choosing any tab opens it again. Both the fold and the last chosen tab
+ * are kept for this visit only (one tab per family for 2D and 3D), never written to storage.
  */
 export function RightPanel() {
   const sessionId = useChatStore((state) => state.activeSessionId);

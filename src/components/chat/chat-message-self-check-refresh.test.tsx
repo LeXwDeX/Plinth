@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -94,7 +94,8 @@ describe('the result card follows records written by a later turn (#246)', () =>
 
     await waitFor(() => expect(badge().getAttribute('data-role')).toBe('passed'));
     expect(badge().textContent).toBe(messages['ui.chat.self_check.status_passed']);
-    // The earlier reply also shows the folded record card, without a reload.
+    // The earlier reply also shows the folded record card, without a reload; opening it shows the record.
+    fireEvent.click(view.getByTestId('chat-self-check-record-toggle'));
     expect(view.getByTestId('chat-self-check-record').textContent).toContain('matches the reference');
   });
 

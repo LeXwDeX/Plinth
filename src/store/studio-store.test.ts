@@ -61,7 +61,7 @@ describe('chat column width', () => {
 
 describe('stage rail expansion', () => {
   beforeEach(() => {
-    useStudioStore.setState({ chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false });
+    useStudioStore.setState({ chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false, panelCollapsed: false });
   });
 
   it('starts collapsed when nothing is stored', () => {
@@ -215,5 +215,31 @@ describe('model parts', () => {
     expect(useStudioStore.getState().partExportRequest).toBeNull();
     store.setSelectedPart(null);
     store.setStageParts(null);
+  });
+});
+
+describe('right panel folding', () => {
+  beforeEach(() => {
+    useStudioStore.setState({ chatWidth: CHAT_WIDTH_DEFAULT, chatCollapsed: false, railExpanded: false, panelCollapsed: false, panelTab2d: null, panelTab3d: null });
+  });
+
+  it('starts open and keeps a fold for this visit only: nothing about it reaches local storage', () => {
+    const data = stubStorage();
+    expect(useStudioStore.getState().panelCollapsed).toBe(false);
+    useStudioStore.getState().setPanelCollapsed(true);
+    expect(useStudioStore.getState().panelCollapsed).toBe(true);
+    expect(data.get(STUDIO_PREFS_KEY) ?? '').not.toContain('panelCollapsed');
+    expect(readStudioPrefs()).not.toHaveProperty('panelCollapsed');
+  });
+
+  it('opens again when a tab is chosen or a processing step is shown', () => {
+    stubStorage();
+    useStudioStore.getState().setPanelCollapsed(true);
+    useStudioStore.getState().setPanelTab('image', 'details');
+    expect(useStudioStore.getState().panelCollapsed).toBe(false);
+    useStudioStore.getState().setPanelCollapsed(true);
+    useStudioStore.getState().showProcess(null);
+    expect(useStudioStore.getState().panelCollapsed).toBe(false);
+    expect(useStudioStore.getState().panelTab3d).toBe('process');
   });
 });

@@ -29,6 +29,8 @@ interface SelfCheckRecordCardProps {
   records: readonly SelfCheckRecord[];
   /** The reply's render pictures; a check's @handle claims its own thumbnail. */
   renders: readonly MessagePicture[];
+  /** Folded by default so the chat stays readable; tests open it to read the records. */
+  defaultOpen?: boolean;
 }
 
 /**
@@ -37,9 +39,9 @@ interface SelfCheckRecordCardProps {
  * server counters, the written conclusion and the evidence the server stored.
  * A result without a record is unchecked; this card only renders records.
  */
-export function SelfCheckRecordCard({ records, renders }: SelfCheckRecordCardProps) {
+export function SelfCheckRecordCard({ records, renders, defaultOpen = false }: SelfCheckRecordCardProps) {
   const { schema } = useProductSchema();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const text = (key: string) => schemaText(schema, key);
   const toggle = (taskId: string) => {
