@@ -89,6 +89,10 @@ type Kind struct {
 	// body carries texture_urls and an OBJ export comes with an MTL. nil leaves
 	// the sample's keys untouched.
 	Textured func(request map[string]any) bool
+	// Validate, when set, checks the documented values of a create request and
+	// answers the text of the 400 refusal, or "" for a valid request. It runs
+	// after the Need groups and before any source lookup.
+	Validate func(request map[string]any) string
 }
 
 // Config assembles one version's handler.
@@ -419,6 +423,12 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 			}
 			if !present {
 				e.fail(w, http.StatusBadRequest, "Either "+strings.Join(group, " or ")+" must be provided")
+				return
+			}
+		}
+		if kind.Validate != nil {
+			if message := kind.Validate(request); message != "" {
+				e.fail(w, http.StatusBadRequest, message)
 				return
 			}
 		}

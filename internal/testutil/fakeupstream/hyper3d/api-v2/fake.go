@@ -9,6 +9,8 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +41,10 @@ const samplePrefix = "/api/v2"
 const (
 	docsRoot = "https://docs.hyper3d.ai/en/api-specification/"
 	captured = "2026-10-29"
+	// formDocs is when the value rules of the Gen-2.5 form (rodin-gen2-5) were
+	// last checked. They are constructed from that page, like the error bodies:
+	// no wire sample covers a rejected value (see validateGenerationForm).
+	formDocs = "2026-11-12"
 	// errorDocs is when the error bodies without a wire sample were last
 	// checked against docsRoot+"errors". They are constructed from that page:
 	// application failures are HTTP 201 with the reason in error and the
@@ -101,10 +107,13 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			Note: "the official file host is not part of the API; this route serves the fixed files the download list names (content types as observed)"},
 	}
 	for _, k := range kinds {
+		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). The documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_NO_ACTIVE_SUBSCRIPTION, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, IMAGE_LABEL_LENGTH_TOO_LONG, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
+		if k.Need == "prompt-or-images" {
+			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, and the TAPose and quad_normal switches) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed"
+		}
 		out = append(out, fakeupstream.Endpoint{
 			Method: "POST", Path: k.Path, Evidence: fakeupstream.EvidenceReal, Sample: "POST " + samplePrefix + k.Path,
-			DocURL: docsRoot + k.DocPage, CheckedAt: captured,
-			Note: "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). The documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_NO_ACTIVE_SUBSCRIPTION, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, IMAGE_LABEL_LENGTH_TOO_LONG, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)",
+			DocURL: docsRoot + k.DocPage, CheckedAt: captured, Note: note,
 		})
 	}
 	return out
@@ -405,6 +414,91 @@ func (h *handler) reject(w http.ResponseWriter, code, message string) {
 	writeJSON(w, http.StatusCreated, body)
 }
 
+// Value rules of the Gen-2.5 form, constructed from the official page
+// (docsRoot+"rodin-gen2-5", checked formDocs). A value outside them is answered
+// like the other invalid requests, HTTP 201 with INVALID_REQUEST, the documented
+// code for invalid values; the message text is the fake's own. Only the fields
+// whose values the page restricts and Plinth can send are checked; the rest of
+// the form is accepted as before.
+const (
+	maxSeed                 = 65535
+	minQualityOverride      = 500
+	maxQualityOverride      = 2000000
+	maxQualityOverrideLower = 1000000 // every Gen-2.5 tier below High
+	maxQualityOverrideQuad  = 200000  // the additional ceiling of Quad mode
+)
+
+var (
+	generationMeshModes      = []string{"Raw", "Quad"}
+	generationQualityPresets = []string{"high", "medium", "low", "extra-low"}
+	// generationTextureModes are the documented texture_mode values; the
+	// resolution each gives is the page's texture resolution table (2K for
+	// extreme-low to high, 6K for extreme-high, without HighPack), which the
+	// fake does not need to model.
+	generationTextureModes = []string{"legacy", "extreme-low", "low", "medium", "high", "extreme-high"}
+	generationHighTiers    = []string{"Gen-2.5-High", "Gen-2.5-Extreme-High"}
+	// generationSwitches are the documented boolean fields.
+	generationSwitches = []string{
+		"TAPose", "quad_normal", "use_original_alpha", "preview_render", "hd_texture",
+		"is_micro", "texture_delight", "uhd_texture", "soft",
+	}
+)
+
+// validateGenerationForm returns the rejection message of the first field that
+// breaks a rule, or "" when the form is valid.
+func validateGenerationForm(fields map[string]string) string {
+	if value, present := fields["seed"]; present {
+		if number, ok := wholeNumber(value); !ok || number < 0 || number > maxSeed {
+			return fmt.Sprintf("seed must be an integer between 0 and %d.", maxSeed)
+		}
+	}
+	mode, hasMode := fields["mesh_mode"]
+	if hasMode && !slices.Contains(generationMeshModes, mode) {
+		return "mesh_mode must be one of Raw, Quad."
+	}
+	if quality, present := fields["quality"]; present && !slices.Contains(generationQualityPresets, quality) {
+		return "quality must be one of high, medium, low, extra-low."
+	}
+	if texture, present := fields["texture_mode"]; present && !slices.Contains(generationTextureModes, texture) {
+		return "texture_mode must be one of legacy, extreme-low, low, medium, high, extreme-high."
+	}
+	for _, name := range generationSwitches {
+		if value, present := fields[name]; present && value != "true" && value != "false" {
+			return name + " must be a boolean."
+		}
+	}
+	value, present := fields["quality_override"]
+	if !present {
+		return ""
+	}
+	number, ok := wholeNumber(value)
+	if !ok || number < minQualityOverride || number > maxQualityOverride {
+		return fmt.Sprintf("quality_override must be an integer between %d and %d.", minQualityOverride, maxQualityOverride)
+	}
+	tier := fields["tier"]
+	if strings.HasPrefix(tier, "Gen-2.5-") && !slices.Contains(generationHighTiers, tier) && number > maxQualityOverrideLower {
+		return fmt.Sprintf("quality_override must not exceed %d for tier %s.", maxQualityOverrideLower, tier)
+	}
+	// Gen-2.5 tiers default to Raw; every other tier (an omitted tier is
+	// Regular) defaults to Quad.
+	if !hasMode {
+		mode = "Quad"
+		if strings.HasPrefix(tier, "Gen-2.5-") {
+			mode = "Raw"
+		}
+	}
+	if mode == "Quad" && number > maxQualityOverrideQuad {
+		return fmt.Sprintf("quality_override must not exceed %d in Quad mode.", maxQualityOverrideQuad)
+	}
+	return ""
+}
+
+// wholeNumber parses a form value that must be an integer.
+func wholeNumber(value string) (int64, bool) {
+	number, err := strconv.ParseInt(value, 10, 64)
+	return number, err == nil
+}
+
 func (h *handler) submitHandler(k kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
@@ -437,6 +531,10 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 			}
 			if strings.TrimSpace(form.fields["prompt"]) == "" && form.files["images"] == 0 {
 				h.reject(w, "INVALID_REQUEST", "Please upload at least one image or give a prompt.")
+				return
+			}
+			if message := validateGenerationForm(form.fields); message != "" {
+				h.reject(w, "INVALID_REQUEST", message)
 				return
 			}
 		case "asset":

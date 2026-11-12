@@ -76,6 +76,7 @@ type providerOptions struct {
 	ResponseAliases  []generation.ResponseAlias `json:"response_aliases,omitempty"`
 	NativeConversion *nativeConversionOptions   `json:"native_conversion,omitempty"`
 	SourceRig        *nativeSourceRig           `json:"source_rig,omitempty"`
+	SourceRigs       []nativeSourceRigRule      `json:"source_rigs,omitempty"`
 	Transform        []float64                  `json:"transform,omitempty"`
 	// ReferenceWire selects a non-default reference image wire for
 	// image-to-3d; "multiview_inputs" sends view-key `inputs` (multiview_model.go).
@@ -216,6 +217,11 @@ func (a *Adapter) Start(
 			"Tripo Offering 缺少 model 或 endpoint",
 		)
 	}
+	// The export options are checked now, before the paid generation: a
+	// declaration that cannot be written would only fail after the model exists.
+	if _, err := generationConversion(request.Offering, options); err != nil {
+		return generation.Observation{}, err
+	}
 	multiviewWire := request.Offering.Capability == generation.ImageTo3D &&
 		options.ReferenceWire == referenceWireMultiviewInputs
 	var views []string
@@ -245,6 +251,11 @@ func (a *Adapter) Start(
 		// Format selection and consent are private platform decisions. Their
 		// authorized conversion jobs run only after the base model succeeds.
 		if name == request.Offering.PriceSelectionParameter() {
+			continue
+		}
+		// Export options (texture size, pivot, FBX preset) belong to the
+		// conversion jobs, not to the generation request.
+		if conversionBoundParameter(options, name) {
 			continue
 		}
 		body[name] = value

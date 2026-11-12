@@ -44,9 +44,9 @@ type ChatAgentCraftPrompt struct {
 	// (#239). Empty keeps the historical behavior.
 	WhenDomain string `json:"when_domain,omitempty"`
 	// WhenBriefAny names production brief fields; when the frozen brief sets
-	// any of them (a non-empty text or a true flag), the brief is injected
-	// even on a turn of the other workspace domain, so a 2D stage turn of a
-	// session headed for 3D still gets the 3D craft (#285).
+	// any of them (a non-empty text, profile or select value, or a true flag),
+	// the brief is injected even on a turn of the other workspace domain, so a
+	// 2D stage turn of a session headed for 3D still gets the 3D craft (#285).
 	WhenBriefAny []string `json:"when_brief_any,omitempty"`
 	// OfferingCapabilities selects the Offerings whose knowledge fills
 	// {offering_tradeoffs} (#249). Empty keeps a historical CraftPrompt
@@ -154,7 +154,7 @@ func validateCraftPrompts(prompts []ChatAgentCraftPrompt, toolNames map[string]s
 			for _, field := range briefFields {
 				if field.Name == name {
 					switch field.Type {
-					case "profile", "image_profile", "text", "boolean":
+					case "profile", "image_profile", "select", "text", "boolean":
 						declared = true
 					}
 				}

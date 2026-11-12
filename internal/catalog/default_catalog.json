@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-10.246-self-check.1",
+    "revision": "2026-11-12.276-lowpoly-path.1",
     "terminology": {
       "user_facing": [
         {
@@ -1582,7 +1582,7 @@
         "input_parameter_invalid": "{label}的值无效；这一步没有提交，也没有扣积分。请检查后重试。",
         "input_parameters_invalid": "这次请求的输入参数无效；这一步没有提交，也没有扣积分。请检查后重试。",
         "input_source_task_expired": "来源任务 {label} 在服务商处的原任务已超过保留期；这一步没有提交，也没有扣积分。请先重新生成来源模型，或改用接受已保存模型文件的服务。",
-        "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。",
+        "input_source_task_unsupported": "来源任务 {label} 不满足这一步的来源要求；这一步没有提交，也没有扣积分。请重新选择来源。{alternative}",
         "input_source_face_limit": "来源模型有 {faces} 个三角面，超过这一步最多 {limit} 个三角面的限制；这一步没有提交，也没有扣积分。请先把模型简化（Remesh）到上限以内再试。",
         "plan_source_face_limit": "这个计划里，「{source_service}」按当前参数会交付约 {estimate} 个三角面，超过后面的步骤「{service}」最多接受的 {limit} 个三角面；整个计划没有创建，也没有扣积分。请调低「{source_service}」的目标面数后重新规划，兼容的拓扑与目标面数上限：{choices}。",
         "input_parameter_range": "{label}为 {value}，按当前参数组合只能在 {minimum}–{maximum} 之间；这一步没有提交，也没有扣积分。请改为这个范围内的值，或去掉这个值改用默认值后重试。"
@@ -4504,6 +4504,7 @@
         "ui.studio.brief.none": "未填写",
         "ui.studio.brief.yes": "是",
         "ui.studio.brief.no": "否",
+        "ui.studio.brief.unlisted": "{value}（原有输入）",
         "ui.studio.brief.load_failed": "读取制作简报失败",
         "ui.studio.brief.loading": "正在读取制作简报…",
         "ui.studio.brief.notes_hint": "写清用途之外的限制、禁忌和参考。",
@@ -4704,7 +4705,7 @@
         "ui.studio.stage.action.process_hint.mesh-segmentation": "识别模型部件并生成分件结果。",
         "ui.studio.stage.action.process_hint.mesh-completion": "补全同会话原生 Tripo 分割结果中的全部部件。",
         "ui.studio.stage.action.process_hint.retexture": "保留模型形状，按描述或参考图重新生成整套贴图。",
-        "ui.studio.stage.action.process_hint.rigging": "给人形模型加上骨骼，之后才能做动作。",
+        "ui.studio.stage.action.process_hint.rigging": "给模型加上骨骼，之后才能做动作；人形、四足等骨架类型按绑骨检查的结果选择。",
         "ui.studio.stage.action.process_hint.rig-check": "检查原生 Tripo 模型是否适合绑骨，只返回报告，不执行绑骨。",
         "ui.studio.stage.action.process_hint.uv-unwrap": "为静态模型重新展开 UV，原贴图不会保留。",
         "ui.studio.stage.action.process_hint.resize": "按指定高度或最长边缩放模型，并设置底部或中心原点。",
@@ -4727,6 +4728,8 @@
         "ui.studio.stage.action.to_3d_hint": "用这张图发一轮“图生 3D”给 Agent。",
         "ui.studio.stage.action.to_3d_target": "当前版本这张图；画板改过时用虚线框里的画面",
         "ui.studio.stage.group.identity": "当前对象",
+        "ui.studio.stage.actions_previous": "向左查看更多工具",
+        "ui.studio.stage.actions_next": "向右查看更多工具",
         "ui.studio.stage.group.produce": "产出",
         "ui.studio.stage.group.output": "输出",
         "ui.studio.stage.group.view": "查看",
@@ -5315,7 +5318,19 @@
           {"name": "purpose", "type": "profile", "label": "用途"},
           {"name": "image_use", "type": "image_profile", "label": "2D 用途"},
           {"name": "style", "type": "text", "label": "风格", "maximum_characters": 200, "multiline": true, "placeholder": "如：写实、低多边形、暖色调金属材质"},
-          {"name": "target_platform", "type": "text", "label": "目标平台", "maximum_characters": 120, "placeholder": "如：Unity、Unreal、Web、AR、3D 打印"},
+          {"name": "target_engine", "type": "select", "label": "目标引擎", "options": [
+            {"id": "unity", "label": "Unity"},
+            {"id": "unreal", "label": "Unreal Engine"},
+            {"id": "godot", "label": "Godot"},
+            {"id": "web", "label": "Web / three.js"},
+            {"id": "other", "label": "其他引擎"}
+          ]},
+          {"name": "target_platform", "type": "select", "label": "目标平台", "options": [
+            {"id": "mobile", "label": "手机"},
+            {"id": "pc_console", "label": "PC / 主机"},
+            {"id": "web", "label": "网页"},
+            {"id": "xr", "label": "XR（VR / AR / MR）"}
+          ]},
           {"name": "triangle_budget", "type": "integer", "label": "三角面预算", "minimum": 100, "maximum": 2000000},
           {"name": "notes", "type": "text", "label": "补充说明", "maximum_characters": 1000, "multiline": true, "placeholder": "记录限制、排除项和参考方向。"}
         ],
@@ -6023,7 +6038,7 @@
               "retexture_model",
               "revise_processing_plan"
             ],
-            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n高细节模型拿去做游戏资产时要降面数，不要直接交付两百万面的结果。各处理服务保留什么、改变什么，以 list_offerings 里的 description 为准：带烘焙的减面（如 Tripo 减面）把贴图烘焙到低模上；只重建几何的重拓扑（如 Meshy 重拓扑）不保留贴图，尺寸也可能改变，之后要接换贴图，要原尺寸就按源模型高度接精确尺寸。能用带烘焙的减面就先用它；面数已达标的模型不要再叠加重拓扑。\n推荐管线：\n- 游戏角色：概念图（A-pose）→ 三视图/四视图 → 多视图生成或低模生成 → 自检 → 需要时重拓扑 → 绑骨 → 动画。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n对照参考图：图生 3D 或多视图结果用 compare_model_reference 按视角把参考图与模型渲染并排，结果附确定性的轮廓交并比、包围盒比例差与主体色差；指标只作参考，最终看并排图和自己的判断。检查后用 record_self_check 写结论（passed 或 has_issues）并列出发现、处理与剩余问题；服务端按真实工具调用生成记录，未自检的结果不得说成已检查。轮次、每轮渲染和修正次数有上限，到上限就停下并如实汇报遗留问题。\n读 inspect_model 结果：topology.inconsistent_winding_edges 大于 0 表示相邻面朝向不一致，topology.inside_out 为 true 表示闭合网格整体朝内，两者都会让 watertight 为 false，打印前必须修复（看 usage_check 中 watertight 一项的 fix_hint）；警告 skin_bind_pose 表示骨骼无法解算，蒙皮按绑定姿态检查，包围盒、尺寸和原点都以绑定姿态为准，汇报时要说明；三角带（strip）模型的 triangles 只计实际绘制的三角面，不含拼接用的退化面，可能少于按索引数推算的值。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。减面、拆件、换贴图修不了的问题要回到输入图：手指或四肢粘连、背面被糊成一团、比例或轮廓与参考不符、缺少部件，先修输入图或补全正侧背视角，再重新生成，不要在同一个模型上反复加工。每次修改后重新 inspect 和 render 确认，不要假设修好了。\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每个模型的提示词前先读【偏好摘要】。已选用方向要逐字沿用其造型、比例与材质；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
+            "text": "【3D 制作要领】\n用途决定一切。展示渲染、3D 打印要高细节（数十万到两百万面，打印还要水密）；游戏和实时资产要低模和干净拓扑（道具和场景件约几百到两万三角面，角色约五千到六万，必须有 UV），Web/AR 一般在十万面以内、贴图 2K。工具会按制作简报的用途给出默认模型和参数，并在 inspect_model 结果里给出预算判定。\n模型取舍（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n高细节模型拿去做游戏资产时要降面数，不要直接交付两百万面的结果。各处理服务保留什么、改变什么，以 list_offerings 里的 description 为准：带烘焙的减面（如 Tripo 减面）把贴图烘焙到低模上；只重建几何的重拓扑（如 Meshy 重拓扑）不保留贴图，尺寸也可能改变，之后要接换贴图，要原尺寸就按源模型高度接精确尺寸。能用带烘焙的减面就先用它；面数已达标的模型不要再叠加重拓扑。\n推荐管线：\n- 游戏角色，简报里写了“需要绑骨”（needs_rig）时的默认路线：A 姿态概念图 → 三视图（create_three_view，subject_type=humanoid）→ 多视图转 3D（create_model_3d_from_views）→ 自检 → 需要时降面（Tripo v3.1 的结果用带烘焙的减面，其他来源才用重拓扑）→ 绑骨 → 动画。只有用户锁定了别的路线，或已有合格的 A 姿态正面图时才改走图生 3D；不绑骨的角色可以直接图生低模。绑骨前确认面数在绑骨服务的上限以内。\n- 游戏道具/场景件：概念图 → 图生低模 → 自检 → 需要时拆件或减面。\n- 要“高模细节加游戏面数”的角色或道具：用 Tripo v3.1（文生、图生、多视图都可）生成高细节模型，这一步的 face_limit 用 set_params 设成较高的值并写明理由，面数超出用途预算是预期的（它只是降面前的中间模型）；多视图的游戏用途默认开着 smart_low_poly 和 quad，要一并设为关闭，否则面数上限只有 2 万和 15 万以内；再用 Tripo 带烘焙的减面，把 face_limit 设为用途面数上限，贴图烘焙到低模并自动展开 UV；角色之后绑骨、动画。Tripo P2、Meshy、Rodin 的结果和上传文件不接带烘焙的减面：要降面只能用 Meshy 重拓扑（不保留贴图，之后接换贴图），或回到 Tripo v3.1 重新生成。直接出低模的路线（P2、Meshy T2.5）不需要这一步；Meshy 7.1 在游戏用途下开自动重拓扑也能一步出带贴图的低模，但 Meshy 官方更推荐低模游戏资产用智能拓扑（T2.5）。\n- 展示渲染：概念图 → 多视图生成（至少正、侧、背）→ 自检 → 需要时换贴图。\n- 3D 打印：高细节生成 → 可打印性检查 → 修复 → 自检水密。\n自检要点：轮廓和比例是否与参考一致；背面是否被糊成一团；手指、耳朵、武器等细小结构是否粘连或断裂；有没有漂浮碎片（inspect_model 的 connected_components、debris_components、debris_triangles）；贴图接缝、错位和拉伸；左右对称的物体是否对称；面数、UV、水密是否满足用途预算。\n对照参考图：图生 3D 或多视图结果用 compare_model_reference 按视角把参考图与模型渲染并排，结果附确定性的轮廓交并比、包围盒比例差与主体色差；指标只作参考，最终看并排图和自己的判断。检查后用 record_self_check 写结论（passed 或 has_issues）并列出发现、处理与剩余问题；服务端按真实工具调用生成记录，未自检的结果不得说成已检查。轮次、每轮渲染和修正次数有上限，到上限就停下并如实汇报遗留问题。\n读 inspect_model 结果：topology.inconsistent_winding_edges 大于 0 表示相邻面朝向不一致，topology.inside_out 为 true 表示闭合网格整体朝内，两者都会让 watertight 为 false，打印前必须修复（看 usage_check 中 watertight 一项的 fix_hint）；警告 skin_bind_pose 表示骨骼无法解算，蒙皮按绑定姿态检查，包围盒、尺寸和原点都以绑定姿态为准，汇报时要说明；三角带（strip）模型的 triangles 只计实际绘制的三角面，不含拼接用的退化面，可能少于按索引数推算的值。\n修改优先级：先用不付费或便宜的手段（拆分出有问题的部件、只处理那个部件、减面），再考虑换贴图或部件补全，最后才是改进输入后整体重做。减面、拆件、换贴图修不了的问题要回到输入图：手指或四肢粘连、背面被糊成一团、比例或轮廓与参考不符、缺少部件，先修输入图或补全正侧背视角，再重新生成，不要在同一个模型上反复加工。每次修改后重新 inspect 和 render 确认，不要假设修好了。\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每个模型的提示词前先读【偏好摘要】。已选用方向要逐字沿用其造型、比例与材质；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
             "offering_capabilities": ["text-to-3d", "image-to-3d"],
             "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
             "tradeoff_separator": "\n"
@@ -6035,7 +6050,7 @@
               "create_multiview_images",
               "create_model_3d_from_views"
             ],
-            "text": "【三视图制作要领】\n逐张三视图（create_three_view）用于要给 3D 做输入的同一主体：正面以用户选的图为身份锚，左侧、背面（和可选右侧）都以已通过的正面为源，按正交投影、中性均匀光、统一姿态/比例/画幅生成；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束。每一张都是独立任务，因此可以只重做或替换有问题的那一张，并在完成后用 inspect_image 比较主体占比、背景和轮廓高度；预算制且计划已覆盖这些步骤时，服务端会逐视角自动完成并只重做不一致的那一张，严格/自动模式仍逐张由用户点“继续生成”。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；多视图模型由 Catalog 的启用项决定，支持视角标注的模型和按 front/left/back/right 顺序读取的模型都可用，不要假设不同模型价格相同。"
+            "text": "【三视图制作要领】\n逐张三视图（create_three_view）用于要给 3D 做输入的同一主体：正面以用户选的图为身份锚，左侧、背面（和可选右侧）都以已通过的正面为源，按正交投影、中性均匀光、统一姿态/比例/画幅生成；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束。每一张都是独立任务，因此可以只重做或替换有问题的那一张，并在完成后用 inspect_image 比较主体占比、背景和轮廓高度；画幅按源图主体的高宽比选择（竖版角色不会落进 1:1），服务端的一致性检查还会比对主色分布、配件等独立部件数量和左右镜像。这些数字看不出款式和语义，所以三视图完成后要对照正面图逐张复核服装、配色、配件和左右（回执里附有清单），发现问题如实告诉用户并建议重试或替换那一张。预算制且计划已覆盖这些步骤时，服务端会逐视角自动完成并只重做不一致的那一张，严格/自动模式仍逐张由用户点“继续生成”。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；多视图模型由 Catalog 的启用项决定，支持视角标注的模型和按 front/left/back/right 顺序读取的模型都可用，不要假设不同模型价格相同。"
           },
           {
             "id": "image2d",
@@ -6046,7 +6061,7 @@
               "create_multiview_images",
               "edit_multiview_images"
             ],
-            "text": "【2D 自检】\n2D 结果也要在交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付；自检与修正轮数有上限，到上限就停下并如实说明剩余问题。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）检查输入图：应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。不通过时先修图再提交；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。\n可用图像模型（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每张图的提示词前先读【偏好摘要】。已选用方向要逐字沿用其画风、构图与身份细节；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
+            "text": "【2D 自检】\n2D 结果也要在交付前自检：生成后用 inspect_image（checklist=delivery）看确定性事实（尺寸、透明通道、背景、主体占比、是否贴边），再看图判断主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付；自检与修正轮数有上限，到上限就停下并如实说明剩余问题。\ndelivery 清单还会按制作简报的 2D 用途核对：最小短边（不达标时 hint 会点名能达到的推荐模型，换模型前先告诉用户，不要静默替换）、贴图是否可无缝平铺（接缝位置写在结果里，可用 region 放大看）、要透明底时是否有真正的 alpha 通道和干净的边缘（白边会被标出）。unknown 表示这张图无法判断，不是通过。\n提交图生 3D 前，用 inspect_image（checklist=3d_input，带 show_picture 看图）检查输入图：应单主体、完整不贴边、纯色或透明背景、均匀光、无投影阴影、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开，需要绑骨的角色必须是 A 或 T 姿态。姿态、透视和投影阴影要你看图判断，用 visual_review 逐项记入自检记录。不通过时先修图再提交；用户明确要求照原图做时，才在 create_model_3d_from_image / create_model_3d_from_views 的 input_override_reason 里写明理由。\n可用图像模型（按当前启用且可用的 Offering 实时生成）：\n{offering_tradeoffs}\n账本：系统上下文里的【生产账本】是服务端事实。要复用或改写某一步的完整提示词时，用 get_production_step 按 @stepN 或任务 ID 取回，不要凭记忆重写；上一回合的自检遗留问题和已否决方向以账本为准。\n偏好：写每张图的提示词前先读【偏好摘要】。已选用方向要逐字沿用其画风、构图与身份细节；已否决方向及其原因不要换词重试，除非用户明确要求。重新生成/重绘/改词重发只是未确认信号，先确认方向再批量出图。",
             "offering_capabilities": ["text-to-image", "image-to-image"],
             "tradeoff_template": "- {model}：擅长 {strengths}；避免 {weaknesses}",
             "tradeoff_separator": "\n"
@@ -6062,10 +6077,21 @@
               "edit_multiview_images",
               "create_three_view"
             ],
-            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求。用途推荐的参数会进入冻结输入；用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认，不要静默替换。工具结果里的 model_choice 说明模型来源（用户锁定、你指定、用途推荐或默认），按实告诉用户。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，主体完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图要单主体、完整、纯色或透明背景，角色用 A-pose 或 T-pose，四肢和手指分开。\n角色设定表与系列：同一角色的多张图先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用；三视图或多视角只改变视角，不改身份和画风。\n修图还是重画：换颜色、换背景、去背景、局部修改用图生图或 remove_background；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动，达到自检与修正上限就停下说明。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时，按用途推荐选择；带理由偏离时把理由写进参数说明。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）确认输入图满足要求，不通过先修图。"
+            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求。用途推荐的参数会进入冻结输入；用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认，不要静默替换。工具结果里的 model_choice 说明模型来源（用户锁定、你指定、用途推荐或默认），按实告诉用户。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，主体完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图要单主体、完整、纯色或透明背景、无投影阴影、弱透视，角色用 A-pose 或 T-pose，四肢和手指分开。\n角色设定表与系列：同一角色的多张图先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用；三视图或多视角只改变视角，不改身份和画风。\n修图还是重画：换颜色、换背景、去背景、局部修改用图生图或 remove_background；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动，达到自检与修正上限就停下说明。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时，按用途推荐选择；带理由偏离时把理由写进参数说明。\n提交图生 3D 前，用 inspect_image（checklist=3d_input）确认输入图满足要求，不通过先修图。"
+          },
+          {
+            "id": "model3d_assets",
+            "when_domain": "model-3d",
+            "when_brief_any": ["purpose", "image_for_3d"],
+            "when_tools_any": [
+              "create_model_3d",
+              "create_model_3d_from_image",
+              "create_model_3d_from_views"
+            ],
+            "text": "【资产类型与风格要点】\n先判断主体属于哪一类，再按要点准备输入图、写提示词和自检；简报里的目标引擎与目标平台决定尺度、面数和贴图的取舍。三视图主体类型：角色 humanoid、动物 quadruped、武器、载具与建筑等硬表面 hard_surface、其他 generic。\n资产类型：\n- 角色：A 姿态（需要绑骨时必须，T 姿态也可），四肢和手指分开、不互相遮挡，中性站姿与表情；手持物、背包、披风、长发分开做或做短，否则会粘连，绑骨后也会穿插。\n- 武器：硬表面，剪影与比例准确，边缘留小倒角让高光成立，刃口不要薄到零厚度；弹匣、鞘、拉栓等会动或可装卸的部件分件；按握持点定原点与朝向。\n- 道具：单件、剪影清晰，细节烘进法线贴图而不是堆面；原点放在底面中心（手持物放握持点）；成套道具统一比例与贴图精度。\n- 载具：左右严格对称，车轮、炮塔、舱门、旋翼等会动的部件分件并把轴心放在转动中心，车头朝向统一，尺度按真实大小（轿车约 4.5 米）；内部不建模。\n- 建筑与场景件：按统一的模块网格建模（如 1、2 或 4 米），两端接口对齐便于引擎拼接；墙面和地面用无缝可平铺的贴图；看不见的内部和背面不建；整栋建筑拆成外墙、屋顶、门窗等件；需要 LOD 时先出最高精度再逐档减面，不要每档单独生成。\n风格：\n- 写实 PBR：贴图只含固有色，不烘光影与阴影；法线、粗糙度、金属度走 PBR 通道；输入图用中性均匀光。\n- 手绘：光影和笔触可以直接画进贴图，材质简单，通常只用一张固有色贴图；轮廓概括，贴图分辨率要够。\n- 卡通渲染（toon/cel）：大块平涂、色阶分明，几何干净，贴图不烘光影；描边和明暗阶交给引擎的着色。\n- 低模：用剪影和转折处的面数表达形体，细节靠贴图；面数以用途预算为准。\n- 像素风：先定网格（每格像素数）与调色板，贴图用最近邻采样、关闭滤波与 mipmap；图生 3D 很难保住像素格，先如实告诉用户，必要时改用体素或低分辨率贴图的低模。"
           }
         ],
-        "system_prompt": "你是 Plinth 的美术总监，同时负责 2D 图像与 3D 模型。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要图或要模型、而会话还没有制作简报时，先用 ask_choice 请用户选用途：3D 用 kind=usage_profile，2D 用 kind=image_usage_profile；2D 的引导要更轻，需求已经说清或用户说随便时不要出卡，直接用默认用途开始。需要风格、平台、画幅、透明背景或是否作为 3D 输入时，再用一两句话问清，然后用 update_production_brief 记下。一次最多一张选择卡，不要一次问一长串；简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。2D 与 3D 用同一套四层优先级：用户在本会话锁定的模型 > 你带理由指定的模型 > 用途推荐 > 默认。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换；用途推荐与用户所选冲突时先确认，不静默覆盖。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出推荐模型与参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说；批准卡也会带来源与理由。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 2D 结果交付前，用 inspect_image（checklist=delivery）看尺寸、透明通道、背景、主体占比与贴边，再看图检查主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性；作为 3D 输入图时用 checklist=3d_input 检查单主体、完整不贴边、纯色或透明背景与姿势。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式；有参考图时用 compare_model_reference 按视角并排对照。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。检查后用 record_self_check 写结论（passed 或 has_issues），列出发现、处理与剩余问题；记录由服务端按真实工具调用生成并持久保存，未自检的结果不得说成已检查。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 每次写生成提示词、选模型前，先读系统上下文里的偏好摘要：已选用方向逐字沿用；已否决方向及其原因不要换个说法重复提交，除非用户明确要求。重新生成、局部重绘或改词重发留下的“未确认”信号不算确认，先问清方向再批量出图。\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 每个模型的具体写法（语言、描述式或关键词式、长度、是否读取文本、反向提示词、参考图作用）以工具描述和 list_offerings 中该 Offering 的 prompt guidance 为准；guidance 与这里的通用基线冲突时，以 guidance 为准。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要；服务端会把本会话的风格锚（风格锁定的原文与参考图）逐字注入系统上下文，直接照用。改写已有步骤时，先用 get_production_step 按 @stepN 或任务 ID 取回该步的完整提示词，只改用户要求的局部并保留其余原文；基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n- 工具结果里的 final_prompt 是服务端实际提交的提示词，prompt_note 列出套用的模板、风格锁、默认反向提示词和截断；有改写或拒绝时按结果如实说明。提示词超过模型上限会被拒绝且不会扣费，按提示的差额缩写后重新调用。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
+        "system_prompt": "你是 Plinth 的美术总监，同时负责 2D 图像与 3D 模型。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要图或要模型、而会话还没有制作简报时，先用 ask_choice 请用户选用途：3D 用 kind=usage_profile，2D 用 kind=image_usage_profile；2D 的引导要更轻，需求已经说清或用户说随便时不要出卡，直接用默认用途开始。需要风格、画幅、透明背景或是否作为 3D 输入时，再用一两句话问清，然后用 update_production_brief 记下。游戏或实时用途的资产（游戏角色、游戏道具与场景件、Web/AR，或用户说要放进引擎）还必须问清目标引擎（Unity、Unreal、Godot、Web 或其他）和目标平台（手机、PC/主机、网页、XR），角色再问是否需要绑骨与动画；这几项只有用户知道，不要替用户选，用户话里已经说清的直接记下。一次最多一张选择卡，不要一次问一长串；简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡；需要绑骨的角色默认先出 A 姿态概念图，再走三视图 → 多视图转 3D 的路线（create_three_view，subject_type=humanoid，再 create_model_3d_from_views）。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。2D 与 3D 用同一套四层优先级：用户在本会话锁定的模型 > 你带理由指定的模型 > 用途推荐 > 默认。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换；用途推荐与用户所选冲突时先确认，不静默覆盖。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出推荐模型与参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说；批准卡也会带来源与理由。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 2D 结果交付前，用 inspect_image（checklist=delivery）看尺寸、透明通道、背景、主体占比与贴边，以及制作简报用途要求的最小短边、贴图平铺和透明底边缘，再看图检查主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性；作为 3D 输入图时用 checklist=3d_input（带 show_picture 看图）检查单主体、完整不贴边、纯色或透明背景，并对它列出的视觉项（姿态、透视、投影阴影）逐项看图判断，用 visual_review 记入自检记录；需要绑骨的角色必须是 A 或 T 姿态，任何一项不通过都先修图。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式；有参考图时用 compare_model_reference 按视角并排对照。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。检查后用 record_self_check 写结论（passed 或 has_issues），列出发现、处理与剩余问题；记录由服务端按真实工具调用生成并持久保存，未自检的结果不得说成已检查。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步。\n\n提示词写法：\n- 每次写生成提示词、选模型前，先读系统上下文里的偏好摘要：已选用方向逐字沿用；已否决方向及其原因不要换个说法重复提交，除非用户明确要求。重新生成、局部重绘或改词重发留下的“未确认”信号不算确认，先问清方向再批量出图。\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 每个模型的具体写法（语言、描述式或关键词式、长度、是否读取文本、反向提示词、参考图作用）以工具描述和 list_offerings 中该 Offering 的 prompt guidance 为准；guidance 与这里的通用基线冲突时，以 guidance 为准。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要；服务端会把本会话的风格锚（风格锁定的原文与参考图）逐字注入系统上下文，直接照用。改写已有步骤时，先用 get_production_step 按 @stepN 或任务 ID 取回该步的完整提示词，只改用户要求的局部并保留其余原文；基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n- 工具结果里的 final_prompt 是服务端实际提交的提示词，prompt_note 列出套用的模板、风格锁、默认反向提示词和截断；有改写或拒绝时按结果如实说明。提示词超过模型上限会被拒绝且不会扣费，按提示的差额缩写后重新调用。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -6319,6 +6345,7 @@
             "default_purpose_text": "会话没有可用的制作简报用途，按默认用途「{purpose}」判定。",
             "brief_purpose_text": "按制作简报的用途「{purpose}」判定。",
             "triangle_override_text": "三角面上限采用制作简报的 triangle_budget：{value}。",
+            "platform_budget_text": "按制作简报的目标平台「{platform}」的预算判定。",
             "no_capability_text": "当前 Catalog 没有可用于修复这一项的已启用能力。",
             "capability_joiner": " → ",
             "option_separator": " 或 ",
@@ -6353,8 +6380,11 @@
               },
               {
                 "check": "texture_size",
-                "template": "贴图超过用途上限；请重新生成并降低贴图尺寸。",
-                "options": []
+                "template": "贴图超过用途的上限 {maximum} 像素；可用 {capabilities} 把贴图降采样到上限以内，不必重新生成。",
+                "unavailable_template": "贴图超过用途的上限 {maximum} 像素；当前没有已启用的贴图降采样能力，只能重新生成并降低贴图尺寸。",
+                "options": [
+                  {"capabilities": [{"capability": "format-conversion", "parameter": "texture_size", "value": "{maximum}"}]}
+                ]
               },
               {
                 "check": "pivot_bottom_center",
@@ -6561,15 +6591,54 @@
       "image_review": {
         "limits": {"max_bytes": 33554432, "max_pixels": 40000000},
         "delivery": {"require_alpha": false, "require_plain_background": false, "max_background_spread": 0, "min_subject_ratio": 0.01, "max_subject_ratio": 0.99, "require_edge_clear": false, "max_components": 0},
-        "input_3d": {"require_alpha": false, "require_plain_background": true, "max_background_spread": 32, "min_subject_ratio": 0.05, "max_subject_ratio": 0.95, "require_edge_clear": true, "max_components": 1},
+        "input_3d": {"require_alpha": false, "require_plain_background": true, "max_background_spread": 32, "min_subject_ratio": 0.05, "max_subject_ratio": 0.95, "require_edge_clear": true, "max_components": 6, "min_main_component_ratio": 0.6},
         "delivery_checklist": "【2D 交付自检】对照用户要求和制作简报检查：主体是否正确、构图与画面比例、肢体与手部、文字与水印、与参考图或风格锁的一致性。先用 inspect_image 看确定性事实，再看图判断“像不像、对不对”；发现问题先修再交付。",
-        "input_3d_checklist": "【3D 输入图自检】用于图生 3D 的图片应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。inspect_image 的确定性结果不通过时，先修图（去背景、裁切、重画）再提交。",
+        "input_3d_checklist": "【3D 输入图自检】用于图生 3D 的图片应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。inspect_image 的确定性结果不通过时，先修图（去背景、裁切、重画）再提交。确定性检查看不出姿态、透视和投影阴影：结果里的 visual_items 列出这些要你看图判断的项（用 show_picture 看图），逐项用 visual_review 写出 pass、fail 或 not_applicable 和一句看到了什么，服务端会把它们记入自检记录；任何一项 fail 都先修图再提交。",
         "refused_template": "这些输入图不适合作为 3D 源：{reasons}。先修图（去背景、裁切、改成单主体或补全主体）再提交；如果用户明确要求照原图做，请在 {override_argument} 里写明理由后重试。",
         "override_argument": "input_override_reason",
         "override_note": "已按用户要求照原图提交，理由：{reason}。",
         "unreadable_template": "图片 {handle} 无法检查：{reason}。不要猜测它的内容。",
         "max_rounds": 3,
-        "rounds_exhausted_template": "本回合的 inspect_image 次数已用完（{maximum} 次）；停止自检，直接如实汇报剩余问题。"
+        "rounds_exhausted_template": "本回合的 inspect_image 次数已用完（{maximum} 次）；停止自检，直接如实汇报剩余问题。",
+        "usage": {
+          "transparent_field": "image_transparent",
+          "brief_purpose_note": "delivery 清单已按制作简报里的 2D 用途「{purpose}」核对最小短边、平铺和透明底。",
+          "default_purpose_note": "制作简报没有写 2D 用途，delivery 清单按默认用途「{purpose}」核对。向用户汇报结果时说明这一点；要按别的用途判断，先和用户确认再更新制作简报。",
+          "tiling": {"segments": 8, "max_seam_ratio": 2.5, "min_seam_delta": 6},
+          "alpha": {"min_transparent_ratio": 0.005, "max_background_spread": 32},
+          "edge_fringe": {"band_ratio": 0.002, "light_luma": 225, "luma_gap": 60, "max_ratio": 0.12},
+          "hints": {
+            "short_edge": "实际 {actual}，低于用途「{purpose}」要求的短边 {minimum} 像素。{models}不要静默换模型：先告诉用户这张图的分辨率不够，再带理由改用能达到的模型重新生成；用户锁定了模型时，如实说明并让用户决定。",
+            "seamless": "对边接不上：{actual}。按可平铺贴图重写提示词（seamless tileable texture，正面平视，均匀漫射光，整幅没有单一视觉焦点，图案越过每条边继续）后重画，或换更擅长重复图案的模型；可用 region 放大看接缝处。不要把有接缝的图说成可平铺。",
+            "alpha": "没有真正的透明通道：{actual}。要透明底时，先对这张图用 remove_background，或重新生成时选支持透明背景的参数，再自检。不要把不透明的图说成透明底。",
+            "edge_fringe": "透明边缘残留浅色边：{actual}。放到深色或彩色界面会露出白边。对这张图重新 remove_background，必要时换背景更干净的源图；用 region 放大边缘确认干净后再交付。"
+          },
+          "models_template": "该用途推荐里能达到的模型：{models}。",
+          "models_separator": "、",
+          "no_models_text": "该用途的推荐模型里没有一个在 Schema 里能证明达到这个分辨率，请如实告诉用户，不要承诺能达到。"
+        },
+        "visual_review_argument": "visual_review",
+        "visual_note_max_characters": 200,
+        "input_3d_visual_items": [
+          {
+            "id": "pose",
+            "label": "姿态",
+            "instruction": "看主体姿态：需要绑骨的角色（简报里的“需要绑骨”，即 needs_rig）必须是 A 姿态或 T 姿态——双臂离开躯干、双腿略分开、手指分开、没有交叉或互相遮挡；不绑骨的角色也应四肢分开。主体不是角色时标 not_applicable。",
+            "fix_hint": "用图生图或重画改成 A 姿态，四肢和手指分开；已有三视图时先重做正面，再以它为源重做其他视角。"
+          },
+          {
+            "id": "perspective",
+            "label": "透视",
+            "instruction": "看有没有明显透视：近大远小、广角畸变、俯拍或仰拍、线条向消失点收拢。应是接近正交的水平视角，主体比例没有被视角拉伸；多视角输入时每个视角都要看。",
+            "fix_hint": "重画成正交或弱透视的水平视角；多视角输入时用 create_three_view 以正面为源重做这一视角。"
+          },
+          {
+            "id": "cast_shadow",
+            "label": "投影阴影",
+            "instruction": "看主体有没有投到地面或背景上的阴影，以及强烈的单侧光明暗。光线应均匀柔和，主体上没有烘死的阴影。",
+            "fix_hint": "重画或用图生图改成均匀柔光、无地面投影，背景换成纯色。"
+          }
+        ]
       },
       "image_mask": {
         "tool": "create_selection_mask",
@@ -6673,7 +6742,7 @@
         {
           "name": "update_production_brief",
           "execution": {"implementation_key":"session.brief","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Replace this session's production brief with a complete, concise version. Before 2D or 3D work, first ask briefly what the result is for, then write the brief and ask the person to confirm it before generating. For 3D, the purpose sets the default model, triangle budget, UV and watertight requirements. For 2D, image_use sets the recommended model, aspect ratio, background and size requirements; image_transparent and image_for_3d record delivery choices. A value the person explicitly locked must be kept exactly, while unlocked choices are yours to decide and explain. The object you submit replaces the previous brief entirely, so repeat every field still in force. Omit fields to clear them; submit an empty object to clear the brief. Use ask_choice with kind usage_profile or image_usage_profile when the person should pick a purpose from a card, and kind direction for a stylistic or compositional choice.",
+          "description": "Replace this session's production brief with a complete, concise version. Before 2D or 3D work, first ask briefly what the result is for, then write the brief and ask the person to confirm it before generating. For 3D, the purpose sets the default model, triangle budget, UV and watertight requirements. For a game or real-time asset also ask for, and record, the target engine (target_engine), the target platform (target_platform) and, for a character, whether it needs a skeleton (needs_rig) and animation (needs_animation); skip what the person already stated. For 2D, image_use sets the recommended model, aspect ratio, background and size requirements; image_transparent and image_for_3d record delivery choices. A value the person explicitly locked must be kept exactly, while unlocked choices are yours to decide and explain. The object you submit replaces the previous brief entirely, so repeat every field still in force. Omit fields to clear them; submit an empty object to clear the brief. Use ask_choice with kind usage_profile or image_usage_profile when the person should pick a purpose from a card, and kind direction for a stylistic or compositional choice.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -6698,10 +6767,15 @@
                 "maxLength": 200,
                 "description": "Short style note: visual style, materials, palette or reference direction."
               },
+              "target_engine": {
+                "type": "string",
+                "enum": ["unity", "unreal", "godot", "web", "other"],
+                "description": "Engine the asset will be imported into: unity, unreal, godot, web (a browser engine such as three.js) or other. Omit when the asset is not for an engine."
+              },
               "target_platform": {
                 "type": "string",
-                "maxLength": 120,
-                "description": "Where the model will be used: Unity, Unreal, Web, an AR runtime, or a printer model."
+                "enum": ["mobile", "pc_console", "web", "xr"],
+                "description": "Platform class the asset must run on: mobile, pc_console (PC or console), web (browser) or xr (VR, AR or MR headsets). Omit when it is not for real-time use."
               },
               "needs_parts": {
                 "type": "boolean",
@@ -6709,7 +6783,7 @@
               },
               "needs_rig": {
                 "type": "boolean",
-                "description": "True when the model needs a skeleton."
+                "description": "True when the model needs a skeleton; a character that needs one starts from an A-pose (or T-pose) reference."
               },
               "needs_animation": {
                 "type": "boolean",
@@ -7000,7 +7074,7 @@
         {
           "name": "inspect_image",
           "execution": {"implementation_key":"image.inspect","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
-          "description": "Read-only deterministic inspection of one picture of this session. Pass an image handle such as @img3 (generated results and history lookups both report their handles) or @selected for the currently selected picture. The result reports the picture's size and aspect, whether it has a transparent channel, how transparent it is, the border/background colour spread, the subject's pixel share and box, whether the subject touches an edge, and how many separate subject components there are. A checklist (delivery, the default, or 3d_input) turns those facts into pass/fail checks with a fix hint. Use it to self-check a generated 2D result before delivering it, or to check an input picture before image-to-3D. It never creates a Task, charges credits or changes the session; a look at a picture that is not readable is refused with the reason.",
+          "description": "Read-only deterministic inspection of one picture of this session. Pass an image handle such as @img3 (generated results and history lookups both report their handles) or @selected for the currently selected picture. The result reports the picture's size and aspect, whether it has a transparent channel, how transparent it is, the border/background colour spread, the subject's pixel share and box, whether the subject touches an edge, and how many separate subject components there are. A checklist (delivery, the default, or 3d_input) turns those facts into pass/fail checks with a fix hint. The delivery checklist also judges the picture against the session's 2D purpose from the production brief (or the default purpose, and says which): the purpose's minimum short edge in pixels, seamless tiling for textures (a broken seam is reported with its position), and, when a transparent background is wanted, a real alpha channel and clean edges with no light rim. A failed check carries a hint with the next step; a check that cannot be judged is unknown, not passed. The 3d_input checklist also lists visual_items that pixels cannot judge (pose, perspective, cast shadows): look at the picture (show_picture) and give your verdict on each in visual_review; the server records them beside the deterministic checks, so a failed item shows up in the self-check record. Use it to self-check a generated 2D result before delivering it, or to check an input picture before image-to-3D. It never creates a Task, charges credits or changes the session; a look at a picture that is not readable is refused with the reason.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -7028,6 +7102,31 @@
               "show_picture": {
                 "type": "boolean",
                 "description": "When true, attach the named original picture (or the region crop) to the result so you can look at it. Omit to only read the deterministic report."
+              },
+              "visual_review": {
+                "type": "array",
+                "description": "Your own verdicts on the checklist's visual_items (only checklist 3d_input declares them): one entry per item you actually looked at, each item at most once. The server records them beside the deterministic checks and counts a fail in the self-check record; your last inspect_image call for a picture is the one recorded, so repeat the verdicts when you call again. A call naming an item the checklist does not declare is refused whole.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "type": "string",
+                      "enum": ["pose", "perspective", "cast_shadow"],
+                      "description": "The visual item id from visual_items."
+                    },
+                    "verdict": {
+                      "type": "string",
+                      "enum": ["pass", "fail", "not_applicable"],
+                      "description": "pass when the picture meets the item, fail when it does not, not_applicable when the item does not apply to this picture (for example pose for a prop)."
+                    },
+                    "note": {
+                      "type": "string",
+                      "description": "One short sentence on what you saw."
+                    }
+                  },
+                  "required": ["item", "verdict"],
+                  "additionalProperties": false
+                }
               }
             },
             "required": ["image"],
@@ -7367,7 +7466,7 @@
         {
           "name": "create_three_view",
           "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model selected by the human. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, so clothing, proportions and colors stay consistent. Pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
+          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model selected by the human. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, so clothing, proportions and colors stay consistent. Pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, using the nearest size the model supports, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8024,7 +8123,7 @@
             "cancellation": "task",
             "agent_scope": "3d"
           },
-          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -8078,10 +8177,30 @@
                 "type": "number",
                 "description": "rigging only: character height in meters."
               },
+              "rig_type": {
+                "type": "string",
+                "description": "rigging only, for a service that declares it (Tripo Rigging): the skeleton type. Take it from the rig-check report of this model (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic); run rig-check first when the character is not a plain biped humanoid, and use others only when the check fits no type. Omit it for a biped humanoid. list_offerings names the types each service takes."
+              },
+              "spec": {
+                "type": "string",
+                "description": "rigging only, for a biped skeleton of Tripo Rigging v3.0: the skeleton naming, one of the values list_offerings lists. Omit it and the target engine in the production brief decides (Unity and Unreal Engine have their own naming), otherwise Tripo naming applies; say why when you choose one yourself. Only a skeleton with Tripo naming can be animated with Tripo animation. Other skeleton types always use Tripo naming."
+              },
+              "skeleton_template": {
+                "type": "string",
+                "description": "rigging only, for Meshy Rigging: the skeleton template, one of the values list_offerings lists. Omit it and the target engine in the production brief decides (Unity and Unreal Engine have their own template), otherwise Meshy's own skeleton applies; say why when you choose one yourself."
+              },
+              "include_fingers": {
+                "type": "boolean",
+                "description": "rigging only, for Meshy Rigging: add finger bones. Only when the person wants fingers; it cannot go with a texture image and a quad-topology source is not supported."
+              },
               "action_id": {
                 "type": "integer",
                 "minimum": 0,
-                "description": "animation only (required): action ID from list_offerings; a long choice list there is options_compact, comma-separated value:Name entries such as 4:Attack."
+                "description": "animation only (Meshy, required): action ID from list_offerings; a long choice list there is options_compact, comma-separated value:Name entries such as 4:Attack."
+              },
+              "animation_action": {
+                "type": "string",
+                "description": "animation only (Tripo): the preset from list_offerings, for example preset:idle, preset:run, preset:jump or preset:quadruped:walk. It must fit the rig type of the source rigging task (biped presets for a biped rig, the matching creature preset for a creature rig); a mismatch is refused before anything is paid. Omit it for the default walk."
               },
               "source_asset_id": {
                 "type": "string",
@@ -8206,7 +8325,12 @@
               "resize_height": "resize_height",
               "auto_size": "auto_size",
               "height_meters": "height_meters",
+              "rig_type": "rig_type",
+              "spec": "spec",
+              "skeleton_template": "skeleton_template",
+              "include_fingers": "include_fingers",
               "action_id": "action_id",
+              "animation_action": "animation_action",
               "resize_longest_side": "resize_longest_side",
               "origin_at": "origin_at",
               "printer_type": "printer_type",
@@ -8292,7 +8416,7 @@
             "retexture",
             "format-conversion"
           ],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -9336,7 +9460,7 @@
             "argument": "purpose",
             "option_source": "usage_profiles",
             "question": "这个 3D 模型主要用来做什么？",
-            "message": "请选择这次 3D 制作的用途。用途决定默认的模型、面数与 UV 要求；选好后我会按该用途继续。"
+            "message": "请选择这次 3D 制作的用途。用途决定默认的模型、面数与 UV 要求；选好后我会按该用途继续，游戏用途还会再确认目标引擎、平台和是否需要绑骨。"
           },
           {
             "id": "image_usage_profile",
@@ -9415,6 +9539,7 @@
       "model3d_usage": {
         "default_profile": "render",
         "override_coverage_required": true,
+        "platform_field": "target_platform",
         "profiles": [
           {
             "id": "render",
@@ -9459,12 +9584,16 @@
             "description": "游戏或实时应用中的角色；控制面数并保留 UV，便于绑骨、动画与引擎导入。",
             "recommended_offerings": {
               "text-to-3d": [
+                "tripo/tripo-p2/text-to-3d",
                 "meshy/meshy-t2.5/text-to-3d",
-                "tripo/tripo-p2/text-to-3d"
+                "hyper3d/rodin-gen-2.5/text-to-3d",
+                "meshy/meshy-7.1/text-to-3d"
               ],
               "image-to-3d": [
+                "tripo/tripo-p2/image-to-3d",
                 "meshy/meshy-t2.5/image-to-3d",
-                "tripo/tripo-p2/image-to-3d"
+                "hyper3d/rodin-gen-2.5/image-to-3d",
+                "meshy/meshy-7.1/image-to-3d"
               ],
               "multiview-to-3d": [
                 "tripo/tripo-v3.1-multiview/image-to-3d",
@@ -9473,21 +9602,29 @@
             },
             "parameter_overrides": {
               "tripo/tripo-p2/text-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2/image-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "texture_quality": "standard"
               },
               "tripo/tripo-p2-multiview/image-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "texture_quality": "standard"
               },
               "tripo/tripo-v3.1-multiview/image-to-3d": {
-                "face_limit": 20000,
+                "face_limit": 10000,
+                "quad": true,
                 "smart_low_poly": true,
-                "texture_quality": "standard"
+                "texture_quality": "standard",
+                "output_formats": ["GLTF", "FBX"],
+                "export_texture_format": "PNG",
+                "export_texture_size": "2k",
+                "export_pivot_bottom_center": true
               },
               "meshy/meshy-t2.5/text-to-3d": {
                 "target_polycount": 20000,
@@ -9496,10 +9633,85 @@
               "meshy/meshy-t2.5/image-to-3d": {
                 "target_polycount": 20000,
                 "pose_mode": "a-pose"
+              },
+              "hyper3d/rodin-gen-2.5/text-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 10000,
+                "texture_mode": "high",
+                "TAPose": true,
+                "quad_normal": true
+              },
+              "hyper3d/rodin-gen-2.5/image-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 10000,
+                "texture_mode": "high",
+                "TAPose": true,
+                "quad_normal": true
+              },
+              "meshy/meshy-7.1/text-to-3d": {
+                "should_remesh": true,
+                "topology": "quad",
+                "target_polycount": 10000,
+                "texture_resolution": "2k",
+                "pose_mode": "a-pose"
+              },
+              "meshy/meshy-7.1/image-to-3d": {
+                "should_remesh": true,
+                "topology": "quad",
+                "target_polycount": 10000,
+                "texture_resolution": "2k",
+                "pose_mode": "a-pose"
               }
             },
-            "reason": "角色用于实时渲染，需要受控面数与 UV；先用成本更低的 Meshy T2.5，P2 作为可设置低面数的备选。",
+            "reason": "角色要做表情和关节变形，需要四边面布线：优先使用支持四边面输出的模型并默认开启四边面。文生、图生先用 Tripo P2；Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后。四边面的真实拓扑质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（自动重拓扑、四边面、约 2 万个三角面）并烘出 2K 贴图，一步得到带贴图的低模；但 Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图与四边面拓扑质量尚无真实样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
+            "platforms": [
+              {
+                "ids": ["mobile", "web", "xr"],
+                "budget": {
+                  "max_triangles": 20000,
+                  "max_texture_size": 2048
+                }
+              },
+              {
+                "ids": ["pc_console"],
+                "budget": {
+                  "max_triangles": 100000,
+                  "max_texture_size": 4096
+                },
+                "parameter_overrides": {
+                  "tripo/tripo-p2/text-to-3d": {
+                    "face_limit": 25000
+                  },
+                  "tripo/tripo-p2/image-to-3d": {
+                    "face_limit": 25000
+                  },
+                  "tripo/tripo-p2-multiview/image-to-3d": {
+                    "face_limit": 25000
+                  },
+                  "tripo/tripo-v3.1-multiview/image-to-3d": {
+                    "face_limit": 50000,
+                    "smart_low_poly": false
+                  },
+                  "meshy/meshy-t2.5/text-to-3d": {
+                    "target_polycount": 30000
+                  },
+                  "meshy/meshy-t2.5/image-to-3d": {
+                    "target_polycount": 30000
+                  },
+                  "meshy/meshy-7.1/text-to-3d": {
+                    "target_polycount": 25000
+                  },
+                  "meshy/meshy-7.1/image-to-3d": {
+                    "target_polycount": 25000
+                  }
+                }
+              }
+            ],
             "pipeline": [
+              {
+                "capability": "remesh",
+                "offering_id": "tripo/geometry/decimate-triangle"
+              },
               {
                 "capability": "rigging"
               },
@@ -9524,11 +9736,15 @@
             "recommended_offerings": {
               "text-to-3d": [
                 "meshy/meshy-t2.5/text-to-3d",
-                "tripo/tripo-p2/text-to-3d"
+                "tripo/tripo-p2/text-to-3d",
+                "hyper3d/rodin-gen-2.5/text-to-3d",
+                "meshy/meshy-7.1/text-to-3d"
               ],
               "image-to-3d": [
                 "meshy/meshy-t2.5/image-to-3d",
-                "tripo/tripo-p2/image-to-3d"
+                "tripo/tripo-p2/image-to-3d",
+                "hyper3d/rodin-gen-2.5/image-to-3d",
+                "meshy/meshy-7.1/image-to-3d"
               ],
               "multiview-to-3d": [
                 "tripo/tripo-v3.1-multiview/image-to-3d",
@@ -9549,17 +9765,73 @@
               "tripo/tripo-v3.1-multiview/image-to-3d": {
                 "face_limit": 20000,
                 "smart_low_poly": true,
-                "texture_quality": "standard"
+                "texture_quality": "standard",
+                "output_formats": ["GLTF", "FBX"],
+                "export_texture_format": "PNG",
+                "export_texture_size": "2k",
+                "export_pivot_bottom_center": true
               },
               "meshy/meshy-t2.5/text-to-3d": {
                 "target_polycount": 8000
               },
               "meshy/meshy-t2.5/image-to-3d": {
                 "target_polycount": 8000
+              },
+              "hyper3d/rodin-gen-2.5/text-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 4000,
+                "texture_mode": "high",
+                "quad_normal": true
+              },
+              "hyper3d/rodin-gen-2.5/image-to-3d": {
+                "mesh_mode": "Quad",
+                "quality_override": 4000,
+                "texture_mode": "high",
+                "quad_normal": true
+              },
+              "meshy/meshy-7.1/text-to-3d": {
+                "should_remesh": true,
+                "topology": "triangle",
+                "target_polycount": 8000,
+                "texture_resolution": "2k"
+              },
+              "meshy/meshy-7.1/image-to-3d": {
+                "should_remesh": true,
+                "topology": "triangle",
+                "target_polycount": 8000,
+                "texture_resolution": "2k"
               }
             },
-            "reason": "道具与场景件的面数预算更低；先用 Meshy T2.5，P2 作为自适应低模的备选。",
+            "reason": "道具与场景件不需要变形，目录里的 Offering 自述把 Meshy T2.5 与 Tripo P2 都写成适合游戏与实时资产的低模、干净拓扑，没有可依据的质量差异；质量相同时才按成本排先后，所以报价较低的 T2.5 在前、P2 在后；Rodin Gen-2.5 可出四边面并烘焙法线贴图（2K 贴图），排第三。面数预算更低，P2 不设面数覆盖，按其自适应低模。两者的真实输出质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（三角面、约 8000 面）并烘出 2K 贴图，一步得到带贴图的低模；但 Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图质量尚无真实样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
+            "platforms": [
+              {
+                "ids": ["mobile", "web", "xr"],
+                "budget": {
+                  "max_triangles": 8000,
+                  "max_texture_size": 2048
+                },
+                "parameter_overrides": {
+                  "tripo/tripo-p2-multiview/image-to-3d": {
+                    "face_limit": 8000
+                  },
+                  "tripo/tripo-v3.1-multiview/image-to-3d": {
+                    "face_limit": 8000
+                  }
+                }
+              },
+              {
+                "ids": ["pc_console"],
+                "budget": {
+                  "max_triangles": 40000,
+                  "max_texture_size": 4096
+                }
+              }
+            ],
             "pipeline": [
+              {
+                "capability": "remesh",
+                "offering_id": "tripo/geometry/decimate-triangle"
+              },
               {
                 "capability": "mesh-segmentation"
               }
@@ -9647,11 +9919,17 @@
             },
             "overrides_not_needed": [
               "meshy/meshy-7.1/text-to-3d",
-              "tripo/tripo-v3.1-full/text-to-3d",
-              "meshy/meshy-7.1/image-to-3d",
-              "tripo/tripo-v3.1-full/image-to-3d"
+              "meshy/meshy-7.1/image-to-3d"
             ],
-            "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。",
+            "parameter_overrides": {
+              "tripo/tripo-v3.1-full/text-to-3d": {
+                "output_formats": ["GLTF", "STL", "3MF"]
+              },
+              "tripo/tripo-v3.1-full/image-to-3d": {
+                "output_formats": ["GLTF", "STL", "3MF"]
+              }
+            },
+            "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。Tripo 只导出 GLB、STL 与 3MF 三种格式，其余格式打印用不到，转换保持基础价。",
             "pipeline": [
               {
                 "capability": "analyze-printability"
@@ -9701,11 +9979,27 @@
               "placeholder": "如：写实、低多边形、暖色调金属材质"
             },
             {
+              "name": "target_engine",
+              "type": "select",
+              "label": "目标引擎",
+              "options": [
+                {"id": "unity", "label": "Unity"},
+                {"id": "unreal", "label": "Unreal Engine"},
+                {"id": "godot", "label": "Godot"},
+                {"id": "web", "label": "Web / three.js"},
+                {"id": "other", "label": "其他引擎"}
+              ]
+            },
+            {
               "name": "target_platform",
-              "type": "text",
+              "type": "select",
               "label": "目标平台",
-              "maximum_characters": 120,
-              "placeholder": "如：Unity、Unreal、Web、AR、3D 打印"
+              "options": [
+                {"id": "mobile", "label": "手机"},
+                {"id": "pc_console", "label": "PC / 主机"},
+                {"id": "web", "label": "网页"},
+                {"id": "xr", "label": "XR（VR / AR / MR）"}
+              ]
             },
             {
               "name": "needs_parts",
@@ -9738,8 +10032,34 @@
               "placeholder": "记录限制、排除项和参考方向。"
             }
           ],
-          "context_template": "\n\n【制作简报】{brief}\n这是本会话的制作简报：用途决定质量与默认参数；用户明确锁定的事项必须遵守，未锁定的事项由你按用途决定并说明理由。没有写入的字段不代表用户锁定。",
-          "empty_text": "尚未建立制作简报。开始 2D 或 3D 工作前，先用一两个简短的问题问清用途，再调用 update_production_brief 写入简报并请用户确认。",
+          "parameter_defaults": [
+            {
+              "field": "target_engine",
+              "value": "unity",
+              "parameter_overrides": {
+                "tripo/processing/rigging-v3": {
+                  "spec": "unity"
+                },
+                "meshy/processing/rigging": {
+                  "skeleton_template": "unity_humanoid"
+                }
+              }
+            },
+            {
+              "field": "target_engine",
+              "value": "unreal",
+              "parameter_overrides": {
+                "tripo/processing/rigging-v3": {
+                  "spec": "unreal"
+                },
+                "meshy/processing/rigging": {
+                  "skeleton_template": "ue5_mannequin"
+                }
+              }
+            }
+          ],
+          "context_template": "\n\n【制作简报】{brief}\n这是本会话的制作简报：用途决定质量与默认参数；用户明确锁定的事项必须遵守，未锁定的事项由你按用途决定并说明理由。没有写入的字段不代表用户锁定。目标引擎、目标平台和是否绑骨只有用户知道，不能替用户决定：游戏或实时用途里它们没写入时，先用一两句话问清并记入简报，再开始制作。",
+          "empty_text": "尚未建立制作简报。开始 2D 或 3D 工作前，先用一两个简短的问题问清用途，再调用 update_production_brief 写入简报并请用户确认。游戏或实时用途的资产还要问清目标引擎（Unity、Unreal、Godot、Web 或其他）和目标平台（手机、PC/主机、网页、XR），角色再问是否需要绑骨与动画；用户话里已经说清的直接写入，不重复问。",
           "field_template": "{label}：{value}",
           "flag_template": "{label}",
           "separator": "；",
@@ -9766,7 +10086,8 @@
             "profile_undeclared": "用途 “{value}” 未声明",
             "text_too_long": "字段 “{field}” 不能超过 {maximum} 个字符",
             "out_of_range": "字段 “{field}” 必须在 {minimum} 与 {maximum} 之间",
-            "unsupported_type": "字段 “{field}” 的类型 “{type}” 未实现"
+            "unsupported_type": "字段 “{field}” 的类型 “{type}” 未实现",
+            "select_undeclared": "字段 “{field}” 只能取这些值之一：{options}"
           }
         },
         "budget_limits": [
@@ -9778,7 +10099,7 @@
           {
             "semantic": "texture-size",
             "bound": "max_texture_size",
-            "option_values": {"2k": 2048, "4k": 4096, "8k": 8192},
+            "option_values": {"2k": 2048, "4k": 4096, "8k": 8192, "high": 2048, "extreme-high": 6144},
             "item_template": "{model} 的「{parameter}」为 {value}（贴图边长 {amount} 像素），超过用途「{purpose}」的贴图边长上限 {maximum} 像素"
           }
         ],
@@ -9796,19 +10117,19 @@
             "description": "游戏、影视或产品前期的概念设定图，允许多主体与场景，重视构图、氛围和叙事。",
             "recommended_offerings": {
               "text-to-image": [
-                "meshy/nano-banana-pro/text-to-image",
-                "gemini/gemini-3-pro-image/text-to-image"
+                "gemini/gemini-3-pro-image/text-to-image",
+                "meshy/nano-banana-pro/text-to-image"
               ],
               "image-to-image": [
-                "meshy/nano-banana-pro/image-to-image",
-                "gemini/gemini-3-pro-image/image-to-image"
+                "gemini/gemini-3-pro-image/image-to-image",
+                "meshy/nano-banana-pro/image-to-image"
               ]
             },
             "parameter_overrides": {
+              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "16:9", "image_size": "4K"},
+              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "16:9", "image_size": "4K"},
               "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "16:9"},
-              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "16:9"},
-              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "16:9"},
-              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "16:9"}
+              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "16:9"}
             },
             "requirements": {
               "aspect_ratio": "16:9",
@@ -9817,7 +10138,7 @@
               "subjects": "multiple",
               "pose": ""
             },
-            "reason": "概念设定要交代场景与多主体关系，优先提示词遵循和构图稳定的模型；宽画幅更接近概念图的常用比例。"
+            "reason": "概念设定要交代场景与多主体关系，优先提示词遵循和构图稳定、且能出到所需分辨率的模型；宽画幅更接近概念图的常用比例。"
           },
           {
             "id": "illustration",
@@ -9825,19 +10146,19 @@
             "description": "单角色立绘、宣传插画或封面；主体突出，画幅便于排版和裁切。",
             "recommended_offerings": {
               "text-to-image": [
-                "meshy/nano-banana-pro/text-to-image",
-                "gemini/gemini-3-pro-image/text-to-image"
+                "gemini/gemini-3-pro-image/text-to-image",
+                "meshy/nano-banana-pro/text-to-image"
               ],
               "image-to-image": [
-                "meshy/nano-banana-pro/image-to-image",
-                "gemini/gemini-3-pro-image/image-to-image"
+                "gemini/gemini-3-pro-image/image-to-image",
+                "meshy/nano-banana-pro/image-to-image"
               ]
             },
             "parameter_overrides": {
+              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "3:4", "image_size": "4K"},
+              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "3:4", "image_size": "4K"},
               "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "3:4"},
-              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "3:4"},
-              "gemini/gemini-3-pro-image/text-to-image": {"aspect_ratio": "3:4"},
-              "gemini/gemini-3-pro-image/image-to-image": {"aspect_ratio": "3:4"}
+              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "3:4"}
             },
             "requirements": {
               "aspect_ratio": "3:4",
@@ -9846,7 +10167,7 @@
               "subjects": "single",
               "pose": ""
             },
-            "reason": "立绘以单角色为主体，需要稳定的身份与细节表现；竖画幅便于排版，优先提示词遵循与角色一致性好的模型。"
+            "reason": "立绘以单角色为主体，需要稳定的身份与细节表现；竖画幅便于排版，优先提示词遵循与角色一致性好、且能出到所需分辨率的模型。"
           },
           {
             "id": "icon_prop",
@@ -9854,19 +10175,19 @@
             "description": "图标、道具图或 UI 素材；单主体、方形构图，背景干净或透明，便于裁切和合成。",
             "recommended_offerings": {
               "text-to-image": [
-                "meshy/nano-banana-pro/text-to-image",
-                "openai/gpt-image-2/text-to-image"
+                "openai/gpt-image-2/text-to-image",
+                "meshy/nano-banana-pro/text-to-image"
               ],
               "image-to-image": [
-                "meshy/nano-banana-pro/image-to-image",
-                "openai/gpt-image-2/image-to-image"
+                "openai/gpt-image-2/image-to-image",
+                "meshy/nano-banana-pro/image-to-image"
               ]
             },
             "parameter_overrides": {
-              "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "1:1", "remove_background": true},
-              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "1:1", "remove_background": true},
               "openai/gpt-image-2/text-to-image": {"size": "2048x2048", "background": "transparent"},
-              "openai/gpt-image-2/image-to-image": {"size": "2048x2048", "background": "transparent"}
+              "openai/gpt-image-2/image-to-image": {"size": "2048x2048", "background": "transparent"},
+              "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "1:1", "remove_background": true},
+              "meshy/nano-banana-pro/image-to-image": {"aspect_ratio": "1:1", "remove_background": true}
             },
             "requirements": {
               "aspect_ratio": "1:1",
@@ -9875,7 +10196,7 @@
               "subjects": "single",
               "pose": ""
             },
-            "reason": "图标和道具图要单主体、方形、背景可去除；优先能稳定出单一主体并支持透明背景的模型。"
+            "reason": "图标和道具图要单主体、方形、背景可去除；优先能稳定出单一主体、直接支持透明背景并能出到要求分辨率的模型。"
           },
           {
             "id": "texture_asset",
@@ -9883,15 +10204,19 @@
             "description": "可平铺的材质贴图或表面纹理；方形、均匀光、弱透视，供 3D 或平面使用。",
             "recommended_offerings": {
               "text-to-image": [
+                "openai/gpt-image-2/text-to-image",
                 "meshy/nano-banana-2/text-to-image",
                 "jimeng/seedream-4-5/text-to-image"
               ],
               "image-to-image": [
+                "openai/gpt-image-2/image-to-image",
                 "meshy/nano-banana-2/image-to-image",
                 "jimeng/seedream-4-5/image-to-image"
               ]
             },
             "parameter_overrides": {
+              "openai/gpt-image-2/text-to-image": {"size": "2048x2048"},
+              "openai/gpt-image-2/image-to-image": {"size": "2048x2048"},
               "meshy/nano-banana-2/text-to-image": {"aspect_ratio": "1:1"},
               "meshy/nano-banana-2/image-to-image": {"aspect_ratio": "1:1"},
               "jimeng/seedream-4-5/text-to-image": {"size": "4096x4096"},
@@ -9902,9 +10227,11 @@
               "minimum_short_edge": 1024,
               "background": "any",
               "subjects": "single",
-              "pose": ""
+              "pose": "",
+              "tileable": true
             },
-            "reason": "贴图要方形、均匀、无强透视；优先成本低、适合批量变体的模型，需要更高分辨率时用高分辨率模型。"
+            "reason": "贴图要方形、均匀、无强透视，还要能无缝平铺；有损压缩的块状噪点会在法线、粗糙度这类数据贴图上变成明显瑕疵，所以优先无损（PNG）输出的模型。即梦 Seedream 4.5 固定输出 JPEG，只在没有其他可用模型时使用。",
+            "prompt_guidance": "按可平铺贴图写提示词：写明 seamless tileable texture；正面平视、无透视；均匀漫射光，没有投影、渐晕和高光热点；整幅细节密度一致，没有单一视觉焦点，也没有边框；图案越过每条边继续，不要把物体摆在边缘。"
           },
           {
             "id": "model3d_input",
@@ -9920,6 +10247,7 @@
               "meshy/nano-banana-pro/text-to-image": {"aspect_ratio": "1:1", "pose_mode": "a-pose", "remove_background": true},
               "meshy/nano-banana-2/text-to-image": {"aspect_ratio": "1:1", "pose_mode": "a-pose", "remove_background": true}
             },
+            "resolution_unverified_offerings": ["meshy/nano-banana-pro/text-to-image"],
             "requirements": {
               "aspect_ratio": "1:1",
               "minimum_short_edge": 1024,
@@ -9930,6 +10258,10 @@
             "reason": "3D 输入图必须单主体、完整、背景干净并保持角色姿势；优先能固定姿势并直接去背景的模型，产出后用 inspect_image 的 3d_input 自检。"
           }
         ],
+        "output_resolutions": {
+          "gemini/gemini-3-pro-image/text-to-image": {"parameter": "image_size", "pixels": {"1K": 1048576, "2K": 4194304, "4K": 16777216}},
+          "gemini/gemini-3-pro-image/image-to-image": {"parameter": "image_size", "pixels": {"1K": 1048576, "2K": 4194304, "4K": 16777216}}
+        },
         "requirements_note": {
           "template": "{items}",
           "separator": "；",
@@ -9951,7 +10283,9 @@
           "pose_texts": {
             "a-pose": "A-pose",
             "t-pose": "T-pose"
-          }
+          },
+          "tileable_text": "必须可无缝平铺",
+          "guidance_template": "提示词要点：{value}"
         }
       },
       "context_compaction": {
@@ -10015,13 +10349,16 @@
             "id": "humanoid",
             "label": "人形角色",
             "front_constraints": "The subject is a humanoid character: use a neutral standing A-pose (or keep the reference's T-pose), with arms away from the body, hands open and fingers separated, feet apart and weight even; keep the same anatomy, face, hairstyle, clothing, accessories and colors as the reference.",
-            "view_constraints": "The subject is the same humanoid character in true orthographic projection for this view: no perspective or foreshortening; keep exactly the same A-pose or T-pose, proportions, height in frame and scale as the front view; arms and fingers stay separated and do not overlap the torso; neutral even lighting, plain background."
+            "view_constraints": "The subject is the same humanoid character in true orthographic projection for this view: no perspective or foreshortening; keep exactly the same A-pose or T-pose, proportions, height in frame and scale as the front view; arms and fingers stay separated and do not overlap the torso; neutral even lighting, plain background.",
+            "frame_minimum_ratio": 0.66,
+            "frame_maximum_ratio": 1
           },
           {
             "id": "quadruped",
             "label": "四足动物",
             "front_constraints": "The subject is a quadruped animal: use a neutral standing pose with all four legs visible and separated, head level, tail clear of the body; keep the same anatomy, fur or scales, markings and colors as the reference.",
-            "view_constraints": "The subject is the same quadruped animal in true orthographic projection for this view: no perspective or foreshortening; keep exactly the same pose, proportions, height in frame and scale as the front view; all four legs and the tail stay visible and separated; neutral even lighting, plain background."
+            "view_constraints": "The subject is the same quadruped animal in true orthographic projection for this view: no perspective or foreshortening; keep exactly the same pose, proportions, height in frame and scale as the front view; all four legs and the tail stay visible and separated; neutral even lighting, plain background.",
+            "frame_minimum_ratio": 1
           },
           {
             "id": "hard_surface",
@@ -10034,7 +10371,54 @@
           "max_subject_ratio_delta": 0.08,
           "max_background_spread": 32,
           "max_bbox_height_delta": 0.12,
-          "max_attempts_per_view": 2
+          "max_attempts_per_view": 2,
+          "front": {
+            "max_components": 6,
+            "min_main_component_ratio": 0.6
+          },
+          "appearance": {
+            "subject_threshold": 32,
+            "palette": {
+              "max_distance": 0.1,
+              "colours": 6,
+              "min_share": 0.03,
+              "merge_distance": 48
+            },
+            "parts": {
+              "max_count_delta": 1,
+              "min_share": 0.01
+            },
+            "mirror": {
+              "normalized_side": 64,
+              "pairs": [
+                {
+                  "views": ["left", "right"],
+                  "min_overlap": 0.6,
+                  "max_orientation_margin": 0.1
+                },
+                {
+                  "views": ["front", "back"],
+                  "min_overlap": 0.5,
+                  "max_orientation_margin": 0.1
+                }
+              ]
+            }
+          },
+          "reason_separator": "；",
+          "reasons": {
+            "nonblank": "画面里几乎没有可见主体（{actual}）",
+            "background": "背景不是纯色或透明（{actual}）",
+            "subject_size": "主体大小不合要求（{actual}）",
+            "edge": "主体被画面边缘裁切（{actual}）",
+            "components": "主体被分成过多块（{actual}，要求 {expected}）",
+            "main_component": "画面里不止一个主体：最大的一块只占主体的 {actual}，要求不低于 {expected}",
+            "subject_size_delta": "主体占画面的比例与正面图相差过大（{actual}；要求 {expected}）",
+            "silhouette_height_delta": "主体高度与正面图相差过大（{actual}；要求 {expected}）",
+            "palette_distance": "主色分布与正面图不一致，服装或配色可能漂移（差异上限 {expected}，实测 {actual}；分号后箭头前是正面主色，箭头后是本视图主色）",
+            "part_count_delta": "配件或独立部件的数量与正面图不符，可能缺少或多出了配件（正面 -> 本视图：{actual}，允许相差 {expected}）",
+            "mirror_overlap": "轮廓与{partner}不呈镜像，姿态或比例对不上（镜像重合度 {actual}，要求不低于 {expected}）",
+            "mirror_orientation": "朝向与{partner}相同而不是镜像，疑似左右互换（不镜像 / 镜像重合度 = {actual}，前者最多可高出后者 {expected}）"
+          }
         },
         "continuation": {
           "enabled": true,
@@ -10043,6 +10427,40 @@
             "view_not_finished": "这个视角的任务没有成功完成",
             "view_already_started": "另一个视角已在等待或生成中",
             "consistency_retries_exhausted": "自动重做次数已用完，这一张仍与正面图不一致"
+          }
+        },
+        "frame": {
+          "enabled": true,
+          "subject_threshold": 32,
+          "min_subject_ratio": 0.02,
+          "margin_ratio": 0.08
+        },
+        "review": {
+          "checklist_template": "\n\n【三视图复核】自动检查只比轮廓、主色分布、独立部件数和左右镜像，看不出款式和语义。请你看上面这几张图，把 {views} 逐张与正面图对照，每一项都要确认：\n{items}\n{view_notes}发现不一致时，如实告诉用户是哪一张的哪一项，建议在三视图卡片上重试或替换那一张；不要自己改写提示词去重做其他视角，也不要在没有对照过的情况下说三视图已经一致。",
+          "item_template": "- {text}",
+          "items": [
+            {
+              "id": "clothing",
+              "text": "服装：款式、层次、领口袖口、纹样与标志性细节与正面图一致"
+            },
+            {
+              "id": "colours",
+              "text": "配色：各部位的主色与材质质感与正面图一致，没有色相或明暗漂移"
+            },
+            {
+              "id": "accessories",
+              "text": "配件：武器、宠物、饰品、背包等的数量、大小和位置与正面图一致，没有凭空多出或消失"
+            },
+            {
+              "id": "sides",
+              "text": "左右：左侧、右侧的手持物、挂件和不对称细节与正面图一致，没有左右互换（正面图画面左侧是主体自己的右侧）"
+            }
+          ],
+          "view_note_template": "- {view}：{note}\n",
+          "view_notes": {
+            "left": "从主体自己的左侧看过去，主体的左侧在近侧；右侧的物件被身体挡住时可以看不见，但不能出现在左侧。",
+            "back": "从主体身后看，画面左侧是主体自己的左侧，与正面图的左右相反：正面图画面左侧的物件，在背面图里应出现在画面右侧。",
+            "right": "从主体自己的右侧看过去，主体的右侧在近侧；左侧的物件被身体挡住时可以看不见，但不能出现在右侧。"
           }
         },
         "messages": {
@@ -10056,7 +10474,7 @@
           "group_not_ready": "这组三视图还不能用于多视图生成 3D，没有提交任务：需要正面图和至少一个其他视角都已完成。请告诉用户先在三视图卡片上生成剩余视图，或改用「只用正面转 3D」。",
           "views_changed": "用户点按钮之后这组三视图有视图被替换或重新生成了，没有提交任务。请告诉用户在三视图卡片上重新点「用三视图生成 3D」。",
           "views_invalid": "图片的视角标注无效，没有提交任务：每张图只能标一个所选模型支持的视角，不能重复，且必须有正面。请让用户重新标注视角。",
-          "agent_completed": "三视图运行 {run} 的必需视角已完成并通过一致性检查：{views}。用 create_model_3d_from_views 的 three_view_group={run} 提交多视图 3D；不要再告诉用户这些视角不会自动完成。",
+          "agent_completed": "三视图运行 {run} 的必需视角已完成并通过一致性检查：{views}。用 create_model_3d_from_views 的 three_view_group={run} 提交多视图 3D；不要再告诉用户这些视角不会自动完成。{checklist}",
           "agent_paused": "三视图运行 {run} 在 {view} 暂停：{reason}。后续视角没有自动提交，请告诉用户在三视图卡片上继续或重试。",
           "consistency_retry": "{view} 与正面图不一致（{reasons}），已自动重做第 {attempt}/{maximum} 次；其他视角不受影响。",
           "consistency_failed": "{view} 与正面图仍不一致（{reasons}），已停止自动重做。请让用户在三视图卡片上重试这一张，或替换它。",
@@ -17090,6 +17508,7 @@
             "ui.studio.brief.none": "Not set",
             "ui.studio.brief.yes": "Yes",
             "ui.studio.brief.no": "No",
+            "ui.studio.brief.unlisted": "{value} (previous entry)",
             "ui.studio.brief.load_failed": "Could not load the production brief",
             "ui.studio.brief.loading": "Loading the production brief…",
             "ui.studio.brief.notes_hint": "Record constraints, exclusions and references beyond the purpose.",
@@ -17290,7 +17709,7 @@
             "ui.studio.stage.action.process_hint.mesh-segmentation": "Identify the model's parts and generate a segmented result.",
             "ui.studio.stage.action.process_hint.mesh-completion": "Complete all parts of a native Tripo Segment result from this session.",
             "ui.studio.stage.action.process_hint.retexture": "Keep the model's shape and regenerate the entire texture set from a description or reference image.",
-            "ui.studio.stage.action.process_hint.rigging": "Add a skeleton to a humanoid model so it can be animated afterward.",
+            "ui.studio.stage.action.process_hint.rigging": "Add a skeleton to a model so it can be animated afterward; choose the skeleton type (biped, quadruped and so on) as the rig check reports.",
             "ui.studio.stage.action.process_hint.rig-check": "Check whether a native Tripo model is suitable for rigging; returns a report only and doesn't rig.",
             "ui.studio.stage.action.process_hint.uv-unwrap": "Re-unwrap UVs for a static model; the original texture is not kept.",
             "ui.studio.stage.action.process_hint.resize": "Scale the model to a given height or longest side, and set a bottom or center origin.",
@@ -17313,6 +17732,8 @@
             "ui.studio.stage.action.to_3d_hint": "Send the Agent an \"image to 3D\" turn using this image.",
             "ui.studio.stage.action.to_3d_target": "The current version's image; if the artboard was edited, the image inside the dashed frame",
             "ui.studio.stage.group.identity": "Current object",
+            "ui.studio.stage.actions_previous": "Show earlier tools",
+            "ui.studio.stage.actions_next": "Show more tools",
             "ui.studio.stage.group.produce": "Produce",
             "ui.studio.stage.group.output": "Output",
             "ui.studio.stage.group.view": "View",
@@ -18766,7 +19187,7 @@
             "chat.presentation.messages.model_choice_unavailable": "The model named by this call ({model}) is not available right now, or cannot accept this input, so nothing was submitted. Available options: {choices}. Use one of them, or continue with the purpose's recommendation.",
             "chat.presentation.messages.choice_option_invalid": "The direction card's options are invalid: 2 to 8 options are required, each id must be a short alphanumeric token and each label non-empty. Call ask_choice again with valid options.",
             "chat.choice.kinds[id=usage_profile].question": "What is this 3D model mainly for?",
-            "chat.choice.kinds[id=usage_profile].message": "Choose the purpose of this 3D work. The purpose decides the default model, triangle budget and UV requirements; after you choose, I will continue with that purpose.",
+            "chat.choice.kinds[id=usage_profile].message": "Choose the purpose of this 3D work. The purpose decides the default model, triangle budget and UV requirements; after you choose, I will continue with that purpose, and for a game purpose I will also confirm the target engine, the platform and whether it needs rigging.",
             "chat.choice.kinds[id=visual_anchor].question": "Set this image as a visual anchor?",
             "chat.choice.kinds[id=visual_anchor].message": "Confirm whether to save this visual anchor to the session. It is written only after confirmation; declining changes nothing.",
             "chat.choice.kinds[id=visual_anchor].accept_label": "Set as visual anchor",
@@ -18790,16 +19211,17 @@
             "chat.reroll.messages.idempotency_required": "Reroll requires an Idempotency-Key so a repeated request cannot charge twice.",
             "chat.image2d_usage.profiles[id=concept_art].label": "Concept art",
             "chat.image2d_usage.profiles[id=concept_art].description": "Concept art for games, film or product development; several subjects and a scene are allowed, with emphasis on composition, mood and narrative.",
-            "chat.image2d_usage.profiles[id=concept_art].reason": "Concept art explains a scene and the relationships between subjects; prefer models that follow prompts and hold a stable composition, and a wide frame close to the usual concept-art ratio.",
+            "chat.image2d_usage.profiles[id=concept_art].reason": "Concept art explains a scene and the relationships between subjects; prefer models that follow prompts, hold a stable composition and can reach the required resolution, and a wide frame close to the usual concept-art ratio.",
             "chat.image2d_usage.profiles[id=illustration].label": "Character illustration / key art",
             "chat.image2d_usage.profiles[id=illustration].description": "A single-character illustration, key art or cover; a prominent subject and a frame that is easy to lay out and crop.",
-            "chat.image2d_usage.profiles[id=illustration].reason": "Illustration is built around one character and needs stable identity and detail; a portrait frame is easy to lay out, and prompt-following models with good character consistency come first.",
+            "chat.image2d_usage.profiles[id=illustration].reason": "Illustration is built around one character and needs stable identity and detail; a portrait frame is easy to lay out, and prompt-following models with good character consistency that can reach the required resolution come first.",
             "chat.image2d_usage.profiles[id=icon_prop].label": "Icon / prop image",
             "chat.image2d_usage.profiles[id=icon_prop].description": "An icon, prop image or UI asset; one subject in a square frame with a clean or transparent background, easy to crop and composite.",
-            "chat.image2d_usage.profiles[id=icon_prop].reason": "Icons and prop images need one subject, a square frame and a removable background; prefer models that hold a single subject and support transparency.",
+            "chat.image2d_usage.profiles[id=icon_prop].reason": "Icons and prop images need one subject, a square frame and a removable background; prefer models that hold a single subject, support transparency directly and reach the required resolution.",
             "chat.image2d_usage.profiles[id=texture_asset].label": "Texture asset",
             "chat.image2d_usage.profiles[id=texture_asset].description": "A tileable material texture or surface pattern; square, evenly lit and weakly perspective, for 3D or graphic use.",
-            "chat.image2d_usage.profiles[id=texture_asset].reason": "A texture must be square, even and without strong perspective; prefer low-cost models that suit batches of variants, and a high-resolution model when more detail is needed.",
+            "chat.image2d_usage.profiles[id=texture_asset].reason": "A texture must be square, even, without strong perspective and tile seamlessly; lossy compression blocks become visible flaws on data textures such as normal and roughness maps, so lossless (PNG) models come first. Jimeng Seedream 4.5 always delivers JPEG and is used only when no other model is available.",
+            "chat.image2d_usage.profiles[id=texture_asset].prompt_guidance": "Write the prompt for a tileable texture: say seamless tileable texture; flat-on view with no perspective; even diffuse light without cast shadows, vignette or highlight hot spots; the same detail density across the whole frame, with no single focal point and no border; the pattern continues across every edge, so keep objects away from the edges.",
             "chat.image2d_usage.profiles[id=model3d_input].label": "3D input image",
             "chat.image2d_usage.profiles[id=model3d_input].description": "A single-subject concept image used to generate a 3D model; solid or transparent background, complete and not cropped, characters in A-pose or T-pose, checked by the 3D input gate of #245.",
             "chat.image2d_usage.profiles[id=model3d_input].reason": "A 3D input image must show one complete subject with a clean background and a stable pose; prefer models that can pin the pose and remove the background, then self-check with inspect_image checklist=3d_input.",
@@ -18818,37 +19240,44 @@
             "chat.image2d_usage.requirements_note.subjects_texts.multiple": "multiple allowed",
             "chat.image2d_usage.requirements_note.pose_texts.a-pose": "A-pose",
             "chat.image2d_usage.requirements_note.pose_texts.t-pose": "T-pose",
+            "chat.image2d_usage.requirements_note.tileable_text": "must tile seamlessly",
+            "chat.image2d_usage.requirements_note.guidance_template": "prompt tips: {value}",
             "chat.model3d_usage.profiles[id=render].label": "Display / rendering",
             "chat.model3d_usage.profiles[id=render].description": "A model for display, preview or promotion; not aimed at real-time use or printing.",
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
             "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
             "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
-            "chat.model3d_usage.profiles[id=game_character].reason": "A character rendered in real time needs a controlled triangle count and UVs; Meshy T2.5 comes first for its lower cost, with P2 as the alternative that can set a low face limit.",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character has to deform for expressions and joints, which needs quad topology: models that can output quads come first, and quads are turned on by default. For text and single-image input Tripo P2 comes first; Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality. The real topology quality of the quads has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (automatic remesh, quads, about 20,000 triangles) and bakes 2K textures, so one step gives a textured low-poly model; but Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures and the quad topology after remesh have not been checked against real upstream samples. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
             "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
             "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
-            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces have a lower triangle budget; Meshy T2.5 comes first, with P2 as the adaptive low-poly alternative.",
+            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces do not deform. The catalog's own notes describe both Meshy T2.5 and Tripo P2 as low-poly, clean-topology models for games and real-time assets, so there is no documented quality difference to rank by; cost only orders models of equal quality, so the lower-quoted T2.5 comes first and P2 follows; Rodin Gen-2.5 comes third for quad faces with a baked normal map and 2K textures. The triangle budget is lower; P2 sets no face limit so it can choose its own adaptive low-poly count. The real output quality of both has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (triangles, about 8,000 faces) and bakes 2K textures, so one step gives a textured low-poly model; but Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures after remesh have not been checked against real upstream samples. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
             "chat.model3d_usage.profiles[id=web_ar].label": "Web / AR display",
             "chat.model3d_usage.profiles[id=web_ar].description": "A model shown live on the web or in AR; the triangle count is controlled and UVs are kept.",
             "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; Meshy 7.1's low triangle count and 2K textures come first, with P2 as an alternative.",
             "chat.model3d_usage.profiles[id=print].label": "3D printing",
             "chat.model3d_usage.profiles[id=print].description": "A solid model for 3D printing; full detail is kept and a watertight mesh is required so it can be sliced.",
-            "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1.",
+            "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1. Tripo exports only GLB, STL and 3MF; printing has no use for the other formats, and the conversions stay at the basic price.",
             "chat.model3d_usage.brief.fields[name=purpose].label": "Purpose",
             "chat.model3d_usage.brief.fields[name=image_use].label": "2D purpose",
             "chat.model3d_usage.brief.fields[name=image_transparent].label": "Transparent background",
             "chat.model3d_usage.brief.fields[name=image_for_3d].label": "Image for 3D input",
             "chat.model3d_usage.brief.fields[name=style].label": "Style",
             "chat.model3d_usage.brief.fields[name=style].placeholder": "For example: realistic, low-poly, warm-toned metal materials",
+            "chat.model3d_usage.brief.fields[name=target_engine].label": "Target engine",
+            "chat.model3d_usage.brief.fields[name=target_engine].options[id=other].label": "Other engine",
             "chat.model3d_usage.brief.fields[name=target_platform].label": "Target platform",
-            "chat.model3d_usage.brief.fields[name=target_platform].placeholder": "For example: Unity, Unreal, Web, AR, 3D print",
+            "chat.model3d_usage.brief.fields[name=target_platform].options[id=mobile].label": "Mobile",
+            "chat.model3d_usage.brief.fields[name=target_platform].options[id=pc_console].label": "PC / console",
+            "chat.model3d_usage.brief.fields[name=target_platform].options[id=web].label": "Web",
+            "chat.model3d_usage.brief.fields[name=target_platform].options[id=xr].label": "XR (VR / AR / MR)",
             "chat.model3d_usage.brief.fields[name=needs_parts].label": "Parts need separating",
             "chat.model3d_usage.brief.fields[name=needs_rig].label": "Rigging needed",
             "chat.model3d_usage.brief.fields[name=needs_animation].label": "Animation needed",
             "chat.model3d_usage.brief.fields[name=triangle_budget].label": "Triangle budget",
             "chat.model3d_usage.brief.fields[name=notes].label": "Additional notes",
             "chat.model3d_usage.brief.fields[name=notes].placeholder": "Record constraints, exclusions and references.",
-            "chat.model3d_usage.brief.context_template": "\n\n[Production brief] {brief}\nThis is the session's production brief: the purpose decides quality and default parameters; anything the user explicitly locked must be obeyed, and unlocked choices are yours to decide and explain. A field that was not written does not mean the user locked it.",
-            "chat.model3d_usage.brief.empty_text": "No production brief yet. Before starting 2D or 3D work, ask one or two short questions to learn the purpose, then call update_production_brief to write the brief and ask the user to confirm it.",
+            "chat.model3d_usage.brief.context_template": "\n\n[Production brief] {brief}\nThis is the session's production brief: the purpose decides quality and default parameters; anything the user explicitly locked must be obeyed, and unlocked choices are yours to decide and explain. A field that was not written does not mean the user locked it. The target engine, the target platform and whether to rig are known only to the user and are not yours to decide: for a game or real-time purpose, when they are not written, ask in one or two sentences and record the answer in the brief before starting.",
+            "chat.model3d_usage.brief.empty_text": "No production brief yet. Before starting 2D or 3D work, ask one or two short questions to learn the purpose, then call update_production_brief to write the brief and ask the user to confirm it. For a game or real-time asset also ask for the target engine (Unity, Unreal, Godot, Web or other) and the target platform (mobile, PC/console, web, XR), and for a character whether it needs rigging and animation; record what the user's message already states without asking again.",
             "chat.model3d_usage.brief.field_template": "{label}: {value}",
             "chat.model3d_usage.brief.purpose_template": "{label} ({budget})",
             "chat.model3d_usage.brief.budget_template": "Budget {minimum}–{maximum} triangles{requirements}",
@@ -18873,6 +19302,7 @@
             "chat.model3d_usage.brief.messages.text_too_long": "Field “{field}” cannot exceed {maximum} characters",
             "chat.model3d_usage.brief.messages.out_of_range": "Field “{field}” must be between {minimum} and {maximum}",
             "chat.model3d_usage.brief.messages.unsupported_type": "Field “{field}” has an unsupported type “{type}”",
+            "chat.model3d_usage.brief.messages.select_undeclared": "Field “{field}” must be one of: {options}",
             "chat.model3d_usage.budget_limits[semantic=polycount].item_template": "{parameter} of {model} is {value} (about {amount} triangles), over the {maximum}-triangle limit of the purpose “{purpose}”",
             "chat.model3d_usage.budget_limits[semantic=texture-size].item_template": "{parameter} of {model} is {value} (textures {amount} pixels on a side), over the {maximum}-pixel texture limit of the purpose “{purpose}”",
             "chat.model3d_usage.budget_note.template": "These values are over the budget of this session's purpose “{purpose}”; the server submits them as given and refused nothing: {items}. Tell the user plainly which values are over the budget and what that may mean; unless the user explicitly asked for these values, suggest values within the budget.",
@@ -19111,7 +19541,7 @@
             "runtime.generation_messages.input_parameter_invalid": "{label} has an invalid value. This step was not submitted and no credits were spent. Check it and retry.",
             "runtime.generation_messages.input_parameters_invalid": "The input parameters for this request are invalid. This step was not submitted and no credits were spent. Check them and retry.",
             "runtime.generation_messages.input_source_task_expired": "The provider no longer keeps the original task for source {label} (past its retention). This step was not submitted and no credits were spent. Generate the source again, or use a service that accepts the saved model file.",
-            "runtime.generation_messages.input_source_task_unsupported": "Source {label} does not meet this step's source requirements. This step was not submitted and no credits were spent. Select another source.",
+            "runtime.generation_messages.input_source_task_unsupported": "Source {label} does not meet this step's source requirements. This step was not submitted and no credits were spent. Select another source. {alternative}",
             "runtime.generation_messages.input_source_face_limit": "The source model has {faces} triangle faces, over this step's limit of {limit}. This step was not submitted and no credits were spent. Simplify the model (Remesh) to within the limit first, then retry.",
             "runtime.generation_messages.plan_source_face_limit": "In this plan, {source_service} with its current settings would deliver about {estimate} triangle faces, over the {limit} that the later step {service} accepts. The plan was not created and no credits were spent. Lower the target face count of {source_service} and plan again; compatible topology and maximum target face count: {choices}.",
             "runtime.generation_messages.input_parameter_range": "{label} is {value}, but with the current combination of settings it must be between {minimum} and {maximum}. This step was not submitted and no credits were spent. Use a value in that range, or leave it out to use the default, then retry.",
@@ -19147,8 +19577,8 @@
             "chat.agent.refetch_unavailable_content.repeated_failure": "fetching this result again already failed for exactly the same reason as the task itself ({cause}). A refetch reuses the settings the task was generated with and the same provider result, so another try would fail the same way; it is no longer offered. Tell the user plainly why the result cannot be recovered; a new generation would charge again and needs their explicit decision. Do not call recover_task_result again for this task",
             "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task or observe_task on it), and do not call recover_task_result again for this task",
             "chat.agent_scope.mock_refusal": "The current mode does not allow this request (it needs {tool}); this step is currently unavailable and cannot be done.",
-            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
-            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=refine_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",
@@ -19219,6 +19649,10 @@
             "Mask 精炼": "Mask refinement",
             "Matting 下载返回 HTTP {status}": "Matting download returned HTTP {status}",
             "Matting 产物定位符无效": "The Matting output locator is invalid.",
+            "T/A 姿态": "T/A pose",
+            "三角面 (Raw)": "Triangles (Raw)",
+            "固定种子有助于复现相近的几何与贴图结果，范围 0 到 65535；不填则由上游随机。": "A fixed seed helps reproduce similar geometry and textures, from 0 to 65535; when empty the upstream picks one at random.",
+            "把高精度几何细节烘焙到法线贴图，面数较低时也能保留细节；默认关闭。": "Bakes high-resolution geometry detail into a normal map so a lower face count keeps its detail; off by default.",
             "拆分方式": "Split method",
             "拆解模型": "Split model",
             "按图元": "By primitive",
@@ -19227,6 +19661,9 @@
             "按连通块": "By connected component",
             "按节点、图元、材质或网格连通块拆分；默认按连通块。": "Split by node, primitive, material, or connected mesh component; connected component is the default.",
             "最小部件占比": "Minimum part ratio",
+            "极致 (extreme-high，6K)": "Extreme (6K)",
+            "法线贴图烘焙": "Normal map baking",
+            "让人形主体按 T 姿态或 A 姿态生成，便于绑骨和动画；关闭时保持输入中的姿态。非人形主体不建议开启。": "Generates a human-like subject in a T-pose or A-pose, which suits rigging and animation; when off, the pose of the input is kept. Not advised for non-humanoid subjects.",
             "面数占比低于此值的碎片并入包围盒中心最近的部件。": "Fragments below this triangle ratio are merged into the part whose bounding-box center is nearest.",
             "最大部件数": "Maximum parts",
             "超出时按面数保留最大的部件，其余合并为一个 rest 部件。": "Above this count, the largest parts by triangles are kept and the rest merge into one rest part.",
@@ -19438,6 +19875,8 @@
             "后空翻接勾拳 (Backflip_and_Hooks)": "Backflip and hooks",
             "后空翻起身 (Backflip_and_Rise)": "Backflip and rise",
             "后空翻跳 (Backflip_Jump)": "Backflip jump",
+            "高 (high，2K)": "High (2K)",
+            "默认使用最高的极致档：官方表中不加 HighPack 时为 6K 贴图，较高档额外 +2 Hyper3D credits；高档为 2K 贴图，不加价。会话用途规定了贴图上限（如 2048）时，Agent 发起的生成按上限取值。": "The default is the highest, extreme tier: 6K textures without HighPack in the official table, +2 Hyper3D credits over the high tier. The high tier gives 2K textures at no extra charge. When the session purpose sets a texture limit (such as 2048), steps started by the Agent take a value within it.",
             "默认使用最高纹理分辨率 8K；会话用途规定了更低的贴图上限时，Agent 发起的换贴图按上限取值。": "Defaults to the highest texture resolution, 8K; when the session's purpose sets a lower texture limit, a retexture the Agent starts uses that limit.",
             "后端固定从预览开始，预览完成后自动提交精细化，交付带贴图的最高质量模型。精细化阶段由适配器内部提交。": "The backend always starts with a preview and submits refinement automatically once the preview completes, delivering the highest-quality textured model. The refine stage is submitted internally by the adapter.",
             "后退射击 (Walk_Backward_While_Shooting)": "Walk backward while shooting",
@@ -19818,8 +20257,9 @@
             "本人已保存或上传的 GLB；在原始资产坐标中以单位矩阵处理。": "A GLB you saved or uploaded. It is processed with the identity matrix in the original asset coordinates.",
             "本人已成功的平台任务保存的静态 GLB；不接受直接上传的文件。": "The static GLB saved by one of your successful platform tasks. Directly uploaded files are not accepted.",
             "本人拥有、已经成功交付的同模板 Meshy API 设计预览任务。": "A Meshy API design preview task of the same template that you own and that has been delivered successfully.",
-            "本人拥有且已成功的原生 Tripo Rig v3.0（v3.0-20260909）双足 Tripo 骨架绑骨任务；不接受 v2.5 绑骨、原始生成模型、其他骨架或上传文件。": "A native Tripo Rig v3.0 (v3.0-20260909) biped Tripo skeleton rigging task that you own and that has completed successfully. v2.5 rigging, original generated models, other skeletons, and uploaded files are not accepted.",
             "本人拥有且已成功的原生 Tripo 文生或图生 3D 模型；不接收检查报告、上传文件或其他服务模型。": "A native Tripo text-to-3D or image-to-3D model that you own and that has completed successfully. Check reports, uploaded files, and models from other services are not accepted.",
+            "本人拥有且已成功的 Tripo v3.1 文生、图生或多视图 3D 模型；不接收检查报告、Tripo P2 结果、上传文件或其他服务模型。": "A Tripo v3.1 text-to-3D, image-to-3D or multiview-to-3D model that you own and that has completed successfully. Check reports, Tripo P2 results, uploaded files, and models from other services are not accepted.",
+            "可改走的路径：要保住贴图又降面，先用 Tripo v3.1 重新生成高细节模型，再用这一步做带烘焙的减面（Tripo P2 的面数在生成时设定，需要调整就重新生成）；已有的 Meshy 或 Rodin 模型可用 Meshy 重拓扑降面，但重拓扑不保留贴图，之后要接换贴图重做。": "Alternative routes: to reduce the face count and keep the textures, generate a high-detail model with Tripo v3.1 first and then run this step on it (the face count of a Tripo P2 model is set when it is generated, so generate it again to change it). An existing Meshy or Rodin model can be reduced with Meshy remesh, but remesh does not keep textures, so follow it with retexturing.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes.",
             "本人拥有的 JPG、PNG 或 WebP 图片，最多 20,000,000 字节。每边至少 32 像素，总像素不超过 178,956,970。": "A JPG, PNG, or WebP image that you own, up to 20,000,000 bytes. Each side must be at least 32 pixels, and the total pixel count must not exceed 178,956,970.",
             "本人拥有的自包含静态 GLB；不限制生成服务。直接上传限 10 MiB；本人成功任务产出的 GLB 最多 70 MiB（以 data URI 内联）。": "A self-contained static GLB that you own, from any generation service. Direct uploads are limited to 10 MiB; a GLB produced by your own successful task can be up to 70 MiB (sent inline as a data URI).",
@@ -19831,9 +20271,27 @@
             "一次转换固定导出全部六种格式（共 1 积分）。Meshy Convert 只返回各格式的模型文件，不单独返回贴图或材质库：OBJ 文件里引用了一个材质库（如 temp.mtl），但这个文件不随结果提供；OBJ 的形状和贴图坐标（UV）完整，但没有材质和贴图。任一格式校验失败则任务失败。": "One run always exports all six formats (1 credit in total). Meshy Convert returns only the model file of each format, with no separate textures or material library: the OBJ references a material library (such as temp.mtl) that is not provided with the result; its shape and texture coordinates (UVs) are complete, but it has no materials or textures. The task fails if any format fails its check.",
             "本服务固定请求全部六种官方格式；任一格式校验失败则任务失败。": "This service always requests all six official formats; if any format fails validation, the task fails.",
             "只重建网格几何（拓扑类型和目标面数），请按不保留贴图规划：上传或其他服务生成的模型重拓扑后实测是白模，Meshy 自己生成的模型也不保证贴图完好。重拓扑没有保持尺寸的选项，结果尺寸可能与源模型不同。需要贴图时，能用就先选带烘焙的减面；已重拓扑的模型要贴图就接换贴图，要原尺寸就接精确尺寸并按源模型高度设置。": "Rebuilds the mesh geometry only (topology type and target face count); plan for lost textures: uploaded models and models from other services came back untextured (white) after remesh in testing, and textures on Meshy's own models are not guaranteed either. Remesh has no option to keep the size, so the result may differ in size from the source. When textures matter, prefer a decimation that bakes textures when one is available; to texture a remeshed model, follow with retexture, and to restore its size, follow with exact resize set to the source model's height.",
-            "带烘焙的减面：固定把源模型的贴图烘焙到减面后的三角面模型上并同步展开 UV，用于把高细节模型降到用途面数预算内且保留贴图。来源只能是本人已成功的 Tripo H3 v3.1 文生或单图生 3D 模型，不接多视图结果、上传文件或其他服务的模型。": "Decimation with baking: always bakes the source model's textures onto the decimated triangle model and unwraps its UVs, to bring a high-detail model within the purpose's face budget while keeping its textures. The source must be your own successful Tripo H3 v3.1 text-to-3D or single-image-to-3D model; multiview results, uploaded files and models from other services are not accepted.",
+            "带烘焙的减面：固定把源模型的贴图烘焙到减面后的三角面模型上并同步展开 UV，用于把高细节模型降到用途面数预算内且保留贴图。来源只能是本人已成功的 Tripo H3 v3.1 文生、单图生或多视图 3D 模型，不接 Tripo P2 结果、上传文件或其他服务的模型。": "Decimation with baking: always bakes the source model's textures onto the decimated triangle model and unwraps its UVs, to bring a high-detail model within the purpose's face budget while keeping its textures. The source must be your own successful Tripo H3 v3.1 text-to-3D, single-image-to-3D or multiview-to-3D model; Tripo P2 results, uploaded files and models from other services are not accepted.",
             "本服务固定请求并保存全部六种官方格式，其中 3MF 必须显式请求。": "This service always requests and saves all six official formats; 3MF must be requested explicitly.",
-            "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。": "This service requests all six verified conversion formats; each costs an extra 5 credits and is authorized by the session approval policy for this frozen input.",
+            "导出贴图尺寸": "Export texture size",
+            "2K（2048 像素）": "2K (2048 pixels)",
+            "4K（4096 像素）": "4K (4096 pixels)",
+            "8K（8192 像素）": "8K (8192 pixels)",
+            "导出原点移到底部中心": "Move the export origin to the bottom center",
+            "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。": "The default keeps the upstream origin; when the model should stand on its feet in an engine, the purpose or the Agent turns it on with a stated reason.",
+            "FBX 导出预设": "FBX export preset",
+            "烘焙缩放": "Bake scale",
+            "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。": "The default follows the upstream default preset; when the target software clearly needs another preset, the Agent adjusts it with a stated reason.",
+            "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。": "The verified conversion formats to request; six by default. Each conversion costs an extra 5 credits; when the texture format is not JPEG, the texture size is not 4K, or the origin is moved to the bottom center, the conversions are advanced ones and cost 10 credits each. Authorized by the session approval policy for this frozen input. The GLTF conversion delivers the self-contained GLB main model and must be selected; the other formats are chosen by purpose, and every selected format is a required deliverable.",
+            "导出贴图格式": "Export texture format",
+            "JPEG（有损，上游默认）": "JPEG (lossy, the upstream default)",
+            "PNG（无损）": "PNG (lossless)",
+            "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。": "The texture format the format conversions export. JPEG is small but lossy and is the upstream default, which keeps the conversion at the basic price; PNG is lossless, so normal maps show no compression blocks, but the conversion is priced as an advanced one.",
+            "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs lossless textures (a game, for example) chooses PNG in its own declaration, and the Agent may also choose it with a stated reason.",
+            "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。": "Side length of the diffuse texture the format conversions export. The default is 4K, the upstream default, which keeps the conversion at the basic price; any other value makes it an advanced conversion. The highest generated texture tier is advertised as 8K (native and exported textures measured 4096 on 2026-10-19); choose 8K to stay at or above it.",
+            "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs smaller or larger textures says so in its own declaration, and the Agent may also adjust it to another legal value with a stated reason.",
+            "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。": "Moves the model origin to the bottom center during format conversion (off by default upstream; turning it on makes the conversion an advanced one). Game and real-time purposes turn it on so the model is easy to place and scale in an engine; display purposes keep the upstream default.",
+            "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。": "The export preset of FBX conversions (the upstream default is Blender; another preset does not change the price). The official page only says that Bake scale bakes the scale transform into the geometry; the differences between the other presets are not stated, and which preset suits which engine is not verified, so the default is used until a target-engine field exists. Used for FBX conversions only.",
             "本服务请求并保存全部六种官方格式。": "This service requests and saves all six official formats.",
             "本入口支持至少 0.001 米（1 毫米），这是本入口的有界范围，不是上游公布的尺寸下限。": "This entry point supports a minimum of 0.001 m (1 mm). This is the entry point's own bound, not a minimum size published by the upstream.",
             "平台处理": "Platform processing",
@@ -20245,6 +20703,48 @@
             "骄傲阔步·原地 (Proud_Strut_inplace)": "Proud strut (in place)",
             "骨架命名": "Skeleton naming",
             "骨架类型": "Skeleton type",
+            "Blender Rigify 基础人形": "Blender Rigify basic human",
+            "Character Creator 5 HD 中性基础体": "Character Creator 5 HD neutral base",
+            "Meshy 默认骨架": "Meshy default skeleton",
+            "八足": "Octopod",
+            "八足行走": "Octopod walk",
+            "六足": "Hexapod",
+            "六足行走": "Hexapod walk",
+            "其他": "Other",
+            "其他生物骨架": "Other creature skeletons",
+            "动作必须与来源骨架的类型相符：双足骨架用双足动作，四足、六足、八足、蛇形、水生骨架用对应的生物动作。": "The action must fit the type of the source skeleton: a biped skeleton takes the biped actions; a quadruped, hexapod, octopod, serpentine or aquatic skeleton takes the matching creature action.",
+            "包含手指骨骼": "Include finger bones",
+            "双足": "Biped",
+            "双足骨架": "Biped skeleton",
+            "受击": "Hurt",
+            "只有双足骨架可以选骨架命名，其他类型固定使用 Tripo 命名。选了 Tripo 以外的命名，这个骨架就不能再用 Tripo 动画生成预设动作。": "Only a biped skeleton can choose its naming; every other type always uses Tripo naming. A skeleton with any naming other than Tripo can no longer be given preset motions by Tripo animation.",
+            "四足": "Quadruped",
+            "四足行走": "Quadruped walk",
+            "奔跑": "Run",
+            "射击": "Shoot",
+            "带手指骨骼的绑骨不能同时指定纹理参考图。": "Rigging with finger bones cannot also take a texture reference image.",
+            "待机": "Idle",
+            "扑跃": "Dive",
+            "挥砍": "Slash",
+            "攀爬": "Climb",
+            "本人拥有且已成功的原生 Tripo Rigging v3.0（v3.0-20260909）绑骨任务，骨架命名须是 Tripo；双足以及四足、六足、八足、蛇形、水生骨架各有对应动作。不接受 v2.5 绑骨、其他骨架命名、原始生成模型或上传文件。": "A native Tripo Rigging v3.0 (v3.0-20260909) rigging task that you own and that has completed successfully, with Tripo skeleton naming; biped, quadruped, hexapod, octopod, serpentine and aquatic skeletons each have matching actions. v2.5 rigging, other skeleton namings, original generated models and uploaded files are not accepted.",
+            "水生": "Aquatic",
+            "水生前行": "Aquatic march",
+            "绑骨检查会给出建议的骨骼类型，请按报告选择。": "The rig check recommends a skeleton type; choose the one in its report.",
+            "绑骨检查会给出建议的骨骼类型，请按报告选择；只有检查归不进任何一类的生物才选「其他」。": "The rig check recommends a skeleton type; choose the one in its report, and choose Other only for a creature the check cannot place in any type.",
+            "给 Meshy 生成的人形角色绑骨，只支持人形。可以选骨架模板，让骨骼命名与目标引擎或建模软件一致（Unreal Engine 5 Mannequin、Unity Humanoid、Mixamo 等），也可以加上手指骨骼；选了非默认模板或加了手指骨骼后，文件单位为米。制作简报写明了目标引擎、你又没指定时，骨架模板默认跟随目标引擎。": "Rigs a humanoid character generated by Meshy; humanoids only. You can choose a skeleton template so the bone naming matches the target engine or modeling software (Unreal Engine 5 Mannequin, Unity Humanoid, Mixamo and others), and you can add finger bones; with a non-default template or with finger bones the files are in meters. When the production brief names a target engine and you have not chosen, the skeleton template follows the target engine.",
+            "给 Tripo 生成的模型绑骨，支持双足人形，也支持四足、六足、八足、鸟类、蛇形、水生等生物。先做绑骨检查，骨架类型按报告的建议选择；检查归不进任何一类的生物才选「其他」。双足骨架还可以选骨架命名（Tripo、Mixamo、ActorCore、Unity、Unreal Engine、VRM）：要放进游戏引擎的角色按目标引擎选，制作简报写明了目标引擎、你又没指定时默认跟随目标引擎；其他类型固定用 Tripo 命名。只有 Tripo 命名的骨架可以继续用 Tripo 动画生成预设动作。": "Rigs a model generated by Tripo. Supports biped humanoids as well as quadruped, hexapod, octopod, avian, serpentine and aquatic creatures. Run a rig check first and choose the skeleton type the report recommends; choose Other only for a creature the check cannot place in any type. A biped skeleton can also choose its naming (Tripo, Mixamo, ActorCore, Unity, Unreal Engine, VRM): for a character headed into a game engine choose by the target engine, and when the production brief names a target engine and you have not chosen, it follows the target engine. Every other type always uses Tripo naming. Only a skeleton with Tripo naming can go on to Tripo animation for preset motions.",
+            "给 Tripo 生成的模型绑骨，适合四足、六足、八足、鸟类、蛇形、水生等非人形生物，骨架类型按绑骨检查报告的建议选择。绑出的骨架不能继续做 Tripo 动画，也不能选引擎骨架命名：要人形骨架、引擎骨架命名或后续动画，请用 Tripo Rigging v3.0。": "Rigs a model generated by Tripo; suited to non-humanoid creatures (quadruped, hexapod, octopod, avian, serpentine, aquatic), with the skeleton type chosen as the rig check report recommends. A skeleton rigged here cannot go on to Tripo animation and cannot choose an engine skeleton naming: for a biped skeleton, an engine skeleton naming or animation afterward, use Tripo Rigging v3.0.",
+            "给 Tripo Rigging v3.0 绑好骨的模型套用预设动作，交付带动画的 GLB。双足骨架可选待机、行走、奔跑、扑跃、攀爬、跳跃、挥砍、射击、受击、跌倒、转身；四足、六足、八足、蛇形、水生骨架各有一个行走或前行动作；鸟类和「其他」骨架暂无预设动作。动作必须与骨架类型相符，不相符的组合在提交前就被拒绝；骨架命名不是 Tripo（如 Unity、Unreal Engine）的骨架不能用本服务做动画。": "Applies a preset motion to a model rigged by Tripo Rigging v3.0 and delivers a GLB with the animation. A biped skeleton can take idle, walk, run, dive, climb, jump, slash, shoot, hurt, fall and turn; quadruped, hexapod, octopod, serpentine and aquatic skeletons each have one walk or march motion; avian and Other skeletons have no preset motion yet. The motion must fit the skeleton type, and a mismatched pair is refused before submission; a skeleton whose naming is not Tripo (Unity, Unreal Engine and so on) cannot be animated by this service.",
+            "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持；手部无法加指骨时任务会失败，可关闭此项重试。": "Adds finger bones to the hands at no extra credits, and the files are in meters. It cannot be combined with a texture reference image, and a source model with quad topology is not supported; if the hands cannot be given finger bones the task fails, so turn this off and retry.",
+            "蛇形": "Serpentine",
+            "蛇形前行": "Serpentine march",
+            "跌倒": "Fall",
+            "跳跃": "Jump",
+            "转身": "Turn",
+            "骨架模板": "Skeleton template",
+            "鸟类": "Avian",
+            "默认的 Meshy 骨架适合直接预览和 Meshy 动画；选了引擎或建模软件的骨架模板，骨骼命名就与该软件一致，文件单位为米。": "The default Meshy skeleton suits direct preview and Meshy animation; with a template for an engine or modeling software the bones are named as that software expects and the files are in meters.",
             "高尔夫开球 (golf_drive)": "Golf drive",
             "高质量": "High quality",
             "高踢 (High_Kick)": "High kick",
@@ -20266,7 +20766,9 @@
             "默认关闭重拓扑以保留最高质量的原始几何；需要更规整网格时可说明理由启用。": "Remesh is off by default to preserve the highest-quality original geometry. Enable it with a stated reason when you need a cleaner mesh.",
             "默认启用 PBR 材质，并启用纹理。": "PBR materials are enabled by default, along with textures.",
             "默认建议三角面：Meshy 的 8K 纹理不支持四边面。": "Triangle faces are recommended by default: Meshy's 8K texture does not support quad faces.",
+            "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。": "Triangles are the recommended default. With quad faces the target face count is in quads, up to 200000; the exported GLB holds only triangles, each quad split in two, so its triangle count is about twice the chosen count.",
             "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。": "The default is triangles: Meshy 8K textures don't support quad faces.",
+            "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。": "The recommended default is the 2,000,000 ceiling; quad faces allow at most 200,000. When no count is given, the default is brought into the range of the current topology; when the session purpose sets a face budget, steps started by the Agent take a value within it.",
             "默认建议为上限 300000；需要控制面数时用独立的重拓扑。": "The default is the 300000 upper limit; use a separate remesh when you need to control the face count.",
             "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。": "Applies only when auto remesh is on. By default no remesh runs, for the highest quality, so the face count follows the geometry resolution and the model itself (at 4K, measured at about 250 thousand to 7.9 million faces, with single formats up to several hundred MB). To control the face count or delivery size, turn on auto remesh or use a separate remesh.",
             "默认建议为最高几何分辨率 4K。": "The default is the highest geometry resolution, 4K.",
@@ -26293,7 +26795,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/text-to-3d",
-      "revision": "2026-11-06.139.1",
+      "revision": "2026-11-12.278.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -26736,7 +27238,7 @@
               "label": "3MF"
             }
           ],
-          "description": "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。",
+          "description": "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。",
           "presentation": {
             "surface": "readonly",
             "control": "multi-select"
@@ -26750,9 +27252,111 @@
             "3MF"
           ],
           "required": true,
-          "min_items": 6,
+          "min_items": 1,
+          "required_items": [
+            "GLTF"
+          ],
           "adjustment_policy": "advised",
           "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "export_texture_format",
+          "label": "导出贴图格式",
+          "type": "select",
+          "default": "JPEG",
+          "options": [
+            {
+              "value": "JPEG",
+              "label": "JPEG（有损，上游默认）"
+            },
+            {
+              "value": "PNG",
+              "label": "PNG（无损）"
+            }
+          ],
+          "description": "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。"
+        },
+        {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "default": "4k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。"
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": false,
+          "description": "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。"
+        },
+        {
+          "name": "export_fbx_preset",
+          "label": "FBX 导出预设",
+          "type": "select",
+          "default": "blender",
+          "options": [
+            {
+              "value": "blender",
+              "label": "Blender"
+            },
+            {
+              "value": "3dsmax",
+              "label": "3ds Max"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "bake_scale",
+              "label": "烘焙缩放"
+            }
+          ],
+          "description": "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。"
         },
         {
           "name": "authorize_extra_credits",
@@ -26789,6 +27393,11 @@
           "variant": "converted.usdz",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "USDZ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -26796,6 +27405,11 @@
           "variant": "converted.fbx",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "FBX"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -26803,6 +27417,11 @@
           "variant": "converted.obj",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "OBJ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -26810,6 +27429,11 @@
           "variant": "converted.stl",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "STL"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -26817,6 +27441,11 @@
           "variant": "converted.3mf",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "3MF"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -26916,10 +27545,29 @@
           "label": "附加导出格式转换",
           "amount": "5",
           "parameter": "output_formats",
-          "max_items": 6
+          "max_items": 6,
+          "upgrade": {
+            "amount": "10",
+            "when_any": [
+              {
+                "parameter": "export_texture_format",
+                "operator": "not-equals",
+                "value": "JPEG"
+              },
+              {
+                "parameter": "export_texture_size",
+                "operator": "not-equals",
+                "value": "4k"
+              },
+              {
+                "parameter": "export_pivot_bottom_center",
+                "operator": "truthy"
+              }
+            ]
+          }
         },
         "consent_parameter": "authorize_extra_credits",
-        "max_authorized_extra_amount": "125"
+        "max_authorized_extra_amount": "155"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -26930,6 +27578,33 @@
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "native_conversion": {
+          "bindings": [
+            {
+              "parameter": "export_texture_format",
+              "wire": "texture_format",
+              "upstream_default": "JPEG"
+            },
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size",
+              "upstream_default": 4096
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "upstream_default": false
+            },
+            {
+              "parameter": "export_fbx_preset",
+              "wire": "fbx_preset",
+              "formats": [
+                "FBX"
+              ],
+              "upstream_default": "blender"
+            }
+          ]
+        },
         "response_aliases": [
           {
             "key": "model_url",
@@ -27649,7 +28324,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/image-to-3d",
-      "revision": "2026-11-06.139.1",
+      "revision": "2026-11-12.278.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -28168,7 +28843,7 @@
               "label": "3MF"
             }
           ],
-          "description": "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。",
+          "description": "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。",
           "presentation": {
             "surface": "readonly",
             "control": "multi-select"
@@ -28182,9 +28857,111 @@
             "3MF"
           ],
           "required": true,
-          "min_items": 6,
+          "min_items": 1,
+          "required_items": [
+            "GLTF"
+          ],
           "adjustment_policy": "advised",
           "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "export_texture_format",
+          "label": "导出贴图格式",
+          "type": "select",
+          "default": "JPEG",
+          "options": [
+            {
+              "value": "JPEG",
+              "label": "JPEG（有损，上游默认）"
+            },
+            {
+              "value": "PNG",
+              "label": "PNG（无损）"
+            }
+          ],
+          "description": "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。"
+        },
+        {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "default": "4k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。"
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": false,
+          "description": "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。"
+        },
+        {
+          "name": "export_fbx_preset",
+          "label": "FBX 导出预设",
+          "type": "select",
+          "default": "blender",
+          "options": [
+            {
+              "value": "blender",
+              "label": "Blender"
+            },
+            {
+              "value": "3dsmax",
+              "label": "3ds Max"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "bake_scale",
+              "label": "烘焙缩放"
+            }
+          ],
+          "description": "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。"
         },
         {
           "name": "authorize_extra_credits",
@@ -28221,6 +28998,11 @@
           "variant": "converted.usdz",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "USDZ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28228,6 +29010,11 @@
           "variant": "converted.fbx",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "FBX"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28235,6 +29022,11 @@
           "variant": "converted.obj",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "OBJ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28242,6 +29034,11 @@
           "variant": "converted.stl",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "STL"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28249,6 +29046,11 @@
           "variant": "converted.3mf",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "3MF"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -28348,10 +29150,29 @@
           "label": "附加导出格式转换",
           "amount": "5",
           "parameter": "output_formats",
-          "max_items": 6
+          "max_items": 6,
+          "upgrade": {
+            "amount": "10",
+            "when_any": [
+              {
+                "parameter": "export_texture_format",
+                "operator": "not-equals",
+                "value": "JPEG"
+              },
+              {
+                "parameter": "export_texture_size",
+                "operator": "not-equals",
+                "value": "4k"
+              },
+              {
+                "parameter": "export_pivot_bottom_center",
+                "operator": "truthy"
+              }
+            ]
+          }
         },
         "consent_parameter": "authorize_extra_credits",
-        "max_authorized_extra_amount": "125"
+        "max_authorized_extra_amount": "155"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -28362,6 +29183,33 @@
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "native_conversion": {
+          "bindings": [
+            {
+              "parameter": "export_texture_format",
+              "wire": "texture_format",
+              "upstream_default": "JPEG"
+            },
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size",
+              "upstream_default": 4096
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "upstream_default": false
+            },
+            {
+              "parameter": "export_fbx_preset",
+              "wire": "fbx_preset",
+              "formats": [
+                "FBX"
+              ],
+              "upstream_default": "blender"
+            }
+          ]
+        },
         "upload_endpoint": "files",
         "response_aliases": [
           {
@@ -28420,7 +29268,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-multiview/image-to-3d",
-      "revision": "2026-11-06.139.1",
+      "revision": "2026-11-12.278.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -28943,7 +29791,7 @@
               "label": "3MF"
             }
           ],
-          "description": "本服务请求全部六种已验证转换格式；每种额外消耗 5 积分，由本次冻结输入的会话批准策略授权。",
+          "description": "请求的已验证转换格式，默认六种。每种转换额外消耗 5 积分；贴图格式非 JPEG、贴图尺寸非 4K、原点移到底部中心任一开启时按进阶转换，每种 10 积分。由本次冻结输入的会话批准策略授权。GLTF 转换交付自包含的 GLB 主模型，必须选择；其余格式按用途选择，被选中的格式都是必需产物。",
           "presentation": {
             "surface": "readonly",
             "control": "multi-select"
@@ -28957,9 +29805,111 @@
             "3MF"
           ],
           "required": true,
-          "min_items": 6,
+          "min_items": 1,
+          "required_items": [
+            "GLTF"
+          ],
           "adjustment_policy": "advised",
           "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "export_texture_format",
+          "label": "导出贴图格式",
+          "type": "select",
+          "default": "JPEG",
+          "options": [
+            {
+              "value": "JPEG",
+              "label": "JPEG（有损，上游默认）"
+            },
+            {
+              "value": "PNG",
+              "label": "PNG（无损）"
+            }
+          ],
+          "description": "格式转换导出的贴图格式。JPEG 体积小但有损，是上游默认，转换保持基础价；PNG 无损，法线贴图不会出现压缩块，但转换按进阶转换计价。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。"
+        },
+        {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "default": "4k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。"
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": false,
+          "description": "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认保持上游原点；需要放进引擎按脚底摆放时由用途或 Agent 说明理由后开启。"
+        },
+        {
+          "name": "export_fbx_preset",
+          "label": "FBX 导出预设",
+          "type": "select",
+          "default": "blender",
+          "options": [
+            {
+              "value": "blender",
+              "label": "Blender"
+            },
+            {
+              "value": "3dsmax",
+              "label": "3ds Max"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "bake_scale",
+              "label": "烘焙缩放"
+            }
+          ],
+          "description": "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认沿用上游默认预设；目标软件明确需要其他预设时，Agent 说明理由后调整。"
         },
         {
           "name": "authorize_extra_credits",
@@ -28996,6 +29946,11 @@
           "variant": "converted.usdz",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "USDZ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29003,6 +29958,11 @@
           "variant": "converted.fbx",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "FBX"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29010,6 +29970,11 @@
           "variant": "converted.obj",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "OBJ"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29017,6 +29982,11 @@
           "variant": "converted.stl",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "STL"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29024,6 +29994,11 @@
           "variant": "converted.3mf",
           "delivery": "required",
           "minimum": 1,
+          "required_when": {
+            "parameter": "output_formats",
+            "operator": "contains",
+            "value": "3MF"
+          },
           "max_bytes": 1073741824
         },
         {
@@ -29123,10 +30098,29 @@
           "label": "附加导出格式转换",
           "amount": "5",
           "parameter": "output_formats",
-          "max_items": 6
+          "max_items": 6,
+          "upgrade": {
+            "amount": "10",
+            "when_any": [
+              {
+                "parameter": "export_texture_format",
+                "operator": "not-equals",
+                "value": "JPEG"
+              },
+              {
+                "parameter": "export_texture_size",
+                "operator": "not-equals",
+                "value": "4k"
+              },
+              {
+                "parameter": "export_pivot_bottom_center",
+                "operator": "truthy"
+              }
+            ]
+          }
         },
         "consent_parameter": "authorize_extra_credits",
-        "max_authorized_extra_amount": "125"
+        "max_authorized_extra_amount": "155"
       },
       "asset_hosts": [
         "tripo3d.com",
@@ -29137,6 +30131,33 @@
         "endpoint": "generation/multiview-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "native_conversion": {
+          "bindings": [
+            {
+              "parameter": "export_texture_format",
+              "wire": "texture_format",
+              "upstream_default": "JPEG"
+            },
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size",
+              "upstream_default": 4096
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "upstream_default": false
+            },
+            {
+              "parameter": "export_fbx_preset",
+              "wire": "fbx_preset",
+              "formats": [
+                "FBX"
+              ],
+              "upstream_default": "blender"
+            }
+          ]
+        },
         "upload_endpoint": "files",
         "response_aliases": [
           {
@@ -32117,13 +33138,14 @@
     },
     {
       "id": "meshy/processing/rigging",
-      "revision": "2026-10-29.121.1",
+      "revision": "2026-11-12.277.1",
       "provider_id": "meshy",
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
       "model_id": "meshy-processing",
       "model_name": "Meshy Rigging",
       "capability": "rigging",
+      "description": "给 Meshy 生成的人形角色绑骨，只支持人形。可以选骨架模板，让骨骼命名与目标引擎或建模软件一致（Unreal Engine 5 Mannequin、Unity Humanoid、Mixamo 等），也可以加上手指骨骼；选了非默认模板或加了手指骨骼后，文件单位为米。制作简报写明了目标引擎、你又没指定时，骨架模板默认跟随目标引擎。",
       "adapter_key": "meshy.v2",
       "enabled": true,
       "recommended": false,
@@ -32200,6 +33222,79 @@
           "name": "texture_image_url",
           "label": "纹理参考图",
           "type": "text"
+        },
+        {
+          "name": "skeleton_template",
+          "label": "骨架模板",
+          "type": "select",
+          "default": "meshyrig",
+          "presentation": {
+            "surface": "provider",
+            "control": "select"
+          },
+          "description": "默认的 Meshy 骨架适合直接预览和 Meshy 动画；选了引擎或建模软件的骨架模板，骨骼命名就与该软件一致，文件单位为米。",
+          "options": [
+            {
+              "value": "meshyrig",
+              "label": "Meshy 默认骨架"
+            },
+            {
+              "value": "mixamo",
+              "label": "Mixamo"
+            },
+            {
+              "value": "ue5_mannequin",
+              "label": "Unreal Engine 5 Mannequin"
+            },
+            {
+              "value": "unity_humanoid",
+              "label": "Unity Humanoid"
+            },
+            {
+              "value": "max_biped",
+              "label": "3ds Max Biped"
+            },
+            {
+              "value": "maya_human_ik",
+              "label": "Maya HumanIK"
+            },
+            {
+              "value": "blender_rigify_basic_human",
+              "label": "Blender Rigify 基础人形"
+            },
+            {
+              "value": "cc5_hd_neutral_base",
+              "label": "Character Creator 5 HD 中性基础体"
+            },
+            {
+              "value": "daz_genesis9",
+              "label": "DAZ Genesis 9"
+            }
+          ],
+          "omit_when": [
+            {
+              "parameter": "skeleton_template",
+              "operator": "equals",
+              "value": "meshyrig"
+            }
+          ]
+        },
+        {
+          "name": "include_fingers",
+          "label": "包含手指骨骼",
+          "type": "boolean",
+          "default": false,
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          },
+          "description": "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持；手部无法加指骨时任务会失败，可关闭此项重试。",
+          "omit_when": [
+            {
+              "parameter": "include_fingers",
+              "operator": "falsy"
+            }
+          ]
         }
       ],
       "input_rules": [
@@ -32211,6 +33306,20 @@
           ],
           "minimum": 1,
           "maximum": 1
+        },
+        {
+          "parameters": [],
+          "forbidden_when": [
+            {
+              "parameter": "include_fingers",
+              "operator": "truthy"
+            },
+            {
+              "parameter": "texture_image_url",
+              "operator": "present"
+            }
+          ],
+          "message": "带手指骨骼的绑骨不能同时指定纹理参考图。"
         }
       ],
       "outputs": [
@@ -36187,7 +37296,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/text-to-3d",
-      "revision": "2026-10-20.188.1",
+      "revision": "2026-11-12.279.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -36304,6 +37413,118 @@
           "semantic": "prompt"
         },
         {
+          "name": "mesh_mode",
+          "label": "拓扑类型",
+          "type": "select",
+          "default": "Raw",
+          "options": [
+            {
+              "value": "Raw",
+              "label": "三角面 (Raw)"
+            },
+            {
+              "value": "Quad",
+              "label": "四边面 (Quad)"
+            }
+          ],
+          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "quality_override",
+          "label": "目标面数",
+          "type": "number",
+          "integer": true,
+          "default": 2000000,
+          "minimum": 500,
+          "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "mesh_mode", "operator": "equals", "value": "Quad"},
+              "maximum": 200000
+            }
+          ],
+          "semantic": "polycount",
+          "description": "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "number",
+            "step": 1000
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "texture_mode",
+          "label": "纹理质量",
+          "type": "select",
+          "default": "extreme-high",
+          "options": [
+            {
+              "value": "high",
+              "label": "高 (high，2K)"
+            },
+            {
+              "value": "extreme-high",
+              "label": "极致 (extreme-high，6K)"
+            }
+          ],
+          "semantic": "texture-size",
+          "description": "默认使用最高的极致档：官方表中不加 HighPack 时为 6K 贴图，较高档额外 +2 Hyper3D credits；高档为 2K 贴图，不加价。会话用途规定了贴图上限（如 2048）时，Agent 发起的生成按上限取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "TAPose",
+          "label": "T/A 姿态",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "TAPose", "operator": "falsy"}
+          ],
+          "description": "让人形主体按 T 姿态或 A 姿态生成，便于绑骨和动画；关闭时保持输入中的姿态。非人形主体不建议开启。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "quad_normal",
+          "label": "法线贴图烘焙",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "quad_normal", "operator": "falsy"}
+          ],
+          "description": "把高精度几何细节烘焙到法线贴图，面数较低时也能保留细节；默认关闭。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "label": "随机种子",
+          "type": "number",
+          "integer": true,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "固定种子有助于复现相近的几何与贴图结果，范围 0 到 65535；不填则由上游随机。",
+          "presentation": {
+            "surface": "provider",
+            "control": "number"
+          }
+        },
+        {
           "name": "authorize_extra_credits",
           "label": "同意完整原生报价",
           "type": "boolean",
@@ -36330,7 +37551,8 @@
           {
             "id": "extreme_texture",
             "label": "Extreme High 纹理",
-            "amount": "2"
+            "amount": "2",
+            "when": {"parameter": "texture_mode", "operator": "equals", "value": "extreme-high"}
           }
         ],
         "consent_parameter": "authorize_extra_credits",
@@ -36339,7 +37561,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/image-to-3d",
-      "revision": "2026-10-20.188.1",
+      "revision": "2026-11-12.279.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -36475,6 +37697,118 @@
           "semantic": "prompt"
         },
         {
+          "name": "mesh_mode",
+          "label": "拓扑类型",
+          "type": "select",
+          "default": "Raw",
+          "options": [
+            {
+              "value": "Raw",
+              "label": "三角面 (Raw)"
+            },
+            {
+              "value": "Quad",
+              "label": "四边面 (Quad)"
+            }
+          ],
+          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "quality_override",
+          "label": "目标面数",
+          "type": "number",
+          "integer": true,
+          "default": 2000000,
+          "minimum": 500,
+          "maximum": 2000000,
+          "maximum_when": [
+            {
+              "when": {"parameter": "mesh_mode", "operator": "equals", "value": "Quad"},
+              "maximum": 200000
+            }
+          ],
+          "semantic": "polycount",
+          "description": "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "number",
+            "step": 1000
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "texture_mode",
+          "label": "纹理质量",
+          "type": "select",
+          "default": "extreme-high",
+          "options": [
+            {
+              "value": "high",
+              "label": "高 (high，2K)"
+            },
+            {
+              "value": "extreme-high",
+              "label": "极致 (extreme-high，6K)"
+            }
+          ],
+          "semantic": "texture-size",
+          "description": "默认使用最高的极致档：官方表中不加 HighPack 时为 6K 贴图，较高档额外 +2 Hyper3D credits；高档为 2K 贴图，不加价。会话用途规定了贴图上限（如 2048）时，Agent 发起的生成按上限取值。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "select"
+          },
+          "adjustment_policy": "advised",
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+        },
+        {
+          "name": "TAPose",
+          "label": "T/A 姿态",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "TAPose", "operator": "falsy"}
+          ],
+          "description": "让人形主体按 T 姿态或 A 姿态生成，便于绑骨和动画；关闭时保持输入中的姿态。非人形主体不建议开启。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "quad_normal",
+          "label": "法线贴图烘焙",
+          "type": "boolean",
+          "default": false,
+          "omit_when": [
+            {"parameter": "quad_normal", "operator": "falsy"}
+          ],
+          "description": "把高精度几何细节烘焙到法线贴图，面数较低时也能保留细节；默认关闭。",
+          "presentation": {
+            "surface": "provider",
+            "control": "boolean"
+          }
+        },
+        {
+          "name": "seed",
+          "label": "随机种子",
+          "type": "number",
+          "integer": true,
+          "minimum": 0,
+          "maximum": 65535,
+          "description": "固定种子有助于复现相近的几何与贴图结果，范围 0 到 65535；不填则由上游随机。",
+          "presentation": {
+            "surface": "provider",
+            "control": "number"
+          }
+        },
+        {
           "name": "authorize_extra_credits",
           "label": "同意完整原生报价",
           "type": "boolean",
@@ -36501,7 +37835,8 @@
           {
             "id": "extreme_texture",
             "label": "Extreme High 纹理",
-            "amount": "2"
+            "amount": "2",
+            "when": {"parameter": "texture_mode", "operator": "equals", "value": "extreme-high"}
           }
         ],
         "consent_parameter": "authorize_extra_credits",
@@ -38637,13 +39972,14 @@
     },
     {
       "id": "tripo/processing/rigging",
-      "revision": "2026-10-16.3",
+      "revision": "2026-11-12.277.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-rigging",
       "model_name": "Tripo Rigging",
       "capability": "rigging",
+      "description": "给 Tripo 生成的模型绑骨，适合四足、六足、八足、鸟类、蛇形、水生等非人形生物，骨架类型按绑骨检查报告的建议选择。绑出的骨架不能继续做 Tripo 动画，也不能选引擎骨架命名：要人形骨架、引擎骨架命名或后续动画，请用 Tripo Rigging v3.0。",
       "domain": "processing",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -38688,38 +40024,38 @@
           "type": "select",
           "default": "biped",
           "presentation": {
-            "surface": "readonly",
+            "surface": "provider",
             "control": "select"
           },
-          "fixed": true,
+          "description": "绑骨检查会给出建议的骨骼类型，请按报告选择。",
           "options": [
             {
               "value": "biped",
-              "label": "biped"
+              "label": "双足"
             },
             {
               "value": "quadruped",
-              "label": "quadruped"
+              "label": "四足"
             },
             {
               "value": "hexapod",
-              "label": "hexapod"
+              "label": "六足"
             },
             {
               "value": "octopod",
-              "label": "octopod"
+              "label": "八足"
             },
             {
               "value": "avian",
-              "label": "avian"
+              "label": "鸟类"
             },
             {
               "value": "serpentine",
-              "label": "serpentine"
+              "label": "蛇形"
             },
             {
               "value": "aquatic",
-              "label": "aquatic"
+              "label": "水生"
             }
           ]
         },
@@ -38898,13 +40234,14 @@
     },
     {
       "id": "tripo/processing/rigging-v3",
-      "revision": "2026-10-20.1",
+      "revision": "2026-11-12.277.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-rigging-v3",
       "model_name": "Tripo Rigging v3.0",
       "capability": "rigging",
+      "description": "给 Tripo 生成的模型绑骨，支持双足人形，也支持四足、六足、八足、鸟类、蛇形、水生等生物。先做绑骨检查，骨架类型按报告的建议选择；检查归不进任何一类的生物才选「其他」。双足骨架还可以选骨架命名（Tripo、Mixamo、ActorCore、Unity、Unreal Engine、VRM）：要放进游戏引擎的角色按目标引擎选，制作简报写明了目标引擎、你又没指定时默认跟随目标引擎；其他类型固定用 Tripo 命名。只有 Tripo 命名的骨架可以继续用 Tripo 动画生成预设动作。",
       "domain": "processing",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -38949,38 +40286,42 @@
           "type": "select",
           "default": "biped",
           "presentation": {
-            "surface": "readonly",
+            "surface": "provider",
             "control": "select"
           },
-          "fixed": true,
+          "description": "绑骨检查会给出建议的骨骼类型，请按报告选择；只有检查归不进任何一类的生物才选「其他」。",
           "options": [
             {
               "value": "biped",
-              "label": "biped"
+              "label": "双足"
             },
             {
               "value": "quadruped",
-              "label": "quadruped"
+              "label": "四足"
             },
             {
               "value": "hexapod",
-              "label": "hexapod"
+              "label": "六足"
             },
             {
               "value": "octopod",
-              "label": "octopod"
+              "label": "八足"
             },
             {
               "value": "avian",
-              "label": "avian"
+              "label": "鸟类"
             },
             {
               "value": "serpentine",
-              "label": "serpentine"
+              "label": "蛇形"
             },
             {
               "value": "aquatic",
-              "label": "aquatic"
+              "label": "水生"
+            },
+            {
+              "value": "others",
+              "label": "其他"
             }
           ]
         },
@@ -38990,10 +40331,17 @@
           "type": "select",
           "default": "tripo",
           "presentation": {
-            "surface": "readonly",
-            "control": "select"
+            "surface": "provider",
+            "control": "select",
+            "disabled_when": [
+              {
+                "parameter": "rig_type",
+                "operator": "not-equals",
+                "value": "biped"
+              }
+            ]
           },
-          "fixed": true,
+          "description": "只有双足骨架可以选骨架命名，其他类型固定使用 Tripo 命名。选了 Tripo 以外的命名，这个骨架就不能再用 Tripo 动画生成预设动作。",
           "options": [
             {
               "value": "tripo",
@@ -39002,6 +40350,32 @@
             {
               "value": "mixamo",
               "label": "Mixamo"
+            },
+            {
+              "value": "actorcore",
+              "label": "ActorCore"
+            },
+            {
+              "value": "unity",
+              "label": "Unity"
+            },
+            {
+              "value": "unreal",
+              "label": "Unreal Engine"
+            },
+            {
+              "value": "vrm",
+              "label": "VRM"
+            }
+          ],
+          "forced_when": [
+            {
+              "when": {
+                "parameter": "rig_type",
+                "operator": "not-equals",
+                "value": "biped"
+              },
+              "value": "tripo"
             }
           ]
         },
@@ -39159,13 +40533,14 @@
     },
     {
       "id": "tripo/processing/animation",
-      "revision": "2026-10-20.2",
+      "revision": "2026-11-12.277.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-animation",
       "model_name": "Tripo Animation",
       "capability": "animation",
+      "description": "给 Tripo Rigging v3.0 绑好骨的模型套用预设动作，交付带动画的 GLB。双足骨架可选待机、行走、奔跑、扑跃、攀爬、跳跃、挥砍、射击、受击、跌倒、转身；四足、六足、八足、蛇形、水生骨架各有一个行走或前行动作；鸟类和「其他」骨架暂无预设动作。动作必须与骨架类型相符，不相符的组合在提交前就被拒绝；骨架命名不是 Tripo（如 Unity、Unreal Engine）的骨架不能用本服务做动画。",
       "domain": "processing",
       "adapter_key": "tripo.v3",
       "enabled": true,
@@ -39201,7 +40576,7 @@
             "tripo/processing/rigging-v3"
           ],
           "task_source_binding": "provider",
-          "description": "本人拥有且已成功的原生 Tripo Rig v3.0（v3.0-20260909）双足 Tripo 骨架绑骨任务；不接受 v2.5 绑骨、原始生成模型、其他骨架或上传文件。"
+          "description": "本人拥有且已成功的原生 Tripo Rigging v3.0（v3.0-20260909）绑骨任务，骨架命名须是 Tripo；双足以及四足、六足、八足、蛇形、水生骨架各有对应动作。不接受 v2.5 绑骨、其他骨架命名、原始生成模型或上传文件。"
         },
         {
           "name": "animation_action",
@@ -39214,10 +40589,87 @@
           },
           "options": [
             {
+              "value": "preset:idle",
+              "label": "待机",
+              "group": "双足骨架"
+            },
+            {
               "value": "preset:walk",
-              "label": "行走"
+              "label": "行走",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:run",
+              "label": "奔跑",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:dive",
+              "label": "扑跃",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:climb",
+              "label": "攀爬",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:jump",
+              "label": "跳跃",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:slash",
+              "label": "挥砍",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:shoot",
+              "label": "射击",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:hurt",
+              "label": "受击",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:fall",
+              "label": "跌倒",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:turn",
+              "label": "转身",
+              "group": "双足骨架"
+            },
+            {
+              "value": "preset:quadruped:walk",
+              "label": "四足行走",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:hexapod:walk",
+              "label": "六足行走",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:octopod:walk",
+              "label": "八足行走",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:serpentine:march",
+              "label": "蛇形前行",
+              "group": "其他生物骨架"
+            },
+            {
+              "value": "preset:aquatic:march",
+              "label": "水生前行",
+              "group": "其他生物骨架"
             }
           ],
+          "description": "动作必须与来源骨架的类型相符：双足骨架用双足动作，四足、六足、八足、蛇形、水生骨架用对应的生物动作。",
           "required": true,
           "semantic": "action",
           "wire_name": "animation"
@@ -39292,11 +40744,66 @@
       "provider_options": {
         "endpoint": "animations/retarget",
         "observe_endpoint": "tasks/{task_id}",
-        "source_rig": {
-          "model": "v3.0-20260909",
-          "rig_type": "biped",
-          "spec": "tripo"
-        },
+        "source_rigs": [
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "biped",
+            "spec": "tripo",
+            "animations": [
+              "preset:idle",
+              "preset:walk",
+              "preset:run",
+              "preset:dive",
+              "preset:climb",
+              "preset:jump",
+              "preset:slash",
+              "preset:shoot",
+              "preset:hurt",
+              "preset:fall",
+              "preset:turn"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "quadruped",
+            "spec": "tripo",
+            "animations": [
+              "preset:quadruped:walk"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "hexapod",
+            "spec": "tripo",
+            "animations": [
+              "preset:hexapod:walk"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "octopod",
+            "spec": "tripo",
+            "animations": [
+              "preset:octopod:walk"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "serpentine",
+            "spec": "tripo",
+            "animations": [
+              "preset:serpentine:march"
+            ]
+          },
+          {
+            "model": "v3.0-20260909",
+            "rig_type": "aquatic",
+            "spec": "tripo",
+            "animations": [
+              "preset:aquatic:march"
+            ]
+          }
+        ],
         "response_aliases": [
           {
             "key": "model_url",
@@ -43360,13 +44867,13 @@
     },
     {
       "id": "tripo/geometry/decimate-triangle",
-      "revision": "2026-10-22.185.5",
+      "revision": "2026-11-12.276.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-decimate-triangle",
       "model_name": "Tripo Retopology Triangle",
-      "description": "带烘焙的减面：固定把源模型的贴图烘焙到减面后的三角面模型上并同步展开 UV，用于把高细节模型降到用途面数预算内且保留贴图。来源只能是本人已成功的 Tripo H3 v3.1 文生或单图生 3D 模型，不接多视图结果、上传文件或其他服务的模型。",
+      "description": "带烘焙的减面：固定把源模型的贴图烘焙到减面后的三角面模型上并同步展开 UV，用于把高细节模型降到用途面数预算内且保留贴图。来源只能是本人已成功的 Tripo H3 v3.1 文生、单图生或多视图 3D 模型，不接 Tripo P2 结果、上传文件或其他服务的模型。",
       "capability": "remesh",
       "domain": "processing",
       "adapter_key": "tripo.v3",
@@ -43402,9 +44909,11 @@
           ],
           "task_offerings": [
             "tripo/tripo-v3.1-full/text-to-3d",
-            "tripo/tripo-v3.1-full/image-to-3d"
+            "tripo/tripo-v3.1-full/image-to-3d",
+            "tripo/tripo-v3.1-multiview/image-to-3d"
           ],
-          "description": "本人拥有且已成功的原生 Tripo 文生或图生 3D 模型；不接收检查报告、上传文件或其他服务模型。"
+          "description": "本人拥有且已成功的 Tripo v3.1 文生、图生或多视图 3D 模型；不接收检查报告、Tripo P2 结果、上传文件或其他服务模型。",
+          "task_source_alternative": "可改走的路径：要保住贴图又降面，先用 Tripo v3.1 重新生成高细节模型，再用这一步做带烘焙的减面（Tripo P2 的面数在生成时设定，需要调整就重新生成）；已有的 Meshy 或 Rodin 模型可用 Meshy 重拓扑降面，但重拓扑不保留贴图，之后要接换贴图重做。"
         },
         {
           "name": "quad",
@@ -43668,7 +45177,7 @@
     },
     {
       "id": "tripo/geometry/decimate-quad",
-      "revision": "2026-10-22.185.5",
+      "revision": "2026-11-12.276.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -43709,9 +45218,11 @@
           ],
           "task_offerings": [
             "tripo/tripo-v3.1-full/text-to-3d",
-            "tripo/tripo-v3.1-full/image-to-3d"
+            "tripo/tripo-v3.1-full/image-to-3d",
+            "tripo/tripo-v3.1-multiview/image-to-3d"
           ],
-          "description": "本人拥有且已成功的原生 Tripo 文生或图生 3D 模型；不接收检查报告、上传文件或其他服务模型。"
+          "description": "本人拥有且已成功的 Tripo v3.1 文生、图生或多视图 3D 模型；不接收检查报告、Tripo P2 结果、上传文件或其他服务模型。",
+          "task_source_alternative": "可改走的路径：要保住贴图又降面，先用 Tripo v3.1 重新生成高细节模型，再用这一步做带烘焙的减面（Tripo P2 的面数在生成时设定，需要调整就重新生成）；已有的 Meshy 或 Rodin 模型可用 Meshy 重拓扑降面，但重拓扑不保留贴图，之后要接换贴图重做。"
         },
         {
           "name": "quad",

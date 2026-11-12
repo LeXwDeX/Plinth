@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -64,9 +65,9 @@ func validateProject(
 		return errors.New("project.assets.kinds 不能为空")
 	}
 
-	briefFields := make(map[string]string, len(chat.Model3DUsage.Brief.Fields))
+	briefFields := make(map[string]ChatProductionBriefField, len(chat.Model3DUsage.Brief.Fields))
 	for _, field := range chat.Model3DUsage.Brief.Fields {
-		briefFields[field.Name] = field.Type
+		briefFields[field.Name] = field
 	}
 	conventions := project.Conventions
 	fieldNames := make(map[string]bool, len(conventions.Fields))
@@ -78,8 +79,14 @@ func validateProject(
 			return fmt.Errorf("project.conventions.fields 字段重复: %q", field.Name)
 		}
 		declared, exists := briefFields[field.Name]
-		if !exists || declared != field.Type {
+		if !exists || declared.Type != field.Type {
 			return fmt.Errorf("project.conventions.fields[%d] 不是 chat.model3d_usage.brief.fields 的同名同类型子集: %q/%q", index, field.Name, field.Type)
+		}
+		// A convention seeds a new session's brief, so a select must offer
+		// exactly the brief's options: a value the brief refuses would
+		// otherwise be seeded into every new session (#286).
+		if field.Type == "select" && !slices.Equal(field.Options, declared.Options) {
+			return fmt.Errorf("project.conventions.fields[%d] 的 options 必须与 chat.model3d_usage.brief.fields 中 %q 的 options 一致", index, field.Name)
 		}
 		fieldNames[field.Name] = true
 	}

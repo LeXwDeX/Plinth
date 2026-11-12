@@ -69,15 +69,20 @@ type modelInput struct {
 
 // briefPurpose returns the 3D purpose profile the session's production brief
 // selects. A session without a brief has none: nothing is recommended or
-// overridden by a purpose.
+// overridden by a purpose. The profile is already the variant for the brief's
+// target platform when the purpose declares one (#275), so its budget and
+// parameter overrides are what every later layer reads; a session without a
+// platform gets the purpose as declared.
 func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatModel3DUsageProfile, bool) {
 	usage := executor.chat.Model3DUsage
 	if len(usage.Profiles) == 0 || command.Options.ProductionBrief.Empty() {
 		return catalog.ChatModel3DUsageProfile{}, false
 	}
-	id := command.Options.ProductionBrief.Text(briefFieldOfType(usage.Brief, "profile"))
+	brief := command.Options.ProductionBrief
+	id := brief.Text(briefFieldOfType(usage.Brief, "profile"))
 	for _, profile := range usage.Profiles {
 		if profile.ID == id {
+			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
 			return profile, true
 		}
 	}
@@ -163,37 +168,75 @@ func (executor *Executor) profileParameterValues(command chat.ToolCommand, offer
 func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offering generation.Offering,
 	current map[string]json.RawMessage) (purposeProfile, map[string]json.RawMessage) {
 	profile, found := executor.purposeOf(command)
-	if !found {
-		return purposeProfile{}, nil
-	}
-	overrides := profile.ParameterOverrides[string(offering.ID)]
-	values := make(map[string]json.RawMessage, len(overrides))
-	for name, value := range overrides {
-		declared := false
-		for _, parameter := range offering.Parameters {
-			if parameter.Name != name {
-				continue
-			}
-			declared = offering.AgentParameterAllowed(parameter)
-			break
-		}
-		if declared {
-			values[name] = value
-		}
-	}
-	// The triangle and texture budget belongs to 3D purposes (#129); a 2D
-	// purpose contributes only its declared parameter overrides.
-	if toolDomain(command) != string(generation.DomainImage) {
-		if model3d, ok := executor.briefPurpose(command); ok {
-			for name, value := range executor.budgetValues(command, model3d, offering, values, current) {
+	values := map[string]json.RawMessage{}
+	if found {
+		overrides := profile.ParameterOverrides[string(offering.ID)]
+		for name, value := range overrides {
+			if publicAgentParameter(offering, name) {
 				values[name] = value
 			}
 		}
+		// The triangle and texture budget belongs to 3D purposes (#129); a 2D
+		// purpose contributes only its declared parameter overrides.
+		if toolDomain(command) != string(generation.DomainImage) {
+			if model3d, ok := executor.briefPurpose(command); ok {
+				for name, value := range executor.budgetValues(command, model3d, offering, values, current) {
+					values[name] = value
+				}
+			}
+		}
+	}
+	// What a select field of the brief gives the Offering (#277) is the person's
+	// own, more specific choice than the purpose's generic values, and holds with
+	// or without a purpose.
+	for name, value := range executor.briefDefaultValues(command, offering) {
+		values[name] = value
 	}
 	if len(values) == 0 {
 		return profile, nil
 	}
 	return profile, values
+}
+
+// publicAgentParameter reports whether an Offering declares name as a
+// parameter the Agent may set: the rule every value a layer gives an Offering
+// on its own must pass (the Catalog checked it at load time; this repeats it so
+// a hand-built Executor cannot apply a value the Offering does not expose).
+func publicAgentParameter(offering generation.Offering, name string) bool {
+	for _, parameter := range offering.Parameters {
+		if parameter.Name == name {
+			return offering.AgentParameterAllowed(parameter)
+		}
+	}
+	return false
+}
+
+// briefDefaultValues are the values the session brief's select fields give an
+// Offering through the Schema's brief.parameter_defaults (#277): the target
+// engine picks the skeleton naming of a rigging step. They fill only what the
+// step left unset (applyPurposeValues), so a value the person or the Agent set
+// for the step stays theirs.
+func (executor *Executor) briefDefaultValues(command chat.ToolCommand, offering generation.Offering) map[string]json.RawMessage {
+	brief := command.Options.ProductionBrief
+	if brief.Empty() {
+		return nil
+	}
+	var values map[string]json.RawMessage
+	for _, entry := range executor.chat.Model3DUsage.Brief.ParameterDefaults {
+		if brief.Text(entry.Field) != entry.Value {
+			continue
+		}
+		for name, value := range entry.ParameterOverrides[string(offering.ID)] {
+			if !publicAgentParameter(offering, name) {
+				continue
+			}
+			if values == nil {
+				values = map[string]json.RawMessage{}
+			}
+			values[name] = value
+		}
+	}
+	return values
 }
 
 // modelShape is the recommended_offerings key of this call. For an image call
@@ -321,6 +364,26 @@ func (executor *Executor) profileOffering(command chat.ToolCommand, capability g
 	return generation.Offering{}, purposeProfile{}, false
 }
 
+// recommendedWorkspaceOffering finds the workspace pick among the purpose's
+// recommendations for this call's input shape, available and accepting the
+// input; false when the pick is not one of them.
+func (executor *Executor) recommendedWorkspaceOffering(
+	command chat.ToolCommand,
+	capability generation.Capability,
+	input modelInput,
+	profile purposeProfile,
+	workspace string,
+) (generation.Offering, bool) {
+	candidates := executor.availableOfferings(capability)
+	for _, name := range profile.RecommendedOfferings[executor.modelShape(command, capability)] {
+		offering, matched := matchOffering(candidates, name)
+		if matched && modelMatches(offering, workspace) && executor.acceptsModelInput(offering, input) {
+			return offering, true
+		}
+	}
+	return generation.Offering{}, false
+}
+
 // chooseOffering selects the Offering of a generation tool call by the
 // model-choice layers: the person's explicit pick for the tool's workspace
 // domain, the Agent's model argument, the purpose recommendation, the
@@ -379,6 +442,13 @@ func (executor *Executor) chooseOffering(
 		// asks the person to confirm the switch (#103 review C1).
 		workspace := strings.TrimSpace(executor.userModel(command))
 		if workspace != "" && !modelMatches(offering, workspace) {
+			// The visible pick is itself one of the purpose's recommendations:
+			// run it instead of asking. Nothing is replaced silently, and the 2D
+			// delivery check still names a model that reaches the purpose's
+			// resolution when this one falls short (#282).
+			if recommended, ok := executor.recommendedWorkspaceOffering(command, capability, input, profile, workspace); ok {
+				return offeringChoice{Offering: recommended, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
+			}
 			if text := executor.modelWorkspaceConflictText(command, workspace, offering, profile); text != "" {
 				return offeringChoice{Refusal: text}, nil
 			}

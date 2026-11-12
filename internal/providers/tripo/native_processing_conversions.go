@@ -65,6 +65,10 @@ type nativeConversionOptions struct {
 	MaxSourceBytes int64                      `json:"max_source_bytes"`
 	Parameters     map[string]json.RawMessage `json:"parameters"`
 	Formats        []nativeConversionFormat   `json:"formats"`
+	// Bindings is the generation Offerings' addition (conversion_parameters.go):
+	// public parameters forwarded to every export request. A processing Offering
+	// declares none.
+	Bindings []nativeConversionBinding `json:"bindings,omitempty"`
 }
 type nativeConversionFormat struct {
 	Format    string `json:"format"`
@@ -113,7 +117,7 @@ func nativeConversionDeclaration(o generation.Offering, options providerOptions)
 		}
 		return matched, nil
 	}
-	if o.PostSuccess != nil || o.Cost == nil || o.Cost.ExtraCredits <= 0 || o.Cost.SelectionParameter == "" || o.Cost.ConsentParameter == "" || o.Cost.SelectionParameter == o.Cost.ConsentParameter || o.CostPolicy == nil || !validRigCheckRoute(options.ConvertEndpoint, false) || c.MaxSourceBytes <= 0 || c.MaxSourceBytes > maximumTripoModelBytes || len(c.Formats) == 0 || len(c.Formats) > maximumNativeConversionFormats || len(c.Parameters) == 0 {
+	if o.PostSuccess != nil || o.Cost == nil || o.Cost.ExtraCredits <= 0 || o.Cost.SelectionParameter == "" || o.Cost.ConsentParameter == "" || o.Cost.SelectionParameter == o.Cost.ConsentParameter || o.CostPolicy == nil || !validRigCheckRoute(options.ConvertEndpoint, false) || c.MaxSourceBytes <= 0 || c.MaxSourceBytes > maximumTripoModelBytes || len(c.Formats) == 0 || len(c.Formats) > maximumNativeConversionFormats || len(c.Parameters) == 0 || len(c.Bindings) != 0 {
 		return nil, nativeProcessingProtocolError()
 	}
 	sourceFound := false

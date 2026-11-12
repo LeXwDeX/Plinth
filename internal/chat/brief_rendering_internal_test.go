@@ -74,3 +74,38 @@ func TestBriefPromptRendersTheImagePurposeAndRequirements(t *testing.T) {
 		t.Fatalf("brief prompt leaks the purpose id:\n%s", prompt)
 	}
 }
+
+// #286: a select field renders its option's label, not the stored id, and a
+// stored value that is no option (free text written before the field became a
+// select) is rendered as it was written instead of being dropped.
+func TestBriefPromptRendersSelectLabelsAndKeepsFreeText(t *testing.T) {
+	schema := briefTestSchema()
+	schema.Fields = []catalog.ChatProductionBriefField{
+		{Name: "purpose", Type: "profile", Label: "用途"},
+		{Name: "target_engine", Type: "select", Label: "目标引擎", Options: []catalog.ChatProductionBriefOption{
+			{ID: "unity", Label: "Unity"}, {ID: "web", Label: "Web / three.js"},
+		}},
+		{Name: "target_platform", Type: "select", Label: "目标平台", Options: []catalog.ChatProductionBriefOption{
+			{ID: "mobile", Label: "手机"}, {ID: "web", Label: "网页"},
+		}},
+		{Name: "triangle_budget", Type: "integer", Label: "三角面预算"},
+	}
+	orchestrator := &Orchestrator{schema: catalog.ChatSchema{Model3DUsage: briefTestUsage(schema)}}
+
+	prompt := orchestrator.briefPrompt(TurnOptions{ProductionBrief: briefRaw(t, map[string]any{
+		"target_engine": "web", "target_platform": "web",
+	})})
+	if want := "制作简报：\n目标引擎：Web / three.js；目标平台：网页"; prompt != want {
+		t.Fatalf("select prompt = %q, want %q", prompt, want)
+	}
+	if strings.Contains(prompt, "unity") {
+		t.Fatalf("the unset engine option leaked into the prompt: %q", prompt)
+	}
+
+	legacy := orchestrator.briefPrompt(TurnOptions{ProductionBrief: briefRaw(t, map[string]any{
+		"target_engine": "Unity", "target_platform": "手机 + Switch",
+	})})
+	if want := "制作简报：\n目标引擎：Unity；目标平台：手机 + Switch"; legacy != want {
+		t.Fatalf("free-text prompt = %q, want %q", legacy, want)
+	}
+}

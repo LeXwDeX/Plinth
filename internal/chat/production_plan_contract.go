@@ -30,7 +30,7 @@ func (policy *ProductionPlanPolicy) localize(locale, text string) string {
 // returns none for a Catalog without usage profiles (a historical plan keeps
 // working).
 func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand) ([]budget.AcceptanceCriterion, string) {
-	profile, _, found := policy.purposeProfile(command)
+	profile, purposeBudget, found := policy.purposeProfile(command)
 	if !found || len(policy.Budget.Acceptance.Criteria) == 0 {
 		return nil, ""
 	}
@@ -52,7 +52,7 @@ func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand) ([]budget
 		if !declared || len(criteria) >= maximum {
 			continue
 		}
-		planCheck, ok := policy.planCheck(check, profile)
+		planCheck, ok := policy.planCheck(check, profile, purposeBudget)
 		if !ok {
 			continue
 		}
@@ -123,7 +123,7 @@ func (policy *ProductionPlanPolicy) buildCheckpoints(command ToolCommand, steps 
 	if maximum > 0 && len(requested) > maximum {
 		return nil, "at most " + strconv.Itoa(maximum) + " checkpoints may be declared"
 	}
-	profile, _, found := policy.purposeProfile(command)
+	profile, purposeBudget, found := policy.purposeProfile(command)
 	if !found {
 		return nil, "checkpoints need a declared purpose budget"
 	}
@@ -160,7 +160,7 @@ func (policy *ProductionPlanPolicy) buildCheckpoints(command ToolCommand, steps 
 				return nil, "checkpoint check " + check + " is not declared or is repeated"
 			}
 			seenChecks[check] = true
-			planCheck, ok := policy.planCheck(check, profile)
+			planCheck, ok := policy.planCheck(check, profile, purposeBudget)
 			if !ok {
 				return nil, "checkpoint check " + check + " has no purpose threshold"
 			}
@@ -250,8 +250,12 @@ func (policy *ProductionPlanPolicy) buildContingencies(command ToolCommand,
 	return contingencies, ""
 }
 
-// purposeProfile resolves the purpose budget of the proposal turn from the
-// frozen brief or the Schema's default profile.
+// purposeProfile resolves the purpose of the proposal turn from the frozen
+// brief or the Schema's default profile, as the variant for the brief's target
+// platform when the purpose declares one (#275), together with the budget the
+// plan is frozen against: that variant's budget with the brief's
+// triangle_budget over its maximum, the same budget inspect_model judges by
+// (modelReviewUsageBudget), so a checkpoint and the final check never disagree.
 func (policy *ProductionPlanPolicy) purposeProfile(command ToolCommand) (catalog.ChatModel3DUsageProfile, catalog.ChatModel3DUsageBudget, bool) {
 	usage := policy.Usage
 	if len(usage.Profiles) == 0 {
@@ -269,6 +273,7 @@ func (policy *ProductionPlanPolicy) purposeProfile(command ToolCommand) (catalog
 	if !found {
 		profile, found = usage.Profiles[0], true
 	}
+	profile, _ = usage.ForPlatform(profile, command.Options.ProductionBrief.Text(usage.PlatformField))
 	budget := profile.Budget
 	if value, exists := command.Options.ProductionBrief.Integer(usage.Brief.FieldNameOfType("integer")); exists && value > 0 {
 		budget.MaxTriangles = value
@@ -297,28 +302,34 @@ func (policy *ProductionPlanPolicy) profileFromBrief(brief ProductionBrief, usag
 	return catalog.ChatModel3DUsageProfile{}, false
 }
 
-func (policy *ProductionPlanPolicy) planCheck(check string, profile catalog.ChatModel3DUsageProfile) (budget.PlanCheck, bool) {
+// planCheck freezes one check id against the purpose. The triangle and texture
+// bounds and the delivery requirements come from purposeBudget, the budget
+// purposeProfile resolved (the target platform's variant with the brief's
+// triangle_budget over it, #275); the other thresholds come from the purpose
+// and the production review settings.
+func (policy *ProductionPlanPolicy) planCheck(check string, profile catalog.ChatModel3DUsageProfile,
+	purposeBudget catalog.ChatModel3DUsageBudget) (budget.PlanCheck, bool) {
 	switch check {
 	case modelcheck.CheckTriangles:
-		maximum := float64(profile.Budget.MaxTriangles)
+		maximum := float64(purposeBudget.MaxTriangles)
 		planned := budget.PlanCheck{Check: check, Maximum: &maximum}
-		if profile.Budget.MinTriangles != nil {
-			minimum := float64(*profile.Budget.MinTriangles)
+		if purposeBudget.MinTriangles != nil {
+			minimum := float64(*purposeBudget.MinTriangles)
 			planned.Minimum = &minimum
 		}
 		return planned, true
 	case modelcheck.CheckTextureSize:
-		if profile.Budget.MaxTextureSize == nil {
+		if purposeBudget.MaxTextureSize == nil {
 			return budget.PlanCheck{Check: check}, true
 		}
-		maximum := float64(*profile.Budget.MaxTextureSize)
+		maximum := float64(*purposeBudget.MaxTextureSize)
 		return budget.PlanCheck{Check: check, Maximum: &maximum}, true
 	case modelcheck.CheckUV:
-		return budget.PlanCheck{Check: check, Required: profile.Budget.RequireUV}, true
+		return budget.PlanCheck{Check: check, Required: purposeBudget.RequireUV}, true
 	case modelcheck.CheckWatertight:
-		return budget.PlanCheck{Check: check, Required: profile.Budget.RequireWatertight}, true
+		return budget.PlanCheck{Check: check, Required: purposeBudget.RequireWatertight}, true
 	case modelcheck.CheckSkin:
-		return budget.PlanCheck{Check: check, Required: profile.Budget.RequireSkin}, true
+		return budget.PlanCheck{Check: check, Required: purposeBudget.RequireSkin}, true
 	case modelcheck.CheckPivotBottomCenter:
 		ratio := policy.Production.PivotBottomCenterRatio
 		return budget.PlanCheck{Check: check, MaximumRatio: &ratio}, true

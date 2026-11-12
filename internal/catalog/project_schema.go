@@ -53,8 +53,9 @@ type ProjectAssetKindSchema struct {
 
 // ProjectConventionsSchema declares the production defaults a project may
 // carry. Fields reuses the production-brief field declarations (and must be a
-// same-name, same-type subset of chat.model3d_usage.brief.fields); Texts adds
-// free-form naming/coordinate conventions. Neither table is duplicated.
+// same-name, same-type subset of chat.model3d_usage.brief.fields, with the same
+// options for a select); Texts adds free-form naming/coordinate conventions.
+// Neither table is duplicated.
 type ProjectConventionsSchema struct {
 	Fields []ChatProductionBriefField    `json:"fields"`
 	Texts  []ProjectConventionTextSchema `json:"texts"`

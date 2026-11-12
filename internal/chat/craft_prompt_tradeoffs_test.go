@@ -127,3 +127,29 @@ func TestCraftPromptFollowsABriefHeadedFor3DOnA2DStage(t *testing.T) {
 		t.Fatal("a 2D-scope turn got the 3D craft")
 	}
 }
+
+// TestAssetCraftFollowsTheGatesOfTheModel3DCraft is #286: the asset-type and
+// style knowledge is one more craft prompt, so it reaches the Agent on a 3D
+// stage turn and on a 2D stage turn of a session headed for 3D (where the
+// A-pose reference pictures are made), and never in a 2D-only scope.
+func TestAssetCraftFollowsTheGatesOfTheModel3DCraft(t *testing.T) {
+	orchestrator, registry, _ := craftPromptFixture(t, nil, nil)
+	const marker = "【资产类型与风格要点】"
+	if block := orchestrator.craftPrompt(registry, "auto", "model-3d", nil); strings.Count(block, marker) != 1 {
+		t.Fatalf("a 3D stage turn has %d asset crafts, want one", strings.Count(block, marker))
+	}
+	if block := orchestrator.craftPrompt(registry, "auto", "image", nil); strings.Contains(block, marker) {
+		t.Fatal("a 2D stage turn without a brief got the asset craft")
+	}
+	for name, brief := range map[string]ProductionBrief{
+		"3D purpose":     {"purpose": []byte(`"game_character"`)},
+		"3D input image": {"image_for_3d": []byte(`true`)},
+	} {
+		if block := orchestrator.craftPrompt(registry, "auto", "image", brief); !strings.Contains(block, marker) {
+			t.Fatalf("%s: a 2D stage turn of a session headed for 3D lacks the asset craft", name)
+		}
+	}
+	if block := orchestrator.craftPrompt(registry, "2d", "model-3d", ProductionBrief{"purpose": []byte(`"render"`)}); strings.Contains(block, marker) {
+		t.Fatal("a 2D-scope turn got the asset craft")
+	}
+}

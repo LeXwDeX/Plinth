@@ -2511,6 +2511,99 @@ type ChatImageReviewSchema struct {
 	// is returned once the budget is spent.
 	MaxRounds               int    `json:"max_rounds"`
 	RoundsExhaustedTemplate string `json:"rounds_exhausted_template"`
+	// Usage declares the 2D purpose checks of the delivery checklist: the
+	// session's purpose (image2d_usage) sets a minimum resolution, seamless
+	// tiling and a transparent background, and these are the thresholds and
+	// words that judge a picture against them (#282, #284, #287). Nil keeps the
+	// historical delivery checklist.
+	Usage *ChatImageUsageReviewSchema `json:"usage,omitempty"`
+	// Input3DVisualItems are the checks of the 3d_input checklist only a look
+	// at the picture can judge: pose, perspective, cast shadows (#286). The
+	// tool lists them with the checklist; the Agent's verdicts come back in
+	// VisualReviewArgument and are recorded beside the deterministic checks.
+	// They are judged by the Agent, never by a pixel algorithm.
+	Input3DVisualItems []ChatImageVisualItem `json:"input_3d_visual_items,omitempty"`
+	// VisualReviewArgument is the inspect_image argument carrying those
+	// verdicts, and VisualNoteMaxCharacters bounds the note of each. Both are
+	// required once visual items are declared.
+	VisualReviewArgument    string `json:"visual_review_argument,omitempty"`
+	VisualNoteMaxCharacters int    `json:"visual_note_max_characters,omitempty"`
+}
+
+// ChatImageVisualItem is one Agent-judged item of a picture checklist (#286).
+// Instruction tells the Agent what to look at and when the item does not
+// apply; FixHint is what to do about a failed one.
+type ChatImageVisualItem struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Instruction string `json:"instruction"`
+	FixHint     string `json:"fix_hint"`
+}
+
+// ChatImageUsageReviewSchema is application.chat.image_review.usage. Every
+// number is a threshold of a deterministic measurement made by
+// internal/imageinspect; every text is read by the Agent.
+type ChatImageUsageReviewSchema struct {
+	// TransparentField names the production brief boolean that records the
+	// person asked for a transparent background. When it is true the alpha
+	// check demands a real alpha channel whatever the purpose accepts. Empty
+	// leaves the purpose alone to decide.
+	TransparentField string `json:"transparent_field,omitempty"`
+	// BriefPurposeNote and DefaultPurposeNote say which purpose judged the
+	// picture ({purpose}); the second is used when the brief names none and
+	// the Schema's default purpose applies, so the Agent can tell the person.
+	BriefPurposeNote   string `json:"brief_purpose_note"`
+	DefaultPurposeNote string `json:"default_purpose_note"`
+	// Tiling, Alpha and EdgeFringe are the thresholds of the seamless, alpha
+	// and edge_fringe checks.
+	Tiling     ChatImageTilingReviewSchema `json:"tiling"`
+	Alpha      ChatImageAlphaReviewSchema  `json:"alpha"`
+	EdgeFringe ChatImageFringeReviewSchema `json:"edge_fringe"`
+	// Hints is the Agent's next step for each failed check, by check name
+	// (short_edge, seamless, alpha, edge_fringe). Placeholders: {actual},
+	// {expected}, {purpose}, {minimum} (the purpose's minimum short edge) and
+	// {models} (the purpose's recommended models that can reach it). The
+	// short_edge hint must carry {models}: a failed resolution always names a
+	// way out and never switches the model silently.
+	Hints map[string]string `json:"hints"`
+	// ModelsTemplate renders the models of {models} ({models} is their names
+	// joined by ModelsSeparator); NoModelsText stands in for it when no
+	// recommendation can be shown to reach the minimum.
+	ModelsTemplate  string `json:"models_template"`
+	ModelsSeparator string `json:"models_separator"`
+	NoModelsText    string `json:"no_models_text"`
+}
+
+// ChatImageTilingReviewSchema judges the seam measurement. A stretch of a seam
+// is broken when its edge difference is at least MinSeamDelta (0..255) and more
+// than MaxSeamRatio times the difference between neighbouring pixels inside
+// it. Segments is how many stretches each seam is divided into, so a break is
+// reported with its position.
+type ChatImageTilingReviewSchema struct {
+	Segments     int     `json:"segments"`
+	MaxSeamRatio float64 `json:"max_seam_ratio"`
+	MinSeamDelta float64 `json:"min_seam_delta"`
+}
+
+// ChatImageAlphaReviewSchema judges the alpha channel. MinTransparentRatio is
+// the share of fully transparent pixels a channel must show to count as real;
+// MaxBackgroundSpread is the border colour spread up to which an opaque
+// background counts as plain where the purpose takes a solid background too.
+type ChatImageAlphaReviewSchema struct {
+	MinTransparentRatio float64 `json:"min_transparent_ratio"`
+	MaxBackgroundSpread float64 `json:"max_background_spread"`
+}
+
+// ChatImageFringeReviewSchema judges the light rim along a transparent edge.
+// BandRatio is the edge band width as a share of the picture's longer edge;
+// an edge pixel is rim when its luma is at least LightLuma and LumaGap above
+// the subject next to it; MaxRatio is the largest accepted share of the edge
+// that is rim.
+type ChatImageFringeReviewSchema struct {
+	BandRatio float64 `json:"band_ratio"`
+	LightLuma float64 `json:"light_luma"`
+	LumaGap   float64 `json:"luma_gap"`
+	MaxRatio  float64 `json:"max_ratio"`
 }
 
 // ChatSelectionMaskPreviewSchema bounds and styles the server-composed
@@ -2678,6 +2771,10 @@ type ChatImageChecklistSchema struct {
 	MaxSubjectRatio        float64 `json:"max_subject_ratio"`
 	RequireEdgeClear       bool    `json:"require_edge_clear"`
 	MaxComponents          int     `json:"max_components"`
+	// MinMainComponentRatio, when positive, demands the largest piece hold at
+	// least this share of the subject, so a figure with a detached weapon or pet
+	// passes while a sheet of several figures fails (the three-view front rule).
+	MinMainComponentRatio float64 `json:"min_main_component_ratio,omitempty"`
 }
 
 // ChatModelReviewLimits bounds what Parse may accept before any topology is
@@ -2764,6 +2861,11 @@ type ChatModelInspectProductionSchema struct {
 	DefaultPurposeText   string `json:"default_purpose_text"`
 	BriefPurposeText     string `json:"brief_purpose_text"`
 	TriangleOverrideText string `json:"triangle_override_text"`
+	// PlatformBudgetText says which target platform's budget the purpose was
+	// judged against ({platform}, the option label of the brief's platform
+	// field). It is added only when the purpose has a variant for the
+	// session's platform (#275).
+	PlatformBudgetText string `json:"platform_budget_text,omitempty"`
 	// NoCapabilityText replaces a fix hint when no enabled Offering of the
 	// declared capability is available.
 	NoCapabilityText string `json:"no_capability_text"`
@@ -2782,6 +2884,12 @@ type ChatModelInspectFixSchema struct {
 	Check    string                            `json:"check"`
 	Template string                            `json:"template"`
 	Options  []ChatModelInspectFixOptionSchema `json:"options"`
+	// UnavailableTemplate is the hint when Options are declared but none is
+	// available, in place of the global NoCapabilityText. It lets a fix keep
+	// the path that needs no capability (regenerate) while the capability is
+	// disabled, and the capability appears in Template by itself once it is
+	// enabled (#275). It needs Options and carries no {capabilities}.
+	UnavailableTemplate string `json:"unavailable_template,omitempty"`
 }
 
 // ChatModelInspectFixOptionSchema is one way to fix a failed check. Every
@@ -2791,7 +2899,9 @@ type ChatModelInspectFixOptionSchema struct {
 }
 
 // ChatModelInspectFixCapabilitySchema names a capability and, optionally, the
-// public parameter value that makes it fix this check.
+// public parameter value that makes it fix this check. A texture_size fix may
+// write the purpose's texture bound as {maximum} in Value (a number
+// parameter), so one declaration serves every platform budget (#275).
 type ChatModelInspectFixCapabilitySchema struct {
 	Capability string `json:"capability"`
 	Parameter  string `json:"parameter,omitempty"`
@@ -3240,6 +3350,11 @@ type ChatModel3DUsageSchema struct {
 	// the purpose adjusts it: parameters in ParameterOverrides or an explicit
 	// OverridesNotNeeded entry (#249). Off keeps historical Catalogs valid.
 	OverrideCoverageRequired bool `json:"override_coverage_required,omitempty"`
+	// PlatformField names the brief select field that holds the target
+	// platform (#275). Its option ids are the keys of every profile's
+	// Platforms; the service reads the platform through this name, never a
+	// fixed one. Empty means the Catalog has no platform budgets.
+	PlatformField string `json:"platform_field,omitempty"`
 }
 
 // ChatImage2DUsageSchema is application.chat.image2d_usage (#239).
@@ -3248,9 +3363,25 @@ type ChatImage2DUsageSchema struct {
 	// image purpose; it is what the Agent falls back to for an open question.
 	DefaultProfile string                    `json:"default_profile"`
 	Profiles       []ChatImage2DUsageProfile `json:"profiles"`
+	// OutputResolutions declares, by Offering ID, how a resolution tier
+	// parameter turns into pixels, for the Offerings whose frame parameter is
+	// an aspect ratio. Together with an explicit WxH frame value it is the only
+	// proof that a recommended Offering reaches a purpose's minimum short edge
+	// (#282); an Offering with neither cannot be shown to reach it.
+	OutputResolutions map[string]ChatImage2DOutputResolution `json:"output_resolutions,omitempty"`
 	// RequirementsNote renders one purpose's delivery requirements into the
 	// brief and the Agent's context.
 	RequirementsNote ChatImage2DRequirementsNote `json:"requirements_note"`
+}
+
+// ChatImage2DOutputResolution maps the options of one select parameter (a
+// resolution tier such as 1K, 2K, 4K) to the total pixel count the tier
+// delivers. Pixels is a lower bound over every frame the Offering offers: the
+// short edge of a frame is then at least sqrt(pixels x short / long), so a
+// requirement proven against it holds for any frame at least that large.
+type ChatImage2DOutputResolution struct {
+	Parameter string           `json:"parameter"`
+	Pixels    map[string]int64 `json:"pixels"`
 }
 
 // ChatImage2DUsageProfile is one 2D production purpose.
@@ -3270,6 +3401,17 @@ type ChatImage2DUsageProfile struct {
 	// Reason explains the purpose once; every adjusted parameter frozen from
 	// this purpose carries it and source "profile:<id>".
 	Reason string `json:"reason"`
+	// PromptGuidance is how to write the prompt for this purpose (for a
+	// texture: flat-on view, even light, no single focal point). It is rendered
+	// into the production brief beside the requirements (#287).
+	PromptGuidance string `json:"prompt_guidance,omitempty"`
+	// ResolutionUnverifiedOfferings lists the first recommendation of a shape
+	// whose resolution cannot be shown from the Schema (no frame size and no
+	// resolution tier declaration) and that the purpose accepts anyway, because
+	// no recommendation that can express the purpose's other requirements (the
+	// pose, say) can. The delivered picture is still checked against the
+	// minimum short edge by inspect_image (#282).
+	ResolutionUnverifiedOfferings []string `json:"resolution_unverified_offerings,omitempty"`
 }
 
 // ChatImage2DRequirements is what the delivered image must satisfy for the
@@ -3286,6 +3428,9 @@ type ChatImage2DRequirements struct {
 	Subjects string `json:"subjects"`
 	// Pose is empty, a-pose or t-pose.
 	Pose string `json:"pose"`
+	// Tileable demands that the picture tiles seamlessly: its opposite edges
+	// continue into each other (#287).
+	Tileable bool `json:"tileable,omitempty"`
 }
 
 // ChatImage2DRequirementsNote renders the purpose requirements as one text
@@ -3302,6 +3447,10 @@ type ChatImage2DRequirementsNote struct {
 	BackgroundTexts          map[string]string `json:"background_texts"`
 	SubjectsTexts            map[string]string `json:"subjects_texts"`
 	PoseTexts                map[string]string `json:"pose_texts"`
+	// TileableText is the item a tileable purpose adds; GuidanceTemplate wraps
+	// the purpose's PromptGuidance ({value}) as one more item (#287).
+	TileableText     string `json:"tileable_text,omitempty"`
+	GuidanceTemplate string `json:"guidance_template,omitempty"`
 }
 
 // ChatModel3DUsageBudgetLimit bounds the parameters of one semantic by one
@@ -3349,13 +3498,44 @@ type ChatModel3DUsageProfile struct {
 	// Reason explains the purpose once; every adjusted parameter frozen from
 	// this purpose carries it and source "profile:<id>".
 	Reason string `json:"reason"`
-	// Pipeline is reference only: later processing capabilities that suit the
-	// purpose, in order. It is never executed automatically.
+	// Pipeline is reference only: the processing capabilities that suit the
+	// purpose after a generation, in order. It is never executed automatically
+	// and no runtime code reads it: the Agent learns the route from the 3D craft
+	// prompt, which is Schema text too. A game purpose names the reduction that
+	// keeps the textures (#276), the step a high-detail generation needs and a
+	// model that already fits the budget skips.
 	Pipeline []ChatModel3DUsagePipelineStep `json:"pipeline,omitempty"`
 	Budget   ChatModel3DUsageBudget         `json:"budget"`
+	// Platforms are the variants of Budget and ParameterOverrides for the
+	// target platforms a session can name (#275). A session without a platform,
+	// or with one no entry covers, keeps Budget and ParameterOverrides as they
+	// are, so a historical session is judged exactly as before.
+	Platforms []ChatModel3DUsagePlatform `json:"platforms,omitempty"`
 	// ScaleRangeM is the plausible longest-edge range in metres. Nil means
 	// the purpose does not judge scale (render).
 	ScaleRangeM *ChatModel3DUsageScaleRange `json:"scale_range_m,omitempty"`
+}
+
+// ChatModel3DUsagePlatform is one platform variant of a purpose (#275). IDs
+// are option ids of the platform brief field that share this variant, so
+// platforms of the same class (a phone, a browser and a standalone headset)
+// are declared once. Budget names the bounds that differ from the purpose's;
+// every bound it leaves out is the purpose's. ParameterOverrides are merged
+// over the purpose's, Offering by Offering and parameter by parameter, so a
+// platform states only the face counts its budget changes.
+type ChatModel3DUsagePlatform struct {
+	IDs                []string                              `json:"ids"`
+	Budget             ChatModel3DUsagePlatformBudget        `json:"budget"`
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
+}
+
+// ChatModel3DUsagePlatformBudget is the part of the purpose budget a platform
+// changes. The delivery requirements (UV, watertight, skin) belong to the
+// purpose and never vary by platform.
+type ChatModel3DUsagePlatformBudget struct {
+	MinTriangles   *int `json:"min_triangles,omitempty"`
+	MaxTriangles   *int `json:"max_triangles,omitempty"`
+	MaxTextureSize *int `json:"max_texture_size,omitempty"`
 }
 
 // ChatModel3DUsageScaleRange is a closed longest-edge range in metres.
@@ -3387,6 +3567,11 @@ type ChatModel3DUsageBudget struct {
 // brief is replaced as a whole by the Agent tool and by the session API.
 type ChatProductionBriefSchema struct {
 	Fields []ChatProductionBriefField `json:"fields"`
+	// ParameterDefaults give Offerings parameter values by the option a select
+	// field of the brief holds (#277: the target engine picks the skeleton
+	// naming of a rigging step). They are server-only: the browser reads the
+	// fields, not what an option does.
+	ParameterDefaults []ChatProductionBriefDefault `json:"parameter_defaults,omitempty"`
 	// ContextTemplate adds the brief to the system prompt ({brief}); a session
 	// without a brief adds EmptyText in its place.
 	ContextTemplate string `json:"context_template"`
@@ -3444,8 +3629,9 @@ func (brief ChatProductionBriefSchema) FieldNameOfType(fieldType string) string 
 // ChatProductionBriefField declares one brief member and its bound.
 type ChatProductionBriefField struct {
 	Name string `json:"name"`
-	// Type is profile, image_profile, text, boolean or integer. A profile names
-	// a 3D purpose and an image_profile a 2D purpose (#239).
+	// Type is profile, image_profile, select, text, boolean or integer. A
+	// profile names a 3D purpose and an image_profile a 2D purpose (#239); a
+	// select names one of its own Options (#286).
 	Type  string `json:"type"`
 	Label string `json:"label"`
 	// MaximumCharacters bounds a text field; Minimum and Maximum bound an
@@ -3458,6 +3644,52 @@ type ChatProductionBriefField struct {
 	// here so the panel keeps no name-based heuristics (#103 review F11/F7).
 	Multiline   bool   `json:"multiline,omitempty"`
 	Placeholder string `json:"placeholder,omitempty"`
+	// Options are the choices of a select field, in display order (#286). A
+	// stored value outside them (a free-text value written before the field
+	// became a select) still reads and is kept unchanged on write-back, but a
+	// new value must be an option id.
+	Options []ChatProductionBriefOption `json:"options,omitempty"`
+}
+
+// ChatProductionBriefOption is one choice of a select brief field: a stable
+// id the brief stores and the Agent writes, and the label people and the Agent
+// read (#286).
+type ChatProductionBriefOption struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// ChatProductionBriefDefault is what one option of a select brief field gives
+// the Offerings (#277): public parameter values a step that did not set them
+// takes while the brief holds that option. Like a purpose's parameter_overrides,
+// every value must be a public Agent parameter and pass the same normalization
+// as a real submission; a value the person or the Agent set for the step itself
+// always wins over it.
+type ChatProductionBriefDefault struct {
+	// Field names a select field of the brief and Value one of its option ids.
+	Field string `json:"field"`
+	Value string `json:"value"`
+	// ParameterOverrides maps an Offering ID to the parameter values.
+	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides"`
+}
+
+// OptionByID returns the declared option of a select field with that id.
+func (field ChatProductionBriefField) OptionByID(id string) (ChatProductionBriefOption, bool) {
+	for _, option := range field.Options {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return ChatProductionBriefOption{}, false
+}
+
+// OptionIDs lists a select field's option ids in declaration order.
+func (field ChatProductionBriefField) OptionIDs() []string {
+	ids := make([]string, 0, len(field.Options))
+	for _, option := range field.Options {
+		ids = append(ids, option.ID)
+	}
+	return ids
 }
 
 // ChatProductionBriefMessages are the Agent-facing refusals of a brief write.
@@ -3480,6 +3712,10 @@ type ChatProductionBriefMessages struct {
 	OutOfRange string `json:"out_of_range"`
 	// UnsupportedType: {field}, {type}.
 	UnsupportedType string `json:"unsupported_type"`
+	// SelectUndeclared refuses a select value that is none of the field's
+	// option ids: {field}, {options} (#286). Required once a Schema declares
+	// both a select field and any other refusal wording.
+	SelectUndeclared string `json:"select_undeclared,omitempty"`
 }
 
 // ChatAgentScopeSchema is application.chat.agent_scope. The scope of a session
@@ -3559,6 +3795,11 @@ type ChatThreeViewSchema struct {
 	// Continuation lets the server finish the required views of one group
 	// inside an approved budget plan, without a card per view (#243).
 	Continuation ChatThreeViewContinuationSchema `json:"continuation,omitempty"`
+	// Frame makes the views' frame follow the source subject's shape instead
+	// of the Offering's default (#283).
+	Frame ChatThreeViewFrameSchema `json:"frame,omitzero"`
+	// Review is the Agent's visual checklist for the finished views (#283).
+	Review ChatThreeViewReviewSchema `json:"review,omitzero"`
 }
 
 // ChatThreeViewSubjectType is one subject class of the three-view recipe. The
@@ -3569,6 +3810,14 @@ type ChatThreeViewSubjectType struct {
 	Label            string `json:"label"`
 	FrontConstraints string `json:"front_constraints"`
 	ViewConstraints  string `json:"view_constraints"`
+	// FrameMinimumRatio and FrameMaximumRatio bound the frame's width over
+	// height for this class (#283). The pose the front view is asked for can be
+	// wider than the source (a humanoid asked for an A-pose from a picture with
+	// the arms down), and a side view can be wider than the front view (a
+	// quadruped), so the frame never follows the source outside these bounds.
+	// Zero leaves a bound open.
+	FrameMinimumRatio float64 `json:"frame_minimum_ratio,omitempty"`
+	FrameMaximumRatio float64 `json:"frame_maximum_ratio,omitempty"`
 }
 
 // ChatThreeViewConsistencySchema declares how a finished later view is judged
@@ -3580,6 +3829,124 @@ type ChatThreeViewConsistencySchema struct {
 	MaxBackgroundSpread  float64 `json:"max_background_spread"`
 	MaxBBoxHeightDelta   float64 `json:"max_bbox_height_delta"`
 	MaxAttemptsPerView   int     `json:"max_attempts_per_view"`
+	// Front is how the front view, which has no earlier view to be compared
+	// with, is accepted (#283).
+	Front ChatThreeViewFrontSchema `json:"front,omitzero"`
+	// Appearance compares what a later view looks like with the front view:
+	// dominant colours, detached parts and mirrored sides (#283).
+	Appearance ChatThreeViewAppearanceSchema `json:"appearance,omitzero"`
+	// Reasons words each failed check for the Agent, keyed by the check name.
+	// Fields: {actual} (what was measured), {expected} (the bound) and, for a
+	// mirror check, {partner} (the other view). A check without a declared
+	// reason is reported by its name and measurement. The words fill the
+	// {reasons} of messages.consistency_retry and consistency_failed, joined by
+	// ReasonSeparator.
+	Reasons         map[string]string `json:"reasons,omitempty"`
+	ReasonSeparator string            `json:"reason_separator,omitempty"`
+}
+
+// ChatThreeViewFrontSchema declares how the front view is accepted (#283). A
+// character with a floating weapon or a pet is one subject in several pieces,
+// so the piece count is a Schema bound instead of being fixed at one; several
+// figures side by side are still refused by the main-piece share.
+type ChatThreeViewFrontSchema struct {
+	// MaxComponents bounds the pieces of the subject; zero leaves it open.
+	MaxComponents int `json:"max_components"`
+	// MinMainComponentRatio is the share of the subject the largest piece must
+	// hold; zero disables the check.
+	MinMainComponentRatio float64 `json:"min_main_component_ratio"`
+}
+
+// ChatThreeViewAppearanceSchema declares the appearance comparison of a later
+// view with the accepted front view (#283). Every bound is deterministic pixel
+// arithmetic; the Agent's own visual review (Review) covers what the numbers
+// cannot see.
+type ChatThreeViewAppearanceSchema struct {
+	// SubjectThreshold is the colour distance from the background that makes a
+	// pixel part of the subject (the measure of model_review.reference).
+	SubjectThreshold float64                    `json:"subject_threshold"`
+	Palette          ChatThreeViewPaletteSchema `json:"palette"`
+	Parts            ChatThreeViewPartsSchema   `json:"parts"`
+	Mirror           ChatThreeViewMirrorSchema  `json:"mirror"`
+}
+
+// ChatThreeViewPaletteSchema bounds the dominant-colour difference. MaxDistance
+// is the weighted nearest-colour distance on a 0..1 scale (zero disables);
+// Colours, MinShare and MergeDistance say how the palette is read: at most
+// Colours colours of at least MinShare of the subject, colours closer than
+// MergeDistance (RGB) counting as one.
+type ChatThreeViewPaletteSchema struct {
+	MaxDistance   float64 `json:"max_distance"`
+	Colours       int     `json:"colours"`
+	MinShare      float64 `json:"min_share"`
+	MergeDistance float64 `json:"merge_distance"`
+}
+
+// ChatThreeViewPartsSchema bounds the difference in the number of detached
+// parts (accessories) of the subject. MaxCountDelta zero disables it; a piece
+// needs MinShare of the subject's pixels to count as a part.
+type ChatThreeViewPartsSchema struct {
+	MaxCountDelta int     `json:"max_count_delta"`
+	MinShare      float64 `json:"min_share"`
+}
+
+// ChatThreeViewMirrorSchema lists the pairs of views whose silhouettes must be
+// mirror images (#283). NormalizedSide is the edge of the square the
+// silhouettes are scaled to.
+type ChatThreeViewMirrorSchema struct {
+	NormalizedSide int                             `json:"normalized_side"`
+	Pairs          []ChatThreeViewMirrorPairSchema `json:"pairs,omitempty"`
+}
+
+// ChatThreeViewMirrorPairSchema is one pair of opposite views (recipe step
+// keys). The check runs on the view that finishes later, against the other
+// when it is already accepted; an optional view that was never made is skipped.
+// MinOverlap is the least overlap of the mirrored silhouettes and
+// MaxOrientationMargin the most the unmirrored silhouettes may overlap better
+// (a view that faces the same way as the other has its sides swapped). Zero
+// disables the bound.
+type ChatThreeViewMirrorPairSchema struct {
+	Views                []string `json:"views"`
+	MinOverlap           float64  `json:"min_overlap"`
+	MaxOrientationMargin float64  `json:"max_orientation_margin"`
+}
+
+// ChatThreeViewFrameSchema makes the frame of a new group follow its source
+// (#283). The server measures the source's subject, adds MarginRatio of its
+// longer side on every side, and gives each output-size parameter the legal
+// value closest to that shape (the rule of the canvas and the reference
+// picture, #284/#296) at the Offering's own long edge. A source whose subject
+// cannot be told from its background (under MinSubjectRatio of the picture)
+// is measured as a whole picture; a failure to measure keeps the Offering's
+// default frame.
+type ChatThreeViewFrameSchema struct {
+	Enabled          bool    `json:"enabled"`
+	SubjectThreshold float64 `json:"subject_threshold"`
+	MinSubjectRatio  float64 `json:"min_subject_ratio"`
+	MarginRatio      float64 `json:"margin_ratio"`
+}
+
+// ChatThreeViewReviewSchema is the Agent's visual checklist for the finished
+// views (#283): the automatic checks compare silhouettes and colours, not
+// meaning, so the Agent compares each view with the front view item by item.
+// It reaches the Agent through the {checklist} field of messages.agent_completed.
+type ChatThreeViewReviewSchema struct {
+	// ChecklistTemplate fields: {views} (the finished views other than the
+	// front, joined by multiview.view_separator), {items} and {view_notes}.
+	ChecklistTemplate string `json:"checklist_template,omitempty"`
+	// ItemTemplate renders one item ({text}); the items are joined by lines.
+	ItemTemplate string                    `json:"item_template,omitempty"`
+	Items        []ChatThreeViewReviewItem `json:"items,omitempty"`
+	// ViewNoteTemplate renders the note of one finished view ({view}, {note});
+	// ViewNotes are keyed by view key.
+	ViewNoteTemplate string            `json:"view_note_template,omitempty"`
+	ViewNotes        map[string]string `json:"view_notes,omitempty"`
+}
+
+// ChatThreeViewReviewItem is one thing to compare with the front view.
+type ChatThreeViewReviewItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // ChatThreeViewContinuationSchema enables the budget continuation (#243).
@@ -3635,13 +4002,15 @@ type ChatThreeViewMessages struct {
 	ModelSourceNotYet string `json:"model_source_not_yet"`
 	ReferenceRequired string `json:"reference_required"`
 	// AgentCompleted is the receipt once every required view of the group is
-	// accepted; {run}, {views}, {group} and {model_source} are filled (#243).
+	// accepted; {run}, {views}, {group} and {model_source} are filled (#243),
+	// and {checklist} is the Agent's visual checklist (Review, #283).
 	AgentCompleted string `json:"agent_completed,omitempty"`
 	// AgentPaused says the budget continuation stopped without finishing the
 	// group and what the person can do. Fields: {run}, {view}, {reason}.
 	AgentPaused string `json:"agent_paused,omitempty"`
 	// ConsistencyRetry reports one automatically redrawn view: {view},
-	// {attempt}, {maximum}, {reasons}.
+	// {attempt}, {maximum}, {reasons}. The reasons are worded by
+	// consistency.reasons, one per failed check (#283).
 	ConsistencyRetry string `json:"consistency_retry,omitempty"`
 	// ConsistencyFailed reports a view that stayed inconsistent; the group
 	// waits for a person. Fields: {view}, {reasons}.

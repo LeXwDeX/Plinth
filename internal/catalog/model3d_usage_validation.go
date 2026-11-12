@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +26,8 @@ var model3dUsageShapes = []string{"text-to-3d", "image-to-3d", "multiview-to-3d"
 func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []CapabilityPresentation) error {
 	usage := schema.Model3DUsage
 	if len(usage.Profiles) == 0 {
-		if strings.TrimSpace(usage.DefaultProfile) != "" || len(usage.Brief.Fields) > 0 || len(usage.BudgetLimits) > 0 {
+		if strings.TrimSpace(usage.DefaultProfile) != "" || len(usage.Brief.Fields) > 0 || len(usage.Brief.ParameterDefaults) > 0 ||
+			len(usage.BudgetLimits) > 0 || strings.TrimSpace(usage.PlatformField) != "" {
 			return fmt.Errorf("model3d_usage.profiles 不能为空")
 		}
 		return validateChoiceKinds(schema)
@@ -93,10 +96,97 @@ func validateModel3DUsageShape(schema ChatSchema, capabilityPresentations []Capa
 	if err := validateProductionBrief(usage.Brief, len(schema.Image2DUsage.Profiles) > 0); err != nil {
 		return err
 	}
+	if err := validateBriefSelectParameters(schema); err != nil {
+		return err
+	}
+	if err := validateUsagePlatforms(usage); err != nil {
+		return err
+	}
+	if err := validateBriefParameterDefaultsShape(usage.Brief); err != nil {
+		return err
+	}
 	if err := validateBudgetLimits(usage); err != nil {
 		return err
 	}
 	return validateChoiceKinds(schema)
+}
+
+// validateUsagePlatforms checks the platform variants of the purposes (#275):
+// the brief field that names the platform, the option ids each variant covers
+// (once per purpose), and the budget each variant resolves to. A Catalog
+// without a platform field and without variants stays valid.
+func validateUsagePlatforms(usage ChatModel3DUsageSchema) error {
+	declared := false
+	for _, profile := range usage.Profiles {
+		declared = declared || len(profile.Platforms) > 0
+	}
+	if strings.TrimSpace(usage.PlatformField) == "" {
+		if declared {
+			return fmt.Errorf("model3d_usage.platform_field 不能为空：用途声明了 platforms")
+		}
+		return nil
+	}
+	var field *ChatProductionBriefField
+	for index := range usage.Brief.Fields {
+		if usage.Brief.Fields[index].Name == usage.PlatformField {
+			field = &usage.Brief.Fields[index]
+			break
+		}
+	}
+	if field == nil || field.Type != "select" {
+		return fmt.Errorf("model3d_usage.platform_field %q 必须是 brief.fields 中的 select 字段", usage.PlatformField)
+	}
+	for index, profile := range usage.Profiles {
+		covered := map[string]bool{}
+		known := map[string]bool{}
+		for _, ids := range profile.RecommendedOfferings {
+			for _, id := range ids {
+				known[id] = true
+			}
+		}
+		for id := range profile.ParameterOverrides {
+			known[id] = true
+		}
+		for variantIndex, variant := range profile.Platforms {
+			path := fmt.Sprintf("model3d_usage.profiles[%d].platforms[%d]", index, variantIndex)
+			if len(variant.IDs) == 0 {
+				return fmt.Errorf("%s.ids 不能为空", path)
+			}
+			for _, id := range variant.IDs {
+				if _, exists := field.OptionByID(id); !exists {
+					return fmt.Errorf("%s.ids 的 %q 不是字段 %q 的选项", path, id, usage.PlatformField)
+				}
+				if covered[id] {
+					return fmt.Errorf("model3d_usage.profiles[%d].platforms 中平台 %q 重复", index, id)
+				}
+				covered[id] = true
+			}
+			if variant.Budget.MinTriangles == nil && variant.Budget.MaxTriangles == nil && variant.Budget.MaxTextureSize == nil {
+				return fmt.Errorf("%s.budget 至少要声明 min_triangles、max_triangles 或 max_texture_size 之一", path)
+			}
+			effective := profile.Budget.WithPlatform(variant.Budget)
+			if effective.MaxTriangles <= 0 {
+				return fmt.Errorf("%s.budget.max_triangles 必须大于 0", path)
+			}
+			if effective.MinTriangles != nil && (*effective.MinTriangles < 0 || *effective.MinTriangles > effective.MaxTriangles) {
+				return fmt.Errorf("%s.budget.min_triangles 必须在 0 与 max_triangles 之间", path)
+			}
+			if effective.MaxTextureSize != nil && *effective.MaxTextureSize <= 0 {
+				return fmt.Errorf("%s.budget.max_texture_size 必须大于 0", path)
+			}
+			offerings := make([]string, 0, len(variant.ParameterOverrides))
+			for id := range variant.ParameterOverrides {
+				offerings = append(offerings, id)
+			}
+			sort.Strings(offerings)
+			for _, id := range offerings {
+				if !known[id] {
+					return fmt.Errorf("%s.parameter_overrides 的 Offering %q 不在用途的推荐或覆盖列表中", path, id)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // validateBudgetLimits checks the parameter semantics a purpose budget bounds
@@ -149,7 +239,7 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 		return fmt.Errorf("model3d_usage.brief.fields 不能为空")
 	}
 	declared := map[string]ChatProductionBriefField{}
-	profiles, imageProfiles, integers := 0, 0, 0
+	profiles, imageProfiles, integers, selects := 0, 0, 0, 0
 	for index, field := range brief.Fields {
 		if _, exists := declared[field.Name]; exists {
 			return fmt.Errorf("model3d_usage.brief.fields 中 %q 重复", field.Name)
@@ -158,6 +248,9 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 		if strings.TrimSpace(field.Label) == "" {
 			return fmt.Errorf("model3d_usage.brief.fields[%d].label 不能为空", index)
 		}
+		if field.Type != "select" && len(field.Options) > 0 {
+			return fmt.Errorf("model3d_usage.brief.fields[%s] 不是 select，不能声明 options", field.Name)
+		}
 		switch field.Type {
 		case "profile":
 			profiles++
@@ -165,6 +258,11 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 			imageProfiles++
 		case "boolean":
 			// A boolean field has no other declaration.
+		case "select":
+			selects++
+			if err := validateBriefSelectOptions(field); err != nil {
+				return err
+			}
 		case "integer":
 			integers++
 			if field.Minimum <= 0 || field.Maximum <= 0 || field.Minimum > field.Maximum {
@@ -241,14 +339,142 @@ func validateProductionBrief(brief ChatProductionBriefSchema, imageProfilesDecla
 			}
 		}
 	}
-	return validateProductionBriefMessages(brief.Messages)
+	return validateProductionBriefMessages(brief.Messages, selects > 0)
+}
+
+// briefOptionID is the shape of a select option id: a lowercase identifier the
+// brief stores and the Agent writes, never a sentence (#286).
+var briefOptionID = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// validateBriefSelectOptions checks the choices of one select field: at least
+// one, each with a unique identifier id and a label people can read (#286).
+func validateBriefSelectOptions(field ChatProductionBriefField) error {
+	if len(field.Options) == 0 {
+		return fmt.Errorf("model3d_usage.brief.fields[%s] 必须是带 options 的 select", field.Name)
+	}
+	seen := make(map[string]bool, len(field.Options))
+	for index, option := range field.Options {
+		if !briefOptionID.MatchString(option.ID) {
+			return fmt.Errorf("model3d_usage.brief.fields[%s].options[%d].id 必须为小写标识: %q", field.Name, index, option.ID)
+		}
+		if seen[option.ID] {
+			return fmt.Errorf("model3d_usage.brief.fields[%s].options 中 %q 重复", field.Name, option.ID)
+		}
+		seen[option.ID] = true
+		if strings.TrimSpace(option.Label) == "" {
+			return fmt.Errorf("model3d_usage.brief.fields[%s].options[%d].label 不能为空", field.Name, index)
+		}
+	}
+	return nil
+}
+
+// validateBriefParameterDefaultsShape checks the parts of
+// brief.parameter_defaults that need no Offering (#277): each entry names a
+// select field of the brief and one of its options, once, and holds at least one
+// Offering with at least one value.
+func validateBriefParameterDefaultsShape(brief ChatProductionBriefSchema) error {
+	declared := make(map[string]ChatProductionBriefField, len(brief.Fields))
+	for _, field := range brief.Fields {
+		declared[field.Name] = field
+	}
+	seen := map[string]bool{}
+	for index, entry := range brief.ParameterDefaults {
+		field, exists := declared[entry.Field]
+		if !exists || field.Type != "select" {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].field %q 不是简报的 select 字段", index, entry.Field)
+		}
+		if _, exists := field.OptionByID(entry.Value); !exists {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].value %q 不是字段 %q 的选项", index, entry.Value, entry.Field)
+		}
+		key := entry.Field + "\x00" + entry.Value
+		if seen[key] {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults 中 %s=%s 重复", entry.Field, entry.Value)
+		}
+		seen[key] = true
+		if len(entry.ParameterOverrides) == 0 {
+			return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides 不能为空", index)
+		}
+		for offering, values := range entry.ParameterOverrides {
+			if strings.TrimSpace(offering) == "" || len(values) == 0 {
+				return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides 含空 Offering ID 或空参数表", index)
+			}
+		}
+	}
+	return nil
+}
+
+// validateBriefParameterDefaultsOfferings checks the Offerings and values of
+// brief.parameter_defaults once the Offerings are built (#277). Each value is
+// frozen the way a real submission would freeze it, as a purpose override is.
+func validateBriefParameterDefaultsOfferings(brief ChatProductionBriefSchema, byID generationMap) error {
+	for index, entry := range brief.ParameterDefaults {
+		ids := make([]string, 0, len(entry.ParameterOverrides))
+		for id := range entry.ParameterOverrides {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			offering, exists := byID[schemacontract.OfferingID(id)]
+			if !exists {
+				return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides 的 Offering %q 不存在", index, id)
+			}
+			if err := simulateProfileParameters(offering, entry.ParameterOverrides[id]); err != nil {
+				return fmt.Errorf("model3d_usage.brief.parameter_defaults[%d].parameter_overrides[%q]: %w", index, id, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateBriefSelectParameters keeps the brief tool's parameters and the
+// brief's select options one declaration (#286). The Agent writes a select
+// value through update_production_brief, whose parameter enum is the list the
+// model sees; a drift between the two would offer a value the brief refuses or
+// hide one it accepts. A Schema without a select field, or without the brief
+// tool, has nothing to compare.
+func validateBriefSelectParameters(schema ChatSchema) error {
+	var tool *ChatAgentToolSchema
+	for index := range schema.AgentTools {
+		if schema.AgentTools[index].Execution.ImplementationKey == "session.brief" {
+			tool = &schema.AgentTools[index]
+			break
+		}
+	}
+	if tool == nil {
+		return nil
+	}
+	var properties map[string]any
+	if parameters, found := declaredToolParameters(schema, tool.Name); found && parameters != nil {
+		properties, _ = parameters["properties"].(map[string]any)
+	}
+	for _, field := range schema.Model3DUsage.Brief.Fields {
+		if field.Type != "select" {
+			continue
+		}
+		property, ok := properties[field.Name].(map[string]any)
+		if !ok || property["type"] != "string" {
+			return fmt.Errorf("%s 必须把 select 字段 %q 声明为字符串参数", tool.Name, field.Name)
+		}
+		values, ok := property["enum"].([]any)
+		ids := field.OptionIDs()
+		if !ok || len(values) != len(ids) {
+			return fmt.Errorf("%s.%s 的 enum 必须与简报 select 字段的 options 一一对应", tool.Name, field.Name)
+		}
+		for index, value := range values {
+			if value != ids[index] {
+				return fmt.Errorf("%s.%s 的 enum 第 %d 项必须是 %q", tool.Name, field.Name, index+1, ids[index])
+			}
+		}
+	}
+	return nil
 }
 
 // validateProductionBriefMessages checks the refusal wording of the brief
 // write. A historical Catalog may declare none of it; a Catalog that declares
 // any of it must declare all of it, so no refusal silently falls back to a
-// hardcoded sentence in one language (#103 review C3).
-func validateProductionBriefMessages(messages ChatProductionBriefMessages) error {
+// hardcoded sentence in one language (#103 review C3). A Catalog with a select
+// field must also word the refusal of an undeclared option (#286).
+func validateProductionBriefMessages(messages ChatProductionBriefMessages, hasSelect bool) error {
 	all := map[string]string{
 		"unknown_field":      messages.UnknownField,
 		"not_object":         messages.NotObject,
@@ -259,6 +485,9 @@ func validateProductionBriefMessages(messages ChatProductionBriefMessages) error
 		"text_too_long":      messages.TextTooLong,
 		"out_of_range":       messages.OutOfRange,
 		"unsupported_type":   messages.UnsupportedType,
+	}
+	if hasSelect || strings.TrimSpace(messages.SelectUndeclared) != "" {
+		all["select_undeclared"] = messages.SelectUndeclared
 	}
 	any := false
 	for _, value := range all {
@@ -284,10 +513,15 @@ func validateProductionBriefMessages(messages ChatProductionBriefMessages) error
 		"text_too_long":      {"{field}", "{maximum}"},
 		"out_of_range":       {"{field}", "{minimum}", "{maximum}"},
 		"unsupported_type":   {"{field}", "{type}"},
+		"select_undeclared":  {"{field}", "{options}"},
 	}
 	for name, required := range placeholders {
+		text, declared := all[name]
+		if !declared {
+			continue
+		}
 		for _, placeholder := range required {
-			if !strings.Contains(all[name], placeholder) {
+			if !strings.Contains(text, placeholder) {
 				return fmt.Errorf("model3d_usage.brief.messages.%s 必须包含 %s", name, placeholder)
 			}
 		}
@@ -428,6 +662,9 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 	if len(usage.Profiles) == 0 {
 		return nil
 	}
+	if err := validateBriefParameterDefaultsOfferings(usage.Brief, byID); err != nil {
+		return err
+	}
 	if err := validateBudgetLimitParameters(usage, byID); err != nil {
 		return err
 	}
@@ -471,6 +708,9 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 		if err := validatePurposeOverrideCoverage(usage, index, profile); err != nil {
 			return err
 		}
+		if err := validateUsagePlatformOfferings(usage, index, profile, byID); err != nil {
+			return err
+		}
 		for stepIndex, step := range profile.Pipeline {
 			if strings.TrimSpace(step.OfferingID) == "" {
 				if len(step.Parameters) > 0 {
@@ -487,6 +727,40 @@ func validateModel3DUsageOfferings(usage ChatModel3DUsageSchema, byID generation
 			}
 			if err := simulateProfileParameters(offering, step.Parameters); err != nil {
 				return fmt.Errorf("model3d_usage.profiles[%d].pipeline[%d]: %w", index, stepIndex, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateUsagePlatformOfferings freezes the overrides of every platform
+// variant the way a real submission would and holds them to the variant's own
+// budget (#275). The checked overrides are the merged ones: the purpose's values
+// the variant keeps are measured against the variant's smaller budget too, so
+// a variant that lowers the budget cannot leave a purpose override above it.
+func validateUsagePlatformOfferings(usage ChatModel3DUsageSchema, index int, profile ChatModel3DUsageProfile,
+	byID generationMap) error {
+	for variantIndex, variant := range profile.Platforms {
+		if len(variant.IDs) == 0 {
+			continue
+		}
+		resolved, _ := usage.ForPlatform(profile, variant.IDs[0])
+		offerings := make([]string, 0, len(resolved.ParameterOverrides))
+		for id := range resolved.ParameterOverrides {
+			offerings = append(offerings, id)
+		}
+		sort.Strings(offerings)
+		for _, id := range offerings {
+			path := fmt.Sprintf("model3d_usage.profiles[%d].platforms[%d].parameter_overrides[%q]", index, variantIndex, id)
+			offering, exists := byID[schemacontract.OfferingID(id)]
+			if !exists {
+				return fmt.Errorf("model3d_usage.profiles[%d].platforms[%d].parameter_overrides 的 Offering %q 不存在", index, variantIndex, id)
+			}
+			if err := simulateProfileParameters(offering, resolved.ParameterOverrides[id]); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			if err := checkOverridesWithinBudget(usage, resolved, offering, resolved.ParameterOverrides[id]); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
 			}
 		}
 	}
@@ -638,8 +912,34 @@ func modelReviewFixCapabilityDeclared(candidate ChatModelInspectFixCapabilitySch
 		if !offering.AgentParameterAllowed(parameter) {
 			continue
 		}
+		if modelReviewPlaceholder.MatchString(candidate.Value) {
+			// The value is a purpose bound ({maximum}) known only when the
+			// check runs (#275): a public parameter that takes numbers can
+			// take it. Whether the number is in range is decided then.
+			if modelReviewParameterTakesNumbers(parameter) {
+				return true
+			}
+			continue
+		}
 		if modelReviewParameterAccepts(parameter, candidate.Value) {
 			return true
+		}
+	}
+	return false
+}
+
+// modelReviewParameterTakesNumbers reports whether a parameter can be given the
+// number a fix computes from a purpose bound: a number parameter, or a select
+// whose options are numbers (a texture side chosen from a list).
+func modelReviewParameterTakesNumbers(parameter schemacontract.Parameter) bool {
+	switch parameter.Type {
+	case "number":
+		return true
+	case "select":
+		for _, option := range parameter.Options {
+			if _, err := strconv.ParseFloat(option.Value, 64); err == nil {
+				return true
+			}
 		}
 	}
 	return false
@@ -656,6 +956,13 @@ func modelReviewParameterAccepts(parameter schemacontract.Parameter, value strin
 		return false
 	case "boolean":
 		return value == "true" || value == "false"
+	case "number":
+		number, err := strconv.ParseFloat(value, 64)
+		if err != nil || (parameter.Integer && number != math.Trunc(number)) {
+			return false
+		}
+		return (parameter.Minimum == nil || number >= *parameter.Minimum) &&
+			(parameter.Maximum == nil || number <= *parameter.Maximum)
 	default:
 		return true
 	}
@@ -742,6 +1049,35 @@ func simulateProfileParameters(offering schemacontract.Offering, overrides map[s
 			return err
 		}
 		simulated[parameter.Name] = placeholder
+	}
+	// An Offering whose input is "one of these sources" (a counted input rule,
+	// none of the sources required on its own) gets the first one of the rule as
+	// a placeholder, so the missing source does not mask the override check.
+	for _, rule := range offering.InputRules {
+		if len(rule.ForbiddenWhen) > 0 || rule.MaxTotalItems > 0 || rule.Minimum <= 0 {
+			continue
+		}
+		present := 0
+		for _, name := range rule.Parameters {
+			if _, exists := simulated[name]; exists {
+				present++
+			}
+		}
+		for _, name := range rule.Parameters {
+			if present >= rule.Minimum {
+				break
+			}
+			parameter, exists := offeringParameter(offering.Parameters, name)
+			if !exists || parameter.Fixed {
+				continue
+			}
+			placeholder, err := requiredParameterPlaceholder(parameter)
+			if err != nil {
+				return err
+			}
+			simulated[name] = placeholder
+			present++
+		}
 	}
 	if consent := offering.ExtraConsentParameter(); consent != "" {
 		simulated[consent] = json.RawMessage(`true`)

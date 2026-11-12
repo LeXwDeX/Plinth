@@ -50,7 +50,7 @@ Bang 与 Texture 候选已启用（#187），各只声明一个必需 GLB 槽位
 
 ## Rodin 启用合同（#188）
 
-Rodin 两个 Offering 已启用，修订 `2026-10-20.188.1`。当前合同以 [Provider/Schema 合同的 Hyper3D 一节](../provider-schema-architecture.md)为准，这里记录与上文通用协议约束相关的差异：
+Rodin 两个 Offering 已启用，修订 `2026-10-20.188.1`（#279 起为 `2026-11-12.279.1`：拓扑、面数、纹理质量、T/A 姿态、法线烘焙、种子成为公开参数，展示档请求与报价不变）。当前合同以 [Provider/Schema 合同的 Hyper3D 一节](../provider-schema-architecture.md)为准，这里记录与上文通用协议约束相关的差异：
 
 - 下载 host：只登记 `file.hyper3d.com`。依据是一次真实下载回包，以及对其中签名 URL 的只读 Range 请求（直接返回 206，没有重定向）。
 - Extreme-High 一次返回三份文件：PBR pack GLB、附带的 Draco 原始网格和 `preview.webp`。`provider_options.download_files` 声明只取 PBR GLB 和预览图。原始网格能通过有界 Draco 检查（离线复验），但无贴图，所以不交付。

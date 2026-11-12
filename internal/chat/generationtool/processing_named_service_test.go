@@ -136,6 +136,55 @@ func TestNamedServiceThatCannotTakeTheModelSaysWhyAndAsks(t *testing.T) {
 	}
 }
 
+// #276: the baked decimation takes Tripo v3.1 results, not a Tripo P2 one, though
+// both are Tripo image-to-3D results. The refusal of the named service says what
+// to do instead (the route its source parameter declares), in the structured
+// refusal and in the reason text, before anything is frozen, granted or paid.
+func TestNamedDecimationOfAP2ResultSaysTheRouteToTakeInstead(t *testing.T) {
+	h := newProcessingHarness(t, "auto", func(h *processingHarness) []generation.Task {
+		p2, ok := h.gateway.product.Get("tripo/tripo-p2/image-to-3d")
+		if !ok {
+			t.Fatal("the P2 Offering is missing")
+		}
+		task := modelTask("p2-1", "owner-a", "session-a", h.tripo, "image-to-3d", "glb")
+		task.Offering = p2
+		multiview, _ := h.gateway.product.Get("tripo/tripo-v3.1-multiview/image-to-3d")
+		accepted := modelTask("mv-1", "owner-a", "session-a", h.tripo, "image-to-3d", "glb")
+		accepted.Offering = multiview
+		return []generation.Task{task, accepted}
+	})
+	result, _ := h.run("process_model", `{"step":"remesh","source_task_id":"p2-1","offering_id":"tripo/geometry/decimate-triangle"}`)
+	content, message := h.assertAsksAboutService(result)
+	for _, want := range []string{"only takes", "Tripo v3.1", "带烘焙的减面", "Meshy", "重拓扑", "换贴图"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("the refusal does not say %q: %s", want, message)
+		}
+	}
+	requested, _ := content["requested_services"].([]any)
+	if len(requested) == 0 {
+		t.Fatalf("requested_services = %v", content["requested_services"])
+	}
+	refusal, _ := requested[0].(map[string]any)["refusal"].(map[string]any)
+	if refusal["kind"] != "task" || !strings.Contains(refusal["alternative"].(string), "Tripo v3.1") {
+		t.Fatalf("refusal = %v", refusal)
+	}
+
+	// The multiview result of Tripo v3.1 is a source of the same service (#276).
+	h = newProcessingHarness(t, "auto", func(h *processingHarness) []generation.Task {
+		multiview, _ := h.gateway.product.Get("tripo/tripo-v3.1-multiview/image-to-3d")
+		accepted := modelTask("mv-1", "owner-a", "session-a", h.tripo, "image-to-3d", "glb")
+		accepted.Offering = multiview
+		return []generation.Task{accepted}
+	})
+	result, _ = h.run("process_model", `{"step":"remesh","source_task_id":"mv-1","offering_id":"tripo/geometry/decimate-triangle"}`)
+	if result.NoSubmission && result.Error != "" {
+		t.Fatalf("the multiview result was refused as a decimation source: %s", result.AgentContent)
+	}
+	if len(h.gateway.frozen) != 1 || h.gateway.frozen[0].OfferingID != "tripo/geometry/decimate-triangle" {
+		t.Fatalf("frozen = %+v, want the decimation of the multiview result", h.gateway.frozen)
+	}
+}
+
 // G at the tool layer: after the refusal the Agent calls again without the
 // service (or names another one). Only Tripo accepts the model, so before this
 // fix the step froze as Tripo; in the automatic mode that is a paid submission

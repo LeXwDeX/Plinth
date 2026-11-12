@@ -418,12 +418,15 @@ func TestExtendedProviderProjectionOwnsAnimationLibraryFromOfferingSchema(
 	if err := json.NewDecoder(response.Body).Decode(&discovered); err != nil {
 		t.Fatal(err)
 	}
-	// #186 route B adds Tripo Retarget beside Meshy; it exposes only walk.
+	// #186 route B adds Tripo Retarget beside Meshy; since #277 it exposes the 11
+	// biped presets and the five creature presets the Retarget page lists.
 	if len(discovered.Providers) != 2 || discovered.Providers[0].ID != "meshy-processing" || discovered.Providers[1].ID != "tripo-animation" {
 		t.Fatalf("providers = %#v", discovered.Providers)
 	}
 	tripoActions := discovered.Providers[1].ParamSchemas[generation.Animation]
-	if len(tripoActions) != 1 || tripoActions[0].Name != "animation_action" || len(tripoActions[0].Options) != 1 || tripoActions[0].Options[0].Value != "preset:walk" {
+	if len(tripoActions) != 1 || tripoActions[0].Name != "animation_action" || len(tripoActions[0].Options) != 16 ||
+		tripoActions[0].Options[0].Value != "preset:idle" || tripoActions[0].Options[1].Value != "preset:walk" ||
+		tripoActions[0].Options[11].Value != "preset:quadruped:walk" || tripoActions[0].Options[11].Group != "其他生物骨架" {
 		t.Fatalf("Tripo Retarget actions = %#v", tripoActions)
 	}
 	parameters := discovered.Providers[0].ParamSchemas[generation.Animation]

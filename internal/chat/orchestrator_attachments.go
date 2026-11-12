@@ -508,6 +508,10 @@ func (orchestrator *Orchestrator) productionBriefText(
 			value := purposeID
 			budget := ""
 			if found {
+				// The budget the Agent plans against is the one for the brief's
+				// target platform when the purpose has a variant for it (#275);
+				// the platform itself is rendered as its own field.
+				profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
 				value = profile.Label
 				budget = productionBriefBudgetText(profile.Budget, override, hasOverride, briefSchema)
 			}
@@ -527,7 +531,7 @@ func (orchestrator *Orchestrator) productionBriefText(
 			value := imageUse
 			if profile, found := image2DUsageProfile(orchestrator.schema.Image2DUsage, imageUse); found {
 				value = profile.Label
-				if requirements := image2DRequirementsText(profile.Requirements, orchestrator.schema.Image2DUsage.RequirementsNote, briefSchema.ImageRequirementSeparator); requirements != "" {
+				if requirements := image2DRequirementsText(profile, orchestrator.schema.Image2DUsage.RequirementsNote, briefSchema.ImageRequirementSeparator); requirements != "" {
 					if briefSchema.ImageRequirementsTemplate != "" {
 						requirements = strings.ReplaceAll(briefSchema.ImageRequirementsTemplate, "{items}", requirements)
 					}
@@ -535,6 +539,18 @@ func (orchestrator *Orchestrator) productionBriefText(
 						"{label}", value, "{requirements}", requirements,
 					).Replace(briefSchema.ImagePurposeTemplate)
 				}
+			}
+			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
+		case "select":
+			// A stored option id reads as its label; a value outside the
+			// options (free text written before the field became a select)
+			// is kept and shown as it was written (#286).
+			value := brief.Text(field.Name)
+			if value == "" {
+				continue
+			}
+			if option, found := field.OptionByID(value); found {
+				value = option.Label
 			}
 			parts = append(parts, strings.NewReplacer("{label}", label, "{value}", value).Replace(briefSchema.FieldTemplate))
 		case "text":
@@ -573,14 +589,17 @@ func image2DUsageProfile(usage catalog.ChatImage2DUsageSchema, id string) (catal
 }
 
 // image2DRequirementsText renders one 2D purpose's delivery requirements with
-// the Schema's own words, so no enum literal reaches the Agent (#239).
-func image2DRequirementsText(requirements catalog.ChatImage2DRequirements, note catalog.ChatImage2DRequirementsNote, separator string) string {
+// the Schema's own words, so no enum literal reaches the Agent (#239). A
+// tileable purpose adds its tiling requirement and a purpose with prompt
+// guidance adds how to write the prompt (#287).
+func image2DRequirementsText(profile catalog.ChatImage2DUsageProfile, note catalog.ChatImage2DRequirementsNote, separator string) string {
 	if strings.TrimSpace(note.Template) == "" {
 		return ""
 	}
 	if separator == "" {
 		separator = note.Separator
 	}
+	requirements := profile.Requirements
 	items := []string{
 		strings.ReplaceAll(note.AspectRatioTemplate, "{value}", requirements.AspectRatio),
 		strings.ReplaceAll(note.MinimumShortEdgeTemplate, "{value}", strconv.Itoa(requirements.MinimumShortEdge)),
@@ -591,6 +610,12 @@ func image2DRequirementsText(requirements catalog.ChatImage2DRequirements, note 
 		if text := note.PoseTexts[requirements.Pose]; text != "" {
 			items = append(items, strings.ReplaceAll(note.PoseTemplate, "{value}", text))
 		}
+	}
+	if requirements.Tileable {
+		items = append(items, note.TileableText)
+	}
+	if guidance := strings.TrimSpace(profile.PromptGuidance); guidance != "" {
+		items = append(items, strings.ReplaceAll(note.GuidanceTemplate, "{value}", guidance))
 	}
 	kept := items[:0]
 	for _, item := range items {

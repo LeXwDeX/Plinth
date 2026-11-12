@@ -21,6 +21,25 @@ func loadSamples(t *testing.T) *fakeupstream.Samples {
 	return samples
 }
 
+// convertSampleRequest is the POST /v3/models/convert body of the committed real
+// sample (tripo-v3-convert.candidate.json). A convert task shows its request
+// parameters under input, so the drift comparison has to send the same ones.
+func convertSampleRequest() map[string]any {
+	return map[string]any{
+		"input": "https://example.test/model.glb", "format": "STL", "bake": true, "fbx_preset": "blender",
+		"texture_format": "PNG", "texture_size": 512, "with_animation": false,
+	}
+}
+
+// decimateSampleRequest is the POST /v3/mesh/decimate body of the committed real
+// sample (tripo-v3-decimate.candidate.json) with the source task the test made.
+// The fake checks a decimation against the official page (decimate.go), which the
+// kitchen-sink body of the other kinds (a model version of the generation family,
+// a format) does not satisfy.
+func decimateSampleRequest(source any) map[string]any {
+	return map[string]any{"input": source, "model": "v3.0", "bake": true, "quad": false, "smart_uv": true}
+}
+
 func shapeOfBody(t *testing.T, body any) fakeupstream.Shape {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -112,7 +131,11 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			body["input"] = rig
 		}
 		if k.Path == "/models/convert" {
-			body["input"] = "https://example.test/model.glb"
+			// The request of the committed sample: the poll echoes it under input.
+			body = convertSampleRequest()
+		}
+		if k.Path == "/mesh/decimate" {
+			body = decimateSampleRequest(parent)
 		}
 		status, _, response := f.do("POST", k.Path, key, body)
 		if status != http.StatusOK {
@@ -136,7 +159,11 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			body["input"] = rig
 		}
 		if k.Path == "/models/convert" {
-			body["input"] = "https://example.test/model.glb"
+			// The request of the committed sample: the poll echoes it under input.
+			body = convertSampleRequest()
+		}
+		if k.Path == "/mesh/decimate" {
+			body = decimateSampleRequest(parent)
 		}
 		id := f.create(k.Path, body, key)
 		order := []string{statusQueued, statusRunning, statusSuccess}

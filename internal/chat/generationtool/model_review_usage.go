@@ -30,9 +30,14 @@ const (
 
 // modelReviewUsageCheck is the usage_check object of an inspect_model result.
 type modelReviewUsageCheck struct {
-	Purpose       string                      `json:"purpose"`
-	PurposeLabel  string                      `json:"purpose_label"`
-	PurposeSource string                      `json:"purpose_source"`
+	Purpose       string `json:"purpose"`
+	PurposeLabel  string `json:"purpose_label"`
+	PurposeSource string `json:"purpose_source"`
+	// Platform and PlatformLabel name the target platform whose budget the
+	// purpose was judged against; empty when the purpose has no variant for the
+	// session's platform and its single budget applied (#275).
+	Platform      string                      `json:"platform,omitempty"`
+	PlatformLabel string                      `json:"platform_label,omitempty"`
 	Note          string                      `json:"note,omitempty"`
 	Checks        []modelReviewUsageCheckItem `json:"checks"`
 }
@@ -56,9 +61,10 @@ type modelReviewFixAvailability func(catalog.ChatModelInspectFixCapabilitySchema
 
 // newModelReviewUsageCheck judges a report against the purpose selected by the
 // frozen production brief. A brief without a usable purpose falls back to the
-// Schema's default profile; a brief triangle_budget overrides the profile's
-// maximum. It returns nil when the Schema declares no usage profiles, which is
-// how historical Catalogs stay valid.
+// Schema's default profile; the brief's target platform selects the purpose's
+// variant for that platform, and a brief triangle_budget overrides the
+// resulting maximum. It returns nil when the Schema declares no usage profiles,
+// which is how historical Catalogs stay valid.
 func newModelReviewUsageCheck(
 	report modelinspect.Report,
 	usage catalog.ChatModel3DUsageSchema,
@@ -67,12 +73,12 @@ func newModelReviewUsageCheck(
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
 ) *modelReviewUsageCheck {
-	profile, source, found := modelReviewUsageProfile(usage, brief)
+	profile, source, platform, found := modelReviewUsageProfile(usage, brief)
 	if !found {
 		return nil
 	}
 	budget, override := modelReviewUsageBudget(usage, profile, brief)
-	note := modelReviewUsageNote(profile, source, override, production, text)
+	note := modelReviewUsageNote(profile, source, platform, override, production, text)
 	checks := []modelReviewUsageCheckItem{
 		modelReviewUsageTrianglesCheck(report, budget),
 		modelReviewUsageUVCheck(report, budget),
@@ -99,24 +105,35 @@ func newModelReviewUsageCheck(
 		}
 		checks[index].FixHint = modelReviewUsageFixHint(fix, profile, production, text, available)
 	}
-	return &modelReviewUsageCheck{
+	result := &modelReviewUsageCheck{
 		Purpose:       profile.ID,
 		PurposeLabel:  profile.Label,
 		PurposeSource: source,
 		Note:          note,
 		Checks:        checks,
 	}
+	if platform != nil {
+		result.Platform, result.PlatformLabel = platform.ID, platform.Label
+	}
+	return result
 }
 
 // modelReviewUsageProfile resolves the purpose and where it came from. A brief
 // purpose the Schema no longer declares is ignored, like a session without a
-// brief, so a stale session cannot block a read-only inspection.
+// brief, so a stale session cannot block a read-only inspection. The returned
+// purpose is already the variant for the brief's target platform when it has
+// one (#275); the choice says which platform that was and is nil otherwise.
 func modelReviewUsageProfile(
 	usage catalog.ChatModel3DUsageSchema,
 	brief chat.ProductionBrief,
-) (catalog.ChatModel3DUsageProfile, string, bool) {
+) (catalog.ChatModel3DUsageProfile, string, *catalog.ChatModel3DUsagePlatformChoice, bool) {
 	if len(usage.Profiles) == 0 {
-		return catalog.ChatModel3DUsageProfile{}, "", false
+		return catalog.ChatModel3DUsageProfile{}, "", nil, false
+	}
+	resolve := func(profile catalog.ChatModel3DUsageProfile, source string) (
+		catalog.ChatModel3DUsageProfile, string, *catalog.ChatModel3DUsagePlatformChoice, bool) {
+		profile, platform := usage.ForPlatform(profile, brief.Text(usage.PlatformField))
+		return profile, source, platform, true
 	}
 	if !brief.Empty() {
 		field := ""
@@ -130,17 +147,17 @@ func modelReviewUsageProfile(
 			id := brief.Text(field)
 			for _, profile := range usage.Profiles {
 				if profile.ID == id {
-					return profile, modelReviewUsageSourceBrief, true
+					return resolve(profile, modelReviewUsageSourceBrief)
 				}
 			}
 		}
 	}
 	for _, profile := range usage.Profiles {
 		if profile.ID == usage.DefaultProfile {
-			return profile, modelReviewUsageSourceDefault, true
+			return resolve(profile, modelReviewUsageSourceDefault)
 		}
 	}
-	return catalog.ChatModel3DUsageProfile{}, "", false
+	return catalog.ChatModel3DUsageProfile{}, "", nil, false
 }
 
 // modelReviewUsageBudget applies the brief's triangle override to the profile's
@@ -164,6 +181,7 @@ func modelReviewUsageBudget(
 func modelReviewUsageNote(
 	profile catalog.ChatModel3DUsageProfile,
 	source string,
+	platform *catalog.ChatModel3DUsagePlatformChoice,
 	override *int,
 	production catalog.ChatModelInspectProductionSchema,
 	text modelReviewUsageText,
@@ -173,6 +191,9 @@ func modelReviewUsageNote(
 		template = production.BriefPurposeText
 	}
 	note := text(template, "{purpose}", profile.Label)
+	if platform != nil && production.PlatformBudgetText != "" {
+		note += text(production.PlatformBudgetText, "{platform}", platform.Label)
+	}
 	if override != nil {
 		note += text(production.TriangleOverrideText, "{value}", strconv.Itoa(*override))
 	}
@@ -421,9 +442,12 @@ func modelReviewUsageDegenerateCheck(
 
 // modelReviewUsageFixHint renders the fix of a failed check. With no options
 // the Schema template is a static sentence. Otherwise only options whose every
-// capability is available are named; when none is, the Schema's
-// no-capability sentence is the hint instead of a capability that would not
-// work.
+// capability is available are named; when none is, the fix's own
+// unavailable_template (a path that needs no capability, such as regenerating)
+// or else the Schema's no-capability sentence is the hint instead of a
+// capability that would not work. The purpose passed in is already the variant
+// for the session's target platform, so a bound named in the hint is the
+// platform's.
 func modelReviewUsageFixHint(
 	fix catalog.ChatModelInspectFixSchema,
 	profile catalog.ChatModel3DUsageProfile,
@@ -431,13 +455,31 @@ func modelReviewUsageFixHint(
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
 ) string {
+	bounds, bounded := modelReviewFixBounds(fix.Check, profile)
+	boundedText := func(template string) bool {
+		return strings.Contains(template, "{minimum}") || strings.Contains(template, "{maximum}")
+	}
+	if !bounded && (boundedText(fix.Template) || boundedText(fix.UnavailableTemplate)) {
+		return ""
+	}
 	replacements := make([]string, 0, 6)
 	if strings.Contains(fix.Template, "{capabilities}") {
+		resolver := strings.NewReplacer(bounds...)
 		options := make([]string, 0, len(fix.Options))
 		for _, option := range fix.Options {
 			capabilities := make([]string, 0, len(option.Capabilities))
 			supported := true
 			for _, candidate := range option.Capabilities {
+				if strings.Contains(candidate.Value, "{") {
+					// A value that names a purpose bound is filled before it is
+					// asked for or shown; without the bound the option cannot be
+					// offered (#275).
+					if !bounded {
+						supported = false
+						break
+					}
+					candidate.Value = resolver.Replace(candidate.Value)
+				}
 				if !available(candidate) {
 					supported = false
 					break
@@ -449,21 +491,38 @@ func modelReviewUsageFixHint(
 			}
 		}
 		if len(options) == 0 {
+			if strings.TrimSpace(fix.UnavailableTemplate) != "" {
+				return text(fix.UnavailableTemplate, bounds...)
+			}
 			return text(production.NoCapabilityText)
 		}
 		replacements = append(replacements, "{capabilities}", strings.Join(options, production.OptionSeparator))
 	}
-	if strings.Contains(fix.Template, "{minimum}") || strings.Contains(fix.Template, "{maximum}") {
+	replacements = append(replacements, bounds...)
+	return text(fix.Template, replacements...)
+}
+
+// modelReviewFixBounds are the purpose bounds a fix may name as placeholders:
+// the scale range of plausible_scale and, since #275, the texture side of
+// texture_size. The pairs are placeholder and value, ready for a replacer; false
+// means the purpose declares no such bound.
+func modelReviewFixBounds(check string, profile catalog.ChatModel3DUsageProfile) ([]string, bool) {
+	switch check {
+	case catalog.ModelReviewUsageCheckPlausibleScale:
 		if profile.ScaleRangeM == nil {
-			return ""
+			return nil, false
 		}
-		replacements = append(
-			replacements,
+		return []string{
 			"{minimum}", modelReviewUsageNumber(profile.ScaleRangeM.Min),
 			"{maximum}", modelReviewUsageNumber(profile.ScaleRangeM.Max),
-		)
+		}, true
+	case catalog.ModelReviewUsageCheckTextureSize:
+		if profile.Budget.MaxTextureSize == nil {
+			return nil, false
+		}
+		return []string{"{maximum}", strconv.Itoa(*profile.Budget.MaxTextureSize)}, true
 	}
-	return text(fix.Template, replacements...)
+	return nil, false
 }
 
 func modelReviewFixCapabilityText(candidate catalog.ChatModelInspectFixCapabilitySchema) string {
@@ -534,6 +593,15 @@ func modelReviewParameterAccepts(parameter generation.Parameter, value string) b
 		return false
 	case "boolean":
 		return value == "true" || value == "false"
+	case "number":
+		// A bound the fix computed from the purpose (the texture side) must
+		// lie in the range the parameter accepts (#275).
+		number, err := strconv.ParseFloat(value, 64)
+		if err != nil || (parameter.Integer && number != math.Trunc(number)) {
+			return false
+		}
+		return (parameter.Minimum == nil || number >= *parameter.Minimum) &&
+			(parameter.Maximum == nil || number <= *parameter.Maximum)
 	default:
 		return true
 	}

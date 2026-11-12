@@ -10,11 +10,7 @@
 package imageinspect
 
 import (
-	"bytes"
-	"errors"
-	"fmt"
 	"image"
-	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
 
@@ -29,10 +25,13 @@ type Limits struct {
 
 // Report is the JSON-ready inspection result. Ratios are in [0, 1].
 type Report struct {
-	Format   string `json:"format"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
-	HasAlpha bool   `json:"has_alpha"`
+	Format string `json:"format"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	// ShortEdge is the smaller of Width and Height in pixels: the figure a
+	// purpose's minimum resolution is judged by (#282).
+	ShortEdge int  `json:"short_edge"`
+	HasAlpha  bool `json:"has_alpha"`
 	// TransparentRatio is the share of fully transparent pixels; 0 when the
 	// picture has no alpha channel.
 	TransparentRatio float64 `json:"transparent_ratio"`
@@ -53,34 +52,32 @@ type Report struct {
 	// share of all subject pixels.
 	ComponentCount        int     `json:"component_count"`
 	LargestComponentRatio float64 `json:"largest_component_ratio"`
+	// Tiling holds the opposite-edge seam measurements; it is present only when
+	// the caller asked for them (Requirements.Tileable, #287).
+	Tiling *TilingReport `json:"tiling,omitempty"`
+	// EdgeFringe holds the light-rim measurement of a picture's transparent
+	// edge; it is present only when the caller asked for it and the picture has
+	// an alpha channel (#284).
+	EdgeFringe *FringeReport `json:"edge_fringe,omitempty"`
 }
 
 // Inspect decodes data and reports its deterministic picture facts.
 func Inspect(data []byte, limits Limits) (Report, error) {
-	if limits.MaxBytes > 0 && int64(len(data)) > limits.MaxBytes {
-		return Report{}, fmt.Errorf("image is %d bytes, over the %d-byte limit", len(data), limits.MaxBytes)
-	}
-	config, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return Report{}, fmt.Errorf("decode image header: %w", err)
-	}
-	if config.Width <= 0 || config.Height <= 0 {
-		return Report{}, errors.New("image has no pixels")
-	}
-	pixels := int64(config.Width) * int64(config.Height)
-	if limits.MaxPixels > 0 && pixels > limits.MaxPixels {
-		return Report{}, fmt.Errorf("image is %d pixels, over the %d-pixel limit", pixels, limits.MaxPixels)
-	}
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return Report{}, fmt.Errorf("decode image: %w", err)
-	}
-	bounds := img.Bounds()
-	width, height := bounds.Dx(), bounds.Dy()
-	nrgba := image.NewNRGBA(image.Rect(0, 0, width, height))
-	draw.Draw(nrgba, nrgba.Bounds(), img, bounds.Min, draw.Src)
+	return InspectFor(data, limits, Requirements{})
+}
 
-	report := Report{Format: format, Width: width, Height: height}
+// InspectFor is Inspect plus the pixel measurements the requirements ask for:
+// seams when the picture must tile, the transparent-edge rim when its
+// background is judged. A zero Requirements measures nothing extra, so the
+// callers that never judge a purpose pay nothing for the new probes.
+func InspectFor(data []byte, limits Limits, requirements Requirements) (Report, error) {
+	nrgba, format, err := decodeNRGBA(data, limits)
+	if err != nil {
+		return Report{}, err
+	}
+	width, height := nrgba.Bounds().Dx(), nrgba.Bounds().Dy()
+
+	report := Report{Format: format, Width: width, Height: height, ShortEdge: min(width, height)}
 	mask := make([]bool, width*height)
 	hasAlpha := false
 	for y := 0; y < height; y++ {
@@ -129,6 +126,7 @@ func Inspect(data []byte, limits Limits) (Report, error) {
 	report.subjectBox(mask)
 	components, largest := subjectComponents(mask, width, height)
 	report.ComponentCount, report.LargestComponentRatio = components, largest
+	report.measure(nrgba, requirements)
 	return report, nil
 }
 

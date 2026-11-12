@@ -88,7 +88,7 @@ func TestNativeTripoAvailabilityKeepsExactSourcesFullQuotesAndDelivery(t *testin
 			id := schema.OfferingID("tripo/processing/" + candidate.name)
 			o, ok := c.Get(id)
 			enabled := true
-			revision := map[string]string{"texture": "2026-10-22.1", "rigging": "2026-10-16.3", "animation": "2026-10-20.2"}[candidate.name]
+			revision := map[string]string{"texture": "2026-10-22.1", "rigging": "2026-11-12.277.1", "animation": "2026-11-12.277.1"}[candidate.name]
 			if !ok || o.Enabled != enabled || o.Revision != revision || o.ModelID != "tripo-"+candidate.name || o.Capability != candidate.capability || o.AdapterKey != "tripo.v3" || !o.CreditsMetered || o.EstimatedCredits != candidate.credits || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || o.IdempotentSubmission {
 				t.Fatalf("unsafe qualification candidate: %+v", o)
 			}
@@ -197,6 +197,9 @@ func TestNativeTripoAvailabilityKeepsExactSourcesFullQuotesAndDelivery(t *testin
 	}
 }
 
+// Texture quality stays frozen to the highest tier. A Rig's skeleton type is the
+// user's choice since #277 (the v2.5 Offering keeps its naming fixed), so its
+// value is the one the caller gave while the naming and format stay frozen.
 func TestNativeTripoQualificationFixtureFreezesQualityAndBipedIdentity(t *testing.T) {
 	c := enabledNativeTripoCatalog(t)
 	cases := []struct {
@@ -205,7 +208,7 @@ func TestNativeTripoQualificationFixtureFreezesQualityAndBipedIdentity(t *testin
 		fixed map[string]any
 	}{
 		{"texture", `{"source_task":"source","prompt":"silver","authorize_extra_credits":true,"texture_quality":"fast","pbr":false,"bake":false,"delight":false}`, map[string]any{"texture_quality": "extreme", "pbr": true, "bake": true, "delight": true, "texture_alignment": "geometry", "prompt": "silver"}},
-		{"rigging", `{"source_task":"source","authorize_extra_credits":true,"rig_type":"avian","spec":"mixamo","out_format":"fbx"}`, map[string]any{"rig_type": "biped", "spec": "tripo", "out_format": "glb"}},
+		{"rigging", `{"source_task":"source","authorize_extra_credits":true,"rig_type":"avian","spec":"mixamo","out_format":"fbx"}`, map[string]any{"rig_type": "avian", "spec": "tripo", "out_format": "glb"}},
 		{"animation", `{"source_task":"rig","out_format":"fbx","export_with_geometry":false,"animate_in_place":true}`, map[string]any{"animation_action": "preset:walk", "out_format": "glb", "export_with_geometry": true, "animate_in_place": false}},
 	}
 	for _, tc := range cases {
@@ -226,7 +229,7 @@ func TestNativeTripoQualificationFixtureFreezesQualityAndBipedIdentity(t *testin
 				}
 			}
 			for _, p := range o.Parameters {
-				if _, fixed := tc.fixed[p.Name]; fixed && p.Name != "prompt" && p.Name != "texture_alignment" && p.Name != "animation_action" && (!p.Fixed || p.Presentation == nil || p.Presentation.Surface != "readonly") {
+				if _, fixed := tc.fixed[p.Name]; fixed && p.Name != "prompt" && p.Name != "texture_alignment" && p.Name != "animation_action" && p.Name != "rig_type" && (!p.Fixed || p.Presentation == nil || p.Presentation.Surface != "readonly") {
 					t.Fatalf("fixed parameter lacks readonly contract: %+v", p)
 				}
 			}
@@ -284,10 +287,13 @@ func TestNativeTripoQualificationFixtureRejectsUnsupportedInputsAndPresets(t *te
 	for _, tc := range []struct{ name, input string }{
 		{"texture", `{"source_task":"source"}`},
 		{"texture", `{"source_task":"source","prompt":"silver","source_asset":"asset"}`},
+		// The v1.0 names exist only for v1.0 rigs, which no Offering rigs with (#277).
 		{"animation", `{"source_task":"rig","animation_action":"preset:biped:walk"}`},
-		{"animation", `{"source_task":"rig","animation_action":"preset:quadruped:walk"}`},
-		{"animation", `{"source_task":"rig","animation_action":"preset:idle"}`},
-		{"animation", `{"source_task":"rig","animation_action":"preset:run"}`},
+		{"animation", `{"source_task":"rig","animation_action":"preset:biped:wave_goodbye_01"}`},
+		{"animation", `{"source_task":"rig","animation_action":"preset:moonwalk"}`},
+		{"animation", `{"source_task":"rig","animation_action":"walk"}`},
+		// The list form of the upstream is not declared.
+		{"animation", `{"source_task":"rig","animations":["preset:walk"]}`},
 		// Deprecated upstream and ignored; the qualified wire never sends it.
 		{"animation", `{"source_task":"rig","bake_animation":true}`},
 	} {
@@ -300,21 +306,28 @@ func TestNativeTripoQualificationFixtureRejectsUnsupportedInputsAndPresets(t *te
 	animation, _ := c.Get("tripo/processing/animation")
 	for _, p := range animation.Parameters {
 		if p.Name == "animation_action" {
-			// Only the preset qualified on a v3.0 Rig source is exposed.
-			want := []string{"preset:walk"}
+			// The presets the Retarget page lists for a v3.0 Rig (#277).
+			want := []string{
+				"preset:idle", "preset:walk", "preset:run", "preset:dive", "preset:climb", "preset:jump", "preset:slash", "preset:shoot",
+				"preset:hurt", "preset:fall", "preset:turn",
+				"preset:quadruped:walk", "preset:hexapod:walk", "preset:octopod:walk", "preset:serpentine:march", "preset:aquatic:march",
+			}
 			var got []string
 			for _, option := range p.Options {
 				got = append(got, option.Value)
 			}
-			if p.WireName != "animation" || !p.Required || !slices.Equal(got, want) {
-				t.Fatalf("qualified Rig v3 preset contract changed: %+v", p)
+			if p.WireName != "animation" || !p.Required || string(p.Default) != `"preset:walk"` || p.Semantic != schema.SemanticAction || !slices.Equal(got, want) {
+				t.Fatalf("Rig v3 preset contract changed: %+v", p)
 			}
 		}
 	}
 }
 
 // Retarget uses the source Rig's own version, so the Schema binds the exact
-// v3.0 Offering and its frozen model/skeleton instead of same-provider rigging.
+// v3.0 Offering and lists the frozen configurations it animates (#277): every
+// listed model, skeleton type and naming is one the Rig Offering can produce
+// under its own constraints, every preset belongs to exactly one configuration,
+// and no preset is declared that no listed Rig takes.
 func TestTripoRetargetBindsExactRigV3FrozenConfiguration(t *testing.T) {
 	c, err := LoadDefault()
 	if err != nil {
@@ -331,11 +344,14 @@ func TestTripoRetargetBindsExactRigV3FrozenConfiguration(t *testing.T) {
 	}
 	var animationWire struct {
 		Model     string `json:"model"`
-		SourceRig struct {
-			Model   string `json:"model"`
-			RigType string `json:"rig_type"`
-			Spec    string `json:"spec"`
+		SourceRig *struct {
 		} `json:"source_rig"`
+		SourceRigs []struct {
+			Model      string   `json:"model"`
+			RigType    string   `json:"rig_type"`
+			Spec       string   `json:"spec"`
+			Animations []string `json:"animations"`
+		} `json:"source_rigs"`
 	}
 	var rigWire struct {
 		Model string `json:"model"`
@@ -346,13 +362,54 @@ func TestTripoRetargetBindsExactRigV3FrozenConfiguration(t *testing.T) {
 	if err := json.Unmarshal(rig.ProviderOptions, &rigWire); err != nil {
 		t.Fatal(err)
 	}
-	if animationWire.Model != "" || animationWire.SourceRig.Model != rigWire.Model || rigWire.Model != "v3.0-20260909" {
-		t.Fatalf("Retarget must not send its own model and must bind Rig %q: %+v", rigWire.Model, animationWire)
+	if animationWire.Model != "" || animationWire.SourceRig != nil || rigWire.Model != "v3.0-20260909" || len(animationWire.SourceRigs) == 0 {
+		t.Fatalf("Retarget must not send its own model and must list Rig %q configurations: %+v", rigWire.Model, animationWire)
 	}
-	for name, want := range map[string]string{"rig_type": animationWire.SourceRig.RigType, "spec": animationWire.SourceRig.Spec} {
+	optionValues := func(name string) []string {
 		p, ok := offeringParameter(rig.Parameters, name)
-		if !ok || !p.Fixed || string(p.Default) != `"`+want+`"` {
-			t.Fatalf("source Rig %s is not frozen to %q: %+v", name, want, p)
+		if !ok {
+			t.Fatalf("Rig lacks %s", name)
+		}
+		var values []string
+		for _, option := range p.Options {
+			values = append(values, option.Value)
+		}
+		return values
+	}
+	action, _ := offeringParameter(animation.Parameters, "animation_action")
+	offered := map[string]bool{}
+	for _, option := range action.Options {
+		offered[option.Value] = true
+	}
+	listed := map[string]string{}
+	for _, entry := range animationWire.SourceRigs {
+		if entry.Model != rigWire.Model || !slices.Contains(optionValues("rig_type"), entry.RigType) || !slices.Contains(optionValues("spec"), entry.Spec) {
+			t.Fatalf("listed Rig configuration is not one the Rig v3 Offering can produce: %+v", entry)
+		}
+		// Only Tripo naming is animated, and a naming other than Tripo exists for a biped alone.
+		if entry.Spec != "tripo" {
+			t.Fatalf("Retarget lists a naming other than Tripo: %+v", entry)
+		}
+		for _, preset := range entry.Animations {
+			if !offered[preset] {
+				t.Fatalf("listed preset %q is no option of the action parameter", preset)
+			}
+			if previous, twice := listed[preset]; twice {
+				t.Fatalf("preset %q is listed for both %s and %s", preset, previous, entry.RigType)
+			}
+			listed[preset] = entry.RigType
+		}
+	}
+	for preset := range offered {
+		if listed[preset] == "" {
+			t.Fatalf("preset %q is offered but no listed Rig takes it", preset)
+		}
+	}
+	// A biped takes the biped presets; each creature type exactly its own.
+	for preset, rigType := range listed {
+		creature := strings.Count(preset, ":") == 2
+		if creature != (rigType != "biped") || (creature && !strings.HasPrefix(preset, "preset:"+rigType+":")) {
+			t.Fatalf("preset %q is listed for a %s rig", preset, rigType)
 		}
 	}
 	legacy, _ := c.Get("tripo/processing/rigging")

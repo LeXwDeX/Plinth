@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 
 const header = readFileSync(new URL('./stage-header.tsx', import.meta.url), 'utf8');
+const strip = readFileSync(new URL('./stage-action-strip.tsx', import.meta.url), 'utf8');
 const actionsModule = readFileSync(new URL('../../lib/workspace/stage-actions.ts', import.meta.url), 'utf8');
 const stageActions = (defaultCatalog.application as unknown as {
   canvas: { frontend: { stage_actions: Array<{ id: string; kinds: string[]; group: string; label_key: string }> } };
@@ -13,8 +14,12 @@ const actions = readFileSync(new URL('../../hooks/use-object-actions.ts', import
 
 describe('stage header wiring', () => {
   it('keeps the actions inside the header: they shrink and scroll sideways instead of painting over the right panel', () => {
-    expect(header).toMatch(/className="flex min-w-0 items-center overflow-x-auto[^"]*" data-testid="stage-actions"/);
-    expect(header).not.toContain('className="flex shrink-0 items-center" data-testid="stage-actions"');
+    // The actions live in the strip, which scrolls sideways and pages with arrows; the identity group keeps
+    // its badge and version instead of being squeezed to nothing.
+    expect(header).toContain('<StageActionStrip previousLabel=');
+    expect(strip).toMatch(/className="flex min-w-0 items-center overflow-x-auto[^"]*"\n\s*data-testid="stage-actions"/);
+    expect(header).not.toContain('className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden" role="group"');
+    expect(header).toContain('className="flex min-w-0 max-w-[45%] shrink-0 items-center gap-2 overflow-hidden" role="group"');
     expect(header).toContain('data-group={entry.name} className="flex shrink-0 items-center gap-1"');
   });
 

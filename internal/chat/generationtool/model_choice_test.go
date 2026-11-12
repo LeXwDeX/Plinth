@@ -229,6 +229,25 @@ func TestChooseOfferingDoesNotSilentlyReplaceTheWorkspaceModel(t *testing.T) {
 	}
 }
 
+// A workspace pick that is itself one of the purpose's recommendations runs
+// without asking: nothing is replaced, and the purpose still owns the choice
+// (#282 made the first 2D recommendation differ from the default picker model).
+func TestChooseOfferingRunsAWorkspaceModelThePurposeRecommends(t *testing.T) {
+	p2 := choiceTestOffering(choiceP2ID, "tripo-p2", generation.TextTo3D)
+	meshy := choiceTestOffering(choiceMeshyID, "meshy-t2.5", generation.TextTo3D)
+	command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
+	command.Options.AIModel = choiceMeshyID
+	command.Options.ProductionBrief = choiceTestBrief("game_character")
+	choice, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{p2, meshy}}).
+		chooseOffering(command, generation.TextTo3D, nil, modelInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if choice.Refusal != "" || choice.Offering.ID != meshy.ID || choice.Source != "profile" || choice.Profile != "game_character" {
+		t.Fatalf("choice = %+v, want the recommended workspace model without a confirmation", choice)
+	}
+}
+
 func TestChooseOfferingSkipsAnUnavailableProfileRecommendation(t *testing.T) {
 	p2 := choiceTestOffering(choiceP2ID, "tripo-p2", generation.TextTo3D)
 	meshy := choiceTestOffering(choiceMeshyID, "meshy-t2.5", generation.TextTo3D)

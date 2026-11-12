@@ -19,22 +19,31 @@ type Checklist struct {
 	// MaxComponents bounds the number of subject components (1 means a single
 	// subject); zero disables the check.
 	MaxComponents int `json:"max_components,omitempty"`
+	// MinMainComponentRatio, when positive, adds the main_component check: the
+	// largest piece must hold at least this share of the subject.
+	MinMainComponentRatio float64 `json:"min_main_component_ratio,omitempty"`
 }
 
-// Check is one deterministic verdict. Status is "pass" or "fail"; Fix is a
-// stable code the caller localizes (remove_background, crop_subject,
-// single_subject, regenerate).
+// Check is one deterministic verdict. Status is "pass", "fail" or "unknown"
+// (the picture cannot show the property, for example the edge of a picture with
+// no alpha channel); unknown is a fact, never a pass. Fix is a stable code the
+// caller localizes (remove_background, crop_subject, single_subject,
+// regenerate, raise_resolution, regenerate_tileable, clean_edges). Hint is the
+// caller's actionable sentence for a failed check, from the Product Schema; this
+// package never writes it.
 type Check struct {
 	Name     string `json:"check"`
 	Status   string `json:"status"`
 	Actual   string `json:"actual,omitempty"`
 	Expected string `json:"expected,omitempty"`
 	Fix      string `json:"fix,omitempty"`
+	Hint     string `json:"hint,omitempty"`
 }
 
 const (
-	StatusPass = "pass"
-	StatusFail = "fail"
+	StatusPass    = "pass"
+	StatusFail    = "fail"
+	StatusUnknown = "unknown"
 )
 
 // Review judges the report against a checklist.
@@ -71,6 +80,9 @@ func (r Report) Review(checklist Checklist) []Check {
 		checks = append(checks, Check{Name: "components", Status: status(r.ComponentCount <= checklist.MaxComponents),
 			Actual:   fmt.Sprintf("%d component(s)", r.ComponentCount),
 			Expected: fmt.Sprintf("<= %d", checklist.MaxComponents), Fix: "single_subject"})
+	}
+	if checklist.MinMainComponentRatio > 0 {
+		checks = append(checks, MainComponentCheck(r, checklist.MinMainComponentRatio))
 	}
 	return checks
 }

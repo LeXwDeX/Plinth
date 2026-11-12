@@ -95,9 +95,19 @@ func TestLatestRigCatalogSendsDocumentedNativeRequest(t *testing.T) {
 	if err != nil || accepted.Job == nil || posts != 1 {
 		t.Fatalf("Rig v3 create failed: observation=%+v posts=%d err=%v", accepted, posts, err)
 	}
-	for _, forbidden := range []string{
+	// #277: every documented skeleton type and naming reaches the wire (the
+	// fake-driven test below proves the upstream contract); anything else does not.
+	for _, accepted := range []string{
 		`{"source_task":"source","rig_type":"others","spec":"tripo","out_format":"glb","output_formats":["FBX"],"authorize_extra_credits":true}`,
 		`{"source_task":"source","rig_type":"biped","spec":"vrm","out_format":"glb","output_formats":["FBX"],"authorize_extra_credits":true}`,
+	} {
+		if _, _, _, _, err := nativeProcessingInput(offering, json.RawMessage(accepted)); err != nil {
+			t.Fatalf("documented skeleton choice refused: %s: %v", accepted, err)
+		}
+	}
+	for _, forbidden := range []string{
+		`{"source_task":"source","rig_type":"humanoid","spec":"tripo","out_format":"glb","output_formats":["FBX"],"authorize_extra_credits":true}`,
+		`{"source_task":"source","rig_type":"biped","spec":"godot","out_format":"glb","output_formats":["FBX"],"authorize_extra_credits":true}`,
 		`{"source_task":"source","rig_type":"biped","spec":"tripo","out_format":"glb","output_formats":["FBX"],"authorize_extra_credits":true,"file_token":"file_unsafe"}`,
 	} {
 		if _, _, _, _, err := nativeProcessingInput(offering, json.RawMessage(forbidden)); err == nil {

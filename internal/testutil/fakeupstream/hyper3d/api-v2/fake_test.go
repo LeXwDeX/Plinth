@@ -242,6 +242,92 @@ func TestRodinImageCountBoundary(t *testing.T) {
 	}
 }
 
+// The value rules of the Gen-2.5 form are constructed from the official page
+// (https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5, checked
+// 2026-11-12); no wire sample covers a rejected value. Valid combinations are
+// accepted, and a value outside the page's ranges is the documented
+// INVALID_REQUEST with a message.
+func TestGenerationFormValueRules(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	base := func(extra map[string]string) map[string]string {
+		fields := map[string]string{
+			"tier": "Gen-2.5-Extreme-High", "geometry_file_format": "glb", "material": "PBR", "prompt": "a robot",
+		}
+		for name, value := range extra {
+			fields[name] = value
+		}
+		return fields
+	}
+	for name, extra := range map[string]map[string]string{
+		"the display request": {"mesh_mode": "Raw", "quality": "high", "quality_override": "2000000", "texture_mode": "extreme-high"},
+		"a game character": {
+			"mesh_mode": "Quad", "quality": "high", "quality_override": "10000", "texture_mode": "high",
+			"TAPose": "true", "quad_normal": "true",
+		},
+		"the legacy texture mode":          {"texture_mode": "legacy"},
+		"the lowest texture mode":          {"texture_mode": "extreme-low"},
+		"a middle texture mode":            {"texture_mode": "medium"},
+		"the Quad ceiling":                 {"mesh_mode": "Quad", "quality_override": "200000"},
+		"the lowest face count":            {"mesh_mode": "Quad", "quality_override": "500"},
+		"a Raw count above the Quad limit": {"mesh_mode": "Raw", "quality_override": "250000"},
+		"a Raw default mode on Gen-2.5":    {"quality_override": "2000000"},
+		"the seed bounds":                  {"seed": "0"},
+		"the highest seed":                 {"seed": "65535"},
+		"every quality preset in Quad":     {"mesh_mode": "Quad", "quality": "extra-low"},
+		"the switches off":                 {"TAPose": "false", "quad_normal": "false"},
+		"the lower-tier ceiling":           {"tier": "Gen-2.5-Medium", "quality_override": "1000000"},
+	} {
+		t.Run("accepts "+name, func(t *testing.T) {
+			status, _, body := f.Do("POST", Prefix+"/rodin", key, form(base(extra)))
+			if status != http.StatusCreated || body["error"] != nil {
+				t.Fatalf("%v = %d %v", extra, status, body)
+			}
+		})
+	}
+	for name, tc := range map[string]struct {
+		extra   map[string]string
+		message string
+	}{
+		"Quad above its ceiling":              {map[string]string{"mesh_mode": "Quad", "quality_override": "200001"}, "200000 in Quad mode"},
+		"Quad at the display count":           {map[string]string{"mesh_mode": "Quad", "quality_override": "2000000"}, "200000 in Quad mode"},
+		"an omitted tier defaults to Quad":    {map[string]string{"tier": "", "quality_override": "300000"}, "200000 in Quad mode"},
+		"below the lowest count":              {map[string]string{"quality_override": "499"}, "between 500 and 2000000"},
+		"above the highest count":             {map[string]string{"quality_override": "2000001"}, "between 500 and 2000000"},
+		"a fractional count":                  {map[string]string{"quality_override": "1500.5"}, "between 500 and 2000000"},
+		"a count that is not a number":        {map[string]string{"quality_override": "many"}, "between 500 and 2000000"},
+		"a lower tier above its ceiling":      {map[string]string{"tier": "Gen-2.5-Medium", "quality_override": "1000001"}, "1000000 for tier Gen-2.5-Medium"},
+		"a seed above the range":              {map[string]string{"seed": "65536"}, "between 0 and 65535"},
+		"a negative seed":                     {map[string]string{"seed": "-1"}, "between 0 and 65535"},
+		"a seed that is not a number":         {map[string]string{"seed": "lucky"}, "between 0 and 65535"},
+		"an unknown mesh mode":                {map[string]string{"mesh_mode": "quad"}, "mesh_mode must be one of"},
+		"an unknown quality preset":           {map[string]string{"quality": "ultra"}, "quality must be one of"},
+		"an unknown texture mode":             {map[string]string{"texture_mode": "ultra"}, "texture_mode must be one of"},
+		"a texture mode in the wrong case":    {map[string]string{"texture_mode": "Extreme-High"}, "texture_mode must be one of"},
+		"a pose switch that is not a boolean": {map[string]string{"TAPose": "yes"}, "TAPose must be a boolean"},
+		"a bake switch that is not a boolean": {map[string]string{"quad_normal": "1"}, "quad_normal must be a boolean"},
+	} {
+		t.Run("rejects "+name, func(t *testing.T) {
+			fields := base(tc.extra)
+			if fields["tier"] == "" {
+				delete(fields, "tier")
+			}
+			status, _, body := f.Do("POST", Prefix+"/rodin", key, form(fields))
+			message, _ := body["message"].(string)
+			if status != http.StatusCreated || body["error"] != "INVALID_REQUEST" || !strings.Contains(message, tc.message) {
+				t.Fatalf("%v = %d %v, want INVALID_REQUEST mentioning %q", tc.extra, status, body, tc.message)
+			}
+			if body["uuid"] != nil {
+				t.Fatalf("a rejected request must not create a task: %v", body)
+			}
+		})
+	}
+	// The rules belong to the Gen-2.5 generation form only: Bang and Texture
+	// keep accepting what they accepted.
+	if status, _, body := f.Do("POST", Prefix+"/rodin_texture_only", key, form(map[string]string{"material": "PBR", "quality_override": "250000"}, "model", "image")); status != http.StatusCreated || body["error"] != nil {
+		t.Fatalf("texture = %d %v", status, body)
+	}
+}
+
 func TestRequestValidation(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	for name, tc := range map[string]struct {

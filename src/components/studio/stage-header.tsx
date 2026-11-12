@@ -8,6 +8,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { ActionButton } from '@/components/studio/action-button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { KindBadge } from '@/components/studio/kind-badge';
+import { StageActionStrip } from '@/components/studio/stage-action-strip';
 import { RetextureWithImageAction } from '@/components/studio/retexture-with-image';
 import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-capabilities';
 import { useCanvasArtboard } from '@/hooks/use-canvas-artboard';
@@ -230,22 +231,22 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
   }).filter((entry) => entry.nodes.length > 0);
 
   const actions = (
-    // The actions shrink before they overflow: when the stage is narrower than all of them they scroll sideways
-    // inside the header (no scrollbar drawn) and never paint over the right panel. The groups keep their width.
-    <div className="flex min-w-0 items-center overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="stage-actions">
+    // The identity group keeps its kind badge and version; the actions take the rest of the header and page
+    // sideways with arrow buttons when they do not fit, so nothing paints over the right panel (#274).
+    <StageActionStrip previousLabel={text('ui.studio.stage.actions_previous')} nextLabel={text('ui.studio.stage.actions_next')}>
       {actionGroups.map((entry, index) => (
         <Fragment key={entry.name}>
           {index > 0 ? <span aria-hidden className="mx-2 h-5 w-px shrink-0 bg-border" data-testid="stage-group-rule" /> : null}
           <div role="group" aria-label={text(`ui.studio.stage.group.${entry.name}`)} data-group={entry.name} className="flex shrink-0 items-center gap-1">{entry.nodes}</div>
         </Fragment>
       ))}
-    </div>
+    </StageActionStrip>
   );
 
   if (!object) {
     return (
       <header className="@container flex h-11 shrink-0 items-center gap-3 border-b border-border px-3" data-testid="stage-header" data-kind="board">
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden" role="group" aria-label={text('ui.studio.stage.group.identity')}>
+        <div className="flex min-w-0 max-w-[45%] shrink-0 items-center gap-2 overflow-hidden" role="group" aria-label={text('ui.studio.stage.group.identity')}>
           <KindBadge kind="image" />
           <h2 className="shrink-0 text-sm font-semibold" data-testid="stage-board-title">{label}</h2>
         </div>
@@ -264,7 +265,7 @@ export function StageHeader({ object }: { object: CurrentObject | null }) {
 
   return (
     <header className="@container flex h-11 shrink-0 items-center gap-3 border-b border-border px-3" data-testid="stage-header" data-kind={object.kind}>
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden" role="group" aria-label={text('ui.studio.stage.group.identity')}>
+      <div className="flex min-w-0 max-w-[45%] shrink-0 items-center gap-2 overflow-hidden" role="group" aria-label={text('ui.studio.stage.group.identity')}>
         <KindBadge kind={object.kind} />
         <h2 className="shrink-0 text-sm font-semibold" data-testid="stage-version">{label}</h2>
         {handle && handleReference ? (

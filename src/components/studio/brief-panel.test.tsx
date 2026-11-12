@@ -112,8 +112,16 @@ describe('the production brief panel (#103)', () => {
     }
     expect(style.maxLength).toBe(200);
     expect(style.placeholder).toBe(styleField.placeholder ?? '');
-    const target = view.getByTestId('studio-brief-field-target_platform') as HTMLInputElement;
-    expect(target.maxLength).toBe(120);
+    // #286: the engine and platform are selects over the Schema's options.
+    const engine = view.getByTestId('studio-brief-field-target_engine') as HTMLSelectElement;
+    expect(engine.tagName).toBe('SELECT');
+    expect([...engine.options].map((option) => option.value)).toEqual(['', 'unity', 'unreal', 'godot', 'web', 'other']);
+    expect(engine.options[0].textContent).toBe(text('ui.studio.brief.none'));
+    expect([...engine.options].find((option) => option.value === 'web')?.textContent).toBe('Web / three.js');
+    const target = view.getByTestId('studio-brief-field-target_platform') as HTMLSelectElement;
+    expect(target.tagName).toBe('SELECT');
+    expect([...target.options].map((option) => option.value)).toEqual(['', 'mobile', 'pc_console', 'web', 'xr']);
+    expect([...target.options].find((option) => option.value === 'pc_console')?.textContent).toBe('PC / 主机');
     for (const name of ['needs_parts', 'needs_rig', 'needs_animation']) {
       expect((view.getByTestId(`studio-brief-field-${name}`) as HTMLInputElement).type).toBe('checkbox');
     }
@@ -195,6 +203,67 @@ describe('the production brief panel (#103)', () => {
     fireEvent.click(view.getByTestId('studio-brief-save'));
     await waitFor(() => expect(view.queryByTestId('studio-brief-form')).toBeNull());
     expect(client.setBrief).toHaveBeenCalledWith('s1', {});
+  });
+
+  it('shows a stored select as the option’s label and a stored free-text value as it was written (#286)', () => {
+    swr.data = { target_engine: 'unreal', target_platform: 'pc_console' };
+    const view = render(<BriefPanel sessionId="s1" />);
+    expect(view.getByTestId('studio-brief-value-target_engine').textContent).toBe('Unreal Engine');
+    expect(view.getByTestId('studio-brief-value-target_platform').textContent).toBe('PC / 主机');
+    cleanup();
+    // A brief written while the platform was free text still reads in full.
+    swr.data = { target_engine: 'Unity', target_platform: '手机 + Switch' };
+    const legacy = render(<BriefPanel sessionId="s1" />);
+    expect(legacy.getByTestId('studio-brief-value-target_engine').textContent).toBe('Unity');
+    expect(legacy.getByTestId('studio-brief-value-target_platform').textContent).toBe('手机 + Switch');
+  });
+
+  it('saves the chosen engine and platform as option ids (#286)', async () => {
+    client.setBrief.mockResolvedValueOnce({ target_engine: 'godot', target_platform: 'xr' });
+    const view = render(<BriefPanel sessionId="s1" />);
+    fireEvent.click(view.getByTestId('studio-brief-edit'));
+    fireEvent.change(view.getByTestId('studio-brief-field-target_engine'), { target: { value: 'godot' } });
+    fireEvent.change(view.getByTestId('studio-brief-field-target_platform'), { target: { value: 'xr' } });
+    fireEvent.click(view.getByTestId('studio-brief-save'));
+    await waitFor(() => expect(view.queryByTestId('studio-brief-form')).toBeNull());
+    expect(client.setBrief).toHaveBeenCalledWith('s1', { target_engine: 'godot', target_platform: 'xr' });
+    expect(view.getByTestId('studio-brief-value-target_platform').textContent).toBe('XR（VR / AR / MR）');
+  });
+
+  it('clears a select by choosing the empty option (#286)', async () => {
+    swr.data = { target_engine: 'unity', style: '低模' };
+    client.setBrief.mockResolvedValueOnce({ style: '低模' });
+    const view = render(<BriefPanel sessionId="s1" />);
+    fireEvent.click(view.getByTestId('studio-brief-edit'));
+    expect((view.getByTestId('studio-brief-field-target_engine') as HTMLSelectElement).value).toBe('unity');
+    fireEvent.change(view.getByTestId('studio-brief-field-target_engine'), { target: { value: '' } });
+    fireEvent.click(view.getByTestId('studio-brief-save'));
+    await waitFor(() => expect(view.queryByTestId('studio-brief-form')).toBeNull());
+    expect(client.setBrief).toHaveBeenCalledWith('s1', { style: '低模' });
+  });
+
+  it('keeps a stored free-text platform selectable and sends it back until an option replaces it (#286)', async () => {
+    swr.data = { target_platform: '手机 + Switch', style: '低模' };
+    client.setBrief.mockResolvedValueOnce({ target_platform: '手机 + Switch', style: '卡通' });
+    const view = render(<BriefPanel sessionId="s1" />);
+    fireEvent.click(view.getByTestId('studio-brief-edit'));
+    const platform = view.getByTestId('studio-brief-field-target_platform') as HTMLSelectElement;
+    // The old text shows in the control instead of a blank, ahead of the
+    // options and marked as the earlier entry it is.
+    expect(platform.value).toBe('手机 + Switch');
+    expect([...platform.options].map((option) => option.value)).toEqual(['', '手机 + Switch', 'mobile', 'pc_console', 'web', 'xr']);
+    expect(platform.options[1].textContent).toBe(formatSchemaText(text('ui.studio.brief.unlisted'), { value: '手机 + Switch' }));
+    expect(platform.options[1].textContent).toContain('手机 + Switch');
+    // Editing another field leaves it as it was.
+    fireEvent.change(view.getByTestId('studio-brief-field-style'), { target: { value: '卡通' } });
+    fireEvent.click(view.getByTestId('studio-brief-save'));
+    await waitFor(() => expect(view.queryByTestId('studio-brief-form')).toBeNull());
+    expect(client.setBrief).toHaveBeenCalledWith('s1', { target_platform: '手机 + Switch', style: '卡通' });
+    // Choosing an option replaces it for good.
+    fireEvent.click(view.getByTestId('studio-brief-edit'));
+    fireEvent.change(view.getByTestId('studio-brief-field-target_platform'), { target: { value: 'mobile' } });
+    const replaced = view.getByTestId('studio-brief-field-target_platform') as HTMLSelectElement;
+    expect([...replaced.options].map((option) => option.value)).toEqual(['', 'mobile', 'pc_console', 'web', 'xr']);
   });
 
   it('cancels an edit without saving or changing the stored brief', () => {

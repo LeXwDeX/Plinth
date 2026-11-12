@@ -664,6 +664,15 @@ def scenario_chain(api, offerings):
                    {"source_task": gen["id"], "authorize_extra_credits": True}, session)
     if rig and rig.get("state") == "SUCCEEDED":
         run_step(api, offerings, "tripo animation", ANIMATION, "animation", {"source_task": rig["id"]}, session)
+        # #277: another preset of the biped rig, and a quadruped skeleton with its own preset (the request
+        # values are constructed from the official pages; the fake does not tell a quadruped model apart).
+        run_step(api, offerings, "tripo animation (run)", ANIMATION, "animation",
+                 {"source_task": rig["id"], "animation_action": "preset:run"}, session)
+    quad = run_step(api, offerings, "tripo rigging (quadruped)", RIGGING, "rigging",
+                    {"source_task": gen["id"], "rig_type": "quadruped", "authorize_extra_credits": True}, session)
+    if quad and quad.get("state") == "SUCCEEDED":
+        run_step(api, offerings, "tripo animation (quadruped walk)", ANIMATION, "animation",
+                 {"source_task": quad["id"], "animation_action": "preset:quadruped:walk"}, session)
     run_step(api, offerings, "tripo texture", TRIPO_TEXTURE, "retexture",
              {"source_task": gen["id"], "prompt": "plain matte grey", "authorize_extra_credits": True}, session)
     seg = run_step(api, offerings, "tripo segment", SEGMENT, "mesh-segmentation",
@@ -1138,6 +1147,17 @@ def _prepared_reference_assets(payload):
     return normalized.get("reference_assets") or [] if isinstance(normalized, dict) else []
 
 
+def _prepared_size(payload):
+    """The frozen output size of a prepared image step ("WxH"), or ""."""
+    normalized = payload.get("normalized_input")
+    if isinstance(normalized, str):
+        try:
+            normalized = json.loads(normalized)
+        except ValueError:
+            return ""
+    return normalized.get("size") or "" if isinstance(normalized, dict) else ""
+
+
 def _send_chat(api, session, body, seconds=45):
     """Sends one chat message, retrying while a continuation turn still owns it."""
     end = time.time() + seconds
@@ -1154,8 +1174,11 @@ def scenario_three_view(work, api, offerings):
     """#243: an approved budget finishes front, left and back without a click,
     feeds the front output into the later views and submits a P2 multiview 3D
     step; manual mode starts only the front view until the person asks for the
-    next one."""
-    picture = upload_asset(api, "reference.png", make_png(), "image/png")
+    next one. #283: the reference is a tall character (32x144 in a 96x192
+    picture), so the frozen size of every view is a portrait one instead of the
+    model's default square."""
+    picture = upload_asset(api, "reference.png",
+                           make_picture(96, 192, (255, 255, 255), [((32, 24, 64, 168), (52, 58, 70))]), "image/png")
     if not picture:
         record("three-view: upload the reference picture", False, "upload refused")
         return
@@ -1235,6 +1258,22 @@ def scenario_three_view(work, api, offerings):
     record("three-view: left and back frozen inputs use the front output as their source",
            fed_front.get("left") and fed_front.get("back") and bool(front_asset),
            f"front asset {front_asset or 'none'}, left/back fed front {fed_front}")
+    sizes = {}
+    for needle, key in (("clean, neutral front view", "front"), ("clean left view", "left"),
+                        ("clean back view", "back")):
+        match = next((item for item in prepared
+                      if needle in json.dumps(item.get("normalized_input"), ensure_ascii=False)), None)
+        sizes[key] = _prepared_size(match) if match else ""
+
+    def portrait(size):
+        try:
+            width, height = (int(part) for part in size.split("x"))
+        except ValueError:
+            return False
+        return 0 < width < height
+
+    record("three-view: a tall character's views are framed as portraits, not the default square",
+           all(portrait(size) for size in sizes.values()), f"frozen sizes {sizes}")
     run_id = (group or {}).get("run_id") or ""
 
     # The accepted group feeds the multiview 3D step of the same plan.
@@ -1588,14 +1627,35 @@ def scenario_image_purpose(api, offerings, work):
         used = task.get("offering_id")
         contents = _checkpoint_completed_contents(work, "main", session)
         reported = any('"model_choice"' in content and '"profile"' in content for content in contents)
-        ok = (task.get("state") == "SUCCEEDED" and used == "meshy/nano-banana-pro/text-to-image"
-              and normalized.get("aspect_ratio") == "3:4"
+        ok = (task.get("state") == "SUCCEEDED" and used == "gemini/gemini-3-pro-image/text-to-image"
+              and normalized.get("aspect_ratio") == "3:4" and normalized.get("image_size") == "4K"
               and (prepared.get("model_choice") or {}).get("source") == "profile"
               and (prepared.get("model_choice") or {}).get("profile") == "illustration"
               and reported)
         record("#239 2D purpose-driven generation", ok,
                f"offering={used} state={task.get('state')} aspect_ratio={normalized.get('aspect_ratio')} "
                f"model_choice={prepared.get('model_choice')} result_model_choice={reported}")
+
+    # (c2) #282: the fake picture is 64x64, far below the 1536 short edge of the
+    # illustration purpose, so the delivery checklist fails short_edge, keeps the
+    # failed check for the ledger and names a model that can reach it.
+    handles = image_handles(api, session)
+    if not handles:
+        record("#282 delivery checklist judges the purpose", False, "no generated image handle")
+    else:
+        handle = handles[-1]
+        inspect = '[[fake:tool:inspect_image {"image":"' + handle + '"}]]'
+        if not _image_message(api, session, "交付前检查 " + inspect):
+            record("#282 delivery checklist judges the purpose", False, "turn did not finish")
+        else:
+            summaries = _image_self_check_summaries(api, session)
+            summary = next((item for item in reversed(summaries) if item.get("handle") == handle), None) or {}
+            failed = [item.get("check") for item in summary.get("failed_checks") or []]
+            contents = _checkpoint_completed_contents(work, "main", session)
+            named = any('"check":"short_edge"' in content and "Gemini 3 Pro" in content
+                        and '"purpose":"illustration"' in content for content in contents)
+            record("#282 delivery checklist judges the purpose", "short_edge" in failed and named,
+                   f"handle={handle} failed={failed} model_named={named} summary={summary}")
 
     # (d) the explicit 2D lock wins: a different named model is refused before
     # submission, and a later call without a model runs the locked one.
@@ -1679,7 +1739,7 @@ def scenario_image_purpose(api, offerings, work):
         normalized = prepared.get("normalized_input") or {}
         model_choice = prepared.get("model_choice") or {}
         ok = (task.get("state") == "SUCCEEDED"
-              and task.get("offering_id") == "meshy/nano-banana-pro/text-to-image"
+              and task.get("offering_id") == "gemini/gemini-3-pro-image/text-to-image"
               and normalized.get("aspect_ratio") == "16:9"
               and model_choice.get("source") == "profile"
               and model_choice.get("profile") == "concept_art")
@@ -2554,8 +2614,10 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
         usage = document["application"]["chat"]["model3d_usage"]
         game = next(profile for profile in usage["profiles"] if profile["id"] == "game_character")
         override = game.get("parameter_overrides", {}).get("tripo/tripo-v3.1-multiview/image-to-3d", {})
-        covered = usage.get("override_coverage_required") is True and override.get("face_limit") == 20000 \
-            and override.get("smart_low_poly") is True
+        # #275: the character turns quad output on; smart low poly accepts at
+        # most 10000 quad faces, the same 20000 triangles as before.
+        covered = usage.get("override_coverage_required") is True and override.get("face_limit") == 10000 \
+            and override.get("quad") is True and override.get("smart_low_poly") is True
         record("#249 purpose override coverage", covered,
                f"required={usage.get('override_coverage_required')} multiview={override}")
 

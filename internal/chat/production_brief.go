@@ -74,8 +74,8 @@ func (service *Service) SetProductionBrief(
 	sessionID string,
 	raw map[string]json.RawMessage,
 ) (previous, stored ProductionBrief, err error) {
-	return service.writeProductionBrief(ctx, ownerID, sessionID, func(ProductionBrief) (ProductionBrief, error) {
-		return ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, service.image2DUsage.Profiles, raw)
+	return service.writeProductionBrief(ctx, ownerID, sessionID, func(previous ProductionBrief) (ProductionBrief, error) {
+		return ValidateProductionBriefChange(service.model3DUsage.Brief, service.model3DUsage.Profiles, service.image2DUsage.Profiles, previous, raw)
 	})
 }
 
@@ -92,7 +92,7 @@ func (service *Service) UpdateProductionBrief(
 	patch map[string]json.RawMessage,
 ) (previous, stored ProductionBrief, err error) {
 	return service.writeProductionBrief(ctx, ownerID, sessionID, func(previous ProductionBrief) (ProductionBrief, error) {
-		normalized, err := ValidateProductionBrief(service.model3DUsage.Brief, service.model3DUsage.Profiles, service.image2DUsage.Profiles, patch)
+		normalized, err := ValidateProductionBriefChange(service.model3DUsage.Brief, service.model3DUsage.Profiles, service.image2DUsage.Profiles, previous, patch)
 		if err != nil {
 			return nil, err
 		}

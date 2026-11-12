@@ -73,7 +73,13 @@ func TestHyper3DBangPrepareRequiresSameSessionRodinSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	quote, err := source.EvaluateNativeQuote(json.RawMessage(`{"prompt":"a wooden chair"}`))
+	// The source row carries the input the Catalog freezes, which names the
+	// texture mode the Rodin price depends on (#279).
+	_, sourceInput, err := taskCatalog.Normalize(generation.TextTo3D, source.ID, json.RawMessage(`{"prompt":"a wooden chair","authorize_extra_credits":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quote, err := source.EvaluateNativeQuote(sourceInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +95,7 @@ func TestHyper3DBangPrepareRequiresSameSessionRodinSource(t *testing.T) {
 	const taskID = "successful-rodin-source"
 	const attemptID = "successful-rodin-source-attempt"
 	const stamp = "2026-10-21T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO generation_tasks(id,owner_id,session_id,capability,offering_json,input_json,request_hash,state,current_attempt_id,version,created_at,updated_at,finished_at,native_quote_json,native_quote_required) VALUES (?,?,?,?,?,?,'fixture-source-hash','SUCCEEDED',?,1,?,?,?,?,1)`, taskID, owner, sourceSession, "text-to-3d", string(offeringJSON), `{"prompt":"a wooden chair"}`, attemptID, stamp, stamp, stamp, string(quoteJSON))
+	_, err = db.Exec(`INSERT INTO generation_tasks(id,owner_id,session_id,capability,offering_json,input_json,request_hash,state,current_attempt_id,version,created_at,updated_at,finished_at,native_quote_json,native_quote_required) VALUES (?,?,?,?,?,?,'fixture-source-hash','SUCCEEDED',?,1,?,?,?,?,1)`, taskID, owner, sourceSession, "text-to-3d", string(offeringJSON), string(sourceInput), attemptID, stamp, stamp, stamp, string(quoteJSON))
 	if err != nil {
 		t.Fatal(err)
 	}

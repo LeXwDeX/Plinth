@@ -455,6 +455,36 @@ func TestCoverageOfTripoFullDeliversEveryNativeFormat(t *testing.T) {
 	}
 }
 
+// #278: a Tripo task whose purpose asked for the GLB and FBX only is delivered
+// in those two formats; the format list shows them as available and treats the
+// others the way it treats any format a task lacks (a route when one fits, the
+// reason when none does), never as delivered.
+func TestCoverageOfATripoTaskWithTheGameFormatSetListsOnlyWhatItDelivered(t *testing.T) {
+	f := newFixture(t)
+	f.addTask("tripo-game", "owner", "tripo", "image-to-3d",
+		assetSpec{role: "model", variant: "", mediaType: "model/gltf-binary"},
+		assetSpec{role: "converted_model", variant: "converted.gltf", mediaType: "model/gltf-binary"},
+		assetSpec{role: "converted_model", variant: "converted.fbx", mediaType: "application/octet-stream"})
+	coverage, err := f.service.Coverage(context.Background(), generation.OwnTasks("owner"), "tripo-game")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !coverage.Applicable || len(coverage.Formats) != 7 || !coverage.ArchiveAvailable {
+		t.Fatalf("coverage = %#v", coverage)
+	}
+	for _, id := range []string{"glb", "fbx"} {
+		if row := formatByID(t, coverage, id); row.Status != StatusAvailable || row.AssetID == "" {
+			t.Fatalf("%s = %#v", id, row)
+		}
+	}
+	for _, id := range []string{"obj", "stl", "usdz", "3mf"} {
+		row := formatByID(t, coverage, id)
+		if row.Status == StatusAvailable || row.AssetID != "" || row.Status == "converting" {
+			t.Fatalf("%s was not delivered but is listed as %#v", id, row)
+		}
+	}
+}
+
 func TestCoverageOfRiggedAndAnimationSourcesNeverOffersConversion(t *testing.T) {
 	f := newFixture(t)
 	f.addTask("rigged", "owner", "meshy", "rigging",

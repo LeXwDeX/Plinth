@@ -10,6 +10,7 @@ import { ChatBrowserError, createChatBrowserClient } from '@/lib/chat/browser-cl
 import {
   briefIsEmpty,
   briefPayload,
+  briefSelectText,
   briefValueText,
   parseProductionBrief,
   productionBriefFields,
@@ -43,6 +44,7 @@ function valueText(
 ): string {
   if (field.type === 'profile') return purposeLabel(schema, value);
   if (field.type === 'image_profile') return imagePurposeLabel(schema, value);
+  if (field.type === 'select') return briefSelectText(field, value);
   return briefValueText(value, schemaText(schema, 'ui.studio.brief.yes'), schemaText(schema, 'ui.studio.brief.no'));
 }
 
@@ -84,6 +86,31 @@ function BriefFieldInput({
         <option value="">{schemaText(schema, 'ui.studio.brief.none')}</option>
         {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>{profile.label}</option>
+        ))}
+      </select>
+    );
+  }
+  if (field.type === 'select') {
+    const options = field.options ?? [];
+    const current = typeof value === 'string' ? value : '';
+    // #286: a stored value that is no option (text written before the field
+    // became a select) stays visible and selectable, marked as the earlier
+    // entry it is, so saving the form does not silently drop it.
+    const unlisted = current !== '' && !options.some((option) => option.id === current);
+    return (
+      <select
+        id={id}
+        value={current}
+        onChange={(event) => onChange(event.target.value || undefined)}
+        className={shared}
+        data-testid={`studio-brief-field-${field.name}`}
+      >
+        <option value="">{schemaText(schema, 'ui.studio.brief.none')}</option>
+        {unlisted ? (
+          <option value={current}>{formatSchemaText(schemaText(schema, 'ui.studio.brief.unlisted'), { value: current })}</option>
+        ) : null}
+        {options.map((option) => (
+          <option key={option.id} value={option.id}>{option.label}</option>
         ))}
       </select>
     );

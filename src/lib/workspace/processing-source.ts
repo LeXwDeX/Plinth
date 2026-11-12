@@ -73,6 +73,14 @@ export function actionParameter(offering: OfferingWire): SourceParameter | undef
 }
 
 /**
+ * The value an action control submits: a numeric action ID (Meshy's library) goes
+ * as a number, a named preset (Tripo's retarget presets, #277) as the string it is.
+ */
+export function actionValue(action: Pick<SourceParameter, 'type'>, chosen: string): string | number {
+  return action.type === 'number' ? Number(chosen) : chosen;
+}
+
+/**
  * Mirrors Go generation.UpstreamJobExpired (#325, #326): an upstream-job task parameter no longer reaches the
  * Provider's job once a step naming it failed as source_expired, or once the Task holding the job is older than the
  * declared upstream_job_max_age_seconds.

@@ -1914,7 +1914,13 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	if err := validateThreeViewSubjectTypes(schema, *recipe, agentTools); err != nil {
 		return err
 	}
-	if err := validateThreeViewConsistency(schema); err != nil {
+	if err := validateThreeViewConsistency(schema, *recipe); err != nil {
+		return err
+	}
+	if err := validateThreeViewFrame(schema); err != nil {
+		return err
+	}
+	if err := validateThreeViewReview(schema, *recipe); err != nil {
 		return err
 	}
 	return validateThreeViewMultiview(schema.Multiview, *recipe, tools)
@@ -2033,18 +2039,6 @@ func recipeUsesSourceChain(recipe ChatSkillRecipeSchema) bool {
 		}
 	}
 	return false
-}
-
-// validateThreeViewConsistency checks the automatic check's bounds (#243).
-func validateThreeViewConsistency(schema ChatThreeViewSchema) error {
-	consistency := schema.Consistency
-	if consistency.MaxSubjectRatioDelta < 0 || consistency.MaxBackgroundSpread < 0 || consistency.MaxBBoxHeightDelta < 0 {
-		return errors.New("three_view.consistency 的阈值不能为负")
-	}
-	if schema.Continuation.Enabled && consistency.MaxAttemptsPerView < 1 {
-		return errors.New("three_view.consistency.max_attempts_per_view 必须为正")
-	}
-	return nil
 }
 
 // validateThreeViewMultiview checks the binding to the multiview tool (#65):
@@ -3001,7 +2995,8 @@ func validateImageReview(schema ChatSchema) error {
 	}
 	for name, checklist := range map[string]ChatImageChecklistSchema{"delivery": review.Delivery, "input_3d": review.Input3D} {
 		if checklist.MaxBackgroundSpread < 0 || checklist.MinSubjectRatio < 0 || checklist.MaxSubjectRatio < 0 ||
-			checklist.MinSubjectRatio > 1 || checklist.MaxSubjectRatio > 1 || checklist.MaxComponents < 0 {
+			checklist.MinSubjectRatio > 1 || checklist.MaxSubjectRatio > 1 || checklist.MaxComponents < 0 ||
+			checklist.MinMainComponentRatio < 0 || checklist.MinMainComponentRatio > 1 {
 			return fmt.Errorf("chat.image_review.%s 的比例或范围不合法", name)
 		}
 		if checklist.MaxSubjectRatio > 0 && checklist.MinSubjectRatio > checklist.MaxSubjectRatio {
@@ -3017,6 +3012,86 @@ func validateImageReview(schema ChatSchema) error {
 		!strings.Contains(review.RoundsExhaustedTemplate, "{maximum}") ||
 		strings.TrimSpace(review.DeliveryChecklist) == "" || strings.TrimSpace(review.Input3DChecklist) == "" {
 		return errors.New("chat.image_review 的自检轮数、放行参数或文案不完整")
+	}
+	if err := validateImageVisualItems(schema); err != nil {
+		return err
+	}
+	return validateImageUsageReview(schema)
+}
+
+// imageUsageReviewChecks are the checks the 2D purpose adds to the delivery
+// checklist (#282, #284, #287). Each needs a hint for the Agent.
+var imageUsageReviewChecks = []string{"short_edge", "seamless", "alpha", "edge_fringe"}
+
+// imageUsageHintPlaceholder finds the braces a hint can carry; any other brace
+// left in a hint would reach the Agent verbatim.
+var imageUsageHintPlaceholder = regexp.MustCompile(`\{[a-z_]+\}`)
+
+// validateImageUsageReview checks application.chat.image_review.usage: the
+// thresholds of the purpose checks and the words of their next steps. A Schema
+// that declares 2D purposes must declare it, so a purpose's minimum resolution,
+// tiling and transparency are never promised without a check; a Schema with no
+// purposes may omit it (historical Catalogs).
+func validateImageUsageReview(schema ChatSchema) error {
+	usage := schema.ImageReview.Usage
+	if usage == nil {
+		if len(schema.Image2DUsage.Profiles) > 0 {
+			return errors.New("chat.image_review.usage 必须声明：application.chat.image2d_usage 已声明 2D 用途")
+		}
+		return nil
+	}
+	tiling, alpha, fringe := usage.Tiling, usage.Alpha, usage.EdgeFringe
+	if tiling.Segments < 1 || tiling.Segments > 64 || tiling.MaxSeamRatio <= 1 ||
+		tiling.MinSeamDelta < 0 || tiling.MinSeamDelta > 255 {
+		return errors.New("chat.image_review.usage.tiling 的分段数需在 1..64、max_seam_ratio 需大于 1、min_seam_delta 需在 0..255")
+	}
+	if alpha.MinTransparentRatio < 0 || alpha.MinTransparentRatio >= 1 || alpha.MaxBackgroundSpread < 0 {
+		return errors.New("chat.image_review.usage.alpha 的透明占比需在 [0,1)、背景扩散上限不能为负")
+	}
+	if fringe.BandRatio <= 0 || fringe.BandRatio > 0.05 || fringe.LightLuma <= 0 || fringe.LightLuma > 255 ||
+		fringe.LumaGap < 0 || fringe.LumaGap > 255 || fringe.MaxRatio < 0 || fringe.MaxRatio >= 1 {
+		return errors.New("chat.image_review.usage.edge_fringe 的 band_ratio 需在 (0,0.05]、亮度阈值需在 0..255、max_ratio 需在 [0,1)")
+	}
+	for _, name := range []string{usage.BriefPurposeNote, usage.DefaultPurposeNote} {
+		if !strings.Contains(name, "{purpose}") {
+			return errors.New("chat.image_review.usage 的 brief_purpose_note 与 default_purpose_note 必须包含 {purpose}")
+		}
+	}
+	if strings.TrimSpace(usage.ModelsSeparator) == "" || strings.TrimSpace(usage.NoModelsText) == "" ||
+		!strings.Contains(usage.ModelsTemplate, "{models}") {
+		return errors.New("chat.image_review.usage 的 models_template（含 {models}）、models_separator 与 no_models_text 不能为空")
+	}
+	allowed := map[string]bool{"{actual}": true, "{expected}": true, "{purpose}": true, "{minimum}": true, "{models}": true}
+	for _, name := range imageUsageReviewChecks {
+		hint := usage.Hints[name]
+		if strings.TrimSpace(hint) == "" {
+			return fmt.Errorf("chat.image_review.usage.hints.%s 不能为空", name)
+		}
+		for _, placeholder := range imageUsageHintPlaceholder.FindAllString(hint, -1) {
+			if !allowed[placeholder] {
+				return fmt.Errorf("chat.image_review.usage.hints.%s 含未知占位符 %s", name, placeholder)
+			}
+		}
+	}
+	for name := range usage.Hints {
+		if !containsString(imageUsageReviewChecks, name) {
+			return fmt.Errorf("chat.image_review.usage.hints 含未知检查 %q", name)
+		}
+	}
+	if !strings.Contains(usage.Hints["short_edge"], "{models}") {
+		return errors.New("chat.image_review.usage.hints.short_edge 必须包含 {models}：分辨率不达标时要点名可行的模型")
+	}
+	if field := usage.TransparentField; field != "" {
+		declared := false
+		for _, candidate := range schema.Model3DUsage.Brief.Fields {
+			if candidate.Name == field && candidate.Type == "boolean" {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return fmt.Errorf("chat.image_review.usage.transparent_field %q 不是制作简报里声明的 boolean 字段", field)
+		}
 	}
 	return nil
 }
@@ -3528,6 +3603,15 @@ func validateModelInspectProduction(
 		{"capability_joiner", production.CapabilityJoiner, nil},
 		{"option_separator", production.OptionSeparator, nil},
 	}
+	// A Catalog with platform budgets must say which platform a check was
+	// judged against; one without them may omit the sentence (#275).
+	if strings.TrimSpace(usage.PlatformField) != "" || strings.TrimSpace(production.PlatformBudgetText) != "" {
+		texts = append(texts, struct {
+			name     string
+			value    string
+			required []string
+		}{"platform_budget_text", production.PlatformBudgetText, []string{"{platform}"}})
+	}
 	for _, text := range texts {
 		if strings.TrimSpace(text.value) == "" {
 			return fmt.Errorf("chat.model_review.inspect.production.%s 不能为空", text.name)
@@ -3568,18 +3652,37 @@ func validateModelInspectProduction(
 				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 {capabilities}", fix.Check)
 			}
 		}
+		// The purpose bounds a fix may name, in the order its template must
+		// contain them: the scale range of plausible_scale and, since #275,
+		// the texture side of texture_size.
+		var boundNames []string
 		if fix.Check == ModelReviewUsageCheckPlausibleScale && len(fix.Options) > 0 {
-			allowed["{minimum}"] = true
-			allowed["{maximum}"] = true
-			for _, placeholder := range []string{"{minimum}", "{maximum}"} {
-				if !strings.Contains(fix.Template, placeholder) {
-					return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 %s", fix.Check, placeholder)
-				}
+			boundNames = []string{"{minimum}", "{maximum}"}
+		}
+		if fix.Check == ModelReviewUsageCheckTextureSize && len(fix.Options) > 0 {
+			boundNames = []string{"{maximum}"}
+		}
+		bounds := make(map[string]bool, len(boundNames))
+		for _, placeholder := range boundNames {
+			bounds[placeholder] = true
+			allowed[placeholder] = true
+			if !strings.Contains(fix.Template, placeholder) {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 必须包含 %s", fix.Check, placeholder)
 			}
 		}
 		for _, placeholder := range modelReviewPlaceholder.FindAllString(fix.Template, -1) {
 			if !allowed[placeholder] {
 				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].template 含未填充的占位符 %s", fix.Check, placeholder)
+			}
+		}
+		if strings.TrimSpace(fix.UnavailableTemplate) != "" {
+			if len(fix.Options) == 0 {
+				return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].unavailable_template 需要声明 options", fix.Check)
+			}
+			for _, placeholder := range modelReviewPlaceholder.FindAllString(fix.UnavailableTemplate, -1) {
+				if !bounds[placeholder] {
+					return fmt.Errorf("chat.model_review.inspect.production.fixes[%s].unavailable_template 含未填充的占位符 %s", fix.Check, placeholder)
+				}
 			}
 		}
 		for optionIndex, option := range fix.Options {
@@ -3598,6 +3701,17 @@ func validateModelInspectProduction(
 						"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的 parameter 与 value 必须同时为空或同时非空",
 						fix.Check, optionIndex, candidateIndex,
 					)
+				}
+				// A value may name a purpose bound as a placeholder so one
+				// declaration serves every platform budget; only a bound the
+				// fix declares is filled, and only as the whole value (#275).
+				for _, placeholder := range modelReviewPlaceholder.FindAllString(candidate.Value, -1) {
+					if !bounds[placeholder] || candidate.Value != placeholder {
+						return fmt.Errorf(
+							"chat.model_review.inspect.production.fixes[%s].options[%d].capabilities[%d] 的 value 含未填充的占位符 %s",
+							fix.Check, optionIndex, candidateIndex, placeholder,
+						)
+					}
 				}
 			}
 		}

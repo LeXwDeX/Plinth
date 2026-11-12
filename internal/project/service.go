@@ -307,7 +307,14 @@ func (service *Service) SetConventions(ctx context.Context, ownerID, projectID s
 	if _, err := service.Get(ctx, ownerID, projectID); err != nil {
 		return Conventions{}, err
 	}
-	brief, err := service.validateBrief(conventions.Brief)
+	// A select convention may keep the value the project already stores even
+	// when it is not an option (a free-text platform written before the field
+	// became a select), so editing another convention never strands it.
+	previous, err := service.Conventions(ctx, ownerID, projectID)
+	if err != nil {
+		return Conventions{}, err
+	}
+	brief, err := service.validateBrief(conventions.Brief, previous.Brief)
 	if err != nil {
 		return Conventions{}, err
 	}
@@ -526,7 +533,7 @@ func (service *Service) verifyReferences(
 	return result, nil
 }
 
-func (service *Service) validateBrief(raw []byte) ([]byte, error) {
+func (service *Service) validateBrief(raw, stored []byte) ([]byte, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return []byte("{}"), nil
 	}
@@ -534,12 +541,16 @@ func (service *Service) validateBrief(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return nil, ErrInvalid
 	}
+	// stored is the brief the project holds now; an unreadable one keeps
+	// nothing.
+	var previous map[string]json.RawMessage
+	_ = json.Unmarshal(stored, &previous)
 	for name, value := range values {
 		field, exists := service.fields[name]
 		if !exists {
 			return nil, ErrInvalid
 		}
-		if err := service.validateBriefValue(field, value); err != nil {
+		if err := service.validateBriefValue(field, value, previous[name]); err != nil {
 			return nil, err
 		}
 	}
@@ -550,8 +561,25 @@ func (service *Service) validateBrief(raw []byte) ([]byte, error) {
 	return encoded, nil
 }
 
-func (service *Service) validateBriefValue(field catalog.ChatProductionBriefField, raw json.RawMessage) error {
+func (service *Service) validateBriefValue(field catalog.ChatProductionBriefField, raw, stored json.RawMessage) error {
 	switch field.Type {
+	case "select":
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return ErrInvalid
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil
+		}
+		if _, declared := field.OptionByID(value); declared {
+			return nil
+		}
+		// Only the value the project already holds survives unchanged.
+		var kept string
+		if json.Unmarshal(stored, &kept) != nil || strings.TrimSpace(kept) != value {
+			return ErrInvalid
+		}
 	case "profile", "image_profile":
 		var value string
 		if json.Unmarshal(raw, &value) != nil {

@@ -3,8 +3,6 @@ package threeview
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -211,9 +209,13 @@ func (s *Service) continueRejected(ctx context.Context, run skillrun.Run, step s
 		maximum = 1
 	}
 	result.MaximumAttempts = maximum
+	// The reasons describe the picture that was refused, so they are read
+	// before the step is restarted. They reach the Agent in both the redraw
+	// and the exhausted case (#283); a picture that cannot be read again
+	// leaves them empty.
+	result.FailedReasons, _ = s.rejectionReasons(ctx, owner, run, step)
 	if step.Attempt+1 >= maximum {
 		result.Paused, result.Reason = true, ReasonConsistencyExhausted
-		result.FailedReasons, _ = s.rejectionReasons(ctx, owner, run, step)
 		result.Group, _ = s.project(ctx, run)
 		return result, nil
 	}
@@ -444,141 +446,46 @@ func (s *Service) settleStep(ctx context.Context, owner generation.OwnerID, run 
 	return reviewed, nil
 }
 
-// judge returns the automatic decision for one finished view.
+// judge returns the automatic decision for one finished view: rejected when
+// any of its checks failed (#243, #283).
 func (s *Service) judge(ctx context.Context, owner generation.OwnerID, run skillrun.Run,
 	step skillrun.Step,
 ) (skillrun.ReviewStatus, error) {
-	candidate, err := s.assetReport(ctx, owner, step, step.OutputAssetID)
+	checks, err := s.viewChecks(ctx, owner, run, step)
 	if err != nil {
 		return skillrun.Unreviewed, err
 	}
-	if step.Spec.SourceStepKey == "" {
-		// The front view has no reference: require a visible single subject on
-		// a plain background, the same deterministic facts the 3D input gate
-		// reads.
-		checklist := imageinspect.Checklist{
-			RequirePlainBackground: s.schema.Consistency.MaxBackgroundSpread > 0,
-			MaxBackgroundSpread:    s.schema.Consistency.MaxBackgroundSpread,
-			MinSubjectRatio:        0.01,
-			MaxComponents:          1,
-			RequireEdgeClear:       true,
-		}
-		if imageinspect.Failed(candidate.Review(checklist)) {
+	for _, check := range checks {
+		if check.Status == imageinspect.StatusFail {
 			return skillrun.Rejected, nil
 		}
-		return skillrun.Accepted, nil
-	}
-	sourceIndex := stepIndexByKey(run, step.Spec.SourceStepKey)
-	if sourceIndex < 0 {
-		return skillrun.Unreviewed, skillrun.ErrConflict
-	}
-	source := run.Steps[sourceIndex]
-	if source.ReplacementAssetID == "" {
-		if source.Phase != skillrun.OutputReady || source.Review != skillrun.Accepted || source.OutputAssetID == "" {
-			return skillrun.Unreviewed, skillrun.ErrConflict
-		}
-	}
-	sourceAsset := source.OutputAssetID
-	if source.ReplacementAssetID != "" {
-		sourceAsset = source.ReplacementAssetID
-	}
-	reference, err := s.assetReport(ctx, owner, source, sourceAsset)
-	if err != nil {
-		return skillrun.Unreviewed, err
-	}
-	checks := imageinspect.Compare(reference, candidate, imageinspect.Consistency{
-		MaxSubjectRatioDelta: s.schema.Consistency.MaxSubjectRatioDelta,
-		MaxBackgroundSpread:  s.schema.Consistency.MaxBackgroundSpread,
-		MaxBBoxHeightDelta:   s.schema.Consistency.MaxBBoxHeightDelta,
-	})
-	if imageinspect.Failed(checks) {
-		return skillrun.Rejected, nil
 	}
 	return skillrun.Accepted, nil
 }
 
-// assetReport decodes one view's picture: a generated Task output, or the
-// input asset the person put in its place.
-func (s *Service) assetReport(ctx context.Context, owner generation.OwnerID, step skillrun.Step,
-	assetID generation.AssetID,
-) (imageinspect.Report, error) {
-	if assetID == "" {
-		return imageinspect.Report{}, skillrun.ErrConflict
-	}
-	var body io.ReadCloser
-	if step.ReplacementAssetID != "" && step.ReplacementAssetID == assetID {
-		_, opened, err := s.assets.OpenOwned(ctx, owner, assetID)
-		if err != nil {
-			return imageinspect.Report{}, err
-		}
-		body = opened
-	} else {
-		content, err := s.assets.OpenAsset(ctx, owner, step.TaskID, assetID)
-		if err != nil {
-			return imageinspect.Report{}, err
-		}
-		body = content.Body
-	}
-	if body == nil {
-		return imageinspect.Report{}, fmt.Errorf("threeview: asset %s has no reader", assetID)
-	}
-	defer body.Close()
-	var reader io.Reader = body
-	if limit := s.review.Limits.MaxBytes; limit > 0 {
-		reader = io.LimitReader(body, limit+1)
-	}
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return imageinspect.Report{}, err
-	}
-	return imageinspect.Inspect(data, imageinspect.Limits{
-		MaxBytes:  s.review.Limits.MaxBytes,
-		MaxPixels: s.review.Limits.MaxPixels,
-	})
-}
-
-// rejectionReasons words the failed checks of one rejected view.
+// rejectionReasons words the failed checks of one rejected view with the
+// Schema's reasons.
 func (s *Service) rejectionReasons(ctx context.Context, owner generation.OwnerID, run skillrun.Run,
 	step skillrun.Step,
 ) (string, error) {
-	candidate, err := s.assetReport(ctx, owner, step, step.OutputAssetID)
+	if s.assets == nil {
+		return "", nil // no picture reader, so the view was rejected by hand: there is no check to word
+	}
+	checks, err := s.viewChecks(ctx, owner, run, step)
 	if err != nil {
 		return "", err
-	}
-	var checks []imageinspect.Check
-	if step.Spec.SourceStepKey == "" {
-		checks = candidate.Review(imageinspect.Checklist{
-			RequirePlainBackground: s.schema.Consistency.MaxBackgroundSpread > 0,
-			MaxBackgroundSpread:    s.schema.Consistency.MaxBackgroundSpread,
-			MinSubjectRatio:        0.01, MaxComponents: 1, RequireEdgeClear: true,
-		})
-	} else {
-		sourceIndex := stepIndexByKey(run, step.Spec.SourceStepKey)
-		if sourceIndex < 0 {
-			return "", skillrun.ErrConflict
-		}
-		source := run.Steps[sourceIndex]
-		sourceAsset := source.OutputAssetID
-		if source.ReplacementAssetID != "" {
-			sourceAsset = source.ReplacementAssetID
-		}
-		reference, err := s.assetReport(ctx, owner, source, sourceAsset)
-		if err != nil {
-			return "", err
-		}
-		checks = imageinspect.Compare(reference, candidate, imageinspect.Consistency{
-			MaxSubjectRatioDelta: s.schema.Consistency.MaxSubjectRatioDelta,
-			MaxBackgroundSpread:  s.schema.Consistency.MaxBackgroundSpread,
-			MaxBBoxHeightDelta:   s.schema.Consistency.MaxBBoxHeightDelta,
-		})
 	}
 	parts := make([]string, 0, len(checks))
 	for _, check := range checks {
 		if check.Status == imageinspect.StatusFail {
-			parts = append(parts, check.Name+" ("+check.Actual+")")
+			parts = append(parts, s.reasonText(check))
 		}
 	}
-	return strings.Join(parts, "; "), nil
+	separator := s.schema.Consistency.ReasonSeparator
+	if separator == "" {
+		separator = "; "
+	}
+	return strings.Join(parts, separator), nil
 }
 
 func stepIndexByKey(run skillrun.Run, key string) int {

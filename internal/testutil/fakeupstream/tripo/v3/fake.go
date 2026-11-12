@@ -107,7 +107,7 @@ var kinds = []kind{
 	{Path: "/generation/text-to-model", Type: "text_to_model", Base: "text_to_model", Required: []string{"model", "prompt"}, Real: true, DocPage: "generation-text-to-model/standard"},
 	{Path: "/animations/rig-check", Type: "animate_prerigcheck", Base: "animate_prerigcheck", Required: []string{"input"}, Real: true, DocPage: "animations-rig-check"},
 	{Path: "/animations/rig", Type: "animate_rig", Base: "animate_rig", Required: []string{"input", "model"}, Real: true, DocPage: "animations-rig"},
-	{Path: "/animations/retarget", Type: "animate_retarget", Base: "animate_retarget", Required: []string{"input", "animation"}, Real: true, DocPage: "animations-retarget"},
+	{Path: "/animations/retarget", Type: "animate_retarget", Base: "animate_retarget", Required: []string{"input"}, Real: true, DocPage: "animations-retarget"},
 	{Path: "/mesh/segment", Type: "mesh_segmentation", Base: "mesh_segmentation", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-segment"},
 	{Path: "/mesh/complete", Type: "mesh_completion", Base: "mesh_completion", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-complete"},
 	{Path: "/models/convert", Type: "convert_model", Base: "convert_model", Required: []string{"input", "format"}, Real: true, DocPage: "models-convert"},
@@ -116,7 +116,8 @@ var kinds = []kind{
 	{Path: "/generation/image-to-multiview", Type: "image_to_multiview", Base: "image_to_multiview", Required: []string{"input"}, Real: true, DocPage: "generation-image-to-multiview"},
 	{Path: "/generation/edit-multiview", Type: "edit_multiview", Base: "edit_multiview", Required: []string{"input"}, Real: true, DocPage: "generation-edit-multiview"},
 	{Path: "/models/texture", Type: "texture_model", Base: "texture_model", Required: []string{"input"}, Real: true, DocPage: "models-texture"},
-	{Path: "/mesh/decimate", Type: "highpoly_to_lowpoly", Base: "highpoly_to_lowpoly", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-decimate"},
+	// model is optional on the official page (v2.0 when omitted); decimate.go holds the rest of the request.
+	{Path: "/mesh/decimate", Type: "highpoly_to_lowpoly", Base: "highpoly_to_lowpoly", Required: []string{"input"}, Real: true, DocPage: "mesh-decimate"},
 	// multiview-to-model has no captured sample (no paid request yet): it is constructed from the
 	// official documentation and borrows the image_to_model poll structure.
 	{Path: "/generation/multiview-to-model", Type: "multiview_to_model", Base: "image_to_model", Required: []string{"model"}, DocPage: "generation-multiview-to-model/standard"},
@@ -134,6 +135,8 @@ var realKindNotes = map[string]string{
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
 	"/models/texture":                "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url",
 	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url",
+	"/animations/rig":                "the response is captured (rig_type biped, spec tripo, both v2.5 and v3.0); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: rig_type (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic, others), spec (tripo, mixamo, actorcore, unity, unreal, vrm), out_format, which of them exist only under v3.0, and a spec having no effect on a non-biped rig; a poll repeats spec, out_format and the rig type (named topology, as captured)",
+	"/animations/retarget":           "the response is captured (preset:walk on a v3.0 biped rig; a v2 rig ended failed, code 1004); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: animation XOR animations (at most 5), the 11 v3.0 biped presets, the five creature presets (quadruped walk, hexapod walk, octopod walk, serpentine march, aquatic march) and the v1.0 preset:biped: names; a preset that does not fit its rig ends failed with code 1004 like the captured v2 case, which is an assumption",
 	"/mesh/smartsegment":             "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id",
 }
 
@@ -210,7 +213,10 @@ type task struct {
 	parent        string
 	model         string
 	format        string
-	polls         int
+	// request is the accepted create body; a rig or retarget poll echoes parts
+	// of it and a retarget is checked against the rig's.
+	request map[string]any
+	polls   int
 	// failCode and failMessage are set when the task ends in "failed".
 	failCode    int
 	failMessage string
@@ -220,6 +226,9 @@ type task struct {
 	// sourceFidelity is the fidelity an export inherits from the task whose
 	// artifact URL it was asked to convert.
 	sourceFidelity string
+	// convert is the documented parameters of a convert request (convert.go),
+	// echoed under input by the task poll and deciding what the export carries.
+	convert map[string]any
 }
 
 type handler struct {
@@ -534,7 +543,27 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
-		t := &task{id: h.newID(), kind: k, typ: k.Type, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		// The rig, retarget, convert and decimate values are constructed from the
+		// official pages (rig.go, convert.go, decimate.go).
+		message := ""
+		switch k.Path {
+		case "/animations/rig":
+			message = rigRequestError(body)
+		case "/animations/retarget":
+			message = retargetRequestError(body)
+		case "/models/convert":
+			message = convertRequestError(body)
+		case "/mesh/decimate":
+			message = decimateRequestError(body)
+		}
+		if message != "" {
+			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
+			return
+		}
+		t := &task{id: h.newID(), kind: k, typ: k.Type, request: body, scenario: fakeupstream.ScenarioOf(r), expiredIssues: fakeupstream.ExpiredIssues(r)}
+		if k.Path == "/models/convert" {
+			t.convert = convertEcho(body)
+		}
 		t.terminal = terminalStatus(r)
 		if k.Path == "/mesh/smartsegment" {
 			switch segType, _ := body["seg_type"].(string); segType {
@@ -587,8 +616,10 @@ func (h *handler) create(k kind) http.HandlerFunc {
 					return
 				}
 				// Observed once (2026-10-29): retargeting a rig built with a v2 rig
-				// model ends "failed", error 1004 "Invalid input parameter".
-				if k.Type == "animate_retarget" && strings.HasPrefix(source.model, "v2") {
+				// model ends "failed", error 1004 "Invalid input parameter". The other
+				// pairings of preset and rig are constructed from the retarget page
+				// the same way (retargetFits).
+				if presets, _ := retargetPresets(body); k.Type == "animate_retarget" && !retargetFits(source, presets) {
 					t.failCode, t.failMessage = 1004, "Invalid input parameter"
 				}
 			}
@@ -667,13 +698,16 @@ func (h *handler) lookup(id string) *task {
 }
 
 // acceptsSource refuses a source task that cannot feed the kind: a retarget
-// needs a rig, a rig check or rig needs a generated model.
+// needs a rig, a rig check or rig needs a generated model, a decimation needs
+// a text, image or multiview generation task (decimate.go).
 func (h *handler) acceptsSource(k kind, source *task) bool {
 	switch k.Type {
 	case "animate_retarget":
 		return source.kind.Type == "animate_rig"
 	case "animate_rig", "animate_prerigcheck":
 		return source.kind.Type == "text_to_model" || source.kind.Type == "image_to_model"
+	case "highpoly_to_lowpoly":
+		return acceptsDecimateSource(source)
 	}
 	return true
 }
@@ -742,6 +776,20 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 		for _, field := range []string{"original_model_id", "original_task_id"} {
 			if _, has := input[field]; has {
 				input[field] = t.parentID()
+			}
+		}
+		t.echoedInput(input)
+		// A convert task shows the request it ran: the committed sample lists the
+		// request's format, texture_format, texture_size, bake, fbx_preset and
+		// with_animation next to original_model_id, and nothing else.
+		if t.convert != nil {
+			for name := range input {
+				if name != "original_model_id" {
+					delete(input, name)
+				}
+			}
+			for name, value := range t.convert {
+				input[name] = value
 			}
 		}
 	}
@@ -829,7 +877,7 @@ func (t *task) artifactName(field string) string {
 		return "model.splat"
 	}
 	if t.kind.Type == "convert_model" {
-		switch strings.ToUpper(t.format) {
+		switch strings.ToUpper(t.convertFormat()) {
 		case "FBX":
 			return "model.fbx"
 		case "OBJ":
@@ -844,14 +892,22 @@ func (t *task) artifactName(field string) string {
 			return "model.gltf"
 		}
 	}
+	if t.decimatesToQuad() {
+		return "model.fbx"
+	}
 	return "model.glb"
 }
 
-// artifactFile returns the fixed bytes of an artifact name.
-func artifactFile(name, fidelity string) (fakeupstream.File, error) {
+// artifactFile returns the fixed bytes of an artifact name. texture names the
+// image a converted FBX embeds ("png" or "jpeg", convert.go); a rig or animation
+// export keeps its fidelity fixture and no texture.
+func artifactFile(name, fidelity, texture string) (fakeupstream.File, error) {
 	model := func(format string) (fakeupstream.File, error) {
 		if fidelity != "" && (format == "glb" || format == "fbx") {
 			return fakeupstream.ModelFile(format + ":" + fidelity)
+		}
+		if format == "fbx" && texture != "" {
+			return fakeupstream.ModelFile("fbx:texture-" + texture)
 		}
 		return fakeupstream.ModelFile(format)
 	}
@@ -908,7 +964,7 @@ func (h *handler) getArtifact(w http.ResponseWriter, r *http.Request) {
 		writeExpired(w)
 		return
 	}
-	file, err := artifactFile(r.PathValue("name"), t.fidelity())
+	file, err := t.artifact(r.PathValue("name"))
 	if err != nil {
 		http.NotFound(w, r)
 		return

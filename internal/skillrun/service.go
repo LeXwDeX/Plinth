@@ -41,6 +41,9 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Run, error) {
 	if !ok || recipe.ID != cmd.RecipeID || recipe.Revision != cmd.ExpectedRevision {
 		return Run{}, ErrConflict
 	}
+	if recipe, err = withStaticInput(recipe, cmd.StaticInput); err != nil {
+		return Run{}, err
+	}
 	if err := ValidateRecipe(recipe); err != nil {
 		return Run{}, err
 	}
@@ -99,6 +102,33 @@ func (s *Service) Create(ctx context.Context, cmd CreateCommand) (Run, error) {
 		run.Steps = append(run.Steps, Step{Spec: spec, Phase: Planned, Review: Unreviewed})
 	}
 	return s.store.CreateSkillRun(ctx, run)
+}
+
+// withStaticInput returns the recipe with extra static input frozen into every
+// step. The steps get their own copy of the map: the resolver may hand out a
+// map shared with the Schema. A key a step already declares is refused; the
+// prompt and source parameter names are refused by ValidateRecipe.
+func withStaticInput(recipe Recipe, extra map[string]json.RawMessage) (Recipe, error) {
+	if len(extra) == 0 {
+		return recipe, nil
+	}
+	steps := make([]StepSpec, len(recipe.Steps))
+	for index, step := range recipe.Steps {
+		merged := make(map[string]json.RawMessage, len(step.StaticInput))
+		for key, value := range step.StaticInput {
+			merged[key] = value
+		}
+		for key, value := range extra {
+			if _, declared := merged[key]; declared {
+				return Recipe{}, ErrInvalid
+			}
+			merged[key] = append(json.RawMessage(nil), value...)
+		}
+		step.StaticInput = merged
+		steps[index] = step
+	}
+	recipe.Steps = steps
+	return recipe, nil
 }
 
 func (s *Service) Get(ctx context.Context, owner generation.OwnerID, runID string) (Run, error) {

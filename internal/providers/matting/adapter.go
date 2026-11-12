@@ -11,6 +11,8 @@ import (
 	"net/textproto"
 	"net/url"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -98,6 +100,15 @@ type providerRecord struct {
 	ErrorMessage      string `json:"error_message"`
 	InvalidReason     string `json:"invalid_reason"`
 	SuccessfulOrdinal int    `json:"successful_ordinal,omitempty"`
+	// InputOrdinal is the 1-based position, among the pictures the Task
+	// submitted, of the picture this record is about; 0 when the service did
+	// not echo a name the upload filename template can be read back from.
+	// Matted is true when the record produced an artifact. A batch that ends
+	// PARTIAL_SUCCESS is a completed Task with fewer artifacts than inputs
+	// (#284): these two fields are what names the pictures that were not
+	// matted.
+	InputOrdinal int  `json:"input_ordinal,omitempty"`
+	Matted       bool `json:"matted"`
 }
 
 type wireStatusProtocol struct {
@@ -473,15 +484,42 @@ func (value wireDocument) providerRecords(
 				stringAt(task, protocol.Response.InvalidReasonPath),
 			),
 		}
+		record.InputOrdinal = inputOrdinal(record.SourceName, protocol.Multipart.FilenameTemplate)
 		if statusIn(status, protocol.Statuses.SuccessfulTasks) &&
 			downloadable &&
 			identifier != "" {
 			successfulOrdinal++
 			record.SuccessfulOrdinal = successfulOrdinal
+			record.Matted = true
 		}
 		records = append(records, record)
 	}
 	return records
+}
+
+// inputOrdinal reads the 1-based position of an uploaded picture back from the
+// name the service echoes for it, by the upload filename template
+// ("input_{ordinal}{extension}"). A name the template does not produce is 0.
+func inputOrdinal(sourceName, template string) int {
+	if strings.TrimSpace(sourceName) == "" || strings.TrimSpace(template) == "" {
+		return 0
+	}
+	pattern := regexp.QuoteMeta(template)
+	pattern = strings.Replace(pattern, regexp.QuoteMeta("{ordinal}"), `(\d+)`, 1)
+	pattern = strings.Replace(pattern, regexp.QuoteMeta("{extension}"), `(?:\.[A-Za-z0-9]+)?`, 1)
+	expression, err := regexp.Compile("^" + pattern + "$")
+	if err != nil {
+		return 0
+	}
+	match := expression.FindStringSubmatch(sourceName)
+	if len(match) != 2 {
+		return 0
+	}
+	ordinal, err := strconv.Atoi(match[1])
+	if err != nil || ordinal < 1 {
+		return 0
+	}
+	return ordinal
 }
 
 func publicRecordStatus(status string, protocol wireProtocol) string {

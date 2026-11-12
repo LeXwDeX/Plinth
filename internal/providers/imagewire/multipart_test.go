@@ -129,6 +129,128 @@ func TestEncodeMultipartOmitsConditionalParameters(t *testing.T) {
 	}
 }
 
+// partOrder lists the parts of an encoded multipart body in wire order as
+// "name=value" (a file part as "name=<file>").
+func partOrder(t *testing.T, reader io.Reader, contentType string) []string {
+	t.Helper()
+	_, parameters, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := multipart.NewReader(reader, parameters["boundary"])
+	var order []string
+	for {
+		part, err := parts.NextPart()
+		if err == io.EOF {
+			return order
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if part.FileName() != "" {
+			order = append(order, part.FormName()+"=<file>")
+			continue
+		}
+		value, _ := io.ReadAll(part)
+		order = append(order, part.FormName()+"="+string(value))
+	}
+}
+
+// A parameter whose wire name is a request_template field replaces the
+// template value in place (#279): the Rodin Schema turns two display constants
+// into parameters and the request must keep the field order of the recorded
+// wire. The template value stays the fallback while the parameter is absent or
+// omitted, and the other parameters still follow the template.
+func TestEncodeMultipartParameterTakesItsTemplateFieldPlace(t *testing.T) {
+	offering := func(changes ...func(*generation.Offering)) generation.Offering {
+		protocol := generation.ImageProtocol{
+			Endpoint:        "rodin",
+			RequestEncoding: "multipart",
+			RequestTemplate: json.RawMessage(`{"tier":"fixed","mesh_mode":"Raw","count":2000000,"flag":"template"}`),
+		}
+		encoded, _ := json.Marshal(protocol)
+		result := generation.Offering{
+			ID:              "configured/offering",
+			ModelID:         "configured-model",
+			ProviderOptions: encoded,
+			Parameters: []generation.Parameter{
+				{Name: "prompt", Type: "text"},
+				{Name: "mesh_mode", Type: "select", Default: json.RawMessage(`"Raw"`)},
+				{Name: "count", Type: "number", Default: json.RawMessage(`2000000`), OmitWhen: []generation.ParameterCondition{{
+					Parameter: "mesh_mode", Operator: "equals", Value: json.RawMessage(`"Skip"`),
+				}}},
+				{Name: "seed", Type: "number"},
+				{Name: "shape", Type: "select", WireName: "flag",
+					WireValues: map[string]json.RawMessage{"round": json.RawMessage(`"mapped-round"`)}},
+			},
+		}
+		for _, change := range changes {
+			change(&result)
+		}
+		return result
+	}
+	encode := func(t *testing.T, offering generation.Offering, input string) []string {
+		t.Helper()
+		reader, contentType, err := imagewire.EncodeMultipart(context.Background(), generation.StartRequest{
+			Offering: offering, Input: json.RawMessage(input),
+		}, &fixtureAssets{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return partOrder(t, reader, contentType)
+	}
+	for name, test := range map[string]struct {
+		input string
+		want  []string
+	}{
+		"parameters replace the template values where the template had them": {
+			`{"prompt":"p","mesh_mode":"Quad","count":10000,"seed":7}`,
+			[]string{"count=10000", "flag=template", "mesh_mode=Quad", "tier=fixed", "prompt=p", "seed=7"},
+		},
+		"the display defaults keep the template's request unchanged": {
+			`{"prompt":"p","mesh_mode":"Raw","count":2000000}`,
+			[]string{"count=2000000", "flag=template", "mesh_mode=Raw", "tier=fixed", "prompt=p"},
+		},
+		"an absent parameter leaves the template value": {
+			`{"prompt":"p"}`,
+			[]string{"count=2000000", "flag=template", "mesh_mode=Raw", "tier=fixed", "prompt=p"},
+		},
+		"an omitted parameter leaves the template value": {
+			`{"prompt":"p","mesh_mode":"Skip","count":10000}`,
+			[]string{"count=2000000", "flag=template", "mesh_mode=Skip", "tier=fixed", "prompt=p"},
+		},
+		"the wire mapping of the parameter applies in place": {
+			`{"prompt":"p","shape":"round"}`,
+			[]string{"count=2000000", "flag=mapped-round", "mesh_mode=Raw", "tier=fixed", "prompt=p"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := encode(t, offering(), test.input); !equalStrings(got, test.want) {
+				t.Fatalf("parts = %v, want %v", got, test.want)
+			}
+		})
+	}
+	t.Run("a template without a same-named parameter keeps the old order", func(t *testing.T) {
+		plain := offering(func(o *generation.Offering) { o.Parameters = o.Parameters[:1] })
+		want := []string{"count=2000000", "flag=template", "mesh_mode=Raw", "tier=fixed", "prompt=p"}
+		if got := encode(t, plain, `{"prompt":"p"}`); !equalStrings(got, want) {
+			t.Fatalf("parts = %v, want %v", got, want)
+		}
+	})
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestEncodeMultipartEnforcesAssetLimitsAndLocalFailures(t *testing.T) {
 	offering := multipartOffering()
 	offering.Parameters[len(offering.Parameters)-1].MaxBytes = 4

@@ -265,6 +265,106 @@ func TestWorkflowChainSucceedsAndDeliversValidFiles(t *testing.T) {
 	}
 }
 
+// The convert request is checked against the parameters of the official page
+// (convert.go): a wrong type or value is the real 400/code 1004 answer, a valid
+// body is accepted with every documented option.
+func TestConvertRequestIsCheckedAgainstTheOfficialParameters(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	valid := func(changes map[string]any) map[string]any {
+		body := map[string]any{"input": "https://example.test/x.glb", "format": "FBX"}
+		for name, value := range changes {
+			body[name] = value
+		}
+		return body
+	}
+	for name, body := range map[string]map[string]any{
+		"GLB is not a target":           valid(map[string]any{"format": "GLB"}),
+		"lower case format":             valid(map[string]any{"format": "fbx"}),
+		"unknown texture format":        valid(map[string]any{"texture_format": "GIF"}),
+		"texture size as text":          valid(map[string]any{"texture_size": "8192"}),
+		"fractional texture size":       valid(map[string]any{"texture_size": 8192.5}),
+		"pivot as text":                 valid(map[string]any{"pivot_to_center_bottom": "true"}),
+		"unknown fbx preset":            valid(map[string]any{"fbx_preset": "unity"}),
+		"unknown orientation":           valid(map[string]any{"export_orientation": "up"}),
+		"part names as text":            valid(map[string]any{"part_names": "head"}),
+		"packaging outside FBX":         valid(map[string]any{"format": "STL", "texture_packaging": "zip"}),
+		"unknown packaging":             valid(map[string]any{"texture_packaging": "folder"}),
+		"face limit as a boolean":       valid(map[string]any{"face_limit": true}),
+		"scale factor as text":          valid(map[string]any{"scale_factor": "1"}),
+		"quad as a number":              valid(map[string]any{"quad": 1}),
+		"flatten threshold as a string": valid(map[string]any{"flatten_bottom_threshold": "0.01"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, response := f.do("POST", "/models/convert", key, body)
+			if status != http.StatusBadRequest || field(t, response, "code").(float64) != 1004 {
+				t.Fatalf("status %d body %v", status, response)
+			}
+		})
+	}
+	every := valid(map[string]any{
+		"quad": false, "force_symmetry": false, "face_limit": 1000, "flatten_bottom": false, "flatten_bottom_threshold": 0.01,
+		"texture_size": 8192, "texture_format": "PNG", "bake": true, "pack_uv": false, "export_vertex_colors": false,
+		"pivot_to_center_bottom": true, "scale_factor": 1.5, "with_animation": false, "animate_in_place": false,
+		"part_names": []string{"a"}, "export_orientation": "+x", "fbx_preset": "mixamo", "texture_packaging": "embedded",
+	})
+	if status, _, response := f.do("POST", "/models/convert", key, every); status != http.StatusOK {
+		t.Fatalf("every documented option = %d %v", status, response)
+	}
+}
+
+// A convert task shows the parameters it ran (the committed sample), and the
+// exported FBX carries the texture in the requested format; without a request
+// the official default, JPEG, applies. quad forces the FBX output.
+func TestConvertEchoesItsRequestAndDeliversTheRequestedTexture(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	run := func(changes map[string]any) (map[string]any, []byte, string) {
+		body := map[string]any{"input": "https://example.test/x.glb", "format": "FBX"}
+		for name, value := range changes {
+			body[name] = value
+		}
+		_, done := f.finish(f.create("/models/convert", body, key), key)
+		url := f.outputURL(done, "model_url")
+		status, _, data := f.download(url)
+		if status != http.StatusOK {
+			t.Fatalf("download %s = %d", url, status)
+		}
+		return field(t, done, "data", "input").(map[string]any), data, url
+	}
+
+	input, data, _ := run(map[string]any{
+		"texture_format": "PNG", "texture_size": 8192, "pivot_to_center_bottom": true, "fbx_preset": "3dsmax",
+	})
+	for name, want := range map[string]any{
+		"format": "FBX", "texture_format": "PNG", "texture_size": float64(8192), "pivot_to_center_bottom": true, "fbx_preset": "3dsmax",
+	} {
+		if input[name] != want {
+			t.Errorf("input.%s = %v, want %v (input %v)", name, input[name], want, input)
+		}
+	}
+	if _, echoedSource := input["input"]; echoedSource {
+		t.Errorf("the source URL is shown under original_model_id, not input: %v", input)
+	}
+	if !bytes.Contains(data, []byte("\x89PNG\r\n\x1a\n")) || bytes.Contains(data, []byte("\xff\xd8\xff")) {
+		t.Fatal("a PNG texture request did not deliver an FBX with a PNG texture")
+	}
+	if err := deliveryErr(t, data, "converted_model", "fbx", "model/fbx"); err != nil {
+		t.Fatalf("textured FBX rejected by the delivery check: %v", err)
+	}
+
+	_, data, _ = run(nil)
+	if !bytes.Contains(data, []byte("\xff\xd8\xff")) || bytes.Contains(data, []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatal("a request without texture_format must deliver the official default, a JPEG texture")
+	}
+
+	_, data, url := run(map[string]any{"format": "STL", "quad": true})
+	if !strings.HasSuffix(strings.Split(url, "?")[0], ".fbx") {
+		t.Fatalf("quad must force the FBX output, got %s", url)
+	}
+	if err := deliveryErr(t, data, "converted_model", "fbx", "model/fbx"); err != nil {
+		t.Fatalf("quad FBX export rejected: %v", err)
+	}
+}
+
 func TestRetargetOfAV2RigFailsLikeTheOfficialAPI(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	gen := f.create("/generation/text-to-model", textBody(), key)
