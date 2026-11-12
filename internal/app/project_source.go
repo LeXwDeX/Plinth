@@ -70,6 +70,7 @@ func (source *projectChatSource) Context(ctx context.Context, ownerID, projectID
 			Enabled:    guide.Enabled,
 			Text:       guide.Text,
 			References: source.pictureURLs(guide.References),
+			Palette:    append([]string(nil), guide.Palette...),
 		},
 		Conventions: chat.ProjectConventionsContext{
 			Brief: chat.DecodeProductionBrief(string(conventions.Brief)),

@@ -36,6 +36,10 @@ type StyleLock struct {
 	// frozen with a project-source turn (#240). References above stays the
 	// session lock's input asset IDs; the two sets are never merged.
 	ProjectReferences []string `json:"ProjectReferences,omitempty"`
+	// ProjectPalette is the project guide's palette frozen with a
+	// project-source turn (#288). A session-source lock never carries it: the
+	// two tables are never merged.
+	ProjectPalette []string `json:"ProjectPalette,omitempty"`
 	// ProjectName names the project whose guide the turn inherited. ProjectID is
 	// the owner project for direct-prepare reference resolution; it is never part
 	// of the stored session lock.

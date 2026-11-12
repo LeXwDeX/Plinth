@@ -26,6 +26,14 @@ func (orchestrator *Orchestrator) projectPrompt(options TurnOptions) string {
 		} else if len(context.StyleGuide.References) > 0 {
 			style = messages.StyleGuideReferencesOnly
 		}
+		if palette := context.StyleGuide.Palette; len(palette) > 0 && strings.TrimSpace(messages.StyleGuidePalette) != "" {
+			line := strings.ReplaceAll(messages.StyleGuidePalette, "{palette}", strings.Join(palette, ", "))
+			if style == messages.StyleGuideEmpty {
+				style = line
+			} else {
+				style += "\n" + line
+			}
+		}
 	}
 	switch options.StyleLock.Source {
 	case StyleLockSourceOff:

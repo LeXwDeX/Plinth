@@ -1680,7 +1680,7 @@ Chat Agent 通过三个只读工具直接查看本会话（分支会话含祖先
 
 项目是 owner 级对象（迁移 0089）：`projects`、`project_style_guides`、`project_conventions`、`project_assets`。迁移 0090 给 `go_chat_sessions` 增加 `project_id` 与 `style_lock_source`，并把升级前已启用的会话锁回填为 `source=session`，避免用户的锁被项目默认值覆盖。项目只保存引用：风格参考图与资产图片/模型是本人输入资产 ID 或已完成 Task 的 `(task_id, asset_id)`，字节仍由 `internal/assets` 与 `generation` 拥有；删除项目或项目资产只删引用行并级联项目内的指南/约定，不触碰 `generation_assets`、输入资产或已完成任务。`internal/project.Service` 校验名称/数量/文本/参考图限额与提升来源，`internal/adapters/sqlite.ProjectRepository` 的每条查询都按 `projects.owner_id` 过滤，跨用户读写删与提升一律 not found → 404。
 
-会话创建可带 `project_id`（缺失/他人项目拒绝且不建会话）；空简报用项目约定的默认值在同一 INSERT 播种。`StartTurn` 冻结项目上下文（名称、风格指南、约定、资产句柄）与三态风格来源：`project` 只用项目指南（`StyleLock.ProjectReferences` 是服务端转换后的规范图片 URL），`session` 只用本会话锁，`off` 不注入；两套参考图不合并。项目修改只影响下一轮。未归入项目的会话没有可继承指南，其本会话锁继续生效。
+会话创建可带 `project_id`（缺失/他人项目拒绝且不建会话）；空简报用项目约定的默认值在同一 INSERT 播种。`StartTurn` 冻结项目上下文（名称、风格指南、约定、资产句柄）与三态风格来源：`project` 只用项目指南（`StyleLock.ProjectReferences` 是服务端转换后的规范图片 URL；`StyleLock.ProjectPalette` 冻结指南色板（#288），Agent 的项目块按 `project.messages.style_guide_palette` 列出色板，2D 生成提示词按 `project.agent.palette_prompt_template` 追加主色约束，只有色板没有文字的指南也算项目风格来源），`session` 只用本会话锁，`off` 不注入；两套参考图不合并。项目修改只影响下一轮。未归入项目的会话没有可继承指南，其本会话锁继续生效。
 
 Agent 上下文新增项目段（`application.project.agent.context_template`），位于制作简报之后、自检与设定摘要之前，只列摘要与句柄；只读工具 `list_project_assets`（`implementation_key: project.list`、`READ`、`utility`、domains image/model-3d）从冻结上下文返回 `handle/kind/name/description/images/model`，超过 `list_limit` 时附 Schema 文案。生成工具先按 `handle_prefix`（`@projectN`）解析项目句柄，再回落到会话句柄；未知项目句柄返回项目文案，不落到同名会话句柄。结果 `style_sources` 只列出真正进入最终参考列表的项目资产名。项目风格文本写 provider 提示时使用 `chat.style_lock.project_prompt_template`（`{style}`、`{project}`），会话来源保持原模板。
 

@@ -5331,6 +5331,7 @@
         "unknown_asset_template": "项目资产 {handle} 不存在或不属于当前项目。请调用 {tool} 查看可用句柄。",
         "list_limit_template": "最多列出 {limit} 个项目资产。",
         "style_prompt_template": "\n\nProject style: Apply the project's visual style while preserving the user's requested subject, composition and changes. Project: {project}. Style description: {style}",
+        "palette_prompt_template": "\n\nProject palette: Keep the dominant colours within this palette; small accents may deviate: {palette}",
         "handle_prefix": "@project",
         "list_limit": 20
       },
@@ -5361,6 +5362,7 @@
         "style_guide_off": "本会话不注入任何风格参考。",
         "style_guide_empty": "未启用",
         "style_guide_references_only": "（仅参考图）",
+        "style_guide_palette": "色板：{palette}（生成 2D 时主色须落在色板内）",
         "conventions_empty": "无",
         "assets_empty": "无"
       }
