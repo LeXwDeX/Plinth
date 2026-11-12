@@ -418,7 +418,7 @@ func (resolver PurposeParameters) ApplyToDirectInput(brief ProductionBrief, offe
 		values[name] = value
 		supplied[name] = value
 	}
-	merged := make(map[string]string, len(reasons)+len(supplied))
+	merged := map[string]string{}
 	for name, reason := range reasons {
 		merged[name] = reason
 	}
