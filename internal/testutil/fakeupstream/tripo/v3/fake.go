@@ -116,7 +116,8 @@ var kinds = []kind{
 	{Path: "/generation/image-to-multiview", Type: "image_to_multiview", Base: "image_to_multiview", Required: []string{"input"}, Real: true, DocPage: "generation-image-to-multiview"},
 	{Path: "/generation/edit-multiview", Type: "edit_multiview", Base: "edit_multiview", Required: []string{"input"}, Real: true, DocPage: "generation-edit-multiview"},
 	{Path: "/models/texture", Type: "texture_model", Base: "texture_model", Required: []string{"input"}, Real: true, DocPage: "models-texture"},
-	{Path: "/mesh/decimate", Type: "highpoly_to_lowpoly", Base: "highpoly_to_lowpoly", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-decimate"},
+	// model is optional on the official page (v2.0 when omitted); decimate.go holds the rest of the request.
+	{Path: "/mesh/decimate", Type: "highpoly_to_lowpoly", Base: "highpoly_to_lowpoly", Required: []string{"input"}, Real: true, DocPage: "mesh-decimate"},
 	// multiview-to-model has no captured sample (no paid request yet): it is constructed from the
 	// official documentation and borrows the image_to_model poll structure.
 	{Path: "/generation/multiview-to-model", Type: "multiview_to_model", Base: "image_to_model", Required: []string{"model"}, DocPage: "generation-multiview-to-model/standard"},
@@ -542,8 +543,8 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
-		// The rig, retarget and convert values are constructed from the official
-		// pages (rig.go, convert.go).
+		// The rig, retarget, convert and decimate values are constructed from the
+		// official pages (rig.go, convert.go, decimate.go).
 		message := ""
 		switch k.Path {
 		case "/animations/rig":
@@ -552,6 +553,8 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			message = retargetRequestError(body)
 		case "/models/convert":
 			message = convertRequestError(body)
+		case "/mesh/decimate":
+			message = decimateRequestError(body)
 		}
 		if message != "" {
 			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
@@ -695,13 +698,16 @@ func (h *handler) lookup(id string) *task {
 }
 
 // acceptsSource refuses a source task that cannot feed the kind: a retarget
-// needs a rig, a rig check or rig needs a generated model.
+// needs a rig, a rig check or rig needs a generated model, a decimation needs
+// a text, image or multiview generation task (decimate.go).
 func (h *handler) acceptsSource(k kind, source *task) bool {
 	switch k.Type {
 	case "animate_retarget":
 		return source.kind.Type == "animate_rig"
 	case "animate_rig", "animate_prerigcheck":
 		return source.kind.Type == "text_to_model" || source.kind.Type == "image_to_model"
+	case "highpoly_to_lowpoly":
+		return acceptsDecimateSource(source)
 	}
 	return true
 }
@@ -886,6 +892,9 @@ func (t *task) artifactName(field string) string {
 			return "model.gltf"
 		}
 	}
+	if t.decimatesToQuad() {
+		return "model.fbx"
+	}
 	return "model.glb"
 }
 
@@ -955,7 +964,7 @@ func (h *handler) getArtifact(w http.ResponseWriter, r *http.Request) {
 		writeExpired(w)
 		return
 	}
-	file, err := artifactFile(r.PathValue("name"), t.fidelity(), t.convertTexture())
+	file, err := t.artifact(r.PathValue("name"))
 	if err != nil {
 		http.NotFound(w, r)
 		return

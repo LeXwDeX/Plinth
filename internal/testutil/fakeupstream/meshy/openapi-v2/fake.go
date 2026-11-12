@@ -48,6 +48,9 @@ var textTo3D = core.Kind{
 		mode, _ := request["mode"].(string)
 		return mode == "refine"
 	},
+	// The remesh options of the preview, as the Text to 3D page documents them
+	// (core/generation.go).
+	Validate: core.GenerationRequestError,
 }
 
 var endpoints = []fakeupstream.Endpoint{

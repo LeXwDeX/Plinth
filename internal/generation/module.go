@@ -560,12 +560,15 @@ func invalidTaskDependency(offering Offering, parameter Parameter) error {
 }
 
 // taskDependencyRefusal returns the Offering's UserFacing reason for a refused
-// Task source. The public text uses only the parameter label; an Offering that
-// declares no copy keeps its internal diagnostic and the tool layer hides it.
+// Task source. The public text uses only the parameter label and, for a source
+// the step does not take, the route the parameter declares instead (#276); an
+// Offering that declares no copy keeps its internal diagnostic and the tool
+// layer hides it.
 func taskDependencyRefusal(offering Offering, parameter Parameter, reason schema.InputRefusalReason, cause error) *Error {
 	values := schema.InputRefusalValues{}
 	if strings.TrimSpace(parameter.Label) != "" {
 		values.Label = parameter.Label
+		values.Alternative = strings.TrimSpace(parameter.TaskSourceAlternative)
 	} else {
 		reason = schema.InputRefusalParameters
 	}

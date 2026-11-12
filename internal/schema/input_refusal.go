@@ -73,6 +73,10 @@ type InputRefusalValues struct {
 	MaxPixels int64
 	Faces     int64
 	FaceLimit int64
+	// Alternative is the source parameter's declared route to take instead
+	// (Parameter.TaskSourceAlternative); it fills {alternative} of the
+	// unsupported-source refusal and is empty when the parameter declares none.
+	Alternative string
 	// Value, RangeMinimum and RangeMaximum are already formatted numbers.
 	Value        string
 	RangeMinimum string
@@ -151,7 +155,9 @@ func (messages ExecutionMessages) InputRefusal(reason InputRefusalReason, values
 		if values.Label == "" {
 			return nil
 		}
-		pairs = []string{"{label}", values.Label}
+		// {alternative} is empty for a source parameter that declares none, so the
+		// text reads as it did before the placeholder existed.
+		pairs = []string{"{label}", values.Label, "{alternative}", values.Alternative}
 	case InputRefusalFaceLimit:
 		template = messages.InputSourceFaceLimit
 		if values.Faces <= 0 || values.FaceLimit <= 0 {
@@ -173,10 +179,13 @@ func (messages ExecutionMessages) InputRefusal(reason InputRefusalReason, values
 	if template == "" {
 		return nil
 	}
+	// A trailing optional placeholder ({alternative}) leaves a space behind when
+	// its value is empty.
+	detail := strings.TrimSpace(strings.NewReplacer(pairs...).Replace(template))
 	return &Error{
 		Code:           code,
 		Operation:      "validate_provider_input",
-		Detail:         strings.NewReplacer(pairs...).Replace(template),
+		Detail:         detail,
 		UserFacing:     true,
 		DetailTemplate: template,
 		DetailValues:   pairs,

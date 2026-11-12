@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
+	"sync"
 
 	"github.com/LeXwDeX/Plinth/internal/providers/mock/modelfiles"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
@@ -100,4 +102,56 @@ func fixtureTexture(size int) ([]byte, error) {
 		return nil, err
 	}
 	return encoded.Bytes(), nil
+}
+
+// The humanoid has six boxes of six faces; a face cut into s x s squares carries
+// 2*s*s triangles, so the model with subdivision s has 72*s*s of them. The model
+// writers use a 16-bit index buffer and the humanoid has 36*(s+1)^2 vertices,
+// which caps s at 41 (121,032 triangles).
+const (
+	lowPolyTrianglesPerStep = 72
+	lowPolyMaxSubdivision   = 41
+)
+
+var lowPolyModels sync.Map // subdivision -> File
+
+func lowPolySubdivision(triangles int) int {
+	if triangles < lowPolyTrianglesPerStep {
+		return 1
+	}
+	return min(int(math.Sqrt(float64(triangles)/lowPolyTrianglesPerStep)), lowPolyMaxSubdivision)
+}
+
+// LowPolyTriangles is the triangle count of the model LowPolyModelFile hands out
+// for a target: the largest the fixture can carry without passing the target, and
+// never fewer than the 72 of the plain fixture.
+func LowPolyTriangles(triangles int) int {
+	steps := lowPolySubdivision(triangles)
+	return lowPolyTrianglesPerStep * steps * steps
+}
+
+// LowPolyModelFile is the fixed textured humanoid GLB cut finely enough to carry
+// about the given number of triangles (see LowPolyTriangles). A fake that hands
+// out a "reduced" model (Tripo decimate) cannot reduce the fixed source, so it
+// serves this model at the size the request asked for; the texture and UV layout
+// are the fixture's, so the file is textured, has UVs and passes the delivery
+// checks.
+func LowPolyModelFile(triangles int) (File, error) {
+	steps := lowPolySubdivision(triangles)
+	if cached, ok := lowPolyModels.Load(steps); ok {
+		return cached.(File), nil
+	}
+	seed := sha256.Sum256([]byte("fixture\x00"))
+	mesh := modelfiles.BuildHumanoid(seed, steps)
+	texture, err := fixtureTexture(64)
+	if err != nil {
+		return File{}, err
+	}
+	glb, err := modelfiles.BuildGLB(mesh, texture, "Fixture")
+	if err != nil {
+		return File{}, err
+	}
+	file := File{MediaType: "model/gltf-binary", Data: glb}
+	lowPolyModels.Store(steps, file)
+	return file, nil
 }

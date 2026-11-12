@@ -78,6 +78,18 @@
 // texture_format, pivot_to_center_bottom or scale_factor as an advanced
 // conversion (10 credits instead of 5).
 //
+// Retopology (POST /mesh/decimate, #276). The request is checked against the
+// official page read on 2026-11-12 (https://developers.tripo3d.ai/en/docs/mesh-decimate,
+// decimate.go): the source is a text, image or multiview generation task, a file
+// token or a URL (any other task is 400/code 1004; the page names no model version
+// of the source, so a P-series task passes); model is v3.0, v2.0 (the default) or
+// v1.0; face_limit follows the ranges of the page; smart_uv exists only with v3.0.
+// The task object repeats bake, quad and smart_uv with the page's defaults. The
+// delivered GLB is the fixed textured humanoid built to the requested face_limit,
+// not a reduction of the source (fakeupstream.LowPolyModelFile), and quad=true
+// delivers an FBX (the page's v2.0 line and the one real v3.0 quad task). All of
+// it is constructed from the page except the one captured valid v3.0 request.
+//
 // Balance scenarios. insufficient-balance and key-quota are credit refusals of
 // task creation, so they never apply to POST /files; the files page defines no
 // such refusal for an upload.

@@ -249,6 +249,11 @@ func (t *task) echoedInput(input map[string]any) {
 		}
 	}
 	switch t.kind.Type {
+	case "highpoly_to_lowpoly":
+		// The sample repeats these three; the page's defaults stand in for a field the request left out (decimate.go).
+		set("bake", boolOr(t.request["bake"], true))
+		set("quad", boolOr(t.request["quad"], false))
+		set("smart_uv", boolOr(t.request["smart_uv"], false))
 	case "animate_rig":
 		set("spec", stringOr(t.request["spec"], "tripo"))
 		set("topology", rigTypeOf(t.request))

@@ -264,7 +264,9 @@ func TestHyper3DRodinInputsFollowTheDocumentedRanges(t *testing.T) {
 	}
 }
 
-// The game purposes recommend Rodin after the cheaper Meshy and P2 choices
+// The game purposes recommend Rodin after the cheaper Meshy and P2 choices (the
+// third choice; the only entry after it is the Meshy 7.1 one-step remesh of
+// #276, which Meshy itself ranks below Smart Topology for low-poly game assets)
 // and carry a Quad override whose triangulated count stays inside the
 // purpose's triangle budget. A Quad face is two triangles in the GLB, and the
 // budget measures this parameter one to one (output_triangles is declared for
@@ -293,8 +295,9 @@ func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 		}
 		for capability, offeringID := range rodinOfferingIDs {
 			recommended := profile.RecommendedOfferings[string(capability)]
-			if len(recommended) < 3 || recommended[len(recommended)-1] != string(offeringID) {
-				t.Fatalf("%s %s recommends %v, want Rodin last", id, capability, recommended)
+			if len(recommended) < 3 || recommended[2] != string(offeringID) || len(recommended) > 4 ||
+				(len(recommended) == 4 && !strings.HasPrefix(recommended[3], "meshy/meshy-7.1/")) {
+				t.Fatalf("%s %s recommends %v, want Rodin third and at most Meshy 7.1 after it", id, capability, recommended)
 			}
 			override := profile.ParameterOverrides[string(offeringID)]
 			var mode string

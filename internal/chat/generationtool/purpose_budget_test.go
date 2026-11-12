@@ -133,9 +133,11 @@ func TestExplicitValueOverTheBudgetIsKeptAndReported(t *testing.T) {
 	}
 }
 
-// A model the Agent names outside the purpose's recommendations is bounded
-// too: a select texture size takes the largest option within the budget, and
-// the face target is made effective by the remesh the Schema forces with it.
+// A model the Agent names takes the purpose's values for it. Meshy 7.1 is the
+// last of the game purposes' recommendations since #276, so naming it gets the
+// purpose's one-step remesh (a triangle prop at 8000 faces with 2K textures, all
+// inside the budget) rather than the 300000-face default or the budget's own
+// fallback of the purpose's upper bound (20000), which this test pinned before.
 func TestNamedModelTakesTheTextureAndTriangleBudget(t *testing.T) {
 	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
 	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-a",
@@ -151,8 +153,8 @@ func TestNamedModelTakesTheTextureAndTriangleBudget(t *testing.T) {
 		t.Fatalf("frozen = %+v", h.gateway.frozen)
 	}
 	input := h.frozenInput(0)
-	if input["texture_resolution"] != "2k" || input["target_polycount"] != float64(20000) {
-		t.Fatalf("frozen = %v, want 2k textures and 20000 faces", input)
+	if input["texture_resolution"] != "2k" || input["target_polycount"] != float64(8000) || input["topology"] != "triangle" {
+		t.Fatalf("frozen = %v, want 2k textures and a triangle remesh to 8000 faces", input)
 	}
 	for _, name := range []string{"texture_resolution", "target_polycount"} {
 		if source := h.gateway.frozen[0].ParameterSources[name]; source != "profile:game_prop" {

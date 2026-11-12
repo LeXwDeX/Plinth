@@ -92,7 +92,9 @@ func (e *Error) LocalizedDetail(text func(string) string) string {
 		}
 		pairs[index] = value
 	}
-	return strings.NewReplacer(pairs...).Replace(text(e.DetailTemplate))
+	// A template may end in an optional placeholder whose value is empty
+	// (input_source_task_unsupported {alternative}); the space before it goes too.
+	return strings.TrimSpace(strings.NewReplacer(pairs...).Replace(text(e.DetailTemplate)))
 }
 
 func (e *Error) Error() string {

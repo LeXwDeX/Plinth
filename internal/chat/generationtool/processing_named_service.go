@@ -414,6 +414,9 @@ type sourceRefusal struct {
 	Limit        string   `json:"limit,omitempty"`
 	Provider     string   `json:"provider,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Alternative is the route the source parameter declares for a Task the
+	// service does not take (task_source_alternative, #276), in Schema words.
+	Alternative string `json:"alternative,omitempty"`
 }
 
 func (executor *Executor) refusalOf(offering generation.Offering, task generation.Task, asset generation.AssetID,
@@ -450,6 +453,7 @@ func (executor *Executor) refusalOf(offering generation.Offering, task generatio
 		for _, capability := range taskParameter.TaskCapabilities {
 			refusal.Capabilities = append(refusal.Capabilities, string(capability))
 		}
+		refusal.Alternative = taskParameter.TaskSourceAlternative
 	}
 	return refusal
 }
@@ -492,15 +496,32 @@ func reasonText(messages *catalog.ChatToolServiceMessages, offering generation.O
 	if localize != nil {
 		template, service = localize(template), localize(service)
 	}
-	return fill(template, "{service}", service, "{provider}", provider,
+	reason := fill(template, "{service}", service, "{provider}", provider,
 		"{capabilities}", strings.Join(refusal.Capabilities, capabilitySeparator))
+	// A Task of the right provider and capability can still be the wrong one (a
+	// Tripo P2 result for the baked decimation, which takes Tripo v3.1 results
+	// only): the route the Schema declares says what to do instead (#276). It
+	// closes the reason in parentheses, whose own sentence-final stop is dropped
+	// because the message that holds the reason ends it.
+	if refusal.Kind == "task" && refusal.Alternative != "" {
+		route := refusal.Alternative
+		if localize != nil {
+			route = localize(route)
+		}
+		reason += " (" + strings.TrimRight(route, "。.") + ")"
+	}
+	return reason
 }
 
 // localizedSourceRefusal copies the refusal's structured view and translates
-// only its Schema provider name. Kind, sizes and capability IDs stay unchanged.
+// only its Schema texts: the provider name and the route to take instead. Kind,
+// sizes and capability IDs stay unchanged.
 func localizedSourceRefusal(refusal sourceRefusal, localize func(string) string) sourceRefusal {
 	if localize != nil {
 		refusal.Provider = localize(refusal.Provider)
+		if refusal.Alternative != "" {
+			refusal.Alternative = localize(refusal.Alternative)
+		}
 	}
 	return refusal
 }

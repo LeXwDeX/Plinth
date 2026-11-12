@@ -25,6 +25,15 @@
 //     options and answers 422 for a model that can only be rigged with the default
 //     skeleton or without fingers; the fake judges no rig type and models neither
 //     422. None of it has been requested from the real API.
+//   - The remesh options of an image-to-3d request (and of the v2 text-to-3d
+//     preview) are checked against the pages read on 2026-11-12 (#276,
+//     core.GenerationRequestError): target_polycount is 100-300000 for a
+//     remeshed standard model, 100-15000 for meshy-t2 and 100-30000 for
+//     meshy-t2.5, quad topology is refused for the Smart Topology models,
+//     decimation_mode is 1-4; a violation answers 400 {message}. The pages say
+//     nothing about how a quad counts toward target_polycount or whether the
+//     texture of a remeshed image-to-3d task is generated on the remeshed mesh;
+//     neither is modelled. None of it has been requested from the real API.
 //   - PENDING, CANCELED and non-rigging FAILED poll bodies follow the field
 //     documentation of each task object; texture_urls and PBR maps follow the
 //     request's should_texture/enable_pbr options.

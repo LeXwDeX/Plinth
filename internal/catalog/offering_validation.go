@@ -163,6 +163,13 @@ func validateOffering(
 		if _, err := validateValueDefinition(parameter); err != nil {
 			return fmt.Errorf("Offering %q: %w", offering.ID, err)
 		}
+		// A route declared for an unsupported source is only said where the
+		// refusal template has a place for it.
+		if parameter.TaskSourceAlternative != "" &&
+			!strings.Contains(offering.ExecutionMessages.InputSourceTaskUnsupported, "{alternative}") {
+			return fmt.Errorf("Offering %q 的参数 %q 声明了 task_source_alternative，但 generation_messages.input_source_task_unsupported 没有 {alternative}",
+				offering.ID, parameter.Name)
+		}
 	}
 	// 动作参数由专用分组控件与提交路径按"唯一动作"消费（前端
 	// actionParameter/visibleOfferingFields），两个动作语义参数会让过滤
@@ -542,6 +549,7 @@ func offeringUserFacingCopy(offering schemacontract.Offering) []offeringCopyFiel
 			offeringCopyField{prefix + ".label", parameter.Label},
 			offeringCopyField{prefix + ".description", parameter.Description},
 			offeringCopyField{prefix + ".adjustment_reason", parameter.AdjustmentReason},
+			offeringCopyField{prefix + ".task_source_alternative", parameter.TaskSourceAlternative},
 		)
 		for optionIndex, option := range parameter.Options {
 			copies = append(copies, offeringCopyField{fmt.Sprintf("%s.options[%d].label", prefix, optionIndex), option.Label})
@@ -1484,6 +1492,10 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 	return schema, nil
 }
 
+// maxTaskSourceAlternativeRunes bounds a task source parameter's
+// task_source_alternative: it joins a refusal sentence, not a manual.
+const maxTaskSourceAlternativeRunes = 400
+
 func validateTaskSourceParameter(parameter schemacontract.Parameter) error {
 	// same_session binds task sources to this chat session. A saved-model
 	// source parameter (asset or asset-array with source-asset semantics) may
@@ -1516,6 +1528,15 @@ func validateTaskSourceParameter(parameter schemacontract.Parameter) error {
 			return fmt.Errorf("参数 %q 的 task_offerings 含空值、空白或重复项", parameter.Name)
 		}
 		seen[id] = true
+	}
+	// The route to take instead of an unsupported source (#276) is read in the
+	// refusal the kernel gives before anything is paid: complete sentences, no
+	// placeholder of the template it is put into.
+	if alternative := parameter.TaskSourceAlternative; alternative != "" &&
+		(parameter.Type != "task" || strings.TrimSpace(alternative) != alternative ||
+			len([]rune(alternative)) > maxTaskSourceAlternativeRunes || strings.ContainsAny(alternative, "{}")) {
+		return fmt.Errorf("参数 %q 的 task_source_alternative 只能写在 task 参数上，不含首尾空白与花括号，且不超过 %d 个字符",
+			parameter.Name, maxTaskSourceAlternativeRunes)
 	}
 	if parameter.TaskSourceKind != schemacontract.TaskSourceAssets {
 		return nil

@@ -3494,8 +3494,12 @@ type ChatModel3DUsageProfile struct {
 	// Reason explains the purpose once; every adjusted parameter frozen from
 	// this purpose carries it and source "profile:<id>".
 	Reason string `json:"reason"`
-	// Pipeline is reference only: later processing capabilities that suit the
-	// purpose, in order. It is never executed automatically.
+	// Pipeline is reference only: the processing capabilities that suit the
+	// purpose after a generation, in order. It is never executed automatically
+	// and no runtime code reads it: the Agent learns the route from the 3D craft
+	// prompt, which is Schema text too. A game purpose names the reduction that
+	// keeps the textures (#276), the step a high-detail generation needs and a
+	// model that already fits the budget skips.
 	Pipeline []ChatModel3DUsagePipelineStep `json:"pipeline,omitempty"`
 	Budget   ChatModel3DUsageBudget         `json:"budget"`
 	// Platforms are the variants of Budget and ParameterOverrides for the

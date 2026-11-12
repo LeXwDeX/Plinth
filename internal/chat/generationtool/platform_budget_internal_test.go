@@ -353,11 +353,30 @@ func TestPurposeParameterValuesFollowThePlatform(t *testing.T) {
 				t.Fatalf("prop on %q: face_limit %s, want %s", platform, got, want)
 			}
 		}
-		// Meshy 7.1 defaults to an 8K texture: the budget lowers it to the
-		// largest size the platform allows.
+		// Meshy 7.1 multiview defaults to an 8K texture: the budget lowers it to the
+		// largest size the platform allows. (Meshy 7.1 text and image carry the
+		// purpose's own overrides since #276, tested below.)
 		for platform, want := range map[string]string{"": `"2k"`, "mobile": `"2k"`, "pc_console": `"4k"`} {
-			if got := values("meshy/meshy-7.1/image-to-3d", "game_character", platform)["texture_resolution"]; got != want {
+			if got := values("meshy/meshy-7.1-multiview/image-to-3d", "game_character", platform)["texture_resolution"]; got != want {
 				t.Fatalf("character on %q: texture_resolution %s, want %s", platform, got, want)
+			}
+		}
+	})
+	t.Run("Meshy 7.1 remeshes in one step with the purpose's topology and the platform's face count", func(t *testing.T) {
+		// The purposes' overrides reach the Agent's step unchanged: the budget has
+		// nothing to lower in them (a quad counts as two triangles, so 25000 quads
+		// are 50000 triangles, half of what a PC allows).
+		for _, id := range []string{"meshy/meshy-7.1/text-to-3d", "meshy/meshy-7.1/image-to-3d"} {
+			for platform, want := range map[string]string{"": "10000", "mobile": "10000", "xr": "10000", "pc_console": "25000"} {
+				expect(t, values(id, "game_character", platform), map[string]string{
+					"should_remesh": "true", "topology": `"quad"`, "target_polycount": want, "texture_resolution": `"2k"`, "pose_mode": `"a-pose"`})
+			}
+			for _, platform := range []string{"", "mobile", "pc_console"} {
+				got := values(id, "game_prop", platform)
+				expect(t, got, map[string]string{"should_remesh": "true", "topology": `"triangle"`, "target_polycount": "8000", "texture_resolution": `"2k"`})
+				if _, set := got["pose_mode"]; set {
+					t.Fatalf("prop on %q sets a pose: %v", platform, got)
+				}
 			}
 		}
 	})

@@ -31,6 +31,15 @@ func convertSampleRequest() map[string]any {
 	}
 }
 
+// decimateSampleRequest is the POST /v3/mesh/decimate body of the committed real
+// sample (tripo-v3-decimate.candidate.json) with the source task the test made.
+// The fake checks a decimation against the official page (decimate.go), which the
+// kitchen-sink body of the other kinds (a model version of the generation family,
+// a format) does not satisfy.
+func decimateSampleRequest(source any) map[string]any {
+	return map[string]any{"input": source, "model": "v3.0", "bake": true, "quad": false, "smart_uv": true}
+}
+
 func shapeOfBody(t *testing.T, body any) fakeupstream.Shape {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -125,6 +134,9 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			// The request of the committed sample: the poll echoes it under input.
 			body = convertSampleRequest()
 		}
+		if k.Path == "/mesh/decimate" {
+			body = decimateSampleRequest(parent)
+		}
 		status, _, response := f.do("POST", k.Path, key, body)
 		if status != http.StatusOK {
 			t.Fatalf("%s: %d %v", k.Path, status, response)
@@ -149,6 +161,9 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		if k.Path == "/models/convert" {
 			// The request of the committed sample: the poll echoes it under input.
 			body = convertSampleRequest()
+		}
+		if k.Path == "/mesh/decimate" {
+			body = decimateSampleRequest(parent)
 		}
 		id := f.create(k.Path, body, key)
 		order := []string{statusQueued, statusRunning, statusSuccess}

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -25,10 +26,14 @@ func TestTripoGeometryEnabledSourcesAndNormalization(t *testing.T) {
 			id := generation.OfferingID("tripo/geometry/" + kind)
 			o, ok := c.Get(id)
 			// 185.5 declares the native OBJ export as the ZIP it is; 185.6
-			// re-enables Quick Cap.
+			// re-enables Quick Cap; the two decimations take multiview results as
+			// a source since #276 (revision 2026-11-12.276.1).
 			revision := "2026-10-22.185.5"
-			if kind == "quick-cap" {
+			switch kind {
+			case "quick-cap":
 				revision = "2026-10-22.185.6"
+			case "decimate-triangle", "decimate-quad":
+				revision = "2026-11-12.276.1"
 			}
 			if !ok || o.Enabled != qualified[kind] || o.Default || o.Revision != revision {
 				t.Fatalf("geometry Offering enablement drifted from the #185 qualification: %+v", o)
@@ -72,8 +77,17 @@ func TestTripoGeometryEnabledSourcesAndNormalization(t *testing.T) {
 				if len(source.TaskOfferings) != 1 || source.TaskOfferings[0] != "tripo/geometry/segment" || len(source.TaskCapabilities) != 1 || source.TaskCapabilities[0] != "mesh-segmentation" {
 					t.Fatal("Complete did not require exact Segment")
 				}
-			} else if len(source.TaskOfferings) != 2 || source.TaskOfferings[0] != "tripo/tripo-v3.1-full/text-to-3d" || source.TaskOfferings[1] != "tripo/tripo-v3.1-full/image-to-3d" {
-				t.Fatal("source allowlist expanded")
+			} else if kind == "segment" {
+				if len(source.TaskOfferings) != 2 || source.TaskOfferings[0] != "tripo/tripo-v3.1-full/text-to-3d" || source.TaskOfferings[1] != "tripo/tripo-v3.1-full/image-to-3d" {
+					t.Fatal("source allowlist expanded")
+				}
+			} else if !slices.Equal(source.TaskOfferings, []generation.OfferingID{
+				"tripo/tripo-v3.1-full/text-to-3d", "tripo/tripo-v3.1-full/image-to-3d", "tripo/tripo-v3.1-multiview/image-to-3d",
+			}) {
+				// The decimation page lists text, image and multiview generation
+				// tasks as a task input and names no model version (#276); a
+				// P-series task stays out because the page says nothing about it.
+				t.Fatalf("decimation sources = %v", source.TaskOfferings)
 			}
 			for _, extra := range []string{`"part_names":[]`, `"ref_image":"anything"`, `"unknown":true`} {
 				bad := json.RawMessage(`{"source_task":"source","authorize_extra_credits":true,` + extra + `}`)

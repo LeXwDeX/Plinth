@@ -74,6 +74,35 @@ func TestTexturedFBXFixturesEmbedTheirTextureFormat(t *testing.T) {
 	}
 }
 
+// A low-poly model carries the triangle count its target allows (72 per step
+// squared, never above the target), is deterministic, and still passes the
+// delivery checks; the plain fixture is the one-step model.
+func TestLowPolyModelFileCarriesTheRequestedTriangleCount(t *testing.T) {
+	plain, err := smallModelFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for target, want := range map[int]int{0: 72, 71: 72, 72: 72, 287: 72, 288: 288, 500: 288, 8712: 8712, 9370: 8712, 10000: 8712, 20000: 18432, 121032: 121032, 5_000_000: 121032} {
+		if got := LowPolyTriangles(target); got != want {
+			t.Errorf("LowPolyTriangles(%d) = %d, want %d", target, got, want)
+		}
+	}
+	if file, err := LowPolyModelFile(72); err != nil || !bytes.Equal(file.Data, plain["glb"].Data) {
+		t.Errorf("the one-step low-poly model differs from the plain GLB fixture (err %v)", err)
+	}
+	for _, target := range []int{500, 9370, 20000} {
+		file, err := LowPolyModelFile(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, _ := LowPolyModelFile(target)
+		if file.MediaType != "model/gltf-binary" || !bytes.Equal(file.Data, again.Data) {
+			t.Errorf("low-poly model for %d is not a stable GLB", target)
+		}
+		validateDelivered(t, "lowpoly", file.Data, "model", "glb", "model/gltf-binary")
+	}
+}
+
 func validateDelivered(t *testing.T, name string, data []byte, role, variant, mediaType string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
