@@ -917,6 +917,11 @@ type stepInfo struct {
 	// was not made (the tool declares no key, or the frozen input was
 	// unreadable); an empty list says every parameter is at its default.
 	Parameters []reportedParameter
+	// Notices are the public notices of a succeeded step (#284): the Task
+	// succeeded but part of the request did not come out. Reported only
+	// through the tool's declared result key; empty when the Task delivered
+	// everything.
+	Notices []reportedNotice
 	// frozenInput and frozenAdjustments are the prepared input a step ran with,
 	// set by the paths that hold it (a resumed or recovered operation). The
 	// parameters report reads them before the Task's own copy of the input.
@@ -1837,6 +1842,7 @@ func (executor *Executor) wait(
 				frozen = task.Input
 			}
 			info.Parameters = executor.parameterReport(command, task.Offering, frozen, info.frozenAdjustments)
+			info.Notices = executor.noticeReport(command, task)
 		}
 		if task.Failure != nil {
 			observation.Error = executor.failureMessage(command, task.Offering.CreditsMetered, task.Failure)
@@ -2042,6 +2048,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.Parameters; key != "" && info.Parameters != nil {
 		result[key] = info.Parameters
+	}
+	if key := tool.ResultFields.Notices; key != "" && len(info.Notices) > 0 {
+		result[key] = info.Notices
 	}
 	if info.Budget != nil {
 		if key := tool.ResultFields.Budget; key != "" {

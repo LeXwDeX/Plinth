@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -348,6 +349,81 @@ type Task struct {
 	// Attempt; nil when the Task is not running or the upstream reports no
 	// queue.
 	UpstreamQueue *UpstreamQueue `json:"-"`
+	// Notices are the public, non-fatal facts of a SUCCEEDED Task (#284): the
+	// pictures a batch did not matte, so the Task is a success that did not
+	// deliver everything it was asked for. Read only, derived from the current
+	// Attempt's completion observation; written only by the kernel. Empty for
+	// a Task that is not succeeded or delivered everything.
+	Notices []TaskNotice `json:"-"`
+}
+
+// NoticePartialInputs is the notice of a completed batch in which some of the
+// submitted pictures produced no result (#284). The Schema message
+// task.notice.partial_inputs says it without naming them; when Inputs are
+// listed, task.notice.partial_inputs_named names them.
+const NoticePartialInputs = "partial_inputs"
+
+// TaskNotice is one public, non-fatal fact about a Task that succeeded (#284):
+// the Provider's completion observation says part of the request did not come
+// out, and the Task, which is still a success, carries that so the person and
+// the Agent can say it. Code is a stable name whose copy the Schema owns
+// (messages task.notice.<code>, and task.notice.<code>_named when Inputs are
+// listed); Inputs are 1-based positions among the pictures the Task submitted,
+// in the order submitted, and are empty when the Provider cannot say which. A
+// notice never changes the Task's state, assets or failure.
+type TaskNotice struct {
+	Code   string `json:"code"`
+	Inputs []int  `json:"inputs,omitempty"`
+}
+
+const (
+	// maxTaskNotices and maxNoticeInputs bound what one completion can carry:
+	// a notice is a sentence for a person, not a payload.
+	maxTaskNotices  = 4
+	maxNoticeInputs = 200
+)
+
+// normalizeNotices keeps the notices a completion observation reported that
+// the public projection can carry: a code of lowercase letters, digits and
+// underscores that no earlier notice already used, with its positions as
+// positive, distinct, ascending integers. Anything else is dropped rather than
+// refused: a notice is advice, and a malformed one must never cost a paid
+// result its delivery. It returns nil when nothing is left.
+func normalizeNotices(notices []TaskNotice) []TaskNotice {
+	var kept []TaskNotice
+	seen := map[string]bool{}
+	for _, notice := range notices {
+		if len(kept) == maxTaskNotices {
+			break
+		}
+		if !validNoticeCode(notice.Code) || seen[notice.Code] {
+			continue
+		}
+		seen[notice.Code] = true
+		positions := map[int]bool{}
+		var inputs []int
+		for _, position := range notice.Inputs {
+			if position > 0 && !positions[position] && len(inputs) < maxNoticeInputs {
+				positions[position] = true
+				inputs = append(inputs, position)
+			}
+		}
+		sort.Ints(inputs)
+		kept = append(kept, TaskNotice{Code: notice.Code, Inputs: inputs})
+	}
+	return kept
+}
+
+func validNoticeCode(code string) bool {
+	if code == "" || len(code) > 48 || code[0] < 'a' || code[0] > 'z' {
+		return false
+	}
+	for _, character := range code {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // UpstreamQueuedReason is the public queue reason of a running Task whose
@@ -447,6 +523,10 @@ type Attempt struct {
 	// completed a failed conversion from an exactly related delivered Task.
 	// Ordinary Attempts leave it nil.
 	DeliveryCompletion *DeliveryCompletion `json:"delivery_completion,omitempty"`
+	// Notices are the notices the Attempt's completion observation reported,
+	// as the kernel kept them (#284). Written once, by the completion; the
+	// Task projects them only when it is SUCCEEDED.
+	Notices []TaskNotice `json:"-"`
 }
 
 // Delivery completion relation kinds.
@@ -564,6 +644,13 @@ type Observation struct {
 	// Queue reports that the upstream holds the accepted job in its own
 	// queue (#131). The kernel records it only for accepted/running phases.
 	Queue *UpstreamQueue `json:"queue,omitempty"`
+	// Notices are the Provider's one channel for saying that a completed job
+	// did not deliver everything it was asked for (#284): a batch of pictures
+	// of which some were not matted. A completion carries no failure, so
+	// without this the Task would succeed in silence. The kernel keeps them
+	// only from a completed observation, bounded and normalized; they never
+	// change the Task's state, assets or failure.
+	Notices []TaskNotice `json:"notices,omitempty"`
 }
 
 type SubmitCommand struct {

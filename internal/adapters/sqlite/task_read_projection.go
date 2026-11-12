@@ -14,7 +14,8 @@ const taskSummarySelect = `SELECT
  generation_tasks.resource_state_json, generation_tasks.session_id,CASE WHEN generation_tasks.native_quote_required=1 THEN COALESCE(generation_tasks.native_quote_json,'null') ELSE generation_tasks.native_quote_json END,
  EXISTS (SELECT 1 FROM generation_attempts completion_attempt WHERE completion_attempt.task_id = generation_tasks.id AND completion_attempt.delivery_completion_json IS NOT NULL),
  ` + rateLimitQueuedColumn + `,
- ` + upstreamQueueColumn + `
+ ` + upstreamQueueColumn + `,
+ ` + noticesColumn + `
  FROM generation_tasks JOIN generation_task_summaries summary ON summary.task_id = generation_tasks.id`
 
 func taskVisibility(scope generation.TaskListScope, id generation.TaskID) (string, []any) {

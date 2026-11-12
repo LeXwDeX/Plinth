@@ -489,6 +489,9 @@ func (m *Module) applyObservation(
 			return m.finishFailed(ctx, lease, attempt, &Failure{Class: FailureIntegrity, SafeDetail: m.executionMessages(task).InlineStoreFailed}, "materialization.inline_store_failed", settlement)
 		}
 		obs.Artifacts = storedClaims
+		// The one place a notice enters a Task (#284): the completion's own
+		// assertion, bounded and normalized, kept with the Attempt.
+		attempt.Notices = normalizeNotices(obs.Notices)
 		attempt.State = AttemptUpstreamSucceeded
 		attempt.FinishedAt = &now
 		task.State = TaskMaterializing

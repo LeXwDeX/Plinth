@@ -56,6 +56,7 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 		`ALTER TABLE generation_attempts DROP COLUMN last_observation_queue_json`,
 		`ALTER TABLE generation_attempts DROP COLUMN upstream_queued_since`,
 		`ALTER TABLE generation_attempts DROP COLUMN upstream_queued_ms`,
+		`ALTER TABLE generation_attempts DROP COLUMN notices_json`,
 		`ALTER TABLE skill_run_steps DROP COLUMN replacement_asset_id`,
 		`ALTER TABLE go_chat_messages DROP COLUMN multiview`,
 	} {

@@ -334,11 +334,27 @@ var queueNoticeMessages = map[string][]string{
 	"task.queue_reason.upstream_queued_ahead": {"ahead"},
 }
 
+// taskNoticeMessages are the texts of a succeeded Task's notices (#284): the
+// generic sentence, the one that lists positions ({inputs} is filled by the
+// server from the item and separator texts), and the pieces of that list
+// ({ordinal} is the 1-based position). Each copy carries exactly these
+// placeholders in the default text and in every bundle, so no client composes a
+// sentence of its own.
+var taskNoticeMessages = map[string][]string{
+	"task.notice.partial_inputs":       nil,
+	"task.notice.partial_inputs_named": {"inputs"},
+	"task.notice.input":                {"ordinal"},
+	"task.notice.input_separator":      nil,
+}
+
 func validateUnavailableNotices(schema ApplicationSchema) error {
 	if err := validateMessagePlaceholders(schema, unavailableNoticeMessages); err != nil {
 		return err
 	}
 	if err := validateMessagePlaceholders(schema, queueNoticeMessages); err != nil {
+		return err
+	}
+	if err := validateMessagePlaceholders(schema, taskNoticeMessages); err != nil {
 		return err
 	}
 	return validateUnavailableReasons(schema)

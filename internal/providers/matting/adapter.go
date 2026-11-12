@@ -388,7 +388,8 @@ func (value wireDocument) observation(
 	rawStatus := stringAt(value, protocol.Response.BatchStatusPath)
 	status := normalizeStatus(rawStatus)
 	progress := value.progress(protocol)
-	opaque, err := json.Marshal(value.providerRecords(protocol))
+	records := value.providerRecords(protocol)
+	opaque, err := json.Marshal(records)
 	if err != nil {
 		return generation.Observation{}, failure(
 			generation.FailureProtocol,
@@ -427,6 +428,10 @@ func (value wireDocument) observation(
 				Class:      generation.FailureRejected,
 				SafeDetail: protocol.Messages["no_artifacts"],
 			}
+		} else {
+			// A batch that ends PARTIAL_SUCCESS is a completed Task that holds
+			// fewer results than pictures; say which ones are missing (#284).
+			observation.Notices = unmattedNotices(records)
 		}
 	case statusIn(status, protocol.Statuses.Failed):
 		observation.Phase = generation.UpstreamFailed
@@ -495,6 +500,32 @@ func (value wireDocument) providerRecords(
 		records = append(records, record)
 	}
 	return records
+}
+
+// unmattedNotices is the completion's notice that some of the submitted
+// pictures produced no result (#284), or nil when every record did. It names
+// the positions only when it can name them all: a record the service did not
+// echo a position for leaves the others unnamed too, since a list that omits
+// a failed picture would tell the person something untrue.
+func unmattedNotices(records []providerRecord) []generation.TaskNotice {
+	var missing []int
+	unnamed := false
+	for _, record := range records {
+		switch {
+		case record.Matted:
+		case record.InputOrdinal > 0:
+			missing = append(missing, record.InputOrdinal)
+		default:
+			unnamed = true
+		}
+	}
+	switch {
+	case unnamed:
+		return []generation.TaskNotice{{Code: generation.NoticePartialInputs}}
+	case len(missing) > 0:
+		return []generation.TaskNotice{{Code: generation.NoticePartialInputs, Inputs: missing}}
+	}
+	return nil
 }
 
 // inputOrdinal reads the 1-based position of an uploaded picture back from the

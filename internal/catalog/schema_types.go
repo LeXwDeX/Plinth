@@ -5774,6 +5774,12 @@ type ChatToolResultFields struct {
 	// its default. It is declared only on a tool that submits a Task; the
 	// processing plan tool builds its result elsewhere.
 	Parameters string `json:"parameters,omitempty"`
+	// Notices is the optional key of the list of notices a succeeded Task
+	// carries (#284): each has its code, the Schema text in the turn's locale
+	// and the positions it names. The list is present only when the Task has
+	// notices, so a result without the key says the Task delivered everything.
+	// Declared only on a tool that submits a Task.
+	Notices string `json:"notices,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
