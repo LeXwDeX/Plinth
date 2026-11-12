@@ -919,6 +919,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validatePromptReportSchema(schema.Agent.PromptReport); err != nil {
 		return err
 	}
+	if err := validateParameterReport(schema); err != nil {
+		return err
+	}
 	return nil
 }
 

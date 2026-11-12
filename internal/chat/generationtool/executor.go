@@ -149,6 +149,11 @@ type Config struct {
 	// OfferingParameters reads per-offering overrides only for a new input.
 	OfferingParameters       func(ownerID, sessionID, offeringID string) map[string]json.RawMessage
 	OfferingParameterReasons func(ownerID, sessionID, offeringID string) map[string]generation.ParameterReason
+	// OfferingParameterStates reads who wrote each remembered Offering
+	// parameter (the person's pin or the Agent's setting). It only names the
+	// source of a frozen value in the parameters list of a tool result (#296);
+	// nil leaves such a value unattributed.
+	OfferingParameterStates func(ownerID, sessionID, offeringID string) map[string]RememberedParameter
 
 	// Logger records each refused processing step with its call and reason
 	// (#321 A, #233). Nil discards.
@@ -193,6 +198,7 @@ type Executor struct {
 
 	offeringParameters       func(string, string, string) map[string]json.RawMessage
 	offeringParameterReasons func(string, string, string) map[string]generation.ParameterReason
+	offeringParameterStates  func(string, string, string) map[string]RememberedParameter
 
 	logger        *slog.Logger
 	modelFormats  ModelFormatStatus
@@ -257,6 +263,7 @@ func New(config Config) (*Executor, error) {
 
 		offeringParameters:       config.OfferingParameters,
 		offeringParameterReasons: config.OfferingParameterReasons,
+		offeringParameterStates:  config.OfferingParameterStates,
 		logger:                   config.Logger,
 	}, nil
 }
@@ -905,6 +912,16 @@ type stepInfo struct {
 	// injected (#240). Empty when none was used; reported only through the
 	// tool's declared result key.
 	StyleSources []string
+	// Parameters are the frozen parameters of a succeeded step that differ from
+	// the Offering's defaults, with their sources (#296). nil means the report
+	// was not made (the tool declares no key, or the frozen input was
+	// unreadable); an empty list says every parameter is at its default.
+	Parameters []reportedParameter
+	// frozenInput and frozenAdjustments are the prepared input a step ran with,
+	// set by the paths that hold it (a resumed or recovered operation). The
+	// parameters report reads them before the Task's own copy of the input.
+	frozenInput       json.RawMessage
+	frozenAdjustments []generation.ParameterAdjustment
 }
 
 // budgetResult is the budget part of a paid tool result: the plan the step
@@ -1034,6 +1051,7 @@ func (executor *Executor) observeBoundTask(
 				info.ReferenceNote = executor.operationReferenceNote(command, op, prepared, task.Offering)
 				trace := executor.promptTraceFromPrepared(ctx, command, task.Offering, prepared.NormalizedInput)
 				info.PromptFinal, info.PromptNote = executor.promptReport(command, command.Tool, task.Offering, trace)
+				info.frozenInput, info.frozenAdjustments = prepared.NormalizedInput, prepared.ParameterAdjustments
 			}
 			// The grant that admitted the Task still says who approved it; a
 			// read failure only leaves the source unknown, as before.
@@ -1812,6 +1830,13 @@ func (executor *Executor) wait(
 			if info.SizeNote == "" {
 				info.SizeNote = executor.referenceSizeNote(ctx, command, task.Offering, task.Input)
 			}
+			// #296: the report reads the frozen input, so an immediate result,
+			// one after an approval and a recovered one agree.
+			frozen := info.frozenInput
+			if len(frozen) == 0 {
+				frozen = task.Input
+			}
+			info.Parameters = executor.parameterReport(command, task.Offering, frozen, info.frozenAdjustments)
 		}
 		if task.Failure != nil {
 			observation.Error = executor.failureMessage(command, task.Offering.CreditsMetered, task.Failure)
@@ -2014,6 +2039,9 @@ func (executor *Executor) success(
 	}
 	if key := tool.ResultFields.StyleSources; key != "" && len(info.StyleSources) > 0 {
 		result[key] = info.StyleSources
+	}
+	if key := tool.ResultFields.Parameters; key != "" && info.Parameters != nil {
+		result[key] = info.Parameters
 	}
 	if info.Budget != nil {
 		if key := tool.ResultFields.Budget; key != "" {

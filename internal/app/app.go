@@ -803,6 +803,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return values
 		},
+		// #296: the parameters list of a tool result names who wrote a remembered
+		// value, the person's pin or the Agent's setting, from the same store.
+		OfferingParameterStates: func(ownerID, sessionID, offeringID string) map[string]generationtool.RememberedParameter {
+			states := map[string]generationtool.RememberedParameter{}
+			for name, state := range paramsStore.OfferingStates(agentparams.ScopeKey(ownerID, sessionID), offeringID) {
+				if (state.Source == "user" || state.Source == "agent") && len(state.Value) > 0 {
+					states[name] = generationtool.RememberedParameter{Value: state.Value, Source: state.Source}
+				}
+			}
+			return states
+		},
 		Gateway:         module,
 		Tasks:           module,
 		Operations:      repository,
