@@ -52,12 +52,21 @@ const renders = [picture('/api/v1/tasks/t1/assets/r1', 0), picture('/api/v1/task
 const record = reviewRecordOf(schema, toolCalls, renders);
 
 const renderRecord = (leftover: MessagePicture[] = record.leftover) =>
-  render(<ReviewRecordCard calls={record.calls} leftover={leftover} />);
+  render(<ReviewRecordCard calls={record.calls} leftover={leftover} defaultOpen />);
 
 beforeEach(() => { useStudioStore.setState({ stageImage: null }); });
 afterEach(cleanup);
 
 describe('the self-check record of one reply (#103)', () => {
+  it('starts folded to its one title line and opens on click', () => {
+    const view = render(<ReviewRecordCard calls={record.calls} leftover={[]} />);
+    const toggle = view.getByTestId('chat-review-record-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(view.queryAllByTestId('chat-review-line')).toHaveLength(0);
+    fireEvent.click(toggle);
+    expect(view.getAllByTestId('chat-review-line').length).toBeGreaterThan(0);
+  });
+
   it('folds every review call of the reply into one card and counts them', () => {
     const view = renderRecord();
     const card = view.getByTestId('chat-review-record');

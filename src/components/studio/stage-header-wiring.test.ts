@@ -12,6 +12,12 @@ const chat = readFileSync(new URL('./chat-column.tsx', import.meta.url), 'utf8')
 const actions = readFileSync(new URL('../../hooks/use-object-actions.ts', import.meta.url), 'utf8');
 
 describe('stage header wiring', () => {
+  it('keeps the actions inside the header: they shrink and scroll sideways instead of painting over the right panel', () => {
+    expect(header).toMatch(/className="flex min-w-0 items-center overflow-x-auto[^"]*" data-testid="stage-actions"/);
+    expect(header).not.toContain('className="flex shrink-0 items-center" data-testid="stage-actions"');
+    expect(header).toContain('data-group={entry.name} className="flex shrink-0 items-center gap-1"');
+  });
+
   it('places processing navigation in its Schema group and preserves that group’s icon-only rule', () => {
     expect(header).toContain("if (name === schema.canvas.frontend.processing_action.group && kind === 'model')");
     expect(header).toMatch(/view=\{processStepView\(schema, capability\)\} iconOnly=\{iconOnly\}/);

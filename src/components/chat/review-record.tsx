@@ -25,17 +25,19 @@ interface ReviewRecordCardProps {
   calls: ReviewCallModel[];
   /** Rendered pictures no call could claim; shown with the record rather than as 2D results. */
   leftover: MessagePicture[];
+  /** Folded by default so the chat stays readable; tests open it to read the calls. */
+  defaultOpen?: boolean;
 }
 
 /**
  * #103: the read-only review tools of one reply, folded into one card. Each
  * call keeps exactly one line, rendered pictures sit beside the call that made
- * them at thumbnail size, and the card can be folded away. Details (check
+ * them at thumbnail size, and the card starts folded (one line) and opens on click. Details (check
  * results, view names) open per line; a picture opens large on the stage.
  */
-export function ReviewRecordCard({ calls, leftover }: ReviewRecordCardProps) {
+export function ReviewRecordCard({ calls, leftover, defaultOpen = false }: ReviewRecordCardProps) {
   const { schema } = useProductSchema();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
   const rounds = useMemo(() => reviewRounds(calls), [calls]);
   const indexOf = (call: ReviewCallModel) => calls.indexOf(call);

@@ -93,10 +93,10 @@ beforeEach(() => {
   mock.object = null;
   mock.nodes = 0;
   mock.processing = { available: [{ id: 'retexture_model' }], offerings: {}, error: undefined };
-  useStudioStore.setState({ panelTab2d: null, panelTab3d: null, styleLockRequest: null, styleLockOpen: false });
+  useStudioStore.setState({ panelTab2d: null, panelTab3d: null, styleLockRequest: null, styleLockOpen: false, panelCollapsed: false });
 });
 afterEach(() => {
-  useStudioStore.setState({ panelTab2d: null, panelTab3d: null, styleLockRequest: null, styleLockOpen: false });
+  useStudioStore.setState({ panelTab2d: null, panelTab3d: null, styleLockRequest: null, styleLockOpen: false, panelCollapsed: false });
 });
 
 describe('nothing on the stage and an empty board', () => {
@@ -365,8 +365,8 @@ describe('what the panel does not have', () => {
   const source = readFileSync(new URL('./right-panel.tsx', import.meta.url), 'utf8');
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
-  it('has no collapse button and no remembered width', () => {
-    expect(code).not.toMatch(/collapse|expanded|localStorage|sessionStorage|resize/i);
+  it('has no separate collapse button and no resizable or remembered width (folding is the tabs, kept by the store)', () => {
+    expect(code).not.toMatch(/localStorage|sessionStorage|resize/i);
     expect(code).not.toContain('title=');
   });
 
@@ -376,10 +376,42 @@ describe('what the panel does not have', () => {
   });
 
   it('writes the chosen tab to the studio store for the kind it shows', () => {
-    expect(source).toContain('onSelect={(id) => setPanelTab(context, id)}');
+    expect(source).toContain('onSelect={choose(context, active)}');
+    expect(source).toContain("else setPanelTab(kind === 'none' ? 'board' : kind, id);");
   });
 
   it('carries no user text of its own: every word comes from the Schema', () => {
     expect(code).not.toMatch(/[一-鿿]/);
+  });
+});
+
+describe('folding the panel to its tab rail', () => {
+  beforeEach(() => { mock.object = model; });
+  const render = () => renderToStaticMarkup(<RightPanel />);
+
+  it('is open by default: the active tab is filled and expanded, the body shown', () => {
+    const markup = render();
+    expect(markup).not.toContain('data-collapsed');
+    expect(markup).toMatch(/aria-selected="true" aria-expanded="true"/);
+    expect(markup).not.toMatch(/class="min-h-0 min-w-0 flex-col hidden"/);
+  });
+
+  it('hides the content column when folded and keeps the rail with the active tab outlined', () => {
+    useStudioStore.setState({ panelCollapsed: true });
+    const markup = render();
+    expect(markup).toContain('data-collapsed="true"');
+    expect(markup).toMatch(/class="min-h-0 min-w-0 flex-col hidden"/);
+    expect(markup).toContain('data-testid="right-panel-tabs"');
+    const active = markup.match(/<button[^>]*aria-selected="true"[^>]*>/)?.[0] ?? '';
+    expect(active).toContain('aria-expanded="false"');
+    expect(active).not.toContain('bg-accent text-foreground');
+  });
+
+  it('folds on the active tab and opens again on any tab', () => {
+    const source = readFileSync(new URL('./right-panel.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('if (id === current && !collapsed) setPanelCollapsed(true);');
+    useStudioStore.setState({ panelCollapsed: true });
+    useStudioStore.getState().setPanelTab('model', 'details');
+    expect(useStudioStore.getState().panelCollapsed).toBe(false);
   });
 });

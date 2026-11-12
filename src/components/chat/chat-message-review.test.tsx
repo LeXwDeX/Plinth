@@ -115,6 +115,9 @@ describe('the self-check calls of a reply (#103)', () => {
       attachments: [renderAttachment],
     }));
     const record = view.getByTestId('chat-review-record');
+    // The card starts folded to its title line (count only); opening it shows the calls.
+    expect(record.textContent).not.toContain('检查了 @model3');
+    fireEvent.click(view.getByTestId('chat-review-record-toggle'));
     expect(record.textContent).toContain('检查了 @model3：1.9万 三角面 · 有 UV · 不水密');
     expect(record.textContent).toContain('渲染了 @model3：正面');
     expect(record.textContent).toContain(messages['ui.chat.review.record_title']);
@@ -129,6 +132,7 @@ describe('the self-check calls of a reply (#103)', () => {
     const view = renderMessage(reply({
       content: '完成。', toolCalls: [renderCall], images: [renderImage], attachments: [renderAttachment],
     }));
+    fireEvent.click(view.getByTestId('chat-review-record-toggle'));
     fireEvent.click(view.getByTestId('chat-review-thumbnail'));
     expect(useStudioStore.getState().stageImage).toEqual({
       url: renderImage.url,
@@ -168,6 +172,7 @@ describe('the persisted self-check record of a result (#246)', () => {
     expect(badge.getAttribute('data-role')).toBe('passed');
     expect(badge.textContent).toBe(messages['ui.chat.self_check.status_passed']);
     const record = view.getByTestId('chat-self-check-record');
+    fireEvent.click(view.getByTestId('chat-self-check-record-toggle'));
     expect(record.textContent).toContain('matches the reference');
   });
 
