@@ -50,24 +50,37 @@ func New(t *testing.T, config fakeupstream.Config, versions ...fakeupstream.Vers
 // stay in force.
 func (f *Fixture) RouteHost(host string) http.RoundTripper {
 	f.T.Helper()
+	return f.RouteHosts(host)
+}
+
+// RouteHosts is RouteHost for an Adapter that sends its API requests and reads
+// its artifacts through one client: every named host reaches the fixture's
+// server and no other host does, so the whole run stays inside the fake and a
+// request to a host the test did not name fails instead of leaving the process.
+func (f *Fixture) RouteHosts(hosts ...string) http.RoundTripper {
+	f.T.Helper()
 	target, err := url.Parse(f.Server.URL)
 	if err != nil {
 		f.T.Fatal(err)
 	}
 	direct := &http.Transport{Proxy: nil}
 	f.T.Cleanup(direct.CloseIdleConnections)
-	return hostRouter{host: host, target: target, next: direct}
+	return hostRouter{hosts: hosts, target: target, next: direct}
 }
 
 type hostRouter struct {
-	host   string
+	hosts  []string
 	target *url.URL
 	next   http.RoundTripper
 }
 
 func (r hostRouter) RoundTrip(request *http.Request) (*http.Response, error) {
-	if !strings.EqualFold(request.URL.Hostname(), r.host) {
-		return nil, fmt.Errorf("testkit: a request for %q reached a transport that only routes %q to the fake", request.URL.Hostname(), r.host)
+	named := false
+	for _, host := range r.hosts {
+		named = named || strings.EqualFold(request.URL.Hostname(), host)
+	}
+	if !named {
+		return nil, fmt.Errorf("testkit: a request for %q reached a transport that only routes %q to the fake", request.URL.Hostname(), strings.Join(r.hosts, ", "))
 	}
 	routed := request.Clone(request.Context())
 	routed.URL.Scheme, routed.URL.Host, routed.Host = r.target.Scheme, r.target.Host, r.target.Host

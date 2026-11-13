@@ -31,6 +31,11 @@ func (h *processingHarness) runLockedRodin(call string, brief chat.ProductionBri
 	return result
 }
 
+// A Rodin Quad face is about 2.18 triangles in the delivered GLB (one real run,
+// 2026-11-13, #294 follow-up: quality_override 10000 gave about 21,800 triangles);
+// the rule reads it as 2.2, as internal/catalog's rodinQuadTrianglesPerFacePercent.
+const rodinQuadTrianglesPerFacePercent = 220
+
 func TestRodinGamePurposesFreezeQuadWithinTheBudget(t *testing.T) {
 	const rodin = "hyper3d/rodin-gen-2.5/text-to-3d"
 	for _, test := range []struct {
@@ -38,6 +43,9 @@ func TestRodinGamePurposesFreezeQuadWithinTheBudget(t *testing.T) {
 		brief   map[string]any
 		want    map[string]any
 		sources map[string]string
+		// triangles is the triangle budget the purpose resolves to on the brief's
+		// platform (the purpose's own without one); set for the Quad cases.
+		triangles int
 	}{
 		// The advised parameters (topology, count and texture mode) keep the purpose as their
 		// provenance and reason; the plain switches are applied as values only
@@ -45,21 +53,70 @@ func TestRodinGamePurposesFreezeQuadWithinTheBudget(t *testing.T) {
 		{
 			name:  "a character is Quad, T/A posed and normal baked",
 			brief: map[string]any{"purpose": "game_character"},
+			want: map[string]any{"mesh_mode": "Quad", "quality_override": float64(8000), "texture_mode": "high",
+				"TAPose": true, "quad_normal": true},
+			sources: map[string]string{
+				"mesh_mode": "profile:game_character", "quality_override": "profile:game_character",
+				"texture_mode": "profile:game_character",
+			},
+			triangles: 60000,
+		},
+		{
+			// The phone class budget is 20,000 triangles: 8000 quads are about 17,600.
+			name:  "a character on a phone keeps the Quad count inside the phone budget",
+			brief: map[string]any{"purpose": "game_character", "target_platform": "mobile"},
+			want: map[string]any{"mesh_mode": "Quad", "quality_override": float64(8000), "texture_mode": "high",
+				"TAPose": true, "quad_normal": true},
+			sources: map[string]string{
+				"mesh_mode": "profile:game_character", "quality_override": "profile:game_character",
+				"texture_mode": "profile:game_character",
+			},
+			triangles: 20000,
+		},
+		{
+			// PC and console keep the count they had before the real run: about 22,000
+			// triangles of a 100,000 budget, and the 2K mode is still the highest one
+			// inside the 4096 texture budget.
+			name:  "a character on PC and console keeps its larger count",
+			brief: map[string]any{"purpose": "game_character", "target_platform": "pc_console"},
 			want: map[string]any{"mesh_mode": "Quad", "quality_override": float64(10000), "texture_mode": "high",
 				"TAPose": true, "quad_normal": true},
 			sources: map[string]string{
 				"mesh_mode": "profile:game_character", "quality_override": "profile:game_character",
 				"texture_mode": "profile:game_character",
 			},
+			triangles: 100000,
 		},
 		{
 			name:  "a prop is Quad and normal baked, without a pose",
 			brief: map[string]any{"purpose": "game_prop"},
+			want: map[string]any{"mesh_mode": "Quad", "quality_override": float64(3200), "texture_mode": "high",
+				"TAPose": false, "quad_normal": true},
+			sources: map[string]string{
+				"mesh_mode": "profile:game_prop", "quality_override": "profile:game_prop", "texture_mode": "profile:game_prop",
+			},
+			triangles: 20000,
+		},
+		{
+			// The phone class budget of a prop is 8,000 triangles: 3200 quads are about 7,040.
+			name:  "a prop on a phone keeps the Quad count inside the phone budget",
+			brief: map[string]any{"purpose": "game_prop", "target_platform": "mobile"},
+			want: map[string]any{"mesh_mode": "Quad", "quality_override": float64(3200), "texture_mode": "high",
+				"TAPose": false, "quad_normal": true},
+			sources: map[string]string{
+				"mesh_mode": "profile:game_prop", "quality_override": "profile:game_prop", "texture_mode": "profile:game_prop",
+			},
+			triangles: 8000,
+		},
+		{
+			name:  "a prop on PC and console keeps its larger count",
+			brief: map[string]any{"purpose": "game_prop", "target_platform": "pc_console"},
 			want: map[string]any{"mesh_mode": "Quad", "quality_override": float64(4000), "texture_mode": "high",
 				"TAPose": false, "quad_normal": true},
 			sources: map[string]string{
 				"mesh_mode": "profile:game_prop", "quality_override": "profile:game_prop", "texture_mode": "profile:game_prop",
 			},
+			triangles: 40000,
 		},
 		{
 			// web_ar has no Rodin override: the budget alone bounds the Raw count
@@ -117,12 +174,16 @@ func TestRodinGamePurposesFreezeQuadWithinTheBudget(t *testing.T) {
 			if _, reported := h.content(result)[budgetNoteKey]; reported {
 				t.Fatalf("a value within the budget was reported: %s", result.AgentContent)
 			}
-			// A Quad count is two triangles each in the GLB: the frozen count must
-			// leave the purpose's triangle budget unbroken once doubled.
+			// A Quad count is about 2.2 triangles each in the GLB: the frozen count
+			// must leave the triangle budget of the brief's platform unbroken once
+			// converted.
 			if input["mesh_mode"] == "Quad" {
-				budget := map[string]float64{"game_character": 60000, "game_prop": 20000}[test.brief["purpose"].(string)]
-				if 2*input["quality_override"].(float64) > budget {
-					t.Fatalf("%v quads exceed the %v-triangle budget", input["quality_override"], budget)
+				if test.triangles == 0 {
+					t.Fatalf("%s: a Quad case needs the triangle budget it is held to", test.name)
+				}
+				triangles := int(input["quality_override"].(float64)) * rodinQuadTrianglesPerFacePercent / 100
+				if triangles > test.triangles {
+					t.Fatalf("%v quads are about %d triangles, over the %d-triangle budget", input["quality_override"], triangles, test.triangles)
 				}
 			}
 		})

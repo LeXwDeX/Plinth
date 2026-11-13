@@ -107,16 +107,18 @@ func normalizeForOffering(loaded *catalog.Catalog, offering generation.Offering,
 }
 
 // Every value the Schema lets a request carry reaches the service and is
-// accepted: the edges of both ranges and each tier the Schema chooses by.
+// accepted: the edges of both ranges, each tier the Schema chooses the coarse
+// resolution by, and a fine resolution the caller raises to the service's 2048
+// (the Schema never chooses that one by itself, #299).
 func TestEverySchemaAllowedResolutionIsAcceptedByTheService(t *testing.T) {
 	f := testkit.New(t, fakeupstream.Config{}, mattingapiv1.Version())
 	for name, resolutions := range map[string]map[string]any{
-		"the declared defaults": {},
-		"both at the minimum":   {"birefnet_process_res": 512, "sdmatte_process_res": 512},
-		"both at the maximum":   {"birefnet_process_res": 4096, "sdmatte_process_res": 2048},
-		"the larger tier":       {"birefnet_process_res": 2048, "sdmatte_process_res": 2048},
-		"only the coarse step":  {"birefnet_process_res": 3072},
-		"only the fine step":    {"sdmatte_process_res": 1536},
+		"the declared defaults":                        {},
+		"both at the minimum":                          {"birefnet_process_res": 512, "sdmatte_process_res": 512},
+		"both at the maximum":                          {"birefnet_process_res": 4096, "sdmatte_process_res": 2048},
+		"the larger coarse tier and a raised fine one": {"birefnet_process_res": 2048, "sdmatte_process_res": 2048},
+		"only the coarse step":                         {"birefnet_process_res": 3072},
+		"only the fine step":                           {"sdmatte_process_res": 1536},
 	} {
 		if err := startAgainstTheFake(t, f, resolutions); err != nil {
 			t.Fatalf("%s: the service refused what the Schema allows: %v", name, err)

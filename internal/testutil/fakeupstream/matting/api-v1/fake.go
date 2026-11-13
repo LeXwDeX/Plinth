@@ -1,10 +1,14 @@
 package mattingapiv1
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg" // decoders for the picture formats the Offering accepts, so an upload's size can be read
+	_ "image/png"
 	"io"
 	"math"
 	"mime"
@@ -13,6 +17,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/tiff"
+	_ "golang.org/x/image/webp"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
@@ -41,6 +49,14 @@ const statusesChecked = "2026-11-08"
 // its source (issue #284): the process-resolution fields below.
 const limitsChecked = "2026-11-12"
 
+// outOfMemoryObserved is the date the service was seen failing a task for want
+// of GPU memory (#299): a batch of a 2048x2048 and a 16x16 picture, both process
+// resolutions at 2048, on a GPU other tenants were already using, failed ten
+// seconds after it started, and the failed task's error_message was
+// OutOfMemoryMessage's text with the size of the picture it names. The batch's
+// status word and what the other picture's task showed were not recorded.
+const outOfMemoryObserved = "2026-11-13"
+
 // docs: the service is the operator's own and publishes no documentation; its
 // FastAPI OpenAPI page is the reference.
 const docs = "internal matting service (FastAPI /docs)"
@@ -48,10 +64,10 @@ const docs = "internal matting service (FastAPI /docs)"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/jobs", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v1/jobs",
 		DocURL: docs, CheckedAt: captured,
-		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service. Which files of a batch are rejected, fail while processing or come back under another source_name is chosen by the test-only " + FileFaultsHeader + " header (the partial-images scenario rejects every file but the first): the service's own reasons for refusing or failing a file, and whether it echoes the name of such a file, were never observed"},
+		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service. Which files of a batch are rejected, fail while processing or come back under another source_name is chosen by the test-only " + FileFaultsHeader + " header (the partial-images scenario rejects every file but the first): the service's own reasons for refusing a file, and whether it echoes the name of such a file, were never observed, and the one reason it gave for failing a file was seen once (a GPU out of memory, see the batch route)"},
 	{Method: "GET", Path: "/batches/{batch_id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/batches/{id}",
 		DocURL: docs, CheckedAt: captured,
-		Note: "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED or FAILED), the completed batch with no artifact (every file REJECTED or FAILED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them"},
+		Note: "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED or FAILED), the completed batch with no artifact (every file REJECTED or FAILED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them. One reason a task fails is real: on " + outOfMemoryObserved + " the service failed a batch of a 2048x2048 and a 16x16 picture, both process resolutions at 2048, on a GPU other tenants were already using (#299), and the failed task's error_message was OutOfMemoryMessage's text (a " + FileFaultsHeader + " fault of kind gpu_oom reproduces it). Only that message was recorded: the batch's status word, what the other picture's task showed, and which resolutions the GPU can hold are unknown, so the fake does not claim them"},
 	{Method: "GET", Path: "/tasks/{task_id}/download", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/tasks/{id}/download",
 		DocURL: docs, CheckedAt: captured,
 		Note: "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it. Request-phase faults (429/500/timeout) answer here like on the other routes; a REJECTED task, and the task of a file that fails (" + FileFaultsHeader + "), has no artifact and answers 404 (constructed from the TaskStatus enum checked " + statusesChecked + ")"},
@@ -74,14 +90,43 @@ type batch struct {
 
 // batchTask is one uploaded file's task. rejected records that the service's
 // input validation refused the file, failed that processing it fails once the
-// batch finishes; neither task has an artifact. renamed records that the
-// service answers the file under a name of its own.
+// batch finishes; neither task has an artifact. outOfMemory says a failed file
+// fails for want of GPU memory, and width and height are the size read from the
+// upload (zero when it is not a picture the fake can read). renamed records that
+// the service answers the file under a name of its own.
 type batchTask struct {
-	id       string
-	name     string
-	rejected bool
-	failed   bool
-	renamed  bool
+	id            string
+	name          string
+	rejected      bool
+	failed        bool
+	outOfMemory   bool
+	width, height int
+	renamed       bool
+}
+
+// genericFailure is the error_message of a task that fails with no reason the
+// service was ever seen to give.
+const genericFailure = "Fake matting failure."
+
+// OutOfMemoryMessage is the error_message the service gave the task of a
+// picture its GPU could not hold, verbatim as seen on outOfMemoryObserved (#299)
+// except for the pixel size, which is the picture's own. A size the fake could
+// not read leaves out the size clause: the service always reads the size, so
+// that form was never observed.
+func OutOfMemoryMessage(width, height int) string {
+	size := ""
+	if width > 0 && height > 0 {
+		size = fmt.Sprintf("（图片尺寸: %d×%d）", width, height)
+	}
+	return "GPU 显存不足，无法处理该图片" + size + "。建议：使用更大显存的 GPU，或降低 BIREFNET_PROCESS_RES / SDMATTE_PROCESS_RES 配置。"
+}
+
+// failureMessage is the error_message of the task once it is FAILED.
+func (t batchTask) failureMessage() string {
+	if t.outOfMemory {
+		return OutOfMemoryMessage(t.width, t.height)
+	}
+	return genericFailure
 }
 
 // renamedSource is the source_name of a renamed file. It is not a name the
@@ -109,6 +154,11 @@ func (t batchTask) echoedName() string {
 //   - failed: processing the file fails. The task shows the state of the others
 //     (READY, RUNNING) and ends FAILED, with an error_message and no artifact,
 //     once the batch finishes;
+//   - gpu_oom: processing the file fails for want of GPU memory, the one
+//     failure reason seen from the live service (#299, outOfMemoryObserved). It
+//     is a failed whose error_message is OutOfMemoryMessage: the service's
+//     out-of-memory text, naming the size the fake reads from the uploaded
+//     picture (a file that is not a readable picture is named without a size);
 //   - renamed: the service answers the file under a name of its own, so its
 //     source_name is not the name that was uploaded.
 //
@@ -117,8 +167,8 @@ func (t batchTask) echoedName() string {
 // batch) is ignored. A batch in which every file succeeds ends SUCCESS, any other
 // one PARTIAL_SUCCESS. Test-only and constructed from the same enums as the
 // rest of the batch states (see the endpoint notes): the service's own reasons
-// for refusing or failing a file, and whether it echoes the name of such a file,
-// were never observed.
+// for refusing a file, and whether it echoes the name of such a file, were never
+// observed, and its reason for failing one only once (gpu_oom).
 const FileFaultsHeader = "X-Fake-File-Faults"
 
 type handler struct {
@@ -222,11 +272,14 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 	b := &batch{id: fmt.Sprintf("batch_fake%04d", number), scenario: scenario}
 	for index, name := range names {
 		b.tasks = append(b.tasks, batchTask{
-			id:       fmt.Sprintf("task_fake%04d_%02d", number, index+1),
-			name:     name,
-			rejected: faults[index].rejected,
-			failed:   faults[index].failed && !faults[index].rejected,
-			renamed:  faults[index].renamed,
+			id:          fmt.Sprintf("task_fake%04d_%02d", number, index+1),
+			name:        name,
+			rejected:    faults[index].rejected,
+			failed:      faults[index].failed && !faults[index].rejected,
+			outOfMemory: faults[index].outOfMemory && !faults[index].rejected,
+			width:       form.sizes[index].width,
+			height:      form.sizes[index].height,
+			renamed:     faults[index].renamed,
 		})
 	}
 	h.batches[b.id] = b
@@ -242,7 +295,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 // fileFault is what is wrong with one file of a batch (see FileFaultsHeader).
-type fileFault struct{ rejected, failed, renamed bool }
+type fileFault struct{ rejected, failed, outOfMemory, renamed bool }
 
 // fileFaults says what is wrong with each of the total files of a batch: what
 // the request's FileFaultsHeader names, and under ScenarioPartialImages the
@@ -263,6 +316,8 @@ func fileFaults(r *http.Request, scenario fakeupstream.Scenario, total int) []fi
 			faults[index-1].rejected = true
 		case "failed":
 			faults[index-1].failed = true
+		case "gpu_oom":
+			faults[index-1].failed, faults[index-1].outOfMemory = true, true
 		case "renamed":
 			faults[index-1].renamed = true
 		}
@@ -278,11 +333,22 @@ func fileFaults(r *http.Request, scenario fakeupstream.Scenario, total int) []fi
 }
 
 // upload is what the create route reads from the multipart request: the file
-// names of the files parts and the raw pipeline_params_json field.
+// names of the files parts, the size of each picture and the raw
+// pipeline_params_json field.
 type upload struct {
 	names    []string
+	sizes    []pictureSize
 	pipeline string
 }
+
+// pictureSize is the pixel size of an uploaded picture; zero when its header
+// cannot be read.
+type pictureSize struct{ width, height int }
+
+// headerRead bounds how much of a file is looked at for its size: every
+// supported format states it in the first bytes, a JPEG after any metadata
+// segments in front of it.
+const headerRead = 1 << 20
 
 // readUpload reads the uploaded parts; the request is valid when at least one
 // file arrived.
@@ -300,8 +366,10 @@ func readUpload(r *http.Request) (upload, bool) {
 		}
 		switch {
 		case part.FormName() == "files" && part.FileName() != "":
+			head, _ := io.ReadAll(io.LimitReader(part, headerRead))
 			_, _ = io.Copy(io.Discard, part)
 			result.names = append(result.names, part.FileName())
+			result.sizes = append(result.sizes, sizeOf(head))
 		case part.FormName() == PipelineField && part.FileName() == "":
 			raw, _ := io.ReadAll(io.LimitReader(part, 1<<20))
 			result.pipeline = string(raw)
@@ -310,6 +378,16 @@ func readUpload(r *http.Request) (upload, bool) {
 		}
 	}
 	return result, len(result.names) > 0
+}
+
+// sizeOf reads the pixel size from the start of a picture file; zero when it is
+// not a picture the fake can read.
+func sizeOf(head []byte) pictureSize {
+	config, _, err := image.DecodeConfig(bytes.NewReader(head))
+	if err != nil {
+		return pictureSize{}
+	}
+	return pictureSize{width: config.Width, height: config.Height}
 }
 
 // PipelineField is the multipart field that carries the pipeline parameters as
@@ -430,7 +508,7 @@ func (h *handler) envelope(template map[string]any, b *batch, batchStatus, taskS
 		task["download_path"] = samplePrefix + "/tasks/" + entry.id + "/download"
 		task["error_message"], task["invalid_reason"] = nil, nil
 		if status == "FAILED" {
-			task["error_message"] = "Fake matting failure."
+			task["error_message"] = entry.failureMessage()
 		}
 		tasks = append(tasks, task)
 	}

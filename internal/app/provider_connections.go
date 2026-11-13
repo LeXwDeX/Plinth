@@ -316,6 +316,7 @@ func buildProviderAdapterWithTransport(
 			AuthPrefix:     connection.AuthPrefix,
 			RequestTimeout: timeout,
 			HTTPClient:     wireHTTPClient(httpTransport, connection.ID, timeout),
+			ErrorMapping:   connection.ErrorMapping,
 			InputAssets:    inputs,
 			ScratchDir:     scratchDir,
 		})

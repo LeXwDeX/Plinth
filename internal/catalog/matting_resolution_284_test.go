@@ -31,10 +31,14 @@ func mattingParameter(t *testing.T, name string) schema.Parameter {
 	return schema.Parameter{}
 }
 
-// #284: the Schema lets the two working resolutions go as high as the service
-// accepts and chooses the default by the source picture, with the static
-// default kept for pictures that cannot be measured. Matting stays free.
-func TestMattingResolutionsReachTheServiceRangeAndFollowTheSource(t *testing.T) {
+// #284, #299: the Schema lets the two working resolutions go as high as the
+// service accepts. BiRefNet's default follows the source picture, up to the
+// service's own GPU default of 2048. SDMatte's does not: the service's default is
+// 1024 even on a GPU, and the live run of 2026-11-13 ran the GPU out of memory
+// with it raised to 2048 for a 2048x2048 picture, so it stays 1024 whatever the
+// picture and a larger value is only what a caller asks for. Both keep a static
+// default for pictures that cannot be measured. Matting stays free.
+func TestMattingResolutionsReachTheServiceRangeAndSDMatteStaysAtItsDefault(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		maximum float64
@@ -49,15 +53,18 @@ func TestMattingResolutionsReachTheServiceRangeAndFollowTheSource(t *testing.T) 
 		if string(parameter.Default) != "1024" {
 			t.Fatalf("%s static default = %s, want 1024 for pictures that cannot be measured", test.name, parameter.Default)
 		}
-		rule := parameter.DefaultBySourceSide
-		if rule == nil || rule.Source != "source_assets" || len(rule.Tiers) != 2 {
-			t.Fatalf("%s rule = %+v", test.name, rule)
+	}
+	rule := mattingParameter(t, "birefnet_process_res").DefaultBySourceSide
+	if rule == nil || rule.Source != "source_assets" || len(rule.Tiers) != 2 {
+		t.Fatalf("birefnet_process_res rule = %+v", rule)
+	}
+	for side, want := range map[int64]string{1: "1024", 1024: "1024", 1025: "2048", 4096: "2048", 20000: "2048"} {
+		if got, ok := rule.ValueFor(side); !ok || string(got) != want {
+			t.Fatalf("birefnet_process_res for a long side of %d = %s, want %s", side, got, want)
 		}
-		for side, want := range map[int64]string{1: "1024", 1024: "1024", 1025: "2048", 4096: "2048", 20000: "2048"} {
-			if got, ok := rule.ValueFor(side); !ok || string(got) != want {
-				t.Fatalf("%s for a long side of %d = %s, want %s", test.name, side, got, want)
-			}
-		}
+	}
+	if rule := mattingParameter(t, "sdmatte_process_res").DefaultBySourceSide; rule != nil {
+		t.Fatalf("sdmatte_process_res follows the source picture again: %+v", rule)
 	}
 	loaded, err := catalog.LoadDefault()
 	if err != nil {
@@ -72,16 +79,14 @@ func TestMattingResolutionsReachTheServiceRangeAndFollowTheSource(t *testing.T) 
 // The tiers must be values the parameter itself accepts, or a default the
 // Schema supplies would be refused by its own validation.
 func TestMattingTierValuesAreWithinTheDeclaredRange(t *testing.T) {
-	for _, name := range []string{"birefnet_process_res", "sdmatte_process_res"} {
-		parameter := mattingParameter(t, name)
-		for _, tier := range parameter.DefaultBySourceSide.Tiers {
-			var value float64
-			if err := json.Unmarshal(tier.Value, &value); err != nil {
-				t.Fatal(err)
-			}
-			if value < *parameter.Minimum || value > *parameter.Maximum {
-				t.Fatalf("%s tier value %v is outside %v..%v", name, value, *parameter.Minimum, *parameter.Maximum)
-			}
+	parameter := mattingParameter(t, "birefnet_process_res")
+	for _, tier := range parameter.DefaultBySourceSide.Tiers {
+		var value float64
+		if err := json.Unmarshal(tier.Value, &value); err != nil {
+			t.Fatal(err)
+		}
+		if value < *parameter.Minimum || value > *parameter.Maximum {
+			t.Fatalf("birefnet_process_res tier value %v is outside %v..%v", value, *parameter.Minimum, *parameter.Maximum)
 		}
 	}
 }
