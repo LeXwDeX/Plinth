@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -439,6 +441,12 @@ func TestFileFaultsChooseWhatBecomesOfEachFile(t *testing.T) {
 			[]string{"REJECTED", "READY"}, []string{"REJECTED", "SUCCEEDED"}, "PARTIAL_SUCCESS"},
 		{"spaces around the entries are tolerated", " 2 : rejected , 1 : failed ", 2,
 			[]string{"READY", "REJECTED"}, []string{"FAILED", "REJECTED"}, "PARTIAL_SUCCESS"},
+		{"a file the GPU cannot hold fails like any other that fails", "2:gpu_oom", 2,
+			[]string{"READY", "READY"}, []string{"SUCCEEDED", "FAILED"}, "PARTIAL_SUCCESS"},
+		{"every file runs out of memory", "1:gpu_oom,2:gpu_oom", 2,
+			[]string{"READY", "READY"}, []string{"FAILED", "FAILED"}, "PARTIAL_SUCCESS"},
+		{"a file that is rejected and would run out of memory stays rejected", "1:rejected,1:gpu_oom", 2,
+			[]string{"REJECTED", "READY"}, []string{"REJECTED", "SUCCEEDED"}, "PARTIAL_SUCCESS"},
 		{"a renamed file is not a fault of its result", "2:renamed", 2,
 			[]string{"READY", "READY"}, []string{"SUCCEEDED", "SUCCEEDED"}, "SUCCESS"},
 		{"entries it does not understand are ignored", "9:rejected,0:failed,x:failed,1:exploded,1,:failed", 2,
@@ -545,6 +553,147 @@ func TestFileFaultsBelongToTheCreatingRequest(t *testing.T) {
 	}
 	if status := taskStatuses(t, final); final["batch_status"] != "SUCCESS" || !slices.Equal(status, []string{"SUCCEEDED", "SUCCEEDED"}) {
 		t.Fatalf("a poll changed the batch: %v", final)
+	}
+}
+
+// uploadedPicture is one files part: a name and the bytes of a picture.
+type uploadedPicture struct {
+	name string
+	data []byte
+}
+
+// pngOf is a real PNG of the given size; the pixels are empty, so a large one
+// stays small.
+func pngOf(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewGray(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	return encoded.Bytes()
+}
+
+// jobFormWithPictures sends the declared defaults and one files part per
+// picture, carrying that picture's own bytes.
+func jobFormWithPictures(t *testing.T, pictures ...uploadedPicture) testkit.Body {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	_ = writer.WriteField("pipeline_params_json", pipeline)
+	for _, picture := range pictures {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", `form-data; name="files"; filename="`+picture.name+`"`)
+		header.Set("Content-Type", "image/png")
+		part, _ := writer.CreatePart(header)
+		_, _ = part.Write(picture.data)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return testkit.Body{ContentType: writer.FormDataContentType(), Data: buffer.Bytes()}
+}
+
+// realOutOfMemory is the error_message the live service gave on 2026-11-13 for a
+// 2048x2048 picture (#299), character for character. It is written out here on
+// purpose: the test must catch the fake drifting from what the service said, so
+// it does not build the text from the fake's own.
+const realOutOfMemory = "GPU 显存不足，无法处理该图片（图片尺寸: 2048×2048）。建议：使用更大显存的 GPU，或降低 BIREFNET_PROCESS_RES / SDMATTE_PROCESS_RES 配置。"
+
+// #299: the one reason the live service was seen to give for failing a file is a
+// GPU that cannot hold the picture. gpu_oom fails the file with that text, with
+// the size of the picture the fake reads from the upload, in the field a failed
+// task carries its error in; the other file of the batch is not touched.
+func TestGPUOutOfMemoryFailsThePictureWithTheServicesOwnText(t *testing.T) {
+	if got := OutOfMemoryMessage(2048, 2048); got != realOutOfMemory {
+		t.Fatalf("OutOfMemoryMessage(2048, 2048) = %q, want what the service said: %q", got, realOutOfMemory)
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	// The batch of the real run: a 2048x2048 picture and a 16x16 one.
+	status, _, created := f.Do("POST", Prefix+"/jobs", key,
+		jobFormWithPictures(t, uploadedPicture{"input_1.png", pngOf(t, 2048, 2048)}, uploadedPicture{"input_2.png", pngOf(t, 16, 16)}),
+		FileFaultsHeader, "1:gpu_oom")
+	if status != http.StatusOK {
+		t.Fatalf("create: %d %v", status, created)
+	}
+	// The GPU gives out while the batch runs, not when it is accepted.
+	if got := taskStatuses(t, created); !slices.Equal(got, []string{"READY", "READY"}) {
+		t.Fatalf("created statuses = %v", got)
+	}
+	final := pollUntil(f, t, created["batch_id"].(string), "PARTIAL_SUCCESS")
+	big := testkit.Field(t, final, "tasks", 0).(map[string]any)
+	if big["status"] != "FAILED" || big["downloadable"] != false || big["error_message"] != realOutOfMemory || big["invalid_reason"] != nil {
+		t.Fatalf("the 2048x2048 task = %v", big)
+	}
+	small := testkit.Field(t, final, "tasks", 1).(map[string]any)
+	if small["status"] != "SUCCEEDED" || small["downloadable"] != true || small["error_message"] != nil {
+		t.Fatalf("the 16x16 task = %v", small)
+	}
+	// Only the picture that was matted has an artifact.
+	for task, want := range map[string]int{big["task_id"].(string): http.StatusNotFound, small["task_id"].(string): http.StatusOK} {
+		if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+task+"/download", key, nil); status != want {
+			t.Fatalf("download of %s = %d, want %d", task, status, want)
+		}
+	}
+}
+
+// The text names the size of the picture the file really is, width first, so a
+// test that stands in for a large picture gets the message that picture would.
+func TestGPUOutOfMemoryTextNamesEachPicturesOwnSize(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	pictures := []uploadedPicture{
+		{"input_1.png", pngOf(t, 640, 480)},
+		{"input_2.png", pngOf(t, 1, 3000)},
+		{"input_3.png", pngOf(t, 4096, 4096)},
+	}
+	_, _, created := f.Do("POST", Prefix+"/jobs", key, jobFormWithPictures(t, pictures...), FileFaultsHeader, "1:gpu_oom,2:gpu_oom,3:gpu_oom")
+	final := pollUntil(f, t, created["batch_id"].(string), "PARTIAL_SUCCESS")
+	for index, want := range []string{"640×480", "1×3000", "4096×4096"} {
+		message, _ := testkit.Field(t, final, "tasks", index, "error_message").(string)
+		if !strings.Contains(message, "（图片尺寸: "+want+"）") || !strings.HasPrefix(message, "GPU 显存不足，无法处理该图片（") {
+			t.Fatalf("task %d error_message = %q, want it to name %s", index+1, message, want)
+		}
+	}
+}
+
+// The service always reads the size, so the text without one was never seen: a
+// file the fake cannot read a size from gets the text without the size clause,
+// and still the same failure.
+func TestGPUOutOfMemoryOfAFileThatIsNotAPictureLeavesTheSizeOut(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	_, _, created := f.Do("POST", Prefix+"/jobs", key, jobFormWithFiles(t, "input_1.png"), FileFaultsHeader, "1:gpu_oom")
+	final := pollUntil(f, t, created["batch_id"].(string), "PARTIAL_SUCCESS")
+	task := testkit.Field(t, final, "tasks", 0).(map[string]any)
+	message, _ := task["error_message"].(string)
+	if task["status"] != "FAILED" || message != OutOfMemoryMessage(0, 0) ||
+		strings.Contains(message, "图片尺寸") || !strings.HasPrefix(message, "GPU 显存不足，无法处理该图片。建议：") {
+		t.Fatalf("task = %v", task)
+	}
+}
+
+// The batch-level scenario and the per-file fault combine: the batch ends FAILED,
+// every file that was not refused fails with it, and the file that ran out of
+// memory is the one that says so; the others fail without the service's reason
+// (the generic text), so a reader that looks only at the first message misses it.
+func TestGPUOutOfMemoryInAFailedBatchIsOnlyOnTheFileThatRanOut(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	_, _, created := f.Do("POST", Prefix+"/jobs", key,
+		jobFormWithPictures(t, uploadedPicture{"input_1.png", pngOf(t, 16, 16)}, uploadedPicture{"input_2.png", pngOf(t, 2048, 2048)}),
+		"X-Fake-Scenario", "task-failed", FileFaultsHeader, "2:gpu_oom")
+	final := pollUntil(f, t, created["batch_id"].(string), "FAILED")
+	if got := taskStatuses(t, final); !slices.Equal(got, []string{"FAILED", "FAILED"}) {
+		t.Fatalf("final statuses = %v", got)
+	}
+	if message := testkit.Field(t, final, "tasks", 0, "error_message"); message != genericFailure {
+		t.Fatalf("task 1 error_message = %v, want the generic failure", message)
+	}
+	if message := testkit.Field(t, final, "tasks", 1, "error_message"); message != realOutOfMemory {
+		t.Fatalf("task 2 error_message = %v, want %q", message, realOutOfMemory)
+	}
+	// The file that ran out of memory has no artifact. (What the batch-level
+	// scenario does to the download of the other files is not this fault's.)
+	id := testkit.Field(t, final, "tasks", 1, "task_id").(string)
+	if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+id+"/download", key, nil); status != http.StatusNotFound {
+		t.Fatalf("download of the task that ran out of memory = %d", status)
 	}
 }
 
