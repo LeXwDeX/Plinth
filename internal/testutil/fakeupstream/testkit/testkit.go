@@ -1,14 +1,17 @@
 // Package testkit holds the helpers the fake upstream versions' tests share: a
-// server fixture, a JSON request helper and Plinth's delivery check over
-// fetched bytes. Test-only, like the rest of fakeupstream.
+// server fixture, a JSON request helper, a transport that maps an HTTPS artifact
+// host back to the fixture and Plinth's delivery check over fetched bytes.
+// Test-only, like the rest of fakeupstream.
 package testkit
 
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +38,40 @@ func New(t *testing.T, config fakeupstream.Config, versions ...fakeupstream.Vers
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
 	return &Fixture{T: t, Server: server, Fake: fake}
+}
+
+// RouteHost returns a transport that sends every request for host to this
+// fixture's server and refuses any other host. A fake started with
+// fakeupstream.Config.ArtifactOrigin "https://<host>" writes that origin into
+// the artifact URLs of its tasks; an Adapter that downloads only from public
+// HTTPS hosts (Tripo's anonymous native-source client, installed through
+// tripo.Config.NativeSourceTransport) reads them through this transport, so the
+// bytes still come from the fake and the Adapter's own host and scheme checks
+// stay in force.
+func (f *Fixture) RouteHost(host string) http.RoundTripper {
+	f.T.Helper()
+	target, err := url.Parse(f.Server.URL)
+	if err != nil {
+		f.T.Fatal(err)
+	}
+	direct := &http.Transport{Proxy: nil}
+	f.T.Cleanup(direct.CloseIdleConnections)
+	return hostRouter{host: host, target: target, next: direct}
+}
+
+type hostRouter struct {
+	host   string
+	target *url.URL
+	next   http.RoundTripper
+}
+
+func (r hostRouter) RoundTrip(request *http.Request) (*http.Response, error) {
+	if !strings.EqualFold(request.URL.Hostname(), r.host) {
+		return nil, fmt.Errorf("testkit: a request for %q reached a transport that only routes %q to the fake", request.URL.Hostname(), r.host)
+	}
+	routed := request.Clone(request.Context())
+	routed.URL.Scheme, routed.URL.Host, routed.Host = r.target.Scheme, r.target.Host, r.target.Host
+	return r.next.RoundTrip(routed)
 }
 
 // Do sends one request to path (which includes the version prefix). key ""

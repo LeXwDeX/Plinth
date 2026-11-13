@@ -4,17 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
+	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/testkit"
 	tripov3 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/tripo/v3"
 )
 
@@ -22,9 +20,11 @@ import (
 // from the frozen input, so the size a session purpose bounds (a game: 2K) is
 // the size of every exported file, while the default stays the request the
 // exports have always been (8192). The tests use the shipped Product Schema and
-// the real adapter; the scripted upstream plays the part of Tripo, and the
-// requests it saw are then replayed to the Tripo v3 fake, which checks them
-// against the parameters of the official convert page.
+// the real adapter, and the upstream is the Tripo v3 fake: it checks every
+// request against the parameters of the official convert page (a refusal fails
+// the step), serves the model the exports are made from, and shows each export
+// back on its task object, which driveExports holds against what the adapter
+// sent.
 
 // exportSizes are the sizes a processing Offering declares, with the integer
 // the upstream receives for each.
@@ -61,67 +61,147 @@ func shippedRigging(t *testing.T, id string, changes map[string]any) generation.
 	return r
 }
 
-type scriptedExports struct {
-	base     []string
+// exportAssetHost is the host the fake writes into the artifact URLs of these
+// runs. Tripo's native sources are read only over HTTPS from the Offering's
+// asset hosts, so the fake is told to name one and the adapter's source client
+// reaches it through the fixture (testkit.Fixture.RouteHost): the model the
+// exports are made from is the fake's own file, read under the adapter's own
+// host, scheme and GLB checks.
+const exportAssetHost = "assets.example"
+
+// exportRun is one processing step the real adapter ran to completion against
+// the Tripo v3 fake.
+type exportRun struct {
+	fake *testkit.Fixture
+	// source is the fake task the step worked on, baseID the fake task its
+	// processing request created, and model the artifact URL of that task's
+	// result: the source of every export.
+	source, baseID, model string
+	// base are the bodies the processing endpoint received, as the adapter sent
+	// them.
+	base []string
+	// sent are the export requests by format as the adapter sent them (raw), and
+	// converts the same decoded.
+	sent     map[string]string
 	converts map[string]map[string]any
+	// echoes are the parameters the fake's task object shows for each export.
+	echoes   map[string]map[string]any
 	observed generation.Observation
 }
 
-// driveExports runs a started native processing request to completion against a
-// scripted upstream. Each observation uses a new adapter, as a restart does.
-func driveExports(t *testing.T, r generation.StartRequest, endpoint string) scriptedExports {
+// fakeTask creates a task of the Tripo v3 fake the way a client does and returns
+// its id.
+func fakeTask(t *testing.T, fixture *testkit.Fixture, path string, body map[string]any) string {
 	t.Helper()
-	r.Offering.AssetHosts = []string{"assets.example"}
-	run := scriptedExports{converts: map[string]map[string]any{}}
-	var mu sync.Mutex
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
-		if q.Method == http.MethodPost {
-			raw, _ := io.ReadAll(q.Body)
-			if q.URL.Path == "/v3/models/convert" {
-				var body map[string]any
-				_ = json.Unmarshal(raw, &body)
-				format, _ := body["format"].(string)
-				run.converts[format] = body
-				fmt.Fprintf(w, `{"code":0,"data":{"task_id":"child_%s"}}`, format)
-				return
-			}
-			if q.URL.Path != "/v3/"+endpoint {
-				t.Errorf("unexpected POST %s", q.URL.Path)
-			}
-			run.base = append(run.base, string(raw))
-			io.WriteString(w, `{"code":0,"data":{"task_id":"task_processed"}}`)
-			return
-		}
-		id := strings.TrimPrefix(q.URL.Path, "/v3/tasks/")
-		locator := "https://assets.example/processed.glb"
-		if id != "task_processed" {
-			locator = "https://assets.example/" + id + ".bin"
-		}
-		fmt.Fprintf(w, `{"code":0,"data":{"task_id":%q,"status":"success","credits_consumed":10,"output":{"model_url":%q}}}`, id, locator)
-	}))
-	defer server.Close()
-	downloads := 0
+	status, _, created := fixture.Do(http.MethodPost, tripov3.Prefix+"/"+path, "test-key", body)
+	if status != http.StatusOK {
+		t.Fatalf("the fake refused POST %s: %d %v", path, status, created)
+	}
+	id, _ := testkit.Field(t, created, "data", "task_id").(string)
+	return id
+}
+
+// driveExports runs a started native processing request to completion against
+// the Tripo v3 fake. Each observation uses a new adapter, as a restart does.
+// Besides the requests the adapter sent it holds what the fake ran: the task
+// object of every export must show exactly the parameters that were sent (the
+// fake keeps the documented ones and nothing else, the source named
+// original_model_id), so what the tests read from the sent requests is what the
+// fake took.
+func driveExports(t *testing.T, r generation.StartRequest, endpoint string) exportRun {
+	t.Helper()
+	r.Offering.AssetHosts = []string{exportAssetHost}
+	fixture := testkit.New(t, fakeupstream.Config{ArtifactOrigin: "https://" + exportAssetHost}, tripov3.Version())
+	errorMapping, statusMapping := realSampleMappings(t)
+
+	// The model the step works on is a task of the fake, as it is on the real API.
+	run := exportRun{fake: fixture}
+	run.source = fakeTask(t, fixture, "generation/text-to-model", map[string]any{"model": "v3.1-20260211", "prompt": "a robot"})
+	dependency := r.TaskDependencies["source_task"]
+	if dependency.Capability == generation.Capability("mesh-segmentation") {
+		run.source = fakeTask(t, fixture, "mesh/segment", map[string]any{"input": run.source, "model": "v2.0-20260430"})
+	}
+	dependency.UpstreamJob.RemoteID = run.source
+	r.TaskDependencies = map[string]generation.TaskDependency{"source_task": dependency}
+
+	recorder := &rigRecorder{}
+	artifacts := fixture.RouteHost(exportAssetHost)
 	factory := func() *Adapter {
-		a := rigAdapter(t, server)
-		a.nativeSourceClient = nativeDeliveryTestSourceClient(nativeTestGLB, &downloads)
-		return a
+		adapter, err := New(Config{
+			BaseURL: fixture.Server.URL + tripov3.Prefix, APIKey: "test-key", HTTPClient: &http.Client{Transport: recorder},
+			ErrorMapping: errorMapping, StatusMapping: statusMapping,
+			NativeSourceTransport: func(http.RoundTripper) http.RoundTripper { return artifacts },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return adapter
 	}
 	ctx := generation.WithDispatchCheckpointer(context.Background(), &nativeDeliveryPermit{})
 	accepted, err := factory().Start(ctx, r)
 	if err != nil {
 		t.Fatal(err)
 	}
+	run.baseID = accepted.Job.RemoteID
 	q := rigObserve(r, accepted)
-	for i := 0; i < 20 && run.observed.Phase != generation.UpstreamCompleted; i++ {
+	for i := 0; i < 60 && run.observed.Phase != generation.UpstreamCompleted; i++ {
 		if run.observed, err = factory().Observe(ctx, q); err != nil {
 			t.Fatal(err)
+		}
+		if run.observed.Phase == generation.UpstreamFailed {
+			t.Fatalf("the step failed: %+v", run.observed.Failure)
 		}
 		q.Opaque = run.observed.Opaque
 	}
 	if run.observed.Phase != generation.UpstreamCompleted {
 		t.Fatalf("the exports did not complete: %+v", run.observed)
+	}
+
+	run.base = recorder.posts(endpoint)
+	run.sent, run.converts, run.echoes = map[string]string{}, map[string]map[string]any{}, map[string]map[string]any{}
+	for _, raw := range recorder.posts("models/convert") {
+		var body map[string]any
+		if err := json.Unmarshal([]byte(raw), &body); err != nil {
+			t.Fatalf("export request %s: %v", raw, err)
+		}
+		format, _ := body["format"].(string)
+		if _, again := run.converts[format]; again {
+			t.Errorf("the %s export was requested twice", format)
+		}
+		run.sent[format], run.converts[format] = raw, body
+		// Every export is made from the model the processing step produced.
+		if source, _ := body["input"].(string); run.model == "" {
+			run.model = source
+		} else if source != run.model {
+			t.Errorf("the %s export is made from %s, the others from %s", format, source, run.model)
+		}
+	}
+	if prefix := "https://" + exportAssetHost + tripov3.Prefix + "/artifacts/" + run.baseID + "/"; !strings.HasPrefix(run.model, prefix) {
+		t.Errorf("the exports are made from %q, not from a result of the processing task (%s)", run.model, prefix)
+	}
+
+	var state nativeProcessingState
+	if err := json.Unmarshal(run.observed.Opaque, &state); err != nil {
+		t.Fatal(err)
+	}
+	for format, sent := range run.converts {
+		_, _, polled := fixture.Do(http.MethodGet, tripov3.Prefix+"/tasks/"+state.Conversions[format].RemoteID, "test-key", nil)
+		input, _ := testkit.Field(t, polled, "data", "input").(map[string]any)
+		echoed, want := map[string]any{}, map[string]any{}
+		for name, value := range input {
+			if name != "original_model_id" {
+				echoed[name] = value
+			}
+		}
+		for name, value := range sent {
+			if name != "input" {
+				want[name] = value
+			}
+		}
+		if !reflect.DeepEqual(echoed, want) {
+			t.Errorf("the fake ran the %s export under %v, the adapter asked for %v", format, echoed, want)
+		}
+		run.echoes[format] = echoed
 	}
 	return run
 }
@@ -138,7 +218,7 @@ func TestRiggingExportsCarryThePurposeTextureSize(t *testing.T) {
 			r := shippedRigging(t, "tripo/processing/rigging-v3", changes)
 			run := driveExports(t, r, "animations/rig")
 			// The processing request carries the Rig's own fields only.
-			want := `{"input":"task_native","model":"v3.0-20260909","out_format":"glb","rig_type":"biped","spec":"unreal"}`
+			want := fmt.Sprintf(`{"input":%q,"model":"v3.0-20260909","out_format":"glb","rig_type":"biped","spec":"unreal"}`, run.source)
 			if len(run.base) != 1 || run.base[0] != want {
 				t.Fatalf("rig request = %v, want exactly %s", run.base, want)
 			}
@@ -147,7 +227,7 @@ func TestRiggingExportsCarryThePurposeTextureSize(t *testing.T) {
 				t.Fatalf("exports = %v, want the FBX alone", run.converts)
 			}
 			expected := map[string]any{
-				"input": "https://assets.example/processed.glb", "format": "FBX", "texture_size": wire,
+				"input": run.model, "format": "FBX", "texture_size": wire,
 				"texture_format": "PNG", "with_animation": true, "bake": true, "fbx_preset": "blender",
 			}
 			if !reflect.DeepEqual(fbx, expected) {
@@ -231,10 +311,9 @@ func TestTaskFrozenBeforeTheSizeWasAParameterKeepsItsConstantExport(t *testing.T
 		t.Fatalf("the snapshot's declaration is refused: %v", err)
 	}
 	run := driveExports(t, r, "animations/rig")
-	raw, _ := json.Marshal(run.converts["FBX"])
-	want := `{"bake":true,"fbx_preset":"blender","format":"FBX","input":"https://assets.example/processed.glb","texture_format":"PNG","texture_size":8192,"with_animation":true}`
-	if string(raw) != want {
-		t.Fatalf("the snapshot's export = %s, want %s", raw, want)
+	want := fmt.Sprintf(`{"bake":true,"fbx_preset":"blender","format":"FBX","input":%q,"texture_format":"PNG","texture_size":8192,"with_animation":true}`, run.model)
+	if run.sent["FBX"] != want {
+		t.Fatalf("the snapshot's export = %s, want %s", run.sent["FBX"], want)
 	}
 }
 
@@ -244,10 +323,9 @@ func TestTaskFrozenBeforeTheSizeWasAParameterKeepsItsConstantExport(t *testing.T
 func TestDefaultExportRequestIsUnchanged(t *testing.T) {
 	r := shippedRigging(t, "tripo/processing/rigging-v3", nil)
 	run := driveExports(t, r, "animations/rig")
-	raw, _ := json.Marshal(run.converts["FBX"])
-	want := `{"bake":true,"fbx_preset":"blender","format":"FBX","input":"https://assets.example/processed.glb","texture_format":"PNG","texture_size":8192,"with_animation":true}`
-	if string(raw) != want {
-		t.Fatalf("default export = %s, want %s", raw, want)
+	want := fmt.Sprintf(`{"bake":true,"fbx_preset":"blender","format":"FBX","input":%q,"texture_format":"PNG","texture_size":8192,"with_animation":true}`, run.model)
+	if run.sent["FBX"] != want {
+		t.Fatalf("default export = %s, want %s", run.sent["FBX"], want)
 	}
 }
 
@@ -279,9 +357,10 @@ func TestGeometryExportsCarryThePurposeTextureSize(t *testing.T) {
 }
 
 // The requests the adapter sends under a game purpose are accepted by the Tripo
-// v3 fake, which reads them against the official convert page, and the fake
-// shows them back on the task object the way the real API does: the rigging
-// export asks for PNG textures of 2048 pixels, with the animation kept.
+// v3 fake, which reads them against the official convert page (a refusal would
+// have failed the step), and the fake shows them back on the task object the way
+// the real API does: the rigging export asks for PNG textures of 2048 pixels,
+// with the animation kept.
 func TestGamePurposeRiggingExportIsAcceptedByTheTripoFake(t *testing.T) {
 	r := shippedRigging(t, "tripo/processing/rigging-v3", map[string]any{"rig_type": "biped", "spec": "unreal", "export_texture_size": "2k"})
 	run := driveExports(t, r, "animations/rig")
@@ -289,60 +368,21 @@ func TestGamePurposeRiggingExportIsAcceptedByTheTripoFake(t *testing.T) {
 	if body["texture_size"] != float64(2048) || body["texture_format"] != "PNG" || body["with_animation"] != true {
 		t.Fatalf("game purpose export request = %v", body)
 	}
-
-	fake, err := fakeupstream.New(fakeupstream.Config{}, tripov3.Version())
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(fake)
-	defer server.Close()
-	call := func(method, path string, payload any) map[string]any {
-		t.Helper()
-		var reader io.Reader
-		if payload != nil {
-			encoded, _ := json.Marshal(payload)
-			reader = strings.NewReader(string(encoded))
-		}
-		request, err := http.NewRequest(method, server.URL+tripov3.Prefix+"/"+path, reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		request.Header.Set("Authorization", "Bearer test-key")
-		request.Header.Set("Content-Type", "application/json")
-		response, err := server.Client().Do(request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		var decoded map[string]any
-		if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
-			t.Fatal(err)
-		}
-		return decoded
-	}
-	created := call(http.MethodPost, "models/convert", body)
-	if created["code"] != float64(0) {
-		t.Fatalf("the fake refused the rigging export: %v", created)
-	}
-	taskID, _ := created["data"].(map[string]any)["task_id"].(string)
-	var polled map[string]any
-	for range 8 {
-		polled, _ = call(http.MethodGet, "tasks/"+taskID, nil)["data"].(map[string]any)
-		if polled["status"] == "success" {
-			break
-		}
-	}
-	echoed, _ := polled["input"].(map[string]any)
-	if polled["status"] != "success" || echoed["texture_size"] != float64(2048) || echoed["texture_format"] != "PNG" ||
+	echoed := run.echoes["FBX"]
+	if echoed["texture_size"] != float64(2048) || echoed["texture_format"] != "PNG" ||
 		echoed["with_animation"] != true || echoed["format"] != "FBX" {
-		t.Fatalf("the fake did not record the export options: %v", polled)
+		t.Fatalf("the fake did not record the export options: %v", echoed)
 	}
 
 	// A size the adapter could never send is refused by the fake as the official
 	// page says (texture_size is an integer), so the check above is not vacuous.
-	body["texture_size"] = "2k"
-	if refused := call(http.MethodPost, "models/convert", body); refused["code"] == float64(0) {
-		t.Fatalf("the fake accepted a texture size that is not an integer: %v", refused)
+	refused := map[string]any{}
+	for name, value := range body {
+		refused[name] = value
+	}
+	refused["texture_size"] = "2k"
+	if status, _, answer := run.fake.Do(http.MethodPost, tripov3.Prefix+"/models/convert", "test-key", refused); status != http.StatusBadRequest || answer["code"] != float64(1004) {
+		t.Fatalf("the fake accepted a texture size that is not an integer: %d %v", status, answer)
 	}
 }
 
