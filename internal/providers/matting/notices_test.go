@@ -3,8 +3,8 @@ package matting_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"testing"
 
@@ -15,44 +15,84 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/testkit"
 )
 
-// observeBatch serves one batch document of the given tasks
-// and returns the completion the adapter observes from it.
-func observeBatch(t *testing.T, batchStatus string, tasks []map[string]any) generation.Observation {
+// requestHeaders adds the fake's per-request controls (a scenario, or the faults
+// of individual files) to every request the adapter sends. The fake keeps what
+// the creating request asked for, so the later polls need no help.
+type requestHeaders struct {
+	next    http.RoundTripper
+	headers map[string]string
+}
+
+func (transport requestHeaders) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	for name, value := range transport.headers {
+		clone.Header.Set(name, value)
+	}
+	return transport.next.RoundTrip(clone)
+}
+
+// faults asks the shared matting fake for what becomes of individual pictures:
+// "2:rejected,4:failed" refuses the second and fails the fourth, "3:renamed"
+// has the service answer the third under a name of its own.
+func faults(spec string) map[string]string {
+	return map[string]string{mattingapiv1.FileFaultsHeader: spec}
+}
+
+// observeBatch submits the given number of pictures through the real adapter to
+// the shared matting fake, asked for the given headers, and returns the
+// completion the adapter observes once the batch has finished.
+func observeBatch(t *testing.T, pictures int, headers map[string]string) generation.Observation {
 	t.Helper()
-	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(writer).Encode(map[string]any{"batch_id": "batch-1", "batch_status": batchStatus, "tasks": tasks})
-	}))
-	defer upstream.Close()
-	observed, err := newAdapter(t, upstream, nil).Observe(context.Background(), generation.ObserveRequest{
-		AttemptID: "attempt-1", Offering: defaultOffering(),
-		Job: generation.UpstreamJob{ProviderID: "matting", RemoteID: "batch-1"},
+	f := testkit.New(t, fakeupstream.Config{}, mattingapiv1.Version())
+	adapter, err := matting.New(matting.Config{
+		BaseURL: f.Server.URL + "/matting", APIKey: "matting-key",
+		HTTPClient:  &http.Client{Transport: requestHeaders{next: http.DefaultTransport, headers: headers}},
+		InputAssets: memoryInputs{content: []byte("picture")},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, offering := shippedOffering(t)
+	mediaTypes := []string{"image/png", "image/jpeg", "image/webp"}
+	ids, assets := make([]string, pictures), make([]generation.InputAsset, pictures)
+	for index := range ids {
+		ids[index] = fmt.Sprintf("asset-%d", index+1)
+		assets[index] = generation.InputAsset{ID: generation.AssetID(ids[index]), MediaType: mediaTypes[index%len(mediaTypes)]}
+	}
+	input, err := json.Marshal(map[string]any{"source_assets": ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := adapter.Start(context.Background(), generation.StartRequest{
+		AttemptID: "attempt-notices", SubmissionKey: "submission-notices", Offering: offering,
+		Input: input, InputAssets: map[string][]generation.InputAsset{"source_assets": assets},
+	})
+	if err != nil || started.Job == nil {
+		t.Fatalf("the fake refused the batch: %+v %v", started, err)
+	}
+	var observed generation.Observation
+	for range 8 {
+		observed, err = adapter.Observe(context.Background(), generation.ObserveRequest{
+			AttemptID: "attempt-notices", Offering: offering, Job: *started.Job,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if observed.Phase == generation.UpstreamCompleted || observed.Phase == generation.UpstreamFailed {
+			return observed
+		}
+	}
+	t.Fatalf("the batch never finished: %+v", observed)
 	return observed
 }
 
-func succeeded(id, name string) map[string]any {
-	return map[string]any{
-		"task_id": id, "status": "SUCCEEDED", "downloadable": true, "source_name": name,
-		"download_path": "/api/v1/tasks/" + id + "/download",
-	}
-}
-
-func notMatted(id, status, name string) map[string]any {
-	return map[string]any{"task_id": id, "status": status, "downloadable": false, "source_name": name, "invalid_reason": "refused"}
-}
-
 // #284: a completed batch that holds fewer results than pictures says which
-// pictures are missing, by the position each had among the submitted ones.
+// pictures are missing, by the position each had among the submitted ones. The
+// batch is the shared matting fake's: pictures 2 and 4 of four are missing, one
+// refused by the service and one failed while processing, and the two between
+// them were matted.
 func TestPartialSuccessNoticeNamesEveryPictureThatWasNotMatted(t *testing.T) {
-	completed := observeBatch(t, "PARTIAL_SUCCESS", []map[string]any{
-		succeeded("t-1", "input_1.png"),
-		notMatted("t-2", "REJECTED", "input_2.jpg"),
-		succeeded("t-3", "input_3.png"),
-		notMatted("t-4", "FAILED", "input_4.png"),
-	})
+	completed := observeBatch(t, 4, faults("2:rejected,4:failed"))
 	if completed.Phase != generation.UpstreamCompleted || len(completed.Artifacts) != 2 {
 		t.Fatalf("completed = %+v", completed)
 	}
@@ -63,13 +103,14 @@ func TestPartialSuccessNoticeNamesEveryPictureThatWasNotMatted(t *testing.T) {
 }
 
 // A picture the service did not echo a position for cannot be named, and a
-// list that left it out would be untrue, so the notice names none.
+// list that left it out would be untrue, so the notice names none. Here picture
+// 2 was refused under the name it was uploaded with and picture 3 failed under
+// a name of the service's own.
 func TestPartialSuccessNoticeDoesNotNameSomeWhenOneCannotBeNamed(t *testing.T) {
-	completed := observeBatch(t, "PARTIAL_SUCCESS", []map[string]any{
-		succeeded("t-1", "input_1.png"),
-		notMatted("t-2", "REJECTED", "input_2.jpg"),
-		notMatted("t-3", "FAILED", "renamed-by-the-service.png"),
-	})
+	completed := observeBatch(t, 3, faults("2:rejected,3:failed,3:renamed"))
+	if completed.Phase != generation.UpstreamCompleted || len(completed.Artifacts) != 1 {
+		t.Fatalf("completed = %+v", completed)
+	}
 	want := []generation.TaskNotice{{Code: generation.NoticePartialInputs}}
 	if !reflect.DeepEqual(completed.Notices, want) {
 		t.Fatalf("notices = %+v, want %+v", completed.Notices, want)
@@ -77,69 +118,31 @@ func TestPartialSuccessNoticeDoesNotNameSomeWhenOneCannotBeNamed(t *testing.T) {
 }
 
 // A batch in which every picture was matted says nothing; a batch in which
-// none was is a failure, not a success with a notice.
+// none was is a failure, not a success with a notice, whether the service
+// refused the pictures or failed them.
 func TestNoNoticeWhenEveryPictureWasMattedOrNoneWas(t *testing.T) {
-	all := observeBatch(t, "SUCCESS", []map[string]any{succeeded("t-1", "input_1.png"), succeeded("t-2", "input_2.png")})
-	if all.Phase != generation.UpstreamCompleted || len(all.Notices) != 0 {
+	all := observeBatch(t, 2, nil)
+	if all.Phase != generation.UpstreamCompleted || len(all.Artifacts) != 2 || len(all.Notices) != 0 {
 		t.Fatalf("a full success = %+v", all)
 	}
-	none := observeBatch(t, "PARTIAL_SUCCESS", []map[string]any{
-		notMatted("t-1", "REJECTED", "input_1.png"), notMatted("t-2", "REJECTED", "input_2.png"),
-	})
-	if none.Phase != generation.UpstreamFailed || none.Failure == nil || len(none.Notices) != 0 {
-		t.Fatalf("a batch with no result = %+v", none)
+	// A renamed picture that was matted is not a missing one.
+	renamed := observeBatch(t, 2, faults("2:renamed"))
+	if renamed.Phase != generation.UpstreamCompleted || len(renamed.Artifacts) != 2 || len(renamed.Notices) != 0 {
+		t.Fatalf("a full success under another name = %+v", renamed)
 	}
-}
-
-// scenarioTransport asks the fake for one of its scenarios on every request.
-type scenarioTransport struct {
-	next     http.RoundTripper
-	scenario string
-}
-
-func (transport scenarioTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	clone := request.Clone(request.Context())
-	clone.Header.Set("X-Fake-Scenario", transport.scenario)
-	return transport.next.RoundTrip(clone)
+	for name, spec := range map[string]string{"refused": "1:rejected,2:rejected", "failed": "1:failed,2:failed"} {
+		none := observeBatch(t, 2, faults(spec))
+		if none.Phase != generation.UpstreamFailed || none.Failure == nil || len(none.Artifacts) != 0 || len(none.Notices) != 0 {
+			t.Fatalf("a batch with no result (%s) = %+v", name, none)
+		}
+	}
 }
 
 // Against the fake's partial-images scenario, which accepts the first picture
 // and refuses the rest, the adapter's completion names exactly the refused
 // positions, read back from the filenames the fake echoes.
 func TestPartialSuccessNoticeAgainstTheFake(t *testing.T) {
-	f := testkit.New(t, fakeupstream.Config{}, mattingapiv1.Version())
-	adapter, err := matting.New(matting.Config{
-		BaseURL: f.Server.URL + "/matting", APIKey: "matting-key",
-		HTTPClient:  &http.Client{Transport: scenarioTransport{next: http.DefaultTransport, scenario: "partial-images"}},
-		InputAssets: memoryInputs{content: []byte("picture")},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, offering := shippedOffering(t)
-	assets := []generation.InputAsset{
-		{ID: "asset-1", MediaType: "image/png"}, {ID: "asset-2", MediaType: "image/jpeg"}, {ID: "asset-3", MediaType: "image/webp"},
-	}
-	started, err := adapter.Start(context.Background(), generation.StartRequest{
-		AttemptID: "attempt-fake", SubmissionKey: "submission-fake", Offering: offering,
-		Input:       json.RawMessage(`{"source_assets":["asset-1","asset-2","asset-3"]}`),
-		InputAssets: map[string][]generation.InputAsset{"source_assets": assets},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var completed generation.Observation
-	for range 8 {
-		completed, err = adapter.Observe(context.Background(), generation.ObserveRequest{
-			AttemptID: "attempt-fake", Offering: offering, Job: *started.Job,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if completed.Phase == generation.UpstreamCompleted {
-			break
-		}
-	}
+	completed := observeBatch(t, 3, map[string]string{fakeupstream.ScenarioHeader: string(fakeupstream.ScenarioPartialImages)})
 	if completed.Phase != generation.UpstreamCompleted || len(completed.Artifacts) != 1 {
 		t.Fatalf("completed = %+v", completed)
 	}

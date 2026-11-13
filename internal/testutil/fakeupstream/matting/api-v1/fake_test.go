@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -400,6 +401,151 @@ func TestPartialImagesWithOneFileEndsCompletedWithoutArtifacts(t *testing.T) {
 		t.Fatalf("task = %v", task)
 	}
 	// A completed batch that claims no artifact is the Adapter's no_artifacts branch.
+}
+
+// taskStatuses are the statuses of a batch document's tasks, in upload order.
+func taskStatuses(t *testing.T, body map[string]any) []string {
+	t.Helper()
+	tasks, _ := body["tasks"].([]any)
+	statuses := make([]string, 0, len(tasks))
+	for index := range tasks {
+		statuses = append(statuses, testkit.Field(t, body, "tasks", index, "status").(string))
+	}
+	return statuses
+}
+
+// #284: X-Fake-File-Faults chooses what becomes of each file by its 1-based
+// position, so a batch can mix files that succeed with files that are rejected
+// or fail in any positions (partial-images rejects every file but the first).
+// A rejected file is refused in the create response already, a file that fails
+// looks like the others until the batch finishes, and neither has an artifact.
+func TestFileFaultsChooseWhatBecomesOfEachFile(t *testing.T) {
+	for _, test := range []struct {
+		name, faults string
+		files        int
+		created      []string // the task statuses of the create response
+		final        []string // the task statuses of the finished batch
+		batch        string
+	}{
+		{"a rejected file and a file that fails among files that succeed", "2:rejected,4:failed", 4,
+			[]string{"READY", "REJECTED", "READY", "READY"}, []string{"SUCCEEDED", "REJECTED", "SUCCEEDED", "FAILED"}, "PARTIAL_SUCCESS"},
+		{"the first file fails", "1:failed", 2,
+			[]string{"READY", "READY"}, []string{"FAILED", "SUCCEEDED"}, "PARTIAL_SUCCESS"},
+		{"every file fails", "1:failed,2:failed", 2,
+			[]string{"READY", "READY"}, []string{"FAILED", "FAILED"}, "PARTIAL_SUCCESS"},
+		{"every file is rejected", "1:rejected,2:rejected", 2,
+			[]string{"REJECTED", "REJECTED"}, []string{"REJECTED", "REJECTED"}, "PARTIAL_SUCCESS"},
+		{"a file that is rejected and would fail stays rejected", "1:rejected,1:failed", 2,
+			[]string{"REJECTED", "READY"}, []string{"REJECTED", "SUCCEEDED"}, "PARTIAL_SUCCESS"},
+		{"spaces around the entries are tolerated", " 2 : rejected , 1 : failed ", 2,
+			[]string{"READY", "REJECTED"}, []string{"FAILED", "REJECTED"}, "PARTIAL_SUCCESS"},
+		{"a renamed file is not a fault of its result", "2:renamed", 2,
+			[]string{"READY", "READY"}, []string{"SUCCEEDED", "SUCCEEDED"}, "SUCCESS"},
+		{"entries it does not understand are ignored", "9:rejected,0:failed,x:failed,1:exploded,1,:failed", 2,
+			[]string{"READY", "READY"}, []string{"SUCCEEDED", "SUCCEEDED"}, "SUCCESS"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t, fakeupstream.Config{})
+			names := make([]string, test.files)
+			for index := range names {
+				names[index] = fmt.Sprintf("input_%d.png", index+1)
+			}
+			status, created := submitFiles(f, t, names, FileFaultsHeader, test.faults)
+			if status != http.StatusOK {
+				t.Fatalf("create: %d %v", status, created)
+			}
+			if got := taskStatuses(t, created); !slices.Equal(got, test.created) {
+				t.Fatalf("created statuses = %v, want %v", got, test.created)
+			}
+			batchID := created["batch_id"].(string)
+			// The file that fails shows the state of the others until the batch ends.
+			if queued := poll(f, t, batchID); queued["batch_status"] != "READY" {
+				t.Fatalf("first poll = %v", queued)
+			}
+			running := poll(f, t, batchID)
+			for index, got := range taskStatuses(t, running) {
+				if want := map[string]string{"READY": "RUNNING", "REJECTED": "REJECTED"}[test.created[index]]; got != want {
+					t.Fatalf("running task %d = %s, want %s", index+1, got, want)
+				}
+			}
+			final := pollUntil(f, t, batchID, test.batch)
+			if got := taskStatuses(t, final); !slices.Equal(got, test.final) {
+				t.Fatalf("final statuses = %v, want %v", got, test.final)
+			}
+			rejected, accepted := 0, 0
+			for _, want := range test.created {
+				if want == "REJECTED" {
+					rejected++
+				} else {
+					accepted++
+				}
+			}
+			for _, document := range []map[string]any{created, final} {
+				if count(t, document, "total_count") != float64(test.files) || count(t, document, "accepted_count") != float64(accepted) ||
+					count(t, document, "rejected_count") != float64(rejected) {
+					t.Fatalf("counts = %v", document)
+				}
+			}
+			for index, want := range test.final {
+				task := testkit.Field(t, final, "tasks", index).(map[string]any)
+				id := task["task_id"].(string)
+				if task["downloadable"] != (want == "SUCCEEDED") ||
+					(task["invalid_reason"] != nil) != (want == "REJECTED") || (task["error_message"] != nil) != (want == "FAILED") {
+					t.Fatalf("task %d = %v", index+1, task)
+				}
+				// Only a file that succeeded has an artifact to download.
+				wantStatus := http.StatusNotFound
+				if want == "SUCCEEDED" {
+					wantStatus = http.StatusOK
+				}
+				if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+id+"/download", key, nil); status != wantStatus {
+					t.Fatalf("download of the %s task %d = %d, want %d", want, index+1, status, wantStatus)
+				}
+			}
+		})
+	}
+}
+
+// A renamed file is answered under a name of the service's own, and only that
+// file: the others keep the names they were uploaded under, in the create
+// response and in every poll, and a position is always the file's own.
+func TestFileFaultsRenamedFileIsAnsweredUnderAnotherName(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	names := []string{"input_1.png", "input_2.jpg", "input_3.png", "input_4.png"}
+	_, created := submitFiles(f, t, names, FileFaultsHeader, "3:renamed,4:failed")
+	final := pollUntil(f, t, created["batch_id"].(string), "PARTIAL_SUCCESS")
+	for _, document := range []map[string]any{created, final} {
+		for index, name := range names {
+			if index == 2 {
+				name = renamedSource
+			}
+			task := testkit.Field(t, document, "tasks", index).(map[string]any)
+			if task["source_name"] != name || task["source_index"] != float64(index) {
+				t.Fatalf("task %d = %v, want source_name %q", index+1, task, name)
+			}
+		}
+	}
+	if status := taskStatuses(t, final); !slices.Equal(status, []string{"SUCCEEDED", "SUCCEEDED", "SUCCEEDED", "FAILED"}) {
+		t.Fatalf("final statuses = %v", status)
+	}
+}
+
+// The batch keeps the faults of the request that created it: a later poll that
+// carries the header changes nothing, and a batch created without it has none.
+func TestFileFaultsBelongToTheCreatingRequest(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	_, created := submitFiles(f, t, []string{"input_1.png", "input_2.png"})
+	batchID := created["batch_id"].(string)
+	var final map[string]any
+	for range 6 {
+		_, _, final = f.Do("GET", Prefix+"/batches/"+batchID, key, nil, FileFaultsHeader, "1:rejected,2:failed")
+		if final["batch_status"] == "SUCCESS" {
+			break
+		}
+	}
+	if status := taskStatuses(t, final); final["batch_status"] != "SUCCESS" || !slices.Equal(status, []string{"SUCCEEDED", "SUCCEEDED"}) {
+		t.Fatalf("a poll changed the batch: %v", final)
+	}
 }
 
 func TestTaskCanceledScenarioEndsTheBatchCanceled(t *testing.T) {

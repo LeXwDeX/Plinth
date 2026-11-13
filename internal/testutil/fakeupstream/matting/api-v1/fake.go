@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -47,13 +48,13 @@ const docs = "internal matting service (FastAPI /docs)"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/jobs", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v1/jobs",
 		DocURL: docs, CheckedAt: captured,
-		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service"},
+		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service. Which files of a batch are rejected, fail while processing or come back under another source_name is chosen by the test-only " + FileFaultsHeader + " header (the partial-images scenario rejects every file but the first): the service's own reasons for refusing or failing a file, and whether it echoes the name of such a file, were never observed"},
 	{Method: "GET", Path: "/batches/{batch_id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/batches/{id}",
 		DocURL: docs, CheckedAt: captured,
-		Note: "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED), the completed batch with no artifact (every file REJECTED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them"},
+		Note: "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED or FAILED), the completed batch with no artifact (every file REJECTED or FAILED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them"},
 	{Method: "GET", Path: "/tasks/{task_id}/download", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/tasks/{id}/download",
 		DocURL: docs, CheckedAt: captured,
-		Note: "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it. Request-phase faults (429/500/timeout) answer here like on the other routes; a REJECTED task has no artifact and answers 404 (constructed from the TaskStatus enum checked " + statusesChecked + ")"},
+		Note: "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it. Request-phase faults (429/500/timeout) answer here like on the other routes; a REJECTED task, and the task of a file that fails (" + FileFaultsHeader + "), has no artifact and answers 404 (constructed from the TaskStatus enum checked " + statusesChecked + ")"},
 }
 
 // Version is the matting service api/v1 fake.
@@ -72,12 +73,53 @@ type batch struct {
 }
 
 // batchTask is one uploaded file's task. rejected records that the service's
-// input validation refused the file; such a task has no artifact.
+// input validation refused the file, failed that processing it fails once the
+// batch finishes; neither task has an artifact. renamed records that the
+// service answers the file under a name of its own.
 type batchTask struct {
 	id       string
 	name     string
 	rejected bool
+	failed   bool
+	renamed  bool
 }
+
+// renamedSource is the source_name of a renamed file. It is not a name the
+// Adapter's upload filename template produces, so the position of the file
+// cannot be read back from it.
+const renamedSource = "renamed-by-the-service.png"
+
+// echoedName is the source_name the service answers the file with.
+func (t batchTask) echoedName() string {
+	if t.renamed {
+		return renamedSource
+	}
+	return t.name
+}
+
+// FileFaultsHeader selects what becomes of individual files of a batch, on the
+// request that creates it (the batch keeps it for every later poll). The value
+// is a comma-separated list of <position>:<fault> entries: positions are
+// 1-based in upload order and a fault is one of
+//
+//   - rejected: the service's input validation refuses the file. The task is
+//     REJECTED in the create response already, with an invalid_reason, and has no
+//     artifact (ScenarioPartialImages rejects every file but the first the same
+//     way);
+//   - failed: processing the file fails. The task shows the state of the others
+//     (READY, RUNNING) and ends FAILED, with an error_message and no artifact,
+//     once the batch finishes;
+//   - renamed: the service answers the file under a name of its own, so its
+//     source_name is not the name that was uploaded.
+//
+// A file may carry several faults; rejected wins over failed. An entry the fake
+// does not understand (an unknown word, a position that is not a file of the
+// batch) is ignored. A batch in which every file succeeds ends SUCCESS, any other
+// one PARTIAL_SUCCESS. Test-only and constructed from the same enums as the
+// rest of the batch states (see the endpoint notes): the service's own reasons
+// for refusing or failing a file, and whether it echoes the name of such a file,
+// were never observed.
+const FileFaultsHeader = "X-Fake-File-Faults"
 
 type handler struct {
 	env *fakeupstream.Env
@@ -174,6 +216,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	names := form.names
 	scenario := fakeupstream.ScenarioOf(r)
+	faults := fileFaults(r, scenario, len(names))
 	h.mu.Lock()
 	number := len(h.batches) + 1
 	b := &batch{id: fmt.Sprintf("batch_fake%04d", number), scenario: scenario}
@@ -181,7 +224,9 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		b.tasks = append(b.tasks, batchTask{
 			id:       fmt.Sprintf("task_fake%04d_%02d", number, index+1),
 			name:     name,
-			rejected: rejectedBy(scenario, index, len(names)),
+			rejected: faults[index].rejected,
+			failed:   faults[index].failed && !faults[index].rejected,
+			renamed:  faults[index].renamed,
 		})
 	}
 	h.batches[b.id] = b
@@ -196,14 +241,40 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.envelope(h.ready, b, "READY", "READY"))
 }
 
-// rejectedBy says whether the service's input validation refuses the file at
-// index of a batch of total files. Under ScenarioPartialImages the fake
-// rejects every file but the first; a single-file batch is rejected whole, so
-// a completed batch with no artifact is reachable too (the Adapter's
+// fileFault is what is wrong with one file of a batch (see FileFaultsHeader).
+type fileFault struct{ rejected, failed, renamed bool }
+
+// fileFaults says what is wrong with each of the total files of a batch: what
+// the request's FileFaultsHeader names, and under ScenarioPartialImages the
+// rejection of every file but the first; a single-file batch is rejected whole,
+// so a completed batch with no artifact is reachable too (the Adapter's
 // no_artifacts branch). Constructed: the committed samples carry no rejected
 // file.
-func rejectedBy(scenario fakeupstream.Scenario, index, total int) bool {
-	return scenario == fakeupstream.ScenarioPartialImages && (index > 0 || total == 1)
+func fileFaults(r *http.Request, scenario fakeupstream.Scenario, total int) []fileFault {
+	faults := make([]fileFault, total)
+	for _, entry := range strings.Split(r.Header.Get(FileFaultsHeader), ",") {
+		position, word, found := strings.Cut(entry, ":")
+		index, err := strconv.Atoi(strings.TrimSpace(position))
+		if !found || err != nil || index < 1 || index > total {
+			continue
+		}
+		switch strings.TrimSpace(word) {
+		case "rejected":
+			faults[index-1].rejected = true
+		case "failed":
+			faults[index-1].failed = true
+		case "renamed":
+			faults[index-1].renamed = true
+		}
+	}
+	if scenario == fakeupstream.ScenarioPartialImages {
+		for index := range faults {
+			if index > 0 || total == 1 {
+				faults[index].rejected = true
+			}
+		}
+	}
+	return faults
 }
 
 // upload is what the create route reads from the multipart request: the file
@@ -339,7 +410,7 @@ func (h *handler) envelope(template map[string]any, b *batch, batchStatus, taskS
 	accepted, rejected := 0, 0
 	for index, entry := range b.tasks {
 		task := fakeupstream.Clone(taskTemplate)
-		task["task_id"], task["source_index"], task["source_name"] = entry.id, index, entry.name
+		task["task_id"], task["source_index"], task["source_name"] = entry.id, index, entry.echoedName()
 		if entry.rejected {
 			rejected++
 			task["status"], task["downloadable"] = "REJECTED", false
@@ -349,11 +420,16 @@ func (h *handler) envelope(template map[string]any, b *batch, batchStatus, taskS
 			continue
 		}
 		accepted++
-		task["status"] = taskStatus
-		task["downloadable"] = taskStatus == "SUCCEEDED"
+		status := taskStatus
+		if entry.failed && status == "SUCCEEDED" {
+			// A file that fails shows it only once the batch has finished.
+			status = "FAILED"
+		}
+		task["status"] = status
+		task["downloadable"] = status == "SUCCEEDED"
 		task["download_path"] = samplePrefix + "/tasks/" + entry.id + "/download"
 		task["error_message"], task["invalid_reason"] = nil, nil
-		if taskStatus == "FAILED" {
+		if status == "FAILED" {
 			task["error_message"] = "Fake matting failure."
 		}
 		tasks = append(tasks, task)
@@ -392,22 +468,33 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "FAILED", "FAILED"))
 	case b.scenario == fakeupstream.ScenarioTaskCanceled:
 		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "CANCELED", "CANCELED"))
-	case b.scenario == fakeupstream.ScenarioPartialImages:
-		// every accepted file succeeds and every rejected one stays REJECTED,
-		// so a batch with at least one accepted file ends PARTIAL_SUCCESS and
-		// an all-rejected one ends completed with no artifact.
+	case b.incomplete():
+		// every accepted file succeeds unless it fails and every rejected one
+		// stays REJECTED, so a batch with at least one file that succeeds ends
+		// PARTIAL_SUCCESS and one without any ends completed with no artifact.
 		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "PARTIAL_SUCCESS", "SUCCEEDED"))
 	default:
 		writeJSON(w, http.StatusOK, h.envelope(h.success, b, "SUCCESS", "SUCCEEDED"))
 	}
 }
 
-// rejects reports whether the task of this batch was refused by the service's
-// input validation; such a task never has an artifact.
-func (b *batch) rejects(taskID string) bool {
+// incomplete reports whether some file of the batch produces no artifact: the
+// service's input validation refused it, or processing it fails.
+func (b *batch) incomplete() bool {
+	for _, task := range b.tasks {
+		if task.rejected || task.failed {
+			return true
+		}
+	}
+	return false
+}
+
+// lacksArtifact reports whether the task of this batch never has an artifact:
+// its file was refused by the service's input validation or fails.
+func (b *batch) lacksArtifact(taskID string) bool {
 	for _, task := range b.tasks {
 		if task.id == taskID {
-			return task.rejected
+			return task.rejected || task.failed
 		}
 	}
 	return false
@@ -424,9 +511,9 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("task_id")
 	h.mu.Lock()
 	b := h.byTask[taskID]
-	rejected := b != nil && b.rejects(taskID)
+	noArtifact := b != nil && b.lacksArtifact(taskID)
 	h.mu.Unlock()
-	if b == nil || rejected || b.scenario == fakeupstream.ScenarioArtifactNotFound {
+	if b == nil || noArtifact || b.scenario == fakeupstream.ScenarioArtifactNotFound {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Task not found"})
 		return
 	}
