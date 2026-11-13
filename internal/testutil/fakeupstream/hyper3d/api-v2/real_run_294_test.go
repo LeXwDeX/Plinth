@@ -18,9 +18,9 @@ import (
 // 21,800 triangles for 10,000 quads, no skin, three embedded PNG images of
 // 2048x2048) next to a WebP preview. The raw bodies were not captured, so these
 // tests pin what the run showed and what the page's price table gives, not a
-// recorded wire. What the fake does not reproduce is listed in the endpoint note
-// (fake.go, realRun) and checked below only as "not a pass": the fixed 72
-// triangles and one 64x64 texture are the shared fixture's.
+// recorded wire. What the fake does not reproduce (the fixed 72 triangles and the
+// one 64x64 texture are the shared fixture's) is recorded in the /rodin endpoint
+// note (fake.go, rodinRealRunNote) and is not asserted here.
 
 // gameCharacterFields is that run's form: the Catalog's request template with
 // the purpose's overrides, as the adapter sends it.
