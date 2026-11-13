@@ -111,6 +111,10 @@ type archiveItem struct {
 	asset    generation.Asset
 	taskID   generation.TaskID
 	formatID string // set for a target format's model file
+	// twins are the attachments left out because they repeat this file (#293).
+	// Their records hold the same bytes, so one of them stands in when this
+	// record cannot be read.
+	twins []archiveItem
 	// bareConversion marks an OBJ that is a format-conversion result and has no
 	// material library or textures to travel with it.
 	bareConversion bool
@@ -125,12 +129,59 @@ type archiveItem struct {
 	packageMembers []string
 }
 
+// archiveSame is an attachment the ZIP leaves out because a file already in it
+// has the same bytes (#293). kept is that file's asset: the README resolves its
+// path last, since flattenLoneObj can still move an OBJ.
+type archiveSame struct {
+	label string
+	kept  generation.AssetID
+}
+
+// skipsIdenticalFiles reports whether the Schema names the README section for
+// attachments that repeat a packed file. Without both texts an attachment is
+// never left out silently: every one is packed, as before #293.
+func (s *Service) skipsIdenticalFiles() bool {
+	text := s.schema.Archive.Readme
+	return strings.TrimSpace(text.SameHeading) != "" && strings.TrimSpace(text.SameLine) != ""
+}
+
+// sameFile reports whether two saved files hold the same bytes, by their records:
+// both carry a SHA-256 (a historical record may not) and agree on it and on the
+// size. The store verifies the digest of every file it opens, so a record that
+// opens has the bytes it names.
+func sameFile(left, right generation.Asset) bool {
+	return left.SHA256 != "" && left.SHA256 == right.SHA256 && left.Size == right.Size
+}
+
+// identicalTo finds the planned entry that already holds the attachment's bytes:
+// a target format's file first, then an OBJ's dependency, then an earlier
+// attachment.
+func identicalTo(asset generation.Asset, planned ...[]archiveItem) (archiveItem, bool) {
+	for _, items := range planned {
+		for _, item := range items {
+			if sameFile(item.asset, asset) {
+				return item, true
+			}
+		}
+	}
+	return archiveItem{}, false
+}
+
+// slotLabel names a saved file's slot for the README: its variant, or its role
+// when it has none.
+func slotLabel(asset generation.Asset) string {
+	if asset.Variant != "" {
+		return sanitize(asset.Variant)
+	}
+	return sanitize(asset.Role)
+}
+
 // archiveAssets lists the READY files collect would put into the ZIP, without
 // opening any of them: the file of each target format, an OBJ's material
 // library and textures, and the model-like files of the source Task that match
-// no format. The coverage projection uses it to report the same size and entry
-// bound Prepare enforces, so the ZIP action is never advertised for a package
-// that can only answer 413.
+// no format and repeat none of the files before them. The coverage projection
+// uses it to report the same size and entry bound Prepare enforces, so the ZIP
+// action is never advertised for a package that can only answer 413.
 func (s *Service) archiveAssets(v view) []generation.Asset {
 	var assets []generation.Asset
 	seen := map[generation.AssetID]bool{}
@@ -165,11 +216,15 @@ func (s *Service) archiveAssets(v view) []generation.Asset {
 			}
 		}
 	}
+	identical := s.skipsIdenticalFiles()
 	for _, asset := range v.assets {
 		if seen[asset.ID] {
 			continue
 		}
 		if asset.Role != modelRole && asset.Role != convertedRole && asset.Role != spec.Textures.Roles[0] {
+			continue
+		}
+		if identical && slices.ContainsFunc(assets, func(kept generation.Asset) bool { return sameFile(kept, asset) }) {
 			continue
 		}
 		add(asset)
@@ -208,7 +263,7 @@ func (s *Service) Prepare(ctx context.Context, scope generation.TaskListScope, t
 	v := state.view
 	schema := s.schema.Archive
 
-	items, dependencies, other, unresolved := s.collect(ctx, scope, v)
+	items, dependencies, other, same, unresolved := s.collect(ctx, scope, v)
 	if len(items)+len(dependencies)+len(other) == 0 {
 		return nil, ErrEmptyArchive
 	}
@@ -237,6 +292,16 @@ func (s *Service) Prepare(ctx context.Context, scope generation.TaskListScope, t
 		content, err := s.gateway.OpenAssetScoped(ctx, scope, item.taskID, item.asset.ID)
 		if err != nil {
 			s.logger.Warn("打包时无法读取模型文件", "task_id", item.taskID, "asset_id", item.asset.ID, "error", err)
+			// A record left out for repeating this file holds the same bytes; it may
+			// still read when this one does not (it can sit in another stored file).
+			for _, twin := range item.twins {
+				if content, err = s.gateway.OpenAssetScoped(ctx, scope, twin.taskID, twin.asset.ID); err == nil {
+					item.asset = twin.asset
+					break
+				}
+			}
+		}
+		if err != nil {
 			unreadable[item.path] = true
 			continue
 		}
@@ -272,7 +337,7 @@ func (s *Service) Prepare(ctx context.Context, scope generation.TaskListScope, t
 			missing = append(missing, archiveMissing{label: item.path, reason: s.reasonText(reasonAssetUnreadable)})
 		}
 	}
-	result.readme = s.readme(task.ID, items, dependencies, other, unresolved, missing, unreadable)
+	result.readme = s.readme(task.ID, items, dependencies, other, same, unresolved, missing, unreadable)
 	result.Entries = len(result.files) + 1
 	for _, file := range result.files {
 		result.Bytes += file.asset.Size
@@ -306,8 +371,11 @@ func (s *Service) stored(mediaType string) bool {
 // stays at the archive root; a format only keeps its folder when it ships
 // dependency files beside the model (an OBJ with its material library and
 // textures). Dependencies are written under the names the OBJ and the library
-// reference, so the model still loads after extraction.
-func (s *Service) collect(ctx context.Context, scope generation.TaskListScope, v view) (formats, dependencies, other []archiveItem, unresolved []string) {
+// reference, so the model still loads after extraction. An attachment whose
+// bytes an earlier entry already holds is not written again: it is returned in
+// same, for the README to name (#293). Only attachments are compared; a target
+// format and an OBJ dependency are always packed under their own names.
+func (s *Service) collect(ctx context.Context, scope generation.TaskListScope, v view) (formats, dependencies, other []archiveItem, same []archiveSame, unresolved []string) {
 	schema := s.schema.Archive
 	used := map[string]bool{strings.ToLower(schema.Readme.Filename): true}
 	consumed := map[generation.AssetID]bool{}
@@ -351,9 +419,19 @@ func (s *Service) collect(ctx context.Context, scope generation.TaskListScope, v
 		dependencies = append(dependencies, deps...)
 		unresolved = append(unresolved, missing...)
 	}
+	identical := s.skipsIdenticalFiles()
+	twins := map[generation.AssetID][]archiveItem{}
 	for _, asset := range v.assets {
 		if consumed[asset.ID] || (asset.Role != modelRole && asset.Role != convertedRole && asset.Role != schema.ObjPackage.Textures.Roles[0]) {
 			continue
+		}
+		if identical {
+			if kept, found := identicalTo(asset, formats, dependencies, other); found {
+				same = append(same, archiveSame{label: slotLabel(asset), kept: kept.asset.ID})
+				twins[kept.asset.ID] = append(twins[kept.asset.ID], archiveItem{asset: asset, taskID: v.task.ID})
+				consumed[asset.ID] = true
+				continue
+			}
 		}
 		extension := s.mediaExtension(asset.MediaType, ".bin")
 		base := sanitize(asset.Role)
@@ -365,7 +443,14 @@ func (s *Service) collect(ctx context.Context, scope generation.TaskListScope, v
 		other = append(other, archiveItem{path: uniquePath(used, path.Join(schema.OtherDirectory, base+extension)), asset: asset, taskID: v.task.ID})
 		consumed[asset.ID] = true
 	}
-	return formats, dependencies, other, unresolved
+	if len(twins) > 0 {
+		for _, list := range [][]archiveItem{formats, dependencies, other} {
+			for index := range list {
+				list[index].twins = twins[list[index].asset.ID]
+			}
+		}
+	}
+	return formats, dependencies, other, same, unresolved
 }
 
 // objPackagePresent reports whether the task saved a material library or a
@@ -727,7 +812,7 @@ func uniquePath(used map[string]bool, name string) string {
 }
 
 func (s *Service) readme(
-	taskID generation.TaskID, items, dependencies, other []archiveItem,
+	taskID generation.TaskID, items, dependencies, other []archiveItem, same []archiveSame,
 	unresolved []string, missing []archiveMissing, unreadable map[string]bool,
 ) []byte {
 	text := s.schema.Archive.Readme
@@ -775,6 +860,25 @@ func (s *Service) readme(
 			otherLines = append(otherLines, strings.ReplaceAll(text.OtherLine, "{path}", item.path))
 		}
 	}
+	// A file left out for repeating a packed one is named only while the file that
+	// holds its bytes is in the ZIP: the path is read now, after the OBJ may have
+	// moved to the root, and an entry that could not be read says nothing.
+	sameLines := []string{}
+	if len(same) > 0 {
+		packed := map[generation.AssetID]string{}
+		for _, list := range [][]archiveItem{items, dependencies, other} {
+			for _, item := range list {
+				if !unreadable[item.path] {
+					packed[item.asset.ID] = item.path
+				}
+			}
+		}
+		for _, entry := range same {
+			if kept, ok := packed[entry.kept]; ok {
+				sameLines = append(sameLines, strings.NewReplacer("{label}", entry.label, "{path}", kept).Replace(text.SameLine))
+			}
+		}
+	}
 	if text.ConvertedObjNote != "" {
 		for _, item := range items {
 			if item.bareConversion && !unreadable[item.path] {
@@ -818,6 +922,13 @@ func (s *Service) readme(
 		line("")
 		line(text.OtherHeading)
 		for _, entry := range otherLines {
+			line(entry)
+		}
+	}
+	if len(sameLines) > 0 {
+		line("")
+		line(text.SameHeading)
+		for _, entry := range sameLines {
 			line(entry)
 		}
 	}

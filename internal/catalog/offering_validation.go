@@ -289,6 +289,11 @@ func validateOffering(
 				}
 			}
 		}
+		if parameter.DefaultBySourceSide != nil {
+			if err := validateDefaultBySourceSide(offering, parameter); err != nil {
+				return err
+			}
+		}
 		for retired, raw := range parameter.LegacyValues {
 			var replacement any
 			decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -367,6 +372,20 @@ func validateOffering(
 		}
 		if parameter.Presentation == nil {
 			continue
+		}
+		// #292: a parameter that follows the session purpose is one the person
+		// may leave untouched while the purpose fills it. A form can show that
+		// state only for an optional select the person edits themselves (not an
+		// advised one, whose value needs a reason a form cannot give), and the
+		// Offering's own default must stand when no purpose gives a value.
+		if parameter.Presentation.FollowsPurpose &&
+			(!offering.UserParameterAllowed(parameter) || parameter.Presentation.Surface != schemacontract.SurfaceProvider ||
+				parameter.Type != "select" || parameter.Required || len(bytes.TrimSpace(parameter.Default)) == 0) {
+			return fmt.Errorf(
+				"Offering %q 参数 %q 声明 follows_purpose 时必须是本人可设置、非必填且有 default 的 select，presentation.surface 为 provider",
+				offering.ID,
+				parameter.Name,
+			)
 		}
 		for _, condition := range parameter.Presentation.DisabledWhen {
 			target, exists := offeringParameter(offering.Parameters, condition.Parameter)
@@ -1046,6 +1065,15 @@ func validateOfferingOutputs(offering schemacontract.Offering) error {
 				return fmt.Errorf("%s的 required_when 必须引用 text 参数（present）或 select 参数的声明选项（equals），并限定精确 required 槽位", at)
 			}
 		}
+		// A sized output names the parameter that sets the edge of its textures
+		// (#292): a texture-size select of the Offering, on one exact variant.
+		if output.TextureSizeParameter != "" {
+			parameter, exists := offeringParameter(offering.Parameters, output.TextureSizeParameter)
+			if !exists || parameter.Type != "select" || parameter.Semantic != schemacontract.SemanticTextureSize ||
+				output.Variant == "" || output.VariantPrefix != "" || output.VariantFrom != "" {
+				return fmt.Errorf("%s的 texture_size_parameter 必须引用带 texture-size 语义的 select 参数，并限定精确变体", at)
+			}
+		}
 		// minimum 语义（§3.2 规则 5）：旧语义缺省等效 1，显式值保持
 		// 既有严格性；显式 delivery 必须显式且满足各自下界。
 		if output.Delivery == "" {
@@ -1247,6 +1275,56 @@ func validateRequiredItems(parameter schemacontract.Parameter) error {
 	for _, required := range parameter.RequiredItems {
 		if !slices.Contains(defaults, required) {
 			return fmt.Errorf("参数 %q 的默认值缺少 required_items 中的 %q", parameter.Name, required)
+		}
+	}
+	return nil
+}
+
+// validateDefaultBySourceSide checks a parameter whose default follows the
+// size of the submitted pictures (#284): a number parameter that keeps a static
+// default for pictures that cannot be measured, names an asset parameter of the
+// same Offering, and lists ascending tiers whose last one has no upper bound.
+// Every tier value must be one the parameter itself accepts, so a default the
+// Schema supplies is never refused by the validation it then goes through.
+func validateDefaultBySourceSide(offering schemacontract.Offering, parameter schemacontract.Parameter) error {
+	rule := parameter.DefaultBySourceSide
+	problem := func(format string, args ...any) error {
+		return fmt.Errorf("Offering %q 参数 %q 的 default_by_source_side "+format,
+			append([]any{offering.ID, parameter.Name}, args...)...)
+	}
+	if parameter.Type != "number" || parameter.Fixed {
+		return problem("只有可由调用方给值的 number 参数可以声明")
+	}
+	if len(bytes.TrimSpace(parameter.Default)) == 0 {
+		return problem("需要同时声明 default（读不出图片尺寸时使用）")
+	}
+	source, exists := offeringParameter(offering.Parameters, rule.Source)
+	if !exists || (source.Type != "asset" && source.Type != "asset-array") {
+		return problem("的 source %q 必须是本 Offering 的资产参数", rule.Source)
+	}
+	if len(rule.Tiers) == 0 {
+		return problem("缺少 tiers")
+	}
+	previous := int64(0)
+	for index, tier := range rule.Tiers {
+		if last := index == len(rule.Tiers)-1; last {
+			if tier.MaxSide != 0 {
+				return problem("的最后一档不能声明 max_source_side（它覆盖所有更大的图片）")
+			}
+		} else {
+			if tier.MaxSide <= previous {
+				return problem("的 tiers[%d].max_source_side 必须为正且严格递增", index)
+			}
+			previous = tier.MaxSide
+		}
+		var value any
+		decoder := json.NewDecoder(bytes.NewReader(tier.Value))
+		decoder.UseNumber()
+		if len(bytes.TrimSpace(tier.Value)) == 0 || decoder.Decode(&value) != nil {
+			return problem("的 tiers[%d] 缺少有效 value", index)
+		}
+		if _, err := validateValue(parameter, value); err != nil {
+			return problem("的 tiers[%d] value 无效: %w", index, err)
 		}
 	}
 	return nil

@@ -77,6 +77,22 @@ func (s *Service) WithModelReport(report ModelReport) *Service {
 	return s
 }
 
+// SizedTextureEdge returns the texture edge, in pixels, of the deliverables of a
+// step's Task that the session purpose sized (the exports a rigging or a
+// decimation writes at the purpose's texture size), or 0 when it has none.
+// inspected is the saved model the checkpoint reads. The application wires the
+// resolver inspect_model uses, so texture_size is judged on the same deliverable
+// by both and a checkpoint cannot fail the native file the purpose never sized
+// (#292).
+type SizedTextureEdge func(task generation.Task, inspected generation.AssetID) int
+
+// WithSizedTextureEdge installs the resolver of the deliverables a purpose
+// sized. Without it a checkpoint judges the inspected file, as before.
+func (s *Service) WithSizedTextureEdge(edge SizedTextureEdge) *Service {
+	s.sizedTextureEdge = edge
+	return s
+}
+
 // effectiveCheckpoint returns the stored checkpoint, or nil for a historical
 // step. A checkpoint in an unexpected state is treated as absent: nothing
 // invented is evaluated.
@@ -164,7 +180,11 @@ func (s *Service) judgeCheckpoint(ctx context.Context, plan *Plan, task generati
 	if err != nil {
 		return false, err
 	}
-	results := modelcheck.Evaluate(report, checkpoint.Checks)
+	sized := 0
+	if s.sizedTextureEdge != nil {
+		sized = s.sizedTextureEdge(task, generation.AssetID(assetID))
+	}
+	results := modelcheck.EvaluateSized(report, checkpoint.Checks, sized)
 	checkpoint.Results = make([]CheckpointResult, 0, len(results))
 	for _, result := range results {
 		checkpoint.Results = append(checkpoint.Results, CheckpointResult{

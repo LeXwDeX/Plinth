@@ -890,7 +890,11 @@ func (t *task) artifactName(field string) string {
 		case "3MF":
 			return "model.3mf"
 		case "GLTF":
-			return "model.gltf"
+			// The real GLTF export is a binary GLB, not a glTF JSON: the dev-test
+			// check of 2026-11-12 (#293) read the converted.gltf file and the task's
+			// model, which is that file, as the same bytes. The fake delivers the
+			// same fixed GLB the generation does.
+			return "model.glb"
 		}
 	}
 	if t.decimatesToQuad() || t.generatesQuadFBX() {
@@ -915,8 +919,6 @@ func artifactFile(name, fidelity, texture string) (fakeupstream.File, error) {
 	switch path.Ext(name) {
 	case ".glb":
 		return model("glb")
-	case ".gltf":
-		return fakeupstream.ModelFile("gltf")
 	case ".fbx":
 		return model("fbx")
 	case ".zip":

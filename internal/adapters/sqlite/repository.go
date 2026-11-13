@@ -397,6 +397,9 @@ var chatSessionProjectMigration string
 //go:embed migrations/0091_chat_session_preferences.sql
 var chatSessionPreferencesMigration string
 
+//go:embed migrations/0092_attempt_notices.sql
+var attemptNoticesMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -479,7 +482,8 @@ func migrations() []migration {
 		migration{version: 88, name: "agent_operation_correction", sql: agentOperationCorrectionMigration},
 		migration{version: 89, name: "projects", sql: projectsMigration},
 		migration{version: 90, name: "chat_session_project", sql: chatSessionProjectMigration},
-		migration{version: 91, name: "chat_session_preferences", sql: chatSessionPreferencesMigration})
+		migration{version: 91, name: "chat_session_preferences", sql: chatSessionPreferencesMigration},
+		migration{version: 92, name: "attempt_notices", sql: attemptNoticesMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -487,7 +491,8 @@ func migrations() []migration {
 // explicit 2D model lock (#239), 86 the visual anchors (#250), 87 the persisted
 // 3D self-check records (#246), 88 the correction ownership of a paid step
 // (#246), 89 the project assets, 90 the session's project/style source
-// (#240) and 91 the session preference records (#241).
+// (#240), 91 the session preference records (#241) and 92 the notices a
+// completion observation carries (#284).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))
@@ -2265,6 +2270,14 @@ const upstreamQueueColumn = `(SELECT queue_attempt.last_observation_queue_json
 			  AND queue_attempt.state = 'RUNNING'
 			  AND generation_tasks.state = 'RUNNING')`
 
+// noticesColumn 派生"任务成功但有一部分没有做出来"的公开提示（#284）：任务为
+// SUCCEEDED 时，取当前 Attempt 的完成观察所带的提示 JSON。提示是 Attempt 事实，
+// 不新增任务列；任务没有成功（含物化中、失败）时不投影。
+const noticesColumn = `(SELECT notice_attempt.notices_json
+			FROM generation_attempts notice_attempt
+			WHERE notice_attempt.id = generation_tasks.current_attempt_id
+			  AND generation_tasks.state = 'SUCCEEDED')`
+
 const taskSelect = `
 	SELECT
 		id, owner_id, capability, offering_json, input_json, request_hash,
@@ -2275,11 +2288,37 @@ const taskSelect = `
 			WHERE completion_attempt.task_id = generation_tasks.id
 			  AND completion_attempt.delivery_completion_json IS NOT NULL),
 		` + rateLimitQueuedColumn + `,
-		` + upstreamQueueColumn + `
+		` + upstreamQueueColumn + `,
+		` + noticesColumn + `
 	FROM generation_tasks`
 
 type scanner interface {
 	Scan(...any) error
+}
+
+// decodeNotices reads notices_json (#284); NULL is no notice.
+func decodeNotices(raw sql.NullString) ([]generation.TaskNotice, error) {
+	value := strings.TrimSpace(raw.String)
+	if !raw.Valid || value == "" || value == "null" {
+		return nil, nil
+	}
+	var notices []generation.TaskNotice
+	if err := json.Unmarshal([]byte(value), &notices); err != nil {
+		return nil, fmt.Errorf("解析 notices_json: %w", err)
+	}
+	return notices, nil
+}
+
+// encodeNotices is the notices_json value; nil (SQL NULL) when there is none.
+func encodeNotices(notices []generation.TaskNotice) (any, error) {
+	if len(notices) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(notices)
+	if err != nil {
+		return nil, err
+	}
+	return string(encoded), nil
 }
 
 // decodeUpstreamQueue reads last_observation_queue_json (#131); NULL is no
@@ -2312,6 +2351,7 @@ func scanTask(row scanner) (generation.Task, error) {
 	var deliveryCompleted int
 	var rateLimitQueued int
 	var upstreamQueueJSON sql.NullString
+	var noticesJSON sql.NullString
 	err := row.Scan(
 		&task.ID,
 		&task.OwnerID,
@@ -2331,7 +2371,7 @@ func scanTask(row scanner) (generation.Task, error) {
 		&updatedAt,
 		&finishedAt,
 		&resourcesJSON,
-		&sessionID, &nativeQuoteJSON, &deliveryCompleted, &rateLimitQueued, &upstreamQueueJSON,
+		&sessionID, &nativeQuoteJSON, &deliveryCompleted, &rateLimitQueued, &upstreamQueueJSON, &noticesJSON,
 	)
 	if err != nil {
 		return generation.Task{}, err
@@ -2339,6 +2379,9 @@ func scanTask(row scanner) (generation.Task, error) {
 	task.DeliveryCompleted = deliveryCompleted != 0
 	task.RateLimitQueued = rateLimitQueued != 0
 	if task.UpstreamQueue, err = decodeUpstreamQueue(upstreamQueueJSON); err != nil {
+		return generation.Task{}, err
+	}
+	if task.Notices, err = decodeNotices(noticesJSON); err != nil {
 		return generation.Task{}, err
 	}
 	if err := json.Unmarshal([]byte(offeringJSON), &task.Offering); err != nil {
@@ -2493,6 +2536,7 @@ func loadAttempt(
 	var upstreamQueueJSON sql.NullString
 	var upstreamQueuedSince sql.NullString
 	var upstreamQueuedMS int64
+	var noticesJSON sql.NullString
 	var startedAt string
 	var updatedAt string
 	var finishedAt sql.NullString
@@ -2502,7 +2546,7 @@ func loadAttempt(
 		       upstream_provider_id, upstream_job_id, failure_json, opaque_json,
 		       last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase,
 		       started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json,
-		       upstream_queued_since, upstream_queued_ms
+		       upstream_queued_since, upstream_queued_ms, notices_json
 		FROM generation_attempts WHERE id = ?`,
 		id,
 	).Scan(
@@ -2529,11 +2573,15 @@ func loadAttempt(
 		&upstreamQueueJSON,
 		&upstreamQueuedSince,
 		&upstreamQueuedMS,
+		&noticesJSON,
 	)
 	if err != nil {
 		return generation.Attempt{}, err
 	}
 	if attempt.UpstreamQueue, err = decodeUpstreamQueue(upstreamQueueJSON); err != nil {
+		return generation.Attempt{}, err
+	}
+	if attempt.Notices, err = decodeNotices(noticesJSON); err != nil {
 		return generation.Attempt{}, err
 	}
 	if upstreamQueuedSince.Valid {
@@ -2679,13 +2727,17 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 		}
 		upstreamQueue = string(encoded)
 	}
+	notices, err := encodeNotices(attempt.Notices)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO generation_attempts (
 			id, task_id, ordinal, offering_json, state, submission_key,
 			upstream_provider_id, upstream_job_id, failure_json, opaque_json,
 			last_observation_key, last_observation_sequence, observation_failures, last_observation_at, last_observation_phase, started_at, updated_at, finished_at, delivery_completion_json, rate_limit_queued, last_observation_queue_json,
-			upstream_queued_since, upstream_queued_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			upstream_queued_since, upstream_queued_ms, notices_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			state = excluded.state,
 			upstream_provider_id = excluded.upstream_provider_id,
@@ -2703,7 +2755,8 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 			rate_limit_queued = excluded.rate_limit_queued,
 			last_observation_queue_json = excluded.last_observation_queue_json,
 			upstream_queued_since = excluded.upstream_queued_since,
-			upstream_queued_ms = excluded.upstream_queued_ms`,
+			upstream_queued_ms = excluded.upstream_queued_ms,
+			notices_json = COALESCE(excluded.notices_json, generation_attempts.notices_json)`,
 		attempt.ID,
 		attempt.TaskID,
 		attempt.Ordinal,
@@ -2727,6 +2780,7 @@ func upsertAttempt(ctx context.Context, tx *sql.Tx, attempt generation.Attempt) 
 		upstreamQueue,
 		nullTime(attempt.UpstreamQueuedSince),
 		attempt.UpstreamQueuedFor.Milliseconds(),
+		notices,
 	)
 	if err != nil && isUpstreamJobConflict(err) {
 		return fmt.Errorf("%w: %v", generation.RepositoryUpstreamJobConflict, err)

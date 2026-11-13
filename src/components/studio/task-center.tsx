@@ -553,6 +553,12 @@ export function TaskDrawer() {
               {!task.terminal && task.queueNotice ? (
                 <p className="mt-0.5 text-xs text-muted-foreground" data-testid="workspace-task-queue-notice">{task.queueNotice.detail}</p>
               ) : null}
+              {/* A task that succeeded without delivering everything says so (#284); its state stays a success. */}
+              {task.terminal && !task.failure ? (task.notices ?? []).map((notice) => (
+                <p key={notice.code} className="mt-0.5 flex items-start gap-1.5 text-xs text-warning" data-testid="workspace-task-notice" data-notice-code={notice.code}>
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />{notice.detail}
+                </p>
+              )) : null}
 
               {confirmingCancel[task.taskId] ? (
                 <div role="alert" className="mt-2 flex flex-col gap-1.5 rounded-md bg-warning/10 p-2 text-xs text-warning" data-testid="workspace-task-cancel-confirm">

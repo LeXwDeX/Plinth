@@ -52,6 +52,14 @@ type ParameterPresentation struct {
 	DisabledWhen []ParameterCondition `json:"disabled_when,omitempty"`
 	VisibleWhen  []ParameterCondition `json:"visible_when,omitempty"`
 	Notices      []ParameterNotice    `json:"notices,omitempty"`
+	// FollowsPurpose declares that the value the session's production brief gives
+	// this parameter (the purpose's override or the fit of its budget) is the value
+	// the parameter has until the person picks one (#292). A form that submits the
+	// Offering must leave the parameter out while it is untouched and show it as
+	// following the purpose; the server fills it from the brief when the request
+	// omits it, and the Offering's default applies when no purpose gives a value.
+	// A value the request sets is always the request's own.
+	FollowsPurpose bool `json:"follows_purpose,omitempty"`
 }
 
 // ForcedValue 声明参数的强制取值：当 When 条件命中时，服务端规范化
@@ -107,6 +115,45 @@ type AlphaFlatten struct {
 	KeepWhen        []ParameterCondition `json:"keep_when,omitempty"`
 }
 
+// SourceSideDefault gives a number parameter a default that follows the size of
+// the pictures a request submits (#284): a background removal wants its working
+// resolution to match its source, since a larger picture is lost at a small one
+// and a small picture gains nothing from a large one. Source names the asset
+// parameter whose pictures decide it. The long side of a picture is the larger
+// of its width and height; for several pictures the largest long side counts,
+// because one value serves the whole batch. The first Tier whose MaxSide the long
+// side does not exceed gives the value; the last Tier has no MaxSide and covers
+// everything larger. A value the caller gave is never replaced, and pictures that
+// cannot be measured leave the parameter's static Default. The kernel only
+// measures and picks; the tiers are product configuration.
+type SourceSideDefault struct {
+	Source string           `json:"source"`
+	Tiers  []SourceSideTier `json:"tiers"`
+}
+
+// SourceSideTier is one step of SourceSideDefault: the Value for pictures whose
+// long side is at most MaxSide pixels, or for every larger picture when MaxSide
+// is absent (the last tier only).
+type SourceSideTier struct {
+	MaxSide int64           `json:"max_source_side,omitempty"`
+	Value   json.RawMessage `json:"value"`
+}
+
+// ValueFor is the tier value for pictures whose largest long side is side
+// pixels; false when the rule has no tier for it (a side of zero or less, or no
+// open-ended last tier).
+func (rule SourceSideDefault) ValueFor(side int64) (json.RawMessage, bool) {
+	if side <= 0 {
+		return nil, false
+	}
+	for _, tier := range rule.Tiers {
+		if tier.MaxSide == 0 || side <= tier.MaxSide {
+			return tier.Value, true
+		}
+	}
+	return nil, false
+}
+
 // PromptDelivery 声明参数改由提示词传递：参数照常展示与选择，但不上线；
 // 规范化阶段把 Template 中的 {value} 替换为所选值（选项 value 的字符串），
 // 另起一行追加到 Offering 的提示词参数（语义 prompt）末尾，并从输入中移除该参数。
@@ -158,13 +205,17 @@ type Parameter struct {
 	// （forced_when 仍可在其后覆盖），UI 可按 readonly 声明展示，UI 与 Agent 都不能选择该值。用于把
 	// 模型版本、质量档位等固定为最高质量（产品设计宗旨见
 	// docs/provider-schema-architecture.md「最新 API 与最高质量」）。
-	Fixed        bool                       `json:"fixed,omitempty"`
-	Integer      bool                       `json:"integer,omitempty"`
-	ImageSize    *ImageSizeConstraint       `json:"image_size,omitempty"`
-	ImageInput   *ImageInputConstraint      `json:"image_input,omitempty"`
-	AlphaFlatten *AlphaFlatten              `json:"alpha_flatten,omitempty"`
-	WireTemplate json.RawMessage            `json:"wire_template,omitempty"`
-	WireValues   map[string]json.RawMessage `json:"wire_values,omitempty"`
+	Fixed bool `json:"fixed,omitempty"`
+	// DefaultBySourceSide makes the default follow the size of the submitted
+	// pictures (#284); the static Default stays the value when they cannot be
+	// measured. Only a number parameter declares it.
+	DefaultBySourceSide *SourceSideDefault         `json:"default_by_source_side,omitempty"`
+	Integer             bool                       `json:"integer,omitempty"`
+	ImageSize           *ImageSizeConstraint       `json:"image_size,omitempty"`
+	ImageInput          *ImageInputConstraint      `json:"image_input,omitempty"`
+	AlphaFlatten        *AlphaFlatten              `json:"alpha_flatten,omitempty"`
+	WireTemplate        json.RawMessage            `json:"wire_template,omitempty"`
+	WireValues          map[string]json.RawMessage `json:"wire_values,omitempty"`
 
 	Name              string                 `json:"name"`
 	Label             string                 `json:"label"`

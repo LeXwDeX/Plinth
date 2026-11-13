@@ -69,9 +69,10 @@ func TestNativeDeliveryFreezesAllFormatsAndCostsBeforeConsent(t *testing.T) {
 			}
 			var wire struct {
 				Native struct {
-					Source     string         `json:"source_alias"`
-					Max        int64          `json:"max_source_bytes"`
-					Parameters map[string]any `json:"parameters"`
+					Source     string           `json:"source_alias"`
+					Max        int64            `json:"max_source_bytes"`
+					Parameters map[string]any   `json:"parameters"`
+					Bindings   []map[string]any `json:"bindings"`
 					Formats    []struct {
 						Format, Role, Variant string
 						Media                 string `json:"media_type"`
@@ -82,7 +83,11 @@ func TestNativeDeliveryFreezesAllFormatsAndCostsBeforeConsent(t *testing.T) {
 				t.Fatal(err)
 			}
 			native := wire.Native
-			if native.Source != "model" || native.Max != 150000000 || len(native.Formats) != len(tc.formats) || !reflect.DeepEqual(native.Parameters, map[string]any{"texture_size": float64(8192), "texture_format": "PNG", "with_animation": tc.name == "rigging", "bake": true, "fbx_preset": "blender"}) {
+			// The export is lossless PNG with the declared options; its texture size
+			// is the one public parameter the purpose bounds (#292).
+			if native.Source != "model" || native.Max != 150000000 || len(native.Formats) != len(tc.formats) ||
+				!reflect.DeepEqual(native.Parameters, map[string]any{"texture_format": "PNG", "with_animation": tc.name == "rigging", "bake": true, "fbx_preset": "blender"}) ||
+				!reflect.DeepEqual(native.Bindings, []map[string]any{{"parameter": "export_texture_size", "wire": "texture_size"}}) {
 				t.Fatalf("conversion contract=%+v", native)
 			}
 			for i, format := range native.Formats {

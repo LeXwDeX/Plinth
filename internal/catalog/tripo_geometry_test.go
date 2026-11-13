@@ -27,14 +27,10 @@ func TestTripoGeometryEnabledSourcesAndNormalization(t *testing.T) {
 			o, ok := c.Get(id)
 			// 185.5 declares the native OBJ export as the ZIP it is; 185.6
 			// re-enables Quick Cap; the two decimations take multiview results as
-			// a source since #276 (revision 2026-11-12.276.1).
-			revision := "2026-10-22.185.5"
-			switch kind {
-			case "quick-cap":
-				revision = "2026-10-22.185.6"
-			case "decimate-triangle", "decimate-quad":
-				revision = "2026-11-12.276.1"
-			}
+			// a source since #276 (revision 2026-11-12.276.1). #292 binds the
+			// export texture size of all of them to the purpose, which is the
+			// revision they carry now.
+			revision := "2026-11-12.292.1"
 			if !ok || o.Enabled != qualified[kind] || o.Default || o.Revision != revision {
 				t.Fatalf("geometry Offering enablement drifted from the #185 qualification: %+v", o)
 			}

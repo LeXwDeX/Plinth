@@ -118,12 +118,14 @@ func readRecoverySource(ctx context.Context, q queryer, owner generation.OwnerID
 	// bound across 0069 by omitting this local-only attempt column. The 0071
 	// rate-limit queue counter and the 0078 upstream queue report and clock
 	// are likewise local scheduling state, not provider evidence, so they
-	// never enter the source digest.
+	// never enter the source digest. The 0092 notices are the kernel's own
+	// reading of a completion and belong to a succeeded Task, so they stay out
+	// too (#284).
 	attemptSnapshot := make(map[string]any, len(attempts[0]))
 	for key, value := range attempts[0] {
 		switch key {
 		case "delivery_completion_json", "rate_limit_queued",
-			"last_observation_queue_json", "upstream_queued_since", "upstream_queued_ms":
+			"last_observation_queue_json", "upstream_queued_since", "upstream_queued_ms", "notices_json":
 			continue
 		}
 		attemptSnapshot[key] = value

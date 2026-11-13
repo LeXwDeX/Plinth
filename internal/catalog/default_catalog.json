@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-12.294-real-checks.1",
+    "revision": "2026-11-12.284-292-293.1",
     "terminology": {
       "user_facing": [
         {
@@ -4199,6 +4199,10 @@
         "task.queue_reason.rate_limited": "上游限流，排队中；稍后会自动重试，不会重复扣积分",
         "task.queue_reason.upstream_queued": "上游排队中",
         "task.queue_reason.upstream_queued_ahead": "上游排队中（前方约 {ahead} 个任务）",
+        "task.notice.partial_inputs": "部分图片没有处理成功，其余已完成。",
+        "task.notice.partial_inputs_named": "{inputs}没有处理成功，其余已完成。",
+        "task.notice.input": "第 {ordinal} 张",
+        "task.notice.input_separator": "、",
         "failure.transport": "无法连接上游服务",
         "failure.timed_out": "上游请求超时",
         "failure.upstream_queue_timeout": "上游排队过久，已停止等待；服务商可能仍会执行并扣费",
@@ -4793,6 +4797,7 @@
         "ui.studio.params.capability": "适用操作",
         "ui.studio.params.readonly": "固定配置",
         "ui.studio.params.not_set": "未设置",
+        "ui.studio.params.follows_purpose": "按会话用途",
         "ui.studio.params.on": "开",
         "ui.studio.params.off": "关",
         "ui.studio.params.files_selected": "已选择 {count} 个文件",
@@ -6094,7 +6099,7 @@
             "text": "【资产类型与风格要点】\n先判断主体属于哪一类，再按要点准备输入图、写提示词和自检；简报里的目标引擎与目标平台决定尺度、面数和贴图的取舍。三视图主体类型：角色 humanoid、动物 quadruped、武器、载具与建筑等硬表面 hard_surface、其他 generic。\n资产类型：\n- 角色：A 姿态（需要绑骨时必须，T 姿态也可），四肢和手指分开、不互相遮挡，中性站姿与表情；手持物、背包、披风、长发分开做或做短，否则会粘连，绑骨后也会穿插。\n- 武器：硬表面，剪影与比例准确，边缘留小倒角让高光成立，刃口不要薄到零厚度；弹匣、鞘、拉栓等会动或可装卸的部件分件；按握持点定原点与朝向。\n- 道具：单件、剪影清晰，细节烘进法线贴图而不是堆面；原点放在底面中心（手持物放握持点）；成套道具统一比例与贴图精度。\n- 载具：左右严格对称，车轮、炮塔、舱门、旋翼等会动的部件分件并把轴心放在转动中心，车头朝向统一，尺度按真实大小（轿车约 4.5 米）；内部不建模。\n- 建筑与场景件：按统一的模块网格建模（如 1、2 或 4 米），两端接口对齐便于引擎拼接；墙面和地面用无缝可平铺的贴图；看不见的内部和背面不建；整栋建筑拆成外墙、屋顶、门窗等件；需要 LOD 时先出最高精度再逐档减面，不要每档单独生成。\n风格：\n- 写实 PBR：贴图只含固有色，不烘光影与阴影；法线、粗糙度、金属度走 PBR 通道；输入图用中性均匀光。\n- 手绘：光影和笔触可以直接画进贴图，材质简单，通常只用一张固有色贴图；轮廓概括，贴图分辨率要够。\n- 卡通渲染（toon/cel）：大块平涂、色阶分明，几何干净，贴图不烘光影；描边和明暗阶交给引擎的着色。\n- 低模：用剪影和转折处的面数表达形体，细节靠贴图；面数以用途预算为准。\n- 像素风：先定网格（每格像素数）与调色板，贴图用最近邻采样、关闭滤波与 mipmap；图生 3D 很难保住像素格，先如实告诉用户，必要时改用体素或低分辨率贴图的低模。"
           }
         ],
-        "system_prompt": "你是 Plinth 的美术总监，同时负责 2D 图像与 3D 模型。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要图或要模型、而会话还没有制作简报时，先用 ask_choice 请用户选用途：3D 用 kind=usage_profile，2D 用 kind=image_usage_profile；2D 的引导要更轻，需求已经说清或用户说随便时不要出卡，直接用默认用途开始。需要风格、画幅、透明背景或是否作为 3D 输入时，再用一两句话问清，然后用 update_production_brief 记下。游戏或实时用途的资产（游戏角色、游戏道具与场景件、Web/AR，或用户说要放进引擎）还必须问清目标引擎（Unity、Unreal、Godot、Web 或其他）和目标平台（手机、PC/主机、网页、XR），角色再问是否需要绑骨与动画；这几项只有用户知道，不要替用户选，用户话里已经说清的直接记下。一次最多一张选择卡，不要一次问一长串；简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡；需要绑骨的角色默认先出 A 姿态概念图，再走三视图 → 多视图转 3D 的路线（create_three_view，subject_type=humanoid，再 create_model_3d_from_views）。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。2D 与 3D 用同一套四层优先级：用户在本会话锁定的模型 > 你带理由指定的模型 > 用途推荐 > 默认。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换；用途推荐与用户所选冲突时先确认，不静默覆盖。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出推荐模型与参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说；批准卡也会带来源与理由。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 2D 结果交付前，用 inspect_image（checklist=delivery）看尺寸、透明通道、背景、主体占比与贴边，以及制作简报用途要求的最小短边、贴图平铺和透明底边缘，再看图检查主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性；作为 3D 输入图时用 checklist=3d_input（带 show_picture 看图）检查单主体、完整不贴边、纯色或透明背景，并对它列出的视觉项（姿态、透视、投影阴影）逐项看图判断，用 visual_review 记入自检记录；需要绑骨的角色必须是 A 或 T 姿态，任何一项不通过都先修图。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式；有参考图时用 compare_model_reference 按视角并排对照。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。检查后用 record_self_check 写结论（passed 或 has_issues），列出发现、处理与剩余问题；记录由服务端按真实工具调用生成并持久保存，未自检的结果不得说成已检查。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步；模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过。\n\n提示词写法：\n- 每次写生成提示词、选模型前，先读系统上下文里的偏好摘要：已选用方向逐字沿用；已否决方向及其原因不要换个说法重复提交，除非用户明确要求。重新生成、局部重绘或改词重发留下的“未确认”信号不算确认，先问清方向再批量出图。\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 每个模型的具体写法（语言、描述式或关键词式、长度、是否读取文本、反向提示词、参考图作用）以工具描述和 list_offerings 中该 Offering 的 prompt guidance 为准；guidance 与这里的通用基线冲突时，以 guidance 为准。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要；服务端会把本会话的风格锚（风格锁定的原文与参考图）逐字注入系统上下文，直接照用。改写已有步骤时，先用 get_production_step 按 @stepN 或任务 ID 取回该步的完整提示词，只改用户要求的局部并保留其余原文；基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n- 工具结果里的 final_prompt 是服务端实际提交的提示词，prompt_note 列出套用的模板、风格锁、默认反向提示词和截断；有改写或拒绝时按结果如实说明。提示词超过模型上限会被拒绝且不会扣费，按提示的差额缩写后重新调用。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
+        "system_prompt": "你是 Plinth 的美术总监，同时负责 2D 图像与 3D 模型。你对用户最终拿到的东西能不能用负责，而不只是执行某一步。用户只需要说出目标、确认制作简报和预算、验收结果；不要让用户去理解内部的模式、服务或参数，也不要把这些选择推给用户。\n\n工作流程：\n1. 理解目标。用户要图或要模型、而会话还没有制作简报时，先用 ask_choice 请用户选用途：3D 用 kind=usage_profile，2D 用 kind=image_usage_profile；2D 的引导要更轻，需求已经说清或用户说随便时不要出卡，直接用默认用途开始。需要风格、画幅、透明背景或是否作为 3D 输入时，再用一两句话问清，然后用 update_production_brief 记下。游戏或实时用途的资产（游戏角色、游戏道具与场景件、Web/AR，或用户说要放进引擎）还必须问清目标引擎（Unity、Unreal、Godot、Web 或其他）和目标平台（手机、PC/主机、网页、XR），角色再问是否需要绑骨与动画；这几项只有用户知道，不要替用户选，用户话里已经说清的直接记下。一次最多一张选择卡，不要一次问一长串；简报已有的信息不再重复问。\n2. 定计划。批准方式是预算制、并且要做付费的多步工作时，先用 propose_production_plan 提出制作计划：步骤、所用模型、每步预计花费（带它自己的积分单位）、按积分单位分别给出的预算（Tripo、Hyper3D、Meshy 等不同供应商的单位与历史积分各算各的，不相加、不换算）、自检后允许的修正步骤。用户在计划卡上批准后，服务端会自动开启一轮让你按计划开始执行；在各单位的剩余预算内连续执行，不再逐步询问。严格模式下每个需要批准的付费步骤照常出批准卡；自动模式下直接执行。\n3. 准备输入。图生 3D 的质量大半取决于输入图：单一主体、完整不裁切、纯色或透明背景、均匀柔光、没有强阴影、弱透视或正交；角色用 A-pose 或 T-pose，四肢和手指分开、不互相遮挡；需要绑骨的角色默认先出 A 姿态概念图，再走三视图 → 多视图转 3D 的路线（create_three_view，subject_type=humanoid，再 create_model_3d_from_views）。输入不满足时，先出概念图或修图，必要时去背景，再用 create_three_view 或多视图；多视图生成至少给全正面、侧面、背面，不要只给两张。为了让图适合建模而补充的约束（背景、姿势、视角、光照）可以直接写进 prompt，并在回复里说明补了什么；不要加入用户没有要求的风格或内容。工具参数里的 prompt 用英文。\n4. 选模型和参数。2D 与 3D 用同一套四层优先级：用户在本会话锁定的模型 > 你带理由指定的模型 > 用途推荐 > 默认。用户锁定的模型、服务和参数必须照办，做不到时说明原因，不要偷偷换；用途推荐与用户所选冲突时先确认，不静默覆盖。没有锁定的，由你按制作简报的用途和主体来选；工具会按用途给出推荐模型与参数，你可以带理由偏离。工具结果里的 model_choice 说明了模型的来源，按实说；批准卡也会带来源与理由。互不依赖的付费步骤在同一次回复里一起发出；有依赖的按顺序等前一步完成。\n5. 自检后交付。每个 2D 结果交付前，用 inspect_image（checklist=delivery）看尺寸、透明通道、背景、主体占比与贴边，以及制作简报用途要求的最小短边、贴图平铺和透明底边缘，再看图检查主体、构图、肢体与手部、文字和水印、与参考图或风格锁的一致性；作为 3D 输入图时用 checklist=3d_input（带 show_picture 看图）检查单主体、完整不贴边、纯色或透明背景，并对它列出的视觉项（姿态、透视、投影阴影）逐项看图判断，用 visual_review 记入自检记录；需要绑骨的角色必须是 A 或 T 姿态，任何一项不通过都先修图。发现问题先修（重画、去背景、裁切、用参考图编辑）再交付。每个 3D 结果交付前，用 inspect_model 看几何（面数、拓扑、UV、是否水密、漂浮碎片、尺寸）并对照用途预算，用 render_model_views 至少看正面、背面和 3/4 视角，查造型问题时用 clay 模式；有参考图时用 compare_model_reference 按视角并排对照。对照参考图和需求检查：轮廓与比例、背面、手指和细小结构、漂浮碎片、贴图接缝与错位、对称性。检查后用 record_self_check 写结论（passed 或 has_issues），列出发现、处理与剩余问题；记录由服务端按真实工具调用生成并持久保存，未自检的结果不得说成已检查。发现问题就在预算和自检轮数上限内修：减面或重拓扑、换贴图、部件补全、拆分后只处理有问题的部件，或改进输入后重做。到达上限就停下，如实列出剩余问题。\n6. 汇报。简洁说明结果、所用模型和关键参数、自检发现和处理、剩余问题和建议的下一步；模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过；工具结果带 notices 时，说明任务成功但有一部分没做出来（例如抠图有几张没抠成），照 notices 里的 message 如实告诉用户，不要说成全部完成，并问用户要不要只对没做出来的那几张重做。\n\n提示词写法：\n- 每次写生成提示词、选模型前，先读系统上下文里的偏好摘要：已选用方向逐字沿用；已否决方向及其原因不要换个说法重复提交，除非用户明确要求。重新生成、局部重绘或改词重发留下的“未确认”信号不算确认，先问清方向再批量出图。\n- 工具参数中的 prompt 用英文准确表达用户意图，写成完整描述句而不是堆砌标签，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自改换主题或加入用户没要求的角色、物体和情节。\n- 每个模型的具体写法（语言、描述式或关键词式、长度、是否读取文本、反向提示词、参考图作用）以工具描述和 list_offerings 中该 Offering 的 prompt guidance 为准；guidance 与这里的通用基线冲突时，以 guidance 为准。\n- 2D 质量基线（用户和 Skill 都没指定时补足，不覆盖已指定的内容）：按用途选定一种明确的画风或媒介（例如 photorealistic product photo、clean digital illustration、stylized game concept art），写清主光与氛围（例如 soft even studio lighting）、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写明 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；画质由质量参数控制，尺寸与比例由尺寸参数控制，都不写进 prompt。\n- 系列一致：同一会话里的成组图片（系列、变体、多视角、拆件、同一角色的多张）先定一段风格锚（画风/媒介、色板、光线、线条与细节密度、视角与主体在画面中的占比）和身份锚（外形、比例、配色、服装、标志性细节），每张 prompt 都逐字复用这两段，只改需要变化的部分；设定摘要里的风格和角色设定照此写入，用户确认的风格锚也记进设定摘要；服务端会把本会话的风格锚（风格锁定的原文与参考图）逐字注入系统上下文，直接照用。改写已有步骤时，先用 get_production_step 按 @stepN 或任务 ID 取回该步的完整提示词，只改用户要求的局部并保留其余原文；基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。\n- 去背景：用户要去背景、抠图、只保留主体或换透明背景时，调用 remove_background，不用图生图编辑代替；图生图只用于改变画面内容。\n- 文生 3D 的 prompt 只描述一个物体，约 30-60 个英文词，按「物体 → 形状与比例 → 材质与表面 → 风格（如 realistic、stylized、low-poly、hand-painted）→ 主要配色」书写；不写背景、场景、光线、镜头或多个物体，多部件资产分开生成。用户已有满意的参考图时优先图生 3D。\n- 工具结果里的 final_prompt 是服务端实际提交的提示词，prompt_note 列出套用的模板、风格锁、默认反向提示词和截断；有改写或拒绝时按结果如实说明。提示词超过模型上限会被拒绝且不会扣费，按提示的差额缩写后重新调用。\n\n引用与事实：\n- 引用图片和模型用句柄：@img3、@model2、拆分出的部件 @model2#3、@selected 指当前选中的对象；不构造 URL，不用上游 ID。同一轮刚产出的对象，用工具结果 handles 字段给出的句柄。用户说\"这个\"\"这张\"时默认指当前选中的对象。用户的话指向的图不在本轮附件里时，先用 find_history_images 在本会话历史里找，找不到或分不清就简短地问。\n- 价格、积分、能导出的格式、模型是什么结果，一律照工具结果写（quote、estimated_credits、export_formats、capability、provider、model），不要自己估算或推测。说到服务时用供应商名和模型名，不写内部 ID。\n- 批准由服务端按批准方式和预算决定。工具结果说在等批准卡或计划卡时，告诉用户在卡片上决定，不要说已经提交或已经开始；approval 只会是 policy 或 human；policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的，此时 budget 对象说明所属计划与剩余额度，不要说\"你已批准\"。不要让用户去勾选任何设置或切换任何模式。用户拒绝后，说明这一步没有做、没有扣费，再给出替代方案让用户选。\n- 某一步失败时，如实说明是哪一步、哪个模型，以及工具给出的原因。余额不足或 Key 额度问题，请用户联系管理员，不要换模型重试。可能已经扣费的失败不要自动重新提交：先用 get_task 看 result_recovery，能免费取回就用 recover_task_result，否则说明原因，让用户决定是否重新付费。\n- 制作简报之外，用户和你敲定、需要在长对话里一直保持的创作设定（角色、风格、禁忌等），用 update_session_notes 整体更新设定摘要；不写尺寸和一次性要求。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n- 普通对话或只是看图提问时直接回答，不调用生成工具。\n- 不输出原始 URL、内部字段、工具诊断或上游错误原文。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -6349,6 +6354,8 @@
             "brief_purpose_text": "按制作简报的用途「{purpose}」判定。",
             "triangle_override_text": "三角面上限采用制作简报的 triangle_budget：{value}。",
             "platform_budget_text": "按制作简报的目标平台「{platform}」的预算判定。",
+            "export_texture_text": "原生 GLB 贴图为 {native} 像素，交付用 {formats} 已按用途导出为 {export} 像素；贴图项按导出判定（边长取自冻结的步骤参数，没有读取导出文件里的贴图）。",
+            "export_texture_fix_text": "交付用 {formats} 的导出贴图 {export} 像素超过用途的上限 {maximum} 像素：把「导出贴图尺寸」调小后重做这一步，不必重新生成模型。",
             "no_capability_text": "当前 Catalog 没有可用于修复这一项的已启用能力。",
             "capability_joiner": " → ",
             "option_separator": " 或 ",
@@ -7652,7 +7659,7 @@
           "canvas_source": "bind",
           "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["background-removal"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Remove the background of the referenced images using the background-removal offering. Use reference_handles (such as @img3, or @selected) or reference_image_indices for existing images; without either, the images selected on the workspace are used.",
+          "description": "Remove the background of the referenced images using the background-removal offering. Use reference_handles (such as @img3, or @selected) or reference_image_indices for existing images; without either, the images selected on the workspace are used. A result with notices means some pictures were not processed even though the task succeeded: tell the user which ones, as the notice message says, and do not call the batch complete.",
           "ignore_user_model": true,
           "default_to_selection": true,
           "capability": "background-removal",
@@ -7695,6 +7702,7 @@
             "task_id": "task_id",
             "image_urls": "image_urls",
             "parameters": "parameters",
+            "notices": "notices",
             "error": "error",
             "estimated_credits": "estimated_credits",
             "approval": "approval",
@@ -15115,6 +15123,8 @@
         "dependency_missing_line": "- {path}（OBJ 引用了该文件，但任务没有保存它）",
           "other_heading": "其他文件：",
           "other_line": "- {path}",
+          "same_heading": "内容相同的文件：",
+          "same_line": "- {label} 与 {path} 内容相同，只收录一份",
           "complete_note": "所有目标格式均已包含。",
           "incomplete_note": "部分格式未包含，原因见上。可在平台中使用“补齐格式”获取可转换的格式。",
           "converted_obj_note": "说明：{path} 由格式转换服务（Tripo 格式转换或 Meshy Convert）得到，转换结果只包含模型形状，没有材质库（MTL）和贴图文件。需要带材质的模型，请使用 GLB、glTF 或 FBX 等自带材质的格式，或在建模软件里重新赋予材质。",
@@ -17214,6 +17224,10 @@
             "task.queue_reason.rate_limited": "Upstream rate limit reached; queued and will retry automatically without charging credits again",
             "task.queue_reason.upstream_queued": "Queued at the provider",
             "task.queue_reason.upstream_queued_ahead": "Queued at the provider (about {ahead} tasks ahead)",
+            "task.notice.partial_inputs": "Some pictures were not processed; the rest are done.",
+            "task.notice.partial_inputs_named": "Not processed: {inputs}. The rest are done.",
+            "task.notice.input": "picture {ordinal}",
+            "task.notice.input_separator": ", ",
             "failure.transport": "Unable to reach the upstream service",
             "failure.timed_out": "Upstream request timed out",
             "failure.upstream_queue_timeout": "Waited too long in the provider's queue and stopped waiting; the provider may still run and bill the task",
@@ -17808,6 +17822,7 @@
             "ui.studio.params.capability": "Applies to",
             "ui.studio.params.readonly": "Fixed configuration",
             "ui.studio.params.not_set": "Not set",
+            "ui.studio.params.follows_purpose": "Follow the session purpose",
             "ui.studio.params.on": "On",
             "ui.studio.params.off": "Off",
             "ui.studio.params.files_selected": "Selected {count} files",
@@ -19626,6 +19641,8 @@
             "model_delivery.archive.readme.dependency_heading": "OBJ materials and textures (keep them in the same folder as the OBJ):",
             "model_delivery.archive.readme.dependency_missing_line": "- {path} (referenced by the OBJ, but the task did not save it)",
             "model_delivery.archive.readme.other_heading": "Other files:",
+            "model_delivery.archive.readme.same_heading": "Identical files:",
+            "model_delivery.archive.readme.same_line": "- {label} has the same content as {path}; only one copy is included",
             "model_delivery.archive.readme.complete_note": "All target formats are included.",
             "model_delivery.archive.readme.incomplete_note": "Some formats are not included; see the reasons above. Fill in the missing formats on the platform to get the ones that can be converted.",
             "model_delivery.archive.readme.converted_obj_note": "Note: {path} was made by a format conversion service (Tripo format conversion or Meshy Convert) and contains only the model's shape, without a material library (MTL) or texture files. For a model with materials, use a format that carries them, such as GLB, glTF or FBX, or reassign materials in your modeling software.",
@@ -20301,7 +20318,8 @@
             "默认沿用上游默认，转换保持基础价；需要无损贴图的用途（如游戏）在自己的声明里选 PNG，Agent 也可按需求说明理由选择。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs lossless textures (a game, for example) chooses PNG in its own declaration, and the Agent may also choose it with a stated reason.",
             "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。": "Side length of the diffuse texture the format conversions export. The default is 4K, the upstream default, which keeps the conversion at the basic price; any other value makes it an advanced conversion. The highest generated texture tier is advertised as 8K (native and exported textures measured 4096 on 2026-10-19); choose 8K to stay at or above it.",
             "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs smaller or larger textures says so in its own declaration, and the Agent may also adjust it to another legal value with a stated reason.",
-            "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。": "Moves the model origin to the bottom center during format conversion (off by default upstream; turning it on makes the conversion an advanced one). Game and real-time purposes turn it on so the model is easy to place and scale in an engine; display purposes keep the upstream default.",
+            "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。": "Side length of the texture the exports (FBX and other formats that carry textures) are written with; the texture is always lossless PNG. The default is 8K. When no size is chosen (you leave this field as it is, or the Agent starts the step), the texture limit of the purpose in the session's production brief applies, and 8K when the purpose sets none; a size you choose yourself is used as chosen. It applies only to the exported formats; the GLB the step returns directly keeps Tripo's original textures. Exports are always priced as advanced conversions (PNG is not the upstream default format), so changing the size does not change the price.",
+            "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。":"Moves the model origin to the bottom center during format conversion (off by default upstream; turning it on makes the conversion an advanced one). Game and real-time purposes turn it on so the model is easy to place and scale in an engine; display purposes keep the upstream default.",
             "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。": "The export preset of FBX conversions (the upstream default is Blender; another preset does not change the price). The official page only says that Bake scale bakes the scale transform into the geometry; the differences between the other presets are not stated, and which preset suits which engine is not verified, so the default is used until a target-engine field exists. Used for FBX conversions only.",
             "本服务请求并保存全部六种官方格式。": "This service requests and saves all six official formats.",
             "本入口支持至少 0.001 米（1 毫米），这是本入口的有界范围，不是上游公布的尺寸下限。": "This entry point supports a minimum of 0.001 m (1 mm). This is the entry point's own bound, not a minimum size published by the upstream.",
@@ -20462,8 +20480,8 @@
             "站起 7 (Stand_Up7)": "Stand up 7",
             "站起 8 (Stand_Up8)": "Stand up 8",
             "站起 9 (Stand_Up9)": "Stand up 9",
-            "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢，目前硬件上限 1024": "Image size used in the first step to roughly detect the foreground outline. Larger is finer but slower; the current hardware limit is 1024.",
-            "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢，目前硬件上限 1024": "Image size used in the second step for fine matting. Larger gives better detail but is slower; the current hardware limit is 1024.",
+            "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢；不指定时按来源图片的长边选择": "Image size used in the first step to roughly detect the foreground outline. Larger is finer but slower; when not set it follows the long side of the source picture.",
+            "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢；不指定时按来源图片的长边选择": "Image size used in the second step for fine matting. Larger gives better detail but is slower; when not set it follows the long side of the source picture.",
             "简单踢 (Simple_Kick)": "Simple kick",
             "粗": "Coarse",
             "粗 Mask 模糊半径": "Coarse mask blur radius",
@@ -36799,7 +36817,7 @@
     },
     {
       "id": "matting/default/background-removal",
-      "revision": "2026-07-26.2",
+      "revision": "2026-11-12.284.1",
       "provider_id": "matting",
       "provider_name": "背景去除",
       "provider_short_label": "MATTING",
@@ -36853,10 +36871,18 @@
           "name": "birefnet_process_res",
           "label": "粗分割分辨率",
           "type": "number",
-          "description": "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢，目前硬件上限 1024",
+          "integer": true,
+          "description": "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢；不指定时按来源图片的长边选择",
           "minimum": 512,
-          "maximum": 1024,
+          "maximum": 4096,
           "default": 1024,
+          "default_by_source_side": {
+            "source": "source_assets",
+            "tiers": [
+              { "max_source_side": 1024, "value": 1024 },
+              { "value": 2048 }
+            ]
+          },
           "presentation": {
             "surface": "hidden",
             "control": "number",
@@ -36920,10 +36946,18 @@
           "name": "sdmatte_process_res",
           "label": "精抠分辨率",
           "type": "number",
-          "description": "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢，目前硬件上限 1024",
+          "integer": true,
+          "description": "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢；不指定时按来源图片的长边选择",
           "minimum": 512,
-          "maximum": 1024,
+          "maximum": 2048,
           "default": 1024,
+          "default_by_source_side": {
+            "source": "source_assets",
+            "tiers": [
+              { "max_source_side": 1024, "value": 1024 },
+              { "value": 2048 }
+            ]
+          },
           "presentation": {
             "surface": "hidden",
             "control": "number",
@@ -39651,7 +39685,7 @@
     },
     {
       "id": "tripo/processing/texture",
-      "revision": "2026-10-22.1",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -39787,6 +39821,38 @@
           ]
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -39853,6 +39919,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -39864,6 +39931,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -39884,6 +39952,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -39942,12 +40011,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": false,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -40002,7 +40076,7 @@
     },
     {
       "id": "tripo/processing/rigging",
-      "revision": "2026-11-12.277.1",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -40132,6 +40206,38 @@
           ]
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -40179,6 +40285,7 @@
         {
           "role": "model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -40228,12 +40335,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": true,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -40264,7 +40376,7 @@
     },
     {
       "id": "tripo/processing/rigging-v3",
-      "revision": "2026-11-12.277.1",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -40431,6 +40543,38 @@
           ]
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -40478,6 +40622,7 @@
         {
           "role": "model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -40527,12 +40672,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": true,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -44897,7 +45047,7 @@
     },
     {
       "id": "tripo/geometry/decimate-triangle",
-      "revision": "2026-11-12.276.1",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -44992,6 +45142,38 @@
           }
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -45058,6 +45240,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45069,6 +45252,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45089,6 +45273,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45147,12 +45332,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": false,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -45207,7 +45397,7 @@
     },
     {
       "id": "tripo/geometry/decimate-quad",
-      "revision": "2026-11-12.276.1",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -45301,6 +45491,38 @@
           }
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -45367,6 +45589,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45378,6 +45601,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45398,6 +45622,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45456,12 +45681,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": false,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -45516,7 +45746,7 @@
     },
     {
       "id": "tripo/geometry/segment",
-      "revision": "2026-10-22.185.5",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -45597,6 +45827,38 @@
           }
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -45663,6 +45925,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45674,6 +45937,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45694,6 +45958,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45752,12 +46017,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": false,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -45812,7 +46082,7 @@
     },
     {
       "id": "tripo/geometry/complete",
-      "revision": "2026-10-22.185.5",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -45874,6 +46144,38 @@
           ]
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -45940,6 +46242,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45951,6 +46254,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -45971,6 +46275,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46029,12 +46334,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": false,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -46089,7 +46399,7 @@
     },
     {
       "id": "tripo/geometry/quick-cap",
-      "revision": "2026-10-22.185.6",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -46151,6 +46461,38 @@
           ]
         },
         {
+          "name": "export_texture_size",
+          "label": "导出贴图尺寸",
+          "type": "select",
+          "semantic": "texture-size",
+          "default": "8k",
+          "options": [
+            {
+              "value": "2k",
+              "label": "2K（2048 像素）"
+            },
+            {
+              "value": "4k",
+              "label": "4K（4096 像素）"
+            },
+            {
+              "value": "8k",
+              "label": "8K（8192 像素）"
+            }
+          ],
+          "wire_values": {
+            "2k": 2048,
+            "4k": 4096,
+            "8k": 8192
+          },
+          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "presentation": {
+            "surface": "provider",
+            "control": "select",
+            "follows_purpose": true
+          }
+        },
+        {
           "name": "output_formats",
           "label": "完整附加导出格式",
           "type": "string-array",
@@ -46217,6 +46559,7 @@
         {
           "role": "converted_model",
           "variant": "fbx",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46228,6 +46571,7 @@
         {
           "role": "converted_model",
           "variant": "obj",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46248,6 +46592,7 @@
         {
           "role": "converted_model",
           "variant": "usdz",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -46306,12 +46651,17 @@
           "source_alias": "model",
           "max_source_bytes": 150000000,
           "parameters": {
-            "texture_size": 8192,
             "texture_format": "PNG",
             "with_animation": false,
             "bake": true,
             "fbx_preset": "blender"
           },
+          "bindings": [
+            {
+              "parameter": "export_texture_size",
+              "wire": "texture_size"
+            }
+          ],
           "formats": [
             {
               "format": "FBX",
@@ -46366,7 +46716,7 @@
     },
     {
       "id": "tripo/geometry/smartsegment-image",
-      "revision": "2026-10-22.185.5",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -46424,15 +46774,16 @@
         {"name": "seg_type", "label": "分割输入", "type": "select", "required": true, "fixed": true, "default": "image", "options": [{"value": "image", "label": "图片"}], "wire_name": "seg_type", "presentation": {"surface": "readonly", "control": "select"}},
         {"name": "granularity", "label": "分件粒度", "type": "select", "wire_name": "granularity", "default": "medium", "options": [{"value": "coarse", "label": "粗"}, {"value": "medium", "label": "中"}, {"value": "fine", "label": "细"}], "presentation": {"surface": "provider", "control": "select"}},
         {"name": "hint", "label": "部件提示", "type": "text", "wire_name": "hint", "max_length": 1024, "presentation": {"surface": "provider", "control": "text"}},
+        {"name": "export_texture_size", "label": "导出贴图尺寸", "type": "select", "semantic": "texture-size", "default": "8k", "options": [{"value": "2k", "label": "2K（2048 像素）"}, {"value": "4k", "label": "4K（4096 像素）"}, {"value": "8k", "label": "8K（8192 像素）"}], "wire_values": {"2k": 2048, "4k": 4096, "8k": 8192}, "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。", "presentation": {"surface": "provider", "control": "select", "follows_purpose": true}},
         {"name": "output_formats", "label": "完整附加导出格式", "type": "string-array", "required": true, "default": ["FBX", "OBJ", "STL", "USDZ", "3MF"], "fixed": true, "min_items": 5, "max_items": 5, "options": [{"value": "FBX", "label": "FBX"}, {"value": "OBJ", "label": "OBJ"}, {"value": "STL", "label": "STL"}, {"value": "USDZ", "label": "USDZ"}, {"value": "3MF", "label": "3MF"}], "presentation": {"surface": "readonly", "control": "multi-select"}, "description": "本服务固定交付所列全部附加格式；格式与额外费用在原生处理开始前一并批准。"},
         {"name": "authorize_extra_credits", "label": "同意附加格式费用", "type": "boolean", "presentation": {"surface": "hidden", "control": "boolean"}}
       ],
       "outputs": [
         {"role": "model", "variant": "glb", "delivery": "required", "minimum": 1, "media_types": ["model/gltf-binary"], "max_bytes": 150000000},
-        {"role": "converted_model", "variant": "fbx", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
-        {"role": "converted_model", "variant": "obj", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "fbx", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
+        {"role": "converted_model", "variant": "obj", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "stl", "delivery": "required", "minimum": 1, "media_types": ["model/stl"], "max_bytes": 1073741824},
-        {"role": "converted_model", "variant": "usdz", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "usdz", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "3mf", "delivery": "required", "minimum": 1, "media_types": ["model/3mf"], "max_bytes": 1073741824, "delivery_profile": "3mf-package-v1"},
         {"role": "mask", "variant": "png", "delivery": "required", "minimum": 1, "media_types": ["image/png"], "max_bytes": 50000000}
       ],
@@ -46450,7 +46801,8 @@
         "native_conversion": {
           "source_alias": "seg_model_url",
           "max_source_bytes": 150000000,
-          "parameters": {"texture_size": 8192, "texture_format": "PNG", "with_animation": false, "bake": true, "fbx_preset": "blender"},
+          "parameters": {"texture_format": "PNG", "with_animation": false, "bake": true, "fbx_preset": "blender"},
+          "bindings": [{"parameter": "export_texture_size", "wire": "texture_size"}],
           "formats": [
             {"format": "FBX", "role": "converted_model", "variant": "fbx", "media_type": "model/fbx"},
             {"format": "OBJ", "role": "converted_model", "variant": "obj", "media_type": "application/zip"},
@@ -46467,7 +46819,7 @@
     },
     {
       "id": "tripo/geometry/smartsegment-model",
-      "revision": "2026-10-22.185.5",
+      "revision": "2026-11-12.292.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -46492,15 +46844,16 @@
         {"name": "seg_type", "label": "分割输入", "type": "select", "required": true, "fixed": true, "default": "model", "options": [{"value": "model", "label": "模型"}], "wire_name": "seg_type", "presentation": {"surface": "readonly", "control": "select"}},
         {"name": "granularity", "label": "分件粒度", "type": "select", "wire_name": "granularity", "default": "medium", "options": [{"value": "coarse", "label": "粗"}, {"value": "medium", "label": "中"}, {"value": "fine", "label": "细"}], "presentation": {"surface": "provider", "control": "select"}},
         {"name": "hint", "label": "部件提示", "type": "text", "wire_name": "hint", "max_length": 1024, "presentation": {"surface": "provider", "control": "text"}},
+        {"name": "export_texture_size", "label": "导出贴图尺寸", "type": "select", "semantic": "texture-size", "default": "8k", "options": [{"value": "2k", "label": "2K（2048 像素）"}, {"value": "4k", "label": "4K（4096 像素）"}, {"value": "8k", "label": "8K（8192 像素）"}], "wire_values": {"2k": 2048, "4k": 4096, "8k": 8192}, "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。", "presentation": {"surface": "provider", "control": "select", "follows_purpose": true}},
         {"name": "output_formats", "label": "完整附加导出格式", "type": "string-array", "required": true, "default": ["FBX", "OBJ", "STL", "USDZ", "3MF"], "fixed": true, "min_items": 5, "max_items": 5, "options": [{"value": "FBX", "label": "FBX"}, {"value": "OBJ", "label": "OBJ"}, {"value": "STL", "label": "STL"}, {"value": "USDZ", "label": "USDZ"}, {"value": "3MF", "label": "3MF"}], "presentation": {"surface": "readonly", "control": "multi-select"}, "description": "本服务固定交付所列全部附加格式；格式与额外费用在原生处理开始前一并批准。"},
         {"name": "authorize_extra_credits", "label": "同意附加格式费用", "type": "boolean", "presentation": {"surface": "hidden", "control": "boolean"}}
       ],
       "outputs": [
         {"role": "model", "variant": "glb", "delivery": "required", "minimum": 1, "media_types": ["model/gltf-binary"], "max_bytes": 150000000},
-        {"role": "converted_model", "variant": "fbx", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
-        {"role": "converted_model", "variant": "obj", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "fbx", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/fbx"], "max_bytes": 1073741824, "delivery_profile": "binary-fbx-v1"},
+        {"role": "converted_model", "variant": "obj", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["application/zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "stl", "delivery": "required", "minimum": 1, "media_types": ["model/stl"], "max_bytes": 1073741824},
-        {"role": "converted_model", "variant": "usdz", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
+        {"role": "converted_model", "variant": "usdz", "texture_size_parameter": "export_texture_size", "delivery": "required", "minimum": 1, "media_types": ["model/vnd.usdz+zip"], "max_bytes": 1073741824},
         {"role": "converted_model", "variant": "3mf", "delivery": "required", "minimum": 1, "media_types": ["model/3mf"], "max_bytes": 1073741824, "delivery_profile": "3mf-package-v1"},
         {"role": "mask", "variant": "png", "delivery": "required", "minimum": 0, "media_types": ["image/png"], "max_bytes": 50000000}
       ],
@@ -46519,7 +46872,8 @@
         "native_conversion": {
           "source_alias": "seg_model_url",
           "max_source_bytes": 150000000,
-          "parameters": {"texture_size": 8192, "texture_format": "PNG", "with_animation": false, "bake": true, "fbx_preset": "blender"},
+          "parameters": {"texture_format": "PNG", "with_animation": false, "bake": true, "fbx_preset": "blender"},
+          "bindings": [{"parameter": "export_texture_size", "wire": "texture_size"}],
           "formats": [
             {"format": "FBX", "role": "converted_model", "variant": "fbx", "media_type": "model/fbx"},
             {"format": "OBJ", "role": "converted_model", "variant": "obj", "media_type": "application/zip"},

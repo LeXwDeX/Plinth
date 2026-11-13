@@ -64,6 +64,10 @@ func (m *Module) PrepareInput(ctx context.Context, cmd PrepareInputCommand) (Pre
 	if err != nil {
 		return PreparedInput{}, err
 	}
+	offering, normalized, err = m.applySourceSideDefaults(ctx, cmd.OwnerID, cmd.Capability, offering, input, normalized)
+	if err != nil {
+		return PreparedInput{}, err
+	}
 	quote, err := offering.EvaluateNativeQuote(normalized)
 	if err != nil {
 		return PreparedInput{}, &Error{Code: ErrInvalidInput, Operation: "prepare_input", Cause: err}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/processing"
 )
@@ -24,6 +25,27 @@ func (s *Server) createProcessingPlan(writer http.ResponseWriter, request *http.
 	if !owned {
 		s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
 		return
+	}
+	// The panel leaves a parameter that follows the session purpose out of a step
+	// until the person picks a value (#292); the session brief fills it here, the
+	// way the Agent and the direct task API resolve it. Nothing else of the step is
+	// touched, and a session without a purpose changes nothing.
+	for index := range command.Steps {
+		step := &command.Steps[index]
+		offering, found := s.generation.Offering(step.OfferingID)
+		if !found {
+			continue // The plan refuses an unknown Offering.
+		}
+		input, applyErr := s.chat.ApplyPurposeToPlanStep(request.Context(), string(owner), command.SessionID, offering, step.Input)
+		switch {
+		case errors.Is(applyErr, chat.ErrSessionNotFound):
+			s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
+			return
+		case applyErr != nil:
+			s.writeChatInternalError(writer, applyErr)
+			return
+		}
+		step.Input = input
 	}
 	plan, err := s.processing.Create(request.Context(), command)
 	if err != nil {

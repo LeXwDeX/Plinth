@@ -55,6 +55,13 @@ art-ai-storage --database /path/to/data/art-ai.db --storage /path/to/storage > s
 - `generation_input_assets.storage_key`；
 - `generation_artifact_claims.stored_asset_json.storage_key`（待物化本地图片）。
 
+一个存储键可以被多条记录同时引用：内容相同、最终媒体类型也相同的槽位共用一个
+blob（#293，例如 Tripo 全格式任务的 `model` 与 `converted.gltf`）。引用快照按
+存储键去重，只要还有一条记录引用该键，这个 blob 就保留；报告里的 `reference_count`
+与 `blob_count` 数的是存储键与文件，不是资产记录，一个共用的 blob 在候选清单里只
+列一次。字节相同而最终媒体类型不同（扩展名不同）的写入是两个文件，各按自己的键
+判断。
+
 所有任务的引用均保留，包括被标记删除或已失败的任务。此命令不执行数据库
 资产保留策略，不把“前端看不见”当作“无人引用”。数据库缺失、读取失败或
 损坏的 claim JSON 会使操作失败，禁止以空引用集合继续删除。

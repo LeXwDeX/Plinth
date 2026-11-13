@@ -14,7 +14,7 @@ import { faceBudgetDefaults, prerequisiteRefusal, processingPrerequisite, proces
 import { partsKeyOf } from '@/lib/workspace/model-parts';
 import { processingUnavailableNotice } from '@/lib/workspace/processing-refusals';
 import { offeringQuoteText } from '@/lib/workspace/processing-cost';
-import { inputRuleViolations, missingRequiredParameters, uploadAssetInputs } from '@/lib/workspace/processing-inputs';
+import { inputRuleViolations, missingRequiredParameters, parameterDefaults, uploadAssetInputs } from '@/lib/workspace/processing-inputs';
 import { uploadWorkspaceInputAssetResult } from '@/lib/workspace/input-asset-upload';
 import { continuePastCheckpoint, failedCheckpointStep, planHoldsModel, reconcileProcessingPlan, unreconciledStep, retryableFailedStep, stepCreditSuffix, type ProcessingPlan } from '@/lib/workspace/processing-plan';
 import { projectNativeTaskDetail } from '@/lib/workspace/task-projection';
@@ -121,9 +121,11 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
   // UV, also with Retexture in between, #93).
   const budgets = useMemo(() => Object.fromEntries(steps.map((step, index) => [step.capability,
     faceBudgetDefaults(step.offering, steps.slice(index + 1).map((next) => next.offering), values[formKey(step.capability, step.offering.id)] ?? {})])), [steps, values]);
+  // A parameter that follows the session purpose (#292) starts unset: it is not frozen as a visible default, and
+  // the server fills it from the session purpose unless the person picks a value.
   const stepInputs = useMemo(() => Object.fromEntries(steps.map((step) => {
     const parameters = panelFields(step.offering);
-    const defaults = { ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default])), ...budgets[step.capability] };
+    const defaults = { ...parameterDefaults(parameters), ...budgets[step.capability] };
     const key = formKey(step.capability, step.offering.id);
     const input = { ...offeringFixedValues(step.offering), ...schemaParameterValues(parameters, { ...defaults, ...values[key] }) };
     const action = actionParameter(step.offering);
@@ -133,7 +135,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
   // Required inputs still empty (a reference image, say): confirm stays disabled and the step names them (#321).
   const missingFields = useMemo(() => Object.fromEntries(steps.map((step) => {
     const parameters = panelFields(step.offering);
-    const defaults = { ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined).map((parameter) => [parameter.name, parameter.default])), ...budgets[step.capability] };
+    const defaults = { ...parameterDefaults(parameters), ...budgets[step.capability] };
     return [step.capability, missingRequiredParameters(parameters, { ...defaults, ...values[formKey(step.capability, step.offering.id)] })];
   })), [steps, values, budgets]);
   const ruleViolations = useMemo(() => Object.fromEntries(steps.map((step) => [
@@ -394,8 +396,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
               <p data-testid={`processing-quote-${capability.id}`}>{offering ? offeringQuoteText(schema, offering) : schemaText(schema, 'ui.workspace.harness.credits_unknown')}</p>
               {offering && <ReasonHint name={capability.label_cn} reason={lockReason} className="flex w-full flex-col"><SchemaParameters parameters={parameters}
                 values={{
-                  ...Object.fromEntries(parameters.filter((parameter) => parameter.default !== undefined)
-                    .map((parameter) => [parameter.name, parameter.default])),
+                  ...parameterDefaults(parameters),
                   ...budgets[capability.id],
                   ...values[key],
                 }}

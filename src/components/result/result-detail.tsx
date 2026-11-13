@@ -272,6 +272,12 @@ export function ResultDetail({ target }: { target: ResultTarget }) {
         {(status === 'pending' || status === 'running') && (task?.queueNotice ?? tracked?.queueNotice) ? (
           <p className="text-xs text-muted-foreground" role="note" data-testid="result-detail-queue-notice">{(task?.queueNotice ?? tracked?.queueNotice)?.detail}</p>
         ) : null}
+        {/* A succeeded task that did not deliver everything says so (#284); the sentence is the server's, the state is unchanged. */}
+        {status === 'ready' ? (task?.notices ?? tracked?.notices ?? []).map((notice) => (
+          <p key={notice.code} className="flex items-start gap-1.5 text-xs text-warning" role="note" data-testid="result-detail-notice" data-notice-code={notice.code}>
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />{notice.detail}
+          </p>
+        )) : null}
         {loadFailed ? <p className="text-xs text-muted-foreground" role="status">{text('ui.result.detail.load_failed')}</p> : null}
         {displayTarget.kind === 'splat' ? <p className="text-xs text-muted-foreground" role="note" data-testid="result-detail-splat-scope">{text('ui.result.detail.splat_scope')}</p> : null}
 

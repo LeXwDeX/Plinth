@@ -3,9 +3,11 @@ package mattingapiv1
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,9 +34,16 @@ func jobForm(t *testing.T, withFile bool) testkit.Body {
 // jobFormWithFiles sends one files part per name.
 func jobFormWithFiles(t *testing.T, names ...string) testkit.Body {
 	t.Helper()
+	return jobFormWithPipeline(t, pipeline, names...)
+}
+
+// jobFormWithPipeline sends the given pipeline_params_json and one files part
+// per name.
+func jobFormWithPipeline(t *testing.T, pipelineJSON string, names ...string) testkit.Body {
+	t.Helper()
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
-	_ = writer.WriteField("pipeline_params_json", pipeline)
+	_ = writer.WriteField("pipeline_params_json", pipelineJSON)
 	for _, name := range names {
 		header := make(textproto.MIMEHeader)
 		header.Set("Content-Disposition", `form-data; name="files"; filename="`+name+`"`)
@@ -144,6 +153,150 @@ func TestRequestValidationAndAuthentication(t *testing.T) {
 	}
 }
 
+// #284: the service validates the process resolution of its PipelineParams
+// (birefnet_process_res 512..4096 with null meaning auto, sdmatte_process_res
+// 512..2048) and answers 422 outside it, so a Schema range that drifts past the
+// service is caught by the fake before a real batch is spent.
+func TestProcessResolutionIsHeldToTheServiceRange(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		pipeline string
+		refused  []string // the fields the 422 names, in order; none means accepted
+	}{
+		{"declared defaults", pipeline, nil},
+		{"both at the lower edge", `{"birefnet_process_res":512,"sdmatte_process_res":512}`, nil},
+		{"both at the upper edge", `{"birefnet_process_res":4096,"sdmatte_process_res":2048}`, nil},
+		{"birefnet null is auto", `{"birefnet_process_res":null,"sdmatte_process_res":1024}`, nil},
+		{"a field left out takes the service default", `{"expand":240}`, nil},
+		{"an empty pipeline", ``, nil},
+		{"birefnet above its range", `{"birefnet_process_res":4097,"sdmatte_process_res":1024}`, []string{"birefnet_process_res"}},
+		{"birefnet below its range", `{"birefnet_process_res":511}`, []string{"birefnet_process_res"}},
+		{"sdmatte above its range", `{"birefnet_process_res":1024,"sdmatte_process_res":2049}`, []string{"sdmatte_process_res"}},
+		{"sdmatte below its range", `{"sdmatte_process_res":511}`, []string{"sdmatte_process_res"}},
+		{"sdmatte has no auto", `{"sdmatte_process_res":null}`, []string{"sdmatte_process_res"}},
+		{"both out of range are both named", `{"birefnet_process_res":9000,"sdmatte_process_res":100}`,
+			[]string{"birefnet_process_res", "sdmatte_process_res"}},
+		{"a fraction is not an integer", `{"birefnet_process_res":1024.5}`, []string{"birefnet_process_res"}},
+		{"a string is not an integer", `{"birefnet_process_res":"big"}`, []string{"birefnet_process_res"}},
+		{"a whole number written as a float is accepted", `{"birefnet_process_res":2048.0}`, nil},
+		{"a pipeline that is not an object is not judged", `[1,2]`, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t, fakeupstream.Config{})
+			status, _, body := f.Do("POST", Prefix+"/jobs", key, jobFormWithPipeline(t, test.pipeline, "input_1.png"))
+			if len(test.refused) == 0 {
+				if status != http.StatusOK || body["batch_status"] != "READY" {
+					t.Fatalf("%s: %d %v", test.pipeline, status, body)
+				}
+				return
+			}
+			if status != http.StatusUnprocessableEntity {
+				t.Fatalf("%s: %d %v", test.pipeline, status, body)
+			}
+			detail, _ := body["detail"].([]any)
+			if len(detail) != len(test.refused) {
+				t.Fatalf("%s: detail = %v", test.pipeline, body["detail"])
+			}
+			for index, field := range test.refused {
+				if got := testkit.Field(t, body, "detail", index, "loc", 2); got != field {
+					t.Fatalf("detail %d names %v, want %s", index, got, field)
+				}
+			}
+			// The refused create made no batch.
+			if status, _, _ := f.Do("GET", Prefix+"/batches/batch_fake0001", key, nil); status != http.StatusNotFound {
+				t.Fatalf("a refused create left a batch behind: %d", status)
+			}
+		})
+	}
+}
+
+// The refusal is the FastAPI validation list the committed 422 sample shows
+// (type, loc, msg, input), with pydantic's ctx bound for a range error.
+func TestProcessResolutionRefusalIsAFastAPIValidationList(t *testing.T) {
+	samples, err := fakeupstream.LoadSamples(sampleFS, sampleFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sampleEntry map[string]any
+	for _, exchange := range samples.Find("POST "+samplePrefix+"/jobs", "") {
+		if exchange.Response.Status != http.StatusUnprocessableEntity {
+			continue
+		}
+		var sample struct {
+			Detail []map[string]any `json:"detail"`
+		}
+		if err := json.Unmarshal(exchange.Response.Body.JSON, &sample); err != nil || len(sample.Detail) == 0 {
+			t.Fatalf("422 sample = %s: %v", exchange.Response.Body.JSON, err)
+		}
+		sampleEntry = sample.Detail[0]
+	}
+	if sampleEntry == nil {
+		t.Fatal("the sample has no 422 exchange to compare")
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	status, _, body := f.Do("POST", Prefix+"/jobs", key,
+		jobFormWithPipeline(t, `{"birefnet_process_res":8192,"sdmatte_process_res":256}`, "input_1.png"))
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d %v", status, body)
+	}
+	if len(body) != 1 {
+		t.Fatalf("body = %v, want only detail", body)
+	}
+	for index, want := range []struct {
+		field, kind, msg, bound string
+		input, limit            float64
+	}{
+		{"birefnet_process_res", "less_than_equal", "Input should be less than or equal to 4096", "le", 8192, 4096},
+		{"sdmatte_process_res", "greater_than_equal", "Input should be greater than or equal to 512", "ge", 256, 512},
+	} {
+		entry, _ := testkit.Field(t, body, "detail", index).(map[string]any)
+		for name := range sampleEntry {
+			if _, ok := entry[name]; !ok {
+				t.Fatalf("entry %d lacks %q that the real 422 carries: %v", index, name, entry)
+			}
+		}
+		if entry["type"] != want.kind || entry["msg"] != want.msg || entry["input"] != want.input {
+			t.Fatalf("entry %d = %v", index, entry)
+		}
+		if got := testkit.Field(t, entry, "loc", 0); got != "body" {
+			t.Fatalf("entry %d loc = %v", index, entry["loc"])
+		}
+		if got := testkit.Field(t, entry, "loc", 1); got != "pipeline_params_json" {
+			t.Fatalf("entry %d loc = %v", index, entry["loc"])
+		}
+		if got := testkit.Field(t, entry, "loc", 2); got != want.field {
+			t.Fatalf("entry %d loc = %v", index, entry["loc"])
+		}
+		if got := testkit.Field(t, entry, "ctx", want.bound); got != want.limit {
+			t.Fatalf("entry %d ctx = %v", index, entry["ctx"])
+		}
+	}
+}
+
+// The exported limits are what the create route enforces, so a test elsewhere
+// can hold the product Schema's declared ranges against them.
+func TestResolutionLimitsAreTheEnforcedOnes(t *testing.T) {
+	limits := ResolutionLimits()
+	if len(limits) != 2 || limits[0].Field != "birefnet_process_res" || limits[1].Field != "sdmatte_process_res" {
+		t.Fatalf("limits = %+v", limits)
+	}
+	f := newFixture(t, fakeupstream.Config{})
+	for _, limit := range limits {
+		for _, value := range []int64{limit.Min, limit.Max} {
+			form := jobFormWithPipeline(t, fmt.Sprintf(`{"%s":%d}`, limit.Field, value), "input_1.png")
+			if status, _, body := f.Do("POST", Prefix+"/jobs", key, form); status != http.StatusOK {
+				t.Fatalf("%s=%d: %d %v", limit.Field, value, status, body)
+			}
+		}
+		for _, value := range []int64{limit.Min - 1, limit.Max + 1} {
+			form := jobFormWithPipeline(t, fmt.Sprintf(`{"%s":%d}`, limit.Field, value), "input_1.png")
+			if status, _, body := f.Do("POST", Prefix+"/jobs", key, form); status != http.StatusUnprocessableEntity {
+				t.Fatalf("%s=%d: %d %v", limit.Field, value, status, body)
+			}
+		}
+	}
+}
+
 func TestABatchCarriesEveryUploadedFile(t *testing.T) {
 	samples, err := fakeupstream.LoadSamples(sampleFS, sampleFile)
 	if err != nil {
@@ -248,6 +401,151 @@ func TestPartialImagesWithOneFileEndsCompletedWithoutArtifacts(t *testing.T) {
 		t.Fatalf("task = %v", task)
 	}
 	// A completed batch that claims no artifact is the Adapter's no_artifacts branch.
+}
+
+// taskStatuses are the statuses of a batch document's tasks, in upload order.
+func taskStatuses(t *testing.T, body map[string]any) []string {
+	t.Helper()
+	tasks, _ := body["tasks"].([]any)
+	statuses := make([]string, 0, len(tasks))
+	for index := range tasks {
+		statuses = append(statuses, testkit.Field(t, body, "tasks", index, "status").(string))
+	}
+	return statuses
+}
+
+// #284: X-Fake-File-Faults chooses what becomes of each file by its 1-based
+// position, so a batch can mix files that succeed with files that are rejected
+// or fail in any positions (partial-images rejects every file but the first).
+// A rejected file is refused in the create response already, a file that fails
+// looks like the others until the batch finishes, and neither has an artifact.
+func TestFileFaultsChooseWhatBecomesOfEachFile(t *testing.T) {
+	for _, test := range []struct {
+		name, faults string
+		files        int
+		created      []string // the task statuses of the create response
+		final        []string // the task statuses of the finished batch
+		batch        string
+	}{
+		{"a rejected file and a file that fails among files that succeed", "2:rejected,4:failed", 4,
+			[]string{"READY", "REJECTED", "READY", "READY"}, []string{"SUCCEEDED", "REJECTED", "SUCCEEDED", "FAILED"}, "PARTIAL_SUCCESS"},
+		{"the first file fails", "1:failed", 2,
+			[]string{"READY", "READY"}, []string{"FAILED", "SUCCEEDED"}, "PARTIAL_SUCCESS"},
+		{"every file fails", "1:failed,2:failed", 2,
+			[]string{"READY", "READY"}, []string{"FAILED", "FAILED"}, "PARTIAL_SUCCESS"},
+		{"every file is rejected", "1:rejected,2:rejected", 2,
+			[]string{"REJECTED", "REJECTED"}, []string{"REJECTED", "REJECTED"}, "PARTIAL_SUCCESS"},
+		{"a file that is rejected and would fail stays rejected", "1:rejected,1:failed", 2,
+			[]string{"REJECTED", "READY"}, []string{"REJECTED", "SUCCEEDED"}, "PARTIAL_SUCCESS"},
+		{"spaces around the entries are tolerated", " 2 : rejected , 1 : failed ", 2,
+			[]string{"READY", "REJECTED"}, []string{"FAILED", "REJECTED"}, "PARTIAL_SUCCESS"},
+		{"a renamed file is not a fault of its result", "2:renamed", 2,
+			[]string{"READY", "READY"}, []string{"SUCCEEDED", "SUCCEEDED"}, "SUCCESS"},
+		{"entries it does not understand are ignored", "9:rejected,0:failed,x:failed,1:exploded,1,:failed", 2,
+			[]string{"READY", "READY"}, []string{"SUCCEEDED", "SUCCEEDED"}, "SUCCESS"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t, fakeupstream.Config{})
+			names := make([]string, test.files)
+			for index := range names {
+				names[index] = fmt.Sprintf("input_%d.png", index+1)
+			}
+			status, created := submitFiles(f, t, names, FileFaultsHeader, test.faults)
+			if status != http.StatusOK {
+				t.Fatalf("create: %d %v", status, created)
+			}
+			if got := taskStatuses(t, created); !slices.Equal(got, test.created) {
+				t.Fatalf("created statuses = %v, want %v", got, test.created)
+			}
+			batchID := created["batch_id"].(string)
+			// The file that fails shows the state of the others until the batch ends.
+			if queued := poll(f, t, batchID); queued["batch_status"] != "READY" {
+				t.Fatalf("first poll = %v", queued)
+			}
+			running := poll(f, t, batchID)
+			for index, got := range taskStatuses(t, running) {
+				if want := map[string]string{"READY": "RUNNING", "REJECTED": "REJECTED"}[test.created[index]]; got != want {
+					t.Fatalf("running task %d = %s, want %s", index+1, got, want)
+				}
+			}
+			final := pollUntil(f, t, batchID, test.batch)
+			if got := taskStatuses(t, final); !slices.Equal(got, test.final) {
+				t.Fatalf("final statuses = %v, want %v", got, test.final)
+			}
+			rejected, accepted := 0, 0
+			for _, want := range test.created {
+				if want == "REJECTED" {
+					rejected++
+				} else {
+					accepted++
+				}
+			}
+			for _, document := range []map[string]any{created, final} {
+				if count(t, document, "total_count") != float64(test.files) || count(t, document, "accepted_count") != float64(accepted) ||
+					count(t, document, "rejected_count") != float64(rejected) {
+					t.Fatalf("counts = %v", document)
+				}
+			}
+			for index, want := range test.final {
+				task := testkit.Field(t, final, "tasks", index).(map[string]any)
+				id := task["task_id"].(string)
+				if task["downloadable"] != (want == "SUCCEEDED") ||
+					(task["invalid_reason"] != nil) != (want == "REJECTED") || (task["error_message"] != nil) != (want == "FAILED") {
+					t.Fatalf("task %d = %v", index+1, task)
+				}
+				// Only a file that succeeded has an artifact to download.
+				wantStatus := http.StatusNotFound
+				if want == "SUCCEEDED" {
+					wantStatus = http.StatusOK
+				}
+				if status, _, _ := f.Raw("GET", Prefix+"/tasks/"+id+"/download", key, nil); status != wantStatus {
+					t.Fatalf("download of the %s task %d = %d, want %d", want, index+1, status, wantStatus)
+				}
+			}
+		})
+	}
+}
+
+// A renamed file is answered under a name of the service's own, and only that
+// file: the others keep the names they were uploaded under, in the create
+// response and in every poll, and a position is always the file's own.
+func TestFileFaultsRenamedFileIsAnsweredUnderAnotherName(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	names := []string{"input_1.png", "input_2.jpg", "input_3.png", "input_4.png"}
+	_, created := submitFiles(f, t, names, FileFaultsHeader, "3:renamed,4:failed")
+	final := pollUntil(f, t, created["batch_id"].(string), "PARTIAL_SUCCESS")
+	for _, document := range []map[string]any{created, final} {
+		for index, name := range names {
+			if index == 2 {
+				name = renamedSource
+			}
+			task := testkit.Field(t, document, "tasks", index).(map[string]any)
+			if task["source_name"] != name || task["source_index"] != float64(index) {
+				t.Fatalf("task %d = %v, want source_name %q", index+1, task, name)
+			}
+		}
+	}
+	if status := taskStatuses(t, final); !slices.Equal(status, []string{"SUCCEEDED", "SUCCEEDED", "SUCCEEDED", "FAILED"}) {
+		t.Fatalf("final statuses = %v", status)
+	}
+}
+
+// The batch keeps the faults of the request that created it: a later poll that
+// carries the header changes nothing, and a batch created without it has none.
+func TestFileFaultsBelongToTheCreatingRequest(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	_, created := submitFiles(f, t, []string{"input_1.png", "input_2.png"})
+	batchID := created["batch_id"].(string)
+	var final map[string]any
+	for range 6 {
+		_, _, final = f.Do("GET", Prefix+"/batches/"+batchID, key, nil, FileFaultsHeader, "1:rejected,2:failed")
+		if final["batch_status"] == "SUCCESS" {
+			break
+		}
+	}
+	if status := taskStatuses(t, final); final["batch_status"] != "SUCCESS" || !slices.Equal(status, []string{"SUCCEEDED", "SUCCEEDED"}) {
+		t.Fatalf("a poll changed the batch: %v", final)
+	}
 }
 
 func TestTaskCanceledScenarioEndsTheBatchCanceled(t *testing.T) {

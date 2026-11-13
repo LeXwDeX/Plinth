@@ -2866,6 +2866,15 @@ type ChatModelInspectProductionSchema struct {
 	// field). It is added only when the purpose has a variant for the
 	// session's platform (#275).
 	PlatformBudgetText string `json:"platform_budget_text,omitempty"`
+	// ExportTextureText is the note of a texture_size item judged on a
+	// deliverable the purpose sized (#292): {native} is the largest texture of
+	// the inspected file, {formats} the sized deliverables and {export} their
+	// edge. ExportTextureFixText replaces the texture_size fix hint when that
+	// deliverable is over the purpose's bound ({formats}, {export}, {maximum}).
+	// Both are optional: a Catalog without them states no note and keeps the
+	// general fix.
+	ExportTextureText    string `json:"export_texture_text,omitempty"`
+	ExportTextureFixText string `json:"export_texture_fix_text,omitempty"`
 	// NoCapabilityText replaces a fix hint when no enabled Offering of the
 	// declared capability is available.
 	NoCapabilityText string `json:"no_capability_text"`
@@ -5774,6 +5783,12 @@ type ChatToolResultFields struct {
 	// its default. It is declared only on a tool that submits a Task; the
 	// processing plan tool builds its result elsewhere.
 	Parameters string `json:"parameters,omitempty"`
+	// Notices is the optional key of the list of notices a succeeded Task
+	// carries (#284): each has its code, the Schema text in the turn's locale
+	// and the positions it names. The list is present only when the Task has
+	// notices, so a result without the key says the Task delivered everything.
+	// Declared only on a tool that submits a Task.
+	Notices string `json:"notices,omitempty"`
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /

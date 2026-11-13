@@ -132,7 +132,9 @@ func smartSegmentOptions(o generation.Offering) (providerOptions, error) {
 		if exports, err = nativeConversionDeclaration(o, options); err != nil || options.NativeConversion.SourceAlias != "seg_model_url" {
 			return options, smartSegmentProtocolError()
 		}
-		controls = 2
+		// The format selection, the consent and every parameter bound to the exports
+		// (#292) are the platform's own: none of them is a segmentation field.
+		controls = 2 + len(options.NativeConversion.Bindings)
 	}
 	if len(o.Parameters) != 4+controls || len(o.Outputs) != 2+len(exports) {
 		return options, smartSegmentProtocolError()
@@ -145,7 +147,7 @@ func smartSegmentOptions(o generation.Offering) (providerOptions, error) {
 			return options, smartSegmentProtocolError()
 		}
 		found[p.Name] = true
-		if nativeConversionControl(o, options, p.Name) {
+		if nativeConversionControl(o, options, p.Name) || conversionBoundParameter(options, p.Name) {
 			if p.WireName != "" {
 				return options, smartSegmentProtocolError()
 			}
@@ -275,7 +277,7 @@ func smartSegmentInput(o generation.Offering, raw json.RawMessage) (generation.P
 		if err != nil {
 			return source, "", nil, smartSegmentParameterError(o, p, err)
 		}
-		if nativeConversionControl(o, options, p.Name) {
+		if nativeConversionControl(o, options, p.Name) || conversionBoundParameter(options, p.Name) {
 			continue
 		}
 		body[p.WireName] = scalar
@@ -291,6 +293,14 @@ func smartSegmentInput(o generation.Offering, raw json.RawMessage) (generation.P
 	if options.NativeConversion != nil {
 		if err := planPostSuccessConversion(o, raw); err != nil {
 			return source, "", nil, err
+		}
+		// The export options are checked before the upload, like the consent.
+		if len(options.NativeConversion.Bindings) > 0 {
+			for _, format := range options.NativeConversion.Formats {
+				if _, err := conversionBoundValues(o, options.NativeConversion, raw, format.Format); err != nil {
+					return source, "", nil, smartSegmentInputError()
+				}
+			}
 		}
 	}
 	return source, id, body, nil
@@ -487,7 +497,7 @@ func decodeSmartSegmentState(o generation.Offering, input, opaque json.RawMessag
 		return state, nil, smartSegmentProtocolError()
 	}
 	if len(state.Conversions) > 0 && (state.Phase != "submitted" || state.RemoteID == "") ||
-		nativeConversionCheckpoint(state.nativeConversionLedger, options, state.RemoteID) != nil {
+		nativeConversionCheckpoint(state.nativeConversionLedger, o, input, options, state.RemoteID) != nil {
 		return state, nil, smartSegmentProtocolError()
 	}
 	return state, body, nil

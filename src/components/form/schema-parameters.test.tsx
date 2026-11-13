@@ -1,6 +1,6 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { ParamSchema } from '@/lib/providers/types';
 import { isBooleanChoice, SchemaParameters, schemaParameterValues } from './schema-parameters';
@@ -273,4 +273,47 @@ it('says why a parameter is locked by the current settings with the shared unava
   expect(locked).toMatch(/data-testid="unavailable-detail">[^<]*模式: fixed/);
   const free = renderToStaticMarkup(<SchemaParameters parameters={parameters} values={{ mode: 'free' }} onChange={() => {}} />);
   expect(free).not.toContain('parameter-disabled-reason');
+});
+
+// #292: a parameter that follows the session purpose has no value of its own until the person picks one, so the
+// field says so instead of showing the Schema default the purpose may replace.
+describe('a parameter that follows the session purpose (#292)', () => {
+  const size: ParamSchema = {
+    name: 'export_texture_size', label: '导出贴图尺寸', type: 'select', default: '8k', follows_purpose: true,
+    options: [{ value: '2k', label: '2K（2048 像素）' }, { value: '8k', label: '8K（8192 像素）' }],
+  };
+  const followsText = 'ui.studio.params.follows_purpose'; // the mocked text() answers with the key
+  const render = (values: Record<string, unknown>, disabled = false) => {
+    vi.stubGlobal('React', React);
+    return renderToStaticMarkup(<SchemaParameters parameters={[size]} values={values} onChange={() => {}} disabled={disabled} />);
+  };
+
+  it('shows the untouched select as following the purpose, not as its default', () => {
+    const html = render({});
+    expect(html).toContain(`>${followsText}</span>`);
+    expect(html).not.toContain('8K');
+  });
+  it('shows what the person picked', () => {
+    const html = render({ export_texture_size: '2k' });
+    expect(html).toContain('>2K（2048 像素）</span>');
+    expect(html).not.toContain(`>${followsText}</span>`);
+  });
+  it('says it follows the purpose while locked, and shows a picked value as that value', () => {
+    // The locked text reads the Schema's own message, the control the mocked text() above.
+    const message = (defaultCatalog.application.content.messages as Record<string, string>)[followsText];
+    expect(message).toBeTruthy();
+    expect(render({}, true)).toContain(`data-testid="parameter-locked-value">${message}<`);
+    expect(render({ export_texture_size: '2k' }, true)).toContain('data-testid="parameter-locked-value">2K（2048 像素）<');
+  });
+  it('is submitted only once picked, and an empty choice gives it back to the purpose', () => {
+    expect(schemaParameterValues([size], {})).toEqual({});
+    expect(schemaParameterValues([size], { export_texture_size: '' })).toEqual({});
+    expect(schemaParameterValues([size], { export_texture_size: '8k' })).toEqual({ export_texture_size: '8k' });
+  });
+  it('leaves an ordinary select with a default exactly as it was', () => {
+    const plain = { ...size, follows_purpose: undefined };
+    vi.stubGlobal('React', React);
+    const html = renderToStaticMarkup(<SchemaParameters parameters={[plain]} values={{}} onChange={() => {}} />);
+    expect(html).not.toContain(followsText);
+  });
 });

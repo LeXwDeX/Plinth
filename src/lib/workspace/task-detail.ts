@@ -6,7 +6,7 @@
 
 import { offeringShowsCredits, type OfferingParameterWire, type OfferingWire } from '@/lib/agent-offerings';
 import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
-import { findTaskState, projectQueueNotice, projectTaskAssets, type TrackedAsset, type TrackedQueueNotice } from '@/lib/workspace/task-projection';
+import { findTaskState, projectNotices, projectQueueNotice, projectTaskAssets, type TrackedAsset, type TrackedNotice, type TrackedQueueNotice } from '@/lib/workspace/task-projection';
 import { ratioOfSize } from '@/lib/workspace/generation-params';
 import { primaryParent, type VersionTiles } from '@/lib/workspace/versions';
 import { versionLabel } from '@/lib/workspace/version-label';
@@ -38,6 +38,8 @@ export interface TaskDetailWire {
   assets: TrackedAsset[];
   /** 因上游限流等原因排队时的说明，文案由服务端按请求语言解析。 */
   queueNotice?: TrackedQueueNotice;
+  /** 已成功但没有交付全部内容时的说明（#284），文案由服务端按请求语言解析。 */
+  notices?: TrackedNotice[];
 }
 
 const str = (value: unknown): string => (typeof value === 'string' ? value : '');
@@ -75,6 +77,7 @@ export function parseTaskDetail(raw: unknown): TaskDetailWire | null {
     inputDerivations: parseInputDerivations(raw.input_derivations),
     assets: projectTaskAssets(raw.assets),
     ...(projectQueueNotice(raw.queue_notice) ? { queueNotice: projectQueueNotice(raw.queue_notice) } : {}),
+    ...(projectNotices(raw.notices).length > 0 ? { notices: projectNotices(raw.notices) } : {}),
     assetCount: Array.isArray(raw.assets) ? raw.assets.filter((asset) => isRecord(asset) && str(asset.media_type).startsWith('image/')).length : 0,
   };
 }

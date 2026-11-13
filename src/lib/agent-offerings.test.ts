@@ -113,6 +113,20 @@ describe('offeringParamSchemas', () => {
     });
     expect(offeringParamSchemas(wire)).toHaveLength(1);
   });
+
+  it('carries the Schema follows_purpose declaration, and only when the Schema makes it (#292)', () => {
+    const size = { name: 'export_texture_size', label: '导出贴图尺寸', type: 'select', default: '8k', options: [{ value: '8k', label: '8K' }] };
+    const [followed, plain, undeclared] = offeringParamSchemas(offering({
+      parameters: [
+        { ...size, presentation: { surface: 'provider', control: 'select', follows_purpose: true } },
+        { ...size, name: 'texture_size', presentation: { surface: 'provider', control: 'select' } },
+        { ...size, name: 'other_size' },
+      ],
+    }));
+    expect(followed.follows_purpose).toBe(true);
+    expect(plain.follows_purpose).toBeUndefined();
+    expect(undeclared.follows_purpose).toBeUndefined();
+  });
 });
 
 describe('pickDefaultOffering', () => {

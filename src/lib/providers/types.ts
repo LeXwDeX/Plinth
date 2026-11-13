@@ -56,6 +56,11 @@ export interface ParamSchema {
   forced_when?: ParamForcedValue[];
   /** 声明式参数提示；显示条件、文案键和语气均来自 Offering Schema */
   notices?: ParamNotice[];
+  /**
+   * Schema presentation.follows_purpose (#292)：未改动时取会话用途给出的值。表单在人没选之前不提交它，也不把
+   * 默认值当成选择显示；服务端按会话制作简报补值，没有用途时才用 Offering 的默认值。
+   */
+  follows_purpose?: boolean;
 }
 
 export interface ParamCondition {

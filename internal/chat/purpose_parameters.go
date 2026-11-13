@@ -452,3 +452,78 @@ func (service *Service) ApplyPurposeToDirectInput(ctx context.Context, ownerID, 
 	resolver := PurposeParameters{Model3D: service.model3DUsage, Image2D: service.image2DUsage}
 	return resolver.ApplyToDirectInput(brief, offering, input, reasons)
 }
+
+// followsPurposeParameter reports whether the Offering declares name as a
+// parameter that follows the session purpose (presentation.follows_purpose,
+// #292).
+func followsPurposeParameter(offering generation.Offering, name string) bool {
+	for _, parameter := range offering.Parameters {
+		if parameter.Name == name {
+			return parameter.Presentation != nil && parameter.Presentation.FollowsPurpose
+		}
+	}
+	return false
+}
+
+// declaresFollowingParameter reports whether the Offering has any parameter that
+// follows the session purpose.
+func declaresFollowingParameter(offering generation.Offering) bool {
+	for _, parameter := range offering.Parameters {
+		if parameter.Presentation != nil && parameter.Presentation.FollowsPurpose {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyToPlanStep gives a processing plan step, as a person assembles it in the
+// 加工 panel, the values the brief gives the parameters the Offering declares as
+// following the purpose (#292), for the ones the request omitted only: what the
+// request set stays its own even when it equals the Offering's default. The
+// values are the ones the Agent and the direct task API resolve, taken from
+// Values; every other value the purpose gives the Offering is left alone, so the
+// request the panel sent, the price it quoted and the chain checks the plan passes
+// stay what they were. A brief without a value for those parameters, or an input
+// that is not a JSON object (the plan reports it), is returned exactly as it was.
+func (resolver PurposeParameters) ApplyToPlanStep(brief ProductionBrief, offering generation.Offering,
+	input json.RawMessage) (json.RawMessage, error) {
+	if brief.Empty() || len(bytes.TrimSpace(input)) == 0 {
+		return input, nil
+	}
+	values := map[string]json.RawMessage{}
+	if err := json.Unmarshal(input, &values); err != nil || values == nil {
+		return input, nil
+	}
+	_, given := resolver.Values(PurposeQuery{
+		Brief: brief, Domain: string(offering.Domain), Offering: offering, Current: values, ExplicitPurposeOnly: true,
+	})
+	filled := false
+	for name, value := range given {
+		if _, set := values[name]; set || !followsPurposeParameter(offering, name) {
+			continue
+		}
+		values[name] = value
+		filled = true
+	}
+	if !filled {
+		return input, nil
+	}
+	return json.Marshal(values)
+}
+
+// ApplyPurposeToPlanStep reads the brief of the owner's session and applies it to
+// a step of a processing plan (#292). An Offering with no parameter that follows
+// the purpose is returned untouched without reading the session. A missing or
+// foreign session is ErrSessionNotFound.
+func (service *Service) ApplyPurposeToPlanStep(ctx context.Context, ownerID, sessionID string,
+	offering generation.Offering, input json.RawMessage) (json.RawMessage, error) {
+	if !declaresFollowingParameter(offering) {
+		return input, nil
+	}
+	brief, err := service.SessionBrief(ctx, ownerID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	resolver := PurposeParameters{Model3D: service.model3DUsage, Image2D: service.image2DUsage}
+	return resolver.ApplyToPlanStep(brief, offering, input)
+}

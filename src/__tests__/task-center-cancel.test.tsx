@@ -201,3 +201,22 @@ it.each([['clip','model/fbx'],['print-archive','model/3mf']])('shows projected %
     expect(html).toContain('workspace-task-attachment-icon'); expect(html).not.toContain('<img'); expect(html).not.toContain('src=""');
   } finally { storeState.trackedTasks = previous; }
 });
+
+it('says on the task row what a succeeded task did not deliver, and says nothing for a complete or failed one (#284)', () => {
+  const previous = storeState.trackedTasks;
+  const detail = '第 2 张、第 4 张没有处理成功，其余已完成。';
+  storeState.trackedTasks = [
+    { ...trackedTask('partial-task', 'SUCCEEDED', true), notices: [{ code: 'partial_inputs', detail }] },
+    trackedTask('complete-task', 'SUCCEEDED', true),
+    { ...trackedTask('failed-task', 'FAILED', true), failure: { detail: '上游拒绝了请求', retryable: false, failureClass: 'rejected' } as TrackedTask['failure'], notices: [{ code: 'partial_inputs', detail }] },
+  ];
+  try {
+    const html = renderToStaticMarkup(<TaskDrawer />);
+    expect(html).toContain('data-testid="workspace-task-notice"');
+    expect(html).toContain('data-notice-code="partial_inputs"');
+    // Only the succeeded task that holds the notice says it; the failed one carries one too but is a failure.
+    expect(html.split(detail).length - 1).toBe(1);
+    expect(html).toContain('partial-task');
+    expect(html).toContain('complete-task');
+  } finally { storeState.trackedTasks = previous; }
+});

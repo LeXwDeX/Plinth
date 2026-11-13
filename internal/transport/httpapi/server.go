@@ -3008,6 +3008,19 @@ type taskResponse struct {
 	// （upstream_queued，状态 RUNNING，#131）。只多一条 Schema 文案，不改变
 	// 状态机。
 	QueueNotice *queueNotice `json:"queue_notice,omitempty"`
+	// Notices 说明一个已成功的任务没有交付全部请求的内容（#284）：例如抠图批次里
+	// 有几张没抠成。只在任务 SUCCEEDED 时输出，不改变状态、资产与失败；文案是按
+	// 语言解析的 Schema 文案（messages["task.notice.<code>"]），Schema 没有文案的
+	// 提示不输出。
+	Notices []taskNotice `json:"notices,omitempty"`
+}
+
+// taskNotice 是成功任务提示的公开投影：code 是稳定的名字，detail 是整句 Schema
+// 文案（已点名的位置在句子里），inputs 是它点名的位置（1 起、按提交顺序，未知时缺省）。
+type taskNotice struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+	Inputs []int  `json:"inputs,omitempty"`
 }
 
 // queueNotice 是排队原因的公开投影：reason 是稳定的枚举值，detail 是按
@@ -3121,7 +3134,26 @@ func (s *Server) newTaskResponse(locale string, task generation.Task) taskRespon
 	}
 	result.Resources = s.resourceResponses(locale, task)
 	result.ResourcesPending = generation.ResourcesPending(task.Resources)
+	result.Notices = s.taskNotices(locale, task)
 	return result
+}
+
+// taskNotices projects a succeeded Task's notices (#284) with their Schema
+// sentence in the locale. A notice the Schema has no sentence for is left out:
+// a code a person cannot read says nothing.
+func (s *Server) taskNotices(locale string, task generation.Task) []taskNotice {
+	if task.State != generation.TaskSucceeded || len(task.Notices) == 0 {
+		return nil
+	}
+	notices := make([]taskNotice, 0, len(task.Notices))
+	for _, notice := range task.Notices {
+		detail := catalog.ComposeTaskNotice(func(key string) string { return s.messageIn(locale, key) }, notice.Code, notice.Inputs)
+		if detail == "" {
+			continue
+		}
+		notices = append(notices, taskNotice{Code: notice.Code, Detail: detail, Inputs: notice.Inputs})
+	}
+	return notices
 }
 
 // upstreamQueueNotice projects a job waiting in the Provider's own queue

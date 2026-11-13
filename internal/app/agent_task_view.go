@@ -34,6 +34,17 @@ type agentTaskView struct {
 	// UpstreamQueue is present while the Provider holds the accepted job in
 	// its own queue (#131).
 	UpstreamQueue *agentUpstreamQueueView `json:"upstream_queue,omitempty"`
+	// Notices are present on a succeeded Task that did not deliver everything
+	// it was asked for (#284), such as the pictures a batch did not matte.
+	Notices []agentNoticeView `json:"notices,omitempty"`
+}
+
+// agentNoticeView is one notice of a succeeded Task: its code, the Schema's
+// sentence in the turn's locale and the 1-based positions it names.
+type agentNoticeView struct {
+	Code    string `json:"code"`
+	Message string `json:"message,omitempty"`
+	Inputs  []int  `json:"inputs,omitempty"`
 }
 
 // agentUpstreamQueueView is a running Task's upstream queue: Ahead is the
@@ -236,6 +247,10 @@ func buildAgentTaskViewIn(task generation.Task, chatSchema catalog.ChatSchema,
 	if view.UpstreamQueue != nil && view.UpstreamQueue.Note != "" && texts != nil {
 		view.UpstreamQueue.Note = texts.Text(locale, view.UpstreamQueue.Note)
 	}
+	for index := range view.Notices {
+		notice := &view.Notices[index]
+		notice.Message = texts.TaskNoticeText(locale, notice.Code, notice.Inputs)
+	}
 	return view
 }
 
@@ -289,6 +304,11 @@ func buildAgentTaskView(task generation.Task, chatSchema catalog.ChatSchema) age
 			MediaType: asset.MediaType,
 			Size:      schema.SizeText(asset.Size, true),
 		})
+	}
+	if task.State == generation.TaskSucceeded {
+		for _, notice := range task.Notices {
+			view.Notices = append(view.Notices, agentNoticeView{Code: notice.Code, Inputs: notice.Inputs})
+		}
 	}
 	if task.UpstreamQueue != nil && task.State == generation.TaskRunning {
 		view.UpstreamQueue = &agentUpstreamQueueView{Note: chatSchema.Agent.UpstreamQueueContent}

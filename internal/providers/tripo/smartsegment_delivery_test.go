@@ -74,7 +74,7 @@ func newSmartSegmentDeliveryFixture(t *testing.T, kind string) *smartSegmentDeli
 		inputs.body = modelinputtest.Triangle(modelinputtest.Options{Indexed: true, Interleaved: true, Textured: true})
 	}
 	sum := sha256.Sum256(inputs.body)
-	raw, _ := json.Marshal(map[string]any{name: id, "seg_type": kind, "granularity": "fine", "output_formats": []string{"FBX", "OBJ", "STL", "USDZ", "3MF"}, "authorize_extra_credits": true})
+	raw, _ := json.Marshal(map[string]any{name: id, "seg_type": kind, "granularity": "fine", "output_formats": []string{"FBX", "OBJ", "STL", "USDZ", "3MF"}, "export_texture_size": "8k", "authorize_extra_credits": true})
 	f.request = generation.StartRequest{TaskID: "public-smartseg", AttemptID: "attempt-smartseg", OwnerID: "owner", SubmissionKey: "smartseg-submit", Offering: o, Input: raw,
 		InputAssets: map[string][]generation.InputAsset{name: {{ID: generation.AssetID(id), OwnerID: "owner", StorageKey: "owned", Size: int64(len(inputs.body)), SHA256: hex.EncodeToString(sum[:]), MediaType: media}}}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -387,7 +387,7 @@ func TestSmartSegmentDeclarationShapes(t *testing.T) {
 		legacy.Cost, legacy.CostPolicy = nil, nil
 		legacy.Parameters = nil
 		for _, p := range f.request.Offering.Parameters {
-			if p.Name != "output_formats" && p.Name != "authorize_extra_credits" {
+			if p.Name != "output_formats" && p.Name != "authorize_extra_credits" && p.Name != "export_texture_size" {
 				legacy.Parameters = append(legacy.Parameters, p)
 			}
 		}

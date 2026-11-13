@@ -922,6 +922,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateParameterReport(schema); err != nil {
 		return err
 	}
+	if err := validateTaskNoticeField(schema); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -3614,6 +3617,20 @@ func validateModelInspectProduction(
 			value    string
 			required []string
 		}{"platform_budget_text", production.PlatformBudgetText, []string{"{platform}"}})
+	}
+	// The sentences about a deliverable the purpose sized are optional (#292);
+	// one that is declared names exactly its own placeholders.
+	for _, optional := range []struct {
+		name     string
+		value    string
+		required []string
+	}{
+		{"export_texture_text", production.ExportTextureText, []string{"{native}", "{formats}", "{export}"}},
+		{"export_texture_fix_text", production.ExportTextureFixText, []string{"{formats}", "{export}", "{maximum}"}},
+	} {
+		if strings.TrimSpace(optional.value) != "" {
+			texts = append(texts, optional)
+		}
 	}
 	for _, text := range texts {
 		if strings.TrimSpace(text.value) == "" {

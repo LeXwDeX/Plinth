@@ -56,6 +56,15 @@ export interface TrackedQueueNotice {
   detail: string;
 }
 
+/**
+ * 成功的任务没有交付全部请求内容的说明（#284，如抠图有几张没抠成）；detail 是服务端已按请求
+ * 语言解析好的整句文案（已点名位置），前端原样显示，不自己拼句子，也不改任务状态。
+ */
+export interface TrackedNotice {
+  code: string;
+  detail: string;
+}
+
 export interface TrackedTaskProjection {
   state: string;
   progress: number;
@@ -72,6 +81,8 @@ export interface TrackedTaskProjection {
   createdAt?: number;
   /** 仅在任务因上游限流等原因排队（QUEUED）时由服务端给出。 */
   queueNotice?: TrackedQueueNotice;
+  /** 仅在已成功但没有交付全部内容的任务上由服务端给出。 */
+  notices?: TrackedNotice[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -186,6 +197,16 @@ export function projectQueueNotice(raw: unknown): TrackedQueueNotice | undefined
   return { reason: text(raw.reason), detail };
 }
 
+/** 只认带非空 detail 的对象；形状不对一律忽略，不让坏数据变成空白提示。 */
+export function projectNotices(raw: unknown): TrackedNotice[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry): TrackedNotice[] => {
+    if (!isRecord(entry)) return [];
+    const detail = text(entry.detail).trim();
+    return detail === '' ? [] : [{ code: text(entry.code), detail }];
+  });
+}
+
 /** 终态与状态展示只从 schema.task_states 判定；未知状态按非终态处理。 */
 export function findTaskState(
   states: TaskStateSchema[],
@@ -222,6 +243,7 @@ export function projectNativeTaskDetail(
     modelId: text(raw.model_id),
     ...(Number.isFinite(Date.parse(text(raw.created_at))) ? { createdAt: Date.parse(text(raw.created_at)) } : {}),
     ...(projectQueueNotice(raw.queue_notice) ? { queueNotice: projectQueueNotice(raw.queue_notice) } : {}),
+    ...(projectNotices(raw.notices).length > 0 ? { notices: projectNotices(raw.notices) } : {}),
   };
 }
 
