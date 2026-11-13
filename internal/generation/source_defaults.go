@@ -24,7 +24,9 @@ import (
 //
 // Pictures that cannot be measured (an unreadable header, no readable bytes)
 // leave the static default, the behaviour before the rule existed. An Offering
-// that declares no such parameter costs nothing here.
+// that declares no such parameter costs nothing here, which is every shipped
+// Offering since #299 (the matting defaults are a static 1024 on the shared GPU);
+// the tests run the rule on a test-local Offering.
 func (m *Module) applySourceSideDefaults(
 	ctx context.Context,
 	owner OwnerID,

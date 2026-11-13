@@ -126,6 +126,11 @@ type AlphaFlatten struct {
 // everything larger. A value the caller gave is never replaced, and pictures that
 // cannot be measured leave the parameter's static Default. The kernel only
 // measures and picks; the tiers are product configuration.
+//
+// No shipped Offering declares it (#299): the matting service's shared GPU ran
+// out of memory on a 2048x2048 picture at the resolutions the rule chose, so the
+// matting defaults are a static 1024. The rule stays as generic Schema machinery,
+// covered by tests on a test-local Offering, for a service with room to spare.
 type SourceSideDefault struct {
 	Source string           `json:"source"`
 	Tiers  []SourceSideTier `json:"tiers"`
