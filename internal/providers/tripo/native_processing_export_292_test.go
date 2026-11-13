@@ -69,19 +69,52 @@ func shippedRigging(t *testing.T, id string, changes map[string]any) generation.
 // host, scheme and GLB checks.
 const exportAssetHost = "assets.example"
 
-// exportRun is one processing step the real adapter ran to completion against
-// the Tripo v3 fake.
+// exportStack is a Tripo v3 fake with the adapters that run against it. Every
+// adapter sends its requests through recorder and reads the artifact URLs the
+// fake writes (under exportAssetHost) through the fixture.
+type exportStack struct {
+	fixture  *testkit.Fixture
+	recorder *rigRecorder
+	// adapter builds a new adapter, as a restart does.
+	adapter func() *Adapter
+}
+
+// newExportStack starts the fake. inputs resolves the owned source file of an
+// Offering that uploads one (Smart Segmentation) and is nil for the others.
+func newExportStack(t *testing.T, inputs generation.InputAssetResolver) exportStack {
+	t.Helper()
+	fixture := testkit.New(t, fakeupstream.Config{ArtifactOrigin: "https://" + exportAssetHost}, tripov3.Version())
+	errorMapping, statusMapping := realSampleMappings(t)
+	recorder := &rigRecorder{}
+	artifacts := fixture.RouteHost(exportAssetHost)
+	return exportStack{fixture: fixture, recorder: recorder, adapter: func() *Adapter {
+		adapter, err := New(Config{
+			BaseURL: fixture.Server.URL + tripov3.Prefix, APIKey: "test-key", HTTPClient: &http.Client{Transport: recorder},
+			InputAssets: inputs, ErrorMapping: errorMapping, StatusMapping: statusMapping,
+			NativeSourceTransport: func(http.RoundTripper) http.RoundTripper { return artifacts },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return adapter
+	}}
+}
+
+// exportRun is one step with private exports that the real adapter ran to
+// completion against the Tripo v3 fake.
 type exportRun struct {
 	fake *testkit.Fixture
-	// source is the fake task the step worked on, baseID the fake task its
-	// processing request created, and model the artifact URL of that task's
+	// source is the fake task a processing step worked on, baseID the fake task
+	// the step's own request created, and model the artifact URL of that task's
 	// result: the source of every export.
 	source, baseID, model string
-	// base are the bodies the processing endpoint received, as the adapter sent
+	// base are the bodies the step's own endpoint received, as the adapter sent
 	// them.
 	base []string
-	// sent are the export requests by format as the adapter sent them (raw), and
-	// converts the same decoded.
+	// order are the formats in the order their exports were requested, sent the
+	// export requests by format as the adapter sent them (raw), and converts the
+	// same decoded.
+	order    []string
 	sent     map[string]string
 	converts map[string]map[string]any
 	// echoes are the parameters the fake's task object shows for each export.
@@ -89,77 +122,16 @@ type exportRun struct {
 	observed generation.Observation
 }
 
-// fakeTask creates a task of the Tripo v3 fake the way a client does and returns
-// its id.
-func fakeTask(t *testing.T, fixture *testkit.Fixture, path string, body map[string]any) string {
-	t.Helper()
-	status, _, created := fixture.Do(http.MethodPost, tripov3.Prefix+"/"+path, "test-key", body)
-	if status != http.StatusOK {
-		t.Fatalf("the fake refused POST %s: %d %v", path, status, created)
-	}
-	id, _ := testkit.Field(t, created, "data", "task_id").(string)
-	return id
-}
-
-// driveExports runs a started native processing request to completion against
-// the Tripo v3 fake. Each observation uses a new adapter, as a restart does.
-// Besides the requests the adapter sent it holds what the fake ran: the task
+// collect reads what the finished run sent and what the fake ran. The task
 // object of every export must show exactly the parameters that were sent (the
 // fake keeps the documented ones and nothing else, the source named
 // original_model_id), so what the tests read from the sent requests is what the
-// fake took.
-func driveExports(t *testing.T, r generation.StartRequest, endpoint string) exportRun {
+// fake took. conversions is the private export record of the final checkpoint.
+func (run *exportRun) collect(t *testing.T, stack exportStack, endpoint string, conversions map[string]conversionItem) {
 	t.Helper()
-	r.Offering.AssetHosts = []string{exportAssetHost}
-	fixture := testkit.New(t, fakeupstream.Config{ArtifactOrigin: "https://" + exportAssetHost}, tripov3.Version())
-	errorMapping, statusMapping := realSampleMappings(t)
-
-	// The model the step works on is a task of the fake, as it is on the real API.
-	run := exportRun{fake: fixture}
-	run.source = fakeTask(t, fixture, "generation/text-to-model", map[string]any{"model": "v3.1-20260211", "prompt": "a robot"})
-	dependency := r.TaskDependencies["source_task"]
-	if dependency.Capability == generation.Capability("mesh-segmentation") {
-		run.source = fakeTask(t, fixture, "mesh/segment", map[string]any{"input": run.source, "model": "v2.0-20260430"})
-	}
-	dependency.UpstreamJob.RemoteID = run.source
-	r.TaskDependencies = map[string]generation.TaskDependency{"source_task": dependency}
-
-	recorder := &rigRecorder{}
-	artifacts := fixture.RouteHost(exportAssetHost)
-	factory := func() *Adapter {
-		adapter, err := New(Config{
-			BaseURL: fixture.Server.URL + tripov3.Prefix, APIKey: "test-key", HTTPClient: &http.Client{Transport: recorder},
-			ErrorMapping: errorMapping, StatusMapping: statusMapping,
-			NativeSourceTransport: func(http.RoundTripper) http.RoundTripper { return artifacts },
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return adapter
-	}
-	ctx := generation.WithDispatchCheckpointer(context.Background(), &nativeDeliveryPermit{})
-	accepted, err := factory().Start(ctx, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	run.baseID = accepted.Job.RemoteID
-	q := rigObserve(r, accepted)
-	for i := 0; i < 60 && run.observed.Phase != generation.UpstreamCompleted; i++ {
-		if run.observed, err = factory().Observe(ctx, q); err != nil {
-			t.Fatal(err)
-		}
-		if run.observed.Phase == generation.UpstreamFailed {
-			t.Fatalf("the step failed: %+v", run.observed.Failure)
-		}
-		q.Opaque = run.observed.Opaque
-	}
-	if run.observed.Phase != generation.UpstreamCompleted {
-		t.Fatalf("the exports did not complete: %+v", run.observed)
-	}
-
-	run.base = recorder.posts(endpoint)
+	run.base = stack.recorder.posts(endpoint)
 	run.sent, run.converts, run.echoes = map[string]string{}, map[string]map[string]any{}, map[string]map[string]any{}
-	for _, raw := range recorder.posts("models/convert") {
+	for _, raw := range stack.recorder.posts("models/convert") {
 		var body map[string]any
 		if err := json.Unmarshal([]byte(raw), &body); err != nil {
 			t.Fatalf("export request %s: %v", raw, err)
@@ -168,8 +140,9 @@ func driveExports(t *testing.T, r generation.StartRequest, endpoint string) expo
 		if _, again := run.converts[format]; again {
 			t.Errorf("the %s export was requested twice", format)
 		}
+		run.order = append(run.order, format)
 		run.sent[format], run.converts[format] = raw, body
-		// Every export is made from the model the processing step produced.
+		// Every export is made from the model the step produced.
 		if source, _ := body["input"].(string); run.model == "" {
 			run.model = source
 		} else if source != run.model {
@@ -177,15 +150,10 @@ func driveExports(t *testing.T, r generation.StartRequest, endpoint string) expo
 		}
 	}
 	if prefix := "https://" + exportAssetHost + tripov3.Prefix + "/artifacts/" + run.baseID + "/"; !strings.HasPrefix(run.model, prefix) {
-		t.Errorf("the exports are made from %q, not from a result of the processing task (%s)", run.model, prefix)
-	}
-
-	var state nativeProcessingState
-	if err := json.Unmarshal(run.observed.Opaque, &state); err != nil {
-		t.Fatal(err)
+		t.Errorf("the exports are made from %q, not from a result of the step's own task (%s)", run.model, prefix)
 	}
 	for format, sent := range run.converts {
-		_, _, polled := fixture.Do(http.MethodGet, tripov3.Prefix+"/tasks/"+state.Conversions[format].RemoteID, "test-key", nil)
+		_, _, polled := stack.fixture.Do(http.MethodGet, tripov3.Prefix+"/tasks/"+conversions[format].RemoteID, "test-key", nil)
 		input, _ := testkit.Field(t, polled, "data", "input").(map[string]any)
 		echoed, want := map[string]any{}, map[string]any{}
 		for name, value := range input {
@@ -203,6 +171,62 @@ func driveExports(t *testing.T, r generation.StartRequest, endpoint string) expo
 		}
 		run.echoes[format] = echoed
 	}
+}
+
+// fakeTask creates a task of the Tripo v3 fake the way a client does and returns
+// its id.
+func fakeTask(t *testing.T, fixture *testkit.Fixture, path string, body map[string]any) string {
+	t.Helper()
+	status, _, created := fixture.Do(http.MethodPost, tripov3.Prefix+"/"+path, "test-key", body)
+	if status != http.StatusOK {
+		t.Fatalf("the fake refused POST %s: %d %v", path, status, created)
+	}
+	id, _ := testkit.Field(t, created, "data", "task_id").(string)
+	return id
+}
+
+// driveExports runs a started native processing request to completion against
+// the Tripo v3 fake. Each observation uses a new adapter, as a restart does.
+// Besides the requests the adapter sent it holds what the fake ran (see collect).
+func driveExports(t *testing.T, r generation.StartRequest, endpoint string) exportRun {
+	t.Helper()
+	r.Offering.AssetHosts = []string{exportAssetHost}
+	stack := newExportStack(t, nil)
+
+	// The model the step works on is a task of the fake, as it is on the real API.
+	run := exportRun{fake: stack.fixture}
+	run.source = fakeTask(t, stack.fixture, "generation/text-to-model", map[string]any{"model": "v3.1-20260211", "prompt": "a robot"})
+	dependency := r.TaskDependencies["source_task"]
+	if dependency.Capability == generation.Capability("mesh-segmentation") {
+		run.source = fakeTask(t, stack.fixture, "mesh/segment", map[string]any{"input": run.source, "model": "v2.0-20260430"})
+	}
+	dependency.UpstreamJob.RemoteID = run.source
+	r.TaskDependencies = map[string]generation.TaskDependency{"source_task": dependency}
+
+	ctx := generation.WithDispatchCheckpointer(context.Background(), &nativeDeliveryPermit{})
+	accepted, err := stack.adapter().Start(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.baseID = accepted.Job.RemoteID
+	q := rigObserve(r, accepted)
+	for i := 0; i < 60 && run.observed.Phase != generation.UpstreamCompleted; i++ {
+		if run.observed, err = stack.adapter().Observe(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+		if run.observed.Phase == generation.UpstreamFailed {
+			t.Fatalf("the step failed: %+v", run.observed.Failure)
+		}
+		q.Opaque = run.observed.Opaque
+	}
+	if run.observed.Phase != generation.UpstreamCompleted {
+		t.Fatalf("the exports did not complete: %+v", run.observed)
+	}
+	var state nativeProcessingState
+	if err := json.Unmarshal(run.observed.Opaque, &state); err != nil {
+		t.Fatal(err)
+	}
+	run.collect(t, stack, endpoint, state.Conversions)
 	return run
 }
 

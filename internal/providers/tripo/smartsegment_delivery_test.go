@@ -37,7 +37,6 @@ type smartSegmentDeliveryFixture struct {
 	request                  generation.StartRequest
 	uploads, creates         int
 	converts                 []map[string]any
-	createBodies             []map[string]any
 	convertMode              string
 	missingMask              bool
 	remoteType               string
@@ -87,9 +86,6 @@ func newSmartSegmentDeliveryFixture(t *testing.T, kind string) *smartSegmentDeli
 			writeTestEnvelope(w, map[string]any{"file_token": "file_smartseg"})
 		case r.Method == http.MethodPost && r.URL.Path == "/v3/mesh/smartsegment":
 			f.creates++
-			var created map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&created)
-			f.createBodies = append(f.createBodies, created)
 			writeTestEnvelope(w, map[string]any{"task_id": "remote-smartseg"})
 		case r.Method == http.MethodGet && r.URL.Path == "/v3/tasks/remote-smartseg":
 			output := map[string]any{"prompt": "head, body", "seg_model_url": f.segURL, "mask_url": f.maskURL, "seg_task_id": "private-seg", "model_task_id": "private-model"}
@@ -204,48 +200,6 @@ func (f *smartSegmentDeliveryFixture) observeUntilDone(t *testing.T, q generatio
 	}
 	t.Fatal("exports never completed")
 	return obs
-}
-
-// #292: the exports take their texture size from the frozen input, so a purpose
-// that bounds it (a game, 2K) reaches every export of the segmented model, and
-// the shipped default of 8K is the request every export has always been.
-func TestSmartSegmentExportsFollowTheBoundTextureSize(t *testing.T) {
-	for _, test := range []struct {
-		size string
-		want float64
-	}{{"2k", 2048}, {"4k", 4096}, {"8k", 8192}} {
-		t.Run(test.size, func(t *testing.T) {
-			f := newSmartSegmentDeliveryFixture(t, "model")
-			var input map[string]any
-			if err := json.Unmarshal(f.request.Input, &input); err != nil {
-				t.Fatal(err)
-			}
-			input["export_texture_size"] = test.size
-			f.request.Input, _ = json.Marshal(input)
-			obs := f.observeUntilDone(t, f.accept(t))
-			w := f.wire()
-			if obs.Phase != generation.UpstreamCompleted || len(w.unexpected) != 0 || len(w.converts) != 5 {
-				t.Fatalf("completion %+v unexpected=%v converts=%d", obs, w.unexpected, len(w.converts))
-			}
-			for i, format := range []string{"FBX", "OBJ", "STL", "USDZ", "3MF"} {
-				want := map[string]any{"input": f.segURL, "format": format, "texture_size": test.want, "texture_format": "PNG", "with_animation": false, "bake": true, "fbx_preset": "blender"}
-				if !reflect.DeepEqual(w.converts[i], want) {
-					t.Fatalf("export %s wire %v", format, w.converts[i])
-				}
-			}
-			// The bound size is an export option, never a segmentation field.
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			if len(f.createBodies) != 1 {
-				t.Fatalf("segmentation requests = %v", f.createBodies)
-			}
-			for name := range f.createBodies[0] {
-				if strings.Contains(name, "texture") {
-					t.Fatalf("the segmentation request carries the export option %s: %v", name, f.createBodies[0])
-				}
-			}
-		})
-	}
 }
 
 func TestSmartSegmentDeliversSegmentedGLBMaskAndFiveRequiredExports(t *testing.T) {
