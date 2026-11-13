@@ -48,3 +48,38 @@ func TestRouteHostReachesTheFakeForTheNamedHostOnly(t *testing.T) {
 		}
 	}
 }
+
+// RouteHosts serves an Adapter that sends its API requests and reads its
+// artifacts through one client: both named hosts reach the fake, any other one
+// is refused before a socket is opened, and the refusal names every routed host.
+func TestRouteHostsReachesTheFakeForEveryNamedHostOnly(t *testing.T) {
+	f := New(t, fakeupstream.Config{}, fakeupstream.Version{
+		Provider: "probe", API: "v1", Prefix: "/probe",
+		Handler: func(*fakeupstream.Env) (http.Handler, error) {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, "%s %s", r.Method, r.URL.Path)
+			}), nil
+		},
+	})
+	client := &http.Client{Transport: f.RouteHosts("api.example", "files.example")}
+
+	for _, address := range []string{"https://api.example/probe/status", "https://FILES.example/probe/model.glb"} {
+		response, err := client.Get(address)
+		if err != nil {
+			t.Fatalf("%s: %v", address, err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), "GET /") {
+			t.Fatalf("%s answered %d %q", address, response.StatusCode, body)
+		}
+	}
+	response, err := client.Get("https://third.example/probe/status")
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("a host nobody named reached the fake")
+	}
+	if !strings.Contains(err.Error(), `"api.example, files.example"`) {
+		t.Fatalf("the refusal does not name the routed hosts: %v", err)
+	}
+}

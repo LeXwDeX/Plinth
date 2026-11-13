@@ -53,6 +53,12 @@ const (
 	// real observation recorded in
 	// internal/providers/hyper3d/charge_evidence_test.go (2026-10-21).
 	errorDocs = "2026-11-08"
+	// realRun is the day of the one paid game-character run on dev-test (#294
+	// follow-up, recorded in the /rodin endpoint note). The Gen-2.5 page was read
+	// again that day: its price table, its texture_mode defaults by tier and the
+	// extra mesh of the Extreme-High tier (see generationCharge and downloadNames)
+	// are from that reading.
+	realRun = "2026-11-13"
 )
 
 // Job statuses of the official API.
@@ -71,7 +77,60 @@ const tinyModelBytes = 2048
 const (
 	fixedBalance   = 100.0
 	fixedTimestamp = "2026-01-01T00:00:00Z"
+	// fixedCharge is the receipt's consumed of the routes without a price model
+	// (bang, texture) and of a form outside the Gen-2.5 price table.
+	fixedCharge = 0.5
 )
+
+// The Gen-2.5 tier the price table and the extra mesh are about.
+const extremeHighTier = "Gen-2.5-Extreme-High"
+
+// extraMeshName is the additional mesh the Extreme-High tier returns next to the
+// PBR pack and the preview (see downloadNames).
+const extraMeshName = "model_export_raw.glb"
+
+// The price table of the Gen-2.5 page (docsRoot+"rodin-gen2-5", read again on
+// realRun): 0.5 credits for a generation, +0.5 for the Extreme-High tier and +2.0
+// for texture_mode=extreme-high. The page says the charges are additive and that a
+// parameter the table does not list adds nothing. Real receipts: 0.5 for the
+// cheapest request of the alignment run, 3 for the display request (#188) and 1
+// for the game-character run of realRun (Extreme-High with texture_mode=high,
+// Quad, TAPose and quad_normal, so none of those adds a charge). The other
+// combinations are the table applied, not observed.
+const (
+	chargeGeneration         = 0.5
+	chargeExtremeHighTier    = 0.5
+	chargeExtremeHighTexture = 2.0
+)
+
+// defaultTextureModes is the page's texture_mode default by tier, which decides
+// the price of a form that omits the field.
+var defaultTextureModes = map[string]string{
+	"Gen-2.5-Extreme-Low": "extreme-low", "Gen-2.5-Low": "low", "Gen-2.5-Medium": "medium",
+	"Gen-2.5-High": "high", extremeHighTier: "high",
+}
+
+// generationCharge is the credits a valid generation form is charged: the price
+// table above for a Gen-2.5 tier. A form without one (an omitted tier is Regular,
+// a Gen-1/1.5 asset) is outside that table and keeps the fixed charge.
+func generationCharge(fields map[string]string) float64 {
+	tier := fields["tier"]
+	if !strings.HasPrefix(tier, "Gen-2.5-") {
+		return fixedCharge
+	}
+	charge := chargeGeneration
+	if tier == extremeHighTier {
+		charge += chargeExtremeHighTier
+	}
+	texture, has := fields["texture_mode"]
+	if !has {
+		texture = defaultTextureModes[tier]
+	}
+	if texture == "extreme-high" {
+		charge += chargeExtremeHighTexture
+	}
+	return charge
+}
 
 // kind describes one task-creating route.
 type kind struct {
@@ -89,6 +148,17 @@ var kinds = []kind{
 	{Path: "/bang", DocPage: "bang", Need: "asset"},
 	{Path: "/rodin_texture_only", DocPage: "generate-texture", Need: "model-and-image"},
 }
+
+// rodinRealRunNote records the one paid game-character run and what the fake does
+// and does not reproduce of it. It is part of the /rodin endpoint note, so it
+// travels with the alignment report.
+const rodinRealRunNote = "One paid run of the game-character request was made on " + realRun + " (dev-test, #294 follow-up): " +
+	"tier Gen-2.5-Extreme-High with mesh_mode=Quad, quality=high, quality_override=10000, texture_mode=high, TAPose=true, quad_normal=true, geometry_file_format=glb, material=PBR and a prompt was accepted, reached Done after about 160 seconds and was charged 1 credit (0.5 for the generation and 0.5 for the tier, nothing for Quad, the pose switch or the normal bake). " +
+	"It delivered a PBR GLB of 9,437,496 bytes (one mesh, about 21,800 triangles for 10,000 quads, no skin, three embedded PNG images of 2048x2048, bounding box 1.363 x 1.889 x 0.475 in the A pose) and a WebP preview. " +
+	"The raw bodies were not captured, so the fake answers from the page and from what the run showed, not from a recorded wire: consumed follows the page's price table (generationCharge), and the Extreme-High tier lists the extra mesh that the page and the earlier real lists record (" + extraMeshName + "; the real order of the list and the PBR pack's real name for this request were not kept). " +
+	"The page's \"tier is required\" callout is advice, not enforcement: an omitted tier is Regular (a Gen-1/1.5 asset), which the fake accepts too, and Plinth always sends an explicit Gen-2.5 tier. The run does not verify a rejected value, TAPose on a subject that is not humanoid, or the Quad ceiling. " +
+	"Not modeled: the delivered files are the shared fixture's whatever the request (a 72-triangle humanoid with one 64x64 PNG), so the triangle count and the number and size of the textures do not follow it. The observed texture edges are 2048 for texture_mode high (this run) and, from the #188 acceptance, a 6144 base color with two 2048 images for extreme-high. A GLB with a valid 2048 PNG measures about 90 KB (about 50 ms to build and 20 ms to check on a laptop) and 6144 has nine times the pixels; the fake has no per-mode fixture selection yet and the fixture is not scaled. " +
+	"A re-read of the page on " + realRun + " through a summarizing fetch (not a verbatim copy) showed its tier, texture_mode default, resolution and price tables but not the seed, TAPose, quad_normal and Quad-ceiling rules above, nor legacy among the texture_mode values; those stay as checked on " + formDocs + " (the run accepted TAPose and quad_normal together with Quad) and need a check against the full page"
 
 var endpoints = buildEndpoints()
 
@@ -109,7 +179,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 	for _, k := range kinds {
 		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). API_NO_ACTIVE_SUBSCRIPTION was observed on 2026-11-12 (#294): a real submission was refused with it and the product recorded no HTTP status for the refusal (upstream_status 0), which is what the HTTP 201 error body sent here gives; the message text of the real body was not kept, so the message stays the documented description. The other documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, IMAGE_LABEL_LENGTH_TOO_LONG, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
 		if k.Need == "prompt-or-images" {
-			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, and the TAPose and quad_normal switches) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed"
+			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, and the TAPose and quad_normal switches) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed. " + rodinRealRunNote
 		}
 		out = append(out, fakeupstream.Endpoint{
 			Method: "POST", Path: k.Path, Evidence: fakeupstream.EvidenceReal, Sample: "POST " + samplePrefix + k.Path,
@@ -592,7 +662,11 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 			return
 		}
 		body := fakeupstream.Clone(sample)
-		body["uuid"], body["submit_time"], body["consumed"] = t.uuid, fixedTimestamp, 0.5
+		charge := fixedCharge
+		if k.Need == "prompt-or-images" {
+			charge = generationCharge(form.fields)
+		}
+		body["uuid"], body["submit_time"], body["consumed"] = t.uuid, fixedTimestamp, charge
 		if prompt, has := body["prompt"]; has && form.fields["prompt"] != "" {
 			_ = prompt
 			body["prompt"] = form.fields["prompt"]
@@ -610,6 +684,16 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 // downloadNames are the files a finished task offers. Plinth selects the model
 // by the "_pbr.glb" suffix and the preview by name, so a PBR request names its
 // model like the official PBR download.
+//
+// The Extreme-High tier also returns "an additional mesh with up to 10M of faces"
+// (docsRoot+"rodin-gen2-5", read again on realRun): an untextured Draco GLB that
+// the real list of 2026-10-21 names model_export_raw.glb. Where it stands in the
+// real list is not settled (the sanitized capture of 2026-10-26 lists a GLB, the
+// preview and a third file; listed before the PBR pack it would take the model
+// slot of an Offering without download_files), so it is listed last here. The
+// fake serves its fixed GLB under that name (the real file is untextured and
+// Draco-compressed); Plinth takes only the files the Offering's download_files
+// names, so it never reads it.
 func (h *handler) downloadNames(k kind, fields map[string]string) []string {
 	sample, _ := h.download[k.Path]["list"].([]any)
 	var names []string
@@ -623,6 +707,9 @@ func (h *handler) downloadNames(k kind, fields map[string]string) []string {
 			name = "base_" + strings.ToLower(orDefault(fields["resolution"], "basic")) + "_pbr.glb"
 		}
 		names = append(names, name)
+	}
+	if k.Path == "/rodin" && fields["tier"] == extremeHighTier {
+		names = append(names, extraMeshName)
 	}
 	return names
 }
