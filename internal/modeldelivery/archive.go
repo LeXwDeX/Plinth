@@ -24,7 +24,9 @@ type Archive struct {
 	Filename  string
 	MediaType string
 	// Entries counts the files in the ZIP including README.txt; Bytes is the
-	// sum of their sizes. MissingFormats lists the target formats left out.
+	// sum of their sizes. MissingFormats lists the target formats left out; a
+	// format whose slot holds a file the README names as a repeat of an included
+	// one is not left out (#293).
 	Entries        int
 	Bytes          int64
 	MissingFormats []string
@@ -131,10 +133,12 @@ type archiveItem struct {
 
 // archiveSame is an attachment the ZIP leaves out because a file already in it
 // has the same bytes (#293). kept is that file's asset: the README resolves its
-// path last, since flattenLoneObj can still move an OBJ.
+// path last, since flattenLoneObj can still move an OBJ. asset is the record left
+// out: its slot says which format's file it is.
 type archiveSame struct {
 	label string
 	kept  generation.AssetID
+	asset generation.Asset
 }
 
 // skipsIdenticalFiles reports whether the Schema names the README section for
@@ -174,6 +178,49 @@ func slotLabel(asset generation.Asset) string {
 		return sanitize(asset.Variant)
 	}
 	return sanitize(asset.Role)
+}
+
+// packedPaths maps the asset of every planned entry the ZIP really holds to its
+// path; an entry that could not be read is not in it. It is read after Prepare
+// opened the files and after flattenLoneObj may have moved an OBJ, so a path is
+// the one the ZIP carries.
+func packedPaths(unreadable map[string]bool, lists ...[]archiveItem) map[generation.AssetID]string {
+	packed := map[generation.AssetID]string{}
+	for _, list := range lists {
+		for _, item := range list {
+			if !unreadable[item.path] {
+				packed[item.asset.ID] = item.path
+			}
+		}
+	}
+	return packed
+}
+
+// formatsHeldByRepeats finds the formats whose slot holds a file the ZIP leaves
+// out because a file it does hold has the same bytes (#293). A slot is the role
+// and the variant a format's matches name; the media type is not compared, since
+// such a file sits in another container than the one the format's own match asks
+// for (a binary glTF in the slot a glTF conversion delivers to). The kept file
+// has to be in the ZIP, as for the README line that names the repeat. A file with
+// no variant names no slot: there the media type is all that tells formats apart.
+func (s *Service) formatsHeldByRepeats(same []archiveSame, packed map[generation.AssetID]string) map[string]bool {
+	held := map[string]bool{}
+	for _, entry := range same {
+		if _, inPackage := packed[entry.kept]; !inPackage || entry.asset.Variant == "" {
+			continue
+		}
+		for _, format := range s.schema.Formats {
+			for _, match := range format.Matches {
+				slot := match
+				slot.MediaTypes = nil
+				if slot.Matches(entry.asset.Role, entry.asset.Variant, "") {
+					held[format.ID] = true
+					break
+				}
+			}
+		}
+	}
+	return held
 }
 
 // archiveAssets lists the READY files collect would put into the ZIP, without
@@ -318,9 +365,14 @@ func (s *Service) Prepare(ctx context.Context, scope generation.TaskListScope, t
 			included[item.formatID] = item.path
 		}
 	}
+	// A format with no file of its own whose slot the task filled with a file the
+	// ZIP leaves out because an included one has the same bytes is delivered, as
+	// that file: the README names the repeat, so it must not also report the
+	// format as missing (#293).
+	heldByRepeat := s.formatsHeldByRepeats(same, packedPaths(unreadable, items, dependencies, other))
 	var missing []archiveMissing
 	for _, format := range s.schema.Formats {
-		if _, present := included[format.ID]; present || !state.coverage.Applicable {
+		if _, present := included[format.ID]; present || heldByRepeat[format.ID] || !state.coverage.Applicable {
 			continue
 		}
 		result.MissingFormats = append(result.MissingFormats, format.ID)
@@ -427,7 +479,7 @@ func (s *Service) collect(ctx context.Context, scope generation.TaskListScope, v
 		}
 		if identical {
 			if kept, found := identicalTo(asset, formats, dependencies, other); found {
-				same = append(same, archiveSame{label: slotLabel(asset), kept: kept.asset.ID})
+				same = append(same, archiveSame{label: slotLabel(asset), kept: kept.asset.ID, asset: asset})
 				twins[kept.asset.ID] = append(twins[kept.asset.ID], archiveItem{asset: asset, taskID: v.task.ID})
 				consumed[asset.ID] = true
 				continue
@@ -865,14 +917,7 @@ func (s *Service) readme(
 	// moved to the root, and an entry that could not be read says nothing.
 	sameLines := []string{}
 	if len(same) > 0 {
-		packed := map[generation.AssetID]string{}
-		for _, list := range [][]archiveItem{items, dependencies, other} {
-			for _, item := range list {
-				if !unreadable[item.path] {
-					packed[item.asset.ID] = item.path
-				}
-			}
-		}
+		packed := packedPaths(unreadable, items, dependencies, other)
 		for _, entry := range same {
 			if kept, ok := packed[entry.kept]; ok {
 				sameLines = append(sameLines, strings.NewReplacer("{label}", entry.label, "{path}", kept).Replace(text.SameLine))

@@ -527,7 +527,7 @@ Meshy 的 UV 展开、尺寸调整、可打印性分析、Bambu 打印文件包�
 
 **单个格式文件的下载名**（#264 后续；已验收：#264，revision `464d8cd1`）：在「格式」页或结果详情里单独下载某个模型格式时，浏览器保存的文件名与一键 ZIP 内一致，形如 `model-<任务 ID>.glb`、`model-<任务 ID>.gltf.zip`，不是 `asset_<资产 ID>.zip`。命名规则写在 Product Schema 的 `model_delivery.download_filename_template`。图片等可预览的文件不受影响，仍在浏览器里直接显示。
 
-- 结构：`README.txt` 在首位；单独的模型文件直接放在包根目录（如只有一个 GLB 时是 `model.glb`，多格式平铺时是 `model.glb`、`model.fbx`……），不套一层同名文件夹；只有 OBJ 与它的 MTL、贴图一起打包时才放进同一文件夹（如 `obj/model.obj`、`obj/scene/model_material.mtl`），以保持 MTL 与 OBJ 里引用的相对路径有效；任务没保存、或保存了但读取失败的依赖都不算“一起打包”；没有任何依赖能随包时，OBJ 仍在根目录，README 如实写明缺失；不属于任何目标格式的文件放在 `other/`；其中内容（SHA-256）与包里已有文件完全相同的不再重复收录，README 在「内容相同的文件」一节写明“X 与 Y 内容相同，只收录一份”（#293：Tripo 的 `converted.gltf` 与 `model.glb` 是同一份 GLB，包里只有 `model.glb`；两个槽位各自的单个下载不变）。平铺时同名或只差大小写的文件追加序号（如 `model-2.gltf`），README 逐项列出实际路径。Tripo 的 “gltf” 实际是自包含的 GLB，文件名按真实类型写成 `.glb`。
+- 结构：`README.txt` 在首位；单独的模型文件直接放在包根目录（如只有一个 GLB 时是 `model.glb`，多格式平铺时是 `model.glb`、`model.fbx`……），不套一层同名文件夹；只有 OBJ 与它的 MTL、贴图一起打包时才放进同一文件夹（如 `obj/model.obj`、`obj/scene/model_material.mtl`），以保持 MTL 与 OBJ 里引用的相对路径有效；任务没保存、或保存了但读取失败的依赖都不算“一起打包”；没有任何依赖能随包时，OBJ 仍在根目录，README 如实写明缺失；不属于任何目标格式的文件放在 `other/`；其中内容（SHA-256）与包里已有文件完全相同的不再重复收录，README 在「内容相同的文件」一节写明“X 与 Y 内容相同，只收录一份”（#293：Tripo 的 `converted.gltf` 与 `model.glb` 是同一份 GLB，包里只有 `model.glb`；两个槽位各自的单个下载不变；被省略的那条占着 glTF 的槽位，所以 README 不再把 glTF 同时列进「未包含的格式」，没有任何记录占 glTF 槽位的任务仍然列出）。平铺时同名或只差大小写的文件追加序号（如 `model-2.gltf`），README 逐项列出实际路径。Tripo 的 “gltf” 实际是自包含的 GLB，文件名按真实类型写成 `.glb`。
 - 范围：只有任务所有者（管理员按既有资产下载的范围）能下载；别人的任务返回 404。
 - 上限：文件数最多 64 个、总大小最多 1 GiB（Schema 声明）；超过返回 413，不会发出残缺的 ZIP。
 - 审计：每次下载记一条 `download_model_archive`，含文件数、字节数和缺失格式。
