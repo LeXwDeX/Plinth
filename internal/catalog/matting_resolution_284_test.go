@@ -2,11 +2,11 @@ package catalog_test
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/catalog/catalogtest"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -32,13 +32,13 @@ func mattingParameter(t *testing.T, name string) schema.Parameter {
 }
 
 // #284, #299: the Schema lets the two working resolutions go as high as the
-// service accepts. BiRefNet's default follows the source picture, up to the
-// service's own GPU default of 2048. SDMatte's does not: the service's default is
-// 1024 even on a GPU, and the live run of 2026-11-13 ran the GPU out of memory
-// with it raised to 2048 for a 2048x2048 picture, so it stays 1024 whatever the
-// picture and a larger value is only what a caller asks for. Both keep a static
-// default for pictures that cannot be measured. Matting stays free.
-func TestMattingResolutionsReachTheServiceRangeAndSDMatteStaysAtItsDefault(t *testing.T) {
+// service accepts, but both default to the static 1024 Plinth sent before #284,
+// whatever the source picture. On 2026-11-13 the matting service's shared GPU ran
+// out of memory on a 2048x2048 picture twice: with both resolutions at 2048 and,
+// with SDMatte held at 1024, with BiRefNet at 2048 (out of memory in the coarse
+// stage). So neither parameter follows the source picture, and a larger value is
+// only what a caller asks for. Matting stays free.
+func TestMattingResolutionsReachTheServiceRangeAndDefaultTo1024(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		maximum float64
@@ -51,20 +51,11 @@ func TestMattingResolutionsReachTheServiceRangeAndSDMatteStaysAtItsDefault(t *te
 			t.Fatalf("%s is an integer on the service", test.name)
 		}
 		if string(parameter.Default) != "1024" {
-			t.Fatalf("%s static default = %s, want 1024 for pictures that cannot be measured", test.name, parameter.Default)
+			t.Fatalf("%s static default = %s, want 1024 whatever the picture", test.name, parameter.Default)
 		}
-	}
-	rule := mattingParameter(t, "birefnet_process_res").DefaultBySourceSide
-	if rule == nil || rule.Source != "source_assets" || len(rule.Tiers) != 2 {
-		t.Fatalf("birefnet_process_res rule = %+v", rule)
-	}
-	for side, want := range map[int64]string{1: "1024", 1024: "1024", 1025: "2048", 4096: "2048", 20000: "2048"} {
-		if got, ok := rule.ValueFor(side); !ok || string(got) != want {
-			t.Fatalf("birefnet_process_res for a long side of %d = %s, want %s", side, got, want)
+		if parameter.DefaultBySourceSide != nil {
+			t.Fatalf("%s follows the source picture again: %+v", test.name, parameter.DefaultBySourceSide)
 		}
-	}
-	if rule := mattingParameter(t, "sdmatte_process_res").DefaultBySourceSide; rule != nil {
-		t.Fatalf("sdmatte_process_res follows the source picture again: %+v", rule)
 	}
 	loaded, err := catalog.LoadDefault()
 	if err != nil {
@@ -76,27 +67,88 @@ func TestMattingResolutionsReachTheServiceRangeAndSDMatteStaysAtItsDefault(t *te
 	}
 }
 
-// The tiers must be values the parameter itself accepts, or a default the
-// Schema supplies would be refused by its own validation.
-func TestMattingTierValuesAreWithinTheDeclaredRange(t *testing.T) {
-	parameter := mattingParameter(t, "birefnet_process_res")
-	for _, tier := range parameter.DefaultBySourceSide.Tiers {
-		var value float64
-		if err := json.Unmarshal(tier.Value, &value); err != nil {
-			t.Fatal(err)
+// #299: the two descriptions tell the caller what the default is now (1024,
+// whatever the source picture) and what a larger value costs (more GPU memory,
+// and it can fail on the shared service), in both languages. The English text is
+// the bundle's translation of the Chinese one, which Load requires to exist.
+func TestMattingResolutionDescriptionsSayTheDefaultAndTheMemoryCost(t *testing.T) {
+	loaded, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	localization := loaded.Application().Localization
+	if localization == nil {
+		t.Fatal("the default catalog declares no localization")
+	}
+	english := localization.Bundles["en"].OfferingTexts
+	for _, name := range []string{"birefnet_process_res", "sdmatte_process_res"} {
+		parameter := mattingParameter(t, name)
+		for _, want := range []string{"不指定时用 1024", "不随来源图片放大", "更高的值需要更多显存", "共享显卡"} {
+			if !strings.Contains(parameter.Description, want) {
+				t.Errorf("%s description %q does not say %q", name, parameter.Description, want)
+			}
 		}
-		if value < *parameter.Minimum || value > *parameter.Maximum {
-			t.Fatalf("birefnet_process_res tier value %v is outside %v..%v", value, *parameter.Minimum, *parameter.Maximum)
+		if strings.Contains(parameter.Description, "按来源图片") {
+			t.Errorf("%s description still says the default follows the source picture: %q", name, parameter.Description)
+		}
+		translated, ok := english[parameter.Description]
+		if !ok {
+			t.Errorf("%s description has no English translation", name)
+			continue
+		}
+		for _, want := range []string{"when not set it is 1024", "does not grow with the source picture", "Higher values need more GPU memory", "shared GPU"} {
+			if !strings.Contains(translated, want) {
+				t.Errorf("%s English description %q does not say %q", name, translated, want)
+			}
+		}
+		if strings.Contains(translated, "follows the long side") {
+			t.Errorf("%s English description still says the default follows the source picture: %q", name, translated)
 		}
 	}
 }
 
-// default_by_source_side is validated where the Schema loads.
-func TestDefaultBySourceSideDeclarationIsValidated(t *testing.T) {
-	raw, err := os.ReadFile("default_catalog.json")
-	if err != nil {
-		t.Fatal(err)
+// The Offering the rule's tests run on is a test-local one: its document loads
+// as it stands and carries the rule on SourceSideParameter alone, while the
+// shipped Offering it is copied from still declares none.
+func TestSourceSideTestOfferingCarriesTheRuleTheShippedOneDoesNot(t *testing.T) {
+	loaded := catalogtest.LoadWithSourceSideOffering(t)
+	offering, ok := loaded.Get(catalogtest.SourceSideOfferingID)
+	if !ok {
+		t.Fatal("the test-local Offering is not in the catalog")
 	}
+	shipped, ok := loaded.Get(mattingOfferingID)
+	if !ok {
+		t.Fatal("background-removal offering missing")
+	}
+	if offering.Default || !shipped.Default {
+		t.Fatalf("default flags: test-local %v, shipped %v", offering.Default, shipped.Default)
+	}
+	declared := map[string]*schema.SourceSideDefault{}
+	for _, parameter := range offering.Parameters {
+		if parameter.DefaultBySourceSide != nil {
+			declared[parameter.Name] = parameter.DefaultBySourceSide
+		}
+	}
+	rule := declared[catalogtest.SourceSideParameter]
+	if len(declared) != 1 || rule == nil || rule.Source != "source_assets" || len(rule.Tiers) != 2 {
+		t.Fatalf("the test-local Offering declares %+v, want the one rule on %s", declared, catalogtest.SourceSideParameter)
+	}
+	for side, want := range map[int64]string{1: "1024", 1024: "1024", 1025: "2048", 4096: "2048", 20000: "2048"} {
+		if got, ok := rule.ValueFor(side); !ok || string(got) != want {
+			t.Fatalf("for a long side of %d the rule gives %s, want %s", side, got, want)
+		}
+	}
+	for _, parameter := range shipped.Parameters {
+		if parameter.DefaultBySourceSide != nil {
+			t.Fatalf("the shipped matting parameter %s declares a rule: %+v", parameter.Name, parameter.DefaultBySourceSide)
+		}
+	}
+}
+
+// default_by_source_side is validated where the Schema loads. No shipped
+// Offering declares it (#299), so the declarations refused here are made on the
+// test-local Offering, whose own declaration loads as it stands.
+func TestDefaultBySourceSideDeclarationIsValidated(t *testing.T) {
 	for name, test := range map[string]struct {
 		mutate func(parameter map[string]any, offering map[string]any)
 		want   string
@@ -152,20 +204,22 @@ func TestDefaultBySourceSideDeclarationIsValidated(t *testing.T) {
 		}, "只有可由调用方给值的 number 参数可以声明"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			var doc map[string]any
-			if err := json.Unmarshal(raw, &doc); err != nil {
-				t.Fatal(err)
-			}
+			doc := catalogtest.SourceSideDocument(t)
+			mutated := false
 			for _, item := range doc["offerings"].([]any) {
 				offering := item.(map[string]any)
-				if offering["id"] != mattingOfferingID {
+				if offering["id"] != catalogtest.SourceSideOfferingID {
 					continue
 				}
 				for _, entry := range offering["parameters"].([]any) {
-					if parameter := entry.(map[string]any); parameter["name"] == "birefnet_process_res" {
+					if parameter := entry.(map[string]any); parameter["name"] == catalogtest.SourceSideParameter {
 						test.mutate(parameter, offering)
+						mutated = true
 					}
 				}
+			}
+			if !mutated {
+				t.Fatalf("the document has no %s parameter on %s", catalogtest.SourceSideParameter, catalogtest.SourceSideOfferingID)
 			}
 			encoded, _ := json.Marshal(doc)
 			if _, err := catalog.Load(strings.NewReader(string(encoded))); err == nil || !strings.Contains(err.Error(), test.want) {

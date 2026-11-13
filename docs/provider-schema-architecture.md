@@ -782,17 +782,17 @@ Provider 完成观察不能带 `failure`，但一个成功的 Task 可能没交�
 - 生成工具的结果键由 `chat.tools[].result_fields.notices` 声明（目前只有 `remove_background`），不是 Provider 能力；Catalog 加载时校验它不与其他结果字段或保留键冲突、不用于加工计划工具。没有新增 Offering 字段。
 - 内核是唯一写入者：只读 `UpstreamCompleted` 观察的提示，规范化后随 Attempt 持久化（迁移 0092），只给 `SUCCEEDED` 的 Task 投影；格式不对的提示被丢弃而不是拒绝观察。提示不改变任务状态、资产或失败。
 
-机制、持久化与公开面见 `docs/architecture.md` 的“成功任务的公开提示（#284，本机测试，未部署验收）”。
+机制、持久化与公开面见 `docs/architecture.md` 的“成功任务的公开提示（#284，本机测试，未部署验收）”。该通道在 2026-11-13 的一次真实运行里核实过：2048×2048 与 16×16 一批，前者因显存不足失败，Task 仍成功，公开提示点名第 1 张，16×16 输出 RGBA。
 
 ### 参数默认值按来源图片选择（`default_by_source_side`，#284）
 
-有些参数的合适取值取决于来源图片的大小（抠图的处理分辨率：大图在小尺寸下丢细节，小图用大尺寸没有收益）。这是产品配置，不是 Provider 代码，也不是前端分支，所以由 Schema 在参数上声明、内核只做量取与挑选：
+有些参数的合适取值取决于来源图片的大小（抠图的处理分辨率：大图在小尺寸下丢细节，小图用大尺寸没有收益）。这是产品配置，不是 Provider 代码，也不是前端分支，所以由 Schema 在参数上声明、内核只做量取与挑选（当前没有 shipped Offering 使用它，见最后一条）：
 
 - `default_by_source_side {source, tiers[{max_source_side?, value}]}`：`source` 是本 Offering 的资产参数，图片长边（宽高较大者，多张取最大）选第一个 `max_source_side` 不小于它的档，最后一档无上限。只用于调用方可给值的 `number` 参数，必须同时有静态 `default`（读不出尺寸时使用），档位上限为正且严格递增，每档的值本身合法；Catalog 加载时校验（`validateDefaultBySourceSide`）。
 - 只对调用方没有传的参数生效：调用方（用户、Agent、API）显式给的值一律优先，哪怕它等于静态默认。内核（`generation.Module.applySourceSideDefaults`）在 `PrepareInput`/`Submit` 的规范化与压缩之后读已解析来源图片的头部，选定的值随冻结输入保存，之后不再量取；读不出任何一张图的尺寸就整体保持静态默认。
-- 目前只有 `matting/default/background-removal` 的 `birefnet_process_res` 声明它（长边不超过 1024 用 1024，更大用 2048，即服务自己的 GPU 默认），其范围上限（4096、2048）与服务一致，已由 fake 强制。`sdmatte_process_res` 在 #284 时同样声明，#299 去掉：服务对它的默认是 1024（GPU 上也是），2K 图两个都取 2048 时真实服务显存不足（2026-11-13）；它现在是静态默认 1024，调用方显式给的值照旧放行到 2048。
+- 目前 shipped Catalog 没有 Offering 声明它。#284 时 `matting/default/background-removal` 的两个处理分辨率参数都声明过（长边不超过 1024 用 1024，更大用 2048）；#299 先去掉 `sdmatte_process_res` 的（服务对它的默认是 1024，GPU 上也是，2K 图两个都取 2048 时真实服务显存不足，2026-11-13），同一天的第二次真实核实又证明 `birefnet_process_res` 取 2048（SDMatte 1024）处理 2048×2048 的图在这块共享 GPU 上同样显存不足，于是 BiRefNet 的也去掉。两个参数现在都是静态默认 1024，范围上限（4096、2048）与服务一致、已由 fake 强制，调用方显式给的值照旧放行。规则的 Schema 字段、加载校验与内核量取保留，由测试用的局部 Offering 覆盖；某个服务在共享资源上有余量、需要按图片大小选默认值时，在该 Offering 的 number 参数上声明即可，并先用真实核实确认所选值放得下。
 
-机制与验证范围见 `docs/architecture.md` 的“抠图处理分辨率：服务范围与按来源图片选择默认值（#284、#299，本机测试，未部署验收；2026-11-13 有一次真实核实）”。
+机制与验证范围见 `docs/architecture.md` 的“抠图处理分辨率：服务范围与默认值（#284、#299，本机测试，未部署验收；2026-11-13 有两次真实核实）”。
 
 ### 任务自己给出的错误文本按连接声明归类（#299）
 
