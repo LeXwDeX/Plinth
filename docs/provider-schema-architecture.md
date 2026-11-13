@@ -802,4 +802,4 @@ Provider 完成观察不能带 `failure`，但一个成功的 Task 可能没交�
 - 归类只改 Failure 的 `Class` 与 `Retryable`；`SafeDetail` 仍是 Provider 的内部文本（Matting 是命中的那条任务文本），公开说明按 `failure.<class>` 取，不翻译 Provider 的话。分类必须是封闭的 `FailureClass` 之一（Catalog 加载时校验），不能由 Schema 声明新分类。
 - 目前只有 `matting` 连接声明了一条：文本含 `显存不足` 归 `upstream_unavailable`、不可重试。Matting 的 `matting.Config.ErrorMapping` 只用于这条路径，HTTP 错误仍走 `httpjson` 默认分类。
 
-依据、取舍（没有新增分类、文案取舍）与验证范围见 `docs/architecture.md` 的同一节。
+依据、取舍（没有新增分类；公开文案保持各 Provider 共用的一句，具体原因只留在 `SafeDetail`）与验证范围见 `docs/architecture.md` 的同一节。

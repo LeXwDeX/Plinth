@@ -235,12 +235,16 @@ func TestOnlyTheDeclaredMessagesAreClassified(t *testing.T) {
 	}
 }
 
-// What the person reads for the class the adapter reports tells them what to do
-// about it, in both Schema languages: the service ran short of resources for
-// this input, and a lower processing resolution, or a later try, is the way on.
-// The category the Agent acts on is the capacity one, not a refusal that asks the
-// person about their account.
-func TestGPUOutOfMemoryHasPublicTextThatPointsToTheResolution(t *testing.T) {
+// The person reads the class's own Schema text, which every Provider shares: the
+// service is unavailable or short of resources, retry later, and an administrator
+// is the way on when it keeps happening. It is not the refusal the failure used to
+// read as, and it says nothing about pictures or resolutions, which would mislead
+// whoever meets the same class from a Provider that has neither. What is specific
+// to the picture stays where it already was, the service's own text in the
+// failure's detail (the Agent's background status line and the logs), which no
+// public surface carries. The category the Agent acts on is the capacity one, not a
+// refusal that asks the person about their account.
+func TestGPUOutOfMemoryReadsAsTheSharedCapacityText(t *testing.T) {
 	loaded, mapping := shippedMapping(t)
 	observed := observeSized(t, [][2]int{{2048, 2048}}, faults("1:gpu_oom"), mapping)
 	if observed.Failure == nil {
@@ -255,14 +259,25 @@ func TestGPUOutOfMemoryHasPublicTextThatPointsToTheResolution(t *testing.T) {
 	key := "failure." + string(class)
 	chinese := localizer.Message("zh-CN", key)
 	english := localizer.Message("en", key)
-	for _, want := range []string{"显存不足", "降低处理分辨率", "稍后重试"} {
+	for _, want := range []string{"服务暂时不可用或资源不足", "稍后重试", "联系管理员"} {
 		if !strings.Contains(chinese, want) {
 			t.Errorf("the Chinese text %q does not say %q", chinese, want)
 		}
 	}
-	for _, want := range []string{"GPU memory", "lower processing resolution", "retry later"} {
+	for _, want := range []string{"temporarily unavailable or short of resources", "retry later", "contact an administrator"} {
 		if !strings.Contains(english, want) {
 			t.Errorf("the English text %q does not say %q", english, want)
+		}
+	}
+	// Generic for every Provider: no advice about the picture, the resolution or the GPU.
+	for _, banned := range []string{"图片", "分辨率", "显存", "GPU"} {
+		if strings.Contains(chinese, banned) {
+			t.Errorf("the Chinese text %q is specific to pictures (%q)", chinese, banned)
+		}
+	}
+	for _, banned := range []string{"picture", "image", "resolution", "memory", "GPU"} {
+		if strings.Contains(strings.ToLower(english), strings.ToLower(banned)) {
+			t.Errorf("the English text %q is specific to pictures (%q)", english, banned)
 		}
 	}
 	if strings.IndexFunc(english, func(r rune) bool { return unicode.Is(unicode.Han, r) }) >= 0 {
@@ -275,5 +290,9 @@ func TestGPUOutOfMemoryHasPublicTextThatPointsToTheResolution(t *testing.T) {
 	// It is not the text of the refusal the failure used to be.
 	if refusal := application.Content.Messages["failure."+string(generation.FailureRejected)]; chinese == refusal {
 		t.Fatalf("the text is still the refusal's: %q", chinese)
+	}
+	// The service's own words are still what the failure carries.
+	if observed.Failure.SafeDetail != realOutOfMemory {
+		t.Fatalf("detail = %q, want the service's text %q", observed.Failure.SafeDetail, realOutOfMemory)
 	}
 }
