@@ -78,9 +78,13 @@ func (f *sourceSideFixture) prepare(t *testing.T, sources []generation.AssetID, 
 	return prepared, frozen
 }
 
-// #284: a background removal's two working resolutions follow the long side of
-// the pictures it is given. The Schema declares the tiers; the kernel measures
-// the stored pictures and applies them to the parameters the caller left out.
+// #284, #299: a background removal's coarse working resolution follows the long
+// side of the pictures it is given; the fine one does not. The Schema declares the
+// tiers for BiRefNet only: SDMatte's service default of 1024 held for a 2048x2048
+// picture, and raising it to 2048 ran the shared GPU out of memory on 2026-11-13.
+// The kernel measures the stored pictures and applies the tiers to the parameters
+// the caller left out, so a value the caller gives, SDMatte's up to the service's
+// 2048 included, is always the caller's.
 func TestSourceSideDefaultsFollowThePictureSize(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -91,15 +95,21 @@ func TestSourceSideDefaultsFollowThePictureSize(t *testing.T) {
 	}{
 		{"a small picture keeps the working size", [][2]int{{800, 600}}, nil, 1024, 1024},
 		{"a long side of exactly 1024 is still small", [][2]int{{1024, 1024}}, nil, 1024, 1024},
-		{"one pixel over takes the next tier", [][2]int{{1025, 10}}, nil, 2048, 2048},
-		{"the long side counts, not the width", [][2]int{{16, 3000}}, nil, 2048, 2048},
-		{"a very large picture takes the open-ended tier", [][2]int{{4096, 64}}, nil, 2048, 2048},
-		{"a batch is sized by its largest picture", [][2]int{{800, 600}, {2000, 1500}, {640, 480}}, nil, 2048, 2048},
+		{"one pixel over takes the next coarse tier", [][2]int{{1025, 10}}, nil, 2048, 1024},
+		{"the long side counts, not the width", [][2]int{{16, 3000}}, nil, 2048, 1024},
+		{"a very large picture takes the open-ended coarse tier", [][2]int{{4096, 64}}, nil, 2048, 1024},
+		{"a 2048 picture: coarse at the service's GPU default, fine at its own default", [][2]int{{2048, 2048}}, nil, 2048, 1024},
+		{"the batch of the live run that ran the GPU out of memory", [][2]int{{2048, 2048}, {16, 16}}, nil, 2048, 1024},
+		{"a batch is sized by its largest picture", [][2]int{{800, 600}, {2000, 1500}, {640, 480}}, nil, 2048, 1024},
 		{"a batch of small pictures stays small", [][2]int{{800, 600}, {1000, 700}}, nil, 1024, 1024},
-		{"a value the caller gave wins; the other follows the picture",
-			[][2]int{{2000, 1500}}, map[string]any{"birefnet_process_res": 1536}, 1536, 2048},
+		{"a value the caller gave wins; the other follows its own rule",
+			[][2]int{{2000, 1500}}, map[string]any{"birefnet_process_res": 1536}, 1536, 1024},
 		{"a caller value equal to the static default still wins",
-			[][2]int{{2000, 1500}}, map[string]any{"sdmatte_process_res": 1024}, 2048, 1024},
+			[][2]int{{2000, 1500}}, map[string]any{"birefnet_process_res": 1024}, 1024, 1024},
+		{"a fine resolution up to the service's 2048 is the caller's to ask for",
+			[][2]int{{2048, 2048}}, map[string]any{"sdmatte_process_res": 2048}, 2048, 2048},
+		{"a fine resolution the caller lowers is kept",
+			[][2]int{{2048, 2048}}, map[string]any{"sdmatte_process_res": 768}, 2048, 768},
 		{"both given by the caller are kept as given",
 			[][2]int{{2000, 1500}}, map[string]any{"birefnet_process_res": 4096, "sdmatte_process_res": 512}, 4096, 512},
 	} {
@@ -146,7 +156,7 @@ func TestSourceSideDefaultsAreFrozenWithThePreparedInput(t *testing.T) {
 	ctx := context.Background()
 	source := f.upload(t, pictureOf(t, 3000, 2000))
 	prepared, frozen := f.prepare(t, []generation.AssetID{source}, nil)
-	if frozen["birefnet_process_res"] != float64(2048) || frozen["sdmatte_process_res"] != float64(2048) {
+	if frozen["birefnet_process_res"] != float64(2048) || frozen["sdmatte_process_res"] != float64(1024) {
 		t.Fatalf("frozen = %v", frozen)
 	}
 	accepted, err := f.h.module.SubmitPrepared(ctx, authorizePrepared(t, ctx, f.h.repository, prepared, "source-side-prepared"))
@@ -161,7 +171,7 @@ func TestSourceSideDefaultsAreFrozenWithThePreparedInput(t *testing.T) {
 	if err := json.Unmarshal(task.Input, &taskInput); err != nil {
 		t.Fatal(err)
 	}
-	if taskInput["birefnet_process_res"] != float64(2048) || taskInput["sdmatte_process_res"] != float64(2048) {
+	if taskInput["birefnet_process_res"] != float64(2048) || taskInput["sdmatte_process_res"] != float64(1024) {
 		t.Fatalf("task input = %s", task.Input)
 	}
 }

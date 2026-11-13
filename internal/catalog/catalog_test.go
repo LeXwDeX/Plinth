@@ -2631,7 +2631,7 @@ func TestDefaultCatalogOwnsLegacyBackgroundRemovalBatchAndDownloadProtocol(t *te
 		t.Fatal("background-removal offering missing")
 	}
 	if len(offering.ProviderOptions) == 0 ||
-		offering.Revision != "2026-11-12.284.1" {
+		offering.Revision != "2026-11-13.299.1" {
 		t.Fatalf("background-removal offering protocol = %#v", offering)
 	}
 	for _, key := range []string{

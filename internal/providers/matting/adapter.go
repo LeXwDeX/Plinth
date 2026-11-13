@@ -33,11 +33,17 @@ type Config struct {
 	// Empty means os.TempDir(); production passes the storage volume's tmp
 	// directory because the container's /tmp is a small tmpfs (#321 A).
 	ScratchDir string
+	// ErrorMapping is the connection's declared error vocabulary. The adapter
+	// reads only its message matchers, and only against the error text of a
+	// task the service ended FAILED (#299); HTTP errors keep the httpjson
+	// defaults. Nil leaves every failed batch a plain refusal.
+	ErrorMapping *generation.ErrorMapping
 }
 
 type Adapter struct {
-	client      *httpjson.Client
-	inputAssets generation.InputAssetResolver
+	client       *httpjson.Client
+	inputAssets  generation.InputAssetResolver
+	errorMapping *generation.ErrorMapping
 }
 
 type wireProtocol struct {
@@ -139,7 +145,11 @@ func New(config Config) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("matting: %w", err)
 	}
-	return &Adapter{client: client, inputAssets: config.InputAssets}, nil
+	return &Adapter{
+		client:       client,
+		inputAssets:  config.InputAssets,
+		errorMapping: config.ErrorMapping,
+	}, nil
 }
 
 func (a *Adapter) Start(
@@ -376,13 +386,14 @@ func (a *Adapter) Observe(
 	); err != nil {
 		return generation.Observation{}, err
 	}
-	return wireDocument(response).observation(protocol, request)
+	return wireDocument(response).observation(protocol, a.errorMapping, request)
 }
 
 type wireDocument map[string]any
 
 func (value wireDocument) observation(
 	protocol wireProtocol,
+	mapping *generation.ErrorMapping,
 	request generation.ObserveRequest,
 ) (generation.Observation, error) {
 	rawStatus := stringAt(value, protocol.Response.BatchStatusPath)
@@ -424,10 +435,7 @@ func (value wireDocument) observation(
 		observation.Artifacts = value.claims(protocol, request.AttemptID)
 		if len(observation.Artifacts) == 0 {
 			observation.Phase = generation.UpstreamFailed
-			observation.Failure = &generation.Failure{
-				Class:      generation.FailureRejected,
-				SafeDetail: protocol.Messages["no_artifacts"],
-			}
+			observation.Failure = value.failureOf(protocol, mapping, protocol.Messages["no_artifacts"])
 		} else {
 			// A batch that ends PARTIAL_SUCCESS is a completed Task that holds
 			// fewer results than pictures; say which ones are missing (#284).
@@ -435,10 +443,7 @@ func (value wireDocument) observation(
 		}
 	case statusIn(status, protocol.Statuses.Failed):
 		observation.Phase = generation.UpstreamFailed
-		observation.Failure = &generation.Failure{
-			Class:      generation.FailureRejected,
-			SafeDetail: value.failureDetail(protocol),
-		}
+		observation.Failure = value.failureOf(protocol, mapping, value.failureDetail(protocol))
 	case statusIn(status, protocol.Statuses.Canceled):
 		observation.Phase = generation.UpstreamCanceled
 		observation.Failure = &generation.Failure{
@@ -633,6 +638,40 @@ func (value wireDocument) claims(
 		})
 	}
 	return claims
+}
+
+// failureOf is the Failure of a batch that produced no result: a refusal unless
+// a task's own error text hits one of the connection's declared message
+// matchers. The service's out-of-memory text is a capacity failure of the
+// service, not a refusal of the request (#299), so it takes the class and
+// retryability the Schema declares and its text becomes the detail. Every task
+// is read, not only the first one with a message, because the text that names
+// the cause may sit on any of them. detail is what a batch no task explains
+// carries.
+func (value wireDocument) failureOf(
+	protocol wireProtocol,
+	mapping *generation.ErrorMapping,
+	detail string,
+) *generation.Failure {
+	for _, task := range mapsAt(value, protocol.Response.TasksPath) {
+		for _, path := range []string{
+			protocol.Response.ErrorMessagePath,
+			protocol.Response.InvalidReasonPath,
+		} {
+			text := stringAt(task, path)
+			if rule, hit := httpjson.ClassifyMessageWithMapping(mapping, text); hit {
+				return &generation.Failure{
+					Class:      generation.FailureClass(rule.Class),
+					Retryable:  rule.Retryable,
+					SafeDetail: text,
+				}
+			}
+		}
+	}
+	return &generation.Failure{
+		Class:      generation.FailureRejected,
+		SafeDetail: detail,
+	}
 }
 
 func (value wireDocument) failureDetail(protocol wireProtocol) string {

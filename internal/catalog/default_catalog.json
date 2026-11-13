@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-12.284-292-293.1",
+    "revision": "2026-11-13.299.1",
     "terminology": {
       "user_facing": [
         {
@@ -1358,6 +1358,16 @@
           "api_key_setting": "matting_api_key",
           "request_timeout_seconds": 1800,
           "result_refetch": {"mode": "observe"},
+          "error_mapping": {
+            "message_matchers": [
+              {
+                "contains_any": [
+                  "显存不足"
+                ],
+                "class": "upstream_unavailable"
+              }
+            ]
+          },
           "capabilities": [
             "background-removal"
           ]
@@ -4209,7 +4219,7 @@
         "failure.rejected": "上游拒绝或取消了任务",
         "failure.insufficient_balance": "该模型服务商的账户余额不足、已欠费，或没有可用的 API 订阅（未开通，或套餐不含 API 权限），暂时无法生成。请联系管理员处理",
         "failure.credential_quota": "上游服务的 API Key 额度已用完，暂时无法生成。请联系管理员调整 Key 额度或更换 Key",
-        "failure.upstream_unavailable": "上游服务暂时不可用",
+        "failure.upstream_unavailable": "上游服务暂时不可用，或暂时没有足够的资源处理这次的输入（例如显存不足）。请稍后重试；处理图片时也可以降低处理分辨率后再试",
         "failure.submission_unknown": "无法确认上游是否已接受任务",
         "failure.integrity_failure": "生成资产未通过完整性校验",
         "failure.protocol": "上游返回了无法识别的数据",
@@ -17234,7 +17244,7 @@
             "failure.rejected": "The upstream rejected or canceled the task",
             "failure.insufficient_balance": "The model provider's account balance is insufficient or overdue, or the account has no usable API subscription (not activated, or a plan without API access), so generation is temporarily unavailable. Please contact an administrator",
             "failure.credential_quota": "The upstream service's API key has used up its quota, so generation is temporarily unavailable. Please contact an administrator to raise the key's quota or switch to another key",
-            "failure.upstream_unavailable": "The upstream service is temporarily unavailable",
+            "failure.upstream_unavailable": "The upstream service is temporarily unavailable, or has too few resources right now to process this input (for example, not enough GPU memory). Please retry later; when processing a picture, a lower processing resolution can also help",
             "failure.submission_unknown": "Unable to confirm whether the upstream accepted the task",
             "failure.integrity_failure": "The generated asset failed the integrity check",
             "failure.protocol": "The upstream returned unrecognized data",
@@ -20480,8 +20490,8 @@
             "站起 7 (Stand_Up7)": "Stand up 7",
             "站起 8 (Stand_Up8)": "Stand up 8",
             "站起 9 (Stand_Up9)": "Stand up 9",
-            "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢；不指定时按来源图片的长边选择": "Image size used in the first step to roughly detect the foreground outline. Larger is finer but slower; when not set it follows the long side of the source picture.",
-            "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢；不指定时按来源图片的长边选择": "Image size used in the second step for fine matting. Larger gives better detail but is slower; when not set it follows the long side of the source picture.",
+            "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细，但越慢、越占显存；不指定时按来源图片的长边选择": "Image size used in the first step to roughly detect the foreground outline. Larger is finer but slower and needs more GPU memory; when not set it follows the long side of the source picture.",
+            "第二步精细抠图时使用的图片尺寸。越大细节越好，但越慢、越占显存；不指定时用 1024，与服务自己的默认值一致，不随来源图片放大": "Image size used in the second step for fine matting. Larger gives better detail but is slower and needs more GPU memory; when not set it is 1024, the service's own default, and does not grow with the source picture.",
             "简单踢 (Simple_Kick)": "Simple kick",
             "粗": "Coarse",
             "粗 Mask 模糊半径": "Coarse mask blur radius",
@@ -36817,7 +36827,7 @@
     },
     {
       "id": "matting/default/background-removal",
-      "revision": "2026-11-12.284.1",
+      "revision": "2026-11-13.299.1",
       "provider_id": "matting",
       "provider_name": "背景去除",
       "provider_short_label": "MATTING",
@@ -36872,7 +36882,7 @@
           "label": "粗分割分辨率",
           "type": "number",
           "integer": true,
-          "description": "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细但越慢；不指定时按来源图片的长边选择",
+          "description": "第一步粗略识别前景轮廓时使用的图片尺寸。越大越精细，但越慢、越占显存；不指定时按来源图片的长边选择",
           "minimum": 512,
           "maximum": 4096,
           "default": 1024,
@@ -36947,17 +36957,10 @@
           "label": "精抠分辨率",
           "type": "number",
           "integer": true,
-          "description": "第二步精细抠图时使用的图片尺寸。越大细节越好但越慢；不指定时按来源图片的长边选择",
+          "description": "第二步精细抠图时使用的图片尺寸。越大细节越好，但越慢、越占显存；不指定时用 1024，与服务自己的默认值一致，不随来源图片放大",
           "minimum": 512,
           "maximum": 2048,
           "default": 1024,
-          "default_by_source_side": {
-            "source": "source_assets",
-            "tiers": [
-              { "max_source_side": 1024, "value": 1024 },
-              { "value": 2048 }
-            ]
-          },
           "presentation": {
             "surface": "hidden",
             "control": "number",

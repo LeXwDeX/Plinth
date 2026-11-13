@@ -790,6 +790,16 @@ Provider 完成观察不能带 `failure`，但一个成功的 Task 可能没交�
 
 - `default_by_source_side {source, tiers[{max_source_side?, value}]}`：`source` 是本 Offering 的资产参数，图片长边（宽高较大者，多张取最大）选第一个 `max_source_side` 不小于它的档，最后一档无上限。只用于调用方可给值的 `number` 参数，必须同时有静态 `default`（读不出尺寸时使用），档位上限为正且严格递增，每档的值本身合法；Catalog 加载时校验（`validateDefaultBySourceSide`）。
 - 只对调用方没有传的参数生效：调用方（用户、Agent、API）显式给的值一律优先，哪怕它等于静态默认。内核（`generation.Module.applySourceSideDefaults`）在 `PrepareInput`/`Submit` 的规范化与压缩之后读已解析来源图片的头部，选定的值随冻结输入保存，之后不再量取；读不出任何一张图的尺寸就整体保持静态默认。
-- 目前只有 `matting/default/background-removal` 的 `birefnet_process_res`、`sdmatte_process_res` 声明它（长边不超过 1024 用 1024，更大用 2048），其范围上限（4096、2048）与服务一致，已由 fake 强制。
+- 目前只有 `matting/default/background-removal` 的 `birefnet_process_res` 声明它（长边不超过 1024 用 1024，更大用 2048，即服务自己的 GPU 默认），其范围上限（4096、2048）与服务一致，已由 fake 强制。`sdmatte_process_res` 在 #284 时同样声明，#299 去掉：服务对它的默认是 1024（GPU 上也是），2K 图两个都取 2048 时真实服务显存不足（2026-11-13）；它现在是静态默认 1024，调用方显式给的值照旧放行到 2048。
 
-机制与验证范围见 `docs/architecture.md` 的“抠图处理分辨率：服务范围与按来源图片选择默认值（#284，本机测试，未部署验收，未调用真实上游）”。
+机制与验证范围见 `docs/architecture.md` 的“抠图处理分辨率：服务范围与按来源图片选择默认值（#284、#299，本机测试，未部署验收；2026-11-13 有一次真实核实）”。
+
+### 任务自己给出的错误文本按连接声明归类（#299）
+
+连接级 `error_mapping.message_matchers`（`contains_any` / `contains_all` / `equals`，加 `class`、`retryable`）原本只对 HTTP 错误响应的正文生效。有的服务把失败原因放在“任务结束为 `FAILED`”之后任务自己的文本里：抠图服务没有结构化错误码，只有自由文本的 `error_message`（被拒绝的任务在 `invalid_reason`）。这类文本用同一份声明、同一套匹配算法归类（`httpjson.ClassifyMessageWithMapping`），词在 Schema，Adapter 只负责“把任务文本交给它”：
+
+- 只有不带 `http_status` 的匹配器适用于任务文本（带状态的描述的是 HTTP 响应）；`http_status_ranges`、`upstream_code_map` 不参与。没有命中时 Adapter 保持自己的分类，Matting 为 `rejected`。
+- 归类只改 Failure 的 `Class` 与 `Retryable`；`SafeDetail` 仍是 Provider 的内部文本（Matting 是命中的那条任务文本），公开说明按 `failure.<class>` 取，不翻译 Provider 的话。分类必须是封闭的 `FailureClass` 之一（Catalog 加载时校验），不能由 Schema 声明新分类。
+- 目前只有 `matting` 连接声明了一条：文本含 `显存不足` 归 `upstream_unavailable`、不可重试。Matting 的 `matting.Config.ErrorMapping` 只用于这条路径，HTTP 错误仍走 `httpjson` 默认分类。
+
+依据、取舍（没有新增分类、文案取舍）与验证范围见 `docs/architecture.md` 的同一节。

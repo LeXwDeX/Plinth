@@ -165,6 +165,26 @@ func matchDeclaredMessage(
 	return generation.ErrorClassRule{}, false
 }
 
+// ClassifyMessageWithMapping is the connection's declared message matchers
+// applied to an error text that did not come as an HTTP error response: what a
+// task itself says once the job ended FAILED (#299). A matcher bound to an HTTP
+// status describes a response, so it never applies here. ok is false when no
+// matcher hits, and the caller keeps its own classification.
+func ClassifyMessageWithMapping(
+	mapping *generation.ErrorMapping,
+	message string,
+) (generation.ErrorClassRule, bool) {
+	if mapping == nil || strings.TrimSpace(message) == "" {
+		return generation.ErrorClassRule{}, false
+	}
+	for _, matcher := range mapping.MessageMatchers {
+		if matcher.HTTPStatus == nil && messageMatcherHits(matcher, message) {
+			return generation.ErrorClassRule{Class: matcher.Class, Retryable: matcher.Retryable}, true
+		}
+	}
+	return generation.ErrorClassRule{}, false
+}
+
 func messageMatcherHits(matcher generation.ErrorMessageMatcher, message string) bool {
 	if matcher.Equals != "" {
 		return strings.EqualFold(strings.TrimSpace(message), matcher.Equals)
