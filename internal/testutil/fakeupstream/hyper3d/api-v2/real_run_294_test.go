@@ -23,7 +23,9 @@ import (
 // note (fake.go, rodinRealRunNote) and is not asserted here.
 
 // gameCharacterFields is that run's form: the Catalog's request template with
-// the purpose's overrides, as the adapter sends it.
+// the purpose's overrides for its platform (pc_console; a session without a
+// platform and the phone class get 8000 faces since the budget follow-up), as the
+// adapter sends it.
 func gameCharacterFields() map[string]string {
 	return map[string]string{
 		"tier": "Gen-2.5-Extreme-High", "geometry_file_format": "glb", "material": "PBR",

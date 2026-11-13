@@ -9665,14 +9665,14 @@
               },
               "hyper3d/rodin-gen-2.5/text-to-3d": {
                 "mesh_mode": "Quad",
-                "quality_override": 10000,
+                "quality_override": 8000,
                 "texture_mode": "high",
                 "TAPose": true,
                 "quad_normal": true
               },
               "hyper3d/rodin-gen-2.5/image-to-3d": {
                 "mesh_mode": "Quad",
-                "quality_override": 10000,
+                "quality_override": 8000,
                 "texture_mode": "high",
                 "TAPose": true,
                 "quad_normal": true
@@ -9726,6 +9726,12 @@
                   },
                   "meshy/meshy-t2.5/image-to-3d": {
                     "target_polycount": 30000
+                  },
+                  "hyper3d/rodin-gen-2.5/text-to-3d": {
+                    "quality_override": 10000
+                  },
+                  "hyper3d/rodin-gen-2.5/image-to-3d": {
+                    "quality_override": 10000
                   },
                   "meshy/meshy-7.1/text-to-3d": {
                     "target_polycount": 40000
@@ -9808,13 +9814,13 @@
               },
               "hyper3d/rodin-gen-2.5/text-to-3d": {
                 "mesh_mode": "Quad",
-                "quality_override": 4000,
+                "quality_override": 3200,
                 "texture_mode": "high",
                 "quad_normal": true
               },
               "hyper3d/rodin-gen-2.5/image-to-3d": {
                 "mesh_mode": "Quad",
-                "quality_override": 4000,
+                "quality_override": 3200,
                 "texture_mode": "high",
                 "quad_normal": true
               },
@@ -9853,6 +9859,14 @@
                 "budget": {
                   "max_triangles": 40000,
                   "max_texture_size": 4096
+                },
+                "parameter_overrides": {
+                  "hyper3d/rodin-gen-2.5/text-to-3d": {
+                    "quality_override": 4000
+                  },
+                  "hyper3d/rodin-gen-2.5/image-to-3d": {
+                    "quality_override": 4000
+                  }
                 }
               }
             ],

@@ -14,7 +14,9 @@ import (
 // (https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5, read
 // 2026-11-12): quality_override 500 to 2000000 on the Extreme-High tier with an
 // additional 200000 in Quad mode, seed 0 to 65535, TAPose and quad_normal
-// booleans. Texture resolution and billing under Quad are not verified.
+// booleans. One real run (2026-11-13, #294 follow-up) then showed the 2K texture
+// and the charge of 1 credit under Quad and the triangles a Quad face gets (see
+// rodinQuadTrianglesPerFacePercent); the other ranges are still the page's.
 
 var rodinOfferingIDs = map[schema.Capability]schema.OfferingID{
 	schema.TextTo3D:  "hyper3d/rodin-gen-2.5/text-to-3d",
@@ -264,14 +266,29 @@ func TestHyper3DRodinInputsFollowTheDocumentedRanges(t *testing.T) {
 	}
 }
 
+// A Rodin Quad face is about 2.18 triangles in the delivered GLB: the one real run
+// (2026-11-13, dev-test, #294 follow-up; mesh_mode Quad, quality_override 10000,
+// texture_mode high) delivered a GLB of about 21,800 triangles. The pages do not say
+// how a Quad face counts toward quality_override, so this is one sample at one size.
+// The rule below reads it as 2.2 (rounded up, kept in percent so the arithmetic
+// stays in integers) and, like the Meshy quad targets, keeps a tenth of each budget
+// free for the ratio to vary. The budget measures this parameter one to one
+// (output_triangles is declared for processing steps only, and its factor is an
+// integer), so the shipped values are chosen with this arithmetic and held to it
+// here, per platform.
+const (
+	rodinQuadTrianglesPerFacePercent = 220
+	rodinQuadBudgetSharePercent      = 90
+)
+
 // The game purposes recommend Rodin after the cheaper Meshy and P2 choices (the
 // third choice; the only entry after it is the Meshy 7.1 one-step remesh of
 // #276, which Meshy itself ranks below Smart Topology for low-poly game assets)
-// and carry a Quad override whose triangulated count stays inside the
-// purpose's triangle budget. A Quad face is two triangles in the GLB, and the
-// budget measures this parameter one to one (output_triangles is declared for
-// processing steps only), so the values are chosen at half the triangle
-// target: the override itself must already be safe once doubled.
+// and carry a Quad override whose triangulated count stays inside the triangle
+// budget of every target platform. The values are per platform like the other
+// engines' face counts: a session without a platform and the phone, web and XR
+// platforms share the lower count, the PC and console platform keeps the count it
+// had before the real run (which was already inside its budget).
 func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
@@ -283,11 +300,17 @@ func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 		profiles[profile.ID] = profile
 	}
 	for id, want := range map[string]struct {
-		count float64
-		pose  bool
+		pose bool
+		// counts are the Quad face counts by target platform option id; "" is a
+		// session without a platform.
+		counts map[string]float64
 	}{
-		"game_character": {count: 10000, pose: true},
-		"game_prop":      {count: 4000},
+		"game_character": {pose: true, counts: map[string]float64{
+			"": 8000, "mobile": 8000, "web": 8000, "xr": 8000, "pc_console": 10000,
+		}},
+		"game_prop": {counts: map[string]float64{
+			"": 3200, "mobile": 3200, "web": 3200, "xr": 3200, "pc_console": 4000,
+		}},
 	} {
 		profile, ok := profiles[id]
 		if !ok {
@@ -299,61 +322,83 @@ func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 				(len(recommended) == 4 && !strings.HasPrefix(recommended[3], "meshy/meshy-7.1/")) {
 				t.Fatalf("%s %s recommends %v, want Rodin third and at most Meshy 7.1 after it", id, capability, recommended)
 			}
-			override := profile.ParameterOverrides[string(offeringID)]
-			var mode string
-			var count float64
-			var quadNormal, pose bool
-			if json.Unmarshal(override["mesh_mode"], &mode) != nil || mode != "Quad" ||
-				json.Unmarshal(override["quality_override"], &count) != nil || count != want.count ||
-				json.Unmarshal(override["quad_normal"], &quadNormal) != nil || !quadNormal {
-				t.Fatalf("%s %s override = %v", id, offeringID, override)
-			}
-			if raw, set := override["TAPose"]; want.pose {
-				if !set || json.Unmarshal(raw, &pose) != nil || !pose {
-					t.Fatalf("%s %s must switch TAPose on: %v", id, offeringID, override)
-				}
-			} else if set {
-				t.Fatalf("%s %s must not set TAPose on a prop: %v", id, offeringID, override)
-			}
-			for name := range override {
-				switch name {
-				case "mesh_mode", "quality_override", "texture_mode", "TAPose", "quad_normal":
-				default:
-					t.Fatalf("%s %s overrides the unexpected %s", id, offeringID, name)
-				}
-			}
-			// The texture is the highest exposed mode whose documented resolution
-			// fits the purpose's texture budget (2K against 2048 today; the 6K display
-			// mode never fits a game budget up to 4096), so Rodin's result passes the
-			// purpose's texture check instead of failing it.
-			textureLimit, bounded := usage.BudgetLimit(schema.SemanticTextureSize)
-			textureMaximum, declared := textureLimit.Maximum(profile.Budget)
-			if !bounded || !declared {
-				t.Fatalf("%s declares no texture budget to fit", id)
-			}
 			offering, _ := product.Get(offeringID)
-			texture := rodinParameters(offering)["texture_mode"]
-			highest, highestAmount := "", 0.0
-			for _, option := range texture.Options {
-				if amount, known := textureLimit.OptionValues[option.Value]; known && amount <= textureMaximum && amount > highestAmount {
-					highest, highestAmount = option.Value, amount
+			// The Schema declares no quad-to-triangle factor for a generation Offering:
+			// if one appears, the overrides should follow it instead of this test's constant.
+			if offering.OutputTriangles != nil {
+				t.Fatalf("%s declares output_triangles: derive the overrides from it instead of rodinQuadTrianglesPerFacePercent", offeringID)
+			}
+			for platform, count := range want.counts {
+				resolved, _ := usage.ForPlatform(profile, platform)
+				override := resolved.ParameterOverrides[string(offeringID)]
+				var mode string
+				var got float64
+				var quadNormal, pose bool
+				if json.Unmarshal(override["mesh_mode"], &mode) != nil || mode != "Quad" ||
+					json.Unmarshal(override["quality_override"], &got) != nil || got != count ||
+					json.Unmarshal(override["quad_normal"], &quadNormal) != nil || !quadNormal {
+					t.Fatalf("%s on %q: %s override = %v, want Quad at %v faces", id, platform, offeringID, override, count)
 				}
-			}
-			var chosen string
-			if json.Unmarshal(override["texture_mode"], &chosen) != nil || chosen != "high" || chosen != highest {
-				t.Fatalf("%s %s texture_mode = %s, want %q, the highest mode within %v", id, offeringID, override["texture_mode"], highest, textureMaximum)
-			}
-			if measured, ok := textureLimit.Measure(offering, texture, override["texture_mode"], nil); !ok || measured > textureMaximum {
-				t.Fatalf("%s %s texture is %v pixels against the %v budget", id, offeringID, measured, textureMaximum)
-			}
-			triangles := 2 * count
-			if triangles > float64(profile.Budget.MaxTriangles) ||
-				profile.Budget.MinTriangles != nil && triangles < float64(*profile.Budget.MinTriangles) {
-				t.Fatalf("%s %s: %v quads are %v triangles, outside the budget %v-%v", id, offeringID,
-					count, triangles, profile.Budget.MinTriangles, profile.Budget.MaxTriangles)
-			}
-			if _, _, err := product.Normalize(capability, offeringID, rodinInput(t, capability, overrideJSON(t, override))); err != nil {
-				t.Fatalf("%s %s override does not freeze: %v", id, offeringID, err)
+				if raw, set := override["TAPose"]; want.pose {
+					if !set || json.Unmarshal(raw, &pose) != nil || !pose {
+						t.Fatalf("%s on %q: %s must switch TAPose on: %v", id, platform, offeringID, override)
+					}
+				} else if set {
+					t.Fatalf("%s on %q: %s must not set TAPose on a prop: %v", id, platform, offeringID, override)
+				}
+				for name := range override {
+					switch name {
+					case "mesh_mode", "quality_override", "texture_mode", "TAPose", "quad_normal":
+					default:
+						t.Fatalf("%s on %q: %s overrides the unexpected %s", id, platform, offeringID, name)
+					}
+				}
+				// The texture is the highest exposed mode whose documented resolution
+				// fits the budget this platform resolves to (2K against 2048 on the
+				// phone class, still 2K against the 4096 of PC and console: the 6K
+				// display mode never fits a game budget up to 4096), so Rodin's result
+				// passes the purpose's texture check instead of failing it.
+				textureLimit, bounded := usage.BudgetLimit(schema.SemanticTextureSize)
+				textureMaximum, declared := textureLimit.Maximum(resolved.Budget)
+				if !bounded || !declared {
+					t.Fatalf("%s on %q declares no texture budget to fit", id, platform)
+				}
+				texture := rodinParameters(offering)["texture_mode"]
+				highest, highestAmount := "", 0.0
+				for _, option := range texture.Options {
+					if amount, known := textureLimit.OptionValues[option.Value]; known && amount <= textureMaximum && amount > highestAmount {
+						highest, highestAmount = option.Value, amount
+					}
+				}
+				var chosen string
+				if json.Unmarshal(override["texture_mode"], &chosen) != nil || chosen != "high" || chosen != highest {
+					t.Fatalf("%s on %q: %s texture_mode = %s, want %q, the highest mode within %v", id, platform, offeringID,
+						override["texture_mode"], highest, textureMaximum)
+				}
+				if measured, ok := textureLimit.Measure(offering, texture, override["texture_mode"], nil); !ok || measured > textureMaximum {
+					t.Fatalf("%s on %q: %s texture is %v pixels against the %v budget", id, platform, offeringID, measured, textureMaximum)
+				}
+				// A Quad face is about 2.2 triangles in the GLB (see
+				// rodinQuadTrianglesPerFacePercent): the count must fit the budget the
+				// purpose resolves to on this platform once converted, and leave a tenth
+				// of it for the ratio to vary.
+				triangles := int(count) * rodinQuadTrianglesPerFacePercent / 100
+				budget := resolved.Budget
+				minimum := 0
+				if budget.MinTriangles != nil {
+					minimum = *budget.MinTriangles
+				}
+				if triangles > budget.MaxTriangles || triangles < minimum {
+					t.Fatalf("%s on %q: %s %v quads are about %d triangles, outside the budget %d-%d", id, platform, offeringID,
+						count, triangles, minimum, budget.MaxTriangles)
+				}
+				if triangles*100 > budget.MaxTriangles*rodinQuadBudgetSharePercent {
+					t.Fatalf("%s on %q: %s %v quads are about %d triangles, leaving less than a tenth of the %d budget for the quad ratio to vary",
+						id, platform, offeringID, count, triangles, budget.MaxTriangles)
+				}
+				if _, _, err := product.Normalize(capability, offeringID, rodinInput(t, capability, overrideJSON(t, override))); err != nil {
+					t.Fatalf("%s on %q: %s override does not freeze: %v", id, platform, offeringID, err)
+				}
 			}
 		}
 		for _, offeringID := range profile.OverridesNotNeeded {

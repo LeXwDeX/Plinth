@@ -52,7 +52,9 @@ const (
 	gameCharacterOffering = "hyper3d/rodin-gen-2.5/text-to-3d"
 	gameCharacterPrompt   = "a game character standing in an A pose"
 	// gameCharacterInput is the frozen input of the run, as the purpose's
-	// overrides produce it.
+	// overrides produce it on the run's platform (pc_console; a session without a
+	// platform and the phone class get 8000 faces since the budget follow-up, and
+	// the Catalog's tests hold every platform's count to its triangle budget).
 	gameCharacterInput = `{"prompt":"` + gameCharacterPrompt + `","mesh_mode":"Quad","quality_override":10000,"texture_mode":"high","TAPose":true,"quad_normal":true,"authorize_extra_credits":true}`
 )
 
