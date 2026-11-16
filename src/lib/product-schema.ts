@@ -374,6 +374,17 @@ export interface ProductSchema {
       session_title_refresh_attempts: number;
       session_title_refresh_interval_milliseconds: number;
       chat_message_page_size: number;
+      /**
+       * #314: how the page reads a chat session's chat model and thinking level again after a failed read: at most
+       * `max_retries` more reads, waiting exponentially from `initial_delay_milliseconds` up to `max_backoff_milliseconds`
+       * and never less than the server's Retry-After (capped at `max_retry_after_milliseconds`).
+       */
+      session_read_retry: {
+        max_retries: number;
+        initial_delay_milliseconds: number;
+        max_backoff_milliseconds: number;
+        max_retry_after_milliseconds: number;
+      };
       /** #329: generation models no longer offered and the model that replaces each. */
       retired_generation_models?: Array<{ provider_id: string; model_id: string; model_name: string; successor_model_id: string }>;
       display_locale: string;

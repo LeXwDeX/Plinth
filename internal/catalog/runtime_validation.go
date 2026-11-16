@@ -685,6 +685,9 @@ func validateRuntime(schema RuntimeSchema) error {
 		strings.TrimSpace(frontend.AdvancedModelFormFeature) == "" {
 		return errors.New("frontend 的缓存与刷新间隔必须大于 0")
 	}
+	if err := validateSessionReadRetry(frontend.SessionReadRetry); err != nil {
+		return fmt.Errorf("frontend.session_read_retry: %w", err)
+	}
 	switch frontend.AdvancedModelDefaultMode {
 	case "regular", "parts":
 	default:
@@ -708,6 +711,22 @@ func validateRuntime(schema RuntimeSchema) error {
 			"frontend.task_api_prefix 无效: %q",
 			frontend.TaskAPIPrefix,
 		)
+	}
+	return nil
+}
+
+// maxSessionReadRetries caps frontend.session_read_retry.max_retries, so a
+// declaration can never turn a persistent failure into a request storm.
+const maxSessionReadRetries = 10
+
+func validateSessionReadRetry(retry SessionReadRetrySchema) error {
+	if retry.MaxRetries < 1 || retry.MaxRetries > maxSessionReadRetries {
+		return fmt.Errorf("max_retries 必须在 1 到 %d 之间", maxSessionReadRetries)
+	}
+	if retry.InitialDelayMilliseconds < 100 ||
+		retry.MaxBackoffMilliseconds < retry.InitialDelayMilliseconds ||
+		retry.MaxRetryAfterMilliseconds < retry.MaxBackoffMilliseconds {
+		return errors.New("须满足 100 <= initial_delay_milliseconds <= max_backoff_milliseconds <= max_retry_after_milliseconds")
 	}
 	return nil
 }

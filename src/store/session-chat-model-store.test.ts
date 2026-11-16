@@ -12,7 +12,7 @@ function fakeClient(overrides: Partial<ChatBrowserClient>): ChatBrowserClient {
   return overrides as ChatBrowserClient;
 }
 
-beforeEach(() => useSessionContextStore.setState({ reasoning: {}, reasoningBusy: {}, context: {}, compacting: {}, chatModel: {}, chatModelBusy: {} }));
+beforeEach(() => useSessionContextStore.setState({ reasoning: {}, reasoningBusy: {}, reasoningFailed: {}, context: {}, compacting: {}, chatModel: {}, chatModelBusy: {}, chatModelFailed: {} }));
 
 describe('session chat model state (#322)', () => {
   it('keeps each session its own model', async () => {
@@ -42,5 +42,54 @@ describe('session chat model state (#322)', () => {
     expect(await switchSessionChatModel(client, 'a', 'GLM')).toBe(false);
     expect(useSessionContextStore.getState().chatModel.a.selected).toBe('LLM');
     expect(useSessionContextStore.getState().chatModelBusy.a).toBeFalsy();
+  });
+});
+
+// #314: the store remembers that the latest read of a session's chat model failed, so the picker can say so while it
+// holds no model list and the page knows to read again when the window regains focus.
+describe('session chat model read failures (#314)', () => {
+  const failing = (error: unknown = new ChatBrowserError('', 429)) => fakeClient({ getChatModel: vi.fn(async () => { throw error; }) });
+
+  it('marks a failed read, hands the failure on and keeps the session without a model', async () => {
+    const refusal = new ChatBrowserError('', 429);
+    await expect(loadSessionChatModel(failing(refusal), 'a')).rejects.toBe(refusal);
+    const state = useSessionContextStore.getState();
+    expect(state.chatModelFailed.a).toBe(true);
+    expect(state.chatModel.a).toBeUndefined();
+    expect(state.chatModelFailed.b).toBeUndefined();
+  });
+
+  it('clears the mark when a later read succeeds', async () => {
+    await expect(loadSessionChatModel(failing(), 'a')).rejects.toBeTruthy();
+    await loadSessionChatModel(fakeClient({ getChatModel: vi.fn(async () => choice('GLM')) }), 'a');
+    const state = useSessionContextStore.getState();
+    expect(state.chatModelFailed.a).toBeUndefined();
+    expect(state.chatModel.a.selected).toBe('GLM');
+  });
+
+  it('keeps the model it holds when a later read fails, and still marks the failure', async () => {
+    useSessionContextStore.setState({ chatModel: { a: choice('LLM') } });
+    await expect(loadSessionChatModel(failing(), 'a')).rejects.toBeTruthy();
+    const state = useSessionContextStore.getState();
+    expect(state.chatModel.a.selected).toBe('LLM');
+    expect(state.chatModelFailed.a).toBe(true);
+  });
+
+  it('does not take a cancelled read for a failure', async () => {
+    const controller = new AbortController();
+    const aborted = new DOMException('aborted', 'AbortError');
+    const client = fakeClient({ getChatModel: vi.fn(async () => { controller.abort(); throw aborted; }) });
+    await expect(loadSessionChatModel(client, 'a', controller.signal)).rejects.toBe(aborted);
+    expect(useSessionContextStore.getState().chatModelFailed.a).toBeUndefined();
+  });
+
+  it('does not store the answer of a read cancelled while it was answered', async () => {
+    const controller = new AbortController();
+    const client = fakeClient({ getChatModel: vi.fn(async () => { controller.abort(); return choice('GLM'); }) });
+    useSessionContextStore.setState({ chatModelFailed: { a: true } });
+    await loadSessionChatModel(client, 'a', controller.signal);
+    const state = useSessionContextStore.getState();
+    expect(state.chatModel.a).toBeUndefined();
+    expect(state.chatModelFailed.a).toBe(true);
   });
 });

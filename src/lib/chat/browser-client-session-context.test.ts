@@ -129,3 +129,36 @@ describe('ChatBrowserClient context usage and compaction (#322)', () => {
     await expect(client.compactContext('s')).rejects.toMatchObject({ name: ChatBrowserError.name, status: 502, message: '' });
   });
 });
+
+// #314: a rate-limited read tells the page when to come back; the retry of the session's chat model and thinking
+// level waits for it instead of spending its few retries inside the limit's window.
+describe('ChatBrowserClient reads refused with a rate limit (#314)', () => {
+  const reads = ['getReasoning', 'getChatModel'] as const;
+
+  it.each(reads)('%s carries the Retry-After seconds of a 429', async (read) => {
+    const schema = schemaFixture();
+    const { client } = recording(schema, () => Response.json({ error: 'slow down' }, { status: 429, headers: { 'Retry-After': '60' } }));
+    const error = await client[read]('s').catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ChatBrowserError);
+    expect(error).toMatchObject({ status: 429, retryAfterSeconds: 60 });
+  });
+
+  it.each(reads)('%s leaves the wait off when the header is missing or not a number of seconds', async (read) => {
+    const schema = schemaFixture();
+    const unusable: Array<Record<string, string>> = [{}, { 'Retry-After': 'soon' }, { 'Retry-After': '0' }];
+    for (const headers of unusable) {
+      const { client } = recording(schema, () => Response.json({}, { status: 429, headers }));
+      const error = await client[read]('s').catch((cause: unknown) => cause) as ChatBrowserError;
+      expect(error.status).toBe(429);
+      expect(error.retryAfterSeconds).toBeUndefined();
+    }
+  });
+
+  it.each(reads)('%s ignores Retry-After on any other status', async (read) => {
+    const schema = schemaFixture();
+    const { client } = recording(schema, () => Response.json({}, { status: 503, headers: { 'Retry-After': '30' } }));
+    const error = await client[read]('s').catch((cause: unknown) => cause) as ChatBrowserError;
+    expect(error.status).toBe(503);
+    expect(error.retryAfterSeconds).toBeUndefined();
+  });
+});
