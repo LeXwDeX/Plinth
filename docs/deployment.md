@@ -2,7 +2,7 @@
 
 本文是 Plinth 内部环境部署的入口。用户在仓库根目录说「部署到 <环境>」（例如「部署到正式测试环境」）时，Agent 按本文执行。本项目开源：主机、地址、端口、目录与 Compose 名只写在未纳入 Git 的本地部署文件夹 `deploy/local/`，本文和其他仓库文档只用环境名。密钥只在各环境服务器的 `production/runtime.env`（`0600`）中，不进本地环境文件、仓库、Issue 或报告。
 
-自部署（开源用户）不使用本文，见 `README.md` 的 `docker compose` 一条命令部署。
+自部署（开源用户）不使用本文，见 `README.md` 的 `docker compose` 一条命令部署；外部合作方的统一部署方式与出问题时的录制、诊断包流程见 [合作方部署指南](partner-deployment.md)。
 
 ## 1. 环境
 
@@ -180,15 +180,15 @@ art-ai diagnose --out <文件或已存在的目录> [--since 24h] [--max-bytes 3
 - `--max-bytes`：包内全部内容（未压缩）的体积上限，默认 `32m`，范围 `64k` 到 `1g`，可带 `k`/`m`/`g` 后缀。超出时每类从最旧的开始截断（失败任务摘要至多占剩余额度的 1/10，上游录制至多 3/10，其余给日志），清单为每类记下时间范围内共有多少条、包里放了多少条、是否截断。
 - 退出码：`0` 成功；`1` 失败；`2` 参数错误；`3` 隐私扫描命中，未写出任何文件。
 
-在容器里运行（输出目录须可写；自部署镜像根文件系统只读，`/tmp` 是可写的 tmpfs），再用 `docker cp` 取出，用完删除：
+在容器里运行（输出目录须可写；自部署镜像根文件系统只读，`/tmp` 是可写的 tmpfs），再用 `exec -T … cat` 把包流式取出（`docker cp` 不能复制 tmpfs 里的文件），用完删除：
 
 ```bash
 docker compose exec art-ai art-ai diagnose --out /tmp/plinth-diagnose.tar.gz
-docker compose cp art-ai:/tmp/plinth-diagnose.tar.gz .
+docker compose exec -T art-ai cat /tmp/plinth-diagnose.tar.gz > plinth-diagnose.tar.gz
 docker compose exec art-ai rm /tmp/plinth-diagnose.tar.gz
 ```
 
-不用 Compose 时把 `docker compose exec art-ai` 换成 `docker exec <容器>`，`docker compose cp art-ai:` 换成 `docker cp <容器>:`。服务反复重启、`exec` 进不去时，用同一份服务定义起一个一次性容器，把包写到数据卷里再取出（`/tmp` 在容器停止后消失）：
+不用 Compose 时把 `docker compose exec [-T] art-ai` 换成 `docker exec <容器>`（不加 `-t`）。服务反复重启、`exec` 进不去时，用同一份服务定义起一个一次性容器，把包写到数据卷里再取出（`/tmp` 在容器停止后消失）：
 
 ```bash
 docker compose run --no-deps --name art-ai-diagnose art-ai diagnose --out /app/data/plinth-diagnose.tar.gz
@@ -240,7 +240,7 @@ docker compose run --rm --no-deps --entrypoint rm art-ai /app/data/plinth-diagno
 5. 补回归测试：基于 fake 的回归测试复现这次的失败（用失败摘要里的分类、状态码、错误码核对 Adapter 的错误映射），样本放进对应版本的 `testdata/`，运行 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 更新覆盖矩阵。
 6. 收尾：在对应 Issue 里只记结论与脱敏后的结构；诊断包与解包目录用完即删，不提交进仓库。
 
-**Diagnostics bundle (#234):** `art-ai diagnose --out <file or existing directory> [--since 24h] [--max-bytes 32m]` writes one new 0600 `tar.gz` and nothing else. It is read-only (read-only database connection, directories only listed and read, nothing started, migrated or overwritten) and reads the service's own environment, so it runs beside a live stack with `docker compose exec art-ai art-ai diagnose --out /tmp/plinth-diagnose.tar.gz` followed by `docker compose cp`. A bundle holds the running revision and Catalog SHA-256, the names (never values) of the Catalog's runtime settings and whether each is set, a summary of the newest failed tasks (failure class, upstream status and code, a short sanitized excerpt), the log lines of the time range scrubbed value by value, and the #233 capture records unchanged, plus `manifest.json` (per category: entries, entries available, whether the size limit cut it, bytes, SHA-256). Two behaviours apply: free text (logs, excerpts) is scrubbed, replacing credentials, URLs, addresses, e-mail addresses, user identifiers and prompts with placeholders and dropping any line the privacy scan still objects to; every member is then scanned again as it will be written, and any finding refuses the whole export (exit code 3, no file, only file, path and rule are reported). Capture records are never rewritten, so a finding in one refuses the export. On receipt: unpack into a private directory, read the manifest, run `go run ./cmd/fake-upstream-align draft -records <dir>/captures -out <another 0700 directory> -name <name>`, review the draft, align the fake, add regression tests, and delete the bundle.
+**Diagnostics bundle (#234):** `art-ai diagnose --out <file or existing directory> [--since 24h] [--max-bytes 32m]` writes one new 0600 `tar.gz` and nothing else. It is read-only (read-only database connection, directories only listed and read, nothing started, migrated or overwritten) and reads the service's own environment, so it runs beside a live stack with `docker compose exec art-ai art-ai diagnose --out /tmp/plinth-diagnose.tar.gz` followed by `docker compose exec -T art-ai cat /tmp/plinth-diagnose.tar.gz > plinth-diagnose.tar.gz` (`docker cp` cannot read tmpfs). A bundle holds the running revision and Catalog SHA-256, the names (never values) of the Catalog's runtime settings and whether each is set, a summary of the newest failed tasks (failure class, upstream status and code, a short sanitized excerpt), the log lines of the time range scrubbed value by value, and the #233 capture records unchanged, plus `manifest.json` (per category: entries, entries available, whether the size limit cut it, bytes, SHA-256). Two behaviours apply: free text (logs, excerpts) is scrubbed, replacing credentials, URLs, addresses, e-mail addresses, user identifiers and prompts with placeholders and dropping any line the privacy scan still objects to; every member is then scanned again as it will be written, and any finding refuses the whole export (exit code 3, no file, only file, path and rule are reported). Capture records are never rewritten, so a finding in one refuses the export. On receipt: unpack into a private directory, read the manifest, run `go run ./cmd/fake-upstream-align draft -records <dir>/captures -out <another 0700 directory> -name <name>`, review the draft, align the fake, add regression tests, and delete the bundle.
 
 冒烟（`smoke` 从目标环境的 `runtime.env` 读取管理员登录，并设置 `BASE`、`EXPECT_SHA`（容器 OCI revision）`RELEASE_CONTAINER` 与 `RELEASE_ENV`（环境名，验收脚本据此读取同一部署的日志）；不打印密码）：
 

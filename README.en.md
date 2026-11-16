@@ -211,6 +211,15 @@ check `docker compose logs art-ai`.
   `ART_AI_SOURCE_COMMIT=$(git rev-parse HEAD) docker compose up -d --build --wait`; database
   migrations run at startup.
 - **Logs:** run `docker compose logs -f art-ai`; `LOG_LEVEL` in `.env` controls the level.
+- **Diagnostics bundle:** to hand the maintainers something when a stack misbehaves, run
+  `docker compose exec art-ai art-ai diagnose --out /tmp/plinth-diagnose.tar.gz` for a read-only,
+  scrubbed bundle (version, recent logs, failed-task summaries, runtime setting names, upstream-call
+  captures; no keys, prompts, media or user identifiers; set `LOG_DIR=/app/data/logs` in `.env`
+  first, or the bundle has no logs), then stream it out with
+  `docker compose exec -T art-ai cat /tmp/plinth-diagnose.tar.gz > plinth-diagnose.tar.gz`
+  (`/tmp` is tmpfs, which `docker cp` cannot read). The full flow and the privacy notes are in the
+  [partner deployment guide](docs/partner-deployment.md) (in Chinese, with an English summary);
+  usage and options are in the [deployment entry](docs/deployment.md) ("导出诊断包").
 - **Agent tool calls:** `AGENT_MAX_TOOL_CALLS_PER_REPLY` caps tool calls in one Agent reply;
   each new reply starts from zero. Empty uses the default 20; allowed values are 1–100. See
   [Provider configuration](docs/provider-configuration.md#agent-对话模型--agent-chat-model).
@@ -310,6 +319,7 @@ setup, checks and commit conventions are in [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | [docs/provider-configuration.md](docs/provider-configuration.md) | Environment variables for Providers and the Agent model |
 | [docs/self-deploy-security.md](docs/self-deploy-security.md) | Security settings before exposing the service (HTTPS, reverse proxy, rate limits) |
+| [docs/partner-deployment.md](docs/partner-deployment.md) | Guide for partners who self-host: uniform deployment, DEBUG logs, sanitized upstream capture and the diagnostics bundle (Chinese, with an English summary) |
 | [docs/storage-maintenance.md](docs/storage-maintenance.md) | Storage maintenance |
 | [docs/architecture.md](docs/architecture.md) | Architecture and responsibilities |
 | [docs/acceptance-1.0.md](docs/acceptance-1.0.md) | 1.0 acceptance checklist |
