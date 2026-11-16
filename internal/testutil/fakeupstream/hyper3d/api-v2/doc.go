@@ -4,9 +4,12 @@
 // /hyper3d/api/v2. A rejected submission is HTTP 201 with a documented error
 // code in the body; the error bodies without a committed wire sample are
 // constructed from https://docs.hyper3d.ai/en/api-specification/errors (checked
-// 2026-11-08). A Gen-2.5 submission's receipt follows the page's price table and
-// the Extreme-High tier lists its extra mesh; the one paid game-character run of
-// 2026-11-13 (#294 follow-up) and what the fixed files do not reproduce of it
-// are in the /rodin endpoint note. This version is frozen once released: a new
-// Rodin API version gets its own sibling package and never edits this one.
+// 2026-11-08). A Gen-2.5 submission's receipt follows the page's price table, the
+// Extreme-High tier lists its extra mesh, and the PBR pack it delivers follows the
+// request (#303: the triangle count from the face count and the topology, three
+// PNG textures sized by the texture mode; DeliveredModel); the Texture receipt is
+// 2 credits for texture_mode=extreme-high. The one paid game-character run of
+// 2026-11-13 (#294 follow-up) and what the fake does not reproduce of it are in
+// the /rodin endpoint note. This version is frozen once released: a new Rodin API
+// version gets its own sibling package and never edits this one.
 package hyper3dapiv2

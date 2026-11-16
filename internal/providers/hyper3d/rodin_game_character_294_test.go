@@ -38,9 +38,10 @@ import (
 // the run showed at the level the fake can carry: the form as sent, the receipt's
 // charge against the Catalog's quote, the claims the Offering declares (a model and
 // a preview, not the extra mesh the Extreme-High tier also lists) and the bytes
-// the Adapter and Plinth's own checks accept. What the shared fixture does not
-// reproduce (the triangle count, and the number and edge of the textures) is
-// recorded in the fake's endpoint note, not asserted here.
+// the Adapter and Plinth's own checks accept, including what the model carries
+// (since #303 the fake delivers the run's 21,800 triangles and three 2048x2048
+// textures for this request; the tiers and the purposes' budgets are in
+// rodin_delivery_303_test.go).
 //
 // Nothing here leaves the process: the Adapter's client reaches the fake through
 // the fixture's host routes and refuses every other host.
@@ -236,13 +237,18 @@ func TestRodinGameCharacterRunAgainstTheFake(t *testing.T) {
 			t.Fatal(err)
 		}
 		report := modelinspect.Inspect(model, modelinspect.DefaultInspectOptions())
-		if report.Meshes != 1 || len(report.Skins) != 0 || report.TextureCount < 1 {
+		if report.Meshes != 1 || len(report.Skins) != 0 || report.TextureCount != 3 {
 			t.Fatalf("model: %d meshes, %d skins, %d textures", report.Meshes, len(report.Skins), report.TextureCount)
+		}
+		// The run's file (#303): about 21,800 triangles for the 10,000 quads asked
+		// for and the three PNG images of 2048x2048 that texture_mode=high gives.
+		if report.Triangles != 21800 {
+			t.Fatalf("model has %d triangles, want the run's 21800 for 10,000 quads", report.Triangles)
 		}
 		for _, material := range report.Materials {
 			for _, slot := range material.Slots {
-				if slot.Present && slot.MIME != "image/png" {
-					t.Fatalf("texture slot %s is %q, want image/png", slot.Slot, slot.MIME)
+				if slot.Present && (slot.MIME != "image/png" || slot.Width != 2048 || slot.Height != 2048) {
+					t.Fatalf("texture slot %s is %q %dx%d, want image/png 2048x2048", slot.Slot, slot.MIME, slot.Width, slot.Height)
 				}
 			}
 		}

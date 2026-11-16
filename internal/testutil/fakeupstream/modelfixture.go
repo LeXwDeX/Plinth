@@ -83,18 +83,14 @@ func smallModelFiles() (map[string]File, error) {
 	}, nil
 }
 
-// fixtureTexture draws a size x size atlas of six flat tones in the 3x2 layout the humanoid's UVs expect.
+// fixtureTexture draws a size x size atlas of six flat tones (atlasTones) in the 3x2 layout the humanoid's UVs expect.
 func fixtureTexture(size int) ([]byte, error) {
-	tones := []color.NRGBA{
-		{236, 196, 160, 255}, {52, 120, 190, 255}, {64, 90, 150, 255},
-		{70, 98, 160, 255}, {90, 70, 50, 255}, {80, 64, 46, 255},
-	}
 	canvas := image.NewNRGBA(image.Rect(0, 0, size, size))
 	cellW, cellH := size/3, size/2
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
-			cell := min(y/cellH, 1)*3 + min(x/cellW, 2)
-			canvas.SetNRGBA(x, y, tones[cell])
+			tone := atlasTones[min(y/cellH, 1)*3+min(x/cellW, 2)]
+			canvas.SetNRGBA(x, y, color.NRGBA{R: tone[0], G: tone[1], B: tone[2], A: tone[3]})
 		}
 	}
 	var encoded bytes.Buffer

@@ -18,9 +18,10 @@ import (
 // 21,800 triangles for 10,000 quads, no skin, three embedded PNG images of
 // 2048x2048) next to a WebP preview. The raw bodies were not captured, so these
 // tests pin what the run showed and what the page's price table gives, not a
-// recorded wire. What the fake does not reproduce (the fixed 72 triangles and the
-// one 64x64 texture are the shared fixture's) is recorded in the /rodin endpoint
-// note (fake.go, rodinRealRunNote) and is not asserted here.
+// recorded wire. What the delivered file carries follows the request since #303
+// (delivery_303_test.go): the run's request delivers its 21,800 triangles and
+// three 2048x2048 PNGs. What the fake still does not reproduce is recorded in the
+// /rodin endpoint note (fake.go, rodinRealRunNote).
 
 // gameCharacterFields is that run's form: the Catalog's request template with
 // the purpose's overrides for its platform (pc_console; a session without a
@@ -100,11 +101,13 @@ func TestGameCharacterRunIsAcceptedAndDeliversTheShapeOfTheRealRun(t *testing.T)
 				t.Fatal(err)
 			}
 			report := modelinspect.Inspect(model, modelinspect.DefaultInspectOptions())
-			// What the run's file and the fixture share: one mesh, no skin, a
-			// textured PBR material whose images are PNG. The texture edge and the
-			// triangle count are the fixture's (see the endpoint note).
-			if report.Meshes != 1 || len(report.Skins) != 0 || report.TextureCount < 1 {
+			// What the run's file showed: one mesh, no skin, about 21,800 triangles
+			// for 10,000 quads and three PNG images of 2048x2048 in the PBR slots.
+			if report.Meshes != 1 || len(report.Skins) != 0 || report.TextureCount != 3 {
 				t.Fatalf("GLB meshes %d skins %d textures %d", report.Meshes, len(report.Skins), report.TextureCount)
+			}
+			if report.Triangles != 21800 || slotEdgesOf(report) != packEdges(2048) {
+				t.Fatalf("GLB triangles %d, texture edges %v, want the run's 21800 and 2048 x3", report.Triangles, slotEdgesOf(report))
 			}
 			for _, material := range report.Materials {
 				for _, slot := range material.Slots {
@@ -181,8 +184,8 @@ func TestOnlyTheExtremeHighTierListsTheExtraMesh(t *testing.T) {
 }
 
 // The run and its limits travel with the endpoint table (and so with the
-// alignment report): the date, the request, the charge, the delivered file, and
-// what the fixed files do not reproduce of it.
+// alignment report): the date, the request, the charge, the delivered file, how
+// the fake's file follows a request, and what it does not reproduce.
 func TestRodinEndpointNoteRecordsTheRealRunAndItsLimits(t *testing.T) {
 	for _, endpoint := range endpoints {
 		if endpoint.Method != http.MethodPost || endpoint.Path != "/rodin" {
@@ -192,6 +195,9 @@ func TestRodinEndpointNoteRecordsTheRealRunAndItsLimits(t *testing.T) {
 			realRun, "mesh_mode=Quad", "quality_override=10000", "texture_mode=high", "TAPose=true", "quad_normal=true",
 			"charged 1 credit", "9,437,496 bytes", "21,800 triangles", "2048x2048", "Not modeled", "6144 base color",
 			"\"tier is required\" callout is advice",
+			// The delivered file (#303) and the full reading of the page.
+			"SizedModelFile", "2.18 triangles per Quad face", "121,032-triangle ceiling", "HighPack",
+			"complete server-rendered HTML", formDocs,
 		} {
 			if !strings.Contains(endpoint.Note, want) {
 				t.Errorf("the /rodin note does not record %q", want)
