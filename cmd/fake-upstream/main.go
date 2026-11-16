@@ -13,8 +13,11 @@
 // <origin>/openai/images/v1 (OPENAI_BASE_URL), <origin>/gemini/images/v1
 // (GEMINI_BASE_URL), <origin>/jimeng (JIMENG_BASE_URL; the adapter appends
 // api/v3) and <origin>/matting (MATTING_BASE_URL; it appends api/v1). Any API key is accepted; a key or an X-Fake-Scenario header
-// selects a fault (see -help). GET /healthz answers 200 for container health
-// checks.
+// selects a fault (see -help). A stack that cannot add a header or choose its
+// key (the dev-test fake shape, whose Adapters send neither) reaches the matting
+// service's per-file faults through the uploaded picture instead: a
+// "fake-file-faults:<fault>[,<fault>...];" marker in the file's own bytes (#301,
+// see -help). GET /healthz answers 200 for container health checks.
 //
 // Dockerfile.fake-upstream packages it as its own image for the dev-test fake
 // upstream shape (#219, docker-compose.go-fake-upstream.yml); the runtime image
@@ -39,6 +42,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
+	mattingapiv1 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/matting/api-v1"
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/registry"
 )
 
@@ -56,6 +60,9 @@ func run(args []string) error {
 		flags.PrintDefaults()
 		fmt.Fprintf(flags.Output(), "\nFault scenarios (X-Fake-Scenario header, or an API key starting with %q+name):\n  %s\n",
 			fakeupstream.KeyPrefix, strings.Join(fakeupstream.SortedScenarioNames(), "\n  "))
+		fmt.Fprintf(flags.Output(), "\nMatting per-file faults (header %s: <position>:<fault>,..., or, with no header, a marker in the\n"+
+			"uploaded picture's own bytes, which a deployed stack can use: %s<fault>[,<fault>...];):\n  %s\n",
+			mattingapiv1.FileFaultsHeader, mattingapiv1.FileFaultMarker, strings.Join(mattingapiv1.FileFaultWords(), "\n  "))
 	}
 	addr := flags.String("addr", "127.0.0.1:0", "listen address; non-loopback addresses are refused unless -allow-non-loopback")
 	allow := flags.Bool("allow-non-loopback", false, "allow listening on a non-loopback address")

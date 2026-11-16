@@ -90,6 +90,8 @@ curl -sS -b cj $B/api/v1/tasks/$TID | jq '{state, assets: [.assets[]?.url]}'
 
 这个流程在本机 Mock 栈上实测通过（`jq` 见 README 的前置工具）。完整的脚本化版本是 `scripts/smoke/smoke-public-mock.sh`，覆盖 3D 批准卡、每个资产的字节校验和登出撤销。
 
+第 4、5 步的 `Idempotency-Key` 请求头必填，且两步用同一个值（去掉首尾空白后 1 到 200 个字符，重试同一请求时沿用）。缺失或无效时，服务返回 400，`code` 为 `idempotency_key_required`，`detail` 说明需要该请求头；`POST /api/v1/processing-plans` 要 16 到 200 个字符，`POST /api/v1/tasks/{id}/reroll` 同样必填。
+
 核心接口：
 
 | 方法 | 路径 | 说明 |

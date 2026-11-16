@@ -41,8 +41,12 @@ same HTTP API the browser uses:
     Meshy and Hyper3D delivers it.
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, tripo, p2, project, agent, agent-background,
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
 agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, faults;
+"matting-faults" the #301 matting fault paths chosen by the uploaded pictures themselves (the only way a deployed
+stack reaches them): #284's notice naming the pictures that were not matted, #299's out-of-memory batch as a
+partial success and as a capacity failure, and an unmarked batch (scripts/smoke/fake_faults.py,
+scripts/smoke/smoke-fake-faults.py runs the same checks on a fake-shaped dev-test);
 "plan-checkpoint" the #251 budget plan checkpoint: a failed inherited check pauses the next step,
 the declared contingency is inserted within the approved budget, and no second approval card appears;
 "preferences" the #241 session choices: four candidates, pick/reject with reasons, the next prompt carrying them,
@@ -85,6 +89,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
+
+# The gate runs this script and then checks the tree is unchanged: importing the sibling module must not
+# leave a __pycache__ behind (this script had no sibling import before #301).
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fake_faults  # noqa: E402  (sibling module; the script runs from any directory)
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FAKE_PORT = int(os.environ.get("FAKE_STACK_FAKE_PORT", "19410"))
@@ -978,6 +988,18 @@ def scenario_images(api, offerings):
              {"prompt": "make the cube blue", "reference_assets": [picture]}, session)
     step(api, offerings, "matting background-removal", MATTING, "background-removal", {"source_assets": [picture]}, session)
     scenario_style_lock_direct(api, offerings)
+
+
+def scenario_matting_faults(api, offerings):
+    """#301: the matting paths only a fault reaches, chosen by the uploaded pictures (the way a
+    deployed dev-test stack must, scripts/smoke/smoke-fake-faults.py): #284's notice naming the
+    pictures that were not matted, #299's out-of-memory batch as a partial success and as a capacity
+    failure, and an unmarked batch that says nothing. The public Task is held against the Schema's own
+    sentences; the stack's Adapter sends no test header and its key selects no scenario."""
+    if MATTING not in offerings:
+        record("matting-faults: the matting Offering is registered", False, f"{MATTING} is not in the public Offerings")
+        return
+    fake_faults.run(api, record)
 
 
 def scenario_agent(api, offerings):
@@ -5207,7 +5229,7 @@ def scenario_reroll(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -5217,7 +5239,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "tripo", "p2", "agent", "agent-background", "three-view", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -5233,7 +5255,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -5246,6 +5268,8 @@ def main():
                 scenario_hyper3d(api, offerings)
             if "images" in selected:
                 scenario_images(api, offerings)
+            if "matting-faults" in selected:
+                scenario_matting_faults(api, offerings)
             if "tripo" in selected:
                 scenario_tripo_images(api, offerings)
             if "p2" in selected:
