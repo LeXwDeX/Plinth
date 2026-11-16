@@ -13,7 +13,7 @@ const mock = vi.hoisted(() => ({ source: {} as Record<string, unknown> }));
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
 const offering = (id: string) => ({ ...(defaultCatalog.offerings as Array<Record<string, unknown>>).find((entry) => entry.id === id), available: true });
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: defaultCatalog.application, text: (key: string) => (defaultCatalog.application.content.messages as Record<string, string>)[key] ?? '' }) }));
-vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: object) => unknown) => select({ activeSessionId: 'session' }) }));
+vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: object) => unknown) => select({ activeSessionId: 'session', sessions: [], sessionListRevision: 0 }) }));
 vi.mock('@/store/workspace-store', () => ({ useWorkspaceStore: (select: (state: object) => unknown) => select({ registerTask: vi.fn() }) }));
 vi.mock('@/hooks/use-model-processing-capabilities', () => ({ useModelProcessingCapabilities: () => ({
   available: [{ id: 'remesh', label_cn: '重拓扑' }, { id: 'uv-unwrap', label_cn: 'UV 展开' }],

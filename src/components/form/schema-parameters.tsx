@@ -55,7 +55,19 @@ export function parameterLockedText(
   return current === undefined || current === null ? '' : String(current);
 }
 
-export function SchemaParameters({ parameters, values, onChange, disabled, readOnly, lockedHint, parameterMeta }: {
+/**
+ * What a parameter that follows the session purpose says while the person has not picked a value, once the
+ * server has said what the purpose gives it (#306): the Schema's wording with the label of that option, such as
+ * "按会话用途：2K（2048 像素）". Empty when the value is not known or is no option of the parameter, so the caller
+ * keeps the plain "按会话用途" instead of guessing.
+ */
+export function followsPurposeResolvedText(parameter: ParamSchema, resolved: unknown, template: string): string {
+  if (!parameter.follows_purpose || resolved === undefined || resolved === null || resolved === '') return '';
+  const label = parameter.options?.find(option => String(option.value) === String(resolved))?.label;
+  return label ? formatSchemaText(template, { value: label }) : '';
+}
+
+export function SchemaParameters({ parameters, values, onChange, disabled, readOnly, lockedHint, parameterMeta, purposeValues }: {
   parameters: ParamSchema[];
   values: Record<string, unknown>;
   onChange: (name: string, value: unknown) => void;
@@ -66,6 +78,8 @@ export function SchemaParameters({ parameters, values, onChange, disabled, readO
   /** What a read-only parameter says instead of its value, such as "由 Agent 结合对话补充". */
   lockedHint?: string;
   parameterMeta?: (parameter: ParamSchema) => ReactNode;
+  /** The value the session purpose gives each parameter that follows it, by parameter name (#306): an untouched one says what it will take. */
+  purposeValues?: Record<string, unknown>;
 }) {
   const { text, schema } = useProductSchema();
   const separator = schemaText(schema, 'ui.studio.list_separator');
@@ -102,10 +116,12 @@ export function SchemaParameters({ parameters, values, onChange, disabled, readO
     const group = parameter.type === 'string-array' || parameter.type === 'multi-select';
     const choice = isBooleanChoice(parameter);
     const assetCount = Array.isArray(value) ? value.length : value ? 1 : 0;
+    // What the purpose gives a parameter that follows it, worded by the Schema; empty until the server has said (#306).
+    const purposeText = followsPurposeResolvedText(parameter, purposeValues?.[parameter.name], schemaText(schema, 'ui.studio.params.follows_purpose_resolved'));
     const lockedDisplay = !locked ? '' : (readOnly && lockedHint)
       || (parameter.type === 'asset'
         ? assetCount > 0 ? schemaCountMessage(schema, 'ui.studio.params.files_selected', assetCount, { count: assetCount }) : ''
-        : parameterLockedText(parameter, forced.found ? forced.value : value, separator, { on: schemaText(schema, 'ui.studio.params.on'), off: schemaText(schema, 'ui.studio.params.off'), followsPurpose: schemaText(schema, 'ui.studio.params.follows_purpose') }))
+        : parameterLockedText(parameter, forced.found ? forced.value : value, separator, { on: schemaText(schema, 'ui.studio.params.on'), off: schemaText(schema, 'ui.studio.params.off'), followsPurpose: purposeText || schemaText(schema, 'ui.studio.params.follows_purpose') }))
       || schemaText(schema, 'ui.studio.params.not_set');
 
     return <Field key={parameter.name} id={fieldId} label={parameter.label} help={help} group={group} required={parameter.required} meta={parameterMeta?.(parameter)} layout={parameter.type === 'boolean' && !choice && !locked ? 'inline' : 'stacked'}>
@@ -119,7 +135,7 @@ export function SchemaParameters({ parameters, values, onChange, disabled, readO
           ? <OptionSelect {...control} required={parameter.required} disabled={locked} value={String(value ?? '')} onValueChange={selected => onChange(parameter.name, selected)}
               placeholder={text('ui.common.select.placeholder')}
               options={[...(parameter.follows_purpose
-                ? [{ value: '', label: text('ui.studio.params.follows_purpose') }]
+                ? [{ value: '', label: purposeText || text('ui.studio.params.follows_purpose') }]
                 : !parameter.required && parameter.default === undefined ? [{ value: '', label: text('ui.common.select.none') }] : []), ...(parameter.options ?? [])]} />
           : parameter.type === 'asset'
             ? <ImageUpload {...control} disabled={locked} accept={validation?.media_types?.join(',')} multiple={validation?.type === 'asset-array'} maxFiles={validation?.max_items ?? 1} maxBytes={validation?.max_bytes || undefined} onUpload={images => onChange(parameter.name, validation?.type === 'asset-array' ? images : images[0] ?? '')} />

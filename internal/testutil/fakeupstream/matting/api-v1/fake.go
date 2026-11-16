@@ -64,7 +64,7 @@ const docs = "internal matting service (FastAPI /docs)"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/jobs", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v1/jobs",
 		DocURL: docs, CheckedAt: captured,
-		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service. Which files of a batch are rejected, fail while processing or come back under another source_name is chosen by the test-only " + FileFaultsHeader + " header (the partial-images scenario rejects every file but the first): the service's own reasons for refusing a file, and whether it echoes the name of such a file, were never observed, and the one reason it gave for failing a file was seen once (a GPU out of memory, see the batch route)"},
+		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service. Which files of a batch are rejected, fail while processing or come back under another source_name is chosen by the test-only " + FileFaultsHeader + " header or by a " + FileFaultMarker + " list in the file's own bytes, for a deployed stack whose Adapter sends no such header (#301; the partial-images scenario rejects every file but the first): the service's own reasons for refusing a file, and whether it echoes the name of such a file, were never observed, and the one reason it gave for failing a file was seen once (a GPU out of memory, see the batch route)"},
 	{Method: "GET", Path: "/batches/{batch_id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/batches/{id}",
 		DocURL: docs, CheckedAt: captured,
 		Note: "READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED or FAILED), the completed batch with no artifact (every file REJECTED or FAILED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them. One reason a task fails is real: on " + outOfMemoryObserved + " the service failed a batch of a 2048x2048 and a 16x16 picture, both process resolutions at 2048, on a GPU other tenants were already using (#299), and the failed task's error_message was OutOfMemoryMessage's text (a " + FileFaultsHeader + " fault of kind gpu_oom reproduces it). Only that message was recorded: the batch's status word, what the other picture's task showed, and which resolutions the GPU can hold are unknown, so the fake does not claim them"},
@@ -169,7 +169,24 @@ func (t batchTask) echoedName() string {
 // rest of the batch states (see the endpoint notes): the service's own reasons
 // for refusing a file, and whether it echoes the name of such a file, were never
 // observed, and its reason for failing one only once (gpu_oom).
+//
+// The same words can also be written into the file itself (FileFaultMarker), for
+// a stack that cannot add this header to the request the fake receives (#301).
 const FileFaultsHeader = "X-Fake-File-Faults"
+
+// The fault words of a file, in a FileFaultsHeader entry or in the marker of the
+// file's own bytes.
+const (
+	FaultRejected       = "rejected"
+	FaultFailed         = "failed"
+	FaultGPUOutOfMemory = "gpu_oom"
+	FaultRenamed        = "renamed"
+)
+
+// FileFaultWords lists every fault word, for help text and tests.
+func FileFaultWords() []string {
+	return []string{FaultRejected, FaultFailed, FaultGPUOutOfMemory, FaultRenamed}
+}
 
 type handler struct {
 	env *fakeupstream.Env
@@ -266,7 +283,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	names := form.names
 	scenario := fakeupstream.ScenarioOf(r)
-	faults := fileFaults(r, scenario, len(names))
+	faults := fileFaults(r, scenario, form.marked)
 	h.mu.Lock()
 	number := len(h.batches) + 1
 	b := &batch{id: fmt.Sprintf("batch_fake%04d", number), scenario: scenario}
@@ -297,13 +314,33 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 // fileFault is what is wrong with one file of a batch (see FileFaultsHeader).
 type fileFault struct{ rejected, failed, outOfMemory, renamed bool }
 
-// fileFaults says what is wrong with each of the total files of a batch: what
-// the request's FileFaultsHeader names, and under ScenarioPartialImages the
-// rejection of every file but the first; a single-file batch is rejected whole,
-// so a completed batch with no artifact is reachable too (the Adapter's
-// no_artifacts branch). Constructed: the committed samples carry no rejected
-// file.
-func fileFaults(r *http.Request, scenario fakeupstream.Scenario, total int) []fileFault {
+// add records the fault a word names; it reports false for a word the fake does
+// not know.
+func (fault *fileFault) add(word string) bool {
+	switch strings.TrimSpace(word) {
+	case FaultRejected:
+		fault.rejected = true
+	case FaultFailed:
+		fault.failed = true
+	case FaultGPUOutOfMemory:
+		fault.failed, fault.outOfMemory = true, true
+	case FaultRenamed:
+		fault.renamed = true
+	default:
+		return false
+	}
+	return true
+}
+
+// fileFaults says what is wrong with each file of a batch: what the request's
+// FileFaultsHeader names for its position, what the file's own bytes ask for
+// (marked holds, per file, the fault words of its FileFaultMarker lists), and
+// under ScenarioPartialImages the rejection of every file but the first; a
+// single-file batch is rejected whole, so a completed batch with no artifact is
+// reachable too (the Adapter's no_artifacts branch). Constructed: the committed
+// samples carry no rejected file.
+func fileFaults(r *http.Request, scenario fakeupstream.Scenario, marked [][]string) []fileFault {
+	total := len(marked)
 	faults := make([]fileFault, total)
 	for _, entry := range strings.Split(r.Header.Get(FileFaultsHeader), ",") {
 		position, word, found := strings.Cut(entry, ":")
@@ -311,15 +348,11 @@ func fileFaults(r *http.Request, scenario fakeupstream.Scenario, total int) []fi
 		if !found || err != nil || index < 1 || index > total {
 			continue
 		}
-		switch strings.TrimSpace(word) {
-		case "rejected":
-			faults[index-1].rejected = true
-		case "failed":
-			faults[index-1].failed = true
-		case "gpu_oom":
-			faults[index-1].failed, faults[index-1].outOfMemory = true, true
-		case "renamed":
-			faults[index-1].renamed = true
+		faults[index-1].add(word)
+	}
+	for index, words := range marked {
+		for _, word := range words {
+			faults[index].add(word)
 		}
 	}
 	if scenario == fakeupstream.ScenarioPartialImages {
@@ -333,11 +366,13 @@ func fileFaults(r *http.Request, scenario fakeupstream.Scenario, total int) []fi
 }
 
 // upload is what the create route reads from the multipart request: the file
-// names of the files parts, the size of each picture and the raw
-// pipeline_params_json field.
+// names of the files parts, the size of each picture, the fault words each
+// file's own bytes ask for (FileFaultMarker) and the raw pipeline_params_json
+// field.
 type upload struct {
 	names    []string
 	sizes    []pictureSize
+	marked   [][]string
 	pipeline string
 }
 
@@ -370,6 +405,7 @@ func readUpload(r *http.Request) (upload, bool) {
 			_, _ = io.Copy(io.Discard, part)
 			result.names = append(result.names, part.FileName())
 			result.sizes = append(result.sizes, sizeOf(head))
+			result.marked = append(result.marked, markedFaults(head))
 		case part.FormName() == PipelineField && part.FileName() == "":
 			raw, _ := io.ReadAll(io.LimitReader(part, 1<<20))
 			result.pipeline = string(raw)
