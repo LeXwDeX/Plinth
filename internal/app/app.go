@@ -1617,6 +1617,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return nil, err
 		}
 		modelDeliveryService.Localize(texts)
+		// The administration download leaves out a repeated file as the one-click ZIP
+		// does and names it in the same words (#300).
+		administrationGenerationDownloadService.WithRepeatText(modelDeliveryService.RepeatText)
 		// list_session_models reports the same format coverage as the 格式 tab (#321).
 		toolExecutor.SetModelFormats(func(ctx context.Context, owner generation.OwnerID, task generation.TaskID) (map[string]string, error) {
 			coverage, err := modelDeliveryService.Coverage(ctx, generation.OwnTasks(owner), task)

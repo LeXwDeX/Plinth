@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 func catalogOffering(t *testing.T, document map[string]any, id string) map[string]any {
@@ -115,8 +116,29 @@ func TestCatalogLoadRejectsInvalidModelLimitDeclarations(t *testing.T) {
 		"estimate with a non-positive factor": func(document map[string]any) {
 			catalogOffering(t, document, "meshy/processing/remesh")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)["quad"] = json.Number("0")
 		},
-		"estimate on a generation offering": func(document map[string]any) {
-			catalogOffering(t, document, "meshy/meshy-7.1/text-to-3d")["output_triangles"] = catalogOffering(t, document, "meshy/processing/remesh")["output_triangles"]
+		"estimate with a negative factor": func(document map[string]any) {
+			catalogOffering(t, document, "meshy/processing/remesh")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)["quad"] = json.Number("-2.2")
+		},
+		"estimate with a factor that is not a number": func(document map[string]any) {
+			catalogOffering(t, document, "meshy/processing/remesh")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)["quad"] = "2.2"
+		},
+		"estimate with a factor too large to be a number": func(document map[string]any) {
+			catalogOffering(t, document, "meshy/processing/remesh")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)["quad"] = json.Number("1e999")
+		},
+		"estimate with a factor for a topology the parameter lacks": func(document map[string]any) {
+			catalogOffering(t, document, "meshy/processing/remesh")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)["hexagon"] = json.Number("4")
+		},
+		"a generation estimate misses a topology option": func(document map[string]any) {
+			delete(catalogOffering(t, document, "hyper3d/rodin-gen-2.5/text-to-3d")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any), "Raw")
+		},
+		"a generation estimate with a zero factor": func(document map[string]any) {
+			catalogOffering(t, document, "hyper3d/rodin-gen-2.5/image-to-3d")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)["Quad"] = json.Number("0")
+		},
+		"a generation estimate whose count is not a number parameter": func(document map[string]any) {
+			catalogOffering(t, document, "hyper3d/rodin-gen-2.5/text-to-3d")["output_triangles"].(map[string]any)["count_parameter"] = "texture_mode"
+		},
+		"a generation estimate whose topology is not a select": func(document map[string]any) {
+			catalogOffering(t, document, "hyper3d/rodin-gen-2.5/text-to-3d")["output_triangles"].(map[string]any)["topology_parameter"] = "TAPose"
 		},
 		"plan refusal text lost": func(document map[string]any) {
 			messages := document["application"].(map[string]any)["runtime"].(map[string]any)["generation_messages"].(map[string]any)
@@ -133,6 +155,34 @@ func TestCatalogLoadRejectsInvalidModelLimitDeclarations(t *testing.T) {
 				t.Fatal("invalid declaration accepted")
 			}
 		})
+	}
+}
+
+// A factor may be a decimal on either kind of Offering (#304): the loader takes
+// it, and the plan estimate and the compatible budgets follow it.
+func TestCatalogAcceptsDecimalTriangleFactors(t *testing.T) {
+	product, err := loadMutatedCatalog(t, func(document map[string]any) {
+		factors := catalogOffering(t, document, "meshy/processing/remesh")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)
+		factors["quad"] = json.Number("2.25")
+		// The generation declaration of Rodin Gen-2.5 is another factor too.
+		rodin := catalogOffering(t, document, "hyper3d/rodin-gen-2.5/text-to-3d")["output_triangles"].(map[string]any)["triangles_per_face"].(map[string]any)
+		rodin["Quad"] = json.Number("2.18")
+	})
+	if err != nil {
+		t.Fatalf("a decimal factor was refused: %v", err)
+	}
+	remesh, _ := product.Get("meshy/processing/remesh")
+	if got, ok := remesh.EstimateOutputTriangles([]byte(`{"topology":"quad","target_polycount":160000}`)); !ok || got != 360000 {
+		t.Fatalf("Remesh estimate = %d, %v; want 360000", got, ok)
+	}
+	rodin, _ := product.Get("hyper3d/rodin-gen-2.5/text-to-3d")
+	if got, ok := rodin.EstimateOutputTriangles([]byte(`{"mesh_mode":"Quad","quality_override":10000}`)); !ok || got != 21800 {
+		t.Fatalf("Rodin estimate = %d, %v; want the sample's 21800", got, ok)
+	}
+	rigging, _ := product.Get("meshy/processing/rigging")
+	budgets := schema.FormatTopologyBudgets(remesh.OutputTriangles.CompatibleFaceBudgets(*rigging.SourceModelLimit))
+	if budgets != "quad ≤ 142222 / triangle ≤ 320000" { // 320000 / 2.25 = 142222.2
+		t.Fatalf("compatible budgets = %q", budgets)
 	}
 }
 

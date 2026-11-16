@@ -437,4 +437,12 @@ describe('Meshy extension steps: task ID first, local file as fallback, Remesh b
     expect(faceBudgetDefaults(remesh, [retexture, uv], {})).toEqual({ target_polycount: 20000 });
     expect(faceBudgetDefaults(remesh, [remesh, uv], {})).toEqual({});
   });
+  it('divides by a decimal factor and keeps its binary noise from costing a face (#304)', () => {
+    const decimal: OfferingWire = { ...remesh, output_triangles: { count_parameter: 'target_polycount', topology_parameter: 'topology', triangles_per_face: { quad: 2.2, triangle: 1 } } };
+    const limitedTo = (maxTriangles: number): OfferingWire => ({ ...uv, source_model_limit: { max_triangles: maxTriangles, count_basis: 'triangles' } });
+    expect(faceBudgetDefaults(decimal, [uv], {})).toEqual({ target_polycount: 18181 }); // 40000 / 2.2 = 18181.8
+    expect(faceBudgetDefaults(decimal, [limitedTo(6600)], {})).toEqual({ target_polycount: 3000 }); // 6600 / 2.2 is 2999.9999999999995 in binary floating point
+    expect(faceBudgetDefaults(decimal, [limitedTo(22000)], {})).toEqual({ target_polycount: 10000 });
+    expect(faceBudgetDefaults(decimal, [uv], { topology: 'triangle' })).toEqual({ target_polycount: 40000 });
+  });
 });

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
@@ -9,7 +10,10 @@ import (
 
 // validateOfferingModelLimits checks the two declarations a Processing Plan
 // compares before anything is paid (#121): the triangle ceiling a step puts on
-// its source model, and how another step's request turns into triangles.
+// its source model, and how a step's request turns into triangles. The second
+// is declared by processing Offerings (Meshy Remesh) and, since #304, by 3D
+// generation Offerings whose face count a purpose's triangle budget bounds
+// (Rodin Gen-2.5), with a factor that may be fractional.
 func validateOfferingModelLimits(offering schemacontract.Offering) error {
 	if limit := offering.SourceModelLimit; limit != nil {
 		if limit.MaxTriangles <= 0 || limit.CountBasis != schemacontract.SourceModelCountBasisTriangles {
@@ -27,8 +31,8 @@ func validateOfferingModelLimits(offering schemacontract.Offering) error {
 		}
 	}
 	if estimate := offering.OutputTriangles; estimate != nil {
-		if offering.Domain != schemacontract.DomainProcessing {
-			return fmt.Errorf("Offering %q 的 output_triangles 只用于处理能力", offering.ID)
+		if offering.Domain != schemacontract.DomainProcessing && offering.Domain != schemacontract.DomainModel3D {
+			return fmt.Errorf("Offering %q 的 output_triangles 只用于 3D 生成与处理能力", offering.ID)
 		}
 		count, countOK := offeringParameter(offering.Parameters, estimate.CountParameter)
 		topology, topologyOK := offeringParameter(offering.Parameters, estimate.TopologyParameter)
@@ -39,8 +43,9 @@ func validateOfferingModelLimits(offering schemacontract.Offering) error {
 			return fmt.Errorf("Offering %q 的 output_triangles.triangles_per_face 必须覆盖拓扑参数的每个选项且不含多余项", offering.ID)
 		}
 		for _, option := range topology.Options {
-			if factor, declared := estimate.TrianglesPerFace[option.Value]; !declared || factor <= 0 {
-				return fmt.Errorf("Offering %q 的 output_triangles.triangles_per_face[%q] 必须是正整数", offering.ID, option.Value)
+			// A factor is positive and finite; it may be a decimal (a measured ratio).
+			if factor, declared := estimate.TrianglesPerFace[option.Value]; !declared || !(factor > 0) || math.IsInf(factor, 0) {
+				return fmt.Errorf("Offering %q 的 output_triangles.triangles_per_face[%q] 必须是正的有限数（可以是小数）", offering.ID, option.Value)
 			}
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/LeXwDeX/Plinth/internal/assets/samebytes"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -141,20 +142,34 @@ type archiveSame struct {
 	asset generation.Asset
 }
 
+// repeatText is the Schema's README wording for a file the ZIP leaves out because
+// it repeats a packed one (#293).
+func (s *Service) repeatText() samebytes.Text {
+	text := s.schema.Archive.Readme
+	return samebytes.Text{Filename: text.Filename, Heading: text.SameHeading, Line: text.SameLine}
+}
+
+// RepeatText is that wording in the UI locale of ctx. The administration
+// generation download reads it from here, so both ZIPs name a repeated file in the
+// same words (#300).
+func (s *Service) RepeatText(ctx context.Context) samebytes.Text {
+	return s.inLocale(ctx).repeatText()
+}
+
 // skipsIdenticalFiles reports whether the Schema names the README section for
 // attachments that repeat a packed file. Without both texts an attachment is
 // never left out silently: every one is packed, as before #293.
 func (s *Service) skipsIdenticalFiles() bool {
-	text := s.schema.Archive.Readme
-	return strings.TrimSpace(text.SameHeading) != "" && strings.TrimSpace(text.SameLine) != ""
+	return s.repeatText().Declared()
 }
 
-// sameFile reports whether two saved files hold the same bytes, by their records:
-// both carry a SHA-256 (a historical record may not) and agree on it and on the
-// size. The store verifies the digest of every file it opens, so a record that
-// opens has the bytes it names.
+// sameFile reports whether two saved files hold the same bytes, by their records
+// (see samebytes.Same).
 func sameFile(left, right generation.Asset) bool {
-	return left.SHA256 != "" && left.SHA256 == right.SHA256 && left.Size == right.Size
+	return samebytes.Same(
+		samebytes.Record{SHA256: left.SHA256, Size: left.Size},
+		samebytes.Record{SHA256: right.SHA256, Size: right.Size},
+	)
 }
 
 // identicalTo finds the planned entry that already holds the attachment's bytes:
@@ -174,10 +189,7 @@ func identicalTo(asset generation.Asset, planned ...[]archiveItem) (archiveItem,
 // slotLabel names a saved file's slot for the README: its variant, or its role
 // when it has none.
 func slotLabel(asset generation.Asset) string {
-	if asset.Variant != "" {
-		return sanitize(asset.Variant)
-	}
-	return sanitize(asset.Role)
+	return samebytes.Label(asset.Role, asset.Variant)
 }
 
 // packedPaths maps the asset of every planned entry the ZIP really holds to its
@@ -831,23 +843,7 @@ func relativeName(name string) (string, bool) {
 }
 
 func sanitize(value string) string {
-	var builder strings.Builder
-	for _, r := range value {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
-			builder.WriteRune(r)
-		default:
-			builder.WriteRune('_')
-		}
-	}
-	result := strings.TrimLeft(builder.String(), ".")
-	if len(result) > 80 {
-		result = result[:80]
-	}
-	if result == "" {
-		return "asset"
-	}
-	return result
+	return samebytes.Sanitize(value)
 }
 
 // uniquePath returns a path not used yet and records it. Comparison ignores
@@ -915,12 +911,12 @@ func (s *Service) readme(
 	// A file left out for repeating a packed one is named only while the file that
 	// holds its bytes is in the ZIP: the path is read now, after the OBJ may have
 	// moved to the root, and an entry that could not be read says nothing.
-	sameLines := []string{}
+	var repeats []samebytes.Repeat
 	if len(same) > 0 {
 		packed := packedPaths(unreadable, items, dependencies, other)
 		for _, entry := range same {
 			if kept, ok := packed[entry.kept]; ok {
-				sameLines = append(sameLines, strings.NewReplacer("{label}", entry.label, "{path}", kept).Replace(text.SameLine))
+				repeats = append(repeats, samebytes.Repeat{Label: entry.label, Path: kept})
 			}
 		}
 	}
@@ -970,10 +966,9 @@ func (s *Service) readme(
 			line(entry)
 		}
 	}
-	if len(sameLines) > 0 {
+	if section := s.repeatText().Section(repeats); len(section) > 0 {
 		line("")
-		line(text.SameHeading)
-		for _, entry := range sameLines {
+		for _, entry := range section {
 			line(entry)
 		}
 	}

@@ -400,6 +400,9 @@ export function processingSourceLabel(source: Pick<ProcessingSourceTask, 'provid
   return `${source.provider_id} · ${asset?.format || asset?.mediaType || source.capability}`;
 }
 
+/** The slack given to the quotient of a triangle limit and a decimal factor, as the server's faceEstimateTolerance. */
+const FACE_ESTIMATE_TOLERANCE = 1e-6;
+
 /**
  * The face budget a face-reducing step (Remesh) starts with when a later step takes at most so many triangles
  * (UV unwrap's 40,000, #93): the most faces of the step's topology that stay within the tightest limit of the steps
@@ -420,8 +423,10 @@ export function faceBudgetDefaults(offering: OfferingWire, following: readonly O
   const topologyParameter = offering.parameters.find((parameter) => parameter.name === estimate.topology_parameter);
   const topology = input[estimate.topology_parameter] ?? topologyParameter?.default;
   const factor = typeof topology === 'string' ? estimate.triangles_per_face[topology] ?? 0 : 0;
-  if (!countParameter || factor <= 0) return {};
-  let count = Math.floor(limit / factor);
+  if (!countParameter || !(factor > 0)) return {};
+  // The factor may be a decimal (#304); the tolerance keeps its binary noise from costing a face (6600 / 2.2 is 2999.9999999999995),
+  // as internal/schema.FacesWithinTriangles does on the server.
+  let count = Math.floor(limit / factor + FACE_ESTIMATE_TOLERANCE);
   if (typeof countParameter.maximum === 'number') count = Math.min(count, countParameter.maximum);
   if (typeof countParameter.minimum === 'number' && count < countParameter.minimum) return {};
   return { [estimate.count_parameter]: count };

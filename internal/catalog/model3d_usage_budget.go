@@ -50,9 +50,9 @@ func (limit ChatModel3DUsageBudgetLimit) Maximum(budget ChatModel3DUsageBudget) 
 
 // Measure is the amount a value of parameter stands for in the bound's unit:
 // a number times the triangles per face the Offering's output estimate
-// declares for the step's topology, or the declared amount of a select
-// option. values are the step's other parameter values; an absent one reads
-// the Offering default.
+// declares for the step's topology (whole triangles, rounded up: a Rodin quad
+// is 2.2 of them, #304), or the declared amount of a select option. values are
+// the step's other parameter values; an absent one reads the Offering default.
 func (limit ChatModel3DUsageBudgetLimit) Measure(
 	offering schemacontract.Offering,
 	parameter schemacontract.Parameter,
@@ -65,7 +65,10 @@ func (limit ChatModel3DUsageBudgetLimit) Measure(
 		if json.Unmarshal(value, &number) != nil {
 			return 0, false
 		}
-		return number * float64(limit.trianglesPerFace(offering, parameter, values)), true
+		if factor, converted := limit.trianglesPerFace(offering, parameter, values); converted {
+			return schemacontract.TrianglesForFaces(number, factor), true
+		}
+		return number, true
 	case "select":
 		var option string
 		if json.Unmarshal(value, &option) != nil {
@@ -101,8 +104,12 @@ func (limit ChatModel3DUsageBudgetLimit) Fit(
 	}
 	switch parameter.Type {
 	case "number":
-		factor := float64(limit.trianglesPerFace(offering, parameter, values))
-		target := math.Floor(maximum / factor)
+		// The largest count whose converted amount stays within the maximum: a
+		// face count is divided by the topology's factor, rounding down so the
+		// result never exceeds it (20000 triangles hold 9090 Rodin quads, 9090 x
+		// 2.2 = 19998).
+		factor, _ := limit.trianglesPerFace(offering, parameter, values)
+		target := schemacontract.FacesWithinTriangles(maximum, factor)
 		if parameter.Maximum != nil && target > *parameter.Maximum {
 			target = *parameter.Maximum
 		}
@@ -140,16 +147,19 @@ func (limit ChatModel3DUsageBudgetLimit) Fit(
 
 // trianglesPerFace is how many triangles one unit of a face-count parameter
 // delivers: the factor the Offering's output_triangles estimate declares for
-// the step's topology (a quad is two triangles), or one. An unknown topology
-// takes the largest declared factor, the conservative reading.
+// the step's topology (a Meshy quad is two triangles, a Rodin quad 2.2), and
+// whether the Offering declares one for this parameter at all; without it the
+// value is its own amount and the factor is one. An unknown topology takes the
+// largest declared factor, the conservative reading. The declaration is read
+// for a generation Offering as for a processing one (#304).
 func (limit ChatModel3DUsageBudgetLimit) trianglesPerFace(
 	offering schemacontract.Offering,
 	parameter schemacontract.Parameter,
 	values map[string]json.RawMessage,
-) int64 {
+) (float64, bool) {
 	estimate := offering.OutputTriangles
 	if limit.Bound != BudgetBoundMaxTriangles || estimate == nil || estimate.CountParameter != parameter.Name {
-		return 1
+		return 1, false
 	}
 	raw, present := values[estimate.TopologyParameter]
 	if !present {
@@ -161,15 +171,9 @@ func (limit ChatModel3DUsageBudgetLimit) trianglesPerFace(
 	}
 	var topology string
 	if json.Unmarshal(raw, &topology) == nil {
-		if factor := estimate.TrianglesPerFace[topology]; factor > 0 {
-			return factor
+		if factor, usable := estimate.Factor(topology); usable {
+			return factor, true
 		}
 	}
-	largest := int64(1)
-	for _, factor := range estimate.TrianglesPerFace {
-		if factor > largest {
-			largest = factor
-		}
-	}
-	return largest
+	return estimate.LargestFactor(), true
 }

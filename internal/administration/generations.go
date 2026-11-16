@@ -31,6 +31,11 @@ type GenerationAsset struct {
 	Ordinal           int
 	SourceURL         string
 	PreferredFilename string
+	// SHA256 and Size are the digest and byte count the saved record names (#300).
+	// A legacy source file, which is only a URL, names neither: the package never
+	// takes it for a repeat of another file.
+	SHA256 string
+	Size   int64
 }
 
 // GenerationOffering names the Offering a task was frozen for. Fee item labels

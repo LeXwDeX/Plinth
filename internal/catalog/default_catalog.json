@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-13.299.2",
+    "revision": "2026-11-16.304.1",
     "terminology": {
       "user_facing": [
         {
@@ -20864,7 +20864,7 @@
             "默认关闭重拓扑以保留最高质量的原始几何；需要更规整网格时可说明理由启用。": "Remesh is off by default to preserve the highest-quality original geometry. Enable it with a stated reason when you need a cleaner mesh.",
             "默认启用 PBR 材质，并启用纹理。": "PBR materials are enabled by default, along with textures.",
             "默认建议三角面：Meshy 的 8K 纹理不支持四边面。": "Triangle faces are recommended by default: Meshy's 8K texture does not support quad faces.",
-            "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。": "Triangles are the recommended default. With quad faces the target face count is in quads, up to 200000; the exported GLB holds only triangles, each quad split in two, so its triangle count is about twice the chosen count.",
+            "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面约折合 2.2 个三角面（来自一个样本：2026-11-13 的一次真实运行，10000 个四边面实得约 21,800 个三角面）。用途的三角面预算按这个比例换算。": "Triangles are the recommended default. With quad faces the target face count is in quads, up to 200000; the exported GLB holds only triangles, and each quad comes to about 2.2 triangles (from one sample: a real run on 2026-11-13 turned 10000 quads into about 21,800 triangles). A purpose's triangle budget is counted with this ratio.",
             "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。": "The default is triangles: Meshy 8K textures don't support quad faces.",
             "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。": "The recommended default is the 2,000,000 ceiling; quad faces allow at most 200,000. When no count is given, the default is brought into the range of the current topology; when the session purpose sets a face budget, steps started by the Agent take a value within it.",
             "默认建议为上限 300000；需要控制面数时用独立的重拓扑。": "The default is the 300000 upper limit; use a separate remesh when you need to control the face count.",
@@ -37414,7 +37414,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/text-to-3d",
-      "revision": "2026-11-12.279.1",
+      "revision": "2026-11-16.304.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -37462,6 +37462,14 @@
       "asset_hosts": [
         "file.hyper3d.com"
       ],
+      "output_triangles": {
+        "count_parameter": "quality_override",
+        "topology_parameter": "mesh_mode",
+        "triangles_per_face": {
+          "Raw": 1,
+          "Quad": 2.2
+        }
+      },
       "provider_options": {
         "endpoint": "rodin",
         "observe_endpoint": "status",
@@ -37545,7 +37553,7 @@
               "label": "四边面 (Quad)"
             }
           ],
-          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。",
+          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面约折合 2.2 个三角面（来自一个样本：2026-11-13 的一次真实运行，10000 个四边面实得约 21,800 个三角面）。用途的三角面预算按这个比例换算。",
           "presentation": {
             "surface": "readonly",
             "control": "select"
@@ -37679,7 +37687,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/image-to-3d",
-      "revision": "2026-11-12.279.1",
+      "revision": "2026-11-16.304.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -37726,6 +37734,14 @@
       "asset_hosts": [
         "file.hyper3d.com"
       ],
+      "output_triangles": {
+        "count_parameter": "quality_override",
+        "topology_parameter": "mesh_mode",
+        "triangles_per_face": {
+          "Raw": 1,
+          "Quad": 2.2
+        }
+      },
       "provider_options": {
         "endpoint": "rodin",
         "observe_endpoint": "status",
@@ -37829,7 +37845,7 @@
               "label": "四边面 (Quad)"
             }
           ],
-          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面拆成两个，三角面数约为所选面数的两倍。",
+          "description": "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面约折合 2.2 个三角面（来自一个样本：2026-11-13 的一次真实运行，10000 个四边面实得约 21,800 个三角面）。用途的三角面预算按这个比例换算。",
           "presentation": {
             "surface": "readonly",
             "control": "select"

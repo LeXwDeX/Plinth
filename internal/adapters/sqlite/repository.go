@@ -400,6 +400,9 @@ var chatSessionPreferencesMigration string
 //go:embed migrations/0092_attempt_notices.sql
 var attemptNoticesMigration string
 
+//go:embed migrations/0093_claim_same_bytes.sql
+var claimSameBytesMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -483,7 +486,8 @@ func migrations() []migration {
 		migration{version: 89, name: "projects", sql: projectsMigration},
 		migration{version: 90, name: "chat_session_project", sql: chatSessionProjectMigration},
 		migration{version: 91, name: "chat_session_preferences", sql: chatSessionPreferencesMigration},
-		migration{version: 92, name: "attempt_notices", sql: attemptNoticesMigration})
+		migration{version: 92, name: "attempt_notices", sql: attemptNoticesMigration},
+		migration{version: 93, name: "claim_same_bytes", sql: claimSameBytesMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -491,8 +495,9 @@ func migrations() []migration {
 // explicit 2D model lock (#239), 86 the visual anchors (#250), 87 the persisted
 // 3D self-check records (#246), 88 the correction ownership of a paid step
 // (#246), 89 the project assets, 90 the session's project/style source
-// (#240), 91 the session preference records (#241) and 92 the notices a
-// completion observation carries (#284).
+// (#240), 91 the session preference records (#241), 92 the notices a
+// completion observation carries (#284) and 93 the claims a Provider declares
+// byte-identical (#300).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))
@@ -2644,7 +2649,7 @@ func loadClaims(
 	attemptID generation.AttemptID,
 ) ([]generation.ArtifactClaim, error) {
 	rows, err := queryer.QueryContext(ctx, `
-		SELECT claim_id, role, variant, locator, inline_data, media_type, expires_at, metadata_json, stored_asset_json
+		SELECT claim_id, role, variant, locator, inline_data, media_type, expires_at, metadata_json, stored_asset_json, same_bytes_as
 		FROM generation_artifact_claims
 		WHERE attempt_id = ?
 		ORDER BY claim_id ASC`,
@@ -2671,6 +2676,7 @@ func loadClaims(
 			&expiresAt,
 			&metadata,
 			&storedAsset,
+			&claim.SameBytesAs,
 		); err != nil {
 			return nil, err
 		}
@@ -2821,8 +2827,8 @@ func insertClaim(
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO generation_artifact_claims (
-			attempt_id, claim_id, role, variant, locator, inline_data, media_type, expires_at, metadata_json, stored_asset_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			attempt_id, claim_id, role, variant, locator, inline_data, media_type, expires_at, metadata_json, stored_asset_json, same_bytes_as
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		attemptID,
 		claim.ID,
 		claim.Role,
@@ -2833,6 +2839,7 @@ func insertClaim(
 		nullTimePointer(claim.ExpiresAt),
 		nullBytes(claim.Metadata),
 		storedAsset,
+		claim.SameBytesAs,
 	)
 	return err
 }
