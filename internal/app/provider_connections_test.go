@@ -378,6 +378,9 @@ type acmeHarness struct {
 	repository *sqlite.Repository
 	clock      *fakeAcmeClock
 	settings   map[string]string
+	// databasePath is the SQLite file the harness runs on (the diagnostics
+	// export reads it, #234).
+	databasePath string
 }
 
 func newAcmeHarness(
@@ -399,7 +402,8 @@ func newAcmeHarnessWithTransport(
 ) *acmeHarness {
 	t.Helper()
 	root := t.TempDir()
-	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
+	databasePath := filepath.Join(root, "test.db")
+	repository, err := sqlitetest.Open(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +443,7 @@ func newAcmeHarnessWithTransport(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = module.Close() })
-	return &acmeHarness{module: module, repository: repository, clock: clock, settings: settings}
+	return &acmeHarness{module: module, repository: repository, clock: clock, settings: settings, databasePath: databasePath}
 }
 
 func (h *acmeHarness) submitApproved(t *testing.T, capability generation.Capability, offering generation.OfferingID, input json.RawMessage, key string) generation.Accepted {

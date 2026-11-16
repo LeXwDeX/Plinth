@@ -1,4 +1,4 @@
-package wirefixture
+package wirecapture
 
 import (
 	"encoding/json"
@@ -107,7 +107,8 @@ func publicExtension(rawPath string) string {
 	return ""
 }
 
-func queryKeysAllowed(rawQuery string, registered map[string]bool) bool {
+// QueryKeysAllowed reports whether every query parameter name is registered.
+func QueryKeysAllowed(rawQuery string, registered map[string]bool) bool {
 	values, err := url.ParseQuery(rawQuery)
 	if err != nil {
 		return false
@@ -120,9 +121,9 @@ func queryKeysAllowed(rawQuery string, registered map[string]bool) bool {
 	return true
 }
 
-// publicQueryKeys returns the registered query keys without their values.
+// PublicQueryKeys returns the registered query keys without their values.
 // Values are never copied into an Exchange.
-func publicQueryKeys(parsed *url.URL, policy Policy) (keys []string, valid bool) {
+func PublicQueryKeys(parsed *url.URL, policy Policy) (keys []string, valid bool) {
 	if parsed == nil || parsed.User != nil {
 		return nil, false
 	}
@@ -143,9 +144,9 @@ func publicQueryKeys(parsed *url.URL, policy Policy) (keys []string, valid bool)
 	return keys, true
 }
 
-// publicRequestURL returns the public host and path recorded for a raw request
+// PublicRequestURL returns the public host and path recorded for a raw request
 // URL. Signed query values are used only for the lookup and are never returned.
-func publicRequestURL(policy Policy, scheme, host, rawPath, rawQuery string) (string, string, bool) {
+func PublicRequestURL(policy Policy, scheme, host, rawPath, rawQuery string) (string, string, bool) {
 	if policy.projector == nil {
 		return "", "", false
 	}

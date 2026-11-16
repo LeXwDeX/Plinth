@@ -1,4 +1,4 @@
-package wirefixture
+package wirecapture
 
 import (
 	"net/netip"

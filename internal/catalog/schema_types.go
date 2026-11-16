@@ -30,6 +30,9 @@ type ApplicationSchema struct {
 	// environment contract of chat model connections (#322). Optional so
 	// older external Catalog documents stay valid.
 	LLMSettings *LLMSettingsSchema `json:"llm_settings,omitempty"`
+	// Diagnostics is the administrator's read-only runtime view (#233). Server
+	// side only and optional, like LLMSettings.
+	Diagnostics *DiagnosticsSchema `json:"diagnostics,omitempty"`
 	Revision    string             `json:"revision"`
 	// Terminology declares the user-facing words for one concept and the
 	// aliases Catalog loading rejects. Server-side only: the browser consumes
@@ -6818,11 +6821,28 @@ type FrontendRuntimeSchema struct {
 	// ChatMessagePageSize is how many messages the chat column reads when it
 	// opens a conversation and each time the person asks for earlier ones.
 	ChatMessagePageSize int `json:"chat_message_page_size"`
+	// SessionReadRetry bounds how the page reads a chat session's chat model
+	// and thinking level again after a failed read (#314).
+	SessionReadRetry SessionReadRetrySchema `json:"session_read_retry"`
 	// RetiredGenerationModels maps a generation model that is no longer
 	// offered to the model that replaces it (#329). A workspace whose saved
 	// or restored pick is a retired model switches to the successor and says
 	// so; frozen tasks keep the model they ran with.
 	RetiredGenerationModels []RetiredGenerationModel `json:"retired_generation_models,omitempty"`
+}
+
+// SessionReadRetrySchema is how the browser reads a chat session's chat model
+// and thinking level again after a failed read (429, 5xx, network): at most
+// MaxRetries more reads, waiting exponentially from InitialDelayMilliseconds up
+// to MaxBackoffMilliseconds, never shorter than the server's Retry-After, which
+// is itself capped at MaxRetryAfterMilliseconds. Past MaxRetries the page waits
+// for the person (a retry button), the window regaining focus or the network
+// coming back, so a persistent failure cannot keep requesting.
+type SessionReadRetrySchema struct {
+	MaxRetries                int `json:"max_retries"`
+	InitialDelayMilliseconds  int `json:"initial_delay_milliseconds"`
+	MaxBackoffMilliseconds    int `json:"max_backoff_milliseconds"`
+	MaxRetryAfterMilliseconds int `json:"max_retry_after_milliseconds"`
 }
 
 // RetiredGenerationModel is one retired provider model and its successor.

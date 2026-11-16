@@ -66,7 +66,10 @@ type Config struct {
 	AgentConfiguration *agentconfiguration.Service
 	// LLMSettings is the administrator's LLM settings (#322); nil leaves
 	// its routes unregistered.
-	LLMSettings        *llmsettings.Service
+	LLMSettings *llmsettings.Service
+	// UpstreamCapture feeds the administrator's diagnostics view (#233); nil
+	// reports the capture as off.
+	UpstreamCapture    UpstreamCaptureStatus
 	MCP                *mcp.Service
 	AccountInputAssets AccountInputAssetLister
 	Readiness          func(context.Context) error
@@ -194,6 +197,7 @@ type Server struct {
 	harness                           *resolve.Service
 	agentConfiguration                *agentconfiguration.Service
 	llmSettings                       *llmsettings.Service
+	upstreamCapture                   UpstreamCaptureStatus
 	mcp                               *mcp.Service
 	accountInputAssets                AccountInputAssetLister
 	readiness                         func(context.Context) error
@@ -426,6 +430,7 @@ func New(config Config) (*Server, error) {
 		authentication:            config.Authentication,
 		agentConfiguration:        config.AgentConfiguration,
 		llmSettings:               config.LLMSettings,
+		upstreamCapture:           config.UpstreamCapture,
 		mcp:                       config.MCP,
 		accountInputAssets:        config.AccountInputAssets,
 		administration:            config.Administration,
@@ -583,6 +588,7 @@ func (s *Server) routes() {
 	)
 	s.registerAgentConfigurationContracts()
 	s.registerLLMSettingsContracts()
+	s.registerDiagnosticsContract()
 	s.registerMCPContract()
 	s.registerAccountResourcesContracts()
 	s.registerAdministrationUserContracts()

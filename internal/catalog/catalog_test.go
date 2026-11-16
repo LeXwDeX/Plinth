@@ -323,6 +323,7 @@ const minimalApplication = `"application":{
 			"session_title_refresh_attempts":6,
 			"session_title_refresh_interval_milliseconds":2000,
 			"chat_message_page_size":50,
+			"session_read_retry":{"max_retries":4,"initial_delay_milliseconds":1000,"max_backoff_milliseconds":15000,"max_retry_after_milliseconds":120000},
 			"display_locale":"zh-CN",
 			"task_api_prefix":"",
 			"spinner_frame_milliseconds":80,

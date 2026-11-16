@@ -1,4 +1,4 @@
-package wirefixture
+package wirecapture
 
 import (
 	"bufio"
@@ -15,7 +15,9 @@ import (
 // chunks are aggregated by choice and tool-call index; split fields are joined,
 // validated and sanitized as one value, then written once in the last original
 // fragment. Other chunk fields and the chunk order remain unchanged.
-func sseFramed(raw []byte) bool {
+
+// SSEFramed reports whether raw reached a complete SSE boundary.
+func SSEFramed(raw []byte) bool {
 	_, err := parseSSE(raw)
 	if err == nil {
 		return true

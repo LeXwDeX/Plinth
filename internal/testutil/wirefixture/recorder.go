@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"strings"
 	"sync"
@@ -33,7 +32,7 @@ func (r *Recorder) roundTrip(connection string, base http.RoundTripper, request 
 	}
 	clone := request.Clone(request.Context())
 	if request.Body != nil && request.Body != http.NoBody {
-		state.request = newCaptureBody(request.Body, r.Policy.limit(), state.requestDone, func(raw []byte, eof bool) bool {
+		state.request = newCaptureBody(request.Body, r.Policy.Limit(), state.requestDone, func(raw []byte, eof bool) bool {
 			return completeBody(raw, request.ContentLength, request.Header.Get("Content-Type"), request.Method, 0, eof)
 		}, request.Context(), request.ContentLength, jsonContent(request.Header.Get("Content-Type")))
 		clone.Body = state.request
@@ -59,7 +58,7 @@ func (r *Recorder) roundTrip(connection string, base http.RoundTripper, request 
 	if response.Body == nil {
 		state.responseDone(nil, true)
 	} else {
-		response.Body = newCaptureBody(response.Body, r.Policy.limit(), state.responseDone, func(raw []byte, eof bool) bool {
+		response.Body = newCaptureBody(response.Body, r.Policy.Limit(), state.responseDone, func(raw []byte, eof bool) bool {
 			return completeBody(raw, response.ContentLength, response.Header.Get("Content-Type"), request.Method, response.StatusCode, eof)
 		}, request.Context(), response.ContentLength, jsonContent(response.Header.Get("Content-Type")))
 	}
@@ -160,7 +159,7 @@ func (c *capture) finish() {
 	var invalid []string
 	method := strings.ToUpper(c.method)
 	request := Request{Complete: reqDone && !reqIncomplete}
-	if !methods[method] {
+	if !isMethod(method) {
 		invalid = append(invalid, "request method is not registered")
 		request.Complete = false
 	} else {
@@ -256,7 +255,7 @@ func (c *capture) finish() {
 	} else {
 		response.Headers = headers
 	}
-	if response.Complete && !c.emptyResponse && supportedMediaTypes[response.ContentType] {
+	if response.Complete && !c.emptyResponse && supportedMediaType(response.ContentType) {
 		if c.media != nil {
 			if c.media.MediaType != response.ContentType {
 				invalid = append(invalid, "response media type mismatch")
@@ -350,23 +349,6 @@ func (c *capture) storeResponseMedia(mediaType string, raw []byte, response *Res
 	return nil
 }
 
-func contentBase(raw string) (string, error) {
-	if raw == "" {
-		return "", nil
-	}
-	base, _, err := mime.ParseMediaType(strings.TrimSpace(raw))
-	if err != nil {
-		return "", fmt.Errorf("%w: malformed content type", ErrUnsupportedBody)
-	}
-	if err := checkText(base, false); err != nil {
-		return "", err
-	}
-	if _, err := payloadKind(base); err != nil {
-		return "", err
-	}
-	return base, nil
-}
-
 func completeBody(raw []byte, contentLength int64, contentType, method string, status int, eof bool) bool {
 	if status >= 300 && status < 400 {
 		return false
@@ -386,21 +368,6 @@ func completeBody(raw []byte, contentLength int64, contentType, method string, s
 func jsonContent(contentType string) bool {
 	kind, _ := payloadKind(contentType)
 	return kind == PayloadJSON
-}
-
-func protocolFor(contentType string) string {
-	switch kind, _ := payloadKind(contentType); kind {
-	case PayloadJSON:
-		return "json"
-	case PayloadSSE:
-		return "sse"
-	case PayloadMultipart:
-		return "multipart"
-	case PayloadMedia:
-		return "media"
-	default:
-		return "none"
-	}
 }
 
 type captureBody struct {

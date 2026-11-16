@@ -15,4 +15,6 @@
 - `generation/`：任务生成业务流程，只消费 catalog 声明，不内嵌产品内容。
 - `transport/`：HTTP 传输层（handler/路由），不得内嵌业务分支或产品文本。
 - `adapters/` 与 `providers/`：上游 Provider 协议接入，参数/校验/路由声明来自 Offering，代码只做协议解析与调用。
+- `wirecapture/`：上游 HTTP 交换的脱敏、`Validate` 与可选落盘录制（#233）；只依赖标准库，可被正式程序链接，由 `app/` 在装配期包裹连接的 transport，`providers/` 与 `agents/` 不引用它。`testutil/wirefixture` 在其上构建测试侧捕获与回放，不复制规则；`wirecapture/privacyscan` 是独立的第二道隐私扫描。
+- `diagbundle/`：`art-ai diagnose` 的诊断包（#234）：只读地汇集运行信息、Catalog 声明的设置名称、失败任务摘要、日志与 #233 录制，自由文本经 `Scrubber` 逐值脱敏、整包按最终字节再过 `wirecapture/privacyscan`，命中即拒绝写文件。不依赖 `app/`，不写库、不改日志与录制目录；设置名单取自 Catalog，不另抄；`cmd/art-ai` 只分发子命令，来源解析在 `app/diagnose.go`。
 - 依赖方向保持单向：transport → 业务（generation 等）→ adapters/providers → 上游；catalog 被各层消费，不反向依赖业务模块。

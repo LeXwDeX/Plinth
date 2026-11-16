@@ -22,6 +22,9 @@ func validateApplication(schema ApplicationSchema) error {
 	if err := validateLLMSettings(schema); err != nil {
 		return err
 	}
+	if err := validateDiagnostics(schema); err != nil {
+		return err
+	}
 	if strings.TrimSpace(schema.Revision) == "" {
 		return errors.New("revision 不能为空")
 	}

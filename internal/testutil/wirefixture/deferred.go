@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/LeXwDeX/Plinth/internal/wirecapture"
 )
 
 var (
@@ -117,9 +119,7 @@ func (r *Recorder) Finalize(policy Policy) error {
 		d.failLocked(fmt.Errorf("%w: %v", ErrInvalidExchange, err))
 		return d.err
 	}
-	if len(policy.Projection) > 0 {
-		policy.projector = newProjector()
-	}
+	policy = policy.WithProjection()
 	// A private ordinary Recorder reuses finish and AssertComplete, including
 	// strict JSON/SSE, metadata, header and multipart validation. No disk sink.
 	validated := &Recorder{Policy: policy, nextSeq: successes, Evidence: d.store}
@@ -129,7 +129,7 @@ func (r *Recorder) Finalize(policy Policy) error {
 		if c.retryableFailed || c.discarded {
 			continue
 		}
-		if int64(len(c.reqRaw)) > policy.limit() || int64(len(c.respRaw)) > policy.limit() {
+		if int64(len(c.reqRaw)) > policy.Limit() || int64(len(c.respRaw)) > policy.Limit() {
 			d.failLocked(ErrCaptureLimit)
 			return d.err
 		}
@@ -211,10 +211,10 @@ func (d *deferredCapture) reserveLocked(n int64) bool {
 
 // Only headers used by finish are copied. Count slots too, so arbitrarily many
 // empty header values cannot bypass the byte budget.
-func (d *deferredCapture) headersLocked(headers http.Header, allow map[string]bool) http.Header {
+func (d *deferredCapture) headersLocked(headers http.Header, request bool) http.Header {
 	out := http.Header{}
 	for name, values := range headers {
-		if !allow[strings.ToLower(strings.TrimSpace(name))] {
+		if !wirecapture.AllowedHeader(request, name) {
 			continue
 		}
 		n := int64(len(name)) + 32
@@ -272,7 +272,7 @@ func (d *deferredCapture) start(r *Recorder, connection string, req *http.Reques
 		*field = strings.Clone(*field)
 	}
 	meta.Provenance = Provenance(strings.Clone(string(meta.Provenance)))
-	headers := d.headersLocked(req.Header, requestHeaders)
+	headers := d.headersLocked(req.Header, true)
 	if d.err != nil {
 		return 0
 	}
@@ -380,7 +380,7 @@ func (d *deferredCapture) roundTrip(r *Recorder, connection string, base http.Ro
 	mediaType := baseMedia(resp.Header.Get("Content-Type"))
 	emptyResponse := req.Method == http.MethodHead || resp.StatusCode == http.StatusNoContent ||
 		resp.StatusCode == http.StatusNotModified || resp.Body == nil || resp.Body == http.NoBody
-	spoolMedia := supportedMediaTypes[mediaType] && !emptyResponse
+	spoolMedia := supportedMediaType(mediaType) && !emptyResponse
 	var sink *PrivateSink
 	if spoolMedia {
 		if d.store == nil {
@@ -406,7 +406,7 @@ func (d *deferredCapture) roundTrip(r *Recorder, connection string, base http.Ro
 		}
 		return resp, nil
 	}
-	headers := d.headersLocked(resp.Header, responseHeaders)
+	headers := d.headersLocked(resp.Header, false)
 	if d.err != nil {
 		if sink != nil {
 			sink.Abort()

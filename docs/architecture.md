@@ -53,7 +53,7 @@ App 为闭合 `local-recovery` 协议注入回执与资产读取端口，live/mo
 
 延迟模式另从已验证的 candidate 构造无 Aliases 的 `replay-policy.json`：只复制预登记的公开 Keys/Allowed，再收集公开 payload、路径与保留头内已通过定稿校验的终端字符串/数字，重新 `Validate`；不从 raw 推导 Allowed，不导出原清单或私有最终策略。该策略最多 1 MiB，在 `NewPrivateStore` 复核隔离目录后经 `os.Root` 以 0600 独占创建；先写策略，再由既有 `WriteCandidate` 写 `candidate.json`，候选写入失败时删除本次新建策略，已有文件不覆盖。普通测试跳过交互入口，离线测试经过实际 prepare/assemble、HTTP 连接探测、正常 Run 停机及无网络回放；JSON 200 与 SSE 500 交互均是合成数据，SSE 用错误路径完整读取，不证明成功流式对话。真实浏览器、真实上游 corpus 和完整采集流程仍未验收。操作和限制见 `scripts/smoke/README.md`「Opt-In Wire Capture」。
 
-`internal/testutil/wirefixture` 是测试辅助包。它对 HTTP 请求和响应制作受限副本，不改变业务响应、请求重试或任务终态。JSON 字段、字符串与数字须显式登记；布尔值和 null 按结构保留。所有字段先检查 `Policy.Keys`，未知凭据字段也拒绝；只有已登记的凭据字段才脱敏。已登记文本与别名目标仍须通过凭据、地址与嵌套内容检查；别名链拒绝，递归有界。OpenAI 风格 SSE 的 delta 仅支持 `role`、`content`、`reasoning_content` 与 `tool_calls`，其他 delta 字段即使登记也拒绝。内容、推理与工具 ID/名称/参数按 choice/tool 索引合并后检查，再输出标有 `normalized_sse` 的规范化流，不声称保留原始分片。回放严格匹配顺序、方法、公开主机别名、路径、允许保留的头和正文，未匹配请求直接失败，没有网络回退。头的范围固定为 Content-Type、请求 Accept/X-API-Version 与响应 Retry-After，其他头不参与回放契约。
+`internal/testutil/wirefixture` 是测试辅助包。脱敏器（`Sanitize*`、`Validate`、合成媒体与 multipart 解析、草稿推导、上游记录器）自 #233 起实现在可被正式程序链接的 `internal/wirecapture`（见 §3「可选的上游调用脱敏录制」），`wirefixture` 在其上构建测试侧的 `Recorder`、延迟采集、`Replay` 与私有媒体证据，并以类型别名和同名函数重新导出共用部分，两处是同一份规则、没有第二份副本。它对 HTTP 请求和响应制作受限副本，不改变业务响应、请求重试或任务终态。JSON 字段、字符串与数字须显式登记；布尔值和 null 按结构保留。所有字段先检查 `Policy.Keys`，未知凭据字段也拒绝；只有已登记的凭据字段才脱敏。已登记文本与别名目标仍须通过凭据、地址与嵌套内容检查；别名链拒绝，递归有界。OpenAI 风格 SSE 的 delta 仅支持 `role`、`content`、`reasoning_content` 与 `tool_calls`，其他 delta 字段即使登记也拒绝。内容、推理与工具 ID/名称/参数按 choice/tool 索引合并后检查，再输出标有 `normalized_sse` 的规范化流，不声称保留原始分片。回放严格匹配顺序、方法、公开主机别名、路径、允许保留的头和正文，未匹配请求直接失败，没有网络回退。头的范围固定为 Content-Type、请求 Accept/X-API-Version 与响应 Retry-After，其他头不参与回放契约。
 
 普通 `Recorder` 保持即时脱敏模式，JSON body 的 `Close` 仍可能按既有上限补读排空。仅显式 `NewDeferredRecorder(metadata, DeferredLimits)` 启用延迟模式：在请求进入时分配序号，只观察调用者的 `Read`，不预读、不在 `Close` 补读，不调用或改写 `GetBody`，URL、ContentLength 和底层 Read/Close/transport 错误保持透传。`MaxBytes` 和 `MaxExchanges` 必须为正；前者合计在途与已完成 pending 的 body 缓冲容量及复制的路径、主机、固定保留头和元数据，后者限制整轮交互数量（也限制在途数量和取消注册）。每个 body 另限 8 MiB，读取时先检查预算再保留副本；预算不是进程 RSS 上限，不含业务原文、分配器开销和定稿时 sanitizer 临时对象。
 
@@ -114,7 +114,7 @@ UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage
 - 覆盖仅限已提交样本：缺真实样本的 Offering 在矩阵里是 `missing`，不能把这套回放当作对它们的验收。采集仍须在干净工作树、按 `scripts/smoke/README.md` 的流程和付费次数规则执行，candidate 进入仓库前还要人工复核隐私与来源。
 - 这些测试未经过部署验收；它们随 `go test` 在本机和 CI 离线运行，不访问上游、不需要 Key、不产生费用。
 
-**可选上游记录与样本草稿（#220）。** `wirefixture.UpstreamRecorder` 是包裹 Provider HTTP transport 的可选记录器，只在测试工具中可用：它位于 `internal/testutil`，生产二进制不链接（见下文 `TestProductionBinariesDoNotLinkAnyTestutilPackage`），因此生产栈没有开关、也不会产生记录。目前接入点是 `fake-upstream-align official`；测试二进制可直接用 `Wrap(connection, base)` 包裹选定连接。开启须同时设置 `ART_AI_UPSTREAM_RECORD_DIR`（工作树外已存在的 0700 目录）与 `ART_AI_UPSTREAM_RECORD_ACK=1`，缺省关闭；只设一个、目录不是 0700 或位于工作树内、环境标签（`ART_AI_UPSTREAM_RECORD_ENVIRONMENT` 或调用方元数据）缺失或含 `prod`/`formal`/`release`/`live`、缺少 app/Catalog revision 时一律拒绝启动。业务请求、响应字节和错误原样透传；记录器只观察调用方的读取，不预读、不改 `GetBody`。每次交换在响应读完后，按原始字节在内存中推导一份私有策略（登记全部 JSON 键和数字；提示词类字段、超过 128 字节的文本、嵌套 JSON 与未通过 `checkText` 的值替换为 `[redacted]`；整条 URL 替换为固定的 `example.test` URL；不透明 ID 换成跨交换稳定的 `id-N`；主机换成 `example.test`），再交给既有 sanitizer 与 `Validate`；该策略的 Aliases 以原值为键，只在内存中使用，不落盘。落盘的只有脱敏后的 `Exchange` 和 query 键名（不含值），每次交换一个 0600 文件，独占创建、不跟随符号链接。认证头及回放头集合以外的头不保留；媒体响应只计字节数，multipart 文件与二进制响应改为固定合成 recipe（provenance 记为 `derived`）。超过单体上限（默认 8 MiB）、未读完、传输失败、3xx 或 sanitizer 拒绝的交换只写不含值的固定原因。`fake-upstream-align draft -records DIR -out DIR -name STEM [-connection C] [-offering O]` 只读本地记录、不发请求，把记录重新编号后写成与已提交样本同格式的 `<name>.candidate.json`、`.policy.json`（只登记脱敏后出现的键和终端值，无 Aliases）和 `.meta.json`，输出目录同样须是工作树外的 0700 目录，禁止覆盖。离线回归（`upstream_record_test.go`）覆盖默认关闭、半开与生产标签拒绝、文件权限、凭据/认证头/签名 query/提示词/媒体字节不落盘，并用与 `TestCommittedWireCorpusHasNoPrivateData` 相同的加载器和独立扫描检查草稿。草稿只是起点：脱敏有损（提示词、错误消息、URL 都是占位符），提交前仍须人工复核，并按需改用 `export` 的逐 Profile 策略。
+**可选上游记录与样本草稿（#220；#233 起记录器本体在 `internal/wirecapture`）。** `UpstreamRecorder` 是包裹 Provider HTTP transport 的可选记录器，实现在 `internal/wirecapture`，`wirefixture.UpstreamRecorder` 是它的别名。本段描述它的测试工具入口 `NewUpstreamRecorder` / `wirefixture.UpstreamRecorderFromEnv`（双开关、工作树外目录、非生产标签、保留全部记录）；正式程序的入口是 `NewRuntimeRecorder`，由运行设置 `UPSTREAM_CAPTURE_DIR` 打开、带 0700 目录与轮转上限和更严的脱敏档位，见 §3「可选的上游调用脱敏录制」。两个入口共用同一条脱敏管线与记录格式，所以应用写出的目录也能被 `draft` 直接读取。测试工具的接入点是 `fake-upstream-align official`；测试二进制可直接用 `Wrap(connection, base)` 包裹选定连接，生产二进制不链接 `internal/testutil`（见下文 `TestProductionBinariesDoNotLinkAnyTestutilPackage`）。开启须同时设置 `ART_AI_UPSTREAM_RECORD_DIR`（工作树外已存在的 0700 目录）与 `ART_AI_UPSTREAM_RECORD_ACK=1`，缺省关闭；只设一个、目录不是 0700 或位于工作树内、环境标签（`ART_AI_UPSTREAM_RECORD_ENVIRONMENT` 或调用方元数据）缺失或含 `prod`/`formal`/`release`/`live`、缺少 app/Catalog revision 时一律拒绝启动。业务请求、响应字节和错误原样透传；记录器只观察调用方的读取，不预读、不改 `GetBody`。每次交换在响应读完后，按原始字节在内存中推导一份私有策略（登记全部 JSON 键和数字；提示词类字段、超过 128 字节的文本、嵌套 JSON 与未通过 `checkText` 的值替换为 `[redacted]`；整条 URL 替换为固定的 `example.test` URL；不透明 ID 换成跨交换稳定的 `id-N`；主机换成 `example.test`），再交给既有 sanitizer 与 `Validate`；该策略的 Aliases 以原值为键，只在内存中使用，不落盘。落盘的只有脱敏后的 `Exchange` 和 query 键名（不含值），每次交换一个 0600 文件，独占创建、不跟随符号链接。认证头及回放头集合以外的头不保留；媒体响应只计字节数，multipart 文件与二进制响应改为固定合成 recipe（provenance 记为 `derived`）。超过单体上限（默认 8 MiB）、未读完、传输失败、3xx 或 sanitizer 拒绝的交换只写不含值的固定原因。`fake-upstream-align draft -records DIR -out DIR -name STEM [-connection C] [-offering O]` 只读本地记录、不发请求，把记录重新编号后写成与已提交样本同格式的 `<name>.candidate.json`、`.policy.json`（只登记脱敏后出现的键和终端值，无 Aliases）和 `.meta.json`，输出目录同样须是工作树外的 0700 目录，禁止覆盖。离线回归（`upstream_record_test.go`）覆盖默认关闭、半开与生产标签拒绝、文件权限、凭据/认证头/签名 query/提示词/媒体字节不落盘，并用与 `TestCommittedWireCorpusHasNoPrivateData` 相同的加载器和独立扫描检查草稿。草稿只是起点：脱敏有损（提示词、错误消息、URL 都是占位符），提交前仍须人工复核，并按需改用 `export` 的逐 Profile 策略。
 
 流程：用户当次同意真实调用（`AGENTS.md`「上游接口与 Fake」）→ 设置上述开关后运行 `fake-upstream-align official` → `draft` 生成样本草稿 → 人工复核后放入对应版本的 `testdata/`，依样本修正 fake 的响应结构、状态机与错误码 → 补基于 fake 的回归测试，并运行 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 更新覆盖矩阵。真实上游上的完整录制尚未验收，目前只有离线合成数据的回归。
 
@@ -280,6 +280,8 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/scene` / `canvas` / `capture` / `rendermanifest` | 对象表示、会话画布、截图来源和渲染清单；编辑与生成是不同操作 |
 | `internal/administration` / `cachemanagement` | 管理业务、审计与缓存观察；遵守权限和只读事实边界 |
 | `internal/promptenhance` / `legacythumbnail` | 独立的提示增强、受控历史缩略图服务；不是第二 Task 写入者 |
+| `internal/wirecapture` / `wirecapture/privacyscan` | 上游 HTTP 交换的脱敏、校验与可选落盘录制（#233）：sanitizer、`Validate`、草稿推导、`UpstreamRecorder` 与独立隐私扫描；只依赖标准库，由 `internal/app` 在装配期包裹各连接的 transport，测试侧的 `internal/testutil/wirefixture` 复用同一份规则；不读写公开任务事实 |
+| `internal/diagbundle` | `art-ai diagnose`（#234）的诊断包：从运行信息、Catalog 声明的设置名称、失败任务摘要、日志与 #233 录制组装 tar.gz；自由文本逐值脱敏、整包按最终字节再过独立隐私扫描；只读，不推进任务，不写库；由 `internal/app` 解析来源并调用，`cmd/art-ai` 只做子命令分发 |
 | `internal/adapters` | SQLite、历史读取等端口实现；`catalogrecipes` 将声明映射成 SkillRun 执行配方 |
 | `internal/adapters/sqlite` | migration 0042 为个人 Skill 建立 owner 索引和持久存储；#152 的更新只改 `skill_json`，不改 ID、`created_at` 与列表排序，也不消耗创建配额；不把个人内容写入共享 Agent Configuration 版本 |
 | `internal/adapters/mcphttp` / `mcpworkspace` / `mcpagent` | MCP JSON-RPC 传输 / 当前会话公开 Offering、Task、Asset 读取 / 对话工具执行组合 |
@@ -691,6 +693,78 @@ Generation 通过 `AssetFidelityChecker` 端口在初次物化、StoredAsset 引
 管理员修改的保底检查在 `BEGIN IMMEDIATE` 后执行，并与用户修改共用事务。
 跨连接操作不能分别通过旧人数快照。管理员独立审计写入不在该事务内。
 这两类修复使用现有 SQLite 表和仓储端口，没有新建状态服务。
+
+### 可选的上游调用脱敏录制（#233；源码已实现，本机测试与对着 fake 栈的测试通过，未部署验收）
+
+**要解决的问题。** 自行部署的使用方出问题时，需要拿得出上游的结构证据来完善 fake。DEBUG 日志只有启动标记，`internal/providers` 不记录上游请求与响应；#230 的录制器原先在 `internal/testutil/wirefixture`，正式程序不能链接（`TestProductionBinariesDoNotLinkAnyTestutilPackage`）。#233 把脱敏器与录制器核心移到 `internal/wirecapture`，让正式程序按运行设置可选开启。默认关闭；关闭时不包裹任何 transport、不创建目录、不写文件。它既不是审计，也不是任务事实的来源：不改变业务响应、请求重试或任务终态，记录失败只计数并告警，不影响业务请求。
+
+**包与职责。**
+
+- `internal/wirecapture` 只依赖标准库，不依赖任何业务包：公开类型（`Exchange`、`Policy`……）、sanitizer（`SanitizeHost/Path/Headers/Body`、嵌套 JSON、SSE 规范化、百分号与十六进制地址等编码形式的检查）、`Validate`、固定合成媒体 recipe 与 multipart 解析、草稿推导（`draft.go`）、`UpstreamRecorder`（`Wrap`、`Status`）、记录目录（`record_store.go`）及读取（`ListUpstreamRecords`、`ReadUpstreamRecord`、`ParseUpstreamRecord`、`LoadUpstreamRecords`）、样本写出（`WriteCandidate`、`WriteDraftCandidate`）。
+- `internal/wirecapture/privacyscan` 是独立于 sanitizer 的第二道扫描，规则原在 `corpus_privacy_test.go`，现为可链接的包：`ScanExchanges`、`ScanPolicy`、`ScanJSON`、`ScanText`、`ScanRecord`、`ScanRecordDir`。finding 只含文件、JSON 路径与规则名，不含被匹配的值。已提交样本的 `TestCommittedWireCorpusHasNoPrivateData`、记录器自己的测试与 fake 栈测试用的是同一份规则。
+- `internal/testutil/wirefixture` 保留测试侧的 `Recorder`、延迟采集、`Replay`、私有媒体证据与 `ART_AI_UPSTREAM_RECORD_*` 双开关，并重新导出共用部分，不复制规则；`cmd/fake-upstream-align` 仍是测试工具，`draft` 直接读取应用写出的目录。
+- `internal/app` 是唯一的装配点：`newUpstreamCapture` 按配置建出记录器，`withUpstreamCapture` 把它接到每个连接的 transport 装饰器上。`internal/providers` 与 `internal/agents` 不知道它的存在，依赖方向不变（`internal/app` → `wirecapture`）。
+
+**数据流。** Adapter 的 HTTP 请求经 `wireHTTPClient` 构造的 `http.Client`（所有 Provider 连接与对话模型连接都经它；Tripo 匿名来源下载客户端经 `nativeSourceTransport`）→ 被 `UpstreamRecorder.Wrap` 包住的 transport（在连接原有装饰器之外，所以记录的是 Adapter 发出的请求，fake 形态的产物主机映射不影响它）→ 上游。记录器只观察调用方的读取，不预读、不改 `GetBody`。响应读完（或关闭）后，按原始字节在内存中推导一份私有策略，交给既有 sanitizer 与 `Validate`，写出一个 0600 文件；原始字节随即丢弃，策略的 Aliases 以原值为键，从不落盘。recorder 自身的 panic 被截住，不会冒到调用方的 `Read` 或 `Close`。
+
+**运行设置**（Schema `runtime.configuration.settings`，由 `internal/app/upstream_capture.go` 读取）：
+
+| 环境变量 | 设置名 | 默认 | 含义 |
+|---|---|---|---|
+| `UPSTREAM_CAPTURE_DIR` | `upstream_capture_directory` | 空（关闭） | 记录目录，须为绝对路径。不存在则以 0700 创建（含父目录），已存在的目录收紧为 0700；符号链接、非目录、不可写即拒绝启动。不得与 `STORAGE_ROOT`、`WEB_ASSETS_ROOT`、`LEGACY_GENERATED_IMAGES_ROOT`、`LOG_DIR` 相同、包含或位于其中（记录不能经静态资源被访问，也不能被资产维护扫到） |
+| `UPSTREAM_CAPTURE_MAX_RECORDS` | `upstream_capture_max_records` | 2000 | 目录中记录文件（含跳过标记）条数上限，1–100000 |
+| `UPSTREAM_CAPTURE_MAX_MEGABYTES` | `upstream_capture_max_megabytes` | 64 | 记录文件总字节上限，1–4096 |
+
+目录未设置时，两个上限变量被忽略；设置了目录而上限无效，或目录不可用，进程拒绝启动，不会出现"以为在录、其实没录"。单个 body 的缓冲上限是 1 MiB（常量），更大的交换只写不含值的跳过标记。超出任一上限时删除最旧的记录；进程重启时先把目录里已有的记录计入并立即套用上限（调小上限即时生效）。只有后缀为 `.exchange.json` 的常规文件会被计数或删除；旧文件删不掉时，超出上限一成（至少 16 条）后停止写入新记录，以免写满磁盘。
+
+**记录内容：只保留结构。** 管线与 #220 相同，运行时入口另加严格档：
+
+- 字符串只保留"单个短（≤64 字节）、无空白的枚举形 token"（状态词、错误码、模型名、格式名）；提示词类与自由文本类字段名（`prompt`、`text`、`content`、`message`、`name`、`title`、`msg`、`detail`、`subject`、`project`、`note`、`label`、`tag`、`filename` 等）下的值即使很短也替换为 `[redacted]`；整条 URL（含签名 query）、嵌套 JSON、超长文本和未通过 `checkText` 的值同样替换；`id`、`*_id`、`user_id` 等键下的数字写成 0；不透明 ID 换成跨交换稳定的 `id-N`；请求主机换成 `example.test`。
+- 请求的 query 只记键名，不记值；认证头及回放头集合（`Content-Type`、`Accept`、`X-API-Version`、`Retry-After`）以外的头一律不保留；媒体响应与 multipart 文件只记字节数，替换为固定合成 recipe（provenance 记为 `derived`）；`binary/octet-stream` 与 `application/binary`（Tripo CDN 对所有文件如此返回）按 `application/octet-stream` 读；接受 `http` 上游（自托管服务与 fake 上游不走 https）。
+- 响应体在调用方读到 EOF、或关闭前已按声明长度收齐、或是完整的 JSON 文档、或已见 SSE 的 `[DONE]`（对话适配器读到 `[DONE]` 就停）时算完整；调用方中途放弃的流不算。3xx、传输错误、未读完、超过单体上限和 sanitizer 拒绝的交换只写一个跳过标记：固定原因（`transport-error`、`incomplete-body`、`body-over-limit`、`unsupported-body`、`sanitizer-refused`、`redirect`）、连接 ID、已注册的 method 与状态码，没有任何值。
+- 残余风险：用户在一个未列入上述字段名、又恰好是单个短 token 的位置写下的词，仍会被当作枚举形 token 保留；所以记录目录按受保护文件处理（0700/0600），外发前用 `privacyscan.ScanRecordDir` 复扫。
+
+**记录格式与读取接口。** 文件名 `<UTC 时间>-<序号>.exchange.json`（定宽，名字顺序即时间顺序），先写 `.tmp` 再改名，崩溃不会留下写了一半的记录，`.tmp` 在下次启动时清理。内容是 `UpstreamRecord`：`version`、`exchange`（与已提交样本同一 `Exchange` 格式，`captured_at` 为每次交换的时刻，`environment` 取 `APP_ENV`，`app_revision` 取链接进二进制的提交，未打标记的构建为 `unstamped`，`catalog_revision` 取 Catalog 的 `revision`）、`query_keys`、跳过标记字段。序号跨重启递增。#234 的诊断包导出（见下一小节）读取同一目录：`ListUpstreamRecords` 列出，`ParseUpstreamRecord` 解析字节（`ReadUpstreamRecord` 是它加上 0600 常规文件的检查），`privacyscan.ScanRecord` 按单条记录的规则扫描（`ScanRecordDir` 逐条调用它）。
+
+**可见处。** 启动日志：开启时 INFO「上游调用脱敏录制已开启」（目录、条数与大小上限、已有记录数），关闭时 DEBUG；写入失败只告警首次与每千次，不含内容。管理端：`GET /api/admin/diagnostics`（Schema `diagnostics.routes.admin`，权限 `diagnostics.read` 只给管理员角色，`Cache-Control: no-store`），返回 `{"upstream_capture": {enabled, directory, max_records, max_bytes, records, bytes, written, skipped, rotated, write_errors}}`，只有计数、上限和管理员自己配置的目录；该块是仅服务端的 Schema 声明，不在 `/api/version`、`/api/health` 或公开 Schema 投影里。目前没有管理端页面，只有这个只读接口。
+
+**范围与边界。** 覆盖全部 Provider 连接（三个 image-sync 连接、Meshy、Tripo 含匿名来源下载、Hyper3D、抠图）与对话模型连接（默认与 `LLM_CONNECTIONS` 的各连接，含管理员「测试连接」与提示词增强，它们走同一 Adapter）。不覆盖：Provider 账户余额读取（`provideraccounts/httpjson` 用自己的 client）、MCP、历史资产代理。记录只证明录制当时 Adapter 与上游的结构交互。
+
+**已验证与未验证。** 本机 Go 测试：关闭时不包裹、不建目录；设置读取与校验；目录重叠与不可用时拒绝启动；对着 fake 栈跑 Tripo、Meshy、Hyper3D、OpenAI/Gemini/Jimeng 图像、抠图与对话模型，每个连接至少一条记录，`privacyscan.ScanRecordDir` 无发现；请求里的密钥、鉴权头、签名 URL、提示词与上游错误文本不落盘；上限与轮转、重启续记、崩溃残留清理、并发（含 `-race`）；`fake-upstream-align draft` 把应用写出的目录转成可校验、可回放的样本草稿；管理端接口的权限、关闭与开启状态。未验证：真实上游、真实 Docker 卷上的容器用户权限、长时间运行的内存与磁盘占用。
+
+### 诊断包导出（#234；源码已实现，本机测试与对着 fake 栈的测试通过，未部署验收）
+
+**要解决的问题。** #233 让正式程序能记下上游的结构证据；用户出问题时还需要一个标准、安全的"打包发回"方式：运行的 revision 与 Catalog、近期 DEBUG 日志、脱敏样本、失败任务的错误摘要、关键运行配置是否设置，打成一个包，让维护者拿到后能定位问题并完善 fake。它不是审计，也不是任务事实的来源：只读，不推进任何任务，不写库。
+
+**包与职责。**
+
+- `cmd/art-ai`：`diagnose` 子命令。分发写在 `main` 的最前面，早于日志文件的打开、配置校验与服务装配，所以它不会轮转或修剪日志、不迁移、不启动任何组件。选子命令而不是独立二进制，是因为镜像里已有这个二进制，它带着同一个提交与同一份迁移清单，`docker exec` 与一次性容器都能直接用；`Dockerfile.go-runtime` 与镜像目标不变。
+- `internal/app/diagnose.go`：`RunDiagnose`（参数、退出码 0/1/2/3、摘要输出）与 `diagnoseSources`。来源按服务同一套规则解析（`runtimeSettingValue`，Catalog 声明的环境变量与默认值），但不做 `LoadConfig` 的整体校验：只读 `APP_ENV`、`CATALOG_FILE`、`DATABASE_PATH`、`LOG_DIR`、`UPSTREAM_CAPTURE_DIR`，读不出的项记固定词警告并继续；`CATALOG_FILE` 读不了时记 `catalog_file_unreadable` 且不声称摘要，读得到但解析不了时记 `catalog_file_invalid`、摘要仍是该文件的字节，两种情况下设置清单都按内置声明列出。Catalog SHA-256 是运行所用文档（内置的或 `CATALOG_FILE` 的字节）的摘要；`UPSTREAM_SHAPE=fake` 的栈会在加载时派生出一份带 fake 资产主机的文档，摘要仍是它的来源文档。
+- `internal/diagbundle`：组装、脱敏、扫描与写出，不依赖 `internal/app`，不被业务包引用。`Sources` 描述来源（路径、Catalog 声明的设置、`Lookup`），`Build` 在内存里得到 `Bundle`，`Export` 再写文件。`Scrubber` 是自由文本的脱敏器；`SettingsFromCatalog` 把 Catalog 的 `runtime.configuration` 变成设置清单，所以 `settings.json` 跟随运行的 Catalog，代码里没有另一份名单。
+- `internal/adapters/sqlite/diagnostics_failures.go`：`ReadDiagnosticFailures`，失败任务的只读投影（见下）。
+- `internal/wirecapture`、`privacyscan`、`internal/logging`：#234 为复用而加的最小接口：`ParseUpstreamRecord`（按字节解析录制记录，`ReadUpstreamRecord` 现在是它加文件检查）、`privacyscan.ScanRecord`（`ScanRecordDir` 的单条规则，行为不变）、`logging.FileName` 与 `logging.ListLogFiles`（滚动文件的命名与顺序留在写它们的包里）。
+
+**内容与预算。** 五类，每类在 `manifest.json` 里有状态（`included`/`empty`/`unavailable`）、条数、时间范围内可用条数、是否被体积上限截断、字节数与单文件类的 SHA-256；不可用时的原因只有 `not_configured`、`not_found`、`unreadable` 三个固定词，不带路径和错误文本。
+
+- `runtime.json` 与 `settings.json` 是固定部分，不截断；设置的"是否已设置"与服务一样按 Catalog 声明的环境变量逐个看非空，另记起作用的变量名和它是否是弃用别名，仍被设置的已退役变量只记名字。
+- `failures.json`：`generation_tasks` 里 `state = FAILED` 且完成时间（无则最后更新时间）落在范围内的任务，最新的至多 200 个，加上各自最近 10 次尝试的结局。只取失败分类、可否重试、上游 HTTP 状态、上游错误码与已入库的摘录（内核入库时已用 `generation.UpstreamExcerpt` 去掉提示词回声、URL、令牌与邮箱），不取上游任务 ID、产物与输入；任务输入只在内存里用 `generation.InputEchoes` 取出该任务声明为文本的参数，供脱敏器从包内任何位置去掉。摘录再过一次同一个内核脱敏器并截到 240 字符。
+- `logs/art-ai.jsonl`：范围内的日志行（`LOG_DIR` 下的活动文件与滚动文件；滚动文件的关闭时刻早于范围起点的整份跳过）。
+- `captures/`：范围内的录制记录，文件名的时间前缀判定范围，原样读取；不是 0600 常规文件、超过 4 MiB 或解析不了的文件被丢弃并按原因计数。
+- 体积上限 `--max-bytes`（默认 32 MiB，64 KiB 到 1 GiB）约束包内全部成员未压缩的字节数：先扣固定部分与 16 KiB 的清单预留，失败摘要至多占剩余的 1/10，录制至多 3/10，其余给日志，各类都从最旧的开始舍弃，清单记录截断。日志最多把两倍预算的原始行留在内存里，从新到旧逐行处理，装满为止。
+
+**脱敏与拒绝：两种行为，作用于不同的类别。**
+
+- **脱敏（替换）。** 日志与失败摘录是自由文本，进包前由 `Scrubber` 逐值改写；`session_id`、`authorization`、`password`、`prompt` 这类键下的值整个换成 `[redacted]`。哪些键名算凭据、哪些算身份，不是抄一份名单，而是用探针问独立扫描（`privacyscan.ScanText` 对该键名与一个占位值，看命中 `credential-field` 还是 `identity-field`），所以两边不会漂移；扫描没有的少数键名（`actor_id`、`open_id`、`nickname`……与 `prompt`、`instruction` 类）由 `scrub.go` 补充。文本规则与扫描的内容规则一一对应：凭据形状、签名参数名、URL、邮箱、IPv4/IPv6 与十六进制/八进制写法的地址、私有主机名、UUID、base64 与 data URI 都有替换；另把 32 位十六进制标识（本程序用户 ID 的形状）换成占位符。身份占位符 `id-N` 在整个包里稳定：日志里 `owner_id` 键下出现过的值和失败任务的 owner 一旦被登记，它们在自由文本里（至少 8 字节时）也被换成同一个占位符；提示词只来自失败任务的输入，长度不足 8 个字符的忽略。保留任务 ID、请求 ID、Offering ID、状态码、错误码和时间。一行日志脱敏后若仍被扫描命中（例如百分号编码的邮箱），整行丢弃并按规则名计入 `dropped`。
+- **拒绝（不写文件）。** 脱敏之后，`verifyMembers` 对每个成员按最终要写出的字节再跑一遍独立扫描：JSON 成员 `ScanJSON`，日志逐行 `ScanJSON`，录制记录经 `ParseUpstreamRecord` 后 `ScanRecord`，日志与失败摘要另查脱敏器已知的用户标识与提示词是否还在；清单最后生成，也被扫描。任何一条命中返回 `*RefusedError`（退出码 3），没有文件，也没有临时文件，信息里只有文件、JSON 路径与规则名。录制记录不被改写：它们在记录时已经脱敏，改写之后就不再是证据，所以记录里的命中意味着录制或目录被破坏，导出拒绝，要处理的是被点名的文件。
+- 日志与摘要的脱敏依赖键名与正则，残余风险同 #233：未登记键名下的自由文本里的短用户名、自造词与昵称不可识别；所以包仍按受保护文件处理，发出前建议人工看一眼 `logs/art-ai.jsonl` 与 `failures.json`。
+
+**只读与不留痕。** 数据库经 `mode=ro` 与 `query_only` 打开，只读两张表，在一个只读事务里；服务运行时（`-wal`、`-shm` 存在）直接读，能读到只在 WAL 里的最新失败；这两个文件都不存在时（服务已停）改用 `immutable=1`，这样普通只读打开会创建 `-wal` 与 `-shm`、再被另一个用户的运行留成服务无法重开的文件这件事不会发生。日志与录制目录只列目录和读文件，不用 `RotatingFile` 或任何会修剪、轮转的入口。输出是同目录里独占创建的 0600 临时文件，写完后 `link` 到目标名（目标已存在则失败，不覆盖），再删临时文件；扫描没有全部通过之前不创建它。
+
+**包格式。** 一个 tar.gz：顶层目录 `plinth-diagnose-<UTC 时间>/`（0700，解包不会散落文件），其中 `manifest.json` 最先，其后 `runtime.json`、`settings.json`、`failures.json`、`logs/art-ai.jsonl`、`captures/*.exchange.json`；目录 0700、文件 0600，所以解出的 `captures/` 正好是 `fake-upstream-align draft -records` 要求的 0700 目录与 0600 记录。
+
+**已验证与未验证。** 本机 Go 测试（含 `-race`）：脱敏器对扫描每一类规则都有替换且结果无命中、正常日志文本不被改动、十六进制/八进制写法的地址判定与扫描一致、键名分类来自扫描；日志按时间范围与滚动文件选取、整行无法脱敏时丢弃并计数、预算下保留最新；失败摘要的字段、排序、时间范围与上限、超大输入不读取；只读：数据库与 WAL 的摘要在导出前后相同、连接拒绝任何写语句、已停止的库不产生 `-wal`/`-shm`、运行中的库能读到 WAL 里的失败；清单的条数、字节数与 SHA-256 同包内容一致；对着 fake 栈（Meshy 余额不足的真实失败任务、真实录制记录、日志目录）经 `RunDiagnose` 导出，包内无密钥、提示词、会话 ID、用户标识、地址与媒体字节，每个成员再过一次扫描；录制记录被篡改（含邮箱与内网地址）时拒绝，文件名与规则名在信息里而值不在，目录里无任何输出文件；解包后的 `captures/` 可被 `LoadUpstreamRecords` 读取并由 `WriteDraftCandidate` 转成样本草稿。未验证：真实 Docker 卷与容器用户（尤其以 root 运行 `exec` 时的所有权）、真实上游的错误文本、数百万行日志下的耗时（脱敏加两遍扫描约每秒数千行，处理的行数受体积上限约束）、Windows。
+
+**范围与边界。** 失败任务只含公开 Task（聊天轮次与 Agent 的失败不在其内）；设置清单只含 Catalog 声明的设置，`LLM_CONNECTIONS` 之下按 `<ID>_*` 动态读取的变量不在其中；没有 `LOG_DIR` 就没有日志；它不替代 `/api/admin/diagnostics`，后者是服务运行时的只读状态视图，本命令不经过它。
 
 ## 4. 前端职责与数据流
 
@@ -1688,6 +1762,15 @@ DeepSeek 的流式 usage：官方写明 `stream_options` 只能与 `stream: true
 **会话模型。** `chat.ModelPolicy.Source`（`chat.ChatModelSource`，由 `app.chatModelSource` 适配 `llmsettings.Effective`，经 `chat.Service.SetModelSource` 装配）给出可用模型集合 `ChatModelSet{Options[{ID, Model, EffortLevels, DefaultEffort, Window}], DefaultID}`；没有 Source 时退回 A 线的单一部署模型。会话的选择存 `go_chat_sessions.chat_model`（迁移 0066，空串跟随默认，`ContextStore.SetSessionChatModel` 不动 `updated_at`）。`Service.TurnModel` 解析“会话选择在可用集合里则用它，否则默认”，并以 `ChatModelOption.EffortFor` 回落档位；`SessionReasoning`/`SetSessionReasoning`（档位须在管理员开放的档位内）、`SessionContextView`（窗口）、`StartTurn`（冻结 `TurnOptions.Model`、新增的 `TurnOptions.ModelConnection` 与 `ReasoningEffort`）、手动压缩都走它；`Process` 从轮次恢复三者，`agentRequest`、续跑、总结轮、自动压缩与首轮标题请求都带 `agents.Request.Connection`。自动压缩的窗口按轮次冻结的连接取当前选项（`turnWindow`）。DSML 解析改为按轮次模型：`OrchestratorConfig.DSMLFor(model)` = Schema `chat.dsml.enabled` 或该模型 profile 的 `dsml_tool_calls`。`GET/PUT /api/v1/chat/sessions/{sessionID}/model`（`runtime.http.routes.chat_session_model`；请求字段 `chat.api.fields.chat_model`，必须是字符串；响应 `chatModel`、`chatModelChosen`、`chatModelDefault`、`chatModelFallback`、`chatModels[{id, model}]`）按 owner 读写，未知/停用模型 400 `chat_model_invalid`，部署没有 Source 时 409 `chat_model_unavailable`。不写审计（不放宽权限）。
 
 **前端。** `src/lib/llm-settings.ts`（客户端与 `toggleLevel`）、`src/app/admin/llm/page.tsx`；`browser-client` 的 `getChatModel`/`setChatModel`；`session-context-store` 的 `chatModel`，`switchSessionChatModel` 成功后重读档位与上下文；`use-session-chat-model.ts`（会话打开与轮次结束时读取）；`chat-model-picker.tsx` 的 `ChatModelPicker`（模型与思考强度的合并入口，#176）与 `ChatModelNotice`（回落提示，只有一个模型时也显示）。合并入口在输入区底部网格里的顺序是 模型、Skill、参数、对话模型与思考强度、上下文用量；触发按钮显示「模型 · 档位」（当前模型没有档位时只显示模型），弹层用 `TablePopover` 的 `columns` 左右两栏（#223；弹层容器窄于 30rem 时上下堆叠，左右方向键在两栏间移动焦点，落到该栏选中行或第一行）：左栏对话模型表（`TableSection.closeOnPick: false`，选后保持打开，方便接着选档位；会话所选模型已停用时栏底显示回落说明），右栏当前模型的档位表（`closeOnPick: true`，选后关闭；标题 `ui.studio.chat_model.levels_title` 写明模型，无档位与读取中分别用 `levels_none`、`levels_loading`）。右栏只显示会话当前模型的档位：浏览器拿不到其他模型的档位，选模型后由 `switchSessionChatModel` 重读档位刷新右栏，服务端协议不变。管理员只开放一个模型时不显示模型表，只显示档位表（只有一个模型且没有档位时这张表停用）；当前模型没有档位时档位表整表停用并给出原因；旧服务端缺 `chat_session_model` / `chat_session_reasoning` 路由时对应的表不出现，两个路由都缺时整个入口不显示。文案 `ui.studio.chat_model.*`、`ui.studio.reasoning.*`、`llm_settings.ui.*` 中英双语。
+
+**读取失败与重试（#314；源码已实现，待 dev-test 验收）。** 此前 `use-session-chat-model.ts`、`use-session-reasoning.ts` 把会话打开时的首次读取失败吞掉且不再重试，只要首屏有一次 `/model` 或 `/reasoning` 失败（例如被限流返回 429，或网络抖动），选择器就一直不出现，直到切换会话。现在两个 hook 共用 `use-session-read-retry.ts`，由 `src/lib/chat/session-read-retry.ts` 的 `startSessionReadRetry` 驱动读取，状态仍只在 `session-context-store`，没有第二套：
+- **有界退避。** 首次读取失败后按指数退避重读，次数与等待由 Schema `runtime.frontend.session_read_retry` 声明、校验并随公开 Schema 投影，前端不写死：`max_retries`（1 到 10，默认 4）、`initial_delay_milliseconds`（不小于 100，默认 1000）、`max_backoff_milliseconds`（默认 15000）、`max_retry_after_milliseconds`（默认 120000，不小于退避上限）。429 的 `Retry-After` 由 `browser-client` 的 `serverError` 带在 `ChatBrowserError.retryAfterSeconds` 上，等待不短于它（以 `max_retry_after_milliseconds` 为顶），不会把重试用在限流窗口之内。重试用尽后不再自行请求。退避规则与登录会话读取（`authentication.session_retry`、`sessionRetryDelayMs`）相同，界限各自声明。
+- **唤醒与手动重试。** 用尽重试后，窗口重新获得焦点、标签页重新可见或浏览器触发 `online`，且最近一次读取失败时，各读一次并开启新一轮同样有界的重试；选择器里的「重试」按钮同理。最近一次读取没有失败时这些事件什么也不读。一次只有一个读取在途，所以持续失败的请求数不超过（唤醒与点击次数 + 1）×（1 + `max_retries`）。重试一律按这些界限执行，不区分状态码。
+- **取消。** 会话切换、选择器卸载或 Schema 被替换（新 client）时，effect 的 `AbortController` 取消在途读取，并清掉等待中的重试与窗口监听；被取消的读取不记失败，其迟到的答复（包括响应体已读到一半时被取消）也不写入 store，`loadSessionReasoning`/`loadSessionChatModel` 为此检查 `signal.aborted`。
+- **失败状态。** store 的 `reasoningFailed`/`chatModelFailed` 按会话记“最近一次读取失败”，下一次成功读取清除；已持有值时后续读取失败不改变显示（只让窗口回来时再读一次）。选择器在某一部分读取失败且尚无值时不再让这一部分静默缺席：触发按钮带警告图标，悬停说明用共享的「无法使用，<原因>」（`ui.unavailable.reason.picker.chat_model_load_failed`/`reasoning_load_failed`），两部分都没有值时按钮上显示 `ui.studio.chat_model.load_failed_short`；弹层里该部分的栏显示 `ui.studio.chat_model.load_failed`/`ui.studio.reasoning.load_failed`（`role="alert"`）、同一条「无法使用」提示和「重试」（`ui.studio.chat_model.retry`）。失败栏与读取成功后的表用同一个栏标识，失败变成功时不替换已打开的弹层、触发按钮或键盘焦点（承接 #236 的不变量）。
+- **范围。** 只覆盖会话的对话模型与思考档位；上下文用量（`use-session-context.ts`）本次未改，首次失败仍不重试。
+
+回归：`session-read-retry.test.ts`（调度、上限、`Retry-After`、焦点/上线/可见唤醒、取消）、`chat-model-picker-retry.test.tsx`（真实 hook 与 store：首次失败后重试成功、持续失败有上限、失败状态可见、手动重试、会话切换与卸载取消）、`session-context-store.test.ts`、`session-chat-model-store.test.ts`、`browser-client-session-context.test.ts`，以及 Catalog `session_read_retry_test.go`。
 
 **验证。** Catalog（`llm_settings_schema_test.go`）、`internal/llmsettings`（预置、发布/冲突/恢复/重置、校验、连接移除归一、测试分类与未配置不调用）、SQLite（`llm_settings_test.go`：0065→0066 升级、CAS、历史、测试记录、会话选择 owner 隔离）、`internal/agents`（路由与 `StatusError`）、Adapter（`status_error_test.go`）、Mock（`vision_test.go`）、`internal/chat`（`chat_model_test.go`：选择驱动档位/窗口/请求、回落、轮次冻结、无档位模型与压缩连接、DSML 按模型）、`internal/app`（`llm_connections_test.go` 环境解析与拒绝、`llm_probe_test.go` 分类、`llm_settings_integration_test.go` 端到端与 live 每连接只用自己的地址和 key、响应和日志无密钥）、HTTP（`llm_settings_test.go` 权限/修订/审计/保密，`chat_session_context_test.go` 会话模型路由）与前端单测；本机 Mock 栈 `scripts/test-llm-settings.mjs`（#176 起从合并入口读取「模型 · 档位」，并在同一弹层里展开档位表）。`composer-layout.test.tsx` 断言合并入口只占一格、单模型时仍保留该入口且窄屏/宽屏行分布不变；单模型、无档位与旧服务端缺路由时的降级呈现由上述组件单测覆盖。dev-test 真实多连接路由、测试连接对真实网关的分类与读图判断未验收。
 

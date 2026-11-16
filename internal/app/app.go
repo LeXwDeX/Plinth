@@ -225,6 +225,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		logger.Warn("上游形态为 fake：全部 Provider 与对话模型连接指向 fake 上游，不发起真实上游请求",
 			"upstream_shape", upstreamShapeFake, "fake_upstream_origin", shape.origin.String())
 	}
+	// Opt-in recording of upstream calls (#233): off unless the operator set a
+	// directory. Capture wraps every connection's transport, outside any
+	// routing decorator, so it sees each request as the Adapter made it.
+	upstreamCapture, err := newUpstreamCapture(config, applicationSchema, logger)
+	if err != nil {
+		return nil, err
+	}
+	overrides.httpTransport = withUpstreamCapture(upstreamCapture, overrides.httpTransport)
+	logUpstreamCapture(logger, upstreamCapture)
 	// The per-reply tool call budget in force (#275) is one value for the
 	// orchestrator and the public Schema, so the composer's counter shows the
 	// limit the Agent is held to rather than the Schema default.
@@ -1731,6 +1740,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Harness:                           harnessResolver,
 		AgentConfiguration:                agentConfigurationService,
 		LLMSettings:                       llmSettingsService,
+		UpstreamCapture:                   upstreamCapture,
 		MCP:                               mcpService,
 		AccountInputAssets:                repository,
 		Readiness:                         readiness.check,

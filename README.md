@@ -180,6 +180,12 @@ docker compose up -d --wait
   `ART_AI_IMAGE_TAG`（见 `.env.example` 的 Build 段），并换一个 `ART_AI_PORT`；否则会复用同名
   项目、覆盖同名镜像标签。命名卷、容器名随项目名变化。
 - **日志**：`docker compose logs -f art-ai`，级别由 `.env` 的 `LOG_LEVEL` 控制。
+- **诊断包**：出问题要发给维护者时，用 `docker compose exec art-ai art-ai diagnose --out /tmp/plinth-diagnose.tar.gz`
+  导出一个只读、已脱敏的包（版本、近期日志、失败任务摘要、运行设置名称、上游调用录制；
+  不含密钥、提示词、媒体与用户标识；先在 `.env` 设置 `LOG_DIR=/app/data/logs` 才有日志），
+  再用 `docker compose exec -T art-ai cat /tmp/plinth-diagnose.tar.gz > plinth-diagnose.tar.gz`
+  取出（`/tmp` 是 tmpfs，`docker cp` 读不了）。完整流程与隐私说明见
+  [合作方部署指南](docs/partner-deployment.md)，用法与可选参数见 [部署入口](docs/deployment.md)「导出诊断包」。
 - **Agent 工具次数**：`.env` 的 `AGENT_MAX_TOOL_CALLS_PER_REPLY` 限定一次 Agent 回复
   最多执行的工具调用数，每次新回复重新计数；留空为 20，可设 1–100，见
   [Provider 配置](docs/provider-configuration.md#agent-对话模型--agent-chat-model)。
@@ -264,6 +270,7 @@ WEB_ASSETS_ROOT=build/go-web go run ./cmd/art-ai
 |---|---|
 | [docs/provider-configuration.md](docs/provider-configuration.md) | Provider 与 Agent 模型的环境变量 |
 | [docs/self-deploy-security.md](docs/self-deploy-security.md) | 对外提供服务前的安全配置（HTTPS、反向代理、限流） |
+| [docs/partner-deployment.md](docs/partner-deployment.md) | 合作方部署指南：统一部署方式、DEBUG 日志、脱敏录制与诊断包 |
 | [docs/storage-maintenance.md](docs/storage-maintenance.md) | 存储维护 |
 | [docs/architecture.md](docs/architecture.md) | 架构与职责 |
 | [docs/acceptance-1.0.md](docs/acceptance-1.0.md) | 1.0 功能验收清单 |

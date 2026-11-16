@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+// FileName is the name of the active log file of a stack; rotated files are
+// named <base>-<UTC stamp><extension> (see ListLogFiles).
+const FileName = "art-ai.log"
+
+// rotationStampLayout is the UTC layout of the stamp in a rotated file's name.
+const rotationStampLayout = "20060102T150405.000000000Z"
+
 // RotateConfig bounds the persistent log directory of one stack.
 type RotateConfig struct {
 	Directory     string
@@ -90,7 +97,7 @@ func (r *RotatingFile) rotate() error {
 		return err
 	}
 	r.file = nil
-	stamp := r.config.Now().UTC().Format("20060102T150405.000000000Z")
+	stamp := r.config.Now().UTC().Format(rotationStampLayout)
 	extension := filepath.Ext(r.config.FileName)
 	base := strings.TrimSuffix(r.config.FileName, extension)
 	if err := os.Rename(r.path(), filepath.Join(r.config.Directory, base+"-"+stamp+extension)); err != nil {
@@ -120,6 +127,58 @@ func (r *RotatingFile) prune() {
 			}
 		}
 	}
+}
+
+// LogFile is one file of a rotating log directory.
+type LogFile struct {
+	// Name is the file name inside the directory.
+	Name string
+	// Rotated is the UTC instant the file was closed by rotation: no line in it
+	// is later. The active file has no such instant (zero).
+	Rotated time.Time
+}
+
+// ListLogFiles lists, oldest first and the active file last, the regular files
+// of directory that a RotatingFile wrote for fileName. It only reads the
+// directory: it never opens, creates or prunes anything, so it is safe beside a
+// running service. Symbolic links and files with other names are ignored.
+func ListLogFiles(directory, fileName string) ([]LogFile, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	extension := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, extension)
+	var files []LogFile
+	active := false
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() {
+			continue
+		}
+		name := entry.Name()
+		if name == fileName {
+			active = true
+			continue
+		}
+		stamp, found := strings.CutPrefix(name, base+"-")
+		if !found {
+			continue
+		}
+		stamp, found = strings.CutSuffix(stamp, extension)
+		if !found {
+			continue
+		}
+		closed, err := time.Parse(rotationStampLayout, stamp)
+		if err != nil {
+			continue
+		}
+		files = append(files, LogFile{Name: name, Rotated: closed.UTC()})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Rotated.Before(files[j].Rotated) })
+	if active {
+		files = append(files, LogFile{Name: fileName})
+	}
+	return files, nil
 }
 
 func (r *RotatingFile) Close() error {

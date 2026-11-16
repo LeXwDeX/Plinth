@@ -61,6 +61,9 @@ type Config struct {
 	// real client (#256); empty means the TCP peer is the client.
 	TrustedProxies []netip.Prefix
 	Logging        LoggingConfig
+	// UpstreamCapture is the opt-in sanitized recording of upstream calls
+	// (#233); the zero value (no directory) leaves it off.
+	UpstreamCapture UpstreamCaptureConfig
 	// AgentMaxToolCallsPerReply overrides the Schema's per-reply tool call
 	// budget (chat.agent.max_tool_calls_per_reply, #275); 0 keeps the Schema
 	// value.
@@ -258,6 +261,9 @@ func loadConfigFromSchema(
 		}
 	}
 	if config.Logging, err = loggingConfig(values); err != nil {
+		return Config{}, err
+	}
+	if config.UpstreamCapture, err = upstreamCaptureConfig(values); err != nil {
 		return Config{}, err
 	}
 	budgetSetting := schema.Chat.Agent.MaxToolCallsPerReplySetting
