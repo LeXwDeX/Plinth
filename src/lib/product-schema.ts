@@ -135,6 +135,8 @@ export interface ProductSchema {
          chat_session_self_checks?: string;
          /** #103: the session's production brief (GET/PUT). Absent on older servers. */
         chat_session_brief?: string;
+        /** #306: the values the session's purpose gives the parameters that follow it (GET ?offering_id=). Absent on older servers. */
+        chat_session_purpose_parameters?: string;
         /** #103: decide one production plan budget (PUT approve/deny). Absent on older servers. */
         chat_session_budget?: string;
         /** #103: the 3D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */

@@ -663,6 +663,9 @@ func (s *Server) routes() {
 		s.mux.HandleFunc("GET "+routes.ChatSessionBrief, s.withIdentity(s.getChatSessionBrief))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionBrief, s.withPrincipal(s.putChatSessionBrief))
 	}
+	if routes.ChatSessionPurposeParameters != "" {
+		s.mux.HandleFunc("GET "+routes.ChatSessionPurposeParameters, s.withIdentity(s.getChatSessionPurposeParameters))
+	}
 	if routes.ChatSessionModel3D != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionModel3D, s.withIdentity(s.getChatSessionExplicitModel3D))
 		s.mux.HandleFunc("PUT "+routes.ChatSessionModel3D, s.withIdentity(s.putChatSessionExplicitModel3D))

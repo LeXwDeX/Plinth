@@ -7,6 +7,7 @@ import {
   briefPayload,
   briefRoute,
   briefSelectText,
+  briefSignature,
   briefValueText,
   parseProductionBrief,
   productionBriefFields,
@@ -63,6 +64,41 @@ describe('reading a stored brief', () => {
     expect(briefIsEmpty({ needs_rig: false })).toBe(false);
     expect(briefIsEmpty({ triangle_budget: 0 })).toBe(false);
     expect(briefIsEmpty({ style: 'low poly' })).toBe(false);
+  });
+});
+
+// #306: the 加工 panel reads again what the session purpose gives its parameters when the brief changes, so it
+// needs one value that is the same for the same brief and different for another.
+describe('the brief signature', () => {
+  it('is the same for the same brief whatever the order its members arrived in', () => {
+    expect(briefSignature({ purpose: 'game_character', target_platform: 'mobile' }))
+      .toBe(briefSignature({ target_platform: 'mobile', purpose: 'game_character' }));
+  });
+
+  it('changes with any value of the brief, a boolean and a number included', () => {
+    const base = { purpose: 'game_character', target_platform: 'mobile', needs_rig: true, triangle_budget: 8000 };
+    const signatures = new Set([
+      briefSignature(base),
+      briefSignature({ ...base, target_platform: 'pc_console' }),
+      briefSignature({ ...base, purpose: 'print' }),
+      briefSignature({ ...base, needs_rig: false }),
+      briefSignature({ ...base, triangle_budget: 12000 }),
+      briefSignature({ purpose: 'game_character' }),
+    ]);
+    expect(signatures.size).toBe(6);
+  });
+
+  it('reads an absent brief, an empty one and blank members as the same: no brief', () => {
+    expect(briefSignature(undefined)).toBe('');
+    expect(briefSignature({})).toBe('');
+    expect(briefSignature({ style: '', notes: null, purpose: undefined })).toBe('');
+    expect(briefSignature({ needs_rig: false })).not.toBe('');
+    expect(briefSignature({ triangle_budget: 0 })).not.toBe('');
+  });
+
+  it('does not run two members into one', () => {
+    expect(briefSignature({ a: 'b', c: 'd' })).not.toBe(briefSignature({ a: 'b,c', d: '' }));
+    expect(briefSignature({ a: 'bc' })).not.toBe(briefSignature({ ab: 'c' }));
   });
 });
 
