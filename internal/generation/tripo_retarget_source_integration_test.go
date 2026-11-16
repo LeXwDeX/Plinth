@@ -38,7 +38,9 @@ func (retargetRigSourcePort) OpenAsset(_ context.Context, r generation.OpenAsset
 }
 
 // syntheticRig keeps a shipped Rig's identity, model and fixed skeleton while
-// removing the private FBX export, whose real bytes are out of scope here.
+// removing the private exports, whose real bytes are out of scope here. Without
+// the conversion the upstream's GLB is the Rig's model (the shipped Offerings
+// keep it as the original file next to the converted one, #305).
 func syntheticRig(t *testing.T, c *catalog.Catalog, id generation.OfferingID) generation.Offering {
 	t.Helper()
 	o, ok := c.Get(id)
@@ -47,7 +49,7 @@ func syntheticRig(t *testing.T, c *catalog.Catalog, id generation.OfferingID) ge
 	}
 	o.Enabled, o.AdapterKey, o.Cost, o.CostPolicy = true, "rig.fixture", nil, nil
 	o.Parameters = slices.DeleteFunc(slices.Clone(o.Parameters), func(p generation.Parameter) bool {
-		return p.Name == "output_formats" || p.Name == "authorize_extra_credits"
+		return p.Name == "output_formats" || p.Name == "authorize_extra_credits" || p.Name == "export_pivot_bottom_center"
 	})
 	one, zero := 1, 0
 	o.Outputs = []generation.AssetRequirement{{Role: "model", Variant: "glb", Delivery: "required", Minimum: &one, MediaTypes: []string{"model/gltf-binary"}, MaxBytes: 1 << 20}, {Role: "thumbnail", Variant: "rendered_image", Delivery: "background", Minimum: &zero}}
@@ -57,6 +59,16 @@ func syntheticRig(t *testing.T, c *catalog.Catalog, id generation.OfferingID) ge
 	}
 	delete(options, "native_conversion")
 	delete(options, "convert_endpoint")
+	var aliases []map[string]any
+	if err := json.Unmarshal(options["response_aliases"], &aliases); err != nil {
+		t.Fatal(err)
+	}
+	for _, alias := range aliases {
+		if alias["role"] == "original_model" {
+			alias["role"] = "model"
+		}
+	}
+	options["response_aliases"], _ = json.Marshal(aliases)
 	o.ProviderOptions, _ = json.Marshal(options)
 	return o
 }

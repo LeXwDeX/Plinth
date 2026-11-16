@@ -122,9 +122,12 @@ func nativeConversionDeclaration(o generation.Offering, options providerOptions)
 	if o.PostSuccess != nil || o.Cost == nil || o.Cost.ExtraCredits <= 0 || o.Cost.SelectionParameter == "" || o.Cost.ConsentParameter == "" || o.Cost.SelectionParameter == o.Cost.ConsentParameter || o.CostPolicy == nil || !validRigCheckRoute(options.ConvertEndpoint, false) || c.MaxSourceBytes <= 0 || c.MaxSourceBytes > maximumTripoModelBytes || len(c.Formats) == 0 || len(c.Formats) > maximumNativeConversionFormats || len(c.Parameters) == 0 {
 		return nil, nativeProcessingProtocolError()
 	}
+	// The file every export is made from is the processing result, kept as its own
+	// required binary GLB slot: the model slot itself (the original Offerings) or, when the
+	// Offering exports the GLB too (#305), the original file beside it.
 	sourceFound := false
 	for _, a := range options.ResponseAliases {
-		if a.Key == c.SourceAlias && a.Role == "model" {
+		if a.Key == c.SourceAlias {
 			for _, out := range o.Outputs {
 				if out.Role == a.Role && out.Variant == a.Variant && len(out.MediaTypes) == 1 && out.MediaTypes[0] == "model/gltf-binary" && out.Delivery == schema.AssetDeliveryRequired && out.Minimum != nil && *out.Minimum == 1 {
 					sourceFound = true

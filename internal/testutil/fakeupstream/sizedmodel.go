@@ -2,6 +2,7 @@ package fakeupstream
 
 import (
 	"bytes"
+	"cmp"
 	"compress/zlib"
 	"crypto/sha256"
 	"encoding/binary"
@@ -242,9 +243,24 @@ func writePNGChunk(out *bytes.Buffer, kind string, data []byte) {
 	_ = binary.Write(out, binary.BigEndian, checksum.Sum32())
 }
 
+// glbExtras are what a converted model adds to the plain sized GLB: the mime type
+// of its pictures (PNG when empty) and a one-joint skin, with a two-keyframe clip
+// on that joint when animation is set.
+type glbExtras struct {
+	imageMime string
+	skeleton  bool
+	animation bool
+}
+
 // buildSizedGLB writes the mesh and its PNGs (base color, metallic-roughness,
 // normal; fewer when fewer were asked for) as one self-contained GLB 2.0.
 func buildSizedGLB(mesh modelfiles.Mesh, textures [][]byte) ([]byte, error) {
+	return buildGLB(mesh, textures, glbExtras{})
+}
+
+// buildGLB is buildSizedGLB with the extras of a converted model; without extras
+// it writes exactly the bytes buildSizedGLB always wrote.
+func buildGLB(mesh modelfiles.Mesh, textures [][]byte, extras glbExtras) ([]byte, error) {
 	var bin bytes.Buffer
 	type view struct{ offset, length, target int }
 	var views []view
@@ -274,6 +290,24 @@ func buildSizedGLB(mesh modelfiles.Mesh, textures [][]byte) ([]byte, error) {
 	imageViews := make([]int, len(textures))
 	for index, data := range textures {
 		imageViews[index] = addView(data, 0)
+	}
+	// The skin of a rigged source: every vertex is bound to the one joint, whose
+	// bind matrix is the identity because the joint sits at the origin, as in the
+	// Mock's rigged model.
+	var jointsView, weightsView, bindView, timesView, movesView int
+	if extras.skeleton {
+		vertices := mesh.VertexCount()
+		jointsView = addView(make([]byte, vertices*8), 0)
+		weights := make([]float32, vertices*4)
+		for vertex := 0; vertex < vertices; vertex++ {
+			weights[vertex*4] = 1
+		}
+		weightsView = addView(floats(weights), 0)
+		bindView = addView(floats([]float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}), 0)
+		if extras.animation {
+			timesView = addView(floats([]float32{0, 1}), 0)
+			movesView = addView(floats([]float32{0, 0, 0, 0, 0.1, 0}), 0)
+		}
 	}
 	for bin.Len()%4 != 0 {
 		bin.WriteByte(0)
@@ -325,9 +359,36 @@ func buildSizedGLB(mesh modelfiles.Mesh, textures [][]byte) ([]byte, error) {
 		var glTextures, images []map[string]any
 		for index, imageView := range imageViews {
 			glTextures = append(glTextures, map[string]any{"sampler": 0, "source": index})
-			images = append(images, map[string]any{"bufferView": imageView, "mimeType": "image/png"})
+			images = append(images, map[string]any{"bufferView": imageView, "mimeType": cmp.Or(extras.imageMime, "image/png")})
 		}
 		document["textures"], document["images"] = glTextures, images
+	}
+	if extras.skeleton {
+		vertices := mesh.VertexCount()
+		accessors := document["accessors"].([]map[string]any)
+		next := len(accessors)
+		accessors = append(accessors,
+			map[string]any{"bufferView": jointsView, "componentType": 5123, "count": vertices, "type": "VEC4"},
+			map[string]any{"bufferView": weightsView, "componentType": 5126, "count": vertices, "type": "VEC4"},
+			map[string]any{"bufferView": bindView, "componentType": 5126, "count": 1, "type": "MAT4"},
+		)
+		attributes := document["meshes"].([]map[string]any)[0]["primitives"].([]map[string]any)[0]["attributes"].(map[string]int)
+		attributes["JOINTS_0"], attributes["WEIGHTS_0"] = next, next+1
+		document["nodes"] = []map[string]any{{"mesh": 0, "name": "Fixture", "skin": 0}, {"name": "MockRoot"}}
+		document["scenes"] = []map[string]any{{"nodes": []int{0, 1}}}
+		document["skins"] = []map[string]any{{"joints": []int{1}, "skeleton": 1, "inverseBindMatrices": next + 2}}
+		if extras.animation {
+			accessors = append(accessors,
+				map[string]any{"bufferView": timesView, "componentType": 5126, "count": 2, "type": "SCALAR", "min": []float32{0}, "max": []float32{1}},
+				map[string]any{"bufferView": movesView, "componentType": 5126, "count": 2, "type": "VEC3"},
+			)
+			document["animations"] = []map[string]any{{
+				"name":     "MockBounce",
+				"samplers": []map[string]any{{"input": next + 3, "output": next + 4, "interpolation": "LINEAR"}},
+				"channels": []map[string]any{{"sampler": 0, "target": map[string]any{"node": 1, "path": "translation"}}},
+			}}
+		}
+		document["accessors"] = accessors
 	}
 	bufferViews := make([]map[string]any, 0, len(views))
 	for _, v := range views {

@@ -29,11 +29,24 @@ type exportOffering struct {
 	extra map[string]any
 }
 
+// The Offerings that also export their GLB as the model slot carry a later
+// revision (#305): one more advanced conversion in the quote, one more binding.
+var glbExportingOfferings = map[string]bool{
+	"tripo/processing/rigging": true, "tripo/processing/rigging-v3": true, "tripo/geometry/decimate-triangle": true,
+}
+
+func exportRevision(id string) string {
+	if glbExportingOfferings[id] {
+		return "2026-11-16.305.1"
+	}
+	return "2026-11-12.292.1"
+}
+
 var processingExportOfferings = []exportOffering{
 	{"tripo/processing/texture", "source_task", 80, map[string]any{"prompt": "silver"}},
-	{"tripo/processing/rigging", "source_task", 35, nil},
-	{"tripo/processing/rigging-v3", "source_task", 35, nil},
-	{"tripo/geometry/decimate-triangle", "source_task", 85, nil},
+	{"tripo/processing/rigging", "source_task", 45, nil},
+	{"tripo/processing/rigging-v3", "source_task", 45, nil},
+	{"tripo/geometry/decimate-triangle", "source_task", 95, nil},
 	{"tripo/geometry/decimate-quad", "source_task", 90, nil},
 	{"tripo/geometry/segment", "source_task", 90, nil},
 	{"tripo/geometry/complete", "source_task", 100, nil},
@@ -55,7 +68,7 @@ func TestTripoProcessingExportsBindTheTextureSizeToThePurposeBudget(t *testing.T
 	for _, test := range processingExportOfferings {
 		t.Run(test.id, func(t *testing.T) {
 			o, ok := c.Get(generation.OfferingID(test.id))
-			if !ok || o.Revision != "2026-11-12.292.1" {
+			if !ok || o.Revision != exportRevision(test.id) {
 				t.Fatalf("Offering %s %s", o.ID, o.Revision)
 			}
 			var size *schema.Parameter
@@ -113,7 +126,12 @@ func TestTripoProcessingExportsBindTheTextureSizeToThePurposeBudget(t *testing.T
 				t.Fatal(err)
 			}
 			native := options.NativeConversion
-			if !reflect.DeepEqual(native.Bindings, []map[string]any{{"parameter": "export_texture_size", "wire": "texture_size"}}) {
+			bindings := []map[string]any{{"parameter": "export_texture_size", "wire": "texture_size"}}
+			if glbExportingOfferings[test.id] {
+				// The GLB export alone moves the origin to the bottom center (#305).
+				bindings = append(bindings, map[string]any{"parameter": "export_pivot_bottom_center", "wire": "pivot_to_center_bottom", "formats": []any{"GLTF"}})
+			}
+			if !reflect.DeepEqual(native.Bindings, bindings) {
 				t.Fatalf("bindings = %v", native.Bindings)
 			}
 			if _, constant := native.Parameters["texture_size"]; constant {
@@ -229,8 +247,9 @@ func TestProcessingExportsAgreeWithTheGenerationExportOfTheSamePurpose(t *testin
 }
 
 // The outputs the purpose sizes are declared on the Offering: the exports that
-// carry textures, never the native GLB (its resolution is the upstream's), the
-// untextured STL and 3MF, the mask or the thumbnail.
+// carry textures, never a native GLB the upstream returns at its own resolution
+// (the original file of the Offerings that export their GLB, #305, keeps the
+// upstream's), the untextured STL and 3MF, the mask or the thumbnail.
 func TestTripoProcessingExportsDeclareTheOutputsThePurposeSizes(t *testing.T) {
 	c, err := LoadDefault()
 	if err != nil {
@@ -250,14 +269,35 @@ func TestTripoProcessingExportsDeclareTheOutputsThePurposeSizes(t *testing.T) {
 				if output.TextureSizeParameter != "export_texture_size" || output.Variant == "" {
 					t.Fatalf("output %s/%s declares %q", output.Role, output.Variant, output.TextureSizeParameter)
 				}
-				sized[output.Variant] = true
+				sized[output.Role+"/"+output.Variant] = true
+				if output.Role == "original_model" {
+					t.Fatalf("the original file is sized: %+v", output)
+				}
 			}
-			want := map[string]bool{"fbx": true, "obj": true, "usdz": true}
+			want := map[string]bool{"converted_model/fbx": true, "converted_model/obj": true, "converted_model/usdz": true}
 			if test.id == "tripo/processing/rigging" || test.id == "tripo/processing/rigging-v3" {
-				want = map[string]bool{"fbx": true}
+				want = map[string]bool{"model/fbx": true}
+			}
+			if glbExportingOfferings[test.id] {
+				// The GLB the GLTF export writes is the model slot and sized by the purpose.
+				want["model/glb"] = true
 			}
 			if !reflect.DeepEqual(sized, want) {
 				t.Fatalf("sized outputs = %v, want %v", sized, want)
+			}
+			// The original file of those Offerings is the GLB the upstream returned, a
+			// required binary GLB slot of its own that no parameter sizes.
+			if glbExportingOfferings[test.id] {
+				var original *schema.AssetRequirement
+				for index := range o.Outputs {
+					if o.Outputs[index].Role == "original_model" {
+						original = &o.Outputs[index]
+					}
+				}
+				if original == nil || original.Variant != "glb" || original.Minimum == nil || *original.Minimum != 1 ||
+					original.Delivery != schema.AssetDeliveryRequired || !reflect.DeepEqual(original.MediaTypes, []string{"model/gltf-binary"}) {
+					t.Fatalf("original file slot = %+v", original)
+				}
 			}
 		})
 	}
@@ -322,7 +362,15 @@ func TestExportTextureSentencesNameTheirPlaceholders(t *testing.T) {
 			t.Fatalf("export_texture_fix_text %q lacks %s", production.ExportTextureFixText, want)
 		}
 	}
+	// The sentence about the original file a converted GLB sits beside (#305).
+	if !strings.Contains(production.OriginalTextureText, "{original}") {
+		t.Fatalf("original_texture_text %q lacks {original}", production.OriginalTextureText)
+	}
 	for name, mutate := range map[string]func(map[string]any){
+		"an original note without the edge": func(p map[string]any) { p["original_texture_text"] = "任务还保存了上游返回的原始 GLB。" },
+		"an original note with a stranger": func(p map[string]any) {
+			p["original_texture_text"] = production.OriginalTextureText + "{native}"
+		},
 		"a note without the native edge": func(p map[string]any) {
 			p["export_texture_text"] = "已按用途导出为 {export} 像素（{formats}）。"
 		},

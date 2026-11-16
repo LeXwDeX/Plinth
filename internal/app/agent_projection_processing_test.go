@@ -219,7 +219,9 @@ func TestAgentProjectionCompactsLargeOptionLists(t *testing.T) {
 	// animation presets, #278 export parameters, #279 Rodin game parameters)
 	// brings it to 117,559 bytes on 2026-11-12, so the budget moves to 120 KiB.
 	// #292 adds the export texture size to the nine enabled Tripo processing
-	// Offerings (119,912 bytes on 2026-11-12), inside the same budget.
+	// Offerings (119,912 bytes on 2026-11-12), inside the same budget. #305 exports
+	// the GLB of the two rigs and the triangle decimation too (119,930 bytes on
+	// 2026-11-16): the pivot parameter is fixed, so it adds almost nothing.
 	if len(raw) > 120*1024 {
 		t.Fatalf("agent list_offerings projection = %d bytes", len(raw))
 	}

@@ -31,6 +31,9 @@ type rigWire struct {
 type rigRecorder struct {
 	mu       sync.Mutex
 	requests []rigWire
+	// scenario, when set, is asked for the fault the fake injects into a request
+	// ("" for none) with the request's "METHOD path" and body.
+	scenario func(path, body string) string
 }
 
 func (r *rigRecorder) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -42,6 +45,11 @@ func (r *rigRecorder) RoundTrip(request *http.Request) (*http.Response, error) {
 	r.mu.Lock()
 	r.requests = append(r.requests, rigWire{path: request.Method + " " + request.URL.Path, body: string(raw)})
 	r.mu.Unlock()
+	if r.scenario != nil {
+		if name := r.scenario(request.Method+" "+request.URL.Path, string(raw)); name != "" {
+			request.Header.Set("X-Fake-Scenario", name)
+		}
+	}
 	return http.DefaultTransport.RoundTrip(request)
 }
 
@@ -184,10 +192,7 @@ func (s *rigStack) binding(r rigged) json.RawMessage {
 	s.t.Helper()
 	raw, err := s.adapter.ResolveDependencyBinding(generation.DependencyBindingRequest{
 		Offering: r.offering, TaskID: "rig-task", AttemptID: "rig-attempt", Job: r.job, Input: r.input,
-		Assets: []generation.Asset{
-			{ID: "glb", TaskID: "rig-task", AttemptID: "rig-attempt", Role: "model", Variant: "glb", Required: true, Size: 10, SHA256: testAssetSHA},
-			{ID: "fbx", TaskID: "rig-task", AttemptID: "rig-attempt", Role: "model", Variant: "fbx", Required: true, Size: 10, SHA256: testAssetSHA},
-		},
+		Assets: storedRequiredAssets(r.offering, "rig-task", "rig-attempt"),
 	})
 	if err != nil {
 		s.t.Fatalf("binding of %s: %v", r.input, err)

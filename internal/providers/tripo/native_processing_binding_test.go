@@ -129,10 +129,22 @@ func rigBindingRequest(t *testing.T, id generation.OfferingID) generation.Depend
 	t.Helper()
 	o := shippedOffering(t, id)
 	return generation.DependencyBindingRequest{Offering: o, TaskID: "rig", AttemptID: "rig-attempt", Job: generation.UpstreamJob{ProviderID: "tripo", RemoteID: "rig-native"},
-		Input: json.RawMessage(`{"source_task":"source","rig_type":"biped","spec":"tripo","out_format":"glb"}`), Assets: []generation.Asset{
-			{ID: "glb", TaskID: "rig", AttemptID: "rig-attempt", Role: "model", Variant: "glb", Required: true, Size: 10, SHA256: testAssetSHA},
-			{ID: "fbx", TaskID: "rig", AttemptID: "rig-attempt", Role: "model", Variant: "fbx", Required: true, Size: 10, SHA256: testAssetSHA},
-		}}
+		Input:  json.RawMessage(`{"source_task":"source","rig_type":"biped","spec":"tripo","out_format":"glb"}`),
+		Assets: storedRequiredAssets(o, "rig", "rig-attempt")}
+}
+
+// storedRequiredAssets are the assets a finished Task of the Offering has stored:
+// one required asset for every required slot it declares, in its order (the GLB,
+// the FBX and, since #305, the original file of a rig).
+func storedRequiredAssets(o generation.Offering, task generation.TaskID, attempt generation.AttemptID) []generation.Asset {
+	var assets []generation.Asset
+	for _, output := range o.Outputs {
+		if output.Delivery == generation.AssetDeliveryRequired && output.Minimum != nil && *output.Minimum > 0 {
+			assets = append(assets, generation.Asset{ID: generation.AssetID(output.Role + "-" + output.Variant), TaskID: task, AttemptID: attempt,
+				Role: output.Role, Variant: output.Variant, Required: true, Size: 10, SHA256: testAssetSHA})
+		}
+	}
+	return assets
 }
 
 func TestNativeRigDependencyBindingProjectsFrozenRigConfiguration(t *testing.T) {
@@ -177,10 +189,12 @@ func TestNativeRigDependencyBindingProjectsFrozenRigConfiguration(t *testing.T) 
 	}
 
 	for name, mutate := range map[string]func(*generation.DependencyBindingRequest){
-		"missing fbx":    func(q *generation.DependencyBindingRequest) { q.Assets = q.Assets[:1] },
-		"optional asset": func(q *generation.DependencyBindingRequest) { q.Assets[1].Required = false },
-		"other task":     func(q *generation.DependencyBindingRequest) { q.Assets[0].TaskID = "other" },
-		"other attempt":  func(q *generation.DependencyBindingRequest) { q.Assets[1].AttemptID = "older" },
+		"missing fbx":       func(q *generation.DependencyBindingRequest) { q.Assets = q.Assets[:1] },
+		"missing original":  func(q *generation.DependencyBindingRequest) { q.Assets = q.Assets[:2] },
+		"optional asset":    func(q *generation.DependencyBindingRequest) { q.Assets[1].Required = false },
+		"optional original": func(q *generation.DependencyBindingRequest) { q.Assets[2].Required = false },
+		"other task":        func(q *generation.DependencyBindingRequest) { q.Assets[0].TaskID = "other" },
+		"other attempt":     func(q *generation.DependencyBindingRequest) { q.Assets[1].AttemptID = "older" },
 		"unset minimum": func(q *generation.DependencyBindingRequest) {
 			q.Offering.Outputs = append([]generation.AssetRequirement(nil), q.Offering.Outputs...)
 			q.Offering.Outputs[1].Minimum = nil

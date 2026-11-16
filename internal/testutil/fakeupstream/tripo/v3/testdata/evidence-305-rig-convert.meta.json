@@ -1,0 +1,11 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "6a52611280900bb8c87ce16c5d811d1908700514047b10df2a7874c5727757b9",
+  "captured_at_utc": "2026-11-16",
+  "exchanges": 15,
+  "provenance": "captured",
+  "scenario": "tripo-v3-305-rig-convert",
+  "source_revision": "unknown",
+  "transformation": "A paid run of the official API from the dev-test host (#305, 65 credits: one text-to-model, one rig check, one rig, one GLTF and one FBX conversion of the rig's GLB, whose creation from a URL took 47 to 48 seconds): IDs, signed URLs (query dropped), timestamps and balances are placeholders; credits_consumed and every request value are real; media bytes are not stored; only the first poll of each status per task is kept.",
+  "version": 1
+}

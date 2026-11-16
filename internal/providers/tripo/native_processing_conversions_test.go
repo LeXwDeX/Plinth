@@ -245,7 +245,14 @@ func nativeDeliveryFiveFormatsSurviveRestarts(t *testing.T, r generation.StartRe
 			t.Fatal("private export became public task/artifact")
 		}
 	}
-	if observation.Phase != generation.UpstreamCompleted || len(observation.Artifacts) != 6 || posts != 6 || downloads != 6 {
+	// The base job, one child per declared format, and one download of the source
+	// before each child and a last one to check it again.
+	var declared providerOptions
+	if err := json.Unmarshal(r.Offering.ProviderOptions, &declared); err != nil || declared.NativeConversion == nil {
+		t.Fatalf("declaration: %v", err)
+	}
+	formats := len(declared.NativeConversion.Formats)
+	if observation.Phase != generation.UpstreamCompleted || len(observation.Artifacts) != formats+1 || posts != formats+1 || downloads != formats+1 {
 		t.Fatalf("incomplete formats posts%d downloads%d claims%+v", posts, downloads, observation.Artifacts)
 	}
 	if observation.Artifacts[0].Locator != "https://assets.example/original.glb" {
@@ -253,7 +260,7 @@ func nativeDeliveryFiveFormatsSurviveRestarts(t *testing.T, r generation.StartRe
 	}
 	var state nativeProcessingState
 	json.Unmarshal(observation.Opaque, &state)
-	if len(state.Conversions) != 5 || len(state.ConversionRequests) != 5 {
+	if len(state.Conversions) != formats || len(state.ConversionRequests) != formats {
 		t.Fatal("lost child evidence")
 	}
 	for _, item := range state.Conversions {
@@ -444,10 +451,12 @@ func TestNativeDeliveryCatalogDeclarationAndFrozenQuote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The rigs also export their GLB, the model slot (#305): one more advanced
+	// conversion each, 10 credits on top of the base 25 and the FBX export.
 	for _, tc := range []struct {
 		id           generation.OfferingID
 		total, count int
-	}{{"tripo/processing/rigging", 35, 1}, {"tripo/processing/rigging-v3", 35, 1}, {"tripo/processing/texture", 80, 5}} {
+	}{{"tripo/processing/rigging", 45, 2}, {"tripo/processing/rigging-v3", 45, 2}, {"tripo/processing/texture", 80, 5}} {
 		t.Run(string(tc.id), func(t *testing.T) {
 			o, ok := c.Get(tc.id)
 			if !ok {

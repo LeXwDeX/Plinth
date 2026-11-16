@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "505b017254d855b02c787dfbff6a3d208fdaa0207c575fa4348f27bdd47b3315",
+  "catalog_sha256": "f9ee7587b6f87c57ded2d6f484c78aa0d3f555f785e0859e6153258235c54284",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
@@ -36,6 +36,7 @@
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json",
@@ -72,8 +73,8 @@
       "disabled-zero-egress": 11,
       "local-no-wire": 4,
       "missing": 1,
-      "real": 108,
-      "total": 141
+      "real": 111,
+      "total": 144
     }
   },
   "incomplete": [
@@ -2400,6 +2401,7 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
       ],
       "offerings": []
@@ -2416,7 +2418,40 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/animations/rig",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/animations/rig-check",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json"
       ],
       "offerings": []
     },
@@ -2450,7 +2485,24 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/models/convert",
+      "hosts": [
+        "openapi.tripo3d.ai"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json"
       ],
       "offerings": []
     },

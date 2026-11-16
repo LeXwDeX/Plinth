@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/modelinspect"
@@ -177,11 +179,23 @@ func TestGameCharacterBriefDecimatesAHighDetailModelIntoTheBudget(t *testing.T) 
 			}
 
 			// The baked decimation takes that Task as its source and the purpose's
-			// face budget as its target.
+			// face budget as its target. Its export texture size is what the shared
+			// purpose resolver gives the step (#292), which is how every path (the
+			// Agent's tools, the direct task API, the panel) fills it.
 			sourceExports := len(log.bodies("/models/convert"))
+			offering, ok := product.Get("tripo/geometry/decimate-triangle")
+			if !ok {
+				t.Fatal("the decimation is not declared")
+			}
+			chatSchema := product.Application().Chat
+			applied, err := (chat.PurposeParameters{Model3D: chatSchema.Model3DUsage, Image2D: chatSchema.Image2DUsage}).ApplyToDirectInput(
+				briefOf(t, map[string]string{"purpose": tc.purpose, "target_platform": tc.platform}), offering,
+				json.RawMessage(`{"source_task":"`+string(sourceTask.ID)+`","face_limit":`+itoaInt(tc.faceLimit)+`,"authorize_extra_credits":true}`), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			decimation := submitStep(t, harness, generation.Remesh, "tripo/geometry/decimate-triangle",
-				`{"source_task":"`+string(sourceTask.ID)+`","face_limit":`+itoaInt(tc.faceLimit)+`,"authorize_extra_credits":true}`,
-				"lowpoly-decimate-"+tc.name, nil)
+				string(applied.Input), "lowpoly-decimate-"+tc.name, applied.Reasons)
 			task := harness.runUntilTerminal(t, "owner-acme", decimation.TaskID)
 			if task.State != generation.TaskSucceeded {
 				t.Fatalf("decimation state = %s, failure = %#v", task.State, task.Failure)
@@ -202,19 +216,28 @@ func TestGameCharacterBriefDecimatesAHighDetailModelIntoTheBudget(t *testing.T) 
 			if input, _ := requests[0]["input"].(string); input == "" || input == string(sourceTask.ID) {
 				t.Errorf("decimate input = %q, want the source's upstream task id", input)
 			}
-			// The five exports run on the decimated result, as PNG at 8192 with the
-			// bake (the source's own GLTF export came before and is not counted).
+			// The exports run on the decimated result, as PNG at the purpose's texture
+			// size with the bake (the source's own GLTF export came before and is not
+			// counted); the GLB export is one of them, since the model slot is its
+			// result (#305), and the only one that moves the origin.
+			if budget.MaxTextureSize == nil {
+				t.Fatal("the purpose declares no texture budget")
+			}
+			wantSize := float64(*budget.MaxTextureSize)
 			converts := log.bodies("/models/convert")[sourceExports:]
 			sentFormats := []string{}
 			for _, body := range converts {
 				format, _ := body["format"].(string)
 				sentFormats = append(sentFormats, format)
-				if body["texture_format"] != "PNG" || body["texture_size"] != float64(8192) || body["bake"] != true {
-					t.Errorf("%s export = %v", format, body)
+				if body["texture_format"] != "PNG" || body["texture_size"] != wantSize || body["bake"] != true {
+					t.Errorf("%s export = %v, want PNG textures of %v pixels", format, body, wantSize)
+				}
+				if _, pivot := body["pivot_to_center_bottom"]; pivot != (format == "GLTF") {
+					t.Errorf("%s export carries the pivot = %v", format, pivot)
 				}
 			}
 			slices.Sort(sentFormats)
-			if !slices.Equal(sentFormats, []string{"3MF", "FBX", "OBJ", "STL", "USDZ"}) {
+			if !slices.Equal(sentFormats, []string{"3MF", "FBX", "GLTF", "OBJ", "STL", "USDZ"}) {
 				t.Errorf("exports = %v", sentFormats)
 			}
 
@@ -261,6 +284,48 @@ func TestGameCharacterBriefDecimatesAHighDetailModelIntoTheBudget(t *testing.T) 
 			}
 			if budget.MaxTextureSize == nil || longest == 0 || longest > *budget.MaxTextureSize {
 				t.Errorf("texture %d px against the budget %v", longest, budget.MaxTextureSize)
+			}
+			// The model slot is exactly the conversion the fake wrote for that request:
+			// the decimated triangles, a PNG of the purpose's size, the feet on the
+			// floor (#305).
+			wantModel, err := fakeupstream.ConvertedModelFile(fakeupstream.ConvertedModelSpec{
+				Triangles: fakeupstream.LowPolyTriangles(tc.faceLimit), TextureEdge: int(wantSize),
+				TextureFormat: fakeupstream.TextureFormatPNG, Offset: fakeupstream.CenterOrigin(true),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(data, wantModel.Data) {
+				t.Errorf("the model slot is not the converted GLB: %d bytes against %d", len(data), len(wantModel.Data))
+			}
+			if offset := report.BBox.BottomCenterOffset; math.Abs(offset[0])+math.Abs(offset[1])+math.Abs(offset[2]) > 1e-4 {
+				t.Errorf("the model slot is not standing on its pivot: bottom centre %v", offset)
+			}
+
+			// The GLB Tripo returned is kept as the original file, byte for byte, and is
+			// not the model: it is the fixture's own 64-pixel texture here, not what the
+			// purpose sized.
+			var original generation.Asset
+			for _, asset := range task.Assets {
+				if asset.Role == "original_model" {
+					original = asset
+				}
+			}
+			if original.ID == "" || original.Variant != "glb" || !original.Required || original.MediaType != "model/gltf-binary" {
+				t.Fatalf("the decimation kept no original file: %+v", task.Assets)
+			}
+			originalContent, err := harness.module.OpenAsset(context.Background(), "owner-acme", task.ID, original.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalData, _ := io.ReadAll(originalContent.Body)
+			_ = originalContent.Body.Close()
+			native, err := fakeupstream.LowPolyModelFile(tc.faceLimit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(originalData, native.Data) || bytes.Equal(originalData, data) {
+				t.Errorf("the original is not the upstream's own GLB (%d bytes, native %d, model %d)", len(originalData), len(native.Data), len(data))
 			}
 		})
 	}

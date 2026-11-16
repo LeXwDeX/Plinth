@@ -69,14 +69,23 @@
 // original_model_id, exactly as the committed real sample does. The exported FBX
 // embeds one texture in the requested texture_format, and in JPEG, the official
 // default, when the request names none, so a delivered file shows which format
-// was asked for; quad forces the FBX output. pivot_to_center_bottom, fbx_preset,
-// texture_size and the options the page lists but Plinth never sends
-// (texture_packaging zip, part_names, scale_factor, ...) are validated and
-// echoed, not modelled in the bytes: the fixture is one fixed small model.
-// Billing is not modelled; the pricing page treats any non-default value of
-// quad, face_limit, flatten_bottom, flatten_bottom_threshold, texture_size,
-// texture_format, pivot_to_center_bottom or scale_factor as an advanced
-// conversion (10 credits instead of 5).
+// was asked for; quad forces the FBX output. A conversion that names a texture
+// size, a texture format or pivot_to_center_bottom writes them (#305, convert.go):
+// the GLB and the FBX carry a texture of the requested format at the requested
+// size (default JPEG at 4096), a GLB or FBX of a rigged source keeps its skin
+// (and, with with_animation, its clip), the GLB of a decimated source keeps its
+// triangles, and the origin is the middle of the bounding box without
+// pivot_to_center_bottom and the middle of the bottom face with it; the finished
+// GLTF and FBX tasks report that move as output.normalize_scale and
+// output.normalize_translation. A conversion that names none of the three is the
+// fixed fixture it always was. fbx_preset, bake and the options the page lists but
+// Plinth never sends (texture_packaging zip, part_names, scale_factor, ...) are
+// validated and echoed, not modelled in the bytes. The creation of a conversion
+// from a URL waits fakeupstream.Config.ConvertURLDelay (10 ms by default; the real
+// API took 47 to 48 seconds). Billing follows billing.go: 5 credits, 10 when
+// texture size, texture format, the pivot or another option leaves the page's
+// default (quad, face_limit, flatten_bottom, flatten_bottom_threshold,
+// scale_factor), shown from the running poll on.
 //
 // Retopology (POST /mesh/decimate, #276). The request is checked against the
 // official page read on 2026-11-12 (https://developers.tripo3d.ai/en/docs/mesh-decimate,

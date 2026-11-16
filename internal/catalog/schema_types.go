@@ -2878,6 +2878,11 @@ type ChatModelInspectProductionSchema struct {
 	// general fix.
 	ExportTextureText    string `json:"export_texture_text,omitempty"`
 	ExportTextureFixText string `json:"export_texture_fix_text,omitempty"`
+	// OriginalTextureText is the note of a texture_size item judged on a file the
+	// purpose sized (the converted GLB of a rig, #305) when the Task also keeps a
+	// file it did not size, the upstream's own GLB: {original} is the largest
+	// texture of that file. Optional: a Catalog without it says nothing about it.
+	OriginalTextureText string `json:"original_texture_text,omitempty"`
 	// NoCapabilityText replaces a fix hint when no enabled Offering of the
 	// declared capability is available.
 	NoCapabilityText string `json:"no_capability_text"`

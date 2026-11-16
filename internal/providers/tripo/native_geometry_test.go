@@ -222,7 +222,9 @@ func geometryCatalogFixture(t *testing.T, kind string) generation.StartRequest {
 }
 
 func TestGeometryCatalogSixRequiredFormatsAndFrozenQuote(t *testing.T) {
-	for kind, total := range map[string]int{"decimate-triangle": 85, "decimate-quad": 90, "segment": 90, "complete": 100, "quick-cap": 80} {
+	// The triangle decimation also exports its GLB (#305): one more advanced
+	// conversion (10), one more required slot for it, and one for the original.
+	for kind, total := range map[string]int{"decimate-triangle": 95, "decimate-quad": 90, "segment": 90, "complete": 100, "quick-cap": 80} {
 		t.Run(kind, func(t *testing.T) {
 			r := geometryCatalogFixture(t, kind)
 			if r.Offering.Enabled != (kind != "decimate-quad") || r.Offering.Default {
@@ -235,8 +237,12 @@ func TestGeometryCatalogSixRequiredFormatsAndFrozenQuote(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r.Offering.EstimateTotalCredits(r.Input) != total || len(options.NativeConversion.Formats) != 5 {
-				t.Fatal("incomplete quote")
+			exports, want := len(options.NativeConversion.Formats), 5
+			if kind == "decimate-triangle" {
+				want = 6
+			}
+			if r.Offering.EstimateTotalCredits(r.Input) != total || exports != want {
+				t.Fatalf("incomplete quote: %d for %d exports", r.Offering.EstimateTotalCredits(r.Input), exports)
 			}
 			if body["output_formats"] != nil || body["authorize_extra_credits"] != nil || body["part_names"] != nil || body["face_limit"] != nil {
 				t.Fatalf("private control or absent optional leaked: %+v", body)
@@ -247,7 +253,8 @@ func TestGeometryCatalogSixRequiredFormatsAndFrozenQuote(t *testing.T) {
 					required++
 				}
 			}
-			if required != 6 {
+			// The exports and the processing result itself.
+			if required != want+1 {
 				t.Fatalf("required formats %d", required)
 			}
 			if options.NativeConversion.Parameters["quad"] != nil {

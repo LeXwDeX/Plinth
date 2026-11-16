@@ -3,6 +3,7 @@ package tripov3
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"slices"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
@@ -169,6 +170,15 @@ func (t *task) decimateTriangles() int {
 func (t *task) artifact(name string) (fakeupstream.File, error) {
 	if t.isDecimate() && name == "model.glb" {
 		return fakeupstream.LowPolyModelFile(t.decimateTriangles())
+	}
+	// A conversion that names its textures or its origin writes them (convert.go).
+	if spec, built := t.convertedModelSpec(); built {
+		switch path.Ext(name) {
+		case ".glb":
+			return fakeupstream.ConvertedModelFile(spec)
+		case ".fbx":
+			return fakeupstream.ConvertedFBXFile(spec)
+		}
 	}
 	return artifactFile(name, t.fidelity(), t.convertTexture())
 }

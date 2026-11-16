@@ -61,8 +61,9 @@ func TestHarnessPublicEstimateIncludesMissingFixedNativeFormatsWithoutChangingSe
 		operation, id string
 		credits       int
 	}{
-		{"rigging", "tripo/processing/rigging", 35},
-		{"rigging", "tripo/processing/rigging-v3", 35},
+		// 25 for the rig and 10 for each of the two fixed exports (GLB and FBX, #305).
+		{"rigging", "tripo/processing/rigging", 45},
+		{"rigging", "tripo/processing/rigging-v3", 45},
 		{"retexture", "tripo/processing/texture", 80},
 		{"rigging", "meshy/processing/rigging", 5},
 	} {
@@ -121,7 +122,7 @@ func TestNativePublicDiscoveryListsEnabledTripoProcessingAndKeepsPrivateProtocol
 		for _, tc := range []struct {
 			capability, model string
 			credits           int
-		}{{"rigging", "tripo-rigging", 35}, {"rigging", "tripo-rigging-v3", 35}, {"retexture", "tripo-texture", 80}, {"animation", "tripo-animation", 0}} {
+		}{{"rigging", "tripo-rigging", 45}, {"rigging", "tripo-rigging-v3", 45}, {"retexture", "tripo-texture", 80}, {"animation", "tripo-animation", 0}} {
 			// maximum_estimated_credits is 0 when no billed option changes the
 			// price: Retarget has a flat 10-credit estimate and no cost declaration.
 			// #186 route B (2026-10-20): all four are enabled in the default Schema.

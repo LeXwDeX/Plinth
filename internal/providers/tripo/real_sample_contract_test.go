@@ -57,8 +57,10 @@ var realSampleCases = []realSampleCase{
 	{stem: "texture", offering: "tripo/processing/texture", endpoint: "models/texture", taskType: "texture_model",
 		intentionallyCheaper: []string{"pbr", "texture_quality"},
 		claims:               map[string]string{"model:glb": "model_url", "thumbnail:rendered_image": "rendered_image_url"}},
+	// The decimation's own GLB is the original file since #305: the model slot is the
+	// conversion of it, which no official output of this task claims.
 	{stem: "decimate", offering: "tripo/geometry/decimate-triangle", endpoint: "mesh/decimate", taskType: "highpoly_to_lowpoly",
-		claims: map[string]string{"model:glb": "model_url", "thumbnail:rendered_image": "rendered_image_url"}},
+		claims: map[string]string{"original_model:glb": "model_url", "thumbnail:rendered_image": "rendered_image_url"}},
 	{stem: "smartsegment-image", offering: "tripo/geometry/smartsegment-image", endpoint: "mesh/smartsegment", taskType: "smartsegment_image",
 		claims: map[string]string{"model:glb": "seg_model_url", "mask:png": "mask_url"}},
 	{stem: "smartsegment-model", offering: "tripo/geometry/smartsegment-model", endpoint: "mesh/smartsegment", taskType: "smartsegment_model",
@@ -295,8 +297,15 @@ func TestOfficialSamplesMatchTheCatalogDeclarationsAndAdapterMappings(t *testing
 			if prompts, ok := realSampleRequestPrompts(body); ok {
 				prompted = prompts
 			}
+			// The slots a private export delivers are not part of the official output.
+			exported := map[string]bool{}
+			if options.NativeConversion != nil {
+				for _, format := range options.NativeConversion.Formats {
+					exported[format.Role+":"+format.Variant] = true
+				}
+			}
 			for _, slot := range offering.Outputs {
-				if slot.Role == "converted_model" || slot.Delivery != "required" || slot.Minimum != nil && *slot.Minimum == 0 {
+				if slot.Role == "converted_model" || slot.Delivery != "required" || slot.Minimum != nil && *slot.Minimum == 0 || exported[slot.Role+":"+slot.Variant] {
 					continue
 				}
 				if slot.RequiredWhen != nil && !prompted[strings.TrimSuffix(slot.RequiredWhen.Parameter, "_prompt")] {
