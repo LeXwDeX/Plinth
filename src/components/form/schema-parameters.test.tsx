@@ -317,3 +317,66 @@ describe('a parameter that follows the session purpose (#292)', () => {
     expect(html).not.toContain(followsText);
   });
 });
+
+// #306: before the step is confirmed an untouched parameter that follows the session purpose says what the purpose
+// gives it ("按会话用途：2K（2048 像素）"), with the label of the option the server's value names. The wording is the
+// Schema's; what the person picked, and a parameter that does not follow a purpose, are shown as before.
+describe('a parameter that follows the session purpose says what the purpose gives it (#306)', () => {
+  const size: ParamSchema = {
+    name: 'export_texture_size', label: '导出贴图尺寸', type: 'select', default: '8k', follows_purpose: true,
+    options: [{ value: '2k', label: '2K（2048 像素）' }, { value: '4k', label: '4K（4096 像素）' }, { value: '8k', label: '8K（8192 像素）' }],
+  };
+  const messages = defaultCatalog.application.content.messages as Record<string, string>;
+  const resolved = (label: string) => messages['ui.studio.params.follows_purpose_resolved'].replace('{value}', label);
+  const render = (values: Record<string, unknown>, purposeValues?: Record<string, unknown>, options: { disabled?: boolean; parameter?: ParamSchema } = {}) => {
+    vi.stubGlobal('React', React);
+    return renderToStaticMarkup(<SchemaParameters parameters={[options.parameter ?? size]} values={values} purposeValues={purposeValues}
+      onChange={() => {}} disabled={options.disabled} />);
+  };
+
+  it('is worded by the Schema with the value in it', () => {
+    expect(messages['ui.studio.params.follows_purpose_resolved']).toContain('{value}');
+    expect(resolved('2K（2048 像素）')).toBe('按会话用途：2K（2048 像素）');
+  });
+
+  it('names the value the purpose gives in the untouched select', () => {
+    for (const [value, label] of [['2k', '2K（2048 像素）'], ['4k', '4K（4096 像素）'], ['8k', '8K（8192 像素）']]) {
+      const html = render({}, { export_texture_size: value });
+      expect(html).toContain(`>${resolved(label)}</span>`);
+      expect(html).not.toContain('>ui.studio.params.follows_purpose</span>');
+    }
+  });
+
+  it('names it in the locked text as well', () => {
+    expect(render({}, { export_texture_size: '4k' }, { disabled: true })).toContain(`data-testid="parameter-locked-value">${resolved('4K（4096 像素）')}<`);
+  });
+
+  it('shows what the person picked, whatever the purpose gives', () => {
+    const html = render({ export_texture_size: '8k' }, { export_texture_size: '2k' });
+    expect(html).toContain('>8K（8192 像素）</span>');
+    expect(html).not.toContain('按会话用途：');
+    expect(render({ export_texture_size: '8k' }, { export_texture_size: '2k' }, { disabled: true })).toContain('data-testid="parameter-locked-value">8K（8192 像素）<');
+  });
+
+  it('says only that it follows the purpose while the value is not known, or is no option of the parameter', () => {
+    const unknown = [undefined, {}, { other: '2k' }, { export_texture_size: '16k' }, { export_texture_size: null }, { export_texture_size: '' }];
+    for (const purposeValues of unknown) {
+      const html = render({}, purposeValues);
+      expect(html).toContain('>ui.studio.params.follows_purpose</span>');
+      expect(html).not.toContain('按会话用途：');
+    }
+    expect(render({}, { export_texture_size: '16k' }, { disabled: true })).toContain(`data-testid="parameter-locked-value">${messages['ui.studio.params.follows_purpose']}<`);
+  });
+
+  it('reads the value as the option is written when the Schema declares it as a number', () => {
+    const numeric: ParamSchema = { ...size, options: [{ value: '2048', label: '2K' }, { value: '8192', label: '8K' }], default: '8192' };
+    expect(render({}, { export_texture_size: 2048 }, { parameter: numeric })).toContain(`>${resolved('2K')}</span>`);
+  });
+
+  it('leaves a parameter that does not follow a purpose as it was', () => {
+    const plain = { ...size, follows_purpose: undefined };
+    const html = render({}, { export_texture_size: '2k' }, { parameter: plain });
+    expect(html).not.toContain('按会话用途：');
+    expect(html).not.toContain('ui.studio.params.follows_purpose');
+  });
+});

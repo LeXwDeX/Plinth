@@ -72,6 +72,7 @@ func validateContent(schema ContentSchema) error {
 		"error.unknown_offering",
 		"error.no_offering",
 		"error.idempotency_conflict",
+		"error.idempotency_key_required",
 		"error.not_found",
 		"error.conflict",
 		"error.unavailable",

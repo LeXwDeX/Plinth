@@ -15,8 +15,14 @@ func (s *Server) createProcessingPlan(writer http.ResponseWriter, request *http.
 	if err := s.decodeJSON(writer, request, &command); err != nil {
 		return
 	}
+	// The plan ID derives from the key: a request without a usable one is
+	// refused by name rather than as an invalid plan (#302).
+	idempotencyKey, usable := requireIdempotencyKey(writer, request, planIdempotencyKeyRule, s.message(idempotencyKeyRequiredMessage))
+	if !usable {
+		return
+	}
 	command.OwnerID = owner
-	command.IdempotencyKey = strings.TrimSpace(request.Header.Get("Idempotency-Key"))
+	command.IdempotencyKey = idempotencyKey
 	owned, err := s.chat.OwnsSession(request.Context(), string(owner), command.SessionID)
 	if err != nil {
 		s.writeChatInternalError(writer, err)

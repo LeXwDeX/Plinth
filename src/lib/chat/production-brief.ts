@@ -79,6 +79,18 @@ export function briefIsEmpty(brief: ProductionBrief): boolean {
   return Object.values(brief).every((value) => value === undefined || value === null || value === '');
 }
 
+/**
+ * One text that is the same for the same brief and differs for another (#306): the members in a fixed order,
+ * blank ones left out as `briefIsEmpty` leaves them, no brief at all being ''. A reader that must look again
+ * when the brief changes (the 加工 panel's purpose preview) keys on it instead of on the object's identity.
+ */
+export function briefSignature(brief: ProductionBrief | undefined): string {
+  const members = Object.entries(brief ?? {})
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return members.length === 0 ? '' : JSON.stringify(members);
+}
+
 /** How a stored value reads in the panel: booleans as yes/no, everything else as text. */
 export function briefValueText(value: unknown, yes: string, no: string): string {
   if (typeof value === 'boolean') return value ? yes : no;

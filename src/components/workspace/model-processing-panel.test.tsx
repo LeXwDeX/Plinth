@@ -14,7 +14,7 @@ const mock = vi.hoisted(() => ({
 }));
 const messages = defaultCatalog.application.content.messages;
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: defaultCatalog.application }) }));
-vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: object) => unknown) => select({ activeSessionId: 'session' }) }));
+vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: object) => unknown) => select({ activeSessionId: 'session', sessions: [], sessionListRevision: 0 }) }));
 vi.mock('@/store/workspace-store', () => ({ useWorkspaceStore: (select: (state: object) => unknown) => select({ registerTask: vi.fn() }) }));
 vi.mock('@/hooks/use-model-processing-capabilities', () => ({ useModelProcessingCapabilities: () => ({
   available: mock.available, offerings: { remesh: [{ id: 'remesh', capability: 'remesh', revision: 'v2', available: true, estimated_credits: 12, credits_metered: true }] }, refresh: vi.fn(),

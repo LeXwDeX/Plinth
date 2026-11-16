@@ -6281,6 +6281,11 @@ type CoreHTTPRoutesSchema struct {
 	ChatSessionSelfChecks string `json:"chat_session_self_checks,omitempty"`
 	ChatSessionStyleLock  string `json:"chat_session_style_lock,omitempty"`
 	ChatSessionBrief      string `json:"chat_session_brief,omitempty"`
+	// ChatSessionPurposeParameters reads the values the session's purpose gives
+	// the parameters an Offering declares as following it (#306), for the 加工
+	// panel to show before a step is confirmed. Empty (historical Catalogs)
+	// disables the read.
+	ChatSessionPurposeParameters string `json:"chat_session_purpose_parameters,omitempty"`
 	// ChatSessionModel3D writes the 3D model the person explicitly picked in
 	// the session (#103); it is a lock for the generation tools and submits
 	// nothing. Empty (historical Catalogs) disables the write.
