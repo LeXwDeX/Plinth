@@ -118,7 +118,9 @@ export function ChatModelPicker() {
     });
   }
   if (sections.length === 0) return null;
-  const value = level ? `${selectedModel} · ${level}` : selectedModel;
+  // The levels and the model list load separately: until the model name is known the trigger names the level alone
+  // instead of showing a bare separator (#236). The trigger is the same node either way; only its text changes.
+  const value = [selectedModel, level].filter(Boolean).join(' · ');
   const valueParts = level && selectedModel ? { parts: [selectedModel, level], separator: ' · ' } : undefined;
   return (
     <TablePopover

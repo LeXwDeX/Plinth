@@ -153,7 +153,7 @@ func cloneOutputTriangles(source *schema.OutputTriangleEstimate) *schema.OutputT
 		return nil
 	}
 	copied := *source
-	copied.TrianglesPerFace = make(map[string]int64, len(source.TrianglesPerFace))
+	copied.TrianglesPerFace = make(map[string]float64, len(source.TrianglesPerFace))
 	for topology, factor := range source.TrianglesPerFace {
 		copied.TrianglesPerFace[topology] = factor
 	}

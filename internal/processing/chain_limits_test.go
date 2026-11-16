@@ -181,7 +181,7 @@ func TestChainEstimateSurvivesNeutralStepsAndStaysUnknownWhenUnreadable(t *testi
 			{Name: "topology", Type: "select", Default: json.RawMessage(`"quad"`), Options: []generation.ParameterOption{{Value: "quad"}, {Value: "triangle"}}},
 			{Name: "target_polycount", Type: "number", Default: json.RawMessage(`300000`)}},
 		OutputTriangles: &generation.OutputTriangleEstimate{CountParameter: "target_polycount", TopologyParameter: "topology",
-			TrianglesPerFace: map[string]int64{"quad": 2, "triangle": 1}}}
+			TrianglesPerFace: map[string]float64{"quad": 2, "triangle": 1}}}
 	neutral := generation.Offering{ID: "neutral", Revision: "v1", ProviderID: "p", Capability: "retexture", Domain: generation.DomainProcessing, Enabled: true,
 		Parameters: []generation.Parameter{{Name: "source_task", Type: "task", TaskCapabilities: []generation.Capability{"remesh"}}}}
 	limited := generation.Offering{ID: "limited", ModelName: "Rigging model", Revision: "v1", ProviderID: "p", Capability: "rigging", Domain: generation.DomainProcessing, Enabled: true,
@@ -236,5 +236,57 @@ func TestChainEstimateSurvivesNeutralStepsAndStaysUnknownWhenUnreadable(t *testi
 	// Without the Schema text the plan is still refused, only without a reason.
 	if err := create(t, `{}`, ""); !errors.Is(err, ErrInvalid) || generation.UserFacingError(err) != nil {
 		t.Fatalf("no-text refusal = %v", err)
+	}
+}
+
+// The same declaration on a generation Offering (#304): a finished Rodin
+// Gen-2.5 task starts the chain with the triangles its own frozen request
+// delivers, a Quad face counting 2.2 of them, so a plan whose limited step
+// cannot take that model is refused before anything is paid, in the same words
+// as for a Remesh. A text-to-3D source that declares nothing (Meshy 7.1 above)
+// still leaves the count unknown.
+func TestFinishedRodinTaskStartsTheChainWithItsQuadFactor(t *testing.T) {
+	const rodin = "hyper3d/rodin-gen-2.5/text-to-3d"
+	for _, test := range []struct {
+		name      string
+		input     string
+		triangles int64
+		allowed   bool
+	}{
+		{"quad just inside the limit", `{"mesh_mode":"Quad","quality_override":145454}`, 319999, true}, // 319998.8
+		{"quad one face over", `{"mesh_mode":"Quad","quality_override":145455}`, 320001, false},
+		{"triangles at the limit", `{"mesh_mode":"Raw","quality_override":320000}`, 320000, true},
+		{"triangles one face over", `{"mesh_mode":"Raw","quality_override":320001}`, 320001, false},
+		{"the display request", `{}`, 2000000, false},
+		{"the Quad ceiling", `{"mesh_mode":"Quad","quality_override":200000}`, 440000, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newChainFixture(t, rodin, test.input)
+			source := f.gateway.tasks["source"]
+			chain := chainTriangles{}.after(source.Offering, source.Input)
+			if !chain.known || chain.triangles != test.triangles {
+				t.Fatalf("estimate = %d (known %v), want %d", chain.triangles, chain.known, test.triangles)
+			}
+			rigging, _ := f.product.Get(riggingOffering)
+			if err := chain.check(rigging); (err == nil) != test.allowed {
+				t.Fatalf("check allowed = %v, want %v (%v)", err == nil, test.allowed, err)
+			}
+			if test.allowed {
+				return
+			}
+			_, err := f.create(t, test.name, [2]string{riggingOffering, `{}`})
+			refusal := generation.UserFacingError(err)
+			if !errors.Is(err, ErrInvalid) || refusal == nil {
+				t.Fatalf("a plan over the limit was not refused with a reason: %v", err)
+			}
+			for _, want := range []string{fmt.Sprint(test.triangles), "320000", "Rodin Gen-2.5", "Meshy Rigging", "Quad ≤ 145454 / Raw ≤ 320000"} {
+				if !strings.Contains(refusal.Detail, want) {
+					t.Fatalf("detail %q lacks %q", refusal.Detail, want)
+				}
+			}
+			if len(f.store.plans) != 0 || len(f.gateway.commands) != 0 {
+				t.Fatalf("a refused plan left %d plans and %d submissions", len(f.store.plans), len(f.gateway.commands))
+			}
+		})
 	}
 }

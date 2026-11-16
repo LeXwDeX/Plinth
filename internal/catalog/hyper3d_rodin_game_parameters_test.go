@@ -15,8 +15,8 @@ import (
 // 2026-11-12): quality_override 500 to 2000000 on the Extreme-High tier with an
 // additional 200000 in Quad mode, seed 0 to 65535, TAPose and quad_normal
 // booleans. One real run (2026-11-13, #294 follow-up) then showed the 2K texture
-// and the charge of 1 credit under Quad and the triangles a Quad face gets (see
-// rodinQuadTrianglesPerFacePercent); the other ranges are still the page's.
+// and the charge of 1 credit under Quad and the triangles a Quad face gets (the
+// output_triangles factor, #304); the other ranges are still the page's.
 
 var rodinOfferingIDs = map[schema.Capability]schema.OfferingID{
 	schema.TextTo3D:  "hyper3d/rodin-gen-2.5/text-to-3d",
@@ -270,31 +270,80 @@ func TestHyper3DRodinInputsFollowTheDocumentedRanges(t *testing.T) {
 // (2026-11-13, dev-test, #294 follow-up; mesh_mode Quad, quality_override 10000,
 // texture_mode high) delivered a GLB of about 21,800 triangles. The pages do not say
 // how a Quad face counts toward quality_override, so this is one sample at one size.
-// The rule below reads it as 2.2 (rounded up, kept in percent so the arithmetic
-// stays in integers) and, like the Meshy quad targets, keeps a tenth of each budget
-// free for the ratio to vary. The budget measures this parameter one to one
-// (output_triangles is declared for processing steps only, and its factor is an
-// integer), so the shipped values are chosen with this arithmetic and held to it
-// here, per platform.
-const (
-	rodinQuadTrianglesPerFacePercent = 220
-	rodinQuadBudgetSharePercent      = 90
-)
+// The Schema declares it once, as 2.2 triangles per Quad face and 1 per Raw face on
+// both Offerings (output_triangles, #304), with the sample beside it in the
+// topology parameter's description. The game purposes keep explicit Quad counts
+// (the product's choice, taken from the sample's scale with a tenth of each budget
+// left free); the budget measures and fits a face count with the declared factor,
+// which checks those counts when the Catalog loads and converges a count nobody
+// gave, and a new sample changes the number in that one place.
+func TestRodinOfferingsDeclareTheQuadFactorWithItsSample(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts, err := catalog.NewTextLocalizer(product.Application())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range rodinOfferingIDs {
+		offering, _ := product.Get(id)
+		estimate := offering.OutputTriangles
+		if estimate == nil || estimate.CountParameter != "quality_override" || estimate.TopologyParameter != "mesh_mode" ||
+			len(estimate.TrianglesPerFace) != 2 || estimate.TrianglesPerFace["Raw"] != 1 || estimate.TrianglesPerFace["Quad"] != 2.2 {
+			t.Fatalf("%s output_triangles = %+v, want Quad 2.2 and Raw 1 on quality_override by mesh_mode", id, estimate)
+		}
+		if offering.Domain != schema.DomainModel3D {
+			t.Fatalf("%s is in the %s domain", id, offering.Domain)
+		}
+		// The declared factor reaches the same estimate a processing step gets: the
+		// real sample (10,000 Quad faces) is 22,000 triangles, the display request
+		// (two million Raw faces) two million.
+		if got, ok := offering.EstimateOutputTriangles([]byte(`{"mesh_mode":"Quad","quality_override":10000}`)); !ok || got != 22000 {
+			t.Fatalf("%s estimates the sample as %d triangles (%v)", id, got, ok)
+		}
+		if got, ok := offering.EstimateOutputTriangles([]byte(`{}`)); !ok || got != 2000000 {
+			t.Fatalf("%s estimates the display request as %d triangles (%v)", id, got, ok)
+		}
+		// The sample is written beside the number, in both languages, and says it is
+		// the only one.
+		description := rodinParameters(offering)["mesh_mode"].Description
+		for _, want := range []string{"2.2", "2026-11-13", "21,800", "一个样本"} {
+			if !strings.Contains(description, want) {
+				t.Fatalf("%s mesh_mode description %q does not state %q", id, description, want)
+			}
+		}
+		english := texts.Text("en", description)
+		for _, want := range []string{"2.2", "2026-11-13", "21,800", "one sample"} {
+			if !strings.Contains(english, want) {
+				t.Fatalf("%s English mesh_mode description %q does not state %q", id, english, want)
+			}
+		}
+	}
+}
 
 // The game purposes recommend Rodin after the cheaper Meshy and P2 choices (the
 // third choice; the only entry after it is the Meshy 7.1 one-step remesh of
 // #276, which Meshy itself ranks below Smart Topology for low-poly game assets)
-// and carry a Quad override whose triangulated count stays inside the triangle
-// budget of every target platform. The values are per platform like the other
-// engines' face counts: a session without a platform and the phone, web and XR
-// platforms share the lower count, the PC and console platform keeps the count it
-// had before the real run (which was already inside its budget).
+// and carry an explicit Quad count (#294 follow-up). The counts are the product's
+// choice, set from the one real sample (10,000 faces): the phone, web and XR
+// platforms and a session without a platform share the lower count, and PC and
+// console keep the count the run had, so no purpose borrows a large budget to
+// enlarge a count nobody measured. The Offering's declared factor (#304) holds
+// every count to its platform's triangle budget and, like the Meshy quad targets,
+// to nine tenths of it, so a ratio that varies still fits.
+const rodinQuadBudgetSharePercent = 90
+
 func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
 	usage := product.Application().Chat.Model3DUsage
+	limit, bounded := usage.BudgetLimit(schema.SemanticPolycount)
+	if !bounded {
+		t.Fatal("the polycount limit is not declared")
+	}
 	profiles := map[string]catalog.ChatModel3DUsageProfile{}
 	for _, profile := range usage.Profiles {
 		profiles[profile.ID] = profile
@@ -323,21 +372,24 @@ func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 				t.Fatalf("%s %s recommends %v, want Rodin third and at most Meshy 7.1 after it", id, capability, recommended)
 			}
 			offering, _ := product.Get(offeringID)
-			// The Schema declares no quad-to-triangle factor for a generation Offering:
-			// if one appears, the overrides should follow it instead of this test's constant.
-			if offering.OutputTriangles != nil {
-				t.Fatalf("%s declares output_triangles: derive the overrides from it instead of rodinQuadTrianglesPerFacePercent", offeringID)
+			count := rodinParameters(offering)["quality_override"]
+			if offering.OutputTriangles == nil {
+				t.Fatalf("%s declares no output_triangles to hold the purposes' counts to", offeringID)
 			}
-			for platform, count := range want.counts {
+			factor, declared := offering.OutputTriangles.Factor("Quad")
+			if !declared {
+				t.Fatalf("%s declares no Quad factor to hold the purposes' counts to", offeringID)
+			}
+			for platform, wantCount := range want.counts {
 				resolved, _ := usage.ForPlatform(profile, platform)
 				override := resolved.ParameterOverrides[string(offeringID)]
 				var mode string
 				var got float64
 				var quadNormal, pose bool
 				if json.Unmarshal(override["mesh_mode"], &mode) != nil || mode != "Quad" ||
-					json.Unmarshal(override["quality_override"], &got) != nil || got != count ||
+					json.Unmarshal(override["quality_override"], &got) != nil || got != wantCount ||
 					json.Unmarshal(override["quad_normal"], &quadNormal) != nil || !quadNormal {
-					t.Fatalf("%s on %q: %s override = %v, want Quad at %v faces", id, platform, offeringID, override, count)
+					t.Fatalf("%s on %q: %s override = %v, want Quad at %v faces", id, platform, offeringID, override, wantCount)
 				}
 				if raw, set := override["TAPose"]; want.pose {
 					if !set || json.Unmarshal(raw, &pose) != nil || !pose {
@@ -378,23 +430,30 @@ func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 				if measured, ok := textureLimit.Measure(offering, texture, override["texture_mode"], nil); !ok || measured > textureMaximum {
 					t.Fatalf("%s on %q: %s texture is %v pixels against the %v budget", id, platform, offeringID, measured, textureMaximum)
 				}
-				// A Quad face is about 2.2 triangles in the GLB (see
-				// rodinQuadTrianglesPerFacePercent): the count must fit the budget the
-				// purpose resolves to on this platform once converted, and leave a tenth
-				// of it for the ratio to vary.
-				triangles := int(count) * rodinQuadTrianglesPerFacePercent / 100
-				budget := resolved.Budget
-				minimum := 0
-				if budget.MinTriangles != nil {
-					minimum = *budget.MinTriangles
+				// A Quad face is the declared 2.2 triangles in the GLB: the count must fit
+				// the budget the purpose resolves to on this platform once converted, and
+				// leave a tenth of it for the ratio to vary. The budget measures it the same
+				// way (the rule the Catalog applies when it loads).
+				maximum, declared := limit.Maximum(resolved.Budget)
+				if !declared {
+					t.Fatalf("%s on %q declares no triangle budget", id, platform)
 				}
-				if triangles > budget.MaxTriangles || triangles < minimum {
-					t.Fatalf("%s on %q: %s %v quads are about %d triangles, outside the budget %d-%d", id, platform, offeringID,
-						count, triangles, minimum, budget.MaxTriangles)
+				triangles, measured := limit.Measure(offering, count, override["quality_override"], override)
+				if !measured || triangles != schema.TrianglesForFaces(got, factor) {
+					t.Fatalf("%s on %q: %s budget measures %v quads as %v (%v), want the declared factor's %v", id, platform, offeringID,
+						got, triangles, measured, schema.TrianglesForFaces(got, factor))
 				}
-				if triangles*100 > budget.MaxTriangles*rodinQuadBudgetSharePercent {
-					t.Fatalf("%s on %q: %s %v quads are about %d triangles, leaving less than a tenth of the %d budget for the quad ratio to vary",
-						id, platform, offeringID, count, triangles, budget.MaxTriangles)
+				minimum := 0.0
+				if resolved.Budget.MinTriangles != nil {
+					minimum = float64(*resolved.Budget.MinTriangles)
+				}
+				if triangles > maximum || triangles < minimum {
+					t.Fatalf("%s on %q: %s %v quads are about %v triangles, outside the budget %v-%v", id, platform, offeringID,
+						got, triangles, minimum, maximum)
+				}
+				if triangles*100 > maximum*rodinQuadBudgetSharePercent {
+					t.Fatalf("%s on %q: %s %v quads are about %v triangles, leaving less than a tenth of the %v budget for the quad ratio to vary",
+						id, platform, offeringID, got, triangles, maximum)
 				}
 				if _, _, err := product.Normalize(capability, offeringID, rodinInput(t, capability, overrideJSON(t, override))); err != nil {
 					t.Fatalf("%s on %q: %s override does not freeze: %v", id, platform, offeringID, err)
@@ -414,6 +473,99 @@ func TestGameProfilesRecommendRodinWithBudgetedQuadOverrides(t *testing.T) {
 	}
 }
 
+// usageProfileDocument is the decoded model3d_usage profile of a Catalog document.
+func usageProfileDocument(t *testing.T, document map[string]any, id string) map[string]any {
+	t.Helper()
+	usage := document["application"].(map[string]any)["chat"].(map[string]any)["model3d_usage"].(map[string]any)
+	for _, raw := range usage["profiles"].([]any) {
+		if profile := raw.(map[string]any); profile["id"] == id {
+			return profile
+		}
+	}
+	t.Fatalf("profile %q missing", id)
+	return nil
+}
+
+// A purpose's explicit Quad count is held to the budget at load time (#304): the
+// loader converts it with the factor the Offering declares, on every platform the
+// count applies to, and refuses a count whose triangles are over the budget. The
+// boundaries are the most Quad faces the declared 2.2 lets a budget hold: 20000
+// triangles hold 9090 (9090 x 2.2 = 19998), 8000 hold 3636, 100000 hold 45454, 40000
+// hold 18181, and one face more breaks the budget.
+func TestRodinGameCountsOverTheirBudgetFailToLoad(t *testing.T) {
+	set := func(profileID, platform, capability, count string) func(document map[string]any) {
+		return func(document map[string]any) {
+			profile := usageProfileDocument(t, document, profileID)
+			overrides := profile["parameter_overrides"].(map[string]any)
+			if platform != "" {
+				overrides = nil
+				for _, raw := range profile["platforms"].([]any) {
+					variant := raw.(map[string]any)
+					for _, option := range variant["ids"].([]any) {
+						if option == platform {
+							overrides = variant["parameter_overrides"].(map[string]any)
+						}
+					}
+				}
+				if overrides == nil {
+					t.Fatalf("%s declares no overrides for the %s platform", profileID, platform)
+				}
+			}
+			overrides["hyper3d/rodin-gen-2.5/"+capability].(map[string]any)["quality_override"] = json.Number(count)
+		}
+	}
+	for _, test := range []struct {
+		name, profile, platform, count string
+		loads                          bool
+	}{
+		{"a character on a phone at the most the budget holds", "game_character", "", "9090", true},
+		{"a character on a phone, one face more", "game_character", "", "9091", false},
+		{"a character on PC and console at the most", "game_character", "pc_console", "45454", true},
+		{"a character on PC and console, one face more", "game_character", "pc_console", "45455", false},
+		{"a prop on a phone at the most", "game_prop", "", "3636", true},
+		{"a prop on a phone, one face more", "game_prop", "", "3637", false},
+		{"a prop on PC and console at the most", "game_prop", "pc_console", "18181", true},
+		{"a prop on PC and console, one face more", "game_prop", "pc_console", "18182", false},
+	} {
+		for _, capability := range []string{"text-to-3d", "image-to-3d"} {
+			t.Run(test.name+" ("+capability+")", func(t *testing.T) {
+				_, err := loadMutatedCatalog(t, set(test.profile, test.platform, capability, test.count))
+				switch {
+				case test.loads && err != nil:
+					t.Fatalf("a count inside the budget was refused: %v", err)
+				case !test.loads && (err == nil || !strings.Contains(err.Error(), "超出用途预算")):
+					t.Fatalf("a count over the budget loaded or failed for another reason: %v", err)
+				}
+			})
+		}
+	}
+}
+
+// The explicit counts follow the declared factor (#304): a new sample that raises
+// the ratio makes counts chosen for 2.2 too large for the budgets they were chosen
+// under, and the Catalog refuses to load until they are chosen again. At 2.5 the
+// phone budgets are exactly filled (8000 x 2.5 = 20000, 3200 x 2.5 = 8000), a hair
+// more and they are not.
+func TestRodinFactorChangeIsHeldAgainstTheExplicitCounts(t *testing.T) {
+	withQuadFactor := func(factor string) error {
+		_, err := loadMutatedCatalog(t, func(document map[string]any) {
+			for _, capability := range []string{"text-to-3d", "image-to-3d"} {
+				estimate := catalogOffering(t, document, "hyper3d/rodin-gen-2.5/"+capability)["output_triangles"].(map[string]any)
+				estimate["triangles_per_face"].(map[string]any)["Quad"] = json.Number(factor)
+			}
+		})
+		return err
+	}
+	for _, factor := range []string{"2.2", "2.18", "2.5"} {
+		if err := withQuadFactor(factor); err != nil {
+			t.Fatalf("a factor of %s was refused: %v", factor, err)
+		}
+	}
+	if err := withQuadFactor("2.51"); err == nil || !strings.Contains(err.Error(), "超出用途预算") {
+		t.Fatalf("explicit counts over the budget under a factor of 2.51 loaded or failed for another reason: %v", err)
+	}
+}
+
 func overrideJSON(t *testing.T, override map[string]json.RawMessage) string {
 	t.Helper()
 	encoded, err := json.Marshal(override)
@@ -425,7 +577,9 @@ func overrideJSON(t *testing.T, override map[string]json.RawMessage) string {
 
 // quality_override carries the polycount semantic, so a purpose with a lower
 // triangle budget than the display default fits it the way it fits Tripo's face
-// limit and Meshy's target count (#129), without an override.
+// limit and Meshy's target count (#129), without an override. A Raw count is a
+// triangle count; a Quad count is fitted in triangles with the factor the
+// Offering declares (#304), whichever purpose the budget belongs to.
 func TestRodinFaceCountFitsAPurposeBudget(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
@@ -436,6 +590,7 @@ func TestRodinFaceCountFitsAPurposeBudget(t *testing.T) {
 	if !bounded {
 		t.Fatal("the polycount limit is not declared")
 	}
+	quad := map[string]json.RawMessage{"mesh_mode": json.RawMessage(`"Quad"`)}
 	for _, id := range rodinOfferingIDs {
 		offering, _ := product.Get(id)
 		parameter := rodinParameters(offering)["quality_override"]
@@ -445,6 +600,21 @@ func TestRodinFaceCountFitsAPurposeBudget(t *testing.T) {
 		}
 		if _, fitted := limit.Fit(offering, parameter, parameter.Default, nil, 2000000); fitted {
 			t.Fatalf("%s display default does not fit the display budget", id)
+		}
+		// The Quad ceiling (200000 faces, 440000 triangles) against budgets of every
+		// purpose the Schema declares: the web and AR purpose's 100000 holds 45454
+		// Quad faces, a 2000000 display budget holds all of them.
+		for budget, want := range map[float64]string{100000: "45454", 50000: "22727", 20000: "9090", 8000: "3636", 440000: "", 2000000: ""} {
+			value, fitted := limit.Fit(offering, parameter, json.RawMessage(`200000`), quad, budget)
+			if want == "" {
+				if fitted {
+					t.Fatalf("%s Quad ceiling fitted to a %v budget it fits: %s", id, budget, value)
+				}
+				continue
+			}
+			if !fitted || string(value) != want {
+				t.Fatalf("%s Quad ceiling fitted to a %v budget = %s (%v), want %s", id, budget, value, fitted, want)
+			}
 		}
 	}
 }

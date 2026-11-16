@@ -2,6 +2,8 @@ package catalog
 
 import (
 	"encoding/json"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -43,7 +45,7 @@ func TestBudgetLimitFitsAParameterNobodyChose(t *testing.T) {
 	}
 	remesh := usageOffering()
 	remesh.OutputTriangles = &schemacontract.OutputTriangleEstimate{CountParameter: "target_polycount",
-		TopologyParameter: "topology", TrianglesPerFace: map[string]int64{"quad": 2, "triangle": 1}}
+		TopologyParameter: "topology", TrianglesPerFace: map[string]float64{"quad": 2, "triangle": 1}}
 	remesh.Parameters = []schemacontract.Parameter{
 		{Name: "topology", Type: "select", Default: json.RawMessage(`"quad"`)},
 		{Name: "target_polycount", Type: "number", Semantic: schemacontract.SemanticPolycount,
@@ -103,6 +105,163 @@ func TestBudgetLimitFitsAParameterNobodyChose(t *testing.T) {
 				t.Fatalf("Fit = %s (%v), want %s", value, fitted, test.want)
 			}
 		})
+	}
+}
+
+// rodinLikeGenerationOffering reads like the shipped Rodin Gen-2.5 (#304): a
+// 3D generation Offering whose face count is in quads or triangles by its
+// topology parameter, with a factor that is not a whole number.
+func rodinLikeGenerationOffering() schemacontract.Offering {
+	offering := usageOffering(
+		schemacontract.Parameter{Name: "mesh_mode", Type: "select", Default: json.RawMessage(`"Raw"`),
+			Options: []schemacontract.ParameterOption{{Value: "Raw"}, {Value: "Quad"}}},
+		schemacontract.Parameter{Name: "quality_override", Type: "number", Integer: true, Semantic: schemacontract.SemanticPolycount,
+			Default: json.RawMessage(`2000000`), Minimum: usageNumber(500), Maximum: usageNumber(2000000)},
+	)
+	offering.OutputTriangles = &schemacontract.OutputTriangleEstimate{CountParameter: "quality_override", TopologyParameter: "mesh_mode",
+		TrianglesPerFace: map[string]float64{"Raw": 1, "Quad": 2.2}}
+	return offering
+}
+
+// A face count of a generation Offering that declares output_triangles is
+// measured and fitted in triangles with its fractional factor (#304): the
+// largest count whose converted amount stays inside the budget, rounded down,
+// and an amount that is a whole triangle count however the binary product of a
+// decimal factor falls.
+func TestBudgetLimitConvertsAFractionalFactor(t *testing.T) {
+	offering := rodinLikeGenerationOffering()
+	count := offering.Parameters[1]
+	limit := budgetTriangleLimit()
+	mode := func(topology string) map[string]json.RawMessage {
+		return map[string]json.RawMessage{"mesh_mode": json.RawMessage(`"` + topology + `"`)}
+	}
+
+	for name, test := range map[string]struct {
+		value  string
+		values map[string]json.RawMessage
+		want   float64
+	}{
+		"the real sample":                                   {"10000", mode("Quad"), 22000},
+		"a product with binary noise":                       {"3200", mode("Quad"), 7040}, // 3200 * 2.2 = 7040.000000000001
+		"a whole product":                                   {"4000", mode("Quad"), 8800},
+		"a fraction of a triangle rounds up":                {"9091", mode("Quad"), 20001}, // 20000.2
+		"triangles count once":                              {"10000", mode("Raw"), 10000},
+		"the default topology is triangles":                 {"10000", nil, 10000},
+		"an unknown topology is read as the largest factor": {"10000", mode("Hexagon"), 22000},
+	} {
+		t.Run("measure "+name, func(t *testing.T) {
+			got, measured := limit.Measure(offering, count, json.RawMessage(test.value), test.values)
+			if !measured || got != test.want {
+				t.Fatalf("Measure = %v (%v), want %v", got, measured, test.want)
+			}
+		})
+	}
+	// Only a triangle bound converts: a texture bound reads the number as it is.
+	texture := ChatModel3DUsageBudgetLimit{Semantic: schemacontract.SemanticPolycount, Bound: BudgetBoundMaxTextureSize}
+	if got, measured := texture.Measure(offering, count, json.RawMessage(`10000`), mode("Quad")); !measured || got != 10000 {
+		t.Fatalf("a texture bound converted a face count: %v (%v)", got, measured)
+	}
+	// So does an Offering that declares no estimate.
+	plain := usageOffering(count)
+	if got, measured := limit.Measure(plain, count, json.RawMessage(`10000`), mode("Quad")); !measured || got != 10000 {
+		t.Fatalf("an Offering without an estimate converted a face count: %v (%v)", got, measured)
+	}
+
+	for name, test := range map[string]struct {
+		baseline string
+		values   map[string]json.RawMessage
+		maximum  float64
+		want     string // empty: the baseline fits and stays
+	}{
+		"a phone character":                    {"200000", mode("Quad"), 20000, "9090"},   // 9090 * 2.2 = 19998
+		"a phone prop":                         {"200000", mode("Quad"), 8000, "3636"},    // 7999.2
+		"a PC character":                       {"200000", mode("Quad"), 100000, "45454"}, // 99998.8
+		"a PC prop":                            {"200000", mode("Quad"), 40000, "18181"},  // 39998.2
+		"a whole boundary with binary noise":   {"200000", mode("Quad"), 22000, "10000"},
+		"another whole boundary":               {"200000", mode("Quad"), 6600, "3000"},
+		"triangles keep the budget one to one": {"2000000", mode("Raw"), 20000, "20000"},
+		"the default topology is triangles":    {"2000000", nil, 20000, "20000"},
+		"a count one face over the boundary":   {"9091", mode("Quad"), 20000, "9090"}, // 20000.2 rounds up to 20001
+		"a count on the boundary stays":        {"10000", mode("Quad"), 22000, ""},
+		"a count within the budget stays":      {"8000", mode("Quad"), 20000, ""}, // 17600
+		"a budget under the minimum":           {"200000", mode("Quad"), 600, "500"},
+	} {
+		t.Run("fit "+name, func(t *testing.T) {
+			value, fitted := limit.Fit(offering, count, json.RawMessage(test.baseline), test.values, test.maximum)
+			if test.want == "" {
+				if fitted {
+					t.Fatalf("Fit changed a value within the budget: %s", value)
+				}
+				return
+			}
+			if !fitted || string(value) != test.want {
+				t.Fatalf("Fit = %s (%v), want %s", value, fitted, test.want)
+			}
+			// A fitted count is inside the budget and one face more is not (the
+			// minimum aside).
+			if amount, _ := limit.Measure(offering, count, value, test.values); amount > test.maximum && test.want != "500" {
+				t.Fatalf("fitted count %s is %v triangles, over the %v budget", value, amount, test.maximum)
+			}
+			var faces float64
+			if err := json.Unmarshal(value, &faces); err != nil {
+				t.Fatal(err)
+			}
+			if amount, _ := limit.Measure(offering, count, json.RawMessage(strconv.FormatFloat(faces+1, 'f', -1, 64)), test.values); amount <= test.maximum && test.want != "500" {
+				t.Fatalf("fitted count %s is not the largest: %v faces still fit %v", value, faces+1, test.maximum)
+			}
+		})
+	}
+}
+
+// The declaration is checked as the loader checks it, on values the JSON
+// loader cannot produce too (#304): a factor is positive and finite, covers
+// every option of the topology parameter and nothing else, and a 3D
+// generation Offering may declare it as well as a processing one.
+func TestOutputTriangleDeclarationValidation(t *testing.T) {
+	declared := func(domain schemacontract.CapabilityDomain, change func(*schemacontract.Offering)) schemacontract.Offering {
+		offering := rodinLikeGenerationOffering()
+		offering.Domain = domain
+		offering.ExecutionMessages.PlanSourceFaceLimit = "{source_service} {service} {estimate} {limit} {choices}"
+		if change != nil {
+			change(&offering)
+		}
+		return offering
+	}
+	factors := func(offering *schemacontract.Offering) map[string]float64 {
+		return offering.OutputTriangles.TrianglesPerFace
+	}
+	for name, offering := range map[string]schemacontract.Offering{
+		"a decimal factor on a generation Offering":  declared(schemacontract.DomainModel3D, nil),
+		"a decimal factor on a processing Offering":  declared(schemacontract.DomainProcessing, nil),
+		"a whole factor on a generation Offering":    declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { factors(o)["Quad"] = 2 }),
+		"a factor below one is still a positive one": declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { factors(o)["Quad"] = 0.5 }),
+	} {
+		if err := validateOfferingModelLimits(offering); err != nil {
+			t.Errorf("%s was refused: %v", name, err)
+		}
+	}
+	for name, test := range map[string]struct {
+		offering schemacontract.Offering
+		want     string
+	}{
+		"zero":         {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { factors(o)["Quad"] = 0 }), "正的有限数"},
+		"negative":     {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { factors(o)["Quad"] = -2.2 }), "正的有限数"},
+		"not a number": {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { factors(o)["Quad"] = math.NaN() }), "正的有限数"},
+		"infinite":     {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { factors(o)["Quad"] = math.Inf(1) }), "正的有限数"},
+		"minus infinite": {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) {
+			factors(o)["Raw"] = math.Inf(-1)
+		}), "正的有限数"},
+		"a topology option left out": {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { delete(factors(o), "Raw") }), "覆盖拓扑参数的每个选项"},
+		"a factor for no option":     {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) { factors(o)["Hexagon"] = 4 }), "覆盖拓扑参数的每个选项"},
+		"an image Offering":          {declared(schemacontract.DomainImage, nil), "3D 生成与处理能力"},
+		"no refusal text": {declared(schemacontract.DomainModel3D, func(o *schemacontract.Offering) {
+			o.ExecutionMessages.PlanSourceFaceLimit = ""
+		}), "plan_source_face_limit"},
+	} {
+		err := validateOfferingModelLimits(test.offering)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s: error = %v, want mention of %q", name, err, test.want)
+		}
 	}
 }
 
