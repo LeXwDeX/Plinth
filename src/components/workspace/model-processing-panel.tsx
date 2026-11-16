@@ -7,6 +7,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { SchemaParameters, schemaParameterValues } from '@/components/form/schema-parameters';
 import { useModelProcessingCapabilities } from '@/hooks/use-model-processing-capabilities';
 import { useProcessingPlanResume } from '@/hooks/use-processing-plan-resume';
+import { usePurposeParameters } from '@/hooks/use-purpose-parameters';
 import { offeringFixedValues } from '@/lib/agent-offerings';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
@@ -116,6 +117,10 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
   const steps = useMemo(() => source && asset
     ? processingSourceSteps(availableCapabilities, selected, offerings, source, asset, chosen)
     : [], [source, asset, availableCapabilities, selected, offerings, chosen]);
+  // What the session purpose gives the parameters that follow it (#306), for the chosen steps of the person's own
+  // session: an untouched one says "按会话用途：2K" instead of only that it follows the purpose. The server fills the
+  // plan with the same values on confirm; the request itself still leaves such a parameter out.
+  const purposeValues = usePurposeParameters(ownedSession ? sessionID : null, steps.map((step) => step.offering));
   // 每步按 Schema 声明的可填参数组装提交输入，并按 input_rules 在提交前提示违例。
   // A face-reducing step before steps with a face limit starts at the most faces the tightest one takes (Remesh before
   // UV, also with Retexture in between, #93).
@@ -403,6 +408,7 @@ export function ModelProcessingPanel({ selection }: { selection: CurrentObject }
                 onChange={(name, value) => setValues((current) => ({
                   ...current, [key]: { ...current[key], [name]: value },
                 }))}
+                purposeValues={purposeValues[offering.id]}
                 disabled={working || Boolean(activePlan)} /></ReasonHint>}
               {(ruleViolations[capability.id] ?? []).filter((names) => names.some((name) => parameters.some((parameter) => parameter.name === name))).map((names) => <div key={names.join('|')}>
                 {notice(reasonText('input_rule'), `${schemaText(schema, 'ui.workspace.processing.input_rule_violation')}: ${
