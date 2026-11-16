@@ -116,7 +116,10 @@ export interface OfferingWire {
   outputs?: unknown[];
   /** The most triangles this step takes from its source model (#93); the server rechecks it. */
   source_model_limit?: { max_triangles: number; count_basis: string };
-  /** How this step's face budget turns into delivered triangles (Remesh's target and topology, #93). */
+  /**
+   * How this step's face budget turns into delivered triangles (Remesh's target and topology, #93). The factor per topology
+   * may be a decimal (#304: Rodin's Quad face is 2.2 triangles); only processing steps use it in the client.
+   */
   output_triangles?: { count_parameter: string; topology_parameter: string; triangles_per_face: Record<string, number> };
 }
 

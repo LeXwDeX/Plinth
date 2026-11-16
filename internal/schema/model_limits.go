@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,18 +35,76 @@ const SourceModelCountBasisTriangles = "triangles"
 // OutputTriangleEstimate declares how an Offering's requested face budget turns
 // into the triangle count of the model it delivers, so a plan can tell before
 // any step is paid whether a later step's SourceModelLimit will accept it
-// (#121). CountParameter is the numeric parameter holding the budget and
-// TopologyParameter the select parameter naming the face shape;
-// TrianglesPerFace maps each topology value to its factor (quad 2, triangle 1).
+// (#121) and a session purpose's triangle budget can bound a face-count
+// parameter of a 3D generation step too (#129, #304). CountParameter is the
+// numeric parameter holding the budget and TopologyParameter the select
+// parameter naming the face shape; TrianglesPerFace maps each topology value to
+// its factor, the triangles one face comes to: a positive number that need not
+// be whole (Meshy Remesh quad 2, triangle 1; Rodin Gen-2.5 Quad 2.2, Raw 1).
+//
+// The factor of a generation Offering is measured, not documented upstream:
+// the Catalog records the sample and its date beside the declaration, and a new
+// sample changes the number in that one place. Every consumer converts with
+// TrianglesForFaces and FacesWithinTriangles below, so the rounding is the
+// same whichever of them reads it.
 type OutputTriangleEstimate struct {
-	CountParameter    string           `json:"count_parameter"`
-	TopologyParameter string           `json:"topology_parameter"`
-	TrianglesPerFace  map[string]int64 `json:"triangles_per_face"`
+	CountParameter    string             `json:"count_parameter"`
+	TopologyParameter string             `json:"topology_parameter"`
+	TrianglesPerFace  map[string]float64 `json:"triangles_per_face"`
 }
 
-// EstimateOutputTriangles returns the triangles the Offering will deliver for input, taking a
-// parameter the input omits from the Offering's declared default. ok is false
-// when the budget or the topology is missing, not a number/known value.
+// Factor is the declared triangles per face of topology; false for a topology
+// the estimate does not declare or a factor that is not a positive, finite
+// number (the Catalog refuses such a declaration at load time, so this only
+// guards a hand-built value).
+func (e OutputTriangleEstimate) Factor(topology string) (float64, bool) {
+	factor, declared := e.TrianglesPerFace[topology]
+	return factor, declared && factor > 0 && !math.IsInf(factor, 0)
+}
+
+// LargestFactor is the largest declared factor, and at least one: the
+// conservative reading for a face shape the request does not name.
+func (e OutputTriangleEstimate) LargestFactor() float64 {
+	largest := 1.0
+	for topology := range e.TrianglesPerFace {
+		if factor, usable := e.Factor(topology); usable && factor > largest {
+			largest = factor
+		}
+	}
+	return largest
+}
+
+// faceEstimateTolerance is the slack, in triangles or faces, that keeps the
+// binary floating-point noise of a decimal factor from moving a whole boundary:
+// 3200 faces at 2.2 are exactly 7040 triangles although the product is
+// 7040.000000000001, and 6600 triangles hold exactly 3000 faces although the
+// quotient is 2999.9999999999995. A real fraction of a triangle or a face is
+// never this small for a factor written with a few decimals.
+const faceEstimateTolerance = 1e-6
+
+// TrianglesForFaces is the triangles faces faces deliver at factor triangles
+// per face: a whole number, rounded up, so an estimate never falls short of
+// what the request would deliver.
+func TrianglesForFaces(faces, factor float64) float64 {
+	triangles := math.Ceil(faces*factor - faceEstimateTolerance)
+	if triangles == 0 {
+		return 0 // not negative zero, which prints as "-0"
+	}
+	return triangles
+}
+
+// FacesWithinTriangles is the largest whole number of faces that deliver at
+// most triangles at factor triangles per face: the face count a limit admits.
+// It is the inverse of TrianglesForFaces: the result delivers at most
+// triangles, and one more face delivers more.
+func FacesWithinTriangles(triangles, factor float64) float64 {
+	return math.Floor(triangles/factor + faceEstimateTolerance)
+}
+
+// EstimateOutputTriangles returns the triangles the Offering will deliver for
+// input (rounded up, see TrianglesForFaces), taking a parameter the input omits
+// from the Offering's declared default. ok is false when the budget or the
+// topology is missing, not a number/known value.
 func (o Offering) EstimateOutputTriangles(input json.RawMessage) (triangles int64, ok bool) {
 	estimate := o.OutputTriangles
 	if estimate == nil {
@@ -72,11 +131,17 @@ func (o Offering) EstimateOutputTriangles(input json.RawMessage) (triangles int6
 		json.Unmarshal(value(estimate.TopologyParameter), &topology) != nil {
 		return 0, false
 	}
-	factor, known := estimate.TrianglesPerFace[topology]
-	if !known || factor <= 0 {
+	factor, known := estimate.Factor(topology)
+	if !known {
 		return 0, false
 	}
-	return int64(count) * factor, true
+	estimated := TrianglesForFaces(count, factor)
+	if estimated >= math.MaxInt64 {
+		// An absurd budget is over every limit, whatever the platform does with a
+		// float that does not fit an int64.
+		return math.MaxInt64, true
+	}
+	return int64(estimated), true
 }
 
 // CompatibleFaceBudgets lists, for every topology the estimate declares, the
@@ -85,9 +150,9 @@ func (o Offering) EstimateOutputTriangles(input json.RawMessage) (triangles int6
 // advice the Schema's refusal text and the Agent's service description show.
 func (e OutputTriangleEstimate) CompatibleFaceBudgets(limit SourceModelLimit) []TopologyBudget {
 	budgets := make([]TopologyBudget, 0, len(e.TrianglesPerFace))
-	for topology, factor := range e.TrianglesPerFace {
-		if factor > 0 {
-			budgets = append(budgets, TopologyBudget{Topology: topology, MaxFaces: limit.MaxTriangles / factor})
+	for topology := range e.TrianglesPerFace {
+		if factor, usable := e.Factor(topology); usable {
+			budgets = append(budgets, TopologyBudget{Topology: topology, MaxFaces: int64(FacesWithinTriangles(float64(limit.MaxTriangles), factor))})
 		}
 	}
 	sort.Slice(budgets, func(i, j int) bool {
