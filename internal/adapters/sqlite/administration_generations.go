@@ -347,7 +347,7 @@ func (r *Repository) loadAdministrationGenerationAssetsFrom(
 	taskID string,
 ) ([]administration.GenerationAsset, error) {
 	rows, err := reader.QueryContext(ctx, `
-		SELECT id, role, variant, media_type, ordinal
+		SELECT id, role, variant, media_type, ordinal, sha256, size_bytes
 		FROM generation_assets
 		WHERE task_id = ?
 		ORDER BY ordinal ASC, id ASC`,
@@ -366,6 +366,8 @@ func (r *Repository) loadAdministrationGenerationAssetsFrom(
 			&asset.Variant,
 			&asset.MediaType,
 			&asset.Ordinal,
+			&asset.SHA256,
+			&asset.Size,
 		); err != nil {
 			return nil, fmt.Errorf("扫描管理生成资产: %w", err)
 		}

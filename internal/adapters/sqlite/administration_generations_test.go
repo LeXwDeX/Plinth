@@ -102,6 +102,11 @@ func TestAdministrationGenerationDetailSupportsNativeAndLegacyCache(
 		native.Ledger.Offering != frozenAdministrationOffering {
 		t.Fatalf("native detail found=%v detail=%#v", found, native)
 	}
+	// The ledger names each file's digest and size (#300): the package leaves out a
+	// file whose record repeats another's, and only records that name them compare.
+	if asset := native.Ledger.Assets[0]; asset.SHA256 != "abc" || asset.Size != 3 {
+		t.Fatalf("native asset digest %q size %d, want the seeded abc and 3", asset.SHA256, asset.Size)
+	}
 
 	legacy, found, err := repository.GetAdministrationGeneration(
 		ctx,

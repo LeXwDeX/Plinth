@@ -140,6 +140,8 @@ Complete/Quick Cap 的 revision `2026-10-21.185.2` 在 `source_task` 声明 `sam
 
 为履行单个公开步骤而运行的上游上传、转换、导出等私有子作业由协议 Adapter 管理。其 remote ID 和 Opaque 检查点只留服务端。内核存储并回传不透明检查点，接收 Observation 和 ArtifactClaim；HTTP、Agent、Processing Plan 不解析检查点，不另建公开状态机。
 
+ArtifactClaim 可以用 `SameBytesAs` 声明“与同一观察里另一个声明字节相同”（#300；持久化在 `generation_artifact_claims.same_bytes_as`，迁移 0093）。这是构造声明的 Adapter 对自己声明的断言：内核不会因为两个声明的定位符相等就合并下载，因为 `OpenAsset` 的行为可能取决于定位符之外的字段（角色专属的检查、声明元数据里的摘要绑定）。声明了的一组只下载一次，其余槽位从已存的 blob 读回，仍按各自槽位的大小上限、交付 profile、媒体类型与保真度检查，各有独立的资产记录；指向不存在、自身或不能从定位符读取的声明的 `SameBytesAs` 被忽略，该声明照常下载。Tripo 全格式 Offering 把 GLTF 转换的自包含 GLB 同时交给 `model` 槽位与 `converted.gltf` 槽位，是目前唯一的声明方；细节见 `docs/architecture.md` 的「内容寻址与共用的字节」。
+
 同阶段/进度的新私有证据可由 Adapter 显式携带 `Observation.CheckpointBaseSHA256`（不序列化）保存。Generation 只接受当前租约的轮询、运行中的 Task/Attempt、同 Job 与无序号/时间的 Accepted/Running 观察，且不能附带派发、失败、产物或资源副作用；匹配旧 Opaque 的摘要、不同的有效 JSON 与去重键后，沿原有版本和租约 CAS 更新私有检查点及轮询时间。生命周期、进度、上游顺序和公开事件不变；正常存储版本/更新时间仍更新。原有陈旧判定不放宽，Webhook、回退、终态和过期租约不能使用此路径。它只证明本地基线匹配，不能伪称上游时序；Tripo 原生处理用它保留同进度补回的小数积分。
 
 公开投影只能提供安全进度、事件和本地资产。账户原始上游响应、签名 URL、remote ID、密钥、私有检查点不能进入公开 JSON/SSE/日志文案或交付字节。
