@@ -16,7 +16,7 @@ function fakeClient(overrides: Partial<ChatBrowserClient>): ChatBrowserClient {
   return overrides as ChatBrowserClient;
 }
 
-beforeEach(() => useSessionContextStore.setState({ reasoning: {}, reasoningBusy: {}, context: {}, compacting: {} }));
+beforeEach(() => useSessionContextStore.setState({ reasoning: {}, reasoningBusy: {}, reasoningFailed: {}, context: {}, compacting: {} }));
 
 describe('session thinking level state (#322)', () => {
   it('keeps each session its own level', async () => {
@@ -46,6 +46,55 @@ describe('session thinking level state (#322)', () => {
     expect(await switchSessionReasoning(client, 'a', 'max')).toBe(false);
     expect(useSessionContextStore.getState().reasoning.a.effort).toBe('high');
     expect(useSessionContextStore.getState().reasoningBusy.a).toBeFalsy();
+  });
+});
+
+// #314: the store remembers that the latest read of a session's level failed, so the picker can say so while it holds no
+// level and the page knows to read again when the window regains focus.
+describe('session thinking level read failures (#314)', () => {
+  const failing = (error: unknown = new ChatBrowserError('', 429)) => fakeClient({ getReasoning: vi.fn(async () => { throw error; }) });
+
+  it('marks a failed read, hands the failure on and keeps the session without a level', async () => {
+    const refusal = new ChatBrowserError('', 429);
+    await expect(loadSessionReasoning(failing(refusal), 'a')).rejects.toBe(refusal);
+    const state = useSessionContextStore.getState();
+    expect(state.reasoningFailed.a).toBe(true);
+    expect(state.reasoning.a).toBeUndefined();
+    expect(state.reasoningFailed.b).toBeUndefined();
+  });
+
+  it('clears the mark when a later read succeeds', async () => {
+    await expect(loadSessionReasoning(failing(), 'a')).rejects.toBeTruthy();
+    await loadSessionReasoning(fakeClient({ getReasoning: vi.fn(async () => reasoning('low')) }), 'a');
+    const state = useSessionContextStore.getState();
+    expect(state.reasoningFailed.a).toBeUndefined();
+    expect(state.reasoning.a.effort).toBe('low');
+  });
+
+  it('keeps the level it holds when a later read fails, and still marks the failure', async () => {
+    useSessionContextStore.setState({ reasoning: { a: reasoning('high') } });
+    await expect(loadSessionReasoning(failing(), 'a')).rejects.toBeTruthy();
+    const state = useSessionContextStore.getState();
+    expect(state.reasoning.a.effort).toBe('high');
+    expect(state.reasoningFailed.a).toBe(true);
+  });
+
+  it('does not take a cancelled read for a failure', async () => {
+    const controller = new AbortController();
+    const aborted = new DOMException('aborted', 'AbortError');
+    const client = fakeClient({ getReasoning: vi.fn(async () => { controller.abort(); throw aborted; }) });
+    await expect(loadSessionReasoning(client, 'a', controller.signal)).rejects.toBe(aborted);
+    expect(useSessionContextStore.getState().reasoningFailed.a).toBeUndefined();
+  });
+
+  it('does not store the answer of a read cancelled while it was answered', async () => {
+    const controller = new AbortController();
+    const client = fakeClient({ getReasoning: vi.fn(async () => { controller.abort(); return reasoning('max'); }) });
+    useSessionContextStore.setState({ reasoningFailed: { a: true } });
+    await loadSessionReasoning(client, 'a', controller.signal);
+    const state = useSessionContextStore.getState();
+    expect(state.reasoning.a).toBeUndefined();
+    expect(state.reasoningFailed.a).toBe(true);
   });
 });
 

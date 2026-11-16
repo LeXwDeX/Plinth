@@ -114,6 +114,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"runtime.asset_delivery.asset_preview.query",
 		"runtime.asset_delivery.asset_preview.request_value",
 		"runtime.frontend.image_upload.maximum_pixels",
+		"runtime.frontend.session_read_retry.max_retries",
 		"chat.api.fields.content",
 		"chat.api.prompt_enhance.prompt_field",
 		"chat.stream.event_types.done",

@@ -419,10 +419,18 @@ function sessionRoute(schema: ProductSchema, template: string | undefined, sessi
   return route(template, { sessionID });
 }
 
-/** A refusal with the server's own text; empty when it gave none, so the caller words it. */
+/**
+ * A refusal with the server's own text; empty when it gave none, so the caller words it. A rate limit (429) also
+ * carries the seconds the server asked to wait, so a caller that reads again can wait for it (#314).
+ */
 function serverError(schema: ProductSchema, response: Response, payload: unknown): ChatBrowserError {
   const message = record(payload)[schema.chat.api.response_fields.error];
-  return new ChatBrowserError(typeof message === 'string' ? message : '', response.status, responseRequestId(response, payload));
+  return new ChatBrowserError(
+    typeof message === 'string' ? message : '',
+    response.status,
+    responseRequestId(response, payload),
+    response.status === 429 ? retryAfterSecondsOf(response) : undefined,
+  );
 }
 
 function stringList(value: unknown): string[] {
