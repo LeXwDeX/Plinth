@@ -130,7 +130,7 @@ try:
     s, d, _ = admin.j("GET", "/api/admin/users")
     roles = {u["username"]: u["isAdmin"] for u in d.get("data", [])}
     routes = ["/api/admin/users", "/api/admin/audit-logs", "/api/admin/generations", "/api/admin/usage", "/api/admin/balance-summary",
-              "/api/admin/agent-configuration", "/api/admin/llm-settings", "/api/admin/user-assets/x"]
+              "/api/admin/agent-configuration", "/api/admin/llm-settings", "/api/admin/diagnostics", "/api/admin/user-assets/x"]
     got = [(p, A.j("GET", p)[0], anon.j("GET", p)[0]) for p in routes]
     print("  admin routes (path, ordinary user, anonymous):", got)
     sw, _, _ = A.j("POST", "/api/admin/users", {"username": "x", "password": secrets.token_urlsafe(12), "email": "x@example.test", "isAdmin": True})

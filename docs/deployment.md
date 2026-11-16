@@ -148,6 +148,27 @@
 
 **日志（#206）**：`GO_LOG_LEVEL=debug` 由发布脚本固定并写入 `production/compose.env`，测试与生产一致且不提供关闭入口。候选实例启动前记录 `production/logs/art-ai.log` 的行数；healthz/readyz 通过后校验本次启动新增的行包含应用写入的 DEBUG 标记（`marker=debug-log-ready`），文件在发布期间滚动时退化为检查末尾。校验失败按发布失败处理：`ephemeral` 走 `ephemeral_rollback`，持久数据走 `rollback_after_update`，与健康检查失败同级。应用在日志配置完成后写入该标记（`cmd/art-ai/main.go`）；日志滚动仍由运行设置 `LOG_FILE_MAX_MEGABYTES`、`LOG_FILE_MAX_FILES`、`LOG_RETENTION_DAYS` 控制。
 
+**上游调用脱敏录制（#233）**：默认关闭，发布脚本不设置它。出问题时要给维护者上游的结构证据（用来完善 fake），可以在运行环境文件里打开：`UPSTREAM_CAPTURE_DIR=<容器内的绝对路径>`，可选 `UPSTREAM_CAPTURE_MAX_RECORDS`（记录文件条数上限，默认 2000，范围 1–100000）与 `UPSTREAM_CAPTURE_MAX_MEGABYTES`（总大小上限，默认 64，范围 1–4096）；把宿主机上的一个目录挂载到该路径，然后只重建本栈的 `art-ai-go` 服务。启动时目录不存在则以 0700 创建，已存在则收紧为 0700，之后每次上游调用写一个 0600 文件；容器用非 root 运行时，先让挂载目录归该用户所有。目录不可写、是符号链接、不是目录，或与 `STORAGE_ROOT`、`WEB_ASSETS_ROOT`、`LEGACY_GENERATED_IMAGES_ROOT`、`LOG_DIR` 相同、包含或位于其中，设置的上限无效，进程都拒绝启动，不会"以为在录、其实没录"；没设目录时上限变量被忽略。超过条数或总大小上限就删除最旧的记录，占用有界，重启后先按已有文件套用上限；只有 `*.exchange.json` 会被计数或删除，目录里的其他文件不动；也可以随时手工删除记录文件而不影响运行。写文件失败只记一条告警（首次与每千次），业务请求不受影响。这三个变量由 Product Schema 的运行设置声明（默认 Catalog 已声明）；用 `CATALOG_FILE` 换成不含这三项声明的旧 Catalog 时，变量被忽略，录制不会开启。
+
+自部署（根目录的 `docker-compose.yml`，容器根文件系统只读）需要一个可写的挂载。不改仓库里的文件，写一个覆盖文件即可：
+
+```yaml
+# docker-compose.capture.yml
+services:
+  art-ai:
+    volumes:
+      - ./upstream-capture:/app/upstream-capture
+```
+
+在 `.env` 里加 `UPSTREAM_CAPTURE_DIR=/app/upstream-capture`，先让宿主机目录归容器用户所有（`mkdir -m 0700 upstream-capture`，再 `chown` 给容器用户，UID 用 `docker compose run --rm --entrypoint id art-ai -u` 查），然后 `docker compose -f docker-compose.yml -f docker-compose.capture.yml up -d`。目录归属不对时进程拒绝启动并说明原因。
+
+- **记录什么（隐私）。** 每个文件是一次上游调用脱敏后的结构：字段名与类型、HTTP 状态码、错误码、状态枚举词、模型名，值之外的一切都换成占位符。不保存：密钥与鉴权头（只保留 `Content-Type`、`Accept`、`X-API-Version`、`Retry-After`）、URL 里的签名与 query（只记 query 键名）、提示词与对话全文及任何多词文本、媒体与上传文件的字节（只记字节数，换成固定合成文件）、上游地址（一律写成 `example.test`）、用户标识（`id`、`user_id` 等键下的数字写成 0，不透明 ID 换成 `id-N`）。超过 1 MiB 的单个请求或响应、传输错误、未读完与重定向只留一个不含值的跳过标记（原因、连接、HTTP 方法与状态码）。残余风险：用户把一个词写在未被识别为自由文本的字段里时，单个短词会被当作枚举保留。所以仍把目录当作受保护文件：0700 目录、0600 文件，只在受保护环境查看，外发前经 #234 的诊断包导出复扫。
+- **如何确认已开启。** 启动日志有一条 INFO「上游调用脱敏录制已开启」，带目录与上限（未开启时只有 DEBUG 级别的「未开启」）；管理员可读 `GET /api/admin/diagnostics`，返回 `upstream_capture` 的 `enabled`、`directory`、`max_records`、`max_bytes`、`records`、`bytes`、`written`、`skipped`、`rotated`、`write_errors`（只有计数与上限，没有任何上游内容；不在 `/api/version` 里）。
+- **怎么用。** 记录可直接交给 `go run ./cmd/fake-upstream-align draft -records <记录目录> -out <另一个 0700 目录> -name <名字> [-connection <连接 ID>]`：转成与已提交样本同格式的 `candidate/policy/meta` 草稿，再人工复核、对齐 fake、补回归测试（见 `docs/architecture.md`「可选上游记录与样本草稿」与「可选的上游调用脱敏录制」）。
+- **关闭。** 去掉 `UPSTREAM_CAPTURE_DIR` 后重建服务；已写的文件不会被自动删除，用完自行清理。
+
+**Opt-in capture of upstream calls (#233):** off by default. To give the maintainers structural evidence of what the upstream returned, set `UPSTREAM_CAPTURE_DIR=<absolute path inside the container>` in the runtime environment file (optionally `UPSTREAM_CAPTURE_MAX_RECORDS`, default 2000, and `UPSTREAM_CAPTURE_MAX_MEGABYTES`, default 64), mount a host directory there and rebuild only `art-ai-go`. The directory is created or tightened to mode 0700 and every record is a 0600 file; an unusable directory, a symbolic link, or one that overlaps the storage, web-assets, legacy-image or log directories stops the start-up. When a limit is exceeded the oldest records are deleted. A record keeps structure only (field names, types, status codes, error codes, status words, model names): never keys or authorization headers, signed URL queries, prompts or any multi-word text, media bytes, the upstream address or user identifiers. Confirm it from the start-up log or from the administrator-only `GET /api/admin/diagnostics`; feed the files to `fake-upstream-align draft` to turn them into sample drafts. Treat the directory as a protected location all the same.
+
 冒烟（`smoke` 从目标环境的 `runtime.env` 读取管理员登录，并设置 `BASE`、`EXPECT_SHA`（容器 OCI revision）`RELEASE_CONTAINER` 与 `RELEASE_ENV`（环境名，验收脚本据此读取同一部署的日志）；不打印密码）：
 
 ```bash

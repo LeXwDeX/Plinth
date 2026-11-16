@@ -30,6 +30,9 @@ type ApplicationSchema struct {
 	// environment contract of chat model connections (#322). Optional so
 	// older external Catalog documents stay valid.
 	LLMSettings *LLMSettingsSchema `json:"llm_settings,omitempty"`
+	// Diagnostics is the administrator's read-only runtime view (#233). Server
+	// side only and optional, like LLMSettings.
+	Diagnostics *DiagnosticsSchema `json:"diagnostics,omitempty"`
 	Revision    string             `json:"revision"`
 	// Terminology declares the user-facing words for one concept and the
 	// aliases Catalog loading rejects. Server-side only: the browser consumes

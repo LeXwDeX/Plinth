@@ -208,6 +208,33 @@
             ],
             "default": "30"
           },
+          "upstream_capture_directory": {
+            "type": "string",
+            "environment": [
+              {
+                "name": "UPSTREAM_CAPTURE_DIR"
+              }
+            ],
+            "default": ""
+          },
+          "upstream_capture_max_records": {
+            "type": "string",
+            "environment": [
+              {
+                "name": "UPSTREAM_CAPTURE_MAX_RECORDS"
+              }
+            ],
+            "default": "2000"
+          },
+          "upstream_capture_max_megabytes": {
+            "type": "string",
+            "environment": [
+              {
+                "name": "UPSTREAM_CAPTURE_MAX_MEGABYTES"
+              }
+            ],
+            "default": "64"
+          },
           "legacy_backend_startup_enabled": {
             "type": "string",
             "environment": [
@@ -15318,6 +15345,10 @@
         {
           "key": "llm.settings.manage",
           "label": "管理 LLM 设置"
+        },
+        {
+          "key": "diagnostics.read",
+          "label": "查看运行诊断"
         }
       ],
       "roles": [
@@ -15338,7 +15369,8 @@
             "audit.read",
             "generations.manage",
             "agent.configuration.manage",
-            "llm.settings.manage"
+            "llm.settings.manage",
+            "diagnostics.read"
           ]
         }
       ],
@@ -15658,6 +15690,12 @@
         "outcome_upstream_error": "上游返回错误",
         "test_failed": "测试连接失败"
       }
+    },
+    "diagnostics": {
+      "routes": {
+        "admin": "/api/admin/diagnostics"
+      },
+      "permission": "diagnostics.read"
     },
     "localization": {
       "default_locale": "zh-CN",
@@ -18368,6 +18406,7 @@
             "authentication.permissions[key=generations.manage].label": "Manage generation tasks",
             "authentication.permissions[key=agent.configuration.manage].label": "Manage Agent configuration",
             "authentication.permissions[key=llm.settings.manage].label": "Manage LLM settings",
+            "authentication.permissions[key=diagnostics.read].label": "View runtime diagnostics",
             "authentication.roles[key=user].label": "User",
             "authentication.roles[key=admin].label": "Administrator",
             "authentication.messages.unauthenticated": "Not signed in or your session has expired",

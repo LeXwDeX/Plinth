@@ -96,6 +96,7 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	}
 	result.AgentConfiguration = cloneAgentConfiguration(source.AgentConfiguration)
 	result.LLMSettings = cloneLLMSettings(source.LLMSettings)
+	result.Diagnostics = cloneDiagnostics(source.Diagnostics)
 	result.Project = cloneProject(source.Project)
 	result.Chat.Skills.Categories = make([]ChatSkillCategorySchema, len(source.Chat.Skills.Categories))
 	for i, category := range source.Chat.Skills.Categories {

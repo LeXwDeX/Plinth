@@ -1,4 +1,4 @@
-package wirefixture
+package wirecapture
 
 import (
 	"bytes"
@@ -61,12 +61,31 @@ var methods = map[string]bool{
 var requestHeaders = map[string]bool{"content-type": true, "accept": true, "x-api-version": true}
 var responseHeaders = map[string]bool{"content-type": true, "retry-after": true}
 
-func baseMedia(value string) string {
+// IsMethod reports whether method is a registered (upper-case) HTTP method.
+func IsMethod(method string) bool { return methods[method] }
+
+// AllowedHeader reports whether a header survives sanitizing: the replay set
+// only (request Content-Type, Accept and X-API-Version; response Content-Type
+// and Retry-After). Every other header, authentication ones included, is
+// dropped.
+func AllowedHeader(request bool, name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if request {
+		return requestHeaders[name]
+	}
+	return responseHeaders[name]
+}
+
+// BaseMedia is the lower-case media type of a Content-Type value without its
+// parameters.
+func BaseMedia(value string) string {
 	return strings.ToLower(strings.TrimSpace(strings.Split(value, ";")[0]))
 }
 
-func payloadKind(contentType string) (string, error) {
-	switch media := baseMedia(contentType); {
+// PayloadKind maps a content type to its payload encoding (json, sse,
+// multipart or media). An empty type has no kind; any other type is refused.
+func PayloadKind(contentType string) (string, error) {
+	switch media := BaseMedia(contentType); {
 	case media == "":
 		return "", nil
 	case media == "application/json" || strings.HasSuffix(media, "+json"):
@@ -82,7 +101,9 @@ func payloadKind(contentType string) (string, error) {
 	}
 }
 
-func sanitizeHost(host string, policy Policy) (string, error) {
+// SanitizeHost returns the public form of a request host: "example.test", an
+// alias the policy maps to it, or a registered public host.
+func SanitizeHost(host string, policy Policy) (string, error) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "example.test" {
 		return host, nil
@@ -99,7 +120,9 @@ func sanitizeHost(host string, policy Policy) (string, error) {
 	return "", fmt.Errorf("%w: request host", ErrUnsafePublicValue)
 }
 
-func sanitizePath(raw string, policy Policy) (string, error) {
+// SanitizePath returns the public form of a request path; every segment must be
+// approved by the policy (Allowed, or an alias to an Allowed value).
+func SanitizePath(raw string, policy Policy) (string, error) {
 	if raw == "" {
 		raw = "/"
 	}
@@ -142,7 +165,9 @@ func sanitizePath(raw string, policy Policy) (string, error) {
 	return strings.Join(parts, "/"), nil
 }
 
-func sanitizeHeaders(headers http.Header, request bool, policy Policy) (map[string]string, error) {
+// SanitizeHeaders keeps only the replay header set (see AllowedHeader) and checks
+// every kept value.
+func SanitizeHeaders(headers http.Header, request bool, policy Policy) (map[string]string, error) {
 	allow := responseHeaders
 	if request {
 		allow = requestHeaders
@@ -156,7 +181,7 @@ func sanitizeHeaders(headers http.Header, request bool, policy Policy) (map[stri
 		value := strings.Join(values, ", ")
 		switch lower {
 		case "content-type":
-			if _, err := contentBase(value); err != nil {
+			if _, err := ContentBase(value); err != nil {
 				return nil, err
 			}
 			if err := checkText(value, false); err != nil {
@@ -595,8 +620,10 @@ func nestedString(text string, policy Policy, depth int) (string, bool, error) {
 	return string(out), true, err
 }
 
-func sanitizeBody(raw []byte, contentType string, policy Policy) (Payload, error) {
-	kind, err := payloadKind(contentType)
+// SanitizeBody returns the public payload of a JSON or SSE body (bodies of
+// other kinds are handled by ParseMultipart or are media descriptors).
+func SanitizeBody(raw []byte, contentType string, policy Policy) (Payload, error) {
+	kind, err := PayloadKind(contentType)
 	if err != nil {
 		return Payload{}, err
 	}

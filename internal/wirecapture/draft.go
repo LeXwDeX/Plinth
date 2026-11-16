@@ -1,4 +1,4 @@
-package wirefixture
+package wirecapture
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // Draft sanitization (#220) turns one raw upstream exchange into a public
@@ -27,8 +28,56 @@ import (
 // opaque identifiers become stable id-N tokens shared with path segments;
 // the request host becomes example.test; media bytes become fixed synthetic
 // recipes.
+//
+// The strict profile (#233, the application's recorder) keeps structure only:
+// besides the rules above, a string survives only as one short
+// enumeration-shaped token (no whitespace, at most 64 bytes: status words,
+// error codes, model names); every other string is "[redacted]". Numbers under
+// identifier or identity keys become 0. Plain-HTTP upstreams are accepted there
+// because the host is replaced by example.test either way.
 
 const draftLongText = 128
+
+// draftStrictToken is the longest string the strict profile keeps.
+const draftStrictToken = 64
+
+// draftMaxIDs bounds the raw-to-token memory of a long-running recorder. When
+// it is full the mapping restarts: tokens stay unique, only the link between
+// an old ID and its token is lost.
+const draftMaxIDs = 4096
+
+// draftOptions selects how a raw exchange is turned into a public one.
+type draftOptions struct {
+	limit     int64
+	strict    bool // keep structure only (see above)
+	allowHTTP bool // accept plain-HTTP upstreams besides https
+}
+
+// draftStrictFreeKeys are compact key names whose strings are people's words
+// or names (besides draftPromptKeys): the strict profile redacts them even
+// when they are one short token.
+var draftStrictFreeKeys = map[string]bool{
+	"msg": true, "detail": true, "details": true, "hint": true, "errormessage": true, "errormsg": true,
+	"errordescription": true, "explanation": true, "summary": true, "warning": true, "remark": true, "remarks": true,
+	"note": true, "notes": true, "comment": true, "comments": true, "subject": true, "project": true, "projectname": true,
+	"label": true, "tag": true, "tags": true, "keyword": true, "keywords": true, "filename": true, "author": true,
+	"creator": true, "company": true, "organization": true, "team": true, "nickname": true, "displayname": true,
+	"fullname": true, "firstname": true, "lastname": true, "address": true, "location": true, "bio": true, "body": true,
+}
+
+// draftStrictText reports whether a string is one short enumeration-shaped
+// token: the only free text the strict profile keeps.
+func draftStrictText(raw string) bool {
+	if raw == "" || len(raw) > draftStrictToken {
+		return false
+	}
+	for _, r := range raw {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
 
 const draftRedactedURL = "https://example.test/redacted"
 
@@ -51,6 +100,25 @@ var draftMediaRecipes = map[string]string{
 	"model/obj": "obj-triangle", "model/gltf+json": "gltf-json", "model/vnd.usdz+zip": "usdz-empty",
 	"model/3mf": "3mf-empty", "application/zip": "zip-empty", "application/octet-stream": "octet-empty",
 	"text/plain": "text-plain",
+	// Names servers and content sniffers use for the same files (#233: an OBJ
+	// download arrives as application/x-tgif).
+	"application/x-tgif": "obj-triangle", "application/x-obj": "obj-triangle",
+	"application/sla": "stl-triangle", "application/vnd.autodesk.fbx": "fbx-triangle", "application/x-fbx": "fbx-triangle",
+	"application/x-3mf": "3mf-empty", "application/vnd.ms-package.3dmanufacturing-3dmodel+xml": "3mf-empty",
+	"application/x-usdz": "usdz-empty", "application/mtl": "text-plain", "model/mtl": "text-plain",
+}
+
+// draftGenericBinary are the content types some CDNs return for every file
+// (Tripo's is binary/octet-stream). The draft reads them as the registered
+// application/octet-stream.
+var draftGenericBinary = map[string]bool{"binary/octet-stream": true, "application/binary": true}
+
+// normalizeGenericBinary rewrites a generic-binary Content-Type of a header
+// copy to application/octet-stream. The business message is never touched.
+func normalizeGenericBinary(header http.Header) {
+	if draftGenericBinary[BaseMedia(header.Get("Content-Type"))] {
+		header.Set("Content-Type", "application/octet-stream")
+	}
 }
 
 // draftIDs keeps raw→token mappings in memory so an ID returned by a create
@@ -68,6 +136,9 @@ func (d *draftIDs) token(raw string) string {
 	defer d.mu.Unlock()
 	if token, ok := d.ids[raw]; ok {
 		return token
+	}
+	if len(d.ids) >= draftMaxIDs {
+		d.ids = map[string]string{}
 	}
 	d.next++
 	token := fmt.Sprintf("id-%d", d.next)
@@ -95,6 +166,7 @@ type rawExchange struct {
 type draftBuilder struct {
 	policy Policy
 	ids    *draftIDs
+	strict bool
 }
 
 func (b *draftBuilder) redact(raw string) {
@@ -126,6 +198,15 @@ func draftModelKey(key string) bool {
 		compact == "status" || compact == "type"
 }
 
+// draftNumericIdentity reports keys whose number is an identifier or a person
+// (id, *_id, *Id, user_id, uid ...): the strict profile writes 0 for them.
+func draftNumericIdentity(key string) bool {
+	lower := strings.ToLower(key)
+	return sensitiveKey(key) || identityKeys[compactKey(key)] || lower == "id" || lower == "ids" || lower == "uuid" ||
+		strings.HasSuffix(lower, "_id") || strings.HasSuffix(lower, "-id") || strings.HasSuffix(lower, "_ids") ||
+		(len(key) > 2 && (strings.HasSuffix(key, "Id") || strings.HasSuffix(key, "ID") || strings.HasSuffix(key, "Ids")))
+}
+
 func draftIDKey(key string) bool {
 	compact := compactKey(key)
 	return compact == "id" || compact == "ids" || compact == "uuid" || strings.HasSuffix(compact, "id") ||
@@ -151,11 +232,14 @@ func (b *draftBuilder) text(key, raw string) {
 	trimmed := strings.TrimSpace(raw)
 	switch {
 	case draftPromptKeys[compactKey(key)], len(raw) > draftLongText, wholeURL(raw),
-		len(trimmed) >= 2 && (trimmed[0] == '{' || trimmed[0] == '['):
+		len(trimmed) >= 2 && (trimmed[0] == '{' || trimmed[0] == '['),
+		b.strict && draftStrictFreeKeys[compactKey(key)]:
 		b.redact(raw)
 	case identifierRE.MatchString(raw) && (draftIDKey(key) || draftDynamic(raw, 24)):
 		b.idAlias(raw)
 	case checkText(raw, true) != nil || schemeURLRE.MatchString(raw):
+		b.redact(raw)
+	case b.strict && !draftStrictText(raw):
 		b.redact(raw)
 	case draftModelKey(key):
 		if _, aliased := b.policy.Aliases[raw]; !aliased {
@@ -188,6 +272,10 @@ func (b *draftBuilder) value(key string, value any, depth int) {
 		b.text(key, typed)
 	case json.Number:
 		b.policy.Allowed[typed.String()] = true
+		if b.strict && typed.String() != "0" && draftNumericIdentity(key) {
+			b.policy.Aliases[typed.String()] = "0"
+			b.policy.Allowed["0"] = true
+		}
 	}
 }
 
@@ -300,7 +388,7 @@ func (b *draftBuilder) multipartBody(raw []byte, contentType string) {
 		if err == nil {
 			b.policy.Keys[name] = true
 			if !isFile {
-				data, readErr := readPart(part, b.policy.limit())
+				data, readErr := readPart(part, b.policy.Limit())
 				if readErr == nil {
 					b.text(name, string(data))
 				}
@@ -314,7 +402,7 @@ func (b *draftBuilder) body(raw []byte, contentType string) {
 	if len(raw) == 0 {
 		return
 	}
-	switch kind, _ := payloadKind(contentType); kind {
+	switch kind, _ := PayloadKind(contentType); kind {
 	case PayloadJSON:
 		b.jsonBody(raw)
 	case PayloadSSE:
@@ -344,9 +432,9 @@ func (b *draftBuilder) headers(headers http.Header, request bool) {
 }
 
 // draftPolicyFor derives the private policy for one raw exchange.
-func draftPolicyFor(raw rawExchange, ids *draftIDs, limit int64) Policy {
-	b := &draftBuilder{ids: ids, policy: Policy{
-		MaxBodyBytes: limit, Keys: map[string]bool{}, Allowed: map[string]bool{}, Aliases: map[string]string{},
+func draftPolicyFor(raw rawExchange, ids *draftIDs, options draftOptions) Policy {
+	b := &draftBuilder{ids: ids, strict: options.strict, policy: Policy{
+		MaxBodyBytes: options.limit, Keys: map[string]bool{}, Allowed: map[string]bool{}, Aliases: map[string]string{},
 	}}
 	host := strings.ToLower(strings.TrimSpace(raw.host))
 	if host != "" && host != "example.test" {
@@ -385,32 +473,32 @@ const (
 
 // draftExchange sanitizes one raw exchange with its derived policy and
 // validates the result. It returns a value-free reason when it refuses.
-func draftExchange(raw rawExchange, sequence int, meta Metadata, ids *draftIDs, limit int64) (Exchange, draftSkip) {
+func draftExchange(raw rawExchange, sequence int, meta Metadata, ids *draftIDs, options draftOptions) (Exchange, draftSkip) {
 	if raw.status >= 300 && raw.status < 400 {
 		return Exchange{}, skipRedirect
 	}
-	policy := draftPolicyFor(raw, ids, limit)
+	policy := draftPolicyFor(raw, ids, options)
 	method := strings.ToUpper(raw.method)
-	if !methods[method] || raw.scheme != "https" {
+	if !methods[method] || (raw.scheme != "https" && !(options.allowHTTP && raw.scheme == "http")) {
 		return Exchange{}, skipUnsupported
 	}
 	request := Request{Method: method, Complete: true}
 	var err error
-	if request.Host, err = sanitizeHost(raw.host, policy); err != nil {
+	if request.Host, err = SanitizeHost(raw.host, policy); err != nil {
 		return Exchange{}, skipUnsafe
 	}
-	if request.Path, err = sanitizePath(raw.path, policy); err != nil {
+	if request.Path, err = SanitizePath(raw.path, policy); err != nil {
 		return Exchange{}, skipUnsafe
 	}
-	if request.Headers, err = sanitizeHeaders(raw.requestHeaders, true, policy); err != nil {
+	if request.Headers, err = SanitizeHeaders(raw.requestHeaders, true, policy); err != nil {
 		return Exchange{}, skipUnsafe
 	}
-	if request.ContentType, err = contentBase(raw.requestHeaders.Get("Content-Type")); err != nil {
+	if request.ContentType, err = ContentBase(raw.requestHeaders.Get("Content-Type")); err != nil {
 		return Exchange{}, skipUnsupported
 	}
 	substituted := false
 	if request.ContentType == "multipart/form-data" {
-		parsed, _, err := parseMultipart(raw.requestBody, raw.requestHeaders.Get("Content-Type"), policy)
+		parsed, _, err := ParseMultipart(raw.requestBody, raw.requestHeaders.Get("Content-Type"), policy)
 		if err != nil {
 			return Exchange{}, skipUnsafe
 		}
@@ -426,15 +514,15 @@ func draftExchange(raw rawExchange, sequence int, meta Metadata, ids *draftIDs, 
 			substituted = true
 		}
 		request.Body = Payload{Encoding: PayloadMultipart, Multipart: parsed}
-	} else if request.Body, err = sanitizeBody(raw.requestBody, request.ContentType, policy); err != nil {
+	} else if request.Body, err = SanitizeBody(raw.requestBody, request.ContentType, policy); err != nil {
 		return Exchange{}, skipUnsafe
 	}
 
 	response := Response{Status: raw.status, Complete: true}
-	if response.ContentType, err = contentBase(raw.responseHeaders.Get("Content-Type")); err != nil {
+	if response.ContentType, err = ContentBase(raw.responseHeaders.Get("Content-Type")); err != nil {
 		return Exchange{}, skipUnsupported
 	}
-	if response.Headers, err = sanitizeHeaders(raw.responseHeaders, false, policy); err != nil {
+	if response.Headers, err = SanitizeHeaders(raw.responseHeaders, false, policy); err != nil {
 		return Exchange{}, skipUnsafe
 	}
 	switch {
@@ -452,13 +540,13 @@ func draftExchange(raw rawExchange, sequence int, meta Metadata, ids *draftIDs, 
 		response.Body = Payload{Encoding: PayloadMedia, Media: &synthetic}
 		substituted = true
 	default:
-		if response.Body, err = sanitizeBody(raw.responseBody, response.ContentType, policy); err != nil {
+		if response.Body, err = SanitizeBody(raw.responseBody, response.ContentType, policy); err != nil {
 			return Exchange{}, skipUnsafe
 		}
 	}
 	meta.Connection = draftIdentifier(raw.connection)
 	meta.Endpoint = request.Method + " " + request.Path
-	meta.Protocol = protocolFor(response.ContentType)
+	meta.Protocol = ProtocolFor(response.ContentType)
 	meta.Provenance = ProvenanceCaptured
 	if substituted {
 		meta.Provenance = ProvenanceDerived
