@@ -156,7 +156,7 @@ func TestTriangleEstimateAndCompatibleBudgets(t *testing.T) {
 			{Name: "target_polycount", Type: "number", Default: []byte(`300000`)},
 		},
 		OutputTriangles: &schema.OutputTriangleEstimate{CountParameter: "target_polycount", TopologyParameter: "topology",
-			TrianglesPerFace: map[string]int64{"quad": 2, "triangle": 1}},
+			TrianglesPerFace: map[string]float64{"quad": 2, "triangle": 1}},
 	}
 	for name, test := range map[string]struct {
 		input string
