@@ -9,7 +9,9 @@ same HTTP API the browser uses:
   * Meshy text-to-3d (preview + refine) -> remesh -> rigging -> animation, and
     text-to-3d -> retexture / convert, and Hyper3D Rodin text-to-3d -> Bang and
     Rodin image-to-3d with five pictures, run to SUCCEEDED with the same file
-    checks as the Tripo chains;
+    checks as the Tripo chains, and the delivered Rodin pack follows its request
+    (#303): the display request's 6144 base color, a game character's 17,440
+    triangles for 8000 Quad faces and 2048 textures for texture_mode high;
   * Tripo text-to-3d -> rig-check -> rigging -> animation, and
     segmentation -> part completion, run to SUCCEEDED with every required output
     slot present, every file's size and SHA-256 matching, and authenticated
@@ -495,12 +497,15 @@ def chat_context_facts(api):
     return api.chat_context_facts
 
 
-def submit(api, offering, capability, payload, session, style_lock_skipped=False):
+def submit(api, offering, capability, payload, session, style_lock_skipped=False, reasons=None):
     """prepare -> grant (-> human approval) -> submit. Returns (task_id, why).
-    style_lock_skipped is the direct prepare's one-turn exemption (#187)."""
+    style_lock_skipped is the direct prepare's one-turn exemption (#187); reasons
+    explains each advised parameter the request changed (#295)."""
     body = {"session_id": session, "capability": capability, "offering_id": offering, "input": payload}
     if style_lock_skipped:
         body["style_lock_skipped"] = True
+    if reasons:
+        body["parameter_reasons"] = reasons
     status, prepared = api.json("POST", "/api/v1/tasks/prepare", body)
     if status not in (200, 201):
         return None, f"prepare {status} {prepared}"
@@ -567,8 +572,9 @@ def check_delivery(api, task, offering, submitted=None):
     return problems, len(task.get("assets") or [])
 
 
-def run_step(api, offerings, label, offering, capability, payload, session, expect_state="SUCCEEDED", style_lock_skipped=False):
-    task_id, why = submit(api, offering, capability, payload, session, style_lock_skipped=style_lock_skipped)
+def run_step(api, offerings, label, offering, capability, payload, session, expect_state="SUCCEEDED", style_lock_skipped=False,
+             reasons=None):
+    task_id, why = submit(api, offering, capability, payload, session, style_lock_skipped=style_lock_skipped, reasons=reasons)
     if not task_id:
         record(label, False, why)
         return None
@@ -804,9 +810,9 @@ def scenario_p2(api, offerings):
                    f"native_quote {quote}")
 
 
-def step(api, offerings, label, offering, capability, base, session, style_lock_skipped=False):
+def step(api, offerings, label, offering, capability, base, session, style_lock_skipped=False, reasons=None):
     return run_step(api, offerings, label, offering, capability, payload_for(offerings[offering], base), session,
-                    style_lock_skipped=style_lock_skipped)
+                    style_lock_skipped=style_lock_skipped, reasons=reasons)
 
 
 
@@ -831,10 +837,77 @@ def scenario_meshy(api, offerings):
     step(api, offerings, "meshy convert", MESHY_CONVERT, "format-conversion", {"source_task": gen["id"]}, session)
 
 
+def glb_summary(data):
+    """The triangles and the edge of every embedded PNG of a GLB, read from its own
+    bytes (the index accessors and the PNG headers) the way Plinth's checks read a
+    delivered model. None when the bytes are not a GLB 2.0 with PNG images."""
+    if len(data) < 20:
+        return None
+    magic, version, _total, json_length, chunk = struct.unpack_from("<4sIII4s", data)
+    if magic != b"glTF" or version != 2 or chunk != b"JSON":
+        return None
+    document = json.loads(data[20:20 + json_length])
+    binary = 20 + json_length + 8
+    triangles = 0
+    for mesh in document.get("meshes", []):
+        for primitive in mesh.get("primitives", []):
+            if primitive.get("mode", 4) != 4:
+                continue
+            accessor = primitive.get("indices", primitive["attributes"]["POSITION"])
+            triangles += document["accessors"][accessor]["count"] // 3
+    edges = []
+    for image in document.get("images", []):
+        offset = binary + document["bufferViews"][image["bufferView"]].get("byteOffset", 0)
+        header = data[offset:offset + 24]
+        if header[:8] != b"\x89PNG\r\n\x1a\n":
+            return None
+        width, height = struct.unpack(">II", header[16:24])
+        edges.append(max(width, height))
+    return triangles, edges
+
+
+# The most triangles the fake's sized model carries (fakeupstream.MaxSizedModelTriangles,
+# #303: the humanoid fixture cut into 41 x 41 squares); a Rodin request for more is
+# held at it. Keep in sync with internal/testutil/fakeupstream/sizedmodel.go.
+FAKE_MAX_MODEL_TRIANGLES = 121032
+
+
+def check_rodin_pack(api, label, task, want):
+    """The delivered PBR pack follows the request (#303): its triangles and the edge of
+    every embedded texture, read back through the stack. Returns the model's bytes."""
+    model = next((a for a in (task or {}).get("assets") or [] if a.get("role") == "model" and a.get("variant") == "glb"), None)
+    status, raw, _headers = api.call("GET", model["url"]) if model else (0, b"", {})
+    got = glb_summary(raw) if status == 200 else None
+    record(label, got == want, f"model (triangles, texture edges) {got}, want {want}")
+    return raw if status == 200 else None
+
+
 def scenario_hyper3d(api, offerings):
     session = new_session(api)
+    # The display request (the Offering's defaults: Raw, 2,000,000 faces, texture_mode
+    # extreme-high) delivers the 6144 base color beside two 2048 maps and the fake's
+    # triangle ceiling. Such a model is too large to be uploaded as a Texture source
+    # (static-glb-v1 takes textures up to 4096), as with the real service.
+    display = step(api, offerings, "hyper3d rodin text-to-3d (display request)", HYPER3D_TEXT_TO_3D, "text-to-3d",
+                   {"prompt": "a plain cube"}, session)
+    if display and display.get("state") == "SUCCEEDED":
+        check_rodin_pack(api, "hyper3d rodin display pack: 6K base color", display, (FAKE_MAX_MODEL_TRIANGLES, [6144, 2048, 2048]))
+    # The game character the way the phone budget asks for it: 8000 Quad faces (2.18
+    # triangles each), the 2K texture mode, the pose and bake switches. The three
+    # parameters that leave their advised defaults carry a reason, as a purpose gives
+    # it (#295).
+    reason = "the game character purpose asks for it"
+    character = step(api, offerings, "hyper3d rodin text-to-3d (game character)", HYPER3D_TEXT_TO_3D, "text-to-3d",
+                     {"prompt": "a game character standing in an A pose", "mesh_mode": "Quad", "quality_override": 8000,
+                      "texture_mode": "high", "TAPose": True, "quad_normal": True}, session,
+                     reasons={"mesh_mode": reason, "quality_override": reason, "texture_mode": reason})
+    if character and character.get("state") == "SUCCEEDED":
+        check_rodin_pack(api, "hyper3d rodin game character pack: 17,440 triangles, 2K textures", character,
+                         (17440, [2048, 2048, 2048]))
+    # The chain's model: the 2K texture mode, small enough for the Texture upload.
     gen = step(api, offerings, "hyper3d rodin text-to-3d", HYPER3D_TEXT_TO_3D, "text-to-3d",
-               {"prompt": "a plain cube"}, session)
+               {"prompt": "a plain cube", "texture_mode": "high"}, session,
+               reasons={"texture_mode": "the model is chained into the Texture step, whose upload takes textures up to 4096"})
     # Rodin documents 1-5 reference images; the fake enforces that bound (#191), so
     # five images exercise the widest multipart body the Offering accepts.
     pictures = [upload_asset(api, f"view-{index}.png", make_png(32 + index), "image/png") for index in range(5)]
@@ -847,9 +920,8 @@ def scenario_hyper3d(api, offerings):
         step(api, offerings, "hyper3d bang", HYPER3D_BANG, "mesh-segmentation", {"source_task": gen["id"]}, session)
         # Texture takes a local model and a reference picture, both library assets: the
         # generated GLB is downloaded with the session cookie and uploaded as a model file.
-        model = next((a for a in gen.get("assets") or [] if a.get("role") == "model" and a.get("variant") == "glb"), None)
-        status, raw, _headers = api.call("GET", model["url"]) if model else (0, b"", {})
-        model_id = upload_asset(api, "model.glb", raw, "model/gltf-binary") if status == 200 else None
+        raw = check_rodin_pack(api, "hyper3d rodin pack: 2K textures", gen, (FAKE_MAX_MODEL_TRIANGLES, [2048, 2048, 2048]))
+        model_id = upload_asset(api, "model.glb", raw, "model/gltf-binary") if raw else None
         picture_id = upload_asset(api, "reference.png", make_png(), "image/png")
         if not model_id or not picture_id:
             record("hyper3d texture", False, f"could not prepare the inputs (model asset {model_id}, picture {picture_id})")
