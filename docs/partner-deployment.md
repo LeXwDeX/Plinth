@@ -230,7 +230,7 @@ docker compose exec art-ai rm -r /app/data/upstream-capture
 - **密钥与凭据**：不读取 `.env` 文件，`settings.json` 只记「是否已设置」。日志与摘录里的鉴权头、令牌、`Bearer`/`Basic` 凭据、`sk-` 一类的 Provider key 形状、签名 URL 参数，以及名为 `authorization`、`password`、`session_id` 等字段的值，被替换为 `[redacted]`。录制里不保留任何鉴权头（只留 `Content-Type`、`Accept`、`X-API-Version`、`Retry-After`），URL 里的签名与 query 值也不保留（只记 query 的键名）。
 - **提示词全文**：失败任务的输入只在内存里用来识别「哪些文字不能出现」，从不输出；日志与摘录里出现的同样文字被替换为 `[input]`；名为 `prompt`、`instruction` 一类字段的值整个替换；录制里提示词类字段与任何多词文本都替换为占位符。
 - **图片、模型等媒体**：诊断包不读取资产存储（`art-ai-storage`）。录制里的媒体只记字节数，内容换成固定的合成文件；长 base64 与 `data:` URI 替换为 `[blob]`。
-- **用户数据**：诊断包不读取用户、会话与聊天内容，数据库里只读失败任务与尝试两张表。用户名、邮箱、用户 ID 等被换成 `id-1`、`id-2`……（同一个人在包内始终是同一个占位符）或 `[redacted]`；URL 变成 `[url]`，IP 变成 `[ip]`，内网主机名变成 `[host]`，邮箱变成 `[email]`；录制里的上游地址一律写成 `example.test`。
+- **用户数据**：诊断包不读取用户、会话与聊天内容，数据库里只读失败任务与尝试两张表。用户名、邮箱、用户 ID 等被换成 `id-1`、`id-2`……（同一个人在包内始终是同一个占位符）或 `[redacted]`；会话 ID（包括访问日志请求路径里的）写成 `[redacted]`；URL 变成 `[url]`，IP 变成 `[ip]`，内网主机名变成 `[host]`，邮箱变成 `[email]`；录制里的上游地址一律写成 `example.test`。
 
 服务写日志时本来就对所有属性做了一道脱敏（键名含 password/secret/token/api_key/authorization/cookie 的值、`Bearer`/`Basic` 凭据、`key=`/`token=` 一类赋值、Provider key 形状、URL 的 query），导出时再逐值脱敏一次。
 
