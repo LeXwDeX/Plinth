@@ -75,6 +75,29 @@ func recoverySourceTaskSnapshot(task map[string]any) map[string]any {
 	return result
 }
 
+// The 0093 column records which claim a claim shares its bytes with (#300). It
+// is the kernel's own bookkeeping for the download, not provider evidence, and a
+// row sealed before it exists has no such column; omitting only its historical
+// empty default keeps those receipts bound, while a declaration that was made
+// stays inside the source digest.
+func recoverySourceClaims(claims []map[string]any) []map[string]any {
+	result := make([]map[string]any, len(claims))
+	for index, claim := range claims {
+		if value, exists := claim["same_bytes_as"]; !exists || (value != nil && value != "") {
+			result[index] = claim
+			continue
+		}
+		row := make(map[string]any, len(claim))
+		for key, value := range claim {
+			if key != "same_bytes_as" {
+				row[key] = value
+			}
+		}
+		result[index] = row
+	}
+	return result
+}
+
 func readRecoverySource(ctx context.Context, q queryer, owner generation.OwnerID, id generation.TaskID) (generation.RecoverySource, error) {
 	var result generation.RecoverySource
 	tasks, err := recoveryRows(ctx, q, `SELECT t.* FROM generation_tasks t JOIN go_chat_sessions s ON s.id=t.session_id AND s.owner_id=t.owner_id WHERE t.id=? AND t.owner_id=? AND t.state='FAILED' AND NOT EXISTS(SELECT 1 FROM generation_task_tombstones d WHERE d.task_id=t.id)`, id, owner)
@@ -130,7 +153,7 @@ func readRecoverySource(ctx context.Context, q queryer, owner generation.OwnerID
 		}
 		attemptSnapshot[key] = value
 	}
-	snapshot, err := generation.RecoveryDigest(map[string]any{"task": recoverySourceTaskSnapshot(task), "attempt": attemptSnapshot, "claims": claims, "assets": assets})
+	snapshot, err := generation.RecoveryDigest(map[string]any{"task": recoverySourceTaskSnapshot(task), "attempt": attemptSnapshot, "claims": recoverySourceClaims(claims), "assets": assets})
 	if err != nil {
 		return result, err
 	}

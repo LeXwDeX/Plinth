@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
 	"path"
@@ -1021,6 +1022,9 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 	retainedIdentity := map[AssetID]ArtifactClaim{}
 	events := make([]Event, 0)
 	roleOrdinals := map[string]int{}
+	// Claims the Provider declared byte-identical are downloaded once (#300).
+	sharedGroups := declaredIdenticalClaims(lease.Claims)
+	sharedStored := map[string]sharedClaimSource{}
 	var contractedFailure *Failure
 	for _, claim := range lease.Claims {
 		// 本轮已有确定性（不可重试）的阻断失败：后续产物不再下载与检查，
@@ -1095,13 +1099,39 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 			ProviderID: task.Offering.ProviderID,
 			AssetKind:  claim.Role,
 		})
-		body, metadata, err := port.OpenAsset(callCtx, OpenAssetRequest{
-			TaskID:    call.TaskID,
-			AttemptID: call.AttemptID,
-			Offering:  call.Offering,
-			Job:       call.Job,
-			Claim:     claim,
-		})
+		var (
+			body     io.ReadCloser
+			metadata AssetMetadata
+			err      error
+		)
+		// group is empty for a claim that is in no declared group; nothing is ever
+		// kept under the empty name.
+		group := sharedGroups[claim.ID]
+		source, shared := sharedStored[group]
+		if shared {
+			// The file was already stored for another slot of this Observation:
+			// read it back from the store instead of downloading it again. The
+			// bytes below go through this slot's own limit, type and checks.
+			if body, metadata, err = m.openSharedBytes(callCtx, source); err != nil {
+				shared, err = false, nil
+				m.logger.Warn("shared asset unreadable, downloading it again",
+					"event", "materialization.shared_asset_unreadable",
+					"task_id", string(task.ID),
+					"attempt_id", string(attempt.ID),
+					"offering_id", string(task.Offering.ID),
+					"role", safeClaimLabel(claim.Role),
+					"format", safeClaimLabel(claim.Variant))
+			}
+		}
+		if !shared {
+			body, metadata, err = port.OpenAsset(callCtx, OpenAssetRequest{
+				TaskID:    call.TaskID,
+				AttemptID: call.AttemptID,
+				Offering:  call.Offering,
+				Job:       call.Job,
+				Claim:     claim,
+			})
+		}
 		if err != nil {
 			finishCache()
 			cancel()
@@ -1197,6 +1227,22 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 				contractedFailure = preferFailure(contractedFailure, assetStoreFailure(claim, diagnostic))
 			}
 			continue
+		}
+		if group != "" {
+			if shared {
+				m.logger.Info("asset shared with another claim, not downloaded again",
+					"event", "materialization.asset_shared",
+					"task_id", string(task.ID),
+					"attempt_id", string(attempt.ID),
+					"offering_id", string(task.Offering.ID),
+					"role", safeClaimLabel(claim.Role),
+					"format", safeClaimLabel(claim.Variant))
+			} else {
+				// This download serves the rest of its group. It is kept once the
+				// store accepted it, before the slot's fidelity check: that check
+				// is the slot's own verdict, and another slot may not ask for it.
+				sharedStored[group] = sharedClaimSource{asset: asset, responseMediaType: metadata.MediaType}
+			}
 		}
 		if err := m.checkAssetFidelity(ctx, asset, requirement); err != nil {
 			diagnostic := storageDiagnosticOf(err)

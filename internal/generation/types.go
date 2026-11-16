@@ -587,6 +587,15 @@ type ArtifactClaim struct {
 	MediaType   string          `json:"media_type,omitempty"`
 	ExpiresAt   *time.Time      `json:"expires_at,omitempty"`
 	Metadata    json.RawMessage `json:"metadata,omitempty"`
+	// SameBytesAs is the ID of another claim of the same Observation that this
+	// claim has the same bytes as (#300): the Provider built both from one file
+	// (Tripo's GLTF export is both the converted.gltf slot and the model slot),
+	// so materialization downloads them once. Only the Provider can know that;
+	// the kernel never infers it from equal locators, because OpenAsset may
+	// depend on more than the locator. Every slot is still stored and checked on
+	// its own contract. A name that matches no downloadable claim of the
+	// Observation is ignored and the claim is downloaded like any other.
+	SameBytesAs string `json:"same_bytes_as,omitempty"`
 }
 
 type Asset struct {

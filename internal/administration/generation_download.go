@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/LeXwDeX/Plinth/internal/assets/samebytes"
 )
 
 var (
@@ -107,6 +110,17 @@ type GenerationDownloadService struct {
 	unknownExtension         string
 	maximumPackageBytes      int64
 	mediaTypeExtensions      map[string]string
+	// repeatText is the README wording for a file the package leaves out because
+	// another entry holds its bytes (#300). Without it no file is left out.
+	repeatText func(context.Context) samebytes.Text
+}
+
+// WithRepeatText gives the package the README wording that names a repeated file,
+// in the UI locale of the request. It is the one-click ZIP's wording, so a file
+// left out of either package is explained the same way (#300). It is set once,
+// while the service is assembled.
+func (service *GenerationDownloadService) WithRepeatText(text func(context.Context) samebytes.Text) {
+	service.repeatText = text
 }
 
 func NewGenerationDownloadService(
@@ -173,6 +187,10 @@ type GenerationDownloadStream struct {
 	maximum  int64
 	filename string
 	assets   []streamedGenerationAsset
+	// readme names the files the ZIP leaves out because another entry holds their
+	// bytes; empty when nothing was left out (#300).
+	readmeName string
+	readme     []byte
 }
 
 type streamedGenerationAsset struct {
@@ -259,26 +277,46 @@ func (service *GenerationDownloadService) OpenDownload(
 		_ = stream.Close()
 		return nil, result
 	}
-	used := make(map[string]struct{}, len(detail.Ledger.Assets))
+	used := make(map[string]struct{}, len(detail.Ledger.Assets)+1)
+	// A file whose record names the same bytes as an earlier one is packed once and
+	// the README says which entry holds it, as in the one-click ZIP (#300). Without
+	// the wording for that README nothing is left out.
+	text := service.repeatTextFor(ctx)
+	readmeName := safeDownloadFilename(text.Filename)
+	var repeats []samebytes.Repeat
 	var totalBytes int64
-	for _, asset := range detail.Ledger.Assets {
-		content, openErr := service.assets.OpenGenerationAsset(
-			ctx,
-			GenerationAssetRequest{
-				OwnerID: detail.Ledger.UserID,
-				TaskID:  detail.Ledger.TaskID,
-				Asset:   asset,
-			},
+	for _, group := range repeatGroups(detail.Ledger.Assets, text.Declared() && readmeName != "") {
+		// The first record that opens stands for the group; a later one only
+		// opens when the earlier ones could not be read.
+		var (
+			content GenerationAssetContent
+			kept    = -1
 		)
-		if openErr != nil {
-			if ctx.Err() != nil {
-				return fail(ctx.Err())
+		for index, asset := range group {
+			opened, openErr := service.assets.OpenGenerationAsset(
+				ctx,
+				GenerationAssetRequest{
+					OwnerID: detail.Ledger.UserID,
+					TaskID:  detail.Ledger.TaskID,
+					Asset:   asset,
+				},
+			)
+			if openErr != nil {
+				if ctx.Err() != nil {
+					return fail(ctx.Err())
+				}
+				continue
 			}
+			if opened.Body == nil {
+				continue
+			}
+			content, kept = opened, index
+			break
+		}
+		if kept < 0 {
 			continue
 		}
-		if content.Body == nil {
-			continue
-		}
+		asset := group[kept]
 		if stream.maximum > 0 && content.Size > stream.maximum-totalBytes {
 			_ = content.Body.Close()
 			return fail(ErrGenerationDownloadTooLarge)
@@ -291,15 +329,25 @@ func (service *GenerationDownloadService) OpenDownload(
 		if mediaType == "" {
 			mediaType = service.defaultMediaType
 		}
+		filename := service.uniqueFilename(service.assetFilename(asset, mediaType), used)
 		stream.assets = append(stream.assets, streamedGenerationAsset{
-			filename:  service.uniqueFilename(service.assetFilename(asset, mediaType), used),
+			filename:  filename,
 			mediaType: mediaType,
 			body:      content.Body,
 			size:      content.Size,
 		})
+		for index, other := range group {
+			if index != kept {
+				repeats = append(repeats, samebytes.Repeat{Label: samebytes.Label(other.Role, other.Variant), Path: filename})
+			}
+		}
 	}
 	if len(stream.assets) == 0 {
 		return fail(ErrGenerationDownloadFailed)
+	}
+	if len(repeats) > 0 {
+		stream.readmeName = service.uniqueFilename(readmeName, used)
+		stream.readme = []byte(strings.Join(text.Section(repeats), "\n") + "\n")
 	}
 	if len(detail.Ledger.Assets) == 1 && len(stream.assets) == 1 {
 		stream.single = true
@@ -339,6 +387,15 @@ func (stream *GenerationDownloadStream) WriteTo(writer io.Writer) (int64, error)
 		return counter.count, nil
 	}
 	archive := zip.NewWriter(counter)
+	if len(stream.readme) > 0 {
+		entry, err := archive.Create(stream.readmeName)
+		if err != nil {
+			return counter.count, err
+		}
+		if _, err := entry.Write(stream.readme); err != nil {
+			return counter.count, err
+		}
+	}
 	for index := range stream.assets {
 		asset := &stream.assets[index]
 		entry, err := archive.Create(asset.filename)
@@ -364,6 +421,36 @@ func (stream *GenerationDownloadStream) WriteTo(writer io.Writer) (int64, error)
 		return counter.count, err
 	}
 	return counter.count, nil
+}
+
+// repeatTextFor is the README wording for the request, or none when the service
+// was given no wording.
+func (service *GenerationDownloadService) repeatTextFor(ctx context.Context) samebytes.Text {
+	if service.repeatText == nil {
+		return samebytes.Text{}
+	}
+	return service.repeatText(ctx)
+}
+
+// repeatGroups lines the records up in ledger order and gathers those that name
+// the same bytes behind the first of them (samebytes.Same, the rule of the
+// one-click ZIP). With collapse false every record is its own group, as before.
+// A record that names no digest is always alone.
+func repeatGroups(assets []GenerationAsset, collapse bool) [][]GenerationAsset {
+	groups := make([][]GenerationAsset, 0, len(assets))
+	for _, asset := range assets {
+		if collapse {
+			record := samebytes.Record{SHA256: asset.SHA256, Size: asset.Size}
+			if index := slices.IndexFunc(groups, func(group []GenerationAsset) bool {
+				return samebytes.Same(samebytes.Record{SHA256: group[0].SHA256, Size: group[0].Size}, record)
+			}); index >= 0 {
+				groups[index] = append(groups[index], asset)
+				continue
+			}
+		}
+		groups = append(groups, []GenerationAsset{asset})
+	}
+	return groups
 }
 
 type streamCounter struct {

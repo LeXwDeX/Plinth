@@ -1725,6 +1725,9 @@ func newHTTPHarnessWithCatalogAndProviders(
 		if err != nil {
 			t.Fatal(err)
 		}
+		// As in the application: the administration download names a repeated file
+		// in the one-click ZIP's words (#300).
+		administrationGenerationDownloadService.WithRepeatText(modelDelivery.RepeatText)
 	}
 	skillRuntime, err := skillrun.NewRuntime(skillRuns, module, executionGrants)
 	if err != nil {

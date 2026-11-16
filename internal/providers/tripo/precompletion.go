@@ -270,16 +270,20 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 		item.Locator = locator
 		state.Conversions[format] = item
 		requirement, _ := preCompletionOutput(request.Offering, format)
-		base.Artifacts = append(base.Artifacts, generation.ArtifactClaim{
+		conversion := generation.ArtifactClaim{
 			ID:        "convert:" + format,
 			Role:      requirement.Role,
 			Variant:   requirement.Variant,
 			Locator:   locator,
 			MediaType: modelMediaType(locator),
-		})
+		}
+		base.Artifacts = append(base.Artifacts, conversion)
 		if format == primaryModelConversion {
 			primaryModel.Locator = locator
 			primaryModel.MediaType = modelMediaType(locator)
+			// The model slot and the converted slot are one file at one locator,
+			// so materialization downloads it once and stores it for both (#300).
+			primaryModel.SameBytesAs = conversion.ID
 			base.Artifacts = append(base.Artifacts, primaryModel)
 		}
 	}
