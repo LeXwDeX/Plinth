@@ -23,6 +23,12 @@ func (s *Server) createSkillRun(w http.ResponseWriter, r *http.Request, owner ge
 	if err := s.decodeJSON(w, r, &body); err != nil {
 		return
 	}
+	// A request without a usable key is refused by name rather than as generic
+	// invalid input (#302).
+	idempotencyKey, usable := requireIdempotencyKey(w, r, runIdempotencyKeyRule, s.message(idempotencyKeyRequiredMessage))
+	if !usable {
+		return
+	}
 	if !s.taskSessionOwned(w, r, owner, body.SessionID) {
 		return
 	}
@@ -31,7 +37,7 @@ func (s *Server) createSkillRun(w http.ResponseWriter, r *http.Request, owner ge
 		ExpectedRevision: body.RecipeRevision, SelectedOfferingID: body.OfferingID,
 		SourceAssetID: body.SourceAssetID, SourceTaskID: body.SourceTaskID,
 		SourcePreparedInputID: body.SourcePreparedInputID,
-		IdempotencyKey:        r.Header.Get("Idempotency-Key"),
+		IdempotencyKey:        idempotencyKey,
 	})
 	if err != nil {
 		s.writeSkillRunError(w, err)
