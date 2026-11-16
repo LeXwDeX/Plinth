@@ -73,6 +73,10 @@ var (
 	scrubHex32RE      = regexp.MustCompile(`\b[0-9a-f]{32}\b`)
 	scrubBlobRE       = regexp.MustCompile(`[A-Za-z0-9+/_-]{80,}={0,2}`)
 	scrubDataURIRE    = regexp.MustCompile(`(?i)\bdata:[a-z0-9.+/-]*[;,][^\s"']*`)
+	// scrubSessionIDRE is the form of a Plinth session ID, session_ plus a random
+	// run (#322). Only runs with an upper-case letter are taken (sessionIDLike),
+	// so lower-case log key names such as session_title_refresh_attempts stay.
+	scrubSessionIDRE = regexp.MustCompile(`\bsession_[A-Za-z0-9_-]{20,}`)
 	// placeholderRE is what the scan accepts under an identity key.
 	placeholderRE = regexp.MustCompile(`^(?:id-\d+|\[redacted\]|ok)?$`)
 	promptKeyRE   = regexp.MustCompile(`(?i)prompt|instruction`)
@@ -105,11 +109,15 @@ type Scrubber struct {
 	kinds      map[string]keyKind
 	identities map[string]struct{}
 	private    map[string]struct{}
+	// secrets are values found under credential keys (a session ID among them,
+	// #322): redacted wherever they appear, not only under their key.
+	secrets map[string]struct{}
 	// Derived from identities and private; rebuilt when they change.
 	dirty       bool
 	longReplace *strings.Replacer
 	privateList []string
 	privateForm []string
+	secretList  []string
 }
 
 // NewScrubber returns a Scrubber that knows nothing yet.
@@ -117,6 +125,7 @@ func NewScrubber() *Scrubber {
 	return &Scrubber{
 		pseudonyms: map[string]string{}, kinds: map[string]keyKind{},
 		identities: map[string]struct{}{}, private: map[string]struct{}{},
+		secrets: map[string]struct{}{},
 	}
 }
 
@@ -158,6 +167,26 @@ func (s *Scrubber) AddPrivate(text string) {
 	}
 }
 
+// AddSecret registers a value found under a credential key, so free text that
+// repeats it (a session ID in a request path, #322) is redacted too. Values
+// shorter than minIdentityBytes are only redacted under their key.
+func (s *Scrubber) AddSecret(value string) {
+	value = strings.TrimSpace(value)
+	if len(value) < minIdentityBytes || value == redacted {
+		return
+	}
+	if _, known := s.secrets[value]; !known {
+		s.secrets[value] = struct{}{}
+		s.dirty = true
+	}
+}
+
+// sessionIDLike reports whether a session_ run is a session ID rather than a
+// lower-case log key name: an ID is random and holds an upper-case letter.
+func sessionIDLike(run string) bool {
+	return strings.IndexFunc(run[len("session_"):], func(r rune) bool { return r >= 'A' && r <= 'Z' }) >= 0
+}
+
 // prepare derives the replacers from the registered values.
 func (s *Scrubber) prepare() {
 	if !s.dirty {
@@ -185,6 +214,11 @@ func (s *Scrubber) prepare() {
 		s.privateList = append(s.privateList, text)
 	}
 	sortLongestFirst(s.privateList)
+	s.secretList = s.secretList[:0]
+	for value := range s.secrets {
+		s.secretList = append(s.secretList, value)
+	}
+	sortLongestFirst(s.secretList)
 	for _, text := range s.privateList {
 		// The form the text takes inside a JSON string.
 		encoded, _ := json.Marshal(text)
@@ -247,8 +281,11 @@ func (s *Scrubber) Collect(key string, value any) {
 			s.Collect(key, child)
 		}
 	case string:
-		if s.kind(key) == keyIdentity {
+		switch s.kind(key) {
+		case keyIdentity:
 			s.AddIdentity(typed)
+		case keyCredential:
+			s.AddSecret(typed)
 		}
 	case json.Number:
 		if s.kind(key) == keyIdentity {
@@ -312,6 +349,17 @@ func (s *Scrubber) Text(text string) string {
 	text = strings.ToValidUTF8(text, " ")
 	for _, private := range s.privateList {
 		text = strings.ReplaceAll(text, private, placeholderInput)
+	}
+	for _, secret := range s.secretList {
+		text = strings.ReplaceAll(text, secret, redacted)
+	}
+	if strings.Contains(text, "session_") {
+		text = scrubSessionIDRE.ReplaceAllStringFunc(text, func(run string) string {
+			if sessionIDLike(run) {
+				return redacted
+			}
+			return run
+		})
 	}
 	if s.longReplace != nil {
 		text = s.longReplace.Replace(text)
@@ -479,6 +527,16 @@ func (s *Scrubber) Leaks(data []byte) string {
 	for identity := range s.identities {
 		if strings.Contains(text, identity) {
 			return "known-identity"
+		}
+	}
+	for _, secret := range s.secretList {
+		if strings.Contains(text, secret) {
+			return "known-secret"
+		}
+	}
+	for _, run := range scrubSessionIDRE.FindAllString(text, -1) {
+		if sessionIDLike(run) {
+			return "session-id"
 		}
 	}
 	return ""
