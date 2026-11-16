@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"math"
 	"net/http"
 	"reflect"
@@ -147,8 +148,22 @@ func nativeProcessingDeclaration(offering generation.Offering) (generation.Param
 	}
 	// Each wire alias must resolve to one declared output contract. Required
 	// formats remain schema-owned; the materializer checks their actual bytes.
-	matched := converted
+	// The model slot may be the processing result itself or, once the Offering
+	// exports its GLB (#305), a conversion of it: either way one required model
+	// output is declared. An export in another format (the rig's FBX) is not the
+	// model.
+	matched := maps.Clone(converted)
 	requiredModel := false
+	for index := range converted {
+		output := offering.Outputs[index]
+		if output.Role == "model" && output.Minimum != nil && *output.Minimum > 0 && len(output.MediaTypes) == 1 && output.MediaTypes[0] == "model/gltf-binary" {
+			requiredModel = true
+		}
+	}
+	sourceAlias := ""
+	if options.NativeConversion != nil {
+		sourceAlias = options.NativeConversion.SourceAlias
+	}
 	for _, alias := range options.ResponseAliases {
 		index := -1
 		if alias.Key == "" || len(alias.Fields) == 0 {
@@ -167,13 +182,15 @@ func nativeProcessingDeclaration(offering generation.Offering) (generation.Param
 		}
 		matched[index] = true
 		output := offering.Outputs[index]
-		if output.Role == "model" {
+		// The claim of a model, and of the file the exports are made from, takes
+		// the one media type its output declares.
+		if output.Role == "model" || sourceAlias != "" && alias.Key == sourceAlias {
 			if len(output.MediaTypes) != 1 || output.Variant == "" {
 				return source, options, nativeProcessingProtocolError()
 			}
-			if output.Minimum != nil && *output.Minimum > 0 {
-				requiredModel = true
-			}
+		}
+		if output.Role == "model" && output.Minimum != nil && *output.Minimum > 0 {
+			requiredModel = true
 		}
 	}
 	for i, output := range offering.Outputs {

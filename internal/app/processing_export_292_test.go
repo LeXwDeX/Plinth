@@ -81,8 +81,9 @@ func TestGamePurposeRiggingAndDecimationExportPNGAtThePurposeTextureSize(t *test
 				formats    []string
 				animation  bool
 			}{
-				{generation.Rigging, "tripo/processing/rigging-v3", []string{"FBX"}, true},
-				{generation.Remesh, "tripo/geometry/decimate-triangle", []string{"3MF", "FBX", "OBJ", "STL", "USDZ"}, false},
+				// The GLB each step delivers as its model is one of its exports (#305).
+				{generation.Rigging, "tripo/processing/rigging-v3", []string{"FBX", "GLTF"}, true},
+				{generation.Remesh, "tripo/geometry/decimate-triangle", []string{"3MF", "FBX", "GLTF", "OBJ", "STL", "USDZ"}, false},
 			} {
 				offering, ok := product.Get(step.offering)
 				if !ok {
@@ -125,28 +126,39 @@ func TestGamePurposeRiggingAndDecimationExportPNGAtThePurposeTextureSize(t *test
 				}
 				for _, format := range step.formats {
 					role := "converted_model"
-					if step.capability == generation.Rigging {
+					if step.capability == generation.Rigging || format == "GLTF" {
 						role = "model"
 					}
-					if variant := map[string]string{"FBX": "fbx", "OBJ": "obj", "STL": "stl", "USDZ": "usdz", "3MF": "3mf"}[format]; !delivered[role+":"+variant] {
+					if variant := map[string]string{"GLTF": "glb", "FBX": "fbx", "OBJ": "obj", "STL": "stl", "USDZ": "usdz", "3MF": "3mf"}[format]; !delivered[role+":"+variant] {
 						t.Errorf("%s did not deliver the %s export: %v", step.offering, format, delivered)
 					}
 				}
+				// The upstream's own GLB is kept as the original file.
+				if !delivered["original_model:glb"] {
+					t.Errorf("%s kept no original file: %v", step.offering, delivered)
+				}
 				// The Task the kernel froze carries the declaration and the size: the
-				// resolver that inspect_model and the plan checkpoints share names the
-				// export edge the purpose gave, for the GLB they read, whatever
-				// resolution the upstream wrote that file at.
-				var glb generation.AssetID
+				// resolver that inspect_model and the plan checkpoints share leaves the
+				// model GLB, a sized export, to its own bytes (its textures are what the
+				// conversion wrote), and names the export edge the purpose gave for the
+				// original file, whatever resolution the upstream wrote it at.
+				var glb, original generation.AssetID
 				for _, asset := range task.Assets {
-					if asset.Role == "model" && asset.Variant == "glb" {
+					switch {
+					case asset.Role == "model" && asset.Variant == "glb":
 						glb = asset.ID
+					case asset.Role == "original_model":
+						original = asset.ID
 					}
 				}
-				if glb == "" {
-					t.Fatalf("%s delivered no GLB: %v", step.offering, delivered)
+				if glb == "" || original == "" {
+					t.Fatalf("%s delivered no model GLB or no original: %v", step.offering, delivered)
 				}
-				if edge := executor.SizedTextureEdge(task, glb); float64(edge) != tc.size {
-					t.Errorf("%s: the sized export edge = %d, want %v", step.offering, edge, tc.size)
+				if edge := executor.SizedTextureEdge(task, glb); edge != 0 {
+					t.Errorf("%s: the model GLB is judged by the sized edge %d, want its own bytes", step.offering, edge)
+				}
+				if edge := executor.SizedTextureEdge(task, original); float64(edge) != tc.size {
+					t.Errorf("%s: the sized export edge for the original = %d, want %v", step.offering, edge, tc.size)
 				}
 			}
 		})

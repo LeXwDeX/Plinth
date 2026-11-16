@@ -479,9 +479,10 @@ func BuildFBX(mesh Mesh, label string, fidelity ...string) []byte {
 // way FBX exporters embed textures: a Video object whose Content property holds
 // the image bytes and whose RelativeFilename names the file. The test upstream
 // uses it to deliver a conversion whose texture format is the one requested, so
-// the format can be read back from the delivered bytes.
-func BuildTexturedFBX(mesh Mesh, label, filename string, image []byte) []byte {
-	return buildFBX(mesh, label, &fbxEmbeddedImage{filename: filename, data: image})
+// the format can be read back from the delivered bytes. fidelity adds the skin
+// (and clip) of a rigged source as BuildFBX does.
+func BuildTexturedFBX(mesh Mesh, label, filename string, image []byte, fidelity ...string) []byte {
+	return buildFBX(mesh, label, &fbxEmbeddedImage{filename: filename, data: image}, fidelity...)
 }
 
 type fbxEmbeddedImage struct {

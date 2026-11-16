@@ -93,6 +93,13 @@ type Config struct {
 	// fails before the fake answers normally again. 0 means always. The
 	// X-Fake-Fail-Times request header overrides it per request.
 	FailTimes int
+	// ConvertURLDelay is how long the Tripo fake takes to answer the creation
+	// of a model conversion whose input is a URL: the real API took 47 to 48
+	// seconds for it (2026-11-16, #305), because it fetches the model before
+	// it answers. The default is 10 ms, so a test stays fast and can raise it
+	// to prove that a client's request timeout is long enough; a negative
+	// value answers at once.
+	ConvertURLDelay time.Duration
 	// ArtifactOrigin, when set, replaces the origin of artifact URLs in task
 	// outputs ("https://assets.example.test"). A stack whose Adapter only
 	// accepts public HTTPS artifact hosts maps that host back to the fake with
@@ -114,6 +121,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RetryAfter <= 0 {
 		c.RetryAfter = time.Second
+	}
+	if c.ConvertURLDelay == 0 {
+		c.ConvertURLDelay = 10 * time.Millisecond
 	}
 	if c.Now == nil {
 		c.Now = time.Now

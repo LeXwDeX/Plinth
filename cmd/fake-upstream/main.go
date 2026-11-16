@@ -72,6 +72,7 @@ func run(args []string) error {
 	artifactOrigin := flags.String("artifact-origin", "", "origin written into artifact URLs (default: the origin the client used)")
 	verbose := flags.Bool("log", true, "log one line per request (method, path, scenario, status; never the key or bodies)")
 	hold := flags.Duration("timeout-hold", 2*time.Minute, "how long the timeout scenario holds a request")
+	convertDelay := flags.Duration("convert-url-delay", 10*time.Millisecond, "how long the Tripo fake takes to answer the creation of a model conversion from a URL (the real API took 47-48 s; negative answers at once)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -83,7 +84,7 @@ func run(args []string) error {
 	if tcp, ok := listener.Addr().(*net.TCPAddr); ok && !tcp.IP.IsLoopback() && !*allow {
 		return fmt.Errorf("refusing to listen on non-loopback %s", tcp)
 	}
-	server, err := registry.New(fakeupstream.Config{QueuedPolls: *queued, RunningPolls: *running, FailTimes: *failTimes, TimeoutHold: *hold, ArtifactOrigin: *artifactOrigin})
+	server, err := registry.New(fakeupstream.Config{QueuedPolls: *queued, RunningPolls: *running, FailTimes: *failTimes, TimeoutHold: *hold, ConvertURLDelay: *convertDelay, ArtifactOrigin: *artifactOrigin})
 	if err != nil {
 		return err
 	}

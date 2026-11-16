@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+
+	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
 
 // The POST /models/convert request of the official API, read from
@@ -24,7 +26,9 @@ import (
 // Constructed, not captured: the real answer to an invalid value. The committed
 // convert sample covers a valid STL export with bake, fbx_preset, texture_format,
 // texture_size and with_animation, and shows that the task object echoes those
-// parameters under input.
+// parameters under input; the evidence of 2026-11-16 adds a GLTF and an FBX
+// export with the same options (see the end of this file for what a conversion
+// does to the model).
 var (
 	convertFormats         = []string{"GLTF", "FBX", "USDZ", "OBJ", "STL", "3MF"}
 	convertTextureFormats  = []string{"JPEG", "PNG", "WEBP", "BMP", "DPX", "HDR", "OPEN_EXR", "TARGA", "TIFF"}
@@ -160,4 +164,98 @@ func (t *task) convertFormat() string {
 	}
 	format, _ := t.convert["format"].(string)
 	return format
+}
+
+// What a conversion does to the model (#305). Observed 2026-11-16 on the GLB of a
+// v3.0 rig, converted to GLTF and to FBX with PNG textures of 2048 pixels and
+// with_animation, without pivot_to_center_bottom:
+//
+//   - the skin survives (the one skin, its joints in their order, the inverse bind
+//     matrices, JOINTS_0 and WEIGHTS_0), and the textures are written in the
+//     requested format and at the requested size;
+//   - the model is moved so the middle of its bounding box sits on the origin,
+//     and the finished task reports the move as output.normalize_scale and
+//     output.normalize_translation (the same values for both formats). A
+//     conversion to STL, observed on an earlier model, reports neither.
+//
+// What the page promises but the run did not exercise is constructed: with
+// pivot_to_center_bottom the origin is the middle of the bottom face (so the feet
+// rest on y = 0 and normalize_translation moves the bottom face, not the middle),
+// and a texture larger than the source's is drawn at the requested size.
+//
+// A conversion that asks for nothing about its output (no texture_size,
+// texture_format or pivot_to_center_bottom) is delivered as the fixed fixture it
+// always was, so the requests of the generation Offerings keep their bytes.
+
+// convertInt reads an integer parameter of the convert request.
+func (t *task) convertInt(name string) (int, bool) {
+	number, ok := t.convert[name].(json.Number)
+	if !ok {
+		return 0, false
+	}
+	value, err := number.Int64()
+	return int(value), err == nil
+}
+
+// convertedModelSpec is the model a conversion of this task writes, and false
+// when the request asks for nothing about the output (or for what the fixture
+// cannot draw), which leaves the plain fixture.
+func (t *task) convertedModelSpec() (fakeupstream.ConvertedModelSpec, bool) {
+	if t.kind.Type != "convert_model" {
+		return fakeupstream.ConvertedModelSpec{}, false
+	}
+	size, hasSize := t.convertInt("texture_size")
+	format, hasFormat := t.convert["texture_format"].(string)
+	pivot, hasPivot := t.convert["pivot_to_center_bottom"].(bool)
+	if !hasSize && !hasFormat && !hasPivot {
+		return fakeupstream.ConvertedModelSpec{}, false
+	}
+	if !hasSize {
+		size = convertDefaultTextureSize
+	}
+	if !hasFormat {
+		format = convertDefaultTextureFormat
+	}
+	spec := fakeupstream.ConvertedModelSpec{TextureEdge: size, Offset: fakeupstream.CenterOrigin(pivot), Triangles: t.sourceTriangles}
+	switch format {
+	case "PNG":
+		spec.TextureFormat = fakeupstream.TextureFormatPNG
+	case "JPEG":
+		spec.TextureFormat = fakeupstream.TextureFormatJPEG
+	default:
+		return fakeupstream.ConvertedModelSpec{}, false
+	}
+	if fakeupstream.ConvertedTexture(spec.TextureFormat, size) == nil {
+		return fakeupstream.ConvertedModelSpec{}, false
+	}
+	keepsAnimation := true // the page's default is not read; the committed request names it
+	if value, named := t.convert["with_animation"].(bool); named {
+		keepsAnimation = value
+	}
+	spec.Skeleton = t.sourceFidelity != ""
+	spec.Animation = t.sourceFidelity == "animation" && keepsAnimation
+	return spec, true
+}
+
+// normalize adds what a GLTF or FBX conversion reports about the move it made.
+func (t *task) normalize(output map[string]any) {
+	if t.kind.Type != "convert_model" {
+		return
+	}
+	if format := t.convertFormat(); format != "GLTF" && format != "FBX" {
+		return
+	}
+	pivot, _ := t.convert["pivot_to_center_bottom"].(bool)
+	offset := fakeupstream.CenterOrigin(pivot)
+	output["normalize_scale"] = json.Number("1")
+	output["normalize_translation"] = []float64{offset[0], offset[1], offset[2]}
+}
+
+// modelTriangles is the triangle count of the model this task delivers when it is
+// not the plain fixture: the low-poly model a decimation builds.
+func (t *task) modelTriangles() int {
+	if t.isDecimate() && !t.decimatesToQuad() {
+		return fakeupstream.LowPolyTriangles(t.decimateTriangles())
+	}
+	return 0
 }

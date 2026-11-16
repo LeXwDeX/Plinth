@@ -362,10 +362,16 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 		label = identity.TaskID
 	}
 	// A processing result's exports the purpose sized are what its texture budget
-	// judges; the inspected file is reported beside them (#292).
+	// judges; the inspected file is reported beside them (#292). A file the purpose
+	// sized itself is judged as it is, and the upstream's own file kept beside it is
+	// measured so the result can name it (#305).
+	sized := executor.sizedDeliverable(source.task, source.asset)
+	if sized != nil && sized.Own {
+		sized.Original = executor.siblingTextureEdge(ctx, command, review, options, source)
+	}
 	usageCheck := newModelReviewUsageCheckFor(
 		report,
-		executor.sizedDeliverable(source.task, source.asset),
+		sized,
 		executor.chat.Model3DUsage,
 		review.Inspect.Production,
 		command.Options.ProductionBrief,

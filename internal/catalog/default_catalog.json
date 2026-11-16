@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-16.304.1",
+    "revision": "2026-11-16.305.1",
     "terminology": {
       "user_facing": [
         {
@@ -6408,6 +6408,7 @@
             "platform_budget_text": "按制作简报的目标平台「{platform}」的预算判定。",
             "export_texture_text": "原生 GLB 贴图为 {native} 像素，交付用 {formats} 已按用途导出为 {export} 像素；贴图项按导出判定（边长取自冻结的步骤参数，没有读取导出文件里的贴图）。",
             "export_texture_fix_text": "交付用 {formats} 的导出贴图 {export} 像素超过用途的上限 {maximum} 像素：把「导出贴图尺寸」调小后重做这一步，不必重新生成模型。",
+            "original_texture_text": "任务还保存了上游返回的原始 GLB，贴图为 {original} 像素，没有按用途导出，不计入预算；贴图项按这个模型自己的贴图判定。",
             "no_capability_text": "当前 Catalog 没有可用于修复这一项的已启用能力。",
             "capability_joiner": " → ",
             "option_separator": " 或 ",
@@ -12555,6 +12556,7 @@
             "analysis_report": "分析报告",
             "repair_report": "修复报告",
             "model": "模型",
+            "original_model": "原始模型",
             "image": "图片",
             "thumbnail": "缩略图",
             "clip": "动作片段",
@@ -18696,6 +18698,7 @@
             "task_history.assets.attachments.role_labels.analysis_report": "Analysis report",
             "task_history.assets.attachments.role_labels.repair_report": "Repair report",
             "task_history.assets.attachments.role_labels.model": "Model",
+            "task_history.assets.attachments.role_labels.original_model": "Original model",
             "task_history.assets.attachments.role_labels.image": "Image",
             "task_history.assets.attachments.role_labels.thumbnail": "Thumbnail",
             "task_history.assets.attachments.role_labels.clip": "Animation clip",
@@ -20405,6 +20408,8 @@
             "格式转换导出的漫反射贴图边长。默认 4K，即上游默认，转换保持基础价；其他取值按进阶转换计价。生成的最高纹理档官方标称 8K（2026-10-19 实测原生与导出贴图均为 4096），需要不低于它时选 8K。": "Side length of the diffuse texture the format conversions export. The default is 4K, the upstream default, which keeps the conversion at the basic price; any other value makes it an advanced conversion. The highest generated texture tier is advertised as 8K (native and exported textures measured 4096 on 2026-10-19); choose 8K to stay at or above it.",
             "默认沿用上游默认，转换保持基础价；用途要求更小或更大的贴图时在用途声明里写明，Agent 也可按需求说明理由调整合法取值。": "The default follows the upstream default and keeps the conversion at the basic price; a purpose that needs smaller or larger textures says so in its own declaration, and the Agent may also adjust it to another legal value with a stated reason.",
             "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。": "Side length of the texture the exports (FBX and other formats that carry textures) are written with; the texture is always lossless PNG. The default is 8K. When no size is chosen (you leave this field as it is, or the Agent starts the step), the texture limit of the purpose in the session's production brief applies, and 8K when the purpose sets none; a size you choose yourself is used as chosen. It applies only to the exported formats; the GLB the step returns directly keeps Tripo's original textures. Exports are always priced as advanced conversions (PNG is not the upstream default format), so changing the size does not change the price.",
+            "导出文件的贴图边长：GLB 主模型和 FBX 等带贴图的格式都按它导出，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。加工直接返回的原生 GLB 不接受贴图参数，作为原始件另存，仍是 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。": "Side length of the texture the exports are written with: the main GLB and the formats that carry textures (FBX and others) all follow it; the texture is always lossless PNG. The default is 8K. When no size is chosen (you leave this field as it is, or the Agent starts the step), the texture limit of the purpose in the session's production brief applies, and 8K when the purpose sets none; a size you choose yourself is used as chosen. The native GLB the step returns directly takes no texture option and is kept as the original file with Tripo's original textures. Exports are always priced as advanced conversions (PNG is not the upstream default format), so changing the size does not change the price.",
+            "GLB 主模型导出时把模型原点放在底部中心，脚落在地面，便于在引擎里摆放；固定开启。不开时转换会把模型移到包围盒中心，脚不再落地。只作用于 GLB 主模型，FBX 等其他导出格式保持上游默认原点。导出本来就按进阶转换计价，开启不改变价格。": "The main GLB is exported with its origin at the bottom center, feet on the ground, so it is easy to place in an engine; always on. Without it the conversion moves the model to the middle of its bounding box and the feet no longer touch the ground. It applies to the main GLB only; FBX and the other export formats keep the upstream origin. Exports are already priced as advanced conversions, so turning this on does not change the price.",
             "格式转换导出时把模型原点移到底部中心，上游默认关闭，开启时转换按进阶转换计价。游戏、实时用途按用途声明开启，便于在引擎里摆放和缩放；展示用途保持上游默认。":"Moves the model origin to the bottom center during format conversion (off by default upstream; turning it on makes the conversion an advanced one). Game and real-time purposes turn it on so the model is easy to place and scale in an engine; display purposes keep the upstream default.",
             "FBX 转换的导出预设，上游默认 Blender，换预设不改变转换价格。官方页只说明“烘焙缩放”会把缩放变换烘焙进几何，其余预设的差异未写明；各引擎该选哪个预设尚未核实，目标引擎字段落地前统一用默认值。只用于 FBX 转换。": "The export preset of FBX conversions (the upstream default is Blender; another preset does not change the price). The official page only says that Bake scale bakes the scale transform into the geometry; the differences between the other presets are not stated, and which preset suits which engine is not verified, so the default is used until a target-engine field exists. Used for FBX conversions only.",
             "本服务请求并保存全部六种官方格式。": "This service requests and saves all six official formats.",
@@ -40164,7 +40169,7 @@
     },
     {
       "id": "tripo/processing/rigging",
-      "revision": "2026-11-12.292.1",
+      "revision": "2026-11-16.305.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -40318,11 +40323,23 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件的贴图边长：GLB 主模型和 FBX 等带贴图的格式都按它导出，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。加工直接返回的原生 GLB 不接受贴图参数，作为原始件另存，仍是 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
             "control": "select",
             "follows_purpose": true
+          }
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": true,
+          "fixed": true,
+          "description": "GLB 主模型导出时把模型原点放在底部中心，脚落在地面，便于在引擎里摆放；固定开启。不开时转换会把模型移到包围盒中心，脚不再落地。只作用于 GLB 主模型，FBX 等其他导出格式保持上游默认原点。导出本来就按进阶转换计价，开启不改变价格。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
           }
         },
         {
@@ -40331,12 +40348,17 @@
           "type": "string-array",
           "required": true,
           "default": [
+            "GLTF",
             "FBX"
           ],
           "fixed": true,
-          "min_items": 1,
-          "max_items": 1,
+          "min_items": 2,
+          "max_items": 2,
           "options": [
+            {
+              "value": "GLTF",
+              "label": "GLTF"
+            },
             {
               "value": "FBX",
               "label": "FBX"
@@ -40362,6 +40384,7 @@
         {
           "role": "model",
           "variant": "glb",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -40384,6 +40407,17 @@
           "delivery_profile": "binary-fbx-v1"
         },
         {
+          "role": "original_model",
+          "variant": "glb",
+          "delivery": "required",
+          "minimum": 1,
+          "media_types": [
+            "model/gltf-binary"
+          ],
+          "max_bytes": 1073741824,
+          "fidelity": "skeleton"
+        },
+        {
           "role": "thumbnail",
           "variant": "rendered_image",
           "delivery": "background",
@@ -40401,7 +40435,7 @@
           {
             "key": "model",
             "claim_id": "model:model_url",
-            "role": "model",
+            "role": "original_model",
             "variant": "glb",
             "fields": [
               "model_url"
@@ -40432,9 +40466,22 @@
             {
               "parameter": "export_texture_size",
               "wire": "texture_size"
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "formats": [
+                "GLTF"
+              ]
             }
           ],
           "formats": [
+            {
+              "format": "GLTF",
+              "role": "model",
+              "variant": "glb",
+              "media_type": "model/gltf-binary"
+            },
             {
               "format": "FBX",
               "role": "model",
@@ -40454,7 +40501,7 @@
         "extra_label": "完整附加导出格式"
       },
       "cost_policy": {
-        "max_authorized_extra_credits": 10,
+        "max_authorized_extra_credits": 20,
         "messages": {
           "consent_required": "完整交付包含附加转换费用，请先对完整冻结输入批准。",
           "over_limit": "附加导出格式费用超出授权上限，已停止执行。",
@@ -40464,7 +40511,7 @@
     },
     {
       "id": "tripo/processing/rigging-v3",
-      "revision": "2026-11-12.292.1",
+      "revision": "2026-11-16.305.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -40655,11 +40702,23 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件的贴图边长：GLB 主模型和 FBX 等带贴图的格式都按它导出，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。加工直接返回的原生 GLB 不接受贴图参数，作为原始件另存，仍是 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
             "control": "select",
             "follows_purpose": true
+          }
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": true,
+          "fixed": true,
+          "description": "GLB 主模型导出时把模型原点放在底部中心，脚落在地面，便于在引擎里摆放；固定开启。不开时转换会把模型移到包围盒中心，脚不再落地。只作用于 GLB 主模型，FBX 等其他导出格式保持上游默认原点。导出本来就按进阶转换计价，开启不改变价格。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
           }
         },
         {
@@ -40668,12 +40727,17 @@
           "type": "string-array",
           "required": true,
           "default": [
+            "GLTF",
             "FBX"
           ],
           "fixed": true,
-          "min_items": 1,
-          "max_items": 1,
+          "min_items": 2,
+          "max_items": 2,
           "options": [
+            {
+              "value": "GLTF",
+              "label": "GLTF"
+            },
             {
               "value": "FBX",
               "label": "FBX"
@@ -40699,6 +40763,7 @@
         {
           "role": "model",
           "variant": "glb",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
@@ -40721,6 +40786,17 @@
           "delivery_profile": "binary-fbx-v1"
         },
         {
+          "role": "original_model",
+          "variant": "glb",
+          "delivery": "required",
+          "minimum": 1,
+          "media_types": [
+            "model/gltf-binary"
+          ],
+          "max_bytes": 1073741824,
+          "fidelity": "skeleton"
+        },
+        {
           "role": "thumbnail",
           "variant": "rendered_image",
           "delivery": "background",
@@ -40738,7 +40814,7 @@
           {
             "key": "model",
             "claim_id": "model:model_url",
-            "role": "model",
+            "role": "original_model",
             "variant": "glb",
             "fields": [
               "model_url"
@@ -40769,9 +40845,22 @@
             {
               "parameter": "export_texture_size",
               "wire": "texture_size"
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "formats": [
+                "GLTF"
+              ]
             }
           ],
           "formats": [
+            {
+              "format": "GLTF",
+              "role": "model",
+              "variant": "glb",
+              "media_type": "model/gltf-binary"
+            },
             {
               "format": "FBX",
               "role": "model",
@@ -40791,7 +40880,7 @@
         "extra_label": "完整附加导出格式"
       },
       "cost_policy": {
-        "max_authorized_extra_credits": 10,
+        "max_authorized_extra_credits": 20,
         "messages": {
           "consent_required": "完整交付包含附加转换费用，请先对完整冻结输入批准。",
           "over_limit": "附加导出格式费用超出授权上限，已停止执行。",
@@ -45135,7 +45224,7 @@
     },
     {
       "id": "tripo/geometry/decimate-triangle",
-      "revision": "2026-11-12.292.1",
+      "revision": "2026-11-16.305.1",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -45254,11 +45343,23 @@
             "4k": 4096,
             "8k": 8192
           },
-          "description": "导出文件（FBX 等带贴图的格式）的贴图边长，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。只作用于导出的格式，加工直接返回的 GLB 沿用 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
+          "description": "导出文件的贴图边长：GLB 主模型和 FBX 等带贴图的格式都按它导出，贴图固定为无损 PNG，默认 8K。没有单独指定尺寸时（在加工面板里不改动这一项，或由 Agent 发起），按会话制作简报里用途的贴图上限取值，用途不限制贴图时为 8K；自己选定的尺寸以所选为准。加工直接返回的原生 GLB 不接受贴图参数，作为原始件另存，仍是 Tripo 原始贴图。导出一直按进阶转换计价（PNG 不是上游默认格式），改尺寸不改变价格。",
           "presentation": {
             "surface": "provider",
             "control": "select",
             "follows_purpose": true
+          }
+        },
+        {
+          "name": "export_pivot_bottom_center",
+          "label": "导出原点移到底部中心",
+          "type": "boolean",
+          "default": true,
+          "fixed": true,
+          "description": "GLB 主模型导出时把模型原点放在底部中心，脚落在地面，便于在引擎里摆放；固定开启。不开时转换会把模型移到包围盒中心，脚不再落地。只作用于 GLB 主模型，FBX 等其他导出格式保持上游默认原点。导出本来就按进阶转换计价，开启不改变价格。",
+          "presentation": {
+            "surface": "readonly",
+            "control": "boolean"
           }
         },
         {
@@ -45267,6 +45368,7 @@
           "type": "string-array",
           "required": true,
           "default": [
+            "GLTF",
             "FBX",
             "OBJ",
             "STL",
@@ -45274,9 +45376,13 @@
             "3MF"
           ],
           "fixed": true,
-          "min_items": 5,
-          "max_items": 5,
+          "min_items": 6,
+          "max_items": 6,
           "options": [
+            {
+              "value": "GLTF",
+              "label": "GLTF"
+            },
             {
               "value": "FBX",
               "label": "FBX"
@@ -45318,12 +45424,13 @@
         {
           "role": "model",
           "variant": "glb",
+          "texture_size_parameter": "export_texture_size",
           "delivery": "required",
           "minimum": 1,
           "media_types": [
             "model/gltf-binary"
           ],
-          "max_bytes": 150000000
+          "max_bytes": 1073741824
         },
         {
           "role": "converted_model",
@@ -45381,6 +45488,16 @@
           "delivery_profile": "3mf-package-v1"
         },
         {
+          "role": "original_model",
+          "variant": "glb",
+          "delivery": "required",
+          "minimum": 1,
+          "media_types": [
+            "model/gltf-binary"
+          ],
+          "max_bytes": 150000000
+        },
+        {
           "role": "thumbnail",
           "variant": "rendered_image",
           "delivery": "background",
@@ -45398,7 +45515,7 @@
           {
             "key": "model",
             "claim_id": "model:model_url",
-            "role": "model",
+            "role": "original_model",
             "variant": "glb",
             "fields": [
               "model_url"
@@ -45429,9 +45546,22 @@
             {
               "parameter": "export_texture_size",
               "wire": "texture_size"
+            },
+            {
+              "parameter": "export_pivot_bottom_center",
+              "wire": "pivot_to_center_bottom",
+              "formats": [
+                "GLTF"
+              ]
             }
           ],
           "formats": [
+            {
+              "format": "GLTF",
+              "role": "model",
+              "variant": "glb",
+              "media_type": "model/gltf-binary"
+            },
             {
               "format": "FBX",
               "role": "converted_model",
@@ -45475,7 +45605,7 @@
         "extra_label": "完整附加导出格式"
       },
       "cost_policy": {
-        "max_authorized_extra_credits": 50,
+        "max_authorized_extra_credits": 60,
         "messages": {
           "consent_required": "完整交付包含附加转换费用，请先对完整冻结输入批准。",
           "over_limit": "附加导出格式费用超出授权上限，已停止执行。",

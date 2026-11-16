@@ -3627,6 +3627,7 @@ func validateModelInspectProduction(
 	}{
 		{"export_texture_text", production.ExportTextureText, []string{"{native}", "{formats}", "{export}"}},
 		{"export_texture_fix_text", production.ExportTextureFixText, []string{"{formats}", "{export}", "{maximum}"}},
+		{"original_texture_text", production.OriginalTextureText, []string{"{original}"}},
 	} {
 		if strings.TrimSpace(optional.value) != "" {
 			texts = append(texts, optional)

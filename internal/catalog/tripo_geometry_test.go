@@ -21,7 +21,9 @@ func TestTripoGeometryEnabledSourcesAndNormalization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for kind, total := range map[string]int{"decimate-triangle": 85, "decimate-quad": 90, "segment": 90, "complete": 100, "quick-cap": 80} {
+	// The triangle decimation also exports its GLB, the model slot (#305): a sixth
+	// advanced conversion of 10 credits.
+	for kind, total := range map[string]int{"decimate-triangle": 95, "decimate-quad": 90, "segment": 90, "complete": 100, "quick-cap": 80} {
 		t.Run(kind, func(t *testing.T) {
 			id := generation.OfferingID("tripo/geometry/" + kind)
 			o, ok := c.Get(id)
@@ -29,8 +31,12 @@ func TestTripoGeometryEnabledSourcesAndNormalization(t *testing.T) {
 			// re-enables Quick Cap; the two decimations take multiview results as
 			// a source since #276 (revision 2026-11-12.276.1). #292 binds the
 			// export texture size of all of them to the purpose, which is the
-			// revision they carry now.
+			// revision the others carry now; #305 gives the triangle decimation
+			// the GLB export.
 			revision := "2026-11-12.292.1"
+			if kind == "decimate-triangle" {
+				revision = "2026-11-16.305.1"
+			}
 			if !ok || o.Enabled != qualified[kind] || o.Default || o.Revision != revision {
 				t.Fatalf("geometry Offering enablement drifted from the #185 qualification: %+v", o)
 			}

@@ -23,7 +23,8 @@ func TestTripoRigV3EnabledKeepsAcceptedRigAvailable(t *testing.T) {
 	if !ok {
 		t.Fatal("missing explicit latest Rig candidate")
 	}
-	if !candidate.Enabled || candidate.Capability != schema.Rigging || candidate.Revision != "2026-11-12.292.1" || candidate.EstimateTotalCredits(json.RawMessage(`{"source_task":"source","output_formats":["FBX"],"authorize_extra_credits":true}`)) != 35 {
+	// 25 for the rig, 10 for its GLB export and 10 for its FBX export (#305).
+	if !candidate.Enabled || candidate.Capability != schema.Rigging || candidate.Revision != "2026-11-16.305.1" || candidate.EstimateTotalCredits(json.RawMessage(`{"source_task":"source","output_formats":["GLTF","FBX"],"authorize_extra_credits":true}`)) != 45 {
 		t.Fatalf("Rig v3 availability or quote changed: %+v", candidate)
 	}
 	var wire struct {
@@ -38,7 +39,7 @@ func TestTripoRigV3EnabledKeepsAcceptedRigAvailable(t *testing.T) {
 	if err := json.Unmarshal(candidate.ProviderOptions, &wire); err != nil {
 		t.Fatal(err)
 	}
-	if wire.Model != "v3.0-20260909" || wire.Endpoint != "animations/rig" || wire.ObserveEndpoint != "tasks/{task_id}" || wire.ConvertEndpoint != "models/convert" || len(wire.NativeConversion.Formats) != 1 || wire.NativeConversion.Formats[0].Format != "FBX" {
+	if wire.Model != "v3.0-20260909" || wire.Endpoint != "animations/rig" || wire.ObserveEndpoint != "tasks/{task_id}" || wire.ConvertEndpoint != "models/convert" || len(wire.NativeConversion.Formats) != 2 || wire.NativeConversion.Formats[0].Format != "GLTF" || wire.NativeConversion.Formats[1].Format != "FBX" {
 		t.Fatalf("latest Rig route or export changed: %+v", wire)
 	}
 	source := candidate.Parameters[0]
@@ -57,7 +58,7 @@ func TestTripoRigV3EnabledKeepsAcceptedRigAvailable(t *testing.T) {
 			t.Fatalf("%s fixed=%v surface=%+v: %+v", name, p.Fixed, p.Presentation, p)
 		}
 	}
-	if len(candidate.Outputs) != 3 || candidate.Outputs[0].Fidelity != "skeleton" || candidate.Outputs[1].Fidelity != "skeleton" || candidate.Outputs[1].DeliveryProfile != "binary-fbx-v1" {
+	if len(candidate.Outputs) != 4 || candidate.Outputs[0].Fidelity != "skeleton" || candidate.Outputs[1].Fidelity != "skeleton" || candidate.Outputs[1].DeliveryProfile != "binary-fbx-v1" {
 		t.Fatalf("candidate lost required skeleton delivery: %+v", candidate.Outputs)
 	}
 	listed := 0

@@ -32,6 +32,12 @@ func TestGeometryCatalogOfferingsSendOfficialWire(t *testing.T) {
 		t.Run(tc.kind, func(t *testing.T) {
 			r := geometryCatalogFixture(t, tc.kind)
 			r.Offering.AssetHosts = []string{"assets.example"}
+			// The decimation also exports its GLB (#305): the model slot is that
+			// conversion, with the origin at the bottom center.
+			formats := []string{"FBX", "OBJ", "STL", "USDZ", "3MF"}
+			if tc.kind == "decimate-triangle" {
+				formats = append([]string{"GLTF"}, formats...)
+			}
 			var base []string
 			converts := map[string]string{}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
@@ -39,7 +45,7 @@ func TestGeometryCatalogOfferingsSendOfficialWire(t *testing.T) {
 					raw, _ := io.ReadAll(q.Body)
 					if q.URL.Path == "/v3/models/convert" {
 						format := ""
-						for _, f := range []string{"FBX", "OBJ", "STL", "USDZ", "3MF"} {
+						for _, f := range formats {
 							if strings.Contains(string(raw), `"format":"`+f+`"`) {
 								format = f
 							}
@@ -82,19 +88,23 @@ func TestGeometryCatalogOfferingsSendOfficialWire(t *testing.T) {
 				}
 				q.Opaque = observed.Opaque
 			}
-			if observed.Phase != generation.UpstreamCompleted || len(observed.Artifacts) != 6 {
+			if observed.Phase != generation.UpstreamCompleted || len(observed.Artifacts) != len(formats)+1 {
 				t.Fatalf("incomplete delivery: %+v", observed)
 			}
 			if len(base) != 1 || base[0] != tc.body {
 				t.Fatalf("native body = %q, want exactly one %s", base, tc.body)
 			}
-			for _, format := range []string{"FBX", "OBJ", "STL", "USDZ", "3MF"} {
-				want := `{"bake":true,"fbx_preset":"blender","format":"` + format + `","input":"https://assets.example/processed.glb","texture_format":"PNG","texture_size":8192,"with_animation":false}`
+			for _, format := range formats {
+				pivot := ""
+				if format == "GLTF" {
+					pivot = `"pivot_to_center_bottom":true,`
+				}
+				want := `{"bake":true,"fbx_preset":"blender","format":"` + format + `","input":"https://assets.example/processed.glb",` + pivot + `"texture_format":"PNG","texture_size":8192,"with_animation":false}`
 				if converts[format] != want {
 					t.Fatalf("%s export body = %s, want %s", format, converts[format], want)
 				}
 			}
-			if len(converts) != 5 {
+			if len(converts) != len(formats) {
 				t.Fatalf("unexpected export set: %v", converts)
 			}
 		})

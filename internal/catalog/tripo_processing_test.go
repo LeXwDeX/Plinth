@@ -89,8 +89,9 @@ func TestNativeTripoAvailabilityKeepsExactSourcesFullQuotesAndDelivery(t *testin
 			o, ok := c.Get(id)
 			enabled := true
 			// The texture and rigging exports bind their texture size to the purpose
-			// since #292; the retarget has no export.
-			revision := map[string]string{"texture": "2026-11-12.292.1", "rigging": "2026-11-12.292.1", "animation": "2026-11-12.277.1"}[candidate.name]
+			// since #292, and the rig exports its GLB too since #305; the retarget has
+			// no export.
+			revision := map[string]string{"texture": "2026-11-12.292.1", "rigging": "2026-11-16.305.1", "animation": "2026-11-12.277.1"}[candidate.name]
 			if !ok || o.Enabled != enabled || o.Revision != revision || o.ModelID != "tripo-"+candidate.name || o.Capability != candidate.capability || o.AdapterKey != "tripo.v3" || !o.CreditsMetered || o.EstimatedCredits != candidate.credits || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || o.IdempotentSubmission {
 				t.Fatalf("unsafe qualification candidate: %+v", o)
 			}
@@ -110,8 +111,8 @@ func TestNativeTripoAvailabilityKeepsExactSourcesFullQuotesAndDelivery(t *testin
 				if err := json.Unmarshal(normalized, &values); err != nil {
 					t.Fatal(err)
 				}
-				wantTotal := map[string]int{"texture": 80, "rigging": 35, "animation": 10}[candidate.name]
-				wantFormats := map[string][]string{"texture": {"FBX", "OBJ", "STL", "USDZ", "3MF"}, "rigging": {"FBX"}, "animation": nil}[candidate.name]
+				wantTotal := map[string]int{"texture": 80, "rigging": 45, "animation": 10}[candidate.name]
+				wantFormats := map[string][]string{"texture": {"FBX", "OBJ", "STL", "USDZ", "3MF"}, "rigging": {"GLTF", "FBX"}, "animation": nil}[candidate.name]
 				if frozen.EstimateTotalCredits(normalized) != wantTotal || !slices.Equal(values.Formats, wantFormats) {
 					t.Fatalf("enabled %s lost full frozen cost/formats: total=%d input=%s", candidate.name, frozen.EstimateTotalCredits(normalized), normalized)
 				}
@@ -151,7 +152,7 @@ func TestNativeTripoAvailabilityKeepsExactSourcesFullQuotesAndDelivery(t *testin
 			if source.Name != "source_task" || source.Type != "task" || source.Semantic != schema.SemanticSourceTask || source.WireName != "input" || !source.Required || !source.SameProvider || source.TaskSourceKind != schema.TaskSourceUpstreamJob || !slices.Equal(source.TaskCapabilities, wantCapabilities) || !slices.Equal(source.TaskOfferings, wantOfferings) {
 				t.Fatalf("native source identity changed: %+v", source)
 			}
-			if len(o.Outputs) != map[string]int{"texture": 7, "rigging": 3, "animation": 2}[candidate.name] {
+			if len(o.Outputs) != map[string]int{"texture": 7, "rigging": 4, "animation": 2}[candidate.name] {
 				t.Fatalf("unexpected output slots: %+v", o.Outputs)
 			}
 			out, preview := o.Outputs[0], o.Outputs[len(o.Outputs)-1]
@@ -180,7 +181,10 @@ func TestNativeTripoAvailabilityKeepsExactSourcesFullQuotesAndDelivery(t *testin
 			if wire.Endpoint != candidate.endpoint || wire.Model != candidate.model || wire.ObserveEndpoint != "tasks/{task_id}" || wire.ConvertEndpoint != map[bool]string{true: "", false: "models/convert"}[candidate.name == "animation"] || wire.UploadEndpoint != "" || len(wire.Aliases) != 2 {
 				t.Fatalf("unexpected native route: %+v", wire)
 			}
-			for i, expected := range []struct{ key, role, variant string }{{"model_url", "model", "glb"}, {"rendered_image_url", "thumbnail", "rendered_image"}} {
+			// The rig's own GLB is the original file since #305: its model slot is the
+			// conversion of it.
+			modelRole := map[bool]string{true: "original_model", false: "model"}[candidate.name == "rigging"]
+			for i, expected := range []struct{ key, role, variant string }{{"model_url", modelRole, "glb"}, {"rendered_image_url", "thumbnail", "rendered_image"}} {
 				alias := wire.Aliases[i]
 				if alias.Key != map[bool]string{true: "model", false: expected.key}[i == 0 && candidate.name != "animation"] || alias.Role != expected.role || alias.Variant != expected.variant || !slices.Equal(alias.Fields, []string{expected.key}) {
 					t.Fatalf("unexpected alias: %+v", alias)

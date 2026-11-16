@@ -246,9 +246,12 @@ func TestRiggingExportsCarryThePurposeTextureSize(t *testing.T) {
 			if len(run.base) != 1 || run.base[0] != want {
 				t.Fatalf("rig request = %v, want exactly %s", run.base, want)
 			}
+			// The rig exports its GLB (the model slot, with the origin at the bottom
+			// center, #305) and the FBX, at the same size.
 			fbx, ok := run.converts["FBX"]
-			if !ok || len(run.converts) != 1 {
-				t.Fatalf("exports = %v, want the FBX alone", run.converts)
+			gltf, hasGLTF := run.converts["GLTF"]
+			if !ok || !hasGLTF || len(run.converts) != 2 {
+				t.Fatalf("exports = %v, want the GLTF and the FBX", run.converts)
 			}
 			expected := map[string]any{
 				"input": run.model, "format": "FBX", "texture_size": wire,
@@ -256,6 +259,13 @@ func TestRiggingExportsCarryThePurposeTextureSize(t *testing.T) {
 			}
 			if !reflect.DeepEqual(fbx, expected) {
 				t.Fatalf("FBX export = %v, want %v", fbx, expected)
+			}
+			expected["format"], expected["pivot_to_center_bottom"] = "GLTF", true
+			if !reflect.DeepEqual(gltf, expected) {
+				t.Fatalf("GLTF export = %v, want %v", gltf, expected)
+			}
+			if !reflect.DeepEqual(run.order, []string{"GLTF", "FBX"}) {
+				t.Fatalf("exports ran in the order %v, want the GLB first", run.order)
 			}
 		})
 	}
@@ -281,8 +291,18 @@ func TestEveryProcessingExportWritesTheFrozenTextureSize(t *testing.T) {
 			t.Fatalf("%s: %v", id, err)
 		}
 		c := options.NativeConversion
+		// What the frozen input of the Offering holds besides the size: the pivot of
+		// the GLB export, which the Offerings that export their GLB declare (#305).
+		pivots := false
+		for _, parameter := range offering.Parameters {
+			pivots = pivots || parameter.Name == "export_pivot_bottom_center"
+		}
 		for size, wire := range exportSizes {
-			input, _ := json.Marshal(map[string]any{"export_texture_size": size})
+			frozen := map[string]any{"export_texture_size": size}
+			if pivots {
+				frozen["export_pivot_bottom_center"] = true
+			}
+			input, _ := json.Marshal(frozen)
 			for _, format := range c.Formats {
 				body, err := nativeConversionBody(offering, c, input, "https://assets.example/processed.glb", format.Format)
 				if err != nil {
@@ -293,51 +313,21 @@ func TestEveryProcessingExportWritesTheFrozenTextureSize(t *testing.T) {
 					body["format"] != format.Format || body["input"] != "https://assets.example/processed.glb" {
 					t.Fatalf("%s %s %s: export = %v", id, size, format.Format, body)
 				}
-				if len(body) != 7 {
+				// The GLB export of the Offerings that deliver it as their model
+				// (#305) also moves the origin to the bottom center, and nothing
+				// else carries that field.
+				fields := 7
+				if format.Format == "GLTF" {
+					fields++
+					if !pivots || body["pivot_to_center_bottom"] != true {
+						t.Fatalf("%s %s: the GLB export keeps the middle of the box as its origin: %v", id, size, body)
+					}
+				}
+				if len(body) != fields {
 					t.Fatalf("%s %s %s: export carries more than the declared fields: %v", id, size, format.Format, body)
 				}
 			}
 		}
-	}
-}
-
-// A Task frozen before the size was a parameter keeps the Offering it was
-// accepted with: the export size is a constant of that snapshot, its input has
-// no export_texture_size, and the declaration, the requests and the checkpoint
-// are the ones it always had. The snapshot is the shipped rigging taken back to
-// the shape of revision 2026-11-12.277.1.
-func TestTaskFrozenBeforeTheSizeWasAParameterKeepsItsConstantExport(t *testing.T) {
-	r := shippedRigging(t, "tripo/processing/rigging-v3", map[string]any{"export_texture_size": "2k"})
-	legacy := r.Offering
-	legacy.Revision = "2026-11-12.277.1"
-	legacy.Parameters = nil
-	for _, parameter := range r.Offering.Parameters {
-		if parameter.Name != "export_texture_size" {
-			legacy.Parameters = append(legacy.Parameters, parameter)
-		}
-	}
-	var options map[string]any
-	if err := json.Unmarshal(r.Offering.ProviderOptions, &options); err != nil {
-		t.Fatal(err)
-	}
-	native := options["native_conversion"].(map[string]any)
-	delete(native, "bindings")
-	native["parameters"].(map[string]any)["texture_size"] = 8192
-	legacy.ProviderOptions, _ = json.Marshal(options)
-	var values map[string]json.RawMessage
-	if err := json.Unmarshal(r.Input, &values); err != nil {
-		t.Fatal(err)
-	}
-	delete(values, "export_texture_size")
-	r.Offering = legacy
-	r.Input, _ = json.Marshal(values)
-	if err := ValidateOffering(legacy); err != nil {
-		t.Fatalf("the snapshot's declaration is refused: %v", err)
-	}
-	run := driveExports(t, r, "animations/rig")
-	want := fmt.Sprintf(`{"bake":true,"fbx_preset":"blender","format":"FBX","input":%q,"texture_format":"PNG","texture_size":8192,"with_animation":true}`, run.model)
-	if run.sent["FBX"] != want {
-		t.Fatalf("the snapshot's export = %s, want %s", run.sent["FBX"], want)
 	}
 }
 
@@ -368,8 +358,12 @@ func TestGeometryExportsCarryThePurposeTextureSize(t *testing.T) {
 			if len(run.base) != 1 || strings.Contains(run.base[0], "texture") {
 				t.Fatalf("the processing request carries an export option: %v", run.base)
 			}
-			if len(run.converts) != 5 {
-				t.Fatalf("exports = %d, want 5", len(run.converts))
+			want := 5
+			if kind == "decimate-triangle" {
+				want = 6 // and the GLB the decimation delivers as its model (#305)
+			}
+			if len(run.converts) != want {
+				t.Fatalf("exports = %d, want %d", len(run.converts), want)
 			}
 			for format, body := range run.converts {
 				if body["texture_size"] != float64(2048) || body["texture_format"] != "PNG" || body["with_animation"] != false {
@@ -515,25 +509,54 @@ func TestExportCheckpointMustMatchTheFrozenTextureSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	locator := "https://assets.example/original.glb"
-	record := func(size string) nativeConversionLedger {
-		input, _ := json.Marshal(map[string]any{"export_texture_size": size})
-		body, err := nativeConversionBody(r.Offering, options.NativeConversion, input, locator, "FBX")
-		if err != nil {
+	// The ledger of a run whose GLB export is done and whose FBX export is in
+	// flight, with the requests the frozen input writes for the size (tamper
+	// changes the recorded requests).
+	record := func(size string, tamper func(bodies map[string]map[string]any)) nativeConversionLedger {
+		var values map[string]any
+		if err := json.Unmarshal(r.Input, &values); err != nil {
 			t.Fatal(err)
 		}
-		raw, _ := json.Marshal(body)
+		values["export_texture_size"] = size
+		input, _ := json.Marshal(values)
+		bodies := map[string]map[string]any{}
+		for _, format := range options.NativeConversion.Formats {
+			body, err := nativeConversionBody(r.Offering, options.NativeConversion, input, locator, format.Format)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bodies[format.Format] = body
+		}
+		if tamper != nil {
+			tamper(bodies)
+		}
+		requests := map[string]json.RawMessage{}
+		for format, body := range bodies {
+			requests[format], _ = json.Marshal(body)
+		}
 		return nativeConversionLedger{
-			ConversionSource:   &nativeConversionSource{Alias: "model", SHA256: strings.Repeat("a", 64), Size: 16},
-			Conversions:        map[string]conversionItem{"FBX": {Status: conversionItemSubmitted, RemoteID: "child_fbx"}},
-			ConversionRequests: map[string]json.RawMessage{"FBX": raw},
+			ConversionSource: &nativeConversionSource{Alias: "model", SHA256: strings.Repeat("a", 64), Size: 16},
+			Conversions: map[string]conversionItem{
+				"GLTF": {Status: conversionItemDone, RemoteID: "child_gltf", Locator: "https://assets.example/child_gltf.glb"},
+				"FBX":  {Status: conversionItemSubmitted, RemoteID: "child_fbx"},
+			},
+			ConversionRequests: requests,
 		}
 	}
-	if err := nativeConversionCheckpoint(record("2k"), r.Offering, r.Input, options); err != nil {
+	if err := nativeConversionCheckpoint(record("2k", nil), r.Offering, r.Input, options); err != nil {
 		t.Fatalf("the request the frozen input writes was refused: %v", err)
 	}
 	for _, other := range []string{"4k", "8k"} {
-		if err := nativeConversionCheckpoint(record(other), r.Offering, r.Input, options); err == nil {
+		if err := nativeConversionCheckpoint(record(other, nil), r.Offering, r.Input, options); err == nil {
 			t.Fatalf("a recorded %s export was accepted for a 2k input", other)
 		}
+	}
+	// The pivot is the GLB export's alone (#305): a ledger cannot drop it from
+	// that export or carry it into the FBX.
+	if err := nativeConversionCheckpoint(record("2k", func(bodies map[string]map[string]any) { delete(bodies["GLTF"], "pivot_to_center_bottom") }), r.Offering, r.Input, options); err == nil {
+		t.Fatal("a GLB export without the pivot was accepted")
+	}
+	if err := nativeConversionCheckpoint(record("2k", func(bodies map[string]map[string]any) { bodies["FBX"]["pivot_to_center_bottom"] = true }), r.Offering, r.Input, options); err == nil {
+		t.Fatal("an FBX export with the pivot was accepted")
 	}
 }

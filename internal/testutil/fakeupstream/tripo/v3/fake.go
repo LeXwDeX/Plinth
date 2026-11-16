@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
@@ -136,7 +137,8 @@ var realKindNotes = map[string]string{
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
 	"/models/texture":                "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url",
 	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url",
-	"/animations/rig":                "the response is captured (rig_type biped, spec tripo, both v2.5 and v3.0); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: rig_type (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic, others), spec (tripo, mixamo, actorcore, unity, unreal, vrm), out_format, which of them exist only under v3.0, and a spec having no effect on a non-biped rig; a poll repeats spec, out_format and the rig type (named topology, as captured)",
+	"/models/convert":                "captured twice. 2026-10-29: an STL export of a segmentation result with PNG textures of 512 pixels (the task echoes its request under input, the output has only model_url). 2026-11-16 (#305, evidence-305-rig-convert.candidate.json): a GLTF and an FBX export of a v3.0 rig's GLB with PNG textures of 2048 pixels and with_animation, 10 credits each, shown already while the task runs (creation from a URL took 47 to 48 seconds; the poll names a new original_model_id); the finished GLTF and FBX tasks add output.normalize_scale and output.normalize_translation, the move that put the middle of the bounding box on the origin because pivot_to_center_bottom was not set; the GLB keeps the skin, the textures follow the request. What the fake writes for pivot_to_center_bottom, for a texture larger than the source's and for the formats the runs did not cover is constructed from the official page (convert.go)",
+	"/animations/rig":                "the response is captured (rig_type biped, spec tripo, both v2.5 and v3.0; 25 credits on v3.0-20260909, shown while the task runs, observed 2026-11-16); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: rig_type (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic, others), spec (tripo, mixamo, actorcore, unity, unreal, vrm), out_format, which of them exist only under v3.0, and a spec having no effect on a non-biped rig; a poll repeats spec, out_format and the rig type (named topology, as captured)",
 	"/animations/retarget":           "the response is captured (preset:walk on a v3.0 biped rig; a v2 rig ended failed, code 1004); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: animation XOR animations (at most 5), the 11 v3.0 biped presets, the five creature presets (quadruped walk, hexapod walk, octopod walk, serpentine march, aquatic march) and the v1.0 preset:biped: names; a preset that does not fit its rig ends failed with code 1004 like the captured v2 case, which is an assumption",
 	"/mesh/smartsegment":             "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id",
 }
@@ -227,6 +229,13 @@ type task struct {
 	// sourceFidelity is the fidelity an export inherits from the task whose
 	// artifact URL it was asked to convert.
 	sourceFidelity string
+	// sourceTriangles is the triangle count of that task's model when it is not
+	// the plain fixture (a decimation), 0 otherwise.
+	sourceTriangles int
+	// importedID is the id the official API gives the model a conversion fetched
+	// from a URL: the poll names it original_model_id, a new id every time
+	// (observed 2026-11-16, #305).
+	importedID string
 	// convert is the documented parameters of a convert request (convert.go),
 	// echoed under input by the task poll and deciding what the export carries.
 	convert map[string]any
@@ -595,7 +604,22 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		t.model, _ = body["model"].(string)
 		t.format, _ = body["format"].(string)
 		if source, _ := body["input"].(string); k.Path == "/models/convert" {
-			t.sourceFidelity = h.urlFidelity(source)
+			if from := h.urlSource(source); from != nil {
+				t.sourceFidelity, t.sourceTriangles = from.fidelity(), from.modelTriangles()
+			}
+			if isHTTP(source) {
+				// A URL is fetched before the answer: the real API took 47 to 48
+				// seconds to return the task id (observed 2026-11-16, #305). The
+				// model it fetched is a new model with a new id.
+				t.importedID = h.newID()
+				if delay := h.env.ConvertURLDelay; delay > 0 {
+					select {
+					case <-time.After(delay):
+					case <-r.Context().Done():
+						return
+					}
+				}
+			}
 		}
 		// input is a task id, except for the kinds that take an uploaded file (image-to-*,
 		// Smart Segmentation) and Convert, which takes a URL. A file token and a public
@@ -675,21 +699,22 @@ func isHTTP(raw string) bool {
 	return strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://")
 }
 
-// urlFidelity reads which task one of this fake's artifact URLs belongs to.
-func (h *handler) urlFidelity(raw string) string {
+// urlSource finds the task one of this fake's artifact URLs belongs to, nil for
+// any other URL.
+func (h *handler) urlSource(raw string) *task {
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return ""
+		return nil
 	}
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	for i, part := range parts {
 		if part == "artifacts" && i+1 < len(parts) {
 			if source := h.lookup(parts[i+1]); source != nil {
-				return source.fidelity()
+				return source
 			}
 		}
 	}
-	return ""
+	return nil
 }
 
 func (h *handler) lookup(id string) *task {
@@ -758,6 +783,7 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 			data[key] = fixedTimestamp
 		}
 	}
+	t.bill(data, status)
 	// Some task types omit progress in some states (edit_multiview while running,
 	// smartsegment_image while queued or failed): the sample decides.
 	if _, has := data["progress"]; has {
@@ -836,6 +862,7 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 			}
 		}
 		render(output)
+		t.normalize(output)
 	}
 	return body
 }
@@ -855,6 +882,9 @@ func (t *task) fidelity() string {
 func (t *task) parentID() string {
 	if t.parent != "" {
 		return t.parent
+	}
+	if t.importedID != "" {
+		return t.importedID
 	}
 	return "00000000-0000-4000-8000-000000000000"
 }

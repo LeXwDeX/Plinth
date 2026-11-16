@@ -52,7 +52,8 @@ type modelReviewUsageCheckItem struct {
 	FixHint string         `json:"fix_hint,omitempty"`
 	// Note says what the item was judged on when that is not the inspected file:
 	// the deliverable the purpose sized, with the file's own texture edge beside it
-	// (#292).
+	// (#292); or, for a file the purpose sized itself, the original file its Task
+	// keeps beside it (#305).
 	Note string `json:"note,omitempty"`
 }
 
@@ -125,11 +126,17 @@ func newModelReviewUsageCheckFor(
 		}
 		checks[index].FixHint = modelReviewUsageFixHint(fix, profile, production, text, available)
 		// A sized deliverable that is over the bound is fixed by sizing it again,
-		// not by the general fix for the inspected file (#292).
+		// not by the general fix for the inspected file (#292). When the inspected
+		// file is itself the sized one (the GLB of a rig, #305) its measured edge is
+		// the one that is over.
 		if checks[index].Check == catalog.ModelReviewUsageCheckTextureSize && sized != nil &&
 			production.ExportTextureFixText != "" && budget.MaxTextureSize != nil {
+			over := sized.Edge
+			if measured, isEdge := checks[index].Actual.(int); sized.Own && isEdge {
+				over = measured
+			}
 			checks[index].FixHint = text(production.ExportTextureFixText, "{formats}", sized.formats(),
-				"{export}", strconv.Itoa(sized.Edge), "{maximum}", strconv.Itoa(*budget.MaxTextureSize))
+				"{export}", strconv.Itoa(over), "{maximum}", strconv.Itoa(*budget.MaxTextureSize))
 		}
 	}
 	result := &modelReviewUsageCheck{
@@ -318,11 +325,12 @@ func modelReviewUsageSkinCheck(
 }
 
 // modelReviewUsageTextureSizeCheck judges the texture edge the purpose's
-// budget bounds: the deliverable the purpose sized when the Task has one, else
-// the largest texture of the inspected file (modelcheck.TextureEdge, the rule the
-// plan checkpoints use too). When the item is judged on the deliverable and the
-// file's own edge differs, the note says both, so the native result is never
-// taken for a pass and never counted as a failure of the budget (#292).
+// budget bounds: the deliverable the purpose sized when the Task has one the
+// inspector cannot read, else the largest texture of the inspected file
+// (modelcheck.TextureEdge, the rule the plan checkpoints use too). When the item
+// is judged on the deliverable and the file's own edge differs, the note says
+// both, so the native result is never taken for a pass and never counted as a
+// failure of the budget (#292).
 func modelReviewUsageTextureSizeCheck(
 	report modelinspect.Report,
 	budget catalog.ChatModel3DUsageBudget,
@@ -330,11 +338,9 @@ func modelReviewUsageTextureSizeCheck(
 	production catalog.ChatModelInspectProductionSchema,
 	text modelReviewUsageText,
 ) modelReviewUsageCheckItem {
-	edge := 0
-	if sized != nil {
-		edge = sized.Edge
-	}
-	actual, native, bySize := modelcheck.TextureEdge(report, edge)
+	// A sized deliverable the inspector cannot read stands in for the file; a file
+	// that is itself sized is measured as it is (#305).
+	actual, native, bySize := modelcheck.TextureEdge(report, sized.judged())
 	values := map[string]any{}
 	status := modelReviewUsageStatusUnknown
 	if budget.MaxTextureSize != nil {
@@ -348,6 +354,13 @@ func modelReviewUsageTextureSizeCheck(
 	if bySize && native != actual && production.ExportTextureText != "" && text != nil {
 		item.Note = text(production.ExportTextureText, "{native}", strconv.Itoa(native),
 			"{formats}", sized.formats(), "{export}", strconv.Itoa(actual))
+	}
+	// A file judged as it is (the converted GLB of a rig) leaves its Task's other file,
+	// the upstream's own GLB, out of the budget: the note says what its textures are,
+	// when they were measured and differ (#305).
+	if sized != nil && sized.Own && sized.Original > 0 && sized.Original != actual &&
+		production.OriginalTextureText != "" && text != nil {
+		item.Note = text(production.OriginalTextureText, "{original}", strconv.Itoa(sized.Original))
 	}
 	return item
 }

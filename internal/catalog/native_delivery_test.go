@@ -17,7 +17,9 @@ func TestNativeDeliveryFreezesAllFormatsAndCostsBeforeConsent(t *testing.T) {
 		formats      []string
 		extra, total int
 	}{
-		{"rigging", []string{"FBX"}, 10, 35},
+		// The rig also exports its GLB, the model slot (#305): one more advanced
+		// conversion of 10 credits.
+		{"rigging", []string{"GLTF", "FBX"}, 20, 45},
 		{"texture", []string{"FBX", "OBJ", "STL", "USDZ", "3MF"}, 50, 80},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,22 +86,36 @@ func TestNativeDeliveryFreezesAllFormatsAndCostsBeforeConsent(t *testing.T) {
 			}
 			native := wire.Native
 			// The export is lossless PNG with the declared options; its texture size
-			// is the one public parameter the purpose bounds (#292).
+			// is the one public parameter the purpose bounds (#292), and the GLB of a
+			// rig is moved to the bottom center by a fixed public parameter that only
+			// its GLB export reads (#305).
+			bindings := []map[string]any{{"parameter": "export_texture_size", "wire": "texture_size"}}
+			if tc.name == "rigging" {
+				bindings = append(bindings, map[string]any{"parameter": "export_pivot_bottom_center", "wire": "pivot_to_center_bottom", "formats": []any{"GLTF"}})
+			}
 			if native.Source != "model" || native.Max != 150000000 || len(native.Formats) != len(tc.formats) ||
 				!reflect.DeepEqual(native.Parameters, map[string]any{"texture_format": "PNG", "with_animation": tc.name == "rigging", "bake": true, "fbx_preset": "blender"}) ||
-				!reflect.DeepEqual(native.Bindings, []map[string]any{{"parameter": "export_texture_size", "wire": "texture_size"}}) {
+				!reflect.DeepEqual(native.Bindings, bindings) {
 				t.Fatalf("conversion contract=%+v", native)
 			}
 			for i, format := range native.Formats {
-				output := o.Outputs[i+1]
-				if format.Format != tc.formats[i] || format.Role != output.Role || format.Variant != output.Variant || len(output.MediaTypes) != 1 || format.Media != output.MediaTypes[0] || output.Minimum == nil || *output.Minimum != 1 || output.Delivery != schema.AssetDeliveryRequired || output.MaxBytes != 1<<30 {
+				var output schema.AssetRequirement
+				for _, candidate := range o.Outputs {
+					if candidate.Role == format.Role && candidate.Variant == format.Variant {
+						output = candidate
+					}
+				}
+				if format.Format != tc.formats[i] || output.Role == "" || len(output.MediaTypes) != 1 || format.Media != output.MediaTypes[0] || output.Minimum == nil || *output.Minimum != 1 || output.Delivery != schema.AssetDeliveryRequired || output.MaxBytes != 1<<30 {
 					t.Fatalf("format/output mismatch: %+v %+v", format, output)
 				}
 				if format.Format == "FBX" && (output.DeliveryProfile != "binary-fbx-v1" || format.Media != "model/fbx" || output.Variant != "fbx") {
 					t.Fatal("FBX contract widened")
 				}
+				if format.Format == "GLTF" && (format.Role != "model" || format.Variant != "glb" || format.Media != "model/gltf-binary" || output.TextureSizeParameter != "export_texture_size") {
+					t.Fatalf("the GLB export is not the sized model slot: %+v %+v", format, output)
+				}
 				if tc.name == "rigging" && output.Fidelity != "skeleton" {
-					t.Fatal("FBX must prove skeleton")
+					t.Fatal("the exports must prove the skeleton")
 				}
 			}
 		})
