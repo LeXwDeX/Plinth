@@ -111,6 +111,7 @@
 - 叠加文件的 `environment` 覆盖运行环境文件的同名变量：全部 `*_BASE_URL` 指向 `http://fake-upstream:19000/...`，全部 Provider 与对话模型密钥换成 `fake-test-key`，废弃别名与 `LLM_CONNECTIONS` 清空，并设 `UPSTREAM_SHAPE=fake`、`FAKE_UPSTREAM_ORIGIN=http://fake-upstream:19000`。服务启动时 fail-closed 校验（任一连接未指向 fake、任一密钥不是 `fake-` 密钥、`LLM_CONNECTIONS` 非空即拒绝启动）；`LLM_MODEL` 沿用运行环境文件。
 - 成功后 `production/compose.env` 记 `RELEASE_UPSTREAM_SHAPE=fake|live`，`release-env.py smoke` 据此向脚本设 `ART_AI_UPSTREAM_SHAPE`；fake 镜像只保留本次（非强制 `docker rmi`）。以真实形态发布 ephemeral 栈时，成功后移除本项目遗留的 `fake-upstream` 容器与镜像，失败只警告。
 - 运行环境文件里的真实密钥只在真实形态读取；fake 形态的容器环境里同名变量已被 fake 值覆盖，但未被覆盖的其他变量仍随 `env_file` 进入容器，不需要真实形态时可以从 `dev-test` 的运行环境文件移除真实密钥。
+- 在这一形态上触发 fake 的失败路径（#301）：浏览器、冒烟脚本与 Agent 只接触 Plinth，Plinth 的 Adapter 不带 `X-Fake-*` 头、密钥固定为 `fake-test-key`，fake 又不发布主机端口，所以头与 `fake-<场景>` 密钥两种选场景方式够不到抠图的失败路径。抠图 fake 另从上传图片自带的标记（文件头里的 `fake-file-faults:<故障>[,<故障>...];`，故障词同 `X-Fake-File-Faults`）读该文件的故障：没有控制端点，生产代码没有为此新增转发头或测试分支，不带标记的图片不受影响。`python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-fake-faults.py` 对这一形态断言「部分图片没抠成」提示（#284）与显存不足失败（#299）的公开投影，只对 fake 形态运行；用法、取舍与手工复现见 `scripts/smoke/README.md`「Fake 故障冒烟」。该脚本不是每次发布必跑，改动抠图、fake 故障、成功任务提示或失败文案后跑。
 
 ### 全新数据发布（`data: ephemeral`，#28）
 

@@ -11,6 +11,9 @@ import { ModelProcessingPanel } from './model-processing-panel';
 // freeze its visible default (8K) as the person's choice: until they pick a size the field says it follows the
 // purpose and the request leaves it out, so the server gives it the purpose's value. A size they pick is
 // submitted as picked. The Offering is the shipped one, as the server projects it.
+// #306: once the server has said what the purpose gives the size, the untouched field says it ("按会话用途：2K")
+// before the step is confirmed; the request still leaves it out. Reading the values is the hook's job (its own
+// test); here it is stubbed with what the server answers for a game character on a phone, on a PC, or no purpose.
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
@@ -20,18 +23,27 @@ const rigging = {
   capability: 'rigging', available: true, estimated_credits: 35, credits_metered: true, parameters: shipped.parameters,
 } as unknown as OfferingWire;
 
-const mock = vi.hoisted(() => ({ fetch: vi.fn(), reload: vi.fn() }));
+const mock = vi.hoisted(() => ({
+  fetch: vi.fn(), reload: vi.fn(),
+  // The model's session, and what the purpose hook answers with and was asked (#306).
+  sourceSession: 'session',
+  purpose: {} as Record<string, Record<string, unknown>>,
+  purposeCalls: [] as unknown[][],
+}));
 vi.mock('@/components/product-schema-provider', () => ({
   useProductSchema: () => ({ schema, text: (key: string) => schemaText(schema, key) }),
 }));
 vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: object) => unknown) => select({ activeSessionId: 'session' }) }));
+vi.mock('@/hooks/use-purpose-parameters', () => ({
+  usePurposeParameters: (...args: unknown[]) => { mock.purposeCalls.push(args); return mock.purpose; },
+}));
 vi.mock('@/store/workspace-store', () => ({ useWorkspaceStore: (select: (state: object) => unknown) => select({ registerTask: vi.fn() }) }));
 vi.mock('@/hooks/use-model-processing-capabilities', () => ({ useModelProcessingCapabilities: () => ({
   available: [{ id: 'rigging', label_cn: '绑骨' }], offerings: { rigging: [rigging] }, error: undefined,
   refresh: async () => ({ rigging: [rigging] }),
 }) }));
 vi.mock('swr', () => ({ default: (key: string | unknown[]) => Array.isArray(key)
-  ? { data: { id: 'source', session_id: 'session', capability: 'text-to-3d', provider_id: 'tripo', offering_id: 'tripo/tripo-v3.1-full/text-to-3d',
+  ? { data: { id: 'source', session_id: mock.sourceSession, capability: 'text-to-3d', provider_id: 'tripo', offering_id: 'tripo/tripo-v3.1-full/text-to-3d',
     state: 'SUCCEEDED', assets: [{ id: 'asset', kind: 'model', role: 'model', url: '/model.glb', size: 1000, mediaType: 'model/gltf-binary', variant: 'glb' }] } }
   : { data: [], mutate: mock.reload },
 }));
@@ -43,6 +55,9 @@ function renderPanel() {
   render(<ModelProcessingPanel selection={{ kind: 'model', taskId: 'source', assetId: 'asset', url: '/model.glb', sessionId: 'session' }} />);
   fireEvent.click(screen.getByRole('checkbox'));
 }
+
+/** What the size field shows, without the arrow glyph of its trigger. */
+const shown = () => (screen.getByLabelText(sizeLabel).textContent ?? '').replace(/▼$/, '');
 
 /** Opens the size field and picks the option the way a person does; the dropdown highlights an option on hover before a click picks it. */
 async function chooseSize(label: string) {
@@ -63,6 +78,9 @@ beforeEach(() => {
   mock.fetch.mockReset();
   mock.fetch.mockResolvedValue({ ok: true, json: async () => ({}) });
   mock.reload.mockReset();
+  mock.sourceSession = 'session';
+  mock.purpose = {};
+  mock.purposeCalls = [];
   vi.stubGlobal('fetch', mock.fetch);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -74,7 +92,7 @@ describe('a step parameter that follows the session purpose (#292)', () => {
     expect(size.default).toBe('8k');
   });
 
-  it('shows the untouched field as following the purpose, not as the 8K default', () => {
+  it('shows the untouched field as following the purpose, not as the 8K default, until the server has said what it is', () => {
     renderPanel();
     const trigger = screen.getByLabelText(sizeLabel);
     expect(trigger.textContent).toContain(messages['ui.studio.params.follows_purpose']);
@@ -110,5 +128,75 @@ describe('a step parameter that follows the session purpose (#292)', () => {
     await waitFor(() => expect(screen.getByLabelText(sizeLabel).textContent).toContain(messages['ui.studio.params.follows_purpose']));
     const body = await confirm();
     expect(body.steps[0].input).not.toHaveProperty('export_texture_size');
+  });
+});
+
+describe('the untouched size says what the session purpose gives it before the step is confirmed (#306)', () => {
+  const resolved = (label: string) => messages['ui.studio.params.follows_purpose_resolved'].replace('{value}', label);
+
+  it.each([
+    ['a game character on a phone', '2k', '2K（2048 像素）'],
+    ['a game character on a PC', '4k', '4K（4096 像素）'],
+    ['a session without a purpose, which has the Offering default', '8k', '8K（8192 像素）'],
+  ])('shows %s as 按会话用途：%#', (_name, value, label) => {
+    mock.purpose = { [rigging.id]: { export_texture_size: value } };
+    renderPanel();
+    const trigger = screen.getByLabelText(sizeLabel);
+    expect(shown()).toBe(resolved(label));
+    expect(trigger.textContent).toContain(label);
+  });
+
+  it('shows the value the purpose gives in the list of choices too, where the person can go back to it', async () => {
+    mock.purpose = { [rigging.id]: { export_texture_size: '2k' } };
+    renderPanel();
+    fireEvent.click(screen.getByLabelText(sizeLabel));
+    expect(await screen.findByRole('option', { name: resolved('2K（2048 像素）') })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: messages['ui.studio.params.follows_purpose'] })).toBeNull();
+  });
+
+  it('still leaves the size out of the request: it is shown, not chosen', async () => {
+    mock.purpose = { [rigging.id]: { export_texture_size: '2k' } };
+    renderPanel();
+    const body = await confirm();
+    expect(body.steps[0].input).not.toHaveProperty('export_texture_size');
+  });
+
+  it('shows what the person picked instead, and the purpose again once it is given back', async () => {
+    mock.purpose = { [rigging.id]: { export_texture_size: '2k' } };
+    renderPanel();
+    await chooseSize('8K（8192 像素）');
+    await waitFor(() => expect(shown()).toBe('8K（8192 像素）'));
+    expect((await confirm()).steps[0].input).toMatchObject({ export_texture_size: '8k' });
+    await chooseSize(resolved('2K（2048 像素）'));
+    await waitFor(() => expect(shown()).toBe(resolved('2K（2048 像素）')));
+  });
+
+  it('follows the answer as it changes, such as after the brief was edited', () => {
+    mock.purpose = { [rigging.id]: { export_texture_size: '2k' } };
+    const view = render(<ModelProcessingPanel selection={{ kind: 'model', taskId: 'source', assetId: 'asset', url: '/model.glb', sessionId: 'session' }} />);
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(shown()).toBe(resolved('2K（2048 像素）'));
+    mock.purpose = { [rigging.id]: { export_texture_size: '4k' } };
+    view.rerender(<ModelProcessingPanel selection={{ kind: 'model', taskId: 'source', assetId: 'asset', url: '/model.glb', sessionId: 'session' }} />);
+    expect(shown()).toBe(resolved('4K（4096 像素）'));
+  });
+
+  it('asks for the Offerings of the chosen steps only, and only for the person\'s own session', () => {
+    render(<ModelProcessingPanel selection={{ kind: 'model', taskId: 'source', assetId: 'asset', url: '/model.glb', sessionId: 'session' }} />);
+    expect(mock.purposeCalls.at(-1)).toEqual(['session', []]);
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(mock.purposeCalls.at(-1)).toEqual(['session', [rigging]]);
+    cleanup();
+    mock.purposeCalls = [];
+    // A model of another session is not this panel's to ask about: the read would be refused.
+    mock.sourceSession = 'another-session';
+    render(<ModelProcessingPanel selection={{ kind: 'model', taskId: 'source', assetId: 'asset', url: '/model.glb', sessionId: 'another-session' }} />);
+    expect(mock.purposeCalls.at(-1)?.[0]).toBeNull();
+  });
+
+  it('says only that it follows the purpose for a value that is no choice of the size', () => {
+    mock.purpose = { [rigging.id]: { export_texture_size: '16k' } };
+    renderPanel();
+    expect(shown()).toBe(messages['ui.studio.params.follows_purpose']);
   });
 });

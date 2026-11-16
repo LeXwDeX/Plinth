@@ -255,6 +255,20 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 	if err := s.decodeJSON(writer, request, &body); err != nil {
 		return
 	}
+	// A plan step takes its key from its plan, and a header sent with it must
+	// agree (below). Any other grant is bound to the client's Idempotency-Key,
+	// which the submission repeats: without a usable one the request is refused
+	// by name rather than as generic invalid input (#302).
+	forPlanStep := body.PlanID != "" || body.PlanStepID != ""
+	var key string
+	if forPlanStep {
+		key = strings.TrimSpace(request.Header.Get(idempotencyKeyHeader))
+	} else {
+		var usable bool
+		if key, usable = requireIdempotencyKey(writer, request, taskIdempotencyKeyRule, s.message(idempotencyKeyRequiredMessage)); !usable {
+			return
+		}
+	}
 	prepared, err := s.generation.GetPreparedInput(request.Context(), owner, body.PreparedInputID)
 	if err != nil {
 		s.writeDomainError(writer, err)
@@ -263,7 +277,6 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 	if !s.taskSessionOwned(writer, request, owner, prepared.SessionID) {
 		return
 	}
-	key := strings.TrimSpace(request.Header.Get("Idempotency-Key"))
 	operationID := standaloneOperationID(prepared.ID)
 	planStepID := ""
 	binding := harness.Binding{}
@@ -272,7 +285,7 @@ func (s *Server) requestTaskGrant(writer http.ResponseWriter, request *http.Requ
 	// it does not start a browser step (#120). A standalone step is never
 	// eligible.
 	budgetEligible := false
-	if body.PlanID != "" || body.PlanStepID != "" {
+	if forPlanStep {
 		if body.PlanID == "" || body.PlanStepID == "" || s.processing == nil {
 			s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.invalid_input")
 			return

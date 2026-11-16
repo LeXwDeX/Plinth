@@ -476,6 +476,34 @@ func declaresFollowingParameter(offering generation.Offering) bool {
 	return false
 }
 
+// followedGiven are the values the brief gives the parameters the Offering
+// declares as following the purpose (#292): the ones the Agent and the direct task
+// API resolve, taken from Values, with every other value the purpose gives the
+// Offering left out. current holds the values the step already has, which the
+// purpose budget measures against. The plan step the 加工 panel creates (#292) and
+// the value the panel previews for it (#306) both read this one resolution, so the
+// preview cannot disagree with what the plan freezes.
+func (resolver PurposeParameters) followedGiven(brief ProductionBrief, offering generation.Offering,
+	current map[string]json.RawMessage) map[string]json.RawMessage {
+	if brief.Empty() {
+		return nil
+	}
+	_, given := resolver.Values(PurposeQuery{
+		Brief: brief, Domain: string(offering.Domain), Offering: offering, Current: current, ExplicitPurposeOnly: true,
+	})
+	var followed map[string]json.RawMessage
+	for name, value := range given {
+		if !followsPurposeParameter(offering, name) {
+			continue
+		}
+		if followed == nil {
+			followed = map[string]json.RawMessage{}
+		}
+		followed[name] = value
+	}
+	return followed
+}
+
 // ApplyToPlanStep gives a processing plan step, as a person assembles it in the
 // 加工 panel, the values the brief gives the parameters the Offering declares as
 // following the purpose (#292), for the ones the request omitted only: what the
@@ -494,12 +522,9 @@ func (resolver PurposeParameters) ApplyToPlanStep(brief ProductionBrief, offerin
 	if err := json.Unmarshal(input, &values); err != nil || values == nil {
 		return input, nil
 	}
-	_, given := resolver.Values(PurposeQuery{
-		Brief: brief, Domain: string(offering.Domain), Offering: offering, Current: values, ExplicitPurposeOnly: true,
-	})
 	filled := false
-	for name, value := range given {
-		if _, set := values[name]; set || !followsPurposeParameter(offering, name) {
+	for name, value := range resolver.followedGiven(brief, offering, values) {
+		if _, set := values[name]; set {
 			continue
 		}
 		values[name] = value
@@ -509,6 +534,32 @@ func (resolver PurposeParameters) ApplyToPlanStep(brief ProductionBrief, offerin
 		return input, nil
 	}
 	return json.Marshal(values)
+}
+
+// FollowedValues are the values the parameters the Offering declares as following
+// the purpose take for a session with this brief (#306): what a plan step the
+// panel creates freezes for a parameter it left out. A value the purpose gives is
+// the one ApplyToPlanStep fills in; a parameter the purpose gives nothing (no
+// brief, no purpose, a purpose that bounds nothing) takes the Offering's own
+// default, which is what the step has then. The values do not read what else the
+// step holds: the parameters that follow a purpose are selects (the Catalog
+// checks it), and a select's purpose value comes from the purpose's overrides and
+// the options its budget declares, never from the other values of the step. An
+// Offering with no such parameter has no values.
+func (resolver PurposeParameters) FollowedValues(brief ProductionBrief, offering generation.Offering) map[string]json.RawMessage {
+	given := resolver.followedGiven(brief, offering, nil)
+	values := map[string]json.RawMessage{}
+	for _, parameter := range offering.Parameters {
+		if parameter.Presentation == nil || !parameter.Presentation.FollowsPurpose {
+			continue
+		}
+		if value, found := given[parameter.Name]; found {
+			values[parameter.Name] = value
+		} else if len(parameter.Default) > 0 {
+			values[parameter.Name] = parameter.Default
+		}
+	}
+	return values
 }
 
 // ApplyPurposeToPlanStep reads the brief of the owner's session and applies it to
@@ -526,4 +577,19 @@ func (service *Service) ApplyPurposeToPlanStep(ctx context.Context, ownerID, ses
 	}
 	resolver := PurposeParameters{Model3D: service.model3DUsage, Image2D: service.image2DUsage}
 	return resolver.ApplyToPlanStep(brief, offering, input)
+}
+
+// PurposeFollowedValues reads the brief of the owner's session and resolves the
+// values of the parameters the Offering declares as following the purpose (#306),
+// for the 加工 panel to show before a step is confirmed. The session is checked
+// even for an Offering with nothing that follows the purpose: a missing or
+// foreign session is ErrSessionNotFound.
+func (service *Service) PurposeFollowedValues(ctx context.Context, ownerID, sessionID string,
+	offering generation.Offering) (map[string]json.RawMessage, error) {
+	brief, err := service.SessionBrief(ctx, ownerID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	resolver := PurposeParameters{Model3D: service.model3DUsage, Image2D: service.image2DUsage}
+	return resolver.FollowedValues(brief, offering), nil
 }
