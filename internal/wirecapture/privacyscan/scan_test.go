@@ -116,6 +116,55 @@ func TestScanRecordDirCoversCleanRecordsAndFlagsLeaks(t *testing.T) {
 	}
 }
 
+// ScanRecord is the per-record rule set of ScanRecordDir, for callers that read
+// the bytes themselves (the diagnostics export, #234): same findings, and it
+// says whether the record held an exchange.
+func TestScanRecordMatchesTheDirectoryScanRecordByRecord(t *testing.T) {
+	dir := recordDirectory(t)
+	clean := cleanExchange()
+	leaky := cleanExchange()
+	leaky.Response.Body.JSON = json.RawMessage(`{"status":"SUCCEEDED","contact":"bob@corp-mail.com","host":"10.0.0.7"}`)
+	marker := wirecapture.UpstreamRecord{Version: 1, Skipped: "token=abc", Connection: "tripo", Method: "GET", Status: 99999, QueryKeys: []string{"signature=abc"}}
+	records := map[string]wirecapture.UpstreamRecord{
+		"20261116T100000.000000000Z-000001": {Version: 1, Exchange: &clean},
+		"20261116T100001.000000000Z-000002": {Version: 1, Exchange: &leaky},
+		"20261116T100002.000000000Z-000003": marker,
+	}
+	for name, record := range records {
+		writeRecord(t, dir, name, record, 0o600)
+	}
+	var want []privacyscan.Finding
+	for _, name := range []string{"20261116T100000.000000000Z-000001", "20261116T100001.000000000Z-000002", "20261116T100002.000000000Z-000003"} {
+		file := name + wirecapture.UpstreamRecordSuffix
+		read, err := wirecapture.ReadUpstreamRecord(filepath.Join(dir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		findings, hasExchange := privacyscan.ScanRecord(file, read)
+		if hasExchange != (read.Exchange != nil) {
+			t.Errorf("%s: hasExchange=%v for exchange=%v", file, hasExchange, read.Exchange != nil)
+		}
+		want = append(want, findings...)
+	}
+	got, covered, err := privacyscan.ScanRecordDir(dir)
+	if err != nil || covered != 2 || len(want) == 0 {
+		t.Fatalf("covered=%d err=%v want=%v", covered, err, want)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("directory scan reported %d findings, per-record scan %d: %v vs %v", len(got), len(want), got, want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("finding %d: directory %v, record %v", i, got[i], want[i])
+		}
+	}
+	// A record with no exchange and clean fields is clean and covers nothing.
+	if findings, hasExchange := privacyscan.ScanRecord("m.exchange.json", wirecapture.UpstreamRecord{
+		Version: 1, Skipped: "unsupported-body", Connection: "tripo", Method: "GET", Status: 502}); len(findings) != 0 || hasExchange {
+		t.Fatalf("clean marker: %v %v", findings, hasExchange)
+	}
+}
+
 // A file the reader refuses is an error, never a quiet pass.
 func TestScanRecordDirRefusesUnsafeFiles(t *testing.T) {
 	dir := recordDirectory(t)

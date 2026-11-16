@@ -280,6 +280,7 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/administration` / `cachemanagement` | 管理业务、审计与缓存观察；遵守权限和只读事实边界 |
 | `internal/promptenhance` / `legacythumbnail` | 独立的提示增强、受控历史缩略图服务；不是第二 Task 写入者 |
 | `internal/wirecapture` / `wirecapture/privacyscan` | 上游 HTTP 交换的脱敏、校验与可选落盘录制（#233）：sanitizer、`Validate`、草稿推导、`UpstreamRecorder` 与独立隐私扫描；只依赖标准库，由 `internal/app` 在装配期包裹各连接的 transport，测试侧的 `internal/testutil/wirefixture` 复用同一份规则；不读写公开任务事实 |
+| `internal/diagbundle` | `art-ai diagnose`（#234）的诊断包：从运行信息、Catalog 声明的设置名称、失败任务摘要、日志与 #233 录制组装 tar.gz；自由文本逐值脱敏、整包按最终字节再过独立隐私扫描；只读，不推进任务，不写库；由 `internal/app` 解析来源并调用，`cmd/art-ai` 只做子命令分发 |
 | `internal/adapters` | SQLite、历史读取等端口实现；`catalogrecipes` 将声明映射成 SkillRun 执行配方 |
 | `internal/adapters/sqlite` | migration 0042 为个人 Skill 建立 owner 索引和持久存储；#152 的更新只改 `skill_json`，不改 ID、`created_at` 与列表排序，也不消耗创建配额；不把个人内容写入共享 Agent Configuration 版本 |
 | `internal/adapters/mcphttp` / `mcpworkspace` / `mcpagent` | MCP JSON-RPC 传输 / 当前会话公开 Offering、Task、Asset 读取 / 对话工具执行组合 |
@@ -692,8 +693,8 @@ Generation 通过 `AssetFidelityChecker` 端口在初次物化、StoredAsset 引
 
 **包与职责。**
 
-- `internal/wirecapture` 只依赖标准库，不依赖任何业务包：公开类型（`Exchange`、`Policy`……）、sanitizer（`SanitizeHost/Path/Headers/Body`、嵌套 JSON、SSE 规范化、百分号与十六进制地址等编码形式的检查）、`Validate`、固定合成媒体 recipe 与 multipart 解析、草稿推导（`draft.go`）、`UpstreamRecorder`（`Wrap`、`Status`）、记录目录（`record_store.go`）及读取（`ListUpstreamRecords`、`ReadUpstreamRecord`、`LoadUpstreamRecords`）、样本写出（`WriteCandidate`、`WriteDraftCandidate`）。
-- `internal/wirecapture/privacyscan` 是独立于 sanitizer 的第二道扫描，规则原在 `corpus_privacy_test.go`，现为可链接的包：`ScanExchanges`、`ScanPolicy`、`ScanJSON`、`ScanText`、`ScanRecordDir`。finding 只含文件、JSON 路径与规则名，不含被匹配的值。已提交样本的 `TestCommittedWireCorpusHasNoPrivateData`、记录器自己的测试与 fake 栈测试用的是同一份规则。
+- `internal/wirecapture` 只依赖标准库，不依赖任何业务包：公开类型（`Exchange`、`Policy`……）、sanitizer（`SanitizeHost/Path/Headers/Body`、嵌套 JSON、SSE 规范化、百分号与十六进制地址等编码形式的检查）、`Validate`、固定合成媒体 recipe 与 multipart 解析、草稿推导（`draft.go`）、`UpstreamRecorder`（`Wrap`、`Status`）、记录目录（`record_store.go`）及读取（`ListUpstreamRecords`、`ReadUpstreamRecord`、`ParseUpstreamRecord`、`LoadUpstreamRecords`）、样本写出（`WriteCandidate`、`WriteDraftCandidate`）。
+- `internal/wirecapture/privacyscan` 是独立于 sanitizer 的第二道扫描，规则原在 `corpus_privacy_test.go`，现为可链接的包：`ScanExchanges`、`ScanPolicy`、`ScanJSON`、`ScanText`、`ScanRecord`、`ScanRecordDir`。finding 只含文件、JSON 路径与规则名，不含被匹配的值。已提交样本的 `TestCommittedWireCorpusHasNoPrivateData`、记录器自己的测试与 fake 栈测试用的是同一份规则。
 - `internal/testutil/wirefixture` 保留测试侧的 `Recorder`、延迟采集、`Replay`、私有媒体证据与 `ART_AI_UPSTREAM_RECORD_*` 双开关，并重新导出共用部分，不复制规则；`cmd/fake-upstream-align` 仍是测试工具，`draft` 直接读取应用写出的目录。
 - `internal/app` 是唯一的装配点：`newUpstreamCapture` 按配置建出记录器，`withUpstreamCapture` 把它接到每个连接的 transport 装饰器上。`internal/providers` 与 `internal/agents` 不知道它的存在，依赖方向不变（`internal/app` → `wirecapture`）。
 
@@ -716,13 +717,47 @@ Generation 通过 `AssetFidelityChecker` 端口在初次物化、StoredAsset 引
 - 响应体在调用方读到 EOF、或关闭前已按声明长度收齐、或是完整的 JSON 文档、或已见 SSE 的 `[DONE]`（对话适配器读到 `[DONE]` 就停）时算完整；调用方中途放弃的流不算。3xx、传输错误、未读完、超过单体上限和 sanitizer 拒绝的交换只写一个跳过标记：固定原因（`transport-error`、`incomplete-body`、`body-over-limit`、`unsupported-body`、`sanitizer-refused`、`redirect`）、连接 ID、已注册的 method 与状态码，没有任何值。
 - 残余风险：用户在一个未列入上述字段名、又恰好是单个短 token 的位置写下的词，仍会被当作枚举形 token 保留；所以记录目录按受保护文件处理（0700/0600），外发前用 `privacyscan.ScanRecordDir` 复扫。
 
-**记录格式与读取接口。** 文件名 `<UTC 时间>-<序号>.exchange.json`（定宽，名字顺序即时间顺序），先写 `.tmp` 再改名，崩溃不会留下写了一半的记录，`.tmp` 在下次启动时清理。内容是 `UpstreamRecord`：`version`、`exchange`（与已提交样本同一 `Exchange` 格式，`captured_at` 为每次交换的时刻，`environment` 取 `APP_ENV`，`app_revision` 取链接进二进制的提交，未打标记的构建为 `unstamped`，`catalog_revision` 取 Catalog 的 `revision`）、`query_keys`、跳过标记字段。序号跨重启递增。#234 的诊断包导出读取同一目录：`ListUpstreamRecords` 列出、`ReadUpstreamRecord` 读单个（只接受 0600 常规文件与当前版本），`privacyscan.ScanRecordDir` 复扫，`RecorderStatus` 给出清单所需的条数与字节数。
+**记录格式与读取接口。** 文件名 `<UTC 时间>-<序号>.exchange.json`（定宽，名字顺序即时间顺序），先写 `.tmp` 再改名，崩溃不会留下写了一半的记录，`.tmp` 在下次启动时清理。内容是 `UpstreamRecord`：`version`、`exchange`（与已提交样本同一 `Exchange` 格式，`captured_at` 为每次交换的时刻，`environment` 取 `APP_ENV`，`app_revision` 取链接进二进制的提交，未打标记的构建为 `unstamped`，`catalog_revision` 取 Catalog 的 `revision`）、`query_keys`、跳过标记字段。序号跨重启递增。#234 的诊断包导出（见下一小节）读取同一目录：`ListUpstreamRecords` 列出，`ParseUpstreamRecord` 解析字节（`ReadUpstreamRecord` 是它加上 0600 常规文件的检查），`privacyscan.ScanRecord` 按单条记录的规则扫描（`ScanRecordDir` 逐条调用它）。
 
 **可见处。** 启动日志：开启时 INFO「上游调用脱敏录制已开启」（目录、条数与大小上限、已有记录数），关闭时 DEBUG；写入失败只告警首次与每千次，不含内容。管理端：`GET /api/admin/diagnostics`（Schema `diagnostics.routes.admin`，权限 `diagnostics.read` 只给管理员角色，`Cache-Control: no-store`），返回 `{"upstream_capture": {enabled, directory, max_records, max_bytes, records, bytes, written, skipped, rotated, write_errors}}`，只有计数、上限和管理员自己配置的目录；该块是仅服务端的 Schema 声明，不在 `/api/version`、`/api/health` 或公开 Schema 投影里。目前没有管理端页面，只有这个只读接口。
 
 **范围与边界。** 覆盖全部 Provider 连接（三个 image-sync 连接、Meshy、Tripo 含匿名来源下载、Hyper3D、抠图）与对话模型连接（默认与 `LLM_CONNECTIONS` 的各连接，含管理员「测试连接」与提示词增强，它们走同一 Adapter）。不覆盖：Provider 账户余额读取（`provideraccounts/httpjson` 用自己的 client）、MCP、历史资产代理。记录只证明录制当时 Adapter 与上游的结构交互。
 
 **已验证与未验证。** 本机 Go 测试：关闭时不包裹、不建目录；设置读取与校验；目录重叠与不可用时拒绝启动；对着 fake 栈跑 Tripo、Meshy、Hyper3D、OpenAI/Gemini/Jimeng 图像、抠图与对话模型，每个连接至少一条记录，`privacyscan.ScanRecordDir` 无发现；请求里的密钥、鉴权头、签名 URL、提示词与上游错误文本不落盘；上限与轮转、重启续记、崩溃残留清理、并发（含 `-race`）；`fake-upstream-align draft` 把应用写出的目录转成可校验、可回放的样本草稿；管理端接口的权限、关闭与开启状态。未验证：真实上游、真实 Docker 卷上的容器用户权限、长时间运行的内存与磁盘占用。
+
+### 诊断包导出（#234；源码已实现，本机测试与对着 fake 栈的测试通过，未部署验收）
+
+**要解决的问题。** #233 让正式程序能记下上游的结构证据；用户出问题时还需要一个标准、安全的"打包发回"方式：运行的 revision 与 Catalog、近期 DEBUG 日志、脱敏样本、失败任务的错误摘要、关键运行配置是否设置，打成一个包，让维护者拿到后能定位问题并完善 fake。它不是审计，也不是任务事实的来源：只读，不推进任何任务，不写库。
+
+**包与职责。**
+
+- `cmd/art-ai`：`diagnose` 子命令。分发写在 `main` 的最前面，早于日志文件的打开、配置校验与服务装配，所以它不会轮转或修剪日志、不迁移、不启动任何组件。选子命令而不是独立二进制，是因为镜像里已有这个二进制，它带着同一个提交与同一份迁移清单，`docker exec` 与一次性容器都能直接用；`Dockerfile.go-runtime` 与镜像目标不变。
+- `internal/app/diagnose.go`：`RunDiagnose`（参数、退出码 0/1/2/3、摘要输出）与 `diagnoseSources`。来源按服务同一套规则解析（`runtimeSettingValue`，Catalog 声明的环境变量与默认值），但不做 `LoadConfig` 的整体校验：只读 `APP_ENV`、`CATALOG_FILE`、`DATABASE_PATH`、`LOG_DIR`、`UPSTREAM_CAPTURE_DIR`，读不出的项记固定词警告并继续；`CATALOG_FILE` 读不了时记 `catalog_file_unreadable` 且不声称摘要，读得到但解析不了时记 `catalog_file_invalid`、摘要仍是该文件的字节，两种情况下设置清单都按内置声明列出。Catalog SHA-256 是运行所用文档（内置的或 `CATALOG_FILE` 的字节）的摘要；`UPSTREAM_SHAPE=fake` 的栈会在加载时派生出一份带 fake 资产主机的文档，摘要仍是它的来源文档。
+- `internal/diagbundle`：组装、脱敏、扫描与写出，不依赖 `internal/app`，不被业务包引用。`Sources` 描述来源（路径、Catalog 声明的设置、`Lookup`），`Build` 在内存里得到 `Bundle`，`Export` 再写文件。`Scrubber` 是自由文本的脱敏器；`SettingsFromCatalog` 把 Catalog 的 `runtime.configuration` 变成设置清单，所以 `settings.json` 跟随运行的 Catalog，代码里没有另一份名单。
+- `internal/adapters/sqlite/diagnostics_failures.go`：`ReadDiagnosticFailures`，失败任务的只读投影（见下）。
+- `internal/wirecapture`、`privacyscan`、`internal/logging`：#234 为复用而加的最小接口：`ParseUpstreamRecord`（按字节解析录制记录，`ReadUpstreamRecord` 现在是它加文件检查）、`privacyscan.ScanRecord`（`ScanRecordDir` 的单条规则，行为不变）、`logging.FileName` 与 `logging.ListLogFiles`（滚动文件的命名与顺序留在写它们的包里）。
+
+**内容与预算。** 五类，每类在 `manifest.json` 里有状态（`included`/`empty`/`unavailable`）、条数、时间范围内可用条数、是否被体积上限截断、字节数与单文件类的 SHA-256；不可用时的原因只有 `not_configured`、`not_found`、`unreadable` 三个固定词，不带路径和错误文本。
+
+- `runtime.json` 与 `settings.json` 是固定部分，不截断；设置的"是否已设置"与服务一样按 Catalog 声明的环境变量逐个看非空，另记起作用的变量名和它是否是弃用别名，仍被设置的已退役变量只记名字。
+- `failures.json`：`generation_tasks` 里 `state = FAILED` 且完成时间（无则最后更新时间）落在范围内的任务，最新的至多 200 个，加上各自最近 10 次尝试的结局。只取失败分类、可否重试、上游 HTTP 状态、上游错误码与已入库的摘录（内核入库时已用 `generation.UpstreamExcerpt` 去掉提示词回声、URL、令牌与邮箱），不取上游任务 ID、产物与输入；任务输入只在内存里用 `generation.InputEchoes` 取出该任务声明为文本的参数，供脱敏器从包内任何位置去掉。摘录再过一次同一个内核脱敏器并截到 240 字符。
+- `logs/art-ai.jsonl`：范围内的日志行（`LOG_DIR` 下的活动文件与滚动文件；滚动文件的关闭时刻早于范围起点的整份跳过）。
+- `captures/`：范围内的录制记录，文件名的时间前缀判定范围，原样读取；不是 0600 常规文件、超过 4 MiB 或解析不了的文件被丢弃并按原因计数。
+- 体积上限 `--max-bytes`（默认 32 MiB，64 KiB 到 1 GiB）约束包内全部成员未压缩的字节数：先扣固定部分与 16 KiB 的清单预留，失败摘要至多占剩余的 1/10，录制至多 3/10，其余给日志，各类都从最旧的开始舍弃，清单记录截断。日志最多把两倍预算的原始行留在内存里，从新到旧逐行处理，装满为止。
+
+**脱敏与拒绝：两种行为，作用于不同的类别。**
+
+- **脱敏（替换）。** 日志与失败摘录是自由文本，进包前由 `Scrubber` 逐值改写；`session_id`、`authorization`、`password`、`prompt` 这类键下的值整个换成 `[redacted]`。哪些键名算凭据、哪些算身份，不是抄一份名单，而是用探针问独立扫描（`privacyscan.ScanText` 对该键名与一个占位值，看命中 `credential-field` 还是 `identity-field`），所以两边不会漂移；扫描没有的少数键名（`actor_id`、`open_id`、`nickname`……与 `prompt`、`instruction` 类）由 `scrub.go` 补充。文本规则与扫描的内容规则一一对应：凭据形状、签名参数名、URL、邮箱、IPv4/IPv6 与十六进制/八进制写法的地址、私有主机名、UUID、base64 与 data URI 都有替换；另把 32 位十六进制标识（本程序用户 ID 的形状）换成占位符。身份占位符 `id-N` 在整个包里稳定：日志里 `owner_id` 键下出现过的值和失败任务的 owner 一旦被登记，它们在自由文本里（至少 8 字节时）也被换成同一个占位符；提示词只来自失败任务的输入，长度不足 8 个字符的忽略。保留任务 ID、请求 ID、Offering ID、状态码、错误码和时间。一行日志脱敏后若仍被扫描命中（例如百分号编码的邮箱），整行丢弃并按规则名计入 `dropped`。
+- **拒绝（不写文件）。** 脱敏之后，`verifyMembers` 对每个成员按最终要写出的字节再跑一遍独立扫描：JSON 成员 `ScanJSON`，日志逐行 `ScanJSON`，录制记录经 `ParseUpstreamRecord` 后 `ScanRecord`，日志与失败摘要另查脱敏器已知的用户标识与提示词是否还在；清单最后生成，也被扫描。任何一条命中返回 `*RefusedError`（退出码 3），没有文件，也没有临时文件，信息里只有文件、JSON 路径与规则名。录制记录不被改写：它们在记录时已经脱敏，改写之后就不再是证据，所以记录里的命中意味着录制或目录被破坏，导出拒绝，要处理的是被点名的文件。
+- 日志与摘要的脱敏依赖键名与正则，残余风险同 #233：未登记键名下的自由文本里的短用户名、自造词与昵称不可识别；所以包仍按受保护文件处理，发出前建议人工看一眼 `logs/art-ai.jsonl` 与 `failures.json`。
+
+**只读与不留痕。** 数据库经 `mode=ro` 与 `query_only` 打开，只读两张表，在一个只读事务里；服务运行时（`-wal`、`-shm` 存在）直接读，能读到只在 WAL 里的最新失败；这两个文件都不存在时（服务已停）改用 `immutable=1`，这样普通只读打开会创建 `-wal` 与 `-shm`、再被另一个用户的运行留成服务无法重开的文件这件事不会发生。日志与录制目录只列目录和读文件，不用 `RotatingFile` 或任何会修剪、轮转的入口。输出是同目录里独占创建的 0600 临时文件，写完后 `link` 到目标名（目标已存在则失败，不覆盖），再删临时文件；扫描没有全部通过之前不创建它。
+
+**包格式。** 一个 tar.gz：顶层目录 `plinth-diagnose-<UTC 时间>/`（0700，解包不会散落文件），其中 `manifest.json` 最先，其后 `runtime.json`、`settings.json`、`failures.json`、`logs/art-ai.jsonl`、`captures/*.exchange.json`；目录 0700、文件 0600，所以解出的 `captures/` 正好是 `fake-upstream-align draft -records` 要求的 0700 目录与 0600 记录。
+
+**已验证与未验证。** 本机 Go 测试（含 `-race`）：脱敏器对扫描每一类规则都有替换且结果无命中、正常日志文本不被改动、十六进制/八进制写法的地址判定与扫描一致、键名分类来自扫描；日志按时间范围与滚动文件选取、整行无法脱敏时丢弃并计数、预算下保留最新；失败摘要的字段、排序、时间范围与上限、超大输入不读取；只读：数据库与 WAL 的摘要在导出前后相同、连接拒绝任何写语句、已停止的库不产生 `-wal`/`-shm`、运行中的库能读到 WAL 里的失败；清单的条数、字节数与 SHA-256 同包内容一致；对着 fake 栈（Meshy 余额不足的真实失败任务、真实录制记录、日志目录）经 `RunDiagnose` 导出，包内无密钥、提示词、会话 ID、用户标识、地址与媒体字节，每个成员再过一次扫描；录制记录被篡改（含邮箱与内网地址）时拒绝，文件名与规则名在信息里而值不在，目录里无任何输出文件；解包后的 `captures/` 可被 `LoadUpstreamRecords` 读取并由 `WriteDraftCandidate` 转成样本草稿。未验证：真实 Docker 卷与容器用户（尤其以 root 运行 `exec` 时的所有权）、真实上游的错误文本、数百万行日志下的耗时（脱敏加两遍扫描约每秒数千行，处理的行数受体积上限约束）、Windows。
+
+**范围与边界。** 失败任务只含公开 Task（聊天轮次与 Agent 的失败不在其内）；设置清单只含 Catalog 声明的设置，`LLM_CONNECTIONS` 之下按 `<ID>_*` 动态读取的变量不在其中；没有 `LOG_DIR` 就没有日志；它不替代 `/api/admin/diagnostics`，后者是服务运行时的只读状态视图，本命令不经过它。
 
 ## 4. 前端职责与数据流
 

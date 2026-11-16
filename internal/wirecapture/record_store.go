@@ -289,6 +289,15 @@ func ReadUpstreamRecord(path string) (UpstreamRecord, error) {
 	if err != nil {
 		return UpstreamRecord{}, err
 	}
+	return ParseUpstreamRecord(name, raw)
+}
+
+// ParseUpstreamRecord parses the bytes of one record file (current format,
+// unknown fields refused), for a caller that holds the bytes already (the
+// diagnostics export, #234, re-checks what it is about to ship). The JSON
+// bodies of a recorded exchange come back compact, which is the canonical
+// form Validate expects. name only labels errors.
+func ParseUpstreamRecord(name string, raw []byte) (UpstreamRecord, error) {
 	var record UpstreamRecord
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()

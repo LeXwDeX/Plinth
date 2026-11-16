@@ -169,6 +169,79 @@ services:
 
 **Opt-in capture of upstream calls (#233):** off by default. To give the maintainers structural evidence of what the upstream returned, set `UPSTREAM_CAPTURE_DIR=<absolute path inside the container>` in the runtime environment file (optionally `UPSTREAM_CAPTURE_MAX_RECORDS`, default 2000, and `UPSTREAM_CAPTURE_MAX_MEGABYTES`, default 64), mount a host directory there and rebuild only `art-ai-go`. The directory is created or tightened to mode 0700 and every record is a 0600 file; an unusable directory, a symbolic link, or one that overlaps the storage, web-assets, legacy-image or log directories stops the start-up. When a limit is exceeded the oldest records are deleted. A record keeps structure only (field names, types, status codes, error codes, status words, model names): never keys or authorization headers, signed URL queries, prompts or any multi-word text, media bytes, the upstream address or user identifiers. Confirm it from the start-up log or from the administrator-only `GET /api/admin/diagnostics`; feed the files to `fake-upstream-align draft` to turn them into sample drafts. Treat the directory as a protected location all the same.
 
+**导出诊断包（#234）**：出问题要把现场交给维护者时，用同一个程序里的 `art-ai diagnose` 子命令打一个包，不要手工拷日志。它只读：数据库用只读连接打开，日志与录制目录只列出和读取，不启动服务、不迁移、不改任何已有文件，也不覆盖已存在的输出，只新写一个 0600 的 `tar.gz`，所以服务在运行时也能执行。它读的是服务自己的环境变量，数据库、日志、录制目录的位置因此与服务一致；它只读取自己要用的几个设置（`APP_ENV`、`CATALOG_FILE`、`DATABASE_PATH`、`LOG_DIR`、`UPSTREAM_CAPTURE_DIR`），其余设置有问题也不影响它（服务起不来恰恰是最需要诊断包的时候），这几个读不出来时在清单的 `warnings` 里记一个固定词。
+
+```bash
+art-ai diagnose --out <文件或已存在的目录> [--since 24h] [--max-bytes 32m]
+```
+
+- `--out`（必填）：输出文件；给已存在的目录则在其中按 `plinth-diagnose-<UTC 时间>.tar.gz` 命名。已存在的文件不会被覆盖。
+- `--since`：时间范围，默认 `24h`，可写 `90m`、`7d` 或 RFC 3339 时间点；范围到命令开始的时刻为止，对日志、失败任务和录制文件都生效。
+- `--max-bytes`：包内全部内容（未压缩）的体积上限，默认 `32m`，范围 `64k` 到 `1g`，可带 `k`/`m`/`g` 后缀。超出时每类从最旧的开始截断（失败任务摘要至多占剩余额度的 1/10，上游录制至多 3/10，其余给日志），清单为每类记下时间范围内共有多少条、包里放了多少条、是否截断。
+- 退出码：`0` 成功；`1` 失败；`2` 参数错误；`3` 隐私扫描命中，未写出任何文件。
+
+在容器里运行（输出目录须可写；自部署镜像根文件系统只读，`/tmp` 是可写的 tmpfs），再用 `docker cp` 取出，用完删除：
+
+```bash
+docker compose exec art-ai art-ai diagnose --out /tmp/plinth-diagnose.tar.gz
+docker compose cp art-ai:/tmp/plinth-diagnose.tar.gz .
+docker compose exec art-ai rm /tmp/plinth-diagnose.tar.gz
+```
+
+不用 Compose 时把 `docker compose exec art-ai` 换成 `docker exec <容器>`，`docker compose cp art-ai:` 换成 `docker cp <容器>:`。服务反复重启、`exec` 进不去时，用同一份服务定义起一个一次性容器，把包写到数据卷里再取出（`/tmp` 在容器停止后消失）：
+
+```bash
+docker compose run --no-deps --name art-ai-diagnose art-ai diagnose --out /app/data/plinth-diagnose.tar.gz
+docker cp art-ai-diagnose:/app/data/plinth-diagnose.tar.gz .
+docker rm art-ai-diagnose
+docker compose run --rm --no-deps --entrypoint rm art-ai /app/data/plinth-diagnose.tar.gz
+```
+
+包里有什么：
+
+| 类别 | 成员 | 内容 | 来源 |
+|---|---|---|---|
+| 运行信息 `runtime` | `runtime.json` | 运行的提交 revision、Catalog 的 revision 标签与 SHA-256、`APP_ENV` 标签、Go 版本与平台、生成时间 | 构建时链接进二进制的提交；运行所用 Catalog 文档（内置或 `CATALOG_FILE`）的摘要 |
+| 设置 `settings` | `settings.json` | Catalog 声明的每个运行设置：名称、可用的环境变量名、是否机密、是否已设置、哪个变量在起作用；仍被设置的已退役变量名。**不含任何值** | Catalog 的 `runtime.configuration`，不是另抄的一份清单 |
+| 失败任务 `failures` | `failures.json` | 时间范围内最新的失败任务（至多 200 个）：任务 ID、能力、Offering、失败分类、可否重试、上游 HTTP 状态与错误码、各次尝试的结局、owner 的占位符、截断到 240 字符并再脱敏的上游错误摘录；另有按分类、状态、错误码的计数 | 数据库的只读查询，只读生成任务与尝试两张表；任务输入只用来识别该从包里去掉哪些提示词，不输出 |
+| 日志 `logs` | `logs/art-ai.jsonl` | 时间范围内的日志行（含 DEBUG），逐值再脱敏后，按时间顺序，一行一条 JSON | `LOG_DIR` 下的 `art-ai.log` 与滚动文件 |
+| 上游录制 `captures` | `captures/*.exchange.json` | #233 的上游脱敏录制，原样（只读取，不改写） | `UPSTREAM_CAPTURE_DIR` |
+| 清单 | `manifest.json` | 每类的状态、条数、可用条数、是否截断、字节数、SHA-256、被丢弃的条数；revision、Catalog SHA-256、生成时间、时间范围、体积上限、隐私扫描结论 | |
+
+日志与录制要先开：日志类别需要日志文件，设了 `LOG_DIR` 才有（发布脚本部署的栈已设；自部署默认只写容器输出，在 `.env` 加 `LOG_DIR=/app/data/logs` 后重建，日志写进数据卷，按 `LOG_FILE_MAX_MEGABYTES`、`LOG_RETENTION_DAYS` 滚动）；录制类别需要按上文打开 `UPSTREAM_CAPTURE_DIR`。没开的类别在清单里是 `unavailable`，原因写 `not_configured`；目录不存在是 `not_found`，读不了是 `unreadable`，原因只有这三个固定词，不带路径和错误文本。`docker compose logs` 的输出不经本命令脱敏，不要原样发出。
+
+隐私有两种互补的处理，别混用：
+
+- **脱敏（替换）**：日志行与失败摘录是自由文本，逐个值改写后才放进包。鉴权头、令牌、`sk-` 等密钥形状、签名参数（`X-Amz-Signature`、`token=` 等）与名为 `authorization`、`password`、`session_id`、`prompt` 的字段的值变成 `[redacted]`；URL 变成 `[url]`，IP 变成 `[ip]`，内网主机名变成 `[host]`，邮箱变成 `[email]`；UUID、32 位十六进制标识（用户 ID 的形状）、名为 `owner_id`、`username`、`email` 的字段的值，以及包里出现过的、至少 8 字节的用户标识（含自由文本里重复出现的）变成稳定的占位符 `id-1`、`id-2`……（同一个人在包里始终是同一个占位符）；失败任务输入里的提示词文本，在包内任何位置出现都变成 `[input]`；每个值截断到 1024 字节。保留任务 ID、请求 ID（`req_…`）、Offering ID、状态码、错误码、时间与耗时，这些是定位问题要用的。脱敏后仍被隐私扫描命中的日志行整行丢弃，按规则名计入清单的 `dropped`，不会出现在包里；同样被丢弃并计数的还有读不出时间与级别的行（`unparsable`，含正在写入的半行）、超过 1 MiB 的行（`too_long`）、读不了的日志文件（`unreadable_file`），以及录制目录里不是 0600 常规文件、格式不对或超过 4 MiB 的文件（`unreadable`、`oversize`）。
+- **拒绝（不写文件）**：打包前对每个成员按最终要写出的字节再跑一遍独立隐私扫描（`internal/wirecapture/privacyscan`，与 #233 录制器、已提交样本用的是同一份规则）。任何命中，命令都不写文件、退出码 3，只说文件、JSON 路径和规则名，不回显值。录制样本不会被改写（改写过的就不是证据了），所以样本里的任何命中都说明录制或目录被破坏：删去或移走被点名的记录文件后重试。同样，已知的用户标识或提示词仍留在日志与失败摘要里时也拒绝。
+
+残余风险：长度不足 8 字节的用户名只在键名为 `username` 等的字段里被替换，自由文本里的短用户名与普通词没法区分，不替换；任何不在上述键名下的自由文本，只经正则规则处理。所以包仍按受保护文件对待：发出前自己打开 `logs/art-ai.jsonl` 与 `failures.json` 看一眼，只发给维护者，不贴进公开 Issue。
+
+**收到诊断包后的处理流程**（维护者）：
+
+1. 解包到私有目录并核对清单：
+
+   ```bash
+   mkdir -m 0700 diag && tar -xzf plinth-diagnose-<时间>.tar.gz -C diag
+   cat diag/plinth-diagnose-*/manifest.json
+   ```
+
+   先看 `revision` 与 `catalog_sha256` 是不是要排查的版本，`categories` 里有没有 `unavailable`、`truncated` 或 `dropped`（它们限定了能下的结论），`privacy.findings` 必为 0。解出的 `captures/` 是 0700、记录文件是 0600，正是下一步读取的格式。
+2. 看失败：`failures.json` 的 `summary` 给出分类、上游状态码与错误码的分布，再用其中的任务 ID、请求 ID 在 `logs/art-ai.jsonl` 里找前后的日志；`settings.json` 告诉你该设置有没有配、走的是不是已弃用的别名。
+3. 把录制转成样本草稿：
+
+   ```bash
+   mkdir -m 0700 <工作树外的另一个目录>
+   go run ./cmd/fake-upstream-align draft -records diag/plinth-diagnose-<时间>/captures -out <另一个 0700 目录> -name <名字> [-connection <连接 ID>] [-offering <Offering ID>]
+   ```
+
+   写出与已提交样本同格式的 `candidate`、`policy`、`meta`（见「上游调用脱敏录制」与 `docs/architecture.md`「可选上游记录与样本草稿」）。
+4. 对齐 fake：草稿有损（提示词、错误消息、URL 都是占位符），人工复核后，依样本修正 fake 的响应结构、状态机与错误码；接口与 fake 不一致时先对齐 fake、再改实现（`AGENTS.md`「上游接口与 Fake」）。
+5. 补回归测试：基于 fake 的回归测试复现这次的失败（用失败摘要里的分类、状态码、错误码核对 Adapter 的错误映射），样本放进对应版本的 `testdata/`，运行 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 更新覆盖矩阵。
+6. 收尾：在对应 Issue 里只记结论与脱敏后的结构；诊断包与解包目录用完即删，不提交进仓库。
+
+**Diagnostics bundle (#234):** `art-ai diagnose --out <file or existing directory> [--since 24h] [--max-bytes 32m]` writes one new 0600 `tar.gz` and nothing else. It is read-only (read-only database connection, directories only listed and read, nothing started, migrated or overwritten) and reads the service's own environment, so it runs beside a live stack with `docker compose exec art-ai art-ai diagnose --out /tmp/plinth-diagnose.tar.gz` followed by `docker compose cp`. A bundle holds the running revision and Catalog SHA-256, the names (never values) of the Catalog's runtime settings and whether each is set, a summary of the newest failed tasks (failure class, upstream status and code, a short sanitized excerpt), the log lines of the time range scrubbed value by value, and the #233 capture records unchanged, plus `manifest.json` (per category: entries, entries available, whether the size limit cut it, bytes, SHA-256). Two behaviours apply: free text (logs, excerpts) is scrubbed, replacing credentials, URLs, addresses, e-mail addresses, user identifiers and prompts with placeholders and dropping any line the privacy scan still objects to; every member is then scanned again as it will be written, and any finding refuses the whole export (exit code 3, no file, only file, path and rule are reported). Capture records are never rewritten, so a finding in one refuses the export. On receipt: unpack into a private directory, read the manifest, run `go run ./cmd/fake-upstream-align draft -records <dir>/captures -out <another 0700 directory> -name <name>`, review the draft, align the fake, add regression tests, and delete the bundle.
+
 冒烟（`smoke` 从目标环境的 `runtime.env` 读取管理员登录，并设置 `BASE`、`EXPECT_SHA`（容器 OCI revision）`RELEASE_CONTAINER` 与 `RELEASE_ENV`（环境名，验收脚本据此读取同一部署的日志）；不打印密码）：
 
 ```bash

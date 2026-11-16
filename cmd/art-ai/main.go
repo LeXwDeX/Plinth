@@ -12,6 +12,15 @@ import (
 )
 
 func main() {
+	// `art-ai diagnose` exports the diagnostics bundle (#234). It runs beside a
+	// live service or on a stopped stack, so it must not reach the code below:
+	// no log file is opened for writing, nothing is migrated or started.
+	if len(os.Args) > 1 && os.Args[1] == "diagnose" {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		code := app.RunDiagnose(ctx, os.Args[2:], os.Getenv, os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
+	}
 	// Debug until the runtime setting is read, so configuration errors are logged.
 	level := new(slog.LevelVar)
 	level.Set(slog.LevelDebug)
@@ -25,7 +34,7 @@ func main() {
 	if config.Logging.Directory != "" {
 		file, err := logging.OpenRotatingFile(logging.RotateConfig{
 			Directory:     config.Logging.Directory,
-			FileName:      "art-ai.log",
+			FileName:      logging.FileName,
 			MaxBytes:      config.Logging.MaxBytes,
 			MaxFiles:      config.Logging.MaxFiles,
 			RetentionDays: config.Logging.RetentionDays,

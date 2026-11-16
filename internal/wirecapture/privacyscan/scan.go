@@ -520,31 +520,43 @@ func ScanRecordDir(dir string) ([]Finding, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		findings = append(findings, ScanText(name, "$.skipped", "", record.Skipped)...)
-		findings = append(findings, ScanText(name, "$.connection", "", record.Connection)...)
-		findings = append(findings, ScanText(name, "$.method", "", record.Method)...)
-		if record.Status != 0 && (record.Status < 100 || record.Status > 599) {
-			findings = append(findings, Finding{File: name, Path: "$.status", Rule: "record-shape"})
+		recordFindings, hasExchange := ScanRecord(name, record)
+		findings = append(findings, recordFindings...)
+		if hasExchange {
+			covered++
 		}
-		for index, key := range record.QueryKeys {
-			findings = append(findings, ScanText(name, fmt.Sprintf("$.query_keys[%d]", index), "", key)...)
-		}
-		if record.Exchange == nil {
-			continue
-		}
-		covered++
-		exchange := []wirecapture.Exchange{*record.Exchange}
-		policy, err := wirecapture.DraftReplayPolicy(exchange)
-		if err != nil {
-			// An exchange the sanitizer's own validator rejects is a finding in
-			// itself: nothing unvalidated may sit in a record.
-			findings = append(findings, Finding{File: name, Path: "$.exchange", Rule: "exchange-invalid"})
-			continue
-		}
-		findings = append(findings, ScanExchanges(name, exchange, policy)...)
-		findings = append(findings, ScanPolicy(name+".policy", policy)...)
 	}
 	return findings, covered, nil
+}
+
+// ScanRecord checks one record that is already read (the diagnostics export,
+// #234, reads the bytes it ships itself): the skip marker and fixed fields as
+// text, the query key names, and the exchange against the replay policy
+// derived from it alone. hasExchange reports whether the record carried an
+// exchange, so a caller can count what a clean result actually covered.
+func ScanRecord(file string, record wirecapture.UpstreamRecord) (findings []Finding, hasExchange bool) {
+	findings = append(findings, ScanText(file, "$.skipped", "", record.Skipped)...)
+	findings = append(findings, ScanText(file, "$.connection", "", record.Connection)...)
+	findings = append(findings, ScanText(file, "$.method", "", record.Method)...)
+	if record.Status != 0 && (record.Status < 100 || record.Status > 599) {
+		findings = append(findings, Finding{File: file, Path: "$.status", Rule: "record-shape"})
+	}
+	for index, key := range record.QueryKeys {
+		findings = append(findings, ScanText(file, fmt.Sprintf("$.query_keys[%d]", index), "", key)...)
+	}
+	if record.Exchange == nil {
+		return findings, false
+	}
+	exchange := []wirecapture.Exchange{*record.Exchange}
+	policy, err := wirecapture.DraftReplayPolicy(exchange)
+	if err != nil {
+		// An exchange the sanitizer's own validator rejects is a finding in
+		// itself: nothing unvalidated may sit in a record.
+		return append(findings, Finding{File: file, Path: "$.exchange", Rule: "exchange-invalid"}), true
+	}
+	findings = append(findings, ScanExchanges(file, exchange, policy)...)
+	findings = append(findings, ScanPolicy(file+".policy", policy)...)
+	return findings, true
 }
 
 // evidenceRecord is the shape of a media evidence manifest entry: a location,
