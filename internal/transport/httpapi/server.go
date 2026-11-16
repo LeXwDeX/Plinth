@@ -2569,6 +2569,12 @@ func (s *Server) submitTask(
 		s.writeMessageProblem(writer, http.StatusBadRequest, "invalid_input", "error.invalid_input")
 		return
 	}
+	// The key names this submission; a request without a usable one is refused
+	// by name rather than as generic invalid input (#302).
+	idempotencyKey, usable := requireIdempotencyKey(writer, request, taskIdempotencyKeyRule, s.message(idempotencyKeyRequiredMessage))
+	if !usable {
+		return
+	}
 	prepared, err := s.generation.GetPreparedInput(request.Context(), owner, body.PreparedInputID)
 	if err != nil {
 		s.writeDomainError(writer, err)
@@ -2585,7 +2591,7 @@ func (s *Server) submitTask(
 	accepted, err := s.generation.SubmitPrepared(request.Context(), generation.SubmitPreparedCommand{
 		OwnerID: owner, SessionID: prepared.SessionID,
 		PreparedInputID:  prepared.ID,
-		IdempotencyKey:   strings.TrimSpace(request.Header.Get("Idempotency-Key")),
+		IdempotencyKey:   idempotencyKey,
 		OperationID:      standaloneOperationID(prepared.ID),
 		AuthorizationRef: body.AuthorizationRequestID,
 	})

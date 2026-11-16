@@ -21,9 +21,10 @@ func (s *Server) rerollTask(writer http.ResponseWriter, request *http.Request, o
 		return
 	}
 	messages := s.application.Chat.Reroll.Messages
-	idempotencyKey := request.Header.Get("Idempotency-Key")
-	if idempotencyKey == "" {
-		writeProblem(writer, http.StatusBadRequest, "idempotency_key_required", messages.IdempotencyRequired)
+	// A missing, blank or over-long key is refused with this feature's own Schema
+	// copy under the code every keyed route shares (#302).
+	idempotencyKey, usable := requireIdempotencyKey(writer, request, taskIdempotencyKeyRule, messages.IdempotencyRequired)
+	if !usable {
 		return
 	}
 	result, err := s.reroll.Reroll(request.Context(), principal, request.PathValue("taskID"), idempotencyKey)

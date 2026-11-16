@@ -2882,6 +2882,7 @@
         "error.unknown_offering": "指定的模型不存在",
         "error.no_offering": "当前没有可用模型",
         "error.idempotency_conflict": "幂等键与已有请求冲突",
+        "error.idempotency_key_required": "这个请求必须带有效的 Idempotency-Key 请求头：每个新请求用一个新的唯一值（例如随机 UUID），重试同一个请求时沿用同一个值。",
         "error.not_found": "请求的资源不存在",
         "error.conflict": "当前状态不允许执行此操作",
         "error.unavailable": "服务暂时不可用",
@@ -9568,7 +9569,7 @@
           "in_progress": "这个任务的再来一个已经在进行中。",
           "declined": "上次的再来一个已被拒绝；请换一个 Idempotency-Key 再试。",
           "unavailable": "当前产品配置未启用再来一个。",
-          "idempotency_required": "再来一个必须带 Idempotency-Key，避免重复扣费。"
+          "idempotency_required": "再来一个必须带有效的 Idempotency-Key 请求头，避免重复扣费。"
         }
       },
       "model3d_usage": {
@@ -15918,6 +15919,7 @@
             "error.unknown_offering": "The specified model doesn't exist",
             "error.no_offering": "No models are currently available",
             "error.idempotency_conflict": "The idempotency key conflicts with an existing request",
+            "error.idempotency_key_required": "This request must include a valid Idempotency-Key header: use a new unique value (for example a random UUID) for each new request, and reuse the same value when retrying that request.",
             "error.not_found": "The requested resource doesn't exist",
             "error.conflict": "This action isn't allowed in the current state",
             "error.unavailable": "Service temporarily unavailable",
@@ -19261,7 +19263,7 @@
             "chat.reroll.messages.in_progress": "A reroll of this task is already in progress.",
             "chat.reroll.messages.declined": "The last reroll was declined; try again with a new Idempotency-Key.",
             "chat.reroll.messages.unavailable": "Reroll is not enabled by the current product configuration.",
-            "chat.reroll.messages.idempotency_required": "Reroll requires an Idempotency-Key so a repeated request cannot charge twice.",
+            "chat.reroll.messages.idempotency_required": "Reroll requires a valid Idempotency-Key header so a repeated request cannot charge twice.",
             "chat.image2d_usage.profiles[id=concept_art].label": "Concept art",
             "chat.image2d_usage.profiles[id=concept_art].description": "Concept art for games, film or product development; several subjects and a scene are allowed, with emphasis on composition, mood and narrative.",
             "chat.image2d_usage.profiles[id=concept_art].reason": "Concept art explains a scene and the relationships between subjects; prefer models that follow prompts, hold a stable composition and can reach the required resolution, and a wide frame close to the usual concept-art ratio.",
