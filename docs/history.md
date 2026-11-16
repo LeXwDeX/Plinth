@@ -22,6 +22,7 @@
 - 2026-10-30：维护者决定下线 `legacy-formal`（存档 #74）。2026-10-20 改用 `formal-test` 后它的去留一直待决，存档 #60 之后晋级验收来源 `acceptance.legacy_formal_issue` 也未设置。下线只动该栈自己的资源：先对 `<root>/formal/` 做全量备份（数据库、Storage、Web data、日志、报告、运行环境、源码快照与镜像导出，逐件记录大小与 sha256 并验证可列出内容），再停止并移除它的 Compose 项目与网络、删除它独有的镜像和 `<root>/formal/` 目录。该栈没有命名卷。同一发布根里 `dev-test` 的 `production/` 与 `app/`、旧候选 Compose 项目、旧 Next 目录和同机其他业务都未触碰。最终备份保存在发布根之外的独立位置，主机路径与校验值记在存档 #74，不写进仓库。随之删除 `release-go-formal.sh`、`docker-compose.go-formal.yml`、正式栈无 Key 冒烟与离线测试、镜像保留里的 `formal/` pin 保护，环境文件不再支持 `managed_by` 与 `acceptance.legacy_formal_issue`；`release-formal.py` 中仍在用的验收报告与清单校验保留为 `scripts/release-promotion.py`。
 - 2026-11-02：`dev-test` 改为每次发布全新数据（`"data": "ephemeral"`，#28），默认不再做发布备份；测试栈模型改用无版本别名 `qwen-omni-flash`、`gpt-astra`（#64）。
 - 2026-11-03：`formal-test` 发布备份改为 `{"scope": "full", "keep": 2}`，成功后自动清理，只保留最新 2 份，发布备份不含镜像和日志（#66）；此前 `formal-test` 全量备份但不自动清理。
+- 2026-11-16：`dev-test` 与 `formal-test` 的 Agent 默认对话模型由 `qwen-omni-flash` 改为 `qwen-max`（网关当前解析为 qwen4-max）；只改运行配置 `LLM_MODEL`，Product Schema 默认值不变（#309）。
 
 ## 3. 规则来源
 
