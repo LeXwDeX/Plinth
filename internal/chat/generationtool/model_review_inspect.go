@@ -20,7 +20,15 @@ type ModelInspectRequest struct {
 	AssetID                 generation.AssetID
 	SourceVariantPreference []string
 	Brief                   chat.ProductionBrief
-	Locale                  string
+	// Purpose names one chat.model3d_usage profile to judge this inspection
+	// only (#332 7c-1). Empty judges against the Brief like the platform tool.
+	// The caller refuses an ID the Schema does not declare.
+	Purpose string
+	// AllowedFixes bounds the fix hints to capabilities the caller can execute
+	// itself; nil keeps the platform's runtime availability check. The outward
+	// MCP path passes the declared process_model capabilities.
+	AllowedFixes []generation.Capability
+	Locale       string
 }
 
 // ModelInspectResult is the read-only inspection of one saved model.
@@ -46,22 +54,25 @@ func (refusal *ModelInspectRefusal) Error() string { return refusal.Message }
 // The refusal kinds of InspectReviewedModel: the source is not the owner's
 // (not_found), has not succeeded or has no saved model file (not_ready), is not
 // binary glTF (not_glb), is over the Schema's byte limit (too_large), cannot be
-// opened or parsed (unreadable), or the review state is not wired
-// (unavailable).
+// opened or parsed (unreadable), names a purpose the Schema does not declare
+// (unknown_purpose), or the review state is not wired (unavailable).
 const (
-	ModelInspectNotFound    = "not_found"
-	ModelInspectNotReady    = "not_ready"
-	ModelInspectNotGLB      = "not_glb"
-	ModelInspectTooLarge    = "too_large"
-	ModelInspectUnreadable  = "unreadable"
-	ModelInspectUnavailable = "unavailable"
+	ModelInspectNotFound       = "not_found"
+	ModelInspectNotReady       = "not_ready"
+	ModelInspectNotGLB         = "not_glb"
+	ModelInspectTooLarge       = "too_large"
+	ModelInspectUnreadable     = "unreadable"
+	ModelInspectUnknownPurpose = "unknown_purpose"
+	ModelInspectUnavailable    = "unavailable"
 )
 
 // InspectReviewedModel is the read-only core of inspect_model behind the
 // outward MCP server (#332): it loads the owner's Task, parses the saved file
 // through the review cache and concurrency slots, truncates the listed parts
-// and judges the report against the purpose like the platform tool. It never
-// reads the session, writes self-check evidence or creates a Task.
+// and judges the report against the purpose like the platform tool. An explicit
+// Purpose judges this call only, and AllowedFixes keeps fix hints to
+// capabilities the caller can execute. It never reads the session, writes
+// self-check evidence or creates a Task.
 func (executor *Executor) InspectReviewedModel(
 	ctx context.Context,
 	request ModelInspectRequest,
@@ -70,6 +81,14 @@ func (executor *Executor) InspectReviewedModel(
 	if executor.modelAssets == nil || executor.modelReview == nil {
 		return ModelInspectResult{}, &ModelInspectRefusal{
 			Kind: ModelInspectUnavailable, Message: "model review is unavailable",
+		}
+	}
+	// An argument purpose the Schema does not declare is refused here too, not
+	// silently replaced by the brief's purpose: the check below would otherwise
+	// judge something the caller did not ask for (#332 7c-1).
+	if request.Purpose != "" && !modelReviewUsageProfileDeclared(executor.chat.Model3DUsage, request.Purpose) {
+		return ModelInspectResult{}, &ModelInspectRefusal{
+			Kind: ModelInspectUnknownPurpose, Message: "unknown purpose",
 		}
 	}
 	command := chat.ToolCommand{OwnerID: string(request.Owner), Options: chat.TurnOptions{Locale: request.Locale}}
@@ -155,10 +174,12 @@ func (executor *Executor) InspectReviewedModel(
 		executor.chat.Model3DUsage,
 		review.Inspect.Production,
 		request.Brief,
+		request.Purpose,
 		func(template string, replacements ...string) string {
 			return executor.fillText(command, template, replacements...)
 		},
 		executor.modelReviewFixAvailability(),
+		request.AllowedFixes,
 	)
 	return ModelInspectResult{
 		TaskID:         task.ID,

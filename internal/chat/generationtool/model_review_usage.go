@@ -24,8 +24,9 @@ const (
 	modelReviewUsageStatusFail    = "fail"
 	modelReviewUsageStatusUnknown = "unknown"
 
-	modelReviewUsageSourceBrief   = "production_brief"
-	modelReviewUsageSourceDefault = "default_profile"
+	modelReviewUsageSourceBrief    = "production_brief"
+	modelReviewUsageSourceDefault  = "default_profile"
+	modelReviewUsageSourceArgument = "argument"
 )
 
 // ModelReviewUsageCheck is the usage_check object of an inspect_model result,
@@ -71,40 +72,64 @@ type modelReviewUsageText func(template string, replacements ...string) string
 // Offering can perform one declared fix capability.
 type modelReviewFixAvailability func(catalog.ChatModelInspectFixCapabilitySchema) bool
 
+// modelReviewFixAvailabilityWithin narrows an availability check to the
+// capabilities the caller can execute itself (#332 7c-1): a candidate outside
+// the set is not named, even when an Offering offers it, because the caller's
+// own tool could not run it. A nil set keeps the check exactly as it is.
+func modelReviewFixAvailabilityWithin(
+	available modelReviewFixAvailability,
+	allowed []generation.Capability,
+) modelReviewFixAvailability {
+	if allowed == nil {
+		return available
+	}
+	return func(candidate catalog.ChatModelInspectFixCapabilitySchema) bool {
+		return slices.Contains(allowed, generation.Capability(candidate.Capability)) && available(candidate)
+	}
+}
+
 // newModelReviewUsageCheck judges a report against the purpose selected by the
 // frozen production brief. A brief without a usable purpose falls back to the
 // Schema's default profile; the brief's target platform selects the purpose's
 // variant for that platform, and a brief triangle_budget overrides the
-// resulting maximum. It returns nil when the Schema declares no usage profiles,
-// which is how historical Catalogs stay valid.
+// resulting maximum. A non-empty purpose names one Schema profile for this call
+// only (#332 7c-1); the caller has already refused an undeclared one. It
+// returns nil when the Schema declares no usage profiles, which is how
+// historical Catalogs stay valid.
 func newModelReviewUsageCheck(
 	report modelinspect.Report,
 	usage catalog.ChatModel3DUsageSchema,
 	production catalog.ChatModelInspectProductionSchema,
 	brief chat.ProductionBrief,
+	purpose string,
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
 ) *modelReviewUsageCheck {
-	return newModelReviewUsageCheckFor(report, nil, usage, production, brief, text, available)
+	return newModelReviewUsageCheckFor(report, nil, usage, production, brief, purpose, text, available, nil)
 }
 
 // newModelReviewUsageCheckFor is newModelReviewUsageCheck for a Task that has a
 // deliverable the purpose sized (#292): the texture_size item judges that
 // deliverable and reports the inspected file's own texture edge beside it. A nil
-// sized judges the inspected file, as before.
+// sized judges the inspected file, as before. allowedFixes bounds the fix hints
+// to capabilities the caller can execute itself; nil keeps every runtime
+// availability check, as the platform path does.
 func newModelReviewUsageCheckFor(
 	report modelinspect.Report,
 	sized *sizedDeliverable,
 	usage catalog.ChatModel3DUsageSchema,
 	production catalog.ChatModelInspectProductionSchema,
 	brief chat.ProductionBrief,
+	purpose string,
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
+	allowedFixes []generation.Capability,
 ) *modelReviewUsageCheck {
-	profile, source, platform, found := modelReviewUsageProfile(usage, brief)
+	profile, source, platform, found := modelReviewUsageProfileFor(usage, brief, purpose)
 	if !found {
 		return nil
 	}
+	available = modelReviewFixAvailabilityWithin(available, allowedFixes)
 	budget, override := modelReviewUsageBudget(usage, profile, brief)
 	note := modelReviewUsageNote(profile, source, platform, override, production, text)
 	checks := []modelReviewUsageCheckItem{
@@ -157,6 +182,39 @@ func newModelReviewUsageCheckFor(
 		result.Platform, result.PlatformLabel = platform.ID, platform.Label
 	}
 	return result
+}
+
+// modelReviewUsageProfileFor resolves the purpose with an explicit argument
+// taking precedence over the brief (#332 7c-1). An argument the Schema does not
+// declare has no profile (found=false); the caller refuses it rather than
+// silently judging another purpose. The argument still uses the brief's target
+// platform for the variant, like a brief purpose does.
+func modelReviewUsageProfileFor(
+	usage catalog.ChatModel3DUsageSchema,
+	brief chat.ProductionBrief,
+	purpose string,
+) (catalog.ChatModel3DUsageProfile, string, *catalog.ChatModel3DUsagePlatformChoice, bool) {
+	if purpose != "" {
+		for _, profile := range usage.Profiles {
+			if profile.ID == purpose {
+				profile, platform := usage.ForPlatform(profile, brief.Text(usage.PlatformField))
+				return profile, modelReviewUsageSourceArgument, platform, true
+			}
+		}
+		return catalog.ChatModel3DUsageProfile{}, "", nil, false
+	}
+	return modelReviewUsageProfile(usage, brief)
+}
+
+// modelReviewUsageProfileDeclared reports whether the Schema declares a purpose
+// profile with this ID.
+func modelReviewUsageProfileDeclared(usage catalog.ChatModel3DUsageSchema, id string) bool {
+	for _, profile := range usage.Profiles {
+		if profile.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // modelReviewUsageProfile resolves the purpose and where it came from. A brief
@@ -222,6 +280,11 @@ func modelReviewUsageNote(
 	production catalog.ChatModelInspectProductionSchema,
 	text modelReviewUsageText,
 ) string {
+	// An explicit argument judges this inspection only, so there is no session
+	// purpose to explain (#332 7c-1).
+	if source == modelReviewUsageSourceArgument {
+		return ""
+	}
 	template := production.DefaultPurposeText
 	if source == modelReviewUsageSourceBrief {
 		template = production.BriefPurposeText

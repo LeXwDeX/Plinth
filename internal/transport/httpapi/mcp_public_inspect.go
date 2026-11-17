@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"errors"
+	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -13,8 +15,8 @@ import (
 // read-only inspection the platform's Agent tool runs, over the Task's saved
 // model file. It never writes self-check evidence, counts a step or creates a
 // Task. The purpose judgement reads the brief stored in the Task's session;
-// a session without one (a browser session, an externally started Task) falls
-// back to the Schema's default profile.
+// purpose names one chat.model3d_usage profile for this call only (#332 7c-1),
+// and a session without a brief falls back to the Schema's default profile.
 func (s *Server) mcpInspectModel(call *mcpCall) (mcpOutcome, error) {
 	task, missing, err := s.mcpOwnedTask(call, mcpStringArgument(call, "task_id"))
 	if err != nil {
@@ -22,6 +24,10 @@ func (s *Server) mcpInspectModel(call *mcpCall) (mcpOutcome, error) {
 	}
 	if missing != nil {
 		return *missing, nil
+	}
+	purpose := mcpStringArgument(call, "purpose")
+	if purpose != "" && !s.mcpModelPurposeKnown(purpose) {
+		return s.mcpInvalidArguments(call.locale, "$.purpose: 未知用途，可用 "+s.mcpModelPurposeIDs()), nil
 	}
 	assetID := mcpStringArgument(call, "asset_id")
 	if s.modelInspector == nil {
@@ -37,7 +43,8 @@ func (s *Server) mcpInspectModel(call *mcpCall) (mcpOutcome, error) {
 	result, err := s.modelInspector.InspectReviewedModel(call.ctx, generationtool.ModelInspectRequest{
 		Owner: call.owner, TaskID: task.ID, AssetID: generation.AssetID(assetID),
 		SourceVariantPreference: s.application.MCPPublic.Generation.SourceVariantPreference,
-		Brief:                   brief, Locale: call.locale,
+		Brief:                   brief, Purpose: purpose,
+		AllowedFixes: s.mcpInspectModelFixCapabilities(), Locale: call.locale,
 	})
 	if err != nil {
 		var refusal *generationtool.ModelInspectRefusal
@@ -69,13 +76,47 @@ func (s *Server) mcpInspectModel(call *mcpCall) (mcpOutcome, error) {
 	}, nil
 }
 
+// mcpModelPurposeKnown reports whether the Schema declares the 3D purpose.
+func (s *Server) mcpModelPurposeKnown(id string) bool {
+	for _, profile := range s.application.Chat.Model3DUsage.Profiles {
+		if profile.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// mcpModelPurposeIDs lists the purposes a caller may pass, for the refusal that
+// names them.
+func (s *Server) mcpModelPurposeIDs() string {
+	ids := make([]string, 0, len(s.application.Chat.Model3DUsage.Profiles))
+	for _, profile := range s.application.Chat.Model3DUsage.Profiles {
+		ids = append(ids, profile.ID)
+	}
+	return strings.Join(ids, "、")
+}
+
+// mcpInspectModelFixCapabilities are the capabilities the declared
+// process_model tool can execute: inspect_model may name only these in a fix
+// hint (#332 7c-1). A Catalog without the tool gets an empty set, not nil,
+// because nil means "no filter" to the inspection core.
+func (s *Server) mcpInspectModelFixCapabilities() []generation.Capability {
+	for _, tool := range s.application.MCPPublic.Tools {
+		if tool.Name == catalog.MCPToolProcessModel {
+			return append([]generation.Capability{}, tool.Capabilities...)
+		}
+	}
+	return []generation.Capability{}
+}
+
 // mcpInspectProblemCodes maps the refusal kinds of InspectReviewedModel to the
 // business error codes of the tool result.
 var mcpInspectProblemCodes = map[string]string{
-	generationtool.ModelInspectNotFound:    "asset_not_found",
-	generationtool.ModelInspectNotReady:    "model_not_ready",
-	generationtool.ModelInspectNotGLB:      "model_not_glb",
-	generationtool.ModelInspectTooLarge:    "model_too_large",
-	generationtool.ModelInspectUnreadable:  "model_unreadable",
-	generationtool.ModelInspectUnavailable: "model_unavailable",
+	generationtool.ModelInspectNotFound:       "asset_not_found",
+	generationtool.ModelInspectNotReady:       "model_not_ready",
+	generationtool.ModelInspectNotGLB:         "model_not_glb",
+	generationtool.ModelInspectTooLarge:       "model_too_large",
+	generationtool.ModelInspectUnreadable:     "model_unreadable",
+	generationtool.ModelInspectUnknownPurpose: "invalid_arguments",
+	generationtool.ModelInspectUnavailable:    "model_unavailable",
 }
