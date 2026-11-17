@@ -30,6 +30,20 @@ type suspendConsentToolExecutor struct {
 	resumeConsentGate <-chan struct{}
 }
 
+// recoverySnapshotRepository 在 Run 的启动恢复快照（ListTurns）返回后
+// 关闭 recovered，让测试能在快照之后再创建轮次（#325）。
+type recoverySnapshotRepository struct {
+	*memoryChatRepository
+	once      sync.Once
+	recovered chan struct{}
+}
+
+func (r *recoverySnapshotRepository) ListTurns(ctx context.Context, states []string) ([]chat.Turn, error) {
+	turns, err := r.memoryChatRepository.ListTurns(ctx, states)
+	r.once.Do(func() { close(r.recovered) })
+	return turns, err
+}
+
 type uncertainAcceptedTool struct{ calls int }
 
 func TestUnknownAcceptedThreeViewKeepsCheckpointForRestart(t *testing.T) {
@@ -370,7 +384,11 @@ func TestOrchestratorRecoveredConsentSuspendsAndReleasesWorker(t *testing.T) {
 
 func testOrchestratorConsentSuspendsAndReleasesWorker(t *testing.T, recoverSuspended bool) {
 	t.Helper()
-	service := newChatService(t, newMemoryChatRepository())
+	repository := &recoverySnapshotRepository{
+		memoryChatRepository: newMemoryChatRepository(),
+		recovered:            make(chan struct{}),
+	}
+	service := newChatService(t, repository)
 	schema := suspendSchema(t)
 	resumeConsentGate := make(chan struct{})
 	tools := &suspendConsentToolExecutor{resumeConsentGate: resumeConsentGate}
@@ -398,17 +416,21 @@ func testOrchestratorConsentSuspendsAndReleasesWorker(t *testing.T, recoverSuspe
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	sessionA, err := service.CreateSession(ctx, "owner-a", "A", "chat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	assistantA := startTurnFor(t, service, "owner-a", sessionA.ID, "paint a cat")
-	commandA := chat.ProcessTurn{
-		OwnerID:            "owner-a",
-		SessionID:          sessionA.ID,
-		AssistantMessageID: assistantA,
+	var sessionA chat.Session
+	var commandA chat.ProcessTurn
+	startTurnA := func() {
+		sessionA, err = service.CreateSession(ctx, "owner-a", "A", "chat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		commandA = chat.ProcessTurn{
+			OwnerID:            "owner-a",
+			SessionID:          sessionA.ID,
+			AssistantMessageID: startTurnFor(t, service, "owner-a", sessionA.ID, "paint a cat"),
+		}
 	}
 	if recoverSuspended {
+		startTurnA()
 		// Force startup recovery to replay an already suspended plan, without
 		// relying on Run's recovery snapshot racing the first worker execution.
 		if err := orchestrator.Process(ctx, commandA); err != nil {
@@ -431,6 +453,15 @@ func testOrchestratorConsentSuspendsAndReleasesWorker(t *testing.T, recoverSuspe
 		orchestrator.ResumeConsentWait("owner-a", sessionA.ID)
 	})
 	if !recoverSuspended {
+		// A 的轮次必须在 Run 的启动恢复快照之后创建：否则快照收进 A，
+		// 恢复协程在 -race 下被推迟时会把过期的 A 副本排到 B 之后，
+		// 它的零 deadline 重放在两次唤醒之间重新登记挂起（#325）。
+		select {
+		case <-repository.recovered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("orchestrator.Run never took its recovery snapshot")
+		}
+		startTurnA()
 		if err := orchestrator.Schedule(ctx, commandA); err != nil {
 			t.Fatal(err)
 		}
