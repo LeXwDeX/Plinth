@@ -222,6 +222,13 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			States:     states,
 			ItemStates: itemStates,
 		}
+		// #328: the browser only needs the heartbeat interval; grace, polling,
+		// parallel/round/retry limits and the continuation copy stay server-only.
+		if execution := cloned.AssetList.Execution; execution != nil && execution.Presence.HeartbeatSeconds > 0 {
+			publicAssetList.Presence = &PublicAssetListPresenceSchema{
+				HeartbeatSeconds: execution.Presence.HeartbeatSeconds,
+			}
+		}
 	}
 	var publicStepPolicy *PublicStepPolicySchema
 	if cloned.StepPolicy != nil {

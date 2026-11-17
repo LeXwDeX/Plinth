@@ -32,6 +32,35 @@ type AssetListSchema struct {
 	ItemBlocks []ValueLabel            `json:"item_blocks"`
 	Messages   AssetListMessagesSchema `json:"messages"`
 	UI         AssetListUISchema       `json:"ui"`
+	// Execution 是 #328 的自动制作段，可选。未声明时不启动 runner、不注册
+	// 在场/运行路由，清单保持 #327 行为；声明但 enabled=false 时 runner 不
+	// 启动，运行控制返回不可用。
+	Execution *AssetListExecutionSchema `json:"execution,omitempty"`
+}
+
+// AssetListExecutionSchema 是自动制作的调度与在场参数。poll_interval、
+// max_*、grace 与 continuation 都是 server-only；浏览器只拿到心跳间隔。
+type AssetListExecutionSchema struct {
+	Enabled                  bool                        `json:"enabled"`
+	PollIntervalMilliseconds int                         `json:"poll_interval_milliseconds"`
+	MaxParallelItems         int                         `json:"max_parallel_items"`
+	MaxRoundsPerItem         int                         `json:"max_rounds_per_item"`
+	MaxCapacityRetries       int                         `json:"max_capacity_retries"`
+	Presence                 AssetListPresenceSchema     `json:"presence"`
+	Continuation             AssetListContinuationSchema `json:"continuation"`
+}
+
+// AssetListPresenceSchema 是前端心跳与在场宽限：heartbeat 公开，grace 只用于
+// 服务端判断“用户已离开”。
+type AssetListPresenceSchema struct {
+	HeartbeatSeconds int `json:"heartbeat_seconds"`
+	GraceSeconds     int `json:"grace_seconds"`
+}
+
+// AssetListContinuationSchema 是开轮/续轮时写给 Agent 的文案，必须带
+// {name}、{description}、{route}、{round} 四个占位符。
+type AssetListContinuationSchema struct {
+	Message string `json:"message"`
 }
 
 // AssetListLimitsSchema 是清单的数量与文本边界。每个项目保留的清单数只计
@@ -101,6 +130,25 @@ type AssetListMessagesSchema struct {
 	ProposeInvalidItems        string `json:"propose_invalid_items"`
 	ProposeReferenceUnresolved string `json:"propose_reference_unresolved"`
 	ProposeFailed              string `json:"propose_failed"`
+	// #328 自动制作：暂停/恢复/停止、续轮与失败分类。
+	PausePresence      string `json:"pause_presence"`
+	PauseUser          string `json:"pause_user"`
+	PauseStepCap       string `json:"pause_step_cap"`
+	PauseFailure       string `json:"pause_failure"`
+	Resumed            string `json:"resumed"`
+	Stopped            string `json:"stopped"`
+	Skipped            string `json:"skipped"`
+	RoundLimit         string `json:"round_limit"`
+	AwaitingReview     string `json:"awaiting_review"`
+	NeedsYou           string `json:"needs_you"`
+	ItemFailed         string `json:"item_failed"`
+	ItemFailedInput    string `json:"item_failed_input"`
+	ItemFailedCapacity string `json:"item_failed_capacity"`
+	ItemFailedRefused  string `json:"item_failed_refused"`
+	ItemFailedInternal string `json:"item_failed_internal"`
+	StepCapBlocked     string `json:"step_cap_blocked"`
+	NeedsApproval      string `json:"needs_approval"`
+	RunWaiting         string `json:"run_waiting"`
 }
 
 // AssetListUISchema 是清单卡与项目面板的固定标题和按钮文案。
@@ -123,6 +171,14 @@ type PublicAssetListSchema struct {
 	Routes     []PublicAssetListRouteSchema `json:"routes"`
 	States     []PublicAssetListStateSchema `json:"states"`
 	ItemStates []PublicAssetListStateSchema `json:"item_states"`
+	// Presence 只在声明 execution 时出现：浏览器需要心跳间隔；grace、
+	// 轮询间隔、并行/轮数/重试与续轮文案都不公开。
+	Presence *PublicAssetListPresenceSchema `json:"presence,omitempty"`
+}
+
+// PublicAssetListPresenceSchema 是公开的在场参数：只有心跳间隔。
+type PublicAssetListPresenceSchema struct {
+	HeartbeatSeconds int `json:"heartbeat_seconds"`
 }
 
 // PublicAssetListKindSchema 是公开的清单项类型：id、label、映射到的项目库

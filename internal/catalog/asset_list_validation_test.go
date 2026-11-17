@@ -229,6 +229,73 @@ func TestAssetListValidationRejectsIncompleteOrUnknownDeclarations(t *testing.T)
 		"session asset lists route missing": func(app *catalog.ApplicationSchema) {
 			app.Runtime.HTTP.Routes.ChatSessionAssetLists = ""
 		},
+		"poll interval too small": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.PollIntervalMilliseconds = 499
+		},
+		"poll interval too large": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.PollIntervalMilliseconds = 60001
+		},
+		"parallel items zero": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.MaxParallelItems = 0
+		},
+		"parallel items too many": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.MaxParallelItems = 4
+		},
+		"rounds zero": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.MaxRoundsPerItem = 0
+		},
+		"rounds too many": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.MaxRoundsPerItem = 11
+		},
+		"capacity retries negative": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.MaxCapacityRetries = -1
+		},
+		"capacity retries too many": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.MaxCapacityRetries = 4
+		},
+		"heartbeat too small": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Presence.HeartbeatSeconds = 4
+		},
+		"heartbeat too large": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Presence.HeartbeatSeconds = 61
+		},
+		"grace too small": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Presence.GraceSeconds = 29
+		},
+		"grace too large": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Presence.GraceSeconds = 601
+		},
+		"grace below twice heartbeat": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Presence.HeartbeatSeconds = 60
+			app.AssetList.Execution.Presence.GraceSeconds = 119
+		},
+		"continuation empty": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Continuation.Message = " "
+		},
+		"continuation without name": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Continuation.Message = "{description} {route} {round}"
+		},
+		"continuation without description": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Continuation.Message = "{name} {route} {round}"
+		},
+		"continuation without route": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Continuation.Message = "{name} {description} {round}"
+		},
+		"continuation without round": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Continuation.Message = "{name} {description} {route}"
+		},
+		"enabled without presence route": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Enabled = true
+			app.Runtime.HTTP.Routes.ProjectPresence = ""
+		},
+		"enabled without run route": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Enabled = true
+			app.Runtime.HTTP.Routes.ProjectAssetListRun = ""
+		},
+		"enabled without item route": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Enabled = true
+			app.Runtime.HTTP.Routes.ProjectAssetListItem = ""
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -275,6 +342,27 @@ func TestAssetListRouteParametersAreExact(t *testing.T) {
 		"session route with project parameter": func(app *catalog.ApplicationSchema) {
 			app.Runtime.HTTP.Routes.ChatSessionAssetLists = "/api/v1/chat/sessions/{projectID}/asset-lists"
 		},
+		"presence route without project": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectPresence = "/api/v1/presence"
+		},
+		"presence route with extra parameter": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectPresence = "/api/v1/projects/{projectID}/presence/{tabID}"
+		},
+		"run control route without project": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectAssetListRun = "/api/v1/asset-lists/{listID}/run"
+		},
+		"run control route without list": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectAssetListRun = "/api/v1/projects/{projectID}/asset-lists/run"
+		},
+		"item control route without list": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectAssetListItem = "/api/v1/projects/{projectID}/items/{itemID}"
+		},
+		"item control route without item": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectAssetListItem = "/api/v1/projects/{projectID}/asset-lists/{listID}/items"
+		},
+		"item control route with extra parameter": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectAssetListItem = "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}/{action}"
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -318,13 +406,115 @@ func TestAssetListCloneDoesNotShareSlices(t *testing.T) {
 	first.AssetList.States[0].Role = "mutated"
 	first.AssetList.ItemStates[0].Label = "mutated"
 	first.AssetList.ItemBlocks[0].Value = "mutated"
+	first.AssetList.Execution.Continuation.Message = "mutated"
 	second := source.Application()
 	if second.AssetList.Kinds[0].Label == "mutated" ||
 		second.AssetList.Routes[0].Kinds[0] == "mutated" ||
 		second.AssetList.Routes[0].Steps[0].Capability == "mutated" ||
 		second.AssetList.States[0].Role == "mutated" ||
 		second.AssetList.ItemStates[0].Label == "mutated" ||
-		second.AssetList.ItemBlocks[0].Value == "mutated" {
+		second.AssetList.ItemBlocks[0].Value == "mutated" ||
+		second.AssetList.Execution.Continuation.Message == "mutated" {
 		t.Fatal("Catalog Application() shares asset list slices with a previous copy")
+	}
+}
+
+// #328：默认 Catalog 声明自动制作段（默认关闭），公开投影只给心跳间隔。
+func TestDefaultAssetListExecutionDeclaresScheduleAndPresence(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	execution := application.AssetList.Execution
+	if execution == nil {
+		t.Fatal("default Catalog has no asset_list.execution")
+	}
+	if execution.Enabled ||
+		execution.PollIntervalMilliseconds != 2000 ||
+		execution.MaxParallelItems != 1 ||
+		execution.MaxRoundsPerItem != 3 ||
+		execution.MaxCapacityRetries != 0 ||
+		execution.Presence.HeartbeatSeconds != 15 ||
+		execution.Presence.GraceSeconds != 120 {
+		t.Fatalf("execution = %+v", execution)
+	}
+	if err := catalog.ValidateApplicationSchema(application); err != nil {
+		t.Fatalf("default asset_list.execution invalid: %v", err)
+	}
+	public := application.Public().AssetList
+	if public.Presence == nil || public.Presence.HeartbeatSeconds != 15 {
+		t.Fatalf("public presence = %+v", public.Presence)
+	}
+}
+
+// 未声明 execution 时旧 Catalog 仍可加载，公开投影也没有 presence。
+func TestAssetListExecutionStaysOptional(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	application.AssetList.Execution = nil
+	if err := catalog.ValidateApplicationSchema(application); err != nil {
+		t.Fatalf("Catalog without asset_list.execution rejected: %v", err)
+	}
+	public := application.Public().AssetList
+	if public.Presence != nil {
+		t.Fatalf("public projection invented presence: %+v", public.Presence)
+	}
+	encoded, err := json.Marshal(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "presence") {
+		t.Fatalf("public asset_list without execution still carries presence: %s", encoded)
+	}
+}
+
+// #328：自动制作文案中英成对，占位符一致，续轮文案走 fields 覆盖。
+func TestAssetListExecutionCopyIsLocalized(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	english := application.Localization.Bundles["en"]
+	var messages map[string]string
+	raw, err := json.Marshal(application.AssetList.Messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{
+		"pause_presence", "pause_user", "pause_step_cap", "pause_failure",
+		"resumed", "stopped", "skipped", "round_limit",
+		"awaiting_review", "needs_you",
+		"item_failed", "item_failed_input", "item_failed_capacity",
+		"item_failed_refused", "item_failed_internal",
+		"step_cap_blocked", "needs_approval", "run_waiting",
+	} {
+		if strings.TrimSpace(messages[key]) == "" {
+			t.Errorf("asset_list.messages.%s missing from the default copy", key)
+		}
+		if strings.TrimSpace(english.Fields["asset_list.messages."+key]) == "" {
+			t.Errorf("asset_list.messages.%s missing from the English fields", key)
+		}
+	}
+	if strings.TrimSpace(english.Fields["asset_list.execution.continuation.message"]) == "" {
+		t.Error("asset_list.execution.continuation.message missing from the English fields")
+	}
+	for _, key := range []string{
+		"ui.asset_list.run_status", "ui.asset_list.run_running",
+		"ui.asset_list.run_paused_presence", "ui.asset_list.run_paused_user",
+		"ui.asset_list.run_paused_step_cap", "ui.asset_list.run_paused_failure",
+		"ui.asset_list.run_stopped", "ui.asset_list.run_completed",
+		"ui.asset_list.run_progress",
+		"ui.asset_list.run_pause", "ui.asset_list.run_resume",
+		"ui.asset_list.run_stop", "ui.asset_list.run_stop_confirm",
+		"ui.asset_list.run_skip", "ui.asset_list.run_start",
+		"ui.asset_list.run_waiting",
+		"ui.asset_list.item_awaiting_approval", "ui.asset_list.item_step_cap",
+		"ui.asset_list.item_round_limit",
+	} {
+		if strings.TrimSpace(application.Content.Messages[key]) == "" {
+			t.Errorf("content.messages %s missing from the default copy", key)
+		}
+		if strings.TrimSpace(english.Messages[key]) == "" {
+			t.Errorf("content.messages %s missing from the English bundle", key)
+		}
 	}
 }

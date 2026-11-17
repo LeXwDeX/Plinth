@@ -154,6 +154,24 @@ func validateAssetList(
 		"propose_invalid_items":          list.Messages.ProposeInvalidItems,
 		"propose_reference_unresolved":   list.Messages.ProposeReferenceUnresolved,
 		"propose_failed":                 list.Messages.ProposeFailed,
+		"pause_presence":                 list.Messages.PausePresence,
+		"pause_user":                     list.Messages.PauseUser,
+		"pause_step_cap":                 list.Messages.PauseStepCap,
+		"pause_failure":                  list.Messages.PauseFailure,
+		"resumed":                        list.Messages.Resumed,
+		"stopped":                        list.Messages.Stopped,
+		"skipped":                        list.Messages.Skipped,
+		"round_limit":                    list.Messages.RoundLimit,
+		"awaiting_review":                list.Messages.AwaitingReview,
+		"needs_you":                      list.Messages.NeedsYou,
+		"item_failed":                    list.Messages.ItemFailed,
+		"item_failed_input":              list.Messages.ItemFailedInput,
+		"item_failed_capacity":           list.Messages.ItemFailedCapacity,
+		"item_failed_refused":            list.Messages.ItemFailedRefused,
+		"item_failed_internal":           list.Messages.ItemFailedInternal,
+		"step_cap_blocked":               list.Messages.StepCapBlocked,
+		"needs_approval":                 list.Messages.NeedsApproval,
+		"run_waiting":                    list.Messages.RunWaiting,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("asset_list.messages.%s 不能为空", field)
@@ -172,6 +190,10 @@ func validateAssetList(
 		}
 	}
 
+	if err := validateAssetListExecution(list.Execution); err != nil {
+		return err
+	}
+
 	// 路由键只为 #327 PR3 使用；声明清单时四条都必须存在，注册与否由 HTTP
 	// 层决定。
 	routes := schema.Runtime.HTTP.Routes
@@ -183,6 +205,61 @@ func validateAssetList(
 	} {
 		if strings.TrimSpace(route) == "" {
 			return fmt.Errorf("application.asset_list 需要 runtime.http.routes.%s", name)
+		}
+	}
+	// #328：开启自动制作时，在场与运行/单项控制路由必须声明；路由的注册
+	// 仍由 HTTP 层决定。
+	if list.Execution != nil && list.Execution.Enabled {
+		for name, route := range map[string]string{
+			"project_presence":        routes.ProjectPresence,
+			"project_asset_list_run":  routes.ProjectAssetListRun,
+			"project_asset_list_item": routes.ProjectAssetListItem,
+		} {
+			if strings.TrimSpace(route) == "" {
+				return fmt.Errorf("asset_list.execution.enabled 需要 runtime.http.routes.%s", name)
+			}
+		}
+	}
+	return nil
+}
+
+// validateAssetListExecution 校验可选的自动制作段（#328）。未声明时放行；
+// 声明后数值必须在既定范围内，续轮文案必须带齐四个占位符。
+func validateAssetListExecution(execution *AssetListExecutionSchema) error {
+	if execution == nil {
+		return nil
+	}
+	if execution.PollIntervalMilliseconds < 500 || execution.PollIntervalMilliseconds > 60000 {
+		return errors.New("asset_list.execution.poll_interval_milliseconds 必须在 500 到 60000 之间")
+	}
+	if execution.MaxParallelItems < 1 || execution.MaxParallelItems > 3 {
+		return errors.New("asset_list.execution.max_parallel_items 必须在 1 到 3 之间")
+	}
+	if execution.MaxRoundsPerItem < 1 || execution.MaxRoundsPerItem > 10 {
+		return errors.New("asset_list.execution.max_rounds_per_item 必须在 1 到 10 之间")
+	}
+	if execution.MaxCapacityRetries < 0 || execution.MaxCapacityRetries > 3 {
+		return errors.New("asset_list.execution.max_capacity_retries 必须在 0 到 3 之间")
+	}
+	heartbeat := execution.Presence.HeartbeatSeconds
+	if heartbeat < 5 || heartbeat > 60 {
+		return errors.New("asset_list.execution.presence.heartbeat_seconds 必须在 5 到 60 之间")
+	}
+	grace := execution.Presence.GraceSeconds
+	if grace < 30 || grace > 600 {
+		return errors.New("asset_list.execution.presence.grace_seconds 必须在 30 到 600 之间")
+	}
+	if grace < 2*heartbeat {
+		return errors.New("asset_list.execution.presence.grace_seconds 必须至少是 heartbeat_seconds 的两倍")
+	}
+	message := execution.Continuation.Message
+	if strings.TrimSpace(message) == "" {
+		return errors.New("asset_list.execution.continuation.message 不能为空")
+	}
+	placeholders := placeholderSet(message)
+	for _, name := range []string{"name", "description", "route", "round"} {
+		if !placeholders[name] {
+			return fmt.Errorf("asset_list.execution.continuation.message 缺少占位符 {%s}", name)
 		}
 	}
 	return nil

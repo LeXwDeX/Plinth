@@ -50,6 +50,7 @@ var (
 	ErrInvalid             = errors.New("assetlist: invalid")
 	ErrExpired             = errors.New("assetlist: draft expired")
 	ErrConflict            = errors.New("assetlist: version or status conflict")
+	ErrItemState           = errors.New("assetlist: item state conflict")
 	ErrLimit               = errors.New("assetlist: limit reached")
 	ErrProjectNotFound     = errors.New("assetlist: project not found")
 	ErrSessionNotInProject = errors.New("assetlist: session is not in the project")
@@ -138,6 +139,9 @@ type Item struct {
 	StateReason             string              `json:"state_reason,omitempty"`
 	Version                 int64               `json:"version"`
 	SessionID               string              `json:"session_id,omitempty"`
+	LastTurnMessageID       string              `json:"last_turn_message_id,omitempty"`
+	NextActionAt            time.Time           `json:"next_action_at"`
+	Block                   string              `json:"block,omitempty"`
 	ProjectAssetID          string              `json:"project_asset_id,omitempty"`
 	Round                   int                 `json:"round"`
 	Result                  json.RawMessage     `json:"result"`

@@ -597,7 +597,8 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 	skipKeys := schema.AccessKeys == nil
 	skipMCP := schema.MCPPublic == nil
 	skipAssetList := schema.AssetList == nil
-	if !skipBudget && !skipSteps && !skipKeys && !skipMCP && !skipAssetList {
+	skipExecution := skipAssetList || schema.AssetList.Execution == nil
+	if !skipBudget && !skipSteps && !skipKeys && !skipMCP && !skipAssetList && !skipExecution {
 		return fields
 	}
 	applied := make(map[string]string, len(fields))
@@ -615,6 +616,11 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 			continue
 		}
 		if skipAssetList && strings.HasPrefix(path, "asset_list.") {
+			continue
+		}
+		// 自动制作段同样可选：声明 asset_list 但没有 execution 的 Catalog
+		// 不要求（也不拒绝）续轮文案的译文。
+		if skipExecution && strings.HasPrefix(path, "asset_list.execution.") {
 			continue
 		}
 		applied[path] = text

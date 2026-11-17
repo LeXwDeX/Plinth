@@ -39,6 +39,10 @@ func cloneAssetList(source *AssetListSchema) *AssetListSchema {
 	result.States = append([]AssetListStateSchema(nil), source.States...)
 	result.ItemStates = append([]AssetListStateSchema(nil), source.ItemStates...)
 	result.ItemBlocks = append([]ValueLabel(nil), source.ItemBlocks...)
+	if source.Execution != nil {
+		execution := *source.Execution
+		result.Execution = &execution
+	}
 	return &result
 }
 
