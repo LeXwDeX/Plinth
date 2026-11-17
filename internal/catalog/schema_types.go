@@ -67,6 +67,11 @@ type ApplicationSchema struct {
 	// older external Catalog documents stay valid; omitted, the internal steps
 	// approval mode and the settings route do not exist.
 	StepPolicy *StepPolicySchema `json:"step_policy,omitempty"`
+	// AccessKeys is the personal access keys (#332): keys a person issues so a
+	// program, such as an external MCP client, can act as them. Optional so
+	// older external Catalog documents stay valid; omitted, the key management
+	// routes are not registered and no key can be issued.
+	AccessKeys *AccessKeysSchema `json:"access_keys,omitempty"`
 	// ProviderDeprecations lists, per Provider, the models, wire fields and
 	// values its current documentation has deprecated or retired (#329).
 	// Catalog loading rejects an Offering that would send one. Server-side
@@ -1190,6 +1195,9 @@ type PublicApplicationSchema struct {
 	// StepPolicy is the browser-visible 3D step mode (#330): modes, defaults
 	// and the cap range. Omitted when the Catalog predates it.
 	StepPolicy *PublicStepPolicySchema `json:"step_policy,omitempty"`
+	// AccessKeys is the browser-visible access key contract (#332): limits,
+	// lifetimes and scope labels. Omitted when the Catalog predates it.
+	AccessKeys *PublicAccessKeysSchema `json:"access_keys,omitempty"`
 }
 
 // PublicDeliveryFormat is the browser-visible part of ModelFormatSchema.
@@ -6292,6 +6300,12 @@ type CoreHTTPRoutesSchema struct {
 	// AccountStepPolicy reads and writes the person's 3D step settings (#330);
 	// empty (historical Catalogs) leaves the route unregistered.
 	AccountStepPolicy string `json:"account_step_policy,omitempty"`
+	// AccountAccessKeys lists (GET) and issues (POST) the person's personal
+	// access keys (#332); AccountAccessKey revokes one (DELETE, {id}). Both
+	// need a real browser session. Empty (historical Catalogs) leaves them
+	// unregistered.
+	AccountAccessKeys string `json:"account_access_keys,omitempty"`
+	AccountAccessKey  string `json:"account_access_key,omitempty"`
 	ChatSkills        string `json:"chat_skills"`
 	// ClientErrors receives browser error reports for the server log (#233).
 	ClientErrors        string `json:"client_errors,omitempty"`

@@ -72,7 +72,7 @@ func scanGrant(row interface{ Scan(...any) error }) (executiongrant.Grant, error
 		&g.OfferingRevision, &g.PreparedInputID, &g.PreparedInputHash,
 		&g.IdempotencyKey, &g.OperationID, &g.PlanStepID, &g.TriggerTurnID, &g.Status,
 		&taskID, &g.Source, &g.RequestVersion, &decidedBy, &decidedAt, &created, &updated,
-		&g.Harness.Revision, &g.Harness.Digest, &budgetEligible)
+		&g.Harness.Revision, &g.Harness.Digest, &budgetEligible, &g.AccessKeyID)
 	if err != nil {
 		return g, err
 	}
@@ -98,7 +98,7 @@ const grantSelect = `SELECT request_id, owner_id, session_id, offering_id,
  offering_revision, prepared_input_id, prepared_input_hash, idempotency_key,
  operation_id, plan_step_id, trigger_turn_id, status, task_id, source, request_version,
  decided_by, decided_at, created_at, updated_at, harness_revision, harness_digest,
- budget_eligible FROM execution_grants`
+ budget_eligible, access_key_id FROM execution_grants`
 
 func grantByRequest(ctx context.Context, conn interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -156,7 +156,20 @@ func (r *Repository) bindTaskExecutionGrant(ctx context.Context, conn *sql.Conn,
 // A changed pending/denied request replaces its former ID; an approved or
 // consumed request cannot be changed. Reuse of the original key is exact-only.
 func (r *Repository) PreparePending(ctx context.Context, identity executiongrant.Identity, source, triggerTurnID string) (executiongrant.Grant, error) {
-	return r.preparePending(ctx, identity, source, triggerTurnID, false)
+	return r.preparePending(ctx, identity, source, triggerTurnID, false, "")
+}
+
+var _ executiongrant.AccessKeyGrantStore = (*Repository)(nil)
+
+// PreparePendingForAccessKey issues a pending grant of source access_key that
+// records the personal access key whose call asked for it (#332). The key is
+// not part of the operation's identity: a person's keys all act with the
+// person's authority, so a key replacing another while the grant is still
+// pending or was denied (a rotated key retrying the same call after the cap was
+// raised) is issued the new grant under the new key. A grant that was approved
+// or consumed is never issued again; the replay returns it as it is.
+func (r *Repository) PreparePendingForAccessKey(ctx context.Context, identity executiongrant.Identity, accessKeyID string) (executiongrant.Grant, error) {
+	return r.preparePending(ctx, identity, executiongrant.AccessKey, "", false, accessKeyID)
 }
 
 // PreparePendingWithBudget issues a grant that an active production plan may
@@ -167,15 +180,19 @@ func (r *Repository) PreparePendingWithBudget(ctx context.Context, identity exec
 	if !budgetEligible || (source != executiongrant.AgentPending && source != executiongrant.HumanBrowser) {
 		return executiongrant.Grant{}, executiongrant.ErrInvalid
 	}
-	return r.preparePending(ctx, identity, source, triggerTurnID, true)
+	return r.preparePending(ctx, identity, source, triggerTurnID, true, "")
 }
 
-func (r *Repository) preparePending(ctx context.Context, identity executiongrant.Identity, source, triggerTurnID string, budgetEligible bool) (executiongrant.Grant, error) {
-	if !identity.Valid() || (source != executiongrant.HumanBrowser && source != executiongrant.AgentPending) {
+func (r *Repository) preparePending(ctx context.Context, identity executiongrant.Identity, source, triggerTurnID string, budgetEligible bool, accessKeyID string) (executiongrant.Grant, error) {
+	if !identity.Valid() || (source != executiongrant.HumanBrowser && source != executiongrant.AgentPending && source != executiongrant.AccessKey) {
 		return executiongrant.Grant{}, executiongrant.ErrInvalid
 	}
 	if (source == executiongrant.AgentPending && triggerTurnID == "") ||
-		(source == executiongrant.HumanBrowser && triggerTurnID != "") {
+		(source != executiongrant.AgentPending && triggerTurnID != "") {
+		return executiongrant.Grant{}, executiongrant.ErrInvalid
+	}
+	// The key belongs to an access-key grant and to nothing else.
+	if (source == executiongrant.AccessKey) != (accessKeyID != "") {
 		return executiongrant.Grant{}, executiongrant.ErrInvalid
 	}
 	conn, err := r.grantWriteConn(ctx)
@@ -247,18 +264,18 @@ func (r *Repository) preparePending(ctx context.Context, identity executiongrant
 		}
 		_, err = conn.ExecContext(ctx, `UPDATE execution_grants SET request_id=?, offering_id=?, offering_revision=?,
  prepared_input_id=?, prepared_input_hash=?, idempotency_key=?, status='pending', task_id=NULL,
- request_version=request_version+1, decided_by=NULL, decided_at=NULL, trigger_turn_id=?, updated_at=?, harness_revision=?, harness_digest=?, budget_eligible=?
+ request_version=request_version+1, decided_by=NULL, decided_at=NULL, trigger_turn_id=?, updated_at=?, harness_revision=?, harness_digest=?, budget_eligible=?, access_key_id=?
  WHERE request_id=? AND owner_id=? AND status IN ('pending','denied')`,
 			requestID, identity.OfferingID, identity.OfferingRevision, identity.PreparedInputID,
-			identity.PreparedInputHash, identity.IdempotencyKey, triggerTurnID, now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest, boolInt(budgetEligible), old.RequestID, identity.OwnerID)
+			identity.PreparedInputHash, identity.IdempotencyKey, triggerTurnID, now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest, boolInt(budgetEligible), accessKeyID, old.RequestID, identity.OwnerID)
 	} else {
 		_, err = conn.ExecContext(ctx, `INSERT INTO execution_grants
  (request_id,owner_id,session_id,offering_id,offering_revision,prepared_input_id,prepared_input_hash,
- idempotency_key,operation_id,plan_step_id,trigger_turn_id,status,source,request_version,created_at,updated_at,harness_revision,harness_digest,budget_eligible)
- VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,1,?,?,?,?,?)`, requestID, identity.OwnerID, identity.SessionID,
+ idempotency_key,operation_id,plan_step_id,trigger_turn_id,status,source,request_version,created_at,updated_at,harness_revision,harness_digest,budget_eligible,access_key_id)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,1,?,?,?,?,?,?)`, requestID, identity.OwnerID, identity.SessionID,
 			identity.OfferingID, identity.OfferingRevision, identity.PreparedInputID,
 			identity.PreparedInputHash, identity.IdempotencyKey, identity.OperationID,
-			identity.PlanStepID, triggerTurnID, source, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest, boolInt(budgetEligible))
+			identity.PlanStepID, triggerTurnID, source, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), identity.Harness.Revision, identity.Harness.Digest, boolInt(budgetEligible), accessKeyID)
 	}
 	if err != nil {
 		return executiongrant.Grant{}, err

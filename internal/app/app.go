@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/adapters/catalogrecipes"
 	"github.com/LeXwDeX/Plinth/internal/adapters/legacyassetproxy"
@@ -84,7 +85,10 @@ type Application struct {
 	pendingApprovals *pendingapproval.Service
 	scene            *scene.Service
 	manifests        *rendermanifest.Service
-	server           *http.Server
+	// accessKeyAuthenticator resolves personal access keys for a separate
+	// listener (#332); the main server's identity does not accept them.
+	accessKeyAuthenticator *accesskeys.Authenticator
+	server                 *http.Server
 }
 
 // The chat references read a snapshot's recorded digest through this, never
@@ -1743,6 +1747,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, fmt.Errorf("账户设置（3D 步数模式）: %w", err)
 	}
+	accessKeysService, accessKeyAuthenticator, err := accessKeysFromSchema(
+		repository, repository, accessPolicy, applicationSchema.AccessKeys, logger)
+	if err != nil {
+		return nil, fmt.Errorf("个人访问 Key: %w", err)
+	}
 	api, err := httpapi.New(httpapi.Config{
 		Harness:                           harnessResolver,
 		AgentConfiguration:                agentConfigurationService,
@@ -1751,6 +1760,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MCP:                               mcpService,
 		AccountInputAssets:                repository,
 		AccountSettings:                   accountSettingsService,
+		AccessKeys:                        accessKeysService,
 		Readiness:                         readiness.check,
 		Generation:                        module,
 		ExecutionGrants:                   executionGrants,
@@ -1826,15 +1836,16 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	closeRepository = false
 	return &Application{
 		readiness: readiness, config: config,
-		logger:           logger,
-		schema:           applicationSchema,
-		generation:       module,
-		thumbnails:       thumbnailBackfill,
-		chatAgent:        chatAgent,
-		processing:       processingService,
-		scene:            sceneService,
-		pendingApprovals: pendingApprovalService,
-		manifests:        manifestService,
+		logger:                 logger,
+		schema:                 applicationSchema,
+		generation:             module,
+		thumbnails:             thumbnailBackfill,
+		chatAgent:              chatAgent,
+		processing:             processingService,
+		scene:                  sceneService,
+		pendingApprovals:       pendingApprovalService,
+		manifests:              manifestService,
+		accessKeyAuthenticator: accessKeyAuthenticator,
 		server: &http.Server{
 			Addr:    config.Address,
 			Handler: handler,

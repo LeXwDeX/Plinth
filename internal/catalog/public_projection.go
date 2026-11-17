@@ -195,6 +195,17 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			Cap:         cloned.StepPolicy.Cap,
 		}
 	}
+	var publicAccessKeys *PublicAccessKeysSchema
+	if cloned.AccessKeys != nil {
+		publicAccessKeys = &PublicAccessKeysSchema{
+			KeyPrefix:      cloned.AccessKeys.KeyPrefix,
+			MaxKeysPerUser: cloned.AccessKeys.MaxKeysPerUser,
+			DefaultTTLDays: cloned.AccessKeys.DefaultTTLDays,
+			MaxTTLDays:     cloned.AccessKeys.MaxTTLDays,
+			NameMaxLength:  cloned.AccessKeys.NameMaxLength,
+			Scopes:         cloned.AccessKeys.Scopes,
+		}
+	}
 	return PublicApplicationSchema{
 		AgentConfiguration: cloned.AgentConfiguration.Public(),
 		LLMSettings:        cloned.LLMSettings.Public(),
@@ -270,6 +281,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 		Localization:    source.publicLocalization(),
 		Project:         publicProject,
 		StepPolicy:      publicStepPolicy,
+		AccessKeys:      publicAccessKeys,
 	}
 }
 

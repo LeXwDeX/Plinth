@@ -52,6 +52,27 @@ export interface StepPolicyProductSchema {
   cap: { default: number; minimum: number; maximum: number };
 }
 
+/**
+ * #332: the browser-visible personal access keys. A key lets a program, such as
+ * an external MCP client, act as the person without a browser; only its digest
+ * is stored and the plaintext is shown once, at creation. Keys are managed
+ * (listed, created, revoked) with a real browser session only. Absent on older
+ * servers: the key dialog stays hidden. The last-use interval, the server's
+ * messages and the audit declaration stay on the server.
+ */
+export interface AccessKeysProductSchema {
+  /** Every key starts with this word and an underscore, e.g. `plk_`. */
+  key_prefix: string;
+  /** The most active (not revoked, not expired) keys one person may hold. */
+  max_keys_per_user: number;
+  /** The lifetime of a key whose request names none, and the longest a request may ask for. */
+  default_ttl_days: number;
+  max_ttl_days: number;
+  name_max_length: number;
+  /** `read` (query and download) and `generate` (start generation and processing), with labels. */
+  scopes: Array<{ value: string; label: string }>;
+}
+
 /** The browser contract after convention names are reduced to strings. */
 export type NormalizedProjectProductSchema = Omit<ProjectProductSchema, 'conventions'> & {
   conventions: { fields: string[]; texts: string[] };
@@ -117,6 +138,8 @@ export interface ProductSchema {
   projects?: ProjectProductSchema;
   /** #330: the 3D step mode; absent on older servers. */
   step_policy?: StepPolicyProductSchema;
+  /** #332: personal access keys; absent on older servers. */
+  access_keys?: AccessKeysProductSchema;
   runtime: {
     /**
      * #329 note 99647: the one text that says only the first reference pictures are used — the general form and
@@ -223,6 +246,10 @@ export interface ProductSchema {
         account_resources: string;
         /** #330: GET reads and PUT saves the person's 3D step settings (PUT needs the browser session). */
         account_step_policy?: string;
+        /** #332: GET lists and POST issues the person's access keys; both need the browser session. */
+        account_access_keys?: string;
+        /** #332: DELETE (`{id}`) revokes one of the person's access keys. */
+        account_access_key?: string;
         agent_params: string;
         agent_bind: string;
         agent_consent: string;

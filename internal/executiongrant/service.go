@@ -15,6 +15,12 @@ import (
 const HumanBrowser = "human_browser"
 const AgentPending = "agent_human_decision"
 
+// AccessKey is the source of a grant a personal access key's call asked for
+// (#332), for instance an external MCP client. No person decides it and no
+// approval card exists for it: AccessKeyActor approves it, or denies it in
+// place. See access_key.go.
+const AccessKey = "access_key"
+
 // PolicyActorPrefix prefixes Grant.DecidedBy for an approval made by the
 // session approval policy instead of a person. A human actor ID never has it.
 const PolicyActorPrefix = "policy:"
@@ -85,6 +91,9 @@ type PrepareCommand struct {
 	// active production plan instead of a per-step human decision (#103). It
 	// is stored with the grant; browser-started steps are never eligible.
 	BudgetEligible bool
+	// AccessKeyID names the personal access key of a Source AccessKey grant
+	// (#332); empty for every other source.
+	AccessKeyID string
 }
 
 // SessionModeReader returns the owner's approval mode for one of its sessions.
@@ -144,11 +153,17 @@ func (s Service) Expired(g Grant) bool {
 
 func (s Service) Prepare(ctx context.Context, cmd PrepareCommand) (Grant, error) {
 	if !cmd.Harness.Valid() || s.Grants == nil || s.Prepared == nil || cmd.OwnerID == "" || cmd.ActorID == "" ||
-		(cmd.Source != HumanBrowser && cmd.Source != AgentPending) || cmd.SessionID == "" || cmd.PreparedInputID == "" {
+		(cmd.Source != HumanBrowser && cmd.Source != AgentPending && cmd.Source != AccessKey) ||
+		cmd.SessionID == "" || cmd.PreparedInputID == "" {
 		return Grant{}, ErrInvalid
 	}
 	if (cmd.Source == AgentPending && cmd.TriggerTurnID == "") ||
-		(cmd.Source == HumanBrowser && cmd.TriggerTurnID != "") {
+		(cmd.Source != AgentPending && cmd.TriggerTurnID != "") {
+		return Grant{}, ErrInvalid
+	}
+	// The key that asked belongs to an access-key grant and to nothing else;
+	// no production plan ever approves such a grant.
+	if (cmd.Source == AccessKey) != (cmd.AccessKeyID != "") || (cmd.Source == AccessKey && cmd.BudgetEligible) {
 		return Grant{}, ErrInvalid
 	}
 	snapshot, err := s.Prepared.GetExecutionPreparedSnapshot(ctx, cmd.OwnerID, cmd.PreparedInputID)
@@ -166,6 +181,13 @@ func (s Service) Prepare(ctx context.Context, cmd PrepareCommand) (Grant, error)
 		PreparedInputID: snapshot.ID, PreparedInputHash: snapshot.InputHash,
 		IdempotencyKey: cmd.IdempotencyKey, OperationID: cmd.OperationID,
 		PlanStepID: cmd.PlanStepID, Harness: cmd.Harness,
+	}
+	if cmd.Source == AccessKey {
+		store, ok := s.Grants.(AccessKeyGrantStore)
+		if !ok {
+			return Grant{}, ErrInvalid
+		}
+		return store.PreparePendingForAccessKey(ctx, identity, cmd.AccessKeyID)
 	}
 	if cmd.BudgetEligible {
 		// Budget eligibility is declared by the server-side caller: an Agent

@@ -2216,6 +2216,8 @@
           "account_usage": "/api/v1/account/usage",
           "account_resources": "/api/v1/account/resources",
           "account_step_policy": "/api/v1/account/step-policy",
+          "account_access_keys": "/api/v1/account/access-keys",
+          "account_access_key": "/api/v1/account/access-keys/{id}",
           "chat_session_harness": "/api/v1/chat/sessions/{sessionID}/harness",
           "task_recovery": "/api/v1/tasks/{taskID}/recovery",
           "task_recovery_prepare": "/api/v1/tasks/{taskID}/recovery/prepare",
@@ -5469,6 +5471,26 @@
       "audit": {
         "update_action": "set_step_policy",
         "resource_type": "account_step_policy"
+      }
+    },
+    "access_keys": {
+      "key_prefix": "plk",
+      "max_keys_per_user": 10,
+      "default_ttl_days": 90,
+      "max_ttl_days": 365,
+      "name_max_length": 80,
+      "scopes": [
+        {"value": "read", "label": "只读（查询与下载）"},
+        {"value": "generate", "label": "生成（发起生成与加工）"}
+      ],
+      "last_used_update_seconds": 60,
+      "messages": {
+        "limit_reached": "访问 Key 已达到上限（最多 {max} 个有效 Key）。请先吊销不再使用的 Key，再创建新的。"
+      },
+      "audit": {
+        "create_action": "create_access_key",
+        "revoke_action": "revoke_access_key",
+        "resource_type": "access_key"
       }
     },
     "chat": {
@@ -14753,6 +14775,14 @@
         "label": "设置 3D 步数模式"
       },
       {
+        "value": "create_access_key",
+        "label": "创建访问 Key"
+      },
+      {
+        "value": "revoke_access_key",
+        "label": "吊销访问 Key"
+      },
+      {
         "value": "continue_turn_in_background",
         "label": "停止等待，任务后台继续"
       },
@@ -19296,6 +19326,11 @@
             "audit_actions[value=promote_project_asset].label": "Promote project asset",
             "audit_actions[value=set_production_brief].label": "Set production brief",
             "audit_actions[value=set_step_policy].label": "Set 3D step mode",
+            "audit_actions[value=create_access_key].label": "Create access key",
+            "audit_actions[value=revoke_access_key].label": "Revoke access key",
+            "access_keys.scopes[value=read].label": "Read (query and download)",
+            "access_keys.scopes[value=generate].label": "Generate (start generation and processing)",
+            "access_keys.messages.limit_reached": "You have reached the access key limit (at most {max} active keys). Revoke a key you no longer use, then create a new one.",
             "step_policy.modes[value=agent].label": "Managed by the Agent",
             "step_policy.modes[value=unlimited].label": "Unlimited steps",
             "step_policy.modes[value=cap].label": "Limit steps",

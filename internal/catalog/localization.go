@@ -589,7 +589,8 @@ func validateBundleFieldLeaf(steps []pathStep) error {
 func applicableBundleFields(schema ApplicationSchema, fields map[string]string) map[string]string {
 	skipBudget := schema.Chat.ApprovalPolicy.Budget.MaxCredits <= 0
 	skipSteps := schema.StepPolicy == nil
-	if !skipBudget && !skipSteps {
+	skipKeys := schema.AccessKeys == nil
+	if !skipBudget && !skipSteps && !skipKeys {
 		return fields
 	}
 	applied := make(map[string]string, len(fields))
@@ -598,6 +599,9 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 			continue
 		}
 		if skipSteps && strings.HasPrefix(path, "step_policy.") {
+			continue
+		}
+		if skipKeys && strings.HasPrefix(path, "access_keys.") {
 			continue
 		}
 		applied[path] = text
