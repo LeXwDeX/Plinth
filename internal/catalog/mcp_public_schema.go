@@ -222,6 +222,12 @@ type MCPPublicMessages struct {
 	MethodNotAllowed  string `json:"method_not_allowed"`
 	RequestTooLarge   string `json:"request_too_large"`
 	Internal          string `json:"internal"`
+	// The refusals of the listener's limits (access_keys.rate_limit), both
+	// 429 with Retry-After. RateLimited answers a key that made too many
+	// requests; AuthThrottled a client address that failed to authenticate too
+	// often. Both carry {seconds}, the wait.
+	RateLimited   string `json:"rate_limited"`
+	AuthThrottled string `json:"auth_throttled"`
 
 	// The answers of the tools that start work. NeedsPerson carries {task_id};
 	// ServiceUnavailable and ServiceMismatch {service}; TooManyInFlight

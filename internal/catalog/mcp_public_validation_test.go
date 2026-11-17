@@ -241,6 +241,10 @@ func TestMCPPublicRejectsInvalidDeclarations(t *testing.T) {
 		"needs-person lacks the task":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.NeedsPerson = "ask a person" },
 		"in-flight message lacks time": func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.TooManyInFlight = "later" },
 		"no unauthenticated message":   func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.Unauthenticated = "" },
+		"no rate-limited message":      func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.RateLimited = "" },
+		"rate-limited lacks the wait":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.RateLimited = "slow down" },
+		"no throttled message":         func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.AuthThrottled = " " },
+		"throttled lacks the wait":     func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.AuthThrottled = "try later" },
 		"scope message lacks holder":   func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InsufficientScope = "no" },
 		"detail message lacks holder":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InvalidArguments = "no" },
 	} {
@@ -301,7 +305,8 @@ func TestMCPPublicCopyIsLocalized(t *testing.T) {
 	service := application.MCPPublic
 	for _, text := range []string{
 		service.Instructions, service.Messages.Unauthenticated, service.Messages.InsufficientScope,
-		service.Messages.TaskNotFound, service.Messages.Internal, service.StatusBlock.Summary.Template,
+		service.Messages.TaskNotFound, service.Messages.Internal, service.Messages.RateLimited, service.Messages.AuthThrottled,
+		service.StatusBlock.Summary.Template,
 		service.StatusBlock.Summary.TemplateNoAsset, service.StatusBlock.Summary.BalanceUnknown,
 		service.StatusBlock.Summary.Unknown, service.Tools[0].Description, service.Tools[len(service.Tools)-1].Description,
 	} {
@@ -311,5 +316,10 @@ func TestMCPPublicCopyIsLocalized(t *testing.T) {
 	}
 	if got := localizer.Text("en", service.Messages.InsufficientScope); !strings.Contains(got, "{scope}") {
 		t.Fatalf("the English scope message lost its placeholder: %q", got)
+	}
+	for name, message := range map[string]string{"rate_limited": service.Messages.RateLimited, "auth_throttled": service.Messages.AuthThrottled} {
+		if got := localizer.Text("en", message); !strings.Contains(got, "{seconds}") {
+			t.Fatalf("the English %s message lost its placeholder: %q", name, got)
+		}
 	}
 }

@@ -54,6 +54,12 @@ func validateAccessKeys(schema ApplicationSchema, auditActions map[string]struct
 	if keys.LastUsedUpdateSeconds < 1 {
 		return errors.New("access_keys.last_used_update_seconds 必须为正数")
 	}
+	// A Catalog without rate_limit is valid and limits nothing; a declared one
+	// has two positive counts (zero would refuse every request, and a negative
+	// count means nothing, so neither is read as "no limit").
+	if limit := keys.RateLimit; limit != nil && (limit.RequestsPerMinute < 1 || limit.AuthFailuresPerMinute < 1) {
+		return errors.New("access_keys.rate_limit 必须同时声明为正整数的 requests_per_minute 与 auth_failures_per_minute")
+	}
 	if message := keys.Messages.LimitReached; strings.TrimSpace(message) == "" || !strings.Contains(message, "{max}") {
 		return errors.New("access_keys.messages.limit_reached 必须非空并包含 {max}")
 	}

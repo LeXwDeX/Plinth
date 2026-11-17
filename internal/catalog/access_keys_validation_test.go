@@ -33,6 +33,9 @@ func TestDefaultAccessKeysLoadAndProjectSafeMembers(t *testing.T) {
 	if keys.Audit.CreateAction == "" || keys.Audit.RevokeAction == "" || !strings.Contains(keys.Messages.LimitReached, "{max}") {
 		t.Fatalf("audit/messages = %+v %+v", keys.Audit, keys.Messages)
 	}
+	if keys.RateLimit == nil || keys.RateLimit.RequestsPerMinute != 120 || keys.RateLimit.AuthFailuresPerMinute != 20 {
+		t.Fatalf("rate limit = %+v; the external listener ships with 120 requests per key and 20 failed authentications per address a minute", keys.RateLimit)
+	}
 
 	public := application.Public().AccessKeys
 	if public == nil || public.KeyPrefix != "plk" || len(public.Scopes) != 2 || public.MaxKeysPerUser != keys.MaxKeysPerUser {
@@ -47,7 +50,10 @@ func TestDefaultAccessKeysLoadAndProjectSafeMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	section, _ := json.Marshal(document["access_keys"])
-	for _, internal := range []string{"last_used_update_seconds", "limit_reached", "create_action", "revoke_action", "resource_type"} {
+	for _, internal := range []string{
+		"last_used_update_seconds", "limit_reached", "create_action", "revoke_action", "resource_type",
+		"rate_limit", "requests_per_minute", "auth_failures_per_minute",
+	} {
 		if strings.Contains(string(section), internal) {
 			t.Fatalf("public access_keys leaks %q: %s", internal, section)
 		}
@@ -82,7 +88,15 @@ func TestAccessKeysValidationRejectsIncompleteOrUnknownDeclarations(t *testing.T
 		},
 		"unknown scope":      func(app *catalog.ApplicationSchema) { app.AccessKeys.Scopes[0].Value = "admin" },
 		"no last-use window": func(app *catalog.ApplicationSchema) { app.AccessKeys.LastUsedUpdateSeconds = 0 },
-		"missing message":    func(app *catalog.ApplicationSchema) { app.AccessKeys.Messages.LimitReached = "" },
+		// A declared rate_limit names both counts as positive integers: a
+		// zero or a negative count would silently refuse every request or
+		// silently limit nothing.
+		"no request limit":           func(app *catalog.ApplicationSchema) { app.AccessKeys.RateLimit.RequestsPerMinute = 0 },
+		"negative request limit":     func(app *catalog.ApplicationSchema) { app.AccessKeys.RateLimit.RequestsPerMinute = -1 },
+		"no failed-auth limit":       func(app *catalog.ApplicationSchema) { app.AccessKeys.RateLimit.AuthFailuresPerMinute = 0 },
+		"negative failed-auth limit": func(app *catalog.ApplicationSchema) { app.AccessKeys.RateLimit.AuthFailuresPerMinute = -5 },
+		"rate limit declared empty":  func(app *catalog.ApplicationSchema) { app.AccessKeys.RateLimit = &catalog.AccessKeysRateLimitSchema{} },
+		"missing message":            func(app *catalog.ApplicationSchema) { app.AccessKeys.Messages.LimitReached = "" },
 		"message without max": func(app *catalog.ApplicationSchema) {
 			app.AccessKeys.Messages.LimitReached = "上限已满"
 		},
@@ -126,9 +140,25 @@ func TestAccessKeysCloneDoesNotShareSlices(t *testing.T) {
 	}
 	first := source.Application()
 	first.AccessKeys.Scopes[0].Value = "mutated"
+	first.AccessKeys.RateLimit.RequestsPerMinute = 1
 	second := source.Application()
 	if second.AccessKeys.Scopes[0].Value == "mutated" {
 		t.Fatal("Catalog Application() shares access key scopes with a previous copy")
+	}
+	if second.AccessKeys.RateLimit.RequestsPerMinute == 1 {
+		t.Fatal("Catalog Application() shares the access key rate limit with a previous copy")
+	}
+}
+
+// The rate limit is an optional part of the section: a Catalog that does not
+// declare it is valid and limits nothing (the listener lets every request
+// through, as a Catalog written before the limits existed always did).
+func TestAccessKeysWithoutRateLimitStaysValid(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	application.AccessKeys.RateLimit = nil
+	if err := catalog.ValidateApplicationSchema(application); err != nil {
+		t.Fatalf("access_keys without rate_limit rejected: %v", err)
 	}
 }
 
