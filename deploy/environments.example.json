@@ -29,7 +29,7 @@
       }
     },
     "formal-test": {
-      "description": "正式测试环境（测试版本中的稳定版）：只接收 dev-test 已稳定通过全部验收的精确 revision",
+      "description": "正式测试环境（测试版本中的稳定版）：只接收 dev-test 已稳定通过全部验收的精确 revision；layout 里的 MCP_PUBLIC_BIND_IP 与 MCP_PUBLIC_HOST_PORT 是可选键，只在要对局域网开放外部 MCP 监听时才写（见 docs/deployment.md）",
       "ssh": "root@<formal-test-host>",
       "root": "<formal-test-release-root>",
       "base_url": "http://<formal-test-host>:<port>",
@@ -52,6 +52,8 @@
       "layout": {
         "GO_WEB_BIND_IP": "<formal-test-host>",
         "GO_WEB_HOST_PORT": "<port>",
+        "MCP_PUBLIC_BIND_IP": "<formal-test-host>",
+        "MCP_PUBLIC_HOST_PORT": "<mcp-port>",
         "GO_PROD_DB_DIR": "<formal-test-release-root>/production/data",
         "GO_PROD_STORAGE_DIR": "<formal-test-release-root>/production/storage-go",
         "GO_PROD_WEB_DATA_DIR": "<formal-test-release-root>/production/web-data",

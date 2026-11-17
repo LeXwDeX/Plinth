@@ -26,6 +26,15 @@ type StepPolicySchema struct {
 	// CountedCapabilities lists the capabilities whose Tasks count as 3D steps.
 	// Server-side only.
 	CountedCapabilities []schemacontract.Capability `json:"counted_capabilities"`
+	// BalanceCacheSeconds is how long a read of a provider's balance is kept
+	// before the provider is asked again, and BalanceReadTimeoutSeconds how
+	// long one read may take. A failed read is kept for the same time, so a
+	// provider that is down is not asked on every call. Both are read by the
+	// shared balance reader the external MCP service (#332) and later the
+	// platform Agent use; required when application.mcp_public is declared.
+	// Server-side only.
+	BalanceCacheSeconds       int `json:"balance_cache_seconds,omitempty"`
+	BalanceReadTimeoutSeconds int `json:"balance_read_timeout_seconds,omitempty"`
 	// Messages is the copy of the server's answers. Server-side only.
 	Messages StepPolicyMessagesSchema `json:"messages"`
 	// Audit names the product-audit action of a changed setting.

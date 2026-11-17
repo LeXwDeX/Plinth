@@ -43,6 +43,27 @@ func cloneAccessKeys(source *AccessKeysSchema) *AccessKeysSchema {
 	return &result
 }
 
+func cloneMCPPublic(source *MCPPublicSchema) *MCPPublicSchema {
+	if source == nil {
+		return nil
+	}
+	result := *source
+	result.ServiceGroups = make([]MCPPublicServiceGroup, len(source.ServiceGroups))
+	for i, group := range source.ServiceGroups {
+		result.ServiceGroups[i] = group
+		result.ServiceGroups[i].Capabilities = append([]schemacontract.Capability(nil), group.Capabilities...)
+	}
+	result.StatusBlock.Schema = append(json.RawMessage(nil), source.StatusBlock.Schema...)
+	result.StatusBlock.BalanceAccounts = append([]string(nil), source.StatusBlock.BalanceAccounts...)
+	result.Tools = make([]MCPPublicTool, len(source.Tools))
+	for i, tool := range source.Tools {
+		result.Tools[i] = tool
+		result.Tools[i].InputSchema = append(json.RawMessage(nil), tool.InputSchema...)
+		result.Tools[i].OutputSchema = append(json.RawMessage(nil), tool.OutputSchema...)
+	}
+	return &result
+}
+
 func cloneStringMap(source map[string]string) map[string]string {
 	result := make(map[string]string, len(source))
 	for key, value := range source {
@@ -119,6 +140,7 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	result.Project = cloneProject(source.Project)
 	result.StepPolicy = cloneStepPolicy(source.StepPolicy)
 	result.AccessKeys = cloneAccessKeys(source.AccessKeys)
+	result.MCPPublic = cloneMCPPublic(source.MCPPublic)
 	result.Chat.Skills.Categories = make([]ChatSkillCategorySchema, len(source.Chat.Skills.Categories))
 	for i, category := range source.Chat.Skills.Categories {
 		result.Chat.Skills.Categories[i] = category

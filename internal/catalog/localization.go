@@ -590,7 +590,8 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 	skipBudget := schema.Chat.ApprovalPolicy.Budget.MaxCredits <= 0
 	skipSteps := schema.StepPolicy == nil
 	skipKeys := schema.AccessKeys == nil
-	if !skipBudget && !skipSteps && !skipKeys {
+	skipMCP := schema.MCPPublic == nil
+	if !skipBudget && !skipSteps && !skipKeys && !skipMCP {
 		return fields
 	}
 	applied := make(map[string]string, len(fields))
@@ -602,6 +603,9 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 			continue
 		}
 		if skipKeys && strings.HasPrefix(path, "access_keys.") {
+			continue
+		}
+		if skipMCP && strings.HasPrefix(path, "mcp_public.") {
 			continue
 		}
 		applied[path] = text

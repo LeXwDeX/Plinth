@@ -25,7 +25,9 @@ type Directory interface {
 // The Principal is the key owner's scope only. The user's roles never apply,
 // so an administrator's key has no administrator permissions, and the Principal
 // is of the owner who holds the key, never of anyone else. A key whose owner
-// was deleted or disabled no longer authenticates.
+// was deleted or disabled no longer authenticates. The scopes the Principal
+// carries are the key's effective scopes (EffectiveScopes): a key that may
+// generate may also read.
 type Authenticator struct {
 	Keys   *Service
 	Users  Directory
@@ -70,5 +72,5 @@ func (a *Authenticator) Identify(request *http.Request) (access.Principal, error
 	}
 	return a.Policy.AccessKeyPrincipal(
 		access.Claims{ID: record.ID, Name: name, Email: record.Email},
-		authenticated.KeyID, authenticated.Scopes), nil
+		authenticated.KeyID, EffectiveScopes(authenticated.Scopes)), nil
 }

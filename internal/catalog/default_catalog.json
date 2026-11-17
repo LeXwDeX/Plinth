@@ -58,6 +58,15 @@
             "default": "127.0.0.1:13333",
             "required": true
           },
+          "mcp_public_listen_addr": {
+            "type": "string",
+            "environment": [
+              {
+                "name": "MCP_PUBLIC_LISTEN_ADDR"
+              }
+            ],
+            "default": ""
+          },
           "database_path": {
             "type": "string",
             "environment": [
@@ -5465,6 +5474,8 @@
         "mesh-completion",
         "model-split"
       ],
+      "balance_cache_seconds": 30,
+      "balance_read_timeout_seconds": 5,
       "messages": {
         "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。"
       },
@@ -5481,7 +5492,7 @@
       "name_max_length": 80,
       "scopes": [
         {"value": "read", "label": "只读（查询与下载）"},
-        {"value": "generate", "label": "生成（发起生成与加工）"}
+        {"value": "generate", "label": "生成（发起生成与加工，同时包含只读）"}
       ],
       "last_used_update_seconds": 60,
       "messages": {
@@ -5491,6 +5502,103 @@
         "create_action": "create_access_key",
         "revoke_action": "revoke_access_key",
         "resource_type": "access_key"
+      }
+    },
+    "mcp_public": {
+      "enabled": true,
+      "path": "/mcp",
+      "download_path": "/mcp/tasks/{taskID}/assets/{assetID}",
+      "protocol_version": "2026-07-28",
+      "server_name": "Plinth",
+      "instructions": "Plinth 的对外 MCP 服务，用你自己的访问 Key 作 Bearer 调用。每个工具的响应都带状态块（structuredContent 里的 status）：3D 步数模式、本资产与累计已用的 3D 步数、三家 3D 供应商的余额、失败归因与建议动作。默认由你自己判断要不要继续做 3D 步骤，平台不拦截。余额读不到时写 unknown，不代表零。",
+      "max_request_bytes": 1048576,
+      "max_response_bytes": 4194304,
+      "read_header_timeout_seconds": 10,
+      "read_timeout_seconds": 30,
+      "write_timeout_seconds": 1800,
+      "idle_timeout_seconds": 120,
+      "poll_interval_seconds": 5,
+      "list_page_size": 20,
+      "list_max_page_size": 100,
+      "service_groups": [
+        {
+          "id": "image",
+          "label": "图片",
+          "capabilities": ["text-to-image", "image-to-image", "background-removal"]
+        },
+        {
+          "id": "model",
+          "label": "3D 模型",
+          "capabilities": ["text-to-3d", "image-to-3d"]
+        },
+        {
+          "id": "processing",
+          "label": "模型加工",
+          "capabilities": ["retexture", "remesh", "rigging", "animation", "format-conversion", "model-split"]
+        }
+      ],
+      "status_block": {
+        "key": "status",
+        "schema": {"type": "object", "description": "你自己判断下一步所需的事实。读取状态块不计步、不扣费。", "properties": {"step_mode": {"type": "string", "enum": ["agent", "unlimited", "cap"], "description": "MCP 入口当前的 3D 步数模式：agent=由你自己管理，不设上限；unlimited=不限；cap=每个资产有硬上限"}, "step_mode_label": {"type": "string", "description": "步数模式的名称"}, "step_cap": {"type": ["integer", "null"], "description": "硬上限模式下每个资产最多能用的 3D 步数；其他模式为 null"}, "asset": {"type": ["object", "null"], "description": "这次调用涉及的资产（一个对话会话）；没有涉及资产时为 null", "properties": {"id": {"type": "string", "description": "资产 ID（会话 ID）"}, "title": {"type": ["string", "null"], "description": "资产标题"}, "used_steps": {"type": ["integer", "null"], "description": "本资产已用的 3D 步数；读取失败为 null，不是零"}, "steps_left": {"type": ["integer", "null"], "description": "硬上限模式下本资产还能做几步；其他模式为 null"}}, "required": ["id", "used_steps", "steps_left"]}, "total_used_steps": {"type": ["integer", "null"], "description": "你（Key 的所有者）经 MCP 累计的 3D 步数，所有资产合计；读取失败为 null，不是零"}, "balances": {"type": "array", "description": "三家 3D 供应商的余额（供应商的原生单位）。读取失败的写 state=unknown，不是零，也不影响本次调用", "items": {"type": "object", "properties": {"provider": {"type": "string", "description": "供应商 ID"}, "label": {"type": "string", "description": "供应商名称"}, "state": {"type": "string", "enum": ["ok", "unknown"], "description": "ok=读到了；unknown=读不到（不代表余额为零）"}, "amount": {"type": ["string", "null"], "description": "余额数值（十进制字符串）；unknown 时为 null"}, "unit": {"type": ["string", "null"], "description": "原生单位 ID"}, "unit_label": {"type": ["string", "null"], "description": "原生单位名称，如 Meshy credits"}, "read_at": {"type": ["string", "null"], "description": "读取时间（RFC 3339）。取自服务端短时缓存，可能比现在早几十秒"}}, "required": ["provider", "label", "state", "amount", "unit", "unit_label", "read_at"]}}, "step_costs": {"type": "array", "description": "本资产用过的服务每一步大约消耗多少（原生单位，约数）；没有原生计价的服务不列出", "items": {"type": "object", "properties": {"offering_id": {"type": "string", "description": "服务（供给项）ID"}, "provider": {"type": "string", "description": "供应商 ID"}, "capability": {"type": "string", "description": "能力"}, "amount": {"type": "string", "description": "每一步大约消耗的数量（十进制字符串）"}, "unit": {"type": "string", "description": "原生单位 ID"}, "unit_label": {"type": "string", "description": "原生单位名称"}}, "required": ["offering_id", "provider", "capability", "amount", "unit", "unit_label"]}}, "failure": {"type": ["object", "null"], "description": "这次调用涉及的任务失败时，失败归因与建议动作；否则为 null", "properties": {"task_id": {"type": "string", "description": "失败的任务 ID"}, "category": {"type": "string", "enum": ["input_invalid", "parameter_invalid", "upstream_capacity", "upstream_refused", "internal"], "description": "失败归因的五类之一"}, "next_action": {"type": "string", "enum": ["retry", "retry_later", "fix_input", "fix_parameters", "ask_user", "contact_admin"], "description": "建议动作"}, "retryable": {"type": "boolean", "description": "平台判断这次失败是否值得重试"}, "user_decision_required": {"type": "boolean", "description": "为 true 时可能已经扣费，必须由用户决定，不要自动重试"}, "advice": {"type": "string", "description": "建议动作的说明"}}, "required": ["task_id", "category", "next_action", "retryable", "user_decision_required", "advice"]}}, "required": ["step_mode", "step_mode_label", "step_cap", "asset", "total_used_steps", "balances", "step_costs", "failure"]},
+        "balance_accounts": ["meshy", "tripo", "hyper3d"],
+        "max_assets": 20,
+        "cost_task_window": 50,
+        "summary": {
+          "template": "状态：3D 步数模式「{mode}」；本资产已用 {asset_steps} 步；经 MCP 累计 {total_steps} 步；余额：{balances}",
+          "template_no_asset": "状态：3D 步数模式「{mode}」；经 MCP 累计 {total_steps} 步；余额：{balances}",
+          "balance_item": "{label} {amount} {unit_label}",
+          "balance_unknown": "{label} 未知",
+          "unknown": "未知",
+          "separator": " / "
+        }
+      },
+      "tools": [
+        {
+          "name": "list_services",
+          "description": "列出可以通过 MCP 使用的服务（供给项），按能力分组，写明每个服务当前是否可用、每一步大约消耗多少、要什么输入、有哪些可调参数。服务不可用时会明说，不会换成别的模型。",
+          "scope": "read",
+          "input_schema": {"type": "object", "properties": {"capability": {"type": "string", "minLength": 1, "maxLength": 64, "description": "只看某个能力，如 image-to-3d；不传则列出全部"}, "available_only": {"type": "boolean", "description": "为 true 时只列出当前可用的服务"}}, "additionalProperties": false},
+          "output_schema": {"type": "object", "properties": {"groups": {"type": "array", "description": "按用途分组的能力", "items": {"type": "object", "properties": {"id": {"type": "string", "description": "分组 ID"}, "label": {"type": "string", "description": "分组名称"}, "capabilities": {"type": "array", "items": {"type": "object", "properties": {"capability": {"type": "string", "description": "能力"}, "services": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "description": "服务（供给项）ID，后续生成类工具用它指定服务"}, "provider": {"type": "string", "description": "供应商 ID"}, "provider_name": {"type": "string", "description": "供应商名称"}, "model": {"type": "string", "description": "模型 ID"}, "model_name": {"type": "string", "description": "模型名称"}, "available": {"type": "boolean", "description": "运行配置是否可用；不可用的服务不会被悄悄换成别的"}, "recommended": {"type": "boolean", "description": "是否推荐"}, "step_cost": {"type": ["object", "null"], "description": "每一步大约消耗的原生单位（约数）；没有原生计价为 null", "properties": {"amount": {"type": "string"}, "unit": {"type": "string"}, "unit_label": {"type": "string"}}}, "inputs": {"type": "array", "description": "这个服务要的输入：图片、来源任务等", "items": {"type": "object", "properties": {"name": {"type": "string", "description": "参数名"}, "label": {"type": "string", "description": "名称"}, "kind": {"type": "string", "description": "asset、asset-array 或 task"}, "required": {"type": "boolean"}, "min_items": {"type": "integer"}, "max_items": {"type": "integer"}, "media_types": {"type": "array", "items": {"type": "string"}}, "max_bytes": {"type": "integer"}, "task_capabilities": {"type": "array", "description": "来源任务必须属于的能力", "items": {"type": "string"}}}}}, "parameters": {"type": "array", "description": "可调参数摘要；固定值和隐藏参数不列出", "items": {"type": "object", "properties": {"name": {"type": "string", "description": "参数名"}, "label": {"type": "string", "description": "名称"}, "type": {"type": "string", "description": "参数类型"}, "required": {"type": "boolean"}, "default": {"type": ["string", "number", "boolean", "array", "object", "null"], "description": "默认值"}, "options": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "string"}, "label": {"type": "string"}}}}, "minimum": {"type": ["number", "null"]}, "maximum": {"type": ["number", "null"]}, "max_length": {"type": "integer"}}}}}, "required": ["id", "provider", "model", "available"]}}}}}}}}, "error": {"type": "object", "description": "业务错误：只在 isError 为 true 的结果里出现", "properties": {"code": {"type": "string", "description": "错误码"}, "message": {"type": "string", "description": "原因，可直接转告用户"}}, "required": ["code", "message"]}}}
+        },
+        {
+          "name": "get_status",
+          "description": "查看 3D 步数模式、你的各个 MCP 资产已用的 3D 步数、累计步数和三家 3D 供应商的余额。读取不计步、不扣费。每个工具的响应都带同样的状态块，不必为了拿状态而专门调用它。",
+          "scope": "read",
+          "input_schema": {"type": "object", "properties": {}, "additionalProperties": false},
+          "output_schema": {"type": "object", "properties": {"assets": {"type": "array", "description": "你的 MCP 资产（每个资产是一个对话会话），最近有活动的在前", "items": {"type": "object", "properties": {"asset_id": {"type": "string", "description": "资产 ID（会话 ID）"}, "title": {"type": ["string", "null"], "description": "资产标题"}, "used_steps": {"type": ["integer", "null"], "description": "已用的 3D 步数；读取失败为 null"}, "last_activity_at": {"type": ["string", "null"], "description": "最近一次授权的时间（RFC 3339）"}}, "required": ["asset_id", "used_steps"]}}, "assets_truncated": {"type": "boolean", "description": "为 true 时还有更早的资产没有列出"}, "error": {"type": "object", "description": "业务错误：只在 isError 为 true 的结果里出现", "properties": {"code": {"type": "string", "description": "错误码"}, "message": {"type": "string", "description": "原因，可直接转告用户"}}, "required": ["code", "message"]}}}
+        },
+        {
+          "name": "get_task",
+          "description": "查询一个任务的状态、进度、失败归因与建议动作，以及它属于哪个资产。任务没结束时结果里有建议的轮询间隔。只能查自己的任务；别人的任务当作不存在。",
+          "scope": "read",
+          "input_schema": {"type": "object", "properties": {"task_id": {"type": "string", "minLength": 1, "maxLength": 200, "description": "任务 ID"}}, "required": ["task_id"], "additionalProperties": false},
+          "output_schema": {"type": "object", "properties": {"task": {"type": "object", "description": "一个任务", "properties": {"id": {"type": "string", "description": "任务 ID"}, "asset_id": {"type": ["string", "null"], "description": "任务所属的资产（会话）ID"}, "capability": {"type": "string", "description": "能力"}, "offering_id": {"type": "string", "description": "所用服务（供给项）ID"}, "provider": {"type": "string", "description": "供应商 ID"}, "model": {"type": "string", "description": "模型 ID"}, "state": {"type": "string", "description": "公开状态，取自产品状态表（如 PENDING、IN_PROGRESS、SUCCEEDED、FAILED）"}, "state_label": {"type": "string", "description": "状态名称"}, "terminal": {"type": "boolean", "description": "为 true 时任务已结束，不用再轮询"}, "outcome": {"type": "string", "enum": ["pending", "running", "success", "failure", "canceled"], "description": "结果类别"}, "progress": {"type": ["integer", "null"], "description": "进度 0 到 100；状态表不展示进度的状态为 null"}, "created_at": {"type": "string", "description": "创建时间（RFC 3339）"}, "updated_at": {"type": "string", "description": "最近更新时间（RFC 3339）"}, "finished_at": {"type": ["string", "null"], "description": "结束时间（RFC 3339）"}, "asset_count": {"type": "integer", "description": "已经有几个产物文件"}, "failure": {"type": ["object", "null"], "description": "失败时的归因；否则为 null", "properties": {"category": {"type": "string", "description": "失败归因的五类之一"}, "next_action": {"type": "string", "description": "建议动作"}, "retryable": {"type": "boolean"}, "user_decision_required": {"type": "boolean"}, "advice": {"type": "string", "description": "建议动作的说明"}, "detail": {"type": "string", "description": "失败原因（面向用户的文字）"}}}, "poll_after_seconds": {"type": ["integer", "null"], "description": "任务没结束时建议隔几秒再查；已结束为 null"}}, "required": ["id", "capability", "state", "terminal"]}, "error": {"type": "object", "description": "业务错误：只在 isError 为 true 的结果里出现", "properties": {"code": {"type": "string", "description": "错误码"}, "message": {"type": "string", "description": "原因，可直接转告用户"}}, "required": ["code", "message"]}}}
+        },
+        {
+          "name": "list_tasks",
+          "description": "列出任务：带 asset_id 时列出这个资产（对话会话）的任务，不带时列出你最近的任务。分页，用返回的 next_cursor 取下一页。只列自己的任务。",
+          "scope": "read",
+          "input_schema": {"type": "object", "properties": {"asset_id": {"type": "string", "minLength": 1, "maxLength": 200, "description": "只看这个资产（会话）的任务"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "每页最多几个，缺省取服务端的默认页大小"}, "cursor": {"type": "string", "minLength": 1, "maxLength": 512, "description": "上一页返回的 next_cursor"}}, "additionalProperties": false},
+          "output_schema": {"type": "object", "properties": {"tasks": {"type": "array", "items": {"type": "object", "description": "一个任务", "properties": {"id": {"type": "string", "description": "任务 ID"}, "asset_id": {"type": ["string", "null"], "description": "任务所属的资产（会话）ID"}, "capability": {"type": "string", "description": "能力"}, "offering_id": {"type": "string", "description": "所用服务（供给项）ID"}, "provider": {"type": "string", "description": "供应商 ID"}, "model": {"type": "string", "description": "模型 ID"}, "state": {"type": "string", "description": "公开状态，取自产品状态表（如 PENDING、IN_PROGRESS、SUCCEEDED、FAILED）"}, "state_label": {"type": "string", "description": "状态名称"}, "terminal": {"type": "boolean", "description": "为 true 时任务已结束，不用再轮询"}, "outcome": {"type": "string", "enum": ["pending", "running", "success", "failure", "canceled"], "description": "结果类别"}, "progress": {"type": ["integer", "null"], "description": "进度 0 到 100；状态表不展示进度的状态为 null"}, "created_at": {"type": "string", "description": "创建时间（RFC 3339）"}, "updated_at": {"type": "string", "description": "最近更新时间（RFC 3339）"}, "finished_at": {"type": ["string", "null"], "description": "结束时间（RFC 3339）"}, "asset_count": {"type": "integer", "description": "已经有几个产物文件"}, "failure": {"type": ["object", "null"], "description": "失败时的归因；否则为 null", "properties": {"category": {"type": "string", "description": "失败归因的五类之一"}, "next_action": {"type": "string", "description": "建议动作"}, "retryable": {"type": "boolean"}, "user_decision_required": {"type": "boolean"}, "advice": {"type": "string", "description": "建议动作的说明"}, "detail": {"type": "string", "description": "失败原因（面向用户的文字）"}}}, "poll_after_seconds": {"type": ["integer", "null"], "description": "任务没结束时建议隔几秒再查；已结束为 null"}}, "required": ["id", "capability", "state", "terminal"]}}, "next_cursor": {"type": ["string", "null"], "description": "还有下一页时的游标；否则为 null"}, "error": {"type": "object", "description": "业务错误：只在 isError 为 true 的结果里出现", "properties": {"code": {"type": "string", "description": "错误码"}, "message": {"type": "string", "description": "原因，可直接转告用户"}}, "required": ["code", "message"]}}}
+        },
+        {
+          "name": "get_task_assets",
+          "description": "列出一个任务的产物文件：角色、格式、大小、摘要和下载地址。下载地址在同一个 MCP 监听上，用同一把 Key 作 Bearer 取回字节。任务没成功时 complete 为 false，产物可能为空。",
+          "scope": "read",
+          "input_schema": {"type": "object", "properties": {"task_id": {"type": "string", "minLength": 1, "maxLength": 200, "description": "任务 ID"}}, "required": ["task_id"], "additionalProperties": false},
+          "output_schema": {"type": "object", "properties": {"task_id": {"type": "string", "description": "任务 ID"}, "state": {"type": "string", "description": "任务的公开状态"}, "complete": {"type": "boolean", "description": "任务已成功结束、产物已齐"}, "assets": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "description": "产物 ID"}, "role": {"type": "string", "description": "产物角色，如 model、thumbnail、texture"}, "variant": {"type": ["string", "null"], "description": "角色下的变体，如 mtl、obj"}, "format": {"type": ["string", "null"], "description": "模型文件的格式名，如 GLB；没有已知格式为 null"}, "media_type": {"type": "string", "description": "媒体类型"}, "size": {"type": "integer", "description": "字节数"}, "sha256": {"type": "string", "description": "内容摘要"}, "required": {"type": "boolean", "description": "这个产物是不是交付必需的"}, "delivery": {"type": ["string", "null"], "description": "交付方式"}, "download_url": {"type": "string", "description": "下载地址：同一个 MCP 监听上的鉴权下载路由，用同一把 Key 作 Bearer 取回字节"}}, "required": ["id", "role", "media_type", "size", "download_url"]}}, "error": {"type": "object", "description": "业务错误：只在 isError 为 true 的结果里出现", "properties": {"code": {"type": "string", "description": "错误码"}, "message": {"type": "string", "description": "原因，可直接转告用户"}}, "required": ["code", "message"]}}}
+        }
+      ],
+      "messages": {
+        "unauthenticated": "需要有效的访问 Key：请求头 Authorization: Bearer <访问 Key>。Key 无效、已吊销或已过期时同样会被拒绝。",
+        "insufficient_scope": "这把访问 Key 没有「{scope}」权限，请在账户设置里用有这个权限的 Key。",
+        "invalid_arguments": "参数无效：{detail}",
+        "task_not_found": "没有找到这个任务。",
+        "asset_not_found": "没有找到这个资产。",
+        "not_found": "没有这个路径。",
+        "method_not_allowed": "这个路径不支持这种请求方法。",
+        "request_too_large": "请求体太大。",
+        "internal": "服务暂时无法完成这个请求，请稍后重试。"
       }
     },
     "chat": {
@@ -19329,8 +19437,30 @@
             "audit_actions[value=create_access_key].label": "Create access key",
             "audit_actions[value=revoke_access_key].label": "Revoke access key",
             "access_keys.scopes[value=read].label": "Read (query and download)",
-            "access_keys.scopes[value=generate].label": "Generate (start generation and processing)",
+            "access_keys.scopes[value=generate].label": "Generate (start generation and processing; includes read)",
             "access_keys.messages.limit_reached": "You have reached the access key limit (at most {max} active keys). Revoke a key you no longer use, then create a new one.",
+            "mcp_public.instructions": "Plinth's external MCP service. Call it with your own access key as the Bearer token. Every tool response carries a status block (status in structuredContent): the 3D step mode, the 3D steps used by this asset and in total, the balances of the three 3D providers, and a failure attribution with a suggested action. By default you decide whether to continue with 3D steps; the platform does not block. A balance that could not be read says unknown, which does not mean zero.",
+            "mcp_public.service_groups[id=image].label": "Images",
+            "mcp_public.service_groups[id=model].label": "3D models",
+            "mcp_public.service_groups[id=processing].label": "Model processing",
+            "mcp_public.status_block.summary.template": "Status: 3D step mode \"{mode}\"; this asset used {asset_steps} steps; {total_steps} steps in total through MCP; balances: {balances}",
+            "mcp_public.status_block.summary.template_no_asset": "Status: 3D step mode \"{mode}\"; {total_steps} steps in total through MCP; balances: {balances}",
+            "mcp_public.status_block.summary.balance_unknown": "{label} unknown",
+            "mcp_public.status_block.summary.unknown": "unknown",
+            "mcp_public.messages.unauthenticated": "A valid access key is required: send Authorization: Bearer <access key>. A key that is invalid, revoked or expired is refused the same way.",
+            "mcp_public.messages.insufficient_scope": "This access key does not have the \"{scope}\" scope; use a key that has it, created in the account settings.",
+            "mcp_public.messages.invalid_arguments": "Invalid arguments: {detail}",
+            "mcp_public.messages.task_not_found": "That task was not found.",
+            "mcp_public.messages.asset_not_found": "That asset was not found.",
+            "mcp_public.messages.not_found": "There is no such path.",
+            "mcp_public.messages.method_not_allowed": "This path does not support that request method.",
+            "mcp_public.messages.request_too_large": "The request body is too large.",
+            "mcp_public.messages.internal": "The service could not complete this request right now; try again later.",
+            "mcp_public.tools[name=list_services].description": "Lists the services (offerings) usable through MCP, grouped by capability, with whether each is available right now, roughly what one step costs, which inputs it needs and which parameters can be tuned. An unavailable service is said to be unavailable; it is never replaced by another model.",
+            "mcp_public.tools[name=get_status].description": "Shows the 3D step mode, the 3D steps each of your MCP assets used, the running total and the balances of the three 3D providers. Reading counts no step and charges nothing. Every tool response carries the same status block, so there is no need to call this just to get it.",
+            "mcp_public.tools[name=get_task].description": "Reads one task: state, progress, failure attribution with a suggested action, and the asset it belongs to. An unfinished task comes with a suggested polling interval. Only your own tasks can be read; another person's task is treated as missing.",
+            "mcp_public.tools[name=list_tasks].description": "Lists tasks: with asset_id the tasks of that asset (chat session), without it your most recent tasks. Paged; pass the returned next_cursor for the next page. Only your own tasks are listed.",
+            "mcp_public.tools[name=get_task_assets].description": "Lists the output files of a task: role, format, size, digest and download URL. The URL is on the same MCP listener; fetch the bytes with the same key as the Bearer token. While the task has not succeeded, complete is false and the list may be empty.",
             "step_policy.modes[value=agent].label": "Managed by the Agent",
             "step_policy.modes[value=unlimited].label": "Unlimited steps",
             "step_policy.modes[value=cap].label": "Limit steps",

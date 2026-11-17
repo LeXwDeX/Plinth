@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -1776,7 +1775,10 @@ func newHTTPHarnessWithCatalogAndProviders(
 	}
 	accountSettingsService := harnessAccountSettings(t, repository, applicationSchema)
 	accessKeysService := harnessAccessKeys(t, repository, applicationSchema)
+	mcpParts := harnessMCP(t, repository, applicationSchema, accountSettingsService, accessKeysService, accessPolicy, providerAccountService)
 	api, err := httpapi.New(httpapi.Config{
+		MCPIdentity:                       mcpParts.identity,
+		MCPStatus:                         mcpParts.status,
 		Harness:                           harnessResolver,
 		Retry:                             retryService,
 		Reroll:                            rerollService,
@@ -1822,11 +1824,12 @@ func newHTTPHarnessWithCatalogAndProviders(
 		InputAssets:           compatibleInputs,
 		AssetPreviews:         assetPreviews,
 		AssetGateway:          inputs,
-		Logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:                harnessLogger(t),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerHarnessMCP(t, module, api, mcpParts, accessKeysService, repository)
 	return module, api.Handler(), inputs, cacheService
 }
 

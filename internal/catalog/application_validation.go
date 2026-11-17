@@ -396,6 +396,9 @@ func validateApplication(schema ApplicationSchema) error {
 	if err := validateAccessKeys(schema, auditActions); err != nil {
 		return fmt.Errorf("access_keys: %w", err)
 	}
+	if err := validateMCPPublic(schema, capabilities); err != nil {
+		return fmt.Errorf("mcp_public: %w", err)
+	}
 	if err := validateAuthentication(schema.Authentication); err != nil {
 		return err
 	}

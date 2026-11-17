@@ -22,6 +22,12 @@ services:
       - "1001"
     ports:
       - "${GO_WEB_BIND_IP:-0.0.0.0}:${GO_WEB_HOST_PORT:-13333}:13333"
+      # 对外 MCP 监听（#332）：容器内端口固定 13343。进程只在运行环境文件设置
+      # MCP_PUBLIC_LISTEN_ADDR=0.0.0.0:13343 时才监听（未设置就没有监听，这个映射空着，容器内地址必须
+      # 与这里一致）。缺省只发布到回环地址；对局域网开放由环境文件 layout 的 MCP_PUBLIC_BIND_IP 与
+      # MCP_PUBLIC_HOST_PORT 决定。无 TLS，只用于内网或本机。同机有两个这样的栈时，两栈的
+      # MCP_PUBLIC_HOST_PORT 必须不同；隔离预检（scripts/cutover-go-production.sh）用自己的回环端口。
+      - "${MCP_PUBLIC_BIND_IP:-127.0.0.1}:${MCP_PUBLIC_HOST_PORT:-13343}:13343"
     env_file:
       - path: "${GO_RUNTIME_ENV_FILE:?GO_RUNTIME_ENV_FILE is required}"
         required: true

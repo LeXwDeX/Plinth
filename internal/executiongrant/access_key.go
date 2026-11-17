@@ -3,6 +3,7 @@ package executiongrant
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 )
@@ -139,4 +140,40 @@ func (s Service) AccessKeyStepStatus(ctx context.Context, ownerID, sessionID str
 		return StepSummary{}, ErrInvalid
 	}
 	return store.StepUsage(ctx, ownerID, sessionID, StepRequest{Entry: approvalpolicy.StepEntryMCP, Steps: *s.Policy.Steps})
+}
+
+// AccessKeyAsset is one asset (a chat session) of the owner on which a
+// personal access key has asked for steps, with the 3D steps the asset used.
+type AccessKeyAsset struct {
+	SessionID string
+	// Title is the asset's name in the owner's session list; empty when the
+	// session has none.
+	Title string
+	// Used counts the asset's 3D steps the way the cap mode does, whatever the
+	// owner's mode is: Tasks that were or may have been charged plus approved
+	// steps that have no Task yet.
+	Used int
+	// LastGrantAt is when a key last asked for a step on the asset.
+	LastGrantAt time.Time
+}
+
+// AccessKeyUsageStore reads, and never decides, the 3D steps used through
+// personal access keys (#332). The external MCP service shows them to the
+// calling Agent in the status block of every response. The counting is the
+// steps mode's own, so the numbers match what the cap would see.
+type AccessKeyUsageStore interface {
+	// AssetStepsUsed counts the 3D steps of one asset of the owner, in every
+	// mode.
+	AssetStepsUsed(ctx context.Context, ownerID, sessionID string, counted []string) (int, error)
+	// AssetTitle is the name of the owner's asset (chat session) in the
+	// owner's session list; found is false when the owner has no such session.
+	AssetTitle(ctx context.Context, ownerID, sessionID string) (title string, found bool, err error)
+	// AccessKeyStepsTotal counts the owner's 3D steps taken through access
+	// keys over all assets: the Tasks bound to a grant of source access_key,
+	// plus approved key grants that have no Task yet.
+	AccessKeyStepsTotal(ctx context.Context, ownerID string, counted []string) (int, error)
+	// AccessKeyAssets lists up to limit of the owner's assets on which a key
+	// asked for a step, the most recently active first. More is true when
+	// older ones exist.
+	AccessKeyAssets(ctx context.Context, ownerID string, counted []string, limit int) (assets []AccessKeyAsset, more bool, err error)
 }

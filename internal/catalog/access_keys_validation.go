@@ -21,6 +21,9 @@ func validateAccessKeys(schema ApplicationSchema, auditActions map[string]struct
 	if keys == nil {
 		return nil
 	}
+	if schema.StepPolicy == nil {
+		return errors.New("application.access_keys 需要 application.step_policy（访问 Key 的授权按 3D 步数模式判定）")
+	}
 	if keys.KeyPrefix == "" || len(keys.KeyPrefix) > 16 {
 		return errors.New("access_keys.key_prefix 必须是 1 到 16 个小写字母或数字")
 	}

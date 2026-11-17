@@ -72,6 +72,10 @@ type ApplicationSchema struct {
 	// older external Catalog documents stay valid; omitted, the key management
 	// routes are not registered and no key can be issued.
 	AccessKeys *AccessKeysSchema `json:"access_keys,omitempty"`
+	// MCPPublic is the external MCP service (#332): a listener of its own that
+	// serves personal access keys only. Optional so older external Catalog
+	// documents stay valid; omitted, no listener starts. Server-side only.
+	MCPPublic *MCPPublicSchema `json:"mcp_public,omitempty"`
 	// ProviderDeprecations lists, per Provider, the models, wire fields and
 	// values its current documentation has deprecated or retired (#329).
 	// Catalog loading rejects an Offering that would send one. Server-side

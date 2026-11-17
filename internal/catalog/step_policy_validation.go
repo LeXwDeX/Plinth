@@ -67,6 +67,10 @@ func validateStepPolicy(
 		}
 		counted[capability] = true
 	}
+	if policy.BalanceCacheSeconds < 0 || policy.BalanceCacheSeconds > 3600 ||
+		policy.BalanceReadTimeoutSeconds < 0 || policy.BalanceReadTimeoutSeconds > 60 {
+		return errors.New("step_policy.balance_cache_seconds 必须在 0 到 3600，balance_read_timeout_seconds 在 0 到 60")
+	}
 	message := policy.Messages.CapReached
 	if strings.TrimSpace(message) == "" ||
 		!strings.Contains(message, "{used}") || !strings.Contains(message, "{cap}") {

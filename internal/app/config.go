@@ -28,9 +28,12 @@ type Config struct {
 	DeprecatedEnvironment []string
 	// RetiredEnvironment lists configured variables that are no longer read.
 	// It contains names only, for one startup warning; values are discarded.
-	RetiredEnvironment        []string
-	Environment               string
-	Address                   string
+	RetiredEnvironment []string
+	Environment        string
+	Address            string
+	// MCPPublicAddress is where the external MCP listener (#332) listens; empty
+	// means it does not run.
+	MCPPublicAddress          string
 	DatabasePath              string
 	StorageRoot               string
 	WebAssetsRoot             string
@@ -134,6 +137,7 @@ func LoadConfig() (Config, error) {
 func runtimeWiringSettingNames(schema catalog.ApplicationSchema) []string {
 	return []string{
 		"address",
+		"mcp_public_listen_addr",
 		"database_path",
 		"storage_root",
 		"web_assets_root",
@@ -204,6 +208,7 @@ func loadConfigFromSchema(
 		RuntimeSettings:           values,
 		Environment:               environment,
 		Address:                   values["address"],
+		MCPPublicAddress:          strings.TrimSpace(values["mcp_public_listen_addr"]),
 		DatabasePath:              values["database_path"],
 		StorageRoot:               values["storage_root"],
 		WebAssetsRoot:             values["web_assets_root"],
@@ -423,6 +428,9 @@ func (c Config) Validate() error {
 		return errors.New("运行设置 storage_root 不能为空")
 	case strings.TrimSpace(c.LegacyGeneratedImagesRoot) == "":
 		return errors.New("运行设置 legacy_generated_images_root 不能为空")
+	}
+	if err := validMCPListenAddress(c.MCPPublicAddress, c.Address); err != nil {
+		return err
 	}
 	if c.ProviderMode != "mock" && c.ProviderMode != "live" {
 		return fmt.Errorf("运行设置 provider_mode 的值无效: %q", c.ProviderMode)

@@ -444,6 +444,62 @@ func TestAuthenticatorResolvesAKeyToTheOwnersScopeOnly(t *testing.T) {
 	}
 }
 
+// A key that may generate may also read: the scopes the identity carries are
+// the effective ones, while the key itself keeps what it was issued with.
+func TestEffectiveScopesAddWhatTheIssuedOnesInclude(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct{ issued, want []string }{
+		"read stays read":             {[]string{"read"}, []string{"read"}},
+		"generate includes read":      {[]string{"generate"}, []string{"generate", "read"}},
+		"both keep their order":       {[]string{"generate", "read"}, []string{"generate", "read"}},
+		"read then generate":          {[]string{"read", "generate"}, []string{"read", "generate"}},
+		"an unknown scope is carried": {[]string{"later"}, []string{"later"}},
+		"nothing":                     {nil, nil},
+	} {
+		input := append([]string(nil), test.issued...)
+		got := accesskeys.EffectiveScopes(input)
+		if strings.Join(got, ",") != strings.Join(test.want, ",") {
+			t.Errorf("%s: EffectiveScopes(%v) = %v, want %v", name, test.issued, got, test.want)
+		}
+		if strings.Join(input, ",") != strings.Join(test.issued, ",") {
+			t.Errorf("%s: the issued scopes were changed: %v", name, input)
+		}
+	}
+}
+
+func TestAuthenticatorGivesAGenerateKeyTheReadScopeToo(t *testing.T) {
+	t.Parallel()
+	store, clk := newMemoryStore(), fixedClock()
+	service := newService(t, store, clk, nil)
+	users := directory{"owner-b": {ID: "owner-b", Username: "bee", Name: "Bee", Active: true}}
+	authenticator := &accesskeys.Authenticator{Keys: service, Users: users, Policy: testPolicy(t)}
+	generateOnly := mustCreate(t, service, "owner-b", "generate only", "generate")
+	readOnly := mustCreate(t, service, "owner-b", "read only", "read")
+
+	principal, err := authenticator.Identify(bearer("Bearer " + generateOnly.Key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential := principal.Credential(); !credential.HasScope("generate") || !credential.HasScope("read") || credential.HasScope("admin") {
+		t.Fatalf("a generate key carries %v", credential.Scopes)
+	}
+	// The key itself is stored and listed as it was issued.
+	if listed := mustList(t, service, "owner-b"); len(listed) != 2 {
+		t.Fatalf("listed = %+v", listed)
+	} else {
+		for _, record := range listed {
+			if record.ID == generateOnly.Record.ID && strings.Join(record.Scopes, ",") != "generate" {
+				t.Fatalf("the stored scopes of the generate key = %v", record.Scopes)
+			}
+		}
+	}
+	// A read key does not gain the right to generate.
+	reader, err := authenticator.Identify(bearer("Bearer " + readOnly.Key))
+	if err != nil || reader.Credential().HasScope("generate") || !reader.Credential().HasScope("read") {
+		t.Fatalf("a read key carries %v err=%v", reader.Credential().Scopes, err)
+	}
+}
+
 func TestAuthenticatorRefusesWhatIsNotAUsableKey(t *testing.T) {
 	t.Parallel()
 	store, clk := newMemoryStore(), fixedClock()

@@ -381,6 +381,93 @@ def ephemeral_document():
     return load(changed(mutate))
 
 
+class McpListenerLayoutTest(unittest.TestCase):
+    """#332: the external MCP listener's host side is an optional pair of layout keys."""
+
+    @staticmethod
+    def with_layout(layout):
+        return changed(lambda environments: environments["alone"].update(layout=layout))
+
+    @staticmethod
+    def words(document, name="alone"):
+        return release_env.release_variables(document["environments"][name], None)["RELEASE_SERVER_ENV"].split()
+
+    @staticmethod
+    def compose_env(document, name="alone"):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "environments.json"
+            path.write_text(json.dumps(document))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                assert release_env.main(["--file", str(path), "compose-env", name]) == 0
+        return output.getvalue().splitlines()
+
+    def test_environments_that_name_neither_key_are_unchanged(self):
+        document = load(BASE)  # none of the base environments has a layout at all
+        for name in document["environments"]:
+            with self.subTest(name=name):
+                self.assertFalse([word for word in self.words(document, name) if word.startswith("MCP_PUBLIC_")])
+                self.assertFalse([line for line in self.compose_env(document, name) if line.startswith("MCP_PUBLIC_")])
+        # A layout with the other keys, as the existing stacks have, validates and sends only those.
+        document = load(self.with_layout({"GO_WEB_BIND_IP": "10.0.0.9", "GO_WEB_HOST_PORT": "13333",
+                                          "GO_PROD_DB_DIR": "/srv/alone/production/data"}))
+        words = self.words(document)
+        self.assertIn("GO_WEB_HOST_PORT=13333", words)
+        self.assertFalse([word for word in words if word.startswith("MCP_PUBLIC_")])
+        self.assertFalse([line for line in self.compose_env(document) if line.startswith("MCP_PUBLIC_")])
+
+    def test_both_keys_reach_the_server_and_manual_runs(self):
+        document = load(self.with_layout({"GO_WEB_HOST_PORT": "13333", "MCP_PUBLIC_BIND_IP": "10.0.0.9",
+                                          "MCP_PUBLIC_HOST_PORT": "13344"}))
+        words = self.words(document)
+        self.assertIn("MCP_PUBLIC_BIND_IP=10.0.0.9", words)
+        self.assertIn("MCP_PUBLIC_HOST_PORT=13344", words)
+        self.assertIn("GO_WEB_HOST_PORT=13333", words)
+        lines = self.compose_env(document)
+        self.assertIn("MCP_PUBLIC_BIND_IP=10.0.0.9", lines)
+        self.assertIn("MCP_PUBLIC_HOST_PORT=13344", lines)
+
+    def test_one_key_alone_is_enough(self):
+        for key, value in (("MCP_PUBLIC_BIND_IP", "0.0.0.0"), ("MCP_PUBLIC_HOST_PORT", "13344")):
+            with self.subTest(key=key):
+                words = self.words(load(self.with_layout({key: value})))
+                self.assertIn(f"{key}={value}", words)
+                self.assertEqual([word for word in words if word.startswith("MCP_PUBLIC_")], [f"{key}={value}"])
+
+    def test_bad_values_are_refused(self):
+        for key, value in (("MCP_PUBLIC_BIND_IP", "999.1.1.1"), ("MCP_PUBLIC_BIND_IP", "10.0.0"), ("MCP_PUBLIC_BIND_IP", "::1"),
+                           ("MCP_PUBLIC_BIND_IP", "listener.example"), ("MCP_PUBLIC_BIND_IP", "10.0.0.9:13344"),
+                           ("MCP_PUBLIC_BIND_IP", "01.2.3.4"), ("MCP_PUBLIC_HOST_PORT", "0"), ("MCP_PUBLIC_HOST_PORT", "65536"),
+                           ("MCP_PUBLIC_HOST_PORT", "13344x"), ("MCP_PUBLIC_HOST_PORT", "013344"), ("MCP_PUBLIC_HOST_PORT", "-1"),
+                           ("MCP_PUBLIC_HOST_PORT", "")):
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(release_env.EnvironmentError_, key):
+                load(self.with_layout({key: value}))
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "MCP_PUBLIC_HOST_PORT"):
+            load(self.with_layout({"MCP_PUBLIC_HOST_PORT": 13344}))
+
+    def test_the_mcp_port_cannot_take_the_web_port_of_the_same_address(self):
+        # The same port on the same address (or the wildcard) is one socket.
+        for layout in ({"MCP_PUBLIC_HOST_PORT": "13333"},
+                       {"GO_WEB_BIND_IP": "10.0.0.9", "GO_WEB_HOST_PORT": "8080", "MCP_PUBLIC_BIND_IP": "10.0.0.9", "MCP_PUBLIC_HOST_PORT": "8080"},
+                       {"GO_WEB_BIND_IP": "10.0.0.9", "GO_WEB_HOST_PORT": "8080", "MCP_PUBLIC_BIND_IP": "0.0.0.0", "MCP_PUBLIC_HOST_PORT": "8080"}):
+            with self.subTest(layout=layout), self.assertRaisesRegex(release_env.EnvironmentError_, "differ from GO_WEB_HOST_PORT"):
+                load(self.with_layout(layout))
+        # Different addresses are different sockets.
+        load(self.with_layout({"GO_WEB_BIND_IP": "10.0.0.9", "GO_WEB_HOST_PORT": "8080",
+                               "MCP_PUBLIC_BIND_IP": "127.0.0.1", "MCP_PUBLIC_HOST_PORT": "8080"}))
+        # A stack that names no MCP key is not checked: its layout is what it always was.
+        load(self.with_layout({"GO_WEB_HOST_PORT": "13343"}))
+
+    def test_the_example_environments_file_names_the_optional_keys(self):
+        example = json.loads((ROOT / "deploy/environments.example.json").read_text())
+        layout = example["environments"]["formal-test"]["layout"]
+        self.assertIn("MCP_PUBLIC_BIND_IP", layout)
+        self.assertIn("MCP_PUBLIC_HOST_PORT", layout)
+        self.assertIn("MCP_PUBLIC_BIND_IP", example["environments"]["formal-test"]["description"])
+        self.assertNotIn("MCP_PUBLIC_BIND_IP", example["environments"]["dev-test"]["layout"])
+        self.assertLessEqual(set(layout), set(release_env.LAYOUT_KEYS))
+
+
 class UpstreamShapeTest(unittest.TestCase):
     """#219: the ephemeral dev-test stack defaults to the fake upstream; live needs two switches."""
 

@@ -137,14 +137,17 @@ class PatternTests(unittest.TestCase):
                     "ssh": "root@build-host.internal.test", "root": "/srv/stack-dev",
                     "base_url": "http://10.9.8.7:13333", "compose_project": "plinth_dev",
                     "protect_projects": ["plinth_candidate"],
-                    "layout": {"GO_WEB_HOST_PORT": "13333", "GO_LEGACY_INPUT_ASSETS_DIR": "/srv/legacy/assets"},
+                    "layout": {"GO_WEB_HOST_PORT": "13333", "GO_LEGACY_INPUT_ASSETS_DIR": "/srv/legacy/assets",
+                               "MCP_PUBLIC_BIND_IP": "10.9.8.5", "MCP_PUBLIC_HOST_PORT": "13343"},
                     "build": {"goproxy": "https://proxy.internal.test/go/,direct",
                               "add_hosts": ["npm.internal.test:10.9.8.6"]}},
                     "template": {"ssh": "root@<host>", "root": "<root>", "compose_project": "x"}}}))
             literals = snapshot.environment_literals(path)
         self.assertEqual(literals, sorted({
             "build-host.internal.test", "/srv/stack-dev", "10.9.8.7", "plinth_dev",
-            "plinth_candidate", "/srv/legacy/assets", "npm.internal.test", "proxy.internal.test", "10.9.8.6"}))
+            "plinth_candidate", "/srv/legacy/assets", "npm.internal.test", "proxy.internal.test", "10.9.8.6",
+            # The MCP bind address names a host; its port, like the web port, names nothing.
+            "10.9.8.5"}))
         self.assertEqual(snapshot.environment_literals(Path(directory) / "missing.json"), [])
 
     def test_npm_registry_address_stays_forbidden(self):

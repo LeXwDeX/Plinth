@@ -46,9 +46,31 @@ var (
 const (
 	// ScopeRead is the right to query and download.
 	ScopeRead = "read"
-	// ScopeGenerate is the right to start generation and processing.
+	// ScopeGenerate is the right to start generation and processing. It
+	// includes ScopeRead: a caller that starts work has to be able to poll the
+	// Tasks it started and fetch their files.
 	ScopeGenerate = "generate"
 )
+
+// scopeIncludes names, per scope, the scopes it carries with it.
+var scopeIncludes = map[string][]string{ScopeGenerate: {ScopeRead}}
+
+// EffectiveScopes is what a key may do: the scopes it was issued with plus the
+// ones those include, the issued ones first and in their order. The stored key
+// and its listing keep the scopes it was issued with; the identity a key
+// authenticates as carries the effective ones, so every check of a scope sees
+// the implication. The result is a new slice.
+func EffectiveScopes(issued []string) []string {
+	effective := slices.Clone(issued)
+	for _, scope := range issued {
+		for _, included := range scopeIncludes[scope] {
+			if !slices.Contains(effective, included) {
+				effective = append(effective, included)
+			}
+		}
+	}
+	return effective
+}
 
 // idBytes and secretBytes size the two random parts of a key: an 80-bit
 // public ID the store looks the key up by, and a 256-bit secret.
