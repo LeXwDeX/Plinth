@@ -26,7 +26,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		t.Fatal(err)
 	}
 	for path, keys := range map[string][]string{
-		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization", "project"},
+		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization", "project", "step_policy"},
 		"llm_settings": {"routes", "ui"},
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
 		// #80: the composer's capacity text and the result limit pair.
@@ -54,10 +54,16 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// #240: the browser builds the project switcher and panels from the
 		// limits, asset kinds, style-guide bounds and convention names; Agent
 		// templates, audit actions and error copy stay server-side.
-		"project":                           {"limits", "assets", "style_guide", "conventions"},
-		"project.assets":                    {"kinds"},
-		"project.style_guide":               {"maximum_text_characters", "maximum_references", "maximum_palette_colors", "palette_color_pattern"},
-		"project.conventions":               {"fields", "texts"},
+		"project":             {"limits", "assets", "style_guide", "conventions"},
+		"project.assets":      {"kinds"},
+		"project.style_guide": {"maximum_text_characters", "maximum_references", "maximum_palette_colors", "palette_color_pattern"},
+		"project.conventions": {"fields", "texts"},
+		// #330: the browser sees the modes with their labels, the defaults and
+		// the cap range; the counted capabilities, the Agent-facing message and
+		// the audit declaration stay server-side.
+		"step_policy":                       {"modes", "default_mode", "cap"},
+		"step_policy.default_mode":          {"list", "mcp"},
+		"step_policy.cap":                   {"default", "minimum", "maximum"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},
 		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets"},

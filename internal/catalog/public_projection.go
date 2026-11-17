@@ -187,6 +187,14 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			Conventions: PublicProjectConventionsSchema{Fields: fields, Texts: texts},
 		}
 	}
+	var publicStepPolicy *PublicStepPolicySchema
+	if cloned.StepPolicy != nil {
+		publicStepPolicy = &PublicStepPolicySchema{
+			Modes:       cloned.StepPolicy.Modes,
+			DefaultMode: cloned.StepPolicy.DefaultMode,
+			Cap:         cloned.StepPolicy.Cap,
+		}
+	}
 	return PublicApplicationSchema{
 		AgentConfiguration: cloned.AgentConfiguration.Public(),
 		LLMSettings:        cloned.LLMSettings.Public(),
@@ -261,6 +269,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 		Authentication:  publicAuth,
 		Localization:    source.publicLocalization(),
 		Project:         publicProject,
+		StepPolicy:      publicStepPolicy,
 	}
 }
 

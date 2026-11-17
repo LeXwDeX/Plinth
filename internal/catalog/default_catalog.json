@@ -2215,6 +2215,7 @@
           "agent_consent": "/api/v1/agent/consent",
           "account_usage": "/api/v1/account/usage",
           "account_resources": "/api/v1/account/resources",
+          "account_step_policy": "/api/v1/account/step-policy",
           "chat_session_harness": "/api/v1/chat/sessions/{sessionID}/harness",
           "task_recovery": "/api/v1/tasks/{taskID}/recovery",
           "task_recovery_prepare": "/api/v1/tasks/{taskID}/recovery/prepare",
@@ -5439,6 +5440,35 @@
         "style_guide_palette": "色板：{palette}（生成 2D 时主色须落在色板内）",
         "conventions_empty": "无",
         "assets_empty": "无"
+      }
+    },
+    "step_policy": {
+      "modes": [
+        {"value": "agent", "label": "Agent 自己管理"},
+        {"value": "unlimited", "label": "不限步数"},
+        {"value": "cap", "label": "限制步数"}
+      ],
+      "default_mode": {"list": "agent", "mcp": "agent"},
+      "cap": {"default": 20, "minimum": 1, "maximum": 200},
+      "counted_capabilities": [
+        "text-to-3d",
+        "image-to-3d",
+        "image-to-splat",
+        "text-to-motion",
+        "retexture",
+        "remesh",
+        "rigging",
+        "animation",
+        "mesh-segmentation",
+        "mesh-completion",
+        "model-split"
+      ],
+      "messages": {
+        "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。"
+      },
+      "audit": {
+        "update_action": "set_step_policy",
+        "resource_type": "account_step_policy"
       }
     },
     "chat": {
@@ -14719,6 +14749,10 @@
         "label": "设置制作简报"
       },
       {
+        "value": "set_step_policy",
+        "label": "设置 3D 步数模式"
+      },
+      {
         "value": "continue_turn_in_background",
         "label": "停止等待，任务后台继续"
       },
@@ -19261,6 +19295,11 @@
             "audit_actions[value=delete_project].label": "Delete project",
             "audit_actions[value=promote_project_asset].label": "Promote project asset",
             "audit_actions[value=set_production_brief].label": "Set production brief",
+            "audit_actions[value=set_step_policy].label": "Set 3D step mode",
+            "step_policy.modes[value=agent].label": "Managed by the Agent",
+            "step_policy.modes[value=unlimited].label": "Unlimited steps",
+            "step_policy.modes[value=cap].label": "Limit steps",
+            "step_policy.messages.cap_reached": "This asset has used all of its 3D steps ({used} used, cap {cap}); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in their account settings to continue.",
             "audit_actions[value=continue_turn_in_background].label": "Stop waiting, keep the task running",
             "audit_actions[value=change_own_password].label": "Change own password",
             "audit_actions[value=admin_read_users].label": "Administrator viewed users",

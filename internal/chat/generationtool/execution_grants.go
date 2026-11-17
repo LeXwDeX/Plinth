@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -330,6 +332,14 @@ func (executor *Executor) resumeAgentOperation(
 				return chat.ToolResult{NoSubmission: true}, err
 			}
 			grant = decision.Grant
+			if decision.Outcome == executiongrant.PolicyOutcomeStepCap && decision.Steps != nil {
+				// The 3D step mode refused this step: its asset used all the
+				// steps the person allows (#330). The grant is already denied,
+				// no approval card exists and nothing is submitted; the Agent
+				// reads why and tells the person.
+				cardSettled()
+				return executor.stepCapResult(command, *decision.Steps), nil
+			}
 		}
 		if grant.Status == executiongrant.Pending {
 			if err := executor.operations.MarkAgentPolicyEvaluated(ctx, op); err != nil {
@@ -375,6 +385,15 @@ func (executor *Executor) resumeAgentOperation(
 		// of the Schema's wait.
 		return chat.ToolResult{Suspend: true, NoSubmission: true}, nil
 	case executiongrant.Denied:
+		if grant.StepCapReached() {
+			// A replay of a call the 3D step mode already refused repeats the
+			// step-cap answer, not the generic denial of a person's card.
+			summary, err := executor.grants.StepStatus(ctx, op.OwnerID, op.SessionID)
+			if err != nil {
+				return chat.ToolResult{NoSubmission: true}, err
+			}
+			return executor.stepCapResult(command, summary), nil
+		}
 		return chat.ToolResult{AgentContent: executor.chat.Agent.ConsentDeniedContent, NoSubmission: true}, nil
 	case executiongrant.Claimed:
 		return chat.ToolResult{Suspend: true}, nil
@@ -486,4 +505,27 @@ func (executor *Executor) abandonBudgetReservation(ctx context.Context, op Opera
 		executor.logger.WarnContext(ctx, "budget reservation release failed",
 			"grant_request_id", op.GrantRequestID, "error", err)
 	}
+}
+
+// stepCapResult is the tool result of a 3D step the steps mode refused (#330):
+// a failure whose text is the Schema's step-cap message with the asset's used
+// steps and its cap, in the turn's locale. Nothing was submitted.
+func (executor *Executor) stepCapResult(command chat.ToolCommand, summary executiongrant.StepSummary) chat.ToolResult {
+	text := ""
+	if executor.stepPolicy != nil {
+		text = executor.stepPolicy.Messages.CapReached
+	}
+	if text == "" {
+		text = executor.chat.Agent.ConsentDeniedContent
+	}
+	if localize := executor.localizeText(command); localize != nil {
+		text = localize(text)
+	}
+	text = strings.NewReplacer(
+		"{used}", strconv.Itoa(summary.Used),
+		"{cap}", strconv.Itoa(summary.Cap),
+	).Replace(text)
+	result := executor.failure(command, "", text)
+	result.NoSubmission = true
+	return result
 }

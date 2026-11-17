@@ -132,6 +132,10 @@ type Config struct {
 	// Project is application.project (#240): the @projectN handle prefix and
 	// the copy for an unknown project asset. Nil disables project handles.
 	Project *catalog.ProjectSchema
+	// StepPolicy is application.step_policy (#330): the copy the Agent reads
+	// when a 3D step is refused because its asset used all its steps. Nil
+	// keeps the generic denial text.
+	StepPolicy *catalog.StepPolicySchema
 	// CanvasArtboard gives the Schema tables that turn a ratio-only output
 	// size into pixels (ratio_pixels, ratio_pixel_tiers) for the size notes.
 	CanvasArtboard catalog.CanvasArtboardSchema
@@ -182,6 +186,7 @@ type Executor struct {
 	inputAsset    string
 	chat          catalog.ChatSchema
 	project       *catalog.ProjectSchema
+	stepPolicy    *catalog.StepPolicySchema
 	texts         *catalog.TextLocalizer
 	modelDelivery catalog.ModelDeliverySchema
 	skills        map[string]catalog.SkillSchema
@@ -251,6 +256,7 @@ func New(config Config) (*Executor, error) {
 		inputAsset:    config.InputAssetRoute,
 		chat:          config.Chat,
 		project:       config.Project,
+		stepPolicy:    config.StepPolicy,
 		texts:         config.Texts,
 		modelDelivery: config.ModelDelivery,
 		skills:        skills,

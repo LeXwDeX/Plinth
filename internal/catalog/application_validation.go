@@ -390,6 +390,9 @@ func validateApplication(schema ApplicationSchema) error {
 			generatedImage.AuditAction,
 		)
 	}
+	if err := validateStepPolicy(schema, capabilities, auditActions); err != nil {
+		return fmt.Errorf("step_policy: %w", err)
+	}
 	if err := validateAuthentication(schema.Authentication); err != nil {
 		return err
 	}

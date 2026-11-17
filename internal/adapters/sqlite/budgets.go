@@ -260,9 +260,11 @@ func (r *Repository) DecideProductionBudget(ctx context.Context, ownerID, budget
 // unbound and releases that reservation in the same transaction. It is called
 // when the operation the grant authorized ends without a Task (a permanently
 // rejected submit, or a processing authorization that will never be used), so
-// the plan's reserved credits are not held forever (#103 review B2). Grants
-// without a reservation, claimed grants (a submit is in flight) and decided
-// grants are left untouched.
+// the plan's reserved credits are not held forever (#103 review B2). A grant
+// the 3D step mode approved (#330) is denied the same way: it holds one step of
+// its asset's cap until it binds a Task, and an operation that ended without
+// one must give that step back. Other grants without a reservation, claimed
+// grants (a submit is in flight) and decided grants are left untouched.
 func abandonUnboundGrantOnConn(ctx context.Context, conn *sql.Conn, owner, requestID string, now time.Time) error {
 	if owner == "" || requestID == "" {
 		return nil
@@ -271,10 +273,10 @@ func abandonUnboundGrantOnConn(ctx context.Context, conn *sql.Conn, owner, reque
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants
  SET status = 'denied', decided_by = ?, decided_at = ?, updated_at = ?
  WHERE request_id = ? AND owner_id = ? AND status = 'approved'
- AND EXISTS (SELECT 1 FROM budget_reservations
+ AND (decided_by = ? OR EXISTS (SELECT 1 FROM budget_reservations
   WHERE budget_reservations.grant_request_id = execution_grants.request_id
-  AND budget_reservations.state = 'reserved' AND budget_reservations.task_id = '')`,
-		executiongrant.AbandonedActor, stamp, stamp, requestID, owner)
+  AND budget_reservations.state = 'reserved' AND budget_reservations.task_id = ''))`,
+		executiongrant.AbandonedActor, stamp, stamp, requestID, owner, executiongrant.StepsActor)
 	if err != nil {
 		return err
 	}

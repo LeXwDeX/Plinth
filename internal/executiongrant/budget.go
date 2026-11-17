@@ -59,6 +59,11 @@ type PolicyResult struct {
 	// Budget is the session's current plan summary when the evaluation read
 	// one; nil when there is no plan or the mode did not use the budget.
 	Budget *budget.Summary
+	// Steps is the asset's 3D step standing when the internal steps mode
+	// decided the grant (#330); nil in every other mode. With the
+	// PolicyOutcomeStepCap outcome the grant was denied and these are the
+	// numbers the refusal was decided on.
+	Steps *StepSummary
 }
 
 // ProductionBudgetStore persists production plans and their reservations.
@@ -129,14 +134,20 @@ func (snapshot PreparedSnapshot) BudgetAmount() budget.Amount {
 
 // AbandonBudgetReservation releases the reservation of an approved grant whose
 // operation ended without binding a Task (a permanently rejected submit, or a
-// plan step that will never submit this authorization). It is idempotent: a
-// grant that is not approved, already bound, or has no reservation is left
-// untouched. Deployments without plan storage have nothing to release.
+// plan step that will never submit this authorization). A grant the steps mode
+// approved (#330) is denied the same way, so it stops counting as a 3D step of
+// its asset: the operation that held it ended without a Task. It is
+// idempotent: a grant that is not approved, already bound, or holds neither a
+// reservation nor a step is left untouched. Deployments without plan or step
+// storage have nothing to release.
 func (s Service) AbandonBudgetReservation(ctx context.Context, ownerID, requestID string) error {
 	if ownerID == "" || requestID == "" {
 		return ErrInvalid
 	}
 	releaser, ok := s.Budgets.(BudgetReservationReleaser)
+	if !ok {
+		releaser, ok = s.Grants.(BudgetReservationReleaser)
+	}
 	if !ok {
 		return nil
 	}

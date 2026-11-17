@@ -38,6 +38,20 @@ export interface ProjectProductSchema {
   conventions: { fields: Array<string | { name: string }>; texts: Array<string | { name: string }> };
 }
 
+/**
+ * #330: the browser-visible 3D step mode. Only 3D steps are governed; 2D steps
+ * and LLM calls are never counted or blocked. Each person keeps one setting for
+ * asset lists and one for external MCP. Absent on older servers: the settings
+ * stay hidden. The counted capabilities and the Agent-facing text stay on the
+ * server.
+ */
+export interface StepPolicyProductSchema {
+  /** `agent` (the Agent manages the steps, the default), `unlimited` or `cap` (a hard cap per asset). */
+  modes: Array<{ value: string; label: string }>;
+  default_mode: { list: string; mcp: string };
+  cap: { default: number; minimum: number; maximum: number };
+}
+
 /** The browser contract after convention names are reduced to strings. */
 export type NormalizedProjectProductSchema = Omit<ProjectProductSchema, 'conventions'> & {
   conventions: { fields: string[]; texts: string[] };
@@ -101,6 +115,8 @@ export interface ProductSchema {
    */
   project?: ProjectProductSchema;
   projects?: ProjectProductSchema;
+  /** #330: the 3D step mode; absent on older servers. */
+  step_policy?: StepPolicyProductSchema;
   runtime: {
     /**
      * #329 note 99647: the one text that says only the first reference pictures are used — the general form and
@@ -205,6 +221,8 @@ export interface ProductSchema {
         model_archive?: string;
         account_usage: string;
         account_resources: string;
+        /** #330: GET reads and PUT saves the person's 3D step settings (PUT needs the browser session). */
+        account_step_policy?: string;
         agent_params: string;
         agent_bind: string;
         agent_consent: string;

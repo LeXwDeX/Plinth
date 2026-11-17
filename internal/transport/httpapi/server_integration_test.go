@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/adapters/catalogrecipes"
 	"github.com/LeXwDeX/Plinth/internal/adapters/legacygeneration"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
@@ -1772,6 +1773,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 	if err != nil {
 		t.Fatal(err)
 	}
+	accountSettingsService := harnessAccountSettings(t, repository, applicationSchema)
 	api, err := httpapi.New(httpapi.Config{
 		Harness:                           harnessResolver,
 		Retry:                             retryService,
@@ -1781,6 +1783,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		ModelDelivery:                     modelDelivery,
 		Processing:                        processingPlans,
 		AccountInputAssets:                repository,
+		AccountSettings:                   accountSettingsService,
 		ExecutionGrants:                   executionGrants,
 		AgentOperations:                   repository,
 		PendingApprovals:                  pendingApprovals,
@@ -1935,6 +1938,32 @@ func readBody(t *testing.T, response *http.Response) []byte {
 
 // harnessApprovalPolicy mirrors the production conversion from the Product
 // Schema so HTTP tests exercise the same policy as the application.
+// harnessAccountSettings builds the person's settings service the way the
+// application assembly does: nil for a Catalog without a step policy.
+func harnessAccountSettings(t *testing.T, repository *sqlite.Repository, application catalog.ApplicationSchema) *accountsettings.Service {
+	t.Helper()
+	declared := application.StepPolicy
+	if declared == nil {
+		return nil
+	}
+	modes := make([]string, 0, len(declared.Modes))
+	for _, mode := range declared.Modes {
+		modes = append(modes, mode.Value)
+	}
+	service, err := accountsettings.New(repository, accountsettings.Config{
+		Modes: modes,
+		Steps: approvalpolicy.StepsPolicy{
+			DefaultList: approvalpolicy.StepSetting{Mode: declared.DefaultMode.List, Cap: declared.Cap.Default},
+			DefaultMCP:  approvalpolicy.StepSetting{Mode: declared.DefaultMode.MCP, Cap: declared.Cap.Default},
+		},
+		CapMinimum: declared.Cap.Minimum, CapMaximum: declared.Cap.Maximum,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
 func harnessApprovalPolicy(application catalog.ApplicationSchema) approvalpolicy.Policy {
 	declared := application.Chat.ApprovalPolicy
 	manual := make([]string, 0, len(declared.ManualApprovalCapabilities))

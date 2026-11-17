@@ -587,12 +587,17 @@ func validateBundleFieldLeaf(steps []pathStep) error {
 // check strict while the mode is configured still catches typos in the
 // shipped copy.
 func applicableBundleFields(schema ApplicationSchema, fields map[string]string) map[string]string {
-	if schema.Chat.ApprovalPolicy.Budget.MaxCredits > 0 {
+	skipBudget := schema.Chat.ApprovalPolicy.Budget.MaxCredits <= 0
+	skipSteps := schema.StepPolicy == nil
+	if !skipBudget && !skipSteps {
 		return fields
 	}
 	applied := make(map[string]string, len(fields))
 	for path, text := range fields {
-		if strings.HasPrefix(path, "chat.approval_policy.budget.") {
+		if skipBudget && strings.HasPrefix(path, "chat.approval_policy.budget.") {
+			continue
+		}
+		if skipSteps && strings.HasPrefix(path, "step_policy.") {
 			continue
 		}
 		applied[path] = text

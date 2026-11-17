@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/assetdelivery"
@@ -72,13 +73,16 @@ type Config struct {
 	UpstreamCapture    UpstreamCaptureStatus
 	MCP                *mcp.Service
 	AccountInputAssets AccountInputAssetLister
-	Readiness          func(context.Context) error
-	Generation         *generation.Module
-	ExecutionGrants    *executiongrant.Service
-	Processing         *processing.Service
-	ModelDelivery      *modeldelivery.Service
-	Lineage            *lineage.Service
-	Retry              *taskretry.Service
+	// AccountSettings stores the person's 3D step settings (#330); nil leaves
+	// the step policy route unregistered.
+	AccountSettings *accountsettings.Service
+	Readiness       func(context.Context) error
+	Generation      *generation.Module
+	ExecutionGrants *executiongrant.Service
+	Processing      *processing.Service
+	ModelDelivery   *modeldelivery.Service
+	Lineage         *lineage.Service
+	Retry           *taskretry.Service
 	// Reroll starts a new task from the frozen input of a succeeded one (#242).
 	Reroll                 *taskreroll.Service
 	ProviderWebhooks       ProviderWebhookIngestor
@@ -200,6 +204,7 @@ type Server struct {
 	upstreamCapture                   UpstreamCaptureStatus
 	mcp                               *mcp.Service
 	accountInputAssets                AccountInputAssetLister
+	accountSettings                   *accountsettings.Service
 	readiness                         func(context.Context) error
 	generation                        *generation.Module
 	executionGrants                   *executiongrant.Service
@@ -433,6 +438,7 @@ func New(config Config) (*Server, error) {
 		upstreamCapture:           config.UpstreamCapture,
 		mcp:                       config.MCP,
 		accountInputAssets:        config.AccountInputAssets,
+		accountSettings:           config.AccountSettings,
 		administration:            config.Administration,
 		administrationAudit:       config.AdministrationAudit,
 		administrationGenerations: config.AdministrationGenerations,
@@ -591,6 +597,7 @@ func (s *Server) routes() {
 	s.registerDiagnosticsContract()
 	s.registerMCPContract()
 	s.registerAccountResourcesContracts()
+	s.registerAccountStepPolicyContract()
 	s.registerAdministrationUserContracts()
 	s.registerAdministrationAuditLogContracts()
 	s.registerAdministrationGenerationContracts()
