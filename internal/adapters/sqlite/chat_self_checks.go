@@ -58,6 +58,33 @@ func (r *Repository) ListSelfChecks(ctx context.Context, owner, session string) 
 	return records, nil
 }
 
+// SelfChecksByTask returns the owner's records of one task across sessions,
+// newest first. The task-scoped index makes this the lookup the external MCP
+// status block uses when the record lives in another session.
+func (r *Repository) SelfChecksByTask(ctx context.Context, owner, taskID string, limit int) ([]chat.SelfCheckRecord, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+selfCheckColumns+` FROM chat_self_checks
+		WHERE owner_id = ? AND task_id = ? ORDER BY updated_at DESC, id DESC LIMIT ?`, owner, taskID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list task self-checks: %w", err)
+	}
+	defer rows.Close()
+	var records []chat.SelfCheckRecord
+	for rows.Next() {
+		record, err := scanSelfCheck(rows)
+		if err != nil {
+			return nil, fmt.Errorf("read self-check: %w", err)
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list task self-checks: %w", err)
+	}
+	return records, nil
+}
+
 // SelfCheck returns one record of the owner's session.
 func (r *Repository) SelfCheck(ctx context.Context, owner, session, taskID string) (chat.SelfCheckRecord, bool, error) {
 	record, err := scanSelfCheck(r.db.QueryRowContext(ctx, `SELECT `+selfCheckColumns+` FROM chat_self_checks

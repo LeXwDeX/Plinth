@@ -1762,7 +1762,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, fmt.Errorf("个人访问 Key: %w", err)
 	}
 	mcpStatus, err := mcpStatusFromSchema(applicationSchema, accountSettingsService, repository,
-		providerAccountService, texts, logger)
+		providerAccountService, chatService, texts, logger)
 	if err != nil {
 		return nil, fmt.Errorf("对外 MCP 状态块: %w", err)
 	}

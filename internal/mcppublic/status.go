@@ -51,6 +51,7 @@ type Block struct {
 	Balances       []Balance    `json:"balances"`
 	StepCosts      []StepCost   `json:"step_costs"`
 	Failure        *Failure     `json:"failure"`
+	Inspection     *Inspection  `json:"inspection"`
 	summaryParts   summaryFacts `json:"-"`
 }
 
@@ -95,6 +96,47 @@ type Failure struct {
 	Advice               string `json:"advice"`
 }
 
+// InspectionSourcePlatformSelfCheck is the only source the block reports: the
+// platform's own 3D self-check record. An external inspection (A2) would add
+// another source.
+const InspectionSourcePlatformSelfCheck = "platform_self_check"
+
+// Inspection is the platform's last self-check of a finished 3D Task. It is
+// evidence for the caller, never a delivery approval: a passed verdict may
+// carry a waiver, and a task without a record has no inspection (null). The
+// platform's delivery-state roles are passed, issues, unchecked and
+// uncheckable; the values are not invented here.
+type Inspection struct {
+	TaskID    string                  `json:"task_id"`
+	Source    string                  `json:"source"`
+	Verdict   string                  `json:"verdict"`
+	Purpose   *InspectionPurpose      `json:"purpose"`
+	Failed    []InspectionFailedCheck `json:"failed"`
+	Waiver    bool                    `json:"waiver"`
+	CheckedAt *string                 `json:"checked_at"`
+}
+
+// InspectionPurpose names the purpose the inspection judged the model against;
+// nil when no inspection recorded one.
+type InspectionPurpose struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Source string `json:"source"`
+}
+
+// InspectionFailedCheck names one purpose check the latest successful
+// inspection judged as failed. It is a check id, never free text.
+type InspectionFailedCheck struct {
+	Check string `json:"check"`
+}
+
+// InspectionReader reads the platform's last self-check of one task. The
+// returned Inspection is nil with found false when the platform recorded none.
+// The block never fails a call: an error is logged and shown as null.
+type InspectionReader interface {
+	Inspection(ctx context.Context, ownerID, taskID string) (*Inspection, bool, error)
+}
+
 type summaryFacts struct {
 	hasAsset   bool
 	assetSteps *int
@@ -125,6 +167,9 @@ type Config struct {
 	Settings      Settings
 	Usage         executiongrant.AccessKeyUsageStore
 	Balances      Balances
+	// Inspections reads the platform self-check of a succeeded 3D task; nil
+	// keeps every block's inspection null.
+	Inspections InspectionReader
 	// Localize turns Schema copy into the request's language; nil keeps it.
 	Localize func(locale, text string) string
 	Logger   *slog.Logger
@@ -186,6 +231,10 @@ type Subject struct {
 	Costs []StepCost
 	// Failure is the attribution of the task the call concerned, if it failed.
 	Failure *Failure
+	// TaskID is the succeeded task whose platform self-check the block reports.
+	// Only get_task and get_task_assets set it; a task without a record keeps
+	// the inspection null.
+	TaskID string
 }
 
 // Build reads the facts of the subject. It never fails: what cannot be read is
@@ -236,6 +285,23 @@ func (b *Builder) Build(ctx context.Context, locale string, subject Subject) Blo
 	block.Balances = b.balances(ctx)
 	if len(subject.Costs) > 0 {
 		block.StepCosts = append(block.StepCosts, subject.Costs...)
+	}
+	if subject.TaskID != "" && b.config.Inspections != nil {
+		inspection, found, err := b.config.Inspections.Inspection(ctx, subject.OwnerID, subject.TaskID)
+		switch {
+		case err != nil:
+			b.config.Logger.Warn("MCP 状态块：自检结论读取失败，inspection 为 null",
+				"owner_id", subject.OwnerID, "task_id", subject.TaskID, "error", err)
+		case !found || inspection == nil:
+			// No record is normal: 2D, MCP-only and never-reviewed tasks have
+			// no platform verdict. It is reported as null and not logged.
+		default:
+			// failed is always an array, never null.
+			if inspection.Failed == nil {
+				inspection.Failed = []InspectionFailedCheck{}
+			}
+			block.Inspection = inspection
+		}
 	}
 	return block
 }

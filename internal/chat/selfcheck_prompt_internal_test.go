@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,22 @@ func (store *promptSelfCheckStore) ListSelfChecks(_ context.Context, owner, sess
 func (store *promptSelfCheckStore) SelfCheck(_ context.Context, owner, session, taskID string) (SelfCheckRecord, bool, error) {
 	record, found := store.records[owner+"\x00"+session+"\x00"+taskID]
 	return record, found, nil
+}
+
+func (store *promptSelfCheckStore) SelfChecksByTask(_ context.Context, owner, task string, limit int) ([]SelfCheckRecord, error) {
+	var records []SelfCheckRecord
+	for key, record := range store.records {
+		if strings.HasPrefix(key, owner+"\x00") && strings.HasSuffix(key, "\x00"+task) {
+			records = append(records, record)
+		}
+	}
+	sort.Slice(records, func(left, right int) bool {
+		return records[left].UpdatedAt.After(records[right].UpdatedAt)
+	})
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+	}
+	return records, nil
 }
 
 func (store *promptSelfCheckStore) SaveSelfCheck(_ context.Context, owner, session string,

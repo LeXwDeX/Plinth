@@ -27,9 +27,17 @@ var errSelfCheckNoCheck = errors.New("chat: no matching self-check evidence")
 type SelfCheckStore interface {
 	ListSelfChecks(ctx context.Context, owner, session string) ([]SelfCheckRecord, error)
 	SelfCheck(ctx context.Context, owner, session, taskID string) (SelfCheckRecord, bool, error)
+	// SelfChecksByTask returns the owner's newest records of one task, across
+	// sessions: a record may be written in a branch or in an ancestor session.
+	SelfChecksByTask(ctx context.Context, owner, taskID string, limit int) ([]SelfCheckRecord, error)
 	SaveSelfCheck(ctx context.Context, owner, session string, record SelfCheckRecord,
 		expectedRevision int64) (SelfCheckRecord, bool, error)
 }
+
+// selfCheckTaskCandidates bounds the records one task lookup compares. A task
+// has one record per session it was inspected in; eight is well above the
+// usual one and keeps the read small.
+const selfCheckTaskCandidates = 8
 
 // SelfCheckService owns the read-modify-write of the records. It uses the
 // Schema's states and limits only; it never creates a Task, spends credits or
@@ -72,6 +80,40 @@ func (service *SelfCheckService) Get(ctx context.Context, owner, session, taskID
 		return SelfCheckRecord{}, false, ErrSelfCheckUnavailable
 	}
 	return service.store.SelfCheck(ctx, owner, session, taskID)
+}
+
+// SelfCheckByTask returns the owner's newest self-check record of one task
+// across the owner's sessions. A record with a written conclusion wins over
+// one without one, the latest Conclusion.At first; otherwise the store's newest
+// record is returned. The owner scopes the read; a task the platform never
+// inspected has no record.
+func (service *SelfCheckService) SelfCheckByTask(ctx context.Context, owner, taskID string) (SelfCheckRecord, bool, error) {
+	if !service.available() {
+		return SelfCheckRecord{}, false, ErrSelfCheckUnavailable
+	}
+	if strings.TrimSpace(taskID) == "" {
+		return SelfCheckRecord{}, false, nil
+	}
+	records, err := service.store.SelfChecksByTask(ctx, owner, taskID, selfCheckTaskCandidates)
+	if err != nil {
+		return SelfCheckRecord{}, false, err
+	}
+	if len(records) == 0 {
+		return SelfCheckRecord{}, false, nil
+	}
+	best := -1
+	for index, record := range records {
+		if record.Conclusion == nil {
+			continue
+		}
+		if best < 0 || record.Conclusion.At.After(records[best].Conclusion.At) {
+			best = index
+		}
+	}
+	if best >= 0 {
+		return records[best], true, nil
+	}
+	return records[0], true, nil
 }
 
 // Counts derives the persisted counters of a record.

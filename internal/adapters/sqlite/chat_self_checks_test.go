@@ -97,6 +97,49 @@ func TestSelfCheckStoreInsertsReadsAndUpdatesWithCompareAndSwap(t *testing.T) {
 	}
 }
 
+// TestSelfCheckStoreReadsTaskAcrossSessions is the #332 7c-2 lookup: the
+// record may live in a branch or ancestor session, so the task-scoped read
+// spans the owner's sessions and orders newest first.
+func TestSelfCheckStoreReadsTaskAcrossSessions(t *testing.T) {
+	r := selfCheckTestRepository(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := r.CreateSession(ctx, chat.Session{
+		ID: "session-c", OwnerID: "owner-a", OwnerName: "Owner", Title: "branch",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	older := selfCheckRecord("task-a", "asset-older", "")
+	older.UpdatedAt = now
+	if _, _, err := r.SaveSelfCheck(ctx, "owner-a", "session-a", older, 0); err != nil {
+		t.Fatal(err)
+	}
+	newer := selfCheckRecord("task-a", "asset-newer", "passed")
+	newer.UpdatedAt = now.Add(time.Minute)
+	if _, _, err := r.SaveSelfCheck(ctx, "owner-a", "session-c", newer, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.SaveSelfCheck(ctx, "owner-a", "session-a", selfCheckRecord("task-b", "asset-b", ""), 0); err != nil {
+		t.Fatal(err)
+	}
+
+	records, err := r.SelfChecksByTask(ctx, "owner-a", "task-a", 8)
+	if err != nil || len(records) != 2 {
+		t.Fatalf("records = %+v err=%v", records, err)
+	}
+	if records[0].ModelAssetID != "asset-newer" || records[1].ModelAssetID != "asset-older" {
+		t.Fatalf("order = %q, %q", records[0].ModelAssetID, records[1].ModelAssetID)
+	}
+	if limited, err := r.SelfChecksByTask(ctx, "owner-a", "task-a", 1); err != nil || len(limited) != 1 ||
+		limited[0].ModelAssetID != "asset-newer" {
+		t.Fatalf("limited = %+v err=%v", limited, err)
+	}
+	if foreign, err := r.SelfChecksByTask(ctx, "owner-b", "task-a", 8); err != nil || len(foreign) != 0 {
+		t.Fatalf("foreign = %+v err=%v", foreign, err)
+	}
+}
+
 func TestSelfCheckStoreScopesReadsAndCascadesDeletes(t *testing.T) {
 	r := selfCheckTestRepository(t)
 	ctx := context.Background()

@@ -51,6 +51,22 @@ func (store *correctionStore) SelfCheck(_ context.Context, owner, session, task 
 	return record, found, nil
 }
 
+func (store *correctionStore) SelfChecksByTask(_ context.Context, owner, taskID string, limit int) ([]chat.SelfCheckRecord, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var records []chat.SelfCheckRecord
+	for key, record := range store.records {
+		if !strings.HasPrefix(key, owner+"\x00") || !strings.HasSuffix(key, "\x00"+taskID) {
+			continue
+		}
+		records = append(records, record)
+		if limit > 0 && len(records) >= limit {
+			break
+		}
+	}
+	return records, nil
+}
+
 func (store *correctionStore) SaveSelfCheck(_ context.Context, owner, session string,
 	record chat.SelfCheckRecord, expected int64) (chat.SelfCheckRecord, bool, error) {
 	store.mu.Lock()

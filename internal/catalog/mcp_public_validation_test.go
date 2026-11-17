@@ -215,7 +215,7 @@ func TestToolOutputSchemaCarriesTheStatusBlock(t *testing.T) {
 		if _, ok := parsed.Properties["status"]; !ok || len(parsed.Required) == 0 || parsed.Required[len(parsed.Required)-1] != "status" {
 			t.Fatalf("%s: served schema lacks the required status block: %s", tool.Name, served)
 		}
-		for _, name := range []string{"step_mode", "asset", "total_used_steps", "balances", "step_costs", "failure"} {
+		for _, name := range []string{"step_mode", "asset", "total_used_steps", "balances", "step_costs", "failure", "inspection"} {
 			if _, ok := parsed.Properties["status"].Properties[name]; !ok {
 				t.Fatalf("%s: status block lacks %q", tool.Name, name)
 			}
@@ -301,6 +301,15 @@ func TestMCPPublicRejectsInvalidDeclarations(t *testing.T) {
 		},
 		"status nested misses a name": func(a *catalog.ApplicationSchema) {
 			a.MCPPublic.StatusBlock.Schema = json.RawMessage(strings.Replace(string(a.MCPPublic.StatusBlock.Schema), `"read_at"`, `"seen_at"`, 1))
+		},
+		"status misses the inspection": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.StatusBlock.Schema = json.RawMessage(strings.Replace(string(a.MCPPublic.StatusBlock.Schema), `"inspection":`, `"check":`, 1))
+		},
+		"inspection purpose misses a name": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.StatusBlock.Schema = json.RawMessage(strings.Replace(string(a.MCPPublic.StatusBlock.Schema), `"label": {"type": "string", "description": "用途名称"}`, `"name": {"type": "string", "description": "用途名称"}`, 1))
+		},
+		"inspection failed check misses its name": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.StatusBlock.Schema = json.RawMessage(strings.Replace(string(a.MCPPublic.StatusBlock.Schema), `"check":`, `"name":`, 1))
 		},
 		"blank balance account": func(a *catalog.ApplicationSchema) { a.MCPPublic.StatusBlock.BalanceAccounts = []string{"meshy", " "} },
 		"repeated balance account": func(a *catalog.ApplicationSchema) {

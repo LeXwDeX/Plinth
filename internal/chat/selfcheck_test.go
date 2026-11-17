@@ -3,9 +3,11 @@ package chat_test
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -43,6 +45,24 @@ func (store *memorySelfCheckStore) SelfCheck(_ context.Context, owner, session, 
 	defer store.mu.Unlock()
 	record, found := store.records[selfCheckKey(owner, session, task)]
 	return record, found, nil
+}
+
+func (store *memorySelfCheckStore) SelfChecksByTask(_ context.Context, owner, task string, limit int) ([]chat.SelfCheckRecord, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var records []chat.SelfCheckRecord
+	for key, record := range store.records {
+		if strings.HasPrefix(key, owner+"\x00") && strings.HasSuffix(key, "\x00"+task) {
+			records = append(records, record)
+		}
+	}
+	sort.Slice(records, func(left, right int) bool {
+		return records[left].UpdatedAt.After(records[right].UpdatedAt)
+	})
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+	}
+	return records, nil
 }
 
 func (store *memorySelfCheckStore) SaveSelfCheck(_ context.Context, owner, session string,
@@ -425,5 +445,62 @@ func TestSelfCheckPassRequiresACleanPurposeCheckOrAWaiver(t *testing.T) {
 	if got := saved.Conclusion; got.Waiver != "用户接受" || got.Purpose != "render" ||
 		got.PurposeLabel != "展示/渲染" || got.PurposeSource != "default_profile" {
 		t.Fatalf("saved conclusion = %+v", got)
+	}
+}
+
+// TestSelfCheckByTaskChoosesTheNewestConclusionAcrossSessions is the #332
+// 7c-2 lookup rule: a record written in a branch or ancestor session is found
+// by task id, and a written conclusion wins over a newer record without one.
+func TestSelfCheckByTaskChoosesTheNewestConclusionAcrossSessions(t *testing.T) {
+	schema := testSelfCheckSchema(t)
+	store := newMemorySelfCheckStore()
+	service := chat.NewSelfCheckService(store, schema)
+	ctx := context.Background()
+	base := time.Date(2026, 11, 17, 8, 0, 0, 0, time.UTC)
+	save := func(session string, updated, conclusionAt time.Time, status string) {
+		t.Helper()
+		record := chat.SelfCheckRecord{
+			TaskID: "task-a", CreatedAt: base, UpdatedAt: updated,
+			Checks: []chat.SelfCheckCheck{{Round: 1, Kind: chat.SelfCheckKindInspect, Tool: "inspect_model", OK: true, At: updated}},
+		}
+		if status != "" {
+			record.Conclusion = &chat.SelfCheckConclusion{Status: status, Summary: "checked", At: conclusionAt}
+		}
+		if _, _, err := store.SaveSelfCheck(ctx, "owner-a", session, record, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The newest updated record has no conclusion: the older written one wins.
+	save("session-new", base.Add(3*time.Hour), time.Time{}, "")
+	save("session-old", base.Add(time.Hour), base.Add(time.Hour), "has_issues")
+	// Among conclusions, Conclusion.At decides, not updated_at.
+	save("session-branch", base.Add(2*time.Hour), base.Add(2*time.Hour), "passed")
+	record, found, err := service.SelfCheckByTask(ctx, "owner-a", "task-a")
+	if err != nil || !found || record.Conclusion == nil || record.Conclusion.Status != "passed" {
+		t.Fatalf("by task = %+v found=%v err=%v", record, found, err)
+	}
+	// Another owner's record is not found.
+	if _, found, err := service.SelfCheckByTask(ctx, "owner-b", "task-a"); err != nil || found {
+		t.Fatalf("foreign owner = found %v err %v", found, err)
+	}
+	if _, found, err := service.SelfCheckByTask(ctx, "owner-a", "task-missing"); err != nil || found {
+		t.Fatalf("missing task = found %v err %v", found, err)
+	}
+
+	// Without any conclusion the store's newest record is returned.
+	bare := newMemorySelfCheckStore()
+	bareService := chat.NewSelfCheckService(bare, schema)
+	for index, session := range []string{"session-first", "session-second"} {
+		record := chat.SelfCheckRecord{
+			TaskID: "task-b", ModelAssetID: session, CreatedAt: base,
+			UpdatedAt: base.Add(time.Duration(index) * time.Hour),
+		}
+		if _, _, err := bare.SaveSelfCheck(ctx, "owner-a", session, record, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, found, err := bareService.SelfCheckByTask(ctx, "owner-a", "task-b")
+	if err != nil || !found || latest.ModelAssetID != "session-second" {
+		t.Fatalf("without a conclusion = %+v found=%v err=%v", latest, found, err)
 	}
 }
