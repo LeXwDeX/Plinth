@@ -1,0 +1,474 @@
+package assetlist
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/project"
+)
+
+// Config is the Schema-derived policy and the runtime ports of the service.
+// ProjectMaxItems is application.project.limits.maximum_list_items, the
+// existing per-list item bound (the asset_list section deliberately declares
+// no second name for it).
+type Config struct {
+	Repository      Repository
+	Schema          catalog.AssetListSchema
+	ProjectMaxItems int
+	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
+	// draft+confirmed lists one project keeps. Terminal lists (rejected,
+	// expired, superseded) do not count. <= 0 means unlimited.
+	MaxListsPerProject int
+	// Counted names the capabilities whose planned Tasks count as 3D steps.
+	// StepPolicy is a convenience: when Counted is nil its
+	// count_capabilities list is used. Both empty means every step is 2D.
+	Counted    map[generation.Capability]bool
+	StepPolicy *catalog.StepPolicySchema
+	// ResolveStep snapshots one capability's runtime offering. nil marks every
+	// step available without an offering id, which is what tests and catalogs
+	// without runtime offerings use. An error marks the step unavailable with
+	// the error text as its reason; it never blocks the proposal.
+	ResolveStep func(capability string) (RouteStep, error)
+	// ValidateBrief checks the shared production brief against
+	// chat.model3d_usage.brief.fields. nil only checks that it is JSON.
+	ValidateBrief func(json.RawMessage) error
+	Now           func() time.Time
+	NewID         func(prefix string) (string, error)
+}
+
+// Service implements the list workflow over a Repository.
+type Service struct {
+	repository         Repository
+	limits             catalog.AssetListLimitsSchema
+	projectMaxItems    int
+	maxListsPerProject int
+	kinds              map[string]catalog.AssetListKindSchema
+	routes             map[string]catalog.AssetListRouteSchema
+	counted            map[generation.Capability]bool
+	resolveStep        func(capability string) (RouteStep, error)
+	validateBrief      func(json.RawMessage) error
+	clock              func() time.Time
+	newID              func(prefix string) (string, error)
+}
+
+// New builds the service. A Catalog that declares application.asset_list is
+// fully validated by the Catalog layer, so missing limits, kinds or routes
+// here mean the application was wired with the wrong section.
+func New(config Config) (*Service, error) {
+	if config.Repository == nil {
+		return nil, fmt.Errorf("%w: repository", ErrInvalid)
+	}
+	if config.ProjectMaxItems <= 0 {
+		return nil, fmt.Errorf("%w: project item limit", ErrInvalid)
+	}
+	limits := config.Schema.Limits
+	if limits.NameMaxLength <= 0 || limits.DescriptionMaxLength <= 0 ||
+		limits.MaxReferencesPerItem <= 0 || limits.DraftTTLSeconds <= 0 {
+		return nil, fmt.Errorf("%w: asset list limits", ErrInvalid)
+	}
+	kinds := make(map[string]catalog.AssetListKindSchema, len(config.Schema.Kinds))
+	for _, kind := range config.Schema.Kinds {
+		kinds[kind.ID] = kind
+	}
+	if len(kinds) == 0 {
+		return nil, fmt.Errorf("%w: no asset list kinds", ErrInvalid)
+	}
+	routes := make(map[string]catalog.AssetListRouteSchema, len(config.Schema.Routes))
+	for _, route := range config.Schema.Routes {
+		routes[route.ID] = route
+	}
+	if len(routes) == 0 {
+		return nil, fmt.Errorf("%w: no asset list routes", ErrInvalid)
+	}
+	counted := make(map[generation.Capability]bool, len(config.Counted))
+	for capability, value := range config.Counted {
+		counted[capability] = value
+	}
+	if config.Counted == nil && config.StepPolicy != nil {
+		for _, capability := range config.StepPolicy.CountedCapabilities {
+			counted[capability] = true
+		}
+	}
+	clock := config.Now
+	if clock == nil {
+		clock = func() time.Time { return time.Now().UTC() }
+	}
+	newID := config.NewID
+	if newID == nil {
+		newID = randomID
+	}
+	return &Service{
+		repository:         config.Repository,
+		limits:             limits,
+		projectMaxItems:    config.ProjectMaxItems,
+		maxListsPerProject: config.MaxListsPerProject,
+		kinds:              kinds,
+		routes:             routes,
+		counted:            counted,
+		resolveStep:        config.ResolveStep,
+		validateBrief:      config.ValidateBrief,
+		clock:              clock,
+		newID:              newID,
+	}, nil
+}
+
+func randomID(prefix string) (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	return prefix + hex.EncodeToString(value[:]), nil
+}
+
+// Propose validates and stores one draft list for the Agent's session. The
+// session must currently belong to the project: the proposal tool has no
+// project_id parameter, so a session outside the project is refused instead of
+// guessing. A replayed request_key returns the stored list untouched
+// (whatever state it reached meanwhile); it never creates or revives a list.
+// A project already at MaxListsPerProject live (draft+confirmed) lists is
+// refused with ErrLimit before any draft is superseded.
+func (service *Service) Propose(ctx context.Context, input ProposeInput) (List, error) {
+	ownerID := strings.TrimSpace(input.Owner)
+	projectID := strings.TrimSpace(input.ProjectID)
+	sessionID := strings.TrimSpace(input.SessionID)
+	requestKey := strings.TrimSpace(input.RequestKey)
+	if ownerID == "" || projectID == "" || sessionID == "" || requestKey == "" {
+		return List{}, fmt.Errorf("%w: owner, project, session and request_key are required", ErrInvalid)
+	}
+	existing, found, err := service.repository.FindByRequestKey(ctx, ownerID, requestKey)
+	if err != nil {
+		return List{}, err
+	}
+	if found {
+		return service.decorate(existing), nil
+	}
+	exists, err := service.repository.ProjectExists(ctx, ownerID, projectID)
+	if err != nil {
+		return List{}, err
+	}
+	if !exists {
+		return List{}, ErrProjectNotFound
+	}
+	sessionProject, err := service.repository.SessionProject(ctx, ownerID, sessionID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return List{}, ErrSessionNotInProject
+		}
+		return List{}, err
+	}
+	if sessionProject != projectID {
+		return List{}, ErrSessionNotInProject
+	}
+	title, err := service.title(input.Title)
+	if err != nil {
+		return List{}, err
+	}
+	now := service.clock()
+	items, err := service.buildItems(ownerID, input.Items, now)
+	if err != nil {
+		return List{}, err
+	}
+	brief, err := service.brief(input.Brief)
+	if err != nil {
+		return List{}, err
+	}
+	id, err := service.newID("alist_")
+	if err != nil {
+		return List{}, err
+	}
+	list := List{
+		ID:              id,
+		RequestKey:      requestKey,
+		OwnerID:         ownerID,
+		ProjectID:       projectID,
+		SourceSessionID: sessionID,
+		OriginMessageID: strings.TrimSpace(input.OriginMessageID),
+		Title:           title,
+		Status:          StatusDraft,
+		Brief:           brief,
+		Version:         0,
+		ExpiresAt:       now.Add(time.Duration(service.limits.DraftTTLSeconds) * time.Second),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Items:           items,
+	}
+	stored, err := service.repository.Propose(ctx, list, items, service.maxListsPerProject)
+	if err != nil {
+		return List{}, err
+	}
+	return service.decorate(stored), nil
+}
+
+// Edit replaces a draft's title, brief and items under an expected_version
+// CAS. Confirmed and other terminal lists are never edited; an expired draft
+// reports ErrExpired and the adapter records the expiry.
+func (service *Service) Edit(ctx context.Context, input EditInput) (List, error) {
+	ownerID := strings.TrimSpace(input.Owner)
+	projectID := strings.TrimSpace(input.ProjectID)
+	listID := strings.TrimSpace(input.ListID)
+	if ownerID == "" || projectID == "" || listID == "" {
+		return List{}, ErrNotFound
+	}
+	if input.ExpectedVersion < 0 {
+		return List{}, fmt.Errorf("%w: expected_version", ErrInvalid)
+	}
+	title, err := service.title(input.Title)
+	if err != nil {
+		return List{}, err
+	}
+	now := service.clock()
+	items, err := service.buildItems(ownerID, input.Items, now)
+	if err != nil {
+		return List{}, err
+	}
+	brief, err := service.brief(input.Brief)
+	if err != nil {
+		return List{}, err
+	}
+	stored, err := service.repository.EditList(ctx, List{
+		ID:        listID,
+		OwnerID:   ownerID,
+		ProjectID: projectID,
+		Title:     title,
+		Brief:     brief,
+		UpdatedAt: now,
+	}, items, input.ExpectedVersion)
+	if err != nil {
+		return List{}, err
+	}
+	return service.decorate(stored), nil
+}
+
+// Decide confirms, rejects or replaces a draft. Confirming while another list
+// is confirmed is ErrActiveConflict: the person must explicitly replace it.
+// Repeating the same decision returns the current list (a double click decides
+// once); any other status is ErrConflict. An expired draft is stored as
+// expired and reports ErrExpired.
+func (service *Service) Decide(ctx context.Context, input DecideInput) (List, error) {
+	ownerID := strings.TrimSpace(input.Owner)
+	projectID := strings.TrimSpace(input.ProjectID)
+	listID := strings.TrimSpace(input.ListID)
+	action := strings.TrimSpace(input.Decision)
+	if ownerID == "" || projectID == "" || listID == "" {
+		return List{}, ErrNotFound
+	}
+	switch action {
+	case DecisionConfirm, DecisionReject, DecisionReplace:
+	default:
+		return List{}, fmt.Errorf("%w: decision %q", ErrInvalid, action)
+	}
+	stored, err := service.repository.Decide(ctx, Decision{
+		OwnerID:   ownerID,
+		ProjectID: projectID,
+		ListID:    listID,
+		Action:    action,
+		Reason:    strings.TrimSpace(input.Reason),
+		At:        service.clock(),
+	})
+	if err != nil {
+		return List{}, err
+	}
+	return service.decorate(stored), nil
+}
+
+// Get reads one list with its items, owner and project filtered. The stored
+// status is unchanged when a draft's TTL passed; EffectiveStatus says expired.
+func (service *Service) Get(ctx context.Context, ownerID, projectID, listID string) (List, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	projectID = strings.TrimSpace(projectID)
+	listID = strings.TrimSpace(listID)
+	if ownerID == "" || projectID == "" || listID == "" {
+		return List{}, ErrNotFound
+	}
+	list, err := service.repository.GetList(ctx, ownerID, projectID, listID)
+	if err != nil {
+		return List{}, err
+	}
+	return service.decorate(list), nil
+}
+
+// List reads the project's lists in update order as summaries: status, counts
+// and effective status, without items.
+func (service *Service) List(ctx context.Context, ownerID, projectID string) ([]List, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	projectID = strings.TrimSpace(projectID)
+	if ownerID == "" || projectID == "" {
+		return nil, ErrNotFound
+	}
+	lists, err := service.repository.ListLists(ctx, ownerID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range lists {
+		lists[index] = service.decorate(lists[index])
+	}
+	return lists, nil
+}
+
+// decorate derives the read-time effective status and, when the items are
+// loaded, the plan totals. A draft at exactly its expiry instant is expired.
+func (service *Service) decorate(list List) List {
+	list.EffectiveStatus = list.Status
+	if list.Status == StatusDraft && !list.ExpiresAt.IsZero() && !service.clock().Before(list.ExpiresAt) {
+		list.EffectiveStatus = StatusExpired
+	}
+	if list.Items != nil {
+		steps, model3dSteps := 0, 0
+		for _, item := range list.Items {
+			steps += item.PlannedStepCount
+			model3dSteps += item.PlannedModel3DStepCount
+		}
+		list.PlannedStepCount = steps
+		list.PlannedModel3DStepCount = model3dSteps
+	}
+	return list
+}
+
+func (service *Service) title(raw string) (string, error) {
+	title := strings.TrimSpace(raw)
+	if title == "" {
+		return "", fmt.Errorf("%w: title is required", ErrInvalid)
+	}
+	if utf8.RuneCountInString(title) > service.limits.NameMaxLength {
+		return "", fmt.Errorf("%w: title is too long", ErrInvalid)
+	}
+	return title, nil
+}
+
+func (service *Service) brief(raw json.RawMessage) (json.RawMessage, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		raw = json.RawMessage("{}")
+	}
+	if !json.Valid(raw) {
+		return nil, fmt.Errorf("%w: brief is not JSON", ErrInvalid)
+	}
+	if service.validateBrief != nil {
+		if err := service.validateBrief(raw); err != nil {
+			return nil, fmt.Errorf("%w: brief: %v", ErrInvalid, err)
+		}
+	}
+	return append(json.RawMessage(nil), raw...), nil
+}
+
+// buildItems validates the whole item set before any row is written: the
+// project's item bound, unique names (trimmed, case-insensitive), kinds and
+// routes from the Schema, the per-item reference bound and shape, and the
+// availability snapshot of every route step.
+func (service *Service) buildItems(ownerID string, inputs []ItemInput, now time.Time) ([]Item, error) {
+	if len(inputs) == 0 {
+		return nil, fmt.Errorf("%w: at least one item is required", ErrInvalid)
+	}
+	if len(inputs) > service.projectMaxItems {
+		return nil, fmt.Errorf("%w: at most %d items per list", ErrLimit, service.projectMaxItems)
+	}
+	seen := make(map[string]bool, len(inputs))
+	items := make([]Item, 0, len(inputs))
+	for index, input := range inputs {
+		kindID := strings.TrimSpace(input.Kind)
+		kind, exists := service.kinds[kindID]
+		if !exists {
+			return nil, fmt.Errorf("%w: item %d has unknown kind %q", ErrInvalid, index+1, kindID)
+		}
+		name := strings.TrimSpace(input.Name)
+		if name == "" {
+			return nil, fmt.Errorf("%w: item %d needs a name", ErrInvalid, index+1)
+		}
+		if utf8.RuneCountInString(name) > service.limits.NameMaxLength {
+			return nil, fmt.Errorf("%w: item %d name is too long", ErrInvalid, index+1)
+		}
+		key := strings.ToLower(name)
+		if seen[key] {
+			return nil, fmt.Errorf("%w: duplicate item name %q", ErrInvalid, name)
+		}
+		seen[key] = true
+		description := strings.TrimSpace(input.Description)
+		if utf8.RuneCountInString(description) > service.limits.DescriptionMaxLength {
+			return nil, fmt.Errorf("%w: item %d description is too long", ErrInvalid, index+1)
+		}
+		routeID := strings.TrimSpace(input.RouteID)
+		if routeID == "" {
+			routeID = kind.DefaultRoute
+		}
+		route, exists := service.routes[routeID]
+		if !exists {
+			return nil, fmt.Errorf("%w: item %d has unknown route %q", ErrInvalid, index+1, routeID)
+		}
+		if !slices.Contains(route.Kinds, kindID) {
+			return nil, fmt.Errorf("%w: route %q does not serve kind %q", ErrInvalid, routeID, kindID)
+		}
+		references, err := service.references(input.References)
+		if err != nil {
+			return nil, err
+		}
+		steps := make([]RouteStep, 0, len(route.Steps))
+		model3dSteps := 0
+		for _, step := range route.Steps {
+			capability := string(step.Capability)
+			resolved := RouteStep{Capability: capability, Available: true}
+			if service.resolveStep != nil {
+				if value, err := service.resolveStep(capability); err != nil {
+					resolved.Available = false
+					resolved.Reason = err.Error()
+				} else {
+					resolved = value
+					resolved.Capability = capability
+				}
+			}
+			if service.counted[step.Capability] {
+				model3dSteps++
+			}
+			steps = append(steps, resolved)
+		}
+		id, err := service.newID("aitem_")
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, Item{
+			ID:                      id,
+			OwnerID:                 ownerID,
+			Kind:                    kindID,
+			Name:                    name,
+			Description:             description,
+			References:              references,
+			RouteID:                 routeID,
+			Route:                   steps,
+			PlannedStepCount:        len(steps),
+			PlannedModel3DStepCount: model3dSteps,
+			State:                   StateTodo,
+			Version:                 0,
+			Result:                  json.RawMessage("{}"),
+			Review:                  json.RawMessage("{}"),
+			CreatedAt:               now,
+			UpdatedAt:               now,
+		})
+	}
+	return items, nil
+}
+
+// references bounds and shape-checks the item's references. Resolution from
+// @imgN/@projectN handles to project.Reference belongs to the caller (#327
+// PR3); this package never widens the owner's scope.
+func (service *Service) references(values []project.Reference) ([]project.Reference, error) {
+	if len(values) > service.limits.MaxReferencesPerItem {
+		return nil, fmt.Errorf("%w: at most %d references per item", ErrLimit, service.limits.MaxReferencesPerItem)
+	}
+	result := make([]project.Reference, 0, len(values))
+	for _, reference := range values {
+		if !reference.Valid() {
+			return nil, fmt.Errorf("%w: invalid reference", ErrInvalid)
+		}
+		result = append(result, reference)
+	}
+	return result, nil
+}

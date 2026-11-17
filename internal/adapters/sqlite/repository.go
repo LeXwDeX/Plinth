@@ -421,6 +421,9 @@ var mcpAssetsMigration string
 //go:embed migrations/0099_chat_self_checks_task.sql
 var chatSelfChecksTaskMigration string
 
+//go:embed migrations/0100_asset_lists.sql
+var assetListsMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -511,7 +514,8 @@ func migrations() []migration {
 		migration{version: 96, name: "access_keys", sql: accessKeysMigration},
 		migration{version: 97, name: "execution_grant_access_key", sql: executionGrantAccessKeyMigration},
 		migration{version: 98, name: "mcp_assets", sql: mcpAssetsMigration},
-		migration{version: 99, name: "chat_self_checks_task", sql: chatSelfChecksTaskMigration})
+		migration{version: 99, name: "chat_self_checks_task", sql: chatSelfChecksTaskMigration},
+		migration{version: 100, name: "asset_lists", sql: assetListsMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -524,8 +528,9 @@ func migrations() []migration {
 // byte-identical (#300), 94 the reason a chat turn ended (#328), 95 the
 // per-person account settings, the 3D step mode (#330), 96 the personal
 // access keys (#332), 97 the grant source of an access key (#332), 98 the
-// asset-to-session mapping of the external MCP service (#332) and 99 the
-// task lookup index of the 3D self-check records (#332).
+// asset-to-session mapping of the external MCP service (#332), 99 the
+// task lookup index of the 3D self-check records (#332) and 100 the project
+// production lists and their items (#327).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))
