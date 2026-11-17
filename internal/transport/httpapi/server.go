@@ -153,8 +153,11 @@ type Config struct {
 	InputAssets           InputAssetUploader
 	ModelPreviews         ModelPreviewReader
 	// AssetPreviews makes the downscaled task pictures small views ask for (#290); nil serves originals.
-	AssetPreviews  AssetPreviews
-	AssetGateway   SignedAssetGateway
+	AssetPreviews AssetPreviews
+	AssetGateway  SignedAssetGateway
+	// TaskAssetLinks signs the short-lived download links of the external MCP
+	// listener (#332); nil means signed links are unavailable.
+	TaskAssetLinks TaskAssetLinkSigner
 	RuntimeVersion func() string
 	// ArchiveTempDir 是 Range 归档物化临时文件的目录。留空时用
 	// os.TempDir()；生产装配传入运行卷目录，因为容器默认 /tmp
@@ -281,6 +284,7 @@ type Server struct {
 	modelPreviews          ModelPreviewReader
 	assetPreviews          AssetPreviews
 	assetGateway           SignedAssetGateway
+	taskAssetLinks         TaskAssetLinkSigner
 	runtimeVersion         func() string
 	archiveTempDir         string
 	assetVerificationStats func() (hits, misses, verifiedBytes uint64)
@@ -497,6 +501,7 @@ func New(config Config) (*Server, error) {
 		modelPreviews:          config.ModelPreviews,
 		assetPreviews:          config.AssetPreviews,
 		assetGateway:           config.AssetGateway,
+		taskAssetLinks:         config.TaskAssetLinks,
 		runtimeVersion:         config.RuntimeVersion,
 		archiveTempDir:         strings.TrimSpace(config.ArchiveTempDir),
 		assetVerificationStats: config.AssetVerificationStats,
@@ -554,8 +559,7 @@ func (s *Server) Handler() http.Handler {
 	// 客户端地址先于限流解析（#256），可信代理之外的 X-Forwarded-For 一律忽略。
 	return requestLogMiddleware(
 		s.logger,
-		s.providerAssetRoute,
-		s.providerWebhookSecretRoutes(),
+		append([]routing.One{s.providerAssetRoute}, s.providerWebhookSecretRoutes()...),
 		localeTraceMiddleware(s.application, s.texts, clientAddressMiddleware(
 			s.trustedProxies,
 			s.securityHeadersMiddleware(
@@ -951,6 +955,14 @@ type SignedAssetGateway interface {
 		context.Context,
 		string,
 	) (generation.InputAsset, io.ReadCloser, error)
+}
+
+// TaskAssetLinkSigner signs and verifies the short-lived download links of the
+// external MCP listener (#332). It is nil when the deployment has no asset
+// signing key; signed links are then unavailable.
+type TaskAssetLinkSigner interface {
+	SignTaskAsset(taskID generation.TaskID, assetID generation.AssetID, ownerID generation.OwnerID, ttl time.Duration) (string, time.Time, error)
+	OpenTaskAsset(token string) (generation.TaskID, generation.AssetID, generation.OwnerID, error)
 }
 
 type LegacyGeneratedImageStore interface {
@@ -3720,8 +3732,7 @@ func recoverMiddleware(
 
 func requestLogMiddleware(
 	logger *slog.Logger,
-	providerAssetRoute routing.One,
-	webhookSecretRoutes []routing.One,
+	secretRoutes []routing.One,
 	next http.Handler,
 ) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -3738,7 +3749,7 @@ func requestLogMiddleware(
 		attributes := []any{
 			"request_id", trace.id,
 			"method", request.Method,
-			"path", safeLogPath(request.URL.Path, providerAssetRoute, webhookSecretRoutes),
+			"path", safeLogPath(request.URL.Path, secretRoutes),
 			"status", status,
 			"duration_ms", time.Since(started).Milliseconds(),
 		}
@@ -3747,7 +3758,7 @@ func requestLogMiddleware(
 		// between calls WithContext.
 		trace.mu.Lock()
 		if trace.route != "" {
-			attributes = append(attributes, "route", safeLogPath(trace.route, providerAssetRoute, webhookSecretRoutes))
+			attributes = append(attributes, "route", safeLogPath(trace.route, secretRoutes))
 		}
 		if trace.sessionID != "" {
 			attributes = append(attributes, "session_id", trace.sessionID)
@@ -3808,18 +3819,8 @@ func (recorder *statusRecorder) FlushError() error {
 
 func (recorder *statusRecorder) Flush() { _ = recorder.FlushError() }
 
-func safeLogPath(
-	value string,
-	providerAssetRoute routing.One,
-	webhookSecretRoutes []routing.One,
-) string {
-	if redacted, matched := providerAssetRoute.Redact(
-		value,
-		"redacted",
-	); matched {
-		return redacted
-	}
-	for _, route := range webhookSecretRoutes {
+func safeLogPath(value string, secretRoutes []routing.One) string {
+	for _, route := range secretRoutes {
 		if redacted, matched := route.Redact(value, "redacted"); matched {
 			return redacted
 		}

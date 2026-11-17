@@ -24,8 +24,7 @@ func runRequestLogChain(
 	}
 	chain := requestLogMiddleware(
 		logger,
-		route,
-		nil,
+		[]routing.One{route},
 		recoverMiddleware(logger, "internal error", handler),
 	)
 	response := httptest.NewRecorder()

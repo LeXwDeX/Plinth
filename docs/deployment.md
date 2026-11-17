@@ -269,6 +269,8 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 
 监听没有 TLS，访问 Key 是 Bearer 令牌：只在局域网或本机使用，不得经公网明文传输；要对公网开放，须在进程里配置证书或在前面放 TLS 终结（本仓库不提供）。候选栈的 Compose 文件（`docker-compose.go-candidate.yml`）与自部署的根 `docker-compose.yml` 不发布这个端口。发布后用该 Key 对 `POST /mcp` 调 `server/discover` 与 `get_status`，确认监听与状态块（行为见 [`architecture.md`](architecture.md)「对外 MCP 监听」）。
 
+**签名下载。** `get_task_assets` 传 `signed: true` 时，监听按 Schema `application.mcp_public.signed_download_path`（缺省 `/mcp/signed-assets/{token}`）签发短时地址，有效期取 `signed_download_ttl_seconds`（默认 300 秒，不超过 `signed_download_max_ttl_seconds`，当前 3600 秒）。签发要求运行环境文件同时配置 `PUBLIC_BASE_URL` 与 `ASSET_SIGNING_KEY`（启动校验；`ASSET_SIGNING_KEY` 不少于 32 字节），只有 `ASSET_SIGNING_KEY` 非空时监听才具备签发能力；签名 key 由 `ASSET_SIGNING_KEY` 按用途派生，与输入资产签名令牌互不通用。没有配置签名密钥时，`signed: true` 返回 `isError` 与错误码 `signed_download_unavailable`，不签发链接；未签名的鉴权下载仍可用。签名地址不要求 `Authorization`、不计入 Key 限流，但同样只走这个监听、没有 TLS：只能在内网或本机使用，不得经公网明文传输。令牌无效、过期、被篡改或所有者不符一律 404；服务端不记录令牌明文，访问日志把令牌脱敏为 `{redacted}`。客户端拿到的绝对地址按请求的 Host 与协议拼成，与鉴权下载一致，不依赖 `PUBLIC_BASE_URL`。
+
 监听按 Schema `access_keys.rate_limit` 限流（每把 Key 每分钟的请求数、每个客户端地址每分钟的鉴权失败次数），计数在进程内，重启清零，只对单实例成立。监听不信任任何代理，不读 `trusted_proxy_cidrs`：客户端地址就是到达容器的 TCP 对端，经 Docker 网关或 NAT 到达的调用方共用一个地址、一起计数。
 
 ## 7. 冒烟失败后的手工回滚

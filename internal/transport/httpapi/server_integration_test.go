@@ -1848,6 +1848,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		InputAssets:           compatibleInputs,
 		AssetPreviews:         assetPreviews,
 		AssetGateway:          inputs,
+		TaskAssetLinks:        harnessTaskAssetLinks(mcpParts),
 		Logger:                harnessLogger(t),
 	})
 	if err != nil {

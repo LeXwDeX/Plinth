@@ -5512,6 +5512,9 @@
       "enabled": true,
       "path": "/mcp",
       "download_path": "/mcp/tasks/{taskID}/assets/{assetID}",
+      "signed_download_path": "/mcp/signed-assets/{token}",
+      "signed_download_ttl_seconds": 300,
+      "signed_download_max_ttl_seconds": 3600,
       "protocol_version": "2026-07-28",
       "server_name": "Plinth",
       "instructions": "Plinth 的对外 MCP 服务，用你自己的访问 Key 作 Bearer 调用。每个工具的响应都带状态块（structuredContent 里的 status）：3D 步数模式、本资产与累计已用的 3D 步数、三家 3D 供应商的余额、失败归因与建议动作。默认由你自己判断要不要继续做 3D 步骤，平台不拦截。余额读不到时写 unknown，不代表零。",
@@ -5606,10 +5609,10 @@
         },
         {
           "name": "get_task_assets",
-          "description": "列出一个任务的产物文件：角色、格式、大小、摘要和下载地址。下载地址在同一个 MCP 监听上，用同一把 Key 作 Bearer 取回字节。任务没成功时 complete 为 false，产物可能为空。",
+          "description": "列出一个任务的产物文件：角色、格式、大小、摘要和下载地址。默认下载地址在同一个 MCP 监听上，需要用同一把 Key 作 Bearer 鉴权；传 signed=true 时返回短时签名下载地址，地址本身即可取回字节，不必再带 Authorization，有效期由服务端配置。任务没成功时 complete 为 false，产物可能为空。",
           "scope": "read",
-          "input_schema": {"type": "object", "properties": {"task_id": {"type": "string", "minLength": 1, "maxLength": 200, "description": "任务 ID"}}, "required": ["task_id"], "additionalProperties": false},
-          "output_schema": {"type": "object", "properties": {"task_id": {"type": "string", "description": "任务 ID"}, "state": {"type": "string", "description": "任务的公开状态"}, "complete": {"type": "boolean", "description": "任务已成功结束、产物已齐"}, "assets": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "description": "产物 ID"}, "role": {"type": "string", "description": "产物角色，如 model、thumbnail、texture"}, "variant": {"type": ["string", "null"], "description": "角色下的变体，如 mtl、obj"}, "format": {"type": ["string", "null"], "description": "模型文件的格式名，如 GLB；没有已知格式为 null"}, "media_type": {"type": "string", "description": "媒体类型"}, "size": {"type": "integer", "description": "字节数"}, "sha256": {"type": "string", "description": "内容摘要"}, "required": {"type": "boolean", "description": "这个产物是不是交付必需的"}, "delivery": {"type": ["string", "null"], "description": "交付方式"}, "download_url": {"type": "string", "description": "下载地址：同一个 MCP 监听上的鉴权下载路由，用同一把 Key 作 Bearer 取回字节"}}, "required": ["id", "role", "media_type", "size", "download_url"]}}, "error": {"type": "object", "description": "业务错误：只在 isError 为 true 的结果里出现", "properties": {"code": {"type": "string", "description": "错误码"}, "message": {"type": "string", "description": "原因，可直接转告用户"}}, "required": ["code", "message"]}}}
+          "input_schema": {"type": "object", "properties": {"task_id": {"type": "string", "minLength": 1, "maxLength": 200, "description": "任务 ID"}, "signed": {"type": "boolean", "description": "为 true 时返回短时签名下载地址：地址本身即可取回字节，不必再带 Authorization 头；有效期由服务端配置。缺省为 false。"}}, "required": ["task_id"], "additionalProperties": false},
+          "output_schema": {"type": "object", "properties": {"task_id": {"type": "string", "description": "任务 ID"}, "state": {"type": "string", "description": "任务的公开状态"}, "complete": {"type": "boolean", "description": "任务已成功结束、产物已齐"}, "download_expires_at": {"type": ["string", "null"], "description": "签名下载地址的过期时间（RFC 3339）；未请求签名时为 null"}, "assets": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string", "description": "产物 ID"}, "role": {"type": "string", "description": "产物角色，如 model、thumbnail、texture"}, "variant": {"type": ["string", "null"], "description": "角色下的变体，如 mtl、obj"}, "format": {"type": ["string", "null"], "description": "模型文件的格式名，如 GLB；没有已知格式为 null"}, "media_type": {"type": "string", "description": "媒体类型"}, "size": {"type": "integer", "description": "字节数"}, "sha256": {"type": "string", "description": "内容摘要"}, "required": {"type": "boolean", "description": "这个产物是不是交付必需的"}, "delivery": {"type": ["string", "null"], "description": "交付方式"}, "download_url": {"type": "string", "description": "下载地址：同一个 MCP 监听上的签名或鉴权下载路由；签名地址可直接取回字节，鉴权地址需用同一把 Key 作 Bearer"}}, "required": ["id", "role", "media_type", "size", "download_url"]}}, "error": {"type": "object", "description": "业务错误：只在 isError 为 true 的结果里出现", "properties": {"code": {"type": "string", "description": "错误码"}, "message": {"type": "string", "description": "原因，可直接转告用户"}}, "required": ["code", "message"]}}}
         },
         {
           "name": "upload_image",
@@ -5680,7 +5683,8 @@
         "too_many_in_flight": "你同时进行中的任务已达上限，这一步没有提交。请 {seconds} 秒后用同一个 idempotency_key 重试，或先等已有任务完成。",
         "upload_too_large": "图片太大：上限 {max} 字节。请缩小后再传。",
         "upload_invalid": "data 不是有效的 base64，或解码后是空的。",
-        "upload_type_not_allowed": "不支持这种文件：只接受 {types}。文件类型按内容判断，不看你声明的名字。"
+        "upload_type_not_allowed": "不支持这种文件：只接受 {types}。文件类型按内容判断，不看你声明的名字。",
+        "signed_download_unavailable": "这个服务端没有配置资产签名密钥，暂时不能签发短时下载地址。请改用同一把 Key 的鉴权下载地址，或联系管理员配置签名密钥。"
       }
     },
     "chat": {
@@ -19540,11 +19544,12 @@
             "mcp_public.messages.internal": "The service could not complete this request right now; try again later.",
             "mcp_public.messages.rate_limited": "This access key has made too many requests this minute, so this request was not run. Wait {seconds} seconds, then retry.",
             "mcp_public.messages.auth_throttled": "Too many failed authentications came from this address, so its requests are not accepted for now. Check that the access key is correct, wait {seconds} seconds, then retry.",
+            "mcp_public.messages.signed_download_unavailable": "This server has no asset signing key configured, so it cannot issue short-lived download addresses right now. Use the authenticated download address with the same key instead, or ask an administrator to configure a signing key.",
             "mcp_public.tools[name=list_services].description": "Lists the services (offerings) usable through MCP, grouped by capability, with whether each is available right now, roughly what one step costs, which inputs it needs and which parameters can be tuned. An unavailable service is said to be unavailable; it is never replaced by another model.",
             "mcp_public.tools[name=get_status].description": "Shows the 3D step mode, the 3D steps each of your MCP assets used, the running total and the balances of the three 3D providers. Reading counts no step and charges nothing. Every tool response carries the same status block, so there is no need to call this just to get it.",
             "mcp_public.tools[name=get_task].description": "Reads one task: state, progress, failure attribution with a suggested action, and the asset it belongs to. An unfinished task comes with a suggested polling interval. Only your own tasks can be read; another person's task is treated as missing.",
             "mcp_public.tools[name=list_tasks].description": "Lists tasks: with asset_id the tasks of that asset (chat session), without it your most recent tasks. Paged; pass the returned next_cursor for the next page. Only your own tasks are listed.",
-            "mcp_public.tools[name=get_task_assets].description": "Lists the output files of a task: role, format, size, digest and download URL. The URL is on the same MCP listener; fetch the bytes with the same key as the Bearer token. While the task has not succeeded, complete is false and the list may be empty.",
+            "mcp_public.tools[name=get_task_assets].description": "Lists the output files of a task: role, format, size, digest and download URL. With signed=true the URL is a short-lived signed download address that needs no Authorization header to fetch the bytes; the server decides how long it stays valid. Otherwise the URL is on the same MCP listener and needs the same key as the Bearer token. While the task has not succeeded, complete is false and the list may be empty.",
             "mcp_public.assets.default_title": "MCP · Default",
             "mcp_public.tools[name=upload_image].description": "Uploads one reference picture as base64 and returns its image ID, which later calls of generate_image, create_model, remove_background and process_model take as a picture input. The size cap and the accepted types are in the Schema; the type is read from the bytes, not from anything you declare. Resize larger pictures first. Uploading counts no step, charges nothing and belongs to no asset.",
             "mcp_public.tools[name=generate_image].description": "Generates a picture: with only prompt it is text-to-image; with images (reference picture IDs) it is image-to-image. Returns the task ID and the service actually used at once; poll with get_task until it ends, then fetch the picture with get_task_assets. 2D has no step limit. Needs idempotency_key: retrying with the same key returns the same task. Pass asset to put the task in a named asset.",

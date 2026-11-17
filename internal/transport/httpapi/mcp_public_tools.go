@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/mcphttp"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -68,16 +69,19 @@ type mcpRuntime struct {
 	tools         map[string]*mcpTool
 	order         []string
 	downloadRoute routing.Two
+	signedRoute   routing.One
+	signedTTL     time.Duration
 }
 
-func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Two) (*mcpRuntime, error) {
+func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Two, signedRoute routing.One) (*mcpRuntime, error) {
+	ttl := time.Duration(service.SignedDownloadTTLSeconds) * time.Second
 	handlers := map[string]func(*mcpCall) (mcpOutcome, error){
 		catalog.MCPToolListServices: s.mcpListServices,
 		catalog.MCPToolGetStatus:    s.mcpGetStatus,
 		catalog.MCPToolGetTask:      s.mcpGetTask,
 		catalog.MCPToolListTasks:    s.mcpListTasks,
 		catalog.MCPToolGetTaskAssets: func(call *mcpCall) (mcpOutcome, error) {
-			return s.mcpGetTaskAssets(call, route)
+			return s.mcpGetTaskAssets(call, route, signedRoute, ttl)
 		},
 		catalog.MCPToolUploadImage:      s.mcpUploadImage,
 		catalog.MCPToolGenerateImage:    s.mcpStartTask,
@@ -85,7 +89,7 @@ func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Tw
 		catalog.MCPToolCreateModel:      s.mcpStartTask,
 		catalog.MCPToolProcessModel:     s.mcpStartTask,
 	}
-	runtime := &mcpRuntime{server: s, service: service, tools: map[string]*mcpTool{}, downloadRoute: route}
+	runtime := &mcpRuntime{server: s, service: service, tools: map[string]*mcpTool{}, downloadRoute: route, signedRoute: signedRoute, signedTTL: ttl}
 	for _, declared := range service.Tools {
 		run, implemented := handlers[declared.Name]
 		if !implemented {
@@ -464,7 +468,14 @@ type mcpAssetView struct {
 	DownloadURL string  `json:"download_url"`
 }
 
-func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two) (mcpOutcome, error) {
+func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two, signedRoute routing.One, ttl time.Duration) (mcpOutcome, error) {
+	signed, _ := call.arguments["signed"].(bool)
+	if signed && s.taskAssetLinks == nil {
+		return mcpOutcome{problem: &mcpProblem{
+			Code:    "signed_download_unavailable",
+			Message: s.mcpText(call.locale, s.application.MCPPublic.Messages.SignedDownloadUnavailable),
+		}}, nil
+	}
 	task, missing, err := s.mcpOwnedTask(call, mcpStringArgument(call, "task_id"))
 	if err != nil {
 		return mcpOutcome{}, err
@@ -483,11 +494,25 @@ func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two) (mcpOutcome,
 	}
 	projected := s.newTaskResponse(call.locale, task)
 	assets := make([]mcpAssetView, 0, len(projected.Assets))
+	// downloadExpires is the first link's expiry: every link of this answer was
+	// signed at once and lasts the same.
+	var downloadExpires any
 	for _, asset := range projected.Assets {
 		entry := mcpAssetView{
 			ID: string(asset.ID), Role: asset.Role, MediaType: asset.MediaType, Size: asset.Size,
 			SHA256: asset.SHA256, Required: asset.Required,
-			DownloadURL: call.base + route.Render(string(task.ID), string(asset.ID)),
+		}
+		if signed {
+			token, expires, err := s.taskAssetLinks.SignTaskAsset(task.ID, asset.ID, call.owner, ttl)
+			if err != nil {
+				return mcpOutcome{}, fmt.Errorf("签署任务产物下载链接: %w", err)
+			}
+			entry.DownloadURL = call.base + signedRoute.Render(token)
+			if downloadExpires == nil {
+				downloadExpires = expires.UTC().Format(time.RFC3339)
+			}
+		} else {
+			entry.DownloadURL = call.base + route.Render(string(task.ID), string(asset.ID))
 		}
 		if asset.Variant != "" {
 			variant := asset.Variant
@@ -507,6 +532,7 @@ func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two) (mcpOutcome,
 		data: map[string]any{
 			"task_id": string(task.ID), "state": view.State,
 			"complete": task.State == generation.TaskSucceeded, "assets": assets,
+			"download_expires_at": downloadExpires,
 		},
 		subject: subject,
 	}, nil

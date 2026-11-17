@@ -35,6 +35,14 @@ func TestDefaultMCPPublicLoadsAndStaysServerSide(t *testing.T) {
 	if service.Path != "/mcp" || service.ProtocolVersion != "2026-07-28" || service.StatusBlock.Key != "status" {
 		t.Fatalf("mcp_public = %+v", service)
 	}
+	if service.SignedDownloadPath != "/mcp/signed-assets/{token}" ||
+		service.SignedDownloadTTLSeconds != 300 || service.SignedDownloadMaxTTLSeconds != 3600 {
+		t.Fatalf("signed download declaration = %q, %d, %d", service.SignedDownloadPath,
+			service.SignedDownloadTTLSeconds, service.SignedDownloadMaxTTLSeconds)
+	}
+	if strings.TrimSpace(service.Messages.SignedDownloadUnavailable) == "" {
+		t.Fatal("mcp_public.messages.signed_download_unavailable is empty")
+	}
 	names := make([]string, 0, len(service.Tools))
 	for _, tool := range service.Tools {
 		names = append(names, tool.Name)
@@ -119,16 +127,46 @@ func TestMCPPublicRejectsInvalidDeclarations(t *testing.T) {
 		"download without ids":  func(a *catalog.ApplicationSchema) { a.MCPPublic.DownloadPath = "/mcp/assets" },
 		"download wrong ids":    func(a *catalog.ApplicationSchema) { a.MCPPublic.DownloadPath = "/mcp/{task}/{asset}" },
 		"same routes":           func(a *catalog.ApplicationSchema) { a.MCPPublic.DownloadPath = "/mcp" },
-		"no protocol version":   func(a *catalog.ApplicationSchema) { a.MCPPublic.ProtocolVersion = " " },
-		"no server name":        func(a *catalog.ApplicationSchema) { a.MCPPublic.ServerName = "" },
-		"no instructions":       func(a *catalog.ApplicationSchema) { a.MCPPublic.Instructions = "" },
-		"zero request limit":    func(a *catalog.ApplicationSchema) { a.MCPPublic.MaxRequestBytes = 0 },
-		"huge response limit":   func(a *catalog.ApplicationSchema) { a.MCPPublic.MaxResponseBytes = 1 << 40 },
-		"zero read timeout":     func(a *catalog.ApplicationSchema) { a.MCPPublic.ReadTimeoutSeconds = 0 },
-		"zero write timeout":    func(a *catalog.ApplicationSchema) { a.MCPPublic.WriteTimeoutSeconds = 0 },
-		"zero poll interval":    func(a *catalog.ApplicationSchema) { a.MCPPublic.PollIntervalSeconds = 0 },
-		"page above maximum":    func(a *catalog.ApplicationSchema) { a.MCPPublic.ListPageSize = a.MCPPublic.ListMaxPageSize + 1 },
-		"no service groups":     func(a *catalog.ApplicationSchema) { a.MCPPublic.ServiceGroups = nil },
+		"signed download without token": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadPath = "/mcp/signed-assets"
+		},
+		"signed download wrong parameters": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadPath = "/mcp/signed-assets/{taskID}/{assetID}"
+		},
+		"signed download without slash": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadPath = "mcp/signed-assets/{token}"
+		},
+		"signed download is the endpoint": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadPath = "/mcp"
+		},
+		"signed download is the download path": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadPath = "/mcp/tasks/{taskID}/assets/{assetID}"
+		},
+		"signed download outside the endpoint": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadPath = "/assets/{token}"
+		},
+		"signed download ttl too short": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadTTLSeconds = 29
+		},
+		"signed download ttl above its maximum": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadTTLSeconds = a.MCPPublic.SignedDownloadMaxTTLSeconds + 1
+		},
+		"signed download maximum too long": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.SignedDownloadMaxTTLSeconds = 86401
+		},
+		"no signed download message": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Messages.SignedDownloadUnavailable = " "
+		},
+		"no protocol version": func(a *catalog.ApplicationSchema) { a.MCPPublic.ProtocolVersion = " " },
+		"no server name":      func(a *catalog.ApplicationSchema) { a.MCPPublic.ServerName = "" },
+		"no instructions":     func(a *catalog.ApplicationSchema) { a.MCPPublic.Instructions = "" },
+		"zero request limit":  func(a *catalog.ApplicationSchema) { a.MCPPublic.MaxRequestBytes = 0 },
+		"huge response limit": func(a *catalog.ApplicationSchema) { a.MCPPublic.MaxResponseBytes = 1 << 40 },
+		"zero read timeout":   func(a *catalog.ApplicationSchema) { a.MCPPublic.ReadTimeoutSeconds = 0 },
+		"zero write timeout":  func(a *catalog.ApplicationSchema) { a.MCPPublic.WriteTimeoutSeconds = 0 },
+		"zero poll interval":  func(a *catalog.ApplicationSchema) { a.MCPPublic.PollIntervalSeconds = 0 },
+		"page above maximum":  func(a *catalog.ApplicationSchema) { a.MCPPublic.ListPageSize = a.MCPPublic.ListMaxPageSize + 1 },
+		"no service groups":   func(a *catalog.ApplicationSchema) { a.MCPPublic.ServiceGroups = nil },
 		"unknown capability": func(a *catalog.ApplicationSchema) {
 			a.MCPPublic.ServiceGroups[0].Capabilities = append(a.MCPPublic.ServiceGroups[0].Capabilities, "no-such-capability")
 		},
@@ -306,9 +344,11 @@ func TestMCPPublicCopyIsLocalized(t *testing.T) {
 	for _, text := range []string{
 		service.Instructions, service.Messages.Unauthenticated, service.Messages.InsufficientScope,
 		service.Messages.TaskNotFound, service.Messages.Internal, service.Messages.RateLimited, service.Messages.AuthThrottled,
+		service.Messages.SignedDownloadUnavailable,
 		service.StatusBlock.Summary.Template,
 		service.StatusBlock.Summary.TemplateNoAsset, service.StatusBlock.Summary.BalanceUnknown,
 		service.StatusBlock.Summary.Unknown, service.Tools[0].Description, service.Tools[len(service.Tools)-1].Description,
+		mcpToolOf(&application, catalog.MCPToolGetTaskAssets).Description,
 	} {
 		if translated := localizer.Text("en", text); translated == text || strings.TrimSpace(translated) == "" {
 			t.Errorf("no English overlay for %q", text)

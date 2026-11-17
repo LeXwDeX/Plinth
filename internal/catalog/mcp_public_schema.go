@@ -64,6 +64,14 @@ type MCPPublicSchema struct {
 	// download route of the same listener (GET), with {taskID} and {assetID}.
 	Path         string `json:"path"`
 	DownloadPath string `json:"download_path"`
+	// SignedDownloadPath is the short-lived signed download route of the same
+	// listener (GET), with exactly one {token} parameter. It is a sub-path of
+	// Path and differs from DownloadPath. SignedDownloadTTLSeconds is how long
+	// a signed link stays valid; SignedDownloadMaxTTLSeconds is the largest
+	// value a Schema may declare.
+	SignedDownloadPath          string `json:"signed_download_path"`
+	SignedDownloadTTLSeconds    int    `json:"signed_download_ttl_seconds"`
+	SignedDownloadMaxTTLSeconds int    `json:"signed_download_max_ttl_seconds"`
 	// ProtocolVersion is the MCP wire revision the endpoint speaks.
 	ProtocolVersion string `json:"protocol_version"`
 	// ServerName is the name server/discover reports; Instructions is the
@@ -252,6 +260,9 @@ type MCPPublicMessages struct {
 	UploadTooLarge       string `json:"upload_too_large"`
 	UploadInvalid        string `json:"upload_invalid"`
 	UploadTypeNotAllowed string `json:"upload_type_not_allowed"`
+	// SignedDownloadUnavailable answers a signed:true tool result when the
+	// server has no signing key configured.
+	SignedDownloadUnavailable string `json:"signed_download_unavailable"`
 }
 
 // ToolOutputSchema is the output schema a tool is served with: its own result

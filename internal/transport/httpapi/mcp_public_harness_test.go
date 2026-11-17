@@ -20,6 +20,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/assetlinks"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -146,6 +147,32 @@ func harnessMCP(t *testing.T, repository *sqlite.Repository, application catalog
 		identity: &accesskeys.Authenticator{Keys: keys, Users: mcpDirectory{}, Policy: policy},
 		status:   status, assets: assets, clock: clock,
 	}
+}
+
+// harnessTaskAssetLinks is the signer the application assembles from
+// asset_signing_key, over the harness clock so a test can expire a link.
+func harnessTaskAssetLinks(parts mcpHarnessParts) httpapi.TaskAssetLinkSigner {
+	if parts.clock == nil {
+		return nil
+	}
+	return harnessTaskAssetSigner{Signer: assetlinks.NewSignerWithClock([]byte(strings.Repeat("k", 32)), parts.clock.Now)}
+}
+
+// harnessTaskAssetSigner adapts the token signer to the listener's interface.
+type harnessTaskAssetSigner struct{ *assetlinks.Signer }
+
+func (s harnessTaskAssetSigner) SignTaskAsset(
+	taskID generation.TaskID, assetID generation.AssetID, ownerID generation.OwnerID, ttl time.Duration,
+) (string, time.Time, error) {
+	return s.Signer.Sign(taskID, assetID, ownerID, ttl)
+}
+
+func (s harnessTaskAssetSigner) OpenTaskAsset(token string) (generation.TaskID, generation.AssetID, generation.OwnerID, error) {
+	payload, err := s.Signer.Verify(token)
+	if err != nil {
+		return "", "", "", err
+	}
+	return payload.TaskID, payload.AssetID, payload.OwnerID, nil
 }
 
 // mcpFixture is the external MCP listener of one harness, with the means to

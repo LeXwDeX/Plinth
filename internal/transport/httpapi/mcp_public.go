@@ -21,8 +21,11 @@ import (
 // web server that serves the pages and /api/v1/*: the process opens a second
 // listener, on an address only the runtime configuration names, and MCPPublicHandler
 // is that listener's whole handler. It mounts the MCP endpoint and the asset
-// download route and nothing else, so a request for any other path is a 404 and
-// a key never reaches the main API, whose identity does not accept keys.
+// download routes and nothing else, so a request for any other path is a 404
+// and a key never reaches the main API, whose identity does not accept keys.
+// The routes are three: the endpoint, the key-scoped download and the
+// short-lived signed download (#332), whose token is its own credential and
+// asks for no key.
 //
 // The handlers are written once: the endpoint is the mcphttp public handler,
 // the tools read through the same task, offering and asset projections the web
@@ -67,7 +70,11 @@ func (s *Server) MCPPublicHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: mcp_public.download_path: %w", err)
 	}
-	runtime, err := s.newMCPRuntime(*service, downloadRoute)
+	signedRoute, err := routing.ParseOne(service.SignedDownloadPath, "token")
+	if err != nil {
+		return nil, fmt.Errorf("httpapi: mcp_public.signed_download_path: %w", err)
+	}
+	runtime, err := s.newMCPRuntime(*service, downloadRoute, signedRoute)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +95,7 @@ func (s *Server) MCPPublicHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc(service.Path, s.mcpEndpoint(endpoint))
 	mux.HandleFunc("GET "+service.DownloadPath, s.withMCPKey(s.mcpDownload))
+	mux.HandleFunc("GET "+service.SignedDownloadPath, s.mcpSignedDownload)
 	mux.HandleFunc("/", s.mcpNotFound)
 	// The listener serves its callers directly and never sits behind the web
 	// server's reverse proxy, so it trusts no proxy: the client address is the
@@ -99,7 +107,7 @@ func (s *Server) MCPPublicHandler() (http.Handler, error) {
 	// logged with its request ID. The log never holds the key, the
 	// Authorization header, a prompt or an argument: it records the method,
 	// the path, the status and the reason the handler noted.
-	return requestLogMiddleware(s.logger, s.providerAssetRoute, s.providerWebhookSecretRoutes(),
+	return requestLogMiddleware(s.logger, append([]routing.One{s.providerAssetRoute, signedRoute}, s.providerWebhookSecretRoutes()...),
 		localeTraceMiddleware(s.application, s.texts, clientAddressMiddleware(nil,
 			s.securityHeadersMiddleware(
 				recoverMiddleware(s.logger, s.application.MCPPublic.Messages.Internal, routeTraceMiddleware(mux)),
@@ -215,6 +223,31 @@ func (s *Server) mcpDownload(writer http.ResponseWriter, request *http.Request, 
 		return
 	}
 	s.downloadAsset(writer, request, principal)
+}
+
+// mcpSignedDownload streams one product file named by a short-lived signed
+// token (#332): no key, no rate limit of a key and no detail about a refusal,
+// which is always a 404. The token's owner is the download's Principal, so the
+// same owner scope, delivery headers and audit apply as on the key route.
+func (s *Server) mcpSignedDownload(writer http.ResponseWriter, request *http.Request) {
+	if s.taskAssetLinks == nil {
+		http.NotFound(writer, request)
+		return
+	}
+	taskID, assetID, ownerID, err := s.taskAssetLinks.OpenTaskAsset(request.PathValue("token"))
+	if err != nil {
+		if trace := requestTraceFrom(request.Context()); trace != nil {
+			trace.noteProblem("signed_download_invalid", "signed task asset link refused", []error{err})
+		}
+		http.NotFound(writer, request)
+		return
+	}
+	request.SetPathValue("taskID", string(taskID))
+	request.SetPathValue("assetID", string(assetID))
+	if trace := requestTraceFrom(request.Context()); trace != nil {
+		trace.noteOwner(string(ownerID))
+	}
+	s.downloadAsset(writer, request, access.Principal{Claims: access.Claims{ID: string(ownerID)}})
 }
 
 // writeMCPProblem answers a refusal of the listener in JSON-RPC form: the

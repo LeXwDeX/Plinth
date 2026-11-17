@@ -91,7 +91,7 @@ func TestRequireIdempotencyKeyLogsTheInternalReasonNotTheKey(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/grants", nil)
 			request.Header.Set("Idempotency-Key", test.header)
 			response := httptest.NewRecorder()
-			requestLogMiddleware(logger, route, nil, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			requestLogMiddleware(logger, []routing.One{route}, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				requireIdempotencyKey(writer, request, taskIdempotencyKeyRule, "Schema copy")
 			})).ServeHTTP(response, request)
 			if strings.Contains(response.Body.String(), "canary") || strings.Contains(logs.String(), "canary") {

@@ -30,6 +30,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/assetdelivery"
+	"github.com/LeXwDeX/Plinth/internal/assetlinks"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacygenerated"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacyinput"
@@ -1773,6 +1774,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if accessKeyAuthenticator != nil {
 		mcpIdentity = accessKeyAuthenticator
 	}
+	// 未配置 asset_signing_key 时不装配签名器：对外 MCP 的 signed 下载链接不可用。
+	var taskAssetLinks httpapi.TaskAssetLinkSigner
+	if config.AssetSigningKey != "" {
+		taskAssetLinks = newTaskAssetLinkSigner(assetlinks.NewSigner([]byte(config.AssetSigningKey)))
+	}
 	api, err := httpapi.New(httpapi.Config{
 		MCPIdentity:                       mcpIdentity,
 		MCPStatus:                         mcpStatus,
@@ -1835,6 +1841,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Scene:                 sceneService,
 		RenderManifests:       manifestService,
 		AssetGateway:          inputAssetService,
+		TaskAssetLinks:        taskAssetLinks,
 		// Range 归档要物化整个 ZIP；放到运行卷而不是容器 /tmp，
 		// 后者的默认容量可能远小于一个真实 3D 归档。
 		ArchiveTempDir:         filepath.Join(config.StorageRoot, "tmp"),

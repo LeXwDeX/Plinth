@@ -2,7 +2,9 @@ package httpapi_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/assetlinks"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema/toolschema"
@@ -595,6 +598,9 @@ func TestMCPGetTaskAssetsAndTheDownloadRoute(t *testing.T) {
 	if result.isError || result.structured["complete"] != true || result.structured["state"] != "SUCCEEDED" || len(assets) != len(task.Assets) || len(assets) == 0 {
 		t.Fatalf("assets = %s", result.raw)
 	}
+	if expires, present := result.structured["download_expires_at"]; !present || expires != nil {
+		t.Fatalf("unsigned download_expires_at = %v (present %v)", expires, present)
+	}
 	for _, raw := range assets {
 		asset := raw.(map[string]any)
 		url := asset["download_url"].(string)
@@ -655,6 +661,123 @@ func TestMCPGetTaskAssetsAndTheDownloadRoute(t *testing.T) {
 	f.handler.ServeHTTP(recorder, missing)
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("missing asset = %d", recorder.Code)
+	}
+}
+
+func TestMCPGetTaskAssetsSignsShortLivedDownloadLinks(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	key := f.issueKey("owner-a", "read")
+	task := f.succeededTask("owner-a", "", "signed-download-task")
+
+	result := f.call(key, "get_task_assets", map[string]any{"task_id": string(task.ID), "signed": true})
+	assets := result.structured["assets"].([]any)
+	if result.isError || len(assets) != len(task.Assets) || len(assets) == 0 {
+		t.Fatalf("signed assets = %s", result.raw)
+	}
+	expiresText, ok := result.structured["download_expires_at"].(string)
+	if !ok {
+		t.Fatalf("download_expires_at = %v", result.structured["download_expires_at"])
+	}
+	expires, err := time.Parse(time.RFC3339, expiresText)
+	if err != nil {
+		t.Fatalf("download_expires_at %q: %v", expiresText, err)
+	}
+	if until := expires.Sub(f.clock.Now()); until < 290*time.Second || until > 310*time.Second {
+		t.Fatalf("download_expires_at is %v away, want about the Schema TTL", until)
+	}
+	unsigned := f.call(key, "get_task_assets", map[string]any{"task_id": string(task.ID), "signed": false})
+	if expires := unsigned.structured["download_expires_at"]; expires != nil {
+		t.Fatalf("signed:false download_expires_at = %v", expires)
+	}
+	for _, raw := range unsigned.structured["assets"].([]any) {
+		if url := raw.(map[string]any)["download_url"].(string); !strings.HasPrefix(url, "http://example.com/mcp/tasks/") {
+			t.Fatalf("signed:false download URL = %s", url)
+		}
+	}
+
+	var signedPath string
+	for _, raw := range assets {
+		asset := raw.(map[string]any)
+		url := asset["download_url"].(string)
+		if !strings.HasPrefix(url, "http://example.com/mcp/signed-assets/") {
+			t.Fatalf("signed download URL = %s", url)
+		}
+		signedPath = strings.TrimPrefix(url, "http://example.com")
+		// No Authorization header: the token is the credential.
+		recorder := httptest.NewRecorder()
+		f.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, signedPath, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("anonymous signed download = %d %s", recorder.Code, recorder.Body.String())
+		}
+		content, err := f.module.OpenAsset(context.Background(), "owner-a", task.ID, generation.AssetID(asset["id"].(string)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, _ := io.ReadAll(content.Body)
+		content.Body.Close()
+		if recorder.Body.String() != string(want) || len(want) == 0 {
+			t.Fatalf("download = %d bytes, want %d bytes", recorder.Body.Len(), len(want))
+		}
+		if sum := fmt.Sprintf("%x", sha256.Sum256(recorder.Body.Bytes())); sum != asset["sha256"] {
+			t.Fatalf("download sha256 = %s, want %s", sum, asset["sha256"])
+		}
+		if float64(len(want)) != asset["size"].(float64) {
+			t.Fatalf("download size = %d, want %v", len(want), asset["size"])
+		}
+		if recorder.Header().Get("X-Content-Type-Options") != "nosniff" || recorder.Header().Get("Content-Security-Policy") != "sandbox" ||
+			!strings.Contains(recorder.Header().Get("Cache-Control"), "no-store") {
+			t.Fatalf("download headers = %v", recorder.Header())
+		}
+	}
+
+	token := strings.TrimPrefix(signedPath, "/mcp/signed-assets/")
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		t.Fatalf("signed token = %q", token)
+	}
+	tamper := func(value string) string {
+		changed := []byte(value)
+		if changed[0] == 'A' {
+			changed[0] = 'B'
+		} else {
+			changed[0] = 'A'
+		}
+		return string(changed)
+	}
+	for _, bad := range []string{tamper(parts[0]) + "." + parts[1], parts[0] + "." + tamper(parts[1])} {
+		recorder := httptest.NewRecorder()
+		f.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/mcp/signed-assets/"+bad, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("tampered token = %d %s", recorder.Code, recorder.Body.String())
+		}
+	}
+	// The same signer's token for another owner names an asset that owner does not have.
+	signer := assetlinks.NewSignerWithClock([]byte(strings.Repeat("k", 32)), f.clock.Now)
+	foreign, _, err := signer.Sign(task.ID, task.Assets[0].ID, generation.OwnerID("owner-b"), 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	f.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/mcp/signed-assets/"+foreign, nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("another owner's signed link = %d %s", recorder.Code, recorder.Body.String())
+	}
+
+	log := f.serverLog()
+	if strings.Contains(log, token) {
+		t.Fatalf("the access log holds the signed token")
+	}
+	if !strings.Contains(log, "/mcp/signed-assets/{redacted}") {
+		t.Fatalf("the access log does not redact the signed route: %s", log)
+	}
+
+	// A link past its TTL is refused, the same 404 as any other bad token.
+	f.clock.Advance(301 * time.Second)
+	recorder = httptest.NewRecorder()
+	f.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, signedPath, nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expired signed link = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 
