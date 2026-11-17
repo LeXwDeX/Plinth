@@ -1,0 +1,243 @@
+// Package assetlist owns a project's production lists (#327): the Agent
+// proposes one draft list, the person confirms or rejects it, and later steps
+// run each item. This package holds the workflow rules only: it prices
+// nothing, charges nothing, creates no tasks or sessions and registers no
+// project assets. The SQLite adapter persists it.
+package assetlist
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/LeXwDeX/Plinth/internal/project"
+)
+
+// List statuses. The Schema owns their labels; the server owns these ids.
+const (
+	StatusDraft      = "draft"
+	StatusConfirmed  = "confirmed"
+	StatusRejected   = "rejected"
+	StatusExpired    = "expired"
+	StatusSuperseded = "superseded"
+)
+
+// Item states. review means waiting for the person's acceptance; only #328
+// moves an item past todo, and paused/blocked stay reserved for #328.
+const (
+	StateTodo     = "todo"
+	StateWorking  = "working"
+	StateReview   = "review"
+	StateAccepted = "accepted"
+	StateReturned = "returned"
+	StateFailed   = "failed"
+	StateSkipped  = "skipped"
+)
+
+// Decision actions of one person's answer to a draft list.
+const (
+	DecisionConfirm = "confirm"
+	DecisionReject  = "reject"
+	DecisionReplace = "replace"
+)
+
+// Owner-scoped workflow errors. A missing or foreign list/project is always
+// ErrNotFound so transport layers can answer 404 without leaking existence.
+var (
+	ErrNotFound            = errors.New("assetlist: not found")
+	ErrInvalid             = errors.New("assetlist: invalid")
+	ErrExpired             = errors.New("assetlist: draft expired")
+	ErrConflict            = errors.New("assetlist: version or status conflict")
+	ErrLimit               = errors.New("assetlist: limit reached")
+	ErrProjectNotFound     = errors.New("assetlist: project not found")
+	ErrSessionNotInProject = errors.New("assetlist: session is not in the project")
+)
+
+// ErrActiveConflict reports that the project already has a confirmed list and
+// the person asked to confirm another one without replacing it. Transport
+// layers turn it into the "replace the current list" refusal.
+type ErrActiveConflict struct {
+	ListID string
+	Title  string
+}
+
+func (e *ErrActiveConflict) Error() string {
+	return fmt.Sprintf("assetlist: project already has the confirmed list %q (%s)", e.Title, e.ListID)
+}
+
+func (e *ErrActiveConflict) Is(target error) bool {
+	_, ok := target.(*ErrActiveConflict)
+	return ok
+}
+
+// ErrActiveWorking reports that a replace would strand a confirmed list whose
+// item is still running. The person must resolve the running item first.
+type ErrActiveWorking struct {
+	ListID string
+}
+
+func (e *ErrActiveWorking) Error() string {
+	return fmt.Sprintf("assetlist: the confirmed list %s has items in progress", e.ListID)
+}
+
+func (e *ErrActiveWorking) Is(target error) bool {
+	_, ok := target.(*ErrActiveWorking)
+	return ok
+}
+
+// List is one production list of a project. Brief is the shared production
+// brief (validated against chat.model3d_usage.brief.fields by the caller); the
+// items carry references only, never bytes. EffectiveStatus is derived at read
+// time: an unexpired draft whose TTL passed reads as expired without a write.
+// PlannedStepCount and PlannedModel3DStepCount are plan values summed over the
+// items; the actual step accounting stays in #328's execution grant.
+type List struct {
+	ID                      string          `json:"id"`
+	RequestKey              string          `json:"request_key,omitempty"`
+	OwnerID                 string          `json:"owner_id"`
+	ProjectID               string          `json:"project_id"`
+	SourceSessionID         string          `json:"source_session_id,omitempty"`
+	OriginMessageID         string          `json:"origin_message_id,omitempty"`
+	Title                   string          `json:"title"`
+	Status                  string          `json:"status"`
+	Brief                   json.RawMessage `json:"brief"`
+	Version                 int64           `json:"version"`
+	DecidedAt               *time.Time      `json:"decided_at,omitempty"`
+	DecidedBy               string          `json:"decided_by,omitempty"`
+	DecisionReason          string          `json:"decision_reason,omitempty"`
+	SupersededBy            string          `json:"superseded_by,omitempty"`
+	ExpiresAt               time.Time       `json:"expires_at"`
+	CreatedAt               time.Time       `json:"created_at"`
+	UpdatedAt               time.Time       `json:"updated_at"`
+	EffectiveStatus         string          `json:"effective_status,omitempty"`
+	Items                   []Item          `json:"items,omitempty"`
+	PlannedStepCount        int             `json:"planned_step_count"`
+	PlannedModel3DStepCount int             `json:"planned_model3d_step_count"`
+}
+
+// Item is one asset of a list. Route is the snapshot taken at proposal time:
+// each step names the runtime offering, whether it was available then and why
+// not. An unavailable step is kept and shown, never silently swapped.
+type Item struct {
+	ID                      string              `json:"id"`
+	OwnerID                 string              `json:"owner_id"`
+	Kind                    string              `json:"kind"`
+	Name                    string              `json:"name"`
+	Description             string              `json:"description,omitempty"`
+	References              []project.Reference `json:"references"`
+	RouteID                 string              `json:"route_id"`
+	Route                   []RouteStep         `json:"route"`
+	PlannedStepCount        int                 `json:"planned_step_count"`
+	PlannedModel3DStepCount int                 `json:"planned_model3d_step_count"`
+	State                   string              `json:"state"`
+	StateReason             string              `json:"state_reason,omitempty"`
+	Version                 int64               `json:"version"`
+	SessionID               string              `json:"session_id,omitempty"`
+	ProjectAssetID          string              `json:"project_asset_id,omitempty"`
+	Round                   int                 `json:"round"`
+	Result                  json.RawMessage     `json:"result"`
+	Review                  json.RawMessage     `json:"review"`
+	CreatedAt               time.Time           `json:"created_at"`
+	UpdatedAt               time.Time           `json:"updated_at"`
+}
+
+// RouteStep is one planned capability of an item, with the runtime offering
+// snapshot. Available false means the step cannot run now; Reason explains it.
+type RouteStep struct {
+	Capability string `json:"capability"`
+	OfferingID string `json:"offering_id,omitempty"`
+	Available  bool   `json:"available"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// ProposeInput is one Agent proposal. The server supplies owner, project and
+// session: the proposal tool has no project_id parameter. RequestKey is the
+// stable idempotency identity of the tool call. ItemInput carries references
+// already resolved by the caller; this package validates their shape and
+// bounds only.
+type ProposeInput struct {
+	Owner           string          `json:"owner"`
+	ProjectID       string          `json:"project_id"`
+	SessionID       string          `json:"session_id"`
+	OriginMessageID string          `json:"origin_message_id,omitempty"`
+	RequestKey      string          `json:"request_key"`
+	Title           string          `json:"title"`
+	Items           []ItemInput     `json:"items"`
+	Brief           json.RawMessage `json:"brief,omitempty"`
+}
+
+// ItemInput is one proposed item. An empty RouteID takes the kind's
+// default_route from the Schema.
+type ItemInput struct {
+	Kind        string              `json:"kind"`
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	RouteID     string              `json:"route_id,omitempty"`
+	References  []project.Reference `json:"references,omitempty"`
+}
+
+// EditInput replaces a draft list's title, brief and items. ExpectedVersion is
+// the version the browser read; a concurrent edit is ErrConflict.
+type EditInput struct {
+	Owner           string          `json:"owner"`
+	ProjectID       string          `json:"project_id"`
+	ListID          string          `json:"list_id"`
+	ExpectedVersion int64           `json:"expected_version"`
+	Title           string          `json:"title"`
+	Items           []ItemInput     `json:"items"`
+	Brief           json.RawMessage `json:"brief,omitempty"`
+}
+
+// DecideInput is one person's confirm, reject or replace answer. Reason is
+// stored with the decision (required nowhere by the server).
+type DecideInput struct {
+	Owner     string `json:"owner"`
+	ProjectID string `json:"project_id"`
+	ListID    string `json:"list_id"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// Decision is the repository port's parameter: the service fixes the time and
+// the adapter re-reads the list inside its write transaction.
+type Decision struct {
+	OwnerID   string
+	ProjectID string
+	ListID    string
+	Action    string
+	Reason    string
+	At        time.Time
+}
+
+// Repository is the owner-scoped persistence port. Every read filters the
+// owner (and project) and reports a missing or foreign row as ErrNotFound.
+// Propose, EditList and Decide run in one write transaction each:
+//
+//   - Propose first returns an existing list with the same request_key
+//     untouched; otherwise it counts the project's live (draft+confirmed)
+//     lists and refuses at maximum with ErrLimit, then supersedes the drafts
+//     and inserts the new draft with its items. The count runs before the
+//     supersede so an over-limit project cannot keep replacing drafts; once
+//     old drafts reach a terminal status they stop consuming the quota.
+//   - EditList applies the expected_version CAS and replaces all items; only a
+//     draft may be edited.
+//   - Decide checks the status, TTL, the project's confirmed list and the
+//     replace guard atomically: a confirmed list with working items refuses a
+//     replace. The called errors are the typed errors of this package.
+type Repository interface {
+	ProjectExists(ctx context.Context, ownerID, projectID string) (bool, error)
+	SessionProject(ctx context.Context, ownerID, sessionID string) (string, error)
+	FindByRequestKey(ctx context.Context, ownerID, requestKey string) (List, bool, error)
+	ListLists(ctx context.Context, ownerID, projectID string) ([]List, error)
+	GetList(ctx context.Context, ownerID, projectID, listID string) (List, error)
+	// CountLiveLists counts the project's draft+confirmed lists; terminal
+	// lists do not consume the project quota. Propose re-checks the same query
+	// inside its write transaction, so callers use this for display only.
+	CountLiveLists(ctx context.Context, ownerID, projectID string) (int, error)
+	// Propose stores one draft. maximum <= 0 means unlimited.
+	Propose(ctx context.Context, list List, items []Item, maximum int) (List, error)
+	EditList(ctx context.Context, list List, items []Item, expectedVersion int64) (List, error)
+	Decide(ctx context.Context, decision Decision) (List, error)
+}
