@@ -267,6 +267,7 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/agentscope` | Agent 范围（2D / 3D / 自动）的纯策略：`Policy` 把“范围 × 工具类别（`2d`/`3d`/`cross`/`utility`）”解释为允许与否，类别未知或为空按 `cross`（只在自动模式出现），范围未知回到 Schema 默认；从 Schema `chat.agent_scope` 构造，不读写状态；dev-test 已验收（`3a19cc3`） |
 | `internal/chat` | 持久轮次/checkpoint、工具策略、事件与挂起恢复；消息附件与句柄、当前选中对象（已验代表性选用持久化及图片/模型句柄插入；异常恢复范围另列）；工具执行经 Generation 网关 |
 | `internal/project` | owner 级项目容器与资产引用（#240）：项目 CRUD、风格指南（文本/色板/参考图）、生产约定、角色/道具资产与提升；只存引用与元数据，不复制字节；仓储按 `projects.owner_id` 过滤，未知或他人项目一律 not found；跨会话读取 Task 产物只允许项目登记内的精确 `(task, asset)` 对 |
+| `internal/assetlist` | 项目制作清单（#327）：提案、编辑、确认/拒绝/替换与读取的流程规则及 Schema 派生策略；清单只存引用与计划，不报价、不扣费、不建 Task 或会话、不登记项目资产；SQLite 仓储与 chat/HTTP 适配器在各自层 |
 | `internal/agentconfiguration` | 有界共享 Agent 配置及版本管理；`SnapshotForOwner` 始终把 Schema 系统 Skill 放在最前（不属于任何已发布版本，已发布或个人 Skill 不得绑定工具或复用其 ID，修订号附加系统 Skill 摘要）；另按 owner 管理文本 Skill（#152：`UpdatePersonalSkill` 按 owner+ID 整体替换，名称/提示词校验与创建共享），并在新轮次创建 owner 快照；编辑只影响尚未首次冻结的轮次，不编辑执行代码、运行凭据或付费授权 |
 | `internal/mcp` | Schema 固定只读工具、参数与 owner/session 范围的业务准入；协议传输和数据读取由端口注入 |
 | `internal/modeldelivery` | 3D 交付投影：按 Schema `model_delivery` 计算每个 3D 任务的格式覆盖（可下载/可补齐含积分/不可用含原因）、把“补齐格式”规划成 Processing Plan 步骤、并把已隔离的本地资产流式打成 ZIP；不持有任务状态，不调用供应商，不做本地转换 |
@@ -290,6 +291,26 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/adapters/mcphttp` / `mcpworkspace` / `mcpagent` | MCP JSON-RPC 传输 / 当前会话公开 Offering、Task、Asset 读取 / 对话工具执行组合 |
 | `internal/transport` / `routing` | HTTP/SSE、明确 DTO、路由模板与静态 SPA；处理协议与访问边界，不推进业务状态 |
 | `internal/etl` / 迁移命令 | 受控历史迁移，独立于普通运行和测试栈发布 |
+
+### 资产清单（#327；源码已实现，本机测试覆盖，未部署验收；验收记录见 #327）
+
+**模块边界。** `internal/assetlist` 只拥有清单工作流：`Propose`、`Edit`、`Decide`、`Get`、`List` 与 `ListSession`，以及从 `application.asset_list` 派生的限额、类型、路线、状态和文案；它不报价、不扣费、不建 Task 或会话、不登记项目资产。持久化在 `internal/adapters/sqlite/asset_lists.go`：读取按 `owner_id`（及 `project_id`）过滤，缺失或他人一律 `ErrNotFound`；`Propose`、`EditList`、`Decide` 各在一个 `BEGIN IMMEDIATE` 写事务内完成重放/状态检查与写入。`internal/chat/asset_list.go` 与 `asset_list_propose.go` 是适配器：前者复用制作计划的 Offering 选择顺序生成路线可用性快照，并复用会话简报的字段校验；后者解析 `@imgN`/`@projectN` 句柄、校验工具参数并把服务错误映射为 Schema 文案。HTTP 在 `internal/transport/httpapi/asset_lists.go`；Agent 工具 `propose_asset_list` 声明为 control、`utility`、session 范围、幂等 required，结果 `NoSubmission`，返回 `list_id`、`version`、`status`、项数、计划步数（含 3D 计划步数）、不可用项与等待确认文案。Catalog 未声明 `application.asset_list` 时不装配清单服务、四条路由不注册；旧 Catalog 也没有声明该工具。
+
+**数据与状态机。** 迁移 `0100_asset_lists.sql` 新建 `asset_lists` 与 `asset_list_items`，不改旧表、不回填数据。清单状态为 `draft|confirmed|rejected|expired|superseded`，项状态为 `todo|working|review|accepted|returned|failed|skipped`；本期只有 `todo` 可达，其余状态留给 #328 的逐项执行与验收。清单从 `draft` 进入 `confirmed` 或 `rejected`；同一项目再次提案时，旧 `draft` 在同一事务里改为 `superseded`（`superseded_by` 指向新清单）；显式替换时旧 `confirmed` 改为 `superseded`；草稿过期成为 `expired`。`request_key` 有 UNIQUE 约束，`(project_id) WHERE status = 'confirmed'` 的部分唯一索引把“每项目至多一份 confirmed”落到库层。`source_session_id` 与项的 `session_id` 指向 `go_chat_sessions`，删除会话时置 NULL；项目外键 `ON DELETE CASCADE` 删除清单与项。项只保存 `project.Reference`（输入资产 ID 或 `(task_id, asset_id)`），不复制字节。
+
+**提案、编辑与幂等。** `Propose` 要求会话当前属于该项目；工具没有 `project_id` 参数，项目由服务端从会话取得，不在项目里的会话被拒绝。请求键由会话、助手消息、工具调用 ID 与幂等键派生：同一轮内的重放原样返回已存清单（不复活、不重复创建），后续轮次不能用同一个模型调用 ID 重放旧清单。配额在写事务内、supersede 旧草稿之前统计（只计 `draft`+`confirmed`，默认每项目 20 份；超限返回 `ErrLimit`，旧草稿保持不动）。`Edit` 只接受 `draft`，按 `expected_version` 做整体替换的 CAS；版本不符返回冲突，已确认或其他终态不可编辑。过期草稿在事务内先落库为 `expired`，再返回 `ErrExpired`。
+
+**决策。** `confirm`、`reject`、`replace` 三种动作。项目已有 `confirmed` 时，直接确认另一份返回 `ErrActiveConflict`（HTTP 409 带出当前清单 ID 与标题），必须显式替换；显式替换会先把旧 `confirmed` 改为 `superseded`，但旧清单仍有 `working` 项时返回 `ErrActiveWorking` 并拒绝替换。重复同一个决定是幂等的（双击只生效一次，返回当前清单）；其他状态返回冲突。决定写入 `decided_at`、`decided_by`、`decision_reason` 并递增版本。确认、拒绝与替换都不建任务、不扣费、不登记项目资产。
+
+**过期语义。** 草稿 TTL 由 Schema 声明（当前 7 天，`draft_ttl_seconds`）。读取时若 `now >= expires_at`，派生 `effective_status=expired`，不写库；编辑或决策在写事务内才把状态落库为 `expired`。没有后台清扫任务，过期完全由读取派生与下一次写操作落库。
+
+**计划步数与可用性快照。** 每项只能选 Schema `routes` 中适用于该 `kind` 的路线（缺省用 kind 的 `default_route`），Agent 不能自行拼接能力链；`planned_step_count` 是路线步数；`planned_model3d_step_count` 只统计能力在 `step_policy.counted_capabilities` 内的步骤（口径与 3D 步数设置一致，2D 与 LLM 不计）。两者是计划值，按项求和展示，不是预算、不显示已用；实际计步仍由 #328 的执行授权负责。每项保存 `route_id` 与提案/编辑时的 `route_json` 快照 `[{capability, offering_id, available, reason}]`；不可用的步骤照常保存并在工具结果与界面标出，不静默换模型或删步骤。快照按清单的来源会话解析（显式 3D 模型 → 图像域模型 → 能力默认可用 Offering），编辑时用同一来源会话重新解析。
+
+**引用与简报。** `reference_handles` 接受本会话/分支的 `@imgN`（来自该轮冻结历史与当前选中对象）和本项目的 `@projectN`（来自冻结项目快照），解析成 `project.Reference` 只存 ID；单项最多 4 个引用（Schema）。只有 URL 的图片项目资产没有稳定的资产 ID，引用会被拒绝而不是猜测。`brief_json` 按 `chat.model3d_usage.brief.fields` 的同一套规则校验，空简报存为 `{}`。
+
+**HTTP 与 principal。** 四条路由：`GET /api/v1/projects/{projectID}/asset-lists`、`GET/PUT /api/v1/projects/{projectID}/asset-lists/{listID}`、`PUT /api/v1/projects/{projectID}/asset-lists/{listID}/decision`、`GET /api/v1/chat/sessions/{sessionID}/asset-lists`。全部要求真实的浏览器会话：未登录 401；Bearer、部署令牌或开发身份 403；他人的或不存在的清单/项目一律 404。项目列表与会话列表只返回摘要（状态、`effective_status`、项数、计划步数、时间），单份 `GET` 返回项与简报；编辑与决策返回更新后的清单。前端用会话列表把聊天卡片按 `origin_message_id` 挂到提案消息下，提案消息不在当前页时挂到对话末尾；项目面板的“制作清单”区读取项目列表并展示卡片，草稿可确认/拒绝，冲突时提供显式替换。本期不做编辑抽屉、看板与整批下载（#328/#329）。
+
+**公开投影与限额。** 公开投影只含 `limits`、`kinds`、`routes`、`states`、`item_states`；服务端文案 `messages`、`ui` 与预留的 `item_blocks` 不公开，`ui.asset_list.*` 在中英 `content.messages` 成对声明。限额为每项目 20 份 `draft`+`confirmed` 清单、草稿 7 天、名称 120 字、描述 1000 字、单项引用 4 个；项数复用 `application.project.limits.maximum_list_items`（当前 200），不另设同名上限。
 
 ### 凭据种类与个人访问 Key（#332 第 1–2 步；源码已实现，本机 Go 测试覆盖；第 1–5 步已在 dev-test 验收，第 6 步的部署验收记录见 #332；管理端（每 Key 最近使用与调用量、整体关闭）与使用者文档尚未做）
 

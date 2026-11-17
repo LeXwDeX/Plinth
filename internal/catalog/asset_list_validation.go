@@ -138,17 +138,22 @@ func validateAssetList(
 	}
 
 	for field, text := range map[string]string{
-		"confirmed":                   list.Messages.Confirmed,
-		"rejected":                    list.Messages.Rejected,
-		"replaced":                    list.Messages.Replaced,
-		"expired":                     list.Messages.Expired,
-		"limit_reached":               list.Messages.LimitReached,
-		"list_not_found":              list.Messages.ListNotFound,
-		"empty_list":                  list.Messages.EmptyList,
-		"unavailable_item":            list.Messages.UnavailableItem,
-		"step_cap_warning":            list.Messages.StepCapWarning,
-		"all_2d_note":                 list.Messages.All2DNote,
-		"project_asset_limit_warning": list.Messages.ProjectAssetLimitWarning,
+		"confirmed":                      list.Messages.Confirmed,
+		"rejected":                       list.Messages.Rejected,
+		"replaced":                       list.Messages.Replaced,
+		"expired":                        list.Messages.Expired,
+		"limit_reached":                  list.Messages.LimitReached,
+		"list_not_found":                 list.Messages.ListNotFound,
+		"empty_list":                     list.Messages.EmptyList,
+		"unavailable_item":               list.Messages.UnavailableItem,
+		"step_cap_warning":               list.Messages.StepCapWarning,
+		"all_2d_note":                    list.Messages.All2DNote,
+		"project_asset_limit_warning":    list.Messages.ProjectAssetLimitWarning,
+		"proposed":                       list.Messages.Proposed,
+		"propose_session_not_in_project": list.Messages.ProposeSessionNotInProject,
+		"propose_invalid_items":          list.Messages.ProposeInvalidItems,
+		"propose_reference_unresolved":   list.Messages.ProposeReferenceUnresolved,
+		"propose_failed":                 list.Messages.ProposeFailed,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("asset_list.messages.%s 不能为空", field)

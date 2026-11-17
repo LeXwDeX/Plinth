@@ -76,6 +76,9 @@ const (
 	// ToolProposeProductionPlan proposes the budget-mode production plan the
 	// person approves once (#103).
 	ToolProposeProductionPlan = "propose_production_plan"
+	// ToolProposeAssetList proposes one draft production list of a project for
+	// the person to confirm (#327).
+	ToolProposeAssetList = "propose_asset_list"
 	// ToolSetVisualAnchor writes a session visual anchor after the person
 	// confirmed it on a choice card (#250).
 	ToolSetVisualAnchor = "set_visual_anchor"
@@ -164,6 +167,10 @@ type Config struct {
 	// re-quotes every step from the runtime Catalog and stores one pending
 	// plan card (#103).
 	ProposePlan func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// ProposeAssetList validates the Agent's production list against the
+	// Schema, resolves its reference handles and stores one draft list for the
+	// person to confirm (#327).
+	ProposeAssetList func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// WriteVisualAnchor applies one explicitly confirmed visual-anchor write
 	// (#250). The service owns the owner/session checks and the bounds; this
 	// tool cannot touch the user's style lock.
@@ -252,6 +259,7 @@ type Executor struct {
 	askChoice             func(ctx context.Context, command chat.ToolCommand, kind catalog.ChatChoiceKindSchema,
 		arguments chat.AskChoiceArguments) (chat.ToolResult, error)
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	proposeAssetList       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	project                *catalog.ProjectSchema
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
@@ -399,6 +407,7 @@ func New(config Config) (*Executor, error) {
 		updateBrief:            config.UpdateBrief,
 		askChoice:              config.AskChoice,
 		proposePlan:            config.ProposePlan,
+		proposeAssetList:       config.ProposeAssetList,
 		writeVisualAnchor:      config.WriteVisualAnchor,
 		project:                config.Project,
 		consent:                config.Consent,
@@ -467,6 +476,11 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil
 		}
 		return e.proposePlan(ctx, command)
+	case ToolProposeAssetList:
+		if e.proposeAssetList == nil {
+			return chat.ToolResult{Error: "asset lists unavailable", NoSubmission: true}, nil
+		}
+		return e.proposeAssetList(ctx, command)
 	case ToolFindHistoryImages:
 		return e.findHistoryImages(command), nil
 	case ToolInspectImage:

@@ -763,6 +763,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		if err != nil {
 			return nil, fmt.Errorf("资产清单: %w", err)
 		}
+		// The proposal tool validates and stores through the service; its copy
+		// comes from the same Schema section (never hardcoded).
+		chatService.SetAssetLists(chat.AssetListPolicy{
+			Service: assetListService,
+			Schema:  *applicationSchema.AssetList,
+		})
 	}
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// The ledger's parameter source is the existing parameter store's
@@ -941,6 +947,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		},
 		AskChoice:            chatService.AskChoice,
 		ProposePlan:          chatService.ProposeProductionPlan,
+		ProposeAssetList:     chatService.ProposeAssetList,
 		WriteVisualAnchor:    chatService.WriteVisualAnchor,
 		Project:              applicationSchema.Project,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,

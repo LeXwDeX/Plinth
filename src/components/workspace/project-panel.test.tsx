@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
+import type { AssetListDetail, AssetListSummary } from '@/lib/asset-lists/client';
 import type { ProductSchema } from '@/lib/product-schema';
 import { toast } from 'sonner';
 import { ProjectPanel } from './project-panel';
@@ -36,6 +37,21 @@ const mock = vi.hoisted(() => {
     getStyleGuide, setStyleGuide, getConventions, setConventions, listAssets, deleteAsset, promoteAsset,
     client: { getStyleGuide, setStyleGuide, getConventions, setConventions, listAssets, deleteAsset, promoteAsset },
   };
+});
+
+const assetLists = vi.hoisted(() => {
+  const listProjectLists = vi.fn();
+  const getList = vi.fn();
+  const decide = vi.fn();
+  const listSessionLists = vi.fn();
+  return {
+    listProjectLists, getList, decide, listSessionLists,
+    client: { listProjectLists, getList, decide, listSessionLists },
+  };
+});
+vi.mock('@/lib/asset-lists/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/asset-lists/client')>();
+  return { ...actual, assetListClient: () => assetLists.client };
 });
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
@@ -78,10 +94,41 @@ beforeEach(() => {
   mock.setConventions.mockResolvedValue(mock.conventions);
   mock.deleteAsset.mockResolvedValue(undefined);
   mock.promoteAsset.mockResolvedValue({ ...mock.assets[0], id: 'a2', name: 'Role B' });
-  for (const fn of [mock.getStyleGuide, mock.setStyleGuide, mock.getConventions, mock.setConventions, mock.listAssets, mock.deleteAsset, mock.promoteAsset]) fn.mockClear();
+  assetLists.listProjectLists.mockResolvedValue([]);
+  assetLists.getList.mockRejectedValue(new Error('unexpected list read'));
+  assetLists.decide.mockResolvedValue({});
+  assetLists.listSessionLists.mockResolvedValue([]);
+  for (const fn of [mock.getStyleGuide, mock.setStyleGuide, mock.getConventions, mock.setConventions, mock.listAssets, mock.deleteAsset, mock.promoteAsset, assetLists.listProjectLists, assetLists.getList, assetLists.decide, assetLists.listSessionLists]) fn.mockClear();
   toastMock.success.mockClear();
   toastMock.error.mockClear();
 });
+
+function listSummary(overrides: Partial<AssetListSummary> = {}): AssetListSummary {
+  return {
+    id: 'list_1',
+    project_id: 'prj_1',
+    title: 'Hero set',
+    status: 'draft',
+    effective_status: 'draft',
+    item_count: 1,
+    planned_step_count: 1,
+    planned_model3d_step_count: 0,
+    expires_at: '2026-11-25T00:00:00Z',
+    created_at: '2026-11-18T00:00:00Z',
+    updated_at: '2026-11-18T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function listDetail(overrides: Partial<AssetListDetail> = {}): AssetListDetail {
+  return {
+    ...listSummary(),
+    version: 1,
+    brief: {},
+    items: [],
+    ...overrides,
+  };
+}
 
 describe('project panel', () => {
   it('asks for a project when the session is unassigned', () => {
@@ -166,12 +213,44 @@ describe('project panel', () => {
     expect(toast.error).not.toHaveBeenCalledWith(messages['ui.project.load_failed']);
   });
 
-  it('reports a save-specific line when a conventions save fails without a server reason', async () => {
-    mock.setConventions.mockRejectedValue(new Error(''));
+  it('shows the asset list section and its empty state', async () => {
     render(<ProjectPanel sessionId="s1" />);
-    const brief = await screen.findByTestId('project-conventions-brief') as HTMLTextAreaElement;
-    fireEvent.change(brief, { target: { value: '{"purpose":"game_character"}' } });
-    fireEvent.click(screen.getByTestId('project-conventions-save'));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(messages['ui.project.conventions_save_failed']));
+    expect(screen.getByTestId('project-asset-lists-section')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('project-asset-lists-empty').textContent).toBe(messages['ui.asset_list.empty']));
+  });
+
+  it('shows a draft list as a card with its decisions', async () => {
+    assetLists.listProjectLists.mockResolvedValue([listSummary({ id: 'list_draft' })]);
+    assetLists.getList.mockResolvedValue(listDetail({ id: 'list_draft' }));
+    render(<ProjectPanel sessionId="s1" />);
+    const card = await screen.findByTestId('asset-list-card');
+    expect(card.getAttribute('data-variant')).toBe('panel');
+    expect(screen.getByTestId('asset-list-confirm')).toBeTruthy();
+    expect(screen.getByTestId('asset-list-reject')).toBeTruthy();
+    expect(screen.queryByTestId('project-asset-lists-empty')).toBeNull();
+  });
+
+  it('shows a decided or expired list as a light row', async () => {
+    const states = schema.asset_list?.states ?? [];
+    assetLists.listProjectLists.mockResolvedValue([
+      listSummary({ id: 'list_rejected', title: 'Rejected set', status: 'rejected', effective_status: 'rejected' }),
+      listSummary({ id: 'list_expired', title: 'Expired set', status: 'confirmed', effective_status: 'expired' }),
+    ]);
+    render(<ProjectPanel sessionId="s1" />);
+    const rejected = await screen.findByTestId('project-asset-list-list_rejected');
+    expect(rejected.textContent).toContain('Rejected set');
+    expect(rejected.textContent).toContain(states.find((state) => state.id === 'rejected')?.label);
+    const expired = screen.getByTestId('project-asset-list-list_expired');
+    expect(expired.textContent).toContain('Expired set');
+    expect(expired.textContent).toContain(messages['ui.asset_list.expired']);
+    expect(screen.queryByTestId('asset-list-card')).toBeNull();
+  });
+
+  it('keeps the other sections when the list read fails', async () => {
+    assetLists.listProjectLists.mockRejectedValue(new Error('offline'));
+    render(<ProjectPanel sessionId="s1" />);
+    const failed = await screen.findByTestId('project-asset-lists-failed');
+    expect(failed.textContent).toBe(messages['ui.asset_list.load_failed']);
+    expect(screen.getByTestId('project-asset-a1').textContent).toContain('Role A');
   });
 });
