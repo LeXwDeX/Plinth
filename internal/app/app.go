@@ -1784,6 +1784,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		MCPStatus:                         mcpStatus,
 		MCPAssets:                         mcpAssets,
 		ModelInspector:                    toolExecutor,
+		ImageInspector:                    imageReview,
+		PictureAssets:                     repository,
 		Harness:                           harnessResolver,
 		AgentConfiguration:                agentConfigurationService,
 		LLMSettings:                       llmSettingsService,

@@ -25,6 +25,9 @@ import (
 const (
 	purposeSourceBrief   = "production_brief"
 	purposeSourceDefault = "default_profile"
+	// purposeSourceArgument marks a purpose the caller named explicitly, which
+	// judges this inspection only and is not written into a session (#332 7b-2).
+	purposeSourceArgument = "argument"
 )
 
 // purposeJudgement is the purpose a delivery inspection judges against.
@@ -70,6 +73,32 @@ func (service *Service) judgement(brief chat.ProductionBrief) *purposeJudgement 
 	if !found {
 		return nil
 	}
+	return &purposeJudgement{profile: profile, source: source,
+		requirements: service.judgementRequirements(profile, brief)}
+}
+
+// judgementForPurpose resolves an explicit purpose argument (#332 7b-2). The
+// argument judges this inspection only; it is never written into a session. A
+// name the Schema does not declare has no judgement, so the caller refuses it.
+func (service *Service) judgementForPurpose(id string, brief chat.ProductionBrief) *purposeJudgement {
+	if service.review.Usage == nil {
+		return nil
+	}
+	for _, profile := range service.usage.Profiles {
+		if profile.ID == id {
+			return &purposeJudgement{profile: profile, source: purposeSourceArgument,
+				requirements: service.judgementRequirements(profile, brief)}
+		}
+	}
+	return nil
+}
+
+// judgementRequirements turns one purpose and the Schema's thresholds into the
+// measurements the picture is judged by.
+func (service *Service) judgementRequirements(profile catalog.ChatImage2DUsageProfile,
+	brief chat.ProductionBrief,
+) imageinspect.Requirements {
+	usage := service.review.Usage
 	requirements := imageinspect.Requirements{
 		MinShortEdge: profile.Requirements.MinimumShortEdge,
 		Tileable:     profile.Requirements.Tileable,
@@ -100,11 +129,15 @@ func (service *Service) judgement(brief chat.ProductionBrief) *purposeJudgement 
 	if usage.TransparentField != "" && brief.Flag(usage.TransparentField) {
 		requirements.Transparency = imageinspect.TransparencyRequired
 	}
-	return &purposeJudgement{profile: profile, source: source, requirements: requirements}
+	return requirements
 }
 
-// note says which purpose judged the picture.
+// note says which purpose judged the picture. An explicit argument judges only
+// this inspection and has no note to write.
 func (service *Service) note(judgement *purposeJudgement) string {
+	if judgement.source == purposeSourceArgument {
+		return ""
+	}
 	usage := service.review.Usage
 	template := usage.BriefPurposeNote
 	if judgement.source == purposeSourceDefault {

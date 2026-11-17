@@ -84,6 +84,7 @@ func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Tw
 			return s.mcpGetTaskAssets(call, route, signedRoute, ttl)
 		},
 		catalog.MCPToolInspectModel:     s.mcpInspectModel,
+		catalog.MCPToolInspectImage:     s.mcpInspectImage,
 		catalog.MCPToolUploadImage:      s.mcpUploadImage,
 		catalog.MCPToolGenerateImage:    s.mcpStartTask,
 		catalog.MCPToolRemoveBackground: s.mcpStartTask,
@@ -106,6 +107,14 @@ func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Tw
 		}
 		if declared.Name == catalog.MCPToolInspectModel && s.chat == nil {
 			return nil, fmt.Errorf("httpapi: mcp_public 声明了 inspect_model，但没有装配会话服务（读取制作简报）")
+		}
+		// inspect_image reads the picture bytes and the Task session's brief, so
+		// it needs both the inspection core and the chat service.
+		if declared.Name == catalog.MCPToolInspectImage && s.imageInspector == nil {
+			return nil, fmt.Errorf("httpapi: mcp_public 声明了 inspect_image，但没有装配图片检查器")
+		}
+		if declared.Name == catalog.MCPToolInspectImage && s.chat == nil {
+			return nil, fmt.Errorf("httpapi: mcp_public 声明了 inspect_image，但没有装配会话服务（读取制作简报）")
 		}
 		input, _, err := service.ParsedInputSchema(declared.Name)
 		if err != nil {

@@ -1,0 +1,111 @@
+{
+  "agent_content": {
+    "image": {
+      "asset_id": "a1",
+      "handle": "@img1",
+      "height": 128,
+      "task_id": "",
+      "width": 128
+    },
+    "ok": true,
+    "report": {
+      "background_spread": 0,
+      "component_count": 1,
+      "format": "png",
+      "has_alpha": false,
+      "height": 128,
+      "largest_component_ratio": 1,
+      "short_edge": 128,
+      "subject_bbox": [
+        33,
+        33,
+        95,
+        95
+      ],
+      "subject_ratio": 0.24224853515625,
+      "touches_edge": false,
+      "transparent_ratio": 0,
+      "width": 128
+    },
+    "rounds_remaining": 2,
+    "usage_check": {
+      "checklist": "3d_input",
+      "checklist_text": "【3D 输入图自检】用于图生 3D 的图片应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。inspect_image 的确定性结果不通过时，先修图（去背景、裁切、重画）再提交。确定性检查看不出姿态、透视和投影阴影：结果里的 visual_items 列出这些要你看图判断的项（用 show_picture 看图），逐项用 visual_review 写出 pass、fail 或 not_applicable 和一句看到了什么，服务端会把它们记入自检记录；任何一项 fail 都先修图再提交。",
+      "checks": [
+        {
+          "actual": "subject 24.2%",
+          "check": "nonblank",
+          "expected": "a visible subject",
+          "fix": "regenerate",
+          "status": "pass"
+        },
+        {
+          "actual": "alpha=false, border spread 0.0",
+          "check": "background",
+          "expected": "transparency or border spread \u003c= 32",
+          "fix": "remove_background",
+          "status": "pass"
+        },
+        {
+          "actual": "24.2%",
+          "check": "subject_size",
+          "expected": "5%..95%",
+          "fix": "crop_subject",
+          "status": "pass"
+        },
+        {
+          "actual": "touches edge=false",
+          "check": "edge",
+          "expected": "the subject stays inside the frame",
+          "fix": "crop_subject",
+          "status": "pass"
+        },
+        {
+          "actual": "1 component(s)",
+          "check": "components",
+          "expected": "\u003c= 6",
+          "fix": "single_subject",
+          "status": "pass"
+        },
+        {
+          "actual": "100% (1 components)",
+          "check": "main_component",
+          "expected": "60%",
+          "fix": "single_subject",
+          "status": "pass"
+        }
+      ],
+      "visual_items": [
+        {
+          "id": "pose",
+          "instruction": "看主体姿态：需要绑骨的角色（简报里的“需要绑骨”，即 needs_rig）必须是 A 姿态或 T 姿态——双臂离开躯干、双腿略分开、手指分开、没有交叉或互相遮挡；不绑骨的角色也应四肢分开。主体不是角色时标 not_applicable。",
+          "label": "姿态"
+        },
+        {
+          "id": "perspective",
+          "instruction": "看有没有明显透视：近大远小、广角畸变、俯拍或仰拍、线条向消失点收拢。应是接近正交的水平视角，主体比例没有被视角拉伸；多视角输入时每个视角都要看。",
+          "label": "透视"
+        },
+        {
+          "id": "cast_shadow",
+          "instruction": "看主体有没有投到地面或背景上的阴影，以及强烈的单侧光明暗。光线应均匀柔和，主体上没有烘死的阴影。",
+          "label": "投影阴影"
+        }
+      ]
+    }
+  },
+  "summary": {
+    "checks": {
+      "failed": 0,
+      "passed": 6,
+      "unknown": 0
+    },
+    "handle": "@img1",
+    "height": 128,
+    "tool": "inspect_image",
+    "width": 128
+  },
+  "error": "",
+  "no_submission": true,
+  "pictures": null
+}

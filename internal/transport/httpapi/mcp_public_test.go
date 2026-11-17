@@ -171,8 +171,8 @@ func TestMCPGenerateScopeIncludesRead(t *testing.T) {
 	f := newMCPFixture(t, nil)
 	generateOnly := f.issueKey("owner-a", "generate")
 	list := decodeToolResultRaw(t, f.post(generateOnly, "tools/list", nil))
-	if len(list["tools"].([]any)) != 11 {
-		t.Fatalf("a generate key lists %d tools; it carries the read scope too, so 6 reading and 5 starting tools", len(list["tools"].([]any)))
+	if len(list["tools"].([]any)) != 12 {
+		t.Fatalf("a generate key lists %d tools; it carries the read scope too, so 7 reading and 5 starting tools", len(list["tools"].([]any)))
 	}
 	task := f.succeededTask("owner-a", "", "generate-reads")
 	for _, tool := range []struct {
@@ -220,10 +220,10 @@ func TestMCPScopeIsEnforcedPerTool(t *testing.T) {
 		}
 		return names
 	}
-	if names := toolNames(readOnly); len(names) != 5 || containsString(anySlice(names), "get_task") {
+	if names := toolNames(readOnly); len(names) != 6 || containsString(anySlice(names), "get_task") {
 		t.Fatalf("a read key lists %v", names)
 	}
-	if names := toolNames(generateOnly); len(names) != 11 || !containsString(anySlice(names), "get_task") {
+	if names := toolNames(generateOnly); len(names) != 12 || !containsString(anySlice(names), "get_task") {
 		t.Fatalf("a generate key lists %v", names)
 	}
 	denied := f.post(readOnly, "tools/call", map[string]any{"name": "get_task", "arguments": map[string]any{"task_id": "task_x"}})
@@ -283,7 +283,7 @@ func TestMCPProtocolContractThroughTheListener(t *testing.T) {
 
 	list := decodeToolResultRaw(t, f.post(key, "tools/list", nil))
 	tools := list["tools"].([]any)
-	if len(tools) != 6 {
+	if len(tools) != 7 {
 		t.Fatalf("tools = %d", len(tools))
 	}
 	for _, raw := range tools {
@@ -384,6 +384,7 @@ func TestMCPEveryToolResponseCarriesTheStatusBlock(t *testing.T) {
 		"list_tasks of an asset":       {"list_tasks", map[string]any{"asset_id": task.SessionID}, false},
 		"get_task_assets":              {"get_task_assets", map[string]any{"task_id": string(task.ID)}, false},
 		"inspect_model":                {"inspect_model", map[string]any{"task_id": string(task.ID)}, false},
+		"inspect_image":                {"inspect_image", map[string]any{"task_id": string(task.ID)}, false},
 		"get_task of another person":   {"get_task", map[string]any{"task_id": string(other.ID)}, true},
 		"get_task_assets of another":   {"get_task_assets", map[string]any{"task_id": string(other.ID)}, true},
 		"list_tasks of another asset":  {"list_tasks", map[string]any{"asset_id": other.SessionID}, true},

@@ -34,6 +34,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/imagereview"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -72,6 +73,21 @@ type MCPModelInspector interface {
 	InspectReviewedModel(context.Context, generationtool.ModelInspectRequest) (generationtool.ModelInspectResult, error)
 }
 
+// MCPImageInspector is the read-only picture inspection core behind the
+// external MCP inspect_image tool (#332). It shares the platform tool's check
+// assembly and never writes self-check evidence.
+type MCPImageInspector interface {
+	InspectOwned(context.Context, imagereview.InspectRequest) (imagereview.Inspection, error)
+}
+
+// MCPPictureAssetLookup resolves a picture ID that may be an upload or a saved
+// picture output of one of the owner's succeeded Tasks (#332 step 7b). It is
+// the lookup the generation kernel uses for picture inputs; inspect_image
+// needs it because the input-asset open path only holds direct uploads.
+type MCPPictureAssetLookup interface {
+	LoadInputAssets(context.Context, generation.OwnerID, []generation.AssetID) (map[generation.AssetID]generation.InputAsset, error)
+}
+
 type Config struct {
 	Harness            *resolve.Service
 	AgentConfiguration *agentconfiguration.Service
@@ -99,6 +115,12 @@ type Config struct {
 	// ModelInspector is the read-only inspection inspect_model reports; nil
 	// makes a Catalog that declares the tool fail to start.
 	ModelInspector MCPModelInspector
+	// ImageInspector is the read-only picture inspection inspect_image reports;
+	// nil makes a Catalog that declares the tool fail to start.
+	ImageInspector MCPImageInspector
+	// PictureAssets resolves a picture ID to an upload or a saved Task output;
+	// nil leaves a Task output ID unresolvable.
+	PictureAssets MCPPictureAssetLookup
 	// MCPAssets maps the asset names of the external MCP service to chat
 	// sessions (#332). The tools that start work need it, the grant service,
 	// the input assets and the chat service.
@@ -225,23 +247,29 @@ type providerWebhookBinding struct {
 }
 
 type Server struct {
-	clientErrors                      perMinuteLimiter
-	apiRequests                       perMinuteLimiter
-	mcpKeyRequests                    perMinuteLimiter
-	mcpAuthFailures                   perMinuteLimiter
-	trustedProxies                    []netip.Prefix
-	harness                           *resolve.Service
-	agentConfiguration                *agentconfiguration.Service
-	llmSettings                       *llmsettings.Service
-	upstreamCapture                   UpstreamCaptureStatus
-	mcp                               *mcp.Service
-	accountInputAssets                AccountInputAssetLister
-	accountSettings                   *accountsettings.Service
-	accessKeys                        *accesskeys.Service
-	mcpIdentity                       IdentityResolver
-	mcpStatus                         *mcppublic.Builder
-	mcpAssets                         *mcppublic.Assets
-	modelInspector                    MCPModelInspector
+	clientErrors       perMinuteLimiter
+	apiRequests        perMinuteLimiter
+	mcpKeyRequests     perMinuteLimiter
+	mcpAuthFailures    perMinuteLimiter
+	trustedProxies     []netip.Prefix
+	harness            *resolve.Service
+	agentConfiguration *agentconfiguration.Service
+	llmSettings        *llmsettings.Service
+	upstreamCapture    UpstreamCaptureStatus
+	mcp                *mcp.Service
+	accountInputAssets AccountInputAssetLister
+	accountSettings    *accountsettings.Service
+	accessKeys         *accesskeys.Service
+	mcpIdentity        IdentityResolver
+	mcpStatus          *mcppublic.Builder
+	mcpAssets          *mcppublic.Assets
+	modelInspector     MCPModelInspector
+	imageInspector     MCPImageInspector
+	pictureAssets      MCPPictureAssetLookup
+	// mcpImageSlots bounds the pictures inspect_image decodes at once on the
+	// listener (#332 step 7b): a full pool is answered with image_busy instead
+	// of queueing.
+	mcpImageSlots                     chan struct{}
 	readiness                         func(context.Context) error
 	generation                        *generation.Module
 	executionGrants                   *executiongrant.Service
@@ -482,6 +510,8 @@ func New(config Config) (*Server, error) {
 		mcpStatus:                 config.MCPStatus,
 		mcpAssets:                 config.MCPAssets,
 		modelInspector:            config.ModelInspector,
+		imageInspector:            config.ImageInspector,
+		pictureAssets:             config.PictureAssets,
 		administration:            config.Administration,
 		administrationAudit:       config.AdministrationAudit,
 		administrationGenerations: config.AdministrationGenerations,
@@ -531,6 +561,8 @@ func New(config Config) (*Server, error) {
 		taskAssetRoute:         taskAssetRoute,
 		modelCaptureItemRoute:  modelCaptureItemRoute,
 	}
+	// Two pictures may be decoded at once on the listener (#332 step 7b).
+	server.mcpImageSlots = make(chan struct{}, mcpImageSlotsInFlight)
 	publicSchemas, err := catalog.NewLocalizedPublicSchemas(config.Application)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: 公开 Schema 投影: %w", err)

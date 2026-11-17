@@ -80,6 +80,85 @@ func TestDefaultMCPPublicLoadsAndStaysServerSide(t *testing.T) {
 	}
 }
 
+// #332 step 7b: the default Catalog declares inspect_image right after
+// inspect_model, with the platform checklist vocabulary, a pixel cap inside the
+// platform limit, and an output whose only required root property is the status
+// block.
+func TestDefaultMCPInspectImageDeclaration(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	service := application.MCPPublic
+	names := make([]string, 0, len(service.Tools))
+	for _, tool := range service.Tools {
+		names = append(names, tool.Name)
+	}
+	if len(names) != 12 || names[5] != catalog.MCPToolInspectModel || names[6] != catalog.MCPToolInspectImage {
+		t.Fatalf("tools = %v", names)
+	}
+	if service.InspectImage.MaxPixels != 20000000 ||
+		service.InspectImage.MaxPixels > application.Chat.ImageReview.Limits.MaxPixels {
+		t.Fatalf("inspect_image.max_pixels = %d", service.InspectImage.MaxPixels)
+	}
+	tool := mcpToolOf(&application, catalog.MCPToolInspectImage)
+	if tool.Scope != "read" || len(tool.Capabilities) != 0 {
+		t.Fatalf("inspect_image declaration = %+v", tool)
+	}
+	input, declared, err := service.ParsedInputSchema(catalog.MCPToolInspectImage)
+	if err != nil || !declared {
+		t.Fatalf("declared=%v err=%v", declared, err)
+	}
+	for _, name := range []string{"image", "task_id", "asset_id", "checklist", "purpose"} {
+		if _, present := input.Properties[name]; !present {
+			t.Errorf("inspect_image.input_schema lacks %q", name)
+		}
+	}
+	if len(input.Required) != 0 {
+		t.Errorf("inspect_image requires %v; the picture is named by image or task_id in the handler", input.Required)
+	}
+	enum := input.Properties["checklist"].Enum
+	if len(enum) != 2 || enum[0] != "delivery" || enum[1] != "3d_input" {
+		t.Errorf("checklist enum = %v", enum)
+	}
+	served, _, err := service.ToolOutputSchema(catalog.MCPToolInspectImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := toolschema.Parse(served, toolschema.Options{RootObject: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(output.Required) != 1 || output.Required[0] != service.StatusBlock.Key {
+		t.Errorf("the output requires %v; only the status block may be required", output.Required)
+	}
+	usage := output.Properties["usage_check"]
+	for _, name := range []string{"checklist", "checks", "purpose", "purpose_label", "purpose_source", "note"} {
+		if _, present := usage.Properties[name]; !present {
+			t.Errorf("usage_check lacks %q", name)
+		}
+	}
+	report := output.Properties["report"]
+	if report == nil {
+		t.Fatal("the output has no report")
+	}
+	for _, name := range []string{"width", "height", "short_edge", "subject_bbox", "tiling", "edge_fringe"} {
+		if _, present := report.Properties[name]; !present {
+			t.Errorf("report lacks %q", name)
+		}
+	}
+	if len(report.Required) == 0 {
+		t.Error("report requires no facts")
+	}
+	for _, name := range []string{"tiling", "edge_fringe"} {
+		found := false
+		for _, required := range report.Required {
+			found = found || required == name
+		}
+		if found {
+			t.Errorf("report requires the optional %q", name)
+		}
+	}
+}
+
 // The status block's JSON Schema is embedded in every tool's served output
 // schema under the one key, and is required there; the tool's own schema
 // stays as declared.
@@ -285,6 +364,32 @@ func TestMCPPublicRejectsInvalidDeclarations(t *testing.T) {
 		"throttled lacks the wait":     func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.AuthThrottled = "try later" },
 		"scope message lacks holder":   func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InsufficientScope = "no" },
 		"detail message lacks holder":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InvalidArguments = "no" },
+		"zero MCP picture pixel cap":   func(a *catalog.ApplicationSchema) { a.MCPPublic.InspectImage.MaxPixels = 0 },
+		"picture pixel cap above the platform cap": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.InspectImage.MaxPixels = a.Chat.ImageReview.Limits.MaxPixels + 1
+		},
+		"picture tool without the platform byte limit": func(a *catalog.ApplicationSchema) {
+			a.Chat.ImageReview.Limits.MaxBytes = 0
+		},
+		"picture checklist enum drift": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolInspectImage)
+			tool.InputSchema = json.RawMessage(strings.Replace(string(tool.InputSchema),
+				`"delivery", "3d_input"`, `"delivery"`, 1))
+		},
+		"picture checklist differs from the platform tool": func(a *catalog.ApplicationSchema) {
+			for index := range a.Chat.AgentTools {
+				if a.Chat.AgentTools[index].Name != catalog.MCPToolInspectImage {
+					continue
+				}
+				a.Chat.AgentTools[index].Parameters = json.RawMessage(strings.Replace(
+					string(a.Chat.AgentTools[index].Parameters), `"delivery", "3d_input"`, `"delivery"`, 1))
+			}
+		},
+		"no picture-not-ready message": func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.ImageNotReady = " " },
+		"picture-too-large without the pixels": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Messages.ImageTooLarge = "too large, {bytes} bytes"
+		},
+		"picture busy without the wait": func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.ImageBusy = "busy" },
 	} {
 		application := defaultApplication(t)
 		mutate(&application)
@@ -345,11 +450,14 @@ func TestMCPPublicCopyIsLocalized(t *testing.T) {
 		service.Instructions, service.Messages.Unauthenticated, service.Messages.InsufficientScope,
 		service.Messages.TaskNotFound, service.Messages.Internal, service.Messages.RateLimited, service.Messages.AuthThrottled,
 		service.Messages.SignedDownloadUnavailable, service.Messages.ModelUnavailable,
+		service.Messages.ImageNotReady, service.Messages.ImageUnreadable, service.Messages.ImageTooLarge,
+		service.Messages.ImageUnavailable, service.Messages.ImageBusy, service.Messages.AssetNotImage,
 		service.StatusBlock.Summary.Template,
 		service.StatusBlock.Summary.TemplateNoAsset, service.StatusBlock.Summary.BalanceUnknown,
 		service.StatusBlock.Summary.Unknown, service.Tools[0].Description, service.Tools[len(service.Tools)-1].Description,
 		mcpToolOf(&application, catalog.MCPToolGetTaskAssets).Description,
 		mcpToolOf(&application, catalog.MCPToolInspectModel).Description,
+		mcpToolOf(&application, catalog.MCPToolInspectImage).Description,
 	} {
 		if translated := localizer.Text("en", text); translated == text || strings.TrimSpace(translated) == "" {
 			t.Errorf("no English overlay for %q", text)
