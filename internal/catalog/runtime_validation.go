@@ -299,6 +299,7 @@ func validateRuntime(schema RuntimeSchema) error {
 		"project_conventions":             httpRuntime.Routes.ProjectConventions,
 		"project_promote":                 httpRuntime.Routes.ProjectPromote,
 		"chat_session_project":            httpRuntime.Routes.ChatSessionProject,
+		"account_step_policy":             httpRuntime.Routes.AccountStepPolicy,
 		"task_grants":                     httpRuntime.Routes.TaskGrants,
 		"task_grant_decision":             httpRuntime.Routes.TaskGrantDecision,
 		"model_captures":                  httpRuntime.Routes.ModelCaptures,

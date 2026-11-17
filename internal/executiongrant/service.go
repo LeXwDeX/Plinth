@@ -213,7 +213,9 @@ func (s Service) ApproveByPolicy(ctx context.Context, ownerID, requestID, mode s
 
 // ApproveByPolicyDecision is ApproveByPolicy with the budget context the
 // Agent's tool result reports (#103): the outcome, why a step was left to a
-// person, and the session plan summary that was read.
+// person, and the session plan summary that was read. In the internal steps
+// mode (#330) a 3D step over the asset's cap comes back as ErrStepCapReached
+// with the denied grant: nothing was approved.
 func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID, mode string) (PolicyResult, error) {
 	if s.Grants == nil || s.Prepared == nil || ownerID == "" || requestID == "" {
 		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrInvalid
@@ -232,6 +234,10 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 			(grant.Status == Approved || grant.Status == Claimed || grant.Status == Bound) {
 			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeApproved}, nil
 		}
+		if normalized == approvalpolicy.ModeSteps && grant.StepCapReached() {
+			// The steps mode already refused this grant: repeat that answer.
+			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeStepCap}, ErrStepCapReached
+		}
 		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone}, ErrState
 	}
 	snapshot, err := s.Prepared.GetExecutionPreparedSnapshot(ctx, ownerID, grant.PreparedInputID)
@@ -242,6 +248,11 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 		snapshot.SessionID != grant.SessionID || snapshot.OfferingID != grant.OfferingID ||
 		snapshot.OfferingRevision != grant.OfferingRevision || snapshot.InputHash != grant.PreparedInputHash {
 		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
+	}
+	// The internal steps mode decides on its own: nothing waits for a person
+	// and the owner's 3D step setting is the only limit (#330).
+	if normalized == approvalpolicy.ModeSteps {
+		return s.applyStepPolicy(ctx, grant, snapshot)
 	}
 	// A budget-mode Agent step is decided against the approved plan before the
 	// per-capability rules. A browser-started step and a grant created before
@@ -342,6 +353,11 @@ func (s Service) ApplyPolicyDecision(ctx context.Context, grant Grant) (PolicyRe
 	}
 	if errors.Is(err, ErrHumanRequired) {
 		result.Grant = grant
+		return result, nil
+	}
+	if errors.Is(err, ErrStepCapReached) {
+		// The steps mode refused the step: the denied grant is the answer, and
+		// no card follows.
 		return result, nil
 	}
 	return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone, Reason: result.Reason, Budget: result.Budget}, err

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/adapters/catalogrecipes"
 	"github.com/LeXwDeX/Plinth/internal/adapters/legacyassetproxy"
 	"github.com/LeXwDeX/Plinth/internal/adapters/legacygeneration"
@@ -838,6 +839,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		InputAssetRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		Chat:            applicationSchema.Chat,
 		Project:         applicationSchema.Project,
+		StepPolicy:      applicationSchema.StepPolicy,
 		CanvasArtboard:  applicationSchema.Canvas.Frontend.Artboard,
 		ModelDelivery:   applicationSchema.ModelDelivery,
 		Skills:          skillCatalog,
@@ -1737,6 +1739,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	transportApplicationSchema := applicationSchema
 	transportApplicationSchema.Authentication = authenticationSchema
+	accountSettingsService, err := accountSettingsFromSchema(repository, applicationSchema.StepPolicy)
+	if err != nil {
+		return nil, fmt.Errorf("账户设置（3D 步数模式）: %w", err)
+	}
 	api, err := httpapi.New(httpapi.Config{
 		Harness:                           harnessResolver,
 		AgentConfiguration:                agentConfigurationService,
@@ -1744,6 +1750,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		UpstreamCapture:                   upstreamCapture,
 		MCP:                               mcpService,
 		AccountInputAssets:                repository,
+		AccountSettings:                   accountSettingsService,
 		Readiness:                         readiness.check,
 		Generation:                        module,
 		ExecutionGrants:                   executionGrants,
@@ -2244,7 +2251,47 @@ func approvalPolicyFromSchema(application catalog.ApplicationSchema) approvalpol
 	for _, capability := range application.Capabilities {
 		known = append(known, string(capability.ID))
 	}
-	return approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
+	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
+	if application.StepPolicy != nil {
+		// The internal steps mode exists only when the Catalog declares the 3D
+		// step policy (#330). It is not an offered mode: nothing assigns it to a
+		// session yet, and a person can never pick it.
+		policy = policy.WithSteps(stepsPolicyFromSchema(*application.StepPolicy))
+	}
+	return policy
+}
+
+// stepsPolicyFromSchema turns application.step_policy into the pure decision
+// input: the capabilities that count as 3D steps and the setting of a person who
+// never saved one, per entry.
+func stepsPolicyFromSchema(declared catalog.StepPolicySchema) approvalpolicy.StepsPolicy {
+	counted := make([]string, 0, len(declared.CountedCapabilities))
+	for _, capability := range declared.CountedCapabilities {
+		counted = append(counted, string(capability))
+	}
+	return approvalpolicy.StepsPolicy{
+		Counted:     counted,
+		DefaultList: approvalpolicy.StepSetting{Mode: declared.DefaultMode.List, Cap: declared.Cap.Default},
+		DefaultMCP:  approvalpolicy.StepSetting{Mode: declared.DefaultMode.MCP, Cap: declared.Cap.Default},
+	}
+}
+
+// accountSettingsFromSchema builds the person's settings service from the 3D
+// step policy (#330); nil when the Catalog does not declare one.
+func accountSettingsFromSchema(store accountsettings.Store, declared *catalog.StepPolicySchema) (*accountsettings.Service, error) {
+	if declared == nil {
+		return nil, nil
+	}
+	modes := make([]string, 0, len(declared.Modes))
+	for _, mode := range declared.Modes {
+		modes = append(modes, mode.Value)
+	}
+	return accountsettings.New(store, accountsettings.Config{
+		Modes:      modes,
+		Steps:      stepsPolicyFromSchema(*declared),
+		CapMinimum: declared.Cap.Minimum,
+		CapMaximum: declared.Cap.Maximum,
+	})
 }
 
 // threeViewServiceOrNil keeps a deployment without the three-view recipe from

@@ -62,6 +62,11 @@ type ApplicationSchema struct {
 	// session inherits. Optional so older external Catalog documents stay
 	// valid; omitted, the project routes are not registered.
 	Project *ProjectSchema `json:"project,omitempty"`
+	// StepPolicy is the 3D step mode (#330): the person's settings for how many
+	// 3D steps an asset list or an external MCP session may use. Optional so
+	// older external Catalog documents stay valid; omitted, the internal steps
+	// approval mode and the settings route do not exist.
+	StepPolicy *StepPolicySchema `json:"step_policy,omitempty"`
 	// ProviderDeprecations lists, per Provider, the models, wire fields and
 	// values its current documentation has deprecated or retired (#329).
 	// Catalog loading rejects an Offering that would send one. Server-side
@@ -1182,6 +1187,9 @@ type PublicApplicationSchema struct {
 	// Project is the browser-visible project contract (#240). Omitted when
 	// the Catalog predates projects.
 	Project *PublicProjectSchema `json:"project,omitempty"`
+	// StepPolicy is the browser-visible 3D step mode (#330): modes, defaults
+	// and the cap range. Omitted when the Catalog predates it.
+	StepPolicy *PublicStepPolicySchema `json:"step_policy,omitempty"`
 }
 
 // PublicDeliveryFormat is the browser-visible part of ModelFormatSchema.
@@ -6281,7 +6289,10 @@ type CoreHTTPRoutesSchema struct {
 	ProductSchema    string `json:"product_schema"`
 	AccountUsage     string `json:"account_usage"`
 	AccountResources string `json:"account_resources"`
-	ChatSkills       string `json:"chat_skills"`
+	// AccountStepPolicy reads and writes the person's 3D step settings (#330);
+	// empty (historical Catalogs) leaves the route unregistered.
+	AccountStepPolicy string `json:"account_step_policy,omitempty"`
+	ChatSkills        string `json:"chat_skills"`
 	// ClientErrors receives browser error reports for the server log (#233).
 	ClientErrors        string `json:"client_errors,omitempty"`
 	ChatSessionApproval string `json:"chat_session_approval"`

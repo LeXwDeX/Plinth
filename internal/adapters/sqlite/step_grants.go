@@ -1,0 +1,221 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
+)
+
+var _ executiongrant.StepGrantStore = (*Repository)(nil)
+
+// ApproveExecutionGrantWithSteps is the atomic 3D step decision (#330). The
+// capability, the owner's setting, the asset's used steps and the grant
+// decision are read and written in one BEGIN IMMEDIATE transaction, so two
+// concurrent steps of one asset never both take the last step of its cap.
+//
+// A capability the policy does not count (2D, LLM, anything else) is approved
+// without reading the settings. For a counted one: the agent and unlimited
+// modes approve; the cap mode approves while the asset's used steps are below
+// the cap and otherwise denies the grant, decided by executiongrant.StepsActor.
+// No Task exists for a denied grant, so nothing is created or charged. Both
+// outcomes are written to the immutable grant audit.
+func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, requestID string, request executiongrant.StepRequest) (executiongrant.Grant, executiongrant.StepDecision, error) {
+	if owner == "" || requestID == "" || !approvalpolicy.ValidStepEntry(request.Entry) {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrInvalid
+	}
+	conn, err := r.grantWriteConn(ctx)
+	if err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackGrantConn(conn)
+		}
+	}()
+	grant, err := grantByRequest(ctx, conn, owner, requestID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrConflict
+	}
+	if err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	if grant.Status != executiongrant.Pending {
+		// A repeat of a decision this mode already made returns it unchanged
+		// and writes nothing; any other decider's grant is not ours to touch.
+		if grant.DecidedBy == executiongrant.StepsActor {
+			var decision executiongrant.StepDecision
+			switch grant.Status {
+			case executiongrant.Approved, executiongrant.Claimed, executiongrant.Bound:
+				decision.Approved = true
+			case executiongrant.Denied:
+				if decision.Summary, err = stepSummaryOnConn(ctx, conn, owner, grant.SessionID, request); err != nil {
+					return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+				}
+			default:
+				return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrState
+			}
+			if err := commitGrantConn(ctx, conn); err != nil {
+				return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+			}
+			committed = true
+			return grant, decision, nil
+		}
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrState
+	}
+	if grant.OwnerID != owner ||
+		(grant.Source != executiongrant.AgentPending && grant.Source != executiongrant.HumanBrowser) {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrConflict
+	}
+	capability, err := grantCapabilityOnConn(ctx, conn, grant)
+	if err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	var decision executiongrant.StepDecision
+	approve := true
+	if request.Steps.Counts(capability) {
+		decision.Summary, err = stepSummaryOnConn(ctx, conn, owner, grant.SessionID, request)
+		if err != nil {
+			return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+		}
+		approve = decision.Summary.Mode != approvalpolicy.StepModeCap || decision.Summary.Used < decision.Summary.Cap
+	}
+	decision.Approved = approve
+	status, event := executiongrant.Denied, "denied"
+	if approve {
+		status, event = executiongrant.Approved, "approved"
+	}
+	stamp := formatTime(time.Now().UTC())
+	result, err := conn.ExecContext(ctx, `UPDATE execution_grants SET status = ?, decided_by = ?, decided_at = ?, updated_at = ?
+ WHERE request_id = ? AND owner_id = ? AND status = 'pending'`,
+		string(status), executiongrant.StepsActor, stamp, stamp, requestID, owner)
+	if err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	} else if n != 1 {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrState
+	}
+	identityJSON, err := json.Marshal(grant.Identity)
+	if err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO execution_grant_audit
+ (request_id, owner_id, request_version, event, actor_id, identity_json, occurred_at)
+ VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		requestID, owner, grant.RequestVersion, event, executiongrant.StepsActor, string(identityJSON), stamp); err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	decided, err := grantByRequest(ctx, conn, owner, requestID)
+	if err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	if err := commitGrantConn(ctx, conn); err != nil {
+		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+	}
+	committed = true
+	return decided, decision, nil
+}
+
+// StepUsage reads the asset's 3D step standing under the owner's setting of
+// the entry. It decides nothing and takes no write lock.
+func (r *Repository) StepUsage(ctx context.Context, owner, sessionID string, request executiongrant.StepRequest) (executiongrant.StepSummary, error) {
+	if owner == "" || sessionID == "" || !approvalpolicy.ValidStepEntry(request.Entry) {
+		return executiongrant.StepSummary{}, executiongrant.ErrInvalid
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return executiongrant.StepSummary{}, err
+	}
+	defer conn.Close()
+	return stepSummaryOnConn(ctx, conn, owner, sessionID, request)
+}
+
+// grantCapabilityOnConn is the capability of the prepared input the grant
+// froze. It is read here, from the same transaction that decides, and never
+// taken from the caller.
+func grantCapabilityOnConn(ctx context.Context, conn *sql.Conn, grant executiongrant.Grant) (string, error) {
+	var capability sql.NullString
+	err := conn.QueryRowContext(ctx, `SELECT json_extract(payload_json, '$.capability')
+ FROM generation_prepared_inputs WHERE id = ? AND owner_id = ? AND session_id = ?`,
+		grant.PreparedInputID, grant.OwnerID, grant.SessionID).Scan(&capability)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", executiongrant.ErrConflict
+	}
+	if err != nil {
+		return "", err
+	}
+	return capability.String, nil
+}
+
+// stepSummaryOnConn reads the owner's setting of the entry and, for the cap
+// mode, the asset's used steps. The agent and unlimited modes never count.
+func stepSummaryOnConn(ctx context.Context, conn *sql.Conn, owner, sessionID string, request executiongrant.StepRequest) (executiongrant.StepSummary, error) {
+	setting, ok := request.Steps.Default(request.Entry)
+	if !ok {
+		return executiongrant.StepSummary{}, executiongrant.ErrInvalid
+	}
+	stored, found, err := accountSettingsOn(ctx, conn, owner)
+	if err != nil {
+		return executiongrant.StepSummary{}, err
+	}
+	if found {
+		if setting, ok = stored.Entry(request.Entry); !ok {
+			return executiongrant.StepSummary{}, executiongrant.ErrInvalid
+		}
+	}
+	summary := executiongrant.StepSummary{Entry: request.Entry, Mode: setting.Mode, Cap: setting.Cap}
+	if setting.Mode == approvalpolicy.StepModeCap {
+		summary.Used, err = stepsUsedOnConn(ctx, conn, owner, sessionID, request.Steps.Counted)
+		if err != nil {
+			return executiongrant.StepSummary{}, err
+		}
+	}
+	return summary, nil
+}
+
+// stepsUsedOnConn counts the 3D steps of one asset (one chat session of the
+// owner). One public Task is one step, however many outputs it delivers. A
+// step is a Task of a counted capability that was or may have been charged
+// (taskMayBeChargedSQL: a failed or canceled Task that certainly was not
+// charged is left out), or a grant that is approved but has no Task yet.
+// An approved grant whose trigger turn was stopped can never be claimed
+// (turnOwnsStoppedGrantNot), and one whose operation ended without a Task is
+// denied by abandonUnboundGrantOnConn, so neither holds a step.
+func stepsUsedOnConn(ctx context.Context, conn *sql.Conn, owner, sessionID string, counted []string) (int, error) {
+	if len(counted) == 0 {
+		return 0, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(counted)), ",")
+	args := func(extra ...any) []any {
+		values := append([]any{}, extra...)
+		for _, capability := range counted {
+			values = append(values, capability)
+		}
+		return values
+	}
+	var tasks int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM generation_tasks AS task
+ WHERE task.owner_id = ? AND task.session_id = ? AND task.capability IN (`+placeholders+`)
+ AND `+taskMayBeChargedSQL("task"), args(owner, sessionID)...).Scan(&tasks); err != nil {
+		return 0, err
+	}
+	var held int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_grants
+ JOIN generation_prepared_inputs AS prepared
+   ON prepared.id = execution_grants.prepared_input_id AND prepared.owner_id = execution_grants.owner_id
+ WHERE execution_grants.owner_id = ? AND execution_grants.session_id = ?
+ AND execution_grants.status IN ('approved', 'claimed')
+ AND json_extract(prepared.payload_json, '$.capability') IN (`+placeholders+`)
+ AND `+turnOwnsStoppedGrantNot, args(owner, sessionID)...).Scan(&held); err != nil {
+		return 0, err
+	}
+	return tasks + held, nil
+}

@@ -29,6 +29,10 @@ type Policy struct {
 	Modes                      []string
 	ManualApprovalCapabilities []string
 	KnownCapabilities          []string
+	// Steps is set by WithSteps when application.step_policy is declared. It
+	// enables the internal steps mode (ModeSteps), which is deliberately not in
+	// Modes: only the server derives it for a session (#330).
+	Steps *StepsPolicy
 }
 
 // NormalizeMode maps a stored or requested mode to a usable one. An unknown
@@ -42,6 +46,10 @@ func (p Policy) NormalizeMode(mode string) string {
 	case ModeBudget:
 		if p.Allows(ModeBudget) {
 			return ModeBudget
+		}
+	case ModeSteps:
+		if p.StepsEnabled() {
+			return ModeSteps
 		}
 	}
 	return ModeManual
@@ -61,9 +69,12 @@ func (p Policy) Allows(mode string) bool {
 //     Agent steps first; only a step it leaves to a person (no plan, off plan,
 //     over budget) or a step the browser started reaches this function, and
 //     all of them keep manual's rules.
+//   - steps: never. The 3D step cap is decided by executiongrant against the
+//     owner's setting, and a step over the cap is refused, not sent to a
+//     person (#330).
 //   - any other mode is treated as manual.
 func RequiresHuman(policy Policy, mode, capability string) bool {
-	if policy.NormalizeMode(mode) == ModeAuto {
+	if normalized := policy.NormalizeMode(mode); normalized == ModeAuto || normalized == ModeSteps {
 		return false
 	}
 	if capability == "" || !slices.Contains(policy.KnownCapabilities, capability) {
@@ -78,6 +89,7 @@ func RequiresHuman(policy Policy, mode, capability string) bool {
 //
 //   - auto: never; the session already approves every paid step, the extra
 //     part included.
+//   - steps: never. Money is not the constraint of the 3D step mode (#330).
 //   - manual (or any mode treated as manual): always, whatever the step's
 //     capability, because the extra credits are a spend the person has not
 //     agreed to until they see it on an approval card.
@@ -99,5 +111,6 @@ func New(defaultMode string, modes, manualApproval, known []string) Policy {
 }
 
 func RequiresHumanForExtraSpend(policy Policy, mode string, extra bool) bool {
-	return extra && policy.NormalizeMode(mode) != ModeAuto
+	normalized := policy.NormalizeMode(mode)
+	return extra && normalized != ModeAuto && normalized != ModeSteps
 }

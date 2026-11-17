@@ -406,6 +406,9 @@ var claimSameBytesMigration string
 //go:embed migrations/0094_turn_end_reason.sql
 var turnEndReasonMigration string
 
+//go:embed migrations/0095_account_settings.sql
+var accountSettingsMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -491,7 +494,8 @@ func migrations() []migration {
 		migration{version: 91, name: "chat_session_preferences", sql: chatSessionPreferencesMigration},
 		migration{version: 92, name: "attempt_notices", sql: attemptNoticesMigration},
 		migration{version: 93, name: "claim_same_bytes", sql: claimSameBytesMigration},
-		migration{version: 94, name: "turn_end_reason", sql: turnEndReasonMigration})
+		migration{version: 94, name: "turn_end_reason", sql: turnEndReasonMigration},
+		migration{version: 95, name: "account_settings", sql: accountSettingsMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -501,7 +505,8 @@ func migrations() []migration {
 // (#246), 89 the project assets, 90 the session's project/style source
 // (#240), 91 the session preference records (#241), 92 the notices a
 // completion observation carries (#284), 93 the claims a Provider declares
-// byte-identical (#300) and 94 the reason a chat turn ended (#328).
+// byte-identical (#300), 94 the reason a chat turn ended (#328) and 95 the
+// per-person account settings, the 3D step mode (#330).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))
