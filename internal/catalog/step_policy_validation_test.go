@@ -170,6 +170,11 @@ func TestHistoricalCatalogWithoutStepPolicyStaysValid(t *testing.T) {
 	t.Parallel()
 	application := defaultApplication(t)
 	application.StepPolicy = nil
+	// Access keys and the external MCP service both decide by the step mode.
+	application.AccessKeys = nil
+	application.MCPPublic = nil
+	application.Runtime.HTTP.Routes.AccountAccessKeys = ""
+	application.Runtime.HTTP.Routes.AccountAccessKey = ""
 	application.Runtime.HTTP.Routes.AccountStepPolicy = ""
 	if err := catalog.ValidateApplicationSchema(application); err != nil {
 		t.Fatalf("historical Catalog without step_policy rejected: %v", err)

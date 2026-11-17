@@ -49,28 +49,9 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		h.problem(writer, http.StatusBadRequest, 0, -32600)
 		return
 	}
-	var message serverRequest
-	if json.Unmarshal(contents, &message) != nil || message.JSONRPC != "2.0" || !validRequestID(message.ID) || message.Params == nil {
-		h.problem(writer, http.StatusBadRequest, 0, -32600)
-		return
-	}
-	meta, ok := message.Params["_meta"].(map[string]any)
-	version, versionOK := meta["io.modelcontextprotocol/protocolVersion"].(string)
-	if !ok || !versionOK || request.Header.Get("MCP-Protocol-Version") != version || request.Header.Get("Mcp-Method") != message.Method {
-		h.problem(writer, http.StatusBadRequest, message.ID, -32020)
-		return
-	}
-	if version != ProtocolVersion {
-		writer.WriteHeader(http.StatusBadRequest)
-		_ = json.NewEncoder(writer).Encode(map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32022, "message": "Unsupported protocol version", "data": map[string]any{"supported": []string{ProtocolVersion}, "requested": version}}})
-		return
-	}
-	if _, ok := meta["io.modelcontextprotocol/clientInfo"].(map[string]any); !ok {
-		h.problem(writer, http.StatusBadRequest, message.ID, -32602)
-		return
-	}
-	if _, ok := meta["io.modelcontextprotocol/clientCapabilities"].(map[string]any); !ok {
-		h.problem(writer, http.StatusBadRequest, message.ID, -32602)
+	message, refused := parseEnvelope(request, contents, ProtocolVersion)
+	if refused != nil {
+		writeEnvelopeProblem(writer, *refused)
 		return
 	}
 	var result any
@@ -118,8 +99,58 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	_, _ = writer.Write(body)
 }
 func (h *Handler) problem(writer http.ResponseWriter, status int, id any, code int) {
-	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": "MCP request rejected"}})
+	writeEnvelopeProblem(writer, envelopeProblem{status: status, id: id, code: code})
+}
+
+// envelopeProblem is a request refused before any tool runs. Both the internal
+// and the public endpoint refuse a malformed envelope the same way.
+type envelopeProblem struct {
+	status  int
+	id      any
+	code    int
+	message string
+	data    map[string]any
+}
+
+func writeEnvelopeProblem(writer http.ResponseWriter, problem envelopeProblem) {
+	message := problem.message
+	if message == "" {
+		message = "MCP request rejected"
+	}
+	failure := map[string]any{"code": problem.code, "message": message}
+	if problem.data != nil {
+		failure["data"] = problem.data
+	}
+	writer.WriteHeader(problem.status)
+	_ = json.NewEncoder(writer).Encode(map[string]any{"jsonrpc": "2.0", "id": problem.id, "error": failure})
+}
+
+// parseEnvelope checks the JSON-RPC envelope and the MCP request metadata of
+// the stateless protocol: the version, the method and the client facts travel
+// with every request, never in a session.
+func parseEnvelope(request *http.Request, contents []byte, protocol string) (serverRequest, *envelopeProblem) {
+	var message serverRequest
+	if json.Unmarshal(contents, &message) != nil || message.JSONRPC != "2.0" || !validRequestID(message.ID) || message.Params == nil {
+		return serverRequest{}, &envelopeProblem{status: http.StatusBadRequest, id: 0, code: -32600}
+	}
+	meta, ok := message.Params["_meta"].(map[string]any)
+	version, versionOK := meta["io.modelcontextprotocol/protocolVersion"].(string)
+	if !ok || !versionOK || request.Header.Get("MCP-Protocol-Version") != version || request.Header.Get("Mcp-Method") != message.Method {
+		return serverRequest{}, &envelopeProblem{status: http.StatusBadRequest, id: message.ID, code: -32020}
+	}
+	if version != protocol {
+		return serverRequest{}, &envelopeProblem{
+			status: http.StatusBadRequest, id: message.ID, code: -32022, message: "Unsupported protocol version",
+			data: map[string]any{"supported": []string{protocol}, "requested": version},
+		}
+	}
+	if _, ok := meta["io.modelcontextprotocol/clientInfo"].(map[string]any); !ok {
+		return serverRequest{}, &envelopeProblem{status: http.StatusBadRequest, id: message.ID, code: -32602}
+	}
+	if _, ok := meta["io.modelcontextprotocol/clientCapabilities"].(map[string]any); !ok {
+		return serverRequest{}, &envelopeProblem{status: http.StatusBadRequest, id: message.ID, code: -32602}
+	}
+	return message, nil
 }
 
 func validRequestID(value json.RawMessage) bool {

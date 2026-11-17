@@ -40,6 +40,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/lineage"
 	"github.com/LeXwDeX/Plinth/internal/llmsettings"
 	"github.com/LeXwDeX/Plinth/internal/mcp"
+	"github.com/LeXwDeX/Plinth/internal/mcppublic"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/moderation"
 	"github.com/LeXwDeX/Plinth/internal/processing"
@@ -80,7 +81,13 @@ type Config struct {
 	// AccessKeys issues, lists and revokes the person's personal access keys
 	// (#332); nil leaves the key management routes unregistered. The main
 	// server only manages keys: it never authenticates a request with one.
-	AccessKeys      *accesskeys.Service
+	AccessKeys *accesskeys.Service
+	// MCPIdentity authenticates the requests of the external MCP listener
+	// (#332): personal access keys only. MCPStatus builds the status block
+	// every response of the listener carries. Both nil, or the Schema's
+	// mcp_public disabled, leaves MCPPublicHandler without a handler.
+	MCPIdentity     IdentityResolver
+	MCPStatus       *mcppublic.Builder
 	Readiness       func(context.Context) error
 	Generation      *generation.Module
 	ExecutionGrants *executiongrant.Service
@@ -211,6 +218,8 @@ type Server struct {
 	accountInputAssets                AccountInputAssetLister
 	accountSettings                   *accountsettings.Service
 	accessKeys                        *accesskeys.Service
+	mcpIdentity                       IdentityResolver
+	mcpStatus                         *mcppublic.Builder
 	readiness                         func(context.Context) error
 	generation                        *generation.Module
 	executionGrants                   *executiongrant.Service
@@ -446,6 +455,8 @@ func New(config Config) (*Server, error) {
 		accountInputAssets:        config.AccountInputAssets,
 		accountSettings:           config.AccountSettings,
 		accessKeys:                config.AccessKeys,
+		mcpIdentity:               config.MCPIdentity,
+		mcpStatus:                 config.MCPStatus,
 		administration:            config.Administration,
 		administrationAudit:       config.AdministrationAudit,
 		administrationGenerations: config.AdministrationGenerations,
@@ -3374,7 +3385,12 @@ func (s *Server) parameterAdjustmentsIn(
 // locale. value must be made of Schema data only (offerings, tool
 // descriptions), never of a person's content.
 func (s *Server) localizedSchemaData(request *http.Request, value any) any {
-	locale := requestLocale(request)
+	return s.localizeSchemaValue(requestLocale(request), value)
+}
+
+// localizeSchemaValue is localizedSchemaData for a locale: the Schema texts
+// among the string leaves of a value made entirely of Schema data.
+func (s *Server) localizeSchemaValue(locale string, value any) any {
 	if !s.texts.Translates(locale) {
 		return value
 	}

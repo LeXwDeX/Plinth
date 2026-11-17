@@ -69,7 +69,7 @@ export interface AccessKeysProductSchema {
   default_ttl_days: number;
   max_ttl_days: number;
   name_max_length: number;
-  /** `read` (query and download) and `generate` (start generation and processing), with labels. */
+  /** `read` (query and download) and `generate` (start generation and processing; it includes `read`), with labels. */
   scopes: Array<{ value: string; label: string }>;
 }
 

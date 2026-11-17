@@ -139,6 +139,7 @@ func TestHistoricalCatalogWithoutAccessKeysStaysValid(t *testing.T) {
 	t.Parallel()
 	application := defaultApplication(t)
 	application.AccessKeys = nil
+	application.MCPPublic = nil // the external MCP service needs the keys
 	application.Runtime.HTTP.Routes.AccountAccessKeys = ""
 	application.Runtime.HTTP.Routes.AccountAccessKey = ""
 	if err := catalog.ValidateApplicationSchema(application); err != nil {
@@ -166,7 +167,7 @@ func TestAccessKeysLabelsAreLocalized(t *testing.T) {
 	for _, scope := range english.Scopes {
 		labels[scope.Value] = scope.Label
 	}
-	if labels["read"] != "Read (query and download)" || labels["generate"] != "Generate (start generation and processing)" {
+	if labels["read"] != "Read (query and download)" || labels["generate"] != "Generate (start generation and processing; includes read)" {
 		t.Fatalf("english labels = %v", labels)
 	}
 }

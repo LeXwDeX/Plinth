@@ -33,13 +33,13 @@ type Credential struct {
 	Kind CredentialKind
 	// KeyID is the public ID of the access key (CredentialAccessKey only).
 	KeyID string
-	// Scopes are the scopes the access key was issued with (CredentialAccessKey
-	// only).
+	// Scopes are the scopes the access key may use, the ones it was issued with
+	// and the ones those include (CredentialAccessKey only).
 	Scopes []string
 }
 
-// HasScope reports whether the credential was issued with the scope. Only an
-// access key has scopes; every other kind answers false.
+// HasScope reports whether the credential carries the scope. Only an access key
+// has scopes; every other kind answers false.
 func (c Credential) HasScope(scope string) bool {
 	return c.Kind == CredentialAccessKey && slices.Contains(c.Scopes, scope)
 }

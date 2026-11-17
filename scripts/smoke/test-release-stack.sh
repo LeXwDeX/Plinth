@@ -323,6 +323,9 @@ case "$1" in
   compose)
     printf 'compose %s | bind=%s port=%s db=%s legacy=%s\n' "$*" "${GO_WEB_BIND_IP:-}" "${GO_WEB_HOST_PORT:-}" \
       "${GO_PROD_DB_DIR:-}" "${GO_LEGACY_INPUT_ASSETS_DIR:-}" >>"$S_TRACE"
+    # The external MCP listener's host side (#332) is traced on its own line, and only when set.
+    [ -z "${MCP_PUBLIC_BIND_IP:-}${MCP_PUBLIC_HOST_PORT:-}" ] ||
+      echo "compose-mcp bind=${MCP_PUBLIC_BIND_IP:-} port=${MCP_PUBLIC_HOST_PORT:-}" >>"$S_TRACE"
     case " $* " in
       *' up '*' fake-upstream '*) ;;
       *' up '*)
@@ -494,6 +497,44 @@ grep -qx "retention --apply --rollback-image art-ai-go-production:previous --roo
 [ -f "$root/production/compose.env" ] || fail "update compose.env missing"
 echo "PASS server/single-stack-update-retention"
 
+# 2e'. The external MCP listener's host side (#332) is an optional pair of layout keys. A stack that names
+#      neither releases exactly as before and its compose.env names neither; a stack that names them passes
+#      them to the compose calls and records them in compose.env; a bad value is refused before any build.
+root=$(new_root mcp-undeclared); echo none >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=0 "${STABLE[@]}" $(layout "$root")
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "release without the MCP keys failed"; }
+! grep -q '^compose-mcp' "$S_TRACE" || fail "MCP keys reached compose without being declared"
+! grep -q '^MCP_PUBLIC' "$root/production/compose.env" || fail "compose.env names MCP keys that were not declared"
+root=$(new_root mcp-declared); echo none >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=0 "${STABLE[@]}" $(layout "$root") MCP_PUBLIC_BIND_IP=10.0.0.9 MCP_PUBLIC_HOST_PORT=13344
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "release with the MCP keys failed"; }
+grep -qx 'compose-mcp bind=10.0.0.9 port=13344' "$S_TRACE" || fail "compose did not get the MCP keys"
+grep -qx 'MCP_PUBLIC_BIND_IP=10.0.0.9' "$root/production/compose.env" &&
+  grep -qx 'MCP_PUBLIC_HOST_PORT=13344' "$root/production/compose.env" || fail "compose.env lacks the MCP keys"
+# One key alone is enough: the other keeps its compose default.
+root=$(new_root mcp-port-only); echo none >"$S_STATE"
+# shellcheck disable=SC2046
+run_steps "$root" S_CONTAINERS=0 "${STABLE[@]}" $(layout "$root") MCP_PUBLIC_HOST_PORT=13345
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "release with only the MCP port failed"; }
+grep -qx 'compose-mcp bind= port=13345' "$S_TRACE" || fail "compose did not get the MCP port"
+! grep -q '^MCP_PUBLIC_BIND_IP' "$root/production/compose.env" || fail "compose.env names the undeclared MCP bind address"
+# A shared host that names only the MCP keys keeps its derived data directories.
+root=$(new_root mcp-shared); echo previous >"$S_STATE"
+mkdir -p "$root/production/data" "$root/production/storage-go" "$root/production/web-data"
+run_steps "$root" S_CONTAINERS=1 "${SHARED[@]}" MCP_PUBLIC_BIND_IP=10.0.0.9
+[ "$RESULT" = 0 ] || { cat "$root/out.log" >&2; fail "shared-host release with only an MCP key failed"; }
+grep -q -- "-p dev_project -f .* up -d --no-deps art-ai-go | bind= port= db=$root/production/data legacy=\$" "$S_TRACE" || fail "the MCP key changed the other compose variables"
+grep -qx 'compose-mcp bind=10.0.0.9 port=' "$S_TRACE" && grep -qx 'MCP_PUBLIC_BIND_IP=10.0.0.9' "$root/production/compose.env" || fail "shared-host MCP key not passed on"
+for bad in MCP_PUBLIC_BIND_IP=999.1.1.1 MCP_PUBLIC_BIND_IP=10.0.0 MCP_PUBLIC_BIND_IP=host.example MCP_PUBLIC_BIND_IP=10.0.0.9:13344 \
+  MCP_PUBLIC_BIND_IP=01.2.3.4 MCP_PUBLIC_HOST_PORT=0 MCP_PUBLIC_HOST_PORT=65536 MCP_PUBLIC_HOST_PORT=1x MCP_PUBLIC_HOST_PORT=013344; do
+  root=$(new_root "mcp-bad-$RANDOM")
+  run_steps "$root" S_CONTAINERS=0 "${STABLE[@]}" "$bad"
+  [ "$RESULT" = 1 ] && ! grep -q '^build' "$S_TRACE" && grep -q 'is not valid' "$root/out.log" || fail "MCP layout accepted: $bad"
+done
+echo "PASS server/mcp-listener-layout-optional"
+
 # 2f. Layout paths outside the release root are refused before building.
 for bad in "GO_PROD_DB_DIR=/elsewhere/production/data" "GO_LEGACY_ASSET_CACHE_DIR=/elsewhere/cache" \
   "GO_PROD_STORAGE_DIR=ROOT/production/data" "GO_LEGACY_INPUT_ASSETS_DIR=ROOT/production/legacy-x/../../etc"; do
@@ -543,6 +584,7 @@ grep -qx "capacity $DEFAULT_PROJECT-art-ai-go-1 before-build" "$S_TRACE" || fail
 grep -q -- "^build build --target runtime-with-migration-tools" "$S_TRACE" || fail "default build options changed"
 ! grep -q -- "--add-host" "$S_TRACE" || fail "default build named a mirror"
 ! grep -q -- " -f .* -f " "$S_TRACE" || fail "default release used an extra compose file"
+! grep -q '^compose-mcp' "$S_TRACE" || fail "default release passed the MCP listener keys to compose"
 echo "PASS server/default"
 
 # 2h. A shared host may mount legacy directories outside its root (absolute,

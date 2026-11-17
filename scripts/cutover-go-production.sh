@@ -24,6 +24,9 @@ cutover_legacy_container="${CUTOVER_LEGACY_CONTAINER:-}"
 cutover_legacy_project="${CUTOVER_LEGACY_PROJECT:-}"
 cutover_legacy_service="${CUTOVER_LEGACY_SERVICE:-}"
 cutover_preflight_port="${CUTOVER_PREFLIGHT_PORT:-13341}"
+# 对外 MCP 监听（#332）的预检主机端口：隔离预检与仍在运行的生产栈同时存在，它不能用
+# 生产栈发布的那个 MCP 主机端口，否则第二次发布起预检就起不来。
+cutover_preflight_mcp_port="${CUTOVER_PREFLIGHT_MCP_PORT:-13342}"
 cutover_wait_timeout="${CUTOVER_WAIT_TIMEOUT:-180}"
 # 发布根下的 production 目录由调用方给出（release-server-steps.sh、finalize-go-production.sh）；
 # 仓库不写死任何服务器路径（#249）。
@@ -403,6 +406,8 @@ cutover_preflight() {
     GO_LEGACY_INPUT_ASSETS_DIR="${cutover_preflight_root}/legacy/assets" \
     GO_WEB_BIND_IP=127.0.0.1 \
     GO_WEB_HOST_PORT="$cutover_preflight_port" \
+    MCP_PUBLIC_BIND_IP=127.0.0.1 \
+    MCP_PUBLIC_HOST_PORT="$cutover_preflight_mcp_port" \
     "${cutover_preflight_compose[@]}" \
     up -d --no-build --wait \
     --wait-timeout "$cutover_wait_timeout" art-ai-go

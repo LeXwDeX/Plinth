@@ -23,7 +23,7 @@ MOCK = r'''
 import json,os,pathlib,shutil,sys
 args=sys.argv[1:]; tool=pathlib.Path(sys.argv[0]).name
 root=pathlib.Path(os.environ["FIXTURE_ROOT"]); mode=os.environ.get("FIXTURE_MODE","")
-with (root/"calls.jsonl").open("a") as out: out.write(json.dumps({"tool":tool,"args":args,"bind_ip":os.environ.get("GO_WEB_BIND_IP"),"host_port":os.environ.get("GO_WEB_HOST_PORT")})+"\n")
+with (root/"calls.jsonl").open("a") as out: out.write(json.dumps({"tool":tool,"args":args,"bind_ip":os.environ.get("GO_WEB_BIND_IP"),"host_port":os.environ.get("GO_WEB_HOST_PORT"),"mcp_bind_ip":os.environ.get("MCP_PUBLIC_BIND_IP"),"mcp_host_port":os.environ.get("MCP_PUBLIC_HOST_PORT")})+"\n")
 def value(flag): return args[args.index(flag)+1]
 if tool=="hostname": print("fixture-host"); sys.exit()
 if tool=="curl":
@@ -195,6 +195,35 @@ class CutoverAcceptance(unittest.TestCase):
             self.assertNotIn("13341", " ".join(call["args"]))
         self.assertTrue((self.root / "stopped").exists())
         self.assertFalse(any(c["args"][:1] == ["start"] for c in self.calls()))
+
+    def test_preflight_publishes_its_own_mcp_host_port_never_the_stacks(self):
+        # #332: the isolated preflight runs beside the stack that is still up, which holds the host port the
+        # external MCP listener is published on; the preflight must take another one or it cannot start.
+        self.env.update(MCP_PUBLIC_BIND_IP="192.0.2.77", MCP_PUBLIC_HOST_PORT="24113")
+        result = self.run_finalize()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        ups = [c for c in self.calls() if c["tool"] == "docker" and "up" in c["args"]]
+        preflight = [c for c in ups if "formal-go_preflight" in c["args"]]
+        production = [c for c in ups if "formal-go" in c["args"]]
+        # finalize's own preflight and the takeover's both start a preflight container.
+        self.assertGreaterEqual(len(preflight), 1)
+        self.assertEqual(len(production), 1)
+        for call in preflight:
+            self.assertEqual((call["mcp_bind_ip"], call["mcp_host_port"]), ("127.0.0.1", "13342"))
+        self.assertEqual((production[0]["mcp_bind_ip"], production[0]["mcp_host_port"]), ("192.0.2.77", "24113"))
+
+    def test_preflight_mcp_port_can_be_chosen_and_the_stack_without_the_keys_is_unchanged(self):
+        self.env["CUTOVER_PREFLIGHT_MCP_PORT"] = "24114"
+        result = self.run_finalize()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        ups = [c for c in self.calls() if c["tool"] == "docker" and "up" in c["args"]]
+        preflight = [c for c in ups if "formal-go_preflight" in c["args"]]
+        production = [c for c in ups if "formal-go" in c["args"]]
+        self.assertGreaterEqual(len(preflight), 1)
+        self.assertEqual({call["mcp_host_port"] for call in preflight}, {"24114"})
+        self.assertEqual(len(production), 1)
+        # A stack that names no MCP key exports none: the compose defaults apply.
+        self.assertEqual((production[0]["mcp_bind_ip"], production[0]["mcp_host_port"]), (None, None))
 
     def test_explicit_ipv6_binding_is_formatted_for_compose(self):
         args = self.args.copy(); args[args.index("--go-bind-ip")+1] = "::1"

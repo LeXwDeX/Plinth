@@ -371,6 +371,7 @@ func TestAccountAccessKeyRoutesAreAbsentWithoutTheSection(t *testing.T) {
 	t.Parallel()
 	_, handler, cookie, _ := grantTestBrowserWithApplication(t, func(application *catalog.ApplicationSchema) {
 		application.AccessKeys = nil
+		application.MCPPublic = nil // the external MCP service needs the keys
 		application.Runtime.HTTP.Routes.AccountAccessKeys = ""
 		application.Runtime.HTTP.Routes.AccountAccessKey = ""
 	}, []string{"user"})

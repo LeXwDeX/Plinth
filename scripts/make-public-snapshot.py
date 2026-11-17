@@ -149,7 +149,7 @@ def environment_literals(path):
             add(other)
         add(environment.get("extra_compose_file"))
         for key, value in (environment.get("layout") or {}).items():
-            if key != "GO_WEB_HOST_PORT":
+            if key not in ("GO_WEB_HOST_PORT", "MCP_PUBLIC_HOST_PORT"):
                 add(value)
         build = environment.get("build") or {}
         # release-env.py refuses this removed field (#257); read the literal anyway so a

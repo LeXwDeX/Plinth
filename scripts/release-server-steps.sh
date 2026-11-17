@@ -42,7 +42,7 @@
 #                            成功后只保留本次 fake 镜像。空值发布到 ephemeral 栈时，成功后移除本项目
 #                            遗留的 fake-upstream 容器与镜像（非强制 docker rmi）
 #   RELEASE_ALLOW_BOOTSTRAP  =1 时允许空栈首次启动（无旧容器、无数据库）
-#   GO_PROD_*_DIR / GO_LEGACY_*_DIR / GO_WEB_BIND_IP / GO_WEB_HOST_PORT
+#   GO_PROD_*_DIR / GO_LEGACY_*_DIR / GO_WEB_BIND_IP / GO_WEB_HOST_PORT / MCP_PUBLIC_BIND_IP / MCP_PUBLIC_HOST_PORT
 #                            Compose 主机路径与绑定地址，导出给每次 compose 与预检；
 #                            数据目录必须就是 <remote_root>/production/<名称>（未传时按此导出）；
 #                            legacy 目录没有缺省值，单栈主机上必须在 <remote_root>/production/
@@ -171,10 +171,21 @@ fi
 
 # 栈布局：调用方传入的 Compose 主机路径和绑定地址；所有 compose 调用与预检
 # 一致，备份、恢复与容量检查的路径仍固定在 $ROOT/production 下。
+# 每个键都是可选的：未传（或为空）的键直接跳过，Compose 用自己的缺省值；对外 MCP 监听（#332）
+# 的主机侧 MCP_PUBLIC_BIND_IP / MCP_PUBLIC_HOST_PORT 同样，两个都不传时发布行为与此前一致。
 LAYOUT_KEYS="GO_WEB_BIND_IP GO_WEB_HOST_PORT GO_PROD_DB_DIR GO_PROD_STORAGE_DIR GO_PROD_WEB_DATA_DIR
 GO_PROD_LOG_DIR GO_LEGACY_GENERATED_IMAGES_DIR GO_LEGACY_ASSET_CACHE_DIR GO_LEGACY_THUMBNAIL_CACHE_DIR
-GO_LEGACY_INPUT_ASSETS_DIR"
+GO_LEGACY_INPUT_ASSETS_DIR MCP_PUBLIC_BIND_IP MCP_PUBLIC_HOST_PORT"
 STACK_LAYOUT=0
+valid_ipv4() {
+  local octet
+  local -a parts
+  IFS=. read -r -a parts <<<"$1"
+  [ "${#parts[@]}" = 4 ] || return 1
+  for octet in "${parts[@]}"; do
+    [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] && [ "$octet" -le 255 ] || return 1
+  done
+}
 validate_stack_layout() {
   local key value expected
   for key in $LAYOUT_KEYS; do
@@ -182,6 +193,12 @@ validate_stack_layout() {
     [ -n "$value" ] || continue
     STACK_LAYOUT=1
     case "$key" in
+      MCP_PUBLIC_BIND_IP)
+        if valid_ipv4 "$value"; then expected="$value"; else expected=""; fi
+        ;;
+      MCP_PUBLIC_HOST_PORT)
+        if [[ "$value" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$value" -le 65535 ]; then expected="$value"; else expected=""; fi
+        ;;
       GO_PROD_DB_DIR) expected="$ROOT/production/data" ;;
       GO_PROD_STORAGE_DIR) expected="$ROOT/production/storage-go" ;;
       GO_PROD_WEB_DATA_DIR) expected="$ROOT/production/web-data" ;;
@@ -197,7 +214,10 @@ validate_stack_layout() {
     esac
     case "$value" in *..*) expected="" ;; esac
     if [ "$value" != "$expected" ]; then
-      echo "[server] $key does not match the release root layout; nothing was changed" >&2
+      case "$key" in
+        MCP_PUBLIC_*) echo "[server] $key is not valid (an IPv4 address or a port number); nothing was changed" >&2 ;;
+        *) echo "[server] $key does not match the release root layout; nothing was changed" >&2 ;;
+      esac
       exit 1
     fi
     export "$key"

@@ -29,7 +29,7 @@
 | `data` | 仅 `dev-test` 可选（#28）：唯一取值 `"ephemeral"`，每次发布都是全新数据，数据库、资产存储与 legacy 缓存用匿名卷、不挂载主机目录；不得与 `backup` 或 `promote_from` 同时出现；省略时为持久数据（`formal-test` 保持此默认）。`release-env.py` 向服务器段传 `RELEASE_DATA_MODE=ephemeral` |
 | `promote_from` | 只能从该环境晋级（`formal-test` 为 `dev-test`） |
 | `single_stack` | 单项目主机：`image_keep`（保留镜像数，含运行镜像）、`keep_source_snapshots`（保留的 `app.prev-*` 数）、`allow_bootstrap`（允许空栈首次启动） |
-| `layout` | Compose 主机路径与绑定地址（`GO_WEB_BIND_IP`、`GO_WEB_HOST_PORT`、`GO_PROD_*_DIR`、`GO_LEGACY_*_DIR`）；数据目录必须是 `<root>/production/<名称>`，未写时按此导出；legacy 目录没有缺省值，必须写明：单栈环境在 `<root>/production/` 下以 `legacy` 开头，共享主机（`dev-test`）可为发布根之外不含 `..` 的绝对路径 |
+| `layout` | Compose 主机路径与绑定地址（`GO_WEB_BIND_IP`、`GO_WEB_HOST_PORT`、`GO_PROD_*_DIR`、`GO_LEGACY_*_DIR`，另有两个可选键 `MCP_PUBLIC_BIND_IP`、`MCP_PUBLIC_HOST_PORT`，见 §6「外部 MCP 监听」）；数据目录必须是 `<root>/production/<名称>`，未写时按此导出；legacy 目录没有缺省值，必须写明：单栈环境在 `<root>/production/` 下以 `legacy` 开头，共享主机（`dev-test`）可为发布根之外不含 `..` 的绝对路径 |
 | `extra_compose_file` | 追加在主 Compose 文件之后的服务器本地覆盖文件（`<root>/production/` 下，例如固定项目网络子网与容器地址）；只用于本栈服务，隔离预检不用它 |
 | `build` | `network`（`docker build --network`，例如构建容器须以宿主源地址访问内网镜像源时为 `host`）、`goproxy`（GOPROXY 构建参数）、`npm_registry`（NPM_REGISTRY 构建参数，单个 http(s) 地址，指向内部包缓存）、`add_hosts`（`docker build --add-host` 的 `主机名:地址` 列表，用于解析内网 Go 代理等构建依赖主机；缺省 npm 源为公共 registry）；仓库缺省 npm 源为公共 `registry.npmjs.org`（#257：仓库不依赖内部源），内部环境只在本地环境文件里设 `npm_registry` |
 | `source_transfer` | `pipe`（缺省，`git archive` 经 SSH 管道解包）或 `scp`（本地生成 tar，scp 到 `<root>/releases/` 解包后删除） |
@@ -256,6 +256,18 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 **Multiple chat models (#322):** the default chat connection stays `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` in the runtime environment file. To offer more chat models, add `LLM_CONNECTIONS=<ID>,<ID>` to the same file and set `<ID>_BASE_URL`, `<ID>_API_KEY` and `<ID>_MODEL` (optionally `<ID>_CONTEXT_WINDOW_TOKENS`) for each `<ID>` explicitly; with one gateway every address is the same gateway URL, with no alias or fallback between connections. Rules: [Provider configuration](provider-configuration.md#多个对话模型连接--multiple-chat-model-connections). Rebuild only this stack's `art-ai-go` service, then use "Test connection" on the admin page "LLM settings" to check reachability and image input before choosing the default model and the offered levels; the settings are versioned in the database and survive releases.
 
 本地运行时，`smoke-l1-agent-mode.sh` 只能比对 `/api/version` 与 `EXPECT_SHA`；日志文件检查在目标主机运行（设 `ART_AI_SERVER_ROOT=<root>`）或经 SSH 读 `production/logs/art-ai.log` 补核。
+
+### 外部 MCP 监听（#332）
+
+外部 MCP 客户端用本人的个人访问 Key 直连进程里的独立监听（只挂 MCP 路由，不经 Web 服务，也不经反向代理）。默认关闭，要同时满足三件事才可达：
+
+1. Schema `application.mcp_public.enabled` 为真（默认 Catalog 为真）。
+2. 运行环境文件 `production/runtime.env` 设 `MCP_PUBLIC_LISTEN_ADDR=0.0.0.0:13343`。缺省为空，空就不监听；容器内的地址必须是 `0.0.0.0:13343`，与 `docker-compose.go-production.yml` 固定的容器端口 13343 对应，改成别的端口映射就对不上。
+3. 环境文件 `layout` 的两个可选键决定主机一侧：`MCP_PUBLIC_BIND_IP`（IPv4，缺省 `127.0.0.1`，只有本机能连；对局域网开放写主机的局域网地址，`0.0.0.0` 表示所有网卡）与 `MCP_PUBLIC_HOST_PORT`（缺省 13343）。可以只写一个。
+
+两个键都不写的环境发布行为与此前完全一致，`compose.env` 也不出现它们。写了的键由发布脚本与其他 `layout` 键一样导出给 Compose 并写入 `production/compose.env`（手工 Compose 与 `release-env.py compose-env` 用同一份值）；值不是合法的 IPv4 或端口时在构建之前拒绝，端口不能与同一地址上的 `GO_WEB_HOST_PORT` 相同。同一台主机上有两个用这个 Compose 文件的栈时，两栈的 `MCP_PUBLIC_HOST_PORT` 必须不同。隔离预检与仍在运行的栈同时存在，所以预检容器不用栈的 MCP 主机端口，改用回环上的 `CUTOVER_PREFLIGHT_MCP_PORT`（缺省 13342）。
+
+监听没有 TLS，访问 Key 是 Bearer 令牌：只在局域网或本机使用，不得经公网明文传输；要对公网开放，须在进程里配置证书或在前面放 TLS 终结（本仓库不提供）。候选栈的 Compose 文件（`docker-compose.go-candidate.yml`）与自部署的根 `docker-compose.yml` 不发布这个端口。发布后用该 Key 对 `POST /mcp` 调 `server/discover` 与 `get_status`，确认监听与状态块（行为见 [`architecture.md`](architecture.md)「对外 MCP 监听」）。
 
 ## 7. 冒烟失败后的手工回滚
 

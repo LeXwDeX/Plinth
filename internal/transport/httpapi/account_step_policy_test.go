@@ -322,6 +322,9 @@ func TestAccountStepPolicyRouteIsAbsentWithoutTheSection(t *testing.T) {
 	_, handler, cookie, _ := grantTestBrowserWithApplication(t, func(application *catalog.ApplicationSchema) {
 		application.StepPolicy = nil
 		application.Runtime.HTTP.Routes.AccountStepPolicy = ""
+		// Access keys and the external MCP service decide by the step mode.
+		application.AccessKeys, application.MCPPublic = nil, nil
+		application.Runtime.HTTP.Routes.AccountAccessKeys, application.Runtime.HTTP.Routes.AccountAccessKey = "", ""
 	}, []string{"user"})
 	for _, method := range []string{http.MethodGet, http.MethodPut} {
 		response := grantTestRequest(t, handler, cookie, method, stepPolicyPath, `{}`, "")

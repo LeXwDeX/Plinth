@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
@@ -89,6 +90,12 @@ type Application struct {
 	// listener (#332); the main server's identity does not accept them.
 	accessKeyAuthenticator *accesskeys.Authenticator
 	server                 *http.Server
+	// mcpServer is the external MCP listener (#332): a second http.Server that
+	// serves the MCP routes only. Nil unless the Schema enables the service and
+	// the runtime configuration gives it an address.
+	mcpServer *http.Server
+	mcpMutex  sync.Mutex
+	mcpBound  string
 }
 
 // The chat references read a snapshot's recorded digest through this, never
@@ -161,7 +168,8 @@ func (p preparedSceneContext) ResolvePreparedSource(ctx context.Context, owner g
 
 // componentCount is the number of background components Run starts: the
 // coordinator, the chat agent, processing plans, the pending-approval sweep,
-// scene reconciliation and the HTTP server. Run waits for each to return.
+// scene reconciliation and the HTTP server. Run waits for each to return. The
+// external MCP listener (#332), when the application has one, is a seventh.
 const componentCount = 6
 
 type componentResult struct {
@@ -1752,7 +1760,18 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, fmt.Errorf("个人访问 Key: %w", err)
 	}
+	mcpStatus, err := mcpStatusFromSchema(applicationSchema, accountSettingsService, repository,
+		providerAccountService, texts, logger)
+	if err != nil {
+		return nil, fmt.Errorf("对外 MCP 状态块: %w", err)
+	}
+	var mcpIdentity httpapi.IdentityResolver
+	if accessKeyAuthenticator != nil {
+		mcpIdentity = accessKeyAuthenticator
+	}
 	api, err := httpapi.New(httpapi.Config{
+		MCPIdentity:                       mcpIdentity,
+		MCPStatus:                         mcpStatus,
 		Harness:                           harnessResolver,
 		AgentConfiguration:                agentConfigurationService,
 		LLMSettings:                       llmSettingsService,
@@ -1822,6 +1841,19 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	mcpHandler, err := api.MCPPublicHandler()
+	if err != nil {
+		return nil, err
+	}
+	var mcpServer *http.Server
+	switch {
+	case mcpHandler != nil && config.MCPPublicAddress != "":
+		mcpServer = newMCPServer(config.MCPPublicAddress, *applicationSchema.MCPPublic, mcpHandler)
+	case mcpHandler != nil:
+		logger.Info("对外 MCP 已在 Schema 启用，但运行设置 mcp_public_listen_addr 为空：不启动对外 MCP 监听")
+	case config.MCPPublicAddress != "":
+		logger.Warn("已配置 mcp_public_listen_addr，但 Schema 没有启用 application.mcp_public：不启动对外 MCP 监听")
+	}
 	handler := api.Handler()
 	if config.WebAssetsRoot != "" {
 		handler, err = webui.New(webui.Config{
@@ -1846,6 +1878,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		pendingApprovals:       pendingApprovalService,
 		manifests:              manifestService,
 		accessKeyAuthenticator: accessKeyAuthenticator,
+		mcpServer:              mcpServer,
 		server: &http.Server{
 			Addr:    config.Address,
 			Handler: handler,
@@ -2040,7 +2073,15 @@ func (a *Application) Run(ctx context.Context) error {
 			a.generation.Close(),
 		)
 	}
-	results := make(chan componentResult, componentCount)
+	mcpListener, err := a.bindMCP()
+	if err != nil {
+		return errors.Join(err, listener.Close(), a.generation.Close())
+	}
+	components := componentCount
+	if mcpListener != nil {
+		components++
+	}
+	results := make(chan componentResult, components)
 	go func() {
 		a.readiness.coordinator.Store(true)
 		defer a.readiness.coordinator.Store(false)
@@ -2105,6 +2146,9 @@ func (a *Application) Run(ctx context.Context) error {
 		)
 		results <- componentResult{name: "http", err: a.server.Serve(listener)}
 	}()
+	if mcpListener != nil {
+		go func() { results <- componentResult{name: "mcp", err: a.serveMCP(mcpListener)} }()
+	}
 
 	var componentErrors []error
 	received := 0
@@ -2123,9 +2167,12 @@ func (a *Application) Run(ctx context.Context) error {
 		a.schema.Runtime.HTTP.ShutdownTimeoutSeconds,
 	) * time.Second
 	shutdownErr := httpapi.Shutdown(a.server, shutdownTimeout)
+	if a.mcpServer != nil {
+		shutdownErr = errors.Join(shutdownErr, httpapi.Shutdown(a.mcpServer, shutdownTimeout))
+	}
 	waitTimer := time.NewTimer(shutdownTimeout)
 	defer waitTimer.Stop()
-	for received < componentCount {
+	for received < components {
 		select {
 		case result := <-results:
 			received++
@@ -2137,7 +2184,7 @@ func (a *Application) Run(ctx context.Context) error {
 				componentErrors,
 				errors.New("等待 HTTP/协调器/Chat Agent/场景对账/待批准巡检退出超时"),
 			)
-			received = componentCount
+			received = components
 		}
 	}
 	// Background chat-title summaries are best effort: give them the shutdown window to finish, then go on.

@@ -39,11 +39,17 @@ import sys
 SCRIPTS = Path(__file__).resolve().parent
 SERVICE = "art-ai-go"
 LIVE_ACK = "ART_AI_LIVE_ACK"
+# Every key is optional: a layout names only the ones its stack sets, and the server
+# step takes the compose default for the rest. The external MCP listener's host side
+# (#332) is such a pair: neither key means the compose defaults (loopback, port 13343).
 LAYOUT_KEYS = (
     "GO_WEB_BIND_IP", "GO_WEB_HOST_PORT", "GO_PROD_DB_DIR", "GO_PROD_STORAGE_DIR",
     "GO_PROD_WEB_DATA_DIR", "GO_PROD_LOG_DIR", "GO_LEGACY_GENERATED_IMAGES_DIR",
     "GO_LEGACY_ASSET_CACHE_DIR", "GO_LEGACY_THUMBNAIL_CACHE_DIR", "GO_LEGACY_INPUT_ASSETS_DIR",
+    "MCP_PUBLIC_BIND_IP", "MCP_PUBLIC_HOST_PORT",
 )
+IPV4 = re.compile(r"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])")
+PORT = re.compile(r"[1-9][0-9]{0,4}")
 WORD = re.compile(r"[A-Za-z0-9_./:-]+")
 ADD_HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]{0,252}:[0-9A-Fa-f.:]+")
 COMPOSE_PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
@@ -164,6 +170,18 @@ def validate_environment(name, environment, document):
     need(isinstance(layout, dict) and set(layout) <= set(LAYOUT_KEYS), "layout has unknown keys")
     for key, value in layout.items():
         need(isinstance(value, str) and WORD.fullmatch(value) and ".." not in value, f"layout {key} is invalid")
+    # The external MCP listener's host side (#332) is optional; when named it must be an
+    # IPv4 address and a port, and not collide with the web port of the same stack.
+    if "MCP_PUBLIC_BIND_IP" in layout:
+        need(IPV4.fullmatch(layout["MCP_PUBLIC_BIND_IP"]), "layout MCP_PUBLIC_BIND_IP must be an IPv4 address")
+    if "MCP_PUBLIC_HOST_PORT" in layout:
+        need(PORT.fullmatch(layout["MCP_PUBLIC_HOST_PORT"]) and int(layout["MCP_PUBLIC_HOST_PORT"]) <= 65535,
+             "layout MCP_PUBLIC_HOST_PORT must be a port number")
+    if "MCP_PUBLIC_BIND_IP" in layout or "MCP_PUBLIC_HOST_PORT" in layout:
+        web_ip, mcp_ip = layout.get("GO_WEB_BIND_IP", "0.0.0.0"), layout.get("MCP_PUBLIC_BIND_IP", "127.0.0.1")
+        need(layout.get("GO_WEB_HOST_PORT", "13333") != layout.get("MCP_PUBLIC_HOST_PORT", "13343")
+             or not (web_ip == mcp_ip or "0.0.0.0" in (web_ip, mcp_ip)),
+             "layout MCP_PUBLIC_HOST_PORT must differ from GO_WEB_HOST_PORT on the same address")
     extra = environment.get("extra_compose_file")
     if extra is not None:
         need(isinstance(extra, str) and WORD.fullmatch(extra) and ".." not in extra
