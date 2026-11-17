@@ -2,8 +2,10 @@ package httpapi_test
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/modelinspect"
@@ -89,6 +91,69 @@ func TestMCPInspectModelReportsTheInspectionAndTheStatusBlock(t *testing.T) {
 	}
 }
 
+// #332 step 7c-1: inspect_model takes the same explicit purpose as
+// inspect_image, and the fix hints are bounded to the capabilities the declared
+// process_model tool can run.
+func TestMCPInspectModelTakesAPurposeAndBoundsTheFixHints(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	task := f.succeededTask("owner-a", "", "inspect-purpose")
+	f.inspector.result = generationtool.ModelInspectResult{
+		TaskID:  task.ID,
+		AssetID: "asset_checked",
+		UsageCheck: &generationtool.ModelReviewUsageCheck{
+			Purpose: "game_character", PurposeLabel: "游戏/实时·角色", PurposeSource: "argument",
+			Checks: []generationtool.ModelReviewUsageCheckItem{},
+		},
+	}
+	result := f.call(f.issueKey("owner-a", "read"), "inspect_model",
+		map[string]any{"task_id": string(task.ID), "purpose": "game_character"})
+	if result.code != http.StatusOK || result.isError {
+		t.Fatalf("inspect_model = %d %s", result.code, result.raw)
+	}
+	usage := result.structured["usage_check"].(map[string]any)
+	if usage["purpose"] != "game_character" || usage["purpose_source"] != "argument" {
+		t.Errorf("usage_check = %v", usage)
+	}
+	if len(f.inspector.calls) != 1 {
+		t.Fatalf("the inspector was called %d times", len(f.inspector.calls))
+	}
+	request := f.inspector.calls[0]
+	if request.Purpose != "game_character" {
+		t.Errorf("inspection purpose = %q", request.Purpose)
+	}
+	var declared []generation.Capability
+	for _, tool := range f.application.MCPPublic.Tools {
+		if tool.Name == catalog.MCPToolProcessModel {
+			declared = tool.Capabilities
+		}
+	}
+	if len(declared) == 0 {
+		t.Fatal("the default Catalog declares no process_model capabilities")
+	}
+	if !reflect.DeepEqual(request.AllowedFixes, declared) {
+		t.Errorf("allowed fixes = %v, want the declared process_model capabilities %v", request.AllowedFixes, declared)
+	}
+	assertServedSchema(t, f, "inspect_model", result)
+}
+
+// A purpose the Schema does not declare is invalid arguments, and no model is
+// read for it.
+func TestMCPInspectModelRefusesAnUnknownPurpose(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	task := f.succeededTask("owner-a", "", "inspect-unknown-purpose")
+	result := f.call(f.issueKey("owner-a", "read"), "inspect_model",
+		map[string]any{"task_id": string(task.ID), "purpose": "no_such_purpose"})
+	if result.code != http.StatusOK || !result.isError || result.problemCode() != "invalid_arguments" {
+		t.Fatalf("an unknown purpose = %d %s", result.code, result.raw)
+	}
+	if len(f.inspector.calls) != 0 {
+		t.Fatalf("an unknown purpose reached the inspector: %+v", f.inspector.calls)
+	}
+	result.status(t)
+}
+
 // A refusal of the inspection is a business error with the platform's own
 // localized text: the tool never re-words it.
 func TestMCPInspectModelMapsTheRefusalsToBusinessErrors(t *testing.T) {
@@ -97,12 +162,13 @@ func TestMCPInspectModelMapsTheRefusalsToBusinessErrors(t *testing.T) {
 	task := f.succeededTask("owner-a", "", "inspect-refusals")
 	key := f.issueKey("owner-a", "read")
 	for refusal, code := range map[string]string{
-		generationtool.ModelInspectNotFound:    "asset_not_found",
-		generationtool.ModelInspectNotReady:    "model_not_ready",
-		generationtool.ModelInspectNotGLB:      "model_not_glb",
-		generationtool.ModelInspectTooLarge:    "model_too_large",
-		generationtool.ModelInspectUnreadable:  "model_unreadable",
-		generationtool.ModelInspectUnavailable: "model_unavailable",
+		generationtool.ModelInspectNotFound:       "asset_not_found",
+		generationtool.ModelInspectNotReady:       "model_not_ready",
+		generationtool.ModelInspectNotGLB:         "model_not_glb",
+		generationtool.ModelInspectTooLarge:       "model_too_large",
+		generationtool.ModelInspectUnreadable:     "model_unreadable",
+		generationtool.ModelInspectUnknownPurpose: "invalid_arguments",
+		generationtool.ModelInspectUnavailable:    "model_unavailable",
 	} {
 		message := "平台检查文案：" + refusal
 		f.inspector.refuse = &generationtool.ModelInspectRefusal{Kind: refusal, Message: message}

@@ -53,7 +53,7 @@ func platformInspect(t *testing.T, brief chat.ProductionBrief, triangles int64, 
 	available modelReviewFixAvailability) *modelReviewUsageCheck {
 	t.Helper()
 	usage, production := platformShipped(t)
-	check := newModelReviewUsageCheck(platformReport(triangles, texture), usage, production, brief,
+	check := newModelReviewUsageCheck(platformReport(triangles, texture), usage, production, brief, "",
 		usageIdentityText, available)
 	if check == nil {
 		t.Fatal("no usage check")

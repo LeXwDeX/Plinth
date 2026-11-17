@@ -159,6 +159,44 @@ func TestDefaultMCPInspectImageDeclaration(t *testing.T) {
 	}
 }
 
+// #332 step 7c-1: inspect_model declares an explicit purpose like
+// inspect_image, and the English copy says what it does.
+func TestDefaultMCPInspectModelDeclarationHasPurpose(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	service := application.MCPPublic
+	input, declared, err := service.ParsedInputSchema(catalog.MCPToolInspectModel)
+	if err != nil || !declared {
+		t.Fatalf("declared=%v err=%v", declared, err)
+	}
+	purpose, present := input.Properties["purpose"]
+	if !present {
+		t.Fatal("inspect_model.input_schema lacks purpose")
+	}
+	if len(purpose.Types) != 1 || purpose.Types[0] != "string" ||
+		purpose.MinLength == nil || *purpose.MinLength != 1 ||
+		purpose.MaxLength == nil || *purpose.MaxLength != 200 {
+		t.Fatalf("purpose schema = %+v", purpose)
+	}
+	if !strings.Contains(purpose.Description, "chat.model3d_usage") || !strings.Contains(purpose.Description, "只影响本次") {
+		t.Fatalf("purpose description = %q", purpose.Description)
+	}
+	if len(input.Required) != 1 || input.Required[0] != "task_id" {
+		t.Fatalf("inspect_model requires %v; only task_id may be required", input.Required)
+	}
+	if input.AdditionalProperties == nil || *input.AdditionalProperties {
+		t.Fatal("inspect_model arguments must stay a closed object")
+	}
+	tool := mcpToolOf(&application, catalog.MCPToolInspectModel)
+	localizer, err := catalog.NewTextLocalizer(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if translated := localizer.Text("en", tool.Description); !strings.Contains(translated, "purpose") {
+		t.Fatalf("the English inspect_model description omits purpose: %q", translated)
+	}
+}
+
 // The status block's JSON Schema is embedded in every tool's served output
 // schema under the one key, and is required there; the tool's own schema
 // stays as declared.

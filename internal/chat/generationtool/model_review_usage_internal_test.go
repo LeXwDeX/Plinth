@@ -6,6 +6,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/modelinspect"
 )
 
@@ -302,7 +303,7 @@ func TestModelReviewUsageChecksReportPassFailAndUnknown(t *testing.T) {
 			if test.mutate != nil {
 				test.mutate(&report, &usage)
 			}
-			check := newModelReviewUsageCheck(report, usage, production, chat.ProductionBrief{}, usageIdentityText, allAvailable)
+			check := newModelReviewUsageCheck(report, usage, production, chat.ProductionBrief{}, "", usageIdentityText, allAvailable)
 			item := usageItem(t, check, test.check)
 			if item.Status != test.want {
 				t.Fatalf("%s = %q, want %q (actual=%v budget=%v)", test.check, item.Status, test.want, item.Actual, item.Budget)
@@ -327,7 +328,7 @@ func TestModelReviewUsageCheckNamesTheBriefPurposeAndTriangleOverride(t *testing
 		"triangle_budget": []byte(`12`),
 	}
 	check := newModelReviewUsageCheck(
-		usageBaseReport(), usageBaseUsage(), production, brief,
+		usageBaseReport(), usageBaseUsage(), production, brief, "",
 		usageIdentityText, func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true },
 	)
 	if check == nil {
@@ -362,7 +363,7 @@ func TestModelReviewUsageCheckFindsBriefFieldsByDeclaredType(t *testing.T) {
 		"faces": []byte(`12`),
 	}
 	check := newModelReviewUsageCheck(
-		usageBaseReport(), usage, usageProduction(t), brief,
+		usageBaseReport(), usage, usageProduction(t), brief, "",
 		usageIdentityText, func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true },
 	)
 	if check == nil || check.Purpose != "prop" {
@@ -389,7 +390,7 @@ func TestModelReviewUsageCheckFallsBackToTheDefaultPurpose(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			check := newModelReviewUsageCheck(
-				usageBaseReport(), usageBaseUsage(), production, test.brief,
+				usageBaseReport(), usageBaseUsage(), production, test.brief, "",
 				usageIdentityText, func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true },
 			)
 			if check == nil {
@@ -411,7 +412,7 @@ func TestModelReviewUsageCheckFallsBackToTheDefaultPurpose(t *testing.T) {
 func TestModelReviewUsageCheckRequiresUsageProfiles(t *testing.T) {
 	check := newModelReviewUsageCheck(
 		usageBaseReport(), catalog.ChatModel3DUsageSchema{}, usageProduction(t),
-		chat.ProductionBrief{}, usageIdentityText,
+		chat.ProductionBrief{}, "", usageIdentityText,
 		func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true },
 	)
 	if check != nil {
@@ -546,7 +547,7 @@ func TestModelReviewUsageYUpJudgesTheSubjectByPurpose(t *testing.T) {
 			report := usageBaseReport()
 			report.BBox.Size = fixture.size
 			brief := chat.ProductionBrief{"purpose": []byte(`"` + fixture.purpose + `"`)}
-			check := newModelReviewUsageCheck(report, usageBaseUsage(), production, brief, usageIdentityText, allAvailable)
+			check := newModelReviewUsageCheck(report, usageBaseUsage(), production, brief, "", usageIdentityText, allAvailable)
 			item := usageItem(t, check, catalog.ModelReviewUsageCheckYUp)
 			if item.Status != fixture.want {
 				t.Fatalf("y_up = %q (actual %v), want %q", item.Status, item.Actual, fixture.want)
@@ -571,7 +572,7 @@ func TestInspectSelfCheckCheckKeepsThePurposeAndFailedChecks(t *testing.T) {
 	report := usageBaseReport()
 	report.Triangles = 99
 	report.UV.AllHaveUV = false
-	usage := newModelReviewUsageCheck(report, usageBaseUsage(), usageProduction(t), chat.ProductionBrief{},
+	usage := newModelReviewUsageCheck(report, usageBaseUsage(), usageProduction(t), chat.ProductionBrief{}, "",
 		usageIdentityText, func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true })
 	check := inspectSelfCheckCheck("inspect_model", "asset-1", usage)
 	if !check.OK || check.Kind != chat.SelfCheckKindInspect || check.Purpose != "game" ||
@@ -583,5 +584,110 @@ func TestInspectSelfCheckCheckKeepsThePurposeAndFailedChecks(t *testing.T) {
 	}
 	if bare := inspectSelfCheckCheck("inspect_model", "asset-1", nil); len(bare.UsageFailed) != 0 || bare.Purpose != "" {
 		t.Fatalf("no usage check must add no purpose: %+v", bare)
+	}
+}
+
+// TestModelReviewUsageExplicitPurposeOverridesTheBrief is #332 7c-1: an
+// argument purpose judges this call only, is labelled as such, and has no
+// session-purpose note to write because no session purpose was read.
+func TestModelReviewUsageExplicitPurposeOverridesTheBrief(t *testing.T) {
+	production := usageProduction(t)
+	allAvailable := func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true }
+	brief := chat.ProductionBrief{"purpose": []byte(`"game"`)}
+	check := newModelReviewUsageCheckFor(usageBaseReport(), nil, usageBaseUsage(), production, brief, "prop",
+		usageIdentityText, allAvailable, nil)
+	if check == nil {
+		t.Fatal("the argument purpose produced no usage check")
+	}
+	if check.Purpose != "prop" || check.PurposeLabel != "道具" || check.PurposeSource != modelReviewUsageSourceArgument {
+		t.Fatalf("usage = %+v, want the prop profile from the argument", check)
+	}
+	if check.Note != "" {
+		t.Fatalf("an argument purpose wrote a note: %q", check.Note)
+	}
+	// The caller refuses an undeclared argument; the constructor itself must
+	// never fall back to the brief's purpose silently.
+	if unknown := newModelReviewUsageCheckFor(usageBaseReport(), nil, usageBaseUsage(), production, brief, "nope",
+		usageIdentityText, allAvailable, nil); unknown != nil {
+		t.Fatalf("an undeclared purpose produced %+v", unknown)
+	}
+}
+
+// TestModelReviewUsageAllowedFixesKeepHintsExecutable is #332 7c-1: the outward
+// path names only the capabilities its process_model tool declares, while the
+// platform path (nil) keeps the runtime availability behaviour of 7a.
+func TestModelReviewUsageAllowedFixesKeepHintsExecutable(t *testing.T) {
+	production := usageProduction(t)
+	allAvailable := func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true }
+	report := usageBaseReport()
+	report.Triangles = 99
+	report.UV.AllHaveUV = false
+	report.Topology.Watertight = false
+	report.Topology.DebrisTriangles = 10
+	report.Topology.DegenerateTriangles = 5
+	report.Skins = nil
+	report.Materials = []modelinspect.MaterialReport{{Slots: []modelinspect.MaterialSlotReport{
+		{Slot: "base_color", Present: true, Width: 4096, Height: 4096},
+	}}}
+	report.BBox.Size = [3]float64{3, 0.5, 0.5}
+	report.BBox.BottomCenterOffset = [3]float64{1, 0, 0}
+	allowed := []generation.Capability{
+		"retexture", "remesh", "rigging", "animation", "format-conversion", "model-split",
+	}
+	check := newModelReviewUsageCheckFor(report, nil, usageBaseUsage(), production, chat.ProductionBrief{}, "",
+		usageIdentityText, allAvailable, allowed)
+	if check == nil {
+		t.Fatal("no usage check")
+	}
+	hints := map[string]string{}
+	for _, item := range check.Checks {
+		if item.Status != modelReviewUsageStatusFail {
+			continue
+		}
+		hints[item.Check] = item.FixHint
+		if strings.Contains(item.FixHint, "{") {
+			t.Fatalf("%s hint leaves a placeholder: %q", item.Check, item.FixHint)
+		}
+	}
+	for _, want := range []struct{ check, text string }{
+		{catalog.ModelReviewUsageCheckTriangles, "remesh"},
+		{catalog.ModelReviewUsageCheckSkin, "rigging"},
+		{catalog.ModelReviewUsageCheckTextureSize, "format-conversion(texture_size=1024)"},
+		{catalog.ModelReviewUsageCheckPivotBottomCenter, "format-conversion(pivot_to_center_bottom=true)"},
+	} {
+		if !strings.Contains(hints[want.check], want.text) {
+			t.Fatalf("%s hint = %q, want %q", want.check, hints[want.check], want.text)
+		}
+	}
+	if strings.Contains(hints[catalog.ModelReviewUsageCheckPivotBottomCenter], "resize") {
+		t.Fatalf("the pivot hint names an undeclared capability: %q", hints[catalog.ModelReviewUsageCheckPivotBottomCenter])
+	}
+	for _, check := range []string{
+		catalog.ModelReviewUsageCheckUV,
+		catalog.ModelReviewUsageCheckWatertight,
+		catalog.ModelReviewUsageCheckPlausibleScale,
+		catalog.ModelReviewUsageCheckDebris,
+		catalog.ModelReviewUsageCheckDegenerate,
+	} {
+		if hints[check] != production.NoCapabilityText {
+			t.Fatalf("%s hint = %q, want the no-capability text", check, hints[check])
+		}
+	}
+
+	// nil keeps the platform path as it was: every runtime-available capability
+	// may still be named.
+	platform := newModelReviewUsageCheckFor(report, nil, usageBaseUsage(), production, chat.ProductionBrief{}, "",
+		usageIdentityText, allAvailable, nil)
+	for _, want := range []struct{ check, text string }{
+		{catalog.ModelReviewUsageCheckUV, "uv-unwrap"},
+		{catalog.ModelReviewUsageCheckWatertight, "repair-printability"},
+		{catalog.ModelReviewUsageCheckPlausibleScale, "resize"},
+		{catalog.ModelReviewUsageCheckDebris, "model-split"},
+		{catalog.ModelReviewUsageCheckDegenerate, "repair-printability"},
+		{catalog.ModelReviewUsageCheckPivotBottomCenter, "resize(origin_at=bottom)"},
+	} {
+		if item := usageItem(t, platform, want.check); !strings.Contains(item.FixHint, want.text) {
+			t.Fatalf("platform %s hint = %q, want %q", want.check, item.FixHint, want.text)
+		}
 	}
 }
