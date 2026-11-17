@@ -6387,10 +6387,17 @@ type CoreHTTPRoutesSchema struct {
 	// ChatSessionAssetLists lists the lists a session proposed. Only the path
 	// templates live here; the HTTP layer decides the methods. Empty
 	// (historical Catalogs) leaves them unregistered.
-	ProjectAssetLists          string `json:"project_asset_lists,omitempty"`
-	ProjectAssetList           string `json:"project_asset_list,omitempty"`
-	ProjectAssetListDecision   string `json:"project_asset_list_decision,omitempty"`
-	ChatSessionAssetLists      string `json:"chat_session_asset_lists,omitempty"`
+	ProjectAssetLists        string `json:"project_asset_lists,omitempty"`
+	ProjectAssetList         string `json:"project_asset_list,omitempty"`
+	ProjectAssetListDecision string `json:"project_asset_list_decision,omitempty"`
+	ChatSessionAssetLists    string `json:"chat_session_asset_lists,omitempty"`
+	// Project run control routes (#328): presence heartbeats, run control
+	// (pause/resume/stop/start) and per-item skip. PR2 declares the path
+	// templates only; the handlers arrive with the runner. Empty (historical
+	// Catalogs) leaves them unregistered.
+	ProjectPresence            string `json:"project_presence,omitempty"`
+	ProjectAssetListRun        string `json:"project_asset_list_run,omitempty"`
+	ProjectAssetListItem       string `json:"project_asset_list_item,omitempty"`
 	ProviderAsset              string `json:"provider_asset"`
 	Offerings                  string `json:"offerings"`
 	Assets                     string `json:"assets"`

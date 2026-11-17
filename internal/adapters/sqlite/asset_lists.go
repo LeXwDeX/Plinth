@@ -31,6 +31,7 @@ const assetListColumns = `id, request_key, owner_id, project_id, COALESCE(source
 const assetListItemColumns = `id, owner_id, kind, name, description, references_json,
 	route_id, route_json, planned_step_count, planned_model3d_step_count, state,
 	state_reason, version, COALESCE(session_id, ''), project_asset_id, round,
+	last_turn_message_id, next_action_at, block,
 	result_json, review_json, created_at, updated_at`
 
 type assetListQueryer interface {
@@ -457,12 +458,14 @@ func insertAssetListItem(ctx context.Context, conn *sql.Conn, listID string, pos
 		INSERT INTO asset_list_items (id, owner_id, list_id, position, kind, name, description,
 			references_json, route_id, route_json, planned_step_count, planned_model3d_step_count,
 			state, state_reason, version, session_id, project_asset_id, round,
-			result_json, review_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			last_turn_message_id, next_action_at, block, result_json, review_json,
+			created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.ID, item.OwnerID, listID, position, item.Kind, item.Name, item.Description,
 		references, item.RouteID, string(routeJSON), item.PlannedStepCount,
 		item.PlannedModel3DStepCount, item.State, item.StateReason, item.Version,
 		nullString(item.SessionID), item.ProjectAssetID, item.Round,
+		item.LastTurnMessageID, formatTaskTimeOrEmpty(item.NextActionAt), item.Block,
 		string(result), string(review), formatTime(item.CreatedAt), formatTime(item.UpdatedAt)); err != nil {
 		return fmt.Errorf("insert asset list item: %w", err)
 	}
@@ -632,17 +635,21 @@ func finishAssetList(
 
 func scanAssetListItem(scanner interface{ Scan(...any) error }) (assetlist.Item, error) {
 	var value assetlist.Item
-	var references, route, result, review, created, updated string
+	var references, route, result, review, nextActionAt, created, updated string
 	if err := scanner.Scan(
 		&value.ID, &value.OwnerID, &value.Kind, &value.Name, &value.Description,
 		&references, &value.RouteID, &route, &value.PlannedStepCount, &value.PlannedModel3DStepCount,
 		&value.State, &value.StateReason, &value.Version, &value.SessionID, &value.ProjectAssetID,
-		&value.Round, &result, &review, &created, &updated,
+		&value.Round, &value.LastTurnMessageID, &nextActionAt, &value.Block,
+		&result, &review, &created, &updated,
 	); err != nil {
 		return assetlist.Item{}, err
 	}
 	value.References = decodeProjectReferences(references)
 	value.Route = decodeAssetListRoute(route)
+	if nextActionAt != "" {
+		value.NextActionAt, _ = parseTime(nextActionAt)
+	}
 	if result == "" {
 		result = "{}"
 	}

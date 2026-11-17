@@ -61,8 +61,10 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// #327: the browser builds the work list card and the project panel from
 		// the limits, kinds, routes and states by role; the server copy, UI texts
 		// and the reserved item blocks stay server-side.
-		"asset_list":        {"limits", "kinds", "routes", "states", "item_states"},
-		"asset_list.limits": {"max_lists_per_project", "draft_ttl_seconds", "name_max_length", "description_max_length", "max_references_per_item"},
+		// #328: only the presence heartbeat is public from execution.
+		"asset_list":          {"limits", "kinds", "routes", "states", "item_states", "presence"},
+		"asset_list.limits":   {"max_lists_per_project", "draft_ttl_seconds", "name_max_length", "description_max_length", "max_references_per_item"},
+		"asset_list.presence": {"heartbeat_seconds"},
 		// #330: the browser sees the modes with their labels, the defaults and
 		// the cap range; the counted capabilities, the Agent-facing message and
 		// the audit declaration stay server-side.
@@ -147,6 +149,16 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		}
 	}
 
+	// #328: the execution schedule, grace and continuation copy stay server-side.
+	for _, private := range []string{
+		"grace_seconds", "poll_interval_milliseconds", "max_parallel_items",
+		"max_rounds_per_item", "max_capacity_retries", "continuation",
+	} {
+		if strings.Contains(string(encoded), private) {
+			t.Fatalf("public asset_list leaks execution field %q", private)
+		}
+	}
+
 	// Craft briefs are appended to the server-side system context only (#103).
 	for _, prompt := range application.Chat.Agent.CraftPrompts {
 		if strings.Contains(string(encoded), prompt.Text) {
@@ -223,6 +235,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"asset_list.routes",
 		"asset_list.states",
 		"asset_list.item_states",
+		// #328: the browser reads the heartbeat interval only.
+		"asset_list.presence.heartbeat_seconds",
 	} {
 		if _, ok := publicPath(public, path); !ok {
 			t.Errorf("browser contract path missing: %s", path)
@@ -269,6 +283,9 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"authentication.api.password_hash_algorithm",
 		// #327: the server copy, UI texts and reserved item blocks are private.
 		"asset_list.messages", "asset_list.ui", "asset_list.item_blocks",
+		// #328: execution stays server-only except the presence heartbeat.
+		"asset_list.execution", "asset_list.presence.grace_seconds",
+		"asset_list.presence.poll_interval_milliseconds",
 	} {
 		if _, ok := publicPath(public, path); ok {
 			t.Errorf("server-only path leaked: %s", path)
