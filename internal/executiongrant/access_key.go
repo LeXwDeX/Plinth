@@ -142,10 +142,12 @@ func (s Service) AccessKeyStepStatus(ctx context.Context, ownerID, sessionID str
 	return store.StepUsage(ctx, ownerID, sessionID, StepRequest{Entry: approvalpolicy.StepEntryMCP, Steps: *s.Policy.Steps})
 }
 
-// AccessKeyAsset is one asset (a chat session) of the owner on which a
-// personal access key has asked for steps, with the 3D steps the asset used.
+// AccessKeyAsset is one asset (a chat session the external MCP service made for
+// a name, #332) of the owner, with the 3D steps the asset used.
 type AccessKeyAsset struct {
 	SessionID string
+	// Name is the name the caller gave the asset, empty for the default asset.
+	Name string
 	// Title is the asset's name in the owner's session list; empty when the
 	// session has none.
 	Title string
@@ -153,8 +155,9 @@ type AccessKeyAsset struct {
 	// owner's mode is: Tasks that were or may have been charged plus approved
 	// steps that have no Task yet.
 	Used int
-	// LastGrantAt is when a key last asked for a step on the asset.
-	LastGrantAt time.Time
+	// LastActivityAt is when a key last asked for a step on the asset, or when
+	// the asset was made if none did yet.
+	LastActivityAt time.Time
 }
 
 // AccessKeyUsageStore reads, and never decides, the 3D steps used through
@@ -172,8 +175,8 @@ type AccessKeyUsageStore interface {
 	// keys over all assets: the Tasks bound to a grant of source access_key,
 	// plus approved key grants that have no Task yet.
 	AccessKeyStepsTotal(ctx context.Context, ownerID string, counted []string) (int, error)
-	// AccessKeyAssets lists up to limit of the owner's assets on which a key
-	// asked for a step, the most recently active first. More is true when
-	// older ones exist.
+	// AccessKeyAssets lists up to limit of the owner's MCP assets (the sessions
+	// the external MCP service made for names), the most recently active first.
+	// More is true when older ones exist.
 	AccessKeyAssets(ctx context.Context, ownerID string, counted []string, limit int) (assets []AccessKeyAsset, more bool, err error)
 }

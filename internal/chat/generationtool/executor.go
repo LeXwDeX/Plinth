@@ -842,7 +842,7 @@ func (executor *Executor) Execute(
 			return result, nil
 		}
 		result := executor.executionFailure(command, "")
-		result.NoSubmission = knownNotSubmitted(err)
+		result.NoSubmission = KnownNotSubmitted(err)
 		result.RetryAfter = admissionRetryAfter(err)
 		return result, err
 	}
@@ -998,7 +998,9 @@ func admissionRetryAfter(err error) time.Duration {
 	return generation.AdmissionRetryAfter(err)
 }
 
-func knownNotSubmitted(err error) bool {
+// KnownNotSubmitted reports a submission the kernel refused before writing a
+// Task, so the operation ended without one.
+func KnownNotSubmitted(err error) bool {
 	if errors.Is(err, generation.ErrConversionInProgress) {
 		// The repository refused before writing anything: an overlapping
 		// conversion is active, so the turn must not wait for a Task that

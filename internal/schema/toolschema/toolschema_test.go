@@ -115,3 +115,36 @@ func TestOpenObjectsAreAllowedWhenNotClosed(t *testing.T) {
 		t.Fatalf("PropertyNames = %q", got)
 	}
 }
+
+// A caller's service parameters are a map the service that owns their meaning
+// checks, so a tool may declare one deliberately free-form object, and only
+// that: never the root, never one that also declares properties, never one that
+// leaves additionalProperties unsaid.
+func TestFreeFormObjectsAreDeliberateAndNarrow(t *testing.T) {
+	options := Options{ClosedObjects: true, RootObject: true, FreeFormObjects: true}
+	schema := parse(t, `{"type":"object","properties":{"name":{"type":"string"},"parameters":{"type":"object","additionalProperties":true}},"required":["name"],"additionalProperties":false}`, options)
+	if err := schema.Validate(json.RawMessage(`{"name":"x","parameters":{"any":[1,{"deep":true}],"other":"y"}}`)); err != nil {
+		t.Fatalf("a free-form map was refused: %v", err)
+	}
+	if err := schema.Validate(json.RawMessage(`{"name":"x","parameters":"not a map"}`)); err == nil {
+		t.Fatal("a string passed for an object")
+	}
+	if err := schema.Validate(json.RawMessage(`{"name":"x","stray":1}`)); err == nil {
+		t.Fatal("the closed root accepted a stray property")
+	}
+	for name, document := range map[string]string{
+		"open root":            `{"type":"object","properties":{},"additionalProperties":true}`,
+		"open with properties": `{"type":"object","properties":{"o":{"type":"object","properties":{"a":{"type":"string"}},"additionalProperties":true}},"additionalProperties":false}`,
+		"open with required":   `{"type":"object","properties":{"o":{"type":"object","required":["a"],"additionalProperties":true}},"additionalProperties":false}`,
+		"nested unsaid":        `{"type":"object","properties":{"o":{"type":"object"}},"additionalProperties":false}`,
+	} {
+		if _, err := Parse(json.RawMessage(document), options); err == nil {
+			t.Errorf("%s: Parse accepted %s", name, document)
+		}
+	}
+	// Without the option the same free-form map is still refused.
+	if _, err := Parse(json.RawMessage(`{"type":"object","properties":{"o":{"type":"object","additionalProperties":true}},"additionalProperties":false}`),
+		Options{ClosedObjects: true, RootObject: true}); err == nil {
+		t.Fatal("a free-form object was accepted without FreeFormObjects")
+	}
+}

@@ -95,6 +95,7 @@ func (mcpDirectory) FindByID(_ context.Context, id string) (authentication.UserR
 type mcpHarnessParts struct {
 	identity httpapi.IdentityResolver
 	status   *mcppublic.Builder
+	assets   *mcppublic.Assets
 	clock    *mcpClock
 }
 
@@ -104,6 +105,7 @@ type mcpHarnessParts struct {
 // service.
 func harnessMCP(t *testing.T, repository *sqlite.Repository, application catalog.ApplicationSchema,
 	settings *accountsettings.Service, keys *accesskeys.Service, policy *access.Policy, accounts *provideraccounts.Service,
+	sessions *chat.Service,
 ) mcpHarnessParts {
 	t.Helper()
 	if application.MCPPublic == nil || keys == nil || settings == nil || application.StepPolicy == nil {
@@ -134,9 +136,15 @@ func harnessMCP(t *testing.T, repository *sqlite.Repository, application catalog
 	if err != nil {
 		t.Fatal(err)
 	}
+	assets, err := mcppublic.NewAssets(mcppublic.AssetsConfig{
+		Schema: application.MCPPublic.Assets, Sessions: sessions, Store: repository, Localize: texts.Text,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return mcpHarnessParts{
 		identity: &accesskeys.Authenticator{Keys: keys, Users: mcpDirectory{}, Policy: policy},
-		status:   status, clock: clock,
+		status:   status, assets: assets, clock: clock,
 	}
 }
 
@@ -365,8 +373,26 @@ func (r toolResult) problemCode() string {
 	return code
 }
 
-// succeededTask runs a text-to-image Task of the owner to success.
+// succeededTask runs a text-to-image Task of the owner to success in a session
+// that is an MCP asset of the owner (the tools of the service only name those).
 func (f *mcpFixture) succeededTask(owner, session, idempotencyKey string) generation.Task {
+	f.t.Helper()
+	task := f.succeededPlainTask(owner, session, idempotencyKey)
+	f.markAsset(owner, task.SessionID)
+	return task
+}
+
+// markAsset makes a session of the owner an MCP asset, as the service does for
+// a name, without making a session.
+func (f *mcpFixture) markAsset(owner, session string) {
+	f.t.Helper()
+	f.exec(`INSERT OR IGNORE INTO mcp_assets (owner_id, name_key, name, session_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+		owner, strings.ToLower(session), session, session, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// succeededPlainTask runs a text-to-image Task of the owner to success in a
+// session the browser could have made: no MCP asset.
+func (f *mcpFixture) succeededPlainTask(owner, session, idempotencyKey string) generation.Task {
 	f.t.Helper()
 	accepted, err := submitHarnessTask(f.t, f.module, context.Background(), generation.SubmitCommand{
 		OwnerID: generation.OwnerID(owner), SessionID: session, Capability: generation.TextToImage,
@@ -434,9 +460,9 @@ func (f *mcpFixture) keySteps(owner, session, keyID string, n int) {
 		f.t.Fatal(err)
 	} else if !owned {
 		now := time.Now().UTC()
-		if _, err := f.repository.CreateSession(ctx, chat.Session{
+		if _, _, err := f.repository.CreateMCPAsset(ctx, chat.Session{
 			ID: session, OwnerID: owner, OwnerName: "Test human", Title: "MCP · " + session, CreatedAt: now, UpdatedAt: now,
-		}); err != nil {
+		}, strings.ToLower(session), session); err != nil {
 			f.t.Fatal(err)
 		}
 	}

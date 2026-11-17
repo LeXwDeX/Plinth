@@ -86,8 +86,12 @@ type Config struct {
 	// (#332): personal access keys only. MCPStatus builds the status block
 	// every response of the listener carries. Both nil, or the Schema's
 	// mcp_public disabled, leaves MCPPublicHandler without a handler.
-	MCPIdentity     IdentityResolver
-	MCPStatus       *mcppublic.Builder
+	MCPIdentity IdentityResolver
+	MCPStatus   *mcppublic.Builder
+	// MCPAssets maps the asset names of the external MCP service to chat
+	// sessions (#332). The tools that start work need it, the grant service,
+	// the input assets and the chat service.
+	MCPAssets       *mcppublic.Assets
 	Readiness       func(context.Context) error
 	Generation      *generation.Module
 	ExecutionGrants *executiongrant.Service
@@ -220,6 +224,7 @@ type Server struct {
 	accessKeys                        *accesskeys.Service
 	mcpIdentity                       IdentityResolver
 	mcpStatus                         *mcppublic.Builder
+	mcpAssets                         *mcppublic.Assets
 	readiness                         func(context.Context) error
 	generation                        *generation.Module
 	executionGrants                   *executiongrant.Service
@@ -457,6 +462,7 @@ func New(config Config) (*Server, error) {
 		accessKeys:                config.AccessKeys,
 		mcpIdentity:               config.MCPIdentity,
 		mcpStatus:                 config.MCPStatus,
+		mcpAssets:                 config.MCPAssets,
 		administration:            config.Administration,
 		administrationAudit:       config.AdministrationAudit,
 		administrationGenerations: config.AdministrationGenerations,

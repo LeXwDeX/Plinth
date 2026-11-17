@@ -1765,6 +1765,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, fmt.Errorf("对外 MCP 状态块: %w", err)
 	}
+	mcpAssets, err := mcpAssetsFromSchema(applicationSchema, chatService, repository, texts)
+	if err != nil {
+		return nil, fmt.Errorf("对外 MCP 资产映射: %w", err)
+	}
 	var mcpIdentity httpapi.IdentityResolver
 	if accessKeyAuthenticator != nil {
 		mcpIdentity = accessKeyAuthenticator
@@ -1772,6 +1776,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	api, err := httpapi.New(httpapi.Config{
 		MCPIdentity:                       mcpIdentity,
 		MCPStatus:                         mcpStatus,
+		MCPAssets:                         mcpAssets,
 		Harness:                           harnessResolver,
 		AgentConfiguration:                agentConfigurationService,
 		LLMSettings:                       llmSettingsService,

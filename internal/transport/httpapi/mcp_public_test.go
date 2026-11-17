@@ -168,8 +168,8 @@ func TestMCPGenerateScopeIncludesRead(t *testing.T) {
 	f := newMCPFixture(t, nil)
 	generateOnly := f.issueKey("owner-a", "generate")
 	list := decodeToolResultRaw(t, f.post(generateOnly, "tools/list", nil))
-	if len(list["tools"].([]any)) != 5 {
-		t.Fatalf("a generate key lists %d tools; it carries the read scope too", len(list["tools"].([]any)))
+	if len(list["tools"].([]any)) != 10 {
+		t.Fatalf("a generate key lists %d tools; it carries the read scope too, so 5 reading and 5 starting tools", len(list["tools"].([]any)))
 	}
 	task := f.succeededTask("owner-a", "", "generate-reads")
 	for _, tool := range []struct {
@@ -219,7 +219,7 @@ func TestMCPScopeIsEnforcedPerTool(t *testing.T) {
 	if names := toolNames(readOnly); len(names) != 4 || containsString(anySlice(names), "get_task") {
 		t.Fatalf("a read key lists %v", names)
 	}
-	if names := toolNames(generateOnly); len(names) != 5 || !containsString(anySlice(names), "get_task") {
+	if names := toolNames(generateOnly); len(names) != 10 || !containsString(anySlice(names), "get_task") {
 		t.Fatalf("a generate key lists %v", names)
 	}
 	denied := f.post(readOnly, "tools/call", map[string]any{"name": "get_task", "arguments": map[string]any{"task_id": "task_x"}})

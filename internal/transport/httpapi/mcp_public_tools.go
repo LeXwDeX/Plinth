@@ -40,11 +40,19 @@ type mcpCall struct {
 	// base is "scheme://host" of the request; empty when the request had no
 	// Host, which leaves the download URLs relative.
 	base string
+	// tool is the declaration of the tool being called; keyID the access key
+	// that called and ownerName the person's name (the claims').
+	tool      *mcpTool
+	keyID     string
+	ownerName string
 }
 
 // mcpProblem is a business failure: a tool result with isError, written for
-// the calling Agent.
-type mcpProblem struct{ Code, Message string }
+// the calling Agent. RetryAfterSeconds is set when waiting is the remedy.
+type mcpProblem struct {
+	Code, Message     string
+	RetryAfterSeconds *int
+}
 
 // mcpOutcome is what a tool produced. Subject says what the status block
 // should be about.
@@ -71,12 +79,20 @@ func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Tw
 		catalog.MCPToolGetTaskAssets: func(call *mcpCall) (mcpOutcome, error) {
 			return s.mcpGetTaskAssets(call, route)
 		},
+		catalog.MCPToolUploadImage:      s.mcpUploadImage,
+		catalog.MCPToolGenerateImage:    s.mcpStartTask,
+		catalog.MCPToolRemoveBackground: s.mcpStartTask,
+		catalog.MCPToolCreateModel:      s.mcpStartTask,
+		catalog.MCPToolProcessModel:     s.mcpStartTask,
 	}
 	runtime := &mcpRuntime{server: s, service: service, tools: map[string]*mcpTool{}, downloadRoute: route}
 	for _, declared := range service.Tools {
 		run, implemented := handlers[declared.Name]
 		if !implemented {
 			return nil, fmt.Errorf("httpapi: mcp_public 声明了未实现的工具 %q", declared.Name)
+		}
+		if declared.Scope == "generate" && (s.mcpAssets == nil || s.executionGrants == nil || s.inputAssets == nil || s.chat == nil) {
+			return nil, fmt.Errorf("httpapi: mcp_public 声明了发起生成的工具 %q，但没有装配资产映射、授权服务、输入资产或会话服务", declared.Name)
 		}
 		input, _, err := service.ParsedInputSchema(declared.Name)
 		if err != nil {
@@ -132,7 +148,10 @@ func (r *mcpRuntime) CallTool(ctx context.Context, name string, arguments json.R
 	}
 	locale := catalog.LocaleFrom(ctx)
 	base, _ := ctx.Value(mcpBaseKey{}).(string)
-	call := &mcpCall{ctx: ctx, locale: locale, owner: generation.OwnerID(principal.ID()), base: base}
+	call := &mcpCall{
+		ctx: ctx, locale: locale, owner: generation.OwnerID(principal.ID()), base: base,
+		tool: tool, keyID: principal.Credential().KeyID, ownerName: principal.Claims.Name,
+	}
 	var outcome mcpOutcome
 	if err := tool.input.Validate(arguments); err != nil {
 		outcome = r.server.mcpInvalidArguments(locale, err.Error())
@@ -153,7 +172,11 @@ func (r *mcpRuntime) CallTool(ctx context.Context, name string, arguments json.R
 		structured[key] = value
 	}
 	if outcome.problem != nil {
-		structured["error"] = map[string]string{"code": outcome.problem.Code, "message": outcome.problem.Message}
+		failure := map[string]any{"code": outcome.problem.Code, "message": outcome.problem.Message}
+		if outcome.problem.RetryAfterSeconds != nil {
+			failure["retry_after_seconds"] = *outcome.problem.RetryAfterSeconds
+		}
+		structured["error"] = failure
 	}
 	structured[r.server.mcpStatus.Key()] = block
 	encoded, err := json.Marshal(structured)
@@ -345,6 +368,16 @@ func (s *Server) mcpOwnedTask(call *mcpCall, taskID string) (generation.Task, *m
 	return task, nil, err
 }
 
+// mcpAssetSessions says which of the sessions are assets of the caller (#332):
+// a session the service made for a name. A task of another session, say one
+// started in the browser, is the caller's task but belongs to no asset.
+func (s *Server) mcpAssetSessions(call *mcpCall, sessionIDs ...string) (map[string]bool, error) {
+	if s.mcpAssets == nil {
+		return map[string]bool{}, nil
+	}
+	return s.mcpAssets.Marked(call.ctx, string(call.owner), sessionIDs)
+}
+
 func (s *Server) mcpGetTask(call *mcpCall) (mcpOutcome, error) {
 	task, missing, err := s.mcpOwnedTask(call, mcpStringArgument(call, "task_id"))
 	if err != nil {
@@ -354,12 +387,17 @@ func (s *Server) mcpGetTask(call *mcpCall) (mcpOutcome, error) {
 		return *missing, nil
 	}
 	view, attribution := s.mcpTaskView(call.locale, task)
-	return mcpOutcome{
-		data: map[string]any{"task": view},
-		subject: mcppublic.Subject{
-			AssetID: task.SessionID, Failure: attribution, Costs: s.mcpStepCosts(call.ctx, call.owner, task.SessionID),
-		},
-	}, nil
+	subject := mcppublic.Subject{Failure: attribution}
+	marked, err := s.mcpAssetSessions(call, task.SessionID)
+	if err != nil {
+		return mcpOutcome{}, err
+	}
+	if marked[task.SessionID] {
+		subject.AssetID, subject.Costs = task.SessionID, s.mcpStepCosts(call.ctx, call.owner, task.SessionID)
+	} else {
+		view.AssetID = nil
+	}
+	return mcpOutcome{data: map[string]any{"task": view}, subject: subject}, nil
 }
 
 func (s *Server) mcpListTasks(call *mcpCall) (mcpOutcome, error) {
@@ -370,11 +408,11 @@ func (s *Server) mcpListTasks(call *mcpCall) (mcpOutcome, error) {
 	}
 	asset := mcpStringArgument(call, "asset_id")
 	if asset != "" {
-		owned, err := s.chat.OwnsSession(call.ctx, string(call.owner), asset)
+		marked, err := s.mcpAssetSessions(call, asset)
 		if err != nil {
 			return mcpOutcome{}, err
 		}
-		if !owned {
+		if !marked[asset] {
 			return s.mcpAssetNotFound(call.locale), nil
 		}
 		query.SessionID = asset
@@ -386,9 +424,20 @@ func (s *Server) mcpListTasks(call *mcpCall) (mcpOutcome, error) {
 	if err != nil {
 		return mcpOutcome{}, err
 	}
+	sessions := make([]string, 0, len(page.Tasks))
+	for _, task := range page.Tasks {
+		sessions = append(sessions, task.SessionID)
+	}
+	marked, err := s.mcpAssetSessions(call, sessions...)
+	if err != nil {
+		return mcpOutcome{}, err
+	}
 	views := make([]mcpTaskView, 0, len(page.Tasks))
 	for _, task := range page.Tasks {
 		view, _ := s.mcpTaskView(call.locale, task)
+		if !marked[task.SessionID] {
+			view.AssetID = nil
+		}
 		views = append(views, view)
 	}
 	var next *string
@@ -424,6 +473,14 @@ func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two) (mcpOutcome,
 		return *missing, nil
 	}
 	view, attribution := s.mcpTaskView(call.locale, task)
+	subject := mcppublic.Subject{Failure: attribution}
+	marked, err := s.mcpAssetSessions(call, task.SessionID)
+	if err != nil {
+		return mcpOutcome{}, err
+	}
+	if marked[task.SessionID] {
+		subject.AssetID, subject.Costs = task.SessionID, s.mcpStepCosts(call.ctx, call.owner, task.SessionID)
+	}
 	projected := s.newTaskResponse(call.locale, task)
 	assets := make([]mcpAssetView, 0, len(projected.Assets))
 	for _, asset := range projected.Assets {
@@ -451,9 +508,7 @@ func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two) (mcpOutcome,
 			"task_id": string(task.ID), "state": view.State,
 			"complete": task.State == generation.TaskSucceeded, "assets": assets,
 		},
-		subject: mcppublic.Subject{
-			AssetID: task.SessionID, Failure: attribution, Costs: s.mcpStepCosts(call.ctx, call.owner, task.SessionID),
-		},
+		subject: subject,
 	}, nil
 }
 
@@ -473,6 +528,7 @@ func mcpChainHasCode(err error, code generation.ErrorCode) bool {
 
 type mcpAssetStatus struct {
 	AssetID        string  `json:"asset_id"`
+	Name           *string `json:"name"`
 	Title          *string `json:"title"`
 	UsedSteps      *int    `json:"used_steps"`
 	LastActivityAt *string `json:"last_activity_at"`
@@ -490,12 +546,16 @@ func (s *Server) mcpGetStatus(call *mcpCall) (mcpOutcome, error) {
 	for _, asset := range assets {
 		used := asset.Used
 		entry := mcpAssetStatus{AssetID: asset.SessionID, UsedSteps: &used}
+		if asset.Name != "" {
+			name := asset.Name
+			entry.Name = &name
+		}
 		if asset.Title != "" {
 			title := asset.Title
 			entry.Title = &title
 		}
-		if !asset.LastGrantAt.IsZero() {
-			last := asset.LastGrantAt.UTC().Format(timeLayout)
+		if !asset.LastActivityAt.IsZero() {
+			last := asset.LastActivityAt.UTC().Format(timeLayout)
 			entry.LastActivityAt = &last
 		}
 		listed = append(listed, entry)
@@ -512,6 +572,7 @@ type mcpCostView struct {
 }
 
 type mcpInputView struct {
+	MaxLength        int      `json:"max_length,omitempty"`
 	Name             string   `json:"name"`
 	Label            string   `json:"label"`
 	Kind             string   `json:"kind"`
@@ -529,10 +590,15 @@ type mcpOptionView struct {
 }
 
 type mcpParameterView struct {
-	Name      string          `json:"name"`
-	Label     string          `json:"label"`
-	Type      string          `json:"type"`
-	Required  bool            `json:"required"`
+	Name     string `json:"name"`
+	Label    string `json:"label"`
+	Type     string `json:"type"`
+	Required bool   `json:"required"`
+	// Advised marks a parameter the service advises against changing: a caller
+	// that changes it says why in parameter_reasons. Advice is the service's
+	// own text about it.
+	Advised   bool            `json:"advised,omitempty"`
+	Advice    string          `json:"advice,omitempty"`
 	Default   json.RawMessage `json:"default,omitempty"`
 	Options   []mcpOptionView `json:"options,omitempty"`
 	Minimum   *float64        `json:"minimum,omitempty"`
@@ -615,6 +681,12 @@ func (s *Server) mcpListServices(call *mcpCall) (mcpOutcome, error) {
 }
 
 func mcpServiceOf(offering generation.Offering, available bool) mcpServiceView {
+	advice := func(parameter generation.Parameter) string {
+		if parameter.AdjustmentPolicy == "advised" {
+			return parameter.AdjustmentReason
+		}
+		return ""
+	}
 	view := mcpServiceView{
 		ID: string(offering.ID), Provider: offering.ProviderID, ProviderName: offering.ProviderName,
 		Model: offering.ModelID, ModelName: offering.ModelName, Available: available, Recommended: offering.Recommended,
@@ -624,7 +696,24 @@ func mcpServiceOf(offering generation.Offering, available bool) mcpServiceView {
 		view.StepCost = &mcpCostView{Amount: quote.TotalAmount, Unit: quote.Unit, UnitLabel: quote.UnitLabel}
 	}
 	for _, parameter := range offering.Parameters {
+		// Only what a caller may set: the generation tools refuse a fixed,
+		// hidden or read-only parameter named in parameters, so the listing does
+		// not offer one. The pictures and the source are inputs, not parameters.
 		if parameter.Fixed {
+			continue
+		}
+		switch parameter.Type {
+		case "asset", "asset-array", "task":
+		default:
+			if !offering.AgentParameterAllowed(parameter) {
+				continue
+			}
+		}
+		if parameter.Semantic == generation.SemanticPrompt {
+			// The prompt is an input of its own (the prompt argument), not a parameter.
+			view.Inputs = append(view.Inputs, mcpInputView{
+				Name: parameter.Name, Label: parameter.Label, Kind: "prompt", Required: parameter.Required, MaxLength: parameter.MaxLength,
+			})
 			continue
 		}
 		switch parameter.Type {
@@ -640,6 +729,7 @@ func mcpServiceOf(offering generation.Offering, available bool) mcpServiceView {
 		default:
 			entry := mcpParameterView{
 				Name: parameter.Name, Label: parameter.Label, Type: parameter.Type, Required: parameter.Required,
+				Advised: parameter.AdjustmentPolicy == "advised", Advice: advice(parameter),
 				Default: parameter.Default, Minimum: parameter.Minimum, Maximum: parameter.Maximum, MaxLength: parameter.MaxLength,
 			}
 			for _, option := range parameter.Options {

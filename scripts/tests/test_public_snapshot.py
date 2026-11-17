@@ -150,6 +150,17 @@ class PatternTests(unittest.TestCase):
             "10.9.8.5"}))
         self.assertEqual(snapshot.environment_literals(Path(directory) / "missing.json"), [])
 
+    def test_generic_bind_addresses_are_not_literals(self):
+        # A wildcard or loopback bind address names no host; treating it as private would
+        # forbid every Dockerfile and compose file that listens on all interfaces.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "environments.json"
+            path.write_text(json.dumps({"version": 1, "environments": {"dev-test": {
+                "ssh": "root@build-host.internal.test", "root": "/srv/stack-dev",
+                "layout": {"MCP_PUBLIC_BIND_IP": "0.0.0.0", "GO_WEB_BIND_IP": "127.0.0.1"}}}}))
+            literals = snapshot.environment_literals(path)
+        self.assertEqual(literals, ["/srv/stack-dev", "build-host.internal.test"])
+
     def test_npm_registry_address_stays_forbidden(self):
         # The npm package cache is an internal address from the local environment file, so it
         # must never reach the public tree.

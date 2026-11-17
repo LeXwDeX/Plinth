@@ -158,13 +158,24 @@ func (r *Repository) CreateSession(
 	ctx context.Context,
 	session chat.Session,
 ) (chat.Session, error) {
+	if err := insertChatSession(ctx, r.db, session); err != nil {
+		return chat.Session{}, err
+	}
+	return session, nil
+}
+
+// insertChatSession is the one INSERT of a chat session, run on the pool or on
+// the connection of a transaction that stores something else with it.
+func insertChatSession(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, session chat.Session) error {
 	// A project's production defaults seed an empty session brief at creation
 	// (#240), in the same INSERT so a new session never exists without it.
 	storedBrief, err := chat.EncodeProductionBrief(session.Brief)
 	if err != nil {
-		return chat.Session{}, err
+		return err
 	}
-	_, err = r.db.ExecContext(ctx, `
+	_, err = exec.ExecContext(ctx, `
 		INSERT INTO go_chat_sessions (
 			id, owner_id, owner_name, title, created_at, updated_at, approval_mode, agent_scope, title_source,
 			parent_session_id, parent_message_id, parent_title, parent_deleted, project_id, style_lock_source, brief
@@ -187,9 +198,9 @@ func (r *Repository) CreateSession(
 		storedBrief,
 	)
 	if err != nil {
-		return chat.Session{}, fmt.Errorf("create chat session: %w", err)
+		return fmt.Errorf("create chat session: %w", err)
 	}
-	return session, nil
+	return nil
 }
 
 // RenameSession keeps updated_at: only new messages move a session in the
