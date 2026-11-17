@@ -24,6 +24,11 @@ same HTTP API the browser uses:
   * a batched Agent turn (a generation step and the three-view SkillRun in one
     completion) stops waiting, keeps both Tasks running, ends with the Schema
     note and finishes the three-view group in the background;
+  * the external MCP listener (#332) runs the whole generation loop with an
+    access key and no cookie or browser: upload -> image-to-3D -> poll -> the
+    twelve delivered files with their SHA-256 -> keyed and signed downloads ->
+    inspect_model -> remesh, with the status block's step counts unchanged by
+    reads and replays (the "mcp" group);
   * Hyper3D texture (a local model + a reference picture), the OpenAI, Gemini and Jimeng
     image Offerings (text-to-image and image-to-image) and the matting service run to
     SUCCEEDED with the same delivery checks;
@@ -42,7 +47,10 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, faults;
+agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, faults;
+"mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
+files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
+(FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
 "matting-faults" the #301 matting fault paths chosen by the uploaded pictures themselves (the only way a deployed
 stack reaches them): #284's notice naming the pictures that were not matted, #299's out-of-memory batch as a
 partial success and as a capacity failure, and an unmarked batch (scripts/smoke/fake_faults.py,
@@ -70,13 +78,17 @@ The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built
 cmd/art-ai: Tripo's native processing only reads source models from public HTTPS
 hosts, and the test binary maps one reserved ".test" host to the loopback fake
 instead of loosening that rule. Nothing here touches dev-test, formal-test or a
-real upstream. Ports stay away from 18631-18635 (the #62 local stacks).
+real upstream. Ports stay away from 18631-18635 (the #62 local stacks); the
+external MCP listener defaults to 19413 (FAKE_STACK_MCP_PORT).
 """
 import argparse
+import base64
+import datetime
 import hashlib
 import http.cookiejar
 import json
 import os
+import secrets
 import shutil
 import signal
 import socket
@@ -88,6 +100,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import zlib
 
 # The gate runs this script and then checks the tree is unchanged: importing the sibling module must not
@@ -95,21 +108,37 @@ import zlib
 sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fake_faults  # noqa: E402  (sibling module; the script runs from any directory)
+import mcp_client  # noqa: E402  (the external MCP listener's wire client, #332)
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 FAKE_PORT = int(os.environ.get("FAKE_STACK_FAKE_PORT", "19410"))
 STACK_PORT = int(os.environ.get("FAKE_STACK_PORT", "19411"))
+# The external MCP listener (#332) is another listener of the same stack; keep it
+# off 19410/19411/19412 and the 18631-18635 local stacks.
+MCP_PORT = int(os.environ.get("FAKE_STACK_MCP_PORT", str(STACK_PORT + 2)))
 ASSET_HOST = "fake-assets.example.test"  # keep in sync with internal/app/fake_upstream_stack_test.go
 GOOD_KEY = "fake-test-key"
+# The external MCP listener authenticates a key against the user directory, so
+# the key's owner must be a persisted, active user; the development mock
+# identity is not one. The stack bootstraps this local administrator for the
+# "mcp" scenario. The password is random per run and lives only in the stack's
+# environment, never in the source tree.
+MCP_OWNER_USERNAME = "fake-stack-mcp-owner"
+MCP_OWNER_PASSWORD = "fake-stack-" + secrets.token_urlsafe(18)
 
 TEXT_TO_3D = "tripo/tripo-v3.1-full/text-to-3d"
 MESHY_TEXT_TO_3D = "meshy/meshy-7.1/text-to-3d"
+MESHY_IMAGE_TO_3D = "meshy/meshy-7.1/image-to-3d"
 MESHY_REMESH = "meshy/processing/remesh"
 MESHY_RESIZE = "meshy/processing/resize"
 MESHY_RETEXTURE = "meshy/processing/retexture"
 MESHY_CONVERT = "meshy/processing/convert"
 MESHY_RIGGING = "meshy/processing/rigging"
 MESHY_ANIMATION = "meshy/processing/animation"
+# The fake's image-to-3D answer (#332): six model formats (glb, obj, fbx, stl,
+# usdz, 3mf), the textured OBJ's MTL, four PBR maps (base_color, metallic,
+# normal, roughness) and one thumbnail.
+MCP_IMAGE_TO_3D_ASSET_COUNT = 12
 HYPER3D_TEXT_TO_3D = "hyper3d/rodin-gen-2.5/text-to-3d"
 HYPER3D_IMAGE_TO_3D = "hyper3d/rodin-gen-2.5/image-to-3d"
 HYPER3D_BANG = "hyper3d/bang/rodin-task"
@@ -276,11 +305,11 @@ def port_busy(port):
         return False
 
 
-def require_free(port, what):
+def require_free(port, what, env_hint="FAKE_STACK_FAKE_PORT / FAKE_STACK_PORT"):
     """Refuse a port something else already listens on: a health answer from a
     foreign process must never be taken for our own instance."""
     if port_busy(port):
-        raise RuntimeError(f"port {port} for the {what} is already in use; stop that process or set FAKE_STACK_FAKE_PORT / FAKE_STACK_PORT")
+        raise RuntimeError(f"port {port} for the {what} is already in use; stop that process or set {env_hint}")
 
 
 def wait_http(url, child, seconds=30):
@@ -413,7 +442,12 @@ def stack_env(work, name, catalog, key):
         "APP_ENV": "development", "PROVIDER_MODE": "live", "AGENT_MODE": "live", "AUTH_MODE": "development",
         "DEV_MOCK_AUTH": "true", "DEV_MOCK_AUTH_BYPASS_USER_STATE": "true",
         "DEV_MOCK_USER": '{"id":"fake_stack","name":"fake stack","email":"fake@example.test"}',
+        # The bootstrap administrator owns the "mcp" scenario's access key (the
+        # listener checks the key's owner in the user directory).
+        "ADMIN_USERNAME": MCP_OWNER_USERNAME, "ADMIN_PASSWORD": MCP_OWNER_PASSWORD,
         "APP_ADDR": f"127.0.0.1:{STACK_PORT}", "DATABASE_PATH": os.path.join(root, "app.db"),
+        # The external MCP listener (#332) is loopback-only, like everything else.
+        "MCP_PUBLIC_LISTEN_ADDR": f"127.0.0.1:{MCP_PORT}",
         "STORAGE_ROOT": os.path.join(root, "storage"), "LOG_DIR": os.path.join(root, "logs"),
         "WEB_ASSETS_ROOT": web, "CATALOG_FILE": catalog,
         "TRIPO_API_KEY": key, "TRIPO_BASE_URL": f"http://127.0.0.1:{FAKE_PORT}/tripo/v3",
@@ -437,6 +471,7 @@ def stack_env(work, name, catalog, key):
 def start_stack(processes, stack_binary, work, name, catalog, key):
     env, root = stack_env(work, name, catalog, key)
     require_free(STACK_PORT, "stack")
+    require_free(MCP_PORT, "external MCP listener", "FAKE_STACK_MCP_PORT")
     child = processes.start([stack_binary, "-test.run", "^TestFakeUpstreamStack$", "-test.timeout", "0"], env,
                             os.path.join(root, "stack.log"))
     if not wait_http(f"http://127.0.0.1:{STACK_PORT}/healthz", child):
@@ -1000,6 +1035,248 @@ def scenario_matting_faults(api, offerings):
         record("matting-faults: the matting Offering is registered", False, f"{MATTING} is not in the public Offerings")
         return
     fake_faults.run(api, record)
+
+
+def mcp_wait_task(mcp, task_id, seconds=90):
+    """Poll get_task with the listener's suggested interval (or five seconds)
+    until the view is terminal; returns (task view, last tool result)."""
+    deadline = time.time() + seconds
+    view, last = {}, {}
+    while time.time() < deadline:
+        last = mcp.tool("get_task", {"task_id": task_id})
+        task = last["structured"].get("task")
+        view = task if isinstance(task, dict) else {}
+        if view.get("terminal"):
+            return view, last
+        try:
+            wait = float(view.get("poll_after_seconds") or 5)
+        except (TypeError, ValueError):
+            wait = 5
+        time.sleep(max(0.2, min(wait, 5)))
+    return view, last
+
+
+def mcp_downloads(client, assets):
+    """Fetch every asset's bytes; keyed by asset id, never by URL (a signed URL
+    is a credential until it expires)."""
+    blobs = {}
+    for asset in assets:
+        status, headers, data = client.get(asset.get("download_url") or "")
+        blobs[str(asset.get("id") or "")] = {"status": status, "bytes": data, "headers": headers}
+    return blobs
+
+
+def mcp_tampered_token(url):
+    """The same signed address with the last token character changed. The last
+    base64 digit carries the signature's final bits, so flipping its top two
+    bits always changes the signed bytes (changing only the padding bits would
+    not)."""
+    head, _separator, token = url.rpartition("/")
+    if not token:
+        return url
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    index = alphabet.find(token[-1])
+    replacement = alphabet[index ^ 0b110000] if index >= 0 else "A"
+    return head + "/" + token[:-1] + replacement
+
+
+def mcp_rfc3339(value):
+    """True when the value is an RFC 3339 timestamp with a zone."""
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def scenario_mcp(api, mcp_base):
+    """The external MCP listener (#332): a personal access key, no browser.
+
+    The stack's bootstrap administrator only signs in to issue the key (a
+    person does that in the account settings); everything after it carries
+    nothing but the Bearer key, and the signed downloads carry no credential at
+    all. The listener is on loopback, and the run still fails on any
+    non-loopback upstream request."""
+    base = mcp_base.rstrip("/")
+    keyless = mcp_client.McpClient(base)
+    status, headers, _raw = keyless.call("tools/list", {})
+    record("mcp tools/list without a key is 401", status == 401 and "Bearer" in mcp_client.header(headers, "WWW-Authenticate"),
+           f"status {status}")
+
+    # The key's owner must be a persisted user (the listener checks it), which
+    # the development mock identity is not. A separate client signs in as the
+    # stack's bootstrap administrator, so the other scenarios keep their mock
+    # cookie.
+    owner = Api(api.base)
+    status, _signed_in = owner.json("POST", "/api/auth/login",
+                                    {"username": MCP_OWNER_USERNAME, "password": MCP_OWNER_PASSWORD})
+    record("mcp access key owner signs in", status == 200, f"status {status}")
+    status, created = owner.json("POST", "/api/v1/account/access-keys",
+                                 {"name": "fake stack mcp", "scopes": ["generate"], "ttl_days": 1})
+    key = (created or {}).get("key") or ""
+    record("mcp access key issued", status == 201 and key.startswith("plk_"), f"status {status}")
+    if not key:
+        return
+    mcp = mcp_client.McpClient(base, key)
+
+    status, _headers, raw = mcp.call("tools/list", {})
+    names = set()
+    try:
+        names = {tool.get("name") for tool in (json.loads(raw).get("result") or {}).get("tools") or []}
+    except (AttributeError, TypeError, ValueError):
+        pass
+    wanted = {"upload_image", "create_model", "process_model", "get_task", "get_task_assets", "inspect_model", "get_status"}
+    record("mcp tools/list lists the generated-work tools", status == 200 and wanted <= names, f"status {status}, {len(names)} tools")
+
+    upload = mcp.tool("upload_image", {"data": base64.b64encode(make_png(512)).decode(), "filename": "mcp-fake-stack.png"})
+    image = upload["structured"].get("image") or {}
+    image_id = image.get("id") or ""
+    record("mcp upload_image stores a 512x512 PNG",
+           not upload["is_error"] and bool(image_id) and image.get("media_type") == "image/png",
+           f"status {upload['http_status']}, media {image.get('media_type')}")
+    if not image_id:
+        return
+
+    asset = "mcp-fake-stack"
+    idem = "mcp-" + uuid.uuid4().hex
+    started = mcp.tool("create_model", {"images": [image_id], "asset": asset, "idempotency_key": idem})
+    data = started["structured"]
+    block = data.get("status") or {}
+    service = data.get("service") or {}
+    task_id = data.get("task_id") or ""
+    balances = {entry.get("provider") for entry in block.get("balances") or [] if isinstance(entry, dict)}
+    record("mcp create_model starts a counted image-to-3D step",
+           not started["is_error"] and bool(task_id) and data.get("step_counted") is True
+           and service.get("id") == MESHY_IMAGE_TO_3D and block.get("step_mode") == "agent"
+           and (block.get("asset") or {}).get("used_steps") == 1 and block.get("total_used_steps") == 1
+           and balances == {"meshy", "tripo", "hyper3d"},
+           f"status {started['http_status']}, service {service.get('id')}, "
+           f"steps {(block.get('asset') or {}).get('used_steps')}, balances {sorted(balances)}")
+    if not task_id:
+        return
+
+    replay = mcp.tool("create_model", {"images": [image_id], "asset": asset, "idempotency_key": idem})
+    replay_data = replay["structured"]
+    replay_block = replay_data.get("status") or {}
+    record("mcp create_model replay is the same task without another step",
+           not replay["is_error"] and replay_data.get("task_id") == task_id and replay_data.get("replayed") is True
+           and (replay_block.get("asset") or {}).get("used_steps") == 1,
+           f"status {replay['http_status']}, replayed {replay_data.get('replayed')}, "
+           f"steps {(replay_block.get('asset') or {}).get('used_steps')}")
+
+    conflict = mcp.tool("create_model", {"images": [image_id], "asset": asset + "-other", "idempotency_key": idem})
+    conflict_data = conflict["structured"]
+    conflict_error = conflict_data.get("error") or {}
+    conflict_block = conflict_data.get("status") or {}
+    record("mcp create_model with the same key and another asset is a conflict",
+           conflict["is_error"] and conflict_error.get("code") == "idempotency_conflict"
+           and conflict_block.get("total_used_steps") == 1,
+           f"status {conflict['http_status']}, code {conflict_error.get('code')}, "
+           f"steps {conflict_block.get('total_used_steps')}")
+
+    view, _last = mcp_wait_task(mcp, task_id)
+    record("mcp get_task reaches SUCCEEDED", view.get("state") == "SUCCEEDED", f"state {view.get('state')}")
+
+    files = mcp.tool("get_task_assets", {"task_id": task_id, "signed": False})
+    assets = files["structured"].get("assets") or []
+    record("mcp get_task_assets lists the twelve image-to-3D files",
+           files["structured"].get("complete") is True and len(assets) == MCP_IMAGE_TO_3D_ASSET_COUNT,
+           f"complete {files['structured'].get('complete')}, {len(assets)} assets")
+
+    blobs = mcp_downloads(mcp, assets)
+    problems = mcp_client.asset_problems(assets, blobs)
+    record("mcp keyed downloads match size and SHA-256", bool(assets) and not problems,
+           f"{len(assets)} files" + ("" if not problems else "; " + "; ".join(problems[:5])))
+
+    urls_keyed = bool(assets) and all("/mcp/tasks/" in (asset.get("download_url") or "") for asset in assets)
+    record("mcp unsigned download addresses are keyed",
+           urls_keyed and files["structured"].get("download_expires_at") is None,
+           f"expires_at {files['structured'].get('download_expires_at')}")
+    refused = [keyless.get(asset.get("download_url") or "")[0] for asset in assets]
+    record("mcp unsigned downloads without a key are 401",
+           bool(refused) and all(status == 401 for status in refused), f"{len(refused)} links, {sorted(set(refused))}")
+    if assets:
+        unknown = (assets[0].get("download_url") or "").rsplit("/", 1)[0] + "/asset_does_not_exist"
+        status, _headers, _raw = mcp.get(unknown)
+    else:
+        status = 0
+    record("mcp unknown asset download is 404", status == 404, f"status {status}")
+
+    signed = mcp.tool("get_task_assets", {"task_id": task_id, "signed": True})
+    signed_data = signed["structured"]
+    signed_assets = signed_data.get("assets") or []
+    urls_signed = bool(signed_assets) and all("/mcp/signed-assets/" in (asset.get("download_url") or "") for asset in signed_assets)
+    record("mcp signed download addresses are short-lived",
+           urls_signed and mcp_rfc3339(signed_data.get("download_expires_at")),
+           f"{len(signed_assets)} links, expires_at {signed_data.get('download_expires_at')}")
+    signed_blobs = mcp_downloads(keyless, signed_assets)
+    signed_problems = mcp_client.asset_problems(signed_assets, signed_blobs)
+    record("mcp signed downloads need no key and match SHA-256", bool(signed_assets) and not signed_problems,
+           f"{len(signed_assets)} files" + ("" if not signed_problems else "; " + "; ".join(signed_problems[:5])))
+    if signed_assets:
+        status, _headers, _raw = keyless.get(mcp_tampered_token(signed_assets[0].get("download_url") or ""))
+    else:
+        status = 0
+    record("mcp tampered signed token is 404", status == 404, f"status {status}")
+
+    inspect = mcp.tool("inspect_model", {"task_id": task_id})
+    inspected = inspect["structured"]
+    report = inspected.get("report") or {}
+    usage = inspected.get("usage_check") or {}
+    checks = usage.get("checks") or []
+    complete_checks = all(isinstance(item, dict) and bool(item.get("check")) and bool(item.get("status"))
+                          and "actual" in item and isinstance(item.get("budget"), dict) for item in checks)
+    record("mcp inspect_model reads the saved GLB",
+           not inspect["is_error"] and isinstance(report.get("triangles"), (int, float)) and report["triangles"] > 0
+           and bool(checks) and complete_checks and isinstance(inspected.get("status"), dict),
+           f"status {inspect['http_status']}, triangles {report.get('triangles')}, checks {len(checks)}")
+
+    status_result = mcp.tool("get_status", {})
+    status_block = status_result["structured"].get("status") or {}
+    record("mcp inspect_model and get_status count no step",
+           not status_result["is_error"] and status_block.get("total_used_steps") == 1,
+           f"total steps {status_block.get('total_used_steps')}")
+
+    again = mcp.tool("get_task", {"task_id": task_id})
+    assets_again = mcp.tool("get_task_assets", {"task_id": task_id})
+    inspection_null = ((again["structured"].get("status") or {}).get("inspection") is None
+                       and (assets_again["structured"].get("status") or {}).get("inspection") is None)
+    record("mcp-only tasks have no platform inspection", inspection_null, "inspection is null on both reads")
+
+    remesh_idem = "mcp-remesh-" + uuid.uuid4().hex
+    remesh = mcp.tool("process_model", {"operation": "remesh", "source_task_id": task_id,
+                                        "asset": asset, "idempotency_key": remesh_idem})
+    remesh_data = remesh["structured"]
+    remesh_block = remesh_data.get("status") or {}
+    remesh_task_id = remesh_data.get("task_id") or ""
+    record("mcp process_model remesh counts the second step",
+           not remesh["is_error"] and bool(remesh_task_id) and remesh_data.get("step_counted") is True
+           and (remesh_block.get("asset") or {}).get("used_steps") == 2,
+           f"status {remesh['http_status']}, steps {(remesh_block.get('asset') or {}).get('used_steps')}")
+    if not remesh_task_id:
+        return
+
+    remesh_view, _last = mcp_wait_task(mcp, remesh_task_id)
+    record("mcp remesh reaches SUCCEEDED", remesh_view.get("state") == "SUCCEEDED", f"state {remesh_view.get('state')}")
+
+    remesh_files = mcp.tool("get_task_assets", {"task_id": remesh_task_id})
+    remesh_assets = remesh_files["structured"].get("assets") or []
+    _status, offerings = api.json("GET", "/api/v1/offerings")
+    offering = next((entry for entry in (offerings or {}).get("offerings") or [] if entry.get("id") == MESHY_REMESH), {})
+    slots = mcp_client.required_slots(offering)
+    delivered = {(entry.get("role"), entry.get("variant")) for entry in remesh_assets}
+    missing = [slot for slot in slots
+               if not any(role == slot[0] and (slot[1] is None or variant == slot[1]) for role, variant in delivered)]
+    record("mcp remesh delivers every required slot",
+           bool(slots) and remesh_files["structured"].get("complete") is True and not missing,
+           f"{len(slots)} required slots, {len(remesh_assets)} files"
+           + ("" if not missing else "; missing " + str(missing[:5])))
+    remesh_blobs = mcp_downloads(mcp, remesh_assets)
+    remesh_problems = mcp_client.asset_problems(remesh_assets, remesh_blobs)
+    record("mcp remesh files match size and SHA-256", bool(remesh_assets) and not remesh_problems,
+           f"{len(remesh_assets)} files" + ("" if not remesh_problems else "; " + "; ".join(remesh_problems[:5])))
 
 
 def scenario_agent(api, offerings):
@@ -5229,7 +5506,7 @@ def scenario_reroll(api, offerings, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -5239,7 +5516,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -5253,9 +5530,9 @@ def main():
                                      {"PATH": os.environ["PATH"]}, os.path.join(work, "fake.log"))
         if not wait_port(FAKE_PORT, fake_child):
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
-        print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}", flush=True)
+        print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -5282,6 +5559,8 @@ def main():
                 scenario_hyper3d_agent(api, offerings)
             if "agent-background" in selected:
                 scenario_agent_background(api, offerings)
+            if "mcp" in selected:
+                scenario_mcp(api, f"http://127.0.0.1:{MCP_PORT}")
             if "agent-quality" in selected:
                 scenario_agent_quality(api, offerings, args.report or os.path.join(work, "agent-quality"), work)
             if "image-self-check" in selected:
