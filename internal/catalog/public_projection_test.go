@@ -26,7 +26,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		t.Fatal(err)
 	}
 	for path, keys := range map[string][]string{
-		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization", "project", "step_policy", "access_keys"},
+		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization", "project", "asset_list", "step_policy", "access_keys"},
 		"llm_settings": {"routes", "ui"},
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
 		// #80: the composer's capacity text and the result limit pair.
@@ -58,6 +58,11 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"project.assets":      {"kinds"},
 		"project.style_guide": {"maximum_text_characters", "maximum_references", "maximum_palette_colors", "palette_color_pattern"},
 		"project.conventions": {"fields", "texts"},
+		// #327: the browser builds the work list card and the project panel from
+		// the limits, kinds, routes and states by role; the server copy, UI texts
+		// and the reserved item blocks stay server-side.
+		"asset_list":        {"limits", "kinds", "routes", "states", "item_states"},
+		"asset_list.limits": {"max_lists_per_project", "draft_ttl_seconds", "name_max_length", "description_max_length", "max_references_per_item"},
 		// #330: the browser sees the modes with their labels, the defaults and
 		// the cap range; the counted capabilities, the Agent-facing message and
 		// the audit declaration stay server-side.
@@ -96,6 +101,49 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		slices.Sort(keys)
 		if !slices.Equal(actual, keys) {
 			t.Errorf("public path %s keys = %v, want %v", path, actual, keys)
+		}
+	}
+
+	// #327: the kind, route, step and state arrays publish only the fields the
+	// card and panel read; item blocks and copy stay server-side.
+	assetList := public["asset_list"].(map[string]any)
+	for _, kind := range assetList["kinds"].([]any) {
+		object := kind.(map[string]any)
+		actual := make([]string, 0, len(object))
+		for key := range object {
+			actual = append(actual, key)
+		}
+		slices.Sort(actual)
+		if !slices.Equal(actual, []string{"default_route", "id", "label", "project_kind"}) {
+			t.Errorf("public asset_list kind keys = %v", actual)
+		}
+	}
+	for _, route := range assetList["routes"].([]any) {
+		object := route.(map[string]any)
+		actual := make([]string, 0, len(object))
+		for key := range object {
+			actual = append(actual, key)
+		}
+		slices.Sort(actual)
+		if !slices.Equal(actual, []string{"id", "kinds", "label", "steps"}) {
+			t.Errorf("public asset_list route keys = %v", actual)
+		}
+		for _, step := range object["steps"].([]any) {
+			stepObject := step.(map[string]any)
+			if len(stepObject) != 1 || stepObject["capability"] == nil {
+				t.Errorf("public asset_list route step = %v", stepObject)
+			}
+		}
+	}
+	for _, state := range append(assetList["states"].([]any), assetList["item_states"].([]any)...) {
+		object := state.(map[string]any)
+		actual := make([]string, 0, len(object))
+		for key := range object {
+			actual = append(actual, key)
+		}
+		slices.Sort(actual)
+		if !slices.Equal(actual, []string{"id", "label", "role"}) {
+			t.Errorf("public asset_list state keys = %v", actual)
 		}
 	}
 
@@ -169,6 +217,12 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"authentication.login.redirect_query",
 		"authentication.messages.invalid_credentials",
 		"authentication.login.title",
+		// #327: the work list card and project panel read these.
+		"asset_list.limits.max_lists_per_project",
+		"asset_list.kinds",
+		"asset_list.routes",
+		"asset_list.states",
+		"asset_list.item_states",
 	} {
 		if _, ok := publicPath(public, path); !ok {
 			t.Errorf("browser contract path missing: %s", path)
@@ -213,6 +267,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"authentication.roles", "authentication.sso",
 		"runtime.http.legacy_routes.auth_sso_logout",
 		"authentication.api.password_hash_algorithm",
+		// #327: the server copy, UI texts and reserved item blocks are private.
+		"asset_list.messages", "asset_list.ui", "asset_list.item_blocks",
 	} {
 		if _, ok := publicPath(public, path); ok {
 			t.Errorf("server-only path leaked: %s", path)

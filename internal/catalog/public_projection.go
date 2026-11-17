@@ -187,6 +187,42 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			Conventions: PublicProjectConventionsSchema{Fields: fields, Texts: texts},
 		}
 	}
+	var publicAssetList *PublicAssetListSchema
+	if cloned.AssetList != nil {
+		kinds := make([]PublicAssetListKindSchema, 0, len(cloned.AssetList.Kinds))
+		for _, kind := range cloned.AssetList.Kinds {
+			kinds = append(kinds, PublicAssetListKindSchema{
+				ID:           kind.ID,
+				Label:        kind.Label,
+				ProjectKind:  kind.ProjectKind,
+				DefaultRoute: kind.DefaultRoute,
+			})
+		}
+		routes := make([]PublicAssetListRouteSchema, 0, len(cloned.AssetList.Routes))
+		for _, route := range cloned.AssetList.Routes {
+			routes = append(routes, PublicAssetListRouteSchema{
+				ID:    route.ID,
+				Label: route.Label,
+				Kinds: route.Kinds,
+				Steps: route.Steps,
+			})
+		}
+		states := make([]PublicAssetListStateSchema, 0, len(cloned.AssetList.States))
+		for _, state := range cloned.AssetList.States {
+			states = append(states, PublicAssetListStateSchema{ID: state.ID, Label: state.Label, Role: state.Role})
+		}
+		itemStates := make([]PublicAssetListStateSchema, 0, len(cloned.AssetList.ItemStates))
+		for _, state := range cloned.AssetList.ItemStates {
+			itemStates = append(itemStates, PublicAssetListStateSchema{ID: state.ID, Label: state.Label, Role: state.Role})
+		}
+		publicAssetList = &PublicAssetListSchema{
+			Limits:     cloned.AssetList.Limits,
+			Kinds:      kinds,
+			Routes:     routes,
+			States:     states,
+			ItemStates: itemStates,
+		}
+	}
 	var publicStepPolicy *PublicStepPolicySchema
 	if cloned.StepPolicy != nil {
 		publicStepPolicy = &PublicStepPolicySchema{
@@ -280,6 +316,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 		Authentication:  publicAuth,
 		Localization:    source.publicLocalization(),
 		Project:         publicProject,
+		AssetList:       publicAssetList,
 		StepPolicy:      publicStepPolicy,
 		AccessKeys:      publicAccessKeys,
 	}

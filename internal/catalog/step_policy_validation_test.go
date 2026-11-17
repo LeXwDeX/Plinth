@@ -173,6 +173,13 @@ func TestHistoricalCatalogWithoutStepPolicyStaysValid(t *testing.T) {
 	// Access keys and the external MCP service both decide by the step mode.
 	application.AccessKeys = nil
 	application.MCPPublic = nil
+	// A Catalog written before the step mode also predates asset lists, which
+	// plan their 3D steps with it.
+	application.AssetList = nil
+	application.Runtime.HTTP.Routes.ProjectAssetLists = ""
+	application.Runtime.HTTP.Routes.ProjectAssetList = ""
+	application.Runtime.HTTP.Routes.ProjectAssetListDecision = ""
+	application.Runtime.HTTP.Routes.ChatSessionAssetLists = ""
 	application.Runtime.HTTP.Routes.AccountAccessKeys = ""
 	application.Runtime.HTTP.Routes.AccountAccessKey = ""
 	application.Runtime.HTTP.Routes.AccountStepPolicy = ""

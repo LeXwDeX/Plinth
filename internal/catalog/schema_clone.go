@@ -24,6 +24,24 @@ func cloneProject(source *ProjectSchema) *ProjectSchema {
 	return &result
 }
 
+func cloneAssetList(source *AssetListSchema) *AssetListSchema {
+	if source == nil {
+		return nil
+	}
+	result := *source
+	result.Kinds = append([]AssetListKindSchema(nil), source.Kinds...)
+	result.Routes = make([]AssetListRouteSchema, len(source.Routes))
+	for index, route := range source.Routes {
+		result.Routes[index] = route
+		result.Routes[index].Kinds = append([]string(nil), route.Kinds...)
+		result.Routes[index].Steps = append([]AssetListStepSchema(nil), route.Steps...)
+	}
+	result.States = append([]AssetListStateSchema(nil), source.States...)
+	result.ItemStates = append([]AssetListStateSchema(nil), source.ItemStates...)
+	result.ItemBlocks = append([]ValueLabel(nil), source.ItemBlocks...)
+	return &result
+}
+
 func cloneStepPolicy(source *StepPolicySchema) *StepPolicySchema {
 	if source == nil {
 		return nil
@@ -145,6 +163,7 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	result.LLMSettings = cloneLLMSettings(source.LLMSettings)
 	result.Diagnostics = cloneDiagnostics(source.Diagnostics)
 	result.Project = cloneProject(source.Project)
+	result.AssetList = cloneAssetList(source.AssetList)
 	result.StepPolicy = cloneStepPolicy(source.StepPolicy)
 	result.AccessKeys = cloneAccessKeys(source.AccessKeys)
 	result.MCPPublic = cloneMCPPublic(source.MCPPublic)
