@@ -31,6 +31,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/assetdelivery"
 	"github.com/LeXwDeX/Plinth/internal/assetlinks"
+	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacygenerated"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacyinput"
@@ -735,6 +736,34 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Usage:      applicationSchema.Chat.Model3DUsage,
 		Production: applicationSchema.Chat.ModelReview.Inspect.Production,
 	})
+	// Production lists (#327): the service reuses the plan's offering
+	// selection through the chat adapters, so an explicit model lock and an
+	// unavailable provider are reflected in the availability snapshot. The
+	// feature is absent when the Catalog declares no asset_list section.
+	var assetListService *assetlist.Service
+	if applicationSchema.AssetList != nil {
+		if applicationSchema.Project == nil || applicationSchema.StepPolicy == nil {
+			return nil, fmt.Errorf("资产清单: application.asset_list 需要 application.project 与 application.step_policy")
+		}
+		counted := make(map[generation.Capability]bool, len(applicationSchema.StepPolicy.CountedCapabilities))
+		for _, capability := range applicationSchema.StepPolicy.CountedCapabilities {
+			counted[generation.Capability(capability)] = true
+		}
+		assetListService, err = assetlist.New(assetlist.Config{
+			Repository:         repository.AssetListRepository(),
+			Schema:             *applicationSchema.AssetList,
+			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
+			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
+			Counted:            counted,
+			ResolveStepFor: func(ctx context.Context, ownerID, sessionID, capability string) (assetlist.RouteStep, error) {
+				return chatService.ResolveAssetListStep(ctx, ownerID, sessionID, generation.Capability(capability))
+			},
+			ValidateBrief: chatService.ValidateAssetListBrief,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("资产清单: %w", err)
+		}
+	}
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// The ledger's parameter source is the existing parameter store's
 	// last-writer state (#248): when the person's pin still equals the frozen
@@ -1821,6 +1850,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		CanvasImages:                      canvasImageService,
 		Chat:                              chatService,
 		Projects:                          projectService,
+		AssetLists:                        assetListService,
 		DirectStyleReferences:             referenceResolver,
 		AgentParams:                       paramsStore,
 		AgentState:                        agentStateStore,

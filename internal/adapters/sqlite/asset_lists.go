@@ -116,6 +116,8 @@ func (r *AssetListRepository) FindByRequestKey(ctx context.Context, ownerID, req
 func (r *AssetListRepository) ListLists(ctx context.Context, ownerID, projectID string) ([]assetlist.List, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT `+assetListColumns+`,
+		       COALESCE((SELECT COUNT(*) FROM asset_list_items i
+		                 WHERE i.list_id = asset_lists.id), 0),
 		       COALESCE((SELECT SUM(i.planned_step_count) FROM asset_list_items i
 		                 WHERE i.list_id = asset_lists.id), 0),
 		       COALESCE((SELECT SUM(i.planned_model3d_step_count) FROM asset_list_items i
@@ -557,6 +559,7 @@ func listAssetListItems(ctx context.Context, queryer assetListQueryer, listID st
 }
 
 func sumAssetListItems(list *assetlist.List) {
+	list.ItemCount = len(list.Items)
 	steps, model3dSteps := 0, 0
 	for _, item := range list.Items {
 		steps += item.PlannedStepCount
@@ -585,7 +588,7 @@ func scanAssetListSummary(scanner interface{ Scan(...any) error }) (assetlist.Li
 	var decidedAt sql.NullString
 	var created, updated, expires string
 	targets := assetListScanTargets(&value, &brief, &decidedAt, &created, &updated, &expires)
-	targets = append(targets, &value.PlannedStepCount, &value.PlannedModel3DStepCount)
+	targets = append(targets, &value.ItemCount, &value.PlannedStepCount, &value.PlannedModel3DStepCount)
 	if err := scanner.Scan(targets...); err != nil {
 		return assetlist.List{}, err
 	}

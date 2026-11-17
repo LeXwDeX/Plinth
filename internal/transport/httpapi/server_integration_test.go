@@ -32,6 +32,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/assetdelivery"
+	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacygenerated"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacyinput"
@@ -763,6 +764,9 @@ var fixtureExecutions sync.Map // *generation.Module -> *fixtureExecutionState
 
 type fixtureExecutionState struct {
 	repository *sqlite.Repository
+	// databasePath lets a test write a row the HTTP contract has no route
+	// for (an asset list item already working, #327).
+	databasePath string
 	// pending is the pending-approval service the harness wired into the API,
 	// so a test can run its background sweep deterministically.
 	pending *pendingapproval.Service
@@ -1005,12 +1009,13 @@ func newHTTPHarnessWithCatalogAndProviders(
 ) (*generation.Module, http.Handler, *inputassets.Service, *cachemanagement.Service) {
 	t.Helper()
 	root := t.TempDir()
-	repository, err := httpapi.OpenMigratedTestRepository(filepath.Join(root, "test.db"))
+	databasePath := filepath.Join(root, "test.db")
+	repository, err := httpapi.OpenMigratedTestRepository(databasePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, setup := range databaseSetups {
-		setup(t, filepath.Join(root, "test.db"))
+		setup(t, databasePath)
 	}
 	store, err := local.New(filepath.Join(root, "storage"))
 	if err != nil {
@@ -1495,7 +1500,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixtureExecutions.Store(module, &fixtureExecutionState{repository: repository})
+	fixtureExecutions.Store(module, &fixtureExecutionState{repository: repository, databasePath: databasePath})
 	t.Cleanup(func() { fixtureExecutions.Delete(module) })
 	nativeAdministrationGenerationAssetReader :=
 		administration.GenerationAssetReaderFunc(
@@ -1820,6 +1825,36 @@ func newHTTPHarnessWithCatalogAndProviders(
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Production lists (#327). The harness resolves availability without the
+	// runtime Offerings so a test can assert both an available and an
+	// unavailable step deterministically; the brief uses the real Schema
+	// rules.
+	var assetListService *assetlist.Service
+	if listSchema := applicationSchema.AssetList; listSchema != nil &&
+		applicationSchema.Project != nil && applicationSchema.StepPolicy != nil {
+		counted := make(map[generation.Capability]bool, len(applicationSchema.StepPolicy.CountedCapabilities))
+		for _, capability := range applicationSchema.StepPolicy.CountedCapabilities {
+			counted[generation.Capability(capability)] = true
+		}
+		assetListService, err = assetlist.New(assetlist.Config{
+			Repository:         repository.AssetListRepository(),
+			Schema:             *listSchema,
+			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
+			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
+			Counted:            counted,
+			ResolveStepFor: func(_ context.Context, _, _, capability string) (assetlist.RouteStep, error) {
+				if capability == "remesh" {
+					return assetlist.RouteStep{Capability: capability, Available: false,
+						Reason: "remesh provider is disabled in the harness"}, nil
+				}
+				return assetlist.RouteStep{Capability: capability, OfferingID: "harness-" + capability, Available: true}, nil
+			},
+			ValidateBrief: chatService.ValidateAssetListBrief,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	api, err := httpapi.New(httpapi.Config{
 		MCPIdentity:                       mcpParts.identity,
 		MCPStatus:                         mcpParts.status,
@@ -1856,6 +1891,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		CanvasImages:                      canvasImageService,
 		Chat:                              chatService,
 		Projects:                          projectService,
+		AssetLists:                        assetListService,
 		ChatScheduler:                     chatScheduler,
 		ChatContext:                       harnessCompactor(chatScheduler),
 		OwnsAgentSession: func(ctx context.Context, ownerID, sessionID string) bool {

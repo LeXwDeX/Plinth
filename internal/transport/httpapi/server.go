@@ -26,6 +26,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
 	"github.com/LeXwDeX/Plinth/internal/assetdelivery"
+	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/cachemanagement"
 	"github.com/LeXwDeX/Plinth/internal/canvas"
@@ -164,6 +165,9 @@ type Config struct {
 	// Projects is the owner-scoped project service (#240); nil leaves the
 	// project routes unregistered.
 	Projects *project.Service
+	// AssetLists is the project's production list service (#327); nil leaves
+	// the asset list routes unregistered.
+	AssetLists *assetlist.Service
 	// DirectStyleReferences resolves a project session's frozen style pictures
 	// for a direct prepare; nil refuses a request that would need them.
 	DirectStyleReferences DirectStyleReferenceResolver
@@ -302,6 +306,7 @@ type Server struct {
 	renderManifests                   *rendermanifest.Service
 	chat                              *chat.Service
 	projects                          *project.Service
+	assetLists                        *assetlist.Service
 	directStyleReferences             DirectStyleReferenceResolver
 	chatScheduler                     ChatTurnScheduler
 	chatContext                       ChatContextCompactor
@@ -528,6 +533,7 @@ func New(config Config) (*Server, error) {
 		canvasImages:          config.CanvasImages,
 		chat:                  config.Chat,
 		projects:              config.Projects,
+		assetLists:            config.AssetLists,
 		directStyleReferences: config.DirectStyleReferences,
 		chatScheduler:         config.ChatScheduler,
 		chatContext:           config.ChatContext,
@@ -747,6 +753,24 @@ func (s *Server) routes() {
 	}
 	if route := routes.ChatSessionProject; route != "" {
 		s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.putChatSessionProject))
+	}
+	// Production lists (#327). Every route answers only a real browser
+	// session; the handlers refuse a Bearer identity with 403. A historical
+	// Catalog without the section leaves the routes unregistered.
+	if s.assetLists != nil {
+		if route := routes.ProjectAssetLists; route != "" {
+			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.listProjectAssetLists))
+		}
+		if route := routes.ProjectAssetList; route != "" {
+			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.getProjectAssetList))
+			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.putProjectAssetList))
+		}
+		if route := routes.ProjectAssetListDecision; route != "" {
+			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.decideProjectAssetList))
+		}
+		if route := routes.ChatSessionAssetLists; route != "" {
+			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.listChatSessionAssetLists))
+		}
 	}
 	if routes.ChatSessionBrief != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionBrief, s.withIdentity(s.getChatSessionBrief))
