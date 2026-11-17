@@ -77,6 +77,7 @@ describe('asset list schema contract', () => {
       project_asset_list: '/api/v1/projects/{projectID}/asset-lists/{listID}',
       project_asset_list_decision: '/api/v1/projects/{projectID}/asset-lists/{listID}/decision',
       chat_session_asset_lists: '/api/v1/chat/sessions/{sessionID}/asset-lists',
+      project_presence: '/api/v1/projects/{projectID}/presence',
     });
   });
 });
@@ -118,6 +119,43 @@ describe('asset list client', () => {
     const client = createAssetListClient(schema, { fetcher });
     await expect(client.listSessionLists('s 1')).resolves.toEqual([summary]);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/chat/sessions/s%201/asset-lists');
+  });
+
+  it('posts presence from the Schema route and treats 204 as success', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.presence('prj 1', 'tab 1', 'present')).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%201/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tab_id: 'tab 1', state: 'present' }),
+    });
+  });
+
+  it('lets a leave request outlive the page', async () => {
+    const fetcher = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.presence('prj_1', 'tab_1', 'leave')).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj_1/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tab_id: 'tab_1', state: 'leave' }),
+      keepalive: true,
+    });
+  });
+
+  it('refuses presence when the Catalog has no route', async () => {
+    const routes = { ...schema.runtime.http.routes, project_presence: undefined };
+    const old = {
+      ...schema,
+      runtime: { ...schema.runtime, http: { ...schema.runtime.http, routes } },
+    } as ProductSchema;
+    const fetcher = vi.fn() as unknown as typeof fetch;
+    await expect(createAssetListClient(old, { fetcher }).presence('p1', 't1', 'present')).rejects.toMatchObject({
+      name: 'AssetListError',
+      status: 0,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it('takes the route template from the Schema it was built with', async () => {

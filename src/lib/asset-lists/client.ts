@@ -109,11 +109,15 @@ export interface AssetListClientDependencies {
   fetcher?: typeof fetch;
 }
 
+export type AssetListPresenceState = 'present' | 'leave';
+
 export interface AssetListClient {
   listProjectLists(projectID: string): Promise<AssetListSummary[]>;
   getList(projectID: string, listID: string): Promise<AssetListDetail>;
   decide(projectID: string, listID: string, decision: AssetListDecision, reason?: string): Promise<AssetListDetail>;
   listSessionLists(sessionID: string): Promise<AssetListSummary[]>;
+  /** #328: this browser tab is (or is no longer) watching the project. */
+  presence(projectID: string, tabID: string, state: AssetListPresenceState): Promise<void>;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -135,6 +139,15 @@ function route(template: string, parameters: Record<string, string>): string {
   });
 }
 
+/**
+ * #328: the presence URL for `navigator.sendBeacon`. Empty when the Catalog has
+ * no route; the heartbeat then falls back to the client's fetch.
+ */
+export function assetListPresenceURL(schema: ProductSchema, projectID: string): string {
+  const template = schema.runtime.http.routes.project_presence;
+  return template ? route(template, { projectID }) : '';
+}
+
 export function createAssetListClient(
   schema: ProductSchema,
   dependencies: AssetListClientDependencies = {},
@@ -153,6 +166,8 @@ export function createAssetListClient(
     route(required(routes.project_asset_list_decision), { projectID, listID });
   const sessionListsRoute = (sessionID: string) =>
     route(required(routes.chat_session_asset_lists), { sessionID });
+  const presenceRoute = (projectID: string) =>
+    route(required(routes.project_presence), { projectID });
 
   // A non-2xx answer is the server's own refusal: carry its code, detail and
   // the 409 list fields. A body that is not JSON still keeps the status.
@@ -206,6 +221,17 @@ export function createAssetListClient(
       const payload = await payloadOf(response);
       if (!response.ok) failure(response, payload);
       return summaries(payload);
+    },
+    async presence(projectID, tabID, state) {
+      // 204: no body to read. A leave may be the last request of a page that
+      // is going away, so it asks the browser to finish it after the page.
+      const response = await fetcher(presenceRoute(projectID), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tab_id: tabID, state }),
+        ...(state === 'leave' ? { keepalive: true } : {}),
+      });
+      if (!response.ok) failure(response, await payloadOf(response));
     },
   };
 }

@@ -168,6 +168,9 @@ type Config struct {
 	// AssetLists is the project's production list service (#327); nil leaves
 	// the asset list routes unregistered.
 	AssetLists *assetlist.Service
+	// AssetListPresence is the per-tab browser heartbeat (#328); nil leaves
+	// the presence route unregistered even when the Catalog declares execution.
+	AssetListPresence assetlist.PresenceStore
 	// DirectStyleReferences resolves a project session's frozen style pictures
 	// for a direct prepare; nil refuses a request that would need them.
 	DirectStyleReferences DirectStyleReferenceResolver
@@ -307,6 +310,7 @@ type Server struct {
 	chat                              *chat.Service
 	projects                          *project.Service
 	assetLists                        *assetlist.Service
+	assetListPresence                 assetlist.PresenceStore
 	directStyleReferences             DirectStyleReferenceResolver
 	chatScheduler                     ChatTurnScheduler
 	chatContext                       ChatContextCompactor
@@ -534,6 +538,7 @@ func New(config Config) (*Server, error) {
 		chat:                  config.Chat,
 		projects:              config.Projects,
 		assetLists:            config.AssetLists,
+		assetListPresence:     config.AssetListPresence,
 		directStyleReferences: config.DirectStyleReferences,
 		chatScheduler:         config.ChatScheduler,
 		chatContext:           config.ChatContext,
@@ -770,6 +775,14 @@ func (s *Server) routes() {
 		}
 		if route := routes.ChatSessionAssetLists; route != "" {
 			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.listChatSessionAssetLists))
+		}
+		// The heartbeat is part of the execution section (#328): a Catalog
+		// without it, or a server started without the store, keeps the route
+		// unregistered.
+		if s.assetListPresence != nil {
+			if route := routes.ProjectPresence; route != "" {
+				s.mux.HandleFunc("POST "+route, s.withPrincipal(s.postProjectPresence))
+			}
 		}
 	}
 	if routes.ChatSessionBrief != "" {
