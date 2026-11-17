@@ -314,7 +314,7 @@ func (w *world) approval(callID string, detach bool) (generationtool.Operation, 
 			State:   "running", CreatedAt: now, UpdatedAt: now}); err != nil {
 		w.t.Fatal(err)
 	}
-	if err := w.repo.UpdateTurnState(ctx, turnID, "done", now); err != nil {
+	if err := w.repo.UpdateTurnState(ctx, turnID, "done", "", now); err != nil {
 		w.t.Fatal(err)
 	}
 	if err := w.repo.FinishStream(ctx, "session-a", turnID, "done", now.Add(time.Hour)); err != nil {

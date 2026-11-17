@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
@@ -216,6 +217,7 @@ func TestListMessagesHealsStaleOrphanUsingConfiguredPresentation(
 		ctx,
 		assistant.ID,
 		"configured-turn-done",
+		"",
 		assistant.CreatedAt,
 	); err != nil {
 		t.Fatal(err)
@@ -258,7 +260,7 @@ func TestListMessagesPageHealsStaleOrphanAndRejectsBadQueries(
 	if err := service.UpdateMessage(ctx, "owner-a", assistant); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.UpdateTurnState(ctx, assistant.ID, "configured-turn-done", assistant.CreatedAt); err != nil {
+	if err := repository.UpdateTurnState(ctx, assistant.ID, "configured-turn-done", "", assistant.CreatedAt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -350,6 +352,7 @@ func TestListMessagesKeepsOrphanedPersistedImages(
 		ctx,
 		assistant.ID,
 		"configured-turn-error",
+		"",
 		assistant.CreatedAt,
 	); err != nil {
 		t.Fatal(err)
@@ -421,6 +424,18 @@ func TestDurableStreamReplaysThenPublishesConfiguredEvents(t *testing.T) {
 	}
 }
 
+// configuredEndReasons are the turn end reasons every test service declares
+// (#328). They differ from the shipped strings, so a literal hardcoded in the
+// service cannot pass.
+var configuredEndReasons = catalog.ChatTurnEndReasonsSchema{
+	Completed:        "configured-end-completed",
+	ToolLimit:        "configured-end-tool-limit",
+	AwaitingApproval: "configured-end-awaiting-approval",
+	Stopped:          "configured-end-stopped",
+	Background:       "configured-end-background",
+	Error:            "configured-end-error",
+}
+
 func newChatService(
 	t *testing.T,
 	repository chat.Repository,
@@ -460,6 +475,7 @@ func newChatServiceWith(
 		TurnWaitingTask: "configured-turn-waiting-task",
 		TurnDone:        "configured-turn-done",
 		TurnError:       "configured-turn-error",
+		TurnEndReasons:  configuredEndReasons,
 		PlaceholderHealing: chat.PlaceholderHealingPolicy{
 			StaleAfter:                time.Minute,
 			PromptArgument:            "configured-prompt",
@@ -1302,6 +1318,7 @@ func (r *memoryChatRepository) UpdateTurnState(
 	_ context.Context,
 	assistantMessageID string,
 	state string,
+	endReason string,
 	updatedAt time.Time,
 ) error {
 	r.mu.Lock()
@@ -1311,6 +1328,7 @@ func (r *memoryChatRepository) UpdateTurnState(
 		return chat.ErrMessageNotFound
 	}
 	turn.State = state
+	turn.EndReason = endReason
 	turn.UpdatedAt = updatedAt
 	r.turns[assistantMessageID] = turn
 	return nil

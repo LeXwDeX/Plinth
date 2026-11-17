@@ -470,6 +470,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		schema.State.FailedPromptPreviewChars <= 0 {
 		return errors.New("state 的超时和 prompt 预览长度必须为正数")
 	}
+	if err := schema.State.TurnEndReasons.Validate(); err != nil {
+		return err
+	}
 	if schema.Frontend.ConnectionTimeoutMilliseconds <= 0 ||
 		schema.Frontend.FallbackPollMilliseconds <= 0 ||
 		schema.Frontend.ReconnectCheckDelayMilliseconds <= 0 ||

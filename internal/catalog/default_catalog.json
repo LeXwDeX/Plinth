@@ -5747,6 +5747,14 @@
         "turn_waiting_task": "waiting_task",
         "turn_done": "done",
         "turn_error": "error",
+        "turn_end_reasons": {
+          "completed": "completed",
+          "tool_limit": "tool_limit",
+          "awaiting_approval": "awaiting_approval",
+          "stopped": "stopped",
+          "background": "background",
+          "error": "error"
+        },
         "placeholder_stale_milliseconds": 300000,
         "failed_prompt_preview_characters": 50
       },

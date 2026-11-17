@@ -1302,7 +1302,7 @@ func (r *Repository) listTurnsFiltered(
 	rows, err := r.db.QueryContext(
 		ctx,
 		`SELECT owner_id, session_id, assistant_message_id, options_json,
-		        state, stop_requested, checkpoint_json, checkpoint_version, created_at, updated_at
+		        state, end_reason, stop_requested, checkpoint_json, checkpoint_version, created_at, updated_at
 		 FROM go_chat_turns
 		 WHERE state IN (`+strings.Join(placeholders, ",")+")"+extraWhere+`
 		 ORDER BY created_at ASC`,
@@ -1326,6 +1326,7 @@ func (r *Repository) listTurnsFiltered(
 			&turn.AssistantMessageID,
 			&optionsJSON,
 			&turn.State,
+			&turn.EndReason,
 			&stopRequested,
 			&checkpointJSON,
 			&turn.CheckpointVersion,
@@ -1414,12 +1415,14 @@ func (r *Repository) UpdateTurnState(
 	ctx context.Context,
 	assistantMessageID string,
 	state string,
+	endReason string,
 	updatedAt time.Time,
 ) error {
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE go_chat_turns SET state = ?, updated_at = ?
+		UPDATE go_chat_turns SET state = ?, end_reason = ?, updated_at = ?
 		WHERE assistant_message_id = ?`,
 		state,
+		endReason,
 		formatTime(updatedAt),
 		assistantMessageID,
 	)

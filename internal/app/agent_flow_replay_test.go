@@ -451,6 +451,31 @@ func (s *replayStack) turnsEnded(session string) bool {
 	return total > 0 && open == 0
 }
 
+// replayTurnEnd is how one Agent turn ended: its state and its end reason (#328).
+type replayTurnEnd struct{ state, reason string }
+
+// turnEnds reads how every Agent turn of the session ended, oldest first.
+func (s *replayStack) turnEnds(session string) []replayTurnEnd {
+	s.t.Helper()
+	rows, err := s.database.Query(`SELECT state, end_reason FROM go_chat_turns WHERE session_id=? ORDER BY created_at, rowid`, session)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	defer rows.Close()
+	var ends []replayTurnEnd
+	for rows.Next() {
+		var end replayTurnEnd
+		if err := rows.Scan(&end.state, &end.reason); err != nil {
+			s.t.Fatal(err)
+		}
+		ends = append(ends, end)
+	}
+	if err := rows.Err(); err != nil {
+		s.t.Fatal(err)
+	}
+	return ends
+}
+
 type replayCard struct {
 	RequestID  string `json:"request_id"`
 	Capability string `json:"capability"`
@@ -535,6 +560,13 @@ func (s *replayStack) awaitApprovalCard(session string) replayCard {
 	})
 	if s.rodin.calls.Load() != 0 || s.tasks(session) != 0 {
 		s.t.Fatal("something was submitted before the person approved")
+	}
+	// #328: the turn that left the card ended as done and says it waits for the
+	// person; the real executor and operation store answered the question.
+	state := s.application.schema.Chat.State
+	want := replayTurnEnd{state: state.TurnDone, reason: state.TurnEndReasons.AwaitingApproval}
+	if ends := s.turnEnds(session); want.reason == "" || len(ends) != 1 || ends[0] != want {
+		s.t.Fatalf("the turn that left the approval card ended as %+v, want %+v", ends, want)
 	}
 	return s.cards(session)[0]
 }

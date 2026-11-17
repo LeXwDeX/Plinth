@@ -1,0 +1,61 @@
+package catalog
+
+import (
+	"fmt"
+	"strings"
+)
+
+// ChatTurnEndReasonsSchema names why a chat turn ended (#328), one string per
+// reason the orchestrator tells apart. The server stores the string with the
+// finished turn, so a reader can tell a turn that spent its tool budget from
+// one that waits for an approval without a literal of its own. The whole
+// object is optional: a Catalog that leaves it out records no reason and keeps
+// the empty string.
+type ChatTurnEndReasonsSchema struct {
+	// Completed is a normal end.
+	Completed string `json:"completed"`
+	// ToolLimit is a reply that spent its tool budget (chat.agent.
+	// max_tool_calls_per_reply, #275) and ended with the tool-less summary round.
+	ToolLimit string `json:"tool_limit"`
+	// AwaitingApproval is a turn that left at least one approval card (a paid
+	// step or a production plan) for the person to decide.
+	AwaitingApproval string `json:"awaiting_approval"`
+	// Stopped is a turn the person stopped.
+	Stopped string `json:"stopped"`
+	// Background is a turn that ended while its Tasks keep running (#137).
+	Background string `json:"background"`
+	// Error is a turn that finished as failed.
+	Error string `json:"error"`
+}
+
+// Declared reports whether the Catalog declares the turn end reasons.
+func (reasons ChatTurnEndReasonsSchema) Declared() bool {
+	return reasons != ChatTurnEndReasonsSchema{}
+}
+
+// Validate refuses a declaration that is only partly there: once any reason is
+// declared, every reason needs a value and no two may share one, or a reader
+// could not tell the reasons apart. An undeclared object is valid.
+func (reasons ChatTurnEndReasonsSchema) Validate() error {
+	if !reasons.Declared() {
+		return nil
+	}
+	seen := make(map[string]string, 6)
+	for _, entry := range []struct{ name, value string }{
+		{"completed", reasons.Completed},
+		{"tool_limit", reasons.ToolLimit},
+		{"awaiting_approval", reasons.AwaitingApproval},
+		{"stopped", reasons.Stopped},
+		{"background", reasons.Background},
+		{"error", reasons.Error},
+	} {
+		if strings.TrimSpace(entry.value) == "" {
+			return fmt.Errorf("state.turn_end_reasons.%s 不能为空", entry.name)
+		}
+		if other, duplicate := seen[entry.value]; duplicate {
+			return fmt.Errorf("state.turn_end_reasons.%s 与 state.turn_end_reasons.%s 的值 %q 重复", entry.name, other, entry.value)
+		}
+		seen[entry.value] = entry.name
+	}
+	return nil
+}

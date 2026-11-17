@@ -445,6 +445,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		TurnWaitingTask:       applicationSchema.Chat.State.TurnWaitingTask,
 		TurnDone:              applicationSchema.Chat.State.TurnDone,
 		TurnError:             applicationSchema.Chat.State.TurnError,
+		TurnEndReasons:        applicationSchema.Chat.State.TurnEndReasons,
 		PlaceholderHealing: chat.PlaceholderHealingPolicy{
 			StaleAfter: time.Duration(
 				applicationSchema.Chat.State.PlaceholderStaleMilliseconds,

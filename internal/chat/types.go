@@ -189,6 +189,10 @@ type Turn struct {
 	CheckpointVersion  int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	// EndReason is the Schema string (application.chat.state.turn_end_reasons)
+	// of why the turn ended (#328). Empty while the turn runs, for a turn that
+	// ended before reasons were recorded, and when the Schema declares none.
+	EndReason string
 }
 
 // TurnCheckpoint is the durable continuation of one assistant tool round.

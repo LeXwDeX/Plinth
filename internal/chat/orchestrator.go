@@ -1254,6 +1254,9 @@ func (orchestrator *Orchestrator) Process(
 	// backgroundFinalized means the turn ended with its Tasks still running
 	// (#137); a stop requested later must not cancel them.
 	backgroundFinalized := false
+	// toolLimitReached means the reply spent its tool budget and the tool-less
+	// summary round ran; it only feeds the turn's end reason (#328).
+	toolLimitReached := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1282,17 +1285,24 @@ func (orchestrator *Orchestrator) Process(
 				return
 			}
 		}
+		finishCtx := context.WithoutCancel(ctx)
+		failedTurn := failed || processErr != nil
 		finishErr := errors.Join(
 			orchestrator.service.FinishStream(
-				context.WithoutCancel(ctx),
+				finishCtx,
 				command.SessionID,
 				command.AssistantMessageID,
-				failed || processErr != nil,
+				failedTurn,
 			),
-			orchestrator.service.FinishTurn(
-				context.WithoutCancel(ctx),
+			orchestrator.service.FinishTurnWithReason(
+				finishCtx,
 				command.AssistantMessageID,
-				failed || processErr != nil,
+				orchestrator.turnEndReason(finishCtx, command, assistant, turnOutcome{
+					failed:     failedTurn,
+					background: backgroundFinalized,
+					stopped:    stopFinalized,
+					toolLimit:  toolLimitReached,
+				}),
 			),
 		)
 		if err := finishErr; processErr == nil && err != nil {
@@ -1456,6 +1466,7 @@ func (orchestrator *Orchestrator) Process(
 	// never streamed or stored; the unexecuted calls are listed with Schema
 	// texts. exit reports that Process must return err right away.
 	summarizeAtLimit := func(base agents.Request, pendingCalls []agents.ToolCall) (bool, error) {
+		toolLimitReached = true
 		pendingCalls = append([]agents.ToolCall(nil), pendingCalls...)
 		summaryRequest := base
 		summaryRequest.Tools = nil
