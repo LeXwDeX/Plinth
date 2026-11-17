@@ -89,12 +89,18 @@ func (s *Server) MCPPublicHandler() (http.Handler, error) {
 	mux.HandleFunc(service.Path, s.mcpEndpoint(endpoint))
 	mux.HandleFunc("GET "+service.DownloadPath, s.withMCPKey(s.mcpDownload))
 	mux.HandleFunc("/", s.mcpNotFound)
+	// The listener serves its callers directly and never sits behind the web
+	// server's reverse proxy, so it trusts no proxy: the client address is the
+	// TCP peer, and a forwarding header can neither free a throttled caller nor
+	// throttle someone else, whatever trusted_proxy_cidrs lists for the main
+	// server (a Docker gateway registered there would otherwise make every
+	// connection that arrives through it trust X-Forwarded-For).
 	// The access log is outermost, as on the main server: every 4xx and 5xx is
 	// logged with its request ID. The log never holds the key, the
 	// Authorization header, a prompt or an argument: it records the method,
 	// the path, the status and the reason the handler noted.
 	return requestLogMiddleware(s.logger, s.providerAssetRoute, s.providerWebhookSecretRoutes(),
-		localeTraceMiddleware(s.application, s.texts, clientAddressMiddleware(s.trustedProxies,
+		localeTraceMiddleware(s.application, s.texts, clientAddressMiddleware(nil,
 			s.securityHeadersMiddleware(
 				recoverMiddleware(s.logger, s.application.MCPPublic.Messages.Internal, routeTraceMiddleware(mux)),
 			),
@@ -146,12 +152,35 @@ type mcpPrincipalHandler func(http.ResponseWriter, *http.Request, access.Princip
 // cookie, no deployment token, no development identity. A request without a
 // key, with a key that is wrong, revoked or expired, or whose owner can no
 // longer act, is 401 with a Bearer challenge; the caller can never tell which.
+//
+// The listener's limits (access_keys.rate_limit, mcp_public_limits.go) bracket
+// the check: a client address that failed to authenticate too often is refused
+// with 429 before the key is looked up, every 401 counts as a failure of the
+// address, and an authenticated key is counted before its tool or download runs.
 func (s *Server) withMCPKey(next mcpPrincipalHandler) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
+		limits := s.mcpRateLimit()
+		client := ""
+		if limits != nil {
+			// Checked before the key is looked up and counted after it fails:
+			// sequential guesses stop at the limit; attempts in flight at once
+			// all pass the check and overshoot it by their number (a 256-bit
+			// secret stays unguessable either way). Reserving a slot per attempt
+			// would instead throttle valid callers that share an address while
+			// their keys are being checked.
+			client = mcpClientBucket(request)
+			if throttled, wait := s.mcpAuthFailures.exceeded(client, limits.AuthFailuresPerMinute); throttled {
+				s.writeMCPAuthThrottled(writer, request, wait, limits.AuthFailuresPerMinute)
+				return
+			}
+		}
 		principal, err := s.mcpIdentity.Identify(request)
 		switch {
 		case err == nil && principal.Credential().Kind == access.CredentialAccessKey:
 		case err == nil, errors.Is(err, accesskeys.ErrNotAKey), errors.Is(err, accesskeys.ErrUnauthorized):
+			if limits != nil {
+				s.mcpAuthFailures.record(client)
+			}
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="`+s.application.MCPPublic.ServerName+`"`)
 			s.writeMCPProblem(writer, request, http.StatusUnauthorized, -32001, "unauthenticated", "Unauthenticated",
 				s.application.MCPPublic.Messages.Unauthenticated)
@@ -163,6 +192,13 @@ func (s *Server) withMCPKey(next mcpPrincipalHandler) http.HandlerFunc {
 		}
 		if trace := requestTraceFrom(request.Context()); trace != nil {
 			trace.noteOwner(principal.ID())
+		}
+		if limits != nil {
+			keyID := principal.Credential().KeyID
+			if allowed, wait := s.mcpKeyRequests.take(keyID, limits.RequestsPerMinute); !allowed {
+				s.writeMCPKeyLimited(writer, request, wait, keyID, limits.RequestsPerMinute)
+				return
+			}
 		}
 		next(writer, request.WithContext(context.WithValue(request.Context(), mcpPrincipalKey{}, principal)), principal)
 	}
@@ -186,7 +222,18 @@ func (s *Server) mcpDownload(writer http.ResponseWriter, request *http.Request, 
 // language and the request ID the access log records. The causes go to the
 // access log only.
 func (s *Server) writeMCPProblem(writer http.ResponseWriter, request *http.Request, status, rpcCode int, code, rpcMessage, detail string, causes ...error) {
-	data := map[string]any{"detail": s.localizedText(requestLocale(request), detail)}
+	s.writeMCPProblemData(writer, request, status, rpcCode, code, rpcMessage, detail, nil, causes...)
+}
+
+// writeMCPProblemData is writeMCPProblem with more members in the error's data,
+// such as the wait a 429 asks the caller to honour. The detail and the request
+// ID are the problem's own and cannot be replaced by them.
+func (s *Server) writeMCPProblemData(writer http.ResponseWriter, request *http.Request, status, rpcCode int, code, rpcMessage, detail string, extra map[string]any, causes ...error) {
+	data := map[string]any{}
+	for name, value := range extra {
+		data[name] = value
+	}
+	data["detail"] = s.localizedText(requestLocale(request), detail)
 	if trace := requestTraceFrom(request.Context()); trace != nil {
 		trace.noteProblem(code, detail, causes)
 		data["request_id"] = trace.id

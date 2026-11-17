@@ -63,3 +63,80 @@ func TestRateLimitKeyGroupsIPv6ByPrefix64(t *testing.T) {
 		t.Fatalf("codes = %v", codes)
 	}
 }
+
+// take is allow with the wait of a refusal; exceeded asks without counting;
+// record counts an event that already happened. All three read one window per
+// key, a fixed minute from its first event.
+func TestPerMinuteLimiterTakeExceededAndRecord(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)
+	limiter := &perMinuteLimiter{now: func() time.Time { return now }}
+
+	// Asking never counts, and never creates a window.
+	for range 5 {
+		if exceeded, wait := limiter.exceeded("a", 2); exceeded || wait != 0 {
+			t.Fatalf("exceeded on an empty key = %v %v", exceeded, wait)
+		}
+	}
+	if len(limiter.windows) != 0 {
+		t.Fatalf("asking created %d windows", len(limiter.windows))
+	}
+
+	// take allows perMinute events, then refuses with the time the window has left.
+	for index := range 2 {
+		if allowed, wait := limiter.take("a", 2); !allowed || wait != 0 {
+			t.Fatalf("take %d = %v %v", index+1, allowed, wait)
+		}
+		now = now.Add(10 * time.Second)
+	}
+	if allowed, wait := limiter.take("a", 2); allowed || wait != 40*time.Second {
+		t.Fatalf("take over the limit = %v %v, want a refusal with 40s left", allowed, wait)
+	}
+	if exceeded, wait := limiter.exceeded("a", 2); !exceeded || wait != 40*time.Second {
+		t.Fatalf("exceeded over the limit = %v %v", exceeded, wait)
+	}
+	// Another key has its own window.
+	if allowed, _ := limiter.take("b", 2); !allowed {
+		t.Fatal("another key was refused")
+	}
+
+	// record counts without asking: two failures reach a limit of two, and only then.
+	limiter.record("c")
+	if exceeded, _ := limiter.exceeded("c", 2); exceeded {
+		t.Fatal("one recorded event reached a limit of two")
+	}
+	limiter.record("c")
+	if exceeded, _ := limiter.exceeded("c", 2); !exceeded {
+		t.Fatal("two recorded events did not reach a limit of two")
+	}
+
+	// A window ends a minute after its first event, whatever came after: a began
+	// 60s ago, c 40s ago.
+	now = now.Add(40 * time.Second)
+	if allowed, _ := limiter.take("a", 2); !allowed {
+		t.Fatal("the window of a had ended")
+	}
+	if exceeded, wait := limiter.exceeded("c", 2); !exceeded || wait != 20*time.Second {
+		t.Fatalf("the window of c = %v %v, want it still running for 20s", exceeded, wait)
+	}
+	now = now.Add(20 * time.Second)
+	if exceeded, _ := limiter.exceeded("c", 2); exceeded {
+		t.Fatal("the window of c had ended")
+	}
+}
+
+// A Retry-After value is whole seconds, rounded up and never zero.
+func TestRetryAfterSecondsRoundsUpAndIsNeverZero(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		wait time.Duration
+		want int
+	}{
+		{time.Minute, 60}, {59*time.Second + time.Nanosecond, 60}, {30 * time.Second, 30},
+		{time.Second + time.Millisecond, 2}, {time.Millisecond, 1}, {0, 1}, {-time.Second, 1},
+	} {
+		if got := retryAfterSeconds(test.wait); got != test.want {
+			t.Fatalf("retryAfterSeconds(%v) = %d, want %d", test.wait, got, test.want)
+		}
+	}
+}

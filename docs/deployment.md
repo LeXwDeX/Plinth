@@ -269,6 +269,8 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 
 监听没有 TLS，访问 Key 是 Bearer 令牌：只在局域网或本机使用，不得经公网明文传输；要对公网开放，须在进程里配置证书或在前面放 TLS 终结（本仓库不提供）。候选栈的 Compose 文件（`docker-compose.go-candidate.yml`）与自部署的根 `docker-compose.yml` 不发布这个端口。发布后用该 Key 对 `POST /mcp` 调 `server/discover` 与 `get_status`，确认监听与状态块（行为见 [`architecture.md`](architecture.md)「对外 MCP 监听」）。
 
+监听按 Schema `access_keys.rate_limit` 限流（每把 Key 每分钟的请求数、每个客户端地址每分钟的鉴权失败次数），计数在进程内，重启清零，只对单实例成立。监听不信任任何代理，不读 `trusted_proxy_cidrs`：客户端地址就是到达容器的 TCP 对端，经 Docker 网关或 NAT 到达的调用方共用一个地址、一起计数。
+
 ## 7. 冒烟失败后的手工回滚
 
 自动回滚只覆盖发布脚本内的失败。冒烟失败且已有前一版本时（首次 bootstrap 版本没有前一版本，只能停止服务并保留现场）：

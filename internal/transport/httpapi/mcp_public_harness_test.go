@@ -175,6 +175,9 @@ func registerHarnessMCP(t *testing.T, module *generation.Module, api *httpapi.Se
 	if handler == nil {
 		return
 	}
+	// The listener's limit windows follow the harness clock, so a test moves a
+	// minute without waiting for it.
+	api.SetMCPLimitClock(parts.clock.Now)
 	mcpFixtures.Store(module, &mcpFixture{handler: handler, keys: keys, repository: repository, clock: parts.clock})
 	t.Cleanup(func() { mcpFixtures.Delete(module) })
 }

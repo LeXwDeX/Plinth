@@ -213,6 +213,8 @@ type providerWebhookBinding struct {
 type Server struct {
 	clientErrors                      perMinuteLimiter
 	apiRequests                       perMinuteLimiter
+	mcpKeyRequests                    perMinuteLimiter
+	mcpAuthFailures                   perMinuteLimiter
 	trustedProxies                    []netip.Prefix
 	harness                           *resolve.Service
 	agentConfiguration                *agentconfiguration.Service

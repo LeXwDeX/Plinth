@@ -105,6 +105,7 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"asset_not_found": messages.AssetNotFound, "not_found": messages.NotFound,
 		"method_not_allowed": messages.MethodNotAllowed, "request_too_large": messages.RequestTooLarge,
 		"internal":     messages.Internal,
+		"rate_limited": messages.RateLimited, "auth_throttled": messages.AuthThrottled,
 		"needs_person": messages.NeedsPerson, "service_unavailable": messages.ServiceUnavailable,
 		"service_mismatch": messages.ServiceMismatch, "no_service": messages.NoService,
 		"input_refused": messages.InputRefused, "source_not_found": messages.SourceNotFound,
@@ -125,6 +126,7 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	for name, check := range map[string]struct{ text, holder string }{
 		"needs_person": {messages.NeedsPerson, "{task_id}"}, "service_unavailable": {messages.ServiceUnavailable, "{service}"},
 		"service_mismatch": {messages.ServiceMismatch, "{service}"}, "too_many_in_flight": {messages.TooManyInFlight, "{seconds}"},
+		"rate_limited": {messages.RateLimited, "{seconds}"}, "auth_throttled": {messages.AuthThrottled, "{seconds}"},
 		"asset_name_invalid": {messages.AssetNameInvalid, "{max}"},
 		"upload_too_large":   {messages.UploadTooLarge, "{max}"}, "upload_type_not_allowed": {messages.UploadTypeNotAllowed, "{types}"},
 	} {

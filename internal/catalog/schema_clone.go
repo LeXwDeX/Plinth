@@ -40,6 +40,10 @@ func cloneAccessKeys(source *AccessKeysSchema) *AccessKeysSchema {
 	}
 	result := *source
 	result.Scopes = append([]ValueLabel(nil), source.Scopes...)
+	if source.RateLimit != nil {
+		limit := *source.RateLimit
+		result.RateLimit = &limit
+	}
 	return &result
 }
 
