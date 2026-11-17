@@ -24,7 +24,7 @@ type parityPayload struct {
 	} `json:"usage_check"`
 }
 
-func checkParity(t *testing.T, result chat.ToolResult, checked inspection, size int64) {
+func checkParity(t *testing.T, result chat.ToolResult, checked Inspection, size int64) {
 	t.Helper()
 	if result.Error != "" {
 		t.Fatalf("platform result = %+v", result)

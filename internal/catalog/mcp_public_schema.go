@@ -19,6 +19,10 @@ const (
 	// MCPToolInspectModel reads one saved model the way the platform's
 	// inspect_model tool does; it writes no self-check evidence.
 	MCPToolInspectModel = "inspect_model"
+	// MCPToolInspectImage reads one picture the way the platform's
+	// inspect_image tool does; it writes no self-check evidence and takes no
+	// round.
+	MCPToolInspectImage = "inspect_image"
 	// The tools that start work (scope generate). upload_image only stores a
 	// picture; the others create a Task through the generation kernel.
 	MCPToolUploadImage      = "upload_image"
@@ -33,6 +37,7 @@ func MCPPublicToolNames() []string {
 	return []string{
 		MCPToolListServices, MCPToolGetStatus, MCPToolGetTask, MCPToolListTasks, MCPToolGetTaskAssets,
 		MCPToolInspectModel,
+		MCPToolInspectImage,
 		MCPToolUploadImage, MCPToolGenerateImage, MCPToolRemoveBackground, MCPToolCreateModel, MCPToolProcessModel,
 	}
 }
@@ -97,6 +102,10 @@ type MCPPublicSchema struct {
 	// list_tasks.
 	ListPageSize    int `json:"list_page_size"`
 	ListMaxPageSize int `json:"list_max_page_size"`
+	// InspectImage bounds the picture inspect_image decodes (#332 step 7b).
+	// MaxPixels is the pixel cap of one MCP inspection; it must stay within
+	// chat.image_review.limits.max_pixels, which remains the hard cap.
+	InspectImage MCPPublicInspectImage `json:"inspect_image"`
 	// ServiceGroups groups the capabilities list_services shows. A capability
 	// outside every group is not offered through the service.
 	ServiceGroups []MCPPublicServiceGroup `json:"service_groups"`
@@ -149,6 +158,13 @@ type MCPPublicUpload struct {
 	// the bytes, never taken from the caller.
 	MediaTypes        []string `json:"media_types"`
 	FilenameMaxLength int      `json:"filename_max_length"`
+}
+
+// MCPPublicInspectImage is the bound of inspect_image (#332 step 7b): one
+// picture may be decoded up to MaxPixels in total; anything larger is refused
+// with image_too_large instead of spending the listener's memory on it.
+type MCPPublicInspectImage struct {
+	MaxPixels int64 `json:"max_pixels"`
 }
 
 // MCPPublicAudit names how a Task or a picture the external service made is
@@ -271,6 +287,15 @@ type MCPPublicMessages struct {
 	// inspector assembled. The other refusals of the inspection are worded by
 	// the platform's own inspect_model texts (chat.model_review).
 	ModelUnavailable string `json:"model_unavailable"`
+	// The answers of inspect_image (#332 step 7b). ImageTooLarge carries
+	// {bytes} and {pixels}; ImageBusy carries {seconds}. AssetNotImage words a
+	// Task output that exists but is not a saved picture.
+	ImageNotReady    string `json:"image_not_ready"`
+	ImageUnreadable  string `json:"image_unreadable"`
+	ImageTooLarge    string `json:"image_too_large"`
+	ImageUnavailable string `json:"image_unavailable"`
+	ImageBusy        string `json:"image_busy"`
+	AssetNotImage    string `json:"asset_not_image"`
 }
 
 // ToolOutputSchema is the output schema a tool is served with: its own result

@@ -126,6 +126,25 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		}
 		break
 	}
+	// inspect_image narrows the platform picture inspection's limits (#332 step
+	// 7b): the byte cap is the platform's own, and the MCP pixel cap must stay
+	// within it.
+	for _, tool := range service.Tools {
+		if tool.Name != MCPToolInspectImage {
+			continue
+		}
+		limits := schema.Chat.ImageReview.Limits
+		if limits.MaxBytes <= 0 || limits.MaxPixels <= 0 {
+			return errors.New("application.mcp_public 声明了 inspect_image，需要 chat.image_review.limits 的 max_bytes 与 max_pixels 为正数")
+		}
+		if service.InspectImage.MaxPixels < 1 || service.InspectImage.MaxPixels > limits.MaxPixels {
+			return errors.New("mcp_public.inspect_image.max_pixels 必须为正数，且不超过 chat.image_review.limits.max_pixels")
+		}
+		if err := validateMCPInspectImageChecklist(schema.Chat, tool); err != nil {
+			return err
+		}
+		break
+	}
 	messages := service.Messages
 	for name, text := range map[string]string{
 		"unauthenticated": messages.Unauthenticated, "insufficient_scope": messages.InsufficientScope,
@@ -144,6 +163,9 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"too_many_in_flight": messages.TooManyInFlight, "upload_too_large": messages.UploadTooLarge,
 		"upload_invalid": messages.UploadInvalid, "upload_type_not_allowed": messages.UploadTypeNotAllowed,
 		"signed_download_unavailable": messages.SignedDownloadUnavailable, "model_unavailable": messages.ModelUnavailable,
+		"image_not_ready": messages.ImageNotReady, "image_unreadable": messages.ImageUnreadable,
+		"image_too_large": messages.ImageTooLarge, "image_unavailable": messages.ImageUnavailable,
+		"image_busy": messages.ImageBusy, "asset_not_image": messages.AssetNotImage,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("mcp_public.messages.%s 不能为空", name)
@@ -161,6 +183,51 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	} {
 		if !strings.Contains(check.text, check.holder) {
 			return fmt.Errorf("mcp_public.messages.%s 必须含 %s", name, check.holder)
+		}
+	}
+	if !strings.Contains(messages.ImageTooLarge, "{bytes}") || !strings.Contains(messages.ImageTooLarge, "{pixels}") {
+		return errors.New("mcp_public.messages.image_too_large 必须含 {bytes} 与 {pixels}")
+	}
+	if !strings.Contains(messages.ImageBusy, "{seconds}") {
+		return errors.New("mcp_public.messages.image_busy 必须含 {seconds}")
+	}
+	return nil
+}
+
+// mcpImageChecklists are the checklist names inspect_image serves, in the
+// platform tool's order. The MCP declaration must offer exactly these.
+var mcpImageChecklists = []string{"delivery", "3d_input"}
+
+// validateMCPInspectImageChecklist keeps the MCP inspect_image checklist enum
+// equal to the platform tool's (#332 step 7b): the handler trusts the enum the
+// Schema serves, and the platform tool remains the one vocabulary.
+func validateMCPInspectImageChecklist(chat ChatSchema, tool MCPPublicTool) error {
+	input, err := toolschema.Parse(tool.InputSchema, mcpArgumentOptions)
+	if err != nil {
+		return fmt.Errorf("mcp_public.tools[%s].input_schema 无效: %w", tool.Name, err)
+	}
+	property, declared := input.Properties["checklist"]
+	if !declared || len(property.Enum) != len(mcpImageChecklists) {
+		return fmt.Errorf("mcp_public.tools[%s].input_schema 的 checklist 必须用 enum 列出 %s", tool.Name, strings.Join(mcpImageChecklists, "、"))
+	}
+	for index, value := range property.Enum {
+		if value != mcpImageChecklists[index] {
+			return fmt.Errorf("mcp_public.tools[%s].input_schema 的 checklist enum 必须是 %s", tool.Name, strings.Join(mcpImageChecklists, "、"))
+		}
+	}
+	parameters, found := declaredToolParameters(chat, tool.Name)
+	if !found {
+		return fmt.Errorf("chat.agent_tools 缺少 %s 的声明，无法核对 inspect_image 的 checklist", tool.Name)
+	}
+	properties, _ := parameters["properties"].(map[string]any)
+	platform, _ := properties["checklist"].(map[string]any)
+	values, _ := platform["enum"].([]any)
+	if len(values) != len(mcpImageChecklists) {
+		return fmt.Errorf("%s 的 checklist enum 必须是 %s", tool.Name, strings.Join(mcpImageChecklists, "、"))
+	}
+	for index, value := range values {
+		if value != mcpImageChecklists[index] {
+			return fmt.Errorf("%s 的 checklist enum 必须是 %s", tool.Name, strings.Join(mcpImageChecklists, "、"))
 		}
 	}
 	return nil

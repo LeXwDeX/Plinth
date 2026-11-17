@@ -376,17 +376,32 @@ func (service *Service) read(ctx context.Context, owner string, picture chat.Res
 }
 
 func readLimited(reader io.Reader, limit int64) ([]byte, error) {
-	if limit <= 0 {
-		return io.ReadAll(reader)
-	}
-	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	data, tooLarge, err := readLimitedWithin(reader, limit)
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > limit {
+	if tooLarge {
 		return nil, fmt.Errorf("picture is over the %d-byte limit", limit)
 	}
 	return data, nil
+}
+
+// readLimitedWithin is readLimited that reports the limit refusal separately,
+// so the read-only MCP entry can classify it without matching the message
+// (#332 7b-2). The bytes and the cap semantics are the same.
+func readLimitedWithin(reader io.Reader, limit int64) ([]byte, bool, error) {
+	if limit <= 0 {
+		data, err := io.ReadAll(reader)
+		return data, false, err
+	}
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return nil, true, nil
+	}
+	return data, false, nil
 }
 
 // unreadable is the Schema refusal naming a picture that cannot be decoded.

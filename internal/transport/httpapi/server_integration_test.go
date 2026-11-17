@@ -43,6 +43,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/chat/imagereview"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -1799,11 +1800,33 @@ func newHTTPHarnessWithCatalogAndProviders(
 	accountSettingsService := harnessAccountSettings(t, repository, applicationSchema)
 	accessKeysService := harnessAccessKeys(t, repository, applicationSchema)
 	mcpParts := harnessMCP(t, repository, applicationSchema, accountSettingsService, accessKeysService, accessPolicy, providerAccountService, chatService)
+	// The external MCP listener shares the platform inspect_image core, as the
+	// application does (#332 step 7b).
+	imageReview, err := imagereview.New(imagereview.Config{
+		Context: applicationSchema.Chat.Context,
+		Review:  applicationSchema.Chat.ImageReview,
+		Inputs:  inputs,
+		Tasks:   module,
+		Usage:   applicationSchema.Chat.Image2DUsage,
+		Brief:   applicationSchema.Chat.Model3DUsage.Brief,
+		Offerings: func(id string) (generation.Offering, bool) {
+			offering, found := taskCatalog.Get(generation.OfferingID(id))
+			if !found || !module.OfferingAvailable(offering.ID) {
+				return generation.Offering{}, false
+			}
+			return offering, true
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	api, err := httpapi.New(httpapi.Config{
 		MCPIdentity:                       mcpParts.identity,
 		MCPStatus:                         mcpParts.status,
 		MCPAssets:                         mcpParts.assets,
 		ModelInspector:                    mcpParts.inspector,
+		ImageInspector:                    imageReview,
+		PictureAssets:                     repository,
 		Harness:                           harnessResolver,
 		Retry:                             retryService,
 		Reroll:                            rerollService,
