@@ -94,27 +94,30 @@ func (e *ErrActiveWorking) Is(target error) bool {
 // PlannedStepCount and PlannedModel3DStepCount are plan values summed over the
 // items; the actual step accounting stays in #328's execution grant.
 type List struct {
-	ID                      string          `json:"id"`
-	RequestKey              string          `json:"request_key,omitempty"`
-	OwnerID                 string          `json:"owner_id"`
-	ProjectID               string          `json:"project_id"`
-	SourceSessionID         string          `json:"source_session_id,omitempty"`
-	OriginMessageID         string          `json:"origin_message_id,omitempty"`
-	Title                   string          `json:"title"`
-	Status                  string          `json:"status"`
-	Brief                   json.RawMessage `json:"brief"`
-	Version                 int64           `json:"version"`
-	DecidedAt               *time.Time      `json:"decided_at,omitempty"`
-	DecidedBy               string          `json:"decided_by,omitempty"`
-	DecisionReason          string          `json:"decision_reason,omitempty"`
-	SupersededBy            string          `json:"superseded_by,omitempty"`
-	ExpiresAt               time.Time       `json:"expires_at"`
-	CreatedAt               time.Time       `json:"created_at"`
-	UpdatedAt               time.Time       `json:"updated_at"`
-	EffectiveStatus         string          `json:"effective_status,omitempty"`
-	Items                   []Item          `json:"items,omitempty"`
-	PlannedStepCount        int             `json:"planned_step_count"`
-	PlannedModel3DStepCount int             `json:"planned_model3d_step_count"`
+	ID              string          `json:"id"`
+	RequestKey      string          `json:"request_key,omitempty"`
+	OwnerID         string          `json:"owner_id"`
+	ProjectID       string          `json:"project_id"`
+	SourceSessionID string          `json:"source_session_id,omitempty"`
+	OriginMessageID string          `json:"origin_message_id,omitempty"`
+	Title           string          `json:"title"`
+	Status          string          `json:"status"`
+	Brief           json.RawMessage `json:"brief"`
+	Version         int64           `json:"version"`
+	DecidedAt       *time.Time      `json:"decided_at,omitempty"`
+	DecidedBy       string          `json:"decided_by,omitempty"`
+	DecisionReason  string          `json:"decision_reason,omitempty"`
+	SupersededBy    string          `json:"superseded_by,omitempty"`
+	ExpiresAt       time.Time       `json:"expires_at"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	EffectiveStatus string          `json:"effective_status,omitempty"`
+	// ItemCount is the number of items; summaries carry it without loading the
+	// items themselves.
+	ItemCount               int    `json:"item_count"`
+	Items                   []Item `json:"items,omitempty"`
+	PlannedStepCount        int    `json:"planned_step_count"`
+	PlannedModel3DStepCount int    `json:"planned_model3d_step_count"`
 }
 
 // Item is one asset of a list. Route is the snapshot taken at proposal time:
@@ -188,6 +191,10 @@ type EditInput struct {
 	Title           string          `json:"title"`
 	Items           []ItemInput     `json:"items"`
 	Brief           json.RawMessage `json:"brief,omitempty"`
+	// SessionID is the proposal session the edit resolves the availability of
+	// its steps against. It is not part of the wire contract: the transport
+	// layer reads it from the list's source_session_id.
+	SessionID string `json:"-"`
 }
 
 // DecideInput is one person's confirm, reject or replace answer. Reason is

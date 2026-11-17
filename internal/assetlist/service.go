@@ -40,6 +40,10 @@ type Config struct {
 	// without runtime offerings use. An error marks the step unavailable with
 	// the error text as its reason; it never blocks the proposal.
 	ResolveStep func(capability string) (RouteStep, error)
+	// ResolveStepFor resolves one capability for a known owner and session and
+	// takes precedence over ResolveStep. The session is the list's proposal
+	// session: its explicit model picks shape the offering the step snapshots.
+	ResolveStepFor func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
 	// ValidateBrief checks the shared production brief against
 	// chat.model3d_usage.brief.fields. nil only checks that it is JSON.
 	ValidateBrief func(json.RawMessage) error
@@ -57,6 +61,7 @@ type Service struct {
 	routes             map[string]catalog.AssetListRouteSchema
 	counted            map[generation.Capability]bool
 	resolveStep        func(capability string) (RouteStep, error)
+	resolveStepFor     func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
 	validateBrief      func(json.RawMessage) error
 	clock              func() time.Time
 	newID              func(prefix string) (string, error)
@@ -117,6 +122,7 @@ func New(config Config) (*Service, error) {
 		routes:             routes,
 		counted:            counted,
 		resolveStep:        config.ResolveStep,
+		resolveStepFor:     config.ResolveStepFor,
 		validateBrief:      config.ValidateBrief,
 		clock:              clock,
 		newID:              newID,
@@ -175,7 +181,7 @@ func (service *Service) Propose(ctx context.Context, input ProposeInput) (List, 
 		return List{}, err
 	}
 	now := service.clock()
-	items, err := service.buildItems(ownerID, input.Items, now)
+	items, err := service.buildItems(ctx, ownerID, sessionID, input.Items, now)
 	if err != nil {
 		return List{}, err
 	}
@@ -228,7 +234,7 @@ func (service *Service) Edit(ctx context.Context, input EditInput) (List, error)
 		return List{}, err
 	}
 	now := service.clock()
-	items, err := service.buildItems(ownerID, input.Items, now)
+	items, err := service.buildItems(ctx, ownerID, strings.TrimSpace(input.SessionID), input.Items, now)
 	if err != nil {
 		return List{}, err
 	}
@@ -316,14 +322,56 @@ func (service *Service) List(ctx context.Context, ownerID, projectID string) ([]
 	return lists, nil
 }
 
+// ProjectExists reports whether the owner has the project. The transport layer
+// uses it to answer a missing project with 404 instead of an empty list.
+func (service *Service) ProjectExists(ctx context.Context, ownerID, projectID string) (bool, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	projectID = strings.TrimSpace(projectID)
+	if ownerID == "" || projectID == "" {
+		return false, nil
+	}
+	return service.repository.ProjectExists(ctx, ownerID, projectID)
+}
+
+// ListSession reads the lists one session proposed as summaries. The session
+// must be the owner's; a session outside a project has no lists.
+func (service *Service) ListSession(ctx context.Context, ownerID, sessionID string) ([]List, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	sessionID = strings.TrimSpace(sessionID)
+	if ownerID == "" || sessionID == "" {
+		return nil, ErrNotFound
+	}
+	projectID, err := service.repository.SessionProject(ctx, ownerID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if projectID == "" {
+		return nil, nil
+	}
+	lists, err := service.repository.ListLists(ctx, ownerID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]List, 0, len(lists))
+	for _, list := range lists {
+		if list.SourceSessionID != sessionID {
+			continue
+		}
+		result = append(result, service.decorate(list))
+	}
+	return result, nil
+}
+
 // decorate derives the read-time effective status and, when the items are
-// loaded, the plan totals. A draft at exactly its expiry instant is expired.
+// loaded, the item count and plan totals. A draft at exactly its expiry
+// instant is expired.
 func (service *Service) decorate(list List) List {
 	list.EffectiveStatus = list.Status
 	if list.Status == StatusDraft && !list.ExpiresAt.IsZero() && !service.clock().Before(list.ExpiresAt) {
 		list.EffectiveStatus = StatusExpired
 	}
 	if list.Items != nil {
+		list.ItemCount = len(list.Items)
 		steps, model3dSteps := 0, 0
 		for _, item := range list.Items {
 			steps += item.PlannedStepCount
@@ -365,7 +413,7 @@ func (service *Service) brief(raw json.RawMessage) (json.RawMessage, error) {
 // project's item bound, unique names (trimmed, case-insensitive), kinds and
 // routes from the Schema, the per-item reference bound and shape, and the
 // availability snapshot of every route step.
-func (service *Service) buildItems(ownerID string, inputs []ItemInput, now time.Time) ([]Item, error) {
+func (service *Service) buildItems(ctx context.Context, ownerID, sessionID string, inputs []ItemInput, now time.Time) ([]Item, error) {
 	if len(inputs) == 0 {
 		return nil, fmt.Errorf("%w: at least one item is required", ErrInvalid)
 	}
@@ -416,7 +464,16 @@ func (service *Service) buildItems(ownerID string, inputs []ItemInput, now time.
 		for _, step := range route.Steps {
 			capability := string(step.Capability)
 			resolved := RouteStep{Capability: capability, Available: true}
-			if service.resolveStep != nil {
+			switch {
+			case service.resolveStepFor != nil && sessionID != "":
+				if value, err := service.resolveStepFor(ctx, ownerID, sessionID, capability); err != nil {
+					resolved.Available = false
+					resolved.Reason = err.Error()
+				} else {
+					resolved = value
+					resolved.Capability = capability
+				}
+			case service.resolveStep != nil:
 				if value, err := service.resolveStep(capability); err != nil {
 					resolved.Available = false
 					resolved.Reason = err.Error()
