@@ -26,7 +26,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		t.Fatal(err)
 	}
 	for path, keys := range map[string][]string{
-		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization", "project", "step_policy"},
+		"":             {"revision", "runtime", "content", "chat", "canvas", "task_history", "task_stream", "administration", "agent_configuration", "llm_settings", "capabilities", "task_states", "audit_actions", "delivery_formats", "authentication", "localization", "project", "step_policy", "access_keys"},
 		"llm_settings": {"routes", "ui"},
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
 		// #80: the composer's capacity text and the result limit pair.
@@ -61,9 +61,13 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// #330: the browser sees the modes with their labels, the defaults and
 		// the cap range; the counted capabilities, the Agent-facing message and
 		// the audit declaration stay server-side.
-		"step_policy":                       {"modes", "default_mode", "cap"},
-		"step_policy.default_mode":          {"list", "mcp"},
-		"step_policy.cap":                   {"default", "minimum", "maximum"},
+		"step_policy":              {"modes", "default_mode", "cap"},
+		"step_policy.default_mode": {"list", "mcp"},
+		"step_policy.cap":          {"default", "minimum", "maximum"},
+		// #332: the browser builds the access key dialog from the limits,
+		// lifetimes and scope labels; the last-use interval, the server's
+		// messages and the audit declaration stay server-side.
+		"access_keys":                       {"key_prefix", "max_keys_per_user", "default_ttl_days", "max_ttl_days", "name_max_length", "scopes"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},
 		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets"},

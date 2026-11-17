@@ -71,6 +71,9 @@ type Grant struct {
 	// BudgetEligible reports whether this Agent step may be approved by an
 	// active production plan instead of a per-step human decision (#103).
 	BudgetEligible bool
+	// AccessKeyID is the personal access key whose call asked for the grant
+	// (#332). It is set exactly when Source is AccessKey.
+	AccessKeyID    string
 	RequestVersion int64
 	DecidedBy      string
 	DecidedAt      *time.Time

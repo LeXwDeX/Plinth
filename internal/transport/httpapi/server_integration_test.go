@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/adapters/catalogrecipes"
 	"github.com/LeXwDeX/Plinth/internal/adapters/legacygeneration"
@@ -1774,6 +1775,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		t.Fatal(err)
 	}
 	accountSettingsService := harnessAccountSettings(t, repository, applicationSchema)
+	accessKeysService := harnessAccessKeys(t, repository, applicationSchema)
 	api, err := httpapi.New(httpapi.Config{
 		Harness:                           harnessResolver,
 		Retry:                             retryService,
@@ -1784,6 +1786,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Processing:                        processingPlans,
 		AccountInputAssets:                repository,
 		AccountSettings:                   accountSettingsService,
+		AccessKeys:                        accessKeysService,
 		ExecutionGrants:                   executionGrants,
 		AgentOperations:                   repository,
 		PendingApprovals:                  pendingApprovals,
@@ -1938,6 +1941,20 @@ func readBody(t *testing.T, response *http.Response) []byte {
 
 // harnessApprovalPolicy mirrors the production conversion from the Product
 // Schema so HTTP tests exercise the same policy as the application.
+// harnessAccessKeys builds the personal access key service the way the
+// application assembly does: nil for a Catalog without application.access_keys.
+func harnessAccessKeys(t *testing.T, repository *sqlite.Repository, application catalog.ApplicationSchema) *accesskeys.Service {
+	t.Helper()
+	if application.AccessKeys == nil {
+		return nil
+	}
+	service, err := accesskeys.New(repository, accesskeys.ConfigFromSchema(*application.AccessKeys, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
 // harnessAccountSettings builds the person's settings service the way the
 // application assembly does: nil for a Catalog without a step policy.
 func harnessAccountSettings(t *testing.T, repository *sqlite.Repository, application catalog.ApplicationSchema) *accountsettings.Service {

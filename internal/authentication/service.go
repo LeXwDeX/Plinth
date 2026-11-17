@@ -263,12 +263,18 @@ func (s *Service) Identify(request *http.Request) (access.Principal, error) {
 				s.schema.AdminRole,
 			)
 		}
+		// A user without a session cookie is the non-production mock user: a
+		// development convenience, not a signed-in browser.
+		kind := access.CredentialDevelopment
+		if hasSessionCookie {
+			kind = access.CredentialBrowserSession
+		}
 		return s.policy.Principal(access.Claims{
 			ID:    user.ID,
 			Name:  user.Name,
 			Email: user.Email,
 			Roles: roles,
-		}), nil
+		}).WithCredential(access.Credential{Kind: kind}), nil
 	}
 	// A present session cookie is an explicit authentication attempt. If it is
 	// expired, revoked, deleted or otherwise invalid, never silently replace it

@@ -25,8 +25,18 @@ var _ executiongrant.StepGrantStore = (*Repository)(nil)
 // the cap and otherwise denies the grant, decided by executiongrant.StepsActor.
 // No Task exists for a denied grant, so nothing is created or charged. Both
 // outcomes are written to the immutable grant audit.
+//
+// The same transaction decides the grants of a personal access key (#332):
+// request.Actor names executiongrant.AccessKeyActor, which settles only grants
+// of source access_key, under the owner's MCP setting. A step that needs a
+// person (request.NeedsPerson) is denied by AccessKeyNeedsPersonActor without
+// reading the capability or the settings.
 func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, requestID string, request executiongrant.StepRequest) (executiongrant.Grant, executiongrant.StepDecision, error) {
-	if owner == "" || requestID == "" || !approvalpolicy.ValidStepEntry(request.Entry) {
+	actor := request.Actor
+	if actor == "" {
+		actor = executiongrant.StepsActor
+	}
+	if owner == "" || requestID == "" || !approvalpolicy.ValidStepEntry(request.Entry) || !validStepActor(actor, request) {
 		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrInvalid
 	}
 	conn, err := r.grantWriteConn(ctx)
@@ -47,14 +57,16 @@ func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, 
 		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
 	}
 	if grant.Status != executiongrant.Pending {
-		// A repeat of a decision this mode already made returns it unchanged
+		// A repeat of a decision this actor already made returns it unchanged
 		// and writes nothing; any other decider's grant is not ours to touch.
-		if grant.DecidedBy == executiongrant.StepsActor {
+		if grant.DecidedBy == actor || (actor == executiongrant.AccessKeyActor && grant.DecidedBy == executiongrant.AccessKeyNeedsPersonActor) {
 			var decision executiongrant.StepDecision
-			switch grant.Status {
-			case executiongrant.Approved, executiongrant.Claimed, executiongrant.Bound:
+			switch {
+			case grant.Status == executiongrant.Approved || grant.Status == executiongrant.Claimed || grant.Status == executiongrant.Bound:
 				decision.Approved = true
-			case executiongrant.Denied:
+			case grant.Status == executiongrant.Denied && grant.DecidedBy == executiongrant.AccessKeyNeedsPersonActor:
+				decision.NeedsPerson = true
+			case grant.Status == executiongrant.Denied:
 				if decision.Summary, err = stepSummaryOnConn(ctx, conn, owner, grant.SessionID, request); err != nil {
 					return executiongrant.Grant{}, executiongrant.StepDecision{}, err
 				}
@@ -69,22 +81,25 @@ func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, 
 		}
 		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrState
 	}
-	if grant.OwnerID != owner ||
-		(grant.Source != executiongrant.AgentPending && grant.Source != executiongrant.HumanBrowser) {
+	if grant.OwnerID != owner || !stepActorSettles(actor, grant.Source) {
 		return executiongrant.Grant{}, executiongrant.StepDecision{}, executiongrant.ErrConflict
 	}
-	capability, err := grantCapabilityOnConn(ctx, conn, grant)
-	if err != nil {
-		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
-	}
 	var decision executiongrant.StepDecision
-	approve := true
-	if request.Steps.Counts(capability) {
-		decision.Summary, err = stepSummaryOnConn(ctx, conn, owner, grant.SessionID, request)
+	approve, decidedBy := true, actor
+	if request.NeedsPerson {
+		approve, decidedBy, decision.NeedsPerson = false, executiongrant.AccessKeyNeedsPersonActor, true
+	} else {
+		capability, err := grantCapabilityOnConn(ctx, conn, grant)
 		if err != nil {
 			return executiongrant.Grant{}, executiongrant.StepDecision{}, err
 		}
-		approve = decision.Summary.Mode != approvalpolicy.StepModeCap || decision.Summary.Used < decision.Summary.Cap
+		if request.Steps.Counts(capability) {
+			decision.Summary, err = stepSummaryOnConn(ctx, conn, owner, grant.SessionID, request)
+			if err != nil {
+				return executiongrant.Grant{}, executiongrant.StepDecision{}, err
+			}
+			approve = decision.Summary.Mode != approvalpolicy.StepModeCap || decision.Summary.Used < decision.Summary.Cap
+		}
 	}
 	decision.Approved = approve
 	status, event := executiongrant.Denied, "denied"
@@ -94,7 +109,7 @@ func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, 
 	stamp := formatTime(time.Now().UTC())
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants SET status = ?, decided_by = ?, decided_at = ?, updated_at = ?
  WHERE request_id = ? AND owner_id = ? AND status = 'pending'`,
-		string(status), executiongrant.StepsActor, stamp, stamp, requestID, owner)
+		string(status), decidedBy, stamp, stamp, requestID, owner)
 	if err != nil {
 		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
 	}
@@ -110,7 +125,7 @@ func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, 
 	if _, err := conn.ExecContext(ctx, `INSERT INTO execution_grant_audit
  (request_id, owner_id, request_version, event, actor_id, identity_json, occurred_at)
  VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		requestID, owner, grant.RequestVersion, event, executiongrant.StepsActor, string(identityJSON), stamp); err != nil {
+		requestID, owner, grant.RequestVersion, event, decidedBy, string(identityJSON), stamp); err != nil {
 		return executiongrant.Grant{}, executiongrant.StepDecision{}, err
 	}
 	decided, err := grantByRequest(ctx, conn, owner, requestID)
@@ -122,6 +137,29 @@ func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, 
 	}
 	committed = true
 	return decided, decision, nil
+}
+
+// validStepActor accepts the two deciders of this transaction and the options
+// that belong to each: the access key's actor decides under the MCP entry only
+// and alone may carry NeedsPerson.
+func validStepActor(actor string, request executiongrant.StepRequest) bool {
+	switch actor {
+	case executiongrant.StepsActor:
+		return !request.NeedsPerson
+	case executiongrant.AccessKeyActor:
+		return request.Entry == approvalpolicy.StepEntryMCP
+	}
+	return false
+}
+
+// stepActorSettles reports whether the actor may decide a grant of the source:
+// the steps mode the Agent and browser grants of a session, the access key's
+// policy only the grants of an access key.
+func stepActorSettles(actor, source string) bool {
+	if actor == executiongrant.AccessKeyActor {
+		return source == executiongrant.AccessKey
+	}
+	return source == executiongrant.AgentPending || source == executiongrant.HumanBrowser
 }
 
 // StepUsage reads the asset's 3D step standing under the owner's setting of

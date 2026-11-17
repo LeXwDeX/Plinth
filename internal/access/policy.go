@@ -25,6 +25,7 @@ type Principal struct {
 	Claims      Claims
 	permissions map[Permission]struct{}
 	admin       bool
+	credential  Credential
 }
 
 func (p Principal) ID() string {

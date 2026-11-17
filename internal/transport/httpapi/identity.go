@@ -31,7 +31,7 @@ func (d DevelopmentIdentity) Identify(request *http.Request) (access.Principal, 
 	if strings.TrimSpace(claims.ID) == "" {
 		return access.Principal{}, errUnauthenticated
 	}
-	return d.Policy.Principal(claims), nil
+	return d.Policy.Principal(claims).WithCredential(access.Credential{Kind: access.CredentialDevelopment}), nil
 }
 
 type BearerIdentity struct {
@@ -75,7 +75,8 @@ func (b *BearerIdentity) Identify(request *http.Request) (access.Principal, erro
 	for _, candidate := range b.tokens {
 		if len(provided) == len(candidate.token) &&
 			subtle.ConstantTimeCompare([]byte(provided), []byte(candidate.token)) == 1 {
-			return b.policy.Principal(candidate.claims), nil
+			return b.policy.Principal(candidate.claims).
+				WithCredential(access.Credential{Kind: access.CredentialDeploymentToken}), nil
 		}
 	}
 	return access.Principal{}, errUnauthenticated

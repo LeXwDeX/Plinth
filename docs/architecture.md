@@ -260,7 +260,8 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `cmd/art-ai` / `internal/app` | 进程入口、配置读取、装配、启动/关闭；按协议创建端口，组合声明与运行可用性 |
 | `internal/schema` | 共享合同、类型和算法不变量；不依赖执行模块 |
 | `internal/catalog` | 严格加载唯一产品真源、归一化输入、校验各域、深克隆及公开投影 |
-| `internal/access` / `authentication` | Principal、权限、账号密码登录、Cookie；API 再核 owner 与 CSRF |
+| `internal/access` / `authentication` | Principal、权限、凭据种类（浏览器会话 / 部署令牌 / 开发身份 / 访问 Key）、账号密码登录、Cookie；API 再核 owner 与 CSRF |
+| `internal/accesskeys` | 个人访问 Key（#332）：签发、列表、吊销、认证与最近使用时间；只存摘要，Key 永远只代表本人的所有者范围；主 HTTP 服务不用它认证，只有管理路由用它管理 Key |
 | `internal/harness` / `harness/resolve` | 版本化会话功能选择、只读解析与合法前置方案；解析 Catalog、运行可用性、本人本会话 Task 来源及本人原生上传来源，不创建或推进 Task |
 | `internal/agents` | LLM 对话协议与模型调用端口，不管理生成 Task |
 | `internal/agentscope` | Agent 范围（2D / 3D / 自动）的纯策略：`Policy` 把“范围 × 工具类别（`2d`/`3d`/`cross`/`utility`）”解释为允许与否，类别未知或为空按 `cross`（只在自动模式出现），范围未知回到 Schema 默认；从 Schema `chat.agent_scope` 构造，不读写状态；dev-test 已验收（`3a19cc3`） |
@@ -288,6 +289,16 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/adapters/mcphttp` / `mcpworkspace` / `mcpagent` | MCP JSON-RPC 传输 / 当前会话公开 Offering、Task、Asset 读取 / 对话工具执行组合 |
 | `internal/transport` / `routing` | HTTP/SSE、明确 DTO、路由模板与静态 SPA；处理协议与访问边界，不推进业务状态 |
 | `internal/etl` / 迁移命令 | 受控历史迁移，独立于普通运行和测试栈发布 |
+
+### 凭据种类与个人访问 Key（#332 第 1–2 步；源码已实现，本机 Go 测试覆盖，未部署验收；界面入口、独立 MCP 监听与工具尚未接入）
+
+- **凭据种类。** `access.Principal` 带一个明确的凭据种类（`access.Credential`）：`browser_session`（已登录的浏览器 Cookie）、`deployment_token`（`auth_mode=bearer` 的部署级静态令牌）、`development`（开发身份，以及非生产环境不带 Cookie 的 mock 用户）、`access_key`（个人访问 Key）；没有经过身份解析器构造的 Principal（测试等）种类为空，任何代码都不得把它当作真人。此前“是不是真人”由各路由自己看请求头判断，`taskHumanPrincipal`（真实 Cookie 且不带 `Authorization` 头）仍是需要真人的路由的判据，种类字段是额外的明确事实，不替代它。种类由 `authentication.Service.Identify`、`BearerIdentity`、`DevelopmentIdentity` 在构造 Principal 处设置。
+- **Key 的形态与存储。** `plk_<id>_<secret>`：`plk` 是 Schema 的 `key_prefix`；`id` 是 80 位随机数的小写 base32（16 字符，公开，库按它定位）；`secret` 是 256 位 `crypto/rand` 随机数的小写 base32（52 字符）。表 `access_keys`（迁移 0096）只存整把 Key 的 SHA-256（十六进制），明文只在创建响应里出现一次，库、日志和审计里都没有；`prefix` 列是 `plk_<id>`，不含任何密钥位，用于在列表里识别 Key。吊销只写 `revoked_at`，不删行。认证先按 `id` 取行，再对整把 Key 的摘要做常量时间比较；Key 格式不对、不存在、不匹配、已吊销、已过期都返回同一个 `ErrUnauthorized`，调用方分不出是哪一种（不存在时也比较一个占位摘要）。查库失败是另一类错误，不当作“Key 无效”。
+- **有效期、数量与最近使用。** Key 一定会过期：默认 `default_ttl_days`，请求可要求不超过 `max_ttl_days` 的天数。每个用户同时有效（未吊销、未过期）的 Key 不超过 `max_keys_per_user`，计数与插入在同一个 `BEGIN IMMEDIATE` 事务里（过期按解析后的时间比较，不比较 RFC3339Nano 文本）；吊销或过期会把名额还回去。认证成功后按 `last_used_update_seconds` 节流（同一把 Key 每个间隔至多写一次）、异步地更新 `last_used_at`；写失败只记不含 Key 的警告，不影响认证。
+- **管理路由。** `runtime.http.routes.account_access_keys`（`GET` 列表、`POST` 创建）与 `account_access_key`（`DELETE …/{id}` 吊销），只在 Catalog 声明 `application.access_keys` 和这两条路由、且装配了服务时才注册。三个方法都要真实的浏览器会话（`taskHumanPrincipal`）：带 `Authorization` 头的请求、开发身份、部署令牌都是 403，所以 Key 永远不能管理 Key。列表只给 `id`、`name`、`prefix`、`scopes`、各时间和 `active`，没有摘要。创建返回 201，body 是记录加一次性的 `key`；超过数量上限返回 409（`access_key_limit`，文案取自 Schema 并按请求语言翻译）；吊销返回 204，重复吊销与第一次一样 204，只有真实变更写审计；别人的或不存在的 Key 一律 404。创建与吊销写产品审计（Schema `access_keys.audit` 的 `create_action` / `revoke_action`），Detail 只有名称、前缀、范围和到期时间。
+- **Schema。** 可选段 `application.access_keys`：`key_prefix`、`max_keys_per_user`、`default_ttl_days`、`max_ttl_days`、`name_max_length`、带标签的 `scopes`（`read` 查询与下载、`generate` 发起生成与加工，取值是代码固定的词表，标签与英文覆盖由 Schema 提供）、`last_used_update_seconds`、`messages`、`audit`；缺省时整段不存在、路由不注册、不能签发 Key。公开投影只含前缀、数量上限、有效期、名称长度和范围标签；间隔、文案与审计声明只在服务端。
+- **主服务不接受 Key。** 这一步里主 HTTP 服务的任何路由都不用 Key 认证：`Authorization: Bearer plk_…` 到现有路由与未知令牌一样被拒（401），Key 与会话 Cookie 同时出现时由 Cookie 决定身份，Key 不增加任何权限（回归 `TestAccessKeyIsNotAcceptedByAnyRouteOfTheMainServer`、`TestAccessKeyBesideASessionChangesNothing`）。
+- **给独立监听用的认证器。** `accesskeys.Authenticator`（满足 `httpapi.IdentityResolver`）把 `Authorization: Bearer plk_…` 解析成 Key 持有人的 Principal：凭据种类 `access_key`，带 Key ID 与范围，只有所有者范围——用户的角色不随 Key 走，所以管理员的 Key 也没有管理员权限、读不到别人的数据（`access.Policy.AccessKeyPrincipal` 清掉角色、`admin` 与 `tasks.read.any`）；持有人已删除或停用时 Key 立即失效。它由 `internal/app` 在装配期构造并经 `Application.AccessKeyAuthenticator()` 提供，目前没有任何监听使用它；后续的外部 MCP 监听（art-ai 进程内独立端口，只挂外部 MCP 路由）以它作为身份解析器。
 
 ### ETL 迁移完整性
 
@@ -1113,6 +1124,10 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。**
   - **已用步数的口径。** 一个公开 Task 算一步，不论交付多少产物（拆成 N 个部件仍是一步）。已用 = 该会话里计入清单内能力、且可能已扣费的 Task（沿用 `taskMayBeChargedSQL`：排队、运行、成功，以及上游已完成或提交结果不明的失败或取消任务；确定没扣费的不计）+ 已批准或已认领、还没有 Task 的 Grant（不含触发轮次已被停止、再也认领不了的 Grant）。已绑定的 Grant 只算它的 Task，不重复计。按 owner 与会话隔离，另一个会话或另一个用户的步骤不计入。已批准的 `policy:steps` Grant 若其操作没有产生 Task 就结束（提交被永久拒绝等），`abandonUnboundGrantOnConn` 把它置为 `denied`（`system:budget_abandoned`）并从计数里去掉，否则它会永远占着上限；`executiongrant.Service.AbandonBudgetReservation` 在没有预算存储时改用授权存储自带的释放器。
   - **Agent 工具。** `steps` 下不出批准卡：计入清单内的步骤在上限内按策略批准后正常提交；超出上限时 Grant 当场被拒，工具返回失败结果（`NoSubmission`，不分离、不出卡），文字取自 Schema `step_policy.messages.cap_reached` 并按本轮语言翻译，`{used}`、`{cap}` 填入数字；同一个调用被重放时（Grant 已被这样拒绝）返回同样的步数上限文字，数字按重放时的现状重新读取，不退回通用的“已拒绝”。上限调高之后，Agent 的新调用会得到新的待决 Grant 并正常批准。重复扣费风险（上次尝试已扣费但结果没存下来，#294）仍然不交给策略，照常出批准卡。其余调用 `ApplyPolicy` 的入口（浏览器预备任务、Processing Plan、重试、重抽、SkillRun）在 `steps` 下只会拿到已拒绝的 Grant，不会出卡也不会提交；这些入口目前不会遇到 `steps`。
   - **设置存储与路由。** 表 `account_settings`（迁移 0095）每个用户一行：资产列表与外部 MCP 各有模式和上限，另有乐观并发的 `version`；没有行就是 Schema 默认（`version` 0），模式字符串由 Schema 声明、写入时校验，不加 CHECK。`internal/accountsettings` 校验模式与上限范围并核对版本：上限在任何模式下都要在 Schema 范围内（非 `cap` 模式保留数字，切回时还在）；首次保存期望版本 0，插入版本 1；请求值与当前一致时不写入、不升版本。路由 `runtime.http.routes.account_step_policy`（`/api/v1/account/step-policy`）：GET 读（返回 `version`、`list`、`mcp`、带标签的 `modes` 和 `cap_range`），PUT `{expected_version, list, mcp}` 写，版本不符 409、模式或上限非法 400。PUT 与批准方式切换一样要真实的浏览器登录会话（带 `Authorization` 头的请求不行，外部 MCP 客户端不能给自己调高上限），只在真实变更时写审计（动作 `set_step_policy`，Detail 为 `from`/`to`）。
+- **授权来源 `access_key`（#332 第 2 步，源码已实现，本机 Go 测试覆盖，未部署验收；尚无调用方）。** 个人访问 Key 的调用（外部 MCP 客户端）既不是浏览器里的人，也不是 Agent 轮次，所以有自己的授权来源 `access_key` 和决定者 `policy:access_key`。迁移 0097 重建 `execution_grants`：`source` 的 CHECK 增加 `access_key`，新增 `access_key_id`（来源为 `access_key` 的授权记录发起它的 Key，其余来源为空串；列上的 CHECK 保证二者同进同出），其余每一列、默认值、约束、两个索引原样保留，既有行按原值复制（没有表引用它，也没有触发器或视图依赖它，所以不关外键）。`PrepareCommand` 的来源 `access_key` 必须带 `AccessKeyID`、不带触发轮次、不能预算合格，由可选的数据层接口 `executiongrant.AccessKeyGrantStore.PreparePendingForAccessKey` 签发；同一操作重放时，待决或已拒绝的授权按当前 Key 重新签发（Key 轮换后用同一调用重试），已批准或已消费的不再重新签发，来源不同仍是冲突。
+  - **决定。** 复用 `ApproveExecutionGrantWithSteps` 的同一个事务，用 `StepRequest.Actor`（`policy:access_key`）与入口（固定为 `mcp`）参数化，不另写一份 SQL：决定者只能决定来源 `access_key` 的授权，`steps` 决定者也只能决定 Agent 与浏览器来源的授权，互不越界；计入清单之外的能力（2D、LLM 等）直接批准，不读设置；计入清单内的 3D 能力读该用户的 MCP 设置——`agent`、`unlimited` 批准，`cap` 在该资产（一个会话）已用步数小于上限时批准，否则把授权就地置为 `denied`（`decided_by=policy:access_key`，写审计）。已用步数的口径与 `steps` 相同（一个公开 Task 一步，按 owner 与会话隔离）。入口是 `executiongrant.Service.ApproveForAccessKey`，拒绝以错误连同已拒绝的授权返回：`ErrStepCapReached`（带已用与上限）或 `ErrAccessKeyNeedsPerson`；`AccessKeyStepStatus` 读取资产当前的步数状况，不做决定。
+  - **没有批准卡。** 该来源的授权要么批准、要么当场拒绝，永远不留待决：需要真人才能批准的步骤（上次尝试已扣费但结果没存下来的重复扣费风险 #294、提交可靠性未知等，由调用方判定后以 `AccessKeyStep.NeedsPerson` 传入）以 `policy:access_key:needs_person` 拒绝并写审计，`Grant.AccessKeyNeedsPerson()` 把它和步数上限（`Grant.StepCapReached()`，现也覆盖 `policy:access_key`）、真人的拒绝、停止取消与放弃区分开。真人决定（`Service.Decide`、`DecideExecutionGrant`）和通用策略批准（`ApproveByPolicyDecision`、`ApproveExecutionGrantByPolicy`）都拒绝这个来源，所以没有任何卡或点击能批准它。同一授权重复决定返回同一个结果，不重复写审计；同一资产的并发决定在同一事务里串行，不会越过上限。
+  - **放弃与认领。** 已批准但没有产生 Task 就结束的 `policy:access_key` 授权，与 `policy:steps` 一样由 `abandonUnboundGrantOnConn` 置为 `denied`（`system:budget_abandoned`）并不再占用步数；认领与绑定 Task 沿用现有路径，不区分来源。
 
 #### 轮次结束后仍可批准的 Agent 请求（待批准）
 

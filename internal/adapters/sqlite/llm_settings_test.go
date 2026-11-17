@@ -25,7 +25,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
-		`DELETE FROM go_schema_migrations WHERE version >= 66`, `DROP TABLE IF EXISTS account_settings`, `DROP TABLE IF EXISTS project_assets`, `DROP TABLE IF EXISTS project_conventions`, `DROP TABLE IF EXISTS project_style_guides`, `DROP TABLE IF EXISTS projects`, `DROP TABLE IF EXISTS chat_session_preferences`, `ALTER TABLE go_chat_sessions DROP COLUMN project_id`, `ALTER TABLE go_chat_sessions DROP COLUMN style_lock_source`,
+		`DELETE FROM go_schema_migrations WHERE version >= 66`, `DROP TABLE IF EXISTS account_settings`, `DROP TABLE IF EXISTS access_keys`, `DROP TABLE IF EXISTS project_assets`, `DROP TABLE IF EXISTS project_conventions`, `DROP TABLE IF EXISTS project_style_guides`, `DROP TABLE IF EXISTS projects`, `DROP TABLE IF EXISTS chat_session_preferences`, `ALTER TABLE go_chat_sessions DROP COLUMN project_id`, `ALTER TABLE go_chat_sessions DROP COLUMN style_lock_source`,
 		`DROP TABLE IF EXISTS chat_branch_task_refs`,
 		`DROP TABLE IF EXISTS chat_self_checks`,
 		`DROP TABLE llm_settings_versions`,
@@ -40,7 +40,7 @@ func TestMigration0066UpgradesExistingSessionsToFollowTheDefaultModel(t *testing
 		`ALTER TABLE agent_generation_operations DROP COLUMN correction_task_id`,
 		`DROP TABLE budget_reservations`,
 		`DROP TABLE production_budgets`,
-		`ALTER TABLE execution_grants DROP COLUMN budget_eligible`,
+		`ALTER TABLE execution_grants DROP COLUMN access_key_id`, `ALTER TABLE execution_grants DROP COLUMN budget_eligible`,
 		`ALTER TABLE processing_plans DROP COLUMN origin`,
 		`DROP INDEX IF EXISTS generation_attempts_delivery_completion`,
 		`ALTER TABLE generation_attempts DROP COLUMN delivery_completion_json`,

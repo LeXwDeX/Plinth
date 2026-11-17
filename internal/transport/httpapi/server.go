@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
@@ -76,6 +77,10 @@ type Config struct {
 	// AccountSettings stores the person's 3D step settings (#330); nil leaves
 	// the step policy route unregistered.
 	AccountSettings *accountsettings.Service
+	// AccessKeys issues, lists and revokes the person's personal access keys
+	// (#332); nil leaves the key management routes unregistered. The main
+	// server only manages keys: it never authenticates a request with one.
+	AccessKeys      *accesskeys.Service
 	Readiness       func(context.Context) error
 	Generation      *generation.Module
 	ExecutionGrants *executiongrant.Service
@@ -205,6 +210,7 @@ type Server struct {
 	mcp                               *mcp.Service
 	accountInputAssets                AccountInputAssetLister
 	accountSettings                   *accountsettings.Service
+	accessKeys                        *accesskeys.Service
 	readiness                         func(context.Context) error
 	generation                        *generation.Module
 	executionGrants                   *executiongrant.Service
@@ -439,6 +445,7 @@ func New(config Config) (*Server, error) {
 		mcp:                       config.MCP,
 		accountInputAssets:        config.AccountInputAssets,
 		accountSettings:           config.AccountSettings,
+		accessKeys:                config.AccessKeys,
 		administration:            config.Administration,
 		administrationAudit:       config.AdministrationAudit,
 		administrationGenerations: config.AdministrationGenerations,
@@ -598,6 +605,7 @@ func (s *Server) routes() {
 	s.registerMCPContract()
 	s.registerAccountResourcesContracts()
 	s.registerAccountStepPolicyContract()
+	s.registerAccountAccessKeysContract()
 	s.registerAdministrationUserContracts()
 	s.registerAdministrationAuditLogContracts()
 	s.registerAdministrationGenerationContracts()

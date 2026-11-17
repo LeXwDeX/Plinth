@@ -17,7 +17,12 @@ const StepsActor = PolicyActorPrefix + approvalpolicy.ModeSteps
 // policy is told apart from a person's decision or a system cancellation
 // (CancelledByStop): the Agent reads the step-cap text instead of the generic
 // denial, with or without a replay of the same call.
-func (g Grant) StepCapReached() bool { return g.Status == Denied && g.DecidedBy == StepsActor }
+//
+// A grant of a personal access key (#332) that its policy refused at the cap
+// reads the same way: AccessKeyActor is the other actor that refuses for it.
+func (g Grant) StepCapReached() bool {
+	return g.Status == Denied && (g.DecidedBy == StepsActor || g.DecidedBy == AccessKeyActor)
+}
 
 // PolicyOutcomeStepCap is the outcome of a grant the steps mode refused
 // because its asset used all its 3D steps. The grant is denied in place; no
@@ -43,9 +48,22 @@ type StepSummary struct {
 // StepRequest is what the data layer needs to decide one grant under the steps
 // mode: the entry whose setting applies and the policy (the counted
 // capabilities and the settings of a person who never saved one).
+//
+// Actor and NeedsPerson parameterize the same transaction for the grants of a
+// personal access key (#332) instead of repeating it; see access_key.go.
 type StepRequest struct {
 	Entry string
 	Steps approvalpolicy.StepsPolicy
+	// Actor decides the grant and fixes which grants it may decide: StepsActor
+	// (the zero value) the Agent or browser grants of a steps session,
+	// AccessKeyActor only a grant of source AccessKey, and then Entry must be
+	// the MCP entry.
+	Actor string
+	// NeedsPerson, with AccessKeyActor only, marks a step the policy must not
+	// approve because only a person could (a repeat of a charged attempt whose
+	// result was not stored, #294). A key has no approval card, so the grant is
+	// denied in place by AccessKeyNeedsPersonActor, whatever the capability.
+	NeedsPerson bool
 }
 
 // StepDecision is the data layer's answer. Approved is false when the grant
@@ -54,6 +72,9 @@ type StepRequest struct {
 type StepDecision struct {
 	Approved bool
 	Summary  StepSummary
+	// NeedsPerson is true when an access-key grant was denied because only a
+	// person could approve the step. Summary is then empty.
+	NeedsPerson bool
 }
 
 // StepGrantStore is the data layer's atomic 3D step decision: the usage read

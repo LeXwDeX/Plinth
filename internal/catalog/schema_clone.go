@@ -34,6 +34,15 @@ func cloneStepPolicy(source *StepPolicySchema) *StepPolicySchema {
 	return &result
 }
 
+func cloneAccessKeys(source *AccessKeysSchema) *AccessKeysSchema {
+	if source == nil {
+		return nil
+	}
+	result := *source
+	result.Scopes = append([]ValueLabel(nil), source.Scopes...)
+	return &result
+}
+
 func cloneStringMap(source map[string]string) map[string]string {
 	result := make(map[string]string, len(source))
 	for key, value := range source {
@@ -109,6 +118,7 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	result.Diagnostics = cloneDiagnostics(source.Diagnostics)
 	result.Project = cloneProject(source.Project)
 	result.StepPolicy = cloneStepPolicy(source.StepPolicy)
+	result.AccessKeys = cloneAccessKeys(source.AccessKeys)
 	result.Chat.Skills.Categories = make([]ChatSkillCategorySchema, len(source.Chat.Skills.Categories))
 	for i, category := range source.Chat.Skills.Categories {
 		result.Chat.Skills.Categories[i] = category
