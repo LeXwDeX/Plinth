@@ -28,8 +28,9 @@ const (
 	modelReviewUsageSourceDefault = "default_profile"
 )
 
-// modelReviewUsageCheck is the usage_check object of an inspect_model result.
-type modelReviewUsageCheck struct {
+// ModelReviewUsageCheck is the usage_check object of an inspect_model result,
+// exported so the outward MCP inspect_model can report the same judgement.
+type ModelReviewUsageCheck struct {
 	Purpose       string `json:"purpose"`
 	PurposeLabel  string `json:"purpose_label"`
 	PurposeSource string `json:"purpose_source"`
@@ -39,12 +40,15 @@ type modelReviewUsageCheck struct {
 	Platform      string                      `json:"platform,omitempty"`
 	PlatformLabel string                      `json:"platform_label,omitempty"`
 	Note          string                      `json:"note,omitempty"`
-	Checks        []modelReviewUsageCheckItem `json:"checks"`
+	Checks        []ModelReviewUsageCheckItem `json:"checks"`
 }
 
-// modelReviewUsageCheckItem is one judged property. Actual and Budget hold the
+// modelReviewUsageCheck keeps the internal name of the review tools.
+type modelReviewUsageCheck = ModelReviewUsageCheck
+
+// ModelReviewUsageCheckItem is one judged property. Actual and Budget hold the
 // measured value and the purpose's bound; FixHint is present only on a fail.
-type modelReviewUsageCheckItem struct {
+type ModelReviewUsageCheckItem struct {
 	Check   string         `json:"check"`
 	Status  string         `json:"status"`
 	Actual  any            `json:"actual"`
@@ -56,6 +60,9 @@ type modelReviewUsageCheckItem struct {
 	// keeps beside it (#305).
 	Note string `json:"note,omitempty"`
 }
+
+// modelReviewUsageCheckItem keeps the internal name of the review tools.
+type modelReviewUsageCheckItem = ModelReviewUsageCheckItem
 
 // modelReviewUsageText localizes a Schema template and fills its placeholders.
 type modelReviewUsageText func(template string, replacements ...string) string

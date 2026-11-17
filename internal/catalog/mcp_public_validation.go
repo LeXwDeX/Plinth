@@ -113,6 +113,19 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	if err := validateMCPTools(service, schema.AccessKeys, capabilities); err != nil {
 		return err
 	}
+	// inspect_model reports the same limits it enforces; a Catalog that serves
+	// it must declare the platform inspection's bounds (#332 step 7a).
+	for _, tool := range service.Tools {
+		if tool.Name != MCPToolInspectModel {
+			continue
+		}
+		limits := schema.Chat.ModelReview.Inspect.Limits
+		if limits.MaxBytes <= 0 || limits.MaxTriangles <= 0 || limits.MaxVertices <= 0 ||
+			limits.MaxTexturePixels <= 0 || limits.MaxNodes <= 0 || limits.MaxDepth <= 0 {
+			return errors.New("application.mcp_public 声明了 inspect_model，需要 chat.model_review.inspect.limits（max_bytes、max_triangles、max_vertices 等均为正数）")
+		}
+		break
+	}
 	messages := service.Messages
 	for name, text := range map[string]string{
 		"unauthenticated": messages.Unauthenticated, "insufficient_scope": messages.InsufficientScope,
@@ -130,7 +143,7 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"idempotency_conflict": messages.IdempotencyConflict, "in_progress": messages.InProgress,
 		"too_many_in_flight": messages.TooManyInFlight, "upload_too_large": messages.UploadTooLarge,
 		"upload_invalid": messages.UploadInvalid, "upload_type_not_allowed": messages.UploadTypeNotAllowed,
-		"signed_download_unavailable": messages.SignedDownloadUnavailable,
+		"signed_download_unavailable": messages.SignedDownloadUnavailable, "model_unavailable": messages.ModelUnavailable,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("mcp_public.messages.%s 不能为空", name)

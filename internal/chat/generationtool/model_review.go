@@ -329,79 +329,55 @@ func (executor *Executor) InspectModel(ctx context.Context, command chat.ToolCom
 	if refusal := executor.selfCheckRoundRefusal(ctx, command, source); refusal != nil {
 		return *refusal, nil
 	}
-	entry, refusal, err := executor.loadReviewedModel(ctx, command, review, source)
+	inspected, err := executor.InspectReviewedModel(ctx, ModelInspectRequest{
+		Owner:   generation.OwnerID(command.OwnerID),
+		TaskID:  source.task.ID,
+		AssetID: source.asset.ID,
+		Brief:   command.Options.ProductionBrief,
+		Locale:  command.Options.Locale,
+	})
 	if err != nil {
-		return chat.ToolResult{}, err
-	}
-	if refusal != nil {
-		// The call named this model but could not read it: the round stays in
-		// the record as failed evidence, never as a passed check.
-		executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
-			Kind: chat.SelfCheckKindInspect, Tool: command.Call.Name,
-			AssetID: string(source.asset.ID), Views: []string{}, OK: false, Error: refusal.Error,
-		})
-		return *refusal, nil
-	}
-	options := modelReviewInspectOptions(review)
-	report, err := entry.inspect(ctx, executor.modelReview, options)
-	if err != nil {
-		return chat.ToolResult{}, err
-	}
-	total := len(report.Parts)
-	truncated := false
-	if review.Inspect.MaxListedParts > 0 && total > review.Inspect.MaxListedParts {
-		report.Parts = append([]modelinspect.PartReport(nil), report.Parts[:review.Inspect.MaxListedParts]...)
-		if len(report.UV.Primitives) > review.Inspect.MaxListedParts {
-			report.UV.Primitives = append([]modelinspect.PrimitiveUVReport(nil), report.UV.Primitives[:review.Inspect.MaxListedParts]...)
+		var refusal *ModelInspectRefusal
+		if !errors.As(err, &refusal) {
+			return chat.ToolResult{}, err
 		}
-		truncated = true
+		if modelInspectReadRefusal(refusal.Kind) {
+			// The call named this model but could not read it: the round stays in
+			// the record as failed evidence, never as a passed check.
+			executor.appendSelfCheckCheck(ctx, command, source, chat.SelfCheckCheck{
+				Kind: chat.SelfCheckKindInspect, Tool: command.Call.Name,
+				AssetID: string(source.asset.ID), Views: []string{}, OK: false, Error: refusal.Message,
+			})
+		}
+		return executor.modelReviewRefusal(command, refusal.Message), nil
 	}
 	identity := executor.modelReviewIdentity(ctx, command, source)
 	label := identity.Model
 	if label == "" {
 		label = identity.TaskID
 	}
-	// A processing result's exports the purpose sized are what its texture budget
-	// judges; the inspected file is reported beside them (#292). A file the purpose
-	// sized itself is judged as it is, and the upstream's own file kept beside it is
-	// measured so the result can name it (#305).
-	sized := executor.sizedDeliverable(source.task, source.asset)
-	if sized != nil && sized.Own {
-		sized.Original = executor.siblingTextureEdge(ctx, command, review, options, source)
-	}
-	usageCheck := newModelReviewUsageCheckFor(
-		report,
-		sized,
-		executor.chat.Model3DUsage,
-		review.Inspect.Production,
-		command.Options.ProductionBrief,
-		func(template string, replacements ...string) string {
-			return executor.fillText(command, template, replacements...)
-		},
-		executor.modelReviewFixAvailability(),
-	)
 	result := modelReviewInspectResult{
 		OK: true,
 		Message: executor.fillText(command, review.Texts.InspectReady,
-			"{model}", label, "{triangles}", strconv.FormatInt(report.Triangles, 10)),
+			"{model}", label, "{triangles}", strconv.FormatInt(inspected.Report.Triangles, 10)),
 		Model:          identity,
-		Report:         report,
-		UsageCheck:     usageCheck,
-		PartsTotal:     total,
-		PartsTruncated: truncated,
+		Report:         inspected.Report,
+		UsageCheck:     inspected.UsageCheck,
+		PartsTotal:     inspected.PartsTotal,
+		PartsTruncated: inspected.PartsTruncated,
 		SelfCheck: executor.appendSelfCheckCheck(ctx, command, source, inspectSelfCheckCheck(
-			command.Call.Name, string(source.asset.ID), usageCheck)),
+			command.Call.Name, string(source.asset.ID), inspected.UsageCheck)),
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return chat.ToolResult{Error: "model report not readable", NoSubmission: true}, nil
 	}
-	hasUV, watertight, hasSkin := report.UV.AllHaveUV, report.Topology.Watertight, len(report.Skins) > 0
+	hasUV, watertight, hasSkin := inspected.Report.UV.AllHaveUV, inspected.Report.Topology.Watertight, len(inspected.Report.Skins) > 0
 	summary := modelReviewSummaryJSON(modelReviewMessageSummary{
 		Tool: "inspect", Model: rawString(arguments[review.Source.TaskArgument]),
 		TaskID:    string(source.task.ID),
-		Triangles: report.Triangles, HasUV: &hasUV, Watertight: &watertight, HasSkin: &hasSkin,
-		Usage: usageCheck,
+		Triangles: inspected.Report.Triangles, HasUV: &hasUV, Watertight: &watertight, HasSkin: &hasSkin,
+		Usage: inspected.UsageCheck,
 	})
 	return chat.ToolResult{AgentContent: string(encoded), NoSubmission: true, Summary: summary}, nil
 }
