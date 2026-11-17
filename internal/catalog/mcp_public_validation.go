@@ -45,7 +45,9 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		policy.BalanceReadTimeoutSeconds < 1 || policy.BalanceReadTimeoutSeconds > 60 {
 		return errors.New("application.mcp_public 需要 step_policy.balance_cache_seconds（1 到 3600）与 balance_read_timeout_seconds（1 到 60）")
 	}
-	for name, route := range map[string]string{"path": service.Path, "download_path": service.DownloadPath} {
+	for name, route := range map[string]string{
+		"path": service.Path, "download_path": service.DownloadPath, "signed_download_path": service.SignedDownloadPath,
+	} {
 		if len(route) < 2 || !mcpRoutePattern.MatchString(strings.ReplaceAll(strings.ReplaceAll(route, "{", "a"), "}", "a")) {
 			return fmt.Errorf("mcp_public.%s 必须是以 / 开头、不以 / 结尾的路径: %q", name, route)
 		}
@@ -58,6 +60,19 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	}
 	if service.Path == service.DownloadPath {
 		return errors.New("mcp_public.path 与 download_path 必须不同")
+	}
+	if !configuredRouteParametersMatch(service.SignedDownloadPath, []string{"token"}) {
+		return errors.New("mcp_public.signed_download_path 必须恰好含路径参数 {token}")
+	}
+	if service.SignedDownloadPath == service.Path || service.SignedDownloadPath == service.DownloadPath {
+		return errors.New("mcp_public.signed_download_path 必须与 path、download_path 不同")
+	}
+	if !strings.HasPrefix(service.SignedDownloadPath, service.Path+"/") {
+		return errors.New("mcp_public.signed_download_path 必须是 path 的子路径")
+	}
+	if service.SignedDownloadTTLSeconds < 30 || service.SignedDownloadTTLSeconds > service.SignedDownloadMaxTTLSeconds ||
+		service.SignedDownloadMaxTTLSeconds > 86400 {
+		return errors.New("mcp_public 必须满足 30 <= signed_download_ttl_seconds <= signed_download_max_ttl_seconds <= 86400")
 	}
 	for name, text := range map[string]string{
 		"protocol_version": service.ProtocolVersion, "server_name": service.ServerName, "instructions": service.Instructions,
@@ -115,6 +130,7 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"idempotency_conflict": messages.IdempotencyConflict, "in_progress": messages.InProgress,
 		"too_many_in_flight": messages.TooManyInFlight, "upload_too_large": messages.UploadTooLarge,
 		"upload_invalid": messages.UploadInvalid, "upload_type_not_allowed": messages.UploadTypeNotAllowed,
+		"signed_download_unavailable": messages.SignedDownloadUnavailable,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("mcp_public.messages.%s 不能为空", name)

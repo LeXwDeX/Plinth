@@ -43,7 +43,7 @@ func TestChatInternalErrorLogsItsCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := httptest.NewRecorder()
-	requestLogMiddleware(logger, route, nil, server.mux).ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/chat/session_one", strings.NewReader(`{"title":`)))
+	requestLogMiddleware(logger, []routing.One{route}, server.mux).ServeHTTP(response, httptest.NewRequest(http.MethodPatch, "/chat/session_one", strings.NewReader(`{"title":`)))
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d", response.Code)
 	}

@@ -62,7 +62,7 @@ func TestDomainErrorReturnsOnlyUserFacingReasons(t *testing.T) {
 				t.Fatal(err)
 			}
 			response := httptest.NewRecorder()
-			requestLogMiddleware(logger, route, nil, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			requestLogMiddleware(logger, []routing.One{route}, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 				server.writeDomainError(writer, test.err)
 			})).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/tasks/prepare", nil))
 			var body map[string]any
@@ -145,7 +145,7 @@ func TestUserFacingTemplateReachesNormalAndLegacyErrorsInTheRequestLanguage(t *t
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/task-x", nil)
 			request.Header.Set("Accept-Language", "en")
-			requestLogMiddleware(logging.New(&bytes.Buffer{}, slog.LevelDebug), route, nil, localeTraceMiddleware(application, texts,
+			requestLogMiddleware(logging.New(&bytes.Buffer{}, slog.LevelDebug), []routing.One{route}, localeTraceMiddleware(application, texts,
 				http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 					write(writer, refusal)
 				}))).ServeHTTP(response, request)

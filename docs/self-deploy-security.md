@@ -11,7 +11,7 @@
 | 重置管理员密码 | `ADMIN_PASSWORD_RESET=true` | 默认 `false`。设为 `true` 后，下次启动会把已存在管理员的密码改成 `ADMIN_PASSWORD`，并像产品内改密一样吊销该管理员的全部已登录会话（密码与当前相同时不改也不吊销）；改完立即改回 `false`，并执行 `docker compose up -d --wait` 让容器读取新配置；只编辑 `.env` 或执行 `restart` 不会更新已有容器环境，否则每次重启都会覆盖在产品里修改过的密码。启动时创建或重置管理员都会写 INFO 日志「管理员初始化」（`action`、`username`、`user_id`、`sessions_revoked`）并记入管理后台审计（`bootstrap_admin_created` / `bootstrap_admin_password_reset`），均不含密码；未变化时只记日志 |
 | Mock 登录 | `DEV_MOCK_AUTH=false` | `APP_ENV=production` 时开启 Mock 登录会拒绝启动；`docker-compose.yml` 固定 `APP_ENV=production` 与 `AUTH_MODE=session` |
 | 监听地址 | `ART_AI_BIND_IP` / `ART_AI_PORT` | Compose 默认只绑定 `127.0.0.1:13333`。改成 `0.0.0.0` 或局域网地址前先完成本节其他项，对外服务放在 HTTPS 反向代理之后 |
-| 资产签名 | `PUBLIC_BASE_URL` / `ASSET_SIGNING_KEY` | 只在上游 Provider 需要按 URL 回拉本服务资产时配置，两者须同时设置；生产环境要求 `https` 地址，密钥至少 32 字节（`openssl rand -base64 48`）。默认留空 |
+| 资产签名 | `PUBLIC_BASE_URL` / `ASSET_SIGNING_KEY` | 上游 Provider 需要按 URL 回拉本服务资产时配置；对外 MCP 的产物短时签名下载也用它（服务内按用途派生，两类令牌互不通用）。两者须同时设置；生产环境要求 `https` 地址，密钥至少 32 字节（`openssl rand -base64 48`）。默认留空；未配置时 `signed: true` 返回 `signed_download_unavailable`，未签名的鉴权下载仍可用 |
 | Provider 地址 | `<ID>_BASE_URL` | 每个启用的 Provider 只读自己的地址变量，不借用 Agent 的 `LLM_BASE_URL`，key 不会发往其他连接的地址。`GEMINI_BASE_URL` 没有默认值，设置 `GEMINI_API_KEY` 时必须同时设置，否则 Gemini 不启用；所有模型经同一网关时把各地址变量都显式设为网关地址。见 [Provider 配置](provider-configuration.md) |
 | 运行环境文件 | `.env` | 权限 `0600`，不进 Git，不写进镜像 |
 
