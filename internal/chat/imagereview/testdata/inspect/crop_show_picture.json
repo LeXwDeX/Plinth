@@ -1,0 +1,101 @@
+{
+  "agent_content": {
+    "image": {
+      "asset_id": "a1",
+      "crop_height": 40,
+      "crop_width": 40,
+      "handle": "@img1",
+      "height": 40,
+      "region": {
+        "height": 40,
+        "width": 40,
+        "x": 30,
+        "y": 30
+      },
+      "source_height": 100,
+      "source_width": 100,
+      "task_id": "",
+      "width": 40
+    },
+    "ok": true,
+    "report": {
+      "background_spread": 0,
+      "component_count": 0,
+      "format": "jpeg",
+      "has_alpha": false,
+      "height": 40,
+      "largest_component_ratio": 0,
+      "short_edge": 40,
+      "subject_bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "subject_ratio": 0,
+      "touches_edge": false,
+      "transparent_ratio": 0,
+      "width": 40
+    },
+    "rounds_remaining": 2,
+    "usage_check": {
+      "checklist": "delivery",
+      "checklist_text": "delivery checklist",
+      "checks": [
+        {
+          "actual": "subject 0.0%",
+          "check": "nonblank",
+          "expected": "a visible subject",
+          "fix": "regenerate",
+          "status": "fail"
+        },
+        {
+          "actual": "0.0%",
+          "check": "subject_size",
+          "expected": "1%..99%",
+          "fix": "crop_subject",
+          "status": "fail"
+        }
+      ]
+    }
+  },
+  "summary": {
+    "checks": {
+      "failed": 2,
+      "passed": 0,
+      "unknown": 0
+    },
+    "failed_checks": [
+      {
+        "actual": "subject 0.0%",
+        "check": "nonblank",
+        "fix": "regenerate"
+      },
+      {
+        "actual": "0.0%",
+        "check": "subject_size",
+        "fix": "crop_subject"
+      }
+    ],
+    "handle": "@img1",
+    "height": 40,
+    "tool": "inspect_image",
+    "width": 40
+  },
+  "error": "",
+  "no_submission": true,
+  "pictures": [
+    {
+      "handle": "@img1",
+      "purpose": "crop",
+      "label": "[whole @img1 100x100]",
+      "url_prefix": "/api/v1/assets/a1"
+    },
+    {
+      "handle": "@img1",
+      "purpose": "crop",
+      "label": "[crop @img1 30,30 40×40 40x40]",
+      "url_prefix": "data:image/jpeg;base64,"
+    }
+  ]
+}

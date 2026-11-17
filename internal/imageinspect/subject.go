@@ -19,6 +19,10 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
+// ErrTooLarge marks a refusal for a picture over the byte or pixel limit, so a
+// caller can classify it with errors.Is instead of matching the message text.
+var ErrTooLarge = errors.New("image inspection limit exceeded")
+
 // Decode reads a picture within the byte and pixel limits. It returns the
 // pixels in NRGBA form so every caller measures the same bytes.
 func Decode(data []byte, limits Limits) (*image.NRGBA, error) {
@@ -31,7 +35,7 @@ func Decode(data []byte, limits Limits) (*image.NRGBA, error) {
 // one set of refusal messages.
 func decodeNRGBA(data []byte, limits Limits) (*image.NRGBA, string, error) {
 	if limits.MaxBytes > 0 && int64(len(data)) > limits.MaxBytes {
-		return nil, "", fmt.Errorf("image is %d bytes, over the %d-byte limit", len(data), limits.MaxBytes)
+		return nil, "", fmt.Errorf("image is %d bytes, over the %d-byte limit: %w", len(data), limits.MaxBytes, ErrTooLarge)
 	}
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
@@ -42,7 +46,7 @@ func decodeNRGBA(data []byte, limits Limits) (*image.NRGBA, string, error) {
 	}
 	pixels := int64(config.Width) * int64(config.Height)
 	if limits.MaxPixels > 0 && pixels > limits.MaxPixels {
-		return nil, "", fmt.Errorf("image is %d pixels, over the %d-pixel limit", pixels, limits.MaxPixels)
+		return nil, "", fmt.Errorf("image is %d pixels, over the %d-pixel limit: %w", pixels, limits.MaxPixels, ErrTooLarge)
 	}
 	decoded, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {

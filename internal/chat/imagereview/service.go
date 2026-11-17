@@ -105,8 +105,9 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 	if checklistName == "" {
 		checklistName = "delivery"
 	}
-	checklist, checklistText, ok := service.checklist(checklistName)
-	if !ok {
+	// Refuse an unknown checklist before any bytes are read; inspectBytes
+	// resolves the name again for the check assembly.
+	if _, _, ok := service.checklist(checklistName); !ok {
 		return chat.ToolResult{Error: "unknown checklist", NoSubmission: true}, nil
 	}
 	visualItems := service.visualItems(checklistName)
@@ -203,27 +204,18 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 			})
 		}
 	}
-	// The purpose checks judge the whole delivered picture. A region crop is a
-	// part of it (its short edge, seams and edge are not the picture's), and
-	// the 3D input checklist has its own gate, so neither is judged against the
-	// purpose.
-	var judgement *purposeJudgement
-	if checklistName == "delivery" && !regionRequested {
-		judgement = service.judgement(command.Options.ProductionBrief)
-	}
-	var requirements imageinspect.Requirements
-	if judgement != nil {
-		requirements = judgement.requirements
-	}
-	report, err := imageinspect.InspectFor(data, imageinspect.Limits{
-		MaxBytes:  service.review.Limits.MaxBytes,
-		MaxPixels: service.review.Limits.MaxPixels,
-	}, requirements)
+	// The purpose checks judge the whole delivered picture, so a region crop
+	// skips them; the 3D input checklist has its own gate.
+	checked, err := service.inspectBytesFor(data, checklistName, command.Options.ProductionBrief, !regionRequested)
 	if err != nil {
+		if errors.Is(err, errUnknownChecklist) {
+			return chat.ToolResult{Error: "unknown checklist", NoSubmission: true}, nil
+		}
 		message := strings.NewReplacer("{handle}", picture.Attachment.Handle, "{reason}", err.Error()).
 			Replace(service.review.UnreadableTemplate)
 		return chat.ToolResult{Error: message, NoSubmission: true}, nil
 	}
+	report := checked.Report
 	imageFacts["width"], imageFacts["height"] = report.Width, report.Height
 	if originalWidth <= 0 || originalHeight <= 0 {
 		// No crop asked: report is the original picture's own inspection.
@@ -244,16 +236,13 @@ func (service *Service) Inspect(ctx context.Context, command chat.ToolCommand) (
 		}
 		pictures = append([]chat.ToolPicture{original}, pictures...)
 	}
-	checks := report.Review(checklist)
-	usageCheck := map[string]any{"checklist": checklistName, "checklist_text": checklistText}
-	if judgement != nil {
-		purposeChecks := report.ReviewRequirements(judgement.requirements)
-		service.addHints(purposeChecks, judgement)
-		checks = append(checks, purposeChecks...)
-		usageCheck["purpose"] = judgement.profile.ID
-		usageCheck["purpose_label"] = judgement.profile.Label
-		usageCheck["purpose_source"] = judgement.source
-		usageCheck["note"] = service.note(judgement)
+	checks := checked.Checks
+	usageCheck := map[string]any{"checklist": checklistName, "checklist_text": checked.ChecklistText}
+	if checked.Purpose != nil {
+		usageCheck["purpose"] = checked.Purpose.ID
+		usageCheck["purpose_label"] = checked.Purpose.Label
+		usageCheck["purpose_source"] = checked.Purpose.Source
+		usageCheck["note"] = checked.Purpose.Note
 	}
 	usageCheck["checks"] = checks
 	// The Agent's verdicts on the checklist's visual items (#286) join the

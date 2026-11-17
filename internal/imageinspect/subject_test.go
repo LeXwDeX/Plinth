@@ -1,6 +1,7 @@
 package imageinspect
 
 import (
+	"errors"
 	"image"
 	"image/color"
 	"testing"
@@ -158,5 +159,22 @@ func TestDecodeEnforcesTheByteAndPixelLimits(t *testing.T) {
 	}
 	if _, err := Decode([]byte("not a picture"), Limits{}); err == nil {
 		t.Fatal("garbage must not decode")
+	}
+}
+
+// Both limit refusals carry the ErrTooLarge sentinel, so a caller classifies
+// them without matching the Schema's message text.
+func TestDecodeLimitRefusalsCarryTheTooLargeSentinel(t *testing.T) {
+	data := encodePNG(t, 8, 8, func(int, int) color.NRGBA {
+		return color.NRGBA{R: 1, G: 2, B: 3, A: 255}
+	})
+	if _, err := Decode(data, Limits{MaxBytes: int64(len(data)) - 1}); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("byte limit error = %v, want ErrTooLarge", err)
+	}
+	if _, err := Decode(data, Limits{MaxPixels: 63}); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("pixel limit error = %v, want ErrTooLarge", err)
+	}
+	if _, err := Decode([]byte("not a picture"), Limits{}); errors.Is(err, ErrTooLarge) {
+		t.Fatalf("an undecodable picture is not too large: %v", err)
 	}
 }

@@ -1,0 +1,66 @@
+{
+  "agent_content": {
+    "image": {
+      "asset_id": "a1",
+      "handle": "@img1",
+      "height": 100,
+      "task_id": "",
+      "width": 100
+    },
+    "ok": true,
+    "report": {
+      "background_spread": 0,
+      "component_count": 1,
+      "format": "png",
+      "has_alpha": true,
+      "height": 100,
+      "largest_component_ratio": 1,
+      "short_edge": 100,
+      "subject_bbox": [
+        30,
+        30,
+        69,
+        69
+      ],
+      "subject_ratio": 0.16000000000000003,
+      "touches_edge": false,
+      "transparent_ratio": 0.84,
+      "width": 100
+    },
+    "rounds_remaining": 2,
+    "usage_check": {
+      "checklist": "delivery",
+      "checklist_text": "delivery checklist",
+      "checks": [
+        {
+          "actual": "subject 16.0%",
+          "check": "nonblank",
+          "expected": "a visible subject",
+          "fix": "regenerate",
+          "status": "pass"
+        },
+        {
+          "actual": "16.0%",
+          "check": "subject_size",
+          "expected": "1%..99%",
+          "fix": "crop_subject",
+          "status": "pass"
+        }
+      ]
+    }
+  },
+  "summary": {
+    "checks": {
+      "failed": 0,
+      "passed": 2,
+      "unknown": 0
+    },
+    "handle": "@img1",
+    "height": 100,
+    "tool": "inspect_image",
+    "width": 100
+  },
+  "error": "",
+  "no_submission": true,
+  "pictures": null
+}

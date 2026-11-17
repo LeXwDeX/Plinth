@@ -1,0 +1,85 @@
+{
+  "agent_content": {
+    "image": {
+      "asset_id": "a1",
+      "handle": "@img1",
+      "height": 128,
+      "task_id": "task_1",
+      "width": 128
+    },
+    "ok": true,
+    "report": {
+      "background_spread": 0,
+      "component_count": 1,
+      "format": "png",
+      "has_alpha": false,
+      "height": 128,
+      "largest_component_ratio": 1,
+      "short_edge": 128,
+      "subject_bbox": [
+        33,
+        33,
+        95,
+        95
+      ],
+      "subject_ratio": 0.24224853515625,
+      "touches_edge": false,
+      "transparent_ratio": 0,
+      "width": 128
+    },
+    "rounds_remaining": 2,
+    "usage_check": {
+      "checklist": "delivery",
+      "checklist_text": "【2D 交付自检】对照用户要求和制作简报检查：主体是否正确、构图与画面比例、肢体与手部、文字与水印、与参考图或风格锁的一致性。先用 inspect_image 看确定性事实，再看图判断“像不像、对不对”；发现问题先修再交付。",
+      "checks": [
+        {
+          "actual": "subject 24.2%",
+          "check": "nonblank",
+          "expected": "a visible subject",
+          "fix": "regenerate",
+          "status": "pass"
+        },
+        {
+          "actual": "24.2%",
+          "check": "subject_size",
+          "expected": "1%..99%",
+          "fix": "crop_subject",
+          "status": "pass"
+        },
+        {
+          "actual": "128 px (128 x 128)",
+          "check": "short_edge",
+          "expected": "short edge \u003e= 1536 px",
+          "fix": "raise_resolution",
+          "hint": "实际 128 px (128 x 128)，低于用途「角色立绘 / 宣传插画」要求的短边 1536 像素。该用途推荐里能达到的模型：Gemini 3 Pro (高质量)。不要静默换模型：先告诉用户这张图的分辨率不够，再带理由改用能达到的模型重新生成；用户锁定了模型时，如实说明并让用户决定。",
+          "status": "fail"
+        }
+      ],
+      "note": "delivery 清单已按制作简报里的 2D 用途「角色立绘 / 宣传插画」核对最小短边、平铺和透明底。",
+      "purpose": "illustration",
+      "purpose_label": "角色立绘 / 宣传插画",
+      "purpose_source": "production_brief"
+    }
+  },
+  "summary": {
+    "checks": {
+      "failed": 1,
+      "passed": 2,
+      "unknown": 0
+    },
+    "failed_checks": [
+      {
+        "actual": "128 px (128 x 128)",
+        "check": "short_edge",
+        "fix": "raise_resolution"
+      }
+    ],
+    "handle": "@img1",
+    "height": 128,
+    "tool": "inspect_image",
+    "width": 128
+  },
+  "error": "",
+  "no_submission": true,
+  "pictures": null
+}
