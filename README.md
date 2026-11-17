@@ -296,4 +296,4 @@ WEB_ASSETS_ROOT=build/go-web go run ./cmd/art-ai
 
 ## 许可证
 
-MIT，见 [LICENSE](LICENSE)。第三方依赖与随仓库提供材料的许可证记录见[第三方许可证清单](docs/third-party-licenses.md)。
+Apache-2.0，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。本仓库自有代码自 2026-11-17 起按 Apache-2.0 发布；此前的发行版本仍按 MIT。第三方依赖与随仓库提供材料的许可证记录见[第三方许可证清单](docs/third-party-licenses.md)。

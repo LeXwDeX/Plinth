@@ -82,7 +82,7 @@ python3 scripts/verify-local.py --race    # 再加上 race 测试（CI 必跑，
 
 ## 许可证
 
-MIT，见 [LICENSE](LICENSE)。提交贡献即表示你同意按该许可证发布你的贡献。
+Apache-2.0，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。提交贡献即表示你同意按该许可证发布你的贡献；此前的贡献仍按 MIT 授权。
 
 ---
 
@@ -180,5 +180,5 @@ check.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). By contributing you agree that your contribution is released
-under that license.
+Apache-2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). By contributing you agree that your contribution
+is released under that license; contributions made before the change remain under MIT.
