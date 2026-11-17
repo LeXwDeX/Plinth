@@ -2864,6 +2864,27 @@
       "ui.project.asset_count": "{count} 个资产",
       "ui.project.asset_count_one": "{count} 个资产",
       "ui.project.style_source_help": "项目是默认值；本会话可覆盖或关闭，两套参考图不会合并。",
+      "ui.asset_list.section_title": "制作清单",
+      "ui.asset_list.empty": "还没有制作清单。在聊天里让助手提出一份。",
+      "ui.asset_list.items_count": "{count} 项",
+      "ui.asset_list.items_count_one": "{count} 项",
+      "ui.asset_list.planned_steps": "计划 {steps} 步",
+      "ui.asset_list.planned_model3d_steps": "其中 3D {steps} 步",
+      "ui.asset_list.brief_summary": "制作简报",
+      "ui.asset_list.availability_warning": "{count} 项当前不可用",
+      "ui.asset_list.availability_warning_one": "{count} 项当前不可用",
+      "ui.asset_list.confirm": "确认清单",
+      "ui.asset_list.reject": "拒绝",
+      "ui.asset_list.replace": "替换当前清单",
+      "ui.asset_list.pending_hint": "等待你确认这份清单。",
+      "ui.asset_list.confirmed_hint": "已确认，可按清单逐项推进。",
+      "ui.asset_list.rejected_hint": "这份清单已被拒绝。",
+      "ui.asset_list.active_conflict": "项目已有确认的清单「{title}」。",
+      "ui.asset_list.load_failed": "清单加载失败",
+      "ui.asset_list.decide_failed": "操作失败，请重试。",
+      "ui.asset_list.expired": "已过期",
+      "ui.asset_list.item_unavailable": "不可用",
+      "ui.asset_list.chat_card_title": "资产清单",
       "ui.harness.title": "功能设置",
         "ui.harness.operation_section": "选择功能",
         "ui.harness.not_connected": "这项功能暂未接入可用服务。",
@@ -5513,7 +5534,12 @@
         "unavailable_item": "第 {position} 项「{name}」的路线当前不可用：{detail}。",
         "step_cap_warning": "这份清单计划 {steps} 个 3D 步骤，超过当前步数上限 {cap} 步；超出部分不会执行。",
         "all_2d_note": "这份清单只含 2D 素材，不消耗 3D 步数。",
-        "project_asset_limit_warning": "项目已有 {count} 个资产，上限 {maximum} 个；确认清单不受影响，登记资产时才会拦截。"
+        "project_asset_limit_warning": "项目已有 {count} 个资产，上限 {maximum} 个；确认清单不受影响，登记资产时才会拦截。",
+        "proposed": "制作清单已提交，共 {count} 项、计划 {steps} 步，等待用户确认。",
+        "propose_session_not_in_project": "当前会话还没有归入项目，请先把会话放进项目，再提出制作清单。",
+        "propose_invalid_items": "制作清单参数不合法：请检查项数、名称是否重复、资产种类、路线与引用数量上限。",
+        "propose_reference_unresolved": "部分引用句柄无法解析，请检查引用的图片或项目资产是否存在。",
+        "propose_failed": "制作清单提交失败，服务暂时不可用，请稍后重试。"
       },
       "ui": {
         "card_title": "制作清单",
@@ -7945,6 +7971,34 @@
           "parameters": {
             "type": "object",
             "properties": {},
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "propose_asset_list",
+          "execution": {"implementation_key":"assetlist.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Propose a production list of assets for the current project. The user must confirm the list before any work starts. Returns the list id, item count, planned steps and availability warnings.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "title": {"type": "string", "description": "Short list title"},
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {"type": "string", "enum": ["character", "weapon", "prop", "vehicle", "scene", "image"], "description": "Asset kind"},
+                    "name": {"type": "string", "description": "Unique name within the list"},
+                    "description": {"type": "string", "description": "What this asset is"},
+                    "route_id": {"type": "string", "description": "Optional route id; defaults by kind"},
+                    "reference_handles": {"type": "array", "items": {"type": "string"}, "description": "Optional @imgN or @projectN handles (max 4)"}
+                  },
+                  "required": ["kind", "name", "description"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["title", "items"],
             "additionalProperties": false
           }
         }
@@ -16266,6 +16320,27 @@
             "ui.project.asset_count": "{count} assets",
             "ui.project.asset_count_one": "{count} asset",
             "ui.project.style_source_help": "The project is the default; this session may override or turn it off. The two reference sets are never merged.",
+            "ui.asset_list.section_title": "Work list",
+            "ui.asset_list.empty": "No work list yet. Ask the assistant for one in the chat.",
+            "ui.asset_list.items_count": "{count} items",
+            "ui.asset_list.items_count_one": "{count} item",
+            "ui.asset_list.planned_steps": "{steps} planned steps",
+            "ui.asset_list.planned_model3d_steps": "{steps} of them 3D steps",
+            "ui.asset_list.brief_summary": "Production brief",
+            "ui.asset_list.availability_warning": "{count} items are currently unavailable",
+            "ui.asset_list.availability_warning_one": "{count} item is currently unavailable",
+            "ui.asset_list.confirm": "Confirm list",
+            "ui.asset_list.reject": "Reject",
+            "ui.asset_list.replace": "Replace current list",
+            "ui.asset_list.pending_hint": "Waiting for you to confirm this list.",
+            "ui.asset_list.confirmed_hint": "Confirmed; work through the items on the list.",
+            "ui.asset_list.rejected_hint": "This list was rejected.",
+            "ui.asset_list.active_conflict": "The project already has a confirmed list \"{title}\".",
+            "ui.asset_list.load_failed": "The list could not be loaded",
+            "ui.asset_list.decide_failed": "That action failed; try again.",
+            "ui.asset_list.expired": "Expired",
+            "ui.asset_list.item_unavailable": "Unavailable",
+            "ui.asset_list.chat_card_title": "Asset list",
             "ui.harness.title": "Feature settings",
             "ui.harness.operation_section": "Choose a feature",
             "ui.harness.not_connected": "No service is available for this feature yet.",
@@ -19659,6 +19734,11 @@
             "asset_list.messages.step_cap_warning": "This list plans {steps} 3D steps, over the current limit of {cap}; the excess will not run.",
             "asset_list.messages.all_2d_note": "This list contains only 2D assets and uses no 3D steps.",
             "asset_list.messages.project_asset_limit_warning": "The project already has {count} assets of its {maximum} limit; confirming the list is fine, registration will be blocked.",
+            "asset_list.messages.proposed": "The production list was submitted with {count} items and {steps} planned steps; waiting for the user to confirm.",
+            "asset_list.messages.propose_session_not_in_project": "This session is not in a project yet; put the session in a project before proposing a production list.",
+            "asset_list.messages.propose_invalid_items": "The production list arguments are invalid: check the item count, duplicate names, asset kinds, routes and the reference limit.",
+            "asset_list.messages.propose_reference_unresolved": "Some reference handles could not be resolved; check that the referenced pictures or project assets exist.",
+            "asset_list.messages.propose_failed": "The production list could not be submitted because the service is temporarily unavailable; try again later.",
             "asset_list.ui.card_title": "Work list",
             "asset_list.ui.panel_title": "Work list",
             "asset_list.ui.confirm_button": "Confirm list",

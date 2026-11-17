@@ -6,14 +6,18 @@ import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
+import { AssetListCardLoader } from '@/components/studio/asset-list-card-loader';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useProjects } from '@/hooks/use-projects';
 import { useStyleLock } from '@/hooks/use-style-lock';
+import { assetListClient, type AssetListSummary } from '@/lib/asset-lists/client';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
+import { formatDateTime } from '@/lib/i18n/format';
+import { activeLocale } from '@/lib/i18n/locale';
 import type { ProjectAsset, ProjectConventions, ProjectReference, ProjectStyleGuide } from '@/lib/projects/browser-client';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
 import { withErrorReference } from '@/lib/problem-reference';
-import { projectContract, schemaText } from '@/lib/product-schema';
+import { projectContract, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { useChatStore, type ChatMessage } from '@/store/chat-store';
 import { PromoteAssetDialog } from '@/components/workspace/promote-asset-dialog';
 
@@ -74,6 +78,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
   const projects = useProjects(sessionId);
   const projectSchema = projectContract(schema);
   const chat = useMemo(() => createChatBrowserClient(schema), [schema]);
+  const assetListsClient = useMemo(() => assetListClient(schema), [schema]);
   const lockState = useStyleLock(chat, sessionId);
   const messages = useChatStore((state) => (sessionId ? state.messagesBySession?.[sessionId] ?? NO_MESSAGES : NO_MESSAGES));
   const projectId = projects.activeProjectId;
@@ -81,6 +86,8 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
   const [guide, setGuide] = useState<ProjectStyleGuide | null>(null);
   const [conventions, setConventions] = useState<ProjectConventions | null>(null);
   const [assets, setAssets] = useState<ProjectAsset[]>([]);
+  const [assetLists, setAssetLists] = useState<AssetListSummary[]>([]);
+  const [assetListsFailed, setAssetListsFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   // Style guide draft.
@@ -102,21 +109,31 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!projectId) {
-      setGuide(null); setConventions(null); setAssets([]); setFailed(false);
+      setGuide(null); setConventions(null); setAssets([]); setAssetLists([]); setAssetListsFailed(false); setFailed(false);
       return;
     }
     setLoading(true);
     setFailed(false);
+    // #327: the list section reads on its own; a refusal there leaves the other sections standing.
+    const listsRead = schema.asset_list
+      ? assetListsClient.listProjectLists(projectId).then(
+        (lists): { lists: AssetListSummary[]; failed: boolean } => ({ lists, failed: false }),
+        (): { lists: AssetListSummary[]; failed: boolean } => ({ lists: [], failed: true }),
+      )
+      : Promise.resolve({ lists: [] as AssetListSummary[], failed: false });
     try {
-      const [nextGuide, nextConventions, nextAssets] = await Promise.all([
+      const [nextGuide, nextConventions, nextAssets, nextLists] = await Promise.all([
         projects.client.getStyleGuide(projectId, signal),
         projects.client.getConventions(projectId, signal),
         projects.client.listAssets(projectId, signal),
+        listsRead,
       ]);
       if (signal?.aborted) return;
       setGuide(nextGuide);
       setConventions(nextConventions);
       setAssets(nextAssets);
+      setAssetLists(nextLists.lists);
+      setAssetListsFailed(nextLists.failed);
       setDraftEnabled(nextGuide.enabled);
       setDraftText(nextGuide.text);
       setDraftPalette(nextGuide.palette.join(', '));
@@ -127,7 +144,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [projectId, projects.client]);
+  }, [projectId, projects.client, assetListsClient, schema.asset_list]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -272,6 +289,13 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
     const declared = projectSchema?.assets.kinds.find((candidate) => candidate.id === kind);
     return declared ? schemaText(schema, declared.label_key) : kind;
   };
+  // #327: draft and confirmed lists stay decidable, so they show the full card;
+  // a rejected, expired or superseded list is history and shows one row.
+  const listIsOpen = (list: AssetListSummary) =>
+    (list.status === 'draft' || list.status === 'confirmed') && list.effective_status !== 'expired';
+  const listStatusLabel = (list: AssetListSummary) => list.effective_status === 'expired'
+    ? schemaText(schema, 'ui.asset_list.expired')
+    : schema.asset_list?.states.find((state) => state.id === list.effective_status)?.label ?? list.effective_status;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3" data-testid="project-panel">
@@ -383,6 +407,50 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
           </ul>
         )}
       </section>
+
+      {schema.asset_list ? (
+        <section data-testid="project-asset-lists-section">
+          <h3 className="text-xs font-semibold">{schemaText(schema, 'ui.asset_list.section_title')}</h3>
+          {assetListsFailed ? (
+            <p role="alert" className="mt-1 text-xs text-destructive" data-testid="project-asset-lists-failed">
+              {schemaText(schema, 'ui.asset_list.load_failed')}
+            </p>
+          ) : assetLists.length === 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground" data-testid="project-asset-lists-empty">
+              {schemaText(schema, 'ui.asset_list.empty')}
+            </p>
+          ) : (
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {assetLists.map((list) => listIsOpen(list) ? (
+                <li key={list.id}>
+                  <AssetListCardLoader
+                    summary={list}
+                    schema={schema}
+                    client={assetListsClient}
+                    variant="panel"
+                    onDecided={() => void load()}
+                  />
+                </li>
+              ) : (
+                <li
+                  key={list.id}
+                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-border px-1.5 py-1 text-xs"
+                  data-testid={`project-asset-list-${list.id}`}
+                >
+                  <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{list.title}</span>
+                  <span className="text-muted-foreground" data-testid="project-asset-list-status">{listStatusLabel(list)}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {schemaCountMessage(schema, 'ui.asset_list.items_count', list.item_count, { count: list.item_count })}
+                  </span>
+                  <time className="ml-auto text-[11px] text-muted-foreground" dateTime={list.updated_at}>
+                    {formatDateTime(list.updated_at, activeLocale(schema))}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : null}
 
       <section data-testid="project-promotion-section">
         <h3 className="text-xs font-semibold">{text('session_images')}</h3>

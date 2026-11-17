@@ -85,17 +85,22 @@ type AssetListStateSchema struct {
 // 填充；{title}/{count}/{steps}/{cap}/{maximum}/{days}/{position}/{name}/{detail}
 // 都保留原样。
 type AssetListMessagesSchema struct {
-	Confirmed                string `json:"confirmed"`
-	Rejected                 string `json:"rejected"`
-	Replaced                 string `json:"replaced"`
-	Expired                  string `json:"expired"`
-	LimitReached             string `json:"limit_reached"`
-	ListNotFound             string `json:"list_not_found"`
-	EmptyList                string `json:"empty_list"`
-	UnavailableItem          string `json:"unavailable_item"`
-	StepCapWarning           string `json:"step_cap_warning"`
-	All2DNote                string `json:"all_2d_note"`
-	ProjectAssetLimitWarning string `json:"project_asset_limit_warning"`
+	Confirmed                  string `json:"confirmed"`
+	Rejected                   string `json:"rejected"`
+	Replaced                   string `json:"replaced"`
+	Expired                    string `json:"expired"`
+	LimitReached               string `json:"limit_reached"`
+	ListNotFound               string `json:"list_not_found"`
+	EmptyList                  string `json:"empty_list"`
+	UnavailableItem            string `json:"unavailable_item"`
+	StepCapWarning             string `json:"step_cap_warning"`
+	All2DNote                  string `json:"all_2d_note"`
+	ProjectAssetLimitWarning   string `json:"project_asset_limit_warning"`
+	Proposed                   string `json:"proposed"`
+	ProposeSessionNotInProject string `json:"propose_session_not_in_project"`
+	ProposeInvalidItems        string `json:"propose_invalid_items"`
+	ProposeReferenceUnresolved string `json:"propose_reference_unresolved"`
+	ProposeFailed              string `json:"propose_failed"`
 }
 
 // AssetListUISchema 是清单卡与项目面板的固定标题和按钮文案。

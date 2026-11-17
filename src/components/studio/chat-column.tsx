@@ -22,6 +22,8 @@ import { markdownSourceOf } from '@/components/chat/markdown-text';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { ApprovalCard } from '@/components/studio/approval-card';
 import { PlanCard, PlanReloadNotice } from '@/components/studio/plan-card';
+import { AssetListCardLoader } from '@/components/studio/asset-list-card-loader';
+import { assetListPlacement } from '@/components/studio/asset-list-placement';
 import { ChoiceCard } from '@/components/studio/choice-card';
 import { QueuedTurns } from '@/components/studio/queued-turns';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
@@ -42,6 +44,7 @@ import { useSessionApproval } from '@/hooks/use-session-approval';
 import { useSessionNotes } from '@/hooks/use-session-notes';
 import { useSessionPendingApprovals } from '@/hooks/use-session-pending-approvals';
 import { useSessionChoices } from '@/hooks/use-session-choices';
+import { useSessionAssetLists } from '@/hooks/use-session-asset-lists';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useSessionPreferences } from '@/hooks/use-session-preferences';
 import { useSessionState } from '@/hooks/use-session-state';
@@ -84,6 +87,7 @@ import { useElementHeight } from '@/hooks/use-element-height';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import { choiceCardPlacement, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { assetListClient } from '@/lib/asset-lists/client';
 import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
 import { InFlightGuard } from '@/lib/chat/in-flight-guard';
@@ -250,6 +254,7 @@ export function ChatColumn() {
     [schema],
   );
   const configurationClient = useMemo(() => createAgentConfigurationClient(schema), [schema]);
+  const assetListsClient = useMemo(() => assetListClient(schema), [schema]);
   const chatWidth = useStudioStore((state) => state.chatWidth);
   const collapsed = useStudioStore((state) => state.chatCollapsed);
   const setChatWidth = useStudioStore((state) => state.setChatWidth);
@@ -331,6 +336,8 @@ export function ChatColumn() {
   const pending = useSessionPendingApprovals(activeSessionId);
   const sessionChoices = useSessionChoices(activeSessionId);
   const refreshChoices = sessionChoices.refresh;
+  // #327: the production lists proposed in this session, shown as cards in the conversation.
+  const sessionAssetLists = useSessionAssetLists(activeSessionId ?? null);
   const [answeringChoice, setAnsweringChoice] = useState<string | null>(null);
   const versions = useSessionVersions();
   const { slotOf } = useStageViewer();
@@ -1532,6 +1539,11 @@ export function ChatColumn() {
     () => choiceCardPlacement(sessionChoices.cards, displayMessages.map((message) => message.id)),
     [sessionChoices.cards, displayMessages],
   );
+  // #327: a production list follows the message that proposed it; every other list goes to the end.
+  const assetListCards = useMemo(
+    () => assetListPlacement(sessionAssetLists.lists, displayMessages.map((message) => message.id)),
+    [sessionAssetLists.lists, displayMessages],
+  );
   // #322: each context compaction shows as a display-only divider after the last message made no later
   // than it; it is not a message, so it is never copied, edited or sent.
   const sessionCompactions = useSessionCompactions(activeSessionId);
@@ -2241,6 +2253,20 @@ export function ChatColumn() {
                       {choicePlacement.byMessage.get(item.message.id)!.map(renderChoiceCard)}
                     </div>
                   ) : null}
+                  {(assetListCards.byMessage.get(item.message.id)?.length ?? 0) > 0 ? (
+                    <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-asset-list-cards">
+                      {assetListCards.byMessage.get(item.message.id)!.map((list) => (
+                        <AssetListCardLoader
+                          key={list.id}
+                          summary={list}
+                          schema={schema}
+                          client={assetListsClient}
+                          variant="chat"
+                          onDecided={sessionAssetLists.refresh}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
                   {compactionDividers.byMessage.get(item.message.id)?.map((compaction) => (
                     <ContextCompactedDivider key={compaction.id} compaction={compaction} />
                   ))}
@@ -2255,6 +2281,20 @@ export function ChatColumn() {
             {choicePlacement.loose.length > 0 ? (
               <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-choice-cards">
                 {choicePlacement.loose.map(renderChoiceCard)}
+              </div>
+            ) : null}
+            {assetListCards.loose.length > 0 ? (
+              <div className="mt-2 flex flex-col gap-2 px-1" data-testid="chat-asset-list-loose">
+                {assetListCards.loose.map((list) => (
+                  <AssetListCardLoader
+                    key={list.id}
+                    summary={list}
+                    schema={schema}
+                    client={assetListsClient}
+                    variant="chat"
+                    onDecided={sessionAssetLists.refresh}
+                  />
+                ))}
               </div>
             ) : null}
             {(planCards.length > 0 || budgetShown || planReloadError) ? (

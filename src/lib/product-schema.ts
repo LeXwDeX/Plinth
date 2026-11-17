@@ -39,6 +39,30 @@ export interface ProjectProductSchema {
 }
 
 /**
+ * #327: the browser-visible production list contract. The panel and the list
+ * card render kinds, routes and states from here; the server's messages, the
+ * UI copy and the reserved item blocks stay server-side. Absent on older
+ * servers: the list card and the project panel section stay hidden.
+ */
+export interface AssetListProductSchema {
+  /** Count and text bounds; the per-project list cap counts draft and confirmed lists only. */
+  limits: {
+    max_lists_per_project: number;
+    draft_ttl_seconds: number;
+    name_max_length: number;
+    description_max_length: number;
+    max_references_per_item: number;
+  };
+  /** Item kinds mapped to a project asset kind and a default route id. */
+  kinds: Array<{ id: string; label: string; project_kind: string; default_route: string }>;
+  /** The routes the Agent may pick; a route is a fixed capability sequence. */
+  routes: Array<{ id: string; label: string; kinds: string[]; steps: Array<{ capability: string }> }>;
+  /** List states and item states; the browser renders by `role` and never invents meaning. */
+  states: Array<{ id: string; label: string; role: string }>;
+  item_states: Array<{ id: string; label: string; role: string }>;
+}
+
+/**
  * #330: the browser-visible 3D step mode. Only 3D steps are governed; 2D steps
  * and LLM calls are never counted or blocked. Each person keeps one setting for
  * asset lists and one for external MCP. Absent on older servers: the settings
@@ -138,6 +162,8 @@ export interface ProductSchema {
   projects?: ProjectProductSchema;
   /** #330: the 3D step mode; absent on older servers. */
   step_policy?: StepPolicyProductSchema;
+  /** #327: the production list contract; absent on older servers. */
+  asset_list?: AssetListProductSchema;
   /** #332: personal access keys; absent on older servers. */
   access_keys?: AccessKeysProductSchema;
   runtime: {
@@ -168,6 +194,12 @@ export interface ProductSchema {
          project_style_guide?: string;
          project_conventions?: string;
          project_promote?: string;
+         /** #327: a project's lists (GET), one list with its items (GET) and the PUT decision. */
+         project_asset_lists?: string;
+         project_asset_list?: string;
+         project_asset_list_decision?: string;
+         /** #327: the lists proposed in one chat session (GET). */
+         chat_session_asset_lists?: string;
          /** #240: assign (PUT) the session to a project. */
          chat_session_project?: string;
          /** #246: the session's persisted 3D self-check records (GET). Absent on older servers. */

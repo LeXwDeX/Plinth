@@ -396,6 +396,10 @@ type Service struct {
 	// (#103); nil leaves the tool and the budget context unavailable.
 	productionPlans *ProductionPlanPolicy
 
+	// assetLists is the production-list proposal writer (#327); nil leaves the
+	// tool unavailable.
+	assetLists *AssetListPolicy
+
 	// selfChecks is the persisted 3D self-check record service (#246); nil
 	// leaves the record route, the tool and the prompt injection unavailable.
 	selfChecks *SelfCheckService

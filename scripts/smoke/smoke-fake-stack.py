@@ -43,11 +43,16 @@ same HTTP API the browser uses:
     first signed URLs have expired) heals on the next read of the job, and
     artifact-expired-stuck (every URL issued before a renewal has expired) fails the
     Task until the fake renews its URLs; then the free result refetch of Tripo,
-    Meshy and Hyper3D delivers it.
+    Meshy and Hyper3D delivers it;
+  * the production list workflow (#327) proposes a draft through the chat tool, edits
+    it under expected_version, confirms and replaces it, rejects another, expires a
+    one-second draft, keeps an unavailable route with its reason, plans no 3D step for
+    a 2D-only list, and answers a foreign owner with 404 (the "asset-list" group,
+    three private stacks).
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, faults;
+agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, faults;
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
@@ -345,7 +350,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -355,6 +360,8 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
     missing, corrupt or expired URL, never occurs in production); the fault runs
     use that catalog. The background-wait threshold drops to one second so a test
     Task reaches it while the fake still polls; the shipped value stays untouched.
+    draft_ttl_seconds shortens the production list's draft TTL (#327), so the
+    expiry arm does not wait the shipped week.
     The default Catalog file and its base URLs stay untouched."""
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
@@ -367,6 +374,8 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
         catalog["application"]["chat"]["preferences"]["maximum_entries"] = 0
     if preference_compaction:
         catalog["application"]["chat"]["context_compaction"]["keep_recent_rounds"] = 1
+    if draft_ttl_seconds is not None:
+        catalog["application"]["asset_list"]["limits"]["draft_ttl_seconds"] = draft_ttl_seconds
     if manual_image_edits:
         # The mask scenario needs an approval card for a 2D edit step (#244);
         # the shipped policy asks a human only for the listed capabilities.
@@ -398,6 +407,37 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
                     parameter["default"] = "url"
                     parameter.pop("forced_when", None)
                     parameter.pop("fixed", None)
+    if disabled:
+        # The Catalog refuses a legacy model projection whose capability lost
+        # its last enabled Offering. Apply the Catalog's own counting rule
+        # (enabled; a native-priced Offering counts only when its model
+        # declares native_pricing) and drop the projections and models that no
+        # enabled Offering serves, so an arm that disables a whole capability
+        # still loads. A model id another enabled Offering keeps (the
+        # offering-knowledge arm's Tripo P2) stays untouched.
+        discovery = catalog["application"].get("provider_discovery") or {}
+        models = discovery.get("legacy_models") or []
+        configured = {model.get("model_id"): model for model in models}
+        enabled_models = {}
+        for offering in catalog["offerings"]:
+            if not offering.get("enabled", True):
+                continue
+            model_id = offering.get("model_id")
+            if offering.get("native_pricing") is not None and not (
+                    model_id in configured and configured[model_id].get("native_pricing")):
+                continue
+            enabled_models.setdefault(model_id, set()).add(offering.get("capability"))
+        kept = []
+        for model in models:
+            capabilities = enabled_models.get(model.get("model_id"))
+            if not capabilities:
+                continue
+            for field in ("parameter_projections", "constraint_projections"):
+                projections = model.get(field) or {}
+                model[field] = {capability: value for capability, value in projections.items()
+                                if capability in capabilities}
+            kept.append(model)
+        discovery["legacy_models"] = kept
     if self_check:
         chat = catalog["application"]["chat"]
         chat["self_check"]["limits"] = {
@@ -5504,9 +5544,319 @@ def scenario_reroll(api, offerings, work):
            f"status={status} body={waiting}")
 
 
+# ---------------------------------------------------------------- asset lists (#327)
+
+# Every rigging Offering the shipped Catalog enables; the availability arm
+# disables all of them so the text-to-3d-rig route has no runnable second step.
+# text-to-3d itself stays enabled: a chat tool narrows its model choices from
+# the enabled text-to-3d Offerings and the Catalog refuses a tool without one.
+ASSET_LIST_RIGGING = (
+    "meshy/processing/rigging",
+    "tripo/processing/rigging",
+    "tripo/processing/rigging-v3",
+)
+
+
+def _asset_list_marker(title, items):
+    arguments = json.dumps({"title": title, "items": items}, ensure_ascii=False, separators=(",", ":"))
+    return "[[fake:tool:propose_asset_list " + arguments + "]]"
+
+
+def _asset_list_turn(api, work, stack, session, title, items, seconds=60):
+    """One chat turn whose fake LLM answer proposes the list; waits for the
+    turn's final reply and returns (tool result JSON, why)."""
+    before = assistant_reply_count(api, session)
+    status, _ = _send_chat(api, session, {
+        "content": "提出制作清单 " + _asset_list_marker(title, items),
+        "creative_domain": "model-3d",
+    })
+    if status not in (200, 201, 202):
+        return None, f"send {status}"
+    end = time.time() + seconds
+    while time.time() < end and assistant_reply_count(api, session) <= before:
+        time.sleep(0.5)
+    if assistant_reply_count(api, session) <= before:
+        return None, "the proposal turn produced no final reply"
+    end = time.time() + 10
+    results = []
+    while time.time() < end:
+        results = _tool_results(work, stack, session, "propose_asset_list")
+        if results:
+            break
+        time.sleep(0.5)
+    if not results:
+        return None, "the proposal tool left no result"
+    return results[-1], ""
+
+
+def _asset_list_setup(api, name):
+    """Creates the project and its first session; returns (session, project, why)."""
+    status, project = api.json("POST", "/api/v1/projects", {"name": name})
+    project_id = (project or {}).get("id") or ""
+    if status != 201 or not project_id:
+        return "", "", f"create project {status} {json.dumps(project, ensure_ascii=False)[:120]}"
+    status, session = api.json("POST", "/api/chat/sessions", {"title": "", "project_id": project_id})
+    session_id = (session or {}).get("id") or ""
+    if status not in (200, 201) or not session_id:
+        return "", project_id, f"create session {status} {json.dumps(session, ensure_ascii=False)[:120]}"
+    return session_id, project_id, ""
+
+
+def _asset_list_summaries(api, session):
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/asset-lists")
+    return (body or {}).get("data") or [] if status == 200 else []
+
+
+def _project_asset_lists(api, project_id):
+    status, body = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists")
+    return (body or {}).get("data") or [] if status == 200 else []
+
+
+def scenario_asset_list_main(api, work):
+    """#327 (a-f, i, j): the proposal, detail, edit, confirm, replace, reject,
+    2D-only and foreign-owner arms on the shipped Catalog."""
+    session, project_id, why = _asset_list_setup(api, "资产清单冒烟")
+    if why:
+        record("#327 create the asset list project", False, why)
+        return
+    character = {"kind": "character", "name": "主角 阿岚", "description": "红发剑士，全身绑骨", "route_id": "text-to-3d-rig"}
+    prop = {"kind": "prop", "name": "长剑", "description": "单手长剑，低模"}
+    result, why = _asset_list_turn(api, work, "asset-list", session, "第一章 角色与道具", [character, prop])
+    if result is None:
+        record("#327 the agent proposes a draft and the session lists it", False, why)
+        return
+    list_id = str(result.get("list_id") or "")
+    summary = next((item for item in _asset_list_summaries(api, session) if item.get("id") == list_id), {})
+    record("#327 the agent proposes a draft and the session lists it",
+           bool(list_id) and result.get("version") == 0 and result.get("status") == "draft"
+           and result.get("item_count") == 2 and result.get("planned_step_count") == 3
+           and result.get("planned_model3d_step_count") == 3 and not result.get("unavailable_items")
+           and summary.get("status") == "draft" and summary.get("effective_status") == "draft"
+           and bool(summary.get("origin_message_id")) and summary.get("item_count") == 2
+           and summary.get("planned_step_count") == 3 and summary.get("planned_model3d_step_count") == 3,
+           f"tool={json.dumps(result, ensure_ascii=False)[:240]} summary={json.dumps(summary, ensure_ascii=False)[:200]}")
+    if not list_id:
+        return
+
+    status, detail = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}")
+    items = (detail or {}).get("items") or []
+    first = items[0] if items else {}
+    second = items[1] if len(items) > 1 else {}
+    first_route = first.get("route") or []
+    second_route = second.get("route") or []
+    record("#327 the detail keeps kinds, routes and planned steps",
+           status == 200 and detail.get("version") == 0 and detail.get("status") == "draft"
+           and detail.get("effective_status") == "draft" and len(items) == 2
+           and first.get("kind") == "character" and first.get("name") == character["name"]
+           and first.get("route_id") == "text-to-3d-rig"
+           and [(step.get("capability"), step.get("available")) for step in first_route]
+           == [("text-to-3d", True), ("rigging", True)]
+           and all(step.get("offering_id") for step in first_route)
+           and first.get("planned_step_count") == 2 and first.get("planned_model3d_step_count") == 2
+           and first.get("state") == "todo"
+           and second.get("kind") == "prop" and second.get("name") == prop["name"]
+           and second.get("route_id") == "text-to-3d"
+           and [(step.get("capability"), step.get("available")) for step in second_route]
+           == [("text-to-3d", True)]
+           and second.get("planned_step_count") == 1 and second.get("planned_model3d_step_count") == 1,
+           f"items={[(item.get('kind'), item.get('route_id'), [(step.get('capability'), step.get('available')) for step in item.get('route') or []]) for item in items]}")
+
+    edited_items = [
+        {"kind": "character", "name": "主角 阿岚", "description": "红发剑士，全身绑骨", "route_id": "text-to-3d-rig"},
+        {"kind": "vehicle", "name": "霜狼战车", "description": "双人雪地载具"},
+    ]
+    edit_body = {"title": "第一章 角色与载具", "items": edited_items, "brief": {}, "expected_version": 0}
+    status, edited = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}", edit_body)
+    record("#327 an edit replaces the draft and bumps the version",
+           status == 200 and edited.get("version") == 1 and edited.get("title") == "第一章 角色与载具"
+           and [(item.get("kind"), item.get("name")) for item in edited.get("items") or []]
+           == [("character", "主角 阿岚"), ("vehicle", "霜狼战车")]
+           and edited.get("item_count") == 2 and edited.get("planned_step_count") == 3
+           and edited.get("planned_model3d_step_count") == 3,
+           f"status={status} version={edited.get('version')} "
+           f"items={[(item.get('kind'), item.get('route_id')) for item in edited.get('items') or []]}")
+    status, stale = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}", edit_body)
+    record("#327 an edit with a stale expected_version is refused",
+           status == 409 and stale.get("code") == "conflict",
+           f"status={status} code={stale.get('code')}")
+
+    status, confirmed = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                                 {"decision": "confirm"})
+    record("#327 confirming the draft activates it",
+           status == 200 and confirmed.get("status") == "confirmed"
+           and confirmed.get("effective_status") == "confirmed" and bool(confirmed.get("decided_at")),
+           f"status={status} state={confirmed.get('status')} version={confirmed.get('version')}")
+    status, repeated = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                                {"decision": "confirm"})
+    record("#327 repeating the confirmation is idempotent",
+           status == 200 and repeated.get("status") == "confirmed"
+           and repeated.get("version") == confirmed.get("version"),
+           f"status={status} state={repeated.get('status')} version={repeated.get('version')}")
+    summary = next((item for item in _project_asset_lists(api, project_id) if item.get("id") == list_id), {})
+    record("#327 the project list shows the confirmed state",
+           summary.get("status") == "confirmed" and summary.get("effective_status") == "confirmed"
+           and summary.get("planned_step_count") == 3 and summary.get("planned_model3d_step_count") == 3,
+           json.dumps(summary, ensure_ascii=False)[:200])
+
+    second_result, why = _asset_list_turn(api, work, "asset-list", session, "第二章 雪山营地",
+                                          [{"kind": "scene", "name": "雪山营地", "description": "远景营地"}])
+    second_id = str((second_result or {}).get("list_id") or "")
+    if not second_id:
+        record("#327 a second proposal becomes another draft", False, why)
+    else:
+        record("#327 a second proposal becomes another draft",
+               second_result.get("status") == "draft" and second_result.get("item_count") == 1,
+               json.dumps(second_result, ensure_ascii=False)[:200])
+        status, conflict = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{second_id}/decision",
+                                    {"decision": "confirm"})
+        record("#327 confirming while another list is active conflicts",
+               status == 409 and conflict.get("code") == "asset_list_active_conflict"
+               and conflict.get("active_list_id") == list_id
+               and conflict.get("active_list_title") == "第一章 角色与载具",
+               f"status={status} {json.dumps(conflict, ensure_ascii=False)[:200]}")
+        replace_status, replaced = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{second_id}/decision",
+                                            {"decision": "replace"})
+        previous_status, previous = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}")
+        record("#327 replace activates the new list and supersedes the old one",
+               replace_status == 200 and replaced.get("status") == "confirmed"
+               and previous_status == 200 and previous.get("status") == "superseded"
+               and previous.get("superseded_by") == second_id,
+               f"replace={replace_status}/{replaced.get('status')} previous={previous.get('status')}/"
+               f"{previous.get('superseded_by')}")
+
+    reject_result, why = _asset_list_turn(api, work, "asset-list", session, "第三章 备用道具",
+                                          [{"kind": "prop", "name": "备用手斧", "description": "备用低模"}])
+    reject_id = str((reject_result or {}).get("list_id") or "")
+    if not reject_id:
+        record("#327 rejecting a draft closes it", False, why)
+    else:
+        status, rejected = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{reject_id}/decision",
+                                    {"decision": "reject", "reason": "暂不制作"})
+        record("#327 rejecting a draft closes it",
+               status == 200 and rejected.get("status") == "rejected"
+               and rejected.get("effective_status") == "rejected"
+               and rejected.get("decision_reason") == "暂不制作",
+               f"status={status} state={rejected.get('status')} reason={rejected.get('decision_reason')}")
+
+    image_result, why = _asset_list_turn(api, work, "asset-list", session, "第四章 2D 素材",
+                                         [{"kind": "image", "name": "界面图标", "description": "一组 2D 图标"}])
+    image_id = str((image_result or {}).get("list_id") or "")
+    if not image_id:
+        record("#327 a 2D-only list plans no 3D steps", False, why)
+    else:
+        status, image_detail = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{image_id}")
+        image_items = (image_detail or {}).get("items") or []
+        image_item = image_items[0] if image_items else {}
+        image_route = image_item.get("route") or []
+        image_summary = next((item for item in _asset_list_summaries(api, session) if item.get("id") == image_id), {})
+        record("#327 a 2D-only list plans no 3D steps",
+               image_result.get("item_count") == 1 and image_result.get("planned_step_count") == 1
+               and image_result.get("planned_model3d_step_count") == 0
+               and status == 200 and image_detail.get("planned_step_count") == 1
+               and image_detail.get("planned_model3d_step_count") == 0
+               and image_summary.get("planned_model3d_step_count") == 0
+               and image_item.get("route_id") == "text-to-image"
+               and [(step.get("capability"), step.get("available")) for step in image_route]
+               == [("text-to-image", True)]
+               and image_item.get("planned_model3d_step_count") == 0,
+               f"tool={json.dumps(image_result, ensure_ascii=False)[:200]} "
+               f"summary={json.dumps(image_summary, ensure_ascii=False)[:160]}")
+
+    # A different persisted user sees neither the project's lists nor one list.
+    owner = Api(api.base)
+    status, _signed_in = owner.json("POST", "/api/auth/login",
+                                    {"username": MCP_OWNER_USERNAME, "password": MCP_OWNER_PASSWORD})
+    detail_status, _ = owner.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{image_id or list_id}")
+    lists_status, _ = owner.json("GET", f"/api/v1/projects/{project_id}/asset-lists")
+    record("#327 a foreign owner reads the lists as missing",
+           status == 200 and detail_status == 404 and lists_status == 404,
+           f"login={status} detail={detail_status} project lists={lists_status}")
+
+
+def scenario_asset_list_unavailable(api, work):
+    """#327 (h): a route whose second step has no enabled Offering stays on the
+    list with its reason, and the planned steps are still counted."""
+    session, project_id, why = _asset_list_setup(api, "资产清单不可用路线")
+    if why:
+        record("#327 an unavailable route stays with its reason and planned step", False, why)
+        return
+    result, why = _asset_list_turn(api, work, "asset-list-unavailable", session, "无路可走的清单",
+                                   [{"kind": "character", "name": "无路角色", "description": "绑骨能力已全部禁用",
+                                     "route_id": "text-to-3d-rig"}])
+    if result is None:
+        record("#327 an unavailable route stays with its reason and planned step", False, why)
+        return
+    list_id = str(result.get("list_id") or "")
+    status, detail = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}")
+    items = (detail or {}).get("items") or []
+    route = (items[0].get("route") if items else None) or []
+    unavailable = result.get("unavailable_items") or []
+    record("#327 an unavailable route stays with its reason and planned step",
+           bool(list_id) and result.get("status") == "draft"
+           and result.get("planned_step_count") == 2 and result.get("planned_model3d_step_count") == 2
+           and len(unavailable) == 1 and unavailable[0].get("position") == 1
+           and unavailable[0].get("name") == "无路角色" and bool(unavailable[0].get("reason"))
+           and status == 200 and detail.get("planned_model3d_step_count") == 2
+           and len(items) == 1 and items[0].get("planned_step_count") == 2
+           and items[0].get("planned_model3d_step_count") == 2
+           and [(step.get("capability"), step.get("available")) for step in route]
+           == [("text-to-3d", True), ("rigging", False)]
+           and bool(route[-1].get("reason")),
+           f"tool={json.dumps(result, ensure_ascii=False)[:260]} route={route}")
+
+
+def scenario_asset_list_expiry(api, work):
+    """#327 (g): a one-second draft TTL reads as expired without a write and
+    refuses the decision with asset_list_expired."""
+    session, project_id, why = _asset_list_setup(api, "资产清单草稿过期")
+    if why:
+        record("#327 an expired draft reads as expired and refuses the decision", False, why)
+        return
+    result, why = _asset_list_turn(api, work, "asset-list-ttl", session, "一秒草稿",
+                                   [{"kind": "prop", "name": "过期长剑", "description": "草稿会过期"}])
+    list_id = str((result or {}).get("list_id") or "")
+    if not list_id:
+        record("#327 an expired draft reads as expired and refuses the decision", False, why)
+        return
+    time.sleep(1.5)
+    status, detail = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}")
+    decision_status, decision = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                                         {"decision": "confirm"})
+    record("#327 an expired draft reads as expired and refuses the decision",
+           status == 200 and detail.get("status") == "draft"
+           and detail.get("effective_status") == "expired"
+           and decision_status == 409 and decision.get("code") == "asset_list_expired",
+           f"detail={detail.get('status')}/{detail.get('effective_status')} "
+           f"decision={decision_status}/{decision.get('code')}")
+
+
+def scenario_asset_list(work, stack_binary, processes, catalog):
+    """#327: the production list workflow on the fake stack. Three private
+    stacks: the shipped Catalog for the workflow, every rigging Offering
+    disabled for the availability arm, and a one-second draft TTL for expiry."""
+    child, api = start_stack(processes, stack_binary, work, "asset-list", catalog, GOOD_KEY)
+    try:
+        scenario_asset_list_main(api, work)
+    finally:
+        processes.stop(child)
+    unavailable = private_catalog(work, disabled=ASSET_LIST_RIGGING,
+                                  name="catalog-asset-list-unavailable.json")
+    child, api = start_stack(processes, stack_binary, work, "asset-list-unavailable", unavailable, GOOD_KEY)
+    try:
+        scenario_asset_list_unavailable(api, work)
+    finally:
+        processes.stop(child)
+    expiry = private_catalog(work, draft_ttl_seconds=1, name="catalog-asset-list-ttl.json")
+    child, api = start_stack(processes, stack_binary, work, "asset-list-ttl", expiry, GOOD_KEY)
+    try:
+        scenario_asset_list_expiry(api, work)
+    finally:
+        processes.stop(child)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -5516,7 +5866,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "asset-list", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -5618,6 +5968,11 @@ def main():
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             scenario_preferences(api, offerings, work, enabled=args.preferences != "off")
             processes.stop(child)
+        if "asset-list" in selected:
+            # #327: its own stacks, because the expiry arm needs a one-second
+            # draft TTL and the availability arm needs every rigging Offering
+            # disabled; the workflow arm keeps the shipped Catalog.
+            scenario_asset_list(work, stack_binary, processes, catalog)
         check_no_real_upstream(work)
     finally:
         processes.stop_all()
