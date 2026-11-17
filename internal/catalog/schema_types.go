@@ -4772,6 +4772,9 @@ type ChatStateSchema struct {
 	TurnError                    string `json:"turn_error"`
 	PlaceholderStaleMilliseconds int    `json:"placeholder_stale_milliseconds"`
 	FailedPromptPreviewChars     int    `json:"failed_prompt_preview_characters"`
+	// TurnEndReasons are the strings stored with a finished turn to say why it
+	// ended (#328). Optional: left out, no reason is recorded.
+	TurnEndReasons ChatTurnEndReasonsSchema `json:"turn_end_reasons,omitzero"`
 }
 
 type ChatFrontendSchema struct {

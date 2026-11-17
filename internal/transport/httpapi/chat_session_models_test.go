@@ -25,7 +25,7 @@ func recordTurn(t *testing.T, repository *sqlite.Repository, owner, session, id 
 	); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.UpdateTurnState(ctx, id, "done", at); err != nil {
+	if err := repository.UpdateTurnState(ctx, id, "done", "", at); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.FinishStream(ctx, session, id, "done", at); err != nil {

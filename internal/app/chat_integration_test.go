@@ -116,13 +116,13 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		t.Fatal("assistant message was not created")
 	}
 	turnDeadline := time.Now().Add(20 * time.Second)
-	turnState := ""
+	turnState, turnEndReason := "", ""
 	for time.Now().Before(turnDeadline) {
 		turn, readErr := grantRepository.GetTurn(context.Background(), "owner-a", sessionID, assistantMessageID)
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		turnState = turn.State
+		turnState, turnEndReason = turn.State, turn.EndReason
 		if turnState == application.schema.Chat.State.TurnDone || turnState == application.schema.Chat.State.TurnError {
 			break
 		}
@@ -130,6 +130,10 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 	}
 	if turnState != application.schema.Chat.State.TurnDone {
 		t.Fatalf("agent turn did not finish after task completion: %s", turnState)
+	}
+	// #328: the assembled app stores the Schema's end reason with the turn.
+	if want := application.schema.Chat.State.TurnEndReasons.Completed; want == "" || turnEndReason != want {
+		t.Fatalf("finished turn end reason = %q, want the Schema's %q", turnEndReason, want)
 	}
 
 	rawDatabase := openRawAppDatabase(t, filepath.Join(root, "art-ai.db"))

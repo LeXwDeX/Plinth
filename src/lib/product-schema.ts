@@ -1675,6 +1675,15 @@ export interface ChatProductSchema {
     turn_running: string;
     turn_done: string;
     turn_error: string;
+    /** #328: why a finished turn ended; absent when the Catalog declares none. */
+    turn_end_reasons?: {
+      completed: string;
+      tool_limit: string;
+      awaiting_approval: string;
+      stopped: string;
+      background: string;
+      error: string;
+    };
     placeholder_stale_milliseconds: number;
     failed_prompt_preview_characters: number;
   };

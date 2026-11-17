@@ -192,11 +192,16 @@ type Repository interface {
 	// RecentSessionTurnOptions lists the options of the session's newest
 	// turns, newest first, at most the given number, in any state.
 	RecentSessionTurnOptions(context.Context, string, string, int) ([]TurnOptions, error)
+	// UpdateTurnState sets the turn's state and why it ended (#328): endReason
+	// is the Schema's end reason string, empty when the turn is not finished or
+	// the Schema declares none. Every call replaces the stored reason, so a
+	// turn that runs again loses its old one.
 	UpdateTurnState(
-		context.Context,
-		string,
-		string,
-		time.Time,
+		ctx context.Context,
+		assistantMessageID string,
+		state string,
+		endReason string,
+		at time.Time,
 	) error
 	RequestTurnStop(context.Context, string, string, []string, time.Time) (Turn, bool, error)
 	TurnStopRequested(context.Context, string, string, string) (bool, error)
@@ -242,6 +247,10 @@ type ServiceConfig struct {
 	SubscriberBufferSize  int
 	EventFields           EventFieldPolicy
 	EventTypes            EventTypePolicy
+	// TurnEndReasons is application.chat.state.turn_end_reasons (#328): the
+	// strings stored with a finished turn to say why it ended. Optional; a zero
+	// value records no reason.
+	TurnEndReasons catalog.ChatTurnEndReasonsSchema
 	// ApprovalPolicy comes from application.chat.approval_policy. A zero
 	// policy offers only manual mode.
 	ApprovalPolicy approvalpolicy.Policy
@@ -346,6 +355,7 @@ type Service struct {
 	turnWaitingTask            string
 	turnDone                   string
 	turnError                  string
+	turnEndReasons             catalog.ChatTurnEndReasonsSchema
 	placeholderHealing         PlaceholderHealingPolicy
 	streamCleanupTTL           time.Duration
 	subscriberBufferSize       int
@@ -452,6 +462,9 @@ func NewService(config ServiceConfig) (*Service, error) {
 			return nil, fmt.Errorf("chat: %s is required", name)
 		}
 	}
+	if err := config.TurnEndReasons.Validate(); err != nil {
+		return nil, fmt.Errorf("chat: %w", err)
+	}
 	if config.Clock == nil {
 		config.Clock = time.Now
 	}
@@ -498,6 +511,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		turnWaitingTask:            config.TurnWaitingTask,
 		turnDone:                   config.TurnDone,
 		turnError:                  config.TurnError,
+		turnEndReasons:             config.TurnEndReasons,
 		placeholderHealing:         config.PlaceholderHealing,
 		streamCleanupTTL:           config.StreamCleanupTTL,
 		subscriberBufferSize:       config.SubscriberBufferSize,
@@ -1417,6 +1431,8 @@ func (service *Service) TurnStopRequested(ctx context.Context, ownerID, sessionI
 	return service.repository.TurnStopRequested(ctx, ownerID, sessionID, assistantMessageID)
 }
 
+// MarkTurnRunning sets the turn running. It stores no end reason, so a turn
+// that runs again loses the reason of its earlier end (#328).
 func (service *Service) MarkTurnRunning(
 	ctx context.Context,
 	assistantMessageID string,
@@ -1425,25 +1441,23 @@ func (service *Service) MarkTurnRunning(
 		ctx,
 		assistantMessageID,
 		service.turnRunning,
+		"",
 		service.clock(),
 	)
 }
 
+// FinishTurn ends the turn as failed or as a normal end. A caller that knows
+// more about why the turn ended uses FinishTurnWithReason.
 func (service *Service) FinishTurn(
 	ctx context.Context,
 	assistantMessageID string,
 	failed bool,
 ) error {
-	state := service.turnDone
+	reason := TurnEndCompleted
 	if failed {
-		state = service.turnError
+		reason = TurnEndError
 	}
-	return service.repository.UpdateTurnState(
-		ctx,
-		assistantMessageID,
-		state,
-		service.clock(),
-	)
+	return service.FinishTurnWithReason(ctx, assistantMessageID, reason)
 }
 
 func (service *Service) DeleteMessage(

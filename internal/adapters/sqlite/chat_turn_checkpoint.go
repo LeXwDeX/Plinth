@@ -17,11 +17,11 @@ func (r *Repository) GetTurn(ctx context.Context, ownerID, sessionID, assistantI
 	var optionsJSON, checkpointJSON, createdAt, updatedAt string
 	var stopRequested int
 	err := r.db.QueryRowContext(ctx, `SELECT owner_id, session_id, assistant_message_id,
-		options_json, state, stop_requested, checkpoint_json, checkpoint_version,
+		options_json, state, end_reason, stop_requested, checkpoint_json, checkpoint_version,
 		created_at, updated_at FROM go_chat_turns
 		WHERE owner_id = ? AND session_id = ? AND assistant_message_id = ?`,
 		ownerID, sessionID, assistantID).Scan(&turn.OwnerID, &turn.SessionID,
-		&turn.AssistantMessageID, &optionsJSON, &turn.State, &stopRequested,
+		&turn.AssistantMessageID, &optionsJSON, &turn.State, &turn.EndReason, &stopRequested,
 		&checkpointJSON, &turn.CheckpointVersion, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return chat.Turn{}, chat.ErrMessageNotFound
