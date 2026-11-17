@@ -79,6 +79,18 @@ func (f fakeBalances) Read(_ context.Context, ids []string) []provideraccounts.R
 	return result
 }
 
+type fakeInspections struct {
+	inspection *mcppublic.Inspection
+	found      bool
+	err        error
+	calls      int
+}
+
+func (f *fakeInspections) Inspection(context.Context, string, string) (*mcppublic.Inspection, bool, error) {
+	f.calls++
+	return f.inspection, f.found, f.err
+}
+
 var readTime = time.Date(2026, 11, 17, 8, 30, 0, 0, time.UTC)
 
 func known(id, amount, unit, label string) provideraccounts.Reading {
@@ -92,6 +104,7 @@ type harness struct {
 	builder        *mcppublic.Builder
 	settings       *fakeSettings
 	usage          *fakeUsage
+	inspections    *fakeInspections
 	logs           *bytes.Buffer
 	mcp            *catalog.MCPPublicSchema
 }
@@ -117,10 +130,14 @@ func newHarness(t *testing.T, mutate func(*harness)) *harness {
 	if mutate != nil {
 		mutate(h)
 	}
+	var inspections mcppublic.InspectionReader
+	if h.inspections != nil {
+		inspections = h.inspections
+	}
 	h.builder, err = mcppublic.New(mcppublic.Config{
 		StatusBlock: h.mcp.StatusBlock, StepPolicy: *application.StepPolicy, ProviderAccounts: h.accounts(application),
 		AccountLabels: map[string]string{"meshy": "MeshyAI", "tripo": "Tripo", "hyper3d": "Hyper3D"},
-		Settings:      h.settings, Usage: h.usage, Balances: balances,
+		Settings:      h.settings, Usage: h.usage, Balances: balances, Inspections: inspections,
 		Localize: func(locale, text string) string {
 			if locale == "en" && text == "Agent 自己管理" {
 				return "Managed by the Agent"
@@ -344,5 +361,74 @@ func TestBlockSkipsABalanceAccountTheDeploymentDoesNotDeclare(t *testing.T) {
 	none.conforms(t, empty)
 	if len(empty.Balances) != 0 {
 		t.Fatalf("balances = %+v", empty.Balances)
+	}
+}
+
+func TestBlockReportsTheSubjectTaskInspection(t *testing.T) {
+	t.Parallel()
+	when := "2026-11-17T08:30:00Z"
+	reader := &fakeInspections{found: true, inspection: &mcppublic.Inspection{
+		TaskID: "task-1", Source: mcppublic.InspectionSourcePlatformSelfCheck, Verdict: "passed",
+		Purpose:   &mcppublic.InspectionPurpose{ID: "display", Label: "展示/渲染", Source: "default_profile"},
+		Waiver:    true,
+		CheckedAt: &when,
+	}}
+	h := newHarness(t, func(h *harness) { h.inspections = reader })
+	block := h.builder.Build(context.Background(), "", mcppublic.Subject{OwnerID: "owner-a", TaskID: "task-1"})
+	decoded := h.conforms(t, block)
+	inspection, ok := decoded["inspection"].(map[string]any)
+	if !ok || inspection["task_id"] != "task-1" || inspection["source"] != "platform_self_check" ||
+		inspection["verdict"] != "passed" || inspection["waiver"] != true || inspection["checked_at"] != when {
+		t.Fatalf("inspection = %v", decoded["inspection"])
+	}
+	// failed is an array even when the reader left it nil.
+	if failed, ok := inspection["failed"].([]any); !ok || len(failed) != 0 {
+		t.Fatalf("failed = %v", inspection["failed"])
+	}
+	purpose := inspection["purpose"].(map[string]any)
+	if purpose["id"] != "display" || purpose["label"] != "展示/渲染" || purpose["source"] != "default_profile" {
+		t.Fatalf("purpose = %v", purpose)
+	}
+	if reader.calls != 1 {
+		t.Fatalf("reader calls = %d", reader.calls)
+	}
+
+	// No task id (the other tools) never reads.
+	reader.calls = 0
+	decoded = h.conforms(t, h.builder.Build(context.Background(), "", mcppublic.Subject{OwnerID: "owner-a"}))
+	if reader.calls != 0 || decoded["inspection"] != nil {
+		t.Fatalf("a subject without a task: calls=%d inspection=%v", reader.calls, decoded["inspection"])
+	}
+}
+
+func TestBlockInspectionIsNullWhenUnreadableOrMissing(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		reader *fakeInspections
+		warn   string
+	}{
+		"not found": {reader: &fakeInspections{}},
+		"read failed": {
+			reader: &fakeInspections{err: errors.New("self-check store is down")},
+			warn:   "自检结论读取失败",
+		},
+		"no reader": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, func(h *harness) { h.inspections = test.reader })
+			decoded := h.conforms(t, h.builder.Build(context.Background(), "",
+				mcppublic.Subject{OwnerID: "owner-a", TaskID: "task-1"}))
+			if decoded["inspection"] != nil {
+				t.Fatalf("inspection = %v", decoded["inspection"])
+			}
+			if test.warn != "" {
+				if !strings.Contains(h.logs.String(), test.warn) {
+					t.Fatalf("logs = %q", h.logs.String())
+				}
+			} else if strings.Contains(h.logs.String(), "自检") {
+				// A missing record is normal and must not raise a warning.
+				t.Fatalf("a missing record was logged: %q", h.logs.String())
+			}
+		})
 	}
 }

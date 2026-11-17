@@ -410,6 +410,11 @@ func (s *Server) mcpGetTask(call *mcpCall) (mcpOutcome, error) {
 	}
 	view, attribution := s.mcpTaskView(call.locale, task)
 	subject := mcppublic.Subject{Failure: attribution}
+	if task.State == generation.TaskSucceeded {
+		// Only a succeeded task can carry the platform's self-check verdict;
+		// the other tools never set the task id, so they report null.
+		subject.TaskID = string(task.ID)
+	}
 	marked, err := s.mcpAssetSessions(call, task.SessionID)
 	if err != nil {
 		return mcpOutcome{}, err
@@ -503,6 +508,11 @@ func (s *Server) mcpGetTaskAssets(call *mcpCall, route routing.Two, signedRoute 
 	}
 	view, attribution := s.mcpTaskView(call.locale, task)
 	subject := mcppublic.Subject{Failure: attribution}
+	if task.State == generation.TaskSucceeded {
+		// Only a succeeded task can carry the platform's self-check verdict;
+		// the other tools never set the task id, so they report null.
+		subject.TaskID = string(task.ID)
+	}
 	marked, err := s.mcpAssetSessions(call, task.SessionID)
 	if err != nil {
 		return mcpOutcome{}, err

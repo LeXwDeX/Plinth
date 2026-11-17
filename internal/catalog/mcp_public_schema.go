@@ -54,6 +54,9 @@ const (
 	MCPStatusBalances       = "balances"
 	MCPStatusStepCosts      = "step_costs"
 	MCPStatusFailure        = "failure"
+	// MCPStatusInspection is the platform's last 3D self-check of a succeeded
+	// task; null when the platform recorded none (2D and MCP-only tasks).
+	MCPStatusInspection = "inspection"
 )
 
 // MCPPublicSchema is application.mcp_public (#332): the external MCP service.

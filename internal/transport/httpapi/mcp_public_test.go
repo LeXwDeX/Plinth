@@ -399,7 +399,7 @@ func TestMCPEveryToolResponseCarriesTheStatusBlock(t *testing.T) {
 			continue
 		}
 		status := result.status(t)
-		for _, field := range []string{"step_mode", "step_mode_label", "step_cap", "asset", "total_used_steps", "balances", "step_costs", "failure"} {
+		for _, field := range []string{"step_mode", "step_mode_label", "step_cap", "asset", "total_used_steps", "balances", "step_costs", "failure", "inspection"} {
 			if _, present := status[field]; !present {
 				t.Errorf("%s: the status block lacks %q: %s", name, field, result.raw)
 			}

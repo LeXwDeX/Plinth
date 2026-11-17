@@ -96,11 +96,74 @@ func (mcpDirectory) FindByID(_ context.Context, id string) (authentication.UserR
 }
 
 type mcpHarnessParts struct {
-	identity  httpapi.IdentityResolver
-	status    *mcppublic.Builder
-	assets    *mcppublic.Assets
-	inspector *harnessModelInspector
-	clock     *mcpClock
+	identity    httpapi.IdentityResolver
+	status      *mcppublic.Builder
+	assets      *mcppublic.Assets
+	inspector   *harnessModelInspector
+	inspections *harnessInspectionReader
+	clock       *mcpClock
+}
+
+// harnessInspectionReader reads the real persisted self-check record through
+// the chat service, so the harness exercises the same cross-session lookup as
+// the application. It counts its reads and can be made to fail, which lets a
+// test prove that list_tasks and running tasks never read it and that a read
+// failure leaves the block null instead of failing the call.
+type harnessInspectionReader struct {
+	sessions *chat.Service
+	schema   catalog.ChatSelfCheckSchema
+	calls    atomic.Int32
+	fail     atomic.Bool
+}
+
+func (reader *harnessInspectionReader) Inspection(ctx context.Context, ownerID, taskID string) (*mcppublic.Inspection, bool, error) {
+	reader.calls.Add(1)
+	if reader.fail.Load() {
+		return nil, false, fmt.Errorf("self-check store is down")
+	}
+	record, found, err := reader.sessions.SelfCheckByTask(ctx, ownerID, taskID)
+	if err != nil || !found {
+		return nil, false, err
+	}
+	return harnessInspectionFromRecord(reader.schema, record), true, nil
+}
+
+// harnessInspectionFromRecord mirrors the application's mapping into the block.
+func harnessInspectionFromRecord(schema catalog.ChatSelfCheckSchema, record chat.SelfCheckRecord) *mcppublic.Inspection {
+	inspection := &mcppublic.Inspection{
+		TaskID:  record.TaskID,
+		Source:  mcppublic.InspectionSourcePlatformSelfCheck,
+		Verdict: chat.SelfCheckDerivedStatus(schema, record).Role,
+		Failed:  []mcppublic.InspectionFailedCheck{},
+	}
+	if conclusion := record.Conclusion; conclusion != nil {
+		inspection.Waiver = strings.TrimSpace(conclusion.Waiver) != ""
+		if !conclusion.At.IsZero() {
+			at := conclusion.At.UTC().Format(time.RFC3339)
+			inspection.CheckedAt = &at
+		}
+		if strings.TrimSpace(conclusion.Purpose) != "" {
+			inspection.Purpose = &mcppublic.InspectionPurpose{
+				ID: conclusion.Purpose, Label: conclusion.PurposeLabel, Source: conclusion.PurposeSource,
+			}
+		}
+	}
+	_, latestOK := chat.SelfCheckLatestInspect(record)
+	if latestOK != nil {
+		for _, check := range latestOK.UsageFailed {
+			inspection.Failed = append(inspection.Failed, mcppublic.InspectionFailedCheck{Check: check})
+		}
+		if inspection.Purpose == nil && strings.TrimSpace(latestOK.Purpose) != "" {
+			inspection.Purpose = &mcppublic.InspectionPurpose{
+				ID: latestOK.Purpose, Label: latestOK.PurposeLabel, Source: latestOK.PurposeSource,
+			}
+		}
+		if inspection.CheckedAt == nil && !latestOK.At.IsZero() {
+			at := latestOK.At.UTC().Format(time.RFC3339)
+			inspection.CheckedAt = &at
+		}
+	}
+	return inspection
 }
 
 // harnessModelInspector stands in for the generation executor's read-only
@@ -177,10 +240,16 @@ func harnessMCP(t *testing.T, repository *sqlite.Repository, application catalog
 	if err != nil {
 		t.Fatal(err)
 	}
+	var inspections *harnessInspectionReader
+	var inspectionReader mcppublic.InspectionReader
+	if sessions != nil {
+		inspections = &harnessInspectionReader{sessions: sessions, schema: application.Chat.SelfCheck}
+		inspectionReader = inspections
+	}
 	status, err := mcppublic.New(mcppublic.Config{
 		StatusBlock: application.MCPPublic.StatusBlock, StepPolicy: *application.StepPolicy, ProviderAccounts: application.Runtime.ProviderAccounts,
 		AccountLabels: labels,
-		Settings:      settings, Usage: repository, Balances: cache, Localize: texts.Text,
+		Settings:      settings, Usage: repository, Balances: cache, Inspections: inspectionReader, Localize: texts.Text,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +262,7 @@ func harnessMCP(t *testing.T, repository *sqlite.Repository, application catalog
 	}
 	return mcpHarnessParts{
 		identity: &accesskeys.Authenticator{Keys: keys, Users: mcpDirectory{}, Policy: policy},
-		status:   status, assets: assets, inspector: &harnessModelInspector{}, clock: clock,
+		status:   status, assets: assets, inspector: &harnessModelInspector{}, inspections: inspections, clock: clock,
 	}
 }
 
@@ -233,6 +302,7 @@ type mcpFixture struct {
 	keys         *accesskeys.Service
 	repository   *sqlite.Repository
 	inspector    *harnessModelInspector
+	inspections  *harnessInspectionReader
 	clock        *mcpClock
 	databasePath string
 	steps        approvalpolicy.StepsPolicy
@@ -255,7 +325,8 @@ func registerHarnessMCP(t *testing.T, module *generation.Module, api *httpapi.Se
 	// minute without waiting for it.
 	api.SetMCPLimitClock(parts.clock.Now)
 	mcpFixtures.Store(module, &mcpFixture{
-		handler: handler, keys: keys, repository: repository, inspector: parts.inspector, clock: parts.clock,
+		handler: handler, keys: keys, repository: repository, inspector: parts.inspector,
+		inspections: parts.inspections, clock: parts.clock,
 	})
 	t.Cleanup(func() { mcpFixtures.Delete(module) })
 }

@@ -1345,6 +1345,17 @@ func (service *Service) SelfCheck(ctx context.Context, ownerID, sessionID, taskI
 	return service.selfChecks.Get(ctx, ownerID, sessionID, taskID)
 }
 
+// SelfCheckByTask returns the owner's newest self-check record of one task,
+// across the owner's sessions. It deliberately checks no session ownership:
+// the record may have been written in a branch or ancestor session, and the
+// store scopes the read to the owner.
+func (service *Service) SelfCheckByTask(ctx context.Context, ownerID, taskID string) (SelfCheckRecord, bool, error) {
+	if service.selfChecks == nil {
+		return SelfCheckRecord{}, false, nil
+	}
+	return service.selfChecks.SelfCheckByTask(ctx, ownerID, taskID)
+}
+
 // AttachSelfCheckHandles names the pictures one recorded check produced; the
 // orchestrator calls it after the reply assigned the attachment handles.
 func (service *Service) AttachSelfCheckHandles(ctx context.Context, ownerID, sessionID, taskID, tool string,

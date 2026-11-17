@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,6 +35,7 @@ func mcpStatusFromSchema(
 	settings *accountsettings.Service,
 	usage executiongrant.AccessKeyUsageStore,
 	accounts *provideraccounts.Service,
+	chatService *chat.Service,
 	texts *catalog.TextLocalizer,
 	logger *slog.Logger,
 ) (*mcppublic.Builder, error) {
@@ -56,12 +58,81 @@ func mcpStatusFromSchema(
 	for _, account := range application.Runtime.HTTP.LegacyProviderBalance.Accounts {
 		labels[account.AccountID] = account.Label
 	}
+	var inspections mcppublic.InspectionReader
+	if chatService != nil {
+		inspections = mcpInspectionReader{chat: chatService, schema: application.Chat.SelfCheck}
+	}
 	return mcppublic.New(mcppublic.Config{
 		StatusBlock: service.StatusBlock, StepPolicy: *application.StepPolicy, ProviderAccounts: application.Runtime.ProviderAccounts,
 		AccountLabels: labels,
-		Settings:      settings, Usage: usage, Balances: cache,
+		Settings:      settings, Usage: usage, Balances: cache, Inspections: inspections,
 		Localize: texts.Text, Logger: logger,
 	})
+}
+
+// mcpInspectionReader adapts the persisted self-check record to the status
+// block's inspection. mcppublic never sees chat.SelfCheckRecord.
+type mcpInspectionReader struct {
+	chat   *chat.Service
+	schema catalog.ChatSelfCheckSchema
+}
+
+// Inspection returns the platform's last self-check of one task. The chat
+// service reads across the owner's sessions, so a record written in a branch
+// or ancestor session is found too.
+func (reader mcpInspectionReader) Inspection(ctx context.Context, ownerID, taskID string) (*mcppublic.Inspection, bool, error) {
+	record, found, err := reader.chat.SelfCheckByTask(ctx, ownerID, taskID)
+	if err != nil || !found {
+		return nil, false, err
+	}
+	return mcpInspectionFromRecord(reader.schema, record), true, nil
+}
+
+// mcpInspectionFromRecord maps the record to the block's shape. The verdict is
+// the platform's derived delivery-state role (passed, issues, unchecked or
+// uncheckable), never a word invented here; free text, counts and remedies
+// stay out of the block. Only failed check ids, the waiver boolean and the
+// time are reported.
+func mcpInspectionFromRecord(schema catalog.ChatSelfCheckSchema, record chat.SelfCheckRecord) *mcppublic.Inspection {
+	inspection := &mcppublic.Inspection{
+		TaskID:  record.TaskID,
+		Source:  mcppublic.InspectionSourcePlatformSelfCheck,
+		Verdict: chat.SelfCheckDerivedStatus(schema, record).Role,
+		Failed:  []mcppublic.InspectionFailedCheck{},
+	}
+	if conclusion := record.Conclusion; conclusion != nil {
+		inspection.Waiver = strings.TrimSpace(conclusion.Waiver) != ""
+		inspection.CheckedAt = mcpInspectionTime(conclusion.At)
+		inspection.Purpose = mcpInspectionPurpose(conclusion.Purpose, conclusion.PurposeLabel, conclusion.PurposeSource)
+	}
+	_, latestOK := chat.SelfCheckLatestInspect(record)
+	if latestOK != nil {
+		for _, check := range latestOK.UsageFailed {
+			inspection.Failed = append(inspection.Failed, mcppublic.InspectionFailedCheck{Check: check})
+		}
+		if inspection.Purpose == nil {
+			inspection.Purpose = mcpInspectionPurpose(latestOK.Purpose, latestOK.PurposeLabel, latestOK.PurposeSource)
+		}
+		if inspection.CheckedAt == nil {
+			inspection.CheckedAt = mcpInspectionTime(latestOK.At)
+		}
+	}
+	return inspection
+}
+
+func mcpInspectionPurpose(id, label, source string) *mcppublic.InspectionPurpose {
+	if strings.TrimSpace(id) == "" {
+		return nil
+	}
+	return &mcppublic.InspectionPurpose{ID: id, Label: label, Source: source}
+}
+
+func mcpInspectionTime(at time.Time) *string {
+	if at.IsZero() {
+		return nil
+	}
+	formatted := at.UTC().Format(time.RFC3339)
+	return &formatted
 }
 
 // mcpAssetsFromSchema builds the service that maps an external caller's asset

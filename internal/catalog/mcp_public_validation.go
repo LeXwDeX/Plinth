@@ -17,13 +17,41 @@ var (
 	mcpGroupIDPattern   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 )
 
-// mcpStatusNested lists, per status block property, the property names the
-// code writes inside it (the object of "asset", the items of the arrays).
+// mcpStatusNested lists, per status block property path, the property names
+// the code writes inside it. A path may descend through objects ("inspection.
+// purpose") and the lookup descends an array's items as well.
 var mcpStatusNested = map[string][]string{
-	MCPStatusAsset:     {"id", "title", "used_steps", "steps_left"},
-	MCPStatusBalances:  {"provider", "label", "state", "amount", "unit", "unit_label", "read_at"},
-	MCPStatusStepCosts: {"offering_id", "provider", "capability", "amount", "unit", "unit_label"},
-	MCPStatusFailure:   {"task_id", "category", "next_action", "retryable", "user_decision_required", "advice"},
+	MCPStatusAsset:                   {"id", "title", "used_steps", "steps_left"},
+	MCPStatusBalances:                {"provider", "label", "state", "amount", "unit", "unit_label", "read_at"},
+	MCPStatusStepCosts:               {"offering_id", "provider", "capability", "amount", "unit", "unit_label"},
+	MCPStatusFailure:                 {"task_id", "category", "next_action", "retryable", "user_decision_required", "advice"},
+	MCPStatusInspection:              {"task_id", "source", "verdict", "purpose", "failed", "waiver", "checked_at"},
+	MCPStatusInspection + ".purpose": {"id", "label", "source"},
+	MCPStatusInspection + ".failed":  {"check"},
+}
+
+// mcpStatusChild resolves a dotted property path in the parsed status block.
+func mcpStatusChild(properties map[string]*toolschema.Schema, path string) (*toolschema.Schema, bool) {
+	var node *toolschema.Schema
+	for index, segment := range strings.Split(path, ".") {
+		if index == 0 {
+			found := false
+			node, found = properties[segment]
+			if !found {
+				return nil, false
+			}
+			continue
+		}
+		if node == nil || node.Properties == nil {
+			return nil, false
+		}
+		next, found := node.Properties[segment]
+		if !found {
+			return nil, false
+		}
+		node = next
+	}
+	return node, node != nil
 }
 
 // mcpForbiddenArguments are argument names a tool may never declare: the
@@ -334,20 +362,23 @@ func validateMCPStatusBlock(block MCPPublicStatusBlock) error {
 	}
 	for _, name := range []string{
 		MCPStatusStepMode, MCPStatusStepModeLabel, MCPStatusStepCap, MCPStatusAsset,
-		MCPStatusTotalUsedSteps, MCPStatusBalances, MCPStatusStepCosts, MCPStatusFailure,
+		MCPStatusTotalUsedSteps, MCPStatusBalances, MCPStatusStepCosts, MCPStatusFailure, MCPStatusInspection,
 	} {
 		if _, declared := parsed.Properties[name]; !declared {
 			return fmt.Errorf("mcp_public.status_block.schema 缺少属性 %q（服务端会写出它）", name)
 		}
 	}
-	for name, nested := range mcpStatusNested {
-		node := parsed.Properties[name]
+	for path, nested := range mcpStatusNested {
+		node, found := mcpStatusChild(parsed.Properties, path)
+		if !found {
+			return fmt.Errorf("mcp_public.status_block.schema 缺少属性 %q（服务端会写出它）", path)
+		}
 		if node.Items != nil {
 			node = node.Items
 		}
 		for _, field := range nested {
 			if _, declared := node.Properties[field]; !declared {
-				return fmt.Errorf("mcp_public.status_block.schema 的 %s 缺少属性 %q（服务端会写出它）", name, field)
+				return fmt.Errorf("mcp_public.status_block.schema 的 %s 缺少属性 %q（服务端会写出它）", path, field)
 			}
 		}
 	}

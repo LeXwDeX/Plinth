@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +46,24 @@ func (store *reviewSelfCheckStore) SelfCheck(_ context.Context, owner, session, 
 	defer store.mu.Unlock()
 	record, found := store.records[store.key(owner, session, task)]
 	return record, found, nil
+}
+
+func (store *reviewSelfCheckStore) SelfChecksByTask(_ context.Context, owner, task string, limit int) ([]chat.SelfCheckRecord, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var records []chat.SelfCheckRecord
+	for key, record := range store.records {
+		if strings.HasPrefix(key, owner+"\x00") && strings.HasSuffix(key, "\x00"+task) {
+			records = append(records, record)
+		}
+	}
+	sort.Slice(records, func(left, right int) bool {
+		return records[left].UpdatedAt.After(records[right].UpdatedAt)
+	})
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+	}
+	return records, nil
 }
 
 func (store *reviewSelfCheckStore) SaveSelfCheck(_ context.Context, owner, session string,
