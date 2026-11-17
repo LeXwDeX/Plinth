@@ -284,6 +284,11 @@ func validateLocalization(schema ApplicationSchema) error {
 		if path == OfferingsCoverage {
 			continue
 		}
+		// 制作清单是可选段：旧 Catalog 不声明它，共享的 coverage 也不该因此
+		// 要求一份不存在的段。
+		if path == assetListCoverage && schema.AssetList == nil {
+			continue
+		}
 		node, err := resolveLocalizationNode(document, path)
 		if err != nil {
 			return fmt.Errorf("coverage %q: %w", path, err)
@@ -591,7 +596,8 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 	skipSteps := schema.StepPolicy == nil
 	skipKeys := schema.AccessKeys == nil
 	skipMCP := schema.MCPPublic == nil
-	if !skipBudget && !skipSteps && !skipKeys && !skipMCP {
+	skipAssetList := schema.AssetList == nil
+	if !skipBudget && !skipSteps && !skipKeys && !skipMCP && !skipAssetList {
 		return fields
 	}
 	applied := make(map[string]string, len(fields))
@@ -606,6 +612,9 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 			continue
 		}
 		if skipMCP && strings.HasPrefix(path, "mcp_public.") {
+			continue
+		}
+		if skipAssetList && strings.HasPrefix(path, "asset_list.") {
 			continue
 		}
 		applied[path] = text

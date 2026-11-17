@@ -62,6 +62,11 @@ type ApplicationSchema struct {
 	// session inherits. Optional so older external Catalog documents stay
 	// valid; omitted, the project routes are not registered.
 	Project *ProjectSchema `json:"project,omitempty"`
+	// AssetList is the project's work list (#327): the kinds, routes, states and
+	// copy of a list of assets to make. Optional so older external Catalog
+	// documents stay valid; omitted, no list can be proposed. It requires
+	// application.step_policy so 3D planned steps always have one definition.
+	AssetList *AssetListSchema `json:"asset_list,omitempty"`
 	// StepPolicy is the 3D step mode (#330): the person's settings for how many
 	// 3D steps an asset list or an external MCP session may use. Optional so
 	// older external Catalog documents stay valid; omitted, the internal steps
@@ -1196,6 +1201,10 @@ type PublicApplicationSchema struct {
 	// Project is the browser-visible project contract (#240). Omitted when
 	// the Catalog predates projects.
 	Project *PublicProjectSchema `json:"project,omitempty"`
+	// AssetList is the browser-visible project work list (#327): limits, kinds,
+	// routes and states by role. Server copy and reserved item blocks stay
+	// server-side. Omitted when the Catalog predates it.
+	AssetList *PublicAssetListSchema `json:"asset_list,omitempty"`
 	// StepPolicy is the browser-visible 3D step mode (#330): modes, defaults
 	// and the cap range. Omitted when the Catalog predates it.
 	StepPolicy *PublicStepPolicySchema `json:"step_policy,omitempty"`
@@ -6364,14 +6373,24 @@ type CoreHTTPRoutesSchema struct {
 	// ProjectStyleGuide, ProjectConventions and ProjectPromote are the
 	// per-project sub-routes; ChatSessionProject assigns a session to a
 	// project.
-	Project                    string `json:"project,omitempty"`
-	ProjectItem                string `json:"project_item,omitempty"`
-	ProjectAssets              string `json:"project_assets,omitempty"`
-	ProjectAssetItem           string `json:"project_asset_item,omitempty"`
-	ProjectStyleGuide          string `json:"project_style_guide,omitempty"`
-	ProjectConventions         string `json:"project_conventions,omitempty"`
-	ProjectPromote             string `json:"project_promote,omitempty"`
-	ChatSessionProject         string `json:"chat_session_project,omitempty"`
+	Project            string `json:"project,omitempty"`
+	ProjectItem        string `json:"project_item,omitempty"`
+	ProjectAssets      string `json:"project_assets,omitempty"`
+	ProjectAssetItem   string `json:"project_asset_item,omitempty"`
+	ProjectStyleGuide  string `json:"project_style_guide,omitempty"`
+	ProjectConventions string `json:"project_conventions,omitempty"`
+	ProjectPromote     string `json:"project_promote,omitempty"`
+	ChatSessionProject string `json:"chat_session_project,omitempty"`
+	// Project asset list routes (#327): ProjectAssetLists lists a project's
+	// lists, ProjectAssetList reads and replaces one draft and
+	// ProjectAssetListDecision confirms/rejects/replaces it;
+	// ChatSessionAssetLists lists the lists a session proposed. Only the path
+	// templates live here; the HTTP layer decides the methods. Empty
+	// (historical Catalogs) leaves them unregistered.
+	ProjectAssetLists          string `json:"project_asset_lists,omitempty"`
+	ProjectAssetList           string `json:"project_asset_list,omitempty"`
+	ProjectAssetListDecision   string `json:"project_asset_list_decision,omitempty"`
+	ChatSessionAssetLists      string `json:"chat_session_asset_lists,omitempty"`
 	ProviderAsset              string `json:"provider_asset"`
 	Offerings                  string `json:"offerings"`
 	Assets                     string `json:"assets"`

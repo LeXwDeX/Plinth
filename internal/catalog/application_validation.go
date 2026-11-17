@@ -393,6 +393,9 @@ func validateApplication(schema ApplicationSchema) error {
 	if err := validateStepPolicy(schema, capabilities, auditActions); err != nil {
 		return fmt.Errorf("step_policy: %w", err)
 	}
+	if err := validateAssetList(schema, capabilities); err != nil {
+		return fmt.Errorf("asset_list: %w", err)
+	}
 	if err := validateAccessKeys(schema, auditActions); err != nil {
 		return fmt.Errorf("access_keys: %w", err)
 	}

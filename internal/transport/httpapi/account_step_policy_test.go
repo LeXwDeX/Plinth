@@ -325,6 +325,12 @@ func TestAccountStepPolicyRouteIsAbsentWithoutTheSection(t *testing.T) {
 		// Access keys and the external MCP service decide by the step mode.
 		application.AccessKeys, application.MCPPublic = nil, nil
 		application.Runtime.HTTP.Routes.AccountAccessKeys, application.Runtime.HTTP.Routes.AccountAccessKey = "", ""
+		// The asset list plans 3D steps with the same policy.
+		application.AssetList = nil
+		application.Runtime.HTTP.Routes.ProjectAssetLists = ""
+		application.Runtime.HTTP.Routes.ProjectAssetList = ""
+		application.Runtime.HTTP.Routes.ProjectAssetListDecision = ""
+		application.Runtime.HTTP.Routes.ChatSessionAssetLists = ""
 	}, []string{"user"})
 	for _, method := range []string{http.MethodGet, http.MethodPut} {
 		response := grantTestRequest(t, handler, cookie, method, stepPolicyPath, `{}`, "")
