@@ -118,6 +118,9 @@ def local_roots():
     return module, roots
 
 
+GENERIC_ADDRESSES = frozenset({"0.0.0.0", "127.0.0.1", "localhost", "::1"})
+
+
 def environment_literals(path):
     """Every identifying string of the local environments file, as literals."""
     try:
@@ -129,7 +132,10 @@ def environment_literals(path):
     values = set()
 
     def add(value):
-        if isinstance(value, str) and len(value) >= 4 and not value.startswith("<"):
+        # Wildcard and loopback bind addresses name no environment; the public
+        # tree uses them everywhere, so they are never private literals.
+        if (isinstance(value, str) and len(value) >= 4 and not value.startswith("<")
+                and value not in GENERIC_ADDRESSES):
             values.add(value)
 
     def host_of(url):

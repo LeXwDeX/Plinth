@@ -55,9 +55,12 @@ func cloneMCPPublic(source *MCPPublicSchema) *MCPPublicSchema {
 	}
 	result.StatusBlock.Schema = append(json.RawMessage(nil), source.StatusBlock.Schema...)
 	result.StatusBlock.BalanceAccounts = append([]string(nil), source.StatusBlock.BalanceAccounts...)
+	result.Generation.SourceVariantPreference = append([]string(nil), source.Generation.SourceVariantPreference...)
+	result.Upload.MediaTypes = append([]string(nil), source.Upload.MediaTypes...)
 	result.Tools = make([]MCPPublicTool, len(source.Tools))
 	for i, tool := range source.Tools {
 		result.Tools[i] = tool
+		result.Tools[i].Capabilities = append([]schemacontract.Capability(nil), tool.Capabilities...)
 		result.Tools[i].InputSchema = append(json.RawMessage(nil), tool.InputSchema...)
 		result.Tools[i].OutputSchema = append(json.RawMessage(nil), tool.OutputSchema...)
 	}

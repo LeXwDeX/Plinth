@@ -92,7 +92,10 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	if err := validateMCPStatusBlock(service.StatusBlock); err != nil {
 		return err
 	}
-	if err := validateMCPTools(service, schema.AccessKeys); err != nil {
+	if err := validateMCPGeneration(schema, service, capabilities); err != nil {
+		return err
+	}
+	if err := validateMCPTools(service, schema.AccessKeys, capabilities); err != nil {
 		return err
 	}
 	messages := service.Messages
@@ -101,7 +104,16 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"invalid_arguments": messages.InvalidArguments, "task_not_found": messages.TaskNotFound,
 		"asset_not_found": messages.AssetNotFound, "not_found": messages.NotFound,
 		"method_not_allowed": messages.MethodNotAllowed, "request_too_large": messages.RequestTooLarge,
-		"internal": messages.Internal,
+		"internal":     messages.Internal,
+		"needs_person": messages.NeedsPerson, "service_unavailable": messages.ServiceUnavailable,
+		"service_mismatch": messages.ServiceMismatch, "no_service": messages.NoService,
+		"input_refused": messages.InputRefused, "source_not_found": messages.SourceNotFound,
+		"source_not_ready": messages.SourceNotReady, "source_incompatible": messages.SourceIncompatible,
+		"image_not_found": messages.ImageNotFound, "asset_name_invalid": messages.AssetNameInvalid,
+		"asset_project_mismatch": messages.AssetProjectMismatch, "project_not_found": messages.ProjectNotFound,
+		"idempotency_conflict": messages.IdempotencyConflict, "in_progress": messages.InProgress,
+		"too_many_in_flight": messages.TooManyInFlight, "upload_too_large": messages.UploadTooLarge,
+		"upload_invalid": messages.UploadInvalid, "upload_type_not_allowed": messages.UploadTypeNotAllowed,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("mcp_public.messages.%s 不能为空", name)
@@ -110,7 +122,84 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	if !strings.Contains(messages.InsufficientScope, "{scope}") || !strings.Contains(messages.InvalidArguments, "{detail}") {
 		return errors.New("mcp_public.messages.insufficient_scope 必须含 {scope}，invalid_arguments 必须含 {detail}")
 	}
+	for name, check := range map[string]struct{ text, holder string }{
+		"needs_person": {messages.NeedsPerson, "{task_id}"}, "service_unavailable": {messages.ServiceUnavailable, "{service}"},
+		"service_mismatch": {messages.ServiceMismatch, "{service}"}, "too_many_in_flight": {messages.TooManyInFlight, "{seconds}"},
+		"asset_name_invalid": {messages.AssetNameInvalid, "{max}"},
+		"upload_too_large":   {messages.UploadTooLarge, "{max}"}, "upload_type_not_allowed": {messages.UploadTypeNotAllowed, "{types}"},
+	} {
+		if !strings.Contains(check.text, check.holder) {
+			return fmt.Errorf("mcp_public.messages.%s 必须含 %s", name, check.holder)
+		}
+	}
 	return nil
+}
+
+// validateMCPGeneration checks the sections the tools that start work read:
+// the assets, the key namespace, the upload cap and the audit marks.
+func validateMCPGeneration(schema ApplicationSchema, service *MCPPublicSchema, capabilities map[schemacontract.Capability]struct{}) error {
+	assets := service.Assets
+	if assets.NameMaxLength < 1 || assets.NameMaxLength > 200 {
+		return errors.New("mcp_public.assets.name_max_length 必须在 1 到 200 之间")
+	}
+	if !strings.Contains(assets.TitleTemplate, "{name}") || strings.TrimSpace(assets.DefaultTitle) == "" {
+		return errors.New("mcp_public.assets.title_template 必须含 {name}，default_title 不能为空")
+	}
+	generation := service.Generation
+	prefix := generation.IdempotencyKeyPrefix
+	if prefix == "" || len(prefix) > 32 || strings.ContainsAny(prefix, " \t\r\n") {
+		return errors.New("mcp_public.generation.idempotency_key_prefix 必须是 1 到 32 个字符、不含空白的前缀")
+	}
+	if len(generation.SourceVariantPreference) == 0 {
+		return errors.New("mcp_public.generation.source_variant_preference 不能为空")
+	}
+	for _, variant := range generation.SourceVariantPreference {
+		if strings.TrimSpace(variant) == "" {
+			return errors.New("mcp_public.generation.source_variant_preference 含空名")
+		}
+	}
+	upload := service.Upload
+	// The base64 text of the picture and the rest of the request must fit the body bound.
+	encoded := (upload.MaxBytes + 2) / 3 * 4
+	if upload.MaxBytes < 1 || encoded+8192 > service.MaxRequestBytes {
+		return errors.New("mcp_public.upload.max_bytes 必须为正，且它的 base64 文本加 8 KiB 要放进 max_request_bytes")
+	}
+	if upload.MaxBytes > schema.Runtime.InputAssets.UploadMaxBytes {
+		return errors.New("mcp_public.upload.max_bytes 不能超过 runtime.input_assets.upload_max_bytes")
+	}
+	if upload.FilenameMaxLength < 1 || upload.FilenameMaxLength > 255 {
+		return errors.New("mcp_public.upload.filename_max_length 必须在 1 到 255 之间")
+	}
+	if len(upload.MediaTypes) == 0 {
+		return errors.New("mcp_public.upload.media_types 不能为空")
+	}
+	for _, mediaType := range upload.MediaTypes {
+		if !strings.HasPrefix(mediaType, "image/") || strings.ToLower(mediaType) != mediaType {
+			return fmt.Errorf("mcp_public.upload.media_types 只能是小写的 image/* 类型: %q", mediaType)
+		}
+		if allowed := schema.Runtime.InputAssets.AllowedUploadMediaTypes; len(allowed) > 0 && !slices.Contains(allowed, mediaType) {
+			return fmt.Errorf("mcp_public.upload.media_types 的 %q 不在 runtime.input_assets.allowed_upload_media_types 中", mediaType)
+		}
+	}
+	audit := service.Audit
+	for name, text := range map[string]string{"entry_field": audit.EntryField, "entry_value": audit.EntryValue, "access_key_field": audit.AccessKeyField} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("mcp_public.audit.%s 不能为空", name)
+		}
+	}
+	return nil
+}
+
+// mcpToolArguments are the argument names the code of each tool that starts
+// work reads. A Schema that leaves one out would declare a tool whose
+// arguments the code never sees.
+var mcpToolArguments = map[string][]string{
+	MCPToolUploadImage:      {"data", "filename"},
+	MCPToolGenerateImage:    {"asset", "project", "service", "prompt", "images", "parameters", "parameter_reasons", "idempotency_key"},
+	MCPToolRemoveBackground: {"asset", "project", "service", "image", "parameters", "parameter_reasons", "idempotency_key"},
+	MCPToolCreateModel:      {"asset", "project", "service", "prompt", "images", "parameters", "parameter_reasons", "idempotency_key"},
+	MCPToolProcessModel: {"asset", "project", "service", "operation", "source_task_id", "source_asset_id", "prompt", "images",
+		"parameters", "parameter_reasons", "idempotency_key"},
 }
 
 func validateMCPServiceGroups(groups []MCPPublicServiceGroup, capabilities map[schemacontract.Capability]struct{}) error {
@@ -203,7 +292,7 @@ func validateMCPStatusBlock(block MCPPublicStatusBlock) error {
 	return nil
 }
 
-func validateMCPTools(service *MCPPublicSchema, keys *AccessKeysSchema) error {
+func validateMCPTools(service *MCPPublicSchema, keys *AccessKeysSchema, capabilities map[schemacontract.Capability]struct{}) error {
 	if len(service.Tools) == 0 {
 		return errors.New("mcp_public.tools 不能为空")
 	}
@@ -224,9 +313,12 @@ func validateMCPTools(service *MCPPublicSchema, keys *AccessKeysSchema) error {
 		if !slices.Contains(scopes, tool.Scope) {
 			return fmt.Errorf("mcp_public.tools[%s].scope %q 未在 access_keys.scopes 中声明", tool.Name, tool.Scope)
 		}
-		input, err := toolschema.Parse(tool.InputSchema, toolschema.Options{ClosedObjects: true, RootObject: true})
+		input, err := toolschema.Parse(tool.InputSchema, mcpArgumentOptions)
 		if err != nil {
 			return fmt.Errorf("mcp_public.tools[%s].input_schema 无效: %w", tool.Name, err)
+		}
+		if err := validateMCPToolContract(service, tool, input, capabilities); err != nil {
+			return err
 		}
 		for _, name := range mcpForbiddenArguments {
 			if _, declared := input.Properties[name]; declared {
@@ -251,11 +343,78 @@ func validateMCPTools(service *MCPPublicSchema, keys *AccessKeysSchema) error {
 	return nil
 }
 
+// mcpArgumentOptions is how a tool's arguments are parsed: closed objects, but
+// a deliberately free-form map (a caller's service parameters) is allowed.
+var mcpArgumentOptions = toolschema.Options{ClosedObjects: true, RootObject: true, FreeFormObjects: true}
+
+// validateMCPToolContract checks what the code expects of a tool that starts
+// work: the arguments it reads, the generate scope, and, for a tool that
+// starts a Task, the declared capabilities and a required idempotency key
+// that fits the Task's key once the namespace prefix is put before it.
+func validateMCPToolContract(service *MCPPublicSchema, tool MCPPublicTool, input *toolschema.Schema, capabilities map[schemacontract.Capability]struct{}) error {
+	names, startsWork := mcpToolArguments[tool.Name]
+	if !startsWork {
+		if len(tool.Capabilities) > 0 {
+			return fmt.Errorf("mcp_public.tools[%s] 不启动任务，不能声明 capabilities", tool.Name)
+		}
+		return nil
+	}
+	if tool.Scope != "generate" {
+		return fmt.Errorf("mcp_public.tools[%s].scope 必须是 generate", tool.Name)
+	}
+	for _, name := range names {
+		if _, declared := input.Properties[name]; !declared {
+			return fmt.Errorf("mcp_public.tools[%s].input_schema 缺少参数 %q（服务端会读取它）", tool.Name, name)
+		}
+	}
+	if tool.Name == MCPToolUploadImage {
+		if len(tool.Capabilities) > 0 {
+			return fmt.Errorf("mcp_public.tools[%s] 不启动任务，不能声明 capabilities", tool.Name)
+		}
+		return nil
+	}
+	if len(tool.Capabilities) == 0 {
+		return fmt.Errorf("mcp_public.tools[%s].capabilities 不能为空", tool.Name)
+	}
+	grouped := map[schemacontract.Capability]bool{}
+	for _, group := range service.ServiceGroups {
+		for _, capability := range group.Capabilities {
+			grouped[capability] = true
+		}
+	}
+	seen := map[schemacontract.Capability]bool{}
+	for _, capability := range tool.Capabilities {
+		if _, declared := capabilities[capability]; !declared || !grouped[capability] || seen[capability] {
+			return fmt.Errorf("mcp_public.tools[%s].capabilities 含未知、重复或不在 service_groups 里的能力 %q", tool.Name, capability)
+		}
+		seen[capability] = true
+	}
+	key := input.Properties["idempotency_key"]
+	required := slices.Contains(input.Required, "idempotency_key")
+	if !required || !slices.Contains(key.Types, "string") || len(key.Types) != 1 || key.MinLength == nil || *key.MinLength < 1 ||
+		key.MaxLength == nil || len(service.Generation.IdempotencyKeyPrefix)+*key.MaxLength > 200 {
+		return fmt.Errorf("mcp_public.tools[%s].input_schema 的 idempotency_key 必须是必填字符串，声明 minLength（至少 1）与 maxLength，且前缀加上它不超过 200 字节", tool.Name)
+	}
+	if tool.Name == MCPToolProcessModel {
+		operation := input.Properties["operation"]
+		if len(operation.Enum) == 0 {
+			return fmt.Errorf("mcp_public.tools[%s].input_schema 的 operation 必须用 enum 列出能力", tool.Name)
+		}
+		for _, value := range operation.Enum {
+			text, _ := value.(string)
+			if !slices.Contains(tool.Capabilities, schemacontract.Capability(text)) {
+				return fmt.Errorf("mcp_public.tools[%s].input_schema 的 operation 含不在 capabilities 里的值 %v", tool.Name, value)
+			}
+		}
+	}
+	return nil
+}
+
 // ParsedInputSchema returns the parsed argument schema of a declared tool.
 func (m MCPPublicSchema) ParsedInputSchema(name string) (*toolschema.Schema, bool, error) {
 	for _, tool := range m.Tools {
 		if tool.Name == name {
-			parsed, err := toolschema.Parse(tool.InputSchema, toolschema.Options{ClosedObjects: true, RootObject: true})
+			parsed, err := toolschema.Parse(tool.InputSchema, mcpArgumentOptions)
 			return parsed, true, err
 		}
 	}

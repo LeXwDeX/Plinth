@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -89,6 +90,167 @@ func (s *Server) directOffering(capability generation.Capability, id generation.
 	return s.generation.Offering(id)
 }
 
+// directPrepare is what a direct prepare freezes: the task API's prepare route
+// and the external MCP service's tools (#332) both start from it, so a session's
+// style lock and production purpose shape the input the same way whoever asks.
+type directPrepare struct {
+	SessionID           string
+	Capability          generation.Capability
+	OfferingID          generation.OfferingID
+	Input               json.RawMessage
+	SceneID             string
+	ManifestID          string
+	ManifestHash        string
+	SourceSceneObjectID string
+	SourceSceneRevision int64
+	// StyleLockSkipped is the request's one-turn exemption (#187).
+	StyleLockSkipped bool
+	// ParameterReasons explains each advised parameter the request changed, as
+	// the Agent tool's parameter_reasons does (#295).
+	ParameterReasons map[string]string
+}
+
+// directFailureKind says what stopped a direct prepare, so each caller words it
+// in its own protocol.
+type directFailureKind int
+
+const (
+	// directSessionMissing: the purpose lookup found no such session.
+	directSessionMissing directFailureKind = iota + 1
+	// directProjectReferences: the project's style pictures cannot be copied
+	// into the owner's input assets (#240); the request is refused rather than
+	// submitted with the pictures silently dropped.
+	directProjectReferences
+	// directStyleReference: a style lock picture is no longer available.
+	directStyleReference
+	// directRefused: the generation kernel or the style lock merge refused the
+	// input; err is the domain error.
+	directRefused
+	// directInternal: a read failed.
+	directInternal
+)
+
+type directFailure struct {
+	kind directFailureKind
+	err  error
+}
+
+// prepareDirectInput freezes a direct request's input for the owner: the
+// session's style lock is merged into it (a project's pictures copied into the
+// owner's input assets), the session brief's purpose fills the parameters the
+// request left unset, and the kernel normalizes and freezes the result. It
+// writes nothing to any response; a refusal comes back for the caller to word.
+func (s *Server) prepareDirectInput(ctx context.Context, owner generation.OwnerID, body directPrepare) (generation.PreparedInput, *directFailure) {
+	input := body.Input
+	if !body.StyleLockSkipped {
+		style := s.application.Chat.StyleLock
+		if s.chat != nil && chat.StyleLockAppliesToDirect(style, body.Capability) {
+			offeringID := body.OfferingID
+			if offeringID == "" {
+				// The same default the preparation below would select.
+				if resolved, resolveErr := s.generation.DefaultOfferingID(body.Capability); resolveErr == nil {
+					offeringID = resolved
+				}
+			}
+			if offering, found := s.generation.Offering(offeringID); found &&
+				chat.StyleLockAppliesToDirect(style, offering.Capability) {
+				lock, lockErr := s.chat.EffectiveStyleLock(ctx, string(owner), body.SessionID)
+				if lockErr != nil {
+					// The session was just proved owned, so this is a read failure.
+					return generation.PreparedInput{}, &directFailure{kind: directInternal, err: lockErr}
+				}
+				// A project-source lock carries the project guide's canonical
+				// URLs. Direct prepare accepts input assets, so they are copied
+				// here exactly like the chat generation path copies a Task
+				// picture; a failure refuses the request with the Schema copy
+				// instead of silently dropping pictures (#240).
+				if lock.ProjectID != "" && len(lock.ProjectReferences) > 0 {
+					if s.directStyleReferences == nil {
+						return generation.PreparedInput{}, &directFailure{kind: directProjectReferences}
+					}
+					assets, resolveErr := s.directStyleReferences.Resolve(ctx,
+						references.ReferenceScope{
+							Owner: owner, SessionID: body.SessionID, ProjectID: lock.ProjectID,
+						}, lock.ProjectReferences)
+					if resolveErr != nil {
+						return generation.PreparedInput{}, &directFailure{kind: directProjectReferences, err: resolveErr}
+					}
+					lock.References = make([]string, 0, len(assets))
+					for _, assetID := range assets {
+						lock.References = append(lock.References, string(assetID))
+					}
+					lock.ProjectReferences = nil
+				}
+				merged, mergeErr := chat.ApplyStyleLockToDirectInput(lock, body.StyleLockSkipped,
+					body.Capability, offering, style, input)
+				if mergeErr != nil {
+					if errors.Is(mergeErr, chat.ErrStyleLockReferenceUnavailable) {
+						return generation.PreparedInput{}, &directFailure{kind: directStyleReference, err: mergeErr}
+					}
+					return generation.PreparedInput{}, &directFailure{kind: directRefused, err: mergeErr}
+				}
+				input = merged
+			}
+		}
+	}
+	// The session brief's purpose, platform and engine values fill the
+	// parameters the request left unset, with the purpose's reason and source on
+	// the advised ones: the Agent freezes the same values for the same session
+	// (#295). The resolution is the business layer's, not the handler's.
+	reasons, sources := body.ParameterReasons, map[string]string(nil)
+	if offering, found := s.directOffering(body.Capability, body.OfferingID); found && s.chat != nil &&
+		offering.Capability == body.Capability {
+		applied, applyErr := s.chat.ApplyPurposeToDirectInput(ctx, string(owner), body.SessionID,
+			offering, input, reasons)
+		switch {
+		case errors.Is(applyErr, chat.ErrSessionNotFound):
+			return generation.PreparedInput{}, &directFailure{kind: directSessionMissing, err: applyErr}
+		case applyErr != nil:
+			// The session was just proved owned, so this is a read failure.
+			return generation.PreparedInput{}, &directFailure{kind: directInternal, err: applyErr}
+		}
+		input, reasons, sources = applied.Input, applied.Reasons, applied.Sources
+	}
+	prepared, err := s.generation.PrepareInput(ctx, generation.PrepareInputCommand{
+		OwnerID: owner, SessionID: body.SessionID, Capability: body.Capability,
+		OfferingID: body.OfferingID, Input: input, SceneID: body.SceneID,
+		ManifestID: body.ManifestID, ManifestHash: body.ManifestHash,
+		SourceSceneObjectID: body.SourceSceneObjectID, SourceSceneRevision: body.SourceSceneRevision,
+		ParameterReasons: reasons, ParameterSources: sources,
+		// A direct request keeps the first reference pictures a single-picture
+		// model takes, as the Agent does, and is told so (#329 follow-up).
+		KeepFirstReferences: true,
+	})
+	if err != nil {
+		return generation.PreparedInput{}, &directFailure{kind: directRefused, err: err}
+	}
+	return prepared, nil
+}
+
+// writeDirectFailure answers a refused direct prepare on the task API.
+func (s *Server) writeDirectFailure(writer http.ResponseWriter, request *http.Request, failure *directFailure) {
+	switch failure.kind {
+	case directSessionMissing:
+		s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
+	case directProjectReferences:
+		if failure.err != nil {
+			noteCause(writer, failure.err)
+		}
+		s.writeDirectProjectReferenceProblem(writer, request)
+	case directStyleReference:
+		detail := s.application.Chat.Presentation.Messages.StyleLockReferenceUnavailable
+		if s.texts != nil {
+			detail = s.texts.TextIn(request.Context(), detail)
+		}
+		writeProblem(writer, http.StatusBadRequest, "invalid_input", detail)
+	case directRefused:
+		s.writeDomainError(writer, failure.err)
+	default:
+		noteCause(writer, failure.err)
+		s.writeMessageProblem(writer, http.StatusInternalServerError, "internal", "error.internal")
+	}
+}
+
 func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
 	var body struct {
 		Capability          generation.Capability `json:"capability"`
@@ -115,102 +277,14 @@ func (s *Server) prepareTask(writer http.ResponseWriter, request *http.Request, 
 	if !s.taskSessionOwned(writer, request, owner, body.SessionID) {
 		return
 	}
-	input := body.Input
-	if !body.StyleLockSkipped {
-		style := s.application.Chat.StyleLock
-		if s.chat != nil && chat.StyleLockAppliesToDirect(style, body.Capability) {
-			offeringID := body.OfferingID
-			if offeringID == "" {
-				// The same default the preparation below would select.
-				if resolved, resolveErr := s.generation.DefaultOfferingID(body.Capability); resolveErr == nil {
-					offeringID = resolved
-				}
-			}
-			if offering, found := s.generation.Offering(offeringID); found &&
-				chat.StyleLockAppliesToDirect(style, offering.Capability) {
-				lock, lockErr := s.chat.EffectiveStyleLock(request.Context(), string(owner), body.SessionID)
-				if lockErr != nil {
-					// The session was just proved owned, so this is a read failure.
-					noteCause(writer, lockErr)
-					s.writeMessageProblem(writer, http.StatusInternalServerError, "internal", "error.internal")
-					return
-				}
-				// A project-source lock carries the project guide's canonical
-				// URLs. Direct prepare accepts input assets, so they are copied
-				// here exactly like the chat generation path copies a Task
-				// picture; a failure refuses the request with the Schema copy
-				// instead of silently dropping pictures (#240).
-				if lock.ProjectID != "" && len(lock.ProjectReferences) > 0 {
-					if s.directStyleReferences == nil {
-						s.writeDirectProjectReferenceProblem(writer, request)
-						return
-					}
-					assets, resolveErr := s.directStyleReferences.Resolve(request.Context(),
-						references.ReferenceScope{
-							Owner: owner, SessionID: body.SessionID, ProjectID: lock.ProjectID,
-						}, lock.ProjectReferences)
-					if resolveErr != nil {
-						noteCause(writer, resolveErr)
-						s.writeDirectProjectReferenceProblem(writer, request)
-						return
-					}
-					lock.References = make([]string, 0, len(assets))
-					for _, assetID := range assets {
-						lock.References = append(lock.References, string(assetID))
-					}
-					lock.ProjectReferences = nil
-				}
-				merged, mergeErr := chat.ApplyStyleLockToDirectInput(lock, body.StyleLockSkipped,
-					body.Capability, offering, style, input)
-				if mergeErr != nil {
-					if errors.Is(mergeErr, chat.ErrStyleLockReferenceUnavailable) {
-						detail := s.application.Chat.Presentation.Messages.StyleLockReferenceUnavailable
-						if s.texts != nil {
-							detail = s.texts.TextIn(request.Context(), detail)
-						}
-						writeProblem(writer, http.StatusBadRequest, "invalid_input", detail)
-						return
-					}
-					s.writeDomainError(writer, mergeErr)
-					return
-				}
-				input = merged
-			}
-		}
-	}
-	// The session brief's purpose, platform and engine values fill the
-	// parameters the request left unset, with the purpose's reason and source on
-	// the advised ones: the Agent freezes the same values for the same session
-	// (#295). The resolution is the business layer's, not the handler's.
-	reasons, sources := body.ParameterReasons, map[string]string(nil)
-	if offering, found := s.directOffering(body.Capability, body.OfferingID); found && s.chat != nil &&
-		offering.Capability == body.Capability {
-		applied, applyErr := s.chat.ApplyPurposeToDirectInput(request.Context(), string(owner), body.SessionID,
-			offering, input, reasons)
-		switch {
-		case errors.Is(applyErr, chat.ErrSessionNotFound):
-			s.writeMessageProblem(writer, http.StatusNotFound, "not_found", "error.task_not_found")
-			return
-		case applyErr != nil:
-			// The session was just proved owned, so this is a read failure.
-			noteCause(writer, applyErr)
-			s.writeMessageProblem(writer, http.StatusInternalServerError, "internal", "error.internal")
-			return
-		}
-		input, reasons, sources = applied.Input, applied.Reasons, applied.Sources
-	}
-	prepared, err := s.generation.PrepareInput(request.Context(), generation.PrepareInputCommand{
-		OwnerID: owner, SessionID: body.SessionID, Capability: body.Capability,
-		OfferingID: body.OfferingID, Input: input, SceneID: body.SceneID,
-		ManifestID: body.ManifestID, ManifestHash: body.ManifestHash,
+	prepared, failure := s.prepareDirectInput(request.Context(), owner, directPrepare{
+		SessionID: body.SessionID, Capability: body.Capability, OfferingID: body.OfferingID, Input: body.Input,
+		SceneID: body.SceneID, ManifestID: body.ManifestID, ManifestHash: body.ManifestHash,
 		SourceSceneObjectID: body.SourceSceneObjectID, SourceSceneRevision: body.SourceSceneRevision,
-		ParameterReasons: reasons, ParameterSources: sources,
-		// A direct request keeps the first reference pictures a single-picture
-		// model takes, as the Agent does, and is told so (#329 follow-up).
-		KeepFirstReferences: true,
+		StyleLockSkipped: body.StyleLockSkipped, ParameterReasons: body.ParameterReasons,
 	})
-	if err != nil {
-		s.writeDomainError(writer, err)
+	if failure != nil {
+		s.writeDirectFailure(writer, request, failure)
 		return
 	}
 	// Return only the decision-relevant public identity. Private dependency

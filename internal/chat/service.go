@@ -584,6 +584,24 @@ func (service *Service) CreateSessionInProject(
 	title string,
 	projectID string,
 ) (Session, error) {
+	session, err := service.NewSessionInProject(ctx, ownerID, ownerName, title, projectID)
+	if err != nil {
+		return Session{}, err
+	}
+	return service.repository.CreateSession(ctx, session)
+}
+
+// NewSessionInProject builds the session CreateSessionInProject would store,
+// with the same project checks and defaults, without storing it. A caller that
+// has to store the session together with something else (the external MCP
+// service's asset mapping, #332) does so itself.
+func (service *Service) NewSessionInProject(
+	ctx context.Context,
+	ownerID string,
+	ownerName string,
+	title string,
+	projectID string,
+) (Session, error) {
 	projectID = strings.TrimSpace(projectID)
 	var projectBrief ProductionBrief
 	if projectID != "" {
@@ -611,7 +629,7 @@ func (service *Service) CreateSessionInProject(
 		titleSource = TitleSourcePending
 	}
 	now := service.clock()
-	return service.repository.CreateSession(ctx, Session{
+	return Session{
 		ID:          service.newID("session"),
 		OwnerID:     ownerID,
 		OwnerName:   ownerName,
@@ -627,7 +645,7 @@ func (service *Service) CreateSessionInProject(
 		ApprovalMode: service.approvalPolicy.NormalizeMode(service.approvalPolicy.DefaultMode),
 		// ... and in the Schema default Agent scope (auto).
 		AgentScope: service.agentScope.Normalize(service.agentScope.DefaultMode),
-	})
+	}, nil
 }
 
 // cloneProductionBrief copies a frozen brief so a caller cannot mutate the

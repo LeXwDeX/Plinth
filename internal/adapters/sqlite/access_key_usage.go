@@ -85,8 +85,11 @@ func (r *Repository) AccessKeyStepsTotal(ctx context.Context, ownerID string, co
 	return tasks + held, nil
 }
 
-// AccessKeyAssets lists the owner's assets with a grant of source access_key,
-// the most recently asked-on first, each with its used 3D steps.
+// AccessKeyAssets lists the owner's MCP assets, the most recently active first,
+// each with its used 3D steps (#332). An asset is a chat session the external
+// MCP service made for a name (mcp_assets); its activity is the latest grant of
+// an access key on it, or its creation when no key asked for a step yet. A
+// session of the owner that no key ever reached is not an asset of the service.
 func (r *Repository) AccessKeyAssets(ctx context.Context, ownerID string, counted []string, limit int) ([]executiongrant.AccessKeyAsset, bool, error) {
 	if ownerID == "" || limit < 1 {
 		return nil, false, executiongrant.ErrInvalid
@@ -96,12 +99,14 @@ func (r *Repository) AccessKeyAssets(ctx context.Context, ownerID string, counte
 		return nil, false, err
 	}
 	defer conn.Close()
-	rows, err := conn.QueryContext(ctx, `SELECT grants.session_id, COALESCE(sessions.title, ''), MAX(grants.created_at) AS last_at
- FROM execution_grants AS grants
- LEFT JOIN go_chat_sessions AS sessions ON sessions.id = grants.session_id AND sessions.owner_id = grants.owner_id
- WHERE grants.owner_id = ? AND grants.source = '`+executiongrant.AccessKey+`'
- GROUP BY grants.session_id
- ORDER BY last_at DESC, grants.session_id
+	rows, err := conn.QueryContext(ctx, `SELECT assets.session_id, assets.name, COALESCE(sessions.title, ''),
+   COALESCE((SELECT MAX(grants.created_at) FROM execution_grants AS grants
+     WHERE grants.owner_id = assets.owner_id AND grants.session_id = assets.session_id
+     AND grants.source = '`+executiongrant.AccessKey+`'), assets.created_at) AS last_at
+ FROM mcp_assets AS assets
+ JOIN go_chat_sessions AS sessions ON sessions.id = assets.session_id AND sessions.owner_id = assets.owner_id
+ WHERE assets.owner_id = ?
+ ORDER BY last_at DESC, assets.session_id
  LIMIT ?`, ownerID, limit+1)
 	if err != nil {
 		return nil, false, err
@@ -110,12 +115,12 @@ func (r *Repository) AccessKeyAssets(ctx context.Context, ownerID string, counte
 	for rows.Next() {
 		var asset executiongrant.AccessKeyAsset
 		var last string
-		if err := rows.Scan(&asset.SessionID, &asset.Title, &last); err != nil {
+		if err := rows.Scan(&asset.SessionID, &asset.Name, &asset.Title, &last); err != nil {
 			rows.Close()
 			return nil, false, err
 		}
 		if parsed, err := time.Parse(time.RFC3339Nano, last); err == nil {
-			asset.LastGrantAt = parsed.UTC()
+			asset.LastActivityAt = parsed.UTC()
 		}
 		assets = append(assets, asset)
 	}

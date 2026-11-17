@@ -13,6 +13,10 @@
 // call: a number that cannot be read is reported as unknown (null), never as
 // zero. Which balance accounts, which words and which property names it uses
 // come from the Product Schema (application.mcp_public.status_block).
+//
+// The package also keeps the external service's asset names (assets.go): the
+// mapping from a caller's name to one of the person's chat sessions, which is
+// the asset every step count in the block is about.
 package mcppublic
 
 import (

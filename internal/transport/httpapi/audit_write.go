@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -22,12 +23,15 @@ func (server *Server) recordProductAudit(
 		event.IPAddress = request.Header.Get(headers.RealIP)
 	}
 	event.UserAgent = request.Header.Get(headers.UserAgent)
-	if err := server.administrationAudit.RecordAudit(
-		request.Context(),
-		event,
-	); err != nil {
+	server.writeAuditEvent(request.Context(), event)
+}
+
+// writeAuditEvent persists a product audit event best-effort, for callers that
+// have no *http.Request in hand (a tool call of the external MCP service).
+func (server *Server) writeAuditEvent(ctx context.Context, event administration.AuditEvent) {
+	if err := server.administrationAudit.RecordAudit(ctx, event); err != nil {
 		server.logger.WarnContext(
-			request.Context(),
+			ctx,
 			"写入产品审计事件失败",
 			"action", event.Action,
 			"user_id", event.ActorID,

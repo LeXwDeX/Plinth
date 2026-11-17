@@ -6,7 +6,8 @@
 //
 // The subset: type (one name or a list, with "null"), enum, minimum, maximum,
 // minLength, maxLength, items, minItems, maxItems, uniqueItems, properties,
-// required and additionalProperties (a boolean). description, title, default
+// required and additionalProperties (a boolean; true only on a free-form map
+// when Options.FreeFormObjects allows it). description, title, default
 // and examples are annotations and are kept but never enforced. There are no
 // references, no combinators and no patterns.
 //
@@ -51,6 +52,13 @@ type Options struct {
 	ClosedObjects bool
 	// RootObject requires the root to be an object schema.
 	RootObject bool
+	// FreeFormObjects lets a tool argument be a deliberately open map: under
+	// ClosedObjects, a nested object that says additionalProperties: true and
+	// declares no property of its own is accepted. Its keys and values are not
+	// checked here; the service that owns their meaning checks them (a
+	// caller's service parameters, which the offering declares). The root is
+	// never one, and an object that declares properties is closed.
+	FreeFormObjects bool
 }
 
 var annotations = map[string]bool{"description": true, "title": true, "default": true, "examples": true}
@@ -263,8 +271,12 @@ func (s *Schema) check(path string, options Options) error {
 	if (s.Properties != nil || len(s.Required) > 0 || s.AdditionalProperties != nil) && !has("object") {
 		return fmt.Errorf("%s: object keywords need the object type", path)
 	}
-	if has("object") && options.ClosedObjects && (s.AdditionalProperties == nil || *s.AdditionalProperties) {
-		return fmt.Errorf("%s: an object schema must say additionalProperties: false", path)
+	if has("object") && options.ClosedObjects {
+		freeForm := options.FreeFormObjects && path != "$" && s.AdditionalProperties != nil && *s.AdditionalProperties &&
+			len(s.Properties) == 0 && len(s.Required) == 0
+		if (s.AdditionalProperties == nil || *s.AdditionalProperties) && !freeForm {
+			return fmt.Errorf("%s: an object schema must say additionalProperties: false", path)
+		}
 	}
 	seen := map[string]bool{}
 	for _, name := range s.Required {

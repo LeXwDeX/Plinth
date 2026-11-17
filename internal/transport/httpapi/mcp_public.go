@@ -41,6 +41,11 @@ type mcpPrincipalKey struct{}
 // tool names are ones the caller can reach on the address it used.
 type mcpBaseKey struct{}
 
+// mcpClientKey carries who is calling, as the product audit writes it.
+type mcpClientKey struct{}
+
+type mcpClient struct{ address, userAgent string }
+
 func mcpPrincipalFrom(ctx context.Context) (access.Principal, bool) {
 	principal, ok := ctx.Value(mcpPrincipalKey{}).(access.Principal)
 	return principal, ok
@@ -109,7 +114,13 @@ func (s *Server) mcpEndpoint(endpoint http.Handler) http.HandlerFunc {
 		if request.Host != "" {
 			base = scheme + "://" + request.Host
 		}
-		endpoint.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), mcpBaseKey{}, base)))
+		headers := s.application.Administration.AuditLogs.RequestHeaders
+		client := mcpClient{address: request.Header.Get(headers.ForwardedFor), userAgent: request.Header.Get(headers.UserAgent)}
+		if client.address == "" {
+			client.address = request.Header.Get(headers.RealIP)
+		}
+		ctx := context.WithValue(context.WithValue(request.Context(), mcpBaseKey{}, base), mcpClientKey{}, client)
+		endpoint.ServeHTTP(writer, request.WithContext(ctx))
 	})
 	return func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {

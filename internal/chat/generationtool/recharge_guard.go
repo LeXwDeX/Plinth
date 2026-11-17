@@ -6,10 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
-	"github.com/LeXwDeX/Plinth/internal/schema"
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // SessionTasks is the read side of the task kernel the recharge guard uses:
@@ -29,37 +30,48 @@ type SessionTasks interface {
 const rechargeScanLimit = 100
 
 // unstoredChargedTasks returns, newest first, the session's Tasks that failed
+// after the upstream finished and charged and that nothing has answered since
+// (see UnstoredChargedTasks). Kinds are the capabilities of this tool (its
+// Schema execution capabilities) plus the capability being prepared: the Agent
+// may move between a tool's capabilities (text-to-image and image-to-image,
+// text-to-3d and image-to-3d) or models when it "tries again", so neither the
+// Offering nor the exact input identifies a repeat.
+func (executor *Executor) unstoredChargedTasks(ctx context.Context, command chat.ToolCommand,
+	capability generation.Capability) ([]generation.TaskID, error) {
+	return UnstoredChargedTasks(ctx, executor.tasks, executor.chat, generation.OwnerID(command.OwnerID), command.SessionID,
+		append([]generation.Capability{capability}, command.Tool.Execution.Capabilities...))
+}
+
+// UnstoredChargedTasks returns, newest first, the session's Tasks that failed
 // after the upstream finished and charged (the Schema's
 // generation_failed_metered_by_class declares the class for an Offering that
 // bills in credits, the same rule as MeteredFailureMessage) and that nothing has
 // answered since: no Task able to produce the same kind of result was created
 // in the session after the failure, and no asset recovery of it is under way or
-// done. Kinds are the capabilities of this tool (its Schema execution
-// capabilities) plus the capability being prepared: the Agent may move between a
-// tool's capabilities (text-to-image and image-to-image, text-to-3d and
-// image-to-3d) or models when it "tries again", so neither the Offering nor the
-// exact input identifies a repeat.
+// done. kinds are the capabilities whose Tasks count as "the same kind". A
+// repeat of such a step charges again, so every entry that submits steps on
+// someone's behalf (the Agent, the external MCP service) sends a step that
+// would repeat one to a person instead of approving it (#294).
 //
 // A later Task of the same kind proves a decision was made after the failure:
 // a person ran it from the workspace, retried it from the task list, or
 // approved it on a card this guard forced. That is what clears the guard.
-func (executor *Executor) unstoredChargedTasks(ctx context.Context, command chat.ToolCommand,
-	capability generation.Capability) ([]generation.TaskID, error) {
-	classes := executor.chat.Presentation.Messages.GenerationFailedMeteredByClass
-	if executor.tasks == nil || len(classes) == 0 || command.OwnerID == "" || command.SessionID == "" {
+func UnstoredChargedTasks(ctx context.Context, tasks SessionTasks, schema catalog.ChatSchema,
+	owner generation.OwnerID, session string, kindList []generation.Capability) ([]generation.TaskID, error) {
+	classes := schema.Presentation.Messages.GenerationFailedMeteredByClass
+	if tasks == nil || len(classes) == 0 || owner == "" || session == "" {
 		return nil, nil
 	}
-	kinds := map[generation.Capability]bool{capability: true}
-	for _, declared := range command.Tool.Execution.Capabilities {
-		kinds[declared] = true
+	kinds := map[generation.Capability]bool{}
+	for _, kind := range kindList {
+		kinds[kind] = true
 	}
-	owner := generation.OwnerID(command.OwnerID)
-	page, err := executor.tasks.List(ctx, generation.OwnTasks(owner),
-		generation.ListQuery{SessionID: command.SessionID, Limit: rechargeScanLimit})
+	page, err := tasks.List(ctx, generation.OwnTasks(owner),
+		generation.ListQuery{SessionID: session, Limit: rechargeScanLimit})
 	if err != nil {
 		return nil, err
 	}
-	refetches, err := executor.tasks.SessionRefetchSources(ctx, owner, command.SessionID)
+	refetches, err := tasks.SessionRefetchSources(ctx, owner, session)
 	if err != nil {
 		return nil, err
 	}
@@ -83,14 +95,14 @@ func (executor *Executor) unstoredChargedTasks(ctx context.Context, command chat
 		// An asset recovery answers the failure only after it actually
 		// succeeded; a queued, running, materializing, failed or canceled one
 		// leaves the result out of hand.
-		if task.Capability != schema.AssetRecovery || task.State != generation.TaskSucceeded {
+		if task.Capability != schemacontract.AssetRecovery || task.State != generation.TaskSucceeded {
 			continue
 		}
-		full, err := executor.tasks.Get(ctx, owner, task.ID)
+		full, err := tasks.Get(ctx, owner, task.ID)
 		if err != nil {
 			return nil, err
 		}
-		provenance, err := executor.tasks.TaskRecoveryProvenance(ctx, full)
+		provenance, err := tasks.TaskRecoveryProvenance(ctx, full)
 		if err != nil {
 			return nil, err
 		}
@@ -112,11 +124,11 @@ func (executor *Executor) unstoredChargedTasks(ctx context.Context, command chat
 			continue // a same-kind Task was started after this failure was known
 		}
 		// The list projection omits the Offering's billing flag; read the Task.
-		full, err := executor.tasks.Get(ctx, owner, task.ID)
+		full, err := tasks.Get(ctx, owner, task.ID)
 		if err != nil {
 			return nil, err
 		}
-		if MeteredFailureMessage(executor.chat, full.Offering.CreditsMetered, full.Failure) != "" {
+		if MeteredFailureMessage(schema, full.Offering.CreditsMetered, full.Failure) != "" {
 			unstored = append(unstored, task.ID)
 		}
 	}

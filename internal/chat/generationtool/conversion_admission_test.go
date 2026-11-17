@@ -13,10 +13,10 @@ import (
 // created.
 func TestKnownNotSubmittedRecognizesAnOverlappingConversion330(t *testing.T) {
 	err := &generation.Error{Code: generation.ErrConflict, Cause: generation.ErrConversionInProgress}
-	if !knownNotSubmitted(err) {
+	if !KnownNotSubmitted(err) {
 		t.Fatal("an overlapping conversion conflict was treated as a possible submission")
 	}
-	if knownNotSubmitted(&generation.Error{Code: generation.ErrConflict}) {
+	if KnownNotSubmitted(&generation.Error{Code: generation.ErrConflict}) {
 		t.Fatal("an unrelated conflict must keep the unknown-submission path")
 	}
 }
@@ -26,7 +26,7 @@ func TestKnownNotSubmittedRecognizesAnOverlappingConversion330(t *testing.T) {
 // carry none.
 func TestAdmissionRetryAfterOnlyForTooManyRequests(t *testing.T) {
 	full := &generation.Error{Code: generation.ErrTooManyRequests, RetryAfter: 30 * time.Second}
-	if admissionRetryAfter(full) != 30*time.Second || !knownNotSubmitted(full) {
+	if admissionRetryAfter(full) != 30*time.Second || !KnownNotSubmitted(full) {
 		t.Fatal("admission refusal must be a known non-submission with its RetryAfter")
 	}
 	if admissionRetryAfter(&generation.Error{Code: generation.ErrTooManyRequests}) != 0 ||

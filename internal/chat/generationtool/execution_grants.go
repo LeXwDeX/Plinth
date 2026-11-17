@@ -71,6 +71,15 @@ func (executor *Executor) checkAgentTurnActive(ctx context.Context, command chat
 // submitted without an approved grant bound to that input. An Offering without
 // a consent parameter is left alone.
 func agentConsentInput(offering generation.Offering, input json.RawMessage) (json.RawMessage, error) {
+	return ConsentInput(offering, input)
+}
+
+// ConsentInput is the server's consent to an Offering's extra credits, frozen
+// into an input whose step a grant then decides (see agentConsentInput). The
+// external MCP service (#332) takes the same road as the Agent: a caller never
+// names the flag, and nothing is submitted without a grant bound to the frozen
+// input.
+func ConsentInput(offering generation.Offering, input json.RawMessage) (json.RawMessage, error) {
 	if offering.ExtraConsentParameter() == "" {
 		return input, nil
 	}
@@ -422,7 +431,7 @@ func (executor *Executor) resumeAgentOperation(
 			return executor.harnessRefusal(command, err)
 		}
 		failure := executor.executionFailure(command, "")
-		failure.NoSubmission = knownNotSubmitted(err)
+		failure.NoSubmission = KnownNotSubmitted(err)
 		failure.RetryAfter = admissionRetryAfter(err)
 		if failure.RetryAfter == 0 {
 			if failure.NoSubmission {

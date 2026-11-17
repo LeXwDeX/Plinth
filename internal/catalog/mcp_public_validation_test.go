@@ -6,8 +6,19 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 	"github.com/LeXwDeX/Plinth/internal/schema/toolschema"
 )
+
+// mcpToolOf is the declaration of a tool in an application a test edits.
+func mcpToolOf(application *catalog.ApplicationSchema, name string) *catalog.MCPPublicTool {
+	for index := range application.MCPPublic.Tools {
+		if application.MCPPublic.Tools[index].Name == name {
+			return &application.MCPPublic.Tools[index]
+		}
+	}
+	panic("no tool " + name)
+}
 
 // #332: the default Catalog declares the external MCP service. It is a
 // server-side section: nothing of it reaches the browser's public Schema.
@@ -27,8 +38,18 @@ func TestDefaultMCPPublicLoadsAndStaysServerSide(t *testing.T) {
 	names := make([]string, 0, len(service.Tools))
 	for _, tool := range service.Tools {
 		names = append(names, tool.Name)
-		if tool.Scope != "read" {
-			t.Errorf("tool %s needs scope %q; only reading tools exist so far", tool.Name, tool.Scope)
+		// The tools that start work need the generate scope, the others read.
+		wantScope := "read"
+		switch tool.Name {
+		case catalog.MCPToolUploadImage, catalog.MCPToolGenerateImage, catalog.MCPToolRemoveBackground,
+			catalog.MCPToolCreateModel, catalog.MCPToolProcessModel:
+			wantScope = "generate"
+		}
+		if tool.Scope != wantScope {
+			t.Errorf("tool %s needs scope %q, want %q", tool.Name, tool.Scope, wantScope)
+		}
+		if wantScope == "read" && len(tool.Capabilities) > 0 {
+			t.Errorf("reading tool %s declares capabilities %v", tool.Name, tool.Capabilities)
 		}
 	}
 	if strings.Join(names, ",") != strings.Join(catalog.MCPPublicToolNames(), ",") {
@@ -156,9 +177,72 @@ func TestMCPPublicRejectsInvalidDeclarations(t *testing.T) {
 		"output owns the status key": func(a *catalog.ApplicationSchema) {
 			a.MCPPublic.Tools[0].OutputSchema = json.RawMessage(`{"type":"object","properties":{"status":{"type":"string"}}}`)
 		},
-		"no unauthenticated message":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.Unauthenticated = "" },
-		"scope message lacks holder":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InsufficientScope = "no" },
-		"detail message lacks holder": func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InvalidArguments = "no" },
+		"no asset name bound":    func(a *catalog.ApplicationSchema) { a.MCPPublic.Assets.NameMaxLength = 0 },
+		"huge asset name bound":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Assets.NameMaxLength = 1000 },
+		"title without the name": func(a *catalog.ApplicationSchema) { a.MCPPublic.Assets.TitleTemplate = "MCP asset" },
+		"no default title":       func(a *catalog.ApplicationSchema) { a.MCPPublic.Assets.DefaultTitle = " " },
+		"no key prefix":          func(a *catalog.ApplicationSchema) { a.MCPPublic.Generation.IdempotencyKeyPrefix = "" },
+		"key prefix with space":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Generation.IdempotencyKeyPrefix = "m cp:" },
+		"key prefix too long": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Generation.IdempotencyKeyPrefix = strings.Repeat("p", 33)
+		},
+		"no variant preference": func(a *catalog.ApplicationSchema) { a.MCPPublic.Generation.SourceVariantPreference = nil },
+		"no upload cap":         func(a *catalog.ApplicationSchema) { a.MCPPublic.Upload.MaxBytes = 0 },
+		"upload cap above the request bound": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Upload.MaxBytes = a.MCPPublic.MaxRequestBytes
+		},
+		"no upload types": func(a *catalog.ApplicationSchema) { a.MCPPublic.Upload.MediaTypes = nil },
+		"upload type not a picture": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Upload.MediaTypes = []string{"model/gltf-binary"}
+		},
+		"upload type not allowed": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Upload.MediaTypes = []string{"image/tiff"}
+		},
+		"no audit entry": func(a *catalog.ApplicationSchema) { a.MCPPublic.Audit.EntryValue = "" },
+		"generating tool with scope read": func(a *catalog.ApplicationSchema) {
+			mcpToolOf(a, catalog.MCPToolCreateModel).Scope = "read"
+		},
+		"generating tool without capabilities": func(a *catalog.ApplicationSchema) {
+			mcpToolOf(a, catalog.MCPToolCreateModel).Capabilities = nil
+		},
+		"generating tool with an unknown capability": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolCreateModel)
+			tool.Capabilities = append(tool.Capabilities, "no-such-capability")
+		},
+		"generating tool with a capability no group serves": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolGenerateImage)
+			tool.Capabilities = append(tool.Capabilities, "text-to-motion")
+		},
+		"upload tool with capabilities": func(a *catalog.ApplicationSchema) {
+			mcpToolOf(a, catalog.MCPToolUploadImage).Capabilities = []schemacontract.Capability{"text-to-image"}
+		},
+		"generating tool without its idempotency key": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolCreateModel)
+			tool.InputSchema = json.RawMessage(strings.Replace(string(tool.InputSchema), `"idempotency_key"`, `"retry_token"`, -1))
+		},
+		"idempotency key not required": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolRemoveBackground)
+			tool.InputSchema = json.RawMessage(strings.Replace(string(tool.InputSchema), `"image", "idempotency_key"`, `"image"`, 1))
+		},
+		"idempotency key too long for the Task key": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolGenerateImage)
+			tool.InputSchema = json.RawMessage(strings.Replace(string(tool.InputSchema), `"maxLength": 128`, `"maxLength": 199`, 1))
+		},
+		"process operation outside the capabilities": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolProcessModel)
+			tool.Capabilities = tool.Capabilities[:2]
+		},
+		"closed parameters object": func(a *catalog.ApplicationSchema) {
+			tool := mcpToolOf(a, catalog.MCPToolCreateModel)
+			tool.InputSchema = json.RawMessage(strings.Replace(string(tool.InputSchema),
+				`"parameters": {"type": "object", "additionalProperties": true,`, `"parameters": {"type": "object", "additionalProperties": true, "properties": {"x": {"type": "string"}},`, 1))
+		},
+		"no needs-person message":      func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.NeedsPerson = "" },
+		"needs-person lacks the task":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.NeedsPerson = "ask a person" },
+		"in-flight message lacks time": func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.TooManyInFlight = "later" },
+		"no unauthenticated message":   func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.Unauthenticated = "" },
+		"scope message lacks holder":   func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InsufficientScope = "no" },
+		"detail message lacks holder":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Messages.InvalidArguments = "no" },
 	} {
 		application := defaultApplication(t)
 		mutate(&application)
@@ -194,9 +278,13 @@ func TestMCPPublicCopiesAreIndependent(t *testing.T) {
 	first.MCPPublic.Tools[0].InputSchema[2] = 'X'
 	first.MCPPublic.ServiceGroups[0].Capabilities[0] = "mutated"
 	first.MCPPublic.StatusBlock.BalanceAccounts[0] = "mutated"
+	first.MCPPublic.Generation.SourceVariantPreference[0] = "mutated"
+	first.MCPPublic.Upload.MediaTypes[0] = "mutated"
+	mcpToolOf(&first, catalog.MCPToolCreateModel).Capabilities[0] = "mutated"
 	second := source.Application()
 	if second.MCPPublic.Tools[0].InputSchema[2] == 'X' || second.MCPPublic.ServiceGroups[0].Capabilities[0] == "mutated" ||
-		second.MCPPublic.StatusBlock.BalanceAccounts[0] == "mutated" {
+		second.MCPPublic.StatusBlock.BalanceAccounts[0] == "mutated" || second.MCPPublic.Generation.SourceVariantPreference[0] == "mutated" ||
+		second.MCPPublic.Upload.MediaTypes[0] == "mutated" || mcpToolOf(&second, catalog.MCPToolCreateModel).Capabilities[0] == "mutated" {
 		t.Fatal("Catalog Application() shares MCP service declarations with a previous copy")
 	}
 }

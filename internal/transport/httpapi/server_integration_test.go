@@ -783,6 +783,27 @@ type hookedGrantRepository struct {
 	state *fixtureExecutionState
 }
 
+// The optional capabilities of the SQLite grant store that the external MCP
+// service needs (#332), forwarded so wrapping the repository does not hide them.
+
+func (r *hookedGrantRepository) PreparePendingForAccessKey(ctx context.Context, identity executiongrant.Identity, accessKeyID string) (executiongrant.Grant, error) {
+	return r.Repository.(executiongrant.AccessKeyGrantStore).PreparePendingForAccessKey(ctx, identity, accessKeyID)
+}
+
+func (r *hookedGrantRepository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, requestID string, request executiongrant.StepRequest) (executiongrant.Grant, executiongrant.StepDecision, error) {
+	return r.Repository.(executiongrant.StepGrantStore).ApproveExecutionGrantWithSteps(ctx, owner, requestID, request)
+}
+
+func (r *hookedGrantRepository) StepUsage(ctx context.Context, owner, sessionID string, request executiongrant.StepRequest) (executiongrant.StepSummary, error) {
+	return r.Repository.(executiongrant.StepGrantStore).StepUsage(ctx, owner, sessionID, request)
+}
+
+func (r *hookedGrantRepository) GrantByKey(ctx context.Context, owner, key string) (executiongrant.Grant, bool, error) {
+	return r.Repository.(interface {
+		GrantByKey(context.Context, string, string) (executiongrant.Grant, bool, error)
+	}).GrantByKey(ctx, owner, key)
+}
+
 func (r *hookedGrantRepository) DecideExecutionGrant(ctx context.Context, owner, requestID, actor string,
 	decision executiongrant.Decision) (executiongrant.Grant, error) {
 	if hook := r.state.beforeDecide; hook != nil {
@@ -1467,6 +1488,8 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Assets:     store,
 		Inputs:     generationInputs,
 		Cache:      cacheService,
+		// As the application sets it: the Schema's in-flight limit per person.
+		PerOwnerMaxInflightTasks: applicationSchema.Runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1775,10 +1798,11 @@ func newHTTPHarnessWithCatalogAndProviders(
 	}
 	accountSettingsService := harnessAccountSettings(t, repository, applicationSchema)
 	accessKeysService := harnessAccessKeys(t, repository, applicationSchema)
-	mcpParts := harnessMCP(t, repository, applicationSchema, accountSettingsService, accessKeysService, accessPolicy, providerAccountService)
+	mcpParts := harnessMCP(t, repository, applicationSchema, accountSettingsService, accessKeysService, accessPolicy, providerAccountService, chatService)
 	api, err := httpapi.New(httpapi.Config{
 		MCPIdentity:                       mcpParts.identity,
 		MCPStatus:                         mcpParts.status,
+		MCPAssets:                         mcpParts.assets,
 		Harness:                           harnessResolver,
 		Retry:                             retryService,
 		Reroll:                            rerollService,
@@ -1994,7 +2018,22 @@ func harnessApprovalPolicy(application catalog.ApplicationSchema) approvalpolicy
 	for _, capability := range application.Capabilities {
 		known = append(known, string(capability.ID))
 	}
-	return approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
+	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
+	if application.StepPolicy != nil {
+		// As the application assembles it: the internal steps mode exists when the
+		// Catalog declares the 3D step policy (#330), and the access-key policy of
+		// the external MCP service decides under it.
+		counted := make([]string, 0, len(application.StepPolicy.CountedCapabilities))
+		for _, capability := range application.StepPolicy.CountedCapabilities {
+			counted = append(counted, string(capability))
+		}
+		policy = policy.WithSteps(approvalpolicy.StepsPolicy{
+			Counted:     counted,
+			DefaultList: approvalpolicy.StepSetting{Mode: application.StepPolicy.DefaultMode.List, Cap: application.StepPolicy.Cap.Default},
+			DefaultMCP:  approvalpolicy.StepSetting{Mode: application.StepPolicy.DefaultMode.MCP, Cap: application.StepPolicy.Cap.Default},
+		})
+	}
+	return policy
 }
 
 // harnessAttachmentVerifier accepts claims about "own-" prefixed objects only,

@@ -12,6 +12,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/mcppublic"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
@@ -60,6 +61,24 @@ func mcpStatusFromSchema(
 		AccountLabels: labels,
 		Settings:      settings, Usage: usage, Balances: cache,
 		Localize: texts.Text, Logger: logger,
+	})
+}
+
+// mcpAssetsFromSchema builds the service that maps an external caller's asset
+// names to chat sessions (#332). It is nil when the Catalog does not declare the
+// external service.
+func mcpAssetsFromSchema(
+	application catalog.ApplicationSchema,
+	sessions mcppublic.AssetSessions,
+	store chat.MCPAssetStore,
+	texts *catalog.TextLocalizer,
+) (*mcppublic.Assets, error) {
+	service := application.MCPPublic
+	if service == nil {
+		return nil, nil
+	}
+	return mcppublic.NewAssets(mcppublic.AssetsConfig{
+		Schema: service.Assets, Sessions: sessions, Store: store, Localize: texts.Text,
 	})
 }
 

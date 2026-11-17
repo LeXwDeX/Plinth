@@ -235,3 +235,12 @@ func declaresReferenceViews(offering generation.Offering) bool {
 	}
 	return false
 }
+
+// TakesSeveralViews reports whether an Offering takes several views of one
+// object (#65): labelled by a reference-views parameter, or in order through a
+// multi-image endpoint. The external MCP service (#332) picks such a service
+// for a call that gives several pictures of one model and names none.
+func TakesSeveralViews(offering generation.Offering) bool {
+	_, _, declared := multiviewViewsOf(offering, catalog.ChatThreeViewMultiviewSchema{})
+	return declared
+}

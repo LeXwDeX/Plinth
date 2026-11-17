@@ -16,11 +16,21 @@ const (
 	MCPToolGetTask       = "get_task"
 	MCPToolListTasks     = "list_tasks"
 	MCPToolGetTaskAssets = "get_task_assets"
+	// The tools that start work (scope generate). upload_image only stores a
+	// picture; the others create a Task through the generation kernel.
+	MCPToolUploadImage      = "upload_image"
+	MCPToolGenerateImage    = "generate_image"
+	MCPToolRemoveBackground = "remove_background"
+	MCPToolCreateModel      = "create_model"
+	MCPToolProcessModel     = "process_model"
 )
 
 // MCPPublicToolNames is the tools the code implements, in declaration order.
 func MCPPublicToolNames() []string {
-	return []string{MCPToolListServices, MCPToolGetStatus, MCPToolGetTask, MCPToolListTasks, MCPToolGetTaskAssets}
+	return []string{
+		MCPToolListServices, MCPToolGetStatus, MCPToolGetTask, MCPToolListTasks, MCPToolGetTaskAssets,
+		MCPToolUploadImage, MCPToolGenerateImage, MCPToolRemoveBackground, MCPToolCreateModel, MCPToolProcessModel,
+	}
 }
 
 // The property names of the status block the code writes. The Schema declares
@@ -79,8 +89,63 @@ type MCPPublicSchema struct {
 	// outside every group is not offered through the service.
 	ServiceGroups []MCPPublicServiceGroup `json:"service_groups"`
 	StatusBlock   MCPPublicStatusBlock    `json:"status_block"`
-	Tools         []MCPPublicTool         `json:"tools"`
-	Messages      MCPPublicMessages       `json:"messages"`
+	// Assets names the assets the generation tools work on, Generation the rules
+	// of starting a Task through them, Upload the picture upload and Audit how
+	// those calls are told apart in the product audit.
+	Assets     MCPPublicAssets     `json:"assets"`
+	Generation MCPPublicGeneration `json:"generation"`
+	Upload     MCPPublicUpload     `json:"upload"`
+	Audit      MCPPublicAudit      `json:"audit"`
+	Tools      []MCPPublicTool     `json:"tools"`
+	Messages   MCPPublicMessages   `json:"messages"`
+}
+
+// MCPPublicAssets is how a caller's asset name becomes a chat session (#332):
+// a name maps, per person, to one session that is made the first time the name
+// is used and marked as coming from MCP.
+type MCPPublicAssets struct {
+	// NameMaxLength is the longest asset name, in characters, once whitespace
+	// is folded.
+	NameMaxLength int `json:"name_max_length"`
+	// TitleTemplate is the session's title ({name} is the asset name);
+	// DefaultTitle the title of the person's default asset, the one a call that
+	// names no asset works on.
+	TitleTemplate string `json:"title_template"`
+	DefaultTitle  string `json:"default_title"`
+}
+
+// MCPPublicGeneration is what the tools that start a Task share.
+type MCPPublicGeneration struct {
+	// IdempotencyKeyPrefix is put before the caller's idempotency_key to make
+	// the key of the Task and of its grant, so a caller's key can never meet the
+	// key another entry (the browser, the Agent) made: the person's keys are one
+	// namespace.
+	IdempotencyKeyPrefix string `json:"idempotency_key_prefix"`
+	// SourceVariantPreference orders the saved model files of a source Task
+	// when a processing service takes a file and the caller named none, the
+	// main model first (as the Agent's processing tools do).
+	SourceVariantPreference []string `json:"source_variant_preference"`
+}
+
+// MCPPublicUpload bounds upload_image. The picture goes through the same
+// ingestion as a browser upload; this is the cap of the base64 route.
+type MCPPublicUpload struct {
+	// MaxBytes bounds the decoded picture. The base64 text of it, and the rest
+	// of the request, must fit max_request_bytes.
+	MaxBytes int64 `json:"max_bytes"`
+	// MediaTypes are the picture types the tool accepts. The type is read from
+	// the bytes, never taken from the caller.
+	MediaTypes        []string `json:"media_types"`
+	FilenameMaxLength int      `json:"filename_max_length"`
+}
+
+// MCPPublicAudit names how a Task or a picture the external service made is
+// marked in the product audit: the same actions the browser writes, with the
+// entry and the access key in the detail.
+type MCPPublicAudit struct {
+	EntryField     string `json:"entry_field"`
+	EntryValue     string `json:"entry_value"`
+	AccessKeyField string `json:"access_key_field"`
 }
 
 // MCPPublicServiceGroup is one group of list_services.
@@ -97,9 +162,14 @@ type MCPPublicTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	// Scope is the access key scope the tool needs (read or generate).
-	Scope        string          `json:"scope"`
-	InputSchema  json.RawMessage `json:"input_schema"`
-	OutputSchema json.RawMessage `json:"output_schema"`
+	Scope string `json:"scope"`
+	// Capabilities are the capabilities a tool that starts a Task may start,
+	// among them the ones whose earlier failed attempts of a session count when
+	// the step is checked for a repeated charge. Empty for a tool that starts
+	// none.
+	Capabilities []schemacontract.Capability `json:"capabilities,omitempty"`
+	InputSchema  json.RawMessage             `json:"input_schema"`
+	OutputSchema json.RawMessage             `json:"output_schema"`
 }
 
 // MCPPublicStatusBlock declares the facts every tool response carries so the
@@ -152,6 +222,30 @@ type MCPPublicMessages struct {
 	MethodNotAllowed  string `json:"method_not_allowed"`
 	RequestTooLarge   string `json:"request_too_large"`
 	Internal          string `json:"internal"`
+
+	// The answers of the tools that start work. NeedsPerson carries {task_id};
+	// ServiceUnavailable and ServiceMismatch {service}; TooManyInFlight
+	// {seconds}; AssetNameInvalid {max}; UploadTooLarge
+	// {max}; UploadTypeNotAllowed {types}. A step that hit the asset's 3D step
+	// cap is worded by step_policy.messages.cap_reached.
+	NeedsPerson          string `json:"needs_person"`
+	ServiceUnavailable   string `json:"service_unavailable"`
+	ServiceMismatch      string `json:"service_mismatch"`
+	NoService            string `json:"no_service"`
+	InputRefused         string `json:"input_refused"`
+	SourceNotFound       string `json:"source_not_found"`
+	SourceNotReady       string `json:"source_not_ready"`
+	SourceIncompatible   string `json:"source_incompatible"`
+	ImageNotFound        string `json:"image_not_found"`
+	AssetNameInvalid     string `json:"asset_name_invalid"`
+	AssetProjectMismatch string `json:"asset_project_mismatch"`
+	ProjectNotFound      string `json:"project_not_found"`
+	IdempotencyConflict  string `json:"idempotency_conflict"`
+	InProgress           string `json:"in_progress"`
+	TooManyInFlight      string `json:"too_many_in_flight"`
+	UploadTooLarge       string `json:"upload_too_large"`
+	UploadInvalid        string `json:"upload_invalid"`
+	UploadTypeNotAllowed string `json:"upload_type_not_allowed"`
 }
 
 // ToolOutputSchema is the output schema a tool is served with: its own result

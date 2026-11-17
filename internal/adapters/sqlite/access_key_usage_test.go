@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -78,9 +79,17 @@ func TestAccessKeyAssetsListsTheKeysAssetsNewestFirstWithTheirSteps(t *testing.T
 	f.keyTask(t, "owner-a", "asset-new", "retexture", "task-new-2", "SUCCEEDED", "")
 	// The asset's step count includes what the browser did in it, as the cap does.
 	f.task(t, "browser-step", "owner-a", "asset-new", "image-to-3d", "SUCCEEDED", "", "COMPLETED")
-	// An asset no key worked on is not a key asset; another person's is not mine.
+	// A session is an asset of the service only when the service named it
+	// (mcp_assets): one a key never reached, or the browser alone worked in, is
+	// not; another person's is not mine.
 	f.task(t, "plain-step", "owner-a", "plain-session", "text-to-3d", "SUCCEEDED", "", "COMPLETED")
 	f.keyTask(t, "owner-b", "asset-b", "text-to-3d", "task-b", "SUCCEEDED", "")
+	for _, asset := range [][3]string{{"owner-a", "asset-old", "Old"}, {"owner-a", "asset-new", "木桶"}, {"owner-b", "asset-b", "B"}} {
+		if _, err := f.r.db.Exec(`INSERT INTO mcp_assets (owner_id, name_key, name, session_id, created_at) VALUES (?, ?, ?, ?, '2026-02-01T00:00:00Z')`,
+			asset[0], strings.ToLower(asset[2]), asset[2], asset[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := f.r.db.Exec(`UPDATE go_chat_sessions SET title = 'MCP · 木桶' WHERE id = 'asset-new'`); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +101,7 @@ func TestAccessKeyAssetsListsTheKeysAssetsNewestFirstWithTheirSteps(t *testing.T
 	if err != nil || more || len(assets) != 2 {
 		t.Fatalf("assets = %+v more=%v err=%v", assets, more, err)
 	}
-	if assets[0].SessionID != "asset-new" || assets[0].Title != "MCP · 木桶" || assets[0].Used != 3 || assets[0].LastGrantAt.IsZero() {
+	if assets[0].SessionID != "asset-new" || assets[0].Title != "MCP · 木桶" || assets[0].Used != 3 || assets[0].Name != "木桶" || assets[0].LastActivityAt.IsZero() {
 		t.Fatalf("newest = %+v; want asset-new with 3 steps (2 key + 1 browser)", assets[0])
 	}
 	if assets[1].SessionID != "asset-old" || assets[1].Used != 1 || assets[1].Title != "test" {
@@ -108,6 +117,26 @@ func TestAccessKeyAssetsListsTheKeysAssetsNewestFirstWithTheirSteps(t *testing.T
 	}
 	if _, _, err := f.r.AccessKeyAssets(ctx, "", f.steps.Counted, 5); err == nil {
 		t.Fatal("an empty owner was accepted")
+	}
+}
+
+// An asset the service made but no key asked a step on yet is still an asset:
+// the marker, not the grants, says so, and its activity is its creation.
+func TestAccessKeyAssetsIncludeAnAssetWithoutAnyGrant(t *testing.T) {
+	f := newStepFixture(t)
+	ctx := context.Background()
+	f.session(t, "owner-a", "fresh")
+	f.session(t, "owner-a", "stale")
+	for _, row := range [][2]string{{"fresh", "2026-03-01T00:00:00Z"}, {"stale", "2026-01-01T00:00:00Z"}} {
+		if _, err := f.r.db.Exec(`INSERT INTO mcp_assets (owner_id, name_key, name, session_id, created_at) VALUES ('owner-a', ?, ?, ?, ?)`,
+			row[0], row[0], row[0], row[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assets, more, err := f.r.AccessKeyAssets(ctx, "owner-a", f.steps.Counted, 10)
+	if err != nil || more || len(assets) != 2 || assets[0].SessionID != "fresh" || assets[1].SessionID != "stale" ||
+		assets[0].Used != 0 || assets[0].LastActivityAt.Year() != 2026 || assets[0].LastActivityAt.Month() != 3 {
+		t.Fatalf("assets = %+v more=%v err=%v", assets, more, err)
 	}
 }
 
