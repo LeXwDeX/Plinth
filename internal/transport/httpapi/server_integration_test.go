@@ -1803,6 +1803,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		MCPIdentity:                       mcpParts.identity,
 		MCPStatus:                         mcpParts.status,
 		MCPAssets:                         mcpParts.assets,
+		ModelInspector:                    mcpParts.inspector,
 		Harness:                           harnessResolver,
 		Retry:                             retryService,
 		Reroll:                            rerollService,

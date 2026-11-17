@@ -319,6 +319,21 @@ func TestModelReviewIsOnlyValidatedWhenAToolUsesIt(t *testing.T) {
 	app.Chat.Harness.BaseTools = base
 	app.Chat.ModelReview = catalog.ChatModelReviewSchema{}
 	app.Chat.SelfCheck = catalog.ChatSelfCheckSchema{}
+	// The outward MCP inspect_model runs the same inspection, so it goes with
+	// the review block its limits live in (#332 step 7a).
+	if app.MCPPublic != nil {
+		var mcpTools []catalog.MCPPublicTool
+		for _, tool := range app.MCPPublic.Tools {
+			if tool.Name != catalog.MCPToolInspectModel {
+				mcpTools = append(mcpTools, tool)
+			}
+		}
+		app.MCPPublic.Tools = mcpTools
+		if bundle, ok := app.Localization.Bundles["en"]; ok {
+			delete(bundle.Fields, "mcp_public.tools[name=inspect_model].description")
+			app.Localization.Bundles["en"] = bundle
+		}
+	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {
 		t.Fatalf("a Schema without the review tools was rejected: %v", err)
 	}

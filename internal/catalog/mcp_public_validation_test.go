@@ -344,11 +344,12 @@ func TestMCPPublicCopyIsLocalized(t *testing.T) {
 	for _, text := range []string{
 		service.Instructions, service.Messages.Unauthenticated, service.Messages.InsufficientScope,
 		service.Messages.TaskNotFound, service.Messages.Internal, service.Messages.RateLimited, service.Messages.AuthThrottled,
-		service.Messages.SignedDownloadUnavailable,
+		service.Messages.SignedDownloadUnavailable, service.Messages.ModelUnavailable,
 		service.StatusBlock.Summary.Template,
 		service.StatusBlock.Summary.TemplateNoAsset, service.StatusBlock.Summary.BalanceUnknown,
 		service.StatusBlock.Summary.Unknown, service.Tools[0].Description, service.Tools[len(service.Tools)-1].Description,
 		mcpToolOf(&application, catalog.MCPToolGetTaskAssets).Description,
+		mcpToolOf(&application, catalog.MCPToolInspectModel).Description,
 	} {
 		if translated := localizer.Text("en", text); translated == text || strings.TrimSpace(translated) == "" {
 			t.Errorf("no English overlay for %q", text)

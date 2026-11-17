@@ -16,6 +16,9 @@ const (
 	MCPToolGetTask       = "get_task"
 	MCPToolListTasks     = "list_tasks"
 	MCPToolGetTaskAssets = "get_task_assets"
+	// MCPToolInspectModel reads one saved model the way the platform's
+	// inspect_model tool does; it writes no self-check evidence.
+	MCPToolInspectModel = "inspect_model"
 	// The tools that start work (scope generate). upload_image only stores a
 	// picture; the others create a Task through the generation kernel.
 	MCPToolUploadImage      = "upload_image"
@@ -29,6 +32,7 @@ const (
 func MCPPublicToolNames() []string {
 	return []string{
 		MCPToolListServices, MCPToolGetStatus, MCPToolGetTask, MCPToolListTasks, MCPToolGetTaskAssets,
+		MCPToolInspectModel,
 		MCPToolUploadImage, MCPToolGenerateImage, MCPToolRemoveBackground, MCPToolCreateModel, MCPToolProcessModel,
 	}
 }
@@ -263,6 +267,10 @@ type MCPPublicMessages struct {
 	// SignedDownloadUnavailable answers a signed:true tool result when the
 	// server has no signing key configured.
 	SignedDownloadUnavailable string `json:"signed_download_unavailable"`
+	// ModelUnavailable answers inspect_model when the server has no model
+	// inspector assembled. The other refusals of the inspection are worded by
+	// the platform's own inspect_model texts (chat.model_review).
+	ModelUnavailable string `json:"model_unavailable"`
 }
 
 // ToolOutputSchema is the output schema a tool is served with: its own result

@@ -24,9 +24,11 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/authentication"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/mcppublic"
+	"github.com/LeXwDeX/Plinth/internal/modelinspect"
 	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 	"github.com/LeXwDeX/Plinth/internal/transport/httpapi"
@@ -94,10 +96,56 @@ func (mcpDirectory) FindByID(_ context.Context, id string) (authentication.UserR
 }
 
 type mcpHarnessParts struct {
-	identity httpapi.IdentityResolver
-	status   *mcppublic.Builder
-	assets   *mcppublic.Assets
-	clock    *mcpClock
+	identity  httpapi.IdentityResolver
+	status    *mcppublic.Builder
+	assets    *mcppublic.Assets
+	inspector *harnessModelInspector
+	clock     *mcpClock
+}
+
+// harnessModelInspector stands in for the generation executor's read-only
+// inspection in the harness: it echoes the requested identifiers and a test
+// can make it return a fixed result or one refusal.
+type harnessModelInspector struct {
+	calls  []generationtool.ModelInspectRequest
+	result generationtool.ModelInspectResult
+	refuse error
+}
+
+func (inspector *harnessModelInspector) InspectReviewedModel(
+	_ context.Context, request generationtool.ModelInspectRequest,
+) (generationtool.ModelInspectResult, error) {
+	inspector.calls = append(inspector.calls, request)
+	if inspector.refuse != nil {
+		return generationtool.ModelInspectResult{}, inspector.refuse
+	}
+	result := inspector.result
+	if result.TaskID == "" {
+		result.TaskID = request.TaskID
+	}
+	if result.AssetID == "" {
+		result.AssetID = request.AssetID
+	}
+	// A real inspection lists empty collections rather than nil ones.
+	if result.Report.Parts == nil {
+		result.Report.Parts = []modelinspect.PartReport{}
+	}
+	if result.Report.Materials == nil {
+		result.Report.Materials = []modelinspect.MaterialReport{}
+	}
+	if result.Report.UV.Primitives == nil {
+		result.Report.UV.Primitives = []modelinspect.PrimitiveUVReport{}
+	}
+	if result.Report.Skins == nil {
+		result.Report.Skins = []modelinspect.SkinReport{}
+	}
+	if result.Report.Animations == nil {
+		result.Report.Animations = []modelinspect.AnimationReport{}
+	}
+	if result.Report.Warnings == nil {
+		result.Report.Warnings = []string{}
+	}
+	return result, nil
 }
 
 // harnessMCP assembles what the application assembles for the external MCP
@@ -145,7 +193,7 @@ func harnessMCP(t *testing.T, repository *sqlite.Repository, application catalog
 	}
 	return mcpHarnessParts{
 		identity: &accesskeys.Authenticator{Keys: keys, Users: mcpDirectory{}, Policy: policy},
-		status:   status, assets: assets, clock: clock,
+		status:   status, assets: assets, inspector: &harnessModelInspector{}, clock: clock,
 	}
 }
 
@@ -184,6 +232,7 @@ type mcpFixture struct {
 	handler      http.Handler
 	keys         *accesskeys.Service
 	repository   *sqlite.Repository
+	inspector    *harnessModelInspector
 	clock        *mcpClock
 	databasePath string
 	steps        approvalpolicy.StepsPolicy
@@ -205,7 +254,9 @@ func registerHarnessMCP(t *testing.T, module *generation.Module, api *httpapi.Se
 	// The listener's limit windows follow the harness clock, so a test moves a
 	// minute without waiting for it.
 	api.SetMCPLimitClock(parts.clock.Now)
-	mcpFixtures.Store(module, &mcpFixture{handler: handler, keys: keys, repository: repository, clock: parts.clock})
+	mcpFixtures.Store(module, &mcpFixture{
+		handler: handler, keys: keys, repository: repository, inspector: parts.inspector, clock: parts.clock,
+	})
 	t.Cleanup(func() { mcpFixtures.Delete(module) })
 }
 

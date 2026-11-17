@@ -33,6 +33,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -64,6 +65,13 @@ type DirectStyleReferenceResolver interface {
 	Resolve(context.Context, references.ReferenceScope, []string) ([]generation.AssetID, error)
 }
 
+// MCPModelInspector is the read-only model inspection core behind the
+// external MCP inspect_model tool (#332). It shares the platform tool's
+// parse cache and concurrency slots.
+type MCPModelInspector interface {
+	InspectReviewedModel(context.Context, generationtool.ModelInspectRequest) (generationtool.ModelInspectResult, error)
+}
+
 type Config struct {
 	Harness            *resolve.Service
 	AgentConfiguration *agentconfiguration.Service
@@ -88,6 +96,9 @@ type Config struct {
 	// mcp_public disabled, leaves MCPPublicHandler without a handler.
 	MCPIdentity IdentityResolver
 	MCPStatus   *mcppublic.Builder
+	// ModelInspector is the read-only inspection inspect_model reports; nil
+	// makes a Catalog that declares the tool fail to start.
+	ModelInspector MCPModelInspector
 	// MCPAssets maps the asset names of the external MCP service to chat
 	// sessions (#332). The tools that start work need it, the grant service,
 	// the input assets and the chat service.
@@ -230,6 +241,7 @@ type Server struct {
 	mcpIdentity                       IdentityResolver
 	mcpStatus                         *mcppublic.Builder
 	mcpAssets                         *mcppublic.Assets
+	modelInspector                    MCPModelInspector
 	readiness                         func(context.Context) error
 	generation                        *generation.Module
 	executionGrants                   *executiongrant.Service
@@ -469,6 +481,7 @@ func New(config Config) (*Server, error) {
 		mcpIdentity:               config.MCPIdentity,
 		mcpStatus:                 config.MCPStatus,
 		mcpAssets:                 config.MCPAssets,
+		modelInspector:            config.ModelInspector,
 		administration:            config.Administration,
 		administrationAudit:       config.AdministrationAudit,
 		administrationGenerations: config.AdministrationGenerations,

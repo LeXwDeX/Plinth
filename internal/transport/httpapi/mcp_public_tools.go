@@ -83,6 +83,7 @@ func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Tw
 		catalog.MCPToolGetTaskAssets: func(call *mcpCall) (mcpOutcome, error) {
 			return s.mcpGetTaskAssets(call, route, signedRoute, ttl)
 		},
+		catalog.MCPToolInspectModel:     s.mcpInspectModel,
 		catalog.MCPToolUploadImage:      s.mcpUploadImage,
 		catalog.MCPToolGenerateImage:    s.mcpStartTask,
 		catalog.MCPToolRemoveBackground: s.mcpStartTask,
@@ -97,6 +98,14 @@ func (s *Server) newMCPRuntime(service catalog.MCPPublicSchema, route routing.Tw
 		}
 		if declared.Scope == "generate" && (s.mcpAssets == nil || s.executionGrants == nil || s.inputAssets == nil || s.chat == nil) {
 			return nil, fmt.Errorf("httpapi: mcp_public 声明了发起生成的工具 %q，但没有装配资产映射、授权服务、输入资产或会话服务", declared.Name)
+		}
+		// inspect_model is read-only, but it reads the Task session's
+		// production brief: without the chat service there is nothing to read.
+		if declared.Name == catalog.MCPToolInspectModel && s.modelInspector == nil {
+			return nil, fmt.Errorf("httpapi: mcp_public 声明了 inspect_model，但没有装配模型检查器")
+		}
+		if declared.Name == catalog.MCPToolInspectModel && s.chat == nil {
+			return nil, fmt.Errorf("httpapi: mcp_public 声明了 inspect_model，但没有装配会话服务（读取制作简报）")
 		}
 		input, _, err := service.ParsedInputSchema(declared.Name)
 		if err != nil {
