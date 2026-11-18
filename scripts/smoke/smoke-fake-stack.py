@@ -49,10 +49,17 @@ same HTTP API the browser uses:
     one-second draft, keeps an unavailable route with its reason, plans no 3D step for
     a 2D-only list, and answers a foreign owner with 404 (the "asset-list" group,
     three private stacks).
+  * the scene decomposition flow (#331) cuts two regions out of a synthetic scene
+    picture at original resolution, pixel-compares them with the source, proves a
+    repeated rectangle shares one asset across calls and turns, refuses invalid
+    regions without storing anything, re-cuts the merged union region through an
+    edit's crop instruction, proposes with reference_input_asset_ids and confirms
+    the list onto the board, all with no Task, step or charge (the
+    "asset-list-crops" group).
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, faults;
+agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, faults;
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
@@ -5686,13 +5693,16 @@ def _asset_list_marker(title, items):
     return "[[fake:tool:propose_asset_list " + arguments + "]]"
 
 
-def _asset_list_turn(api, work, stack, session, title, items, seconds=60):
+def _asset_list_turn(api, work, stack, session, title, items, seconds=60,
+                     content=None, creative_domain="model-3d"):
     """One chat turn whose fake LLM answer proposes the list; waits for the
-    turn's final reply and returns (tool result JSON, why)."""
+    turn's final reply and returns (tool result JSON, why). content replaces
+    the default message, so one turn can carry crop markers beside the
+    proposal; creative_domain picks the tool set the fake may call."""
     before = assistant_reply_count(api, session)
     status, _ = _send_chat(api, session, {
-        "content": "提出制作清单 " + _asset_list_marker(title, items),
-        "creative_domain": "model-3d",
+        "content": content or ("提出制作清单 " + _asset_list_marker(title, items)),
+        "creative_domain": creative_domain,
     })
     if status not in (200, 201, 202):
         return None, f"send {status}"
@@ -5952,6 +5962,301 @@ def scenario_asset_list_expiry(api, work):
            and decision_status == 409 and decision.get("code") == "asset_list_expired",
            f"detail={detail.get('status')}/{detail.get('effective_status')} "
            f"decision={decision_status}/{decision.get('code')}")
+
+
+# ---------------------------------------------------------------- asset list crops (#331)
+
+# The synthetic scene picture of the crop scenario: a 4x3 grid of 64x64 solid
+# blocks, so every region's pixels are predictable. Crops are cut at original
+# resolution and compared pixel by pixel with these rows.
+CROP_SOURCE_WIDTH = 256
+CROP_SOURCE_HEIGHT = 192
+CROP_REGION_A = {"x": 0, "y": 0, "width": 0.25, "height": 0.5}
+CROP_REGION_B = {"x": 0.25, "y": 0.5, "width": 0.5, "height": 0.5}
+# CROP_PIXEL_UNION is the bounding box of A and B; the edit's crop instruction
+# re-cuts that merged region.
+CROP_REGION_UNION = {"x": 0, "y": 0, "width": 0.75, "height": 1}
+CROP_PIXEL_A = (0, 0, 64, 96)
+CROP_PIXEL_B = (64, 96, 192, 192)
+CROP_PIXEL_UNION = (0, 0, 192, 192)
+
+
+def _crop_source_picture():
+    """The deterministic scene picture: one solid colour per 64x64 block."""
+    blocks = [
+        ((column * 64, row * 64, (column + 1) * 64, (row + 1) * 64),
+         (32 + column * 48, 48 + row * 56, 160 - column * 24))
+        for row in range(CROP_SOURCE_HEIGHT // 64) for column in range(CROP_SOURCE_WIDTH // 64)
+    ]
+    return make_picture(CROP_SOURCE_WIDTH, CROP_SOURCE_HEIGHT, (20, 20, 20), blocks)
+
+
+def _crop_marker(regions):
+    arguments = json.dumps({"image": "@img1", "regions": regions}, ensure_ascii=False, separators=(",", ":"))
+    return "[[fake:tool:crop_image_regions " + arguments + "]]"
+
+
+def _crop_region(label, region):
+    return {"label": label, "region": region}
+
+
+def _crop_turn(api, work, stack, session, content, image_urls=None, seconds=60):
+    """One chat turn on the image domain, which is where crop_image_regions
+    lives; waits for the turn's final reply and returns every crop tool result
+    the conversation kept so far, or (None, why)."""
+    before = assistant_reply_count(api, session)
+    body = {"content": content, "creative_domain": "image"}
+    if image_urls:
+        body["image_urls"] = image_urls
+    status, _ = _send_chat(api, session, body)
+    if status not in (200, 201, 202):
+        return None, f"send {status}"
+    end = time.time() + seconds
+    while time.time() < end and assistant_reply_count(api, session) <= before:
+        time.sleep(0.5)
+    if assistant_reply_count(api, session) <= before:
+        return None, "the crop turn produced no final reply"
+    return _tool_results(work, stack, session, "crop_image_regions"), ""
+
+
+def _wait_crop_label(work, stack, session, label, seconds=20):
+    """Waits for the crop result carrying one label and returns it."""
+    end = time.time() + seconds
+    result = None
+    while time.time() < end:
+        result = _crop_result_by_label(_tool_results(work, stack, session, "crop_image_regions"), label)
+        if result is not None:
+            return result
+        time.sleep(0.5)
+    return result
+
+
+def _crop_result_by_label(results, label):
+    for result in results:
+        for crop in result.get("crops") or []:
+            if crop.get("label") == label:
+                return result
+    return None
+
+
+def _crop_refusal(results, label):
+    for result in results:
+        if result.get("success") is False and "(" + label + ")" in str(result.get("error") or ""):
+            return result
+    return None
+
+
+def _crop_asset_id(result):
+    crops = (result or {}).get("crops") or []
+    return str(crops[0].get("input_asset_id") or "") if len(crops) == 1 else ""
+
+
+def _crop_matches(result, pixel, region):
+    """One crop's asset id, pixel rectangle and normalized region as asked."""
+    crops = (result or {}).get("crops") or []
+    if len(crops) != 1:
+        return False
+    crop = crops[0]
+    want = {"x0": pixel[0], "y0": pixel[1], "x1": pixel[2], "y1": pixel[3]}
+    if crop.get("pixel_rect") != want or not str(crop.get("input_asset_id") or ""):
+        return False
+    normalized = crop.get("normalized_region") or {}
+    try:
+        return all(abs(float(normalized.get(key)) - region[key]) < 1e-9
+                   for key in ("x", "y", "width", "height"))
+    except (TypeError, ValueError):
+        return False
+
+
+def _crop_asset_check(api, source_rows, asset_id, pixel):
+    """Downloads one crop and compares it pixel by pixel with the source
+    rectangle; returns (ok, detail)."""
+    import l5_common
+
+    status, raw, _headers = api.call("GET", f"/api/v1/assets/{asset_id}")
+    if status != 200:
+        return False, f"download {asset_id}: {status}"
+    try:
+        width, height, rows = l5_common.decode_png(raw)
+    except ValueError as error:
+        return False, f"decode {asset_id}: {error}"
+    x0, y0, x1, y1 = pixel
+    if (width, height) != (x1 - x0, y1 - y0):
+        return False, f"{asset_id}: {width}x{height}, want {x1 - x0}x{y1 - y0}"
+    for y in range(height):
+        if rows[y] != source_rows[y0 + y][3 * x0:3 * x1]:
+            return False, f"{asset_id}: row {y} differs from the source rectangle"
+    return True, f"{asset_id}: {width}x{height} matches the source rectangle"
+
+
+def _sqlite_count(work, stack, query, parameters=()):
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        (count,) = db.execute(query, parameters).fetchone()
+        db.close()
+        return count
+    except sqlite3.Error:
+        return -1
+
+
+def _balance_amounts(body):
+    return {account.get("provider"): (account.get("native_balance") or {}).get("amount")
+            for account in (body or {}).get("accounts") or []}
+
+
+def scenario_asset_list_crops(api, work, stack):
+    """#331 (b): a synthetic scene picture is decomposed with crop_image_regions
+    and proposed with reference_input_asset_ids. Cuts are pixel-compared with
+    the source at original resolution, a repeated rectangle keeps one asset
+    across calls and turns, refused regions store nothing, an edit's crop
+    instruction re-cuts the merged union region, and the confirmed list shows
+    on the board. No Task, step or charge happens anywhere in the flow."""
+    import l5_common
+
+    source = _crop_source_picture()
+    source_id = upload_asset(api, "scene-grid.png", source, "image/png")
+    if not source_id:
+        record("#331 the synthetic scene picture uploads", False, "upload refused")
+        return
+    record("#331 the synthetic scene picture uploads", True,
+           f"{CROP_SOURCE_WIDTH}x{CROP_SOURCE_HEIGHT} {source_id}")
+    session, project_id, why = _asset_list_setup(api, "场景图拆解冒烟")
+    if why:
+        record("#331 create the crop scenario project", False, why)
+        return
+    _status, balance_before = api.json("GET", "/api/meshy/balance")
+
+    # Round 1: two real cuts, the same rectangle again in the same reply, and
+    # two refused regions (past the edge, under the shortest-side minimum).
+    markers = " ".join([
+        _crop_marker([_crop_region("hero", CROP_REGION_A)]),
+        _crop_marker([_crop_region("sword", CROP_REGION_B)]),
+        _crop_marker([_crop_region("hero-again", CROP_REGION_A)]),
+        _crop_marker([_crop_region("out", {"x": 0.9, "y": 0.9, "width": 0.2, "height": 0.2})]),
+        _crop_marker([_crop_region("tiny", {"x": 0.5, "y": 0.5, "width": 0.1, "height": 0.1})]),
+    ])
+    results, why = _crop_turn(api, work, stack, session, "把场景图里的主体都裁出来 " + markers,
+                              image_urls=[f"/api/v1/assets/{source_id}"])
+    if results is None:
+        record("#331 the first crop turn runs", False, why)
+        return
+    hero = _wait_crop_label(work, stack, session, "hero")
+    sword = _wait_crop_label(work, stack, session, "sword")
+    again = _wait_crop_label(work, stack, session, "hero-again")
+    out = _crop_refusal(_tool_results(work, stack, session, "crop_image_regions"), "out")
+    tiny = _crop_refusal(_tool_results(work, stack, session, "crop_image_regions"), "tiny")
+    hero_id, sword_id = _crop_asset_id(hero), _crop_asset_id(sword)
+    record("#331 the first turn cuts both regions at original resolution",
+           bool(hero_id) and bool(sword_id)
+           and (hero.get("source_width"), hero.get("source_height")) == (CROP_SOURCE_WIDTH, CROP_SOURCE_HEIGHT)
+           and (sword.get("source_width"), sword.get("source_height")) == (CROP_SOURCE_WIDTH, CROP_SOURCE_HEIGHT)
+           and _crop_matches(hero, CROP_PIXEL_A, CROP_REGION_A)
+           and _crop_matches(sword, CROP_PIXEL_B, CROP_REGION_B),
+           f"hero={json.dumps(hero, ensure_ascii=False)[:200]} "
+           f"sword={json.dumps(sword, ensure_ascii=False)[:200]}")
+    record("#331 a repeated rectangle in the same turn returns the same asset",
+           bool(hero_id) and _crop_asset_id(again) == hero_id,
+           f"hero={hero_id} again={_crop_asset_id(again)}")
+    record("#331 a region past the source edge is refused",
+           out is not None and out.get("code") == "invalid_region",
+           json.dumps(out, ensure_ascii=False)[:200])
+    record("#331 a region under the shortest-side minimum is refused",
+           tiny is not None and tiny.get("code") == "image_too_small",
+           json.dumps(tiny, ensure_ascii=False)[:200])
+    count_first = _sqlite_count(work, stack,
+                                "SELECT COUNT(*) FROM input_asset_crops WHERE source_asset_id=?", (source_id,))
+    record("#331 refused regions store no crop asset",
+           count_first == 2, f"provenance rows={count_first}, want 2")
+
+    # Round 2: the same rectangle across turns, and the proposal whose items
+    # directly name the first turn's crops.
+    items = [
+        {"kind": "character", "name": "主角 阿岚", "description": "红发剑士",
+         "route_id": "text-to-3d", "reference_input_asset_ids": [hero_id]},
+        {"kind": "prop", "name": "长剑", "description": "单手长剑",
+         "route_id": "text-to-3d", "reference_input_asset_ids": [sword_id]},
+    ]
+    cross = _crop_marker([_crop_region("hero-cross", CROP_REGION_A)])
+    content = "提出制作清单并再确认一次同一区域 " + cross + " " + _asset_list_marker("场景拆解清单", items)
+    proposal, why = _asset_list_turn(api, work, stack, session, "场景拆解清单", items,
+                                     content=content, creative_domain="image")
+    list_id = str((proposal or {}).get("list_id") or "")
+    record("#331 the second turn proposes the list with crop references",
+           proposal is not None and proposal.get("status") == "draft"
+           and proposal.get("item_count") == 2 and bool(list_id),
+           why or json.dumps(proposal, ensure_ascii=False)[:240])
+    cross_result = _wait_crop_label(work, stack, session, "hero-cross")
+    record("#331 a repeated rectangle across turns returns the same asset",
+           bool(hero_id) and _crop_asset_id(cross_result) == hero_id,
+           f"hero={hero_id} cross={_crop_asset_id(cross_result)}")
+    status, detail = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}")
+    detail_items = (detail or {}).get("items") or []
+    references = [[reference.get("input_asset_id") for reference in item.get("references") or []]
+                  for item in detail_items]
+    record("#331 the draft's items reference exactly the cut assets",
+           status == 200 and (detail or {}).get("version") == 0
+           and references == [[hero_id], [sword_id]],
+           f"status={status} references={references} want {[[hero_id], [sword_id]]}")
+
+    source_width, source_height, source_rows = l5_common.decode_png(source)
+    hero_ok, hero_detail = _crop_asset_check(api, source_rows, hero_id, CROP_PIXEL_A)
+    sword_ok, sword_detail = _crop_asset_check(api, source_rows, sword_id, CROP_PIXEL_B)
+    record("#331 both crops decode to their source rectangles, pixel for pixel",
+           (source_width, source_height) == (CROP_SOURCE_WIDTH, CROP_SOURCE_HEIGHT)
+           and hero_ok and sword_ok, f"{hero_detail}; {sword_detail}")
+
+    # The edit merges A and B: its crop instruction re-cuts the union region
+    # and replaces the first item's crop reference with the new asset.
+    edit_items = [
+        {"kind": "character", "name": "主角 阿岚", "description": "红发剑士", "route_id": "text-to-3d",
+         "references": [{"input_asset_id": hero_id}],
+         "crop": {"source_input_asset_id": source_id, "region": CROP_REGION_UNION}},
+        {"kind": "prop", "name": "长剑", "description": "单手长剑", "route_id": "text-to-3d",
+         "references": [{"input_asset_id": sword_id}]},
+    ]
+    status, edited = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}",
+                              {"title": "场景拆解清单（合并）", "items": edit_items,
+                               "brief": {}, "expected_version": 0})
+    edited_items = (edited or {}).get("items") or []
+    first_references = [reference.get("input_asset_id")
+                        for reference in (edited_items[0].get("references") or [])] if edited_items else []
+    union_id = first_references[0] if len(first_references) == 1 else ""
+    record("#331 the edit's crop instruction re-cuts the merged region",
+           status == 200 and (edited or {}).get("version") == 1 and len(edited_items) == 2
+           and bool(union_id) and union_id not in (hero_id, sword_id) and first_references == [union_id]
+           and [reference.get("input_asset_id")
+                for reference in (edited_items[1].get("references") or [])] == [sword_id],
+           f"status={status} version={(edited or {}).get('version')} union={union_id} "
+           f"references={[[reference.get('input_asset_id') for reference in item.get('references') or []]
+                          for item in edited_items]}")
+    union_ok, union_detail = _crop_asset_check(api, source_rows, union_id, CROP_PIXEL_UNION)
+    count_edit = _sqlite_count(work, stack,
+                               "SELECT COUNT(*) FROM input_asset_crops WHERE source_asset_id=?", (source_id,))
+    record("#331 the merged crop matches the union rectangle and adds one provenance row",
+           union_ok and count_edit == 3, f"{union_detail}; provenance rows={count_edit}, want 3")
+
+    status, confirmed = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                                 {"decision": "confirm"})
+    board_status, board = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/board")
+    board_list = (board or {}).get("list") or {}
+    board_items = (board or {}).get("items") or []
+    record("#331 the confirmed list appears on the board with both items",
+           status == 200 and (confirmed or {}).get("status") == "confirmed"
+           and board_status == 200 and board_list.get("id") == list_id
+           and board_list.get("status") == "confirmed" and board_list.get("item_count") == 2
+           and [item.get("name") for item in board_items] == ["主角 阿岚", "长剑"],
+           f"decision={status}/{(confirmed or {}).get('status')} board={board_status} "
+           f"items={[item.get('name') for item in board_items]}")
+
+    # The whole flow is read-only: no public Task was created (so no 3D step
+    # was counted) and the provider balances did not move.
+    _status, balance_after = api.json("GET", "/api/meshy/balance")
+    record("#331 the decomposition creates no Task, step or charge",
+           not session_tasks(api, session)
+           and _sqlite_count(work, stack, "SELECT COUNT(*) FROM generation_tasks") == 0
+           and _balance_amounts(balance_before) == _balance_amounts(balance_after),
+           f"tasks={len(session_tasks(api, session))} balances={_balance_amounts(balance_after)}")
 
 
 # ---------------------------------------------------------------- asset list runs (#328)
@@ -6433,7 +6738,7 @@ def scenario_asset_list(work, stack_binary, processes, catalog):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-run,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -6443,7 +6748,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "asset-list", "asset-list-run", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -6550,6 +6855,14 @@ def main():
             # draft TTL and the availability arm needs every rigging Offering
             # disabled; the workflow arm keeps the shipped Catalog.
             scenario_asset_list(work, stack_binary, processes, catalog)
+        if "asset-list-crops" in selected:
+            # #331: its own stack so the scenario can run alone under --only;
+            # it needs only the shipped Catalog.
+            child, api = start_stack(processes, stack_binary, work, "asset-list-crops", catalog, GOOD_KEY)
+            try:
+                scenario_asset_list_crops(api, work, "asset-list-crops")
+            finally:
+                processes.stop(child)
         if "asset-list-run" in selected:
             # #328: its own stacks, because execution is off in the shipped
             # Catalog and every arm needs a short poll and grace window.
