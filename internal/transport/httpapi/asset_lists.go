@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/project"
 )
 
@@ -67,6 +69,22 @@ type assetListItemWire struct {
 	Round                   int                   `json:"round"`
 	CreatedAt               time.Time             `json:"created_at"`
 	UpdatedAt               time.Time             `json:"updated_at"`
+	// Crop is the provenance of the item's crop reference (#331): the source
+	// picture and the normalized region. It is omitted when the item has no
+	// crop reference and only the list detail carries it, never the summary.
+	Crop *assetListCropWire `json:"crop,omitempty"`
+}
+
+// assetListCropWire is one item's crop provenance (#331). The merge-duplicates
+// editor unions the normalized regions cut from one source, so the wire exposes
+// geometry only: no picture bytes, crop asset id, hash or owner id.
+type assetListCropWire struct {
+	SourceInputAssetID string             `json:"source_input_asset_id"`
+	SourceKind         string             `json:"source_kind"`
+	SourceWidth        int                `json:"source_width"`
+	SourceHeight       int                `json:"source_height"`
+	Region             listcrop.Region    `json:"region"`
+	PixelRect          listcrop.PixelRect `json:"pixel_rect"`
 }
 
 type assetListWire struct {
@@ -195,6 +213,40 @@ func assetListItemFields(item assetlist.Item) assetListItemWire {
 	}
 }
 
+// assetListCropField picks the crop provenance one item exposes (#331). Only
+// input-asset references can be crops; the provenance map is owner-scoped, so
+// a foreign id or a list_crop asset without provenance yields no crop object.
+// An item may reference at most one crop, but stored data may briefly carry
+// several: the last crop reference wins, matching the edit rule that replaces
+// the previous crop with the new one appended last.
+func assetListCropField(item assetlist.Item, crops map[generation.AssetID]listcrop.Crop) *assetListCropWire {
+	var (
+		chosen listcrop.Crop
+		found  bool
+	)
+	for _, reference := range item.References {
+		if reference.InputAssetID == "" {
+			continue
+		}
+		crop, ok := crops[generation.AssetID(reference.InputAssetID)]
+		if !ok {
+			continue
+		}
+		chosen, found = crop, true
+	}
+	if !found {
+		return nil
+	}
+	return &assetListCropWire{
+		SourceInputAssetID: string(chosen.SourceInputAssetID),
+		SourceKind:         chosen.SourceKind,
+		SourceWidth:        chosen.SourceWidth,
+		SourceHeight:       chosen.SourceHeight,
+		Region:             chosen.Region,
+		PixelRect:          chosen.PixelRect,
+	}
+}
+
 func assetListReviewFields(review assetlist.ItemReview) assetListReviewWire {
 	raw := review.Review
 	if len(raw) == 0 {
@@ -232,10 +284,16 @@ func assetListBoardFields(board assetlist.Board) assetListBoardWire {
 	return assetListBoardWire{List: assetListSummaryFields(board.List), Items: items}
 }
 
-func assetListResultWire(value assetlist.List) assetListWire {
+// assetListResultWire renders the list detail. crops is the owner-scoped
+// provenance of every referenced crop asset, keyed by crop asset id; nil (no
+// store or no crop references) leaves every item without the optional crop
+// object.
+func assetListResultWire(value assetlist.List, crops map[generation.AssetID]listcrop.Crop) assetListWire {
 	items := make([]assetListItemWire, 0, len(value.Items))
 	for _, item := range value.Items {
-		items = append(items, assetListItemFields(item))
+		wire := assetListItemFields(item)
+		wire.Crop = assetListCropField(item, crops)
+		items = append(items, wire)
 	}
 	brief := value.Brief
 	if len(brief) == 0 {
@@ -248,6 +306,36 @@ func assetListResultWire(value assetlist.List) assetListWire {
 		SupersededBy:         value.SupersededBy,
 		Items:                items,
 	}
+}
+
+// assetListCropProvenance loads the owner-scoped crop provenance of every
+// input asset the list's items reference (#331) in one batch. A server without
+// the store keeps the pre-#331 wire: no crop objects at all.
+func (s *Server) assetListCropProvenance(ctx context.Context, owner string,
+	value assetlist.List,
+) (map[generation.AssetID]listcrop.Crop, error) {
+	if s.assetListCrops == nil {
+		return nil, nil
+	}
+	ids := make([]generation.AssetID, 0, len(value.Items))
+	seen := make(map[generation.AssetID]struct{}, len(value.Items))
+	for _, item := range value.Items {
+		for _, reference := range item.References {
+			if reference.InputAssetID == "" {
+				continue
+			}
+			id := generation.AssetID(reference.InputAssetID)
+			if _, duplicate := seen[id]; duplicate {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return s.assetListCrops.Load(ctx, generation.OwnerID(owner), ids)
 }
 
 // writeAssetListError maps the service's owner-scoped errors. NotFound (a
@@ -450,8 +538,13 @@ func (s *Server) getProjectAssetList(writer http.ResponseWriter, request *http.R
 		s.writeAssetListError(writer, err, "")
 		return
 	}
+	crops, err := s.assetListCropProvenance(request.Context(), owner, value)
+	if err != nil {
+		s.writeAssetListError(writer, err, value.Title)
+		return
+	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
-	writeJSON(writer, http.StatusOK, assetListResultWire(value))
+	writeJSON(writer, http.StatusOK, assetListResultWire(value, crops))
 }
 
 // getProjectAssetListBoard is the read-only acceptance board (#329a). It
@@ -503,7 +596,12 @@ func (s *Server) putProjectAssetList(writer http.ResponseWriter, request *http.R
 		s.writeAssetListError(writer, err, existing.Title)
 		return
 	}
-	writeJSON(writer, http.StatusOK, assetListResultWire(value))
+	crops, err := s.assetListCropProvenance(request.Context(), owner, value)
+	if err != nil {
+		s.writeAssetListError(writer, err, value.Title)
+		return
+	}
+	writeJSON(writer, http.StatusOK, assetListResultWire(value, crops))
 }
 
 func (s *Server) decideProjectAssetList(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
@@ -530,7 +628,12 @@ func (s *Server) decideProjectAssetList(writer http.ResponseWriter, request *htt
 		s.writeAssetListError(writer, err, existing.Title)
 		return
 	}
-	writeJSON(writer, http.StatusOK, assetListResultWire(value))
+	crops, err := s.assetListCropProvenance(request.Context(), owner, value)
+	if err != nil {
+		s.writeAssetListError(writer, err, value.Title)
+		return
+	}
+	writeJSON(writer, http.StatusOK, assetListResultWire(value, crops))
 }
 
 // controlProjectAssetListRun applies one person action to the list's run

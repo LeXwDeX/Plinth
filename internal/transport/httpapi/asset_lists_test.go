@@ -188,6 +188,24 @@ type assetListTestWire struct {
 			AssetID      string `json:"asset_id"`
 			InputAssetID string `json:"input_asset_id"`
 		} `json:"references"`
+		Crop *struct {
+			SourceInputAssetID string `json:"source_input_asset_id"`
+			SourceKind         string `json:"source_kind"`
+			SourceWidth        int    `json:"source_width"`
+			SourceHeight       int    `json:"source_height"`
+			Region             struct {
+				X      float64 `json:"x"`
+				Y      float64 `json:"y"`
+				Width  float64 `json:"width"`
+				Height float64 `json:"height"`
+			} `json:"region"`
+			PixelRect struct {
+				X0 int `json:"x0"`
+				Y0 int `json:"y0"`
+				X1 int `json:"x1"`
+				Y1 int `json:"y1"`
+			} `json:"pixel_rect"`
+		} `json:"crop"`
 	} `json:"items"`
 }
 
@@ -1010,5 +1028,154 @@ func TestProjectAssetListEditCropInstructionHonorsPerImageLimit(t *testing.T) {
 	}
 	if problem := decodeAssetListTestProblem(t, second); problem.Code != "asset_list_image_item_limit" {
 		t.Fatalf("second crop problem = %+v", problem)
+	}
+}
+
+// #331: the list detail exposes the crop provenance of an item's crop
+// reference, so the merge-duplicates editor can union the normalized regions.
+// The source picture itself may be gone: the provenance row still answers.
+func TestProjectAssetListDetailExposesCropProvenance(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", defaultListItem())
+	// scene_a is never stored as an input asset: provenance outlives its
+	// source picture, and the detail still reports the geometry.
+	seedAssetListCrop(t, harness.repository, "crop_1", "scene_a")
+	seedAssetListInputAsset(t, harness.repository, "owner-a", "in_1", "image/png", "image")
+	edit := `{"title":"Cropped","expected_version":0,"items":[` +
+		`{"kind":"character","name":"Knight","references":[` +
+		`{"input_asset_id":"crop_1"},{"input_asset_id":"in_1"}]},` +
+		`{"kind":"character","name":"Squire","references":[{"input_asset_id":"in_1"}]}]}`
+	if response := harness.editDraft(t, list.ID, edit); response.Code != http.StatusOK {
+		t.Fatalf("edit = %d %s", response.Code, response.Body.String())
+	}
+	read := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet,
+		assetListRoute(assetListItemRoute, harness.projectID, list.ID), "", "")
+	if read.Code != http.StatusOK {
+		t.Fatalf("read = %d %s", read.Code, read.Body.String())
+	}
+	wire := decodeAssetListTestWire(t, read)
+	if len(wire.Items) != 2 || wire.Items[0].Crop == nil {
+		t.Fatalf("items = %+v", wire.Items)
+	}
+	provenance, found, err := harness.repository.InputAssetCropRepository().Get(
+		context.Background(), generation.OwnerID("owner-a"), generation.AssetID("crop_1"))
+	if err != nil || !found {
+		t.Fatalf("crop provenance found=%v err=%v", found, err)
+	}
+	crop := wire.Items[0].Crop
+	if crop.SourceInputAssetID != string(provenance.SourceInputAssetID) ||
+		crop.SourceKind != provenance.SourceKind ||
+		crop.SourceWidth != provenance.SourceWidth || crop.SourceHeight != provenance.SourceHeight {
+		t.Fatalf("crop source = %+v; provenance = %+v", crop, provenance)
+	}
+	if crop.Region.X != provenance.Region.X || crop.Region.Y != provenance.Region.Y ||
+		crop.Region.Width != provenance.Region.Width || crop.Region.Height != provenance.Region.Height {
+		t.Fatalf("crop region = %+v; provenance = %+v", crop.Region, provenance.Region)
+	}
+	if crop.PixelRect.X0 != provenance.PixelRect.X0 || crop.PixelRect.Y0 != provenance.PixelRect.Y0 ||
+		crop.PixelRect.X1 != provenance.PixelRect.X1 || crop.PixelRect.Y1 != provenance.PixelRect.Y1 {
+		t.Fatalf("crop pixel rect = %+v; provenance = %+v", crop.PixelRect, provenance.PixelRect)
+	}
+	// An item whose references carry no provenance keeps the field absent.
+	if wire.Items[1].Crop != nil {
+		t.Fatalf("plain item crop = %+v", wire.Items[1].Crop)
+	}
+}
+
+// #331: stored data may carry several crop references on one item; the last
+// one wins, matching the edit rule that replaces the previous crop with the
+// new one appended last. A foreign owner's crop and a list_crop asset without
+// provenance never produce a crop object.
+func TestProjectAssetListDetailPicksLastCropAndSkipsUnprovenanced(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", defaultListItem())
+	seedAssetListCrop(t, harness.repository, "crop_1", "scene_a")
+	seedAssetListCrop(t, harness.repository, "crop_2", "scene_a")
+	// A list_crop row without provenance is inconsistent stored data.
+	seedAssetListInputAsset(t, harness.repository, "owner-a", "crop_orphan", "image/png", "list_crop")
+	// Another owner's crop with full provenance must stay invisible.
+	seedAssetListInputAsset(t, harness.repository, "owner-b", "crop_foreign", "image/png", "list_crop")
+	if _, _, err := harness.repository.InputAssetCropRepository().InsertOrGet(
+		context.Background(), listcrop.Crop{
+			AssetID:            generation.AssetID("crop_foreign"),
+			OwnerID:            generation.OwnerID("owner-b"),
+			SourceAssetID:      generation.AssetID("scene_b"),
+			SourceKind:         listcrop.SourceKindInput,
+			SourceInputAssetID: generation.AssetID("scene_b"),
+			SourceWidth:        1000,
+			SourceHeight:       1000,
+			Region:             listcrop.Region{X: 0, Y: 0, Width: 0.5, Height: 0.5},
+			PixelRect:          listcrop.PixelRect{X0: 0, Y0: 0, X1: 500, Y1: 500},
+			SHA256:             strings.Repeat("c", 64),
+			CreatedAt:          time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC),
+		}); err != nil {
+		t.Fatalf("seed foreign crop: %v", err)
+	}
+	// The seed service has no reference port, so it stores references the
+	// public edit path would refuse; the read path must still refuse them.
+	if _, err := harness.seed.Edit(context.Background(), assetlist.EditInput{
+		Owner: "owner-a", ProjectID: harness.projectID, ListID: list.ID,
+		ExpectedVersion: 0, Title: "Stored",
+		Items: []assetlist.ItemInput{
+			{Kind: "character", Name: "Knight", References: []project.Reference{
+				{InputAssetID: "crop_1"}, {InputAssetID: "crop_2"}}},
+			{Kind: "character", Name: "Squire", References: []project.Reference{
+				{InputAssetID: "crop_orphan"}, {InputAssetID: "crop_foreign"}}},
+		},
+		SessionID: harness.sessionID,
+	}); err != nil {
+		t.Fatalf("seed stored references: %v", err)
+	}
+	read := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet,
+		assetListRoute(assetListItemRoute, harness.projectID, list.ID), "", "")
+	if read.Code != http.StatusOK {
+		t.Fatalf("read = %d %s", read.Code, read.Body.String())
+	}
+	wire := decodeAssetListTestWire(t, read)
+	if len(wire.Items) != 2 || wire.Items[0].Crop == nil {
+		t.Fatalf("items = %+v", wire.Items)
+	}
+	// crop_2's stored rect starts at x0=500; crop_1's starts at 0.
+	if wire.Items[0].Crop.PixelRect.X0 != 500 ||
+		wire.Items[0].Crop.SourceInputAssetID != "scene_a" {
+		t.Fatalf("last crop = %+v", wire.Items[0].Crop)
+	}
+	if wire.Items[1].Crop != nil {
+		t.Fatalf("unprovenanced crop = %+v", wire.Items[1].Crop)
+	}
+	if strings.Contains(read.Body.String(), "scene_b") {
+		t.Fatalf("foreign crop source leaked: %s", read.Body.String())
+	}
+}
+
+// #331: the summary list stays small; only the detail carries crop provenance.
+func TestProjectAssetListSummaryOmitsCropProvenance(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", defaultListItem())
+	seedAssetListCrop(t, harness.repository, "crop_1", "scene_a")
+	edit := `{"title":"Cropped","expected_version":0,"items":[` +
+		`{"kind":"character","name":"Knight","references":[{"input_asset_id":"crop_1"}]}]}`
+	if response := harness.editDraft(t, list.ID, edit); response.Code != http.StatusOK {
+		t.Fatalf("edit = %d %s", response.Code, response.Body.String())
+	}
+	detail := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet,
+		assetListRoute(assetListItemRoute, harness.projectID, list.ID), "", "")
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"crop"`) {
+		t.Fatalf("detail = %d %s", detail.Code, detail.Body.String())
+	}
+	summary := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet,
+		assetListRoute(assetListProjectRoute, harness.projectID, ""), "", "")
+	if summary.Code != http.StatusOK {
+		t.Fatalf("summary = %d %s", summary.Code, summary.Body.String())
+	}
+	if strings.Contains(summary.Body.String(), `"crop"`) ||
+		strings.Contains(summary.Body.String(), `"pixel_rect"`) {
+		t.Fatalf("summary leaked crop provenance: %s", summary.Body.String())
 	}
 }

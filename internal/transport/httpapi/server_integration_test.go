@@ -1955,6 +1955,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Projects:                          projectService,
 		AssetLists:                        assetListService,
 		AssetListPresence:                 assetListPresence,
+		AssetListCrops:                    repository.InputAssetCropRepository(),
 		ChatScheduler:                     chatScheduler,
 		ChatContext:                       harnessCompactor(chatScheduler),
 		OwnsAgentSession: func(ctx context.Context, ownerID, sessionID string) bool {

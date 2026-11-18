@@ -2109,6 +2109,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Projects:                          projectService,
 		AssetLists:                        assetListService,
 		AssetListPresence:                 assetListPresence,
+		AssetListCrops:                    repository.InputAssetCropRepository(),
 		DirectStyleReferences:             referenceResolver,
 		AgentParams:                       paramsStore,
 		AgentState:                        agentStateStore,
