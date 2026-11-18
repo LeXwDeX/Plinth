@@ -184,6 +184,25 @@ function finish(failed) {
   process.stdout.write(dirty || failed ? 'dirty:' + [...reasons].sort().join(',') + '\n' : 'clean\n',
     error => process.exit(error ? 1 : 0));
 }
+const startedAt = Date.now();
+// FSEvents can replay events for changes made before this stream existed (the
+// coalesced backlog is delivered late when the volume is busy), even though the
+// stream itself was live. Such a change is outside this monitor's window: the
+// fingerprint only starts after 'ready'. A real change after start always
+// advances the path's ctime, or, for a removal, the parent directory's ctime,
+// so a timestamp older than the stream start cannot hide one. Equal timestamps
+// stay dirty.
+function preStartReplay(p) {
+  const target = root + '/' + p;
+  const beforeStart = time => time > 0 && time < startedAt;
+  try {
+    return beforeStart(fs.lstatSync(target).ctimeMs);
+  } catch (error) {
+    if (error.code !== 'ENOENT') return false;
+    try { return beforeStart(fs.lstatSync(require('node:path').dirname(target)).ctimeMs); }
+    catch { return false; }
+  }
+}
 const watcher = fs.watch(root, {recursive: true}, (kind, name) => {
   const p = name ? name.toString().replaceAll('\\', '/') : '';
   if (p === marker) {
@@ -200,6 +219,7 @@ const watcher = fs.watch(root, {recursive: true}, (kind, name) => {
   if (kind === 'change' && p === require('node:path').basename(root) && !fs.existsSync(root + '/' + p)) return;
   if (/^_tmp_[0-9]+_[0-9a-f]+$/.test(p)) return; // pnpm write-permission probes
   if (excluded.some(x => p === x || p.startsWith(x + '/'))) return;
+  if (preStartReplay(p)) return;
   markDirty(name ? 'source-change' : 'unknown-filename');
 });
 watcher.on('error', () => { markDirty('watch-error'); });
