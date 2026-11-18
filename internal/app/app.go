@@ -1145,7 +1145,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// #330: the platform Agent's 3D step segment reads the same facts as
 		// the external MCP status block: the shared balance cache, the step
 		// standing under the owner's setting and the per-step costs.
-		StepPolicy: applicationSchema.StepPolicy,
+		Capabilities: applicationSchema.Capabilities,
+		StepPolicy:   applicationSchema.StepPolicy,
 		StepUsage: func(ctx context.Context, ownerID, sessionID string) (executiongrant.StepSummary, error) {
 			return executionGrants.StepStatus(ctx, ownerID, sessionID)
 		},

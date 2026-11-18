@@ -250,6 +250,9 @@ type OrchestratorConfig struct {
 	// SelfCheckTasks lists the session's finished 3D results for the
 	// self-check prompt (#246). Nil keeps the block out.
 	SelfCheckTasks func(context.Context, string, string) ([]SelfCheckTask, error)
+	// Capabilities are application.capabilities (#330): the names a self-check
+	// remedy uses for the fix's capabilities. Nil falls back to the ids.
+	Capabilities []catalog.CapabilityPresentation
 	// TaskLookup and TaskGet read kernel facts without current Catalog checks.
 	// They let a stopped turn find paid submissions whose response or binding
 	// was lost before the assistant message could be updated.
@@ -327,6 +330,7 @@ type Orchestrator struct {
 	taskCanceler   func(ctx context.Context, ownerID, taskID string) error
 	toolNote       func(tool catalog.ChatToolSchema, options TurnOptions) string
 	selfCheckTasks func(context.Context, string, string) ([]SelfCheckTask, error)
+	capabilities   []catalog.CapabilityPresentation
 	taskLookup     func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
 	taskGet        func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
 	stopConsent    func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
@@ -707,6 +711,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		taskCanceler:       config.TaskCanceler,
 		toolNote:           config.ToolNote,
 		selfCheckTasks:     config.SelfCheckTasks,
+		capabilities:       config.Capabilities,
 		taskLookup:         config.TaskLookup,
 		taskGet:            config.TaskGet,
 		stopConsent:        config.StopConsent,

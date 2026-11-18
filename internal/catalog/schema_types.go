@@ -2915,6 +2915,11 @@ type ChatModelInspectProductionSchema struct {
 	// NoCapabilityText replaces a fix hint when no enabled Offering of the
 	// declared capability is available.
 	NoCapabilityText string `json:"no_capability_text"`
+	// RemedyTemplate words an executable remedy in the 3D self-check context
+	// (#330 step 4): {capabilities} names the fix's capabilities and {steps}
+	// counts the ones application.step_policy.counted_capabilities counts.
+	// Optional; a Catalog without it shows no remedy line.
+	RemedyTemplate string `json:"remedy_template,omitempty"`
 	// CapabilityJoiner joins the capabilities of one fix option;
 	// OptionSeparator joins alternative options.
 	CapabilityJoiner string                      `json:"capability_joiner"`

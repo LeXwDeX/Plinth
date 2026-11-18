@@ -203,6 +203,70 @@ func TestSelfCheckPromptIsIndependentOfTheMessageWindow(t *testing.T) {
 	}
 }
 
+// #330 step 4: the result line gains an executable remedy for each failed
+// purpose check whose fix needs a counted 3D step. Local fixes are omitted
+// rather than shown as "0 步", and the verdict is unchanged.
+func TestSelfCheckPromptAppendsExecutableRemedies(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	orchestrator, store := selfCheckPromptFixture(t, application.Chat)
+	orchestrator.stepPolicy = application.StepPolicy
+	orchestrator.capabilities = application.Capabilities
+	now := time.Now().UTC()
+	store.records["owner-a\x00session-a\x00task-a"] = SelfCheckRecord{
+		TaskID: "task-a", UpdatedAt: now,
+		Checks: []SelfCheckCheck{{
+			Kind: SelfCheckKindInspect, Tool: "inspect_model", OK: true,
+			UsageFailed: []string{"triangles", "uv", "skin"},
+		}},
+		Conclusion: &SelfCheckConclusion{
+			Status: "has_issues", Summary: "three issues", Remaining: []string{"retopology"},
+		},
+	}
+	orchestrator.selfCheckTasks = func(context.Context, string, string) ([]SelfCheckTask, error) {
+		return []SelfCheckTask{{TaskID: "task-a"}}, nil
+	}
+	prompt := orchestrator.selfCheckPrompt(context.Background(), "owner-a", "session-a", nil)
+	issues, _ := SelfCheckStatusByRole(application.Chat.SelfCheck, SelfCheckRoleIssues)
+	for _, want := range []string{
+		"可补救：重拓扑，1 步", "可补救：绑骨，1 步", issues.Label, "three issues",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	for _, forbidden := range []string{"0 步", "UV 展开"} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt shows a local fix as a step remedy (%q):\n%s", forbidden, prompt)
+		}
+	}
+	english := orchestrator.selfCheckPrompt(catalog.WithLocale(context.Background(), "en"), "owner-a", "session-a", nil)
+	if !strings.Contains(english, "Fixable: Remesh, 1 step(s)") {
+		t.Fatalf("English remedy line missing or not localized:\n%s", english)
+	}
+}
+
+func TestSelfCheckPromptShowsNoRemedyWithoutStepPolicyOrText(t *testing.T) {
+	orchestrator, store := selfCheckPromptFixture(t, testCatalogChatSchema(t))
+	now := time.Now().UTC()
+	store.records["owner-a\x00session-a\x00task-a"] = SelfCheckRecord{
+		TaskID: "task-a", UpdatedAt: now,
+		Checks: []SelfCheckCheck{{
+			Kind: SelfCheckKindInspect, Tool: "inspect_model", OK: true,
+			UsageFailed: []string{"triangles"},
+		}},
+	}
+	orchestrator.selfCheckTasks = func(context.Context, string, string) ([]SelfCheckTask, error) {
+		return []SelfCheckTask{{TaskID: "task-a"}}, nil
+	}
+	if prompt := orchestrator.selfCheckPrompt(context.Background(), "owner-a", "session-a", nil); strings.Contains(prompt, "可补救") {
+		t.Fatalf("a Catalog without a step policy showed remedies:\n%s", prompt)
+	}
+}
+
 func TestSelfCheckPromptIsEmptyWithoutTasksOrSchema(t *testing.T) {
 	schema := testCatalogChatSchema(t)
 	orchestrator, _ := selfCheckPromptFixture(t, schema)

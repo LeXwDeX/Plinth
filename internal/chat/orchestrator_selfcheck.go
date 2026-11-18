@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -74,6 +75,11 @@ func (orchestrator *Orchestrator) selfCheckPrompt(ctx context.Context, ownerID, 
 			"{background}", backgroundText,
 			"{summary}", summary,
 		).Replace(orchestrator.text(ctx, policy.TaskLineTemplate))
+		// Executable remedies follow the result's own facts; they never change
+		// its verdict or counters (#330 step 4).
+		if remedies := orchestrator.selfCheckRemediesText(ctx, record); remedies != "" {
+			line += "｜" + remedies
+		}
 		entries = append(entries, selfCheckPromptEntry{
 			task: task, record: record, line: line,
 			updated: record.UpdatedAt.UnixNano(),
@@ -109,6 +115,52 @@ func (orchestrator *Orchestrator) selfCheckPrompt(ctx context.Context, ownerID, 
 		"{results}", strings.Join(lines, "\n"),
 		"{rule}", policy.UncheckedRuleText,
 	).Replace(orchestrator.text(ctx, policy.ContextTemplate))
+}
+
+// selfCheckRemediesText renders the executable remedies of one result, read
+// from the latest successful inspection's failed purpose checks (#330 step 4).
+// The line is added only; the result's verdict and counters stay unchanged.
+func (orchestrator *Orchestrator) selfCheckRemediesText(ctx context.Context, record SelfCheckRecord) string {
+	production := orchestrator.schema.ModelReview.Inspect.Production
+	template := strings.TrimSpace(production.RemedyTemplate)
+	if template == "" || orchestrator.stepPolicy == nil {
+		return ""
+	}
+	_, latestOK := SelfCheckLatestInspect(record)
+	if latestOK == nil || len(latestOK.UsageFailed) == 0 {
+		return ""
+	}
+	remedies := SelfCheckRemedies(production.Fixes, latestOK.UsageFailed, orchestrator.stepPolicy.CountedCapabilities)
+	lines := make([]string, 0, len(remedies))
+	for _, remedy := range remedies {
+		capabilities := make([]string, 0, len(remedy.Capabilities))
+		for _, capability := range remedy.Capabilities {
+			capabilities = append(capabilities, orchestrator.text(ctx, orchestrator.capabilityLabel(capability)))
+		}
+		lines = append(lines, strings.NewReplacer(
+			"{capabilities}", strings.Join(capabilities, production.CapabilityJoiner),
+			"{steps}", strconv.Itoa(remedy.Steps),
+		).Replace(orchestrator.text(ctx, template)))
+	}
+	return strings.Join(lines, "｜")
+}
+
+// capabilityLabel is a capability's default-locale name; orchestrator.text
+// translates it for another locale. An undeclared capability keeps its id.
+func (orchestrator *Orchestrator) capabilityLabel(id string) string {
+	for _, capability := range orchestrator.capabilities {
+		if string(capability.ID) != id {
+			continue
+		}
+		if capability.LabelCN != "" {
+			return capability.LabelCN
+		}
+		if capability.Label != "" {
+			return capability.Label
+		}
+		break
+	}
+	return id
 }
 
 // attachSelfCheckHandles names the pictures a read-only check produced in its

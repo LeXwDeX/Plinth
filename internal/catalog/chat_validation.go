@@ -3638,6 +3638,15 @@ func validateModelInspectProduction(
 			texts = append(texts, optional)
 		}
 	}
+	// The remedy line of the 3D self-check context is optional (#330 step 4):
+	// a Catalog without it shows no remedy.
+	if strings.TrimSpace(production.RemedyTemplate) != "" {
+		texts = append(texts, struct {
+			name     string
+			value    string
+			required []string
+		}{"remedy_template", production.RemedyTemplate, []string{"{capabilities}", "{steps}"}})
+	}
 	for _, text := range texts {
 		if strings.TrimSpace(text.value) == "" {
 			return fmt.Errorf("chat.model_review.inspect.production.%s 不能为空", text.name)
