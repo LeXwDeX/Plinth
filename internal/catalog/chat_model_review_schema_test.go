@@ -189,6 +189,12 @@ func TestModelReviewDeclarationsAreValidated(t *testing.T) {
 		{"empty no-capability text", func(a *catalog.ApplicationSchema) {
 			a.Chat.ModelReview.Inspect.Production.NoCapabilityText = ""
 		}, "no_capability_text"},
+		{"remedy template lacks the step count", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.RemedyTemplate = "可补救：{capabilities}"
+		}, "{steps}"},
+		{"remedy template has an unknown placeholder", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Inspect.Production.RemedyTemplate = "可补救：{capabilities}，{steps} 步（{check}）"
+		}, "{check}"},
 		{"no fixes", func(a *catalog.ApplicationSchema) {
 			a.Chat.ModelReview.Inspect.Production.Fixes = nil
 		}, "缺少检查"},
@@ -319,6 +325,12 @@ func TestModelReviewIsOnlyValidatedWhenAToolUsesIt(t *testing.T) {
 	app.Chat.Harness.BaseTools = base
 	app.Chat.ModelReview = catalog.ChatModelReviewSchema{}
 	app.Chat.SelfCheck = catalog.ChatSelfCheckSchema{}
+	// The remedy line lives in the model_review block that just went away, so
+	// its English translation goes too.
+	if bundle, ok := app.Localization.Bundles["en"]; ok {
+		delete(bundle.Fields, "chat.model_review.inspect.production.remedy_template")
+		app.Localization.Bundles["en"] = bundle
+	}
 	// The outward MCP inspect_model runs the same inspection, so it goes with
 	// the review block its limits live in (#332 step 7a).
 	if app.MCPPublic != nil {
