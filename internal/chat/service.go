@@ -1512,6 +1512,13 @@ func (service *Service) TurnWaitingTaskState() string { return service.turnWaiti
 func (service *Service) TurnQueuedState() string      { return service.turnQueued }
 func (service *Service) TurnRunningState() string     { return service.turnRunning }
 
+// TurnStateTerminal reports whether state is one of the configured terminal
+// turn states (done or error). The asset-list runner (#328) uses it to tell a
+// finished item turn from one still queued, running or waiting for a Task.
+func (service *Service) TurnStateTerminal(state string) bool {
+	return state == service.turnDone || state == service.turnError
+}
+
 func (service *Service) RequestTurnStop(ctx context.Context, ownerID, sessionID string) (Turn, bool, error) {
 	return service.repository.RequestTurnStop(ctx, ownerID, sessionID,
 		[]string{service.turnQueued, service.turnRunning, service.turnWaitingTask}, service.clock())

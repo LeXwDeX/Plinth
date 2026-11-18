@@ -419,6 +419,67 @@ func (r *AssetListRunRepository) SetItemNextActionAt(
 		`next_action_at = ?`, formatTaskTimeOrEmpty(nextActionAt))
 }
 
+// RecordItemTurn stores the assistant message of a turn the server opened for
+// a working item and sets its started-round count. A missing or foreign item
+// is ErrNotFound; a different state is ErrItemState; a lost CAS guard is
+// ErrConflict.
+func (r *AssetListRunRepository) RecordItemTurn(
+	ctx context.Context,
+	ownerID, listID, itemID, assistantMessageID string,
+	round int,
+	expectedVersion int64,
+	at time.Time,
+) (assetlist.Item, error) {
+	if ownerID == "" || listID == "" || itemID == "" {
+		return assetlist.Item{}, fmt.Errorf("%w: item identity", assetlist.ErrInvalid)
+	}
+	if assistantMessageID == "" || round <= 0 {
+		return assetlist.Item{}, fmt.Errorf("%w: item turn", assetlist.ErrInvalid)
+	}
+	var stored assetlist.Item
+	err := r.withWrite(ctx, func(conn *sql.Conn) error {
+		query := `UPDATE asset_list_items SET last_turn_message_id = ?, round = ?,
+			version = version + 1, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND list_id = ? AND state = ?`
+		args := []any{assistantMessageID, round, formatTime(at),
+			itemID, ownerID, listID, assetlist.StateWorking}
+		if expectedVersion != assetlist.VersionUnchecked {
+			if expectedVersion < 0 {
+				return fmt.Errorf("%w: expected version", assetlist.ErrInvalid)
+			}
+			query += ` AND version = ?`
+			args = append(args, expectedVersion)
+		}
+		update, err := conn.ExecContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("record asset list item turn: %w", err)
+		}
+		affected, err := update.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			existing, err := loadAssetListItemByID(ctx, conn, ownerID, listID, itemID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return assetlist.ErrNotFound
+				}
+				return err
+			}
+			if expectedVersion != assetlist.VersionUnchecked && existing.Version != expectedVersion {
+				return assetlist.ErrConflict
+			}
+			return assetlist.ErrItemState
+		}
+		stored, err = loadAssetListItemByID(ctx, conn, ownerID, listID, itemID)
+		return err
+	})
+	if err != nil {
+		return assetlist.Item{}, err
+	}
+	return stored, nil
+}
+
 // updateAssetListItem applies one column update and always bumps the version.
 // A non-negative expectedVersion is a CAS guard; a lost guard is ErrConflict.
 func (r *AssetListRunRepository) updateAssetListItem(

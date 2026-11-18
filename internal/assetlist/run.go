@@ -169,9 +169,9 @@ type FinishItemInput struct {
 //   - ClaimItem picks the first todo item by position only while the run is
 //     running, then moves it todo→working with round+1 and version+1.
 //   - FinishItem moves working→review|failed|skipped only.
-//   - SetItemBlock, SetItemSession and SetItemNextActionAt update one item and
-//     bump its version. A non-negative expectedVersion is a CAS guard;
-//     VersionUnchecked skips it.
+//   - SetItemBlock, SetItemSession, SetItemNextActionAt and RecordItemTurn
+//     update one item and bump its version. A non-negative expectedVersion is
+//     a CAS guard; VersionUnchecked skips it.
 //
 // A lost CAS guard reports ErrConflict; an item in the wrong state reports
 // ErrItemState.
@@ -194,6 +194,12 @@ type RunStore interface {
 	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemSession(ctx context.Context, ownerID, listID, itemID, sessionID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemNextActionAt(ctx context.Context, ownerID, listID, itemID string, nextActionAt time.Time, expectedVersion int64, at time.Time) (Item, error)
+	// RecordItemTurn stores the assistant message of a turn the server opened
+	// for a working item and sets round to the number of started rounds. The
+	// two change together so a restart can tell a scheduled turn (the stored
+	// message id matches) from one that only has a queued turn row. Only a
+	// working item is updated; a different state is ErrItemState.
+	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round int, expectedVersion int64, at time.Time) (Item, error)
 	ItemByID(ctx context.Context, ownerID, listID, itemID string) (Item, error)
 	ItemsByList(ctx context.Context, ownerID, listID string) ([]Item, error)
 	// ItemBySession finds the item whose sub-session is sessionID (#328). An
