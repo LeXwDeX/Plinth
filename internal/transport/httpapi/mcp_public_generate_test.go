@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"net/http"
 	"strings"
@@ -987,5 +988,147 @@ func TestMCPSeveralPicturesPickAMultiviewService(t *testing.T) {
 	single := f.call(key, "create_model", map[string]any{"images": []any{front}, "asset": "Views", "idempotency_key": idem("views")})
 	if single.isError || strings.Contains(single.structured["service"].(map[string]any)["id"].(string), "multiview") {
 		t.Fatalf("one picture = %s", single.raw)
+	}
+}
+
+// testMaskPNG is a PNG mask with a transparent square in the middle and opaque
+// surroundings: the transparent pixels are the region to redraw (#332).
+func testMaskPNG(t *testing.T, side int) []byte {
+	t.Helper()
+	mask := image.NewNRGBA(image.Rect(0, 0, side, side))
+	inner := side / 4
+	for y := 0; y < side; y++ {
+		for x := 0; x < side; x++ {
+			if x >= inner && x < side-inner && y >= inner && y < side-inner {
+				continue // Transparent: redraw this pixel.
+			}
+			mask.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, mask); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+// testJPEG is an opaque JPEG of the given side, for a file a mask parameter
+// does not accept.
+func testJPEG(t *testing.T, side int) []byte {
+	t.Helper()
+	picture := image.NewRGBA(image.Rect(0, 0, side, side))
+	for x := 0; x < side; x++ {
+		for y := 0; y < side; y++ {
+			picture.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 120, A: 255})
+		}
+	}
+	var buffer bytes.Buffer
+	if err := jpeg.Encode(&buffer, picture, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+// #332: an image-to-image call with a mask picks a mask-capable service, sends
+// the mask in the Offering's mask parameter, and the result changes only the
+// mask's transparent region.
+func TestMCPGenerateImageMaskEditsOnlyTheMaskedRegion(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	key := f.issueKey("owner-a", "generate")
+	reference := testPNG(t, 64)
+	referenceID, maskID := f.upload(key, reference), f.upload(key, testMaskPNG(t, 64))
+
+	// list_services names the mask input of the services that take one.
+	listed := f.call(key, "list_services", map[string]any{"capability": "image-to-image"})
+	foundMask := false
+	for _, group := range listed.structured["groups"].([]any) {
+		for _, capability := range group.(map[string]any)["capabilities"].([]any) {
+			for _, raw := range capability.(map[string]any)["services"].([]any) {
+				service := raw.(map[string]any)
+				if service["id"] != "openai/gpt-image-2/image-to-image" {
+					continue
+				}
+				for _, rawInput := range service["inputs"].([]any) {
+					input := rawInput.(map[string]any)
+					if input["name"] == "mask" && input["kind"] == "asset" && input["max_bytes"].(float64) > 0 {
+						foundMask = true
+					}
+				}
+			}
+		}
+	}
+	if !foundMask {
+		t.Fatalf("list_services does not name the mask input: %s", listed.raw)
+	}
+
+	result := f.call(key, "generate_image", map[string]any{
+		"prompt": "a barrel, repaint the middle", "images": []any{referenceID}, "mask": maskID,
+		"asset": "Masked", "idempotency_key": idem("mask"),
+	})
+	if result.isError {
+		t.Fatalf("masked image-to-image = %s", result.raw)
+	}
+	service := result.structured["service"].(map[string]any)
+	if service["id"] != "openai/gpt-image-2/image-to-image" || service["capability"] != "image-to-image" || service["defaulted"] != true {
+		t.Fatalf("service = %v; a mask needs a mask-capable service", service)
+	}
+	task := f.finish("owner-a", taskID(t, result))
+	if task.State != generation.TaskSucceeded {
+		t.Fatalf("task = %+v", task)
+	}
+	saved := false
+	for _, asset := range task.Assets {
+		saved = saved || asset.Role == "image"
+	}
+	if !saved {
+		t.Fatalf("the task saved no picture: %+v", task.Assets)
+	}
+	// The frozen input is what the provider wire is built from: the mask rides
+	// the Offering's mask parameter beside the first reference picture.
+	var frozen map[string]any
+	if err := json.Unmarshal(task.Input, &frozen); err != nil {
+		t.Fatalf("frozen input %s: %v", task.Input, err)
+	}
+	if frozen["mask"] != maskID {
+		t.Fatalf("frozen input mask = %v, want %s (%s)", frozen["mask"], maskID, task.Input)
+	}
+	if references, _ := frozen["reference_assets"].([]any); len(references) == 0 || references[0] != referenceID {
+		t.Fatalf("frozen input references = %v, want %s", frozen["reference_assets"], referenceID)
+	}
+}
+
+// #332: a mask is checked before anything is prepared or paid for, and every
+// refusal names the reason.
+func TestMCPGenerateImageMaskIsRefusedBeforeStarting(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	key, other := f.issueKey("owner-a", "generate"), f.issueKey("owner-b", "generate")
+	reference := f.upload(key, testPNG(t, 64))
+	small := f.upload(key, testMaskPNG(t, 32))
+	opaque := f.upload(key, testPNG(t, 64))
+	jpeg := f.upload(key, testJPEG(t, 64))
+	foreign := f.upload(other, testMaskPNG(t, 64))
+	before := f.countRows(`SELECT COUNT(*) FROM generation_tasks`)
+	for name, test := range map[string]struct {
+		args map[string]any
+		code string
+	}{
+		"size mismatch":          {map[string]any{"prompt": "x", "images": []any{reference}, "mask": small}, "mask_size_mismatch"},
+		"opaque mask":            {map[string]any{"prompt": "x", "images": []any{reference}, "mask": opaque}, "mask_invalid"},
+		"jpeg mask":              {map[string]any{"prompt": "x", "images": []any{reference}, "mask": jpeg}, "mask_invalid"},
+		"another owner's mask":   {map[string]any{"prompt": "x", "images": []any{reference}, "mask": foreign}, "image_not_found"},
+		"no picture":             {map[string]any{"prompt": "x", "mask": small}, "mask_not_supported"},
+		"service without a mask": {map[string]any{"prompt": "x", "images": []any{reference}, "mask": small, "service": "meshy/nano-banana-pro/image-to-image"}, "mask_not_supported"},
+	} {
+		args := test.args
+		args["idempotency_key"] = idem("mask-refused")
+		result := f.call(key, "generate_image", args)
+		if !result.isError || result.problemCode() != test.code {
+			t.Errorf("%s = %s (want %s)", name, result.raw, test.code)
+		}
+	}
+	if after := f.countRows(`SELECT COUNT(*) FROM generation_tasks`); after != before {
+		t.Fatalf("a refused mask started %d tasks", after-before)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -19,6 +21,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/imageinspect"
 	"github.com/LeXwDeX/Plinth/internal/mcppublic"
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -60,6 +63,9 @@ type mcpStartRequest struct {
 	capability generation.Capability
 	prompt     *string
 	images     []string
+	// mask is a picture ID of an edit mask (#332): image-to-image only, a PNG
+	// the size of the first picture, its transparent pixels the region to redraw.
+	mask       string
 	service    string
 	parameters map[string]any
 	reasons    map[string]any
@@ -93,6 +99,7 @@ func (s *Server) mcpStartArguments(call *mcpCall) (mcpStartRequest, *mcpOutcome)
 	request := mcpStartRequest{
 		key: mcpStringArgument(call, "idempotency_key"), asset: mcpStringArgument(call, "asset"),
 		project: mcpStringArgument(call, "project"), service: mcpStringArgument(call, "service"),
+		mask:       mcpStringArgument(call, "mask"),
 		sourceTask: mcpStringArgument(call, "source_task_id"), sourceAsset: mcpStringArgument(call, "source_asset_id"),
 	}
 	if _, present := call.arguments["prompt"]; present {
@@ -648,6 +655,9 @@ func (s *Server) mcpAuditTask(call *mcpCall, task generation.Task, replayed bool
 // replaced.
 func (s *Server) mcpOffering(call *mcpCall, request mcpStartRequest) (generation.Offering, *mcpOutcome) {
 	service := s.application.MCPPublic
+	if request.mask != "" {
+		return s.mcpMaskOffering(call, request)
+	}
 	if request.service != "" {
 		return s.mcpNamedOffering(call, request)
 	}
@@ -691,6 +701,59 @@ func (s *Server) mcpNamedOffering(call *mcpCall, request mcpStartRequest) (gener
 			"{service}", request.service)
 	}
 	return offering, nil
+}
+
+// mcpMaskOffering names the service of an image-to-image call that carries a
+// mask (#332). Only an Offering that declares a mask parameter can take one: a
+// named service without it is refused, never replaced, and a call that names
+// no service uses the default if it declares one, else the first mask-capable
+// available service. No mask-capable service is no_service.
+func (s *Server) mcpMaskOffering(call *mcpCall, request mcpStartRequest) (generation.Offering, *mcpOutcome) {
+	service := s.application.MCPPublic
+	if request.capability != generation.ImageToImage {
+		return generation.Offering{}, s.mcpMessageProblem(call, "mask_not_supported", service.Messages.MaskNotSupported, mcppublic.Subject{})
+	}
+	if request.service != "" {
+		offering, outcome := s.mcpNamedOffering(call, request)
+		if outcome != nil {
+			return generation.Offering{}, outcome
+		}
+		if _, declared := mcpSemanticParameter(offering, generation.SemanticMask); !declared {
+			return generation.Offering{}, s.mcpMessageProblem(call, "mask_not_supported", service.Messages.MaskNotSupported, mcppublic.Subject{})
+		}
+		return offering, nil
+	}
+	var chosen *generation.Offering
+	for _, candidate := range s.generation.Offerings(request.capability) {
+		if !candidate.Enabled || !s.generation.OfferingAvailable(candidate.ID) {
+			continue
+		}
+		if _, declared := mcpSemanticParameter(candidate, generation.SemanticMask); !declared {
+			continue
+		}
+		if candidate.Default {
+			return candidate, nil
+		}
+		if chosen == nil {
+			found := candidate
+			chosen = &found
+		}
+	}
+	if chosen == nil {
+		return generation.Offering{}, s.mcpMessageProblem(call, "no_service", service.Messages.NoService, mcppublic.Subject{})
+	}
+	return *chosen, nil
+}
+
+// mcpSemanticParameter finds the parameter an Offering declares for a semantic
+// slot (the mask a picture edit writes, #244/#332).
+func mcpSemanticParameter(offering generation.Offering, semantic generation.ParameterSemantic) (generation.Parameter, bool) {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic == semantic {
+			return parameter, true
+		}
+	}
+	return generation.Parameter{}, false
 }
 
 // mcpProcessingSource finds the model a processing step takes: a succeeded task
@@ -853,6 +916,19 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 			input[referenceName] = request.images
 		}
 	}
+	if request.mask != "" {
+		parameter, declaredMask := mcpSemanticParameter(offering, generation.SemanticMask)
+		if !declaredMask {
+			return invalid("$.mask: this service declares no mask parameter (see list_services)")
+		}
+		if len(request.images) == 0 {
+			return invalid("$.mask: a mask must name the picture it edits in images")
+		}
+		input[parameter.Name] = request.mask
+		if outcome := s.mcpMaskProblem(call, request, parameter); outcome != nil {
+			return nil, outcome
+		}
+	}
 	if binding != nil {
 		input[binding.Parameter] = binding.Value
 	}
@@ -869,6 +945,120 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 		return invalid("$.parameters: cannot be encoded")
 	}
 	return consented, nil
+}
+
+// mcpMaskProblem checks a mask before anything is prepared or paid for (#332):
+// the picture must be the caller's, a PNG within the Offering's byte cap, hold
+// at least one transparent (redrawn) pixel, and be exactly the size of the
+// first picture the wire sends. A missing picture is image_not_found; the mask
+// itself is checked with the platform's own mask decoder, so the rule cannot
+// drift from the canvas's.
+func (s *Server) mcpMaskProblem(call *mcpCall, request mcpStartRequest, parameter generation.Parameter) *mcpOutcome {
+	service := s.application.MCPPublic
+	limit := parameter.MaxBytes
+	if limit <= 0 {
+		limit = s.application.Runtime.InputAssets.UploadMaxBytes
+	}
+	data, size, outcome, err := s.mcpPictureBytes(call, request.mask, limit)
+	if err != nil || outcome != nil {
+		return outcome
+	}
+	if size > limit {
+		return s.mcpMessageProblem(call, "mask_invalid", service.Messages.MaskInvalid, mcppublic.Subject{},
+			"{max}", strconv.FormatInt(limit, 10))
+	}
+	limits := imageinspect.Limits{MaxBytes: limit, MaxPixels: s.application.Runtime.InputAssets.ImageFitting.MaxDecodePixels}
+	report, err := imageinspect.MeasureMask(data, limits)
+	if err != nil || report.Coverage <= 0 {
+		// Not a PNG, unreadable, or nothing transparent to redraw.
+		return s.mcpMessageProblem(call, "mask_invalid", service.Messages.MaskInvalid, mcppublic.Subject{},
+			"{max}", strconv.FormatInt(limit, 10))
+	}
+	width, height, outcome, err := s.mcpPictureSize(call, request.images[0])
+	if err != nil || outcome != nil {
+		return outcome
+	}
+	if report.Width != width || report.Height != height {
+		return s.mcpMessageProblem(call, "mask_size_mismatch", service.Messages.MaskSizeMismatch, mcppublic.Subject{},
+			"{mask_width}", strconv.Itoa(report.Width), "{mask_height}", strconv.Itoa(report.Height),
+			"{image_width}", strconv.Itoa(width), "{image_height}", strconv.Itoa(height))
+	}
+	return nil
+}
+
+// mcpPictureSize reads the pixel size of a picture the caller names, an upload
+// or a saved Task output.
+func (s *Server) mcpPictureSize(call *mcpCall, id string) (int, int, *mcpOutcome, error) {
+	_, body, outcome, err := s.mcpOpenPicture(call, id)
+	if err != nil || outcome != nil {
+		return 0, 0, outcome, err
+	}
+	defer body.Close()
+	config, _, err := image.DecodeConfig(body)
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		// The kernel would refuse the same picture before dispatch; the mask is
+		// the reason this call had to read it.
+		service := s.application.MCPPublic
+		return 0, 0, s.mcpMessageProblem(call, "input_refused", service.Messages.InputRefused, mcppublic.Subject{}), nil
+	}
+	return config.Width, config.Height, nil, nil
+}
+
+// mcpPictureBytes reads at most max bytes of a picture the caller names plus
+// one, so the caller can tell an over-limit picture without buffering more.
+func (s *Server) mcpPictureBytes(call *mcpCall, id string, max int64) ([]byte, int64, *mcpOutcome, error) {
+	asset, body, outcome, err := s.mcpOpenPicture(call, id)
+	if err != nil || outcome != nil {
+		return nil, 0, outcome, err
+	}
+	defer body.Close()
+	data, err := io.ReadAll(io.LimitReader(body, max+1))
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	size := asset.Size
+	if size <= 0 {
+		size = int64(len(data))
+	}
+	return data, size, nil, nil
+}
+
+// mcpOpenPicture opens an upload or a saved picture output of one of the
+// caller's succeeded Tasks, the two picture IDs the tools accept.
+func (s *Server) mcpOpenPicture(call *mcpCall, id string) (generation.InputAsset, io.ReadCloser, *mcpOutcome, error) {
+	missing := func() (generation.InputAsset, io.ReadCloser, *mcpOutcome, error) {
+		outcome := mcpProblemOutcome("image_not_found", s.mcpText(call.locale, s.application.MCPPublic.Messages.ImageNotFound), mcppublic.Subject{})
+		return generation.InputAsset{}, nil, &outcome, nil
+	}
+	if s.inputAssets != nil {
+		asset, body, err := s.inputAssets.OpenAuthorized(call.ctx, call.owner, generation.AssetID(id), false)
+		if err == nil {
+			return asset, body, nil, nil
+		}
+		var domain *generation.Error
+		if !errors.As(err, &domain) || domain.Code != generation.ErrNotFound {
+			return generation.InputAsset{}, nil, nil, err
+		}
+	}
+	if s.pictureAssets == nil || s.generation == nil {
+		return missing()
+	}
+	loaded, err := s.pictureAssets.LoadInputAssets(call.ctx, call.owner, []generation.AssetID{generation.AssetID(id)})
+	if err != nil {
+		return generation.InputAsset{}, nil, nil, err
+	}
+	asset, found := loaded[generation.AssetID(id)]
+	if !found || asset.TaskID == "" || asset.Role != "image" || asset.StorageKey == "" {
+		return missing()
+	}
+	content, err := s.generation.OpenAsset(call.ctx, call.owner, asset.TaskID, asset.ID)
+	if err != nil {
+		if generation.IsCode(err, generation.ErrNotFound) {
+			return missing()
+		}
+		return generation.InputAsset{}, nil, nil, err
+	}
+	return asset, content.Body, nil, nil
 }
 
 // sameParameterDefault reports whether a caller's value is the declared default.
