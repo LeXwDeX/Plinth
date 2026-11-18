@@ -119,6 +119,23 @@ func (runs *fakeRuns) FinishItem(
 	return *item, nil
 }
 
+func (runs *fakeRuns) SetItemBlock(
+	_ context.Context, ownerID, listID, itemID, block string,
+	expectedVersion int64, at time.Time,
+) (assetlist.Item, error) {
+	item := runs.item(itemID)
+	if item == nil || item.OwnerID != ownerID || item.ListID != listID {
+		return assetlist.Item{}, assetlist.ErrNotFound
+	}
+	if expectedVersion != assetlist.VersionUnchecked && item.Version != expectedVersion {
+		return assetlist.Item{}, assetlist.ErrConflict
+	}
+	item.Block = block
+	item.Version++
+	item.UpdatedAt = at
+	return *item, nil
+}
+
 func (runs *fakeRuns) RecordItemTurn(
 	_ context.Context, ownerID, listID, itemID, assistantMessageID string,
 	round int, expectedVersion int64, at time.Time,
@@ -381,6 +398,22 @@ func (presence *fakePresence) Active(
 	return state, nil
 }
 
+// ------------------------------------------------------------- fake step caps
+
+type fakeStepCaps struct {
+	reached bool
+	err     error
+	calls   int
+}
+
+func (caps *fakeStepCaps) StepCapReached(_ context.Context, _, _ string) (bool, error) {
+	caps.calls++
+	if caps.err != nil {
+		return false, caps.err
+	}
+	return caps.reached, nil
+}
+
 // ------------------------------------------------------------------- fixture
 
 type fixture struct {
@@ -390,6 +423,7 @@ type fixture struct {
 	chat      *fakeChat
 	scheduler *fakeScheduler
 	presence  *fakePresence
+	stepCaps  *fakeStepCaps
 	runner    *assetlistrunner.Runner
 }
 
@@ -400,6 +434,7 @@ func newFixture(t *testing.T, maxParallel, maxRounds int) *fixture {
 		runs:      &fakeRuns{},
 		scheduler: &fakeScheduler{},
 		presence:  &fakePresence{states: map[string]bool{}},
+		stepCaps:  &fakeStepCaps{},
 	}
 	fixture.lists = &fakeLists{runs: fixture.runs}
 	fixture.chat = newFakeChat(fixture.runs, fixture.now)
@@ -410,6 +445,7 @@ func newFixture(t *testing.T, maxParallel, maxRounds int) *fixture {
 		Tasks:     fixture.chat.Tasks,
 		Scheduler: fixture.scheduler,
 		Presence:  fixture.presence,
+		StepCaps:  fixture.stepCaps,
 		Schema: catalog.AssetListSchema{Execution: &catalog.AssetListExecutionSchema{
 			Enabled:                  true,
 			PollIntervalMilliseconds: 2000,
@@ -543,6 +579,64 @@ func TestAdvanceContinuesRoundsUntilTheRoundLimitThenFailsTheItem(t *testing.T) 
 	}
 	if run := fixture.runState(t); run.Status != assetlist.RunRunning {
 		t.Fatalf("run = %s; want running after round_limit", run.Status)
+	}
+}
+
+func TestAdvanceBlocksTheItemAndPausesTheRunAtTheStepCap(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"), newItem("aitem_2", "武器"))
+
+	fixture.advance(t)
+	first := fixture.item(t, "aitem_1")
+	// The turn ended in error with a failed Task: without the step-cap port this
+	// would fail the item as internal and pause the run for a failure.
+	fixture.chat.finishTurn(first.SessionID, turnError)
+	fixture.chat.failTask(first.SessionID, generation.FailureInternal, false, false)
+	fixture.stepCaps.reached = true
+
+	fixture.advance(t)
+
+	first = fixture.item(t, "aitem_1")
+	if first.State != assetlist.StateWorking || first.Block != assetlist.BlockStepCap {
+		t.Fatalf("item = %s/%q; want working blocked at step_cap", first.State, first.Block)
+	}
+	if first.StateReason != "" {
+		t.Fatalf("state reason = %q; a step-cap block is not a failure", first.StateReason)
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunPaused ||
+		run.PauseReason != assetlist.PauseStepCap {
+		t.Fatalf("run = %s/%s; want paused/step_cap", run.Status, run.PauseReason)
+	}
+	if len(fixture.scheduler.calls) != 1 {
+		t.Fatalf("schedules = %d; want no continuation at the cap", len(fixture.scheduler.calls))
+	}
+	if second := fixture.item(t, "aitem_2"); second.State != assetlist.StateTodo {
+		t.Fatalf("second item = %s; want todo after the pause", second.State)
+	}
+	if fixture.stepCaps.calls != 1 {
+		t.Fatalf("step-cap reads = %d; want one at the terminal turn", fixture.stepCaps.calls)
+	}
+}
+
+func TestAdvanceContinuesTheNextRoundWhenTheStepCapWasNotReached(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"))
+
+	fixture.advance(t)
+	first := fixture.item(t, "aitem_1")
+	fixture.chat.finishTurn(first.SessionID, turnDone)
+
+	fixture.advance(t)
+
+	first = fixture.item(t, "aitem_1")
+	if first.Round != 2 || first.Block != assetlist.BlockNone {
+		t.Fatalf("item = round %d block %q; want an unblocked continuation", first.Round, first.Block)
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunRunning {
+		t.Fatalf("run = %s; want running", run.Status)
+	}
+	if fixture.stepCaps.calls != 1 {
+		t.Fatalf("step-cap reads = %d; want one at the terminal turn", fixture.stepCaps.calls)
 	}
 }
 

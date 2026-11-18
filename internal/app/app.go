@@ -32,6 +32,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/assetdelivery"
 	"github.com/LeXwDeX/Plinth/internal/assetlinks"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
+	"github.com/LeXwDeX/Plinth/internal/assetlistrunner"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacygenerated"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacyinput"
@@ -84,6 +85,9 @@ type Application struct {
 	thumbnails *legacythumbnail.Service
 	chatAgent  *chat.Orchestrator
 	processing *processing.Service
+	// assetListRunner drives confirmed lists (#328). Nil unless the Catalog
+	// declares application.asset_list.execution with enabled=true.
+	assetListRunner *assetlistrunner.Runner
 	// pendingApprovals finishes Agent approvals decided after their turn ended.
 	pendingApprovals *pendingapproval.Service
 	scene            *scene.Service
@@ -171,7 +175,8 @@ func (p preparedSceneContext) ResolvePreparedSource(ctx context.Context, owner g
 // componentCount is the number of background components Run starts: the
 // coordinator, the chat agent, processing plans, the pending-approval sweep,
 // scene reconciliation and the HTTP server. Run waits for each to return. The
-// external MCP listener (#332), when the application has one, is a seventh.
+// external MCP listener (#332), when the application has one, is a seventh;
+// the asset-list runner (#328), when execution is enabled, is another.
 const componentCount = 6
 
 type componentResult struct {
@@ -742,6 +747,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// feature is absent when the Catalog declares no asset_list section.
 	var assetListService *assetlist.Service
 	var assetListPresence assetlist.PresenceStore
+	// assetListTasks reads the terminal Tasks of an item's own sub-session. The
+	// completion tool and the runner (#328) share it.
+	var assetListTasks chat.AssetListTaskSource
 	if applicationSchema.AssetList != nil {
 		if applicationSchema.Project == nil || applicationSchema.StepPolicy == nil {
 			return nil, fmt.Errorf("资产清单: application.asset_list 需要 application.project 与 application.step_policy")
@@ -766,6 +774,23 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		if err != nil {
 			return nil, fmt.Errorf("资产清单: %w", err)
 		}
+		// The completion tool reports only the Tasks of the item's own
+		// sub-session; branch ancestors are another session's work. The runner
+		// reads the same source.
+		assetListTasks = func(ctx context.Context, ownerID, sessionID string) ([]generation.Task, error) {
+			page, err := module.List(ctx, generation.OwnTasks(generation.OwnerID(ownerID)),
+				generation.ListQuery{
+					SessionID: sessionID,
+					States: []generation.TaskState{
+						generation.TaskSucceeded, generation.TaskFailed,
+					},
+					Limit: 100,
+				})
+			if err != nil {
+				return nil, err
+			}
+			return page.Tasks, nil
+		}
 		// The proposal tool validates and stores through the service; its copy
 		// comes from the same Schema section (never hardcoded).
 		chatService.SetAssetLists(chat.AssetListPolicy{
@@ -774,22 +799,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			// Item sub-sessions derive the internal steps mode only when the
 			// deployment declares application.step_policy (#330).
 			StepsEnabled: applicationSchema.StepPolicy != nil,
-			// The completion tool reports only the Tasks of the item's own
-			// sub-session; branch ancestors are another session's work.
-			Tasks: func(ctx context.Context, ownerID, sessionID string) ([]generation.Task, error) {
-				page, err := module.List(ctx, generation.OwnTasks(generation.OwnerID(ownerID)),
-					generation.ListQuery{
-						SessionID: sessionID,
-						States: []generation.TaskState{
-							generation.TaskSucceeded, generation.TaskFailed,
-						},
-						Limit: 100,
-					})
-				if err != nil {
-					return nil, err
-				}
-				return page.Tasks, nil
-			},
+			Tasks:        assetListTasks,
 		})
 		// The browser heartbeat (#328) is served only when the Catalog
 		// declares execution; a Catalog without it keeps the route
@@ -1217,6 +1227,26 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	})
 	if err != nil {
 		return nil, err
+	}
+	// The asset-list runner (#328 §2.1) is assembled only for a declared
+	// execution section with enabled=true. It reuses the completion tool's Task
+	// source, the chat service's server-side item turns, and the orchestrator's
+	// queue; Run starts it beside the other background components.
+	var assetListRunner *assetlistrunner.Runner
+	if assetListService != nil && applicationSchema.AssetList.Execution != nil &&
+		applicationSchema.AssetList.Execution.Enabled {
+		assetListRunner = assetlistrunner.New(assetlistrunner.Config{
+			Runs:      repository.AssetListRunRepository(),
+			Lists:     assetListService,
+			Chat:      chatService,
+			Tasks:     assetListTasks,
+			Scheduler: chatAgent,
+			Presence:  repository.AssetListPresenceRepository(),
+			StepCaps:  repository,
+			Schema:    *applicationSchema.AssetList,
+			Clock:     time.Now,
+			Logger:    logger,
+		})
 	}
 	fallbackIdentity, err := buildIdentity(config, accessPolicy)
 	if err != nil {
@@ -1962,6 +1992,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		thumbnails:             thumbnailBackfill,
 		chatAgent:              chatAgent,
 		processing:             processingService,
+		assetListRunner:        assetListRunner,
 		scene:                  sceneService,
 		pendingApprovals:       pendingApprovalService,
 		manifests:              manifestService,
@@ -2169,6 +2200,9 @@ func (a *Application) Run(ctx context.Context) error {
 	if mcpListener != nil {
 		components++
 	}
+	if a.assetListRunner != nil {
+		components++
+	}
 	results := make(chan componentResult, components)
 	go func() {
 		a.readiness.coordinator.Store(true)
@@ -2236,6 +2270,13 @@ func (a *Application) Run(ctx context.Context) error {
 	}()
 	if mcpListener != nil {
 		go func() { results <- componentResult{name: "mcp", err: a.serveMCP(mcpListener)} }()
+	}
+	if a.assetListRunner != nil {
+		// The loop returns as soon as runCtx ends; it never delays shutdown.
+		go func() {
+			a.assetListRunner.Run(runCtx)
+			results <- componentResult{name: "asset-list-runner"}
+		}()
 	}
 
 	var componentErrors []error

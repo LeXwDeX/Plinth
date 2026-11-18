@@ -57,6 +57,7 @@ type Runs interface {
 	UpdateRunStatus(ctx context.Context, ownerID, listID, from, to, pauseReason string, at time.Time) (assetlist.Run, error)
 	ClaimItem(ctx context.Context, ownerID, listID string, at time.Time) (assetlist.Item, bool, error)
 	FinishItem(ctx context.Context, input assetlist.FinishItemInput) (assetlist.Item, error)
+	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (assetlist.Item, error)
 	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round int, expectedVersion int64, at time.Time) (assetlist.Item, error)
 }
 
@@ -92,6 +93,15 @@ type Presence interface {
 	Active(ctx context.Context, ownerID, projectID string, since time.Time) (bool, error)
 }
 
+// StepCaps reports whether the newest turn of an item's sub-session was
+// refused a paid step because the asset used all its 3D steps (#328 §2.5).
+// The runner asks before it continues or fails an item whose turn ended, so a
+// step-cap refusal blocks the item instead of being read as an internal
+// failure. A nil port means the deployment has no step store to observe.
+type StepCaps interface {
+	StepCapReached(ctx context.Context, ownerID, sessionID string) (bool, error)
+}
+
 // Config is the runner's ports and Schema values. Execution nil keeps the
 // defaults above; the application only starts the runner when execution is
 // declared and enabled.
@@ -102,6 +112,7 @@ type Config struct {
 	Tasks     chat.AssetListTaskSource
 	Scheduler Scheduler
 	Presence  Presence
+	StepCaps  StepCaps
 	Schema    catalog.AssetListSchema
 	Clock     func() time.Time
 	Logger    *slog.Logger
@@ -132,6 +143,7 @@ type Runner struct {
 	tasks        chat.AssetListTaskSource
 	scheduler    Scheduler
 	presence     Presence
+	stepCaps     StepCaps
 	interval     time.Duration
 	maxParallel  int
 	maxRounds    int
@@ -152,6 +164,7 @@ func New(config Config) *Runner {
 		tasks:        config.Tasks,
 		scheduler:    config.Scheduler,
 		presence:     config.Presence,
+		stepCaps:     config.StepCaps,
 		interval:     defaultPollInterval,
 		maxParallel:  defaultMaxParallel,
 		maxRounds:    defaultMaxRounds,
@@ -392,6 +405,21 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 			}
 			item.Round = round
 			item.LastTurnMessageID = turn.AssistantMessageID
+		}
+		// A turn refused at the owner's 3D step cap ended while the item still
+		// works: block the item and pause the run instead of continuing the
+		// round or classifying the refusal as a failure (#328 §2.5).
+		capped, err := runner.stepCapReached(ctx, run, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if capped {
+			if err := runner.blockStepCap(ctx, run, item, now); err != nil {
+				return false, err
+			}
+			// The run is paused now; stop the tick before it advances another
+			// working item.
+			return true, nil
 		}
 		report, failed, err := runner.failureReport(ctx, run.OwnerID, sessionID, turn)
 		if err != nil {
@@ -685,6 +713,30 @@ func (runner *Runner) pauseRun(ctx context.Context, run assetlist.Run, reason st
 		return nil
 	}
 	return err
+}
+
+// stepCapReached asks the step store whether the item's newest turn was
+// refused at the cap. Without a store there is nothing to observe.
+func (runner *Runner) stepCapReached(ctx context.Context, run assetlist.Run, sessionID string) (bool, error) {
+	if runner.stepCaps == nil {
+		return false, nil
+	}
+	return runner.stepCaps.StepCapReached(ctx, run.OwnerID, sessionID)
+}
+
+// blockStepCap marks the item on its second axis and pauses the run. The item
+// stays working: the person resolves the cap (or the item) and the control
+// service clears the block before the runner advances it again.
+func (runner *Runner) blockStepCap(ctx context.Context, run assetlist.Run, item assetlist.Item, now time.Time) error {
+	_, err := runner.runs.SetItemBlock(ctx, run.OwnerID, run.ListID, item.ID,
+		assetlist.BlockStepCap, assetlist.VersionUnchecked, now)
+	if err != nil && !errors.Is(err, assetlist.ErrConflict) &&
+		!errors.Is(err, assetlist.ErrItemState) && !errors.Is(err, assetlist.ErrNotFound) {
+		return err
+	}
+	runner.logger.Info("asset list item blocked at the step cap",
+		"run_id", run.ID, "item_id", item.ID)
+	return runner.pauseRun(ctx, run, assetlist.PauseStepCap, now)
 }
 
 // completeIfDone finishes a running list when nothing is left to make. A

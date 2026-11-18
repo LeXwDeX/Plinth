@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -174,6 +175,33 @@ func (r *Repository) StepUsage(ctx context.Context, owner, sessionID string, req
 	}
 	defer conn.Close()
 	return stepSummaryOnConn(ctx, conn, owner, sessionID, request)
+}
+
+// StepCapReached reports whether the session's newest turn was refused a paid
+// step because its asset used all its 3D steps (#328 §2.5). It matches the
+// grants executiongrant.Grant.StepCapReached reads (a denial by the steps or
+// access-key policy actor) decided at or after that turn started; a denial of
+// an older turn does not leak into the next one. It decides nothing and takes
+// no write lock.
+func (r *Repository) StepCapReached(ctx context.Context, ownerID, sessionID string) (bool, error) {
+	if ownerID == "" || sessionID == "" {
+		return false, nil
+	}
+	var reached bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
+ SELECT 1 FROM execution_grants
+ WHERE owner_id = ? AND session_id = ? AND status = 'denied'
+ AND decided_by IN (?, ?)
+ AND julianday(decided_at) >= COALESCE(julianday(
+   (SELECT created_at FROM go_chat_turns
+    WHERE owner_id = ? AND session_id = ?
+    ORDER BY julianday(created_at) DESC LIMIT 1)), 0)
+)`, ownerID, sessionID, executiongrant.StepsActor, executiongrant.AccessKeyActor,
+		ownerID, sessionID).Scan(&reached)
+	if err != nil {
+		return false, fmt.Errorf("read step cap denial: %w", err)
+	}
+	return reached, nil
 }
 
 // grantCapabilityOnConn is the capability of the prepared input the grant
