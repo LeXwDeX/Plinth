@@ -617,7 +617,7 @@ func (s *Server) mcpStartedOutcome(call *mcpCall, task generation.Task, asset mc
 	if note != "" {
 		reference = &note
 	}
-	return mcpOutcome{
+	outcome := mcpOutcome{
 		data: map[string]any{
 			"task_id": string(task.ID), "state": view.State, "state_label": view.StateLabel, "terminal": view.Terminal,
 			"replayed":           replayed,
@@ -629,6 +629,15 @@ func (s *Server) mcpStartedOutcome(call *mcpCall, task generation.Task, asset mc
 		},
 		subject: subject,
 	}
+	// A client that declared the Tasks extension receives a CreateTaskResult
+	// referencing this Task instead (the transport decides, from the request's
+	// capabilities); the ordinary result above stays what a client without the
+	// extension gets.
+	if s.application.MCPPublic.Tasks.Enabled {
+		reference := mcpTaskReference(s.application.MCPPublic, task, view)
+		outcome.task = &reference
+	}
+	return outcome
 }
 
 // mcpAuditTask writes the same audit event the browser writes when a Task is

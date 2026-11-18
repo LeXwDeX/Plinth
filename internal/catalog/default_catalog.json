@@ -5718,6 +5718,11 @@
       "write_timeout_seconds": 1800,
       "idle_timeout_seconds": 120,
       "poll_interval_seconds": 5,
+      "tasks": {
+        "enabled": true,
+        "methods": ["tasks/get", "tasks/cancel"],
+        "result_ttl_seconds": 86400
+      },
       "list_page_size": 20,
       "list_max_page_size": 100,
       "inspect_image": {
@@ -5904,7 +5909,8 @@
         "image_too_large": "图片超过检查上限（{bytes} 字节 / {pixels} 像素）。请缩小后重试。",
         "image_unavailable": "当前服务没有启用图片检查，暂时不能给出检查结果。",
         "image_busy": "图片检查正忙，请 {seconds} 秒后重试。",
-        "asset_not_image": "该产物存在，但不是可检查的图片：需要已保存的 role=image 产物。请传该任务里 role 为 image 的产物 ID。"
+        "asset_not_image": "该产物存在，但不是可检查的图片：需要已保存的 role=image 产物。请传该任务里 role 为 image 的产物 ID。",
+        "task_terminal": "任务已经结束（{state}），这次取消没有改变任何状态。"
       }
     },
     "chat": {
@@ -19970,6 +19976,7 @@
             "mcp_public.messages.image_unavailable": "Picture inspection is not enabled on this server, so no verdict can be given right now.",
             "mcp_public.messages.image_busy": "Picture inspection is busy; retry in {seconds} seconds.",
             "mcp_public.messages.asset_not_image": "That asset exists but is not an inspectable picture: a saved role=image output is required. Pass the ID of an output whose role is image in that task.",
+"mcp_public.messages.task_terminal": "The task has already ended ({state}); this cancellation changed nothing.",
             "mcp_public.tools[name=list_services].description": "Lists the services (offerings) usable through MCP, grouped by capability, with whether each is available right now, roughly what one step costs, which inputs it needs and which parameters can be tuned. A service whose inputs include mask takes an image-to-image edit mask. An unavailable service is said to be unavailable; it is never replaced by another model.",
             "mcp_public.tools[name=get_status].description": "Shows the 3D step mode, the 3D steps each of your MCP assets used, the running total and the balances of the three 3D providers. Reading counts no step and charges nothing. Every tool response carries the same status block, so there is no need to call this just to get it.",
             "mcp_public.tools[name=get_task].description": "Reads one task: state, progress, failure attribution with a suggested action, and the asset it belongs to. An unfinished task comes with a suggested polling interval. Only your own tasks can be read; another person's task is treated as missing.",

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -40,7 +41,116 @@ type PublicResult struct {
 	// Text are the text content blocks, in order.
 	Text    []string
 	IsError bool
+	// Task, when set, is the Task the call created (#332 stage 2). The endpoint
+	// answers with a CreateTaskResult only when the client declared the Tasks
+	// extension; otherwise it answers with the ordinary result above.
+	Task *PublicTask
 }
+
+// CallToolResult is the result's ordinary wire shape: the content blocks and
+// structuredContent a tools/call returns. It is also the completed result a
+// tasks/get carries.
+func (r PublicResult) CallToolResult() (map[string]any, error) {
+	content := make([]map[string]string, 0, len(r.Text))
+	for _, text := range r.Text {
+		content = append(content, map[string]string{"type": "text", "text": text})
+	}
+	called := map[string]any{"content": content, "isError": r.IsError}
+	if len(r.Structured) > 0 {
+		if !json.Valid(r.Structured) {
+			return nil, errors.New("mcphttp: tool returned invalid structured content")
+		}
+		called["structuredContent"] = r.Structured
+	}
+	return called, nil
+}
+
+// The Tasks extension (#332 stage 2) and its fixed wire vocabulary. The
+// extension is declared in server/discover under capabilities.extensions; its
+// methods answer the 2026-07-28 schema shapes:
+//
+//	CreateTaskResult: resultType "task" plus the Task fields
+//	Task:             taskId, status, createdAt, lastUpdatedAt, ttlMs,
+//	                  statusMessage and pollIntervalMs optional
+//	tasks/get:        {taskId} -> Task fields, resultType "complete", plus
+//	                  inputRequests / result / error for the status
+//	tasks/cancel:     {taskId} -> {resultType "complete"}
+//
+// The extension is negotiated per request: the client carries
+// capabilities.extensions in its _meta, the server advertises its own in
+// server/discover. A client that did not declare it never receives a Task.
+const (
+	TasksExtension    = "io.modelcontextprotocol/tasks"
+	MethodTasksGet    = "tasks/get"
+	MethodTasksCancel = "tasks/cancel"
+
+	// TaskNotFound is the JSON-RPC code of a Task the caller cannot see: the
+	// same answer for a task that does not exist and another owner's task.
+	TaskNotFound = -32004
+
+	// The Task status vocabulary of the extension.
+	TaskStatusWorking       = "working"
+	TaskStatusInputRequired = "input_required"
+	TaskStatusCompleted     = "completed"
+	TaskStatusFailed        = "failed"
+	TaskStatusCancelled     = "cancelled"
+)
+
+// PublicTask is a Task as CreateTaskResult and tasks/get carry it.
+type PublicTask struct {
+	TaskID        string
+	Status        string
+	StatusMessage string
+	CreatedAt     string
+	LastUpdatedAt string
+	// TTLMs is how long the server keeps the task; the schema allows null.
+	TTLMs *int64
+	// PollIntervalMs is the suggested wait between tasks/get calls.
+	PollIntervalMs *int64
+}
+
+// PublicTaskResult is one tasks/get answer. Result and Error are set only for
+// the completed and failed statuses.
+type PublicTaskResult struct {
+	PublicTask
+	Result json.RawMessage
+	Error  *PublicTaskFailure
+}
+
+// PublicTaskFailure is the error a failed Task carries.
+type PublicTaskFailure struct {
+	Code    int
+	Message string
+	Data    map[string]any
+}
+
+// PublicTaskCancel is a tasks/cancel acknowledgement. Cancellation is
+// cooperative; a task that already reached a terminal status is reported as
+// such and is not changed.
+type PublicTaskCancel struct {
+	Status          string
+	StatusMessage   string
+	AlreadyTerminal bool
+}
+
+// TaskRuntime is what a runtime that serves the Tasks extension implements.
+type TaskRuntime interface {
+	// GetTask reads one Task of the caller; another owner's Task and a Task
+	// that does not exist are both a TaskError with code TaskNotFound.
+	GetTask(ctx context.Context, taskID string) (PublicTaskResult, error)
+	// CancelTask asks the generation kernel to cancel one of the caller's
+	// Tasks. A terminal Task is acknowledged, not changed.
+	CancelTask(ctx context.Context, taskID string) (PublicTaskCancel, error)
+}
+
+// TaskError is a refused tasks/get or tasks/cancel. Code is a JSON-RPC code
+// (TaskNotFound for a Task the caller cannot see).
+type TaskError struct {
+	Code    int
+	Message string
+}
+
+func (e *TaskError) Error() string { return e.Message }
 
 // ErrUnknownTool is returned by a runtime for a tool it does not serve.
 var ErrUnknownTool = errors.New("mcphttp: unknown tool")
@@ -78,6 +188,12 @@ type PublicPolicy struct {
 	// MaxRequestBytes bounds the body; MaxResponseBytes the JSON response.
 	MaxRequestBytes  int64
 	MaxResponseBytes int64
+	// TasksExtension is the extension server/discover advertises (#332 stage
+	// 2); empty when the endpoint serves none. TasksMethods are the extension
+	// methods it serves (tasks/get, tasks/cancel); a method not listed is a
+	// method not found, as before.
+	TasksExtension string
+	TasksMethods   []string
 	// Detail words a problem in the caller's language (Schema copy); nil
 	// leaves the standard JSON-RPC message alone.
 	Detail func(request *http.Request, kind, scope string) string
@@ -127,15 +243,56 @@ func (h *PublicHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	var result any
 	switch message.Method {
 	case "server/discover":
+		capabilities := map[string]any{"tools": map[string]any{}}
+		if h.policy.TasksExtension != "" {
+			capabilities["extensions"] = map[string]any{h.policy.TasksExtension: map[string]any{}}
+		}
 		discovered := map[string]any{
 			"resultType":   "complete",
 			"serverInfo":   map[string]string{"name": h.policy.ServerName, "version": "1"},
-			"capabilities": map[string]any{"tools": map[string]any{}},
+			"capabilities": capabilities,
 		}
 		if h.policy.Instructions != nil {
 			discovered["instructions"] = h.policy.Instructions(request)
 		}
 		result = discovered
+	case MethodTasksGet, MethodTasksCancel:
+		if !h.servesTaskMethod(message.Method) {
+			h.refuse(writer, request, envelopeProblem{status: http.StatusNotFound, id: message.ID, code: -32601, message: "Method not found"}, "", "", nil)
+			return
+		}
+		taskID, ok := message.Params["taskId"].(string)
+		if !ok || taskID == "" {
+			h.refuse(writer, request, envelopeProblem{status: http.StatusBadRequest, id: message.ID, code: -32602, message: "taskId is required"}, "", "", nil)
+			return
+		}
+		tasks, ok := h.runtime.(TaskRuntime)
+		if !ok {
+			h.internal(writer, request, message.ID, errors.New("the runtime does not serve the Tasks extension"))
+			return
+		}
+		var (
+			answer any
+			err    error
+		)
+		if message.Method == MethodTasksGet {
+			answer, err = tasks.GetTask(request.Context(), taskID)
+		} else {
+			answer, err = tasks.CancelTask(request.Context(), taskID)
+		}
+		if err != nil {
+			h.taskProblem(writer, request, message.ID, err)
+			return
+		}
+		switch typed := answer.(type) {
+		case PublicTaskResult:
+			result = taskResultWire(typed)
+		case PublicTaskCancel:
+			result = taskCancelWire(taskID, typed)
+		default:
+			h.internal(writer, request, message.ID, errors.New("the runtime answered a task method with an unknown result"))
+			return
+		}
 	case "tools/list":
 		tools, err := h.runtime.ListTools(request.Context())
 		if err != nil {
@@ -181,18 +338,16 @@ func (h *PublicHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 			h.internal(writer, request, message.ID, err)
 			return
 		}
-		content := make([]map[string]string, 0, len(outcome.Text))
-		for _, text := range outcome.Text {
-			content = append(content, map[string]string{"type": "text", "text": text})
+		if outcome.Task != nil && h.clientDeclaredTasks(message) {
+			result = createTaskWire(*outcome.Task)
+			break
 		}
-		called := map[string]any{"resultType": "complete", "content": content, "isError": outcome.IsError}
-		if len(outcome.Structured) > 0 {
-			if !json.Valid(outcome.Structured) {
-				h.internal(writer, request, message.ID, errors.New("tool returned invalid structured content"))
-				return
-			}
-			called["structuredContent"] = outcome.Structured
+		called, err := outcome.CallToolResult()
+		if err != nil {
+			h.internal(writer, request, message.ID, err)
+			return
 		}
+		called["resultType"] = "complete"
 		result = called
 	default:
 		h.refuse(writer, request, envelopeProblem{status: http.StatusNotFound, id: message.ID, code: -32601, message: "Method not found"}, "", "", nil)
@@ -208,6 +363,108 @@ func (h *PublicHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write(body)
+}
+
+// servesTaskMethod says whether the endpoint serves one of the extension's
+// methods: the extension must be advertised, and the method listed.
+func (h *PublicHandler) servesTaskMethod(method string) bool {
+	return h.policy.TasksExtension != "" && slices.Contains(h.policy.TasksMethods, method)
+}
+
+// clientDeclaredTasks reads the per-request extension negotiation: the client
+// lists the Tasks extension in the capabilities it sent with this request.
+func (h *PublicHandler) clientDeclaredTasks(message serverRequest) bool {
+	if h.policy.TasksExtension == "" {
+		return false
+	}
+	meta, _ := message.Params["_meta"].(map[string]any)
+	capabilities, _ := meta["io.modelcontextprotocol/clientCapabilities"].(map[string]any)
+	extensions, _ := capabilities["extensions"].(map[string]any)
+	_, declared := extensions[h.policy.TasksExtension]
+	return declared
+}
+
+// taskProblem answers an error of a task method: a Task the caller cannot see
+// is 404 with the extension's code, a missing scope is 403, anything else is
+// internal.
+func (h *PublicHandler) taskProblem(writer http.ResponseWriter, request *http.Request, id json.RawMessage, err error) {
+	var missing *TaskError
+	var scope *ScopeError
+	switch {
+	case errors.As(err, &missing):
+		status := http.StatusBadRequest
+		if missing.Code == TaskNotFound {
+			status = http.StatusNotFound
+		}
+		h.refuse(writer, request, envelopeProblem{status: status, id: id, code: missing.Code, message: missing.Message}, "", "", nil)
+	case errors.As(err, &scope):
+		writer.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", scope="`+scope.Scope+`"`)
+		h.refuse(writer, request, envelopeProblem{status: http.StatusForbidden, id: id, code: -32003, message: "Insufficient scope"}, ProblemInsufficientScope, scope.Scope, nil)
+	default:
+		h.internal(writer, request, id, err)
+	}
+}
+
+// taskFields is the Task object's members, shared by CreateTaskResult and
+// tasks/get. ttlMs is required by the schema and may be null.
+func taskFields(task PublicTask) map[string]any {
+	fields := map[string]any{
+		"taskId": task.TaskID, "status": task.Status,
+		"createdAt": task.CreatedAt, "lastUpdatedAt": task.LastUpdatedAt,
+		"ttlMs": nil,
+	}
+	if task.TTLMs != nil {
+		fields["ttlMs"] = *task.TTLMs
+	}
+	if task.StatusMessage != "" {
+		fields["statusMessage"] = task.StatusMessage
+	}
+	if task.PollIntervalMs != nil {
+		fields["pollIntervalMs"] = *task.PollIntervalMs
+	}
+	return fields
+}
+
+// createTaskWire is the CreateTaskResult a tools/call answers a client that
+// declared the extension with.
+func createTaskWire(task PublicTask) map[string]any {
+	fields := taskFields(task)
+	fields["resultType"] = "task"
+	return fields
+}
+
+// taskResultWire is the tasks/get answer: the Task with the completed result
+// or the failure attached.
+func taskResultWire(result PublicTaskResult) map[string]any {
+	fields := taskFields(result.PublicTask)
+	fields["resultType"] = "complete"
+	if len(result.Result) > 0 && json.Valid(result.Result) {
+		fields["result"] = result.Result
+	}
+	if result.Error != nil {
+		failure := map[string]any{"code": result.Error.Code, "message": result.Error.Message}
+		if result.Error.Data != nil {
+			failure["data"] = result.Error.Data
+		}
+		fields["error"] = failure
+	}
+	return fields
+}
+
+// taskCancelWire is the tasks/cancel acknowledgement. The schema declares only
+// resultType; the outcome (and whether the Task was already terminal) is in
+// _meta under the extension's name.
+func taskCancelWire(taskID string, result PublicTaskCancel) map[string]any {
+	acknowledged := map[string]any{"resultType": "complete"}
+	if result.Status == "" && !result.AlreadyTerminal {
+		return acknowledged
+	}
+	detail := map[string]any{"taskId": taskID, "status": result.Status, "alreadyTerminal": result.AlreadyTerminal}
+	if result.StatusMessage != "" {
+		detail["statusMessage"] = result.StatusMessage
+	}
+	acknowledged["_meta"] = map[string]any{TasksExtension: detail}
+	return acknowledged
 }
 
 func (h *PublicHandler) internal(writer http.ResponseWriter, request *http.Request, id json.RawMessage, cause error) {

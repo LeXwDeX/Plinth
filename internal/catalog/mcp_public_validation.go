@@ -126,6 +126,30 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	if service.PollIntervalSeconds < 1 || service.PollIntervalSeconds > 3600 {
 		return errors.New("mcp_public.poll_interval_seconds 必须在 1 到 3600 之间")
 	}
+	if service.Tasks.Enabled {
+		if service.Tasks.ResultTTLSeconds < 1 || service.Tasks.ResultTTLSeconds > 7*86400 {
+			return errors.New("mcp_public.tasks.result_ttl_seconds 必须在 1 到 604800 之间")
+		}
+		if len(service.Tasks.Methods) == 0 {
+			return errors.New("mcp_public.tasks.methods 不能为空：启用 Tasks 扩展时至少声明 tasks/get 或 tasks/cancel")
+		}
+		known := map[string]bool{}
+		for _, method := range MCPTaskMethods() {
+			known[method] = true
+		}
+		seen := map[string]bool{}
+		for _, method := range service.Tasks.Methods {
+			if !known[method] {
+				return fmt.Errorf("mcp_public.tasks.methods 含未知方法 %q（只允许 tasks/get 与 tasks/cancel）", method)
+			}
+			if seen[method] {
+				return fmt.Errorf("mcp_public.tasks.methods 重复声明了 %q", method)
+			}
+			seen[method] = true
+		}
+	} else if len(service.Tasks.Methods) > 0 || service.Tasks.ResultTTLSeconds != 0 {
+		return errors.New("mcp_public.tasks 未启用时不能声明 methods 或 result_ttl_seconds")
+	}
 	if service.ListPageSize < 1 || service.ListMaxPageSize < service.ListPageSize || service.ListMaxPageSize > 200 {
 		return errors.New("mcp_public 必须满足 1 <= list_page_size <= list_max_page_size <= 200")
 	}
@@ -203,6 +227,14 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	}
 	if !strings.Contains(messages.InsufficientScope, "{scope}") || !strings.Contains(messages.InvalidArguments, "{detail}") {
 		return errors.New("mcp_public.messages.insufficient_scope 必须含 {scope}，invalid_arguments 必须含 {detail}")
+	}
+	if service.Tasks.Enabled {
+		if strings.TrimSpace(messages.TaskTerminal) == "" {
+			return errors.New("mcp_public.messages.task_terminal 不能为空：启用 Tasks 扩展后要答复已终态任务的取消")
+		}
+		if !strings.Contains(messages.TaskTerminal, "{state}") {
+			return errors.New("mcp_public.messages.task_terminal 必须含 {state}")
+		}
 	}
 	for name, check := range map[string]struct{ text, holder string }{
 		"needs_person": {messages.NeedsPerson, "{task_id}"}, "service_unavailable": {messages.ServiceUnavailable, "{service}"},
