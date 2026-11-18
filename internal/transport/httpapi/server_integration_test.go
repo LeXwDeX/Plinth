@@ -1830,6 +1830,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 	// unavailable step deterministically; the brief uses the real Schema
 	// rules.
 	var assetListService *assetlist.Service
+	var assetListPresence assetlist.PresenceStore
 	if listSchema := applicationSchema.AssetList; listSchema != nil &&
 		applicationSchema.Project != nil && applicationSchema.StepPolicy != nil {
 		counted := make(map[generation.Capability]bool, len(applicationSchema.StepPolicy.CountedCapabilities))
@@ -1853,6 +1854,9 @@ func newHTTPHarnessWithCatalogAndProviders(
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if listSchema.Execution != nil {
+			assetListPresence = repository.AssetListPresenceRepository()
 		}
 	}
 	api, err := httpapi.New(httpapi.Config{
@@ -1892,6 +1896,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Chat:                              chatService,
 		Projects:                          projectService,
 		AssetLists:                        assetListService,
+		AssetListPresence:                 assetListPresence,
 		ChatScheduler:                     chatScheduler,
 		ChatContext:                       harnessCompactor(chatScheduler),
 		OwnsAgentSession: func(ctx context.Context, ownerID, sessionID string) bool {

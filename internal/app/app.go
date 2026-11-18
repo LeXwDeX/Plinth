@@ -741,6 +741,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// unavailable provider are reflected in the availability snapshot. The
 	// feature is absent when the Catalog declares no asset_list section.
 	var assetListService *assetlist.Service
+	var assetListPresence assetlist.PresenceStore
 	if applicationSchema.AssetList != nil {
 		if applicationSchema.Project == nil || applicationSchema.StepPolicy == nil {
 			return nil, fmt.Errorf("资产清单: application.asset_list 需要 application.project 与 application.step_policy")
@@ -769,6 +770,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Service: assetListService,
 			Schema:  *applicationSchema.AssetList,
 		})
+		// The browser heartbeat (#328) is served only when the Catalog
+		// declares execution; a Catalog without it keeps the route
+		// unregistered and the list behavior of #327 unchanged.
+		if applicationSchema.AssetList.Execution != nil {
+			assetListPresence = repository.AssetListPresenceRepository()
+		}
 	}
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// The ledger's parameter source is the existing parameter store's
@@ -1858,6 +1865,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Chat:                              chatService,
 		Projects:                          projectService,
 		AssetLists:                        assetListService,
+		AssetListPresence:                 assetListPresence,
 		DirectStyleReferences:             referenceResolver,
 		AgentParams:                       paramsStore,
 		AgentState:                        agentStateStore,

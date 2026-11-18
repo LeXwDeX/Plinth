@@ -65,6 +65,7 @@ function clientWith(getList: ReturnType<typeof vi.fn>): AssetListClient {
     getList: getList as unknown as AssetListClient['getList'],
     decide: vi.fn(async () => detail()),
     listSessionLists: vi.fn(async () => []),
+    presence: vi.fn(async () => {}),
   };
 }
 

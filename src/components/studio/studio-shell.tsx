@@ -1,7 +1,10 @@
 'use client';
 
+import { useMemo } from 'react';
+
 import { RegionErrorBoundary } from '@/components/common/region-error-boundary';
 import { ConnectivityBanner } from '@/components/layout/connectivity-banner';
+import { useProductSchema } from '@/components/product-schema-provider';
 import { ChatColumn } from '@/components/studio/chat-column';
 import { Lightbox } from '@/components/studio/lightbox';
 import { MaskDiscardDialog } from '@/components/studio/mask-discard-dialog';
@@ -13,9 +16,12 @@ import { ResultDetailHost } from '@/components/result/result-detail';
 import { TaskDrawer } from '@/components/studio/task-center';
 import { VersionStrip } from '@/components/studio/version-strip';
 import { Surface } from '@/components/ui/surface';
+import { useAssetListPresence } from '@/hooks/use-asset-list-presence';
 import { useStudioShortcuts } from '@/hooks/use-stage-viewer';
 import { useTaskCompletionNotice } from '@/hooks/use-task-completion-notice';
 import { useTaskTracker } from '@/hooks/use-task-tracker';
+import { assetListClient } from '@/lib/asset-lists/client';
+import { useProjectStore } from '@/store/project-store';
 
 /**
  * 「对话 + 舞台」工作台：顶栏 48px；左边是对话列；中间是舞台和右侧栏，
@@ -25,6 +31,7 @@ export function StudioShell() {
   return (
     <Surface variant="base" radius="none" className="flex h-dvh min-h-0 flex-col overflow-clip text-foreground" data-testid="studio-shell">
       <StudioEffects />
+      <AssetListPresenceEffect />
       <ConnectivityBanner />
       <StudioTopbar />
       <main className="relative flex min-h-0 flex-1">
@@ -55,5 +62,24 @@ function StudioEffects() {
   useTaskTracker();
   useTaskCompletionNotice();
   useStudioShortcuts();
+  return null;
+}
+
+/**
+ * #328: one heartbeat for the whole studio, for the project of the open
+ * session. `activeProjectId` follows the session through `useProjects`; it is
+ * empty while no session is attributed to a project. Kept in its own component
+ * so its subscription redraws nothing else.
+ */
+function AssetListPresenceEffect() {
+  const { schema } = useProductSchema();
+  const projectId = useProjectStore((state) => state.activeProjectId);
+  const client = useMemo(() => assetListClient(schema), [schema]);
+  useAssetListPresence({
+    client,
+    projectId,
+    enabled: Boolean(schema.asset_list?.presence?.heartbeat_seconds),
+    schema,
+  });
   return null;
 }

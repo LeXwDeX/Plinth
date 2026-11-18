@@ -60,6 +60,8 @@ export interface AssetListProductSchema {
   /** List states and item states; the browser renders by `role` and never invents meaning. */
   states: Array<{ id: string; label: string; role: string }>;
   item_states: Array<{ id: string; label: string; role: string }>;
+  /** #328: the heartbeat the browser posts while the project is open; absent on older servers. */
+  presence?: { heartbeat_seconds: number };
 }
 
 /**
@@ -200,6 +202,8 @@ export interface ProductSchema {
          project_asset_list_decision?: string;
          /** #327: the lists proposed in one chat session (GET). */
          chat_session_asset_lists?: string;
+         /** #328: the project's presence heartbeat (POST present/leave). */
+         project_presence?: string;
          /** #240: assign (PUT) the session to a project. */
          chat_session_project?: string;
          /** #246: the session's persisted 3D self-check records (GET). Absent on older servers. */
