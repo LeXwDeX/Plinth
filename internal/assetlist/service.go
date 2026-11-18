@@ -80,20 +80,25 @@ type Service struct {
 	crops           Cropper
 	// imageItemLimit is application.asset_list.decompose.maximum_items_per_image
 	// (#331); 0 leaves the proposal-time per-image bound unwired.
-	imageItemLimit     int
-	presenceGrace      time.Duration
-	executionEnabled   bool
-	limits             catalog.AssetListLimitsSchema
-	projectMaxItems    int
-	maxListsPerProject int
-	kinds              map[string]catalog.AssetListKindSchema
-	routes             map[string]catalog.AssetListRouteSchema
-	counted            map[generation.Capability]bool
-	resolveStep        func(capability string) (RouteStep, error)
-	resolveStepFor     func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
-	validateBrief      func(json.RawMessage) error
-	clock              func() time.Time
-	newID              func(prefix string) (string, error)
+	imageItemLimit int
+	// defaultRouteWithReference is
+	// application.asset_list.decompose.default_route_with_reference (#331): the
+	// route an item with a crop reference and no explicit route_id takes. Empty
+	// keeps the kind's default_route.
+	defaultRouteWithReference string
+	presenceGrace             time.Duration
+	executionEnabled          bool
+	limits                    catalog.AssetListLimitsSchema
+	projectMaxItems           int
+	maxListsPerProject        int
+	kinds                     map[string]catalog.AssetListKindSchema
+	routes                    map[string]catalog.AssetListRouteSchema
+	counted                   map[generation.Capability]bool
+	resolveStep               func(capability string) (RouteStep, error)
+	resolveStepFor            func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
+	validateBrief             func(json.RawMessage) error
+	clock                     func() time.Time
+	newID                     func(prefix string) (string, error)
 }
 
 // New builds the service. A Catalog that declares application.asset_list is
@@ -148,30 +153,33 @@ func New(config Config) (*Service, error) {
 		presenceGrace = time.Duration(config.Schema.Execution.Presence.GraceSeconds) * time.Second
 	}
 	var imageItemLimit int
+	var defaultRouteWithReference string
 	if config.Schema.Decompose != nil {
 		imageItemLimit = config.Schema.Decompose.MaximumItemsPerImage
+		defaultRouteWithReference = strings.TrimSpace(config.Schema.Decompose.DefaultRouteWithReference)
 	}
 	return &Service{
-		repository:         config.Repository,
-		runs:               config.Runs,
-		presence:           config.Presence,
-		reviews:            config.Reviews,
-		referenceAssets:    config.References,
-		crops:              config.Crops,
-		imageItemLimit:     imageItemLimit,
-		presenceGrace:      presenceGrace,
-		executionEnabled:   executionEnabled,
-		limits:             limits,
-		projectMaxItems:    config.ProjectMaxItems,
-		maxListsPerProject: config.MaxListsPerProject,
-		kinds:              kinds,
-		routes:             routes,
-		counted:            counted,
-		resolveStep:        config.ResolveStep,
-		resolveStepFor:     config.ResolveStepFor,
-		validateBrief:      config.ValidateBrief,
-		clock:              clock,
-		newID:              newID,
+		repository:                config.Repository,
+		runs:                      config.Runs,
+		presence:                  config.Presence,
+		reviews:                   config.Reviews,
+		referenceAssets:           config.References,
+		crops:                     config.Crops,
+		imageItemLimit:            imageItemLimit,
+		defaultRouteWithReference: defaultRouteWithReference,
+		presenceGrace:             presenceGrace,
+		executionEnabled:          executionEnabled,
+		limits:                    limits,
+		projectMaxItems:           config.ProjectMaxItems,
+		maxListsPerProject:        config.MaxListsPerProject,
+		kinds:                     kinds,
+		routes:                    routes,
+		counted:                   counted,
+		resolveStep:               config.ResolveStep,
+		resolveStepFor:            config.ResolveStepFor,
+		validateBrief:             config.ValidateBrief,
+		clock:                     clock,
+		newID:                     newID,
 	}, nil
 }
 
@@ -592,17 +600,10 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 		if utf8.RuneCountInString(description) > service.limits.DescriptionMaxLength {
 			return nil, fmt.Errorf("%w: item %d description is too long", ErrInvalid, index+1)
 		}
-		routeID := strings.TrimSpace(input.RouteID)
-		if routeID == "" {
-			routeID = kind.DefaultRoute
-		}
-		route, exists := service.routes[routeID]
-		if !exists {
-			return nil, fmt.Errorf("%w: item %d has unknown route %q", ErrInvalid, index+1, routeID)
-		}
-		if !slices.Contains(route.Kinds, kindID) {
-			return nil, fmt.Errorf("%w: route %q does not serve kind %q", ErrInvalid, routeID, kindID)
-		}
+		// The references are validated before the route is chosen: a crop
+		// reference with no explicit route_id takes the Schema's reference
+		// route (#331). Detecting a crop needs the ReferenceAssets port; a
+		// deployment or test without it keeps the #327 behavior.
 		references := input.References
 		var err error
 		if input.Crop != nil {
@@ -615,6 +616,10 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 			}
 		}
 		references, err = service.references(ctx, ownerID, references, crops)
+		if err != nil {
+			return nil, err
+		}
+		routeID, route, err := service.resolveRoute(kind, kindID, input.RouteID, crops.itemCrops > 0, index)
 		if err != nil {
 			return nil, err
 		}
@@ -670,6 +675,37 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 		})
 	}
 	return items, nil
+}
+
+// resolveRoute picks one item's route. An explicit route_id always wins. An
+// item that carries a crop reference and names no route takes
+// application.asset_list.decompose.default_route_with_reference (#331), so a
+// crop never enters a 3D route directly. The reference route applies only when
+// it serves the item's kind; another kind keeps its default_route. A Catalog
+// without the decompose section keeps the #327 behavior.
+func (service *Service) resolveRoute(kind catalog.AssetListKindSchema, kindID, explicitRouteID string,
+	hasCrop bool, index int,
+) (string, catalog.AssetListRouteSchema, error) {
+	routeID := strings.TrimSpace(explicitRouteID)
+	if routeID == "" && hasCrop && service.defaultRouteWithReference != "" {
+		if route, found := service.routes[service.defaultRouteWithReference]; found &&
+			slices.Contains(route.Kinds, kindID) {
+			routeID = service.defaultRouteWithReference
+		}
+	}
+	if routeID == "" {
+		routeID = kind.DefaultRoute
+	}
+	route, exists := service.routes[routeID]
+	if !exists {
+		return "", catalog.AssetListRouteSchema{},
+			fmt.Errorf("%w: item %d has unknown route %q", ErrInvalid, index+1, routeID)
+	}
+	if !slices.Contains(route.Kinds, kindID) {
+		return "", catalog.AssetListRouteSchema{},
+			fmt.Errorf("%w: route %q does not serve kind %q", ErrInvalid, routeID, kindID)
+	}
+	return routeID, route, nil
 }
 
 // references bounds and shape-checks the item's references and, when the

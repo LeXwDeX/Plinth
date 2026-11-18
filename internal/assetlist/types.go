@@ -183,7 +183,9 @@ type ProposeInput struct {
 }
 
 // ItemInput is one proposed item. An empty RouteID takes the kind's
-// default_route from the Schema. Crop is the optional edit instruction (#331);
+// default_route from the Schema; an item that carries a crop reference takes
+// application.asset_list.decompose.default_route_with_reference instead when
+// the Schema declares one (#331). Crop is the optional edit instruction (#331);
 // a proposal carrying one is refused.
 type ItemInput struct {
 	Kind        string              `json:"kind"`

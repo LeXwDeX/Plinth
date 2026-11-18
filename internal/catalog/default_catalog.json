@@ -8185,7 +8185,7 @@
                     "kind": {"type": "string", "enum": ["character", "weapon", "prop", "vehicle", "scene", "image"], "description": "Asset kind"},
                     "name": {"type": "string", "description": "Unique name within the list"},
                     "description": {"type": "string", "description": "What this asset is"},
-                    "route_id": {"type": "string", "description": "Optional route id; defaults by kind"},
+                    "route_id": {"type": "string", "description": "Optional route id; defaults by kind. An item that references a crop and omits this takes the reference-based route."},
                     "reference_handles": {"type": "array", "items": {"type": "string"}, "description": "Optional @imgN or @projectN handles (max 4)"},
                     "reference_input_asset_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional input asset ids of crops cut from one source picture by crop_image_regions. At most one crop per item, and every crop in the list must come from the same source picture."}
                   },
