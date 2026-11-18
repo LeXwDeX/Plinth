@@ -43,6 +43,11 @@ func (runs *itemTurnRuns) ItemByID(_ context.Context, ownerID, listID, itemID st
 	return item, nil
 }
 
+// RunSummaries keeps list reads undecorated in this fixture.
+func (runs *itemTurnRuns) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
+	return nil, nil
+}
+
 func workingItemTurnItem() assetlist.Item {
 	return assetlist.Item{
 		ID: itemTurnItemID, OwnerID: itemTurnOwnerID, SessionID: itemTurnSessionID,

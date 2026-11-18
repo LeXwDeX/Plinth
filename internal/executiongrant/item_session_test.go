@@ -29,6 +29,11 @@ func (r *itemRuns) ItemBySession(_ context.Context, ownerID, sessionID string) (
 	return item, found, nil
 }
 
+// RunSummaries keeps list reads undecorated in this fixture.
+func (r *itemRuns) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
+	return nil, nil
+}
+
 // itemListRepository is only the identity assetlist.New requires; the
 // item-session lookups under test go through the run store.
 type itemListRepository struct{ assetlist.Repository }

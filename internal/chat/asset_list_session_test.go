@@ -69,6 +69,11 @@ func (runs *itemCreateRuns) SetItemSession(
 	return item, nil
 }
 
+// RunSummaries keeps list reads undecorated in this fixture.
+func (runs *itemCreateRuns) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
+	return nil, nil
+}
+
 func itemSessionItem(state string) assetlist.Item {
 	return assetlist.Item{
 		ID: itemSessionItemID, ListID: itemSessionListID, OwnerID: itemSessionOwnerID,
