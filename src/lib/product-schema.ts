@@ -202,6 +202,10 @@ export interface ProductSchema {
          project_asset_list_decision?: string;
          /** #327: the lists proposed in one chat session (GET). */
          chat_session_asset_lists?: string;
+         /** #328: a list's run (POST start/pause/resume/stop). */
+         project_asset_list_run?: string;
+         /** #328: one list item (PUT skip). */
+         project_asset_list_item?: string;
          /** #328: the project's presence heartbeat (POST present/leave). */
          project_presence?: string;
          /** #240: assign (PUT) the session to a project. */

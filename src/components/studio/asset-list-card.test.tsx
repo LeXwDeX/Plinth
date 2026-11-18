@@ -11,6 +11,7 @@ import {
   type AssetListClient,
   type AssetListDetail,
   type AssetListItem,
+  type AssetListRun,
 } from '@/lib/asset-lists/client';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
 
@@ -69,11 +70,31 @@ function detail(overrides: Partial<AssetListDetail> = {}): AssetListDetail {
   };
 }
 
-function clientWith(decide: ReturnType<typeof vi.fn>): AssetListClient {
+const runVersion = '2026-11-18T01:00:00.123456789Z';
+
+function run(overrides: Partial<AssetListRun> = {}): AssetListRun {
+  return {
+    status: 'running',
+    pause_reason: '',
+    version: runVersion,
+    item_counts: { todo: 1, working: 1, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
+    ...overrides,
+  };
+}
+
+function clientWith(
+  decide: ReturnType<typeof vi.fn>,
+  controls: {
+    controlRun?: ReturnType<typeof vi.fn>;
+    skipItem?: ReturnType<typeof vi.fn>;
+  } = {},
+): AssetListClient {
   return {
     listProjectLists: vi.fn(async () => []),
     getList: vi.fn(async () => detail()),
     decide: decide as unknown as AssetListClient['decide'],
+    controlRun: (controls.controlRun ?? vi.fn(async () => run())) as unknown as AssetListClient['controlRun'],
+    skipItem: (controls.skipItem ?? vi.fn(async () => item({ state: 'skipped' }))) as unknown as AssetListClient['skipItem'],
     listSessionLists: vi.fn(async () => []),
     presence: vi.fn(async () => {}),
   };
@@ -82,20 +103,27 @@ function clientWith(decide: ReturnType<typeof vi.fn>): AssetListClient {
 function renderCard(options: {
   detail?: AssetListDetail;
   decide?: ReturnType<typeof vi.fn>;
+  controlRun?: ReturnType<typeof vi.fn>;
+  skipItem?: ReturnType<typeof vi.fn>;
   onDecided?: () => void;
+  onRunChanged?: () => void;
 } = {}) {
   const decide = options.decide ?? vi.fn(async () => detail({ status: 'confirmed', effective_status: 'confirmed' }));
+  const controlRun = options.controlRun ?? vi.fn(async () => run());
+  const skipItem = options.skipItem ?? vi.fn(async () => item({ state: 'skipped' }));
   const onDecided = options.onDecided ?? vi.fn();
+  const onRunChanged = options.onRunChanged ?? vi.fn();
   const view = render(
     <AssetListCard
       detail={options.detail ?? detail()}
       schema={schema}
       projectId="proj"
-      client={clientWith(decide)}
+      client={clientWith(decide, { controlRun, skipItem })}
       onDecided={onDecided}
+      onRunChanged={onRunChanged}
     />,
   );
-  return { decide, onDecided, view };
+  return { decide, controlRun, skipItem, onDecided, onRunChanged, view };
 }
 
 describe('AssetListCard (#327)', () => {
@@ -258,5 +286,129 @@ describe('AssetListCard (#327)', () => {
     cleanup();
     renderCard({ detail: detail({ items: [], item_count: 0, brief: {} }) });
     expect(screen.queryByTestId('asset-list-items')).toBeNull();
+  });
+});
+
+describe('AssetListCard run controls (#328)', () => {
+  function confirmed(runSummary: AssetListRun | null, overrides: Partial<AssetListDetail> = {}): AssetListDetail {
+    return detail({
+      status: 'confirmed',
+      effective_status: 'confirmed',
+      version: 3,
+      run: runSummary,
+      ...overrides,
+    });
+  }
+
+  it('shows the run status and the counted progress', () => {
+    renderCard({
+      detail: confirmed(run({
+        status: 'paused',
+        pause_reason: 'presence',
+        item_counts: { todo: 1, working: 0, review: 2, accepted: 3, returned: 1, failed: 0, skipped: 1 },
+      })),
+    });
+
+    expect(screen.getByTestId('asset-list-run-status').textContent).toBe(messages['ui.asset_list.run_paused_presence']);
+    expect(screen.getByTestId('asset-list-run-progress').textContent).toBe(
+      formatSchemaText(messages['ui.asset_list.run_progress'], {
+        done: 4, total: 8, working: 0, review: 2, attention: 1,
+      }),
+    );
+    expect(screen.getByTestId('asset-list-run-resume').textContent).toBe(messages['ui.asset_list.run_resume']);
+  });
+
+  it('starts an idle run with the run\'s opaque version string and tells the parent to refresh', async () => {
+    const { controlRun, onRunChanged } = renderCard({ detail: confirmed(run({ status: 'idle' })) });
+
+    expect(screen.queryByTestId('asset-list-run-start')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('asset-list-run-start'));
+
+    await waitFor(() => expect(controlRun).toHaveBeenCalledWith('proj', 'listid', 'start', runVersion));
+    await waitFor(() => expect(onRunChanged).toHaveBeenCalledTimes(1));
+  });
+
+  it('pauses a running list and stops it only after the confirmation', async () => {
+    const { controlRun } = renderCard({ detail: confirmed(run({ status: 'running' })) });
+
+    expect(screen.queryByTestId('asset-list-run-start')).toBeNull();
+    fireEvent.click(screen.getByTestId('asset-list-run-pause'));
+    await waitFor(() => expect(controlRun).toHaveBeenCalledWith('proj', 'listid', 'pause', runVersion));
+
+    fireEvent.click(screen.getByTestId('asset-list-run-stop'));
+    expect(screen.getByTestId('asset-list-run-stop-confirm').textContent).toContain(messages['ui.asset_list.run_stop_confirm']);
+    expect(controlRun).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('asset-list-run-stop-confirmed'));
+    await waitFor(() => expect(controlRun).toHaveBeenLastCalledWith('proj', 'listid', 'stop', runVersion));
+    await waitFor(() => expect(screen.queryByTestId('asset-list-run-stop-confirm')).toBeNull());
+  });
+
+  it('cancels the stop confirmation without sending it', () => {
+    const { controlRun } = renderCard({ detail: confirmed(run({ status: 'paused' })) });
+
+    fireEvent.click(screen.getByTestId('asset-list-run-stop'));
+    fireEvent.click(screen.getByTestId('asset-list-run-stop-cancel'));
+
+    expect(screen.queryByTestId('asset-list-run-stop-confirm')).toBeNull();
+    expect(controlRun).not.toHaveBeenCalled();
+  });
+
+  it('shows no run control on a draft, run-less, stopped or completed list', () => {
+    renderCard({ detail: detail() });
+    expect(screen.queryByTestId('asset-list-run-controls')).toBeNull();
+
+    // A confirmed list without a run has no version token to send, so start is
+    // not offered; the server would refuse both the missing token and no run.
+    cleanup();
+    renderCard({ detail: confirmed(null) });
+    expect(screen.queryByTestId('asset-list-run-controls')).toBeNull();
+
+    cleanup();
+    renderCard({ detail: confirmed(run({ status: 'stopped' })) });
+    expect(screen.queryByTestId('asset-list-run-controls')).toBeNull();
+
+    cleanup();
+    renderCard({ detail: confirmed(run({ status: 'completed' })) });
+    expect(screen.queryByTestId('asset-list-run-controls')).toBeNull();
+  });
+
+  it('skips a todo or working item with the item version, but not in a stopped run', async () => {
+    const skipItem = vi.fn(async () => item({ state: 'skipped' }));
+    const { onRunChanged } = renderCard({
+      detail: confirmed(run({ status: 'running' }), {
+        items: [
+          item({ id: 'item_working', state: 'working', version: 7 }),
+          item({ id: 'item_review', state: 'review', version: 2 }),
+          item({ id: 'item_todo', state: 'todo', version: 4 }),
+        ],
+      }),
+      skipItem,
+    });
+
+    fireEvent.click(screen.getByTestId('asset-list-item-skip-0'));
+    await waitFor(() => expect(skipItem).toHaveBeenCalledWith('proj', 'listid', 'item_working', 7));
+    await waitFor(() => expect(onRunChanged).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('asset-list-item-skip-1')).toBeNull();
+    expect(screen.getByTestId('asset-list-item-skip-2')).toBeTruthy();
+
+    cleanup();
+    renderCard({
+      detail: confirmed(run({ status: 'stopped' }), { items: [item({ id: 'item_todo', state: 'todo' })] }),
+    });
+    expect(screen.queryByTestId('asset-list-item-skip-0')).toBeNull();
+  });
+
+  it('shows the Schema translation of a refused control', async () => {
+    const controlRun = vi.fn().mockRejectedValue(
+      new AssetListError('conflict', 409, { code: 'asset_list_version_conflict', detail: 'ui.asset_list.load_failed' }),
+    );
+    renderCard({ detail: confirmed(run({ status: 'running' })), controlRun });
+
+    fireEvent.click(screen.getByTestId('asset-list-run-pause'));
+
+    await waitFor(() => expect(screen.getByTestId('asset-list-error').textContent).toBe(
+      messages['ui.asset_list.load_failed'],
+    ));
   });
 });

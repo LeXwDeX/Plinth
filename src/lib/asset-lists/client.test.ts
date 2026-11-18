@@ -76,6 +76,8 @@ describe('asset list schema contract', () => {
       project_asset_lists: '/api/v1/projects/{projectID}/asset-lists',
       project_asset_list: '/api/v1/projects/{projectID}/asset-lists/{listID}',
       project_asset_list_decision: '/api/v1/projects/{projectID}/asset-lists/{listID}/decision',
+      project_asset_list_run: '/api/v1/projects/{projectID}/asset-lists/{listID}/run',
+      project_asset_list_item: '/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}',
       chat_session_asset_lists: '/api/v1/chat/sessions/{sessionID}/asset-lists',
       project_presence: '/api/v1/projects/{projectID}/presence',
     });
@@ -112,6 +114,61 @@ describe('asset list client', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ decision: 'reject' }),
     });
+  });
+
+  it('posts a run control with the opaque run version string and returns the run', async () => {
+    const run = {
+      status: 'running',
+      pause_reason: '',
+      version: '2026-11-18T01:00:00.123456789Z',
+      item_counts: { todo: 1, working: 1, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
+    };
+    const fetcher = vi.fn(async () => jsonResponse(run)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.controlRun('prj 1', 'al/1', 'start', run.version)).resolves.toEqual(run);
+    expect(fetcher).toHaveBeenLastCalledWith('/api/v1/projects/prj%201/asset-lists/al%2F1/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start', expected_version: '2026-11-18T01:00:00.123456789Z' }),
+    });
+    await client.controlRun('prj_1', 'al_1', 'pause', '2026-11-18T01:00:01Z', 'manual');
+    expect(fetcher).toHaveBeenLastCalledWith('/api/v1/projects/prj_1/asset-lists/al_1/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pause', expected_version: '2026-11-18T01:00:01Z', reason: 'manual' }),
+    });
+  });
+
+  it('puts a skip with the item version and returns the item', async () => {
+    const skipped = { ...detail.items[0], state: 'skipped', version: 8 };
+    const fetcher = vi.fn(async () => jsonResponse(skipped)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.skipItem('prj 1', 'al 1', 'it/1', 7)).resolves.toEqual(skipped);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%201/asset-lists/al%201/items/it%2F1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'skip', expected_version: 7 }),
+    });
+    await client.skipItem('prj_1', 'al_1', 'it_1', 8, 'not needed');
+    expect(fetcher).toHaveBeenLastCalledWith('/api/v1/projects/prj_1/asset-lists/al_1/items/it_1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'skip', expected_version: 8, reason: 'not needed' }),
+    });
+  });
+
+  it('shows the server detail of a refused run control', async () => {
+    const fetcher = vi.fn(async () => jsonResponse({
+      code: 'asset_list_version_conflict', detail: '制作清单已被更新，请重试。',
+    }, 409)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.controlRun('prj_1', 'al_1', 'stop', '2026-11-18T01:00:02Z')).rejects.toMatchObject({
+      name: 'AssetListError',
+      status: 409,
+      code: 'asset_list_version_conflict',
+      detail: '制作清单已被更新，请重试。',
+    });
+    await expect(client.skipItem('prj_1', 'al_1', 'it_1', 2)).rejects.toMatchObject({ status: 409 });
   });
 
   it('lists a session\'s lists from the Schema route and unwraps data', async () => {

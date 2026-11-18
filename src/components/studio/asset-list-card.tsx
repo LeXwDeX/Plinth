@@ -10,7 +10,9 @@ import {
   type AssetListDecision,
   type AssetListDetail,
   type AssetListItem,
+  type AssetListRunAction,
 } from '@/lib/asset-lists/client';
+import { runIsTerminal, runProgressText, runStatusText } from '@/lib/asset-lists/run';
 import {
   formatSchemaText, schemaCountMessage, schemaText, type ProductSchema,
 } from '@/lib/product-schema';
@@ -24,6 +26,8 @@ export interface AssetListCardProps {
   variant?: 'chat' | 'panel';
   /** A decision succeeded; the parent re-reads the list or the project. */
   onDecided?: () => void;
+  /** #328: a run control or a skip succeeded; the parent re-reads the list or the project. */
+  onRunChanged?: () => void;
 }
 
 type Conflict = { id: string; title: string };
@@ -40,11 +44,16 @@ function scalar(value: unknown): value is string | number | boolean {
  * a 409 conflict into the replace decision that resolves it.
  */
 export function AssetListCard({
-  detail, schema, projectId, client, variant = 'chat', onDecided,
+  detail, schema, projectId, client, variant = 'chat', onDecided, onRunChanged,
 }: AssetListCardProps) {
   const [pending, setPending] = useState<AssetListDecision | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // #328: run controls are a second, independent busy axis, and stop asks first.
+  const [runPending, setRunPending] = useState<AssetListRunAction | null>(null);
+  const [stopConfirm, setStopConfirm] = useState(false);
+  const [skipPending, setSkipPending] = useState<string | null>(null);
+  const run = detail.run ?? null;
   const text = (key: string) => schemaText(schema, key);
   const busy = pending !== null;
   const expired = detail.effective_status === 'expired';
@@ -82,6 +91,25 @@ export function AssetListCard({
           ? text('ui.asset_list.rejected_hint')
           : '';
   const canDecide = detail.status === 'draft' && !expired;
+  // #328: only a confirmed, live list runs; stopped and completed are final.
+  // Start needs the run row created at confirm: its idle state is the only one
+  // with a version token to send. A missing run (execution disabled, or a lost
+  // EnsureRun) has nothing to start, so no start button is offered.
+  const canStart = detail.status === 'confirmed' && !expired && run?.status === 'idle';
+  const canPause = detail.status === 'confirmed' && !expired && run?.status === 'running';
+  const canResume = detail.status === 'confirmed' && !expired && run?.status === 'paused';
+  const canStop = detail.status === 'confirmed' && !expired && Boolean(run) && !runIsTerminal(run);
+  const showRunControls = canStart || canPause || canResume || canStop;
+  const canSkip = (item: AssetListItem) =>
+    Boolean(run) && run?.status !== 'stopped' && (item.state === 'todo' || item.state === 'working');
+  // A server detail that names a Schema message is shown in the active locale;
+  // anything else falls back to the card's own failure copy.
+  const failureMessage = (failure: unknown) => {
+    const detailText = failure instanceof AssetListError
+      ? failure.detail
+      : failure instanceof Error ? failure.message : '';
+    return (detailText ? text(detailText) : '') || text('ui.asset_list.decide_failed');
+  };
 
   const decide = async (decision: AssetListDecision) => {
     if (busy) return;
@@ -96,14 +124,42 @@ export function AssetListCard({
         setConflict({ id: failure.activeListId, title: failure.activeListTitle || failure.activeListId });
         return;
       }
-      // A server detail that names a Schema message is shown in the active
-      // locale; anything else falls back to the card's own failure copy.
-      const detailText = failure instanceof AssetListError
-        ? failure.detail
-        : failure instanceof Error ? failure.message : '';
-      setError((detailText ? text(detailText) : '') || text('ui.asset_list.decide_failed'));
+      setError(failureMessage(failure));
     } finally {
       setPending(null);
+    }
+  };
+
+  // #328: expected_version is the run's opaque version token this card
+  // rendered; the server refuses a stale card instead of overwriting a newer
+  // run. The list's numeric version belongs to decisions and edits.
+  const control = async (action: AssetListRunAction) => {
+    if (runPending || !run) return;
+    setRunPending(action);
+    setError(null);
+    try {
+      await client.controlRun(projectId, detail.id, action, run.version);
+      setStopConfirm(false);
+      onRunChanged?.();
+    } catch (failure) {
+      setError(failureMessage(failure));
+    } finally {
+      setRunPending(null);
+    }
+  };
+
+  // Skipping is a per-item CAS on the item's own version, not the list's.
+  const skip = async (item: AssetListItem) => {
+    if (skipPending) return;
+    setSkipPending(item.id);
+    setError(null);
+    try {
+      await client.skipItem(projectId, detail.id, item.id, item.version);
+      onRunChanged?.();
+    } catch (failure) {
+      setError(failureMessage(failure));
+    } finally {
+      setSkipPending(null);
     }
   };
 
@@ -130,6 +186,19 @@ export function AssetListCard({
         <span>{plannedStepsText}</span>
         {model3dStepsText ? <span>{model3dStepsText}</span> : null}
       </p>
+      {run ? (
+        <p className="flex flex-wrap items-baseline gap-x-2 tabular-nums text-muted-foreground" data-testid="asset-list-run">
+          <span
+            className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-foreground"
+            data-testid="asset-list-run-status"
+            data-status={run.status}
+            data-pause-reason={run.pause_reason || undefined}
+          >
+            {runStatusText(schema, run)}
+          </span>
+          <span data-testid="asset-list-run-progress">{runProgressText(schema, run)}</span>
+        </p>
+      ) : null}
       {briefEntries.length > 0 ? (
         <section className="flex flex-col gap-0.5" data-testid="asset-list-brief">
           <span className="text-[11px] text-foreground/70">{text('ui.asset_list.brief_summary')}</span>
@@ -171,6 +240,20 @@ export function AssetListCard({
                 <span className="text-warning" data-testid="asset-list-item-unavailable">
                   {text('ui.asset_list.item_unavailable')}
                 </span>
+              ) : null}
+              {canSkip(item) ? (
+                <Action
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  className="ml-auto"
+                  disabled={skipPending !== null}
+                  loading={skipPending === item.id}
+                  onClick={() => void skip(item)}
+                  data-testid={`asset-list-item-skip-${index}`}
+                >
+                  {text('ui.asset_list.run_skip')}
+                </Action>
               ) : null}
             </li>
           ))}
@@ -225,6 +308,93 @@ export function AssetListCard({
               >
                 {text('ui.asset_list.replace')}
               </Action>
+            ) : null}
+          </div>
+        ) : null}
+        {showRunControls ? (
+          <div className="flex flex-col gap-1.5" data-testid="asset-list-run-controls">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {canStart ? (
+                <Action
+                  type="button"
+                  size="sm"
+                  disabled={runPending !== null}
+                  loading={runPending === 'start'}
+                  onClick={() => void control('start')}
+                  data-testid="asset-list-run-start"
+                >
+                  {text('ui.asset_list.run_start')}
+                </Action>
+              ) : null}
+              {canPause ? (
+                <Action
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={runPending !== null}
+                  loading={runPending === 'pause'}
+                  onClick={() => void control('pause')}
+                  data-testid="asset-list-run-pause"
+                >
+                  {text('ui.asset_list.run_pause')}
+                </Action>
+              ) : null}
+              {canResume ? (
+                <Action
+                  type="button"
+                  size="sm"
+                  disabled={runPending !== null}
+                  loading={runPending === 'resume'}
+                  onClick={() => void control('resume')}
+                  data-testid="asset-list-run-resume"
+                >
+                  {text('ui.asset_list.run_resume')}
+                </Action>
+              ) : null}
+              {canStop ? (
+                <Action
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={runPending !== null}
+                  loading={runPending === 'stop' && !stopConfirm}
+                  onClick={() => setStopConfirm(true)}
+                  data-testid="asset-list-run-stop"
+                >
+                  {text('ui.asset_list.run_stop')}
+                </Action>
+              ) : null}
+            </div>
+            {stopConfirm ? (
+              <div
+                className="rounded-md border border-border p-2 text-[11px] leading-4 text-muted-foreground"
+                data-testid="asset-list-run-stop-confirm"
+              >
+                <p>{text('ui.asset_list.run_stop_confirm')}</p>
+                <div className="mt-1.5 flex justify-end gap-1.5">
+                  <Action
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    disabled={runPending !== null}
+                    onClick={() => setStopConfirm(false)}
+                    data-testid="asset-list-run-stop-cancel"
+                  >
+                    {text('ui.common.cancel')}
+                  </Action>
+                  <Action
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    disabled={runPending !== null}
+                    loading={runPending === 'stop'}
+                    onClick={() => void control('stop')}
+                    data-testid="asset-list-run-stop-confirmed"
+                  >
+                    {text('ui.common.confirm')}
+                  </Action>
+                </div>
+              </div>
             ) : null}
           </div>
         ) : null}
