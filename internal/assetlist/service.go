@@ -32,7 +32,10 @@ type Config struct {
 	// Presence reads the project's unexpired heartbeats (#328). nil, or an
 	// execution section without presence limits, leaves the submission gate
 	// without a presence check.
-	Presence        PresenceStore
+	Presence PresenceStore
+	// Reviews reads the recorded acceptance decisions of the board (#329a).
+	// nil leaves every item with an empty latest review.
+	Reviews         ReviewStore
 	Schema          catalog.AssetListSchema
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
@@ -65,6 +68,7 @@ type Service struct {
 	repository         Repository
 	runs               RunStore
 	presence           PresenceStore
+	reviews            ReviewStore
 	presenceGrace      time.Duration
 	executionEnabled   bool
 	limits             catalog.AssetListLimitsSchema
@@ -135,6 +139,7 @@ func New(config Config) (*Service, error) {
 		repository:         config.Repository,
 		runs:               config.Runs,
 		presence:           config.Presence,
+		reviews:            config.Reviews,
 		presenceGrace:      presenceGrace,
 		executionEnabled:   executionEnabled,
 		limits:             limits,

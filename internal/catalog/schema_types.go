@@ -6390,7 +6390,10 @@ type CoreHTTPRoutesSchema struct {
 	ProjectAssetLists        string `json:"project_asset_lists,omitempty"`
 	ProjectAssetList         string `json:"project_asset_list,omitempty"`
 	ProjectAssetListDecision string `json:"project_asset_list_decision,omitempty"`
-	ChatSessionAssetLists    string `json:"chat_session_asset_lists,omitempty"`
+	// ProjectAssetListBoard is the read-only acceptance board of one list
+	// (#329a).
+	ProjectAssetListBoard string `json:"project_asset_list_board,omitempty"`
+	ChatSessionAssetLists string `json:"chat_session_asset_lists,omitempty"`
 	// Project run control routes (#328): presence heartbeats, run control
 	// (pause/resume/stop/start) and per-item skip. PR2 declares the path
 	// templates only; the handlers arrive with the runner. Empty (historical

@@ -23,6 +23,7 @@ const (
 	assetListProjectRoute  = "/api/v1/projects/{projectID}/asset-lists"
 	assetListItemRoute     = "/api/v1/projects/{projectID}/asset-lists/{listID}"
 	assetListDecisionRoute = "/api/v1/projects/{projectID}/asset-lists/{listID}/decision"
+	assetListBoardRoute    = "/api/v1/projects/{projectID}/asset-lists/{listID}/board"
 	assetListSessionRoute  = "/api/v1/chat/sessions/{sessionID}/asset-lists"
 )
 
@@ -527,5 +528,168 @@ func setAssetListItemWorking(t *testing.T, databasePath, listID string) {
 	if _, err := db.Exec(`UPDATE asset_list_items SET state = ? WHERE list_id = ?`,
 		assetlist.StateWorking, listID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type assetListBoardTestWire struct {
+	List  assetListTestWire `json:"list"`
+	Items []struct {
+		ID               string          `json:"id"`
+		Name             string          `json:"name"`
+		State            string          `json:"state"`
+		Round            int             `json:"round"`
+		ProjectAssetID   string          `json:"project_asset_id"`
+		PlannedStepCount int             `json:"planned_step_count"`
+		Result           json.RawMessage `json:"result"`
+		Review           json.RawMessage `json:"review"`
+		LatestReview     *struct {
+			ID         string          `json:"id"`
+			Round      int             `json:"round"`
+			Verdict    string          `json:"verdict"`
+			Reason     string          `json:"reason"`
+			ReviewerID string          `json:"reviewer_id"`
+			Review     json.RawMessage `json:"review"`
+		} `json:"latest_review"`
+	} `json:"items"`
+}
+
+func decodeAssetListBoard(t *testing.T, response *httptest.ResponseRecorder) assetListBoardTestWire {
+	t.Helper()
+	var board assetListBoardTestWire
+	if err := json.Unmarshal(response.Body.Bytes(), &board); err != nil {
+		t.Fatalf("asset list board %q: %v", response.Body.String(), err)
+	}
+	return board
+}
+
+func TestProjectAssetListBoardRequiresARealBrowserSession(t *testing.T) {
+	t.Parallel()
+	handler, _, _, _ := bearerKeyHarness(t)
+	path := assetListRoute(assetListBoardRoute, "prj_any", "alist_any")
+
+	anonymous := httptest.NewRecorder()
+	handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, path, nil))
+	if anonymous.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous board = %d %s", anonymous.Code, anonymous.Body.String())
+	}
+
+	bearer := httptest.NewRequest(http.MethodGet, path, nil)
+	bearer.Header.Set("Authorization", "Bearer "+deployToken)
+	bearerResponse := httptest.NewRecorder()
+	handler.ServeHTTP(bearerResponse, bearer)
+	if bearerResponse.Code != http.StatusForbidden {
+		t.Fatalf("bearer board = %d %s", bearerResponse.Code, bearerResponse.Body.String())
+	}
+}
+
+func TestProjectAssetListBoardAggregatesReadOnlyAndOwnerScoped(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID, "Board", defaultListItem())
+	path := assetListRoute(assetListBoardRoute, harness.projectID, list.ID)
+
+	empty := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet, path, "", "")
+	if empty.Code != http.StatusOK {
+		t.Fatalf("board = %d %s", empty.Code, empty.Body.String())
+	}
+	board := decodeAssetListBoard(t, empty)
+	if board.List.ID != list.ID || board.List.Status != assetlist.StatusDraft ||
+		board.List.ItemCount != 1 || board.List.Run != nil ||
+		len(board.Items) != 1 || board.Items[0].ID != list.Items[0].ID ||
+		board.Items[0].PlannedStepCount != 1 || board.Items[0].LatestReview != nil ||
+		string(board.Items[0].Result) != `{}` {
+		t.Fatalf("empty board = %+v", board)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+harness.databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	itemID := list.Items[0].ID
+	if _, err := db.Exec(`
+		UPDATE asset_list_items SET state = ?, round = 2, project_asset_id = ?,
+			result_json = ? WHERE id = ?`,
+		assetlist.StateAccepted, "passet_1", `{"format":"glb","task_id":"task_1"}`, itemID); err != nil {
+		t.Fatal(err)
+	}
+	for _, review := range []struct {
+		id, verdict, reason, review, createdAt string
+		round                                  int
+	}{
+		{"rev_old", assetlist.ReviewVerdictReturned, "size", `{"steps":2}`, "2026-11-18T12:00:00.000000000Z", 1},
+		{"rev_new", assetlist.ReviewVerdictApproved, "ok", `{"steps":4}`, "2026-11-18T12:01:00.000000000Z", 2},
+	} {
+		if _, err := db.Exec(`
+			INSERT INTO asset_list_item_reviews (id, owner_id, list_id, item_id, round,
+				verdict, reason, reviewer_id, review_json, created_at)
+			VALUES (?, 'owner-a', ?, ?, ?, ?, ?, 'owner-a', ?, ?)`,
+			review.id, list.ID, itemID, review.round, review.verdict, review.reason,
+			review.review, review.createdAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var updatedBefore string
+	if err := db.QueryRow(`SELECT updated_at FROM asset_list_items WHERE id = ?`, itemID).
+		Scan(&updatedBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	response := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet, path, "", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("seeded board = %d %s", response.Code, response.Body.String())
+	}
+	board = decodeAssetListBoard(t, response)
+	item := board.Items[0]
+	if item.State != assetlist.StateAccepted || item.Round != 2 ||
+		item.ProjectAssetID != "passet_1" ||
+		string(item.Result) != `{"format":"glb","task_id":"task_1"}` {
+		t.Fatalf("board item = %+v", item)
+	}
+	if item.LatestReview == nil || item.LatestReview.ID != "rev_new" ||
+		item.LatestReview.Verdict != assetlist.ReviewVerdictApproved ||
+		item.LatestReview.Round != 2 || item.LatestReview.ReviewerID != "owner-a" ||
+		string(item.LatestReview.Review) != `{"steps":4}` {
+		t.Fatalf("latest review = %+v", item.LatestReview)
+	}
+
+	// A board GET is read-only: it records no decision and touches no item.
+	var updatedAfter string
+	if err := db.QueryRow(`SELECT updated_at FROM asset_list_items WHERE id = ?`, itemID).
+		Scan(&updatedAfter); err != nil {
+		t.Fatal(err)
+	}
+	if updatedAfter != updatedBefore {
+		t.Fatalf("board updated the item: %q -> %q", updatedBefore, updatedAfter)
+	}
+	var reviewCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM asset_list_item_reviews`).Scan(&reviewCount); err != nil ||
+		reviewCount != 2 {
+		t.Fatalf("reviews after board read = %d, %v", reviewCount, err)
+	}
+
+	// Another owner's list is 404 through the same route.
+	now := time.Now().UTC()
+	if _, err := harness.repository.ProjectRepository().CreateProject(context.Background(), project.Project{
+		ID: "prj_board_b", OwnerID: "owner-b", Name: "B", CreatedAt: now, UpdatedAt: now,
+	}, 20); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := harness.repository.CreateSession(context.Background(), chat.Session{
+		ID: "session-board-b", OwnerID: "owner-b", OwnerName: "B", Title: "B",
+		ProjectID: "prj_board_b", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	foreign := harness.propose(t, "owner-b", "prj_board_b", "session-board-b", "Foreign", defaultListItem())
+	for _, target := range []string{
+		assetListRoute(assetListBoardRoute, "prj_board_b", foreign.ID),
+		assetListRoute(assetListBoardRoute, harness.projectID, "alist_missing"),
+		assetListRoute(assetListBoardRoute, "prj_missing", list.ID),
+	} {
+		missing := grantTestRequest(t, harness.handler, harness.cookie, http.MethodGet, target, "", "")
+		if missing.Code != http.StatusNotFound {
+			t.Fatalf("board %s = %d %s", target, missing.Code, missing.Body.String())
+		}
 	}
 }

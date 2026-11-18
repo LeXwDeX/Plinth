@@ -427,6 +427,9 @@ var assetListsMigration string
 //go:embed migrations/0101_asset_list_runs.sql
 var assetListRunsMigration string
 
+//go:embed migrations/0102_asset_list_item_reviews.sql
+var assetListItemReviewsMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -519,7 +522,8 @@ func migrations() []migration {
 		migration{version: 98, name: "mcp_assets", sql: mcpAssetsMigration},
 		migration{version: 99, name: "chat_self_checks_task", sql: chatSelfChecksTaskMigration},
 		migration{version: 100, name: "asset_lists", sql: assetListsMigration},
-		migration{version: 101, name: "asset_list_runs", sql: assetListRunsMigration})
+		migration{version: 101, name: "asset_list_runs", sql: assetListRunsMigration},
+		migration{version: 102, name: "asset_list_item_reviews", sql: assetListItemReviewsMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -535,7 +539,8 @@ func migrations() []migration {
 // asset-to-session mapping of the external MCP service (#332), 99 the
 // task lookup index of the 3D self-check records (#332) and 100 the project
 // production lists and their items (#327), 101 the long-running execution
-// runs, item execution columns and tab presence of a list (#328).
+// runs, item execution columns and tab presence of a list (#328) and 102 the
+// acceptance decisions of a list item (#329).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))
