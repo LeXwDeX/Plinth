@@ -839,6 +839,32 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Usage:      applicationSchema.Chat.Model3DUsage,
 		Production: applicationSchema.Chat.ModelReview.Inspect.Production,
 	})
+	// #331: the read-only crop_image_regions tool cuts normalized regions out
+	// of one owned picture at original resolution and stores every crop as a
+	// list_crop input asset. The decompose section declares the per-source crop
+	// limit and the crop size bounds; a Catalog without it keeps the package
+	// defaults. The source decode bounds are the mask tool's. The same service
+	// backs the edit crop instruction, through the asset-list Config port.
+	cropConfig := listcrop.Config{
+		Inputs:                     cropInputAssets{inputs: inputAssetService, loader: repository},
+		Tasks:                      module,
+		Crops:                      repository.InputAssetCropRepository(),
+		SourceMaxBytes:             applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+		SourceMaxPixels:            applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+		GeneratedReferenceMaxBytes: applicationSchema.Runtime.InputAssets.GeneratedReferenceMaxBytes,
+		SourceAssetType:            applicationSchema.Runtime.InputAssets.DefaultAssetType,
+	}
+	if applicationSchema.AssetList != nil && applicationSchema.AssetList.Decompose != nil {
+		decompose := applicationSchema.AssetList.Decompose
+		cropConfig.MaximumCropsPerSource = decompose.MaximumItemsPerImage
+		cropConfig.MinimumSide = decompose.Crop.MinimumShortEdge
+		cropConfig.MaximumRegionPixels = decompose.Crop.MaximumRegionPixels
+		cropConfig.UploadMaxBytes = decompose.Crop.MaximumPNGBytes
+	}
+	cropService, err := listcrop.New(cropConfig)
+	if err != nil {
+		return nil, fmt.Errorf("裁剪服务: %w", err)
+	}
 	// Production lists (#327): the service reuses the plan's offering
 	// selection through the chat adapters, so an explicit model lock and an
 	// unavailable provider are reflected in the availability snapshot. The
@@ -865,6 +891,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				inputs: inputAssetService,
 				crops:  repository.InputAssetCropRepository(),
 			},
+			Crops:              cropService,
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
@@ -1003,30 +1030,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	// #331: the read-only crop_image_regions tool cuts normalized regions out
-	// of one owned picture at original resolution and stores every crop as a
-	// list_crop input asset. The decompose section declares the per-source crop
-	// limit and the crop size bounds; a Catalog without it keeps the package
-	// defaults. The source decode bounds are the mask tool's.
-	cropConfig := listcrop.Config{
-		Inputs:                     cropInputAssets{inputs: inputAssetService, loader: repository},
-		Tasks:                      module,
-		Crops:                      repository.InputAssetCropRepository(),
-		SourceMaxBytes:             applicationSchema.Chat.ImageMask.Limits.MaxBytes,
-		SourceMaxPixels:            applicationSchema.Chat.ImageMask.Limits.MaxPixels,
-		GeneratedReferenceMaxBytes: applicationSchema.Runtime.InputAssets.GeneratedReferenceMaxBytes,
-		SourceAssetType:            applicationSchema.Runtime.InputAssets.DefaultAssetType,
-	}
-	if applicationSchema.AssetList != nil && applicationSchema.AssetList.Decompose != nil {
-		decompose := applicationSchema.AssetList.Decompose
-		cropConfig.MaximumCropsPerSource = decompose.MaximumItemsPerImage
-		cropConfig.MinimumSide = decompose.Crop.MinimumShortEdge
-		cropConfig.MaximumRegionPixels = decompose.Crop.MaximumRegionPixels
-		cropConfig.UploadMaxBytes = decompose.Crop.MaximumPNGBytes
-	}
-	cropService, err := listcrop.New(cropConfig)
-	if err != nil {
-		return nil, fmt.Errorf("裁剪服务: %w", err)
-	}
+	// of one owned picture. The service is built above, beside the asset list,
+	// because an edit crop instruction reuses it through the asset-list port.
 	cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
 		Context:  applicationSchema.Chat.Context,
 		Schema:   applicationSchema.Chat.ImageCrop,

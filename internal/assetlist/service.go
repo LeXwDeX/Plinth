@@ -39,7 +39,10 @@ type Config struct {
 	// References resolves input-asset references against the owner's stored
 	// assets and crop provenance (#331), so proposals and edits share one
 	// validation. nil keeps the #327 shape checks only.
-	References      ReferenceAssets
+	References ReferenceAssets
+	// Crops cuts the optional per-item edit crop instruction (#331). nil
+	// refuses crop instructions; the proposal path never accepts them.
+	Crops           Cropper
 	Schema          catalog.AssetListSchema
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
@@ -74,6 +77,7 @@ type Service struct {
 	presence        PresenceStore
 	reviews         ReviewStore
 	referenceAssets ReferenceAssets
+	crops           Cropper
 	// imageItemLimit is application.asset_list.decompose.maximum_items_per_image
 	// (#331); 0 leaves the proposal-time per-image bound unwired.
 	imageItemLimit     int
@@ -153,6 +157,7 @@ func New(config Config) (*Service, error) {
 		presence:           config.Presence,
 		reviews:            config.Reviews,
 		referenceAssets:    config.References,
+		crops:              config.Crops,
 		imageItemLimit:     imageItemLimit,
 		presenceGrace:      presenceGrace,
 		executionEnabled:   executionEnabled,
@@ -222,7 +227,7 @@ func (service *Service) Propose(ctx context.Context, input ProposeInput) (List, 
 		return List{}, err
 	}
 	now := service.clock()
-	items, err := service.buildItems(ctx, ownerID, sessionID, input.Items, now)
+	items, err := service.buildItems(ctx, ownerID, sessionID, input.Items, now, false)
 	if err != nil {
 		return List{}, err
 	}
@@ -275,7 +280,7 @@ func (service *Service) Edit(ctx context.Context, input EditInput) (List, error)
 		return List{}, err
 	}
 	now := service.clock()
-	items, err := service.buildItems(ctx, ownerID, strings.TrimSpace(input.SessionID), input.Items, now)
+	items, err := service.buildItems(ctx, ownerID, strings.TrimSpace(input.SessionID), input.Items, now, true)
 	if err != nil {
 		return List{}, err
 	}
@@ -548,9 +553,10 @@ func (service *Service) brief(raw json.RawMessage) (json.RawMessage, error) {
 // buildItems validates the whole item set before any row is written: the
 // project's item bound, unique names (trimmed, case-insensitive), kinds and
 // routes from the Schema, the per-item reference bound, shape and (when the
-// port is wired) the owner's stored assets and crop provenance, and the
-// availability snapshot of every route step.
-func (service *Service) buildItems(ctx context.Context, ownerID, sessionID string, inputs []ItemInput, now time.Time) ([]Item, error) {
+// port is wired) the owner's stored assets and crop provenance, the optional
+// edit crop instruction, and the availability snapshot of every route step.
+// Only edits may carry crop instructions; a proposal refuses them.
+func (service *Service) buildItems(ctx context.Context, ownerID, sessionID string, inputs []ItemInput, now time.Time, allowCrop bool) ([]Item, error) {
 	if len(inputs) == 0 {
 		return nil, fmt.Errorf("%w: at least one item is required", ErrInvalid)
 	}
@@ -597,7 +603,18 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 		if !slices.Contains(route.Kinds, kindID) {
 			return nil, fmt.Errorf("%w: route %q does not serve kind %q", ErrInvalid, routeID, kindID)
 		}
-		references, err := service.references(ctx, ownerID, input.References, crops)
+		references := input.References
+		var err error
+		if input.Crop != nil {
+			if !allowCrop {
+				return nil, fmt.Errorf("%w: item %d cannot carry a crop instruction in a proposal", ErrInvalid, index+1)
+			}
+			references, err = service.applyCrop(ctx, ownerID, input.Crop, references)
+			if err != nil {
+				return nil, err
+			}
+		}
+		references, err = service.references(ctx, ownerID, references, crops)
 		if err != nil {
 			return nil, err
 		}

@@ -183,13 +183,15 @@ type ProposeInput struct {
 }
 
 // ItemInput is one proposed item. An empty RouteID takes the kind's
-// default_route from the Schema.
+// default_route from the Schema. Crop is the optional edit instruction (#331);
+// a proposal carrying one is refused.
 type ItemInput struct {
 	Kind        string              `json:"kind"`
 	Name        string              `json:"name"`
 	Description string              `json:"description,omitempty"`
 	RouteID     string              `json:"route_id,omitempty"`
 	References  []project.Reference `json:"references,omitempty"`
+	Crop        *CropInstruction    `json:"crop,omitempty"`
 }
 
 // EditInput replaces a draft list's title, brief and items. ExpectedVersion is

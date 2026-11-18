@@ -323,6 +323,26 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 			detail = invalid
 		}
 		writeProblem(writer, http.StatusBadRequest, "asset_list_image_item_limit", detail, err)
+	case errors.Is(err, assetlist.ErrCropRegionTooSmall):
+		// #331: an edit crop instruction whose shortest side is under the
+		// decompose crop bound. The too-small case must precede the generic
+		// region case: it reports both.
+		detail := s.assetListDecomposeMessage(func(messages catalog.AssetListDecomposeMessagesSchema) string {
+			return messages.RegionTooSmall
+		}, map[string]string{"minimum": strconv.Itoa(s.assetListCropMinimumSide())})
+		writeProblem(writer, http.StatusBadRequest, "asset_list_region_too_small", detail, err)
+	case errors.Is(err, assetlist.ErrCropRegionInvalid):
+		detail := s.assetListDecomposeMessage(func(messages catalog.AssetListDecomposeMessagesSchema) string {
+			return messages.RegionInvalid
+		}, nil)
+		writeProblem(writer, http.StatusBadRequest, "asset_list_region_invalid", detail, err)
+	case errors.Is(err, assetlist.ErrReferenceInvalid):
+		// #331: the decompose section owns the crop-reference refusal copy; a
+		// Catalog without it keeps the generic invalid-parameters text.
+		detail := s.assetListDecomposeMessage(func(messages catalog.AssetListDecomposeMessagesSchema) string {
+			return messages.ReferenceInvalid
+		}, nil)
+		writeProblem(writer, http.StatusBadRequest, "asset_list_reference_invalid", detail, err)
 	case errors.Is(err, assetlist.ErrInvalid):
 		writeProblem(writer, http.StatusBadRequest, "invalid_input", invalid, err)
 	default:
@@ -350,6 +370,38 @@ func (s *Server) assetListImageItemLimitMessage() string {
 		return ""
 	}
 	return strings.ReplaceAll(text, "{maximum}", strconv.Itoa(decompose.MaximumItemsPerImage))
+}
+
+// assetListDecomposeMessage fills one decompose refusal copy (#331). A Catalog
+// without the section falls back to the generic invalid-parameters text.
+func (s *Server) assetListDecomposeMessage(
+	pick func(catalog.AssetListDecomposeMessagesSchema) string,
+	values map[string]string,
+) string {
+	detail := ""
+	if s.application.AssetList != nil && s.application.AssetList.Decompose != nil {
+		detail = strings.TrimSpace(pick(s.application.AssetList.Decompose.Messages))
+	}
+	if detail == "" {
+		return s.application.Chat.Presentation.Messages.InvalidParameters
+	}
+	if len(values) == 0 {
+		return detail
+	}
+	replacements := make([]string, 0, len(values)*2)
+	for name, value := range values {
+		replacements = append(replacements, "{"+name+"}", value)
+	}
+	return strings.NewReplacer(replacements...).Replace(detail)
+}
+
+// assetListCropMinimumSide is the declared crop shortest-side bound, filling
+// the region_too_small copy.
+func (s *Server) assetListCropMinimumSide() int {
+	if s.application.AssetList == nil || s.application.AssetList.Decompose == nil {
+		return 0
+	}
+	return s.application.AssetList.Decompose.Crop.MinimumShortEdge
 }
 
 func (s *Server) assetListMaxLists() int {

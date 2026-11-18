@@ -1,12 +1,18 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 	"time"
@@ -75,7 +81,12 @@ func assetListSeedService(t *testing.T, repository *sqlite.Repository, clock fun
 
 func newAssetListHTTPHarness(t *testing.T) *assetListHTTPHarness {
 	t.Helper()
-	module, handler, cookie, _ := grantTestBrowserWithApplication(t, nil, []string{"user"})
+	return newAssetListHTTPHarnessWith(t, nil)
+}
+
+func newAssetListHTTPHarnessWith(t *testing.T, customize func(*catalog.ApplicationSchema)) *assetListHTTPHarness {
+	t.Helper()
+	module, handler, cookie, _ := grantTestBrowserWithApplication(t, customize, []string{"user"})
 	value, ok := fixtureExecutions.Load(module)
 	if !ok {
 		t.Fatal("missing fixture repository")
@@ -811,5 +822,193 @@ func TestProjectAssetListEditValidatesBareCropReferences(t *testing.T) {
 		edited.Items[0].References[0].InputAssetID != "crop_1" ||
 		edited.Items[1].References[0].InputAssetID != "crop_2" {
 		t.Fatalf("edited references = %+v", edited.Items)
+	}
+}
+
+// assetListCropPicture is a 1000x1000 PNG with flat quadrants: big enough for
+// the declared 64-pixel shortest side and cheap to encode.
+func assetListCropPicture() image.Image {
+	picture := image.NewNRGBA(image.Rect(0, 0, 1000, 1000))
+	quadrants := [4]color.NRGBA{
+		{R: 220, G: 40, B: 40, A: 255},
+		{R: 40, G: 220, B: 40, A: 255},
+		{R: 40, G: 40, B: 220, A: 255},
+		{R: 220, G: 220, B: 40, A: 255},
+	}
+	for y := 0; y < 1000; y++ {
+		for x := 0; x < 1000; x++ {
+			index := 0
+			if x >= 500 {
+				index += 1
+			}
+			if y >= 500 {
+				index += 2
+			}
+			picture.SetNRGBA(x, y, quadrants[index])
+		}
+	}
+	return picture
+}
+
+// uploadScene stores one real picture through the browser upload route, so the
+// edit crop instruction has bytes to decode, and returns its input asset id.
+func (harness *assetListHTTPHarness) uploadScene(t *testing.T, picture image.Image) string {
+	t.Helper()
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, picture); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", `form-data; name="`+
+		harness.product.Runtime.InputAssets.UploadFieldName+`"; filename="scene.png"`)
+	header.Set("Content-Type", "image/png")
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(encoded.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost,
+		harness.product.Runtime.HTTP.Routes.Assets, bytes.NewReader(body.Bytes()))
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Origin", "http://example.com")
+	request.AddCookie(harness.cookie)
+	response := httptest.NewRecorder()
+	harness.handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("upload scene = %d %s", response.Code, response.Body.String())
+	}
+	var asset struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &asset); err != nil || asset.ID == "" {
+		t.Fatalf("upload scene body %q: %v", response.Body.String(), err)
+	}
+	return asset.ID
+}
+
+func (harness *assetListHTTPHarness) editDraft(t *testing.T, listID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	return grantTestRequest(t, harness.handler, harness.cookie, http.MethodPut,
+		assetListRoute(assetListItemRoute, harness.projectID, listID), body, "")
+}
+
+// #331: an edit item may carry a crop instruction. The server cuts one region
+// with the real listcrop service, stores a list_crop input asset with its
+// provenance and puts its id in that item's references_json.
+func TestProjectAssetListEditCropInstructionCutsAndReferences(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", defaultListItem())
+	source := harness.uploadScene(t, assetListCropPicture())
+	body := fmt.Sprintf(`{"title":"Cropped","expected_version":0,"items":[`+
+		`{"kind":"character","name":"Knight","crop":{"source_input_asset_id":%q,`+
+		`"region":{"x":0.1,"y":0.2,"width":0.4,"height":0.5}}}]}`, source)
+	response := harness.editDraft(t, list.ID, body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("crop edit = %d %s", response.Code, response.Body.String())
+	}
+	edited := decodeAssetListTestWire(t, response)
+	if edited.Version != 1 || len(edited.Items) != 1 || len(edited.Items[0].References) != 1 {
+		t.Fatalf("edited wire = %+v", edited)
+	}
+	cropID := edited.Items[0].References[0].InputAssetID
+	if cropID == "" || cropID == source {
+		t.Fatalf("crop reference = %+v", edited.Items[0].References)
+	}
+	provenance, found, err := harness.repository.InputAssetCropRepository().Get(
+		context.Background(), generation.OwnerID("owner-a"), generation.AssetID(cropID))
+	if err != nil || !found {
+		t.Fatalf("crop provenance found=%v err=%v", found, err)
+	}
+	if provenance.SourceAssetID != generation.AssetID(source) ||
+		provenance.PixelRect != (listcrop.PixelRect{X0: 100, Y0: 200, X1: 500, Y1: 700}) {
+		t.Fatalf("crop provenance = %+v", provenance)
+	}
+}
+
+// #331: the edit refusal codes of a crop instruction stay in the asset-list
+// vocabulary and reuse the decompose copy.
+func TestProjectAssetListEditCropInstructionRefusalCodes(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", defaultListItem())
+	source := harness.uploadScene(t, assetListCropPicture())
+	put := func(title, region string) *httptest.ResponseRecorder {
+		return harness.editDraft(t, list.ID,
+			fmt.Sprintf(`{"title":%q,"expected_version":0,"items":[`+
+				`{"kind":"character","name":"Knight","crop":{"source_input_asset_id":%q,`+
+				`"region":%s}}]}`, title, source, region))
+	}
+	decompose := harness.product.AssetList.Decompose
+
+	outOfBounds := put("Out of bounds", `{"x":0.8,"y":0.1,"width":0.5,"height":0.2}`)
+	if outOfBounds.Code != http.StatusBadRequest {
+		t.Fatalf("out of bounds = %d %s", outOfBounds.Code, outOfBounds.Body.String())
+	}
+	if problem := decodeAssetListTestProblem(t, outOfBounds); problem.Code != "asset_list_region_invalid" ||
+		problem.Detail != decompose.Messages.RegionInvalid {
+		t.Fatalf("out of bounds problem = %+v", problem)
+	}
+
+	tooSmall := put("Too small", `{"x":0.1,"y":0.1,"width":0.01,"height":0.01}`)
+	if tooSmall.Code != http.StatusBadRequest {
+		t.Fatalf("too small = %d %s", tooSmall.Code, tooSmall.Body.String())
+	}
+	wantSmall := strings.ReplaceAll(decompose.Messages.RegionTooSmall, "{minimum}",
+		fmt.Sprint(decompose.Crop.MinimumShortEdge))
+	if problem := decodeAssetListTestProblem(t, tooSmall); problem.Code != "asset_list_region_too_small" ||
+		problem.Detail != wantSmall {
+		t.Fatalf("too small problem = %+v", problem)
+	}
+
+	missing := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"Missing",`+
+		`"expected_version":0,"items":[{"kind":"character","name":"Knight",`+
+		`"crop":{"source_input_asset_id":"in_missing",`+
+		`"region":{"x":0.1,"y":0.1,"width":0.4,"height":0.4}}}]}`))
+	if missing.Code != http.StatusBadRequest {
+		t.Fatalf("missing source = %d %s", missing.Code, missing.Body.String())
+	}
+	if problem := decodeAssetListTestProblem(t, missing); problem.Code != "asset_list_reference_invalid" ||
+		problem.Detail != decompose.Messages.ReferenceInvalid {
+		t.Fatalf("missing source problem = %+v", problem)
+	}
+}
+
+// #331: the crop instruction counts against maximum_items_per_image while
+// cutting; a second region of the same source over the limit is refused with
+// the image item limit copy.
+func TestProjectAssetListEditCropInstructionHonorsPerImageLimit(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarnessWith(t, func(schema *catalog.ApplicationSchema) {
+		schema.AssetList.Decompose.MaximumItemsPerImage = 1
+	})
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", defaultListItem())
+	source := harness.uploadScene(t, assetListCropPicture())
+	first := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"First",`+
+		`"expected_version":0,"items":[{"kind":"character","name":"Knight",`+
+		`"crop":{"source_input_asset_id":%q,`+
+		`"region":{"x":0.1,"y":0.1,"width":0.4,"height":0.4}}}]}`, source))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first crop = %d %s", first.Code, first.Body.String())
+	}
+	second := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"Second",`+
+		`"expected_version":1,"items":[{"kind":"character","name":"Knight",`+
+		`"crop":{"source_input_asset_id":%q,`+
+		`"region":{"x":0.5,"y":0.5,"width":0.4,"height":0.4}}}]}`, source))
+	if second.Code != http.StatusBadRequest {
+		t.Fatalf("second crop = %d %s", second.Code, second.Body.String())
+	}
+	if problem := decodeAssetListTestProblem(t, second); problem.Code != "asset_list_image_item_limit" {
+		t.Fatalf("second crop problem = %+v", problem)
 	}
 }

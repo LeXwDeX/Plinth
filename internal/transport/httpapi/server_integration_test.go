@@ -783,6 +783,33 @@ type fixtureExecutionState struct {
 	approvals    map[string]fixtureApproval
 }
 
+// harnessCropInputs adapts the harness's input asset service and repository to
+// listcrop.InputAssets (#331), mirroring internal/app's cropInputAssets: the
+// service owns uploads and opens real uploads, the repository projects a
+// finished Task's outputs.
+type harnessCropInputs struct {
+	inputs *inputassets.Service
+	loader *sqlite.Repository
+}
+
+func (store harnessCropInputs) UploadAsset(ctx context.Context, owner generation.OwnerID,
+	upload generation.InputAssetUpload,
+) (generation.InputAsset, error) {
+	return store.inputs.UploadAsset(ctx, owner, upload)
+}
+
+func (store harnessCropInputs) OpenOwned(ctx context.Context, owner generation.OwnerID,
+	id generation.AssetID,
+) (generation.InputAsset, io.ReadCloser, error) {
+	return store.inputs.OpenOwned(ctx, owner, id)
+}
+
+func (store harnessCropInputs) LoadInputAssets(ctx context.Context, owner generation.OwnerID,
+	ids []generation.AssetID,
+) (map[generation.AssetID]generation.InputAsset, error) {
+	return store.loader.LoadInputAssets(ctx, owner, ids)
+}
+
 // hookedGrantRepository is the API's grant repository with a test hook before
 // each decision.
 type hookedGrantRepository struct {
@@ -1839,6 +1866,28 @@ func newHTTPHarnessWithCatalogAndProviders(
 		for _, capability := range applicationSchema.StepPolicy.CountedCapabilities {
 			counted[generation.Capability(capability)] = true
 		}
+		// #331: the edit crop instruction cuts through the same listcrop
+		// service as the crop tool, so the harness assembles it beside the
+		// list service.
+		cropConfig := listcrop.Config{
+			Inputs:                     harnessCropInputs{inputs: inputs, loader: repository},
+			Tasks:                      module,
+			Crops:                      repository.InputAssetCropRepository(),
+			SourceMaxBytes:             applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+			SourceMaxPixels:            applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+			GeneratedReferenceMaxBytes: applicationSchema.Runtime.InputAssets.GeneratedReferenceMaxBytes,
+			SourceAssetType:            applicationSchema.Runtime.InputAssets.DefaultAssetType,
+		}
+		if listSchema.Decompose != nil {
+			cropConfig.MaximumCropsPerSource = listSchema.Decompose.MaximumItemsPerImage
+			cropConfig.MinimumSide = listSchema.Decompose.Crop.MinimumShortEdge
+			cropConfig.MaximumRegionPixels = listSchema.Decompose.Crop.MaximumRegionPixels
+			cropConfig.UploadMaxBytes = listSchema.Decompose.Crop.MaximumPNGBytes
+		}
+		cropService, err := listcrop.New(cropConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
 		assetListService, err = assetlist.New(assetlist.Config{
 			Repository: repository.AssetListRepository(),
 			Runs:       repository.AssetListRunRepository(),
@@ -1847,6 +1896,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 				inputs: inputs,
 				crops:  repository.InputAssetCropRepository(),
 			},
+			Crops:              cropService,
 			Schema:             *listSchema,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
