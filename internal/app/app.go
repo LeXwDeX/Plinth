@@ -57,6 +57,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/imaging"
 	"github.com/LeXwDeX/Plinth/internal/legacythumbnail"
 	"github.com/LeXwDeX/Plinth/internal/lineage"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/llmsettings"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
@@ -145,6 +146,36 @@ func (s renderAssetStore) UploadPNG(ctx context.Context, owner string, pixels []
 		Body: bytes.NewReader(pixels), MediaType: "image/png", OriginalFilename: "render-frame.png",
 		AssetType: "render-frame", MaxBytes: s.maxBytes})
 	return string(asset.ID), err
+}
+
+// cropInputAssets is the crop service's input port (#331): the input asset
+// service owns uploads and opens real uploads, while the repository's
+// LoadInputAssets also projects a finished Task's outputs, which is how a Task
+// source is resolved before it is copied into an input asset.
+type cropInputAssets struct {
+	inputs *inputassets.Service
+	loader interface {
+		LoadInputAssets(context.Context, generation.OwnerID,
+			[]generation.AssetID) (map[generation.AssetID]generation.InputAsset, error)
+	}
+}
+
+func (store cropInputAssets) UploadAsset(ctx context.Context, owner generation.OwnerID,
+	upload generation.InputAssetUpload,
+) (generation.InputAsset, error) {
+	return store.inputs.UploadAsset(ctx, owner, upload)
+}
+
+func (store cropInputAssets) OpenOwned(ctx context.Context, owner generation.OwnerID,
+	id generation.AssetID,
+) (generation.InputAsset, io.ReadCloser, error) {
+	return store.inputs.OpenOwned(ctx, owner, id)
+}
+
+func (store cropInputAssets) LoadInputAssets(ctx context.Context, owner generation.OwnerID,
+	ids []generation.AssetID,
+) (map[generation.AssetID]generation.InputAsset, error) {
+	return store.loader.LoadInputAssets(ctx, owner, ids)
 }
 
 type preparedSceneContext struct {
@@ -907,6 +938,32 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #331: the read-only crop_image_regions tool cuts normalized regions out
+	// of one owned picture at original resolution and stores every crop as a
+	// list_crop input asset. The per-source crop limit falls back to the
+	// listcrop constant until application.asset_list.decompose declares it
+	// (#331b); the source decode bounds are the mask tool's.
+	cropService, err := listcrop.New(listcrop.Config{
+		Inputs:                     cropInputAssets{inputs: inputAssetService, loader: repository},
+		Tasks:                      module,
+		Crops:                      repository.InputAssetCropRepository(),
+		SourceMaxBytes:             applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+		SourceMaxPixels:            applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+		GeneratedReferenceMaxBytes: applicationSchema.Runtime.InputAssets.GeneratedReferenceMaxBytes,
+		SourceAssetType:            applicationSchema.Runtime.InputAssets.DefaultAssetType,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("裁剪服务: %w", err)
+	}
+	cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
+		Context:  applicationSchema.Chat.Context,
+		Schema:   applicationSchema.Chat.ImageCrop,
+		Crops:    cropService,
+		Localize: texts.Text,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("裁剪工具: %w", err)
+	}
 	toolExecutor, err := generationtool.New(generationtool.Config{
 		Logger:          logger,
 		Choices:         repository,
@@ -1000,6 +1057,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ReviseProcessingPlan:  toolExecutor.ReviseProcessingPlan,
 		InspectImage:          imageReview.Inspect,
 		CreateSelectionMask:   imageMask.Execute,
+		CropImageRegions:      cropTool.Execute,
 		InspectModel:          toolExecutor.InspectModel,
 		RenderModelViews:      toolExecutor.RenderModelViews,
 		CompareModels:         toolExecutor.CompareModels,

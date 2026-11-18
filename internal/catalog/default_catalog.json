@@ -7196,6 +7196,18 @@
           "result_note": "已生成选区蒙版（{url}），尺寸 {width}×{height}，覆盖 {coverage}。把它作为 refine_image 的 mask 参数即可只改这个区域；透明=重画，不透明=保持。先让用户确认蒙版无误再提交付费步骤。"
         }
       },
+      "image_crop": {
+        "tool": "crop_image_regions",
+        "texts": {
+          "invalid_arguments": "裁剪参数无效：{detail}。image 只接受 @imgN、@selected 或本人输入资产 ID，不接受 @projectN。",
+          "invalid_region": "裁图区域无效：{detail}。区域用相对原图的归一化坐标（0..1）表示，右/下边界不含。",
+          "image_too_small": "裁图区域太小：{detail}。请把这块区域框得更大一些。",
+          "image_too_large": "图片或裁图区域超过大小上限：{detail}。",
+          "crop_limit_reached": "这张源图的裁图数量已达上限 {limit} 张，不能再新增区域；已裁过的矩形仍会返回原来的资产。",
+          "image_not_found": "找不到可裁剪的源图：{detail}。只能裁剪本人上传或生成的图片；@projectN 和他人资产不可用。",
+          "image_unavailable": "源图暂时无法读取，或不是可裁剪的图片：{detail}。"
+        }
+      },
       "work_ledger": {
         "maximum_steps": 40,
         "summary_maximum_characters": 4000,
@@ -7700,6 +7712,50 @@
               "invert": {"type": "boolean", "description": "Swap the editable and kept areas after building the mask."}
             },
             "required": ["image", "mode"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "crop_image_regions",
+          "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. The result gives each crop's input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "string",
+                "description": "Picture handle (such as @img3) or @selected for the selected picture, or one of your own input asset ids. @projectN is not accepted."
+              },
+              "regions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 24,
+                "description": "The rectangles to cut, in request order. Normalized (0..1) relative to the source picture: x and y start the rectangle, width and height extend it; x+width and y+height must not exceed 1 and both sizes must be positive. The server converts each to source pixels with the right and bottom edges exclusive, and refuses a region whose shortest side is under the Schema minimum or whose area is over the Schema maximum.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "description": "Optional short name echoed in the result so you can match a crop to your list item."
+                    },
+                    "region": {
+                      "type": "object",
+                      "properties": {
+                        "x": {"type": "number", "minimum": 0, "maximum": 1},
+                        "y": {"type": "number", "minimum": 0, "maximum": 1},
+                        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+                        "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+                      },
+                      "required": ["x", "y", "width", "height"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["region"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["image", "regions"],
             "additionalProperties": false
           }
         },
@@ -16331,6 +16387,7 @@
         "chat.pending_approvals",
         "chat.model3d_usage",
         "chat.image2d_usage",
+        "chat.image_crop",
         "chat.choice.kinds",
         "model_delivery",
         "asset_list",
@@ -20146,6 +20203,13 @@
             "chat.image2d_usage.requirements_note.pose_texts.t-pose": "T-pose",
             "chat.image2d_usage.requirements_note.tileable_text": "must tile seamlessly",
             "chat.image2d_usage.requirements_note.guidance_template": "prompt tips: {value}",
+            "chat.image_crop.texts.invalid_arguments": "The crop arguments are invalid: {detail}. image accepts only @imgN, @selected or one of your own input asset ids; @projectN is not accepted.",
+            "chat.image_crop.texts.invalid_region": "The crop region is invalid: {detail}. Regions use normalized coordinates (0..1) relative to the source picture, and the right and bottom edges are exclusive.",
+            "chat.image_crop.texts.image_too_small": "The crop region is too small: {detail}. Make the box larger.",
+            "chat.image_crop.texts.image_too_large": "The picture or the crop region is over a size limit: {detail}.",
+            "chat.image_crop.texts.crop_limit_reached": "This source picture already keeps the maximum of {limit} crops, so no new region can be added; rectangles cropped before still return their stored asset.",
+            "chat.image_crop.texts.image_not_found": "No crop source was found: {detail}. Only your own uploaded or generated pictures can be cropped; @projectN and another owner's assets are not available.",
+            "chat.image_crop.texts.image_unavailable": "The source picture cannot be read right now, or it is not a supported picture: {detail}.",
             "chat.model3d_usage.profiles[id=render].label": "Display / rendering",
             "chat.model3d_usage.profiles[id=render].description": "A model for display, preview or promotion; not aimed at real-time use or printing.",
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",

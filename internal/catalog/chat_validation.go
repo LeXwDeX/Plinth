@@ -759,6 +759,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateImageMask(schema); err != nil {
 		return err
 	}
+	if err := validateImageCrop(schema); err != nil {
+		return err
+	}
 	if err := validateWorkLedger(schema); err != nil {
 		return err
 	}
@@ -991,6 +994,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"recover_task_result":     {"task.refetch", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"inspect_image":           {"image.inspect", "READ", []string{"image", "model-3d"}},
 		"create_selection_mask":   {"image.mask", "READ", []string{"image"}},
+		"crop_image_regions":      {"image.crop", "READ", []string{"image"}},
 		"inspect_model":           {"model.inspect", "READ", []string{"model-3d"}},
 		"render_model_views":      {"model.render", "READ", []string{"model-3d"}},
 		"compare_models":          {"model.compare", "READ", []string{"model-3d"}},
@@ -1756,6 +1760,48 @@ func validateImageMask(schema ChatSchema) error {
 	for _, placeholder := range []string{"{url}", "{width}", "{height}", "{coverage}"} {
 		if !strings.Contains(mask.Texts.ResultNote, placeholder) {
 			return fmt.Errorf("chat.image_mask.texts.result_note 必须包含 %s", placeholder)
+		}
+	}
+	return nil
+}
+
+// validateImageCrop checks the read-only crop_image_regions declaration
+// (#331): the tool it names exists as the declared control tool and every
+// error code the tool result can carry has its Agent-facing copy.
+func validateImageCrop(schema ChatSchema) error {
+	crop := schema.ImageCrop
+	if strings.TrimSpace(crop.Tool) == "" {
+		return nil
+	}
+	declared := false
+	for _, tool := range schema.AgentTools {
+		if tool.Name == crop.Tool && tool.Execution.ImplementationKey == "image.crop" &&
+			len(tool.Execution.Effects) == 1 && tool.Execution.Effects[0] == "READ" {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return fmt.Errorf("chat.image_crop.tool 必须指向声明为 image.crop/READ 的控制工具: %q", crop.Tool)
+	}
+	texts := map[string]struct {
+		text        string
+		placeholder string
+	}{
+		"invalid_arguments":  {crop.Texts.InvalidArguments, "{detail}"},
+		"invalid_region":     {crop.Texts.InvalidRegion, "{detail}"},
+		"image_too_small":    {crop.Texts.ImageTooSmall, "{detail}"},
+		"image_too_large":    {crop.Texts.ImageTooLarge, "{detail}"},
+		"crop_limit_reached": {crop.Texts.CropLimitReached, "{limit}"},
+		"image_not_found":    {crop.Texts.ImageNotFound, "{detail}"},
+		"image_unavailable":  {crop.Texts.ImageUnavailable, "{detail}"},
+	}
+	for code, text := range texts {
+		if strings.TrimSpace(text.text) == "" {
+			return fmt.Errorf("chat.image_crop.texts.%s 不能为空", code)
+		}
+		if !strings.Contains(text.text, text.placeholder) {
+			return fmt.Errorf("chat.image_crop.texts.%s 必须包含 %s", code, text.placeholder)
 		}
 	}
 	return nil

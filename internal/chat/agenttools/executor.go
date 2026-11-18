@@ -56,6 +56,9 @@ const (
 	// ToolCreateSelectionMask builds a local selection mask for one picture and
 	// stores it as the owner's input asset (#244).
 	ToolCreateSelectionMask = "create_selection_mask"
+	// ToolCropImageRegions cuts normalized regions out of one picture and
+	// stores every crop as the owner's list_crop input asset (#331).
+	ToolCropImageRegions = "crop_image_regions"
 	// ToolInspectModel reports the structure of a finished 3D model without
 	// creating a Task (#103).
 	ToolInspectModel = "inspect_model"
@@ -139,6 +142,10 @@ type Config struct {
 	// picture of the command's owner and session, stores a PNG mask as that
 	// owner's input asset and never creates a Task or spends credits.
 	CreateSelectionMask func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// CropImageRegions is the read-only crop tool (#331). It cuts normalized
+	// regions out of one owned picture at original resolution and stores each
+	// crop as a list_crop input asset; no Task, no step and no credits.
+	CropImageRegions func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// InspectModel, RenderModelViews and CompareModels are the read-only model
 	// review tools (#103). They read only the command's owner and session,
 	// never create a Task and never spend credits.
@@ -261,6 +268,7 @@ type Executor struct {
 	reviseProcessingPlan  func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	inspectImage          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	createSelectionMask   func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	cropImageRegions      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	inspectModel          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	renderModelViews      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	compareModels         func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
@@ -412,6 +420,7 @@ func New(config Config) (*Executor, error) {
 		reviseProcessingPlan:   config.ReviseProcessingPlan,
 		inspectImage:           config.InspectImage,
 		createSelectionMask:    config.CreateSelectionMask,
+		cropImageRegions:       config.CropImageRegions,
 		inspectModel:           config.InspectModel,
 		renderModelViews:       config.RenderModelViews,
 		compareModels:          config.CompareModels,
@@ -514,6 +523,11 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "selection mask unavailable", NoSubmission: true}, nil
 		}
 		return e.createSelectionMask(ctx, command)
+	case ToolCropImageRegions:
+		if e.cropImageRegions == nil {
+			return chat.ToolResult{Error: "image crop unavailable", NoSubmission: true}, nil
+		}
+		return e.cropImageRegions(ctx, command)
 	case ToolGetProductionStep:
 		if e.readProductionStep == nil {
 			return chat.ToolResult{Error: "production ledger unavailable", NoSubmission: true}, nil
