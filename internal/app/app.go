@@ -798,6 +798,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			assetListPresence = repository.AssetListPresenceRepository()
 		}
 	}
+	// The kernel paid-gate fallback (#328 §2.5.5, third layer) reuses the same
+	// session→item→run→presence read as the tool Preflight, so a SubmitPrepared
+	// that bypassed the earlier layers cannot create a paid Task while the list
+	// is paused. The helper returns nil outside a declared execution section.
+	module.SetSubmissionGate(newAssetListKernelSubmissionGate(assetListService, applicationSchema.AssetList))
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
 	// The ledger's parameter source is the existing parameter store's
 	// last-writer state (#248): when the person's pin still equals the frozen

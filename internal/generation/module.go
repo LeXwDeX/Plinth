@@ -50,6 +50,11 @@ type Dependencies struct {
 	// Conversions recognizes the Product Schema's declared format
 	// conversions. Nil disables local delivery completion.
 	Conversions DeliveryConversionRule
+	// SubmissionGate is the kernel paid-gate fallback (#328 §2.5.5). It is
+	// consulted only when a Task would be newly created; nil allows every
+	// submission. SetSubmissionGate installs it when assembly builds the gate
+	// after the kernel.
+	SubmissionGate func(ctx context.Context, ownerID, sessionID string) error
 }
 
 // DefaultDispatchCheckpointMaxBytes 是目录未声明时的私有派发意图上限。
@@ -81,6 +86,7 @@ type Module struct {
 	perOwnerMaxInflightTasks   int
 	dispatchCheckpointMaxBytes int64
 	defaultRequestTimeout      time.Duration
+	submissionGate             func(ctx context.Context, ownerID, sessionID string) error
 }
 
 type CacheActivity interface {
@@ -155,6 +161,7 @@ func New(deps Dependencies) (*Module, error) {
 		dispatchCheckpointMaxBytes: dispatchCheckpointMaxBytes,
 		defaultRequestTimeout:      defaultRequestTimeout,
 		perOwnerMaxInflightTasks:   perOwnerMaxInflight,
+		submissionGate:             deps.SubmissionGate,
 	}, nil
 }
 
@@ -274,13 +281,18 @@ func (m *Module) Submit(ctx context.Context, cmd SubmitCommand) (Accepted, error
 	return Accepted{TaskID: created.ID, Replayed: replayed}, nil
 }
 
-// createTask is the one Task admission. A paid format conversion must go
-// through the repository's transactional guard: it reads every active Task of
-// the same owner and session and refuses a second run of the same exact
-// source with an overlapping target format. A repository without the guard
-// cannot admit the conversion, because an unprotected first check would race
-// another submission. Ordinary Tasks keep the existing Create path.
+// createTask is the one Task admission. It first applies the kernel paid-gate
+// fallback to a new Task (idempotent replays pass), then a paid format
+// conversion must go through the repository's transactional guard: it reads
+// every active Task of the same owner and session and refuses a second run of
+// the same exact source with an overlapping target format. A repository
+// without the guard cannot admit the conversion, because an unprotected first
+// check would race another submission. Ordinary Tasks keep the existing Create
+// path.
 func (m *Module) createTask(ctx context.Context, task Task, event Event) (Task, bool, error) {
+	if err := m.admitSubmissionGate(ctx, task); err != nil {
+		return Task{}, false, err
+	}
 	if task.Conversion == nil {
 		return m.repository.Create(ctx, task, event, m.perOwnerMaxInflightTasks)
 	}
@@ -1260,6 +1272,11 @@ var ErrConversionInProgress = errors.New("active format conversion overlaps")
 func mapRepositoryError(operation string, err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, ErrSubmissionBlocked) {
+		// The kernel gate refusal is not a repository failure: keep its reason
+		// and identity for the caller instead of reporting storage trouble.
+		return err
 	}
 	switch {
 	case errors.Is(err, RepositorySessionNotFound):

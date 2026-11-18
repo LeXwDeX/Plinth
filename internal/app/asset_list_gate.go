@@ -7,7 +7,34 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
+
+// newAssetListKernelSubmissionGate builds the third paid-gate layer (#328
+// §2.5.5). Every Task admitted through generation.Module consults the same
+// session→item→run→presence read as the tool Preflight, so already prepared
+// operations and other SubmitPrepared callers cannot bypass a paused list.
+// The refusal carries only the reason; transports map it to Catalog copy.
+func newAssetListKernelSubmissionGate(
+	service *assetlist.Service,
+	schema *catalog.AssetListSchema,
+) func(ctx context.Context, ownerID, sessionID string) error {
+	if service == nil || schema == nil || schema.Execution == nil {
+		return nil
+	}
+	return func(ctx context.Context, ownerID, sessionID string) error {
+		decision, err := service.SubmissionAllowed(ctx, ownerID, sessionID)
+		if err != nil {
+			// A read failure is a refusal: guessing that submission is safe
+			// could take a paid step during a pause whose state we cannot see.
+			return &generation.SubmissionBlockedError{Reason: "unavailable", Cause: err}
+		}
+		if decision.Allowed {
+			return nil
+		}
+		return &generation.SubmissionBlockedError{Reason: decision.Reason}
+	}
+}
 
 // newAssetListSubmissionGate builds the first paid-gate layer (#328 §2.5.5)
 // for the generation tools' Preflight. It is installed only when the Catalog
