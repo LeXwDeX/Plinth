@@ -17,6 +17,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/dsml"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/moderation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
@@ -271,6 +272,18 @@ type OrchestratorConfig struct {
 	// Texts gives the copy of the turn's UI locale. Nil keeps the Schema's
 	// default-locale copy.
 	Texts *catalog.TextLocalizer
+	// StepPolicy is application.step_policy (#330): the Agent's 3D step
+	// segment. Nil keeps the segment out of every prompt.
+	StepPolicy *catalog.StepPolicySchema
+	// StepUsage reads a session's 3D step standing under its owner's setting.
+	// Nil, or an error, writes the standing as unknown for the turn.
+	StepUsage func(ctx context.Context, ownerID, sessionID string) (executiongrant.StepSummary, error)
+	// StepBalances reads the 3D providers' balances through the shared cache.
+	// Nil writes them as unknown.
+	StepBalances func(ctx context.Context) []StepBalance
+	// StepCosts reads the approximate per-step costs of the services the asset
+	// used. Nil writes them as unknown.
+	StepCosts func(ctx context.Context, ownerID, sessionID string) []StepCost
 }
 
 type Orchestrator struct {
@@ -318,8 +331,14 @@ type Orchestrator struct {
 	taskGet        func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
 	stopConsent    func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
 	texts          *catalog.TextLocalizer
-	queue          chan ProcessTurn
-	queueMu        sync.Mutex
+	// stepPolicy, stepUsage, stepBalances and stepCosts render the Agent's
+	// 「3D 步数」segment (#330); a nil policy keeps the segment out.
+	stepPolicy   *catalog.StepPolicySchema
+	stepUsage    func(ctx context.Context, ownerID, sessionID string) (executiongrant.StepSummary, error)
+	stepBalances func(ctx context.Context) []StepBalance
+	stepCosts    func(ctx context.Context, ownerID, sessionID string) []StepCost
+	queue        chan ProcessTurn
+	queueMu      sync.Mutex
 	// titleWaiters counts background title summaries in flight.
 	titleWaiters sync.WaitGroup
 	queued       map[string]struct{}
@@ -692,6 +711,10 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		taskGet:            config.TaskGet,
 		stopConsent:        config.StopConsent,
 		texts:              config.Texts,
+		stepPolicy:         config.StepPolicy,
+		stepUsage:          config.StepUsage,
+		stepBalances:       config.StepBalances,
+		stepCosts:          config.StepCosts,
 		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
 		queued:             map[string]struct{}{},
 		activeCancel:       map[string]context.CancelFunc{},
@@ -2001,6 +2024,10 @@ func (orchestrator *Orchestrator) agentRequest(
 	// The session's real approval mode follows the scope it must not be mixed
 	// up with (#7).
 	sections.add("approval", orchestrator.approvalModePrompt(ctx, ownerID, sessionID))
+	// The 3D step facts follow the approval section and appear only in a
+	// steps session (#330): the mode, the asset's used steps, the three
+	// providers' balances and what one step costs.
+	sections.add("step_policy", orchestrator.stepPolicyPrompt(ctx, ownerID, sessionID))
 	if registryErr == nil {
 		sections.add("skill", orchestrator.skillToolDirective(ctx, registry, options))
 		sections.add("multiview", orchestrator.multiviewDirective(registry, options))

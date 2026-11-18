@@ -345,38 +345,20 @@ func (s *Server) mcpStepCosts(ctx context.Context, owner generation.OwnerID, ses
 	if sessionID == "" || policy == nil {
 		return nil
 	}
-	counted := make(map[generation.Capability]bool, len(policy.CountedCapabilities))
-	for _, capability := range policy.CountedCapabilities {
-		counted[capability] = true
-	}
-	page, err := s.generation.List(ctx, generation.OwnTasks(owner), generation.ListQuery{
-		SessionID: sessionID, Limit: s.application.MCPPublic.StatusBlock.CostTaskWindow,
-	})
+	costs, err := s.generation.StepCosts(ctx, owner, sessionID, policy.CountedCapabilities,
+		s.application.MCPPublic.StatusBlock.CostTaskWindow)
 	if err != nil {
 		s.logger.Warn("MCP 状态块：资产任务读取失败", "owner_id", string(owner), "asset_id", sessionID, "error", err)
 		return nil
 	}
-	var costs []mcppublic.StepCost
-	seen := map[generation.OfferingID]bool{}
-	for _, task := range page.Tasks {
-		if !counted[task.Capability] || seen[task.Offering.ID] {
-			continue
-		}
-		seen[task.Offering.ID] = true
-		offering := task.Offering
-		if current, exists := s.generation.Offering(task.Offering.ID); exists {
-			offering = current
-		}
-		quote := defaultNativePrice(offering)
-		if quote == nil {
-			continue
-		}
-		costs = append(costs, mcppublic.StepCost{
-			OfferingID: string(offering.ID), Provider: offering.ProviderID, Capability: string(task.Capability),
-			Amount: quote.TotalAmount, Unit: quote.Unit, UnitLabel: quote.UnitLabel,
+	result := make([]mcppublic.StepCost, 0, len(costs))
+	for _, cost := range costs {
+		result = append(result, mcppublic.StepCost{
+			OfferingID: cost.OfferingID, Provider: cost.Provider, Capability: cost.Capability,
+			Amount: cost.Amount, Unit: cost.Unit, UnitLabel: cost.UnitLabel,
 		})
 	}
-	return costs
+	return result
 }
 
 // ---- get_task, list_tasks, get_task_assets -----------------------------------

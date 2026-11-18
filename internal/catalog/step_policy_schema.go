@@ -30,11 +30,15 @@ type StepPolicySchema struct {
 	// before the provider is asked again, and BalanceReadTimeoutSeconds how
 	// long one read may take. A failed read is kept for the same time, so a
 	// provider that is down is not asked on every call. Both are read by the
-	// shared balance reader the external MCP service (#332) and later the
-	// platform Agent use; required when application.mcp_public is declared.
+	// shared balance reader the external MCP service (#332) and the platform
+	// Agent use; required when application.mcp_public is declared.
 	// Server-side only.
 	BalanceCacheSeconds       int `json:"balance_cache_seconds,omitempty"`
 	BalanceReadTimeoutSeconds int `json:"balance_read_timeout_seconds,omitempty"`
+	// Prompt is the platform Agent's 3D step segment. It is appended after the
+	// approval-mode section of sessions whose derived approval mode is the
+	// internal steps mode, and never of any other session. Server-side only.
+	Prompt StepPolicyPromptSchema `json:"prompt"`
 	// Messages is the copy of the server's answers. Server-side only.
 	Messages StepPolicyMessagesSchema `json:"messages"`
 	// Audit names the product-audit action of a changed setting.
@@ -55,6 +59,76 @@ type StepPolicyCapSchema struct {
 	Default int `json:"default"`
 	Minimum int `json:"minimum"`
 	Maximum int `json:"maximum"`
+}
+
+// StepPolicyPromptSchema is application.step_policy.prompt (#330): the
+// platform Agent's 3D step context segment. Every number is a fact the turn
+// reads at request time; a read that fails is written as unknown, never as
+// zero, and never blocks the turn.
+type StepPolicyPromptSchema struct {
+	// ContextTemplate is appended after the approval section of a steps
+	// session. Placeholders: {mode_rule}, {usage}, {balances}, {costs},
+	// {guidance}.
+	ContextTemplate string `json:"context_template"`
+	// ModeRules is the rule sentence of each step mode. Placeholders: {mode}
+	// (the mode's label), {cap} (the hard cap in the cap mode).
+	ModeRules []StepPolicyPromptMode `json:"mode_rules"`
+	// ModeUnknownRule is the rule shown when the person's step setting could
+	// not be read this turn. The segment then says the mode is unknown
+	// instead of guessing one.
+	ModeUnknownRule string `json:"mode_unknown_rule"`
+	// UsageLine is the used/cap line of the cap mode: {used}, {cap},
+	// {remaining}.
+	UsageLine string `json:"usage_line"`
+	// UsageLineNoCap is the used line of the agent and unlimited modes:
+	// {used}.
+	UsageLineNoCap string `json:"usage_line_no_cap"`
+	// UsageUnknown is shown when the step standing could not be read.
+	UsageUnknown string `json:"usage_unknown"`
+	// BalanceItem is one known balance in its provider's own unit: {label},
+	// {amount}, {unit_label}.
+	BalanceItem string `json:"balance_item"`
+	// BalanceValueItem is one known balance of a reader without a native
+	// unit: {label}, {amount}.
+	BalanceValueItem string `json:"balance_value_item"`
+	// BalanceUnknown is one unreadable balance: {label}.
+	BalanceUnknown string `json:"balance_unknown"`
+	// BalanceSeparator joins the balance items.
+	BalanceSeparator string `json:"balance_separator"`
+	// BalancesLine wraps the items: {balances}.
+	BalancesLine string `json:"balances_line"`
+	// BalancesUnknown is shown when the deployment declares no balance
+	// account.
+	BalancesUnknown string `json:"balances_unknown"`
+	// CostItem is one service's approximate per-step cost: {capability},
+	// {offering_id}, {amount}, {unit_label}.
+	CostItem string `json:"cost_item"`
+	// CostSeparator joins the cost items.
+	CostSeparator string `json:"cost_separator"`
+	// CostsLine wraps the items: {costs}.
+	CostsLine string `json:"costs_line"`
+	// CostsUnknown is shown when no per-step cost is cheaply derivable.
+	CostsUnknown string `json:"costs_unknown"`
+	// Guidance tells the Agent how to decide whether to continue: stop once
+	// the result is good enough, count the remedy before continuing, stop and
+	// report honestly when the remedy is hopeless or not worth it.
+	Guidance string `json:"guidance"`
+}
+
+// StepPolicyPromptMode is the rule of one step mode in the Agent's segment.
+type StepPolicyPromptMode struct {
+	ID   string `json:"id"`
+	Rule string `json:"rule"`
+}
+
+// Rule returns the rule of one step mode.
+func (prompt StepPolicyPromptSchema) Rule(id string) (string, bool) {
+	for _, mode := range prompt.ModeRules {
+		if mode.ID == id {
+			return mode.Rule, true
+		}
+	}
+	return "", false
 }
 
 // StepPolicyMessagesSchema is the copy the server answers with.

@@ -34,7 +34,7 @@ func mcpStatusFromSchema(
 	application catalog.ApplicationSchema,
 	settings *accountsettings.Service,
 	usage executiongrant.AccessKeyUsageStore,
-	accounts *provideraccounts.Service,
+	balances *provideraccounts.Cache,
 	chatService *chat.Service,
 	texts *catalog.TextLocalizer,
 	logger *slog.Logger,
@@ -43,21 +43,10 @@ func mcpStatusFromSchema(
 	if service == nil {
 		return nil, nil
 	}
-	if settings == nil || application.StepPolicy == nil || accounts == nil {
-		return nil, errors.New("对外 MCP 需要 3D 步数设置与 Provider 账户模块")
+	if settings == nil || application.StepPolicy == nil || balances == nil {
+		return nil, errors.New("对外 MCP 需要 3D 步数设置与共享余额缓存")
 	}
-	cache, err := provideraccounts.NewCache(accounts, provideraccounts.CacheConfig{
-		TTL:     time.Duration(application.StepPolicy.BalanceCacheSeconds) * time.Second,
-		Timeout: time.Duration(application.StepPolicy.BalanceReadTimeoutSeconds) * time.Second,
-		Logger:  logger,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("余额读取缓存: %w", err)
-	}
-	labels := map[string]string{}
-	for _, account := range application.Runtime.HTTP.LegacyProviderBalance.Accounts {
-		labels[account.AccountID] = account.Label
-	}
+	labels := providerBalanceLabels(application)
 	var inspections mcppublic.InspectionReader
 	if chatService != nil {
 		inspections = mcpInspectionReader{chat: chatService, schema: application.Chat.SelfCheck}
@@ -65,7 +54,7 @@ func mcpStatusFromSchema(
 	return mcppublic.New(mcppublic.Config{
 		StatusBlock: service.StatusBlock, StepPolicy: *application.StepPolicy, ProviderAccounts: application.Runtime.ProviderAccounts,
 		AccountLabels: labels,
-		Settings:      settings, Usage: usage, Balances: cache, Inspections: inspections,
+		Settings:      settings, Usage: usage, Balances: balances, Inspections: inspections,
 		Localize: texts.Text, Logger: logger,
 	})
 }
@@ -217,4 +206,90 @@ func (a *Application) serveMCP(listener net.Listener) error {
 	a.logger.Info("对外 MCP 监听已启动（只挂 MCP 路由，没有 TLS，仅限内网或本机）",
 		"address", listener.Addr().String(), "path", a.schema.MCPPublic.Path)
 	return a.mcpServer.Serve(listener)
+}
+
+// providerBalanceLabels names the balance accounts; an account without a
+// label is shown by its ID.
+func providerBalanceLabels(application catalog.ApplicationSchema) map[string]string {
+	labels := map[string]string{}
+	for _, account := range application.Runtime.HTTP.LegacyProviderBalance.Accounts {
+		labels[account.AccountID] = account.Label
+	}
+	return labels
+}
+
+// stepBalanceAccounts lists the balance accounts the platform Agent's 3D step
+// segment shows. It is the external MCP status block's list when that service
+// is declared, and the top bar's list otherwise; only accounts the runtime
+// declares are kept, in Schema order.
+func stepBalanceAccounts(application catalog.ApplicationSchema) []string {
+	var accounts []string
+	if application.MCPPublic != nil {
+		accounts = application.MCPPublic.StatusBlock.BalanceAccounts
+	} else {
+		for _, account := range application.Runtime.HTTP.LegacyProviderBalance.Accounts {
+			accounts = append(accounts, account.AccountID)
+		}
+	}
+	declared := make([]string, 0, len(accounts))
+	for _, account := range accounts {
+		if _, exists := application.Runtime.ProviderAccounts[account]; exists {
+			declared = append(declared, account)
+		}
+	}
+	return declared
+}
+
+// stepBalancesFromSchema builds the platform Agent's balance reader on the
+// shared cache (#330). A nil cache, or a deployment without balance accounts,
+// leaves the segment saying the balances are unknown.
+func stepBalancesFromSchema(
+	application catalog.ApplicationSchema,
+	cache *provideraccounts.Cache,
+) func(context.Context) []chat.StepBalance {
+	if cache == nil {
+		return nil
+	}
+	accounts := stepBalanceAccounts(application)
+	if len(accounts) == 0 {
+		return nil
+	}
+	labels := providerBalanceLabels(application)
+	return func(ctx context.Context) []chat.StepBalance {
+		readings := cache.Read(ctx, accounts)
+		balances := make([]chat.StepBalance, 0, len(accounts))
+		for index, account := range accounts {
+			label := labels[account]
+			if label == "" {
+				label = account
+			}
+			balance := chat.StepBalance{Label: label}
+			if index < len(readings) && readings[index].Known {
+				reading := readings[index]
+				balance.Known = true
+				if reading.Native != nil {
+					balance.Amount, balance.UnitLabel = reading.Native.Amount, reading.Native.UnitLabel
+				} else {
+					balance.Amount = strconv.FormatFloat(reading.Value, 'f', -1, 64)
+				}
+			}
+			balances = append(balances, balance)
+		}
+		return balances
+	}
+}
+
+// defaultStepCostTaskWindow bounds how many of an asset's latest Tasks the
+// platform Agent's per-step cost read scans when the external MCP status block
+// is not declared. Its window lives in that Schema section; without it the
+// same bounded walk uses this default.
+const defaultStepCostTaskWindow = 50
+
+// stepCostTaskWindow is the Task window for the platform Agent's per-step
+// costs, shared with the external MCP status block when declared.
+func stepCostTaskWindow(application catalog.ApplicationSchema) int {
+	if application.MCPPublic != nil && application.MCPPublic.StatusBlock.CostTaskWindow > 0 {
+		return application.MCPPublic.StatusBlock.CostTaskWindow
+	}
+	return defaultStepCostTaskWindow
 }
