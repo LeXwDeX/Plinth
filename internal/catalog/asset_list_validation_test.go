@@ -226,6 +226,9 @@ func TestAssetListValidationRejectsIncompleteOrUnknownDeclarations(t *testing.T)
 		"decision route missing": func(app *catalog.ApplicationSchema) {
 			app.Runtime.HTTP.Routes.ProjectAssetListDecision = ""
 		},
+		"board route missing": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectAssetListBoard = ""
+		},
 		"session asset lists route missing": func(app *catalog.ApplicationSchema) {
 			app.Runtime.HTTP.Routes.ChatSessionAssetLists = ""
 		},
@@ -335,6 +338,9 @@ func TestAssetListRouteParametersAreExact(t *testing.T) {
 		},
 		"decision route without list": func(app *catalog.ApplicationSchema) {
 			app.Runtime.HTTP.Routes.ProjectAssetListDecision = "/api/v1/projects/{projectID}/asset-lists/decision"
+		},
+		"board route without list": func(app *catalog.ApplicationSchema) {
+			app.Runtime.HTTP.Routes.ProjectAssetListBoard = "/api/v1/projects/{projectID}/asset-lists/board"
 		},
 		"session route without session": func(app *catalog.ApplicationSchema) {
 			app.Runtime.HTTP.Routes.ChatSessionAssetLists = "/api/v1/chat/sessions/asset-lists"

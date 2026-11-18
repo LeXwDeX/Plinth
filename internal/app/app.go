@@ -762,6 +762,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Repository:         repository.AssetListRepository(),
 			Runs:               repository.AssetListRunRepository(),
 			Presence:           repository.AssetListPresenceRepository(),
+			Reviews:            repository.AssetListReviewRepository(),
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,

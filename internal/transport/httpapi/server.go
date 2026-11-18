@@ -773,6 +773,10 @@ func (s *Server) routes() {
 		if route := routes.ProjectAssetListDecision; route != "" {
 			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.decideProjectAssetList))
 		}
+		// The acceptance board (#329a) is read-only.
+		if route := routes.ProjectAssetListBoard; route != "" {
+			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.getProjectAssetListBoard))
+		}
 		// Run and item control (#328). The route keys exist in the Catalog from
 		// its declaration but stay unregistered without the list service.
 		if route := routes.ProjectAssetListRun; route != "" {

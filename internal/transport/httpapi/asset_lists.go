@@ -77,6 +77,36 @@ type assetListWire struct {
 	Items        []assetListItemWire `json:"items"`
 }
 
+// assetListReviewWire is one recorded acceptance decision (#329). The review
+// snapshot is opaque to the transport; #329b owns its shape.
+type assetListReviewWire struct {
+	ID         string          `json:"id"`
+	Round      int             `json:"round"`
+	Verdict    string          `json:"verdict"`
+	Reason     string          `json:"reason,omitempty"`
+	ReviewerID string          `json:"reviewer_id,omitempty"`
+	Review     json.RawMessage `json:"review"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+// assetListBoardItemWire adds the produced-artifact reference, the item's
+// acceptance snapshot and the latest decision to the item summary (#329a).
+// The list detail contract stays unchanged.
+type assetListBoardItemWire struct {
+	assetListItemWire
+	Result       json.RawMessage      `json:"result"`
+	Review       json.RawMessage      `json:"review"`
+	LatestReview *assetListReviewWire `json:"latest_review"`
+}
+
+// assetListBoardWire is the read-only acceptance board: the list summary plus
+// every item in position order. A decision is absent, not zeroed, until the
+// person makes one.
+type assetListBoardWire struct {
+	List  assetListSummaryWire     `json:"list"`
+	Items []assetListBoardItemWire `json:"items"`
+}
+
 // assetListEditBody mirrors assetlist.EditInput. References are explicit
 // project references (input asset or Task output); @handles are resolved by
 // the proposal tool, not by this route.
@@ -163,6 +193,43 @@ func assetListItemFields(item assetlist.Item) assetListItemWire {
 		SessionID: item.SessionID, ProjectAssetID: item.ProjectAssetID, Round: item.Round,
 		CreatedAt: item.CreatedAt.UTC(), UpdatedAt: item.UpdatedAt.UTC(),
 	}
+}
+
+func assetListReviewFields(review assetlist.ItemReview) assetListReviewWire {
+	raw := review.Review
+	if len(raw) == 0 {
+		raw = json.RawMessage("{}")
+	}
+	return assetListReviewWire{
+		ID: review.ID, Round: review.Round, Verdict: review.Verdict,
+		Reason: review.Reason, ReviewerID: review.ReviewerID,
+		Review: raw, CreatedAt: review.CreatedAt.UTC(),
+	}
+}
+
+func assetListBoardFields(board assetlist.Board) assetListBoardWire {
+	items := make([]assetListBoardItemWire, 0, len(board.Items))
+	for _, entry := range board.Items {
+		result := entry.Result
+		if len(result) == 0 {
+			result = json.RawMessage("{}")
+		}
+		review := entry.Review
+		if len(review) == 0 {
+			review = json.RawMessage("{}")
+		}
+		wire := assetListBoardItemWire{
+			assetListItemWire: assetListItemFields(entry.Item),
+			Result:            result,
+			Review:            review,
+		}
+		if entry.LatestReview != nil {
+			latest := assetListReviewFields(*entry.LatestReview)
+			wire.LatestReview = &latest
+		}
+		items = append(items, wire)
+	}
+	return assetListBoardWire{List: assetListSummaryFields(board.List), Items: items}
 }
 
 func assetListResultWire(value assetlist.List) assetListWire {
@@ -311,6 +378,24 @@ func (s *Server) getProjectAssetList(writer http.ResponseWriter, request *http.R
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
 	writeJSON(writer, http.StatusOK, assetListResultWire(value))
+}
+
+// getProjectAssetListBoard is the read-only acceptance board (#329a). It
+// writes nothing: the decisions, their snapshots and the batch archive arrive
+// with #329b.
+func (s *Server) getProjectAssetListBoard(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
+	owner, ok := s.assetListOwner(writer, request, principal)
+	if !ok {
+		return
+	}
+	board, err := s.assetLists.Board(request.Context(), owner,
+		request.PathValue("projectID"), request.PathValue("listID"))
+	if err != nil {
+		s.writeAssetListError(writer, err, "")
+		return
+	}
+	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
+	writeJSON(writer, http.StatusOK, assetListBoardFields(board))
 }
 
 func (s *Server) putProjectAssetList(writer http.ResponseWriter, request *http.Request, principal access.Principal) {

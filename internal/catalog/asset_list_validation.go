@@ -200,14 +200,16 @@ func validateAssetList(
 		return err
 	}
 
-	// 路由键只为 #327 PR3 使用；声明清单时四条都必须存在，注册与否由 HTTP
+	// 路由键只为 #327 PR3 使用；声明清单时这几条都必须存在，注册与否由 HTTP
 	// 层决定。
 	routes := schema.Runtime.HTTP.Routes
 	for name, route := range map[string]string{
 		"project_asset_lists":         routes.ProjectAssetLists,
 		"project_asset_list":          routes.ProjectAssetList,
 		"project_asset_list_decision": routes.ProjectAssetListDecision,
-		"chat_session_asset_lists":    routes.ChatSessionAssetLists,
+		// #329a: the read-only acceptance board of one list.
+		"project_asset_list_board": routes.ProjectAssetListBoard,
+		"chat_session_asset_lists": routes.ChatSessionAssetLists,
 	} {
 		if strings.TrimSpace(route) == "" {
 			return fmt.Errorf("application.asset_list 需要 runtime.http.routes.%s", name)

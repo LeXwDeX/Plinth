@@ -2161,6 +2161,7 @@
           "project_asset_lists": "/api/v1/projects/{projectID}/asset-lists",
           "project_asset_list": "/api/v1/projects/{projectID}/asset-lists/{listID}",
           "project_asset_list_decision": "/api/v1/projects/{projectID}/asset-lists/{listID}/decision",
+          "project_asset_list_board": "/api/v1/projects/{projectID}/asset-lists/{listID}/board",
           "chat_session_asset_lists": "/api/v1/chat/sessions/{sessionID}/asset-lists",
           "project_presence": "/api/v1/projects/{projectID}/presence",
           "project_asset_list_run": "/api/v1/projects/{projectID}/asset-lists/{listID}/run",
