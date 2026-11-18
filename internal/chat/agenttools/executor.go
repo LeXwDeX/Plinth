@@ -206,6 +206,11 @@ type Config struct {
 	//（如"未选择生成模型"），返回面向 LLM 的失败文案；空串表示
 	// 通过。批准不再被一次注定失败的调用白白消耗（AGT-04）。
 	Preflight func(command chat.ToolCommand) string
+	// SubmissionGate 是第一层付费闸门（#328 §2.5.5）：生成类工具在提交
+	// 前检查清单 run/项状态与在场，返回非空文案即拒绝。fresh 与已 prepared
+	// 的重放都经过这里；已绑定的 Task 属观察而非新提交，不经过。
+	// nil 表示未装配自动制作，行为不变。
+	SubmissionGate func(ctx context.Context, command chat.ToolCommand) string
 	// ConsentState 读取会话的同意状态；ConsentClear 在一次付费生成
 	// 消费掉批准后清空同意状态（一次性语义）。二者必须同时提供。
 	// ConsentWaitTimeout 界定 request_consent 挂起等待用户决定的最长
@@ -246,6 +251,7 @@ type Executor struct {
 	params                *agentparams.Store
 	generate              chat.ToolExecutor
 	preflight             func(command chat.ToolCommand) string
+	submissionGate        func(ctx context.Context, command chat.ToolCommand) string
 	projection            func() json.RawMessage
 	historyLookup         chat.HistoryLookupPolicy
 	readTask              func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
@@ -398,6 +404,7 @@ func New(config Config) (*Executor, error) {
 		projection:             config.Projection,
 		historyLookup:          config.HistoryLookup,
 		preflight:              config.Preflight,
+		submissionGate:         config.SubmissionGate,
 		readTask:               config.ReadTask,
 		recoverTask:            config.RecoverTask,
 		listModels:             config.ListModels,
@@ -924,6 +931,22 @@ func consentDecision(state map[string]json.RawMessage) string {
 	return ConsentDecisionPending
 }
 
+// submissionRefused runs the first paid-gate layer (#328). A non-empty Schema
+// text refuses the call before any consent claim or generation side effect.
+func (e *Executor) submissionRefused(
+	ctx context.Context,
+	command chat.ToolCommand,
+) (chat.ToolResult, bool) {
+	if e.submissionGate == nil {
+		return chat.ToolResult{}, false
+	}
+	message := e.submissionGate(ctx, command)
+	if message == "" {
+		return chat.ToolResult{}, false
+	}
+	return chat.ToolResult{AgentContent: message, NoSubmission: true}, true
+}
+
 func (e *Executor) generateWithParams(
 	ctx context.Context,
 	command chat.ToolCommand,
@@ -938,6 +961,11 @@ func (e *Executor) generateWithParams(
 	// normalized input. A legacy request_consent decision is only conversational
 	// intent and must never be claimed as authorization for that operation.
 	if exact, ok := e.generate.(interface{ UsesExecutionGrants() bool }); ok && exact.UsesExecutionGrants() {
+		// The first paid-gate layer runs for a fresh operation and for its
+		// already-prepared replay: both are one new submission here.
+		if result, refused := e.submissionRefused(ctx, command); refused {
+			return result, nil
+		}
 		alreadyPrepared := false
 		if reader, ok := e.generate.(interface {
 			ExistingOperation(context.Context, chat.ToolCommand) (bool, error)
@@ -973,6 +1001,11 @@ func (e *Executor) generateWithParams(
 			command.BoundTaskID = taskID
 			return e.generate.Execute(ctx, command, observe)
 		}
+	}
+	// 第一层付费闸门（#328）：清单项会话只在 run 运行且在场时提交新操作。
+	// 已恢复的绑定 Task 在上面按观察返回，不经过这里。
+	if result, refused := e.submissionRefused(ctx, command); refused {
+		return result, nil
 	}
 	// 预检（AGT-04）：不需要用户交互就能判定的失败（未选模型等）
 	// 在同意门禁之前直接返回，批准不再被无效调用消耗。

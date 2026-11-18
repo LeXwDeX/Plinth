@@ -753,6 +753,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		assetListService, err = assetlist.New(assetlist.Config{
 			Repository:         repository.AssetListRepository(),
 			Runs:               repository.AssetListRunRepository(),
+			Presence:           repository.AssetListPresenceRepository(),
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
@@ -988,6 +989,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return agentStateStore.BeginConsent(scope, request, snapshot)
 		},
 		Preflight:                 toolExecutor.SelectionError,
+		SubmissionGate:            newAssetListSubmissionGate(assetListService, applicationSchema.AssetList),
 		MaxGenerationCallsPerTurn: applicationSchema.Chat.Agent.MaxGenerationCallsPerTurn,
 		ConsentApprovedContent:    applicationSchema.Chat.Agent.ConsentApprovedContent,
 		ConsentDeniedContent:      applicationSchema.Chat.Agent.ConsentDeniedContent,

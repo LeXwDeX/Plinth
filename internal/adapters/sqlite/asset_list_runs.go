@@ -174,6 +174,19 @@ func (r *AssetListRunRepository) GetRunByList(ctx context.Context, ownerID, proj
 	return run, nil
 }
 
+// GetRunByListID reads the run when the caller knows the item's list but not
+// its project (the submission gate). The run carries its own project.
+func (r *AssetListRunRepository) GetRunByListID(ctx context.Context, ownerID, listID string) (assetlist.Run, error) {
+	run, err := loadAssetListRunByListID(ctx, r.db, ownerID, listID)
+	if err != nil {
+		if errors.Is(err, assetlist.ErrNotFound) {
+			return assetlist.Run{}, err
+		}
+		return assetlist.Run{}, fmt.Errorf("read asset list run: %w", err)
+	}
+	return run, nil
+}
+
 // RunsByStatus scans the runner's due runs across owners; it has no owner
 // filter because the runner is the server-side scheduler, not a person's
 // request.

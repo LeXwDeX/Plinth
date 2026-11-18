@@ -27,7 +27,11 @@ type Config struct {
 	// Runs reads the execution state, including which item a sub-session
 	// belongs to (#328). nil leaves ItemBySession reporting "no item", which is
 	// the safe answer for a deployment without the runner.
-	Runs            RunStore
+	Runs RunStore
+	// Presence reads the project's unexpired heartbeats (#328). nil, or an
+	// execution section without presence limits, leaves the submission gate
+	// without a presence check.
+	Presence        PresenceStore
 	Schema          catalog.AssetListSchema
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
@@ -59,6 +63,8 @@ type Config struct {
 type Service struct {
 	repository         Repository
 	runs               RunStore
+	presence           PresenceStore
+	presenceGrace      time.Duration
 	limits             catalog.AssetListLimitsSchema
 	projectMaxItems    int
 	maxListsPerProject int
@@ -118,9 +124,15 @@ func New(config Config) (*Service, error) {
 	if newID == nil {
 		newID = randomID
 	}
+	var presenceGrace time.Duration
+	if config.Schema.Execution != nil {
+		presenceGrace = time.Duration(config.Schema.Execution.Presence.GraceSeconds) * time.Second
+	}
 	return &Service{
 		repository:         config.Repository,
 		runs:               config.Runs,
+		presence:           config.Presence,
+		presenceGrace:      presenceGrace,
 		limits:             limits,
 		projectMaxItems:    config.ProjectMaxItems,
 		maxListsPerProject: config.MaxListsPerProject,
