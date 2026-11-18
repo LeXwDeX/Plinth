@@ -149,6 +149,13 @@ type AssetListMessagesSchema struct {
 	StepCapBlocked     string `json:"step_cap_blocked"`
 	NeedsApproval      string `json:"needs_approval"`
 	RunWaiting         string `json:"run_waiting"`
+	// #328 完成工具 submit_asset_list_item 的结果与拒绝文案。
+	ItemReportedDone     string `json:"item_reported_done"`
+	ItemReportedFailed   string `json:"item_reported_failed"`
+	ItemNotInSession     string `json:"item_not_in_session"`
+	ItemNotWorking       string `json:"item_not_working"`
+	ItemNoSuccessfulTask string `json:"item_no_successful_task"`
+	ItemReportFailed     string `json:"item_report_failed"`
 }
 
 // AssetListUISchema 是清单卡与项目面板的固定标题和按钮文案。

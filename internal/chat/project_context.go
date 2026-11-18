@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -89,6 +90,15 @@ func (context *ProjectContext) ProjectAssetByHandle(handle string) *ProjectAsset
 func copyFrozenProject(options *TurnOptions, stored TurnOptions) {
 	options.ProjectID = stored.ProjectID
 	options.ProjectContext = cloneProjectContext(stored.ProjectContext)
+}
+
+// copyFrozenAssetListTurn copies the production-list marks the service froze
+// with a server-started item turn (#328). The caller schedules Process with
+// its own options; the item and its references come from the stored turn, so
+// a caller can never point a turn at another item or rewrite its references.
+func copyFrozenAssetListTurn(options *TurnOptions, stored TurnOptions) {
+	options.AssetListItemID = stored.AssetListItemID
+	options.AssetListReferences = slices.Clone(stored.AssetListReferences)
 }
 
 // cloneProjectContext copies a frozen project snapshot so a running turn

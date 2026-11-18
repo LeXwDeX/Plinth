@@ -6,6 +6,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/project"
 )
 
 var _ chat.AttachmentVerifier = (*Resolver)(nil)
@@ -41,6 +42,89 @@ func (resolver *Resolver) VerifyAttachment(
 	}
 	attachment.ImageSlot = ref.ImageSlot
 	return attachment, nil
+}
+
+// ItemReferenceAttachments turns the stored references of one production-list
+// item into the attachments its sub-session starts with (#328). The item row
+// was verified by the service, so this server path does not apply the client's
+// session rule: a picture of the proposal session is the source of a different
+// session's turn by design. It accepts exactly the frozen references and
+// still checks the owner (and that a Task picture is a file of that Task);
+// VerifyAttachment stays as strict as before and never reads item context.
+func (resolver *Resolver) ItemReferenceAttachments(
+	ctx context.Context,
+	ownerID string,
+	references []project.Reference,
+) ([]chat.Attachment, error) {
+	owner := generation.OwnerID(ownerID)
+	if owner == "" {
+		return nil, chat.ErrAttachmentRejected
+	}
+	result := make([]chat.Attachment, 0, len(references))
+	for _, reference := range references {
+		attachment, err := resolver.itemReferenceAttachment(ctx, owner, reference)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, attachment)
+	}
+	return result, nil
+}
+
+func (resolver *Resolver) itemReferenceAttachment(
+	ctx context.Context,
+	owner generation.OwnerID,
+	reference project.Reference,
+) (chat.Attachment, error) {
+	if !reference.Valid() {
+		return chat.Attachment{}, chat.ErrAttachmentRejected
+	}
+	if reference.InputAssetID != "" {
+		asset, body, err := resolver.inputs.OpenOwned(ctx, owner, generation.AssetID(reference.InputAssetID))
+		if err != nil {
+			return chat.Attachment{}, err
+		}
+		if err := body.Close(); err != nil {
+			return chat.Attachment{}, err
+		}
+		role := chat.AttachmentRoleUpload
+		if resolver.renderAssetType != "" && asset.AssetType == resolver.renderAssetType {
+			role = chat.AttachmentRoleRender
+		}
+		id := generation.AssetID(reference.InputAssetID)
+		return chat.Attachment{
+			Kind:    chat.AttachmentKindImage,
+			Role:    role,
+			AssetID: string(id),
+			URL:     resolver.inputAssetURL(id),
+		}, nil
+	}
+	taskID := generation.TaskID(reference.TaskID)
+	assetID := generation.AssetID(reference.AssetID)
+	task, err := resolver.tasks.Get(ctx, owner, taskID)
+	if err != nil {
+		return chat.Attachment{}, err
+	}
+	if task.ID != taskID || task.OwnerID != owner {
+		return chat.Attachment{}, chat.ErrAttachmentRejected
+	}
+	found := false
+	for _, asset := range task.Assets {
+		if asset.ID == assetID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return chat.Attachment{}, chat.ErrAttachmentRejected
+	}
+	return chat.Attachment{
+		Kind:    chat.AttachmentKindImage,
+		Role:    chat.AttachmentRoleGenerated,
+		AssetID: string(assetID),
+		TaskID:  string(taskID),
+		URL:     resolver.taskAssetURL(taskID, assetID),
+	}, nil
 }
 
 func (resolver *Resolver) verifyImage(

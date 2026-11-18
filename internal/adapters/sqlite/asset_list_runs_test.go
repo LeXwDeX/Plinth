@@ -133,6 +133,16 @@ func TestAssetListRunRepositoryCreateRunIsUniquePerList(t *testing.T) {
 	if _, err := runs.GetRunByList(ctx, "owner-a", "prj_2", "alist_1"); !errors.Is(err, assetlist.ErrNotFound) {
 		t.Fatalf("foreign project run = %v; want ErrNotFound", err)
 	}
+	byList, err := runs.GetRunByListID(ctx, "owner-a", "alist_1")
+	if err != nil || byList.ID != "run_1" || byList.ProjectID != "prj_1" {
+		t.Fatalf("run by list = %+v, %v; want run_1 in prj_1", byList, err)
+	}
+	if _, err := runs.GetRunByListID(ctx, "owner-b", "alist_1"); !errors.Is(err, assetlist.ErrNotFound) {
+		t.Fatalf("foreign owner run by list = %v; want ErrNotFound", err)
+	}
+	if _, err := runs.GetRunByListID(ctx, "owner-a", "alist_missing"); !errors.Is(err, assetlist.ErrNotFound) {
+		t.Fatalf("missing run by list = %v; want ErrNotFound", err)
+	}
 	if _, err := runs.CreateRun(ctx, newAssetListRun("run_3", "owner-a", "prj_1", "alist_missing", assetlist.RunIdle)); !errors.Is(err, assetlist.ErrNotFound) {
 		t.Fatalf("run for missing list = %v; want ErrNotFound", err)
 	}

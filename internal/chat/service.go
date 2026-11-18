@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1124,22 +1125,35 @@ func (service *Service) StartTurn(
 	ctx context.Context,
 	command StartTurn,
 ) (Message, error) {
-	return service.startTurn(ctx, command, "")
+	return service.startTurn(ctx, command, "", nil)
 }
 
 // startTurn starts a turn; planContinuation names the approved production
 // plan a server-started continuation runs (#134), empty for a person's turn.
+// serverOptions carries the fields only the service may set on a turn (#328);
+// StartTurn passes nil.
 func (service *Service) startTurn(
 	ctx context.Context,
 	command StartTurn,
 	planContinuation string,
+	serverOptions *ServerTurnOptions,
 ) (Message, error) {
 	// Client-supplied execution context never becomes a durable turn snapshot.
 	command.Options.Harness = nil
 	command.Options.Selection = nil
 	command.Options.AttachmentPurposes = nil
 	command.Options.SelectionPicked = false
+	// The asset-list marks are the service's, never the caller's (#328).
+	command.Options.AssetListItemID = ""
+	command.Options.AssetListReferences = nil
 	command.Options.PlanContinuation = planContinuation
+	if serverOptions != nil {
+		if serverOptions.Continuation != "" {
+			command.Content = serverOptions.Continuation
+		}
+		command.Options.AssetListItemID = serverOptions.AssetListItemID
+		command.Options.AssetListReferences = slices.Clone(serverOptions.AssetListReferences)
+	}
 	command.Content = strings.TrimSpace(command.Content)
 	if command.Content == "" && len(command.ImageURLs) == 0 {
 		return Message{}, ErrEmptyMessage
@@ -1268,6 +1282,9 @@ func (service *Service) startTurn(
 		}
 	}
 	verified := service.verifyTurnAttachments(ctx, command)
+	if err := service.applyItemTurnReferences(ctx, command.OwnerID, serverOptions, &verified); err != nil {
+		return Message{}, err
+	}
 	for _, purpose := range command.AttachmentPurposes {
 		if purpose.ImageSlot > len(verified.imageVerified) || !verified.imageVerified[purpose.ImageSlot-1] {
 			return Message{}, ErrAttachmentPurposeAttachmentInvalid

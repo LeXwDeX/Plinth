@@ -9,13 +9,16 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// commandReferenceScope is the server-held owner, session and frozen project
-// a generation reference is resolved for. It never comes from tool arguments.
+// commandReferenceScope is the server-held owner, session, frozen project and
+// asset-list item a generation reference is resolved for (#328). It never
+// comes from tool arguments; a client cannot name its own item context.
 func commandReferenceScope(command chat.ToolCommand) references.ReferenceScope {
 	return references.ReferenceScope{
-		Owner:     generation.OwnerID(command.OwnerID),
-		SessionID: command.SessionID,
-		ProjectID: command.Options.ProjectID,
+		Owner:               generation.OwnerID(command.OwnerID),
+		SessionID:           command.SessionID,
+		ProjectID:           command.Options.ProjectID,
+		AssetListItemID:     command.Options.AssetListItemID,
+		AssetListReferences: command.Options.AssetListReferences,
 	}
 }
 

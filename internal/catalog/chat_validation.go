@@ -1000,6 +1000,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"set_visual_anchor":       {"anchor.write", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"list_project_assets":     {"project.list", "READ", []string{"image", "model-3d"}},
 		"propose_asset_list":      {"assetlist.propose", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"submit_asset_list_item":  {"assetlist.submit_item", "SESSION_WRITE", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string

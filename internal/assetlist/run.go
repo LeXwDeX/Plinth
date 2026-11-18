@@ -100,6 +100,10 @@ type RunStore interface {
 	// existing run untouched, like Decide's repeated decision.
 	CreateRun(ctx context.Context, run Run) (Run, error)
 	GetRunByList(ctx context.Context, ownerID, projectID, listID string) (Run, error)
+	// GetRunByListID reads the run of one list when only the item's list is
+	// known (the submission gate). list_id is unique, so the project filter is
+	// unnecessary; the run carries its ProjectID for the presence check.
+	GetRunByListID(ctx context.Context, ownerID, listID string) (Run, error)
 	// RunsByStatus scans runs of every owner for the runner's tick.
 	RunsByStatus(ctx context.Context, status string) ([]Run, error)
 	UpdateRunStatus(ctx context.Context, ownerID, listID, from, to, pauseReason string, at time.Time) (Run, error)

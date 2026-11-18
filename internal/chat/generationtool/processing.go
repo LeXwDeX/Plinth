@@ -850,6 +850,8 @@ func (executor *Executor) executeProcessing(
 			}
 			assets, err := executor.references.Resolve(ctx, references.ReferenceScope{
 				Owner: owner, SessionID: command.SessionID, ProjectID: command.Options.ProjectID,
+				AssetListItemID:     command.Options.AssetListItemID,
+				AssetListReferences: command.Options.AssetListReferences,
 			}, urls)
 			if result, refused := executor.inputRefusal(command, err); refused {
 				return result, nil

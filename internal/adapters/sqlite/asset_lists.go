@@ -28,7 +28,7 @@ const assetListColumns = `id, request_key, owner_id, project_id, COALESCE(source
 	origin_message_id, title, status, version, brief_json, decided_at, decided_by,
 	decision_reason, superseded_by, created_at, updated_at, expires_at`
 
-const assetListItemColumns = `id, owner_id, kind, name, description, references_json,
+const assetListItemColumns = `id, list_id, owner_id, kind, name, description, references_json,
 	route_id, route_json, planned_step_count, planned_model3d_step_count, state,
 	state_reason, version, COALESCE(session_id, ''), project_asset_id, round,
 	last_turn_message_id, next_action_at, block,
@@ -637,7 +637,7 @@ func scanAssetListItem(scanner interface{ Scan(...any) error }) (assetlist.Item,
 	var value assetlist.Item
 	var references, route, result, review, nextActionAt, created, updated string
 	if err := scanner.Scan(
-		&value.ID, &value.OwnerID, &value.Kind, &value.Name, &value.Description,
+		&value.ID, &value.ListID, &value.OwnerID, &value.Kind, &value.Name, &value.Description,
 		&references, &value.RouteID, &route, &value.PlannedStepCount, &value.PlannedModel3DStepCount,
 		&value.State, &value.StateReason, &value.Version, &value.SessionID, &value.ProjectAssetID,
 		&value.Round, &value.LastTurnMessageID, &nextActionAt, &value.Block,

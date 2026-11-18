@@ -27,7 +27,11 @@ type Config struct {
 	// Runs reads the execution state, including which item a sub-session
 	// belongs to (#328). nil leaves ItemBySession reporting "no item", which is
 	// the safe answer for a deployment without the runner.
-	Runs            RunStore
+	Runs RunStore
+	// Presence reads the project's unexpired heartbeats (#328). nil, or an
+	// execution section without presence limits, leaves the submission gate
+	// without a presence check.
+	Presence        PresenceStore
 	Schema          catalog.AssetListSchema
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
@@ -59,6 +63,8 @@ type Config struct {
 type Service struct {
 	repository         Repository
 	runs               RunStore
+	presence           PresenceStore
+	presenceGrace      time.Duration
 	limits             catalog.AssetListLimitsSchema
 	projectMaxItems    int
 	maxListsPerProject int
@@ -118,9 +124,15 @@ func New(config Config) (*Service, error) {
 	if newID == nil {
 		newID = randomID
 	}
+	var presenceGrace time.Duration
+	if config.Schema.Execution != nil {
+		presenceGrace = time.Duration(config.Schema.Execution.Presence.GraceSeconds) * time.Second
+	}
 	return &Service{
 		repository:         config.Repository,
 		runs:               config.Runs,
+		presence:           config.Presence,
+		presenceGrace:      presenceGrace,
 		limits:             limits,
 		projectMaxItems:    config.ProjectMaxItems,
 		maxListsPerProject: config.MaxListsPerProject,
@@ -382,6 +394,54 @@ func (service *Service) ItemBySession(
 		return Item{}, false, nil
 	}
 	return service.runs.ItemBySession(ctx, ownerID, sessionID)
+}
+
+// ItemByID reads one item of the owner's list (#328). A missing, foreign or
+// mismatched list/item pair is ErrNotFound; a read failure is returned. A
+// deployment without a run store has no items.
+func (service *Service) ItemByID(
+	ctx context.Context,
+	ownerID string,
+	listID string,
+	itemID string,
+) (Item, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	listID = strings.TrimSpace(listID)
+	itemID = strings.TrimSpace(itemID)
+	if ownerID == "" || listID == "" || itemID == "" || service.runs == nil {
+		return Item{}, ErrNotFound
+	}
+	return service.runs.ItemByID(ctx, ownerID, listID, itemID)
+}
+
+// RunByList reads the execution state of the owner's confirmed list (#328).
+// A missing run, list or project is ErrNotFound.
+func (service *Service) RunByList(
+	ctx context.Context,
+	ownerID string,
+	projectID string,
+	listID string,
+) (Run, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	projectID = strings.TrimSpace(projectID)
+	listID = strings.TrimSpace(listID)
+	if ownerID == "" || projectID == "" || listID == "" || service.runs == nil {
+		return Run{}, ErrNotFound
+	}
+	return service.runs.GetRunByList(ctx, ownerID, projectID, listID)
+}
+
+// FinishItem applies one terminal item transition (#328): working→review,
+// failed or skipped. A missing item or a state conflict is reported by the run
+// store; the completion tool maps it to its Schema refusal.
+func (service *Service) FinishItem(
+	ctx context.Context,
+	input FinishItemInput,
+) (Item, error) {
+	if service.runs == nil {
+		return Item{}, ErrNotFound
+	}
+	return service.runs.FinishItem(ctx, input)
 }
 
 // decorate derives the read-time effective status and, when the items are

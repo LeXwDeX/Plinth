@@ -34,6 +34,9 @@ type AssetListPolicy struct {
 	// declares the step policy; otherwise it keeps its stored mode, the
 	// stricter result.
 	StepsEnabled bool
+	// Tasks reads the terminal Tasks of one item sub-session for the
+	// completion tool (#328). nil leaves the completion tool unavailable.
+	Tasks AssetListTaskSource
 }
 
 // SetAssetLists installs the production-list proposal writer. Application

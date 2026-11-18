@@ -19,6 +19,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imageinspect"
 	"github.com/LeXwDeX/Plinth/internal/imaging"
+	"github.com/LeXwDeX/Plinth/internal/project"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -81,6 +82,15 @@ type ReferenceScope struct {
 	// false, so they accept only this session, a branch ancestor or a project
 	// registration.
 	AllowAnyOwnerTask bool
+	// AssetListItemID names the production-list item whose turn resolves this
+	// reference (#328). Only the service sets it through StartItemTurn; it is
+	// empty for an ordinary turn.
+	AssetListItemID string
+	// AssetListReferences are that item's references frozen with its turn. A
+	// Task picture is readable in the item's sub-session when it is one of
+	// these exact (task, asset) pairs, even though the picture was made in the
+	// proposal session. Any other pair still follows the ordinary rule.
+	AssetListReferences []project.Reference
 }
 
 type Config struct {
@@ -304,9 +314,10 @@ func (resolver *Resolver) resolveOne(
 
 // taskReferenceAllowed applies the one rule for a Task picture used as a
 // generation input: the owner's own Task of this session (or a Task outside
-// any chat), a branch ancestor this session may read, or a finished Task
-// picture registered in the turn's frozen project (#240). Another session's
-// Task is refused unless exactly one of those holds; another owner never is.
+// any chat), a branch ancestor this session may read, a finished Task picture
+// registered in the turn's frozen project (#240), or one exact reference of
+// the asset-list item this turn runs (#328). Another session's Task is
+// refused unless exactly one of those holds; another owner never is.
 func (resolver *Resolver) taskReferenceAllowed(
 	ctx context.Context,
 	scope ReferenceScope,
@@ -319,6 +330,14 @@ func (resolver *Resolver) taskReferenceAllowed(
 	}
 	if task.ID != taskID || task.OwnerID != scope.Owner {
 		return false, nil
+	}
+	// An item sub-session starts from the exact pictures its item stored
+	// (#328). The pair must match whole: another asset of the same Task or
+	// another Task is still refused. The item row is the service's, never a
+	// claim of this turn.
+	if scope.AssetListItemID != "" &&
+		itemReferenceMatches(scope.AssetListReferences, taskID, assetID) {
+		return true, nil
 	}
 	if scope.AllowAnyOwnerTask || task.SessionID == "" || task.SessionID == scope.SessionID {
 		return true, nil
@@ -343,6 +362,24 @@ func (resolver *Resolver) taskReferenceAllowed(
 		}
 	}
 	return false, nil
+}
+
+// itemReferenceMatches reports whether the Task picture is one of the item's
+// stored references. The pair is compared exactly; an input-asset reference
+// (which carries no Task) never matches a Task picture.
+func itemReferenceMatches(
+	references []project.Reference,
+	taskID generation.TaskID,
+	assetID generation.AssetID,
+) bool {
+	for _, reference := range references {
+		if reference.InputAssetID == "" &&
+			reference.TaskID == string(taskID) &&
+			reference.AssetID == string(assetID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (resolver *Resolver) resolveGenerated(
