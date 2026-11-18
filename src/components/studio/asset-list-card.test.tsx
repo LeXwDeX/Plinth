@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { AssetListCard } from '@/components/studio/asset-list-card';
@@ -10,6 +10,7 @@ import {
   AssetListError,
   type AssetListClient,
   type AssetListDetail,
+  type AssetListCrop,
   type AssetListItem,
   type AssetListRun,
   type CropInstruction,
@@ -23,6 +24,31 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
 const text = (key: string) => schemaText(schema, key);
+
+// jsdom has no PointerEvent; the drag handlers read clientX/clientY and
+// pointerType from it, so the card's tests run on a MouseEvent subclass.
+class TestPointerEvent extends MouseEvent {
+  readonly pointerId: number;
+
+  readonly pointerType: string;
+
+  readonly isPrimary: boolean;
+
+  constructor(type: string, init: PointerEventInit = {}) {
+    super(type, init);
+    this.pointerId = init.pointerId ?? 1;
+    this.pointerType = init.pointerType ?? 'mouse';
+    this.isPrimary = init.isPrimary ?? true;
+  }
+}
+
+beforeAll(() => {
+  Object.defineProperty(window, 'PointerEvent', {
+    configurable: true,
+    writable: true,
+    value: TestPointerEvent,
+  });
+});
 
 afterEach(cleanup);
 
@@ -109,6 +135,7 @@ function clientWith(
 
 function renderCard(options: {
   detail?: AssetListDetail;
+  schema?: ProductSchema;
   decide?: ReturnType<typeof vi.fn>;
   controlRun?: ReturnType<typeof vi.fn>;
   skipItem?: ReturnType<typeof vi.fn>;
@@ -129,7 +156,7 @@ function renderCard(options: {
   const view = render(
     <AssetListCard
       detail={options.detail ?? detail()}
-      schema={schema}
+      schema={options.schema ?? schema}
       projectId="proj"
       client={clientWith(decide, { controlRun, skipItem, edit })}
       onDecided={onDecided}
@@ -544,6 +571,248 @@ describe('AssetListCard draft editing (#331)', () => {
     fireEvent.click(screen.getByTestId('asset-list-save'));
 
     await waitFor(() => expect(screen.getByTestId('asset-list-error').textContent).toBe(refused.detail));
+  });
+});
+
+describe('AssetListCard source crop editing (#331)', () => {
+  const originOne: AssetListCrop = {
+    source_input_asset_id: 'scene_1',
+    region: { x: 0.25, y: 0.25, width: 0.25, height: 0.25 },
+    source_kind: 'image',
+    source_width: 1024,
+    source_height: 512,
+  };
+  const originTwo: AssetListCrop = {
+    source_input_asset_id: 'scene_1',
+    region: { x: 0.5, y: 0.5, width: 0.25, height: 0.25 },
+    source_width: 1024,
+    source_height: 512,
+  };
+
+  function cropped(overrides: Partial<AssetListDetail> = {}): AssetListDetail {
+    return detail({
+      items: [
+        item({ id: 'item_1', references: [{ input_asset_id: 'crop_1' }], crop: originOne }),
+        item({
+          id: 'item_2', kind: 'weapon', name: '长剑',
+          references: [{ input_asset_id: 'crop_2' }], crop: originTwo,
+        }),
+      ],
+      ...overrides,
+    });
+  }
+
+  /** jsdom lays nothing out: the overlay reports the display size the drag needs. */
+  function overlayRect(width = 400, height = 200): Element {
+    const overlay = screen.getByTestId('asset-list-crop-overlay');
+    vi.spyOn(overlay, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height,
+      toJSON: () => ({}),
+    } as DOMRect);
+    return overlay;
+  }
+
+  function drag(overlay: Element, from: [number, number], to: [number, number]) {
+    fireEvent.pointerDown(overlay, { clientX: from[0], clientY: from[1], pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerMove(overlay, { clientX: to[0], clientY: to[1], pointerId: 1, pointerType: 'mouse' });
+    fireEvent.pointerUp(overlay, { clientX: to[0], clientY: to[1], pointerId: 1, pointerType: 'mouse' });
+  }
+
+  function lastEditPayload(edit: ReturnType<typeof vi.fn>) {
+    const calls = edit.mock.calls as unknown as Array<[string, string, {
+      title: string;
+      expected_version: number;
+      items: Array<{
+        kind: string;
+        name: string;
+        description?: string;
+        route_id?: string;
+        references?: Array<{ input_asset_id?: string }>;
+        crop?: CropInstruction;
+      }>;
+    }]>;
+    return calls[calls.length - 1][2];
+  }
+
+  it('shows the shared source picture with numbered normalized boxes', () => {
+    renderCard({ detail: cropped() });
+
+    expect(screen.getByTestId('asset-list-source-image').getAttribute('src')).toBe('/api/v1/assets/scene_1');
+    const first = screen.getByTestId('asset-list-crop-box-0');
+    expect(first.textContent).toBe('1');
+    expect(first.style.left).toBe('25%');
+    expect(first.style.top).toBe('25%');
+    expect(first.style.width).toBe('25%');
+    expect(first.style.height).toBe('25%');
+    const second = screen.getByTestId('asset-list-crop-box-1');
+    expect(second.textContent).toBe('2');
+    expect(second.style.left).toBe('50%');
+    // A read-only draft draws the boxes but offers no drag.
+    expect(screen.queryByTestId('asset-list-crop-hint')).toBeNull();
+  });
+
+  it('explains a draft with no source picture and offers no drawing surface', () => {
+    renderCard({ detail: detail({ items: [item()] }) });
+    expect(screen.getByTestId('asset-list-crop-no-source').textContent).toBe(
+      messages['ui.asset_list.edit_crop_no_source'],
+    );
+    expect(screen.queryByTestId('asset-list-crop-overlay')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    expect(screen.queryByTestId('asset-list-crop-add')).toBeNull();
+    expect(screen.queryByTestId('asset-list-item-recrop-0')).toBeNull();
+  });
+
+  it('warns when items come from more than one source picture', () => {
+    renderCard({
+      detail: detail({
+        items: [
+          item({ id: 'item_1', references: [{ input_asset_id: 'crop_1' }], crop: originOne }),
+          item({
+            id: 'item_2', kind: 'weapon', name: '长剑',
+            references: [{ input_asset_id: 'crop_2' }],
+            crop: { ...originTwo, source_input_asset_id: 'scene_2' },
+          }),
+        ],
+      }),
+    });
+
+    expect(screen.getByTestId('asset-list-crop-mixed').textContent).toBe(
+      messages['ui.asset_list.edit_crop_mixed_source'],
+    );
+    expect(screen.getByTestId('asset-list-crop-box-0')).toBeTruthy();
+    expect(screen.queryByTestId('asset-list-crop-box-1')).toBeNull();
+  });
+
+  it('draws a box, names the new item and saves its crop in the edit body', async () => {
+    const edit = vi.fn(async () => detail({ version: 2 }));
+    renderCard({ detail: cropped(), edit });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    drag(overlayRect(), [40, 20], [240, 120]);
+
+    const form = screen.getByTestId('asset-list-crop-form');
+    expect(form.getAttribute('data-region')).toBe('0.1,0.1,0.5,0.5');
+    expect(screen.getByTestId('asset-list-crop-name-required').textContent).toBe(
+      messages['ui.asset_list.edit_crop_name_required'],
+    );
+    const add = screen.getByTestId('asset-list-crop-form-add') as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+
+    fireEvent.change(screen.getByTestId('asset-list-crop-name'), { target: { value: '宝箱' } });
+    expect(screen.queryByTestId('asset-list-crop-name-required')).toBeNull();
+    fireEvent.change(screen.getByTestId('asset-list-crop-kind'), { target: { value: 'prop' } });
+    fireEvent.click(add);
+
+    // The drawn item joins the draft with the next number on the picture.
+    expect((screen.getByTestId('asset-list-item-name-2') as HTMLInputElement).value).toBe('宝箱');
+    expect(screen.getByTestId('asset-list-crop-box-2').textContent).toBe('3');
+
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    const payload = lastEditPayload(edit);
+    expect(payload.items).toHaveLength(3);
+    expect(payload.items[2]).toEqual({
+      kind: 'prop',
+      name: '宝箱',
+      description: '',
+      references: [],
+      crop: {
+        source_input_asset_id: 'scene_1',
+        region: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 },
+      },
+    });
+  });
+
+  it('re-crops an existing item, keeping its name, kind and route', async () => {
+    const edit = vi.fn(async () => detail({ version: 2 }));
+    renderCard({ detail: cropped(), edit });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.click(screen.getByTestId('asset-list-item-recrop-0'));
+    expect(screen.getByTestId('asset-list-crop-hint').textContent).toBe(
+      messages['ui.asset_list.edit_crop_recrop_hint'],
+    );
+    drag(overlayRect(), [0, 0], [200, 100]);
+
+    const box = screen.getByTestId('asset-list-crop-box-0');
+    expect(box.style.left).toBe('0%');
+    expect(box.style.width).toBe('50%');
+    // The re-crop ends after one drag; the hint returns to adding items.
+    expect(screen.getByTestId('asset-list-crop-hint').textContent).toBe(
+      messages['ui.asset_list.edit_crop_hint'],
+    );
+
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    const payload = lastEditPayload(edit);
+    expect(payload.items[0]).toMatchObject({
+      kind: 'character',
+      name: '主角',
+      route_id: 'text-to-3d',
+      references: [{ input_asset_id: 'crop_1' }],
+      crop: {
+        source_input_asset_id: 'scene_1',
+        region: { x: 0, y: 0, width: 0.5, height: 0.5 },
+      },
+    });
+    // Only the re-cropped item carries an instruction; an unchanged crop is
+    // not cut again.
+    expect(payload.items[1].crop).toBeUndefined();
+  });
+
+  it('refuses a region under the minimum short edge', () => {
+    renderCard({ detail: cropped() });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    // 0.025 of the 1024 px source is 25.6 px, under the 64 px edge.
+    drag(overlayRect(), [0, 0], [10, 10]);
+
+    expect(screen.getByTestId('asset-list-crop-error').textContent).toBe(
+      formatSchemaText(messages['ui.asset_list.edit_crop_too_small'], { minimum: 64 }),
+    );
+    expect(screen.queryByTestId('asset-list-crop-form')).toBeNull();
+    expect(screen.queryByTestId('asset-list-crop-box-2')).toBeNull();
+  });
+
+  it('refuses a new item when the source already holds the Schema maximum', () => {
+    const limited: ProductSchema = {
+      ...schema,
+      asset_list: {
+        ...schema.asset_list!,
+        limits: { ...schema.asset_list!.limits, maximum_items_per_image: 2 },
+      },
+    };
+    renderCard({ detail: cropped(), schema: limited });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    drag(overlayRect(), [0, 0], [200, 100]);
+
+    expect(screen.getByTestId('asset-list-crop-error').textContent).toBe(
+      formatSchemaText(messages['ui.asset_list.edit_crop_image_limit'], { maximum: 2 }),
+    );
+    expect(screen.queryByTestId('asset-list-crop-form')).toBeNull();
+  });
+
+  it('cancels the naming form and the re-crop with Escape', () => {
+    renderCard({ detail: cropped() });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    drag(overlayRect(), [0, 0], [200, 100]);
+    expect(screen.getByTestId('asset-list-crop-form')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('asset-list-crop-form')).toBeNull();
+    expect(screen.queryByTestId('asset-list-crop-box-2')).toBeNull();
+    // Esc leaves the edit itself open.
+    expect(screen.getByTestId('asset-list-save')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('asset-list-item-recrop-1'));
+    expect(screen.getByTestId('asset-list-crop-cancel')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('asset-list-crop-cancel')).toBeNull();
+    expect(screen.getByTestId('asset-list-crop-hint').textContent).toBe(
+      messages['ui.asset_list.edit_crop_hint'],
+    );
   });
 });
 

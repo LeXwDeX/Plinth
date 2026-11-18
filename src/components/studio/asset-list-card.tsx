@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ListChecks } from 'lucide-react';
 
 import { Action } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
   AssetListError,
   type AssetListClient,
+  type AssetListCrop,
   type AssetListDecision,
   type AssetListDetail,
   type AssetListEditInput,
@@ -42,6 +43,14 @@ export interface AssetListCardProps {
 
 type Conflict = { id: string; title: string };
 
+/**
+ * #331: the shortest side a new crop region may have, in source pixels. It
+ * mirrors `application.asset_list.decompose.crop.minimum_short_edge`, which the
+ * public Schema keeps server-side; the server refuses anything smaller with
+ * `asset_list_region_too_small`, so the editor refuses it first.
+ */
+const MIN_CROP_SHORT_EDGE = 64;
+
 /** #331: one item while the card is editing. */
 interface DraftItem {
   /** React key and the identity merge keeps: a merged item keeps the first one. */
@@ -49,13 +58,39 @@ interface DraftItem {
   kind: string;
   name: string;
   description: string;
+  /** Empty on an item drawn by this editor: the server then picks the route. */
   routeID: string;
   references: AssetListReference[];
   state: string;
   /** The region the item's crop was cut from, when the browser resolved it. */
-  origin?: CropInstruction;
+  origin?: AssetListCrop;
   /** An unsaved re-crop instruction to send with the edit. */
   crop?: CropInstruction;
+}
+
+/** #331: one pointer drag over the source picture, in normalized display space. */
+interface CropDrag {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  /** The overlay's display size at pointerdown; the minimum-edge fallback. */
+  width: number;
+  height: number;
+}
+
+/** #331: a drawn region waiting for its name and kind. */
+interface PendingCrop {
+  sourceID: string;
+  region: CropRegion;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function round4(value: number): number {
+  return Math.round(value * 10_000) / 10_000;
 }
 
 /** A scalar brief value; nested objects and arrays have no place on the card. */
@@ -108,6 +143,17 @@ export function AssetListCard({
   const [draft, setDraft] = useState<DraftItem[] | null>(null);
   const [mergeSelection, setMergeSelection] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // #331: the source picture's drawing surface: a live drag, a drawn region
+  // waiting for a name, and the item a drag re-crops next.
+  const [drag, setDrag] = useState<CropDrag | null>(null);
+  const [pendingCrop, setPendingCrop] = useState<PendingCrop | null>(null);
+  const [recropKey, setRecropKey] = useState<string | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newKind, setNewKind] = useState('');
+  const [cropError, setCropError] = useState('');
+  const [naturalSourceSize, setNaturalSourceSize] = useState<{ width: number; height: number } | null>(null);
+  const overlay = useRef<HTMLDivElement | null>(null);
+  const newItemKey = useRef(0);
   const run = detail.run ?? null;
   const text = (key: string) => schemaText(schema, key);
   const busy = pending !== null;
@@ -179,15 +225,16 @@ export function AssetListCard({
 
   // #331: the first input-asset reference is the item's reference picture.
   // Task-output references have no input picture; the card then shows no tile.
-  const referenceImageURL = (references: AssetListReference[]): string => {
-    const assetID = references.find((reference) => reference.input_asset_id)?.input_asset_id ?? '';
+  const inputAssetURL = (assetID: string): string => {
     const template = schema.runtime.http.routes.asset_item;
     if (!assetID || !template) return '';
     return previewAssetUrl(template.replace('{assetID}', encodeURIComponent(assetID)));
   };
+  const referenceImageURL = (references: AssetListReference[]): string =>
+    inputAssetURL(references.find((reference) => reference.input_asset_id)?.input_asset_id ?? '');
   // #331: the detail carries the provenance of the item's crop reference; an
 // item without one (no crop, or an older server) offers no merge entry.
-  const originOf = (item: AssetListItem): CropInstruction | undefined => {
+  const originOf = (item: AssetListItem): AssetListCrop | undefined => {
     const origin = item.crop;
     if (!origin || !origin.source_input_asset_id || !usableRegion(origin.region)) return undefined;
     return origin;
@@ -195,9 +242,64 @@ export function AssetListCard({
   const canMerge = (entry: DraftItem) =>
     Boolean(entry.origin) && entry.references.some((reference) => Boolean(reference.input_asset_id));
 
+  // #331: the source picture is the first resolvable crop origin, editing or
+  // read-only. The server keeps one source picture per list; if an older
+  // local state ever mixed sources, the other source's boxes are not drawn and
+  // the card explains why. A list with no origins has no picture to draw on.
+  const draftOrigins = (draft ?? []).map((entry) => entry.origin);
+  const readOnlyOrigins = items.map(originOf);
+  const origins = draft ? draftOrigins : readOnlyOrigins;
+  const sourceOrigin = origins.find(
+    (origin): origin is AssetListCrop => Boolean(origin?.source_input_asset_id && usableRegion(origin.region)),
+  );
+  const sourceID = sourceOrigin?.source_input_asset_id ?? '';
+  const sourceImageURL = inputAssetURL(sourceID);
+  const sourceBoxes = (draft
+    ? draft.flatMap((entry, index) => (
+      entry.origin && entry.origin.source_input_asset_id === sourceID && usableRegion(entry.origin.region)
+        ? [{ index, name: entry.name, region: entry.origin.region }]
+        : []
+    ))
+    : items.flatMap((item, index) => {
+      const origin = originOf(item);
+      return origin && origin.source_input_asset_id === sourceID
+        ? [{ index, name: item.name, region: origin.region }]
+        : [];
+    }));
+  const mixedSources = Boolean(sourceID) && origins.some(
+    (origin) => Boolean(origin?.source_input_asset_id) && origin?.source_input_asset_id !== sourceID,
+  );
+  // The crop tool measures the minimum short edge in source pixels; the
+  // detail's provenance carries the source size. An older server without it
+  // falls back to the image's natural size, then to the display size.
+  const measuredWidth = Math.max(0, ...origins.map((origin) => origin?.source_width ?? 0));
+  const measuredHeight = Math.max(0, ...origins.map((origin) => origin?.source_height ?? 0));
+  const sourceSize = measuredWidth > 0 && measuredHeight > 0
+    ? { width: measuredWidth, height: measuredHeight }
+    : naturalSourceSize;
+  const maxItemsPerImage = schema.asset_list?.limits.maximum_items_per_image;
+  const sourceItemCount = draft
+    ? draft.filter((entry) => entry.origin?.source_input_asset_id === sourceID).length
+    : 0;
+  const regionStyle = (region: CropRegion) => ({
+    left: `${region.x * 100}%`,
+    top: `${region.y * 100}%`,
+    width: `${region.width * 100}%`,
+    height: `${region.height * 100}%`,
+  });
+
+  /** #331: leave every transient crop gesture; the draft itself is untouched. */
+  const cancelCropGesture = () => {
+    setDrag(null);
+    setPendingCrop(null);
+    setRecropKey(null);
+    setCropError('');
+  };
+
   const startEditing = () => {
     setError(null);
     setMergeSelection([]);
+    cancelCropGesture();
     setDraft(items.map((item): DraftItem => ({
       key: item.id,
       kind: item.kind,
@@ -214,6 +316,7 @@ export function AssetListCard({
     setDraft(null);
     setMergeSelection([]);
     setError(null);
+    cancelCropGesture();
   };
 
   const renameDraft = (key: string, name: string) => {
@@ -248,15 +351,153 @@ export function AssetListCard({
     if (!draft || !mergeReady) return;
     const first = mergeFirst;
     const second = mergeSecond;
-    const crop: CropInstruction = {
-      source_input_asset_id: first.origin!.source_input_asset_id,
+    const origin: AssetListCrop = {
+      ...first.origin!,
       region: unionRegion(first.origin!.region, second.origin!.region),
+    };
+    const crop: CropInstruction = {
+      source_input_asset_id: origin.source_input_asset_id,
+      region: origin.region,
     };
     setDraft(draft
       .filter((entry) => entry.key !== second.key)
-      .map((entry) => (entry.key === first.key ? { ...entry, origin: crop, crop } : entry)));
+      .map((entry) => (entry.key === first.key ? { ...entry, origin, crop } : entry)));
     setMergeSelection([]);
   };
+
+  // #331: a drag is normalized against the displayed picture, so the same
+  // gesture works at any rendered size. All four edges are rounded to four
+  // decimals before the region is stored or submitted.
+  const regionFromDrag = (state: CropDrag): CropRegion => {
+    const left = round4(clamp01(Math.min(state.startX, state.currentX)));
+    const top = round4(clamp01(Math.min(state.startY, state.currentY)));
+    const right = round4(clamp01(Math.max(state.startX, state.currentX)));
+    const bottom = round4(clamp01(Math.max(state.startY, state.currentY)));
+    return { x: left, y: top, width: round4(right - left), height: round4(bottom - top) };
+  };
+
+  const cropTooSmall = (region: CropRegion, display: { width: number; height: number }): boolean => {
+    const sourceWidth = sourceSize?.width || display.width;
+    const sourceHeight = sourceSize?.height || display.height;
+    return region.width * sourceWidth < MIN_CROP_SHORT_EDGE
+      || region.height * sourceHeight < MIN_CROP_SHORT_EDGE;
+  };
+
+  const pointerPoint = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = overlay.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: clamp01((event.clientX - rect.left) / rect.width),
+      y: clamp01((event.clientY - rect.top) / rect.height),
+      width: rect.width,
+      height: rect.height,
+    };
+  };
+
+  const startCropDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draft || saving) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const point = pointerPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    // Capture keeps the drag alive when the pointer leaves the picture; jsdom
+    // and older browsers do not implement it.
+    try { event.currentTarget.setPointerCapture?.(event.pointerId); } catch { /* no capture */ }
+    setPendingCrop(null);
+    setCropError('');
+    setDrag({
+      startX: point.x,
+      startY: point.y,
+      currentX: point.x,
+      currentY: point.y,
+      width: point.width,
+      height: point.height,
+    });
+  };
+
+  const moveCropDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag) return;
+    const point = pointerPoint(event);
+    if (!point) return;
+    setDrag({ ...drag, currentX: point.x, currentY: point.y });
+  };
+
+  const applyRecrop = (key: string, region: CropRegion) => {
+    if (!sourceID) return;
+    const crop: CropInstruction = { source_input_asset_id: sourceID, region };
+    setDraft((current) => current?.map((entry) => (entry.key === key
+      ? { ...entry, origin: { ...entry.origin, source_input_asset_id: sourceID, region }, crop }
+      : entry)) ?? null);
+    setRecropKey(null);
+    setCropError('');
+  };
+
+  const finishCropDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag) return;
+    try {
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+      }
+    } catch { /* no capture */ }
+    const finished = drag;
+    setDrag(null);
+    const region = regionFromDrag(finished);
+    if (!usableRegion(region)) return;
+    if (cropTooSmall(region, finished)) {
+      setCropError(formatSchemaText(text('ui.asset_list.edit_crop_too_small'), { minimum: MIN_CROP_SHORT_EDGE }));
+      return;
+    }
+    if (recropKey) {
+      applyRecrop(recropKey, region);
+      return;
+    }
+    if (maxItemsPerImage && sourceItemCount >= maxItemsPerImage) {
+      setCropError(formatSchemaText(text('ui.asset_list.edit_crop_image_limit'), { maximum: maxItemsPerImage }));
+      return;
+    }
+    setPendingCrop({ sourceID, region });
+    setNewName('');
+    setNewKind(schema.asset_list?.kinds[0]?.id ?? '');
+  };
+
+  const confirmPendingCrop = () => {
+    if (!draft || !pendingCrop) return;
+    const name = newName.trim();
+    if (!name || !newKind) return;
+    const crop: CropInstruction = { source_input_asset_id: pendingCrop.sourceID, region: pendingCrop.region };
+    newItemKey.current += 1;
+    setDraft([...draft, {
+      key: `new-${newItemKey.current}`,
+      kind: newKind,
+      name,
+      description: '',
+      routeID: '',
+      references: [],
+      state: 'todo',
+      origin: crop,
+      crop,
+    }]);
+    setPendingCrop(null);
+    setNewName('');
+    setCropError('');
+  };
+
+  // #331: Esc leaves whichever crop gesture is in flight (a drag, the naming
+  // form, or a re-crop); it never leaves the whole edit.
+  const selectingCrop = Boolean(drag || pendingCrop || recropKey);
+  useEffect(() => {
+    if (!draft || !selectingCrop) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setDrag(null);
+      setPendingCrop(null);
+      setRecropKey(null);
+      setCropError('');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [draft, selectingCrop]);
 
   const save = async () => {
     if (!draft || saving) return;
@@ -272,7 +513,9 @@ export function AssetListCard({
           kind: entry.kind,
           name: entry.name,
           description: entry.description,
-          route_id: entry.routeID,
+          // An item drawn by this editor names no route: the server picks the
+          // reference route for its crop, or the kind's default route.
+          ...(entry.routeID ? { route_id: entry.routeID } : {}),
           references: entry.references,
           ...(entry.crop ? { crop: entry.crop } : {}),
         })),
@@ -400,6 +643,190 @@ export function AssetListCard({
       {availabilityWarning ? (
         <p className="text-warning" data-testid="asset-list-availability-warning">{availabilityWarning}</p>
       ) : null}
+      {detail.status === 'draft' ? (
+        <section className="flex flex-col gap-1" data-testid="asset-list-source">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="text-[11px] text-foreground/70">{text('ui.asset_list.edit_crop_title')}</span>
+            {draft && sourceID ? (
+              <Action
+                type="button"
+                variant="outline"
+                size="xs"
+                className="ml-auto"
+                disabled={saving}
+                onClick={() => {
+                  setRecropKey(null);
+                  setPendingCrop(null);
+                  setCropError('');
+                  overlay.current?.focus();
+                }}
+                data-testid="asset-list-crop-add"
+              >
+                {text('ui.asset_list.edit_crop_add')}
+              </Action>
+            ) : null}
+          </div>
+          {sourceImageURL ? (
+            <>
+              <div className="relative w-fit max-w-full self-center" data-testid="asset-list-source-frame">
+                <img
+                  src={sourceImageURL}
+                  alt={text('ui.asset_list.edit_crop_source')}
+                  className="block max-h-64 w-auto max-w-full rounded-md border border-border bg-muted"
+                  onLoad={(event) => {
+                    const image = event.currentTarget;
+                    if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                      setNaturalSourceSize({ width: image.naturalWidth, height: image.naturalHeight });
+                    }
+                  }}
+                  data-testid="asset-list-source-image"
+                />
+                <div
+                  ref={overlay}
+                  role="group"
+                  tabIndex={draft ? 0 : undefined}
+                  aria-label={text(draft ? 'ui.asset_list.edit_crop_hint' : 'ui.asset_list.edit_crop_title')}
+                  className={`absolute inset-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${
+                    draft ? 'cursor-crosshair touch-none' : ''
+                  }`}
+                  onPointerDown={draft ? startCropDrag : undefined}
+                  onPointerMove={draft ? moveCropDrag : undefined}
+                  onPointerUp={draft ? finishCropDrag : undefined}
+                  onPointerCancel={draft ? cancelCropGesture : undefined}
+                  data-testid="asset-list-crop-overlay"
+                >
+                  {sourceBoxes.map((box) => {
+                    const targeted = Boolean(draft && recropKey && draft[box.index]?.key === recropKey);
+                    return (
+                      <div
+                        key={box.index}
+                        className={`absolute rounded-sm border ${
+                          targeted ? 'border-warning bg-warning/15' : 'border-primary bg-primary/10'
+                        }`}
+                        style={regionStyle(box.region)}
+                        title={box.name}
+                        aria-hidden
+                        data-testid={`asset-list-crop-box-${box.index}`}
+                      >
+                        <span className="absolute left-0 top-0 rounded-sm bg-primary px-0.5 text-[9px] leading-3 text-primary-foreground">
+                          {box.index + 1}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {drag ? (
+                    <div
+                      className="absolute rounded-sm border border-dashed border-primary bg-primary/15"
+                      style={regionStyle(regionFromDrag(drag))}
+                      aria-hidden
+                      data-testid="asset-list-crop-drag"
+                    />
+                  ) : pendingCrop ? (
+                    <div
+                      className="absolute rounded-sm border border-dashed border-primary bg-primary/15"
+                      style={regionStyle(pendingCrop.region)}
+                      aria-hidden
+                      data-testid="asset-list-crop-pending"
+                    />
+                  ) : null}
+                </div>
+              </div>
+              {draft ? (
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px] leading-4 text-muted-foreground">
+                  <p data-testid="asset-list-crop-hint">
+                    {text(recropKey ? 'ui.asset_list.edit_crop_recrop_hint' : 'ui.asset_list.edit_crop_hint')}
+                  </p>
+                  {recropKey ? (
+                    <Action
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={cancelCropGesture}
+                      data-testid="asset-list-crop-cancel"
+                    >
+                      {text('ui.asset_list.edit_crop_cancel')}
+                    </Action>
+                  ) : null}
+                </div>
+              ) : null}
+              {mixedSources ? (
+                <p className="text-warning" data-testid="asset-list-crop-mixed">
+                  {text('ui.asset_list.edit_crop_mixed_source')}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p
+              className="text-[11px] leading-4 text-muted-foreground"
+              data-testid="asset-list-crop-no-source"
+            >
+              {text('ui.asset_list.edit_crop_no_source')}
+            </p>
+          )}
+          {draft && pendingCrop ? (
+            <div
+              className="flex flex-wrap items-end gap-1.5 rounded-md border border-border p-2 text-[11px]"
+              data-testid="asset-list-crop-form"
+              data-region={`${pendingCrop.region.x},${pendingCrop.region.y},${pendingCrop.region.width},${pendingCrop.region.height}`}
+            >
+              <label className="flex min-w-0 flex-col gap-0.5 text-muted-foreground">
+                {text('ui.asset_list.edit_name')}
+                <input
+                  type="text"
+                  autoFocus
+                  value={newName}
+                  maxLength={nameMaxLength}
+                  onChange={(event) => setNewName(event.target.value)}
+                  className="min-w-0 rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground"
+                  data-testid="asset-list-crop-name"
+                />
+              </label>
+              <label className="flex flex-col gap-0.5 text-muted-foreground">
+                {text('ui.asset_list.edit_kind')}
+                <select
+                  value={newKind}
+                  onChange={(event) => setNewKind(event.target.value)}
+                  className="rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground"
+                  data-testid="asset-list-crop-kind"
+                >
+                  {(schema.asset_list?.kinds ?? []).map((kind) => (
+                    <option key={kind.id} value={kind.id}>{kind.label}</option>
+                  ))}
+                </select>
+              </label>
+              {newName.trim() ? null : (
+                <p className="text-warning" data-testid="asset-list-crop-name-required">
+                  {text('ui.asset_list.edit_crop_name_required')}
+                </p>
+              )}
+              <div className="ml-auto flex items-center gap-1.5">
+                <Action
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={cancelCropGesture}
+                  data-testid="asset-list-crop-form-cancel"
+                >
+                  {text('ui.common.cancel')}
+                </Action>
+                <Action
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={!newName.trim() || !newKind}
+                  onClick={confirmPendingCrop}
+                  data-testid="asset-list-crop-form-add"
+                >
+                  {text('ui.common.confirm')}
+                </Action>
+              </div>
+            </div>
+          ) : null}
+          {cropError ? (
+            <p role="alert" className="text-warning" data-testid="asset-list-crop-error">{cropError}</p>
+          ) : null}
+        </section>
+      ) : null}
       {draft ? (
         <ul className="flex flex-col gap-0.5" data-testid="asset-list-items">
           {draft.map((entry, index) => {
@@ -439,12 +866,31 @@ export function AssetListCard({
                 {entry.description ? (
                   <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">{entry.description}</span>
                 ) : null}
+                {sourceID ? (
+                  <Action
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    className={canMerge(entry) ? '' : 'ml-auto'}
+                    aria-pressed={recropKey === entry.key}
+                    disabled={saving}
+                    onClick={() => {
+                      setRecropKey(entry.key);
+                      setPendingCrop(null);
+                      setDrag(null);
+                      setCropError('');
+                    }}
+                    data-testid={`asset-list-item-recrop-${index}`}
+                  >
+                    {text('ui.asset_list.edit_crop_recrop')}
+                  </Action>
+                ) : null}
                 {canMerge(entry) ? (
                   <Action
                     type="button"
                     variant="outline"
                     size="xs"
-                    className="ml-auto"
+                    className={sourceID ? '' : 'ml-auto'}
                     aria-pressed={selected}
                     disabled={saving || (!selected && mergeSelection.length >= 2)}
                     onClick={() => toggleMerge(entry.key)}
@@ -457,7 +903,7 @@ export function AssetListCard({
                   type="button"
                   variant="ghost"
                   size="xs"
-                  className={canMerge(entry) ? '' : 'ml-auto'}
+                  className={canMerge(entry) || sourceID ? '' : 'ml-auto'}
                   disabled={saving || draft.length <= 1}
                   onClick={() => deleteDraft(entry.key)}
                   data-testid={`asset-list-item-delete-${index}`}
