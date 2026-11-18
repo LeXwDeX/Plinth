@@ -116,25 +116,26 @@ describe('asset list client', () => {
     });
   });
 
-  it('posts a run control with the expected version and returns the run', async () => {
+  it('posts a run control with the opaque run version string and returns the run', async () => {
     const run = {
       status: 'running',
       pause_reason: '',
+      version: '2026-11-18T01:00:00.123456789Z',
       item_counts: { todo: 1, working: 1, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
     };
     const fetcher = vi.fn(async () => jsonResponse(run)) as unknown as typeof fetch;
     const client = createAssetListClient(schema, { fetcher });
-    await expect(client.controlRun('prj 1', 'al/1', 'start', 4)).resolves.toEqual(run);
+    await expect(client.controlRun('prj 1', 'al/1', 'start', run.version)).resolves.toEqual(run);
     expect(fetcher).toHaveBeenLastCalledWith('/api/v1/projects/prj%201/asset-lists/al%2F1/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'start', expected_version: 4 }),
+      body: JSON.stringify({ action: 'start', expected_version: '2026-11-18T01:00:00.123456789Z' }),
     });
-    await client.controlRun('prj_1', 'al_1', 'pause', 5, 'manual');
+    await client.controlRun('prj_1', 'al_1', 'pause', '2026-11-18T01:00:01Z', 'manual');
     expect(fetcher).toHaveBeenLastCalledWith('/api/v1/projects/prj_1/asset-lists/al_1/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pause', expected_version: 5, reason: 'manual' }),
+      body: JSON.stringify({ action: 'pause', expected_version: '2026-11-18T01:00:01Z', reason: 'manual' }),
     });
   });
 
@@ -161,7 +162,7 @@ describe('asset list client', () => {
       code: 'asset_list_version_conflict', detail: '制作清单已被更新，请重试。',
     }, 409)) as unknown as typeof fetch;
     const client = createAssetListClient(schema, { fetcher });
-    await expect(client.controlRun('prj_1', 'al_1', 'stop', 2)).rejects.toMatchObject({
+    await expect(client.controlRun('prj_1', 'al_1', 'stop', '2026-11-18T01:00:02Z')).rejects.toMatchObject({
       name: 'AssetListError',
       status: 409,
       code: 'asset_list_version_conflict',

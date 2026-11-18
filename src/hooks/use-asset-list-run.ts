@@ -87,9 +87,11 @@ export function useAssetListRun(options: UseAssetListRunOptions) {
 
   const refresh = useCallback(async () => { await mutate(); }, [mutate]);
 
+  // #328: expectedVersion is the run's opaque `version` string (its updated_at
+  // token); the list's numeric version belongs to decisions and edits.
   const control = useCallback(async (
     action: AssetListRunAction,
-    expectedVersion: number,
+    expectedVersion: string,
     reason?: string,
   ): Promise<AssetListRunState> => {
     if (!projectId || !list) throw new Error('asset list run is not loaded');

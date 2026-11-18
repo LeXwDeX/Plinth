@@ -92,7 +92,10 @@ export function AssetListCard({
           : '';
   const canDecide = detail.status === 'draft' && !expired;
   // #328: only a confirmed, live list runs; stopped and completed are final.
-  const canStart = detail.status === 'confirmed' && !expired && !run;
+  // Start needs the run row created at confirm: its idle state is the only one
+  // with a version token to send. A missing run (execution disabled, or a lost
+  // EnsureRun) has nothing to start, so no start button is offered.
+  const canStart = detail.status === 'confirmed' && !expired && run?.status === 'idle';
   const canPause = detail.status === 'confirmed' && !expired && run?.status === 'running';
   const canResume = detail.status === 'confirmed' && !expired && run?.status === 'paused';
   const canStop = detail.status === 'confirmed' && !expired && Boolean(run) && !runIsTerminal(run);
@@ -127,14 +130,15 @@ export function AssetListCard({
     }
   };
 
-  // #328: expected_version is the list's own version this card rendered; a
-  // stale card is refused by the server instead of overwriting a newer list.
+  // #328: expected_version is the run's opaque version token this card
+  // rendered; the server refuses a stale card instead of overwriting a newer
+  // run. The list's numeric version belongs to decisions and edits.
   const control = async (action: AssetListRunAction) => {
-    if (runPending) return;
+    if (runPending || !run) return;
     setRunPending(action);
     setError(null);
     try {
-      await client.controlRun(projectId, detail.id, action, detail.version);
+      await client.controlRun(projectId, detail.id, action, run.version);
       setStopConfirm(false);
       onRunChanged?.();
     } catch (failure) {

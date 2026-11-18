@@ -12,6 +12,7 @@ import { ProjectPanel } from './project-panel';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = schema.content.messages;
+const runVersion = '2026-11-18T01:00:00.123456789Z';
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 const mock = vi.hoisted(() => {
@@ -102,6 +103,7 @@ beforeEach(() => {
   assetLists.controlRun.mockResolvedValue({
     status: 'paused',
     pause_reason: 'user',
+    version: runVersion,
     item_counts: { todo: 1, working: 0, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
   });
   assetLists.skipItem.mockResolvedValue({});
@@ -242,6 +244,7 @@ describe('project panel', () => {
     const run = {
       status: 'running',
       pause_reason: '',
+      version: runVersion,
       item_counts: { todo: 1, working: 1, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
     };
     assetLists.listProjectLists.mockResolvedValue([
@@ -258,7 +261,7 @@ describe('project panel', () => {
 
     fireEvent.click(screen.getByTestId('asset-list-run-pause'));
     await waitFor(() => expect(assetLists.controlRun).toHaveBeenCalledWith(
-      'prj_1', 'list_confirmed', 'pause', 2,
+      'prj_1', 'list_confirmed', 'pause', runVersion,
     ));
     // The run change re-reads the project list and the card's own detail.
     await waitFor(() => expect(assetLists.listProjectLists).toHaveBeenCalledTimes(2));

@@ -70,10 +70,13 @@ function detail(overrides: Partial<AssetListDetail> = {}): AssetListDetail {
   };
 }
 
+const runVersion = '2026-11-18T01:00:00.123456789Z';
+
 function run(overrides: Partial<AssetListRun> = {}): AssetListRun {
   return {
     status: 'running',
     pause_reason: '',
+    version: runVersion,
     item_counts: { todo: 1, working: 1, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
     ...overrides,
   };
@@ -315,13 +318,13 @@ describe('AssetListCard run controls (#328)', () => {
     expect(screen.getByTestId('asset-list-run-resume').textContent).toBe(messages['ui.asset_list.run_resume']);
   });
 
-  it('starts a confirmed list with the list version and tells the parent to refresh', async () => {
-    const { controlRun, onRunChanged } = renderCard({ detail: confirmed(null) });
+  it('starts an idle run with the run\'s opaque version string and tells the parent to refresh', async () => {
+    const { controlRun, onRunChanged } = renderCard({ detail: confirmed(run({ status: 'idle' })) });
 
-    expect(screen.queryByTestId('asset-list-run')).toBeNull();
+    expect(screen.queryByTestId('asset-list-run-start')).toBeTruthy();
     fireEvent.click(screen.getByTestId('asset-list-run-start'));
 
-    await waitFor(() => expect(controlRun).toHaveBeenCalledWith('proj', 'listid', 'start', 3));
+    await waitFor(() => expect(controlRun).toHaveBeenCalledWith('proj', 'listid', 'start', runVersion));
     await waitFor(() => expect(onRunChanged).toHaveBeenCalledTimes(1));
   });
 
@@ -330,14 +333,14 @@ describe('AssetListCard run controls (#328)', () => {
 
     expect(screen.queryByTestId('asset-list-run-start')).toBeNull();
     fireEvent.click(screen.getByTestId('asset-list-run-pause'));
-    await waitFor(() => expect(controlRun).toHaveBeenCalledWith('proj', 'listid', 'pause', 3));
+    await waitFor(() => expect(controlRun).toHaveBeenCalledWith('proj', 'listid', 'pause', runVersion));
 
     fireEvent.click(screen.getByTestId('asset-list-run-stop'));
     expect(screen.getByTestId('asset-list-run-stop-confirm').textContent).toContain(messages['ui.asset_list.run_stop_confirm']);
     expect(controlRun).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByTestId('asset-list-run-stop-confirmed'));
-    await waitFor(() => expect(controlRun).toHaveBeenLastCalledWith('proj', 'listid', 'stop', 3));
+    await waitFor(() => expect(controlRun).toHaveBeenLastCalledWith('proj', 'listid', 'stop', runVersion));
     await waitFor(() => expect(screen.queryByTestId('asset-list-run-stop-confirm')).toBeNull());
   });
 
@@ -351,8 +354,14 @@ describe('AssetListCard run controls (#328)', () => {
     expect(controlRun).not.toHaveBeenCalled();
   });
 
-  it('shows no run control on a draft, stopped or completed list', () => {
+  it('shows no run control on a draft, run-less, stopped or completed list', () => {
     renderCard({ detail: detail() });
+    expect(screen.queryByTestId('asset-list-run-controls')).toBeNull();
+
+    // A confirmed list without a run has no version token to send, so start is
+    // not offered; the server would refuse both the missing token and no run.
+    cleanup();
+    renderCard({ detail: confirmed(null) });
     expect(screen.queryByTestId('asset-list-run-controls')).toBeNull();
 
     cleanup();

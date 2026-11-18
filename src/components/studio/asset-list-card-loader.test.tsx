@@ -66,6 +66,7 @@ function clientWith(getList: ReturnType<typeof vi.fn>): AssetListClient {
     decide: vi.fn(async () => detail()),
     controlRun: vi.fn(async () => ({
       status: 'running',
+      version: '2026-11-18T01:00:00.123456789Z',
       item_counts: { todo: 0, working: 0, review: 0, accepted: 1, returned: 0, failed: 0, skipped: 0 },
     })) as unknown as AssetListClient['controlRun'],
     skipItem: vi.fn(async () => item({ state: 'skipped' })) as unknown as AssetListClient['skipItem'],

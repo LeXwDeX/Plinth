@@ -21,6 +21,7 @@ function run(overrides: Partial<AssetListRun> = {}): AssetListRun {
   return {
     status: 'running',
     pause_reason: '',
+    version: '2026-11-18T01:00:00.123456789Z',
     item_counts: { todo: 1, working: 1, review: 1, accepted: 2, returned: 0, failed: 0, skipped: 0 },
     ...overrides,
   };

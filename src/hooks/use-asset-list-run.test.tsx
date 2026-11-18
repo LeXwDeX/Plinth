@@ -20,10 +20,13 @@ const schema = defaultCatalog.application as unknown as ProductSchema;
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
 
+const runVersion = '2026-11-18T01:00:00.123456789Z';
+
 function run(overrides: Partial<AssetListRun> = {}): AssetListRun {
   return {
     status: 'running',
     pause_reason: '',
+    version: runVersion,
     item_counts: { todo: 1, working: 1, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
     ...overrides,
   };
@@ -150,10 +153,10 @@ describe('useAssetListRun (#328)', () => {
     await waitFor(() => expect(result.current.run).toEqual(run()));
 
     await act(async () => {
-      await result.current.control('pause', 4);
+      await result.current.control('pause', runVersion);
     });
 
-    expect(client.controlRun).toHaveBeenCalledWith('prj_1', 'al_1', 'pause', 4, undefined);
+    expect(client.controlRun).toHaveBeenCalledWith('prj_1', 'al_1', 'pause', runVersion, undefined);
     expect(client.listProjectLists).toHaveBeenCalledTimes(2);
   });
 

@@ -30,12 +30,15 @@ export interface AssetListRunCounts {
 /**
  * #328: what a run control answers. `status` is the server's wire spelling
  * (idle, running, paused, stopped, completed); `pause_reason` is empty unless
- * paused (user, presence, step_cap, failure). The control response carries no
- * item tally, so the card re-reads the list instead of rendering this object.
+ * paused (user, presence, step_cap, failure); `version` is the run's opaque
+ * updated_at token. The card still re-reads the list instead of rendering this
+ * answer's item tally.
  */
 export interface AssetListRunState {
   status: string;
   pause_reason?: string;
+  /** The run's opaque RFC3339Nano updated_at token; never the list's version. */
+  version: string;
 }
 
 /** #328: the run summary on a project or detail list. */
@@ -151,12 +154,16 @@ export interface AssetListClient {
   getList(projectID: string, listID: string): Promise<AssetListDetail>;
   decide(projectID: string, listID: string, decision: AssetListDecision, reason?: string): Promise<AssetListDetail>;
   listSessionLists(sessionID: string): Promise<AssetListSummary[]>;
-  /** #328: start, pause, resume or stop the list's run; resolves to the new run. */
+  /**
+   * #328: start, pause, resume or stop the list's run; resolves to the new run.
+   * `expectedVersion` is the run summary's opaque `version` string, not the
+   * list's numeric version.
+   */
   controlRun(
     projectID: string,
     listID: string,
     action: AssetListRunAction,
-    expectedVersion: number,
+    expectedVersion: string,
     reason?: string,
   ): Promise<AssetListRunState>;
   /** #328: skip one item of a list; resolves to the item as the server stored it. */
