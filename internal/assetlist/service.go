@@ -23,7 +23,11 @@ import (
 // existing per-list item bound (the asset_list section deliberately declares
 // no second name for it).
 type Config struct {
-	Repository      Repository
+	Repository Repository
+	// Runs reads the execution state, including which item a sub-session
+	// belongs to (#328). nil leaves ItemBySession reporting "no item", which is
+	// the safe answer for a deployment without the runner.
+	Runs            RunStore
 	Schema          catalog.AssetListSchema
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
@@ -54,6 +58,7 @@ type Config struct {
 // Service implements the list workflow over a Repository.
 type Service struct {
 	repository         Repository
+	runs               RunStore
 	limits             catalog.AssetListLimitsSchema
 	projectMaxItems    int
 	maxListsPerProject int
@@ -115,6 +120,7 @@ func New(config Config) (*Service, error) {
 	}
 	return &Service{
 		repository:         config.Repository,
+		runs:               config.Runs,
 		limits:             limits,
 		projectMaxItems:    config.ProjectMaxItems,
 		maxListsPerProject: config.MaxListsPerProject,
@@ -360,6 +366,22 @@ func (service *Service) ListSession(ctx context.Context, ownerID, sessionID stri
 		result = append(result, service.decorate(list))
 	}
 	return result, nil
+}
+
+// ItemBySession reports the item whose sub-session is sessionID, owner-scoped
+// (#328). false is an ordinary session, not an error; a read failure is
+// returned so callers never guess a session's role.
+func (service *Service) ItemBySession(
+	ctx context.Context,
+	ownerID string,
+	sessionID string,
+) (Item, bool, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	sessionID = strings.TrimSpace(sessionID)
+	if ownerID == "" || sessionID == "" || service.runs == nil {
+		return Item{}, false, nil
+	}
+	return service.runs.ItemBySession(ctx, ownerID, sessionID)
 }
 
 // decorate derives the read-time effective status and, when the items are

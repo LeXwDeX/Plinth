@@ -11,6 +11,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
@@ -41,6 +42,10 @@ var (
 	ErrTurnCheckpointConflict     = errors.New("chat: turn checkpoint conflict")
 	ErrInvalidApprovalMode        = errors.New("chat: invalid approval mode")
 	ErrInvalidAgentScope          = errors.New("chat: invalid agent scope")
+	// ErrItemSessionApprovalMode refuses an approval-mode write to an
+	// asset-list item sub-session (#328): its mode is derived from the list
+	// workflow, not chosen by a person.
+	ErrItemSessionApprovalMode = errors.New("chat: an asset-list item session derives its approval mode")
 	// ErrProjectNotFound reports an unknown or foreign project. The HTTP
 	// boundary answers the same 404 as a missing project (#240).
 	ErrProjectNotFound = errors.New("chat: project not found")
@@ -745,6 +750,13 @@ func (service *Service) SetApprovalMode(
 	sessionID string,
 	mode string,
 ) (Session, string, error) {
+	// An item sub-session's mode comes from the list workflow (#328): a person
+	// cannot flip it while the list schedules the item.
+	if _, itemSession, err := service.itemForSession(ctx, ownerID, sessionID); err != nil {
+		return Session{}, "", err
+	} else if itemSession {
+		return Session{}, "", ErrItemSessionApprovalMode
+	}
 	if !service.approvalPolicy.Allows(mode) {
 		return Session{}, "", ErrInvalidApprovalMode
 	}
@@ -765,13 +777,39 @@ func (service *Service) SetApprovalMode(
 	return session, service.approvalPolicy.NormalizeMode(previous.ApprovalMode), nil
 }
 
-// SessionApprovalMode implements executiongrant.SessionModeReader. It is
-// owner-scoped; an unknown or foreign session is an error, never a default.
+// itemForSession reports the asset-list item whose sub-session this is (#328).
+// A deployment without the list workflow has no item sessions. A read failure
+// is returned: no caller may guess a session's role.
+func (service *Service) itemForSession(
+	ctx context.Context,
+	ownerID string,
+	sessionID string,
+) (assetlist.Item, bool, error) {
+	if service.assetLists == nil || service.assetLists.Service == nil {
+		return assetlist.Item{}, false, nil
+	}
+	return service.assetLists.Service.ItemBySession(ctx, ownerID, sessionID)
+}
+
+// SessionApprovalMode implements executiongrant.SessionModeReader. An item
+// sub-session derives the internal steps mode while the deployment declares
+// application.step_policy (#328, #330); every other session keeps the stored
+// mode's normalization. It is owner-scoped; an unknown or foreign session is
+// an error, never a default, and a lookup failure is an error, never a guess.
 func (service *Service) SessionApprovalMode(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
 ) (string, error) {
+	_, itemSession, err := service.itemForSession(ctx, ownerID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if itemSession && service.assetLists.StepsEnabled {
+		return approvalpolicy.ModeSteps, nil
+	}
+	// Not an item session, or no step policy: the stored mode is the stricter
+	// result, so a missing derivation never approves a step by itself.
 	session, found, err := service.repository.Session(ctx, ownerID, sessionID)
 	if err != nil {
 		return "", err
@@ -780,6 +818,25 @@ func (service *Service) SessionApprovalMode(
 		return "", ErrSessionNotFound
 	}
 	return service.approvalPolicy.NormalizeMode(session.ApprovalMode), nil
+}
+
+// SessionStepEntry implements executiongrant.StepSessionReader (#328). Only an
+// item sub-session has an entry; any other session returns an empty entry
+// without an error, which ValidStepEntry rejects so a counted 3D step falls
+// back to a person. A read failure is returned unchanged.
+func (service *Service) SessionStepEntry(
+	ctx context.Context,
+	ownerID string,
+	sessionID string,
+) (string, error) {
+	_, itemSession, err := service.itemForSession(ctx, ownerID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if itemSession {
+		return approvalpolicy.StepEntryList, nil
+	}
+	return "", nil
 }
 
 func (service *Service) RenameSession(

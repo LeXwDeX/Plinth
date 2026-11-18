@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -577,5 +578,51 @@ func TestAssetListRunsCascadeWithListAndProject(t *testing.T) {
 		if err := repository.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s after project delete = %d, %v", table, count, err)
 		}
+	}
+}
+
+// ItemBySession resolves the item from the session id only within its owner:
+// the runner writes the id, and a foreign session must not be attributed to
+// the caller's item.
+func TestAssetListRunRepositoryItemBySessionIsOwnerScopedAndComplete(t *testing.T) {
+	repository, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	seedAssetListProject(t, repository, "owner-b", "prj_b")
+	seedAssetListSession(t, repository, "owner-b", "ses_b", "prj_b")
+	seedAssetListSession(t, repository, "owner-a", "ses_item", "prj_1")
+	seedAssetListSession(t, repository, "owner-b", "ses_foreign", "prj_b")
+
+	items := seedRunList(t, lists, "alist_a", 2)
+	foreign := newAssetListItem("owner-b", "aitem_b", "Foreign item")
+	proposeAssetList(t, lists, newAssetList("alist_b", "owner-b", "prj_b", "ses_b", "req_b"), foreign)
+
+	stored, err := runs.SetItemSession(ctx, "owner-a", "alist_a", items[1].ID,
+		"ses_item", assetlist.VersionUnchecked, assetListTestNow)
+	if err != nil {
+		t.Fatalf("set item session: %v", err)
+	}
+	if _, err := runs.SetItemSession(ctx, "owner-b", "alist_b", foreign.ID,
+		"ses_foreign", assetlist.VersionUnchecked, assetListTestNow); err != nil {
+		t.Fatalf("set foreign item session: %v", err)
+	}
+
+	item, found, err := runs.ItemBySession(ctx, "owner-a", "ses_item")
+	if err != nil || !found || !reflect.DeepEqual(item, stored) {
+		t.Fatalf("item by session = %+v, %v, %v; want %+v", item, found, err, stored)
+	}
+	if item.SessionID != "ses_item" || item.RouteID != stored.RouteID || len(item.Route) != 1 ||
+		item.PlannedModel3DStepCount != 1 || len(item.References) != 1 {
+		t.Fatalf("item fields incomplete: %+v", item)
+	}
+	// The same session string owned by another owner is still a miss.
+	if item, found, err := runs.ItemBySession(ctx, "owner-a", "ses_foreign"); err != nil || found {
+		t.Fatalf("foreign owner = %+v, %v, %v; want none", item, found, err)
+	}
+	if item, found, err := runs.ItemBySession(ctx, "owner-b", "ses_foreign"); err != nil || !found || item.ID != foreign.ID {
+		t.Fatalf("foreign item = %+v, %v, %v; want %s", item, found, err, foreign.ID)
+	}
+	// A session no item runs is an ordinary session, not an error.
+	if item, found, err := runs.ItemBySession(ctx, "owner-a", "ses_none"); err != nil || found || item.ID != "" {
+		t.Fatalf("unknown session = %+v, %v, %v; want no item", item, found, err)
 	}
 }

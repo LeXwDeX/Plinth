@@ -902,3 +902,61 @@ func TestNewRejectsIncompleteConfig(t *testing.T) {
 		t.Fatalf("step policy counted = %d", list.PlannedModel3DStepCount)
 	}
 }
+
+// stubRunStore answers only the item-session lookup; the embedded nil
+// interface keeps the rest of the run port out of these tests.
+type stubRunStore struct {
+	assetlist.RunStore
+	item      assetlist.Item
+	found     bool
+	err       error
+	ownerID   string
+	sessionID string
+}
+
+func (s *stubRunStore) ItemBySession(_ context.Context, ownerID, sessionID string) (assetlist.Item, bool, error) {
+	s.ownerID, s.sessionID = ownerID, sessionID
+	if s.err != nil {
+		return assetlist.Item{}, false, s.err
+	}
+	if !s.found {
+		return assetlist.Item{}, false, nil
+	}
+	return s.item, true, nil
+}
+
+// ItemBySession is the item-session lookup the chat derivation uses: it trims
+// the ids, forwards to the run store and never turns a missing row into an
+// error.
+func TestServiceItemBySessionForwardsToTheRunStore(t *testing.T) {
+	runs := &stubRunStore{item: assetlist.Item{ID: "aitem_1", SessionID: "ses_item"}, found: true}
+	service, _, _ := newService(t, func(config *assetlist.Config) { config.Runs = runs })
+	item, found, err := service.ItemBySession(context.Background(), " owner-a ", " ses_item ")
+	if err != nil || !found || item.ID != "aitem_1" || runs.ownerID != "owner-a" || runs.sessionID != "ses_item" {
+		t.Fatalf("item = %+v, %v, %v; forwarded %q/%q", item, found, err, runs.ownerID, runs.sessionID)
+	}
+
+	runs.found = false
+	if item, found, err := service.ItemBySession(context.Background(), "owner-a", "ses_plain"); err != nil || found || item.ID != "" {
+		t.Fatalf("ordinary session = %+v, %v, %v; want no item", item, found, err)
+	}
+
+	runs.err = errors.New("database is locked")
+	if _, _, err := service.ItemBySession(context.Background(), "owner-a", "ses_item"); !errors.Is(err, runs.err) {
+		t.Fatalf("read failure = %v; want the store error", err)
+	}
+
+	// No run store (no runner assembled) and blank ids are a miss, not a read.
+	plain, _, _ := newService(t, nil)
+	if _, found, err := plain.ItemBySession(context.Background(), "owner-a", "ses_item"); err != nil || found {
+		t.Fatalf("no run store = %v, %v; want no item", found, err)
+	}
+	runs.err, runs.found = nil, true
+	runs.ownerID, runs.sessionID = "unchanged", "unchanged"
+	if _, found, err := service.ItemBySession(context.Background(), "", "ses_item"); err != nil || found {
+		t.Fatalf("blank owner = %v, %v; want no item", found, err)
+	}
+	if runs.ownerID != "unchanged" {
+		t.Fatalf("blank owner reached the store: %q", runs.ownerID)
+	}
+}
