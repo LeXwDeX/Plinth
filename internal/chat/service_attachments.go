@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/LeXwDeX/Plinth/internal/project"
 )
 
 // verifiedAttachments is the outcome of checking a turn's claims against the
@@ -197,6 +199,49 @@ func (service *Service) canvasSources(ctx context.Context, ownerID, sessionID st
 		sources = append(sources, layer.TaskID)
 	}
 	return sources
+}
+
+// ItemReferenceResolver turns the stored references of one asset-list item
+// into the attachments of its sub-session's turn (#328). The reference
+// resolver implements it. The item row was verified by the service, so the
+// path accepts exactly its frozen references; it never widens a client
+// attachment claim, which VerifyAttachment still checks for the session.
+type ItemReferenceResolver interface {
+	ItemReferenceAttachments(ctx context.Context, ownerID string, references []project.Reference) ([]Attachment, error)
+}
+
+// applyItemTurnReferences adds the item's frozen references to the verified
+// selection before handles are assigned. They ride as selection attachments,
+// marked by the turn's AssetListItemID: the existing handle assignment, the
+// @imgN lookup and selectedImageURLs then work unchanged, and the user
+// message's unpictured labels tell the Agent which handles are available.
+func (service *Service) applyItemTurnReferences(
+	ctx context.Context,
+	ownerID string,
+	serverOptions *ServerTurnOptions,
+	verified *verifiedAttachments,
+) error {
+	if serverOptions == nil || len(serverOptions.AssetListReferences) == 0 || !service.handles.Enabled() {
+		return nil
+	}
+	resolver, ok := service.attachments.(ItemReferenceResolver)
+	if !ok {
+		return nil
+	}
+	attachments, err := resolver.ItemReferenceAttachments(ctx, ownerID, serverOptions.AssetListReferences)
+	if err != nil {
+		return err
+	}
+	for _, attachment := range attachments {
+		duplicate := false
+		for _, other := range verified.selection {
+			duplicate = duplicate || SameObject(other, attachment)
+		}
+		if !duplicate {
+			verified.selection = append(verified.selection, attachment)
+		}
+	}
+	return nil
 }
 
 // applyTurnAttachments gives the verified attachments their handles and

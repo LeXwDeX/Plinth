@@ -1206,6 +1206,8 @@ func (orchestrator *Orchestrator) Process(
 	copyFrozenProject(&command.Options, turn.Options)
 	// A plan continuation is the service's mark, never the caller's (#134).
 	command.Options.PlanContinuation = turn.Options.PlanContinuation
+	// So are the production-list item marks of a server-started turn (#328).
+	copyFrozenAssetListTurn(&command.Options, turn.Options)
 	// DSML tool calls are read only for a model whose profile writes them.
 	dsmlSchema := orchestrator.dsmlSchema(command.Options)
 	command.Options.Harness = turn.Options.Harness

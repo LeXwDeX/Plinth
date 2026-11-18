@@ -8,6 +8,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
+	"github.com/LeXwDeX/Plinth/internal/project"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -150,6 +151,13 @@ type TurnOptions struct {
 	// started it when the person approved the plan (#134). Only the service
 	// sets it; a request never does. Empty for an ordinary turn.
 	PlanContinuation string `json:"PlanContinuation,omitempty"`
+	// AssetListItemID is the production-list item this turn runs (#328). Only
+	// StartItemTurn sets it; a request never does. Empty for an ordinary turn.
+	AssetListItemID string `json:"AssetListItemID,omitempty"`
+	// AssetListReferences is the item's references frozen with the turn
+	// (#328). Only the service sets it; a request never does. The Agent reads
+	// the frozen copy, so an item edit cannot change a running turn.
+	AssetListReferences []project.Reference `json:"AssetListReferences,omitempty"`
 }
 
 // SelectionMaskRef is the client's claim about the selection mask of a canvas

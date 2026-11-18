@@ -384,6 +384,24 @@ func (service *Service) ItemBySession(
 	return service.runs.ItemBySession(ctx, ownerID, sessionID)
 }
 
+// ItemByID reads one item of the owner's list (#328). A missing, foreign or
+// mismatched list/item pair is ErrNotFound; a read failure is returned. A
+// deployment without a run store has no items.
+func (service *Service) ItemByID(
+	ctx context.Context,
+	ownerID string,
+	listID string,
+	itemID string,
+) (Item, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	listID = strings.TrimSpace(listID)
+	itemID = strings.TrimSpace(itemID)
+	if ownerID == "" || listID == "" || itemID == "" || service.runs == nil {
+		return Item{}, ErrNotFound
+	}
+	return service.runs.ItemByID(ctx, ownerID, listID, itemID)
+}
+
 // decorate derives the read-time effective status and, when the items are
 // loaded, the item count and plan totals. A draft at exactly its expiry
 // instant is expired.
