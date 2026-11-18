@@ -403,6 +403,16 @@ func (executor *Executor) Execute(
 	command chat.ToolCommand,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
+	result, err := executor.execute(ctx, command, observe)
+	executor.attachStepStanding(ctx, command, &result)
+	return result, err
+}
+
+func (executor *Executor) execute(
+	ctx context.Context,
+	command chat.ToolCommand,
+	observe func(chat.ToolObservation) error,
+) (chat.ToolResult, error) {
 	if command.Tool.Processing != nil && command.Tool.Processing.Plan != nil {
 		if activeHarness(command) {
 			return executor.proposeHarness(ctx, command)

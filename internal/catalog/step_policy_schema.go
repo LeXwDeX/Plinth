@@ -1,6 +1,21 @@
 package catalog
 
-import schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
+import (
+	"encoding/json"
+
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
+)
+
+// The property names of the steps object a generation tool result carries
+// (#330 step 3B). The Schema declares the object as a JSON Schema under
+// application.step_policy.result, and validation requires these names in it, so
+// the declared contract and the emitted object cannot drift apart.
+const (
+	StepResultMode      = "mode"
+	StepResultUsed      = "used"
+	StepResultCap       = "cap"
+	StepResultRemaining = "remaining"
+)
 
 // StepPolicySchema is application.step_policy (#330): the 3D step mode. Only
 // 3D steps are governed; 2D steps and LLM calls are never counted or blocked.
@@ -39,6 +54,9 @@ type StepPolicySchema struct {
 	// approval-mode section of sessions whose derived approval mode is the
 	// internal steps mode, and never of any other session. Server-side only.
 	Prompt StepPolicyPromptSchema `json:"prompt"`
+	// Result declares the steps object a generation tool result carries beside
+	// its budget object (#330 step 3B). Server-side only.
+	Result StepPolicyResultSchema `json:"result"`
 	// Messages is the copy of the server's answers. Server-side only.
 	Messages StepPolicyMessagesSchema `json:"messages"`
 	// Audit names the product-audit action of a changed setting.
@@ -136,6 +154,20 @@ type StepPolicyMessagesSchema struct {
 	// CapReached is what the Agent reads when a 3D step is refused because the
 	// asset used all its steps. {used} and {cap} are the numbers.
 	CapReached string `json:"cap_reached"`
+}
+
+// StepPolicyResultSchema is application.step_policy.result (#330 step 3B): the
+// steps object a generation tool result carries in a steps session, beside the
+// budget object. The object's key is declared per tool by result_fields.steps;
+// its property names are the fixed vocabulary of the code (the StepResult*
+// constants).
+type StepPolicyResultSchema struct {
+	// Schema is the object as a JSON Schema. Validation requires the StepResult*
+	// properties, their types and descriptions, and that mode and used are
+	// required; cap and remaining are optional because only the cap mode writes
+	// them. Every description is server-side copy and is translated in the
+	// non-default locale bundles.
+	Schema json.RawMessage `json:"schema"`
 }
 
 // StepPolicyAuditSchema declares the audit action recorded when a person

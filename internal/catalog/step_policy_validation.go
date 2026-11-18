@@ -74,6 +74,9 @@ func validateStepPolicy(
 	if err := validateStepPolicyPrompt(policy.Prompt); err != nil {
 		return err
 	}
+	if err := validateStepPolicyResult(policy); err != nil {
+		return err
+	}
 	message := policy.Messages.CapReached
 	if strings.TrimSpace(message) == "" ||
 		!strings.Contains(message, "{used}") || !strings.Contains(message, "{cap}") {

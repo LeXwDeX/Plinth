@@ -5847,6 +5847,15 @@ type ChatToolResultFields struct {
 	// step gives when the plan cannot cover it and the step waits for the
 	// person. Empty keys omit the values (#103 review B4).
 	Budget string `json:"budget,omitempty"`
+	// Steps is the optional key of the 3D step standing a generation tool
+	// result carries in a steps session (#330 step 3B), beside the budget
+	// object: the person's mode, the asset's used steps and, under the cap
+	// mode, the cap and the steps left. The object's property names are
+	// declared by application.step_policy.result.schema. Empty keys omit the
+	// value; a result without it has no step context (a step the policy does
+	// not count, a session another approval mode governs, or a standing that
+	// could not be read).
+	Steps  string `json:"steps,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// PurposeBudgetNote is the optional key of the model3d_usage.budget_note
 	// naming the step's values over the session purpose's budget (#129). It
