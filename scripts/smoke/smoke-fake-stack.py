@@ -6051,6 +6051,15 @@ def _crop_asset_id(result):
     return str(crops[0].get("input_asset_id") or "") if len(crops) == 1 else ""
 
 
+def _crop_normalized_matches(normalized, region):
+    """One wire normalized region equals the requested region."""
+    try:
+        return all(abs(float(normalized.get(key)) - region[key]) < 1e-9
+                   for key in ("x", "y", "width", "height"))
+    except (TypeError, ValueError):
+        return False
+
+
 def _crop_matches(result, pixel, region):
     """One crop's asset id, pixel rectangle and normalized region as asked."""
     crops = (result or {}).get("crops") or []
@@ -6061,11 +6070,7 @@ def _crop_matches(result, pixel, region):
     if crop.get("pixel_rect") != want or not str(crop.get("input_asset_id") or ""):
         return False
     normalized = crop.get("normalized_region") or {}
-    try:
-        return all(abs(float(normalized.get(key)) - region[key]) < 1e-9
-                   for key in ("x", "y", "width", "height"))
-    except (TypeError, ValueError):
-        return False
+    return _crop_normalized_matches(normalized, region)
 
 
 def _crop_asset_check(api, source_rows, asset_id, pixel):
@@ -6248,6 +6253,35 @@ def scenario_asset_list_crops(api, work, stack):
            and [item.get("name") for item in board_items] == ["主角 阿岚", "长剑"],
            f"decision={status}/{(confirmed or {}).get('status')} board={board_status} "
            f"items={[item.get('name') for item in board_items]}")
+
+    # #331: each board item carries its crop reference and the same provenance
+    # snapshot the list detail exposes: the edit's union crop on the first
+    # item, the sword crop on the second. The scenario never completes an item,
+    # so a result-free item must not name a representative asset.
+    board_crop_checks = []
+    for item, reference_id, region, pixel in zip(
+            board_items, (union_id, sword_id), (CROP_REGION_UNION, CROP_REGION_B),
+            (CROP_PIXEL_UNION, CROP_PIXEL_B)):
+        source = item.get("source") or {}
+        cut = item.get("region") or {}
+        rect = cut.get("pixel_rect") or {}
+        no_result = (item.get("result") or {}) == {}
+        board_crop_checks.append(
+            item.get("reference_asset_id") == reference_id
+            and source.get("source_input_asset_id") == source_id
+            and source.get("source_kind") == "input_asset"
+            and (source.get("source_width"), source.get("source_height"))
+            == (CROP_SOURCE_WIDTH, CROP_SOURCE_HEIGHT)
+            and _crop_normalized_matches(cut, region)
+            and (rect.get("x0"), rect.get("y0"), rect.get("x1"), rect.get("y1")) == pixel
+            and ((no_result and "representative_asset_id" not in item)
+                 or (not no_result and bool(item.get("representative_asset_id")))))
+    record("#331 the board names each item's crop reference, source and region",
+           len(board_items) == 2 and all(board_crop_checks),
+           json.dumps([{key: item.get(key) for key in
+                        ("name", "reference_asset_id", "source", "region",
+                         "representative_asset_id")}
+                       for item in board_items], ensure_ascii=False)[:500])
 
     # The whole flow is read-only: no public Task was created (so no 3D step
     # was counted) and the provider balances did not move.
