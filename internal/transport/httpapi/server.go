@@ -773,6 +773,14 @@ func (s *Server) routes() {
 		if route := routes.ProjectAssetListDecision; route != "" {
 			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.decideProjectAssetList))
 		}
+		// Run and item control (#328). The route keys exist in the Catalog from
+		// its declaration but stay unregistered without the list service.
+		if route := routes.ProjectAssetListRun; route != "" {
+			s.mux.HandleFunc("POST "+route, s.withPrincipal(s.controlProjectAssetListRun))
+		}
+		if route := routes.ProjectAssetListItem; route != "" {
+			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.updateProjectAssetListItem))
+		}
 		if route := routes.ChatSessionAssetLists; route != "" {
 			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.listChatSessionAssetLists))
 		}

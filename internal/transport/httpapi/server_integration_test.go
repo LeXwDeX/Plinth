@@ -1839,6 +1839,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		}
 		assetListService, err = assetlist.New(assetlist.Config{
 			Repository:         repository.AssetListRepository(),
+			Runs:               repository.AssetListRunRepository(),
 			Schema:             *listSchema,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,

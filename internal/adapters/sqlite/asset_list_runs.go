@@ -264,6 +264,133 @@ func (r *AssetListRunRepository) UpdateRunStatus(
 	return stored, nil
 }
 
+// TransitionRun applies one person-requested run transition (#328). The
+// expectedUpdatedAt token is checked inside the write transaction; a stale
+// token, a status mismatch or an illegal transition is ErrConflict. Repeating
+// the target status is idempotent; the only repeat that writes is a presence
+// pause upgraded to the sticky user pause, and that upgrade keeps the CAS.
+func (r *AssetListRunRepository) TransitionRun(
+	ctx context.Context,
+	ownerID, listID, from, to, pauseReason string,
+	expectedUpdatedAt, at time.Time,
+) (assetlist.Run, error) {
+	if ownerID == "" || listID == "" || !validAssetListRunStatus(from) || !validAssetListRunStatus(to) {
+		return assetlist.Run{}, fmt.Errorf("%w: run status transition", assetlist.ErrInvalid)
+	}
+	if to == assetlist.RunPaused {
+		if pauseReason == assetlist.PauseNone || !validAssetListPauseReason(pauseReason) {
+			return assetlist.Run{}, fmt.Errorf("%w: pause reason %q", assetlist.ErrInvalid, pauseReason)
+		}
+	} else {
+		pauseReason = assetlist.PauseNone
+	}
+	var stored assetlist.Run
+	err := r.withWrite(ctx, func(conn *sql.Conn) error {
+		current, err := scanAssetListRun(conn.QueryRowContext(ctx, `
+			SELECT `+assetListRunColumns+` FROM asset_list_runs
+			WHERE owner_id = ? AND list_id = ?`, ownerID, listID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return assetlist.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read asset list run for transition: %w", err)
+		}
+		if current.Status == to {
+			if to != assetlist.RunPaused || current.PauseReason == pauseReason {
+				stored = current
+				return nil
+			}
+			if current.PauseReason != assetlist.PausePresence || pauseReason != assetlist.PauseUser {
+				return assetlist.ErrConflict
+			}
+		} else if current.Status != from || !assetListRunTransition(from, to) {
+			return assetlist.ErrConflict
+		}
+		if !current.UpdatedAt.Equal(expectedUpdatedAt) {
+			return assetlist.ErrConflict
+		}
+		update, err := conn.ExecContext(ctx, `
+			UPDATE asset_list_runs SET status = ?, pause_reason = ?, updated_at = ?
+			WHERE owner_id = ? AND list_id = ? AND status = ? AND updated_at = ?`,
+			to, pauseReason, formatTime(at), ownerID, listID,
+			current.Status, formatTime(current.UpdatedAt))
+		if err != nil {
+			return fmt.Errorf("transition asset list run: %w", err)
+		}
+		affected, err := update.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return assetlist.ErrConflict
+		}
+		stored, err = loadAssetListRunByListID(ctx, conn, ownerID, listID)
+		return err
+	})
+	if err != nil {
+		return assetlist.Run{}, err
+	}
+	return stored, nil
+}
+
+// RunSummaries reads every run of the owner's project with its item counts,
+// keyed by list id (#328). The left join keeps a run whose list has no items;
+// NULL state rows count nothing. The version token is the stored updated_at.
+func (r *AssetListRunRepository) RunSummaries(
+	ctx context.Context,
+	ownerID, projectID string,
+) (map[string]assetlist.RunSummary, error) {
+	if ownerID == "" || projectID == "" {
+		return nil, fmt.Errorf("%w: run summary identity", assetlist.ErrInvalid)
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT r.list_id, r.status, r.pause_reason, r.updated_at, i.state, COUNT(i.id)
+		FROM asset_list_runs r
+		LEFT JOIN asset_list_items i
+			ON i.owner_id = r.owner_id AND i.list_id = r.list_id
+		WHERE r.owner_id = ? AND r.project_id = ?
+		GROUP BY r.list_id, i.state`, ownerID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list asset list run summaries: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[string]assetlist.RunSummary)
+	for rows.Next() {
+		var (
+			listID, status, pauseReason, updated string
+			state                                sql.NullString
+			count                                int
+		)
+		if err := rows.Scan(&listID, &status, &pauseReason, &updated, &state, &count); err != nil {
+			return nil, err
+		}
+		summary, found := result[listID]
+		if !found {
+			summary = assetlist.RunSummary{
+				Status: status, PauseReason: pauseReason, Version: updated,
+			}
+		}
+		switch state.String {
+		case assetlist.StateTodo:
+			summary.ItemCounts.Todo += count
+		case assetlist.StateWorking:
+			summary.ItemCounts.Working += count
+		case assetlist.StateReview:
+			summary.ItemCounts.Review += count
+		case assetlist.StateAccepted:
+			summary.ItemCounts.Accepted += count
+		case assetlist.StateReturned:
+			summary.ItemCounts.Returned += count
+		case assetlist.StateFailed:
+			summary.ItemCounts.Failed += count
+		case assetlist.StateSkipped:
+			summary.ItemCounts.Skipped += count
+		}
+		result[listID] = summary
+	}
+	return result, rows.Err()
+}
+
 // ClaimItem moves the first todo item by position to working with round+1 and
 // version+1, but only while the run is running. It reports false when nothing
 // is claimable; an update that lost the todo CAS is ErrConflict.
@@ -374,6 +501,72 @@ func (r *AssetListRunRepository) FinishItem(ctx context.Context, input assetlist
 			return assetlist.ErrItemState
 		}
 		stored, err = loadAssetListItemByID(ctx, conn, input.OwnerID, input.ListID, input.ItemID)
+		return err
+	})
+	if err != nil {
+		return assetlist.Item{}, err
+	}
+	return stored, nil
+}
+
+// SkipItem marks one todo or working item skipped under the item version CAS
+// (#328). It only touches state, state_reason and the scheduling instant: the
+// item's session and its bound Tasks stay untouched, so an in-flight turn
+// still stores its result through the normal completion path while the runner
+// stops scheduling the item. An already skipped item is returned untouched; a
+// terminal item is ErrItemState; a lost CAS is ErrConflict.
+func (r *AssetListRunRepository) SkipItem(
+	ctx context.Context,
+	ownerID, listID, itemID, reason string,
+	expectedVersion int64,
+	at time.Time,
+) (assetlist.Item, error) {
+	if ownerID == "" || listID == "" || itemID == "" {
+		return assetlist.Item{}, fmt.Errorf("%w: item identity", assetlist.ErrInvalid)
+	}
+	if expectedVersion < 0 && expectedVersion != assetlist.VersionUnchecked {
+		return assetlist.Item{}, fmt.Errorf("%w: expected version", assetlist.ErrInvalid)
+	}
+	var stored assetlist.Item
+	err := r.withWrite(ctx, func(conn *sql.Conn) error {
+		current, err := loadAssetListItemByID(ctx, conn, ownerID, listID, itemID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return assetlist.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if current.State == assetlist.StateSkipped {
+			stored = current
+			return nil
+		}
+		if current.State != assetlist.StateTodo && current.State != assetlist.StateWorking {
+			return assetlist.ErrItemState
+		}
+		if expectedVersion != assetlist.VersionUnchecked && current.Version != expectedVersion {
+			return assetlist.ErrConflict
+		}
+		query := `UPDATE asset_list_items SET state = ?, state_reason = ?,
+			next_action_at = '', version = version + 1, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND list_id = ? AND state = ?`
+		args := []any{assetlist.StateSkipped, reason, formatTime(at),
+			itemID, ownerID, listID, current.State}
+		if expectedVersion != assetlist.VersionUnchecked {
+			query += ` AND version = ?`
+			args = append(args, expectedVersion)
+		}
+		update, err := conn.ExecContext(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("skip asset list item: %w", err)
+		}
+		affected, err := update.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			return assetlist.ErrConflict
+		}
+		stored, err = loadAssetListItemByID(ctx, conn, ownerID, listID, itemID)
 		return err
 	})
 	if err != nil {

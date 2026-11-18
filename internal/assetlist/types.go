@@ -119,6 +119,9 @@ type List struct {
 	Items                   []Item `json:"items,omitempty"`
 	PlannedStepCount        int    `json:"planned_step_count"`
 	PlannedModel3DStepCount int    `json:"planned_model3d_step_count"`
+	// Run is the derived execution summary of a confirmed list (#328); nil
+	// when the list has no run. It is never stored on the list row.
+	Run *RunSummary `json:"run,omitempty"`
 }
 
 // Item is one asset of a list. Route is the snapshot taken at proposal time:

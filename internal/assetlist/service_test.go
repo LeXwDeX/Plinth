@@ -925,6 +925,11 @@ func (s *stubRunStore) ItemBySession(_ context.Context, ownerID, sessionID strin
 	return s.item, true, nil
 }
 
+// RunSummaries keeps list reads undecorated in this fixture.
+func (s *stubRunStore) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
+	return nil, nil
+}
+
 // ItemBySession is the item-session lookup the chat derivation uses: it trims
 // the ids, forwards to the run store and never turns a missing row into an
 // error.

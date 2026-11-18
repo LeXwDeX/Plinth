@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,6 +34,19 @@ type assetListSummaryWire struct {
 	ExpiresAt               time.Time  `json:"expires_at"`
 	CreatedAt               time.Time  `json:"created_at"`
 	UpdatedAt               time.Time  `json:"updated_at"`
+	// Run is the confirmed list's execution state (#328), null for a draft or
+	// a deployment without the run store.
+	Run *assetListRunWire `json:"run"`
+}
+
+// assetListRunWire is the run summary the list panel and the control route
+// return. Version is the opaque updated_at token the control body echoes as
+// expected_version.
+type assetListRunWire struct {
+	Status      string               `json:"status"`
+	PauseReason string               `json:"pause_reason,omitempty"`
+	Version     string               `json:"version"`
+	ItemCounts  assetlist.ItemCounts `json:"item_counts"`
 }
 
 type assetListItemWire struct {
@@ -78,6 +92,29 @@ type assetListDecisionBody struct {
 	Reason   string `json:"reason"`
 }
 
+// assetListRunControlBody mirrors the run route's body. expected_version is
+// the opaque updated_at token of the run summary, echoed verbatim.
+type assetListRunControlBody struct {
+	Action          string `json:"action"`
+	ExpectedVersion string `json:"expected_version"`
+	Reason          string `json:"reason"`
+}
+
+// assetListItemControlBody is the item route's body. Only action skip exists.
+// A missing expected_version is invalid, so the field stays a pointer.
+type assetListItemControlBody struct {
+	Action          string `json:"action"`
+	ExpectedVersion *int64 `json:"expected_version"`
+	Reason          string `json:"reason"`
+}
+
+func assetListRunFields(summary assetlist.RunSummary) assetListRunWire {
+	return assetListRunWire{
+		Status: summary.Status, PauseReason: summary.PauseReason,
+		Version: summary.Version, ItemCounts: summary.ItemCounts,
+	}
+}
+
 func (s *Server) assetListMessages() catalog.AssetListMessagesSchema {
 	if s.application.AssetList == nil {
 		return catalog.AssetListMessagesSchema{}
@@ -109,21 +146,29 @@ func assetListSummaryFields(value assetlist.List) assetListSummaryWire {
 		decided := value.DecidedAt.UTC()
 		wire.DecidedAt = &decided
 	}
+	if value.Run != nil {
+		run := assetListRunFields(*value.Run)
+		wire.Run = &run
+	}
 	return wire
+}
+
+func assetListItemFields(item assetlist.Item) assetListItemWire {
+	return assetListItemWire{
+		ID: item.ID, Kind: item.Kind, Name: item.Name, Description: item.Description,
+		References: append([]project.Reference{}, item.References...),
+		RouteID:    item.RouteID, Route: append([]assetlist.RouteStep{}, item.Route...),
+		PlannedStepCount: item.PlannedStepCount, PlannedModel3DStepCount: item.PlannedModel3DStepCount,
+		State: item.State, StateReason: item.StateReason, Version: item.Version,
+		SessionID: item.SessionID, ProjectAssetID: item.ProjectAssetID, Round: item.Round,
+		CreatedAt: item.CreatedAt.UTC(), UpdatedAt: item.UpdatedAt.UTC(),
+	}
 }
 
 func assetListResultWire(value assetlist.List) assetListWire {
 	items := make([]assetListItemWire, 0, len(value.Items))
 	for _, item := range value.Items {
-		items = append(items, assetListItemWire{
-			ID: item.ID, Kind: item.Kind, Name: item.Name, Description: item.Description,
-			References: append([]project.Reference{}, item.References...),
-			RouteID:    item.RouteID, Route: append([]assetlist.RouteStep{}, item.Route...),
-			PlannedStepCount: item.PlannedStepCount, PlannedModel3DStepCount: item.PlannedModel3DStepCount,
-			State: item.State, StateReason: item.StateReason, Version: item.Version,
-			SessionID: item.SessionID, ProjectAssetID: item.ProjectAssetID, Round: item.Round,
-			CreatedAt: item.CreatedAt.UTC(), UpdatedAt: item.UpdatedAt.UTC(),
-		})
+		items = append(items, assetListItemFields(item))
 	}
 	brief := value.Brief
 	if len(brief) == 0 {
@@ -182,6 +227,10 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 		writeProblem(writer, http.StatusConflict, "asset_list_expired", detail, err)
 	case errors.Is(err, assetlist.ErrConflict):
 		writeProblem(writer, http.StatusConflict, "conflict", s.message("error.conflict"), err)
+	case errors.Is(err, assetlist.ErrItemState):
+		writeProblem(writer, http.StatusConflict, "asset_list_item_state", s.message("error.conflict"), err)
+	case errors.Is(err, assetlist.ErrRunUnavailable), errors.Is(err, assetlist.ErrExecutionDisabled):
+		writeProblem(writer, http.StatusConflict, "asset_list_execution_disabled", s.message("error.conflict"), err)
 	case errors.Is(err, assetlist.ErrLimit):
 		detail := messages.LimitReached
 		if detail == "" {
@@ -323,6 +372,64 @@ func (s *Server) decideProjectAssetList(writer http.ResponseWriter, request *htt
 		return
 	}
 	writeJSON(writer, http.StatusOK, assetListResultWire(value))
+}
+
+// controlProjectAssetListRun applies one person action to the list's run
+// (#328): start, pause, resume or stop under the expected_version CAS. The
+// answer is the refreshed run summary the panel shows.
+func (s *Server) controlProjectAssetListRun(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
+	owner, ok := s.assetListOwner(writer, request, principal)
+	if !ok {
+		return
+	}
+	projectID := request.PathValue("projectID")
+	listID := request.PathValue("listID")
+	var body assetListRunControlBody
+	if err := s.decodeJSON(writer, request, &body); err != nil {
+		return
+	}
+	if _, err := s.assetLists.ControlRun(request.Context(), owner, projectID, listID,
+		body.Action, body.ExpectedVersion, body.Reason); err != nil {
+		s.writeAssetListError(writer, err, "")
+		return
+	}
+	summary, err := s.assetLists.RunSummaryByList(request.Context(), owner, projectID, listID)
+	if err != nil {
+		s.writeAssetListError(writer, err, "")
+		return
+	}
+	writeJSON(writer, http.StatusOK, assetListRunFields(summary))
+}
+
+// updateProjectAssetListItem is the person's one item action (#328): skip. The
+// item answer is the same summary shape the list detail uses.
+func (s *Server) updateProjectAssetListItem(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
+	owner, ok := s.assetListOwner(writer, request, principal)
+	if !ok {
+		return
+	}
+	var body assetListItemControlBody
+	if err := s.decodeJSON(writer, request, &body); err != nil {
+		return
+	}
+	if body.Action != assetlist.ItemActionSkip {
+		s.writeAssetListError(writer, fmt.Errorf("%w: item action %q", assetlist.ErrInvalid, body.Action), "")
+		return
+	}
+	// The browser always sends the version it read; a negative value would
+	// otherwise select the port's unchecked sentinel.
+	if body.ExpectedVersion == nil || *body.ExpectedVersion < 0 {
+		s.writeAssetListError(writer, fmt.Errorf("%w: expected_version", assetlist.ErrInvalid), "")
+		return
+	}
+	item, err := s.assetLists.SkipItem(request.Context(), owner,
+		request.PathValue("projectID"), request.PathValue("listID"),
+		request.PathValue("itemID"), *body.ExpectedVersion, body.Reason)
+	if err != nil {
+		s.writeAssetListError(writer, err, "")
+		return
+	}
+	writeJSON(writer, http.StatusOK, assetListItemFields(item))
 }
 
 func (s *Server) listChatSessionAssetLists(writer http.ResponseWriter, request *http.Request, principal access.Principal) {

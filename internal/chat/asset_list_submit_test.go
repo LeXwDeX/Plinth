@@ -61,6 +61,11 @@ func (runs *submitRuns) FinishItem(_ context.Context, input assetlist.FinishItem
 	return item, nil
 }
 
+// RunSummaries keeps list reads undecorated in this fixture.
+func (runs *submitRuns) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
+	return nil, nil
+}
+
 func newAssetListSubmitService(t *testing.T, runs *submitRuns,
 	tasks chat.AssetListTaskSource) *chat.Service {
 	t.Helper()

@@ -332,7 +332,11 @@ func (service *Service) Get(ctx context.Context, ownerID, projectID, listID stri
 	if err != nil {
 		return List{}, err
 	}
-	return service.decorate(list), nil
+	summaries, err := service.runSummaries(ctx, ownerID, projectID)
+	if err != nil {
+		return List{}, err
+	}
+	return service.decorateWithRun(list, summaries), nil
 }
 
 // List reads the project's lists in update order as summaries: status, counts
@@ -347,8 +351,12 @@ func (service *Service) List(ctx context.Context, ownerID, projectID string) ([]
 	if err != nil {
 		return nil, err
 	}
+	summaries, err := service.runSummaries(ctx, ownerID, projectID)
+	if err != nil {
+		return nil, err
+	}
 	for index := range lists {
-		lists[index] = service.decorate(lists[index])
+		lists[index] = service.decorateWithRun(lists[index], summaries)
 	}
 	return lists, nil
 }
@@ -383,12 +391,16 @@ func (service *Service) ListSession(ctx context.Context, ownerID, sessionID stri
 	if err != nil {
 		return nil, err
 	}
+	summaries, err := service.runSummaries(ctx, ownerID, projectID)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]List, 0, len(lists))
 	for _, list := range lists {
 		if list.SourceSessionID != sessionID {
 			continue
 		}
-		result = append(result, service.decorate(list))
+		result = append(result, service.decorateWithRun(list, summaries))
 	}
 	return result, nil
 }
@@ -455,6 +467,16 @@ func (service *Service) FinishItem(
 		return Item{}, ErrNotFound
 	}
 	return service.runs.FinishItem(ctx, input)
+}
+
+// decorateWithRun derives the read-time list fields and attaches the list's
+// run summary when it has one (#328). A list without a run keeps Run nil.
+func (service *Service) decorateWithRun(list List, summaries map[string]RunSummary) List {
+	list = service.decorate(list)
+	if summary, found := summaries[list.ID]; found {
+		list.Run = &summary
+	}
+	return list
 }
 
 // decorate derives the read-time effective status and, when the items are

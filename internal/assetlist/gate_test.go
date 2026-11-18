@@ -30,6 +30,11 @@ func (s *gateRunStore) ItemBySession(_ context.Context, ownerID, sessionID strin
 	return s.item, true, nil
 }
 
+// RunSummaries keeps list reads undecorated in this fixture.
+func (s *gateRunStore) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
+	return nil, nil
+}
+
 func (s *gateRunStore) GetRunByListID(_ context.Context, ownerID, listID string) (assetlist.Run, error) {
 	if s.runErr != nil {
 		return assetlist.Run{}, s.runErr

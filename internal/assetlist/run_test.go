@@ -37,6 +37,11 @@ func (store *ensureRunStore) GetRunByList(
 	return run, nil
 }
 
+// RunSummaries keeps list reads undecorated in this fixture.
+func (store *ensureRunStore) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
+	return nil, nil
+}
+
 func (store *ensureRunStore) RunsByStatus(_ context.Context, status string) ([]assetlist.Run, error) {
 	if store.statusesErr != nil {
 		return nil, store.statusesErr
