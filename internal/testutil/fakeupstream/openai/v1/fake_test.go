@@ -352,6 +352,162 @@ func TestSeveralMarkersSkipUnavailableTools(t *testing.T) {
 	}
 }
 
+// #328: a script marker answers one step per assistant tool-call message after
+// the last user message, then falls back to the fixed text.
+func TestScriptMarkerAdvancesPerRound(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	marker := `[[fake:script:lookup_note {"topic":"one"}|lookup_note {"topic":"two"}]]`
+	first := []map[string]any{{"role": "user", "content": "build " + marker}}
+	status, body := f.chat(map[string]any{"model": "m", "messages": first, "tools": lookupTools})
+	call := dig(t, body, "choices", 0, "message", "tool_calls", 0)
+	if status != http.StatusOK || dig(t, call, "function", "name") != "lookup_note" ||
+		dig(t, call, "function", "arguments") != `{"topic":"one"}` {
+		t.Fatalf("round 1: %d %v", status, body)
+	}
+	second := append(append([]map[string]any{}, first...),
+		map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{call}},
+		map[string]any{"role": "tool", "tool_call_id": dig(t, call, "id"), "content": "{}"},
+	)
+	_, body = f.chat(map[string]any{"model": "m", "messages": second, "tools": lookupTools})
+	secondCall := dig(t, body, "choices", 0, "message", "tool_calls", 0)
+	if dig(t, secondCall, "function", "arguments") != `{"topic":"two"}` {
+		t.Fatalf("round 2: %v", body)
+	}
+	third := append(append([]map[string]any{}, second...),
+		map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{secondCall}},
+		map[string]any{"role": "tool", "tool_call_id": dig(t, secondCall, "id"), "content": "{}"},
+	)
+	_, body = f.chat(map[string]any{"model": "m", "messages": third, "tools": lookupTools})
+	if dig(t, body, "choices", 0, "message", "content") != FixedReply {
+		t.Fatalf("exhausted script: %v", body)
+	}
+	if _, has := fakeupstream.Dig(body, "choices", 0, "message", "tool_calls"); has {
+		t.Fatalf("exhausted script repeated a call: %v", body)
+	}
+}
+
+// done ends a script before its rounds are used up.
+func TestScriptMarkerDoneEndsTheSequence(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	marker := `[[fake:script:lookup_note {"topic":"one"}|done]]`
+	first := []map[string]any{{"role": "user", "content": marker}}
+	_, body := f.chat(map[string]any{"model": "m", "messages": first, "tools": lookupTools})
+	call := dig(t, body, "choices", 0, "message", "tool_calls", 0)
+	second := append(append([]map[string]any{}, first...),
+		map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{call}},
+		map[string]any{"role": "tool", "tool_call_id": dig(t, call, "id"), "content": "{}"},
+	)
+	_, body = f.chat(map[string]any{"model": "m", "messages": second, "tools": lookupTools})
+	if dig(t, body, "choices", 0, "message", "content") != FixedReply {
+		t.Fatalf("done step: %v", body)
+	}
+	if _, has := fakeupstream.Dig(body, "choices", 0, "message", "tool_calls"); has {
+		t.Fatalf("done step still called a tool: %v", body)
+	}
+}
+
+// A script marker governs the message: single markers keep their behavior when
+// no script marker is present, and lose to the last script marker when both
+// appear.
+func TestScriptMarkerOverridesSingleMarkers(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	single := ToolMarkerFor("lookup_note", `{"topic":"single"}`)
+	script := `[[fake:script:lookup_note {"topic":"script"}|done]]`
+	_, body := f.chat(map[string]any{"model": "m", "messages": user(single + " " + script), "tools": lookupTools})
+	if dig(t, body, "choices", 0, "message", "tool_calls", 0, "function", "arguments") != `{"topic":"script"}` {
+		t.Fatalf("script must win: %v", body)
+	}
+	_, plain := f.chat(map[string]any{"model": "m", "messages": user(single), "tools": lookupTools})
+	if dig(t, plain, "choices", 0, "message", "tool_calls", 0, "function", "arguments") != `{"topic":"single"}` {
+		t.Fatalf("single marker changed: %v", plain)
+	}
+	// The last script marker wins; invalid JSON falls back to {}.
+	last := `[[fake:script:lookup_note {"topic":}]]`
+	_, body = f.chat(map[string]any{"model": "m", "messages": user(script + " " + last), "tools": lookupTools})
+	if dig(t, body, "choices", 0, "message", "tool_calls", 0, "function", "arguments") != "{}" {
+		t.Fatalf("last script marker or invalid JSON: %v", body)
+	}
+	// A step naming a tool the request does not offer answers fixed text.
+	_, body = f.chat(map[string]any{"model": "m", "messages": user(`[[fake:script:other {}]]`), "tools": lookupTools})
+	if dig(t, body, "choices", 0, "message", "content") != FixedReply {
+		t.Fatalf("unoffered script tool: %v", body)
+	}
+}
+
+func TestScriptMarkerParser(t *testing.T) {
+	text := `[[fake:script:lookup_note {"q":"a|b"} | other {"nested":{"k":1}} | done]] tail`
+	markers := parseScriptMarkers(text)
+	if len(markers) != 1 || len(markers[0]) != 3 {
+		t.Fatalf("markers = %+v", markers)
+	}
+	steps := markers[0]
+	if steps[0].name != "lookup_note" || steps[0].arguments != `{"q":"a|b"}` ||
+		steps[1].name != "other" || steps[1].arguments != `{"nested":{"k":1}}` || !steps[2].done {
+		t.Fatalf("steps = %+v", steps)
+	}
+	// An unterminated marker is ignored rather than swallowing the text.
+	if markers := parseScriptMarkers(`[[fake:script:lookup_note {"q":"a"}`); len(markers) != 0 {
+		t.Fatalf("unterminated marker = %+v", markers)
+	}
+}
+
+// The streaming path answers the same script steps.
+func TestScriptMarkerStreamsEachRound(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	marker := `[[fake:script:lookup_note {"topic":"one"}|lookup_note {"topic":"two"}]]`
+	first := []map[string]any{{"role": "user", "content": marker}}
+	stream := func(messages []map[string]any) (string, string, []map[string]any) {
+		body := map[string]any{"model": "m", "messages": messages, "tools": lookupTools, "stream": true}
+		response, raw := f.send("POST", "/chat/completions", "test-key", body)
+		chunks, done := sseEvents(t, raw)
+		if response.StatusCode != http.StatusOK || !done {
+			t.Fatalf("stream: %d done=%t", response.StatusCode, done)
+		}
+		var name, arguments string
+		for _, chunk := range chunks {
+			found, ok := fakeupstream.Dig(chunk, "choices", 0, "delta", "tool_calls")
+			if !ok {
+				continue
+			}
+			for _, item := range found.([]any) {
+				entry, _ := item.(map[string]any)
+				function, _ := entry["function"].(map[string]any)
+				if value, _ := function["name"].(string); value != "" {
+					name = value
+				}
+				if value, _ := function["arguments"].(string); value != "" {
+					arguments += value
+				}
+			}
+		}
+		return name, arguments, chunks
+	}
+	name, arguments, _ := stream(first)
+	if name != "lookup_note" || arguments != `{"topic":"one"}` {
+		t.Fatalf("stream round 1: name=%q args=%q", name, arguments)
+	}
+	call := map[string]any{"id": "call_fake_0", "type": "function",
+		"function": map[string]any{"name": "lookup_note", "arguments": `{"topic":"one"}`}}
+	second := append(append([]map[string]any{}, first...),
+		map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{call}},
+		map[string]any{"role": "tool", "tool_call_id": "call_fake_0", "content": "{}"},
+	)
+	_, arguments, _ = stream(second)
+	if arguments != `{"topic":"two"}` {
+		t.Fatalf("stream round 2: args=%q", arguments)
+	}
+	secondCall := map[string]any{"id": "call_fake_0", "type": "function",
+		"function": map[string]any{"name": "lookup_note", "arguments": `{"topic":"two"}`}}
+	third := append(append([]map[string]any{}, second...),
+		map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{secondCall}},
+		map[string]any{"role": "tool", "tool_call_id": "call_fake_0", "content": "{}"},
+	)
+	_, arguments, chunks := stream(third)
+	if arguments != "" || dig(t, chunks[len(chunks)-1], "choices", 0, "finish_reason") != "stop" {
+		t.Fatalf("stream exhausted: args=%q last=%v", arguments, chunks[len(chunks)-1])
+	}
+}
+
 // A streaming request whose last message carries StreamErrorMarker answers 200
 // and then ends the started stream with an error frame instead of a completion
 // chunk, without [DONE] (the official 200 description allows an interrupted

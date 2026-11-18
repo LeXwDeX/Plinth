@@ -52,6 +52,17 @@ const StreamErrorMarker = "[[fake:stream-error]]"
 // always is.
 const ToolMarkerPrefix = "[[fake:tool:"
 
+// ScriptMarkerPrefix starts a scripted multi-round answer:
+// [[fake:script:toolA {...}|toolB {...}|done]]. The fake reads the last user
+// message and answers with the step at the number of assistant messages with
+// tool_calls that follow that user message (0-based): a tool step becomes one
+// call, while done or an index past the end becomes the fixed text. A script
+// marker takes precedence over [[fake:tool:...]] markers in the same message,
+// and the last script marker wins. Steps follow the single-marker argument
+// rules: the JSON object is read by balanced braces and invalid JSON becomes
+// {}. A step naming a tool the request does not offer answers fixed text.
+const ScriptMarkerPrefix = "[[fake:script:"
+
 // SystemContainsMarkerPrefix starts a fake-only request convention: a request
 // whose last user message contains [[fake:system-contains TEXT]] is answered
 // with "present: TEXT" when any system message contains TEXT, else
@@ -386,8 +397,9 @@ func (h *handler) listModels(w http.ResponseWriter, r *http.Request) {
 type chatRequest struct {
 	Model    string `json:"model"`
 	Messages []struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
+		Role      string            `json:"role"`
+		Content   json.RawMessage   `json:"content"`
+		ToolCalls []json.RawMessage `json:"tool_calls"`
 	} `json:"messages"`
 	Stream        bool `json:"stream"`
 	StreamOptions struct {
@@ -533,6 +545,146 @@ func isToolMarkerNameChar(c byte) bool {
 		c == '_' || c == '.' || c == '-'
 }
 
+// scriptStep is one step of a script marker: a tool call or "done".
+type scriptStep struct {
+	name, arguments string
+	done            bool
+}
+
+// scriptCalls answers a scripted request: one call for the step selected by
+// the number of assistant tool-call messages after the last user message, or
+// no calls (the fixed text) when that step is done, the script is exhausted,
+// or the step names a tool the request does not offer. The report says whether
+// a script marker governed the request, so single markers never compete.
+func (r chatRequest) scriptCalls() ([]toolCall, bool) {
+	lastUser := r.lastUserIndex()
+	if lastUser < 0 {
+		return nil, false
+	}
+	markers := parseScriptMarkers(messageText(r.Messages[lastUser].Content))
+	if len(markers) == 0 {
+		return nil, false
+	}
+	steps := markers[len(markers)-1]
+	round := r.scriptRound(lastUser)
+	if round >= len(steps) || steps[round].done || !r.hasTool(steps[round].name) {
+		return nil, true
+	}
+	arguments := steps[round].arguments
+	if arguments == "" || !json.Valid([]byte(arguments)) {
+		arguments = "{}"
+	}
+	if promptFromPreferences(arguments) {
+		arguments = r.preferencePromptArguments()
+	}
+	return []toolCall{{name: steps[round].name, arguments: arguments}}, true
+}
+
+// lastUserIndex is the index of the last user message, or -1.
+func (r chatRequest) lastUserIndex() int {
+	for index := len(r.Messages) - 1; index >= 0; index-- {
+		if r.Messages[index].Role == "user" {
+			return index
+		}
+	}
+	return -1
+}
+
+// scriptRound counts the assistant messages that carry tool_calls after the
+// last user message. It stays 0 until the first scripted call is answered and
+// increments once per assistant message, not per call.
+func (r chatRequest) scriptRound(lastUser int) int {
+	round := 0
+	for _, message := range r.Messages[lastUser+1:] {
+		if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+			round++
+		}
+	}
+	return round
+}
+
+// parseScriptMarkers finds every [[fake:script:...]] marker in text. The
+// caller uses the last one. Steps are separated by | and each step is "done"
+// or "NAME {json}"; the object is scanned with the same balanced-brace reader
+// as tool markers, so | and ]] inside strings do not split a step. A marker
+// that never closes or has an empty step is ignored.
+func parseScriptMarkers(text string) [][]scriptStep {
+	var markers [][]scriptStep
+	for offset := 0; offset < len(text); {
+		start := strings.Index(text[offset:], ScriptMarkerPrefix)
+		if start < 0 {
+			break
+		}
+		start += offset
+		steps, end, ok := parseScriptSteps(text, start+len(ScriptMarkerPrefix))
+		if !ok {
+			offset = start + len(ScriptMarkerPrefix)
+			continue
+		}
+		markers = append(markers, steps)
+		offset = end
+	}
+	return markers
+}
+
+// parseScriptSteps reads the steps of one marker starting right after its
+// prefix and returns the index just past the closing ]].
+func parseScriptSteps(text string, position int) ([]scriptStep, int, bool) {
+	var steps []scriptStep
+	for {
+		for position < len(text) && text[position] == ' ' {
+			position++
+		}
+		nameStart := position
+		for position < len(text) && isToolMarkerNameChar(text[position]) {
+			position++
+		}
+		if position == nameStart {
+			return nil, 0, false
+		}
+		name := text[nameStart:position]
+		if name == "done" {
+			steps = append(steps, scriptStep{done: true})
+		} else {
+			arguments := ""
+			for position < len(text) && text[position] == ' ' {
+				position++
+			}
+			if position < len(text) && text[position] == '{' {
+				if end, ok := scanBalancedJSON(text, position); ok {
+					arguments = text[position:end]
+					position = end
+				} else {
+					position = scriptStepBoundary(text, position)
+				}
+			}
+			steps = append(steps, scriptStep{name: name, arguments: arguments})
+		}
+		for position < len(text) && text[position] == ' ' {
+			position++
+		}
+		if strings.HasPrefix(text[position:], "]]") {
+			return steps, position + 2, true
+		}
+		if position < len(text) && text[position] == '|' {
+			position++
+			continue
+		}
+		return nil, 0, false
+	}
+}
+
+// scriptStepBoundary is where an unbalanced JSON object's step ends.
+func scriptStepBoundary(text string, position int) int {
+	boundary := len(text)
+	for _, separator := range []string{"|", "]]"} {
+		if rel := strings.Index(text[position:], separator); rel >= 0 && position+rel < boundary {
+			boundary = position + rel
+		}
+	}
+	return boundary
+}
+
 // scanBalancedJSON returns the end (exclusive) of the JSON object starting at
 // start, or false when it never closes. Braces inside strings are ignored.
 func scanBalancedJSON(text string, start int) (int, bool) {
@@ -619,15 +771,22 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	calls := request.calls()
+	scriptedCalls, scripted := request.scriptCalls()
+	if scripted {
+		// A script marker takes precedence over single tool markers.
+		calls = scriptedCalls
+	}
 	reasoning := ""
 	if request.thinking() {
 		reasoning = FixedReasoning
 	}
 	reply := FixedReply
-	if needle, asked := request.systemContainsAsk(); asked {
-		reply = "absent: " + needle
-		if request.systemContains(needle) {
-			reply = "present: " + needle
+	if !scripted {
+		if needle, asked := request.systemContainsAsk(); asked {
+			reply = "absent: " + needle
+			if request.systemContains(needle) {
+				reply = "present: " + needle
+			}
 		}
 	}
 	if request.Stream {
