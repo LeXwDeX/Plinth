@@ -408,6 +408,12 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 		[]string(nil),
 		source.Administration.BackfillStatus.SyncProviderIDs...,
 	)
+	result.Administration.AccessKeys.Presentation.DateTimeOptions = cloneStringMap(
+		source.Administration.AccessKeys.Presentation.DateTimeOptions,
+	)
+	result.Administration.AccessKeys.Presentation.Text = cloneStringMap(
+		source.Administration.AccessKeys.Presentation.Text,
+	)
 	result.Canvas.Presentation.Text = make(
 		map[string]string,
 		len(source.Canvas.Presentation.Text),

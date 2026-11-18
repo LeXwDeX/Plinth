@@ -13,6 +13,13 @@ func ValidateApplicationSchema(schema ApplicationSchema) error {
 }
 
 func validateApplication(schema ApplicationSchema) error {
+	if err := validateValueLabels("audit_actions", schema.AuditActions); err != nil {
+		return err
+	}
+	auditActions := make(map[string]struct{}, len(schema.AuditActions))
+	for _, action := range schema.AuditActions {
+		auditActions[action.Value] = struct{}{}
+	}
 	if err := validateAgentConfiguration(schema.AgentConfiguration); err != nil {
 		return err
 	}
@@ -62,6 +69,8 @@ func validateApplication(schema ApplicationSchema) error {
 		schema.Administration,
 		schema.Runtime,
 		schema.Authentication,
+		auditActions,
+		schema.AccessKeys != nil,
 	); err != nil {
 		return fmt.Errorf("administration: %w", err)
 	}
@@ -315,13 +324,6 @@ func validateApplication(schema ApplicationSchema) error {
 		)
 	}
 
-	if err := validateValueLabels("audit_actions", schema.AuditActions); err != nil {
-		return err
-	}
-	auditActions := make(map[string]struct{}, len(schema.AuditActions))
-	for _, action := range schema.AuditActions {
-		auditActions[action.Value] = struct{}{}
-	}
 	for action := range schema.Administration.AuditLogs.Presentation.
 		ActionBadgeClasses {
 		if _, exists := auditActions[action]; !exists {

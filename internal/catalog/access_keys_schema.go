@@ -9,6 +9,11 @@ package catalog
 // The section is optional so older Catalog documents stay valid. Without it
 // the management routes are not registered and no key can be issued.
 type AccessKeysSchema struct {
+	// Enabled is the overall switch's initial state. An administrator can
+	// turn the service off and on from the administration view; until then
+	// this value applies. Off refuses every key request and signed download
+	// on the external listener.
+	Enabled bool `json:"enabled"`
 	// KeyPrefix starts every key (lowercase letters and digits, one word).
 	KeyPrefix string `json:"key_prefix"`
 	// MaxKeysPerUser caps the active keys (not revoked, not expired) one

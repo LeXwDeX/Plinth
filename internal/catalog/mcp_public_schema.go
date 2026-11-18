@@ -276,6 +276,10 @@ type MCPPublicStatusSummary struct {
 // MCPPublicMessages is the copy of the service's answers.
 type MCPPublicMessages struct {
 	Unauthenticated string `json:"unauthenticated"`
+	// AccessKeysDisabled answers every request of the listener while an
+	// administrator has turned access keys off: no key is looked up and no
+	// signed download is served.
+	AccessKeysDisabled string `json:"access_keys_disabled"`
 	// InsufficientScope carries {scope}; InvalidArguments carries {detail}.
 	InsufficientScope string `json:"insufficient_scope"`
 	InvalidArguments  string `json:"invalid_arguments"`

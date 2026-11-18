@@ -2279,6 +2279,9 @@
           "admin_balance_summary": "/api/admin/balance-summary",
           "admin_user_assets": "/api/admin/user-assets/{userID}",
           "admin_backfill_status": "/api/admin/backfill-status",
+          "admin_access_keys": "/api/admin/access-keys",
+          "admin_access_key": "/api/admin/access-keys/{keyID}",
+          "admin_access_keys_switch": "/api/admin/access-keys/switch",
           "meshy_proxy_asset": "/api/meshy/proxy-asset"
         },
         "legacy_provider_balance": {
@@ -5912,6 +5915,7 @@
       }
     },
     "access_keys": {
+      "enabled": true,
       "key_prefix": "plk",
       "max_keys_per_user": 10,
       "default_ttl_days": 90,
@@ -6105,6 +6109,7 @@
       ],
       "messages": {
         "unauthenticated": "需要有效的访问 Key：请求头 Authorization: Bearer <访问 Key>。Key 无效、已吊销或已过期时同样会被拒绝。",
+        "access_keys_disabled": "访问 Key 已由管理员整体关闭，这个请求没有执行。请联系管理员重新开启。",
         "insufficient_scope": "这把访问 Key 没有「{scope}」权限，请在账户设置里用有这个权限的 Key。",
         "invalid_arguments": "参数无效：{detail}",
         "task_not_found": "没有找到这个任务。",
@@ -13808,6 +13813,13 @@
           "match": "prefix"
         },
         {
+          "key": "access-keys",
+          "href": "/admin/access-keys",
+          "label": "访问 Key",
+          "icon": "key",
+          "match": "prefix"
+        },
+        {
           "key": "audit",
           "href": "/admin/audit",
           "label": "操作日志",
@@ -14617,6 +14629,93 @@
           "no_pending": "没有需要回填的 PENDING 记录",
           "complete": "回填完成",
           "internal_error": "内部错误"
+        }
+      },
+      "access_keys": {
+        "api": {
+          "fields": {
+            "data": "data",
+            "error": "error",
+            "total": "total",
+            "page": "page",
+            "page_size": "pageSize",
+            "id": "id",
+            "owner_id": "ownerId",
+            "owner_username": "ownerUsername",
+            "owner_name": "ownerName",
+            "name": "name",
+            "prefix": "prefix",
+            "scopes": "scopes",
+            "created_at": "createdAt",
+            "last_used_at": "lastUsedAt",
+            "request_count": "requestCount",
+            "expires_at": "expiresAt",
+            "revoked_at": "revokedAt",
+            "active": "active",
+            "enabled": "enabled"
+          },
+          "query": {
+            "page": "page",
+            "page_size": "pageSize",
+            "search": "search",
+            "owner_id": "ownerId"
+          },
+          "path_parameters": {
+            "key_id": "keyID"
+          }
+        },
+        "permission": "users.manage",
+        "limits": {
+          "default_page_size": 20,
+          "max_page_size": 100,
+          "search_max_length": 120
+        },
+        "audit": {
+          "read_action": "admin_read_access_keys",
+          "revoke_action": "admin_revoke_access_key",
+          "enable_action": "admin_enable_access_keys",
+          "disable_action": "admin_disable_access_keys",
+          "resource_type": "access_key"
+        },
+        "messages": {
+          "invalid_request": "请求参数无效",
+          "key_not_found": "访问 Key 不存在",
+          "internal_error": "服务内部错误，请稍后重试"
+        },
+        "presentation": {
+          "date_locale": "zh-CN",
+          "empty_placeholder": "—",
+          "date_time_options": {
+            "month": "2-digit",
+            "day": "2-digit",
+            "hour": "2-digit",
+            "minute": "2-digit"
+          },
+          "text": {
+            "title": "访问 Key",
+            "empty": "暂无访问 Key",
+            "search_placeholder": "搜索 Key 名称、前缀或所有者",
+            "all_owners": "全部所有者",
+            "column_owner": "所有者",
+            "column_name": "名称",
+            "column_prefix": "前缀",
+            "column_scopes": "权限",
+            "column_created_at": "创建时间",
+            "column_last_used_at": "最近使用",
+            "column_request_count": "调用量",
+            "column_status": "状态",
+            "column_actions": "操作",
+            "status_active": "有效",
+            "status_expired": "已过期",
+            "status_revoked": "已吊销",
+            "revoke": "吊销",
+            "revoke_confirm": "吊销后这个 Key 立即失效，且不能恢复。确定吊销？",
+            "revoked": "访问 Key 已吊销",
+            "switch_title": "对外 MCP 与访问 Key",
+            "switch_description": "关闭后，所有访问 Key 与短时签名下载立即被拒绝；重新开启后恢复。",
+            "switched_on": "对外 MCP 与访问 Key 已开启",
+            "switched_off": "对外 MCP 与访问 Key 已关闭"
+          }
         }
       }
     },
@@ -15670,6 +15769,22 @@
       {
         "value": "admin_trigger_backfill_status",
         "label": "管理员触发状态回填"
+      },
+      {
+        "value": "admin_read_access_keys",
+        "label": "管理员查看访问 Key"
+      },
+      {
+        "value": "admin_revoke_access_key",
+        "label": "管理员吊销访问 Key"
+      },
+      {
+        "value": "admin_enable_access_keys",
+        "label": "管理员整体开启访问 Key"
+      },
+      {
+        "value": "admin_disable_access_keys",
+        "label": "管理员整体关闭访问 Key"
       }
     ],
     "model_delivery": {
@@ -19640,6 +19755,7 @@
             "capabilities[id=edit-multiview].image_result_group.slots[variant=right].label": "Right",
             "administration.navigation[key=dashboard].label": "Overview",
             "administration.navigation[key=users].label": "Users",
+            "administration.navigation[key=access-keys].label": "Access keys",
             "administration.navigation[key=audit].label": "Activity log",
             "administration.navigation[key=generations].label": "Generations",
             "administration.navigation[key=user-assets].label": "Asset review",
@@ -20009,6 +20125,9 @@
             "administration.users.messages.invalid_password": "Password must be at least {minimum} characters",
             "administration.users.messages.invalid_request": "Invalid request parameters",
             "administration.users.messages.internal_error": "Internal server error. Please try again later",
+            "administration.access_keys.messages.invalid_request": "Invalid request parameters",
+            "administration.access_keys.messages.key_not_found": "Access key not found",
+            "administration.access_keys.messages.internal_error": "Internal server error. Please try again later",
             "administration.users.presentation.text.forbidden_title": "Access denied",
             "administration.users.presentation.text.forbidden_description": "Only administrators can access this page",
             "administration.users.presentation.text.count_summary": "{total} users ({active} active)",
@@ -20065,6 +20184,29 @@
             "administration.users.presentation.text.created": "User created",
             "administration.users.presentation.text.active_changed": "User {user}: {action}",
             "administration.users.presentation.text.deleted": "Deleted user {user}",
+            "administration.access_keys.presentation.text.title": "Access keys",
+            "administration.access_keys.presentation.text.empty": "No access keys yet",
+            "administration.access_keys.presentation.text.search_placeholder": "Search by key name, prefix or owner",
+            "administration.access_keys.presentation.text.all_owners": "All owners",
+            "administration.access_keys.presentation.text.column_owner": "Owner",
+            "administration.access_keys.presentation.text.column_name": "Name",
+            "administration.access_keys.presentation.text.column_prefix": "Prefix",
+            "administration.access_keys.presentation.text.column_scopes": "Scopes",
+            "administration.access_keys.presentation.text.column_created_at": "Created",
+            "administration.access_keys.presentation.text.column_last_used_at": "Last used",
+            "administration.access_keys.presentation.text.column_request_count": "Requests",
+            "administration.access_keys.presentation.text.column_status": "Status",
+            "administration.access_keys.presentation.text.column_actions": "Actions",
+            "administration.access_keys.presentation.text.status_active": "Active",
+            "administration.access_keys.presentation.text.status_expired": "Expired",
+            "administration.access_keys.presentation.text.status_revoked": "Revoked",
+            "administration.access_keys.presentation.text.revoke": "Revoke",
+            "administration.access_keys.presentation.text.revoke_confirm": "The key stops working immediately and cannot be restored. Revoke it?",
+            "administration.access_keys.presentation.text.revoked": "Access key revoked",
+            "administration.access_keys.presentation.text.switch_title": "External MCP and access keys",
+            "administration.access_keys.presentation.text.switch_description": "When off, every access key and signed download is refused immediately; turning it on restores them.",
+            "administration.access_keys.presentation.text.switched_on": "External MCP and access keys are on",
+            "administration.access_keys.presentation.text.switched_off": "External MCP and access keys are off",
             "administration.audit_logs.messages.internal_error": "Internal server error. Please try again later",
             "administration.audit_logs.presentation.text.forbidden_title": "Access denied",
             "administration.audit_logs.presentation.text.forbidden_description": "Only administrators can access this page",
@@ -20502,6 +20644,7 @@
             "mcp_public.status_block.summary.balance_unknown": "{label} unknown",
             "mcp_public.status_block.summary.unknown": "unknown",
             "mcp_public.messages.unauthenticated": "A valid access key is required: send Authorization: Bearer <access key>. A key that is invalid, revoked or expired is refused the same way.",
+            "mcp_public.messages.access_keys_disabled": "Access keys have been turned off by an administrator, so this request was not executed. Ask an administrator to turn them back on.",
             "mcp_public.messages.insufficient_scope": "This access key does not have the \"{scope}\" scope; use a key that has it, created in the account settings.",
             "mcp_public.messages.invalid_arguments": "Invalid arguments: {detail}",
             "mcp_public.messages.task_not_found": "That task was not found.",
@@ -20587,6 +20730,10 @@
             "audit_actions[value=continue_turn_in_background].label": "Stop waiting, keep the task running",
             "audit_actions[value=change_own_password].label": "Change own password",
             "audit_actions[value=admin_read_users].label": "Administrator viewed users",
+            "audit_actions[value=admin_read_access_keys].label": "Administrator viewed access keys",
+            "audit_actions[value=admin_revoke_access_key].label": "Administrator revoked an access key",
+            "audit_actions[value=admin_enable_access_keys].label": "Administrator turned access keys on",
+            "audit_actions[value=admin_disable_access_keys].label": "Administrator turned access keys off",
             "audit_actions[value=admin_read_audit_logs].label": "Administrator viewed audit logs",
             "audit_actions[value=admin_read_generations].label": "Administrator viewed generations",
             "audit_actions[value=admin_read_task].label": "Administrator viewed another user's task",

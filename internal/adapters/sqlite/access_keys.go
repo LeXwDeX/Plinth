@@ -14,7 +14,7 @@ import (
 
 var _ accesskeys.Store = (*Repository)(nil)
 
-const accessKeyColumns = `id, owner_id, name, prefix, secret_hash, scopes_json, created_at, last_used_at, expires_at, revoked_at`
+const accessKeyColumns = `id, owner_id, name, prefix, secret_hash, scopes_json, created_at, request_count, last_used_at, expires_at, revoked_at`
 
 // scanAccessKey reads one row of accessKeyColumns. An unset time is the empty
 // string in the column and the zero time here.
@@ -22,7 +22,7 @@ func scanAccessKey(row interface{ Scan(...any) error }) (accesskeys.Record, erro
 	var record accesskeys.Record
 	var scopes, created, lastUsed, expires, revoked string
 	if err := row.Scan(&record.ID, &record.OwnerID, &record.Name, &record.Prefix, &record.SecretHash,
-		&scopes, &created, &lastUsed, &expires, &revoked); err != nil {
+		&scopes, &created, &record.RequestCount, &lastUsed, &expires, &revoked); err != nil {
 		return accesskeys.Record{}, err
 	}
 	if err := json.Unmarshal([]byte(scopes), &record.Scopes); err != nil {
@@ -100,9 +100,10 @@ func (r *Repository) CreateAccessKey(ctx context.Context, record accesskeys.Reco
 	if active >= maxActive {
 		return accesskeys.ErrLimit
 	}
-	if _, err := conn.ExecContext(ctx, `INSERT INTO access_keys (`+accessKeyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	if _, err := conn.ExecContext(ctx, `INSERT INTO access_keys (`+accessKeyColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID, record.OwnerID, record.Name, record.Prefix, record.SecretHash, string(scopes),
-		formatTime(record.CreatedAt), unsetOrTime(record.LastUsedAt), unsetOrTime(record.ExpiresAt), unsetOrTime(record.RevokedAt)); err != nil {
+		formatTime(record.CreatedAt), record.RequestCount, unsetOrTime(record.LastUsedAt),
+		unsetOrTime(record.ExpiresAt), unsetOrTime(record.RevokedAt)); err != nil {
 		return err
 	}
 	if err := commitGrantConn(ctx, conn); err != nil {
@@ -176,8 +177,14 @@ func (r *Repository) RevokeAccessKey(ctx context.Context, ownerID, id string, no
 	return record, changed == 1, nil
 }
 
-// TouchAccessKey records the last use. A revoked key is left as it was.
-func (r *Repository) TouchAccessKey(ctx context.Context, id string, at time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE access_keys SET last_used_at = ? WHERE id = ? AND revoked_at = ''`, formatTime(at), id)
+// RecordAccessKeyUse records uses of the key: the last use time and an
+// atomic addition to the cumulative count. A revoked key is left as it was.
+func (r *Repository) RecordAccessKeyUse(ctx context.Context, id string, at time.Time, uses int64) error {
+	if uses < 0 {
+		return accesskeys.ErrInvalid
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE access_keys SET last_used_at = ?, request_count = request_count + ? WHERE id = ? AND revoked_at = ''`,
+		formatTime(at), uses, id)
 	return err
 }

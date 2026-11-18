@@ -96,6 +96,9 @@ type Record struct {
 	SecretHash string
 	Scopes     []string
 	CreatedAt  time.Time
+	// RequestCount is how many authenticated requests the key has made. A
+	// request that fails authentication is never counted.
+	RequestCount int64
 	// LastUsedAt, ExpiresAt and RevokedAt are the zero time while unset.
 	LastUsedAt time.Time
 	ExpiresAt  time.Time
@@ -125,8 +128,11 @@ type Store interface {
 	// whether this call revoked it (false when it was already revoked);
 	// ErrNotFound when the owner has no such key.
 	RevokeAccessKey(ctx context.Context, ownerID, id string, now time.Time) (Record, bool, error)
-	// TouchAccessKey records the last use of the key.
-	TouchAccessKey(ctx context.Context, id string, at time.Time) error
+	// RecordAccessKeyUse records uses authenticated requests of the key at
+	// at: it sets the last use time and adds uses to the cumulative count.
+	// The count is added atomically, so concurrent calls never lose one. A
+	// revoked key is left as it was.
+	RecordAccessKeyUse(ctx context.Context, id string, at time.Time, uses int64) error
 }
 
 // Config is the Schema's application.access_keys in the form the service uses.
@@ -162,8 +168,16 @@ type Service struct {
 	store  Store
 	config Config
 
-	mu      sync.Mutex
-	touched map[string]time.Time
+	mu   sync.Mutex
+	uses map[string]keyUse
+}
+
+// keyUse is what one key accumulated since its last write: the time of that
+// write and the uses recorded after it. Batching keeps one hot key from
+// turning every request into a database write.
+type keyUse struct {
+	last    time.Time
+	pending int64
 }
 
 // New builds the service. Every bound must be set; the Schema validates them
@@ -190,7 +204,7 @@ func New(store Store, config Config) (*Service, error) {
 		config.Async = func(f func()) { go f() }
 	}
 	config.Scopes = slices.Clone(config.Scopes)
-	return &Service{store: store, config: config, touched: map[string]time.Time{}}, nil
+	return &Service{store: store, config: config, uses: map[string]keyUse{}}, nil
 }
 
 // validPrefix accepts a short lowercase word: it is followed by an underscore
@@ -321,7 +335,7 @@ func (s *Service) Revoke(ctx context.Context, ownerID, id string) (Record, bool,
 		return Record{}, false, err
 	}
 	s.mu.Lock()
-	delete(s.touched, id)
+	delete(s.uses, id)
 	s.mu.Unlock()
 	record.SecretHash = ""
 	return record, changed, nil
@@ -341,8 +355,8 @@ var dummyDigest [sha256.Size]byte
 // Authenticate resolves a presented key to its owner. Every refusal is
 // ErrUnauthorized: the key is malformed, unknown, wrong, revoked or expired.
 // Any other error is a failure to look the key up. A success records the
-// key's last use at most once per interval, after the fact and never failing
-// the authentication.
+// key's last use and adds one to its request count at most once per interval,
+// after the fact and never failing the authentication.
 func (s *Service) Authenticate(ctx context.Context, presented string) (Authentication, error) {
 	id, wellFormed := s.parse(presented)
 	digest := sha256.Sum256([]byte(presented))
@@ -405,21 +419,29 @@ func (s *Service) LooksLikeKey(token string) bool {
 	return ok
 }
 
-// touch records the key's last use unless one was written within the interval.
+// touch records one authenticated request of the key. The last use time is
+// written at most once per interval; the uses in between are added to that
+// write, so the cumulative count stays exact while the write rate stays low.
+// The write runs after the request and never fails it.
 func (s *Service) touch(id string, now time.Time) {
 	s.mu.Lock()
-	last, seen := s.touched[id]
-	if seen && now.Sub(last) < s.config.LastUsedInterval {
+	use := s.uses[id]
+	use.pending++
+	if !use.last.IsZero() && now.Sub(use.last) < s.config.LastUsedInterval {
+		s.uses[id] = use
 		s.mu.Unlock()
 		return
 	}
-	s.touched[id] = now
+	use.last = now
+	uses := use.pending
+	use.pending = 0
+	s.uses[id] = use
 	s.mu.Unlock()
 	s.config.Async(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.store.TouchAccessKey(ctx, id, now); err != nil {
-			s.config.Logger.Warn("access key last use not recorded", "key_id", id, "error", err)
+		if err := s.store.RecordAccessKeyUse(ctx, id, now, uses); err != nil {
+			s.config.Logger.Warn("access key use not recorded", "key_id", id, "error", err)
 		}
 	})
 }

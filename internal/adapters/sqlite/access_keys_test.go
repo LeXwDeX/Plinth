@@ -196,7 +196,7 @@ func TestAccessKeyStoreRevokeIsOwnerScopedAndIdempotent(t *testing.T) {
 	}
 }
 
-func TestAccessKeyStoreTouchRecordsTheLastUseOfALiveKeyOnly(t *testing.T) {
+func TestAccessKeyStoreRecordsUsesOfALiveKeyOnly(t *testing.T) {
 	r := openAccessKeyRepo(t)
 	ctx := context.Background()
 	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
@@ -210,14 +210,45 @@ func TestAccessKeyStoreTouchRecordsTheLastUseOfALiveKeyOnly(t *testing.T) {
 	}
 	used := now.Add(5 * time.Minute)
 	for _, id := range []string{"live", "dead", "missing"} {
-		if err := r.TouchAccessKey(ctx, id, used); err != nil {
-			t.Fatalf("touch %s: %v", id, err)
+		if err := r.RecordAccessKeyUse(ctx, id, used, 2); err != nil {
+			t.Fatalf("record use %s: %v", id, err)
 		}
 	}
 	live, _, _ := r.AccessKey(ctx, "live")
 	dead, _, _ := r.AccessKey(ctx, "dead")
-	if !live.LastUsedAt.Equal(used) || !dead.LastUsedAt.IsZero() {
-		t.Fatalf("live last used %v, revoked last used %v", live.LastUsedAt, dead.LastUsedAt)
+	if !live.LastUsedAt.Equal(used) || live.RequestCount != 2 || !dead.LastUsedAt.IsZero() || dead.RequestCount != 0 {
+		t.Fatalf("live last used %v count %d, revoked last used %v count %d", live.LastUsedAt, live.RequestCount, dead.LastUsedAt, dead.RequestCount)
+	}
+	if err := r.RecordAccessKeyUse(ctx, "live", used, -1); !errors.Is(err, accesskeys.ErrInvalid) {
+		t.Fatalf("negative uses: %v", err)
+	}
+}
+
+// Concurrent use writes never lose a count: the column is incremented in the
+// database, not read and written back.
+func TestAccessKeyStoreCountsConcurrentUses(t *testing.T) {
+	r := openAccessKeyRepo(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	if err := r.CreateAccessKey(ctx, keyRecord("hot", "owner-a", now, time.Hour), 10, now); err != nil {
+		t.Fatal(err)
+	}
+	var wait sync.WaitGroup
+	for index := 0; index < 16; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for use := 0; use < 5; use++ {
+				if err := r.RecordAccessKeyUse(ctx, "hot", now, 1); err != nil {
+					t.Errorf("record use: %v", err)
+				}
+			}
+		}()
+	}
+	wait.Wait()
+	record, found, err := r.AccessKey(ctx, "hot")
+	if err != nil || !found || record.RequestCount != 80 {
+		t.Fatalf("record = %+v found=%v err=%v; want 80 uses", record, found, err)
 	}
 }
 

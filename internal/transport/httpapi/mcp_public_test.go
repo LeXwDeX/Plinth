@@ -1012,3 +1012,83 @@ func TestMCPToolDeclarationsAreAllImplemented(t *testing.T) {
 		}
 	}
 }
+
+// The administrator's overall switch (#332) stops the whole service: every key
+// request and every signed download is refused with an explicit JSON-RPC
+// error, a valid key is not counted, and turning the switch back on restores
+// the service and its usage counter.
+func TestMCPListenerRefusesEverythingWhileAccessKeysAreOff(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	key := f.issueKey("owner-a", "read")
+	if result := f.call(key, "get_status", nil); result.code != http.StatusOK || result.isError {
+		t.Fatalf("baseline = %d %s", result.code, result.raw)
+	}
+	waitForAccessKeyUsage(t, f, "owner-a", 1)
+
+	// A refused authentication is never counted.
+	wrong := key[:len(key)-1] + map[bool]string{true: "b", false: "a"}[key[len(key)-1] == 'a']
+	if result := f.call(wrong, "get_status", nil); result.code != http.StatusUnauthorized {
+		t.Fatalf("wrong key = %d %s", result.code, result.raw)
+	}
+	if record := findAccessKey(t, f, "owner-a"); record.RequestCount != 1 {
+		t.Fatalf("a refused key was counted: %+v", record)
+	}
+
+	if err := f.repository.SetAccessKeySwitch(context.Background(), false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for name, recorder := range map[string]*httptest.ResponseRecorder{
+		"endpoint": f.post(key, "tools/call", map[string]any{"name": "get_status", "arguments": map[string]any{}}),
+		"download": func() *httptest.ResponseRecorder {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/mcp/tasks/task/assets/asset", nil)
+			request.Header.Set("Authorization", "Bearer "+key)
+			f.handler.ServeHTTP(recorder, request)
+			return recorder
+		}(),
+		"signed download": func() *httptest.ResponseRecorder {
+			recorder := httptest.NewRecorder()
+			f.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/mcp/signed-assets/garbage", nil))
+			return recorder
+		}(),
+	} {
+		if recorder.Code != http.StatusForbidden ||
+			!strings.Contains(recorder.Body.String(), `"code":-32005`) ||
+			!strings.Contains(recorder.Body.String(), "整体关闭") {
+			t.Errorf("%s while off = %d %s", name, recorder.Code, recorder.Body.String())
+		}
+		if strings.Contains(recorder.Body.String(), key) {
+			t.Errorf("%s echoes the key", name)
+		}
+	}
+	if record := findAccessKey(t, f, "owner-a"); record.RequestCount != 1 {
+		t.Fatalf("a refused request was counted: %+v", record)
+	}
+
+	if err := f.repository.SetAccessKeySwitch(context.Background(), true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if result := f.call(key, "get_status", nil); result.code != http.StatusOK || result.isError {
+		t.Fatalf("after re-enabling = %d %s", result.code, result.raw)
+	}
+}
+
+func findAccessKey(t *testing.T, f *mcpFixture, owner string) accesskeys.Record {
+	t.Helper()
+	records, err := f.keys.List(context.Background(), owner)
+	if err != nil || len(records) == 0 {
+		t.Fatalf("list keys: %v", err)
+	}
+	return records[0]
+}
+
+func waitForAccessKeyUsage(t *testing.T, f *mcpFixture, owner string, want int64) {
+	t.Helper()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if record := findAccessKey(t, f, owner); record.RequestCount >= want {
+			return
+		}
+	}
+	t.Fatalf("request count of %s never reached %d: %+v", owner, want, findAccessKey(t, f, owner))
+}
