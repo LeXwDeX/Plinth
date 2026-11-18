@@ -4,13 +4,19 @@ import { useState } from 'react';
 import { ListChecks } from 'lucide-react';
 
 import { Action } from '@/components/ui/button';
+import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
   AssetListError,
   type AssetListClient,
   type AssetListDecision,
   type AssetListDetail,
+  type AssetListEditInput,
   type AssetListItem,
+  type AssetListItemInput,
+  type AssetListReference,
   type AssetListRunAction,
+  type CropInstruction,
+  type CropRegion,
 } from '@/lib/asset-lists/client';
 import { runIsTerminal, runProgressText, runStatusText } from '@/lib/asset-lists/run';
 import {
@@ -28,13 +34,52 @@ export interface AssetListCardProps {
   onDecided?: () => void;
   /** #328: a run control or a skip succeeded; the parent re-reads the list or the project. */
   onRunChanged?: () => void;
+  /** #331: an edit succeeded; the parent shows the returned detail. */
+  onEdited?: (detail: AssetListDetail) => void;
+  /** #331: the list changed under the editor (409); the parent re-reads it. */
+  onStale?: () => void;
 }
 
 type Conflict = { id: string; title: string };
 
+/** #331: one item while the card is editing. */
+interface DraftItem {
+  /** React key and the identity merge keeps: a merged item keeps the first one. */
+  key: string;
+  kind: string;
+  name: string;
+  description: string;
+  routeID: string;
+  references: AssetListReference[];
+  state: string;
+  /** The region the item's crop was cut from, when the browser resolved it. */
+  origin?: CropInstruction;
+  /** An unsaved re-crop instruction to send with the edit. */
+  crop?: CropInstruction;
+}
+
 /** A scalar brief value; nested objects and arrays have no place on the card. */
 function scalar(value: unknown): value is string | number | boolean {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+/** #331: a region is usable when it has an area and finite coordinates. */
+function usableRegion(region: CropRegion | undefined): region is CropRegion {
+  if (!region) return false;
+  return [region.x, region.y, region.width, region.height].every(Number.isFinite)
+    && region.width > 0 && region.height > 0;
+}
+
+/** #331: the normalized union of two regions, like the design fixes it. */
+export function unionRegion(first: CropRegion, second: CropRegion): CropRegion {
+  const x = Math.min(first.x, second.x);
+  const y = Math.min(first.y, second.y);
+  return {
+    x,
+    y,
+    width: Math.max(first.x + first.width, second.x + second.width) - x,
+    height: Math.max(first.y + first.height, second.y + second.height) - y,
+  };
 }
 
 /**
@@ -42,10 +87,16 @@ function scalar(value: unknown): value is string | number | boolean {
  * card renders the list's own states and kinds from the Product Schema, offers
  * the confirm/reject decision while the list is an unexpired draft, and turns
  * a 409 conflict into the replace decision that resolves it.
+ *
+ * #331: an unexpired draft is editable: every item shows its reference
+ * thumbnail, can be renamed or deleted, and two items with a resolved crop
+ * origin can be merged into one re-cut over their united region. Saving is one
+ * whole-list replacement; every other status stays read-only.
  */
 export function AssetListCard({
-  detail, schema, projectId, client, variant = 'chat', onDecided, onRunChanged,
+  detail, schema, projectId, client, variant = 'chat', onDecided, onRunChanged, onEdited, onStale,
 }: AssetListCardProps) {
+  const { previewAssetUrl } = useAssetURLRewriter();
   const [pending, setPending] = useState<AssetListDecision | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,6 +104,10 @@ export function AssetListCard({
   const [runPending, setRunPending] = useState<AssetListRunAction | null>(null);
   const [stopConfirm, setStopConfirm] = useState(false);
   const [skipPending, setSkipPending] = useState<string | null>(null);
+  // #331: a draft list being edited. Null means the read-only rendering.
+  const [draft, setDraft] = useState<DraftItem[] | null>(null);
+  const [mergeSelection, setMergeSelection] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
   const run = detail.run ?? null;
   const text = (key: string) => schemaText(schema, key);
   const busy = pending !== null;
@@ -91,6 +146,9 @@ export function AssetListCard({
           ? text('ui.asset_list.rejected_hint')
           : '';
   const canDecide = detail.status === 'draft' && !expired;
+  // #331: only an unexpired draft is editable; every other status stays read-only.
+  const canEdit = canDecide;
+  const nameMaxLength = schema.asset_list?.limits.name_max_length;
   // #328: only a confirmed, live list runs; stopped and completed are final.
   // Start needs the run row created at confirm: its idle state is the only one
   // with a version token to send. A missing run (execution disabled, or a lost
@@ -104,11 +162,137 @@ export function AssetListCard({
     Boolean(run) && run?.status !== 'stopped' && (item.state === 'todo' || item.state === 'working');
   // A server detail that names a Schema message is shown in the active locale;
   // anything else falls back to the card's own failure copy.
-  const failureMessage = (failure: unknown) => {
+  const failureMessage = (failure: unknown, fallback = 'ui.asset_list.decide_failed') => {
     const detailText = failure instanceof AssetListError
       ? failure.detail
       : failure instanceof Error ? failure.message : '';
-    return (detailText ? text(detailText) : '') || text('ui.asset_list.decide_failed');
+    return (detailText ? text(detailText) : '') || text(fallback);
+  };
+  // #331: an edit refusal is the server's Schema copy already (region invalid,
+  // too small, a bad reference, the image item limit); a Schema key is
+  // translated, any other server detail is shown as sent. A network failure
+  // has no server detail and falls back to the card's own copy.
+  const editFailureMessage = (failure: unknown) => {
+    const serverDetail = failure instanceof AssetListError ? failure.detail : '';
+    return text(serverDetail) || serverDetail || text('ui.asset_list.edit_save_failed');
+  };
+
+  // #331: the first input-asset reference is the item's reference picture.
+  // Task-output references have no input picture; the card then shows no tile.
+  const referenceImageURL = (references: AssetListReference[]): string => {
+    const assetID = references.find((reference) => reference.input_asset_id)?.input_asset_id ?? '';
+    const template = schema.runtime.http.routes.asset_item;
+    if (!assetID || !template) return '';
+    return previewAssetUrl(template.replace('{assetID}', encodeURIComponent(assetID)));
+  };
+  // #331: the detail carries the provenance of the item's crop reference; an
+// item without one (no crop, or an older server) offers no merge entry.
+  const originOf = (item: AssetListItem): CropInstruction | undefined => {
+    const origin = item.crop;
+    if (!origin || !origin.source_input_asset_id || !usableRegion(origin.region)) return undefined;
+    return origin;
+  };
+  const canMerge = (entry: DraftItem) =>
+    Boolean(entry.origin) && entry.references.some((reference) => Boolean(reference.input_asset_id));
+
+  const startEditing = () => {
+    setError(null);
+    setMergeSelection([]);
+    setDraft(items.map((item): DraftItem => ({
+      key: item.id,
+      kind: item.kind,
+      name: item.name,
+      description: item.description ?? '',
+      routeID: item.route_id,
+      references: Array.isArray(item.references) ? item.references : [],
+      state: item.state,
+      origin: originOf(item),
+    })));
+  };
+
+  const cancelEditing = () => {
+    setDraft(null);
+    setMergeSelection([]);
+    setError(null);
+  };
+
+  const renameDraft = (key: string, name: string) => {
+    setDraft((current) => current?.map((entry) => (entry.key === key ? { ...entry, name } : entry)) ?? null);
+  };
+
+  const deleteDraft = (key: string) => {
+    setDraft((current) => (current && current.length > 1 ? current.filter((entry) => entry.key !== key) : current));
+    setMergeSelection((current) => current.filter((entry) => entry !== key));
+  };
+
+  const toggleMerge = (key: string) => {
+    setMergeSelection((current) => current.includes(key)
+      ? current.filter((entry) => entry !== key)
+      : current.length >= 2 ? current : [...current, key]);
+  };
+
+  const mergeSelectionItems = (draft ?? []).filter((entry) => mergeSelection.includes(entry.key));
+  const [mergeFirst, mergeSecond] = mergeSelectionItems;
+  const mergeHasOrigins = mergeSelection.length === 2
+    && mergeSelectionItems.length === 2
+    && Boolean(mergeFirst.origin)
+    && Boolean(mergeSecond.origin);
+  const mergeReady = mergeHasOrigins
+    && mergeFirst.origin!.source_input_asset_id === mergeSecond.origin!.source_input_asset_id;
+  const mergeMismatch = mergeHasOrigins && !mergeReady;
+
+  // Merge is local until save: the first selected item keeps its name,
+  // description and references, and carries one crop instruction over the
+  // united region; the second item leaves the list.
+  const mergeSelected = () => {
+    if (!draft || !mergeReady) return;
+    const first = mergeFirst;
+    const second = mergeSecond;
+    const crop: CropInstruction = {
+      source_input_asset_id: first.origin!.source_input_asset_id,
+      region: unionRegion(first.origin!.region, second.origin!.region),
+    };
+    setDraft(draft
+      .filter((entry) => entry.key !== second.key)
+      .map((entry) => (entry.key === first.key ? { ...entry, origin: crop, crop } : entry)));
+    setMergeSelection([]);
+  };
+
+  const save = async () => {
+    if (!draft || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const payload: AssetListEditInput = {
+        title: detail.title,
+        expected_version: detail.version,
+        // The route replaces the brief too; omitting it would clear it.
+        brief: detail.brief,
+        items: draft.map((entry): AssetListItemInput => ({
+          kind: entry.kind,
+          name: entry.name,
+          description: entry.description,
+          route_id: entry.routeID,
+          references: entry.references,
+          ...(entry.crop ? { crop: entry.crop } : {}),
+        })),
+      };
+      const updated = await client.edit(projectId, detail.id, payload);
+      setDraft(null);
+      setMergeSelection([]);
+      onEdited?.(updated);
+    } catch (failure) {
+      // A concurrent edit is not overwritten: the parent re-reads the list,
+      // the local draft stays on screen and a later save uses its version.
+      if (failure instanceof AssetListError && failure.status === 409) {
+        setError(text('ui.asset_list.edit_conflict'));
+        onStale?.();
+      } else {
+        setError(editFailureMessage(failure));
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const decide = async (decision: AssetListDecision) => {
@@ -169,6 +353,7 @@ export function AssetListCard({
       data-testid="asset-list-card"
       data-status={detail.effective_status}
       data-variant={variant}
+      data-editing={draft ? 'true' : undefined}
       aria-label={text(variant === 'chat' ? 'ui.asset_list.chat_card_title' : 'ui.asset_list.section_title')}
     >
       <header className="flex items-center gap-1.5">
@@ -215,49 +400,159 @@ export function AssetListCard({
       {availabilityWarning ? (
         <p className="text-warning" data-testid="asset-list-availability-warning">{availabilityWarning}</p>
       ) : null}
-      {items.length > 0 ? (
+      {draft ? (
         <ul className="flex flex-col gap-0.5" data-testid="asset-list-items">
-          {items.map((item, index) => (
-            <li
-              key={item.id || index}
-              className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-border/70 px-1.5 py-1"
-              data-testid={`asset-list-item-${index}`}
-              data-kind={item.kind}
-              data-state={item.state}
-            >
-              <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{item.name}</span>
-              <span className="text-muted-foreground">{kindLabel(item.kind)}</span>
-              <span className="text-muted-foreground">{itemStateLabel(item.state)}</span>
-              <span className="tabular-nums text-muted-foreground">
-                {formatSchemaText(text('ui.asset_list.planned_steps'), { steps: item.planned_step_count })}
-              </span>
-              {item.planned_model3d_step_count > 0 ? (
-                <span className="tabular-nums text-muted-foreground">
-                  {formatSchemaText(text('ui.asset_list.planned_model3d_steps'), { steps: item.planned_model3d_step_count })}
-                </span>
-              ) : null}
-              {itemUnavailable(item) ? (
-                <span className="text-warning" data-testid="asset-list-item-unavailable">
-                  {text('ui.asset_list.item_unavailable')}
-                </span>
-              ) : null}
-              {canSkip(item) ? (
+          {draft.map((entry, index) => {
+            const thumbnail = referenceImageURL(entry.references);
+            const selected = mergeSelection.includes(entry.key);
+            return (
+              <li
+                key={entry.key}
+                className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md border px-1.5 py-1 ${
+                  selected ? 'border-primary' : 'border-border/70'
+                }`}
+                data-testid={`asset-list-item-${index}`}
+                data-kind={entry.kind}
+                data-state={entry.state}
+                data-merge-selected={selected ? 'true' : undefined}
+              >
+                {thumbnail ? (
+                  <span className="size-8 shrink-0 overflow-hidden rounded border border-border bg-muted">
+                    <img
+                      src={thumbnail}
+                      alt={text('ui.asset_list.edit_reference')}
+                      className="size-full object-cover"
+                      data-testid={`asset-list-item-thumb-${index}`}
+                    />
+                  </span>
+                ) : null}
+                <input
+                  type="text"
+                  value={entry.name}
+                  maxLength={nameMaxLength}
+                  aria-label={text('ui.asset_list.edit_name')}
+                  onChange={(event) => renameDraft(entry.key, event.target.value)}
+                  className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-xs"
+                  data-testid={`asset-list-item-name-${index}`}
+                />
+                <span className="text-muted-foreground">{kindLabel(entry.kind)}</span>
+                {entry.description ? (
+                  <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">{entry.description}</span>
+                ) : null}
+                {canMerge(entry) ? (
+                  <Action
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    className="ml-auto"
+                    aria-pressed={selected}
+                    disabled={saving || (!selected && mergeSelection.length >= 2)}
+                    onClick={() => toggleMerge(entry.key)}
+                    data-testid={`asset-list-item-merge-${index}`}
+                  >
+                    {text('ui.asset_list.edit_merge')}
+                  </Action>
+                ) : null}
                 <Action
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="xs"
-                  className="ml-auto"
-                  disabled={skipPending !== null}
-                  loading={skipPending === item.id}
-                  onClick={() => void skip(item)}
-                  data-testid={`asset-list-item-skip-${index}`}
+                  className={canMerge(entry) ? '' : 'ml-auto'}
+                  disabled={saving || draft.length <= 1}
+                  onClick={() => deleteDraft(entry.key)}
+                  data-testid={`asset-list-item-delete-${index}`}
                 >
-                  {text('ui.asset_list.run_skip')}
+                  {text('ui.asset_list.edit_delete')}
                 </Action>
-              ) : null}
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
+      ) : items.length > 0 ? (
+        <ul className="flex flex-col gap-0.5" data-testid="asset-list-items">
+          {items.map((item, index) => {
+            const thumbnail = detail.status === 'draft' ? referenceImageURL(item.references) : '';
+            return (
+              <li
+                key={item.id || index}
+                className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-border/70 px-1.5 py-1"
+                data-testid={`asset-list-item-${index}`}
+                data-kind={item.kind}
+                data-state={item.state}
+              >
+                {thumbnail ? (
+                  <span className="size-8 shrink-0 self-center overflow-hidden rounded border border-border bg-muted">
+                    <img
+                      src={thumbnail}
+                      alt={text('ui.asset_list.edit_reference')}
+                      className="size-full object-cover"
+                      data-testid={`asset-list-item-thumb-${index}`}
+                    />
+                  </span>
+                ) : null}
+                <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{item.name}</span>
+                <span className="text-muted-foreground">{kindLabel(item.kind)}</span>
+                {detail.status === 'draft' && item.description ? (
+                  <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">{item.description}</span>
+                ) : null}
+                <span className="text-muted-foreground">{itemStateLabel(item.state)}</span>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatSchemaText(text('ui.asset_list.planned_steps'), { steps: item.planned_step_count })}
+                </span>
+                {item.planned_model3d_step_count > 0 ? (
+                  <span className="tabular-nums text-muted-foreground">
+                    {formatSchemaText(text('ui.asset_list.planned_model3d_steps'), { steps: item.planned_model3d_step_count })}
+                  </span>
+                ) : null}
+                {itemUnavailable(item) ? (
+                  <span className="text-warning" data-testid="asset-list-item-unavailable">
+                    {text('ui.asset_list.item_unavailable')}
+                  </span>
+                ) : null}
+                {canSkip(item) ? (
+                  <Action
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    className="ml-auto"
+                    disabled={skipPending !== null}
+                    loading={skipPending === item.id}
+                    onClick={() => void skip(item)}
+                    data-testid={`asset-list-item-skip-${index}`}
+                  >
+                    {text('ui.asset_list.run_skip')}
+                  </Action>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {draft && mergeSelection.length > 0 ? (
+        <div
+          className="flex flex-col gap-1 rounded-md border border-border p-2 text-[11px] leading-4 text-muted-foreground"
+          data-testid="asset-list-merge-panel"
+        >
+          <p>{text('ui.asset_list.edit_merge_hint')}</p>
+          {mergeMismatch ? (
+            <p className="text-warning" data-testid="asset-list-merge-mismatch">
+              {text('ui.asset_list.edit_merge_source_mismatch')}
+            </p>
+          ) : null}
+          {mergeSelection.length === 2 ? (
+            <Action
+              type="button"
+              variant="outline"
+              size="xs"
+              className="self-start"
+              disabled={!mergeReady}
+              onClick={mergeSelected}
+              data-testid="asset-list-merge"
+            >
+              {text('ui.asset_list.edit_merge_selected')}
+            </Action>
+          ) : null}
+        </div>
       ) : null}
       <footer className="flex flex-col gap-1.5" data-testid="asset-list-actions">
         {hint ? <p className="text-muted-foreground" data-testid="asset-list-hint">{hint}</p> : null}
@@ -270,7 +565,45 @@ export function AssetListCard({
             {formatSchemaText(text('ui.asset_list.active_conflict'), { title: conflict.title })}
           </p>
         ) : null}
-        {canDecide || conflict ? (
+        {draft ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Action
+              type="button"
+              size="sm"
+              loading={saving}
+              disabled={saving}
+              onClick={() => void save()}
+              data-testid="asset-list-save"
+            >
+              {text('ui.asset_list.edit_save')}
+            </Action>
+            <Action
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={saving}
+              onClick={cancelEditing}
+              data-testid="asset-list-cancel"
+            >
+              {text('ui.asset_list.edit_cancel')}
+            </Action>
+          </div>
+        ) : null}
+        {!draft && canEdit ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Action
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={startEditing}
+              data-testid="asset-list-edit"
+            >
+              {text('ui.asset_list.edit')}
+            </Action>
+          </div>
+        ) : null}
+        {!draft && (canDecide || conflict) ? (
           <div className="flex flex-wrap items-center gap-1.5">
             {canDecide ? (
               <Action

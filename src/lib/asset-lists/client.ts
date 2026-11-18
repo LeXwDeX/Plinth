@@ -92,6 +92,8 @@ export interface AssetListItem {
   name: string;
   description?: string;
   references: AssetListReference[];
+  /** #331: the provenance of the item's crop reference; absent on older servers. */
+  crop?: AssetListCrop;
   route_id: string;
   route: AssetListRouteStep[];
   planned_step_count: number;
@@ -113,6 +115,65 @@ export interface AssetListDetail extends AssetListSummary {
   /** Set on a list that a `replace` decision superseded. */
   superseded_by?: string;
   items: AssetListItem[];
+}
+
+/** #331: a normalized region relative to its source picture, right and bottom edges exclusive. */
+export interface CropRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * #331: an edit instruction. The server cuts `region` out of the owner's
+ * `source_input_asset_id` picture, stores it as an input asset and makes it the
+ * item's crop reference, replacing the item's previous crop reference.
+ */
+export interface CropInstruction {
+  source_input_asset_id: string;
+  region: CropRegion;
+}
+
+/**
+ * #331: the crop provenance the list detail exposes for one item's crop
+ * reference. Geometry only: the source picture and the normalized region.
+ * Absent when the item has no crop reference or the server predates #331.
+ */
+export interface AssetListCrop extends CropInstruction {
+  source_kind?: string;
+  source_width?: number;
+  source_height?: number;
+  pixel_rect?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+/**
+ * #331: one item of a whole-list edit. `references` are explicit project
+ * references (an input asset or a Task output); the edit route resolves no
+ * @handles. `crop` is edit-only: the proposal tool refuses it and names its
+ * crops through `reference_input_asset_ids` instead.
+ */
+export interface AssetListItemInput {
+  kind: string;
+  name: string;
+  description?: string;
+  route_id?: string;
+  references?: AssetListReference[];
+  crop?: CropInstruction;
+}
+
+/**
+ * #331: the whole-list replacement body of `PUT /asset-lists/{listID}`. The
+ * server replaces the list's items with exactly this set. `expected_version`
+ * is the numeric list version the browser read; a stale version is a 409.
+ * `brief` is replaced as well: omitting it stores an empty brief, so an editor
+ * echoes the detail's brief.
+ */
+export interface AssetListEditInput {
+  title: string;
+  expected_version: number;
+  items: AssetListItemInput[];
+  brief?: Record<string, unknown>;
 }
 
 /**
@@ -176,6 +237,11 @@ export interface AssetListClient {
   ): Promise<AssetListItem>;
   /** #328: this browser tab is (or is no longer) watching the project. */
   presence(projectID: string, tabID: string, state: AssetListPresenceState): Promise<void>;
+  /**
+   * #331: replace a draft list's title, brief and items as a whole. Resolves to
+   * the stored detail; a stale `expected_version` is a 409 `AssetListError`.
+   */
+  edit(projectID: string, listID: string, input: AssetListEditInput): Promise<AssetListDetail>;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -309,6 +375,16 @@ export function createAssetListClient(
       const payload = await payloadOf(response);
       if (!response.ok) failure(response, payload);
       return summaries(payload);
+    },
+    async edit(projectID, listID, input) {
+      const response = await fetcher(listRoute(projectID, listID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return detailOf(payload);
     },
     async presence(projectID, tabID, state) {
       // 204: no body to read. A leave may be the last request of a page that

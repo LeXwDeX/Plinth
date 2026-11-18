@@ -10,6 +10,10 @@ import { AssetListCardLoader } from '@/components/studio/asset-list-card-loader'
 import type { AssetListClient, AssetListDetail, AssetListItem, AssetListSummary } from '@/lib/asset-lists/client';
 import type { ProductSchema } from '@/lib/product-schema';
 
+vi.mock('@/hooks/use-asset-url-rewriter', () => ({
+  useAssetURLRewriter: () => ({ previewAssetUrl: (url: string) => url }),
+}));
+
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
 
@@ -72,6 +76,7 @@ function clientWith(getList: ReturnType<typeof vi.fn>): AssetListClient {
     skipItem: vi.fn(async () => item({ state: 'skipped' })) as unknown as AssetListClient['skipItem'],
     listSessionLists: vi.fn(async () => []),
     presence: vi.fn(async () => {}),
+    edit: vi.fn(async () => detail()) as unknown as AssetListClient['edit'],
   };
 }
 

@@ -2263,6 +2263,7 @@ export function ChatColumn() {
                           client={assetListsClient}
                           variant="chat"
                           onDecided={sessionAssetLists.refresh}
+                          onEdited={sessionAssetLists.refresh}
                         />
                       ))}
                     </div>
@@ -2293,6 +2294,7 @@ export function ChatColumn() {
                     client={assetListsClient}
                     variant="chat"
                     onDecided={sessionAssetLists.refresh}
+                    onEdited={sessionAssetLists.refresh}
                   />
                 ))}
               </div>

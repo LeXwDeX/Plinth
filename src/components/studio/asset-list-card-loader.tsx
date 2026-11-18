@@ -16,6 +16,8 @@ export interface AssetListCardLoaderProps {
   onDecided?: () => void;
   /** #328: a run control or a skip succeeded; re-read this detail and the parent's listing. */
   onRunChanged?: () => void;
+  /** #331: an edit succeeded; the returned detail replaces the cached one and the parent may refresh its listing. */
+  onEdited?: (detail: AssetListDetail) => void;
 }
 
 /**
@@ -24,7 +26,7 @@ export interface AssetListCardLoaderProps {
  * come from the single-list route like the card's decision does.
  */
 export function AssetListCardLoader({
-  summary, schema, client, variant = 'chat', onDecided, onRunChanged,
+  summary, schema, client, variant = 'chat', onDecided, onRunChanged, onEdited,
 }: AssetListCardLoaderProps) {
   const { data, error, isLoading, mutate } = useSWR<AssetListDetail>(
     ['asset-list-detail', summary.project_id, summary.id] as const,
@@ -73,6 +75,16 @@ export function AssetListCardLoader({
       onRunChanged={() => {
         void mutate();
         onRunChanged?.();
+      }}
+      onEdited={(updated) => {
+        // The server already returned the stored list: show it without a
+        // second read, then let the parent refresh its own listing.
+        void mutate(updated, { revalidate: false });
+        onEdited?.(updated);
+      }}
+      onStale={() => {
+        // A concurrent edit (409) is re-read; the card keeps its draft.
+        void mutate();
       }}
     />
   );

@@ -12,8 +12,13 @@ import {
   type AssetListDetail,
   type AssetListItem,
   type AssetListRun,
+  type CropInstruction,
 } from '@/lib/asset-lists/client';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+
+vi.mock('@/hooks/use-asset-url-rewriter', () => ({
+  useAssetURLRewriter: () => ({ previewAssetUrl: (url: string) => url }),
+}));
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
@@ -87,6 +92,7 @@ function clientWith(
   controls: {
     controlRun?: ReturnType<typeof vi.fn>;
     skipItem?: ReturnType<typeof vi.fn>;
+    edit?: ReturnType<typeof vi.fn>;
   } = {},
 ): AssetListClient {
   return {
@@ -97,6 +103,7 @@ function clientWith(
     skipItem: (controls.skipItem ?? vi.fn(async () => item({ state: 'skipped' }))) as unknown as AssetListClient['skipItem'],
     listSessionLists: vi.fn(async () => []),
     presence: vi.fn(async () => {}),
+    edit: (controls.edit ?? vi.fn(async () => detail())) as unknown as AssetListClient['edit'],
   };
 }
 
@@ -105,25 +112,33 @@ function renderCard(options: {
   decide?: ReturnType<typeof vi.fn>;
   controlRun?: ReturnType<typeof vi.fn>;
   skipItem?: ReturnType<typeof vi.fn>;
+  edit?: ReturnType<typeof vi.fn>;
   onDecided?: () => void;
   onRunChanged?: () => void;
+  onEdited?: (updated: AssetListDetail) => void;
+  onStale?: () => void;
 } = {}) {
   const decide = options.decide ?? vi.fn(async () => detail({ status: 'confirmed', effective_status: 'confirmed' }));
   const controlRun = options.controlRun ?? vi.fn(async () => run());
   const skipItem = options.skipItem ?? vi.fn(async () => item({ state: 'skipped' }));
+  const edit = options.edit ?? vi.fn(async () => detail());
   const onDecided = options.onDecided ?? vi.fn();
   const onRunChanged = options.onRunChanged ?? vi.fn();
+  const onEdited = options.onEdited ?? vi.fn();
+  const onStale = options.onStale ?? vi.fn();
   const view = render(
     <AssetListCard
       detail={options.detail ?? detail()}
       schema={schema}
       projectId="proj"
-      client={clientWith(decide, { controlRun, skipItem })}
+      client={clientWith(decide, { controlRun, skipItem, edit })}
       onDecided={onDecided}
       onRunChanged={onRunChanged}
+      onEdited={onEdited}
+      onStale={onStale}
     />,
   );
-  return { decide, controlRun, skipItem, onDecided, onRunChanged, view };
+  return { decide, controlRun, skipItem, edit, onDecided, onRunChanged, onEdited, onStale, view };
 }
 
 describe('AssetListCard (#327)', () => {
@@ -286,6 +301,249 @@ describe('AssetListCard (#327)', () => {
     cleanup();
     renderCard({ detail: detail({ items: [], item_count: 0, brief: {} }) });
     expect(screen.queryByTestId('asset-list-items')).toBeNull();
+  });
+});
+
+describe('AssetListCard draft editing (#331)', () => {
+  const originOne: CropInstruction = {
+    source_input_asset_id: 'scene_1',
+    region: { x: 0.25, y: 0.25, width: 0.25, height: 0.25 },
+  };
+  const originTwo: CropInstruction = {
+    source_input_asset_id: 'scene_1',
+    region: { x: 0.5, y: 0.5, width: 0.25, height: 0.25 },
+  };
+
+  interface EditPayloadItem {
+    kind: string;
+    name: string;
+    description?: string;
+    route_id?: string;
+    references?: Array<{ input_asset_id?: string }>;
+    crop?: CropInstruction;
+  }
+
+  interface EditPayload {
+    title: string;
+    expected_version: number;
+    brief: Record<string, unknown>;
+    items: EditPayloadItem[];
+  }
+
+  function editCalls(edit: ReturnType<typeof vi.fn>): Array<[string, string, EditPayload]> {
+    return edit.mock.calls as unknown as Array<[string, string, EditPayload]>;
+  }
+
+  function lastEditPayload(edit: ReturnType<typeof vi.fn>): EditPayload {
+    const calls = editCalls(edit);
+    return calls[calls.length - 1][2];
+  }
+
+  function editable(overrides: Partial<AssetListDetail> = {}): AssetListDetail {
+    return detail({
+      items: [
+        item({ id: 'item_1', references: [{ input_asset_id: 'crop_1' }] }),
+        item({ id: 'item_2', kind: 'weapon', name: '长剑', references: [{ input_asset_id: 'crop_2' }] }),
+      ],
+      ...overrides,
+    });
+  }
+
+  it('shows a reference thumbnail for every draft item that has one', () => {
+    renderCard({ detail: editable() });
+    expect(screen.getByTestId('asset-list-item-thumb-0').getAttribute('src')).toBe('/api/v1/assets/crop_1');
+    expect(screen.getByTestId('asset-list-item-thumb-1').getAttribute('src')).toBe('/api/v1/assets/crop_2');
+
+    cleanup();
+    renderCard({ detail: detail({ items: [item({ references: [] })] }) });
+    // No reference picture: no empty placeholder either.
+    expect(screen.queryByTestId('asset-list-item-thumb-0')).toBeNull();
+  });
+
+  it('keeps a confirmed list read-only', () => {
+    renderCard({ detail: detail({ status: 'confirmed', effective_status: 'confirmed' }) });
+
+    expect(screen.queryByTestId('asset-list-edit')).toBeNull();
+    expect(screen.queryByTestId('asset-list-item-name-0')).toBeNull();
+    expect(screen.queryByTestId('asset-list-item-delete-0')).toBeNull();
+    expect(screen.queryByTestId('asset-list-item-thumb-0')).toBeNull();
+  });
+
+  it('renames an item and saves the whole list with its version and brief', async () => {
+    const updated = editable({ version: 2 });
+    const edit = vi.fn(async () => updated);
+    const onEdited = vi.fn();
+    renderCard({ detail: editable(), edit, onEdited });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    expect(screen.queryByTestId('asset-list-confirm')).toBeNull();
+    fireEvent.change(screen.getByTestId('asset-list-item-name-0'), { target: { value: '新主角' } });
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    const [projectID, listID, payload] = editCalls(edit)[0];
+    expect(projectID).toBe('proj');
+    expect(listID).toBe('listid');
+    expect(payload).toMatchObject({
+      title: '英雄套装',
+      expected_version: 1,
+      brief: { purpose: '游戏角色', image_transparent: true, triangle_budget: 30000 },
+    });
+    expect(payload.items).toHaveLength(2);
+    expect(payload.items[0]).toMatchObject({
+      kind: 'character',
+      name: '新主角',
+      route_id: 'text-to-3d',
+      references: [{ input_asset_id: 'crop_1' }],
+    });
+    expect(payload.items[1]).toMatchObject({ name: '长剑' });
+    await waitFor(() => expect(onEdited).toHaveBeenCalledWith(updated));
+    // The editor closes on the stored list.
+    await waitFor(() => expect(screen.queryByTestId('asset-list-save')).toBeNull());
+    expect(screen.getByTestId('asset-list-edit')).toBeTruthy();
+  });
+
+  it('deletes an item before saving, keeping at least one', async () => {
+    const edit = vi.fn(async () => detail({ version: 2 }));
+    renderCard({ detail: editable(), edit });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.click(screen.getByTestId('asset-list-item-delete-1'));
+    expect(screen.queryByTestId('asset-list-item-1')).toBeNull();
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    const payload = lastEditPayload(edit);
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]).toMatchObject({ name: '主角', kind: 'character' });
+  });
+
+  it('disables deleting the last remaining item', () => {
+    renderCard({ detail: detail({ items: [item({ references: [{ input_asset_id: 'crop_1' }] })] }) });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    expect((screen.getByTestId('asset-list-item-delete-0') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('merges two same-source items into one crop over their united region', async () => {
+    const edit = vi.fn(async () => detail({ version: 2 }));
+    renderCard({
+      detail: editable({
+        items: [
+          item({ id: 'item_1', references: [{ input_asset_id: 'crop_1' }], crop: originOne }),
+          item({
+            id: 'item_2', kind: 'weapon', name: '长剑',
+            references: [{ input_asset_id: 'crop_2' }], crop: originTwo,
+          }),
+        ],
+      }),
+      edit,
+    });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.click(screen.getByTestId('asset-list-item-merge-0'));
+    expect(screen.getByTestId('asset-list-merge-panel').textContent).toContain(
+      messages['ui.asset_list.edit_merge_hint'],
+    );
+    fireEvent.click(screen.getByTestId('asset-list-item-merge-1'));
+    fireEvent.click(screen.getByTestId('asset-list-merge'));
+
+    // The second item left the list; the first kept its identity.
+    expect(screen.queryByTestId('asset-list-item-1')).toBeNull();
+    expect((screen.getByTestId('asset-list-item-name-0') as HTMLInputElement).value).toBe('主角');
+
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    const payload = lastEditPayload(edit);
+    expect(payload.items).toHaveLength(1);
+    expect(payload.items[0]).toMatchObject({
+      name: '主角',
+      description: '',
+      references: [{ input_asset_id: 'crop_1' }],
+    });
+    expect(payload.items[0].crop).toEqual({
+      source_input_asset_id: 'scene_1',
+      region: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+    });
+  });
+
+  it('refuses to merge two items of different source pictures', () => {
+    renderCard({
+      detail: editable({
+        items: [
+          item({ id: 'item_1', references: [{ input_asset_id: 'crop_1' }], crop: originOne }),
+          item({
+            id: 'item_2', kind: 'weapon', name: '长剑',
+            references: [{ input_asset_id: 'crop_2' }],
+            crop: { ...originTwo, source_input_asset_id: 'scene_2' },
+          }),
+        ],
+      }),
+    });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.click(screen.getByTestId('asset-list-item-merge-0'));
+    fireEvent.click(screen.getByTestId('asset-list-item-merge-1'));
+
+    expect(screen.getByTestId('asset-list-merge-mismatch').textContent).toBe(
+      messages['ui.asset_list.edit_merge_source_mismatch'],
+    );
+    expect((screen.getByTestId('asset-list-merge') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('offers merge only for an item with a reference picture and a resolved origin', () => {
+    renderCard({
+      detail: detail({
+        items: [
+          item({ id: 'item_1', references: [{ input_asset_id: 'crop_1' }], crop: originOne }),
+          // A crop origin but no reference picture still cannot merge.
+          item({ id: 'item_2', name: '长剑', references: [], crop: originTwo }),
+        ],
+      }),
+    });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    expect(screen.getByTestId('asset-list-item-merge-0')).toBeTruthy();
+    expect(screen.queryByTestId('asset-list-item-merge-1')).toBeNull();
+
+    cleanup();
+    // No origin at all: the draft has no merge entry.
+    renderCard({ detail: editable() });
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    expect(screen.queryByTestId('asset-list-item-merge-0')).toBeNull();
+  });
+
+  it('reports a version conflict, re-reads the list and keeps the draft', async () => {
+    const edit = vi.fn().mockRejectedValue(
+      new AssetListError('conflict', 409, { code: 'conflict', detail: 'error.conflict' }),
+    );
+    const onStale = vi.fn();
+    renderCard({ detail: editable(), edit, onStale });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.change(screen.getByTestId('asset-list-item-name-0'), { target: { value: '改过的名字' } });
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+
+    await waitFor(() => expect(screen.getByTestId('asset-list-error').textContent).toBe(
+      messages['ui.asset_list.edit_conflict'],
+    ));
+    expect(onStale).toHaveBeenCalledTimes(1);
+    // The local draft is not overwritten.
+    expect((screen.getByTestId('asset-list-item-name-0') as HTMLInputElement).value).toBe('改过的名字');
+    expect(screen.getByTestId('asset-list-save')).toBeTruthy();
+  });
+
+  it('shows the server copy of another edit refusal', async () => {
+    const refused = new AssetListError('refused', 400, {
+      code: 'asset_list_region_too_small',
+      detail: '拆解区域太小：最短边至少 64 像素，请把这块区域框得更大一些。',
+    });
+    renderCard({ detail: editable(), edit: vi.fn().mockRejectedValue(refused) });
+
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+
+    await waitFor(() => expect(screen.getByTestId('asset-list-error').textContent).toBe(refused.detail));
   });
 });
 
