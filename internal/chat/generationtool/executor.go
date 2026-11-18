@@ -450,7 +450,7 @@ func (executor *Executor) Execute(
 	// #242: one reply draws a bounded number of concept sketches; a later reply
 	// starts a fresh count. An already accepted Task is observed above and is
 	// never refused by this limit.
-	if refusal := executor.conceptSketchLimit(command); refusal != "" {
+	if refusal := executor.conceptSketchLimit(ctx, command); refusal != "" {
 		result := executor.failure(command, "", refusal)
 		result.NoSubmission = true
 		return result, nil
@@ -1467,9 +1467,15 @@ func (executor *Executor) buildInput(
 		}
 	}
 	// #242: the concept sketch's cheap parameters per Offering sit above the
-	// purpose values; the Agent's own values still win.
+	// purpose values. #360 makes a sketch value final: the same values are
+	// applied again after every other layer, so neither the person's panel
+	// nor the Agent can raise a sketch's per-task image count.
 	conceptValues := executor.conceptSketchParameterValues(command, offering)
 	for name, encoded := range conceptValues {
+		if isNullParameter(encoded) {
+			delete(input, name)
+			continue
+		}
 		var value any
 		if err := json.Unmarshal(encoded, &value); err != nil {
 			return nil, nil, err
@@ -1478,13 +1484,43 @@ func (executor *Executor) buildInput(
 	}
 	parameters := make(map[string]json.RawMessage, len(command.Options.Parameters))
 	for name, value := range command.Options.Parameters {
-		if parameter, declared := allowed[name]; declared && turnParameterAllowed(offering, parameter) {
-			parameters[name] = value
+		parameter, declared := allowed[name]
+		if !declared || !turnParameterAllowed(offering, parameter) {
+			continue
 		}
+		// The merged options add the Agent's remembered set_params values to
+		// the panel. A parameter the Agent cannot set (#360) may still come
+		// from the panel's own snapshot, but not from that merged tail.
+		if !offering.AgentParameterAllowed(parameter) && command.ExplicitParameters != nil {
+			if _, fromPanel := command.ExplicitParameters[name]; !fromPanel {
+				continue
+			}
+		}
+		parameters[name] = value
 	}
 	if executor.offeringParameters != nil {
+		// The remembered store holds both layers; each value answers to its
+		// own authority, so a person's "user"-policy setting applies while a
+		// stale Agent value for the same parameter does not (#360).
+		var states map[string]RememberedParameter
+		if executor.offeringParameterStates != nil {
+			states = executor.offeringParameterStates(command.OwnerID, command.SessionID, string(offering.ID))
+		}
 		for name, value := range executor.offeringParameters(command.OwnerID, command.SessionID, string(offering.ID)) {
-			if parameter, declared := allowed[name]; declared && offering.AgentParameterAllowed(parameter) {
+			parameter, declared := allowed[name]
+			if !declared {
+				continue
+			}
+			var permitted bool
+			switch states[name].Source {
+			case "user":
+				permitted = offering.UserParameterAllowed(parameter)
+			case "agent":
+				permitted = offering.AgentParameterAllowed(parameter)
+			default:
+				permitted = offering.UserParameterAllowed(parameter) || offering.AgentParameterAllowed(parameter)
+			}
+			if permitted {
 				parameters[name] = value
 			}
 		}
@@ -1695,6 +1731,21 @@ func (executor *Executor) buildInput(
 	// Offering's mask parameter after every other layer. An Agent-supplied
 	// mask that reached the input above wins.
 	bindSelectionMask(command, offering, input, chosen)
+	// #360: a concept sketch's fixed values are final. The panel, the Agent,
+	// a Skill and the canvas all sit above the ordinary schema layers, but a
+	// sketch must stay exactly one image per task however they were set.
+	for name, encoded := range conceptValues {
+		if isNullParameter(encoded) {
+			delete(input, name)
+			continue
+		}
+		var value any
+		if err := json.Unmarshal(encoded, &value); err != nil {
+			return nil, nil, err
+		}
+		input[name] = value
+		chosen[name] = true
+	}
 	encoded, err := json.Marshal(input)
 	return encoded, referenceAssets, err
 }

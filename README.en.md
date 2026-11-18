@@ -221,7 +221,7 @@ check `docker compose logs art-ai`.
   [partner deployment guide](docs/partner-deployment.md) (in Chinese, with an English summary);
   usage and options are in the [deployment entry](docs/deployment.md) ("导出诊断包").
 - **Agent tool calls:** `AGENT_MAX_TOOL_CALLS_PER_REPLY` caps tool calls in one Agent reply;
-  each new reply starts from zero. Empty uses the default 20; allowed values are 1–100. See
+  each new reply starts from zero. Empty uses the default 100; allowed values are 1–100. See
   [Provider configuration](docs/provider-configuration.md#agent-对话模型--agent-chat-model).
 
 ## Provider configuration

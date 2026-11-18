@@ -3290,16 +3290,18 @@ type ChatChoiceKindSchema struct {
 	DeclineLabel string `json:"decline_label,omitempty"`
 }
 
-// ChatConceptDirectionsSchema is application.chat.concept_directions (#242).
-// An open request draws MinCount..MaxCount low-cost concept sketches in one
-// reply, then opens a choice card of Kind whose options carry each sketch's
-// label, one sentence and thumbnail handle, and the exact arguments of the
-// next refine_image call. Enabled is false (the zero value) on historical
-// Catalogs and the flow is off.
+// ChatConceptDirectionsSchema is application.chat.concept_directions (#242,
+// #360). An open request first asks how many sketches to draw on a quantity
+// card (Quantity); the chosen N is persisted with the choice card. The next
+// reply draws exactly N low-cost concept sketches; N >= MinCount then opens a
+// choice card of Kind whose options carry each sketch's label, one sentence
+// and thumbnail handle, and the exact arguments of the next refine_image call.
+// N = 1 draws one sketch and opens no direction card. Enabled is false (the
+// zero value) on historical Catalogs and the flow is off.
 type ChatConceptDirectionsSchema struct {
 	Enabled bool `json:"enabled"`
-	// MinCount and MaxCount bound the sketches of one reply; the options of the
-	// card must be between MinCount and MaxCount too, and every bound stays
+	// MinCount and MaxCount bound the direction card's options and, without a
+	// recorded quantity answer, the sketches of one reply; every bound stays
 	// within choice.max_options.
 	MinCount int `json:"min_count"`
 	MaxCount int `json:"max_count"`
@@ -3307,12 +3309,16 @@ type ChatConceptDirectionsSchema struct {
 	// declared choice kind whose options the Agent supplies.
 	SketchTool string `json:"sketch_tool"`
 	Kind       string `json:"kind"`
+	// Quantity declares the card that asks how many sketches to draw before
+	// anything is submitted (#360).
+	Quantity ChatConceptQuantitySchema `json:"quantity,omitempty"`
 	// Question is the default card question; Message is the Agent-facing line
 	// of the tool result.
 	Question string `json:"question"`
 	Message  string `json:"message"`
 	// ContextTemplate is added to the system prompt while SketchTool is offered
-	// ({minimum}, {maximum}, {sketch_tool}).
+	// ({minimum}, {maximum}, {quantity_minimum}, {quantity_maximum},
+	// {quantity_kind}, {sketch_tool}, {direction_kind}).
 	ContextTemplate string `json:"context_template"`
 	// MaxLabelCharacters and MaxDescriptionCharacters bound one option; they
 	// stay within ask_choice.options' historical 120/300 bounds.
@@ -3330,6 +3336,36 @@ type ChatConceptDirectionsSchema struct {
 	// Agent does not have to repeat it.
 	ParameterOverrides map[string]map[string]json.RawMessage `json:"parameter_overrides,omitempty"`
 	ParameterReason    string                                `json:"parameter_reason,omitempty"`
+}
+
+// ChatConceptQuantitySchema is application.chat.concept_directions.quantity
+// (#360). Before any paid sketch the Agent opens a card of Kind that asks how
+// many concept sketches to draw; the server builds the MinCount..MaxCount
+// options from the copy below, and the answer is persisted with the choice
+// card, so the chosen count survives a refresh and is checkable server side.
+type ChatConceptQuantitySchema struct {
+	// Kind is the declared choice kind whose options the server builds.
+	Kind string `json:"kind"`
+	// MinCount and MaxCount bound the card's options; both stay within the
+	// direction card's own MaxCount.
+	MinCount int `json:"min_count"`
+	MaxCount int `json:"max_count"`
+	// Question is the card question; Message is the Agent-facing line of the
+	// tool result.
+	Question string `json:"question"`
+	Message  string `json:"message"`
+	// OptionLabel and OptionDescription word each option ({count}).
+	OptionLabel       string `json:"option_label"`
+	OptionDescription string `json:"option_description"`
+	// PendingTemplate tells the Agent a typed reply picks one of the open
+	// card's counts ({continuation}).
+	PendingTemplate string `json:"pending_template"`
+	// AnswerTemplate follows the user message that answered the card; the
+	// next reply draws exactly {count} sketches.
+	AnswerTemplate string `json:"answer_template"`
+	// SketchRefusal refuses a sketch in the reply that opened the quantity
+	// card, before the person answered.
+	SketchRefusal string `json:"sketch_refusal"`
 }
 
 // ChatCandidatesSchema is application.chat.candidates (#242). A production

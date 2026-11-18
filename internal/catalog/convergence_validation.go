@@ -66,13 +66,19 @@ func validateConceptDirections(schema ChatSchema) error {
 			return fmt.Errorf("concept_directions.%s 不能为空", name)
 		}
 	}
-	for _, placeholder := range []string{"{minimum}", "{maximum}", "{sketch_tool}"} {
+	for _, placeholder := range []string{
+		"{minimum}", "{maximum}", "{quantity_minimum}", "{quantity_maximum}",
+		"{quantity_kind}", "{sketch_tool}", "{direction_kind}",
+	} {
 		if !strings.Contains(directions.ContextTemplate, placeholder) {
 			return fmt.Errorf("concept_directions.context_template 缺少 %s", placeholder)
 		}
 	}
 	if !strings.Contains(directions.LimitReached, "{maximum}") {
 		return errors.New("concept_directions.limit_reached 缺少 {maximum}")
+	}
+	if err := validateConceptQuantity(schema, directions); err != nil {
+		return err
 	}
 	if len(directions.ParameterOverrides) > 0 && strings.TrimSpace(directions.ParameterReason) == "" {
 		return errors.New("concept_directions.parameter_reason 不能为空：低成本覆盖需要随提交冻结的说明")
@@ -92,6 +98,49 @@ func validateConceptDirections(schema ChatSchema) error {
 	}
 	if _, ok := optionSchema["thumbnail"]; !ok {
 		return errors.New("concept_directions: ask_choice.options 的选项必须声明 thumbnail")
+	}
+	return nil
+}
+
+// validateConceptQuantity checks the card that asks how many sketches to draw
+// (#360). Its options are counts the server builds, not target-tool calls, so
+// it is a declared kind with option_source concept_quantities and no answer
+// argument; every bound stays within the direction card's own bound.
+func validateConceptQuantity(schema ChatSchema, directions ChatConceptDirectionsSchema) error {
+	quantity := directions.Quantity
+	if quantity.MinCount < 1 || quantity.MaxCount < quantity.MinCount ||
+		quantity.MaxCount > directions.MaxCount ||
+		(schema.Choice.MaxOptions > 0 && quantity.MaxCount > schema.Choice.MaxOptions) {
+		return errors.New("concept_directions.quantity: 需要 1 <= min_count <= max_count <= concept_directions.max_count")
+	}
+	kind, found := chatChoiceKind(schema, quantity.Kind)
+	if !found || kind.OptionSource != "concept_quantities" {
+		return fmt.Errorf("concept_directions.quantity.kind %q 必须是 option_source=concept_quantities 的选择卡", quantity.Kind)
+	}
+	for name, value := range map[string]string{
+		"question":           quantity.Question,
+		"message":            quantity.Message,
+		"option_label":       quantity.OptionLabel,
+		"option_description": quantity.OptionDescription,
+		"pending_template":   quantity.PendingTemplate,
+		"answer_template":    quantity.AnswerTemplate,
+		"sketch_refusal":     quantity.SketchRefusal,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("concept_directions.quantity.%s 不能为空", name)
+		}
+	}
+	for name, value := range map[string]string{
+		"option_label":       quantity.OptionLabel,
+		"option_description": quantity.OptionDescription,
+		"answer_template":    quantity.AnswerTemplate,
+	} {
+		if !strings.Contains(value, "{count}") {
+			return fmt.Errorf("concept_directions.quantity.%s 缺少 {count}", name)
+		}
+	}
+	if !strings.Contains(quantity.PendingTemplate, "{continuation}") {
+		return errors.New("concept_directions.quantity.pending_template 缺少 {continuation}")
 	}
 	return nil
 }
@@ -209,7 +258,7 @@ func validateConceptDirectionOfferings(directions ChatConceptDirectionsSchema, b
 			}
 		}
 		if len(overrides) > 0 {
-			if err := simulateProfileParameters(offering, overrides); err != nil {
+			if err := simulateSketchParameters(offering, overrides); err != nil {
 				return fmt.Errorf("concept_directions.parameter_overrides[%q]: %w", id, err)
 			}
 		}

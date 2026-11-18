@@ -143,17 +143,21 @@ func (e *parallelExecutor) submissions() []string {
 }
 
 type parallelFixture struct {
-	t        *testing.T
-	service  *chat.Service
-	executor *parallelExecutor
-	agent    *parallelAgent
-	command  chat.ProcessTurn
+	t          *testing.T
+	service    *chat.Service
+	executor   *parallelExecutor
+	agent      *parallelAgent
+	command    chat.ProcessTurn
+	toolBudget int
 }
 
 func (f *parallelFixture) orchestrator() *chat.Orchestrator {
 	f.t.Helper()
 	schema := configuredChatSchema(f.t)
 	schema.Agent.WorkerCount, schema.Agent.QueueSize = 4, 16
+	if f.toolBudget > 0 {
+		schema.Agent.MaxToolCallsPerReply = f.toolBudget
+	}
 	o, err := chat.NewOrchestrator(chat.OrchestratorConfig{Service: f.service, Schema: schema, Model: "model",
 		Agent: f.agent, Tools: f.executor, TaskGet: f.executor.get,
 		TaskCanceler: func(_ context.Context, _, taskID string) error {
@@ -468,6 +472,9 @@ func TestQueuedSubmissionPastTheDeadlineNeverGivesAnEmptyReceipt(t *testing.T) {
 
 func TestTwentyFirstGenerationIsRefusedByTheToolBudget(t *testing.T) {
 	f := newParallelFixture(t, 21)
+	// The shipped budget is 100 (#360); this test pins its own smaller budget
+	// so the 21st call still exercises the cutoff.
+	f.toolBudget = 20
 	o := f.orchestrator()
 	ctx := context.Background()
 	if err := o.Process(ctx, f.command); err != nil {

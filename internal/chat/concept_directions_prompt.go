@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// conceptDirectionsPrompt adds the diverge-then-converge rules (#242) while the
-// sketch tool is really offered to this turn. A 3D-scope turn hides the tool,
-// so the block disappears there instead of teaching an unusable flow.
+// conceptDirectionsPrompt adds the ask-count-then-draw rules (#242, #360) while
+// the sketch tool is really offered to this turn. A 3D-scope turn hides the
+// tool, so the block disappears there instead of teaching an unusable flow.
 func (orchestrator *Orchestrator) conceptDirectionsPrompt(registry *toolRegistry, scope string) string {
 	concept := orchestrator.schema.ConceptDirections
 	if !concept.Enabled || strings.TrimSpace(concept.ContextTemplate) == "" {
@@ -19,7 +19,11 @@ func (orchestrator *Orchestrator) conceptDirectionsPrompt(registry *toolRegistry
 	return strings.NewReplacer(
 		"{minimum}", strconv.Itoa(concept.MinCount),
 		"{maximum}", strconv.Itoa(concept.MaxCount),
+		"{quantity_minimum}", strconv.Itoa(concept.Quantity.MinCount),
+		"{quantity_maximum}", strconv.Itoa(concept.Quantity.MaxCount),
+		"{quantity_kind}", concept.Quantity.Kind,
 		"{sketch_tool}", concept.SketchTool,
+		"{direction_kind}", concept.Kind,
 	).Replace(concept.ContextTemplate)
 }
 

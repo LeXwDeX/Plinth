@@ -413,12 +413,51 @@ func TestDefaultCatalogDeclaresParallelGeneration(t *testing.T) {
 	}
 	agent := taskCatalog.Application().Chat.Agent
 	admission := taskCatalog.Application().Runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks
-	if agent.MaxGenerationCallsPerTurn != 20 || agent.MaxToolCallsPerReply != 20 || !agent.ParallelToolCalls ||
+	if agent.MaxGenerationCallsPerTurn != 20 || agent.MaxToolCallsPerReply != 100 || !agent.ParallelToolCalls ||
 		agent.MaxParallelGenerationSubmissions != admission || admission != 8 {
 		t.Fatalf("agent = %d/%d parallel=%v submissions=%d admission=%d", agent.MaxGenerationCallsPerTurn,
 			agent.MaxToolCallsPerReply, agent.ParallelToolCalls, agent.MaxParallelGenerationSubmissions, admission)
 	}
 	if agent.SystemPrompt == "" || !strings.Contains(agent.SystemPrompt, "互不依赖的付费步骤在同一次回复里一起发出") {
 		t.Fatal("system prompt lacks the batch rule")
+	}
+}
+
+// #360: the shipped flow asks how many concept sketches to draw before any
+// paid task, then draws exactly that many. The prompt keeps the count-first
+// rule for open requests and the no-question rules for stated counts, clear
+// styles, references and direct requests; the per-reply tool budget is 100.
+func TestDefaultCatalogDeclaresConceptQuantityFlow(t *testing.T) {
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	concept := taskCatalog.Application().Chat.ConceptDirections
+	if !concept.Enabled {
+		t.Fatal("concept_directions must ship enabled")
+	}
+	if concept.MinCount != 2 || concept.MaxCount != 4 ||
+		concept.SketchTool != "create_concept_sketch" || concept.Kind != "concept_direction" {
+		t.Fatalf("concept_directions = %+v", concept)
+	}
+	quantity := concept.Quantity
+	if quantity.Kind != "concept_quantity" || quantity.MinCount != 1 || quantity.MaxCount != 4 {
+		t.Fatalf("quantity = %+v", quantity)
+	}
+	if !strings.Contains(quantity.OptionLabel, "{count}") ||
+		!strings.Contains(quantity.OptionDescription, "{count}") ||
+		!strings.Contains(quantity.AnswerTemplate, "{count}") {
+		t.Fatalf("quantity copy lacks the count: %+v", quantity)
+	}
+	for _, rule := range []string{
+		"{quantity_kind}", "这一轮不要调用", "用户一开始就说了张数时不再询问",
+		"已有明确风格、参考图", "N=1", "3D 模式不画概念草图",
+	} {
+		if !strings.Contains(concept.ContextTemplate, rule) {
+			t.Fatalf("concept_directions.context_template lacks %q", rule)
+		}
+	}
+	if agent := taskCatalog.Application().Chat.Agent; agent.MaxToolCallsPerReply != 100 {
+		t.Fatalf("max_tool_calls_per_reply = %d", agent.MaxToolCallsPerReply)
 	}
 }

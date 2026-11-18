@@ -187,7 +187,7 @@ docker compose up -d --wait
   取出（`/tmp` 是 tmpfs，`docker cp` 读不了）。完整流程与隐私说明见
   [合作方部署指南](docs/partner-deployment.md)，用法与可选参数见 [部署入口](docs/deployment.md)「导出诊断包」。
 - **Agent 工具次数**：`.env` 的 `AGENT_MAX_TOOL_CALLS_PER_REPLY` 限定一次 Agent 回复
-  最多执行的工具调用数，每次新回复重新计数；留空为 20，可设 1–100，见
+  最多执行的工具调用数，每次新回复重新计数；留空为 100，可设 1–100，见
   [Provider 配置](docs/provider-configuration.md#agent-对话模型--agent-chat-model)。
 
 ## Provider 配置

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -312,6 +313,34 @@ func (service *Service) AskChoice(
 		for _, profile := range service.image2DUsage.Profiles {
 			specs = append(specs, optionSpec{id: profile.ID, label: profile.Label, description: profile.Description})
 		}
+	case "concept_quantities":
+		// The quantity card (#360) asks how many low-cost sketches to draw.
+		// Its options are counts the server builds; the answer is the chosen
+		// count itself, not a target-tool call, and the reply that opens it
+		// submits no paid generation.
+		concept := service.conceptDirections
+		quantity := concept.Quantity
+		if !concept.Enabled || quantity.MinCount < 1 || quantity.MaxCount < quantity.MinCount {
+			return ToolResult{Error: "choice kind unavailable", NoSubmission: true}, nil
+		}
+		for _, call := range command.EarlierCalls {
+			if call.Name == concept.SketchTool {
+				return ToolResult{Error: quantity.SketchRefusal, NoSubmission: true}, nil
+			}
+		}
+		for count := quantity.MinCount; count <= quantity.MaxCount; count++ {
+			text := strconv.Itoa(count)
+			arguments, err := json.Marshal(map[string]int{"count": count})
+			if err != nil {
+				return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+			}
+			specs = append(specs, optionSpec{
+				id:          text,
+				label:       strings.ReplaceAll(quantity.OptionLabel, "{count}", text),
+				description: strings.ReplaceAll(quantity.OptionDescription, "{count}", text),
+				arguments:   arguments,
+			})
+		}
 	case "agent":
 		concept := service.conceptDirections
 		isConcept := concept.Enabled && kind.ID == concept.Kind
@@ -333,10 +362,20 @@ func (service *Service) AskChoice(
 					sketchTasks[call.TaskID] = true
 				}
 			}
-			// The card converges directions that were really drawn first: a
-			// concept card without the declared minimum of sketches in this
-			// reply would ask the person to choose nothing (#242).
-			if sketches < concept.MinCount {
+			// #360: when the person chose a count on the quantity card, the
+			// direction card must converge exactly that many sketches; a
+			// chosen count of one draws no direction card at all.
+			if chosen, ok := service.selectedConceptQuantity(ctx, command); ok {
+				if chosen < concept.MinCount || sketches != chosen {
+					return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+				}
+				if maxOptions <= 0 || chosen < maxOptions {
+					maxOptions = chosen
+				}
+			} else if sketches < concept.MinCount {
+				// The card converges directions that were really drawn first: a
+				// concept card without the declared minimum of sketches in this
+				// reply would ask the person to choose nothing (#242).
 				return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
 			}
 		}

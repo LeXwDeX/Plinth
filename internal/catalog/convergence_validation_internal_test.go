@@ -127,3 +127,32 @@ func TestConceptDirectionOverrideDocumentShape(t *testing.T) {
 		t.Fatalf("round trip lost overrides: %v", decoded.ParameterOverrides)
 	}
 }
+
+// #360: the quantity card asks 1..max_count and its bounds stay inside the
+// direction card's own bound. A card without a declared kind or copy would
+// leave the Agent no way to ask the count.
+func TestConceptQuantityBoundsAndCopyAreValidated(t *testing.T) {
+	chat := shippedConvergenceSchema(t)
+	quantity := chat.ConceptDirections.Quantity
+	if err := validateConceptQuantity(chat, chat.ConceptDirections); err != nil {
+		t.Fatalf("shipped quantity is invalid: %v", err)
+	}
+	if quantity.MinCount != 1 || quantity.MaxCount != chat.ConceptDirections.MaxCount {
+		t.Fatalf("quantity bounds = %d..%d", quantity.MinCount, quantity.MaxCount)
+	}
+	cases := map[string]func(*ChatConceptDirectionsSchema){
+		"zero minimum": func(d *ChatConceptDirectionsSchema) { d.Quantity.MinCount = 0 },
+		"above max":    func(d *ChatConceptDirectionsSchema) { d.Quantity.MaxCount = d.MaxCount + 1 },
+		"unknown kind": func(d *ChatConceptDirectionsSchema) { d.Quantity.Kind = "missing" },
+		"no label":     func(d *ChatConceptDirectionsSchema) { d.Quantity.OptionLabel = "" },
+		"no count":     func(d *ChatConceptDirectionsSchema) { d.Quantity.AnswerTemplate = "draw them" },
+		"no pending":   func(d *ChatConceptDirectionsSchema) { d.Quantity.PendingTemplate = "open" },
+	}
+	for name, mutate := range cases {
+		broken := chat
+		mutate(&broken.ConceptDirections)
+		if err := validateConceptQuantity(broken, broken.ConceptDirections); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+}

@@ -7,9 +7,9 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
-// #275: AGENT_MAX_TOOL_CALLS_PER_REPLY overrides the Schema's per-reply tool
-// call budget; unset keeps the Schema value (20) and an invalid value stops
-// startup instead of silently running with another budget.
+// #275/#360: AGENT_MAX_TOOL_CALLS_PER_REPLY overrides the Schema's per-reply
+// tool call budget; unset keeps the Schema value (100) and an invalid value
+// stops startup instead of silently running with another budget.
 func TestAgentToolCallBudgetComesFromSchemaOrEnvironment(t *testing.T) {
 	taskCatalog, err := catalog.LoadDefault()
 	if err != nil {
@@ -30,7 +30,7 @@ func TestAgentToolCallBudgetComesFromSchemaOrEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema := withToolCallBudget(application.Chat, defaults.AgentMaxToolCallsPerReply)
-	if defaults.AgentMaxToolCallsPerReply != 0 || schema.Agent.MaxToolCallsPerReply != 20 {
+	if defaults.AgentMaxToolCallsPerReply != 0 || schema.Agent.MaxToolCallsPerReply != 100 {
 		t.Fatalf("default budget = %d (override %d)", schema.Agent.MaxToolCallsPerReply, defaults.AgentMaxToolCallsPerReply)
 	}
 
@@ -42,7 +42,7 @@ func TestAgentToolCallBudgetComesFromSchemaOrEnvironment(t *testing.T) {
 	if schema.Agent.MaxToolCallsPerReply != 35 {
 		t.Fatalf("overridden budget = %d", schema.Agent.MaxToolCallsPerReply)
 	}
-	if application.Chat.Agent.MaxToolCallsPerReply != 20 {
+	if application.Chat.Agent.MaxToolCallsPerReply != 100 {
 		t.Fatal("override mutated the shared Schema")
 	}
 

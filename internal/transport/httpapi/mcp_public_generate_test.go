@@ -564,9 +564,10 @@ func TestMCPParametersAreValidatedByTheServicesOwnDeclaration(t *testing.T) {
 	// What a caller may set is listed; what it may not is refused by name and
 	// nothing is made: unknown, hidden (moderation), read-only, the prompt.
 	for name, parameters := range map[string]map[string]any{
-		"unknown": {"no_such_parameter": 1},
-		"hidden":  {"moderation": "low"},
-		"prompt":  {"prompt": "sneaky"},
+		"unknown":   {"no_such_parameter": 1},
+		"hidden":    {"moderation": "low"},
+		"prompt":    {"prompt": "sneaky"},
+		"user only": {"n": 2},
 	} {
 		before := f.countRows(`SELECT COUNT(*) FROM generation_tasks`)
 		result := call(map[string]any{"parameters": parameters})
@@ -576,10 +577,10 @@ func TestMCPParametersAreValidatedByTheServicesOwnDeclaration(t *testing.T) {
 		}
 	}
 	// A value the kernel's normalization refuses is the service's refusal.
-	if bad := call(map[string]any{"parameters": map[string]any{"n": 1000}}); !bad.isError || bad.problemCode() != "input_refused" {
+	if bad := call(map[string]any{"parameters": map[string]any{"size": "1x1"}}); !bad.isError || bad.problemCode() != "input_refused" {
 		t.Fatalf("an out of range value = %s", bad.raw)
 	}
-	if good := call(map[string]any{"parameters": map[string]any{"n": 2}}); good.isError {
+	if good := call(map[string]any{"parameters": map[string]any{"size": "1024x1024"}}); good.isError {
 		t.Fatalf("a legal value = %s", good.raw)
 	}
 	// An advised parameter needs its reason, and a reason is only for one.
@@ -629,7 +630,10 @@ func TestMCPParametersAreValidatedByTheServicesOwnDeclaration(t *testing.T) {
 				if !prompt {
 					t.Error("the prompt is not listed as an input")
 				}
-				if names["n"] == nil || names["quality"]["advised"] != true || names["quality"]["advice"] == "" || names["n"]["advised"] != nil {
+				if names["n"] != nil {
+					t.Errorf("list_services offers n, which only the person's panel can set: %v", names)
+				}
+				if names["quality"]["advised"] != true || names["quality"]["advice"] == "" {
 					t.Errorf("parameters = %v", names)
 				}
 			}

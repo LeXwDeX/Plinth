@@ -226,8 +226,12 @@ func (choice Choice) PendingContinuation() (string, bool) {
 }
 
 // pendingChoicePrompt tells the Agent about the session's open card, so a
-// typed reply maps to one exact option (#321).
+// typed reply maps to one exact option (#321). The concept quantity card
+// (#360) words its own prompt: its answer is a count, not a tool call.
 func (orchestrator *Orchestrator) pendingChoicePrompt(choices []Choice) string {
+	if prompt, ok := orchestrator.conceptQuantityPendingPrompt(choices); ok {
+		return prompt
+	}
 	for _, choice := range choices {
 		if continuation, ok := choice.PendingContinuation(); ok {
 			return strings.ReplaceAll(orchestrator.schema.Choice.PendingTemplate, "{continuation}", continuation)
@@ -237,7 +241,13 @@ func (orchestrator *Orchestrator) pendingChoicePrompt(choices []Choice) string {
 }
 
 // choiceAnswerText follows the user message that answered a card on the card.
+// A concept quantity answer carries the chosen count instead (#360).
 func (orchestrator *Orchestrator) choiceAnswerText(choices []Choice, messageID string) string {
+	for _, choice := range choices {
+		if text, ok := orchestrator.conceptQuantityAnswerText(choice, messageID); ok {
+			return text
+		}
+	}
 	for _, choice := range choices {
 		if choice.AnswerSource != ChoiceAnsweredOnCard || choice.AnswerMessageID != messageID {
 			continue

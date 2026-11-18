@@ -81,8 +81,8 @@ func TestDSMLSpellingsAndPendingTextsAreValidated(t *testing.T) {
 	}
 }
 
-// #275: the tool budget counts executed calls per Agent reply. The Schema
-// declares 20 with a bounded runtime override (AGENT_MAX_TOOL_CALLS_PER_REPLY).
+// #275/#360: the tool budget counts executed calls per Agent reply. The Schema
+// declares 100 with a bounded runtime override (AGENT_MAX_TOOL_CALLS_PER_REPLY).
 func TestDefaultCatalogDeclaresPerReplyToolCallBudget(t *testing.T) {
 	taskCatalog, err := catalog.LoadDefault()
 	if err != nil {
@@ -90,7 +90,7 @@ func TestDefaultCatalogDeclaresPerReplyToolCallBudget(t *testing.T) {
 	}
 	application := taskCatalog.Application()
 	agent := application.Chat.Agent
-	if agent.MaxToolCallsPerReply != 20 || agent.MaxToolCallsPerReplyMaximum < 20 {
+	if agent.MaxToolCallsPerReply != 100 || agent.MaxToolCallsPerReplyMaximum < 100 {
 		t.Fatalf("budget = %d of %d", agent.MaxToolCallsPerReply, agent.MaxToolCallsPerReplyMaximum)
 	}
 	setting, exists := application.Runtime.Configuration.Settings[agent.MaxToolCallsPerReplySetting]
@@ -108,7 +108,7 @@ func TestPerReplyToolCallBudgetIsValidated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	budget := `"max_tool_calls_per_reply": 20,`
+	budget := `"max_tool_calls_per_reply": 100,`
 	setting := `"max_tool_calls_per_reply_setting": "agent_max_tool_calls_per_reply",`
 	override := `"name": "AGENT_MAX_TOOL_CALLS_PER_REPLY"
               }
