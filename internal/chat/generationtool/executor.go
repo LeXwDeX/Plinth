@@ -450,7 +450,7 @@ func (executor *Executor) Execute(
 	// #242: one reply draws a bounded number of concept sketches; a later reply
 	// starts a fresh count. An already accepted Task is observed above and is
 	// never refused by this limit.
-	if refusal := executor.conceptSketchLimit(command); refusal != "" {
+	if refusal := executor.conceptSketchLimit(ctx, command); refusal != "" {
 		result := executor.failure(command, "", refusal)
 		result.NoSubmission = true
 		return result, nil

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
@@ -61,9 +62,11 @@ var (
 	explicitImageSpecPattern = regexp.MustCompile(`\d+\s*[:：]\s*\d+|\d+\s*[x×]\s*\d+|透明背景|背景透明|纯色背景|白色背景|尺寸|像素|竖版|横版|方形`)
 	// #242：开放需求先发散。只匹配测试用的开放说法；明确规格或参考图
 	// 不走这里，直接 refine_image。
-	openConceptPattern   = regexp.MustCompile(`森林守卫|概念方向|先给几个方向|发散|探索方向|explore concepts`)
-	imageWorkspaceMarker = "本轮用户正在 2D 图片工作区"
-	modelWorkspaceMarker = "本轮用户正在 3D 模型工作区"
+	openConceptPattern = regexp.MustCompile(`森林守卫|概念方向|先给几个方向|发散|探索方向|explore concepts`)
+	// #360：服务端把数量卡的答复追加在用户消息后，mock 按其中的 N 画 N 张。
+	conceptQuantityAnswerPattern = regexp.MustCompile(`chose (\d+) concept sketch`)
+	imageWorkspaceMarker         = "本轮用户正在 2D 图片工作区"
+	modelWorkspaceMarker         = "本轮用户正在 3D 模型工作区"
 )
 
 // multiviewPrompts 是四视角编辑里视角词到 edit_multiview_images 参数的对应，按 front、left、back、right 排列。
@@ -284,18 +287,29 @@ func splitVariants(list string) []string {
 }
 
 // conceptDirectionCalls answers an open 2D request with the shipped flow
-// (#242): three low-cost sketches in one reply, then one concept direction
-// card whose options carry the sketch handles and the exact refine_image
-// arguments. The handles @img1..@img3 are the pictures this reply draws; a
-// message that already has a clear brief or explicit specs goes straight to
-// refine_image instead.
+// (#242, #360): the first reply only asks how many low-cost sketches to draw,
+// then the reply after the answer draws exactly that many and, for two or
+// more, opens one concept direction card whose options carry the sketch
+// handles and the exact refine_image arguments. The handles @img1..@imgN are
+// the pictures that reply draws; a message that already has a clear brief or
+// explicit specs goes straight to refine_image instead.
 func (adapter *Adapter) conceptDirectionCalls(request agents.Request, text string) []plannedCall {
 	if !adapter.wants(request, toolCreateConceptSketch) || !adapter.wants(request, toolAskChoice) {
 		return nil
 	}
-	if workspaceDomain(request.Messages) != "image" || briefMissing(request.Messages) ||
-		!openConceptPattern.MatchString(text) || explicitImageSpecPattern.MatchString(text) {
+	if workspaceDomain(request.Messages) != "image" || briefMissing(request.Messages) {
 		return nil
+	}
+	match := conceptQuantityAnswerPattern.FindStringSubmatch(text)
+	if match == nil {
+		if !openConceptPattern.MatchString(text) || explicitImageSpecPattern.MatchString(text) {
+			return nil
+		}
+		return []plannedCall{{name: toolAskChoice, arguments: map[string]any{"kind": "concept_quantity"}}}
+	}
+	count, err := strconv.Atoi(match[1])
+	if err != nil || count < 1 {
+		count = 1
 	}
 	directions := []struct {
 		id, label, description, prompt string
@@ -306,7 +320,13 @@ func (adapter *Adapter) conceptDirectionCalls(request agents.Request, text strin
 			"stylized cartoon concept art, bold clean outlines, exaggerated proportions, vivid colors"},
 		{"low_poly", "低多边形", "几何切面、简洁色块与风格化造型",
 			"low-poly stylized concept art, faceted geometry, flat color blocks"},
+		{"watercolor", "水彩", "湿画法晕染、纸张纹理与柔和边缘",
+			"watercolor concept art, wet-on-wet washes, visible paper grain, soft edges"},
 	}
+	if count > len(directions) {
+		count = len(directions)
+	}
+	directions = directions[:count]
 	options := make([]map[string]any, 0, len(directions))
 	calls := make([]plannedCall, 0, len(directions)+1)
 	for index, direction := range directions {
@@ -324,6 +344,9 @@ func (adapter *Adapter) conceptDirectionCalls(request agents.Request, text strin
 				},
 			},
 		})
+	}
+	if count < 2 {
+		return calls
 	}
 	calls = append(calls, plannedCall{name: toolAskChoice, arguments: map[string]any{
 		"kind":     "concept_direction",

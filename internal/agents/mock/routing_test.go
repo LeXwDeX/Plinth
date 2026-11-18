@@ -598,27 +598,48 @@ func TestImageDrawingWithoutABriefAsksThe2DPurposeOnlyWhenSpecsAreOpen(t *testin
 	}
 }
 
-// #242: an open 2D request draws visibly different directions in one reply,
-// then opens the concept direction card with each sketch's handle and the
-// exact refine_image arguments. A fully specified request skips the sketches.
-func TestOpenConceptRequestDrawsDirectionsThenOpensTheCard(t *testing.T) {
+// #242/#360: an open 2D request first asks how many concept sketches to draw
+// and submits nothing; after the answer the mock draws exactly that many and,
+// from two on, opens the concept direction card with each sketch's handle and
+// the exact refine_image arguments. A fully specified request skips all of it.
+func TestOpenConceptRequestAsksTheQuantityThenDrawsDirections(t *testing.T) {
 	brief := agents.Message{Role: "system", Content: "制作简报：用途：概念设计。\n本轮用户正在 2D 图片工作区"}
-	completion, err := newRoutingAdapter(t).Stream(context.Background(), agents.Request{
-		Messages: []agents.Message{brief, {Role: "user", Content: "画一个森林守卫，先给几个方向"}},
+	open := agents.Message{Role: "user", Content: "画一个森林守卫，先给几个方向"}
+	adapter := newRoutingAdapter(t)
+	first, err := adapter.Stream(context.Background(), agents.Request{
+		Messages: []agents.Message{brief, open},
 		Tools:    allTools,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(completion.ToolCalls) != 4 {
-		t.Fatalf("tool calls = %d, want 3 sketches + 1 card", len(completion.ToolCalls))
+	if len(first.ToolCalls) != 1 || first.ToolCalls[0].Name != "ask_choice" {
+		t.Fatalf("first reply = %+v, want only the quantity card", first.ToolCalls)
 	}
-	for index := 0; index < 3; index++ {
+	var asked struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(first.ToolCalls[0].Arguments, &asked); err != nil || asked.Kind != "concept_quantity" {
+		t.Fatalf("quantity card = %s %v", first.ToolCalls[0].Arguments, err)
+	}
+
+	answer := agents.Message{Role: "user", Content: "选择：2 张\n\n[Concept quantity answer] The person chose 2 concept sketches on the quantity card."}
+	completion, err := adapter.Stream(context.Background(), agents.Request{
+		Messages: []agents.Message{brief, open, answer},
+		Tools:    allTools,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(completion.ToolCalls) != 3 {
+		t.Fatalf("tool calls = %d, want 2 sketches + 1 card", len(completion.ToolCalls))
+	}
+	for index := 0; index < 2; index++ {
 		if completion.ToolCalls[index].Name != "create_concept_sketch" {
 			t.Fatalf("call %d = %s", index, completion.ToolCalls[index].Name)
 		}
 	}
-	card := completion.ToolCalls[3]
+	card := completion.ToolCalls[2]
 	if card.Name != "ask_choice" {
 		t.Fatalf("last call = %s, want ask_choice", card.Name)
 	}
@@ -633,18 +654,34 @@ func TestOpenConceptRequestDrawsDirectionsThenOpensTheCard(t *testing.T) {
 	if err := json.Unmarshal(card.Arguments, &arguments); err != nil {
 		t.Fatal(err)
 	}
-	if arguments.Kind != "concept_direction" || len(arguments.Options) != 3 {
+	if arguments.Kind != "concept_direction" || len(arguments.Options) != 2 {
 		t.Fatalf("card = %s %#v", arguments.Kind, arguments.Options)
 	}
 	for index, option := range arguments.Options {
-		want := map[string]string{"@img1": "realistic", "@img2": "cartoon", "@img3": "low_poly"}
-		handle := []string{"@img1", "@img2", "@img3"}[index]
+		want := map[string]string{"@img1": "realistic", "@img2": "cartoon"}
+		handle := []string{"@img1", "@img2"}[index]
 		if option.ID != want[handle] || option.Thumbnail != handle {
 			t.Fatalf("option %d = %+v", index, option)
 		}
 		if _, present := option.Arguments["prompt"]; !present {
 			t.Fatalf("option %d lacks refine_image prompt: %+v", index, option.Arguments)
 		}
+	}
+}
+
+// A chosen count of one draws one sketch and opens no direction card.
+func TestOpenConceptRequestForOneSketchOpensNoCard(t *testing.T) {
+	brief := agents.Message{Role: "system", Content: "制作简报：用途：概念设计。\n本轮用户正在 2D 图片工作区"}
+	answer := agents.Message{Role: "user", Content: "选择：1 张\n\n[Concept quantity answer] The person chose 1 concept sketches on the quantity card."}
+	completion, err := newRoutingAdapter(t).Stream(context.Background(), agents.Request{
+		Messages: []agents.Message{brief, {Role: "user", Content: "画一个森林守卫，先给几个方向"}, answer},
+		Tools:    allTools,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(completion.ToolCalls) != 1 || completion.ToolCalls[0].Name != "create_concept_sketch" {
+		t.Fatalf("answer of one = %+v", completion.ToolCalls)
 	}
 }
 

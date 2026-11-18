@@ -551,7 +551,7 @@ func validateChoiceKinds(schema ChatSchema) error {
 		seen[kind.ID] = true
 		ids = append(ids, kind.ID)
 		switch kind.OptionSource {
-		case "usage_profiles", "image_usage_profiles", "agent_proposal":
+		case "usage_profiles", "image_usage_profiles", "agent_proposal", "concept_quantities":
 		case "agent":
 			agentOptions = true
 		default:
@@ -567,19 +567,22 @@ func validateChoiceKinds(schema ChatSchema) error {
 			}
 		}
 		// An agent kind may carry no single answer argument: its options carry
-		// the exact target-tool arguments instead (#242). The historical
-		// direction kind still fills one string argument.
-		if kind.Argument == "" && kind.OptionSource != "agent" {
+		// the exact target-tool arguments instead (#242). The quantity card's
+		// options are counts the server builds, so it needs no answer argument
+		// either (#360). The historical direction kind still fills one string
+		// argument.
+		if kind.Argument == "" && kind.OptionSource != "agent" && kind.OptionSource != "concept_quantities" {
 			return fmt.Errorf("choice.kinds[%d].argument 不能为空", index)
 		}
 		parameters, found := declaredToolParameters(schema, kind.ToolName)
 		if !found {
 			return fmt.Errorf("choice.kinds[%d].tool_name %q 不是已声明的工具", index, kind.ToolName)
 		}
-		if kind.OptionSource == "agent_proposal" {
+		if kind.OptionSource == "agent_proposal" || kind.OptionSource == "concept_quantities" {
 			// The Agent's own proposal fills the options; the argument still
 			// names the target tool's parameter that receives the chosen
-			// action, and the kind needs a declared target tool.
+			// action, and the kind needs a declared target tool. The quantity
+			// card submits no tool call at all: its answer is the chosen count.
 			continue
 		}
 		if kind.Argument == "" {

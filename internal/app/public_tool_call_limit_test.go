@@ -10,16 +10,16 @@ import (
 	"testing"
 )
 
-// #275: the public Schema exposes the per-reply tool call budget in force, so
-// the composer's counter shows the limit the Agent is held to. The Schema
-// default is 20; AGENT_MAX_TOOL_CALLS_PER_REPLY overrides it for the
+// #275/#360: the public Schema exposes the per-reply tool call budget in
+// force, so the composer's counter shows the limit the Agent is held to. The
+// Schema default is 100; AGENT_MAX_TOOL_CALLS_PER_REPLY overrides it for the
 // orchestrator and the public projection alike.
 func TestPublicSchemaCarriesEffectiveToolCallLimit(t *testing.T) {
 	for name, run := range map[string]struct {
 		override int
 		want     int
 	}{
-		"schema default":   {override: 0, want: 20},
+		"schema default":   {override: 0, want: 100},
 		"runtime override": {override: 35, want: 35},
 	} {
 		t.Run(name, func(t *testing.T) {
