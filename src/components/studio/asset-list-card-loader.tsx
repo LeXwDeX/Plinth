@@ -14,6 +14,8 @@ export interface AssetListCardLoaderProps {
   variant?: 'chat' | 'panel';
   /** A decision succeeded; the parent re-reads its own listing in addition to this detail. */
   onDecided?: () => void;
+  /** #328: a run control or a skip succeeded; re-read this detail and the parent's listing. */
+  onRunChanged?: () => void;
 }
 
 /**
@@ -22,7 +24,7 @@ export interface AssetListCardLoaderProps {
  * come from the single-list route like the card's decision does.
  */
 export function AssetListCardLoader({
-  summary, schema, client, variant = 'chat', onDecided,
+  summary, schema, client, variant = 'chat', onDecided, onRunChanged,
 }: AssetListCardLoaderProps) {
   const { data, error, isLoading, mutate } = useSWR<AssetListDetail>(
     ['asset-list-detail', summary.project_id, summary.id] as const,
@@ -67,6 +69,10 @@ export function AssetListCardLoader({
       onDecided={() => {
         void mutate();
         onDecided?.();
+      }}
+      onRunChanged={() => {
+        void mutate();
+        onRunChanged?.();
       }}
     />
   );

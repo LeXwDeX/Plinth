@@ -10,6 +10,39 @@ import type { ProductSchema } from '@/lib/product-schema';
 
 export type AssetListDecision = 'confirm' | 'reject' | 'replace';
 
+/** #328: the four run controls the person sends from the list card. */
+export type AssetListRunAction = 'start' | 'pause' | 'resume' | 'stop';
+
+/**
+ * #328: the run's item tally as the server counts it. Every state of
+ * `asset_list.item_states` has a field; the browser never derives its own.
+ */
+export interface AssetListRunCounts {
+  todo: number;
+  working: number;
+  review: number;
+  accepted: number;
+  returned: number;
+  failed: number;
+  skipped: number;
+}
+
+/**
+ * #328: what a run control answers. `status` is the server's wire spelling
+ * (idle, running, paused, stopped, completed); `pause_reason` is empty unless
+ * paused (user, presence, step_cap, failure). The control response carries no
+ * item tally, so the card re-reads the list instead of rendering this object.
+ */
+export interface AssetListRunState {
+  status: string;
+  pause_reason?: string;
+}
+
+/** #328: the run summary on a project or detail list. */
+export interface AssetListRun extends AssetListRunState {
+  item_counts: AssetListRunCounts;
+}
+
 /** One stored reference: exactly one of an input asset or a finished Task asset. */
 export interface AssetListReference {
   task_id?: string;
@@ -45,6 +78,8 @@ export interface AssetListSummary {
   expires_at: string;
   created_at: string;
   updated_at: string;
+  /** #328: null or absent until the list has a run; the browser shows no run line then. */
+  run?: AssetListRun | null;
 }
 
 /** One asset of a list. */
@@ -116,6 +151,22 @@ export interface AssetListClient {
   getList(projectID: string, listID: string): Promise<AssetListDetail>;
   decide(projectID: string, listID: string, decision: AssetListDecision, reason?: string): Promise<AssetListDetail>;
   listSessionLists(sessionID: string): Promise<AssetListSummary[]>;
+  /** #328: start, pause, resume or stop the list's run; resolves to the new run. */
+  controlRun(
+    projectID: string,
+    listID: string,
+    action: AssetListRunAction,
+    expectedVersion: number,
+    reason?: string,
+  ): Promise<AssetListRunState>;
+  /** #328: skip one item of a list; resolves to the item as the server stored it. */
+  skipItem(
+    projectID: string,
+    listID: string,
+    itemID: string,
+    expectedVersion: number,
+    reason?: string,
+  ): Promise<AssetListItem>;
   /** #328: this browser tab is (or is no longer) watching the project. */
   presence(projectID: string, tabID: string, state: AssetListPresenceState): Promise<void>;
 }
@@ -164,6 +215,10 @@ export function createAssetListClient(
     route(required(routes.project_asset_list), { projectID, listID });
   const decisionRoute = (projectID: string, listID: string) =>
     route(required(routes.project_asset_list_decision), { projectID, listID });
+  const runRoute = (projectID: string, listID: string) =>
+    route(required(routes.project_asset_list_run), { projectID, listID });
+  const itemRoute = (projectID: string, listID: string, itemID: string) =>
+    route(required(routes.project_asset_list_item), { projectID, listID, itemID });
   const sessionListsRoute = (sessionID: string) =>
     route(required(routes.chat_session_asset_lists), { sessionID });
   const presenceRoute = (projectID: string) =>
@@ -191,6 +246,8 @@ export function createAssetListClient(
   };
   const summaries = (payload: unknown): AssetListSummary[] => array(object(payload).data) as AssetListSummary[];
   const detailOf = (payload: unknown): AssetListDetail => object(payload) as unknown as AssetListDetail;
+  const runOf = (payload: unknown): AssetListRunState => object(payload) as unknown as AssetListRunState;
+  const itemOf = (payload: unknown): AssetListItem => object(payload) as unknown as AssetListItem;
 
   return {
     async listProjectLists(projectID) {
@@ -215,6 +272,30 @@ export function createAssetListClient(
       const payload = await payloadOf(response);
       if (!response.ok) failure(response, payload);
       return detailOf(payload);
+    },
+    async controlRun(projectID, listID, action, expectedVersion, reason) {
+      const body = reason ? { action, expected_version: expectedVersion, reason } : { action, expected_version: expectedVersion };
+      const response = await fetcher(runRoute(projectID, listID), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return runOf(payload);
+    },
+    async skipItem(projectID, listID, itemID, expectedVersion, reason) {
+      const body = reason
+        ? { action: 'skip', expected_version: expectedVersion, reason }
+        : { action: 'skip', expected_version: expectedVersion };
+      const response = await fetcher(itemRoute(projectID, listID, itemID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return itemOf(payload);
     },
     async listSessionLists(sessionID) {
       const response = await fetcher(sessionListsRoute(sessionID));

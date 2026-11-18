@@ -2,6 +2,7 @@
 
 import { AppTopbar } from '@/components/layout/app-topbar';
 import { ApprovalMenu } from '@/components/studio/approval-menu';
+import { AssetListProgressChip } from '@/components/studio/asset-list-progress-chip';
 import { BudgetBadge } from '@/components/studio/budget-badge';
 import { ProjectSwitcher } from '@/components/studio/project-switcher';
 import { SessionMenu } from '@/components/studio/session-menu';
@@ -13,7 +14,7 @@ export function StudioTopbar() {
     <AppTopbar
       testId="studio-topbar"
       leading={<><ProjectSwitcher /><SessionMenu /></>}
-      actions={<><BudgetBadge /><ApprovalMenu /><TaskCenterButton /></>}
+      actions={<><AssetListProgressChip /><BudgetBadge /><ApprovalMenu /><TaskCenterButton /></>}
     />
   );
 }

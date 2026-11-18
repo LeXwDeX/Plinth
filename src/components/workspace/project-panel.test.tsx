@@ -43,10 +43,12 @@ const assetLists = vi.hoisted(() => {
   const listProjectLists = vi.fn();
   const getList = vi.fn();
   const decide = vi.fn();
+  const controlRun = vi.fn();
+  const skipItem = vi.fn();
   const listSessionLists = vi.fn();
   return {
-    listProjectLists, getList, decide, listSessionLists,
-    client: { listProjectLists, getList, decide, listSessionLists },
+    listProjectLists, getList, decide, controlRun, skipItem, listSessionLists,
+    client: { listProjectLists, getList, decide, controlRun, skipItem, listSessionLists },
   };
 });
 vi.mock('@/lib/asset-lists/client', async (importOriginal) => {
@@ -97,8 +99,14 @@ beforeEach(() => {
   assetLists.listProjectLists.mockResolvedValue([]);
   assetLists.getList.mockRejectedValue(new Error('unexpected list read'));
   assetLists.decide.mockResolvedValue({});
+  assetLists.controlRun.mockResolvedValue({
+    status: 'paused',
+    pause_reason: 'user',
+    item_counts: { todo: 1, working: 0, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
+  });
+  assetLists.skipItem.mockResolvedValue({});
   assetLists.listSessionLists.mockResolvedValue([]);
-  for (const fn of [mock.getStyleGuide, mock.setStyleGuide, mock.getConventions, mock.setConventions, mock.listAssets, mock.deleteAsset, mock.promoteAsset, assetLists.listProjectLists, assetLists.getList, assetLists.decide, assetLists.listSessionLists]) fn.mockClear();
+  for (const fn of [mock.getStyleGuide, mock.setStyleGuide, mock.getConventions, mock.setConventions, mock.listAssets, mock.deleteAsset, mock.promoteAsset, assetLists.listProjectLists, assetLists.getList, assetLists.decide, assetLists.controlRun, assetLists.skipItem, assetLists.listSessionLists]) fn.mockClear();
   toastMock.success.mockClear();
   toastMock.error.mockClear();
 });
@@ -228,6 +236,32 @@ describe('project panel', () => {
     expect(screen.getByTestId('asset-list-confirm')).toBeTruthy();
     expect(screen.getByTestId('asset-list-reject')).toBeTruthy();
     expect(screen.queryByTestId('project-asset-lists-empty')).toBeNull();
+  });
+
+  it('shows a confirmed list\'s run and sends its controls from the panel card', async () => {
+    const run = {
+      status: 'running',
+      pause_reason: '',
+      item_counts: { todo: 1, working: 1, review: 0, accepted: 0, returned: 0, failed: 0, skipped: 0 },
+    };
+    assetLists.listProjectLists.mockResolvedValue([
+      listSummary({ id: 'list_confirmed', status: 'confirmed', effective_status: 'confirmed', run }),
+    ]);
+    assetLists.getList.mockResolvedValue(listDetail({
+      id: 'list_confirmed', status: 'confirmed', effective_status: 'confirmed', version: 2, run,
+    }));
+    render(<ProjectPanel sessionId="s1" />);
+
+    const card = await screen.findByTestId('asset-list-card');
+    expect(card.textContent).toContain(messages['ui.asset_list.run_running']);
+    expect(screen.getByTestId('asset-list-run-progress')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('asset-list-run-pause'));
+    await waitFor(() => expect(assetLists.controlRun).toHaveBeenCalledWith(
+      'prj_1', 'list_confirmed', 'pause', 2,
+    ));
+    // The run change re-reads the project list and the card's own detail.
+    await waitFor(() => expect(assetLists.listProjectLists).toHaveBeenCalledTimes(2));
   });
 
   it('shows a decided or expired list as a light row', async () => {

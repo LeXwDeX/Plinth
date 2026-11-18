@@ -64,6 +64,11 @@ function clientWith(getList: ReturnType<typeof vi.fn>): AssetListClient {
     listProjectLists: vi.fn(async () => []),
     getList: getList as unknown as AssetListClient['getList'],
     decide: vi.fn(async () => detail()),
+    controlRun: vi.fn(async () => ({
+      status: 'running',
+      item_counts: { todo: 0, working: 0, review: 0, accepted: 1, returned: 0, failed: 0, skipped: 0 },
+    })) as unknown as AssetListClient['controlRun'],
+    skipItem: vi.fn(async () => item({ state: 'skipped' })) as unknown as AssetListClient['skipItem'],
     listSessionLists: vi.fn(async () => []),
     presence: vi.fn(async () => {}),
   };

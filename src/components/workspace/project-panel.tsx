@@ -429,6 +429,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
                     client={assetListsClient}
                     variant="panel"
                     onDecided={() => void load()}
+                    onRunChanged={() => void load()}
                   />
                 </li>
               ) : (
