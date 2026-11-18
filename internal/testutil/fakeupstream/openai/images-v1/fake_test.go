@@ -367,3 +367,76 @@ func TestMaskedEditChangesOnlyTheMaskedPixels(t *testing.T) {
 		t.Fatalf("corrupt mask status = %d %v", status, body)
 	}
 }
+
+// #332: the official edit applies the mask to the first picture when several
+// are sent; the fake composes the same way, so a Plinth call that sends the
+// mask beside a list of references cannot mask the wrong one.
+func TestMaskedEditAppliesToTheFirstPicture(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	solid := func(red, green, blue uint8) []byte {
+		picture := image.NewNRGBA(image.Rect(0, 0, 8, 8))
+		for y := 0; y < 8; y++ {
+			for x := 0; x < 8; x++ {
+				picture.SetNRGBA(x, y, color.NRGBA{R: red, G: green, B: blue, A: 255})
+			}
+		}
+		var buffer bytes.Buffer
+		if err := png.Encode(&buffer, picture); err != nil {
+			t.Fatal(err)
+		}
+		return buffer.Bytes()
+	}
+	mask := image.NewNRGBA(image.Rect(0, 0, 8, 8))
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			if x >= 2 && x < 6 && y >= 2 && y < 6 {
+				continue
+			}
+			mask.SetNRGBA(x, y, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
+		}
+	}
+	var encodedMask bytes.Buffer
+	if err := png.Encode(&encodedMask, mask); err != nil {
+		t.Fatal(err)
+	}
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	_ = writer.WriteField("model", Model)
+	_ = writer.WriteField("prompt", "edit the first one")
+	part := func(name string, data []byte) {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", `form-data; name="`+name+`"; filename="`+name+`.png"`)
+		header.Set("Content-Type", "image/png")
+		file, err := writer.CreatePart(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = file.Write(data)
+	}
+	first, second := solid(200, 40, 30), solid(30, 200, 40)
+	part("image[]", first)
+	part("image[]", second)
+	part("mask", encodedMask.Bytes())
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	status, body := edit(f, testkit.Body{ContentType: writer.FormDataContentType(), Data: buffer.Bytes()})
+	if status != http.StatusOK {
+		t.Fatalf("masked edit = %d %v", status, body)
+	}
+	output, _, err := image.Decode(bytes.NewReader(picture(t, body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			if x >= 2 && x < 6 && y >= 2 && y < 6 {
+				continue
+			}
+			got := color.NRGBAModel.Convert(output.At(x, y)).(color.NRGBA)
+			if got.R != 200 || got.G != 40 || got.B != 30 {
+				t.Fatalf("pixel %d,%d outside the mask = %+v, want the first picture", x, y, got)
+			}
+		}
+	}
+}

@@ -163,6 +163,13 @@ func validateOffering(
 		if _, err := validateValueDefinition(parameter); err != nil {
 			return fmt.Errorf("Offering %q: %w", offering.ID, err)
 		}
+		// A mask is an optional, single PNG that edits a picture (#332). It is
+		// never required, never a JPEG, and only image-to-image takes one.
+		if parameter.Semantic == schemacontract.SemanticMask &&
+			(offering.Capability != schemacontract.ImageToImage || parameter.Type != "asset" || parameter.Required ||
+				parameter.MaxBytes <= 0 || len(parameter.MediaTypes) != 1 || parameter.MediaTypes[0] != "image/png") {
+			return fmt.Errorf("Offering %q 的参数 %q 是蒙版：只用于图生图，必须声明可选的单张 PNG（image/png 与正 max_bytes）", offering.ID, parameter.Name)
+		}
 		// A route declared for an unsupported source is only said where the
 		// refusal template has a place for it.
 		if parameter.TaskSourceAlternative != "" &&

@@ -80,6 +80,34 @@ func TestDefaultMCPPublicLoadsAndStaysServerSide(t *testing.T) {
 	}
 }
 
+// #332: generate_image declares the optional mask argument of an image-to-image
+// call, and the three mask refusals carry their placeholders.
+func TestDefaultMCPGenerateImageMaskDeclaration(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	tool := mcpToolOf(&application, catalog.MCPToolGenerateImage)
+	input, err := toolschema.Parse(tool.InputSchema, toolschema.Options{ClosedObjects: true, RootObject: true, FreeFormObjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mask, declared := input.Properties["mask"]
+	if !declared || len(mask.Types) != 1 || mask.Types[0] != "string" {
+		t.Fatalf("generate_image mask = %#v (declared %v)", mask, declared)
+	}
+	service := application.MCPPublic
+	if !strings.Contains(service.Messages.MaskInvalid, "{max}") {
+		t.Fatalf("mask_invalid = %q", service.Messages.MaskInvalid)
+	}
+	for _, holder := range []string{"{mask_width}", "{mask_height}", "{image_width}", "{image_height}"} {
+		if !strings.Contains(service.Messages.MaskSizeMismatch, holder) {
+			t.Fatalf("mask_size_mismatch = %q lacks %s", service.Messages.MaskSizeMismatch, holder)
+		}
+	}
+	if strings.TrimSpace(service.Messages.MaskNotSupported) == "" {
+		t.Fatal("mcp_public.messages.mask_not_supported is empty")
+	}
+}
+
 // #332 step 7b: the default Catalog declares inspect_image right after
 // inspect_model, with the platform checklist vocabulary, a pixel cap inside the
 // platform limit, and an output whose only required root property is the status
@@ -499,6 +527,7 @@ func TestMCPPublicCopyIsLocalized(t *testing.T) {
 		service.Messages.SignedDownloadUnavailable, service.Messages.ModelUnavailable,
 		service.Messages.ImageNotReady, service.Messages.ImageUnreadable, service.Messages.ImageTooLarge,
 		service.Messages.ImageUnavailable, service.Messages.ImageBusy, service.Messages.AssetNotImage,
+		service.Messages.MaskInvalid, service.Messages.MaskSizeMismatch, service.Messages.MaskNotSupported,
 		service.StatusBlock.Summary.Template,
 		service.StatusBlock.Summary.TemplateNoAsset, service.StatusBlock.Summary.BalanceUnknown,
 		service.StatusBlock.Summary.Unknown, service.Tools[0].Description, service.Tools[len(service.Tools)-1].Description,

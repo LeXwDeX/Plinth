@@ -190,6 +190,8 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"idempotency_conflict": messages.IdempotencyConflict, "in_progress": messages.InProgress,
 		"too_many_in_flight": messages.TooManyInFlight, "upload_too_large": messages.UploadTooLarge,
 		"upload_invalid": messages.UploadInvalid, "upload_type_not_allowed": messages.UploadTypeNotAllowed,
+		"mask_invalid": messages.MaskInvalid, "mask_size_mismatch": messages.MaskSizeMismatch,
+		"mask_not_supported":          messages.MaskNotSupported,
 		"signed_download_unavailable": messages.SignedDownloadUnavailable, "model_unavailable": messages.ModelUnavailable,
 		"image_not_ready": messages.ImageNotReady, "image_unreadable": messages.ImageUnreadable,
 		"image_too_large": messages.ImageTooLarge, "image_unavailable": messages.ImageUnavailable,
@@ -208,9 +210,15 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 		"rate_limited": {messages.RateLimited, "{seconds}"}, "auth_throttled": {messages.AuthThrottled, "{seconds}"},
 		"asset_name_invalid": {messages.AssetNameInvalid, "{max}"},
 		"upload_too_large":   {messages.UploadTooLarge, "{max}"}, "upload_type_not_allowed": {messages.UploadTypeNotAllowed, "{types}"},
+		"mask_invalid": {messages.MaskInvalid, "{max}"},
 	} {
 		if !strings.Contains(check.text, check.holder) {
 			return fmt.Errorf("mcp_public.messages.%s 必须含 %s", name, check.holder)
+		}
+	}
+	for _, holder := range []string{"{mask_width}", "{mask_height}", "{image_width}", "{image_height}"} {
+		if !strings.Contains(messages.MaskSizeMismatch, holder) {
+			return fmt.Errorf("mcp_public.messages.mask_size_mismatch 必须含 %s", holder)
 		}
 	}
 	if !strings.Contains(messages.ImageTooLarge, "{bytes}") || !strings.Contains(messages.ImageTooLarge, "{pixels}") {
@@ -321,7 +329,7 @@ func validateMCPGeneration(schema ApplicationSchema, service *MCPPublicSchema, c
 // arguments the code never sees.
 var mcpToolArguments = map[string][]string{
 	MCPToolUploadImage:      {"data", "filename"},
-	MCPToolGenerateImage:    {"asset", "project", "service", "prompt", "images", "parameters", "parameter_reasons", "idempotency_key"},
+	MCPToolGenerateImage:    {"asset", "project", "service", "prompt", "images", "mask", "parameters", "parameter_reasons", "idempotency_key"},
 	MCPToolRemoveBackground: {"asset", "project", "service", "image", "parameters", "parameter_reasons", "idempotency_key"},
 	MCPToolCreateModel:      {"asset", "project", "service", "prompt", "images", "parameters", "parameter_reasons", "idempotency_key"},
 	MCPToolProcessModel: {"asset", "project", "service", "operation", "source_task_id", "source_asset_id", "prompt", "images",
