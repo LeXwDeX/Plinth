@@ -486,6 +486,8 @@ func TestAssetListExecutionCopyIsLocalized(t *testing.T) {
 		"item_failed", "item_failed_input", "item_failed_capacity",
 		"item_failed_refused", "item_failed_internal",
 		"step_cap_blocked", "needs_approval", "run_waiting",
+		"item_reported_done", "item_reported_failed", "item_not_in_session",
+		"item_not_working", "item_no_successful_task", "item_report_failed",
 	} {
 		if strings.TrimSpace(messages[key]) == "" {
 			t.Errorf("asset_list.messages.%s missing from the default copy", key)

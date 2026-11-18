@@ -402,6 +402,36 @@ func (service *Service) ItemByID(
 	return service.runs.ItemByID(ctx, ownerID, listID, itemID)
 }
 
+// RunByList reads the execution state of the owner's confirmed list (#328).
+// A missing run, list or project is ErrNotFound.
+func (service *Service) RunByList(
+	ctx context.Context,
+	ownerID string,
+	projectID string,
+	listID string,
+) (Run, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	projectID = strings.TrimSpace(projectID)
+	listID = strings.TrimSpace(listID)
+	if ownerID == "" || projectID == "" || listID == "" || service.runs == nil {
+		return Run{}, ErrNotFound
+	}
+	return service.runs.GetRunByList(ctx, ownerID, projectID, listID)
+}
+
+// FinishItem applies one terminal item transition (#328): working→review,
+// failed or skipped. A missing item or a state conflict is reported by the run
+// store; the completion tool maps it to its Schema refusal.
+func (service *Service) FinishItem(
+	ctx context.Context,
+	input FinishItemInput,
+) (Item, error) {
+	if service.runs == nil {
+		return Item{}, ErrNotFound
+	}
+	return service.runs.FinishItem(ctx, input)
+}
+
 // decorate derives the read-time effective status and, when the items are
 // loaded, the item count and plan totals. A draft at exactly its expiry
 // instant is expired.

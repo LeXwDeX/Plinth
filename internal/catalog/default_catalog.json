@@ -5579,7 +5579,13 @@
         "item_failed_internal": "清单项「{name}」失败：内部错误，请稍后重试。",
         "step_cap_blocked": "清单项「{name}」的 3D 步数已用完，这一步没有执行。",
         "needs_approval": "清单项「{name}」在等你审批这一步。",
-        "run_waiting": "制作清单「{title}」在等待前一份清单完成。"
+        "run_waiting": "制作清单「{title}」在等待前一份清单完成。",
+        "item_reported_done": "清单项「{name}」已报告完成，进入待验收。",
+        "item_reported_failed": "清单项「{name}」已报告失败。",
+        "item_not_in_session": "这个工具只在制作清单项的会话里可用。",
+        "item_not_working": "清单项当前不在制作中，无法报告结果。",
+        "item_no_successful_task": "本会话没有成功的任务，不能报告完成；请先让生成任务成功。",
+        "item_report_failed": "清单项结果提交失败：清单可能已停止或完成，或服务暂时不可用，请稍后重试。"
       },
       "ui": {
         "card_title": "制作清单",
@@ -8048,6 +8054,20 @@
               }
             },
             "required": ["title", "items"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "submit_asset_list_item",
+          "execution": {"implementation_key":"assetlist.submit_item","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Report the outcome of the current production-list item: done when its task succeeded, failed with a reason otherwise. Only valid inside a list item's own session.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "status": {"type": "string", "enum": ["done", "failed"]},
+              "reason": {"type": "string"}
+            },
+            "required": ["status"],
             "additionalProperties": false
           }
         }
@@ -19825,6 +19845,12 @@
             "asset_list.messages.step_cap_blocked": "Item \"{name}\" used up its 3D steps, so this step did not run.",
             "asset_list.messages.needs_approval": "Item \"{name}\" is waiting for your approval of this step.",
             "asset_list.messages.run_waiting": "The list \"{title}\" is waiting for the previous list to finish.",
+            "asset_list.messages.item_reported_done": "Item \"{name}\" was reported done and is awaiting review.",
+            "asset_list.messages.item_reported_failed": "Item \"{name}\" was reported failed.",
+            "asset_list.messages.item_not_in_session": "This tool is only available inside a production-list item's own session.",
+            "asset_list.messages.item_not_working": "The list item is not in progress, so no result can be reported.",
+            "asset_list.messages.item_no_successful_task": "This session has no successful task, so it cannot report done; let the generation task succeed first.",
+            "asset_list.messages.item_report_failed": "The item report could not be stored: the list may be stopped or completed, or the service is temporarily unavailable; try again later.",
             "asset_list.ui.card_title": "Work list",
             "asset_list.ui.panel_title": "Work list",
             "asset_list.ui.confirm_button": "Confirm list",

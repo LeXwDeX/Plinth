@@ -773,6 +773,22 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			// Item sub-sessions derive the internal steps mode only when the
 			// deployment declares application.step_policy (#330).
 			StepsEnabled: applicationSchema.StepPolicy != nil,
+			// The completion tool reports only the Tasks of the item's own
+			// sub-session; branch ancestors are another session's work.
+			Tasks: func(ctx context.Context, ownerID, sessionID string) ([]generation.Task, error) {
+				page, err := module.List(ctx, generation.OwnTasks(generation.OwnerID(ownerID)),
+					generation.ListQuery{
+						SessionID: sessionID,
+						States: []generation.TaskState{
+							generation.TaskSucceeded, generation.TaskFailed,
+						},
+						Limit: 100,
+					})
+				if err != nil {
+					return nil, err
+				}
+				return page.Tasks, nil
+			},
 		})
 		// The browser heartbeat (#328) is served only when the Catalog
 		// declares execution; a Catalog without it keeps the route
@@ -959,6 +975,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		AskChoice:            chatService.AskChoice,
 		ProposePlan:          chatService.ProposeProductionPlan,
 		ProposeAssetList:     chatService.ProposeAssetList,
+		SubmitAssetListItem:  chatService.SubmitAssetListItem,
 		WriteVisualAnchor:    chatService.WriteVisualAnchor,
 		Project:              applicationSchema.Project,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,

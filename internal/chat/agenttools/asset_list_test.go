@@ -44,3 +44,40 @@ func TestProposeAssetListDispatchesToTheService(t *testing.T) {
 		t.Fatalf("unwired asset list tool = %+v, %v", result, err)
 	}
 }
+
+// #328: the completion call reaches the chat service through the dispatcher;
+// an unwired executor refuses without a submission.
+func TestSubmitAssetListItemDispatchesToTheService(t *testing.T) {
+	var received chat.ToolCommand
+	executor, err := New(Config{
+		Params: agentparams.NewStore(), Generate: &exactPendingGenerate{},
+		SubmitAssetListItem: func(_ context.Context, command chat.ToolCommand) (chat.ToolResult, error) {
+			received = command
+			return chat.ToolResult{AgentContent: `{"item_id":"aitem_1"}`, NoSubmission: true}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
+		Call: agents.ToolCall{ID: "submit-1", Name: ToolSubmitAssetListItem,
+			Arguments: json.RawMessage(`{"status":"done"}`)},
+		Options: chat.TurnOptions{AssetListItemID: "aitem_1"},
+	}
+	result, err := executor.Execute(context.Background(), command, nil)
+	if err != nil || result.AgentContent != `{"item_id":"aitem_1"}` ||
+		!result.NoSubmission || received.Call.ID != "submit-1" ||
+		received.Options.AssetListItemID != "aitem_1" {
+		t.Fatalf("dispatch result=%+v received=%+v err=%v", result, received, err)
+	}
+
+	unwired, err := New(Config{Params: agentparams.NewStore(), Generate: &exactPendingGenerate{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = unwired.Execute(context.Background(), command, nil)
+	if err != nil || !result.NoSubmission || result.Error != "asset list item reports unavailable" {
+		t.Fatalf("unwired asset list item tool = %+v, %v", result, err)
+	}
+}

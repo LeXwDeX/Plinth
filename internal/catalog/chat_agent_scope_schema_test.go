@@ -53,6 +53,7 @@ var shippedToolScopes = map[string]string{
 	"request_consent":            "utility",
 	"list_project_assets":        "utility",
 	"propose_asset_list":         "utility",
+	"submit_asset_list_item":     "utility",
 	"mcp_list_offerings":         "utility",
 	"mcp_list_session_tasks":     "utility",
 	"mcp_get_task_assets":        "utility",

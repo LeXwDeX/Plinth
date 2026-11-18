@@ -172,6 +172,12 @@ func validateAssetList(
 		"step_cap_blocked":               list.Messages.StepCapBlocked,
 		"needs_approval":                 list.Messages.NeedsApproval,
 		"run_waiting":                    list.Messages.RunWaiting,
+		"item_reported_done":             list.Messages.ItemReportedDone,
+		"item_reported_failed":           list.Messages.ItemReportedFailed,
+		"item_not_in_session":            list.Messages.ItemNotInSession,
+		"item_not_working":               list.Messages.ItemNotWorking,
+		"item_no_successful_task":        list.Messages.ItemNoSuccessfulTask,
+		"item_report_failed":             list.Messages.ItemReportFailed,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("asset_list.messages.%s 不能为空", field)

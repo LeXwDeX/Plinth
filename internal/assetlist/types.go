@@ -125,7 +125,11 @@ type List struct {
 // each step names the runtime offering, whether it was available then and why
 // not. An unavailable step is kept and shown, never silently swapped.
 type Item struct {
-	ID                      string              `json:"id"`
+	ID string `json:"id"`
+	// ListID names the list this item belongs to (#328). Sub-session lookups
+	// carry it so a completion report can address the item's run without a
+	// second list query.
+	ListID                  string              `json:"list_id,omitempty"`
 	OwnerID                 string              `json:"owner_id"`
 	Kind                    string              `json:"kind"`
 	Name                    string              `json:"name"`
