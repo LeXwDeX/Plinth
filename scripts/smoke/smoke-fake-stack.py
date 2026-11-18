@@ -5884,36 +5884,35 @@ ASSET_LIST_RUN_CAP_CONTINUATION = (
 )
 
 
-def _asset_list_presence(work, stack, project_id, present=True, tab_id="asset-list-run-tab",
+def _asset_list_presence(api, work, stack, project_id, present=True, tab_id="asset-list-run-tab",
                          age_seconds=0):
-    """Records or removes one browser tab's heartbeat in the stack's SQLite.
+    """Sends one browser tab's heartbeat through the real presence route.
 
-    This branch's base carries the presence store and its 0101 table but not the
-    HTTP heartbeat route (that route landed on main after the branch point), so
-    the scenario writes the same owner/project/tab row the route's present or
-    leave would. age_seconds backdates one present row instead of waiting the
-    shipped minimum 30-second grace window; the runner still compares it through
-    its real PresenceStore port."""
+    age_seconds backdates the stored present row instead of waiting the shipped
+    minimum 30-second grace window; backdating only shortens the wait, the route
+    itself has its own unit tests. The runner still compares the row through its
+    real PresenceStore port."""
+    status, _ = api.json("POST", f"/api/v1/projects/{project_id}/presence",
+                         {"tab_id": tab_id, "state": "present" if present else "leave"})
+    if status not in (200, 204):
+        raise RuntimeError(f"presence heartbeat for {project_id}/{tab_id} answered {status}")
+    if not present or age_seconds <= 0:
+        return
     import sqlite3
     database = os.path.join(work, stack, "app.db")
     connection = sqlite3.connect(database, timeout=10)
     try:
-        if present:
-            stamp = time.strftime("%Y-%m-%dT%H:%M:%S",
-                                  time.gmtime(time.time() - age_seconds)) + ".000000000Z"
-            connection.execute(
-                "INSERT INTO asset_list_presence (owner_id, project_id, tab_id, last_seen_at) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT(owner_id, project_id, tab_id) "
-                "DO UPDATE SET last_seen_at = excluded.last_seen_at",
-                (ASSET_LIST_RUN_OWNER, project_id, tab_id, stamp))
-        else:
-            connection.execute(
-                "DELETE FROM asset_list_presence "
-                "WHERE owner_id = ? AND project_id = ? AND tab_id = ?",
-                (ASSET_LIST_RUN_OWNER, project_id, tab_id))
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S",
+                              time.gmtime(time.time() - age_seconds)) + ".000000000Z"
+        changed = connection.execute(
+            "UPDATE asset_list_presence SET last_seen_at = ? "
+            "WHERE owner_id = ? AND project_id = ? AND tab_id = ?",
+            (stamp, ASSET_LIST_RUN_OWNER, project_id, tab_id)).rowcount
         connection.commit()
     finally:
         connection.close()
+    if changed != 1:
+        raise RuntimeError(f"presence row for {project_id}/{tab_id} is missing; cannot backdate it")
 
 
 def _asset_list_detail(api, project_id, list_id):
@@ -5991,7 +5990,7 @@ def _asset_list_run_arm_progress(work, stack_binary, processes, catalog):
         if why:
             record("#328 run: create the project and session", False, why)
             return
-        beat = lambda: _asset_list_presence(work, stack, project_id)
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
         beat()
         result, why = _asset_list_turn(api, work, stack, session, "自动推进清单", [
             {"kind": "prop", "name": "自动长矛", "description": "低模长矛"},
@@ -6049,7 +6048,7 @@ def _asset_list_run_arm_progress(work, stack_binary, processes, catalog):
         # A heartbeat older than the grace window reads as absent (the Catalog's
         # minimum grace is 30 seconds, so the row is backdated instead of slept);
         # a paused run must not create another Task.
-        _asset_list_presence(work, stack, project_id, age_seconds=60)
+        _asset_list_presence(api, work, stack, project_id, age_seconds=60)
         detail = _wait_asset_list_run(
             api, project_id, list_id,
             lambda value: _asset_list_run_of(value).get("pause_reason") == "presence", seconds=20)
@@ -6133,7 +6132,7 @@ def _asset_list_run_arm_presence(work, stack_binary, processes, catalog):
                f"status={status} run={run.get('status')}/{run.get('pause_reason')} "
                f"counts={_asset_list_counts(detail)} sessions={[bool(i.get('session_id')) for i in items]}")
 
-        beat = lambda: _asset_list_presence(work, stack, project_id)
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
         beat()
         detail = _wait_asset_list_run(
             api, project_id, list_id,
@@ -6167,7 +6166,7 @@ def _asset_list_run_arm_failure(work, stack_binary, processes):
         if why:
             record("#328 run failure: create the project and session", False, why)
             return
-        beat = lambda: _asset_list_presence(work, stack, project_id)
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
         beat()
         result, why = _asset_list_turn(api, work, stack, session, "失败隔离清单", [
             {"kind": "prop", "name": "失败长矛", "description": "低模长矛"},
@@ -6218,7 +6217,7 @@ def _asset_list_run_arm_step_cap(work, stack_binary, processes):
         if why:
             record("#328 run step cap: create the project and session", False, why)
             return
-        beat = lambda: _asset_list_presence(work, stack, project_id)
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
         beat()
         status, policy = api.json("GET", "/api/v1/account/step-policy")
         if status == 200:
