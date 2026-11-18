@@ -10,6 +10,33 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
+func TestAssetListKernelGateIsNotInstalledWithoutExecution(t *testing.T) {
+	t.Parallel()
+	service := &assetlist.Service{}
+	if gate := newAssetListKernelSubmissionGate(nil, nil); gate != nil {
+		t.Fatal("kernel gate installed without an asset list section")
+	}
+	if gate := newAssetListKernelSubmissionGate(service, &catalog.AssetListSchema{}); gate != nil {
+		t.Fatal("kernel gate installed without an execution section")
+	}
+}
+
+func TestAssetListKernelGateAllowsWithoutAnItem(t *testing.T) {
+	t.Parallel()
+	schema := &catalog.AssetListSchema{
+		Execution: &catalog.AssetListExecutionSchema{Enabled: true},
+	}
+	gate := newAssetListKernelSubmissionGate(&assetlist.Service{}, schema)
+	if gate == nil {
+		t.Fatal("kernel gate not installed for a declared execution section")
+	}
+	// The zero service has no run store, so the session is ordinary; the
+	// kernel fallback must keep non-item sessions permissive.
+	if err := gate(context.Background(), "owner", "ses_plain"); err != nil {
+		t.Fatalf("ordinary session refused with %v", err)
+	}
+}
+
 func TestAssetListSubmissionGateIsNotInstalledWithoutExecution(t *testing.T) {
 	t.Parallel()
 	service := &assetlist.Service{}

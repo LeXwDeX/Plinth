@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // TurnEndReason is why a chat turn ended (#328). It is an internal kind: the
@@ -55,6 +56,14 @@ func (service *Service) turnEndReasonText(reason TurnEndReason) (text string, ok
 // when nothing is stored.
 func (service *Service) RecordsTurnEndReasons() bool {
 	return service.turnEndReasons.Declared()
+}
+
+// TurnEndedInError reports whether a turn ended with the Schema's error end
+// reason (#328). Without declared reasons nothing is stored, so the answer is
+// false: the asset-list runner treats only a recorded failure as one.
+func (service *Service) TurnEndedInError(turn Turn) bool {
+	reason := strings.TrimSpace(service.turnEndReasons.Error)
+	return reason != "" && turn.EndReason == reason
 }
 
 // proposedPendingPlan reports whether the turn proposed a production plan that

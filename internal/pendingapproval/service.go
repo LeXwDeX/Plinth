@@ -1098,6 +1098,13 @@ func (s *Service) runApproved(ctx context.Context, op generationtool.Operation, 
 			OperationID: op.OperationID, AuthorizationRef: op.GrantRequestID, Harness: op.Harness,
 		})
 		if err != nil {
+			// A paused production list refuses the new Task without consuming
+			// the approval (#328 §2.5.5): the grant, the frozen input and the
+			// card stay, and the next sweep retries this same submit after the
+			// run resumes.
+			if errors.Is(err, generation.ErrSubmissionBlocked) {
+				return Outcome{}, err
+			}
 			if errors.Is(err, harness.ErrStale) {
 				return s.postAndSettle(ctx, op, s.text(s.inTurnLocale(ctx, op), s.schema.Harness.ChangedMessage))
 			}
@@ -1146,6 +1153,11 @@ func (s *Service) countProcessingCorrection(ctx context.Context, op generationto
 // conversion refusal wrote no Task and claimed no grant, so the approval can
 // stay pending until the other run ends.
 func permanentSubmitFailure(err error) bool {
+	if errors.Is(err, generation.ErrSubmissionBlocked) {
+		// A paused list refuses new Tasks; resuming makes the same submit
+		// admissible again, so the approval must never be settled as failed.
+		return false
+	}
 	if errors.Is(err, generation.ErrConversionInProgress) {
 		return false
 	}

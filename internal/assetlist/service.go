@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -65,6 +66,7 @@ type Service struct {
 	runs               RunStore
 	presence           PresenceStore
 	presenceGrace      time.Duration
+	executionEnabled   bool
 	limits             catalog.AssetListLimitsSchema
 	projectMaxItems    int
 	maxListsPerProject int
@@ -125,6 +127,7 @@ func New(config Config) (*Service, error) {
 		newID = randomID
 	}
 	var presenceGrace time.Duration
+	executionEnabled := config.Schema.Execution != nil && config.Schema.Execution.Enabled
 	if config.Schema.Execution != nil {
 		presenceGrace = time.Duration(config.Schema.Execution.Presence.GraceSeconds) * time.Second
 	}
@@ -133,6 +136,7 @@ func New(config Config) (*Service, error) {
 		runs:               config.Runs,
 		presence:           config.Presence,
 		presenceGrace:      presenceGrace,
+		executionEnabled:   executionEnabled,
 		limits:             limits,
 		projectMaxItems:    config.ProjectMaxItems,
 		maxListsPerProject: config.MaxListsPerProject,
@@ -302,6 +306,15 @@ func (service *Service) Decide(ctx context.Context, input DecideInput) (List, er
 	})
 	if err != nil {
 		return List{}, err
+	}
+	// A confirmed list gets its run here, best-effort: failing to store the run
+	// must not undo the person's decision. The runner creates it lazily anyway
+	// (#328), so a lost write only delays automatic production.
+	if stored.Status == StatusConfirmed && service.executionEnabled {
+		if _, err := service.EnsureRun(ctx, ownerID, projectID, stored.ID); err != nil {
+			slog.Warn("asset list run was not created after confirm",
+				"owner_id", ownerID, "project_id", projectID, "list_id", stored.ID, "error", err)
+		}
 	}
 	return service.decorate(stored), nil
 }
