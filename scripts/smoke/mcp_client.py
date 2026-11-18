@@ -19,6 +19,7 @@ import urllib.request
 PROTOCOL_VERSION = "2026-07-28"
 CLIENT_NAME = "plinth-fake-stack-smoke"
 CLIENT_VERSION = "1"
+TASKS_EXTENSION = "io.modelcontextprotocol/tasks"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -26,21 +27,26 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def envelope(method, params=None, name=""):
+def envelope(method, params=None, name="", tasks=False):
     """One JSON-RPC request of the stateless protocol. Pure: ``params`` is copied.
 
     ``name`` is the tool of a ``tools/call``; it also becomes the ``Mcp-Name``
     header (see ``headers_for``). The request id is fixed because the listener
-    keeps no state between requests and never correlates them.
+    keeps no state between requests and never correlates them. ``tasks``
+    declares the Tasks extension in the per-request client capabilities; a
+    server that serves it answers a generation tool with a CreateTaskResult.
     """
     message = {"jsonrpc": "2.0", "id": 1, "method": method}
     copied = dict(params or {})
     if name:
         copied["name"] = name
+    capabilities = {}
+    if tasks:
+        capabilities["extensions"] = {TASKS_EXTENSION: {}}
     copied["_meta"] = {
         "io.modelcontextprotocol/protocolVersion": PROTOCOL_VERSION,
         "io.modelcontextprotocol/clientInfo": {"name": CLIENT_NAME, "version": CLIENT_VERSION},
-        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientCapabilities": capabilities,
     }
     message["params"] = copied
     return message
@@ -121,14 +127,15 @@ def asset_problems(assets, blobs):
 class McpClient:
     """One listener origin and one access key (empty for the keyless checks)."""
 
-    def __init__(self, base, key=""):
+    def __init__(self, base, key="", tasks=False):
         self.base = base.rstrip("/")
         self.key = key
+        self.tasks = tasks
 
     def call(self, method, params=None, name="", timeout=60):
         """POST one request; returns (status, headers, body). Connection problems
         are a status of 0, a test failure the caller records, never a crash."""
-        body = json.dumps(envelope(method, params, name)).encode()
+        body = json.dumps(envelope(method, params, name, tasks=self.tasks)).encode()
         request = urllib.request.Request(self.base + "/mcp", data=body, method="POST",
                                          headers=headers_for(method, name, self.key))
         opener = urllib.request.build_opener(_NoRedirect())
@@ -160,6 +167,9 @@ class McpClient:
             "structured": structured if isinstance(structured, dict) else {},
             "text": text,
             "rpc_error": payload.get("error") if isinstance(payload, dict) else None,
+            # The whole result, for a CreateTaskResult whose taskId is not a
+            # structuredContent member.
+            "result": result,
         }
 
     def get(self, url, authorization=True, timeout=60):

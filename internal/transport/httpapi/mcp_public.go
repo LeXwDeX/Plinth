@@ -11,6 +11,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/access"
 	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/adapters/mcphttp"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/routing"
 )
 
@@ -78,7 +79,7 @@ func (s *Server) MCPPublicHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	endpoint, err := mcphttp.NewPublicHandler(runtime, mcphttp.PublicPolicy{
+	policy := mcphttp.PublicPolicy{
 		ProtocolVersion:  service.ProtocolVersion,
 		ServerName:       service.ServerName,
 		MaxRequestBytes:  service.MaxRequestBytes,
@@ -88,7 +89,14 @@ func (s *Server) MCPPublicHandler() (http.Handler, error) {
 		},
 		Detail:  s.mcpProblemDetail,
 		Observe: s.mcpObserve,
-	})
+	}
+	// The Tasks extension (#332 stage 2): the discover capabilities advertise
+	// it, and only the methods the Schema lists are served.
+	if service.Tasks.Enabled {
+		policy.TasksExtension = catalog.MCPTasksExtension
+		policy.TasksMethods = service.Tasks.Methods
+	}
+	endpoint, err := mcphttp.NewPublicHandler(runtime, policy)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: mcp_public 端点: %w", err)
 	}

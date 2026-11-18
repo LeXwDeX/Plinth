@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/adapters/mcphttp"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -61,6 +62,10 @@ type mcpOutcome struct {
 	data    map[string]any
 	problem *mcpProblem
 	subject mcppublic.Subject
+	// task, when set, makes the call a Task an extension-aware client polls
+	// (#332 stage 2). The ordinary result is still built, for a client that
+	// did not declare the extension.
+	task *mcphttp.PublicTask
 }
 
 type mcpRuntime struct {
@@ -188,6 +193,13 @@ func (r *mcpRuntime) CallTool(ctx context.Context, name string, arguments json.R
 	}
 	subject := outcome.subject
 	subject.OwnerID = principal.ID()
+	return r.finish(ctx, locale, subject, outcome)
+}
+
+// finish builds the ordinary tool result of an outcome: the status block, the
+// business error and the text blocks. The completed result of a Task is the
+// same shape (tasks/get carries it).
+func (r *mcpRuntime) finish(ctx context.Context, locale string, subject mcppublic.Subject, outcome mcpOutcome) (mcphttp.PublicResult, error) {
 	block := r.server.mcpStatus.Build(ctx, locale, subject)
 	structured := make(map[string]any, len(outcome.data)+2)
 	for key, value := range outcome.data {
@@ -213,7 +225,163 @@ func (r *mcpRuntime) CallTool(ctx context.Context, name string, arguments json.R
 		Structured: encoded,
 		Text:       []string{text, r.server.mcpStatus.Summary(locale, block)},
 		IsError:    outcome.problem != nil,
+		Task:       outcome.task,
 	}, nil
+}
+
+// ---- the Tasks extension (#332 stage 2) -------------------------------------
+
+// mcpTaskStatus maps a generation Task state to the extension's status
+// vocabulary. Any state that is not terminal is working; the extension has no
+// input_required because the service never asks the caller for input.
+func mcpTaskStatus(task generation.Task) string {
+	switch string(task.State) {
+	case string(generation.TaskSucceeded):
+		return mcphttp.TaskStatusCompleted
+	case string(generation.TaskFailed), "EXPIRED":
+		return mcphttp.TaskStatusFailed
+	case string(generation.TaskCanceled):
+		return mcphttp.TaskStatusCancelled
+	}
+	return mcphttp.TaskStatusWorking
+}
+
+// taskReference is the Task object CreateTaskResult and tasks/get carry. The
+// status message is the Schema's state label; the polling interval is only
+// suggested while the Task is not terminal.
+func (r *mcpRuntime) taskReference(task generation.Task, view mcpTaskView) mcphttp.PublicTask {
+	return mcpTaskReference(&r.service, task, view)
+}
+
+// mcpTaskReference builds the Task object from the declared service, so a tool
+// that starts a Task and tasks/get describe it the same way.
+func mcpTaskReference(service *catalog.MCPPublicSchema, task generation.Task, view mcpTaskView) mcphttp.PublicTask {
+	status := mcpTaskStatus(task)
+	ttl := int64(service.Tasks.ResultTTLSeconds) * 1000
+	reference := mcphttp.PublicTask{
+		TaskID: view.ID, Status: status, StatusMessage: view.StateLabel,
+		CreatedAt: view.CreatedAt, LastUpdatedAt: view.UpdatedAt, TTLMs: &ttl,
+	}
+	if status == mcphttp.TaskStatusWorking {
+		poll := int64(service.PollIntervalSeconds) * 1000
+		reference.PollIntervalMs = &poll
+	}
+	return reference
+}
+
+// GetTask serves tasks/get: one of the caller's Tasks, the way get_task shows
+// it. A completed Task carries the tool result of get_task (the task view, the
+// status block and the platform's self-check); a failed Task carries the
+// platform's failure attribution. Another owner's Task is not found.
+func (r *mcpRuntime) GetTask(ctx context.Context, taskID string) (mcphttp.PublicTaskResult, error) {
+	principal, ok := mcpPrincipalFrom(ctx)
+	if !ok {
+		return mcphttp.PublicTaskResult{}, errors.New("mcp: request has no authenticated key")
+	}
+	if !principal.Credential().HasScope(accesskeys.ScopeRead) {
+		return mcphttp.PublicTaskResult{}, &mcphttp.ScopeError{Scope: accesskeys.ScopeRead}
+	}
+	locale := catalog.LocaleFrom(ctx)
+	call := &mcpCall{ctx: ctx, locale: locale, owner: generation.OwnerID(principal.ID()), arguments: map[string]any{"task_id": taskID}}
+	task, missing, err := r.server.mcpOwnedTask(call, taskID)
+	if err != nil {
+		return mcphttp.PublicTaskResult{}, err
+	}
+	if missing != nil {
+		return mcphttp.PublicTaskResult{}, &mcphttp.TaskError{Code: mcphttp.TaskNotFound, Message: missing.problem.Message}
+	}
+	view, attribution := r.server.mcpTaskView(locale, task)
+	answer := mcphttp.PublicTaskResult{PublicTask: r.taskReference(task, view)}
+	switch answer.Status {
+	case mcphttp.TaskStatusCompleted:
+		outcome, err := r.server.mcpGetTask(call)
+		if err != nil {
+			return mcphttp.PublicTaskResult{}, err
+		}
+		subject := outcome.subject
+		subject.OwnerID = principal.ID()
+		result, err := r.finish(ctx, locale, subject, outcome)
+		if err != nil {
+			return mcphttp.PublicTaskResult{}, err
+		}
+		completed, err := result.CallToolResult()
+		if err != nil {
+			return mcphttp.PublicTaskResult{}, err
+		}
+		encoded, err := json.Marshal(completed)
+		if err != nil {
+			return mcphttp.PublicTaskResult{}, fmt.Errorf("encode completed task result: %w", err)
+		}
+		answer.Result = encoded
+	case mcphttp.TaskStatusFailed:
+		subject := mcppublic.Subject{OwnerID: principal.ID(), Failure: attribution}
+		data := map[string]any{"task": view, "status": r.server.mcpStatus.Build(ctx, locale, subject)}
+		failure := &mcphttp.PublicTaskFailure{Code: -32000, Message: view.StateLabel, Data: data}
+		if view.Failure != nil {
+			failure.Message = view.Failure.Advice
+			data["failure"] = view.Failure
+		}
+		answer.Error = failure
+	}
+	return answer, nil
+}
+
+// CancelTask serves tasks/cancel through the generation kernel's own Cancel.
+// Cancelling changes work that may cost money, so it needs the generate scope
+// (which includes read). A Task that already reached a terminal status is
+// acknowledged with alreadyTerminal and is not changed.
+func (r *mcpRuntime) CancelTask(ctx context.Context, taskID string) (mcphttp.PublicTaskCancel, error) {
+	principal, ok := mcpPrincipalFrom(ctx)
+	if !ok {
+		return mcphttp.PublicTaskCancel{}, errors.New("mcp: request has no authenticated key")
+	}
+	if !principal.Credential().HasScope(accesskeys.ScopeGenerate) {
+		return mcphttp.PublicTaskCancel{}, &mcphttp.ScopeError{Scope: accesskeys.ScopeGenerate}
+	}
+	locale := catalog.LocaleFrom(ctx)
+	call := &mcpCall{ctx: ctx, locale: locale, owner: generation.OwnerID(principal.ID())}
+	before, missing, err := r.server.mcpOwnedTask(call, taskID)
+	if err != nil {
+		return mcphttp.PublicTaskCancel{}, err
+	}
+	if missing != nil {
+		return mcphttp.PublicTaskCancel{}, &mcphttp.TaskError{Code: mcphttp.TaskNotFound, Message: missing.problem.Message}
+	}
+	view, _ := r.server.mcpTaskView(locale, before)
+	if before.State.Terminal() {
+		return r.terminalCancel(locale, before, view), nil
+	}
+	task, err := r.server.generation.Cancel(ctx, call.owner, generation.TaskID(taskID))
+	if generation.IsCode(err, generation.ErrNotFound) {
+		return mcphttp.PublicTaskCancel{}, &mcphttp.TaskError{
+			Code: mcphttp.TaskNotFound, Message: r.server.mcpText(locale, r.server.application.MCPPublic.Messages.TaskNotFound),
+		}
+	}
+	if err != nil {
+		return mcphttp.PublicTaskCancel{}, err
+	}
+	if task.State != generation.TaskCanceled {
+		if task.State.Terminal() {
+			// The Task reached another terminal status between the read and the
+			// cancellation; the kernel left it as it was.
+			view, _ = r.server.mcpTaskView(locale, task)
+			return r.terminalCancel(locale, task, view), nil
+		}
+		view, _ = r.server.mcpTaskView(locale, task)
+		return mcphttp.PublicTaskCancel{Status: mcpTaskStatus(task), StatusMessage: view.StateLabel}, nil
+	}
+	view, _ = r.server.mcpTaskView(locale, task)
+	return mcphttp.PublicTaskCancel{Status: mcpTaskStatus(task), StatusMessage: view.StateLabel}, nil
+}
+
+// terminalCancel answers a cancellation of a Task that already ended: the
+// status is explicit and the Schema's wording says nothing changed.
+func (r *mcpRuntime) terminalCancel(locale string, task generation.Task, view mcpTaskView) mcphttp.PublicTaskCancel {
+	return mcphttp.PublicTaskCancel{
+		Status:          mcpTaskStatus(task),
+		StatusMessage:   r.server.mcpFill(locale, r.server.application.MCPPublic.Messages.TaskTerminal, "{state}", view.StateLabel),
+		AlreadyTerminal: true,
+	}
 }
 
 // mcpText is a message of the Schema, in the locale.

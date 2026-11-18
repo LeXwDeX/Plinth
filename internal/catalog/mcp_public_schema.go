@@ -59,6 +59,36 @@ const (
 	MCPStatusInspection = "inspection"
 )
 
+// The Tasks extension (#332 stage 2) the discover capabilities advertise.
+// The extension identifier and its methods are the fixed vocabulary of the
+// code; a Catalog only enables the extension and lists the methods it serves.
+const (
+	MCPTasksExtension   = "io.modelcontextprotocol/tasks"
+	MCPTaskMethodGet    = "tasks/get"
+	MCPTaskMethodCancel = "tasks/cancel"
+)
+
+// MCPTaskMethods is the extension's methods, in the order they are declared.
+func MCPTaskMethods() []string {
+	return []string{MCPTaskMethodGet, MCPTaskMethodCancel}
+}
+
+// MCPPublicTasks is application.mcp_public.tasks (#332 stage 2): whether
+// server/discover advertises the Tasks extension and which of its methods the
+// endpoint serves. Without the extension a generation tool answers with its
+// ordinary result and the extension methods are method-not-found; a client
+// that declared the extension receives a CreateTaskResult from a generation
+// tool and polls it with tasks/get.
+type MCPPublicTasks struct {
+	Enabled bool `json:"enabled"`
+	// Methods are the extension methods served; the fixed vocabulary is
+	// tasks/get and tasks/cancel.
+	Methods []string `json:"methods"`
+	// ResultTTLSeconds is the ttlMs the answers carry: how long the client may
+	// keep polling a Task ID. The Task itself follows the platform's retention.
+	ResultTTLSeconds int `json:"result_ttl_seconds"`
+}
+
 // MCPPublicSchema is application.mcp_public (#332): the external MCP service.
 // It is served by its own listener of the process, never by the main web
 // server, and only on an address the runtime configuration names. Its
@@ -101,6 +131,8 @@ type MCPPublicSchema struct {
 	// PollIntervalSeconds is the polling interval a task result suggests
 	// while the task is not finished.
 	PollIntervalSeconds int `json:"poll_interval_seconds"`
+	// Tasks is the Tasks extension (#332 stage 2) the service advertises.
+	Tasks MCPPublicTasks `json:"tasks"`
 	// ListPageSize and ListMaxPageSize are the default and largest page of
 	// list_tasks.
 	ListPageSize    int `json:"list_page_size"`
@@ -305,6 +337,9 @@ type MCPPublicMessages struct {
 	ImageUnavailable string `json:"image_unavailable"`
 	ImageBusy        string `json:"image_busy"`
 	AssetNotImage    string `json:"asset_not_image"`
+	// TaskTerminal answers tasks/cancel for a Task that already reached a
+	// terminal status; carries {state}. It is required when tasks is enabled.
+	TaskTerminal string `json:"task_terminal"`
 }
 
 // ToolOutputSchema is the output schema a tool is served with: its own result

@@ -310,8 +310,25 @@ func TestMCPPublicRejectsInvalidDeclarations(t *testing.T) {
 		"zero read timeout":   func(a *catalog.ApplicationSchema) { a.MCPPublic.ReadTimeoutSeconds = 0 },
 		"zero write timeout":  func(a *catalog.ApplicationSchema) { a.MCPPublic.WriteTimeoutSeconds = 0 },
 		"zero poll interval":  func(a *catalog.ApplicationSchema) { a.MCPPublic.PollIntervalSeconds = 0 },
-		"page above maximum":  func(a *catalog.ApplicationSchema) { a.MCPPublic.ListPageSize = a.MCPPublic.ListMaxPageSize + 1 },
-		"no service groups":   func(a *catalog.ApplicationSchema) { a.MCPPublic.ServiceGroups = nil },
+		"tasks without methods": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Tasks.Methods = nil
+		},
+		"tasks with an unknown method": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Tasks.Methods = append(a.MCPPublic.Tasks.Methods, "tasks/update")
+		},
+		"tasks with a repeated method": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Tasks.Methods = append(a.MCPPublic.Tasks.Methods, catalog.MCPTaskMethodGet)
+		},
+		"tasks without a result ttl":  func(a *catalog.ApplicationSchema) { a.MCPPublic.Tasks.ResultTTLSeconds = 0 },
+		"tasks declared but disabled": func(a *catalog.ApplicationSchema) { a.MCPPublic.Tasks.Enabled = false },
+		"tasks without the terminal message": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Messages.TaskTerminal = " "
+		},
+		"tasks terminal message without the state": func(a *catalog.ApplicationSchema) {
+			a.MCPPublic.Messages.TaskTerminal = "already over"
+		},
+		"page above maximum": func(a *catalog.ApplicationSchema) { a.MCPPublic.ListPageSize = a.MCPPublic.ListMaxPageSize + 1 },
+		"no service groups":  func(a *catalog.ApplicationSchema) { a.MCPPublic.ServiceGroups = nil },
 		"unknown capability": func(a *catalog.ApplicationSchema) {
 			a.MCPPublic.ServiceGroups[0].Capabilities = append(a.MCPPublic.ServiceGroups[0].Capabilities, "no-such-capability")
 		},

@@ -434,13 +434,21 @@ const mcpTestProtocol = "2026-07-28"
 // post sends one JSON-RPC request to the listener.
 func (f *mcpFixture) post(key, method string, params map[string]any, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 	f.t.Helper()
+	return f.postWithCapabilities(key, method, params, map[string]any{}, mutate...)
+}
+
+// postWithCapabilities sends one request whose client capabilities declare the
+// given extensions, as an extension-aware client does (the Tasks extension,
+// #332 stage 2).
+func (f *mcpFixture) postWithCapabilities(key, method string, params, capabilities map[string]any, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
+	f.t.Helper()
 	if params == nil {
 		params = map[string]any{}
 	}
 	params["_meta"] = map[string]any{
 		"io.modelcontextprotocol/protocolVersion":    mcpTestProtocol,
 		"io.modelcontextprotocol/clientInfo":         map[string]any{"name": "test", "version": "1"},
-		"io.modelcontextprotocol/clientCapabilities": map[string]any{},
+		"io.modelcontextprotocol/clientCapabilities": capabilities,
 	}
 	encoded, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": f.sequence.Add(1), "method": method, "params": params})
 	if err != nil {

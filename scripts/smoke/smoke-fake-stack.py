@@ -1115,6 +1115,29 @@ def mcp_wait_task(mcp, task_id, seconds=90):
     return view, last
 
 
+def mcp_tasks_wait(client, task_id, seconds=90):
+    """Poll tasks/get until the Tasks extension status is terminal; returns the
+    last result object (the task status and, once completed, the tool result)."""
+    deadline = time.time() + seconds
+    last = {}
+    while time.time() < deadline:
+        status, _headers, raw = client.call("tasks/get", {"taskId": task_id})
+        payload = {}
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            payload = {}
+        last = (payload.get("result") or {}) if isinstance(payload, dict) else {}
+        if last.get("status") in ("completed", "failed", "cancelled"):
+            return last
+        try:
+            wait = float(last.get("pollIntervalMs") or 1000) / 1000.0
+        except (TypeError, ValueError):
+            wait = 1
+        time.sleep(max(0.2, min(wait, 5)))
+    return last
+
+
 def mcp_downloads(client, assets):
     """Fetch every asset's bytes; keyed by asset id, never by URL (a signed URL
     is a credential until it expires)."""
@@ -1188,6 +1211,17 @@ def scenario_mcp(api, mcp_base):
         pass
     wanted = {"upload_image", "create_model", "process_model", "get_task", "get_task_assets", "inspect_model", "get_status"}
     record("mcp tools/list lists the generated-work tools", status == 200 and wanted <= names, f"status {status}, {len(names)} tools")
+
+    status, _headers, raw = mcp.call("server/discover", {})
+    discover_capabilities = {}
+    try:
+        discover_capabilities = (json.loads(raw).get("result") or {}).get("capabilities") or {}
+    except (TypeError, ValueError):
+        discover_capabilities = {}
+    extensions = discover_capabilities.get("extensions") or {}
+    record("mcp discover advertises the Tasks extension",
+           status == 200 and mcp_client.TASKS_EXTENSION in extensions,
+           f"status {status}, extensions {sorted(extensions)}")
 
     upload = mcp.tool("upload_image", {"data": base64.b64encode(make_png(512)).decode(), "filename": "mcp-fake-stack.png"})
     image = upload["structured"].get("image") or {}
@@ -1336,6 +1370,74 @@ def scenario_mcp(api, mcp_base):
     remesh_problems = mcp_client.asset_problems(remesh_assets, remesh_blobs)
     record("mcp remesh files match size and SHA-256", bool(remesh_assets) and not remesh_problems,
            f"{len(remesh_assets)} files" + ("" if not remesh_problems else "; " + "; ".join(remesh_problems[:5])))
+
+    # The Tasks extension (#332 stage 2): a client that declares it receives a
+    # CreateTaskResult from a generation tool and polls it with tasks/get;
+    # tasks/cancel cancels a running task through the same generation kernel.
+    tasks = mcp_client.McpClient(base, key, tasks=True)
+    task_start = tasks.tool("generate_image", {"prompt": "tasks extension smoke", "asset": asset,
+                                               "idempotency_key": "mcp-tasks-" + uuid.uuid4().hex})
+    task_ref = task_start.get("result") or {}
+    task_ref_id = task_ref.get("taskId") or ""
+    record("mcp tools/call returns a CreateTaskResult to a Tasks client",
+           not task_start["is_error"] and task_ref.get("resultType") == "task" and bool(task_ref_id)
+           and task_ref.get("status") in ("working", "completed")
+           and isinstance(task_ref.get("ttlMs"), (int, float))
+           and isinstance(task_ref.get("pollIntervalMs"), (int, float)),
+           f"status {task_start['http_status']}, type {task_ref.get('resultType')}, task {bool(task_ref_id)}")
+    if task_ref_id:
+        completed_task = mcp_tasks_wait(tasks, task_ref_id)
+        completed_result = completed_task.get("result") or {}
+        completed_structured = completed_result.get("structuredContent") or {}
+        completed_view = completed_structured.get("task") or {}
+        record("mcp tasks/get reaches completed with the get_task result",
+               completed_task.get("status") == "completed" and completed_view.get("id") == task_ref_id
+               and isinstance(completed_structured.get("status"), dict),
+               f"status {completed_task.get('status')}, task {completed_view.get('id') == task_ref_id}")
+
+    status, _headers, raw = tasks.call("tasks/get", {"taskId": "task_does_not_exist"})
+    missing_code = None
+    try:
+        missing_code = ((json.loads(raw).get("error") or {}).get("code"))
+    except (TypeError, ValueError):
+        missing_code = None
+    record("mcp tasks/get refuses an unknown task", status == 404 and missing_code == -32004,
+           f"status {status}, code {missing_code}")
+
+    # A 2D task can finish while the cancel request travels, so retry a few
+    # times; at least one cancellation must find the task still running.
+    cancel_detail, cancel_id = {}, ""
+    for _attempt in range(3):
+        started_cancel = tasks.tool("generate_image", {"prompt": "cancel me", "asset": asset,
+                                                       "idempotency_key": "mcp-cancel-" + uuid.uuid4().hex})
+        cancel_id = (started_cancel.get("result") or {}).get("taskId") or ""
+        if not cancel_id:
+            continue
+        cancel_status, _headers, cancel_raw = tasks.call("tasks/cancel", {"taskId": cancel_id})
+        if cancel_status != 200:
+            break
+        try:
+            cancel_result = json.loads(cancel_raw).get("result") or {}
+        except (TypeError, ValueError):
+            cancel_result = {}
+        cancel_detail = (cancel_result.get("_meta") or {}).get(mcp_client.TASKS_EXTENSION) or {}
+        if cancel_detail.get("alreadyTerminal") is False:
+            break
+    record("mcp tasks/cancel cancels a running task",
+           cancel_detail.get("status") == "cancelled" and cancel_detail.get("taskId") == cancel_id,
+           f"status {cancel_detail.get('status')}, task {bool(cancel_id)}")
+    if cancel_detail:
+        canceled_view, _last = mcp_wait_task(mcp, cancel_id, seconds=30)
+        record("mcp canceled task is CANCELED", canceled_view.get("state") == "CANCELED",
+               f"state {canceled_view.get('state')}")
+        status, _headers, raw = tasks.call("tasks/cancel", {"taskId": cancel_id})
+        try:
+            again = ((json.loads(raw).get("result") or {}).get("_meta") or {}).get(mcp_client.TASKS_EXTENSION) or {}
+        except (TypeError, ValueError):
+            again = {}
+        record("mcp tasks/cancel on a terminal task says so",
+               status == 200 and again.get("alreadyTerminal") is True,
+               f"status {status}, already {again.get('alreadyTerminal')}")
 
 
 def scenario_agent(api, offerings):
