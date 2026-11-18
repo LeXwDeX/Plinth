@@ -51,6 +51,34 @@ const (
 // versions are never negative.
 const VersionUnchecked int64 = -1
 
+// Item control actions of the person's browser (#328). Only skip exists: the
+// other item transitions belong to the runner and the completion tool.
+const ItemActionSkip = "skip"
+
+// RunSummary is the read-time execution summary of one list (#328): the run
+// state plus the item counts of the list panel. It is derived from the run row
+// and the item table, never stored. Version is the run's updated_at as an
+// opaque RFC3339Nano token; a run has no version column, so every control
+// write uses that instant as its CAS token.
+type RunSummary struct {
+	Status      string     `json:"status"`
+	PauseReason string     `json:"pause_reason,omitempty"`
+	Version     string     `json:"version"`
+	ItemCounts  ItemCounts `json:"item_counts"`
+}
+
+// ItemCounts counts a list's items per state. skipped is terminal like
+// accepted and failed; review and returned still wait for a person.
+type ItemCounts struct {
+	Todo     int `json:"todo"`
+	Working  int `json:"working"`
+	Review   int `json:"review"`
+	Accepted int `json:"accepted"`
+	Returned int `json:"returned"`
+	Failed   int `json:"failed"`
+	Skipped  int `json:"skipped"`
+}
+
 // Run is the execution state of one confirmed list. It carries no list
 // content: the runner reads the list and its items from the list repository.
 // PauseReason is empty unless Status is RunPaused.
@@ -166,9 +194,16 @@ type FinishItemInput struct {
 //   - UpdateRunStatus applies the expected from status and the Go-layer
 //     transition rules (idle→running, running↔paused, →stopped,
 //     running→completed). Repeating the target status returns the current run.
+//   - TransitionRun is the person's control write: the same transition rules
+//     plus a CAS on the run's updated_at token. Repeating the target status is
+//     idempotent; a presence pause may upgrade to the sticky user pause.
 //   - ClaimItem picks the first todo item by position only while the run is
 //     running, then moves it todo→working with round+1 and version+1.
 //   - FinishItem moves working→review|failed|skipped only.
+//   - SkipItem moves todo|working→skipped under the item version CAS and never
+//     touches the item's session or its bound Tasks.
+//   - RunSummaries reads every run of a project with its per-state item
+//     counts for the list panel.
 //   - SetItemBlock, SetItemSession, SetItemNextActionAt and RecordItemTurn
 //     update one item and bump its version. A non-negative expectedVersion is
 //     a CAS guard; VersionUnchecked skips it.
@@ -187,10 +222,24 @@ type RunStore interface {
 	// RunsByStatus scans runs of every owner for the runner's tick.
 	RunsByStatus(ctx context.Context, status string) ([]Run, error)
 	UpdateRunStatus(ctx context.Context, ownerID, listID, from, to, pauseReason string, at time.Time) (Run, error)
+	// TransitionRun applies one person-requested transition under a CAS on
+	// expectedUpdatedAt, the run's updated_at version token. A current status
+	// already equal to to returns the current run untouched, except that a
+	// presence pause upgrades to the sticky user pause. A stale token, a
+	// status mismatch or an illegal transition is ErrConflict.
+	TransitionRun(ctx context.Context, ownerID, listID, from, to, pauseReason string, expectedUpdatedAt, at time.Time) (Run, error)
+	// RunSummaries reads every run of the owner's project with its per-state
+	// item counts, keyed by list id. A list without a run is absent.
+	RunSummaries(ctx context.Context, ownerID, projectID string) (map[string]RunSummary, error)
 	// ClaimItem reports false when nothing is claimable (no todo item or the
 	// run is not running); a lost race is ErrConflict.
 	ClaimItem(ctx context.Context, ownerID, listID string, at time.Time) (Item, bool, error)
 	FinishItem(ctx context.Context, input FinishItemInput) (Item, error)
+	// SkipItem marks one todo or working item skipped and stores reason as its
+	// state_reason. An already skipped item returns the current row; any other
+	// state is ErrItemState. A non-negative expectedVersion is the item CAS
+	// guard, VersionUnchecked skips it. It never cancels a bound Task.
+	SkipItem(ctx context.Context, ownerID, listID, itemID, reason string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemSession(ctx context.Context, ownerID, listID, itemID, sessionID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemNextActionAt(ctx context.Context, ownerID, listID, itemID string, nextActionAt time.Time, expectedVersion int64, at time.Time) (Item, error)

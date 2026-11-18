@@ -140,7 +140,21 @@ type assetListTestWire struct {
 	PlannedModel3DStepCount int             `json:"planned_model3d_step_count"`
 	Version                 int64           `json:"version"`
 	Brief                   json.RawMessage `json:"brief"`
-	Items                   []struct {
+	Run                     *struct {
+		Status      string `json:"status"`
+		PauseReason string `json:"pause_reason"`
+		Version     string `json:"version"`
+		ItemCounts  struct {
+			Todo     int `json:"todo"`
+			Working  int `json:"working"`
+			Review   int `json:"review"`
+			Accepted int `json:"accepted"`
+			Returned int `json:"returned"`
+			Failed   int `json:"failed"`
+			Skipped  int `json:"skipped"`
+		} `json:"item_counts"`
+	} `json:"run"`
+	Items []struct {
 		ID      string `json:"id"`
 		Kind    string `json:"kind"`
 		Name    string `json:"name"`
@@ -154,6 +168,8 @@ type assetListTestWire struct {
 		PlannedStepCount        int    `json:"planned_step_count"`
 		PlannedModel3DStepCount int    `json:"planned_model3d_step_count"`
 		State                   string `json:"state"`
+		StateReason             string `json:"state_reason"`
+		Version                 int64  `json:"version"`
 		References              []struct {
 			TaskID       string `json:"task_id"`
 			AssetID      string `json:"asset_id"`

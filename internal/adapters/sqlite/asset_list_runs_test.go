@@ -686,3 +686,189 @@ func TestAssetListRunRepositoryItemBySessionIsOwnerScopedAndComplete(t *testing.
 		t.Fatalf("unknown session = %+v, %v, %v; want no item", item, found, err)
 	}
 }
+
+func TestAssetListRunRepositoryTransitionRunCASAndIdempotency(t *testing.T) {
+	_, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	seedRunList(t, lists, "alist_1", 1)
+	created := newAssetListRun("run_1", "owner-a", "prj_1", "alist_1", assetlist.RunIdle)
+	if _, err := runs.CreateRun(ctx, created); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	running, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunIdle, assetlist.RunRunning, "", created.UpdatedAt, assetListTestNow.Add(time.Second))
+	if err != nil || running.Status != assetlist.RunRunning ||
+		!running.UpdatedAt.Equal(assetListTestNow.Add(time.Second)) {
+		t.Fatalf("start = %+v, %v", running, err)
+	}
+	if _, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunRunning, assetlist.RunPaused, assetlist.PauseUser,
+		created.UpdatedAt, assetListTestNow.Add(2*time.Second)); !errors.Is(err, assetlist.ErrConflict) {
+		t.Fatalf("stale token pause = %v; want ErrConflict", err)
+	}
+	paused, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunRunning, assetlist.RunPaused, assetlist.PauseUser,
+		running.UpdatedAt, assetListTestNow.Add(2*time.Second))
+	if err != nil || paused.Status != assetlist.RunPaused || paused.PauseReason != assetlist.PauseUser {
+		t.Fatalf("pause = %+v, %v", paused, err)
+	}
+	// Repeating the target status answers the stored run even with a stale
+	// token; the write instant does not move.
+	repeated, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunRunning, assetlist.RunPaused, assetlist.PauseUser,
+		created.UpdatedAt, assetListTestNow.Add(3*time.Second))
+	if err != nil || repeated.PauseReason != assetlist.PauseUser ||
+		!repeated.UpdatedAt.Equal(assetListTestNow.Add(2*time.Second)) {
+		t.Fatalf("repeated pause = %+v, %v", repeated, err)
+	}
+
+	// Resume, then an automatic presence pause upgrades to the sticky user
+	// pause through the control write.
+	if _, err := runs.UpdateRunStatus(ctx, "owner-a", "alist_1",
+		assetlist.RunPaused, assetlist.RunRunning, "", assetListTestNow.Add(3*time.Second)); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	presence, err := runs.UpdateRunStatus(ctx, "owner-a", "alist_1",
+		assetlist.RunRunning, assetlist.RunPaused, assetlist.PausePresence, assetListTestNow.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("presence pause: %v", err)
+	}
+	upgraded, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunPaused, assetlist.RunPaused, assetlist.PauseUser,
+		presence.UpdatedAt, assetListTestNow.Add(5*time.Second))
+	if err != nil || upgraded.PauseReason != assetlist.PauseUser ||
+		!upgraded.UpdatedAt.Equal(assetListTestNow.Add(5*time.Second)) {
+		t.Fatalf("presence upgrade = %+v, %v", upgraded, err)
+	}
+	if _, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunPaused, assetlist.RunPaused, assetlist.PauseStepCap,
+		upgraded.UpdatedAt, assetListTestNow.Add(6*time.Second)); !errors.Is(err, assetlist.ErrConflict) {
+		t.Fatalf("foreign pause reason = %v; want ErrConflict", err)
+	}
+
+	stopped, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunPaused, assetlist.RunStopped, "", upgraded.UpdatedAt, assetListTestNow.Add(6*time.Second))
+	if err != nil || stopped.Status != assetlist.RunStopped || stopped.PauseReason != "" {
+		t.Fatalf("stop = %+v, %v", stopped, err)
+	}
+	if again, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunPaused, assetlist.RunStopped, "", stopped.UpdatedAt, assetListTestNow.Add(7*time.Second)); err != nil ||
+		again.Status != assetlist.RunStopped {
+		t.Fatalf("repeated stop = %+v, %v", again, err)
+	}
+	if _, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunStopped, assetlist.RunRunning, "", stopped.UpdatedAt, assetListTestNow.Add(8*time.Second)); !errors.Is(err, assetlist.ErrConflict) {
+		t.Fatalf("stopped restart = %v; want ErrConflict", err)
+	}
+	if _, err := runs.TransitionRun(ctx, "owner-a", "alist_1",
+		assetlist.RunStopped, assetlist.RunPaused, assetlist.PauseNone, stopped.UpdatedAt, assetListTestNow); !errors.Is(err, assetlist.ErrInvalid) {
+		t.Fatalf("pause without reason = %v; want ErrInvalid", err)
+	}
+	if _, err := runs.TransitionRun(ctx, "owner-b", "alist_1",
+		assetlist.RunStopped, assetlist.RunRunning, "", stopped.UpdatedAt, assetListTestNow); !errors.Is(err, assetlist.ErrNotFound) {
+		t.Fatalf("foreign owner = %v; want ErrNotFound", err)
+	}
+	if _, err := runs.TransitionRun(ctx, "owner-a", "alist_missing",
+		assetlist.RunIdle, assetlist.RunRunning, "", stopped.UpdatedAt, assetListTestNow); !errors.Is(err, assetlist.ErrNotFound) {
+		t.Fatalf("missing run = %v; want ErrNotFound", err)
+	}
+}
+
+func TestAssetListRunRepositorySkipItemCASAndStates(t *testing.T) {
+	_, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	items := seedRunList(t, lists, "alist_1", 3)
+	if _, err := runs.CreateRun(ctx, newAssetListRun("run_1", "owner-a", "prj_1", "alist_1", assetlist.RunRunning)); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	todo, err := runs.SkipItem(ctx, "owner-a", "alist_1", items[0].ID, "not needed", 0, assetListTestNow)
+	if err != nil || todo.State != assetlist.StateSkipped || todo.StateReason != "not needed" || todo.Version != 1 {
+		t.Fatalf("skip todo = %+v, %v", todo, err)
+	}
+	repeated, err := runs.SkipItem(ctx, "owner-a", "alist_1", items[0].ID, "other", 0, assetListTestNow.Add(time.Second))
+	if err != nil || repeated.StateReason != "not needed" || repeated.Version != 1 {
+		t.Fatalf("repeated skip = %+v, %v", repeated, err)
+	}
+
+	claimed, found, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil || !found || claimed.ID != items[1].ID || claimed.State != assetlist.StateWorking {
+		t.Fatalf("claim = %+v, %v, %v", claimed, found, err)
+	}
+	if _, err := runs.SkipItem(ctx, "owner-a", "alist_1", claimed.ID, "", 0, assetListTestNow); !errors.Is(err, assetlist.ErrConflict) {
+		t.Fatalf("stale working version = %v; want ErrConflict", err)
+	}
+	working, err := runs.SkipItem(ctx, "owner-a", "alist_1", claimed.ID, "", claimed.Version, assetListTestNow)
+	if err != nil || working.State != assetlist.StateSkipped || working.Version != claimed.Version+1 {
+		t.Fatalf("skip working = %+v, %v", working, err)
+	}
+
+	reviewItem, found, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil || !found || reviewItem.ID != items[2].ID {
+		t.Fatalf("claim review item = %+v, %v, %v", reviewItem, found, err)
+	}
+	reviewed, err := runs.FinishItem(ctx, assetlist.FinishItemInput{
+		OwnerID: "owner-a", ListID: "alist_1", ItemID: reviewItem.ID,
+		State: assetlist.StateReview, At: assetListTestNow,
+	})
+	if err != nil || reviewed.State != assetlist.StateReview {
+		t.Fatalf("finish review = %+v, %v", reviewed, err)
+	}
+	if _, err := runs.SkipItem(ctx, "owner-a", "alist_1", reviewed.ID, "", reviewed.Version, assetListTestNow); !errors.Is(err, assetlist.ErrItemState) {
+		t.Fatalf("skip review = %v; want ErrItemState", err)
+	}
+	if _, err := runs.SkipItem(ctx, "owner-a", "alist_1", "aitem_missing", "", 0, assetListTestNow); !errors.Is(err, assetlist.ErrNotFound) {
+		t.Fatalf("missing item = %v; want ErrNotFound", err)
+	}
+	if _, err := runs.SkipItem(ctx, "owner-b", "alist_1", items[0].ID, "", 0, assetListTestNow); !errors.Is(err, assetlist.ErrNotFound) {
+		t.Fatalf("foreign owner = %v; want ErrNotFound", err)
+	}
+	if _, err := runs.SkipItem(ctx, "owner-a", "alist_1", items[0].ID, "", -2, assetListTestNow); !errors.Is(err, assetlist.ErrInvalid) {
+		t.Fatalf("invalid version = %v; want ErrInvalid", err)
+	}
+}
+
+func TestAssetListRunRepositoryRunSummaries(t *testing.T) {
+	_, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	seedRunList(t, lists, "alist_1", 3)
+	seedRunList(t, lists, "alist_2", 1)
+	if _, err := runs.CreateRun(ctx, newAssetListRun("run_1", "owner-a", "prj_1", "alist_1", assetlist.RunRunning)); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if _, err := runs.CreateRun(ctx, newAssetListRun("run_2", "owner-a", "prj_1", "alist_2", assetlist.RunIdle)); err != nil {
+		t.Fatalf("create second run: %v", err)
+	}
+
+	claimed, _, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, err := runs.SkipItem(ctx, "owner-a", "alist_1", claimed.ID, "", claimed.Version, assetListTestNow); err != nil {
+		t.Fatalf("skip: %v", err)
+	}
+
+	summaries, err := runs.RunSummaries(ctx, "owner-a", "prj_1")
+	if err != nil || len(summaries) != 2 {
+		t.Fatalf("summaries = %+v, %v; want 2", summaries, err)
+	}
+	first := summaries["alist_1"]
+	if first.Status != assetlist.RunRunning || first.PauseReason != "" || first.Version == "" {
+		t.Fatalf("first summary = %+v", first)
+	}
+	if first.ItemCounts.Todo != 2 || first.ItemCounts.Skipped != 1 ||
+		first.ItemCounts.Working != 0 || first.ItemCounts.Review != 0 {
+		t.Fatalf("first counts = %+v", first.ItemCounts)
+	}
+	second := summaries["alist_2"]
+	if second.Status != assetlist.RunIdle || second.ItemCounts.Todo != 1 {
+		t.Fatalf("second summary = %+v", second)
+	}
+	if summaries, err := runs.RunSummaries(ctx, "owner-b", "prj_1"); err != nil || len(summaries) != 0 {
+		t.Fatalf("foreign owner summaries = %+v, %v; want none", summaries, err)
+	}
+	if _, err := runs.RunSummaries(ctx, "", "prj_1"); !errors.Is(err, assetlist.ErrInvalid) {
+		t.Fatalf("empty owner = %v; want ErrInvalid", err)
+	}
+}
