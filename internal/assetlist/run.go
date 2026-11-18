@@ -3,7 +3,16 @@ package assetlist
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"time"
+)
+
+// Run errors (#328). A deployment without the run store cannot create runs;
+// a Catalog that declares execution but disables it keeps lists manual.
+var (
+	ErrRunUnavailable    = errors.New("assetlist: run store unavailable")
+	ErrExecutionDisabled = errors.New("assetlist: automatic execution is disabled")
 )
 
 // Run statuses (#328). One list has at most one run; only a running run claims
@@ -61,6 +70,77 @@ func (run Run) Waiting() bool { return run.Status == RunIdle }
 
 // Active reports that the run claims items and opens turns.
 func (run Run) Active() bool { return run.Status == RunRunning }
+
+// EnsureRun stores the confirmed list's run exactly once (#328). Repeating the
+// call returns the stored run untouched, like CreateRun. The first run starts
+// running unless the owner already has another running list, in which case it
+// starts idle and waits for the person to start it. A deployment without the
+// run store, or with execution disabled, creates nothing.
+func (service *Service) EnsureRun(
+	ctx context.Context,
+	ownerID, projectID, listID string,
+) (Run, error) {
+	ownerID = strings.TrimSpace(ownerID)
+	projectID = strings.TrimSpace(projectID)
+	listID = strings.TrimSpace(listID)
+	if service.runs == nil {
+		return Run{}, ErrRunUnavailable
+	}
+	if !service.executionEnabled {
+		return Run{}, ErrExecutionDisabled
+	}
+	if ownerID == "" || projectID == "" || listID == "" {
+		return Run{}, ErrNotFound
+	}
+	existing, err := service.runs.GetRunByList(ctx, ownerID, projectID, listID)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return Run{}, err
+	}
+	status := RunRunning
+	running, err := service.runs.RunsByStatus(ctx, RunRunning)
+	if err != nil {
+		return Run{}, err
+	}
+	for _, other := range running {
+		if other.OwnerID == ownerID {
+			status = RunIdle
+			break
+		}
+	}
+	id, err := service.newID("run_")
+	if err != nil {
+		return Run{}, err
+	}
+	now := service.clock()
+	return service.runs.CreateRun(ctx, Run{
+		ID:        id,
+		OwnerID:   ownerID,
+		ProjectID: projectID,
+		ListID:    listID,
+		Status:    status,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+}
+
+// SetItemSession binds one item to its sub-session (#328), bumping the item
+// version. expectedVersion is the version the caller read; VersionUnchecked
+// skips the CAS. Chat calls this while creating the item's session, so it does
+// not have to take the whole run port.
+func (service *Service) SetItemSession(
+	ctx context.Context,
+	ownerID, listID, itemID, sessionID string,
+	expectedVersion int64,
+) (Item, error) {
+	if service.runs == nil {
+		return Item{}, ErrRunUnavailable
+	}
+	return service.runs.SetItemSession(ctx, ownerID, listID, itemID, sessionID,
+		expectedVersion, service.clock())
+}
 
 // FinishItemInput is one terminal item transition. FinishItem only moves a
 // working item to review, failed or skipped; StateReason, Result and Review
