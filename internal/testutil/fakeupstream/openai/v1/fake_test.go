@@ -406,6 +406,30 @@ func TestScriptMarkerDoneEndsTheSequence(t *testing.T) {
 	}
 }
 
+// #328: the script marker belongs to the last user message, not to the last
+// message. A request whose tail is a tool result keeps advancing the script by
+// the assistant tool-call messages after that user message.
+func TestScriptMarkerAdvancesAfterToolResults(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	marker := `[[fake:script:lookup_note {"topic":"one"}|lookup_note {"topic":"two"}|done]]`
+	messages := []map[string]any{{"role": "user", "content": "continue " + marker}}
+	for round, want := range []string{`{"topic":"one"}`, `{"topic":"two"}`} {
+		_, body := f.chat(map[string]any{"model": "m", "messages": messages, "tools": lookupTools})
+		call := dig(t, body, "choices", 0, "message", "tool_calls", 0)
+		if got := dig(t, call, "function", "arguments"); got != want {
+			t.Fatalf("round %d arguments = %v; want %s", round, got, want)
+		}
+		messages = append(messages,
+			map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{call}},
+			map[string]any{"role": "tool", "tool_call_id": dig(t, call, "id"), "content": "{}"})
+	}
+	// The last message is still a tool result; the exhausted script answers text.
+	_, body := f.chat(map[string]any{"model": "m", "messages": messages, "tools": lookupTools})
+	if dig(t, body, "choices", 0, "message", "content") != FixedReply {
+		t.Fatalf("done after tool results: %v", body)
+	}
+}
+
 // A script marker governs the message: single markers keep their behavior when
 // no script marker is present, and lose to the last script marker when both
 // appear.
