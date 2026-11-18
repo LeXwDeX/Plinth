@@ -579,6 +579,48 @@ func TestProposeAssetListRefusesInvalidInputAssetReferences(t *testing.T) {
 	}
 }
 
+// #331: a proposal that takes more items from one source picture than
+// maximum_items_per_image allows is refused with the decompose limit copy,
+// its {maximum} filled in; a proposal at the bound passes.
+func TestProposeAssetListRefusesTooManyItemsForOneImage(t *testing.T) {
+	repository := newAssetListRepo()
+	schema := defaultAssetListSchema(t)
+	schema.Decompose.MaximumItemsPerImage = 1
+	service := newAssetListProposalService(t, repository, schema, func(config *assetlist.Config) {
+		config.References = memoryCropReferences{
+			"crop-1": {MediaType: "image/png", IsCrop: true, CropSourceAssetID: "scene-1"},
+			"crop-2": {MediaType: "image/png", IsCrop: true, CropSourceAssetID: "scene-1"},
+		}
+	})
+	result, err := service.ProposeAssetList(context.Background(), assetListCommand(
+		`{"title":"清单","items":[
+			{"kind":"character","name":"Knight","description":"red coat",
+			 "reference_input_asset_ids":["crop-1"]},
+			{"kind":"prop","name":"Sword","description":"blade",
+			 "reference_input_asset_ids":["crop-2"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.ReplaceAll(schema.Decompose.Messages.ImageItemLimit, "{maximum}", "1")
+	if result.Error != want {
+		t.Fatalf("refusal = %q, want %q", result.Error, want)
+	}
+	if len(repository.lists) != 0 {
+		t.Fatalf("stored lists = %d", len(repository.lists))
+	}
+
+	// One item from the source is at the bound and is accepted.
+	result, err = service.ProposeAssetList(context.Background(), assetListCommand(
+		`{"title":"清单","items":[{"kind":"character","name":"Knight",
+		  "description":"red coat","reference_input_asset_ids":["crop-1"]}]}`))
+	if err != nil || result.Error != "" || !result.NoSubmission {
+		t.Fatalf("proposal at the bound = %+v err=%v", result, err)
+	}
+	if len(repository.lists) != 1 {
+		t.Fatalf("stored lists = %d", len(repository.lists))
+	}
+}
+
 // A Catalog without the decompose section keeps the generic invalid-items
 // copy for a refused reference (#327 behavior).
 func TestProposeAssetListReferenceRefusalFallsBackWithoutDecompose(t *testing.T) {

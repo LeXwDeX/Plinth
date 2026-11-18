@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/project"
 )
@@ -63,6 +64,53 @@ func inputReferences(ids ...string) []project.Reference {
 		references = append(references, project.Reference{InputAssetID: id})
 	}
 	return references
+}
+
+// #331: application.asset_list.decompose.maximum_items_per_image bounds the
+// items a list takes from one source picture; the crop tool enforces the same
+// value while cutting. A list over the bound is refused with a limit error
+// that is also an invalid-list refusal, and the edit path shares it.
+func TestItemPerImageLimitRefusesProposalAndEdit(t *testing.T) {
+	t.Parallel()
+	withLimit := func(limit int) func(*assetlist.Config) {
+		return func(config *assetlist.Config) {
+			referencePort(nil)(config)
+			config.Schema.Decompose = &catalog.AssetListDecomposeSchema{MaximumItemsPerImage: limit}
+		}
+	}
+	items := func() []assetlist.ItemInput {
+		return []assetlist.ItemInput{
+			{Kind: "character", Name: "Hero", References: inputReferences("crop_1")},
+			{Kind: "image", Name: "Icon", References: inputReferences("crop_2")},
+		}
+	}
+	service, _, _ := newService(t, withLimit(1))
+	_, err := service.Propose(context.Background(), assetlist.ProposeInput{
+		Owner: "owner-a", ProjectID: "prj_1", SessionID: "ses_1",
+		OriginMessageID: "msg_1", RequestKey: "req_limit", Title: "Chapter one", Items: items(),
+	})
+	if !errors.Is(err, assetlist.ErrImageItemLimit) || !errors.Is(err, assetlist.ErrInvalid) ||
+		errors.Is(err, assetlist.ErrReferenceInvalid) {
+		t.Fatalf("Propose error = %v; want ErrImageItemLimit and ErrInvalid only", err)
+	}
+
+	// The same bound applies to an edit, which validates the whole reference
+	// set again.
+	service, _, _ = newService(t, withLimit(2))
+	stored, err := service.Propose(context.Background(), assetlist.ProposeInput{
+		Owner: "owner-a", ProjectID: "prj_1", SessionID: "ses_1",
+		OriginMessageID: "msg_1", RequestKey: "req_ok", Title: "Chapter one", Items: items(),
+	})
+	if err != nil {
+		t.Fatalf("two crops from one source under the bound: %v", err)
+	}
+	edit := assetlist.EditInput{
+		Owner: "owner-a", ProjectID: "prj_1", ListID: stored.ID,
+		ExpectedVersion: stored.Version, Title: "Edited", Items: items(),
+	}
+	if _, err := service.Edit(context.Background(), edit); err != nil {
+		t.Fatalf("legal edit: %v", err)
+	}
 }
 
 func TestProposeStoresResolvedInputAssetAndCropReferences(t *testing.T) {

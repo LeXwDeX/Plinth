@@ -71,6 +71,14 @@ type ProjectReferenceChecker interface {
 	RegisteredPicture(ctx context.Context, ownerID, projectID, taskID, assetID string) (bool, error)
 }
 
+// CropProvenance names the source picture of one stored list crop (#331). The
+// attachment resolver gives a stored crop its own role and attaches the
+// source as the item's style reference; nil leaves referenced input assets
+// their upload role.
+type CropProvenance interface {
+	CropSource(ctx context.Context, owner generation.OwnerID, cropAssetID generation.AssetID) (generation.AssetID, bool, error)
+}
+
 // ReferenceScope is the server-held owner/session/project a reference is
 // resolved for. The model never supplies it.
 type ReferenceScope struct {
@@ -134,6 +142,9 @@ type Config struct {
 	// ProjectReferences recognises a finished Task picture registered in an
 	// owner project (#240). Nil accepts no picture outside the session.
 	ProjectReferences ProjectReferenceChecker
+	// Crops names the source of a stored list crop (#331). Nil leaves every
+	// referenced input asset its upload role.
+	Crops CropProvenance
 	// SelectionMaskLimits bound the mask MeasureMask reads and decodes (#244).
 	SelectionMaskLimits imageinspect.Limits
 	// SelectionPreview bounds and styles the server-composed selection preview
@@ -166,6 +177,7 @@ type Resolver struct {
 	renderAssetType         string
 	taskInSession           func(ctx context.Context, owner generation.OwnerID, sessionID string, taskID generation.TaskID) (bool, error)
 	projectReferences       ProjectReferenceChecker
+	crops                   CropProvenance
 	selectionMaskLimits     imageinspect.Limits
 	selectionPreview        imaging.SelectionPreviewStyle
 }
@@ -208,6 +220,7 @@ func New(config Config) (*Resolver, error) {
 		renderAssetType:         config.RenderAssetType,
 		taskInSession:           config.TaskInSession,
 		projectReferences:       config.ProjectReferences,
+		crops:                   config.Crops,
 		selectionMaskLimits:     config.SelectionMaskLimits,
 		selectionPreview:        config.SelectionPreview,
 	}, nil

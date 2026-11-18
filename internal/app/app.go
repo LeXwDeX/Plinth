@@ -188,6 +188,24 @@ type assetListReferenceAssets struct {
 	crops  *sqlite.InputAssetCropRepository
 }
 
+// cropProvenance is the attachment resolver's crop port (#331): it names the
+// source picture of one stored list crop, so a sub-session's first turn reads
+// the crop as the identity/composition reference and the scene as the style
+// reference.
+type cropProvenance struct {
+	crops *sqlite.InputAssetCropRepository
+}
+
+func (port cropProvenance) CropSource(ctx context.Context,
+	owner generation.OwnerID, cropAssetID generation.AssetID,
+) (generation.AssetID, bool, error) {
+	crop, found, err := port.crops.Get(ctx, owner, cropAssetID)
+	if err != nil || !found {
+		return "", false, err
+	}
+	return crop.SourceAssetID, true, nil
+}
+
 func (port assetListReferenceAssets) ResolveInputAsset(ctx context.Context,
 	owner generation.OwnerID, inputAssetID generation.AssetID,
 ) (assetlist.InputAssetReference, bool, error) {
@@ -717,6 +735,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// be read from any session of that project. The exact (task, asset)
 		// pair is checked here; no request can name its own scope.
 		ProjectReferences: projectReferenceChecker,
+		// #331: a production-list item's stored crop is attached with its own
+		// role, and its source scene follows as the style reference.
+		Crops: cropProvenance{crops: repository.InputAssetCropRepository()},
 		// #244: the frozen selection mask and its server-composed preview.
 		SelectionMaskLimits: imageinspect.Limits{
 			MaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,

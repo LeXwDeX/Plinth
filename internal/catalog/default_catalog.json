@@ -5534,6 +5534,7 @@
           "maximum_png_bytes": 16777216
         },
         "default_route_with_reference": "reference-to-3d",
+        "agent_prompt": "【场景图拆解】\n当用户上传的图里有多个可独立制作的物体，并要求「都做出来」「拆开做」时，先出资产清单：不画概念图，也不先问数量——数量卡只在单项需要探索方向时出现。\n步骤：\n1. 先用 inspect_image 按相对原图的归一化 region（0..1，右/下边界不含）逐块查看候选物体，并用 show_picture 看图确认；\n2. 再用 crop_image_regions 批量裁剪候选区域，记下每块返回的输入资产 ID；\n3. 最后用 propose_asset_list 提交清单，每项用 reference_input_asset_ids 引用对应裁图。\n每项只放一条区域，名称、类型、描述齐全；不要漏掉物体，也不要把同一物体拆成多项；区域重叠或被遮挡的物体，在描述里写明看不到的部分。\n同一张图最多拆 {maximum} 项。裁图只是参考，不是最终交付：制作时必须先重画成干净、完整的单主体图，再做 3D；不得让裁图直接作为 3D 输入。不要为了拆解调用付费的生成工具。",
         "messages": {
           "region_invalid": "拆解区域无效：请用相对原图的归一化坐标（0..1）框选，右/下边界不含，且区域面积大于 0。",
           "region_too_small": "拆解区域太小：最短边至少 {minimum} 像素，请把这块区域框得更大一些。",
@@ -6751,12 +6752,16 @@
           "image.generated": "\n[历史图片 {index}，句柄 {handle}：AI 生成，来源任务 {task_id}]",
           "image.capture": "\n[历史图片 {index}，句柄 {handle}：3D 视图截图，来源模型任务 {task_id}，截图记录 {capture_id}]",
           "image.render": "\n[历史图片 {index}，句柄 {handle}：模型自检渲染图，来源模型任务 {task_id}]",
+          "image.crop": "\n[历史图片 {index}，句柄 {handle}：从场景图裁出的参考图，只用于身份与构图参考，不是最终交付]",
+          "image.source_scene": "\n[历史图片 {index}，句柄 {handle}：场景原图，只用于风格参考]",
           "model.generated": "\n[历史图片 {index}，句柄 {handle}：3D 模型的预览缩略图（平台生成的结果，不是用户附的图），模型任务 {task_id}]"
         },
         "unpictured_attachment_templates": {
           "image": "\n[图片 句柄 {handle}：用户在工作区选中，来源任务 {task_id}]",
           "model": "\n[3D 模型 句柄 {handle}：任务 {task_id}]",
-          "image.canvas": "\n[图片 句柄 {handle}：用户发送这一轮时的画板版面（{layout}），由画板上的可见图层拍平得到]"
+          "image.canvas": "\n[图片 句柄 {handle}：用户发送这一轮时的画板版面（{layout}），由画板上的可见图层拍平得到]",
+          "image.crop": "\n[图片 句柄 {handle}：从场景图裁出的参考图，只用于身份与构图参考，不是最终交付]",
+          "image.source_scene": "\n[图片 句柄 {handle}：场景原图，只用于风格参考]"
         },
         "kind_labels": { "image": "图片", "model": "3D 模型" },
         "selection_template": "\n\n当前选中对象：用户在工作区里正选中下列对象。用户说“这个”“这张”“选中的”“这个模型”时指它们；工具参数中用 {alias} 引用全部选中对象，或用各自的句柄。直接用它们做用户要的事，不再追问；它们做不了这一步时，先说明原因并问用户是否改用别的对象，不要自行换成别的对象付费提交。{items}",
@@ -16405,6 +16410,10 @@
         "chat.model3d_usage",
         "chat.image2d_usage",
         "chat.image_crop",
+        "chat.context.attachment_label_templates[image.crop]",
+        "chat.context.attachment_label_templates[image.source_scene]",
+        "chat.context.unpictured_attachment_templates[image.crop]",
+        "chat.context.unpictured_attachment_templates[image.source_scene]",
         "chat.choice.kinds",
         "model_delivery",
         "asset_list",
@@ -19994,10 +20003,15 @@
             "asset_list.messages.propose_invalid_items": "The production list arguments are invalid: check the item count, duplicate names, asset kinds, routes and the reference limit.",
             "asset_list.messages.propose_reference_unresolved": "Some reference handles could not be resolved; check that the referenced pictures or project assets exist.",
             "asset_list.messages.propose_failed": "The production list could not be submitted because the service is temporarily unavailable; try again later.",
+            "asset_list.decompose.agent_prompt": "[Scene decomposition]\nWhen the picture the user uploaded contains several independently makeable objects and they ask to \"make everything in it\" or \"split it up\", produce the asset list first: do not draw concept images and do not ask a quantity question first — a quantity choice only belongs to exploring the direction of a single item.\nSteps:\n1. Use inspect_image with normalized regions relative to the source picture (0..1, right/bottom edges exclusive) to look at candidate objects, with show_picture to see them;\n2. Then use crop_image_regions to cut all candidate regions in one batch and keep each returned input asset ID;\n3. Finally use propose_asset_list, referencing each item's crop through reference_input_asset_ids.\nOne region per item, with name, kind and description; do not miss objects and do not split one object into several items; for overlapping or occluded objects, state in the description which parts cannot be seen.\nOne picture yields at most {maximum} items. A crop is only a reference, never the final deliverable: redraw it into a clean, complete single-subject picture before 3D, and never let a crop enter the 3D input gate directly. Do not call paid generation tools just to decompose.",
             "asset_list.decompose.messages.region_invalid": "The decompose region is invalid: use normalized coordinates (0..1) relative to the source picture, with exclusive right/bottom edges and a region area greater than 0.",
             "asset_list.decompose.messages.region_too_small": "The decompose region is too small: its shortest side must be at least {minimum} pixels; frame a larger region.",
             "asset_list.decompose.messages.image_item_limit": "This picture can be split into at most {maximum} asset items; merge nearby regions or split fewer items.",
             "asset_list.decompose.messages.reference_invalid": "The crop reference is invalid: only crops the person holds, cut from the same source picture and at most one per item, may be referenced.",
+            "chat.context.attachment_label_templates[image.crop]": "\n[History image {index}, handle {handle}: reference cropped from the scene picture, for identity and composition only; not the final deliverable]",
+            "chat.context.attachment_label_templates[image.source_scene]": "\n[History image {index}, handle {handle}: original scene picture, style reference only]",
+            "chat.context.unpictured_attachment_templates[image.crop]": "\n[Image handle {handle}: reference cropped from the scene picture, for identity and composition only; not the final deliverable]",
+            "chat.context.unpictured_attachment_templates[image.source_scene]": "\n[Image handle {handle}: original scene picture, style reference only]",
             "asset_list.messages.pause_presence": "The user left (presence heartbeat stopped), so automatic production is paused; it continues when the user comes back.",
             "asset_list.messages.pause_user": "The user paused automatic production.",
             "asset_list.messages.pause_step_cap": "Item \"{name}\" reached the step limit, so automatic production is paused.",

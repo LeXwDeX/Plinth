@@ -315,6 +315,14 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 		writeProblem(writer, http.StatusNotFound, "not_found", s.message("error.not_found"), err)
 	case errors.Is(err, assetlist.ErrSessionNotInProject):
 		writeProblem(writer, http.StatusBadRequest, "invalid_input", invalid, err)
+	case errors.Is(err, assetlist.ErrImageItemLimit):
+		// #331: a list may not take more items from one source picture than
+		// application.asset_list.decompose.maximum_items_per_image allows.
+		detail := s.assetListImageItemLimitMessage()
+		if detail == "" {
+			detail = invalid
+		}
+		writeProblem(writer, http.StatusBadRequest, "asset_list_image_item_limit", detail, err)
 	case errors.Is(err, assetlist.ErrInvalid):
 		writeProblem(writer, http.StatusBadRequest, "invalid_input", invalid, err)
 	default:
@@ -328,6 +336,20 @@ func (s *Server) assetListTTLDays() int {
 		return 0
 	}
 	return s.application.AssetList.Limits.DraftTTLSeconds / 86400
+}
+
+// assetListImageItemLimitMessage words the refuse of a list that takes too many
+// items from one source picture (#331), with the declared maximum filled in.
+func (s *Server) assetListImageItemLimitMessage() string {
+	if s.application.AssetList == nil || s.application.AssetList.Decompose == nil {
+		return ""
+	}
+	decompose := s.application.AssetList.Decompose
+	text := strings.TrimSpace(decompose.Messages.ImageItemLimit)
+	if text == "" {
+		return ""
+	}
+	return strings.ReplaceAll(text, "{maximum}", strconv.Itoa(decompose.MaximumItemsPerImage))
 }
 
 func (s *Server) assetListMaxLists() int {

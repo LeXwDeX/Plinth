@@ -121,7 +121,7 @@ func validateAssetList(
 		}
 	}
 
-	if err := validateAssetListDecompose(list.Decompose, declaredRoutes); err != nil {
+	if err := validateAssetListDecompose(list.Decompose, declaredRoutes, schema.Chat.Context); err != nil {
 		return err
 	}
 
@@ -244,10 +244,12 @@ var assetListDecompose2DCapabilities = []schemacontract.Capability{
 
 // validateAssetListDecompose 校验可选的拆解段（#331）。未声明时放行；声明后
 // 数值必须在既定范围内，缺省路线必须已声明且第一步是 2D 能力，四条拒绝文案
-// 都不能为空。
+// 与 Agent 拆解要领都必须完整；子会话的裁图/源图标签也必须在 chat.context
+// 中成对声明，否则清单项会被读成「用户上传」。
 func validateAssetListDecompose(
 	decompose *AssetListDecomposeSchema,
 	declaredRoutes map[string]AssetListRouteSchema,
+	context ChatContextSchema,
 ) error {
 	if decompose == nil {
 		return nil
@@ -290,6 +292,17 @@ func validateAssetListDecompose(
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("asset_list.decompose.messages.%s 不能为空", field)
+		}
+	}
+	if strings.TrimSpace(decompose.AgentPrompt) == "" || !strings.Contains(decompose.AgentPrompt, "{maximum}") {
+		return errors.New("asset_list.decompose.agent_prompt 必须声明并包含 {maximum}")
+	}
+	for _, role := range []string{"image.crop", "image.source_scene"} {
+		if !strings.Contains(context.AttachmentLabelTemplates[role], "{handle}") {
+			return fmt.Errorf("asset_list.decompose 需要 context.attachment_label_templates[%q]（含 {handle}）", role)
+		}
+		if !strings.Contains(context.UnpicturedAttachmentTemplates[role], "{handle}") {
+			return fmt.Errorf("asset_list.decompose 需要 context.unpictured_attachment_templates[%q]（含 {handle}）", role)
 		}
 	}
 	return nil

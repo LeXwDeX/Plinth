@@ -16,6 +16,13 @@ import (
 // the proposal tool keep their existing mapping.
 var ErrReferenceInvalid = errors.New("assetlist: invalid reference")
 
+// ErrImageItemLimit reports more crop references cut from one source picture
+// than application.asset_list.decompose.maximum_items_per_image allows (#331).
+// The crop tool enforces the same limit while cutting; proposal and edit
+// enforce it over the whole list. It is also an ErrInvalid refusal, so a
+// caller without a mapping still refuses the request.
+var ErrImageItemLimit = errors.New("assetlist: too many items for one image")
+
 // InputAssetReference is one stored input asset as reference validation sees
 // it.
 type InputAssetReference struct {
@@ -45,7 +52,7 @@ type ReferenceAssets interface {
 type referenceRefusal struct{ reason string }
 
 func (refusal referenceRefusal) Error() string {
-	return "assetlist: invalid reference: " + refusal.reason
+	return "assetlist: image item limit: " + refusal.reason
 }
 
 func (referenceRefusal) Is(target error) bool {
@@ -54,19 +61,38 @@ func (referenceRefusal) Is(target error) bool {
 
 func invalidReference(reason string) error { return referenceRefusal{reason: reason} }
 
+// imageItemLimitRefusal is the per-image item refusal. It reports both
+// ErrImageItemLimit and ErrInvalid, so the proposal tool and the transports
+// can word it with the decompose copy while every other path still refuses.
+type imageItemLimitRefusal struct{ reason string }
+
+func (refusal imageItemLimitRefusal) Error() string {
+	return "assetlist: image item limit: " + refusal.reason
+}
+
+func (imageItemLimitRefusal) Is(target error) bool {
+	return target == ErrInvalid || target == ErrImageItemLimit
+}
+
 // cropReferenceScope validates the crop rules of one item set: at most one
-// crop per item, and every crop of the list cut from the same source picture.
-// The item count resets per item; the source carries across the whole list.
+// crop per item, every crop of the list cut from the same source picture, and
+// at most `maximum` items carrying a crop of one source. The item
+// count resets per item; the source carries across the whole list.
 type cropReferenceScope struct {
 	itemCrops int
 	source    generation.AssetID
 	hasSource bool
+	// maximum is application.asset_list.decompose.maximum_items_per_image.
+	// <= 0 leaves the per-image bound unwired.
+	maximum int
+	// itemsBySource counts the items that referenced a crop of each source.
+	itemsBySource map[generation.AssetID]int
 }
 
 // resetItem starts the next item's per-item rule.
 func (scope *cropReferenceScope) resetItem() { scope.itemCrops = 0 }
 
-// addCrop applies both crop rules to one crop reference.
+// addCrop applies the crop rules to one crop reference.
 func (scope *cropReferenceScope) addCrop(source generation.AssetID) error {
 	scope.itemCrops++
 	if scope.itemCrops > 1 {
@@ -76,6 +102,15 @@ func (scope *cropReferenceScope) addCrop(source generation.AssetID) error {
 		return invalidReference("crops in one list must come from the same source picture")
 	}
 	scope.source, scope.hasSource = source, true
+	if scope.maximum > 0 {
+		if scope.itemsBySource == nil {
+			scope.itemsBySource = map[generation.AssetID]int{}
+		}
+		scope.itemsBySource[source]++
+		if scope.itemsBySource[source] > scope.maximum {
+			return imageItemLimitRefusal{reason: "too many items for one source picture"}
+		}
+	}
 	return nil
 }
 

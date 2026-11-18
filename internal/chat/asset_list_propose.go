@@ -156,6 +156,10 @@ func (service *Service) ProposeAssetList(ctx context.Context, command ToolComman
 		case errors.Is(err, assetlist.ErrSessionNotInProject):
 			return assetListRefusal(assetListMessage(messages.ProposeSessionNotInProject,
 				"the session is not in the project")), nil
+		case errors.Is(err, assetlist.ErrImageItemLimit):
+			// #331: the proposal counts the items cut from one source too; the
+			// Agent gets the decompose limit copy with its maximum.
+			return assetListRefusal(assetListImageItemLimitRefusal(policy.Schema, invalid)), nil
 		case errors.Is(err, assetlist.ErrReferenceInvalid):
 			// #331: the decompose section owns the reference refusal copy; a
 			// Catalog without it keeps the generic invalid-items copy.
@@ -364,6 +368,18 @@ func assetListReferenceRefusal(schema catalog.AssetListSchema, fallback string) 
 	if schema.Decompose != nil {
 		if text := strings.TrimSpace(schema.Decompose.Messages.ReferenceInvalid); text != "" {
 			return text
+		}
+	}
+	return fallback
+}
+
+// assetListImageItemLimitRefusal words a list refused for taking more items
+// from one source picture than maximum_items_per_image allows (#331).
+func assetListImageItemLimitRefusal(schema catalog.AssetListSchema, fallback string) string {
+	if schema.Decompose != nil {
+		if text := strings.TrimSpace(schema.Decompose.Messages.ImageItemLimit); text != "" {
+			return strings.ReplaceAll(text, "{maximum}",
+				strconv.Itoa(schema.Decompose.MaximumItemsPerImage))
 		}
 	}
 	return fallback

@@ -484,6 +484,41 @@ func TestDefaultAssetListDecomposeDeclaresCropContract(t *testing.T) {
 			t.Fatalf("decompose message %s is empty", field)
 		}
 	}
+	if strings.TrimSpace(decompose.AgentPrompt) == "" || !strings.Contains(decompose.AgentPrompt, "{maximum}") {
+		t.Fatalf("decompose agent_prompt = %q", decompose.AgentPrompt)
+	}
+	// The sub-session's crop and scene labels are declared for both the
+	// pictured and the unpictured attachment paths and are translated.
+	englishFields := application.Localization.Bundles["en"].Fields
+	for _, role := range []string{"image.crop", "image.source_scene"} {
+		if !strings.Contains(application.Chat.Context.AttachmentLabelTemplates[role], "{handle}") ||
+			!strings.Contains(application.Chat.Context.UnpicturedAttachmentTemplates[role], "{handle}") {
+			t.Fatalf("role %q has no attachment labels: %+v", role,
+				application.Chat.Context.UnpicturedAttachmentTemplates)
+		}
+		for _, path := range []string{
+			"chat.context.attachment_label_templates[" + role + "]",
+			"chat.context.unpictured_attachment_templates[" + role + "]",
+		} {
+			if strings.TrimSpace(englishFields[path]) == "" {
+				t.Fatalf("English bundle lacks %s", path)
+			}
+		}
+	}
+	if strings.TrimSpace(englishFields["asset_list.decompose.agent_prompt"]) == "" {
+		t.Fatal("English bundle lacks asset_list.decompose.agent_prompt")
+	}
+	covered := map[string]bool{}
+	for _, path := range application.Localization.Coverage {
+		covered[path] = true
+	}
+	for _, role := range []string{"image.crop", "image.source_scene"} {
+		for _, prefix := range []string{"chat.context.attachment_label_templates", "chat.context.unpictured_attachment_templates"} {
+			if !covered[prefix+"["+role+"]"] {
+				t.Fatalf("localization coverage lacks %s[%s]", prefix, role)
+			}
+		}
+	}
 	public := application.Public().AssetList
 	if public == nil || public.Limits.MaximumItemsPerImage != 24 {
 		t.Fatalf("public limits = %+v", public)
@@ -543,6 +578,18 @@ func TestAssetListDecomposeValidationRejectsBadDeclarations(t *testing.T) {
 		},
 		"reference invalid message empty": func(app *catalog.ApplicationSchema) {
 			app.AssetList.Decompose.Messages.ReferenceInvalid = ""
+		},
+		"agent prompt empty": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.AgentPrompt = " "
+		},
+		"agent prompt without the maximum": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.AgentPrompt = "拆解要领"
+		},
+		"crop attachment label missing": func(app *catalog.ApplicationSchema) {
+			delete(app.Chat.Context.AttachmentLabelTemplates, "image.crop")
+		},
+		"source scene unpictured label missing": func(app *catalog.ApplicationSchema) {
+			delete(app.Chat.Context.UnpicturedAttachmentTemplates, "image.source_scene")
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -69,11 +69,14 @@ type Config struct {
 
 // Service implements the list workflow over a Repository.
 type Service struct {
-	repository         Repository
-	runs               RunStore
-	presence           PresenceStore
-	reviews            ReviewStore
-	referenceAssets    ReferenceAssets
+	repository      Repository
+	runs            RunStore
+	presence        PresenceStore
+	reviews         ReviewStore
+	referenceAssets ReferenceAssets
+	// imageItemLimit is application.asset_list.decompose.maximum_items_per_image
+	// (#331); 0 leaves the proposal-time per-image bound unwired.
+	imageItemLimit     int
 	presenceGrace      time.Duration
 	executionEnabled   bool
 	limits             catalog.AssetListLimitsSchema
@@ -140,12 +143,17 @@ func New(config Config) (*Service, error) {
 	if config.Schema.Execution != nil {
 		presenceGrace = time.Duration(config.Schema.Execution.Presence.GraceSeconds) * time.Second
 	}
+	var imageItemLimit int
+	if config.Schema.Decompose != nil {
+		imageItemLimit = config.Schema.Decompose.MaximumItemsPerImage
+	}
 	return &Service{
 		repository:         config.Repository,
 		runs:               config.Runs,
 		presence:           config.Presence,
 		reviews:            config.Reviews,
 		referenceAssets:    config.References,
+		imageItemLimit:     imageItemLimit,
 		presenceGrace:      presenceGrace,
 		executionEnabled:   executionEnabled,
 		limits:             limits,
@@ -552,8 +560,9 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 	seen := make(map[string]bool, len(inputs))
 	items := make([]Item, 0, len(inputs))
 	// The crop rules are list-wide: one crop per item, one source picture per
-	// list. The scope carries the source across the item loop.
-	crops := &cropReferenceScope{}
+	// list and at most maximum_items_per_image items cut from one source. The
+	// scope carries the source across the item loop.
+	crops := &cropReferenceScope{maximum: service.imageItemLimit}
 	for index, input := range inputs {
 		crops.resetItem()
 		kindID := strings.TrimSpace(input.Kind)

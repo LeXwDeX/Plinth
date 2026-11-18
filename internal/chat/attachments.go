@@ -28,6 +28,14 @@ const (
 	// review tools (#103). The service gives this role from the render
 	// asset's declared type; a client cannot claim it.
 	AttachmentRoleRender = "render"
+	// AttachmentRoleCrop marks a production-list reference cut from a scene
+	// picture (#331). The service gives this role from the crop's provenance;
+	// a client cannot claim it.
+	AttachmentRoleCrop = "crop"
+	// AttachmentRoleSourceScene marks the source picture a production-list
+	// item's crop was cut from (#331): the item's style reference. The service
+	// gives this role from the crop's provenance; a client cannot claim it.
+	AttachmentRoleSourceScene = "source_scene"
 )
 
 // CanvasLayout describes an artboard snapshot. Width and Height are read from

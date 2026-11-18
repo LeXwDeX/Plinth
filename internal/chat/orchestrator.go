@@ -2033,6 +2033,12 @@ func (orchestrator *Orchestrator) agentRequest(
 	// steps session (#330): the mode, the asset's used steps, the three
 	// providers' balances and what one step costs.
 	sections.add("step_policy", orchestrator.stepPolicyPrompt(ctx, ownerID, sessionID))
+	// The scene-decomposition guidance (#331) appears only where the turn
+	// carries a picture of a project whose deployment offers production
+	// lists and propose_asset_list; it is server-injected like step_policy.
+	indexedByMessage, lastUserMessage := orchestrator.indexHistoryImages(history)
+	sections.add("asset_list_decompose", orchestrator.decomposePrompt(
+		ctx, options, registry, registryErr, scope, indexedByMessage, lastUserMessage))
 	if registryErr == nil {
 		sections.add("skill", orchestrator.skillToolDirective(ctx, registry, options))
 		sections.add("multiview", orchestrator.multiviewDirective(registry, options))
@@ -2046,7 +2052,6 @@ func (orchestrator *Orchestrator) agentRequest(
 		}
 	}
 	summarized := summarizedThrough(history, latest)
-	indexedByMessage, lastUserMessage := orchestrator.indexHistoryImages(history)
 	sections.add("summary", orchestrator.summaryPrompt(latest))
 	sections.add("compacted_handles", orchestrator.compactedHandlePrompt(history, indexedByMessage, summarized, lastUserMessage))
 	// The ledger and the style anchor are projected from stored facts, not from

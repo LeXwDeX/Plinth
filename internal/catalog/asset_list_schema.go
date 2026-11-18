@@ -93,6 +93,10 @@ type AssetListDecomposeSchema struct {
 	// DefaultRouteWithReference 是清单项带裁剪参考图时采用的路线：必须先重画
 	// 成干净单主体图再进 3D，所以它必须是本段已声明的路线且第一步为 2D 能力。
 	DefaultRouteWithReference string `json:"default_route_with_reference"`
+	// AgentPrompt 是拆解要领，由服务端注入 Agent 系统提示（与 step_policy 同类
+	// 注入，不承担用户/工具结果文案）；{maximum} 由 maximum_items_per_image
+	// 填充。它只进 Schema，不进公开投影。
+	AgentPrompt string `json:"agent_prompt"`
 	// Messages 是拆解与参考图校验的拒绝文案。占位符 {minimum} 是区域最短边，
 	// {maximum} 是单图资产项上限。
 	Messages AssetListDecomposeMessagesSchema `json:"messages"`
