@@ -752,6 +752,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		}
 		assetListService, err = assetlist.New(assetlist.Config{
 			Repository:         repository.AssetListRepository(),
+			Runs:               repository.AssetListRunRepository(),
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
@@ -769,6 +770,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		chatService.SetAssetLists(chat.AssetListPolicy{
 			Service: assetListService,
 			Schema:  *applicationSchema.AssetList,
+			// Item sub-sessions derive the internal steps mode only when the
+			// deployment declares application.step_policy (#330).
+			StepsEnabled: applicationSchema.StepPolicy != nil,
 		})
 		// The browser heartbeat (#328) is served only when the Catalog
 		// declares execution; a Catalog without it keeps the route

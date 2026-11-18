@@ -112,6 +112,10 @@ type RunStore interface {
 	SetItemNextActionAt(ctx context.Context, ownerID, listID, itemID string, nextActionAt time.Time, expectedVersion int64, at time.Time) (Item, error)
 	ItemByID(ctx context.Context, ownerID, listID, itemID string) (Item, error)
 	ItemsByList(ctx context.Context, ownerID, listID string) ([]Item, error)
+	// ItemBySession finds the item whose sub-session is sessionID (#328). An
+	// unknown or foreign session reports false without an error: it is an
+	// ordinary session, not a broken read.
+	ItemBySession(ctx context.Context, ownerID, sessionID string) (Item, bool, error)
 }
 
 // PresenceStore is the per-tab heartbeat of a project. Upsert is idempotent

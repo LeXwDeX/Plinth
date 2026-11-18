@@ -488,6 +488,25 @@ func (r *AssetListRunRepository) ItemsByList(ctx context.Context, ownerID, listI
 	return result, rows.Err()
 }
 
+// ItemBySession finds the item one sub-session runs (#328). The session id is
+// server-written by the runner, so at most one item matches; the owner filter
+// keeps a foreign session from being attributed to the caller's item.
+func (r *AssetListRunRepository) ItemBySession(
+	ctx context.Context,
+	ownerID, sessionID string,
+) (assetlist.Item, bool, error) {
+	item, err := scanAssetListItem(r.db.QueryRowContext(ctx, `
+		SELECT `+assetListItemColumns+` FROM asset_list_items
+		WHERE owner_id = ? AND session_id = ? LIMIT 1`, ownerID, sessionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return assetlist.Item{}, false, nil
+	}
+	if err != nil {
+		return assetlist.Item{}, false, fmt.Errorf("read asset list item by session: %w", err)
+	}
+	return item, true, nil
+}
+
 func loadAssetListItemByID(ctx context.Context, queryer assetListQueryer, ownerID, listID, itemID string) (assetlist.Item, error) {
 	return scanAssetListItem(queryer.QueryRowContext(ctx, `
 		SELECT `+assetListItemColumns+` FROM asset_list_items

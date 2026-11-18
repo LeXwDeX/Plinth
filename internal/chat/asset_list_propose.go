@@ -29,6 +29,11 @@ import (
 type AssetListPolicy struct {
 	Service *assetlist.Service
 	Schema  catalog.AssetListSchema
+	// StepsEnabled is application.step_policy != nil (#330). An item
+	// sub-session derives the internal steps mode only when the deployment
+	// declares the step policy; otherwise it keeps its stored mode, the
+	// stricter result.
+	StepsEnabled bool
 }
 
 // SetAssetLists installs the production-list proposal writer. Application
