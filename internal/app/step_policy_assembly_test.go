@@ -10,6 +10,8 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/accountsettings"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/provideraccounts"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // #330: the assembly turns application.step_policy into the internal steps
@@ -114,5 +116,82 @@ func TestAccountSettingsServiceFollowsTheDeclaredModesAndCapRange(t *testing.T) 
 	broken.DefaultMode.List = "turbo"
 	if _, err := accountSettingsFromSchema(&memoryAccountStore{}, &broken); !errors.Is(err, accountsettings.ErrInvalid) {
 		t.Fatalf("unusable default: %v", err)
+	}
+}
+
+// #330: the platform Agent's step segment shows the external MCP status
+// block's balance accounts when that service is declared, with the top bar's
+// labels.
+func TestStepBalanceAccountsFollowTheMCPStatusBlock(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	accounts := stepBalanceAccounts(application)
+	if want := []string{"meshy", "tripo", "hyper3d"}; !slices.Equal(accounts, want) {
+		t.Fatalf("step balance accounts = %v; want %v", accounts, want)
+	}
+	labels := providerBalanceLabels(application)
+	if labels["meshy"] != "MeshyAI" || labels["tripo"] != "Tripo" || labels["hyper3d"] != "Hyper3D" {
+		t.Fatalf("balance labels = %v", labels)
+	}
+	if window := stepCostTaskWindow(application); window != application.MCPPublic.StatusBlock.CostTaskWindow {
+		t.Fatalf("step cost window = %d; want the MCP status block's %d",
+			window, application.MCPPublic.StatusBlock.CostTaskWindow)
+	}
+}
+
+// nativeBalanceSource answers one account with a native amount and every
+// other read with an error: the segment must show the first and say unknown
+// for the others.
+type nativeBalanceSource struct {
+	account string
+	amount  schema.NativeAmount
+}
+
+func (source nativeBalanceSource) NativeBalance(_ context.Context, accountID string) (*schema.NativeAmount, error) {
+	if accountID != source.account {
+		return nil, errors.New("balance read failed")
+	}
+	amount := source.amount
+	return &amount, nil
+}
+
+func (nativeBalanceSource) Balance(context.Context, string) (float64, error) {
+	return 0, errors.New("balance read failed")
+}
+
+// #330: the platform Agent's balances come from the shared cache, in the
+// Schema's account order; a failed read is unknown, never zero.
+func TestStepBalancesFromSchemaReadsTheSharedCache(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	cache, err := provideraccounts.NewCache(nativeBalanceSource{
+		account: "meshy",
+		amount:  schema.NativeAmount{Amount: "1000", Unit: "meshy.credit", UnitLabel: "Meshy credits"},
+	}, provideraccounts.CacheConfig{TTL: time.Minute, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := stepBalancesFromSchema(application, cache)
+	balances := read(context.Background())
+	if len(balances) != 3 {
+		t.Fatalf("balances = %+v; want three accounts", balances)
+	}
+	if balances[0].Label != "MeshyAI" || !balances[0].Known ||
+		balances[0].Amount != "1000" || balances[0].UnitLabel != "Meshy credits" {
+		t.Fatalf("meshy balance = %+v", balances[0])
+	}
+	for _, balance := range balances[1:] {
+		if balance.Known || balance.Amount != "" {
+			t.Fatalf("a failed read is known: %+v", balance)
+		}
+	}
+	if read := stepBalancesFromSchema(application, nil); read != nil {
+		t.Fatal("a nil cache produced a balance reader")
 	}
 }

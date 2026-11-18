@@ -53,6 +53,7 @@ func cloneStepPolicy(source *StepPolicySchema) *StepPolicySchema {
 	result := *source
 	result.Modes = append([]ValueLabel(nil), source.Modes...)
 	result.CountedCapabilities = append([]schemacontract.Capability(nil), source.CountedCapabilities...)
+	result.Prompt.ModeRules = append([]StepPolicyPromptMode(nil), source.Prompt.ModeRules...)
 	return &result
 }
 

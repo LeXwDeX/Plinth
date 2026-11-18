@@ -36,8 +36,9 @@ var ErrStepCapReached = errors.New("execution grant: 3D step cap reached")
 
 // StepSummary is the 3D step standing of one asset (a chat session) under its
 // entry's setting. Used counts Tasks that were or may have been charged plus
-// the approved steps that have no Task yet; it is only computed for the cap
-// mode and is zero otherwise.
+// the approved steps that have no Task yet; it is read in every mode so the
+// Agent knows how many steps it has used, and only the cap mode compares it
+// with Cap.
 type StepSummary struct {
 	Entry string
 	Mode  string

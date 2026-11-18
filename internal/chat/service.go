@@ -47,6 +47,10 @@ var (
 	// asset-list item sub-session (#328): its mode is derived from the list
 	// workflow, not chosen by a person.
 	ErrItemSessionApprovalMode = errors.New("chat: an asset-list item session derives its approval mode")
+	// ErrMCPSessionApprovalMode refuses an approval-mode write to an external
+	// MCP asset session (#332, #330): its mode is derived from the step policy,
+	// not chosen by a person.
+	ErrMCPSessionApprovalMode = errors.New("chat: an external MCP asset session derives its approval mode")
 	// ErrProjectNotFound reports an unknown or foreign project. The HTTP
 	// boundary answers the same 404 as a missing project (#240).
 	ErrProjectNotFound = errors.New("chat: project not found")
@@ -406,6 +410,11 @@ type Service struct {
 	// tool unavailable.
 	assetLists *AssetListPolicy
 
+	// mcpStepSessions names the sessions that are external MCP assets (#332):
+	// they derive the internal steps mode and the mcp step entry (#330). Nil
+	// leaves every session on its stored mode.
+	mcpStepSessions MCPStepAssetReader
+
 	// selfChecks is the persisted 3D self-check record service (#246); nil
 	// leaves the record route, the tool and the prompt injection unavailable.
 	selfChecks *SelfCheckService
@@ -758,6 +767,13 @@ func (service *Service) SetApprovalMode(
 	} else if itemSession {
 		return Session{}, "", ErrItemSessionApprovalMode
 	}
+	// An external MCP asset session derives the steps mode from the step
+	// policy (#330); a person cannot flip it either.
+	if mcpSession, err := service.isMCPStepSession(ctx, ownerID, sessionID); err != nil {
+		return Session{}, "", err
+	} else if mcpSession {
+		return Session{}, "", ErrMCPSessionApprovalMode
+	}
 	if !service.approvalPolicy.Allows(mode) {
 		return Session{}, "", ErrInvalidApprovalMode
 	}
@@ -794,9 +810,11 @@ func (service *Service) itemForSession(
 
 // SessionApprovalMode implements executiongrant.SessionModeReader. An item
 // sub-session derives the internal steps mode while the deployment declares
-// application.step_policy (#328, #330); every other session keeps the stored
-// mode's normalization. It is owner-scoped; an unknown or foreign session is
-// an error, never a default, and a lookup failure is an error, never a guess.
+// application.step_policy (#328, #330), and an external MCP asset session
+// derives it when the application installed the MCP asset reader (#332,
+// #330); every other session keeps the stored mode's normalization. It is
+// owner-scoped; an unknown or foreign session is an error, never a default,
+// and a lookup failure is an error, never a guess.
 func (service *Service) SessionApprovalMode(
 	ctx context.Context,
 	ownerID string,
@@ -809,8 +827,16 @@ func (service *Service) SessionApprovalMode(
 	if itemSession && service.assetLists.StepsEnabled {
 		return approvalpolicy.ModeSteps, nil
 	}
-	// Not an item session, or no step policy: the stored mode is the stricter
-	// result, so a missing derivation never approves a step by itself.
+	// An external MCP asset session (#332) derives the steps mode when the
+	// application installed the MCP asset reader (#330).
+	if mcpSession, err := service.isMCPStepSession(ctx, ownerID, sessionID); err != nil {
+		return "", err
+	} else if mcpSession {
+		return approvalpolicy.ModeSteps, nil
+	}
+	// Not an item or MCP asset session, or no step policy: the stored mode is
+	// the stricter result, so a missing derivation never approves a step by
+	// itself.
 	session, found, err := service.repository.Session(ctx, ownerID, sessionID)
 	if err != nil {
 		return "", err
@@ -821,10 +847,11 @@ func (service *Service) SessionApprovalMode(
 	return service.approvalPolicy.NormalizeMode(session.ApprovalMode), nil
 }
 
-// SessionStepEntry implements executiongrant.StepSessionReader (#328). Only an
-// item sub-session has an entry; any other session returns an empty entry
-// without an error, which ValidStepEntry rejects so a counted 3D step falls
-// back to a person. A read failure is returned unchanged.
+// SessionStepEntry implements executiongrant.StepSessionReader (#328, #330,
+// #332). An item sub-session has the list entry and an external MCP asset
+// session the mcp entry; any other session returns an empty entry without an
+// error, which ValidStepEntry rejects so a counted 3D step falls back to a
+// person. A read failure is returned unchanged.
 func (service *Service) SessionStepEntry(
 	ctx context.Context,
 	ownerID string,
@@ -836,6 +863,11 @@ func (service *Service) SessionStepEntry(
 	}
 	if itemSession {
 		return approvalpolicy.StepEntryList, nil
+	}
+	if mcpSession, err := service.isMCPStepSession(ctx, ownerID, sessionID); err != nil {
+		return "", err
+	} else if mcpSession {
+		return approvalpolicy.StepEntryMCP, nil
 	}
 	return "", nil
 }

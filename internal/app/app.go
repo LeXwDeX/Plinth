@@ -496,6 +496,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #330: an external MCP asset session (#332) derives the internal steps
+	// mode and the mcp step entry when the deployment declares both the step
+	// policy and the external MCP service. A deployment without either keeps
+	// every session on its stored approval mode.
+	if applicationSchema.StepPolicy != nil && applicationSchema.MCPPublic != nil {
+		chatService.SetMCPStepSessions(repository)
+	}
 	canvasService, err := canvas.New(canvas.Config{
 		Repository:         repository,
 		Sessions:           chatService,
@@ -832,6 +839,30 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// Provider balances and the person's 3D step settings serve both the
+	// external MCP status block (#332) and the platform Agent's step segment
+	// (#330). They are built before either, so both read one balance cache and
+	// one settings service.
+	providerAccountService, err := buildProviderAccounts(config, applicationSchema.Runtime)
+	if err != nil {
+		return nil, err
+	}
+	accountSettingsService, err := accountSettingsFromSchema(repository, applicationSchema.StepPolicy)
+	if err != nil {
+		return nil, fmt.Errorf("账户设置（3D 步数模式）: %w", err)
+	}
+	var stepBalanceCache *provideraccounts.Cache
+	if policy := applicationSchema.StepPolicy; policy != nil &&
+		policy.BalanceCacheSeconds > 0 && policy.BalanceReadTimeoutSeconds > 0 {
+		stepBalanceCache, err = provideraccounts.NewCache(providerAccountService, provideraccounts.CacheConfig{
+			TTL:     time.Duration(policy.BalanceCacheSeconds) * time.Second,
+			Timeout: time.Duration(policy.BalanceReadTimeoutSeconds) * time.Second,
+			Logger:  logger,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("余额读取缓存: %w", err)
+		}
+	}
 	// #251: the acceptance wording is frozen in the proposal turn's language.
 	// Text takes the turn locale; an empty locale would never translate.
 	chatService.SetProductionPlanLocalizer(texts.Text)
@@ -1111,6 +1142,34 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Project: applicationSchema.Project,
 		Texts:   texts,
+		// #330: the platform Agent's 3D step segment reads the same facts as
+		// the external MCP status block: the shared balance cache, the step
+		// standing under the owner's setting and the per-step costs.
+		StepPolicy: applicationSchema.StepPolicy,
+		StepUsage: func(ctx context.Context, ownerID, sessionID string) (executiongrant.StepSummary, error) {
+			return executionGrants.StepStatus(ctx, ownerID, sessionID)
+		},
+		StepBalances: stepBalancesFromSchema(applicationSchema, stepBalanceCache),
+		StepCosts: func(ctx context.Context, ownerID, sessionID string) []chat.StepCost {
+			if applicationSchema.StepPolicy == nil {
+				return nil
+			}
+			costs, err := module.StepCosts(ctx, generation.OwnerID(ownerID), sessionID,
+				applicationSchema.StepPolicy.CountedCapabilities, stepCostTaskWindow(applicationSchema))
+			if err != nil {
+				logger.Warn("3D 步数段：资产任务读取失败，每步费用按未知处理",
+					"owner_id", ownerID, "session_id", sessionID, "error", err)
+				return nil
+			}
+			result := make([]chat.StepCost, 0, len(costs))
+			for _, cost := range costs {
+				result = append(result, chat.StepCost{
+					OfferingID: cost.OfferingID, Capability: cost.Capability,
+					Amount: cost.Amount, UnitLabel: cost.UnitLabel,
+				})
+			}
+			return result
+		},
 		Configuration: func(ctx context.Context, owner string) (chat.AgentConfigurationSnapshot, error) {
 			snapshot, err := agentConfigurationService.SnapshotForOwner(ctx, owner)
 			if err != nil {
@@ -1543,13 +1602,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
-	providerAccountService, err := buildProviderAccounts(
-		config,
-		applicationSchema.Runtime,
-	)
-	if err != nil {
-		return nil, err
-	}
 	administrationBalanceSummaryService, err :=
 		administration.NewBalanceSummaryService(
 			administration.BalanceSummaryServiceConfig{
@@ -1854,17 +1906,13 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	transportApplicationSchema := applicationSchema
 	transportApplicationSchema.Authentication = authenticationSchema
-	accountSettingsService, err := accountSettingsFromSchema(repository, applicationSchema.StepPolicy)
-	if err != nil {
-		return nil, fmt.Errorf("账户设置（3D 步数模式）: %w", err)
-	}
 	accessKeysService, accessKeyAuthenticator, err := accessKeysFromSchema(
 		repository, repository, accessPolicy, applicationSchema.AccessKeys, logger)
 	if err != nil {
 		return nil, fmt.Errorf("个人访问 Key: %w", err)
 	}
 	mcpStatus, err := mcpStatusFromSchema(applicationSchema, accountSettingsService, repository,
-		providerAccountService, chatService, texts, logger)
+		stepBalanceCache, chatService, texts, logger)
 	if err != nil {
 		return nil, fmt.Errorf("对外 MCP 状态块: %w", err)
 	}

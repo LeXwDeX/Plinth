@@ -117,7 +117,51 @@ func TestStepPolicyValidationRejectsIncompleteOrUnknownDeclarations(t *testing.T
 		"duplicate capability": func(app *catalog.ApplicationSchema) {
 			app.StepPolicy.CountedCapabilities = append(app.StepPolicy.CountedCapabilities, app.StepPolicy.CountedCapabilities[0])
 		},
-		"missing message": func(app *catalog.ApplicationSchema) { app.StepPolicy.Messages.CapReached = "" },
+		"no prompt template": func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.ContextTemplate = "" },
+		"prompt template without a placeholder": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.ContextTemplate = strings.ReplaceAll(
+				app.StepPolicy.Prompt.ContextTemplate, "{costs}", "")
+		},
+		"prompt template without the segment name": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.ContextTemplate = strings.ReplaceAll(
+				app.StepPolicy.Prompt.ContextTemplate, "3D 步数", "步数")
+		},
+		"no mode rule": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.ModeRules = app.StepPolicy.Prompt.ModeRules[:2]
+		},
+		"mode rule without its label": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.ModeRules[0].Rule = "由你自己管理"
+		},
+		"duplicate mode rule": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.ModeRules[1].ID = app.StepPolicy.Prompt.ModeRules[0].ID
+		},
+		"no mode unknown rule": func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.ModeUnknownRule = "" },
+		"no usage line":        func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.UsageLine = "" },
+		"usage line without remaining": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.UsageLine = "已用 {used} / {cap} 步"
+		},
+		"no usage line without cap": func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.UsageLineNoCap = "" },
+		"no usage unknown":          func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.UsageUnknown = "" },
+		"balance item without unit": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.BalanceItem = "{label} {amount}"
+		},
+		"balance value item without amount": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.BalanceValueItem = "{label}"
+		},
+		"balance unknown without label": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.BalanceUnknown = "余额未知"
+		},
+		"no balance separator": func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.BalanceSeparator = "" },
+		"no balances line":     func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.BalancesLine = "余额" },
+		"no balances unknown":  func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.BalancesUnknown = "" },
+		"cost item without amount": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Prompt.CostItem = "{capability}（{offering_id}）"
+		},
+		"no cost separator": func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.CostSeparator = "" },
+		"no costs line":     func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.CostsLine = "每步消耗" },
+		"no costs unknown":  func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.CostsUnknown = "" },
+		"no guidance":       func(app *catalog.ApplicationSchema) { app.StepPolicy.Prompt.Guidance = "" },
+		"missing message":   func(app *catalog.ApplicationSchema) { app.StepPolicy.Messages.CapReached = "" },
 		"message without used": func(app *catalog.ApplicationSchema) {
 			app.StepPolicy.Messages.CapReached = "上限 {cap}"
 		},
@@ -157,8 +201,10 @@ func TestStepPolicyCloneDoesNotShareSlices(t *testing.T) {
 	first := source.Application()
 	first.StepPolicy.Modes[0].Value = "mutated"
 	first.StepPolicy.CountedCapabilities[0] = "mutated"
+	first.StepPolicy.Prompt.ModeRules[0].Rule = "mutated"
 	second := source.Application()
-	if second.StepPolicy.Modes[0].Value == "mutated" || second.StepPolicy.CountedCapabilities[0] == "mutated" {
+	if second.StepPolicy.Modes[0].Value == "mutated" || second.StepPolicy.CountedCapabilities[0] == "mutated" ||
+		second.StepPolicy.Prompt.ModeRules[0].Rule == "mutated" {
 		t.Fatal("Catalog Application() shares step policy slices with a previous copy")
 	}
 }
@@ -210,5 +256,41 @@ func TestStepPolicyLabelsAreLocalized(t *testing.T) {
 	}
 	if labels["agent"] != "Managed by the Agent" || labels["unlimited"] != "Unlimited steps" || labels["cap"] != "Limit steps" {
 		t.Fatalf("english labels = %v", labels)
+	}
+}
+
+// #330: the Agent's step segment copy is paired in the English bundle; every
+// template and mode rule has a translation, and the segment keeps its name.
+func TestStepPolicyPromptCopyIsPairedInEnglish(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	fields := application.Localization.Bundles["en"].Fields
+	for _, key := range []string{
+		"step_policy.prompt.context_template",
+		"step_policy.prompt.mode_rules[id=agent].rule",
+		"step_policy.prompt.mode_rules[id=unlimited].rule",
+		"step_policy.prompt.mode_rules[id=cap].rule",
+		"step_policy.prompt.mode_unknown_rule",
+		"step_policy.prompt.usage_line",
+		"step_policy.prompt.usage_line_no_cap",
+		"step_policy.prompt.usage_unknown",
+		"step_policy.prompt.balance_item",
+		"step_policy.prompt.balance_value_item",
+		"step_policy.prompt.balance_unknown",
+		"step_policy.prompt.balance_separator",
+		"step_policy.prompt.balances_line",
+		"step_policy.prompt.balances_unknown",
+		"step_policy.prompt.cost_item",
+		"step_policy.prompt.cost_separator",
+		"step_policy.prompt.costs_line",
+		"step_policy.prompt.costs_unknown",
+		"step_policy.prompt.guidance",
+	} {
+		if strings.TrimSpace(fields[key]) == "" {
+			t.Errorf("english bundle misses %q", key)
+		}
+	}
+	if template := fields["step_policy.prompt.context_template"]; !strings.Contains(template, "[3D steps]") {
+		t.Errorf("english step segment lost its name: %q", template)
 	}
 }

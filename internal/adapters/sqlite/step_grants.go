@@ -221,8 +221,10 @@ func grantCapabilityOnConn(ctx context.Context, conn *sql.Conn, grant executiong
 	return capability.String, nil
 }
 
-// stepSummaryOnConn reads the owner's setting of the entry and, for the cap
-// mode, the asset's used steps. The agent and unlimited modes never count.
+// stepSummaryOnConn reads the owner's setting of the entry and the asset's
+// used steps. The used count is read in every mode, not only under the cap:
+// the Agent manages its own steps in the agent and unlimited modes and needs
+// to know how many it has used (#330). Only the cap mode compares it.
 func stepSummaryOnConn(ctx context.Context, conn *sql.Conn, owner, sessionID string, request executiongrant.StepRequest) (executiongrant.StepSummary, error) {
 	setting, ok := request.Steps.Default(request.Entry)
 	if !ok {
@@ -238,11 +240,9 @@ func stepSummaryOnConn(ctx context.Context, conn *sql.Conn, owner, sessionID str
 		}
 	}
 	summary := executiongrant.StepSummary{Entry: request.Entry, Mode: setting.Mode, Cap: setting.Cap}
-	if setting.Mode == approvalpolicy.StepModeCap {
-		summary.Used, err = stepsUsedOnConn(ctx, conn, owner, sessionID, request.Steps.Counted)
-		if err != nil {
-			return executiongrant.StepSummary{}, err
-		}
+	summary.Used, err = stepsUsedOnConn(ctx, conn, owner, sessionID, request.Steps.Counted)
+	if err != nil {
+		return executiongrant.StepSummary{}, err
 	}
 	return summary, nil
 }
