@@ -35,7 +35,11 @@ type Config struct {
 	Presence PresenceStore
 	// Reviews reads the recorded acceptance decisions of the board (#329a).
 	// nil leaves every item with an empty latest review.
-	Reviews         ReviewStore
+	Reviews ReviewStore
+	// References resolves input-asset references against the owner's stored
+	// assets and crop provenance (#331), so proposals and edits share one
+	// validation. nil keeps the #327 shape checks only.
+	References      ReferenceAssets
 	Schema          catalog.AssetListSchema
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
@@ -69,6 +73,7 @@ type Service struct {
 	runs               RunStore
 	presence           PresenceStore
 	reviews            ReviewStore
+	referenceAssets    ReferenceAssets
 	presenceGrace      time.Duration
 	executionEnabled   bool
 	limits             catalog.AssetListLimitsSchema
@@ -140,6 +145,7 @@ func New(config Config) (*Service, error) {
 		runs:               config.Runs,
 		presence:           config.Presence,
 		reviews:            config.Reviews,
+		referenceAssets:    config.References,
 		presenceGrace:      presenceGrace,
 		executionEnabled:   executionEnabled,
 		limits:             limits,
@@ -533,7 +539,8 @@ func (service *Service) brief(raw json.RawMessage) (json.RawMessage, error) {
 
 // buildItems validates the whole item set before any row is written: the
 // project's item bound, unique names (trimmed, case-insensitive), kinds and
-// routes from the Schema, the per-item reference bound and shape, and the
+// routes from the Schema, the per-item reference bound, shape and (when the
+// port is wired) the owner's stored assets and crop provenance, and the
 // availability snapshot of every route step.
 func (service *Service) buildItems(ctx context.Context, ownerID, sessionID string, inputs []ItemInput, now time.Time) ([]Item, error) {
 	if len(inputs) == 0 {
@@ -544,7 +551,11 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 	}
 	seen := make(map[string]bool, len(inputs))
 	items := make([]Item, 0, len(inputs))
+	// The crop rules are list-wide: one crop per item, one source picture per
+	// list. The scope carries the source across the item loop.
+	crops := &cropReferenceScope{}
 	for index, input := range inputs {
+		crops.resetItem()
 		kindID := strings.TrimSpace(input.Kind)
 		kind, exists := service.kinds[kindID]
 		if !exists {
@@ -577,7 +588,7 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 		if !slices.Contains(route.Kinds, kindID) {
 			return nil, fmt.Errorf("%w: route %q does not serve kind %q", ErrInvalid, routeID, kindID)
 		}
-		references, err := service.references(input.References)
+		references, err := service.references(ctx, ownerID, input.References, crops)
 		if err != nil {
 			return nil, err
 		}
@@ -635,17 +646,26 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 	return items, nil
 }
 
-// references bounds and shape-checks the item's references. Resolution from
-// @imgN/@projectN handles to project.Reference belongs to the caller (#327
-// PR3); this package never widens the owner's scope.
-func (service *Service) references(values []project.Reference) ([]project.Reference, error) {
+// references bounds and shape-checks the item's references and, when the
+// ReferenceAssets port is wired, validates every input-asset reference against
+// the owner's stored assets and crop provenance (#331). Task-shaped references
+// keep the #327 contract. Proposals and edits share this implementation, so a
+// bare references list on an edit PUT cannot bypass the crop rules.
+func (service *Service) references(ctx context.Context, ownerID string,
+	values []project.Reference, crops *cropReferenceScope,
+) ([]project.Reference, error) {
 	if len(values) > service.limits.MaxReferencesPerItem {
 		return nil, fmt.Errorf("%w: at most %d references per item", ErrLimit, service.limits.MaxReferencesPerItem)
 	}
 	result := make([]project.Reference, 0, len(values))
 	for _, reference := range values {
 		if !reference.Valid() {
-			return nil, fmt.Errorf("%w: invalid reference", ErrInvalid)
+			return nil, invalidReference("a reference must name exactly one source")
+		}
+		if reference.InputAssetID != "" {
+			if err := service.validateInputReference(ctx, ownerID, reference, crops); err != nil {
+				return nil, err
+			}
 		}
 		result = append(result, reference)
 	}

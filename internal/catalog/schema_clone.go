@@ -43,6 +43,10 @@ func cloneAssetList(source *AssetListSchema) *AssetListSchema {
 		execution := *source.Execution
 		result.Execution = &execution
 	}
+	if source.Decompose != nil {
+		decompose := *source.Decompose
+		result.Decompose = &decompose
+	}
 	return &result
 }
 

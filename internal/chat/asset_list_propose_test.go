@@ -447,3 +447,157 @@ func TestProposeAssetListReportsUnavailableItems(t *testing.T) {
 		t.Fatalf("content = %+v", content)
 	}
 }
+
+// memoryCropReferences is the #331 reference port of the proposal tests. Every
+// crop names the source picture recorded here; ids absent from the map do not
+// exist.
+type memoryCropReferences map[generation.AssetID]assetlist.InputAssetReference
+
+func (port memoryCropReferences) ResolveInputAsset(_ context.Context,
+	_ generation.OwnerID, id generation.AssetID,
+) (assetlist.InputAssetReference, bool, error) {
+	asset, found := port[id]
+	return asset, found, nil
+}
+
+// #331: a directly named input asset (a crop) merges into the same reference
+// set as the resolved handles, keeps its order after them and is deduplicated.
+func TestProposeAssetListMergesInputAssetReferences(t *testing.T) {
+	repository := newAssetListRepo()
+	schema := defaultAssetListSchema(t)
+	service := newAssetListProposalService(t, repository, schema, nil)
+	result, err := service.ProposeAssetList(context.Background(), assetListCommand(`{
+		"title":"骑士与剑",
+		"items":[
+			{"kind":"character","name":"Knight","description":"red coat",
+			 "reference_handles":["@img1"],
+			 "reference_input_asset_ids":["crop-1","asset-1"]},
+			{"kind":"prop","name":"Sword","description":"blade",
+			 "reference_input_asset_ids":["crop-1"]}
+		]}`))
+	if err != nil || result.Error != "" || !result.NoSubmission {
+		t.Fatalf("proposal = %+v err=%v", result, err)
+	}
+	if len(repository.lists) != 1 {
+		t.Fatalf("stored lists = %d", len(repository.lists))
+	}
+	stored := repository.lists[0]
+	keys := make([]string, 0, len(stored.Items[0].References))
+	for _, reference := range stored.Items[0].References {
+		keys = append(keys, referenceKey(reference))
+	}
+	// @img1 resolves to input:asset-1; the duplicate id collapses.
+	if got, want := strings.Join(keys, ","), "input:asset-1,input:crop-1"; got != want {
+		t.Fatalf("item references = %v, want %v", got, want)
+	}
+	if len(stored.Items[1].References) != 1 ||
+		stored.Items[1].References[0] != (project.Reference{InputAssetID: "crop-1"}) {
+		t.Fatalf("second item references = %+v", stored.Items[1].References)
+	}
+}
+
+// #331: the assetlist service owns the crop rules; a violation reaches the
+// Agent as the decompose section's reference copy, and an empty id is an
+// invalid argument.
+func TestProposeAssetListRefusesInvalidInputAssetReferences(t *testing.T) {
+	cases := []struct {
+		name      string
+		arguments string
+		mutate    func(*assetlist.Config)
+		wantCopy  func(catalog.AssetListSchema) string
+	}{
+		{
+			name: "two crops in one item",
+			arguments: `{"title":"清单","items":[{"kind":"character","name":"Knight",
+				"description":"red coat","reference_input_asset_ids":["crop-1","crop-2"]}]}`,
+			wantCopy: func(schema catalog.AssetListSchema) string {
+				return schema.Decompose.Messages.ReferenceInvalid
+			},
+		},
+		{
+			name: "crops from different sources",
+			arguments: `{"title":"清单","items":[
+				{"kind":"character","name":"Knight","description":"red coat",
+				 "reference_input_asset_ids":["crop-1"]},
+				{"kind":"prop","name":"Sword","description":"blade",
+				 "reference_input_asset_ids":["crop-3"]}]}`,
+			wantCopy: func(schema catalog.AssetListSchema) string {
+				return schema.Decompose.Messages.ReferenceInvalid
+			},
+		},
+		{
+			name: "crop without provenance",
+			arguments: `{"title":"清单","items":[{"kind":"character","name":"Knight",
+				"description":"red coat","reference_input_asset_ids":["crop-broken"]}]}`,
+			mutate: func(config *assetlist.Config) {
+				port := memoryCropReferences{
+					"crop-broken": {MediaType: "image/png", IsCrop: true},
+				}
+				config.References = port
+			},
+			wantCopy: func(schema catalog.AssetListSchema) string {
+				return schema.Decompose.Messages.ReferenceInvalid
+			},
+		},
+		{
+			name: "empty id",
+			arguments: `{"title":"清单","items":[{"kind":"character","name":"Knight",
+				"description":"red coat","reference_input_asset_ids":["  "]}]}`,
+			wantCopy: func(schema catalog.AssetListSchema) string {
+				return schema.Messages.ProposeInvalidItems
+			},
+		},
+	}
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			repository := newAssetListRepo()
+			schema := defaultAssetListSchema(t)
+			service := newAssetListProposalService(t, repository, schema, func(config *assetlist.Config) {
+				// The default port for these cases: two good crops from
+				// different sources plus one valid crop.
+				config.References = memoryCropReferences{
+					"crop-1": {MediaType: "image/png", IsCrop: true, CropSourceAssetID: "scene-1"},
+					"crop-2": {MediaType: "image/png", IsCrop: true, CropSourceAssetID: "scene-1"},
+					"crop-3": {MediaType: "image/png", IsCrop: true, CropSourceAssetID: "scene-2"},
+				}
+				if testCase.mutate != nil {
+					testCase.mutate(config)
+				}
+			})
+			result, err := service.ProposeAssetList(context.Background(), assetListCommand(testCase.arguments))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := testCase.wantCopy(schema); result.Error != want {
+				t.Fatalf("refusal = %q, want %q", result.Error, want)
+			}
+			if len(repository.lists) != 0 {
+				t.Fatalf("stored lists = %d", len(repository.lists))
+			}
+		})
+	}
+}
+
+// A Catalog without the decompose section keeps the generic invalid-items
+// copy for a refused reference (#327 behavior).
+func TestProposeAssetListReferenceRefusalFallsBackWithoutDecompose(t *testing.T) {
+	repository := newAssetListRepo()
+	schema := defaultAssetListSchema(t)
+	schema.Decompose = nil
+	service := newAssetListProposalService(t, repository, schema, func(config *assetlist.Config) {
+		config.References = memoryCropReferences{
+			"crop-1": {MediaType: "image/png", IsCrop: true, CropSourceAssetID: "scene-1"},
+			"crop-2": {MediaType: "image/png", IsCrop: true, CropSourceAssetID: "scene-1"},
+		}
+	})
+	result, err := service.ProposeAssetList(context.Background(), assetListCommand(
+		`{"title":"清单","items":[{"kind":"character","name":"Knight","description":"red coat",
+		  "reference_input_asset_ids":["crop-1","crop-2"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Error != schema.Messages.ProposeInvalidItems {
+		t.Fatalf("refusal = %q, want the generic invalid-items copy", result.Error)
+	}
+}

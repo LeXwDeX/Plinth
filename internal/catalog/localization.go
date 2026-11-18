@@ -598,7 +598,8 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 	skipMCP := schema.MCPPublic == nil
 	skipAssetList := schema.AssetList == nil
 	skipExecution := skipAssetList || schema.AssetList.Execution == nil
-	if !skipBudget && !skipSteps && !skipKeys && !skipMCP && !skipAssetList && !skipExecution {
+	skipDecompose := skipAssetList || schema.AssetList.Decompose == nil
+	if !skipBudget && !skipSteps && !skipKeys && !skipMCP && !skipAssetList && !skipExecution && !skipDecompose {
 		return fields
 	}
 	applied := make(map[string]string, len(fields))
@@ -621,6 +622,10 @@ func applicableBundleFields(schema ApplicationSchema, fields map[string]string) 
 		// 自动制作段同样可选：声明 asset_list 但没有 execution 的 Catalog
 		// 不要求（也不拒绝）续轮文案的译文。
 		if skipExecution && strings.HasPrefix(path, "asset_list.execution.") {
+			continue
+		}
+		// 单图拆解段同样可选：未声明时共享 bundle 里的拆解文案被跳过。
+		if skipDecompose && strings.HasPrefix(path, "asset_list.decompose.") {
 			continue
 		}
 		applied[path] = text

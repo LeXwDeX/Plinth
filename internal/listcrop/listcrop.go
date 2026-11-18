@@ -37,10 +37,9 @@ const (
 	// SourceKindTask marks a source copied from a Task result.
 	SourceKindTask = "task_asset"
 
-	// DefaultMaximumCropsPerSource bounds the crops one source keeps. It is
-	// the constant stand-in for
-	// application.asset_list.decompose.maximum_items_per_image until the
-	// Catalog supplies the value (#331b).
+	// DefaultMaximumCropsPerSource bounds the crops one source keeps. It is the
+	// fallback for application.asset_list.decompose.maximum_items_per_image when
+	// the Catalog declares no decompose section.
 	DefaultMaximumCropsPerSource = 24
 	// DefaultSourceMaxBytes mirrors image.mask.limits.max_bytes.
 	DefaultSourceMaxBytes int64 = 32 << 20

@@ -16,6 +16,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/project"
 )
 
@@ -359,6 +360,9 @@ func TestProjectAssetListEditReplacesDraftUnderVersion(t *testing.T) {
 	harness := newAssetListHTTPHarness(t)
 	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID, "Draft", defaultListItem())
 	path := assetListRoute(assetListItemRoute, harness.projectID, list.ID)
+	// #331: the edit route validates every input-asset reference against the
+	// owner's stored assets, so the picture must exist.
+	seedAssetListInputAsset(t, harness.repository, "owner-a", "in_1", "image/png", "image")
 
 	edit := `{"title":"Edited","expected_version":0,"brief":{"purpose":"render"},"items":[` +
 		`{"kind":"character","name":"Knight","route_id":"text-to-3d-remesh",` +
@@ -691,5 +695,121 @@ func TestProjectAssetListBoardAggregatesReadOnlyAndOwnerScoped(t *testing.T) {
 		if missing.Code != http.StatusNotFound {
 			t.Fatalf("board %s = %d %s", target, missing.Code, missing.Body.String())
 		}
+	}
+}
+
+// seedAssetListInputAsset stores one input asset row. Reference validation only
+// reads the recorded metadata, so no bytes are needed.
+func seedAssetListInputAsset(t *testing.T, repository *sqlite.Repository,
+	owner, id, mediaType, assetType string,
+) {
+	t.Helper()
+	err := repository.CreateInputAsset(context.Background(), generation.InputAsset{
+		ID:               generation.AssetID(id),
+		OwnerID:          generation.OwnerID(owner),
+		StorageKey:       "seed/" + id,
+		OriginalFilename: id + ".png",
+		AssetType:        assetType,
+		MediaType:        mediaType,
+		Size:             1,
+		SHA256:           strings.Repeat("a", 64),
+		CreatedAt:        time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("seed input asset %s: %v", id, err)
+	}
+}
+
+// seedAssetListCrop stores one crop input asset and its provenance (#331).
+func seedAssetListCrop(t *testing.T, repository *sqlite.Repository,
+	cropID, sourceID string,
+) {
+	t.Helper()
+	seedAssetListInputAsset(t, repository, "owner-a", cropID, "image/png", "list_crop")
+	// Crops of one source share the source id but never the pixel rect: the
+	// provenance store's unique key is (owner, source, rect).
+	rects := map[string]listcrop.PixelRect{
+		"crop_1": {X0: 0, Y0: 0, X1: 500, Y1: 500},
+		"crop_2": {X0: 500, Y0: 0, X1: 1000, Y1: 500},
+		"crop_3": {X0: 0, Y0: 500, X1: 500, Y1: 1000},
+	}
+	rect, ok := rects[cropID]
+	if !ok {
+		rect = listcrop.PixelRect{X0: 0, Y0: 0, X1: 500, Y1: 500}
+	}
+	_, _, err := repository.InputAssetCropRepository().InsertOrGet(context.Background(), listcrop.Crop{
+		AssetID:            generation.AssetID(cropID),
+		OwnerID:            "owner-a",
+		SourceAssetID:      generation.AssetID(sourceID),
+		SourceKind:         listcrop.SourceKindInput,
+		SourceInputAssetID: generation.AssetID(sourceID),
+		SourceWidth:        1000,
+		SourceHeight:       1000,
+		Region:             listcrop.Region{X: 0, Y: 0, Width: 0.5, Height: 0.5},
+		PixelRect:          rect,
+		SHA256:             strings.Repeat("b", 64),
+		CreatedAt:          time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("seed crop %s: %v", cropID, err)
+	}
+}
+
+// #331: an edit PUT carries bare references, so the crop rules are enforced on
+// that path too; a list cannot bypass them by skipping reference_input_asset_ids.
+func TestProjectAssetListEditValidatesBareCropReferences(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID, "Draft", defaultListItem())
+	path := assetListRoute(assetListItemRoute, harness.projectID, list.ID)
+	seedAssetListCrop(t, harness.repository, "crop_1", "scene_a")
+	seedAssetListCrop(t, harness.repository, "crop_2", "scene_a")
+	seedAssetListCrop(t, harness.repository, "crop_3", "scene_b")
+	// A list_crop row without provenance is inconsistent stored data.
+	seedAssetListInputAsset(t, harness.repository, "owner-a", "crop_orphan", "image/png", "list_crop")
+	// A stored picture that is not a crop stays a plain reference.
+	seedAssetListInputAsset(t, harness.repository, "owner-a", "in_1", "image/png", "image")
+
+	edit := func(title string, items string) *httptest.ResponseRecorder {
+		return grantTestRequest(t, harness.handler, harness.cookie, http.MethodPut, path,
+			`{"title":"`+title+`","expected_version":0,"items":[`+items+`]}`, "")
+	}
+	// Two crops in one item.
+	twoCrops := edit("Two crops", `{"kind":"character","name":"Knight",`+
+		`"references":[{"input_asset_id":"crop_1"},{"input_asset_id":"crop_2"}]}`)
+	if twoCrops.Code != http.StatusBadRequest {
+		t.Fatalf("two crops = %d %s", twoCrops.Code, twoCrops.Body.String())
+	}
+	// Crops from different source pictures across items.
+	crossSource := edit("Cross source", `{"kind":"character","name":"Knight",`+
+		`"references":[{"input_asset_id":"crop_1"}]},`+
+		`{"kind":"character","name":"Squire","references":[{"input_asset_id":"crop_3"}]}`)
+	if crossSource.Code != http.StatusBadRequest {
+		t.Fatalf("cross source = %d %s", crossSource.Code, crossSource.Body.String())
+	}
+	// A crop without provenance.
+	orphan := edit("Orphan", `{"kind":"character","name":"Knight",`+
+		`"references":[{"input_asset_id":"crop_orphan"}]}`)
+	if orphan.Code != http.StatusBadRequest {
+		t.Fatalf("orphan = %d %s", orphan.Code, orphan.Body.String())
+	}
+	// A missing or foreign input asset.
+	missing := edit("Missing", `{"kind":"character","name":"Knight",`+
+		`"references":[{"input_asset_id":"in_missing"}]}`)
+	if missing.Code != http.StatusBadRequest {
+		t.Fatalf("missing = %d %s", missing.Code, missing.Body.String())
+	}
+	// One crop plus a plain picture, same source picture across items: accepted.
+	valid := edit("Valid", `{"kind":"character","name":"Knight",`+
+		`"references":[{"input_asset_id":"crop_1"},{"input_asset_id":"in_1"}]},`+
+		`{"kind":"character","name":"Squire","references":[{"input_asset_id":"crop_2"}]}`)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("valid = %d %s", valid.Code, valid.Body.String())
+	}
+	edited := decodeAssetListTestWire(t, valid)
+	if len(edited.Items) != 2 || len(edited.Items[0].References) != 2 ||
+		edited.Items[0].References[0].InputAssetID != "crop_1" ||
+		edited.Items[1].References[0].InputAssetID != "crop_2" {
+		t.Fatalf("edited references = %+v", edited.Items)
 	}
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
-import type { ProductSchema } from '@/lib/product-schema';
+import type { AssetListProductSchema, ProductSchema } from '@/lib/product-schema';
 import {
   AssetListError,
   createAssetListClient,
@@ -52,6 +52,21 @@ const detail: AssetListDetail = {
 };
 
 describe('asset list schema contract', () => {
+  // #331: the public limits carry the per-image decompose cap. The raw Catalog
+  // declares the value under asset_list.decompose; the server's public
+  // projection copies it into limits, which this type mirrors.
+  it('types the public per-image decompose cap', () => {
+    const limits: AssetListProductSchema['limits'] = {
+      max_lists_per_project: 20,
+      draft_ttl_seconds: 604800,
+      name_max_length: 120,
+      description_max_length: 1000,
+      max_references_per_item: 4,
+      maximum_items_per_image: 24,
+    };
+    expect(limits.maximum_items_per_image).toBe(24);
+  });
+
   it('publishes the asset list section and the four route templates', () => {
     expect(schema.asset_list).toMatchObject({
       limits: {

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -50,6 +51,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 	"github.com/LeXwDeX/Plinth/internal/lineage"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 	"github.com/LeXwDeX/Plinth/internal/processing"
@@ -1838,9 +1840,13 @@ func newHTTPHarnessWithCatalogAndProviders(
 			counted[generation.Capability(capability)] = true
 		}
 		assetListService, err = assetlist.New(assetlist.Config{
-			Repository:         repository.AssetListRepository(),
-			Runs:               repository.AssetListRunRepository(),
-			Reviews:            repository.AssetListReviewRepository(),
+			Repository: repository.AssetListRepository(),
+			Runs:       repository.AssetListRunRepository(),
+			Reviews:    repository.AssetListReviewRepository(),
+			References: assetListReferenceAssets{
+				inputs: inputs,
+				crops:  repository.InputAssetCropRepository(),
+			},
 			Schema:             *listSchema,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
@@ -2134,4 +2140,38 @@ func harnessCompactor(scheduler httpapi.ChatTurnScheduler) httpapi.ChatContextCo
 		return compactor
 	}
 	return nil
+}
+
+// assetListReferenceAssets is the harness copy of app's #331 reference port:
+// the harness composes services directly instead of calling app.New.
+type assetListReferenceAssets struct {
+	inputs *inputassets.Service
+	crops  *sqlite.InputAssetCropRepository
+}
+
+func (port assetListReferenceAssets) ResolveInputAsset(ctx context.Context,
+	owner generation.OwnerID, inputAssetID generation.AssetID,
+) (assetlist.InputAssetReference, bool, error) {
+	asset, err := port.inputs.OwnedInputAsset(ctx, owner, inputAssetID)
+	if err != nil {
+		var domain *generation.Error
+		if errors.As(err, &domain) &&
+			(domain.Code == generation.ErrNotFound || domain.Code == generation.ErrForbidden) {
+			return assetlist.InputAssetReference{}, false, nil
+		}
+		return assetlist.InputAssetReference{}, false, err
+	}
+	reference := assetlist.InputAssetReference{MediaType: asset.MediaType}
+	crop, found, err := port.crops.Get(ctx, owner, inputAssetID)
+	if err != nil {
+		return assetlist.InputAssetReference{}, false, err
+	}
+	switch {
+	case found:
+		reference.IsCrop = true
+		reference.CropSourceAssetID = crop.SourceAssetID
+	case asset.AssetType == listcrop.CropAssetType:
+		reference.IsCrop = true
+	}
+	return reference, true, nil
 }

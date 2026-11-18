@@ -178,6 +178,45 @@ func (store cropInputAssets) LoadInputAssets(ctx context.Context, owner generati
 	return store.loader.LoadInputAssets(ctx, owner, ids)
 }
 
+// assetListReferenceAssets is the production-list reference port (#331): the
+// input asset service resolves an owner's stored uploads without opening their
+// bytes, and the crop repository supplies the provenance that marks an asset as
+// a crop and names its source. The asset-list package validates the crop rules
+// over this; it never reads the asset tables itself.
+type assetListReferenceAssets struct {
+	inputs *inputassets.Service
+	crops  *sqlite.InputAssetCropRepository
+}
+
+func (port assetListReferenceAssets) ResolveInputAsset(ctx context.Context,
+	owner generation.OwnerID, inputAssetID generation.AssetID,
+) (assetlist.InputAssetReference, bool, error) {
+	asset, err := port.inputs.OwnedInputAsset(ctx, owner, inputAssetID)
+	if err != nil {
+		var domain *generation.Error
+		if errors.As(err, &domain) &&
+			(domain.Code == generation.ErrNotFound || domain.Code == generation.ErrForbidden) {
+			return assetlist.InputAssetReference{}, false, nil
+		}
+		return assetlist.InputAssetReference{}, false, err
+	}
+	reference := assetlist.InputAssetReference{MediaType: asset.MediaType}
+	crop, found, err := port.crops.Get(ctx, owner, inputAssetID)
+	if err != nil {
+		return assetlist.InputAssetReference{}, false, err
+	}
+	switch {
+	case found:
+		reference.IsCrop = true
+		reference.CropSourceAssetID = crop.SourceAssetID
+	case asset.AssetType == listcrop.CropAssetType:
+		// A list_crop row without provenance is inconsistent stored data; the
+		// service refuses it instead of accepting it as a plain picture.
+		reference.IsCrop = true
+	}
+	return reference, true, nil
+}
+
 type preparedSceneContext struct {
 	*rendermanifest.Service
 	scene *scene.Service
@@ -797,10 +836,14 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			counted[generation.Capability(capability)] = true
 		}
 		assetListService, err = assetlist.New(assetlist.Config{
-			Repository:         repository.AssetListRepository(),
-			Runs:               repository.AssetListRunRepository(),
-			Presence:           repository.AssetListPresenceRepository(),
-			Reviews:            repository.AssetListReviewRepository(),
+			Repository: repository.AssetListRepository(),
+			Runs:       repository.AssetListRunRepository(),
+			Presence:   repository.AssetListPresenceRepository(),
+			Reviews:    repository.AssetListReviewRepository(),
+			References: assetListReferenceAssets{
+				inputs: inputAssetService,
+				crops:  repository.InputAssetCropRepository(),
+			},
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
@@ -940,10 +983,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	// #331: the read-only crop_image_regions tool cuts normalized regions out
 	// of one owned picture at original resolution and stores every crop as a
-	// list_crop input asset. The per-source crop limit falls back to the
-	// listcrop constant until application.asset_list.decompose declares it
-	// (#331b); the source decode bounds are the mask tool's.
-	cropService, err := listcrop.New(listcrop.Config{
+	// list_crop input asset. The decompose section declares the per-source crop
+	// limit and the crop size bounds; a Catalog without it keeps the package
+	// defaults. The source decode bounds are the mask tool's.
+	cropConfig := listcrop.Config{
 		Inputs:                     cropInputAssets{inputs: inputAssetService, loader: repository},
 		Tasks:                      module,
 		Crops:                      repository.InputAssetCropRepository(),
@@ -951,7 +994,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		SourceMaxPixels:            applicationSchema.Chat.ImageMask.Limits.MaxPixels,
 		GeneratedReferenceMaxBytes: applicationSchema.Runtime.InputAssets.GeneratedReferenceMaxBytes,
 		SourceAssetType:            applicationSchema.Runtime.InputAssets.DefaultAssetType,
-	})
+	}
+	if applicationSchema.AssetList != nil && applicationSchema.AssetList.Decompose != nil {
+		decompose := applicationSchema.AssetList.Decompose
+		cropConfig.MaximumCropsPerSource = decompose.MaximumItemsPerImage
+		cropConfig.MinimumSide = decompose.Crop.MinimumShortEdge
+		cropConfig.MaximumRegionPixels = decompose.Crop.MaximumRegionPixels
+		cropConfig.UploadMaxBytes = decompose.Crop.MaximumPNGBytes
+	}
+	cropService, err := listcrop.New(cropConfig)
 	if err != nil {
 		return nil, fmt.Errorf("裁剪服务: %w", err)
 	}

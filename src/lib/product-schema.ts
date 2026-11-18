@@ -52,6 +52,8 @@ export interface AssetListProductSchema {
     name_max_length: number;
     description_max_length: number;
     max_references_per_item: number;
+    /** #331: the most asset items one source picture may be split into. Absent on older servers. */
+    maximum_items_per_image?: number;
   };
   /** Item kinds mapped to a project asset kind and a default route id. */
   kinds: Array<{ id: string; label: string; project_kind: string; default_route: string }>;

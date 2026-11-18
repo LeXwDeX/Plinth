@@ -5526,6 +5526,21 @@
         "description_max_length": 1000,
         "max_references_per_item": 4
       },
+      "decompose": {
+        "maximum_items_per_image": 24,
+        "crop": {
+          "minimum_short_edge": 64,
+          "maximum_region_pixels": 4000000,
+          "maximum_png_bytes": 16777216
+        },
+        "default_route_with_reference": "reference-to-3d",
+        "messages": {
+          "region_invalid": "拆解区域无效：请用相对原图的归一化坐标（0..1）框选，右/下边界不含，且区域面积大于 0。",
+          "region_too_small": "拆解区域太小：最短边至少 {minimum} 像素，请把这块区域框得更大一些。",
+          "image_item_limit": "这张图最多拆出 {maximum} 个资产项，请合并相邻区域或减少拆解数量。",
+          "reference_invalid": "裁剪参考图不合法：只能引用本人持有、来自同一张源图且每项至多一张的裁剪图。"
+        }
+      },
       "kinds": [
         {"id": "character", "label": "角色", "project_kind": "character", "default_route": "text-to-3d"},
         {"id": "weapon", "label": "武器", "project_kind": "prop", "default_route": "text-to-3d"},
@@ -5540,7 +5555,8 @@
         {"id": "text-to-3d-remesh", "label": "文生 3D 后重拓扑", "kinds": ["character", "weapon", "prop", "vehicle", "scene"], "steps": [{"capability": "text-to-3d"}, {"capability": "remesh"}]},
         {"id": "text-to-3d-rig", "label": "文生 3D 后绑骨", "kinds": ["character"], "steps": [{"capability": "text-to-3d"}, {"capability": "rigging"}]},
         {"id": "text-to-image", "label": "文生 2D", "kinds": ["image"], "steps": [{"capability": "text-to-image"}]},
-        {"id": "image-edit", "label": "图生 2D", "kinds": ["image"], "steps": [{"capability": "image-to-image"}]}
+        {"id": "image-edit", "label": "图生 2D", "kinds": ["image"], "steps": [{"capability": "image-to-image"}]},
+        {"id": "reference-to-3d", "label": "参考图重画 → 三视图 → 图生 3D → 重拓扑", "kinds": ["character", "weapon", "prop", "vehicle", "scene"], "steps": [{"capability": "image-to-image"}, {"capability": "image-to-multiview"}, {"capability": "image-to-3d"}, {"capability": "remesh"}]}
       ],
       "states": [
         {"id": "draft", "label": "草稿", "role": "pending"},
@@ -8153,7 +8169,8 @@
                     "name": {"type": "string", "description": "Unique name within the list"},
                     "description": {"type": "string", "description": "What this asset is"},
                     "route_id": {"type": "string", "description": "Optional route id; defaults by kind"},
-                    "reference_handles": {"type": "array", "items": {"type": "string"}, "description": "Optional @imgN or @projectN handles (max 4)"}
+                    "reference_handles": {"type": "array", "items": {"type": "string"}, "description": "Optional @imgN or @projectN handles (max 4)"},
+                    "reference_input_asset_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional input asset ids of crops cut from one source picture by crop_image_regions. At most one crop per item, and every crop in the list must come from the same source picture."}
                   },
                   "required": ["kind", "name", "description"],
                   "additionalProperties": false
@@ -19945,6 +19962,7 @@
             "asset_list.routes[id=text-to-3d-rig].label": "Text to 3D, then rig",
             "asset_list.routes[id=text-to-image].label": "Text to 2D",
             "asset_list.routes[id=image-edit].label": "Image to 2D",
+            "asset_list.routes[id=reference-to-3d].label": "Redraw from reference → three views → image to 3D → remesh",
             "asset_list.states[id=draft].label": "Draft",
             "asset_list.states[id=confirmed].label": "Confirmed",
             "asset_list.states[id=rejected].label": "Rejected",
@@ -19976,6 +19994,10 @@
             "asset_list.messages.propose_invalid_items": "The production list arguments are invalid: check the item count, duplicate names, asset kinds, routes and the reference limit.",
             "asset_list.messages.propose_reference_unresolved": "Some reference handles could not be resolved; check that the referenced pictures or project assets exist.",
             "asset_list.messages.propose_failed": "The production list could not be submitted because the service is temporarily unavailable; try again later.",
+            "asset_list.decompose.messages.region_invalid": "The decompose region is invalid: use normalized coordinates (0..1) relative to the source picture, with exclusive right/bottom edges and a region area greater than 0.",
+            "asset_list.decompose.messages.region_too_small": "The decompose region is too small: its shortest side must be at least {minimum} pixels; frame a larger region.",
+            "asset_list.decompose.messages.image_item_limit": "This picture can be split into at most {maximum} asset items; merge nearby regions or split fewer items.",
+            "asset_list.decompose.messages.reference_invalid": "The crop reference is invalid: only crops the person holds, cut from the same source picture and at most one per item, may be referenced.",
             "asset_list.messages.pause_presence": "The user left (presence heartbeat stopped), so automatic production is paused; it continues when the user comes back.",
             "asset_list.messages.pause_user": "The user paused automatic production.",
             "asset_list.messages.pause_step_cap": "Item \"{name}\" reached the step limit, so automatic production is paused.",

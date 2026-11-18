@@ -425,6 +425,150 @@ func TestAssetListCloneDoesNotShareSlices(t *testing.T) {
 	}
 }
 
+// #331：拆解段的指针也随副本深拷贝。
+func TestAssetListCloneDoesNotShareDecompose(t *testing.T) {
+	t.Parallel()
+	source, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := source.Application()
+	if first.AssetList.Decompose == nil {
+		t.Fatal("default Catalog has no asset_list.decompose")
+	}
+	first.AssetList.Decompose.Crop.MinimumShortEdge = 1
+	first.AssetList.Decompose.Messages.ReferenceInvalid = "mutated"
+	second := source.Application()
+	if second.AssetList.Decompose.Crop.MinimumShortEdge == 1 ||
+		second.AssetList.Decompose.Messages.ReferenceInvalid == "mutated" {
+		t.Fatal("Catalog Application() shares the decompose section with a previous copy")
+	}
+}
+
+// #331：默认 Catalog 声明单图拆解段：每图上限 24、裁图尺寸限制、参考图缺省
+// 路线与四条拒绝文案；公开投影只多出单图项数上限，裁图细节不进公开投影。
+func TestDefaultAssetListDecomposeDeclaresCropContract(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	decompose := application.AssetList.Decompose
+	if decompose == nil {
+		t.Fatal("default Catalog has no application.asset_list.decompose")
+	}
+	if decompose.MaximumItemsPerImage != 24 ||
+		decompose.Crop.MinimumShortEdge != 64 ||
+		decompose.Crop.MaximumRegionPixels != 4_000_000 ||
+		decompose.Crop.MaximumPNGBytes != 16<<20 {
+		t.Fatalf("decompose = %+v", decompose)
+	}
+	if decompose.DefaultRouteWithReference != "reference-to-3d" {
+		t.Fatalf("default_route_with_reference = %q", decompose.DefaultRouteWithReference)
+	}
+	steps := map[string][]string{}
+	for _, route := range application.AssetList.Routes {
+		for _, step := range route.Steps {
+			steps[route.ID] = append(steps[route.ID], string(step.Capability))
+		}
+	}
+	if got := steps[decompose.DefaultRouteWithReference]; len(got) != 4 ||
+		got[0] != "image-to-image" || got[1] != "image-to-multiview" ||
+		got[2] != "image-to-3d" || got[3] != "remesh" {
+		t.Fatalf("reference route steps = %v", got)
+	}
+	for field, text := range map[string]string{
+		"region_invalid":    decompose.Messages.RegionInvalid,
+		"region_too_small":  decompose.Messages.RegionTooSmall,
+		"image_item_limit":  decompose.Messages.ImageItemLimit,
+		"reference_invalid": decompose.Messages.ReferenceInvalid,
+	} {
+		if strings.TrimSpace(text) == "" {
+			t.Fatalf("decompose message %s is empty", field)
+		}
+	}
+	public := application.Public().AssetList
+	if public == nil || public.Limits.MaximumItemsPerImage != 24 {
+		t.Fatalf("public limits = %+v", public)
+	}
+	encoded, err := json.Marshal(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{"minimum_short_edge", "maximum_region_pixels", "maximum_png_bytes", "reference_invalid"} {
+		if strings.Contains(string(encoded), private) {
+			t.Fatalf("public asset_list leaks decompose field %q", private)
+		}
+	}
+}
+
+func TestAssetListDecomposeValidationRejectsBadDeclarations(t *testing.T) {
+	t.Parallel()
+	for name, mutate := range map[string]func(*catalog.ApplicationSchema){
+		"zero maximum items": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.MaximumItemsPerImage = 0
+		},
+		"too many maximum items": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.MaximumItemsPerImage = 101
+		},
+		"zero minimum short edge": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Crop.MinimumShortEdge = 0
+		},
+		"minimum short edge too large": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Crop.MinimumShortEdge = 4097
+		},
+		"region pixels below the minimum square": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Crop.MaximumRegionPixels = 4095
+		},
+		"region pixels above the decode bound": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Crop.MaximumRegionPixels = 100_000_001
+		},
+		"zero png bytes": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Crop.MaximumPNGBytes = 0
+		},
+		"png bytes too large": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Crop.MaximumPNGBytes = 256<<20 + 1
+		},
+		"unknown reference route": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.DefaultRouteWithReference = "missing-route"
+		},
+		"reference route starts with a 3D step": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.DefaultRouteWithReference = "image-to-3d"
+		},
+		"region invalid message empty": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Messages.RegionInvalid = " "
+		},
+		"region too small message empty": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Messages.RegionTooSmall = ""
+		},
+		"image item limit message empty": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Messages.ImageItemLimit = ""
+		},
+		"reference invalid message empty": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Messages.ReferenceInvalid = ""
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			application := defaultApplication(t)
+			mutate(&application)
+			if err := catalog.ValidateApplicationSchema(application); err == nil {
+				t.Fatal("invalid asset_list.decompose declaration was accepted")
+			}
+		})
+	}
+}
+
+// 未声明拆解段时旧 Catalog 仍可加载；公开投影的上限为 0。
+func TestAssetListDecomposeStaysOptional(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	application.AssetList.Decompose = nil
+	if err := catalog.ValidateApplicationSchema(application); err != nil {
+		t.Fatalf("Catalog without application.asset_list.decompose rejected: %v", err)
+	}
+	if public := application.Public().AssetList; public == nil || public.Limits.MaximumItemsPerImage != 0 {
+		t.Fatalf("public limits without decompose = %+v", public)
+	}
+}
+
 // #328：默认 Catalog 声明自动制作段（默认关闭），公开投影只给心跳间隔。
 func TestDefaultAssetListExecutionDeclaresScheduleAndPresence(t *testing.T) {
 	t.Parallel()

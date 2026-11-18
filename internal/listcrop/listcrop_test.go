@@ -726,3 +726,24 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 		t.Fatal("New accepted missing dependencies")
 	}
 }
+
+// #331b: without application.asset_list.decompose the package default bounds
+// one source, and an over-limit batch is refused before any picture is read.
+func TestDefaultCropLimitAppliesWithoutCatalog(t *testing.T) {
+	t.Parallel()
+	fixture := newCropFixture(t, nil)
+	regions := make([]listcrop.Region, listcrop.DefaultMaximumCropsPerSource+1)
+	for index := range regions {
+		regions[index] = listcrop.Region{X: 0, Y: 0, Width: 0.1, Height: 0.1}
+	}
+	_, err := fixture.service.CropRegions(context.Background(), listcrop.Request{
+		Owner: "owner-a", Source: "source-1", Regions: regions,
+	})
+	var limit *listcrop.LimitError
+	if !errors.As(err, &limit) || limit.Limit != listcrop.DefaultMaximumCropsPerSource {
+		t.Fatalf("error = %v; want the default %d-crop limit", err, listcrop.DefaultMaximumCropsPerSource)
+	}
+	if rows := fixture.crops.rowsSnapshot(); len(rows) != 0 {
+		t.Fatalf("refused batch stored %d rows", len(rows))
+	}
+}
