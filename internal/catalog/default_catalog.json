@@ -10080,7 +10080,12 @@
         "limit_reached": "同一次回复最多画 {maximum} 个概念方向；请先让用户在这些方向里选择，再继续深入。",
         "parameter_reason": "概念方向草图使用低成本参数，便于先发散再收敛；选定方向后再按正式制作参数深入。",
         "parameter_overrides": {
-          "openai/gpt-image-2/text-to-image": {"quality": "low", "size": "1024x1024"},
+          "openai/gpt-image-2/text-to-image": {"quality": "low", "size": "1024x1024", "n": 1},
+          "openai/gpt-image-2/image-to-image": {"quality": "low", "size": "1024x1024", "n": 1},
+          "openai/gpt-image-2.5-sunburst/text-to-image": {"quality": "low", "size": "1024x1024", "n": 1},
+          "openai/gpt-image-2.5-sunburst/image-to-image": {"quality": "low", "size": "1024x1024", "n": 1},
+          "jimeng/seedream-4-5/text-to-image": {"sequential_image_generation": "disabled", "max_images": null},
+          "jimeng/seedream-4-5/image-to-image": {"sequential_image_generation": "disabled", "max_images": null},
           "gemini/gemini-3-pro-image/text-to-image": {"image_size": "1K"}
         }
       },
@@ -21058,7 +21063,8 @@
             "固定的纹理随机种子可复现相同纹理结果（需与模型随机种子配合）": "A fixed texture seed reproduces the same texture (used together with the model seed).",
             "曲线参数": "Curve parameter",
             "最多打印颜色数": "Max print colors",
-            "最多生成数量": "Maximum number of images",
+            "单次最多出图张数": "Maximum images per generation",
+            "开启组图生成时一个任务最多出几张图；概念图要画几张在概念图数量卡里单独选择。": "How many images one task may produce when image set generation is on; the number of concept sketches is chosen separately on the concept quantity card.",
             "最长边（米，最小 0.001）": "Longest edge (m, min 0.001)",
             "最高": "Maximum",
             "有氧舞 (Cardio_Dance)": "Cardio dance",
@@ -21203,7 +21209,8 @@
             "牛仔流行舞 (Denim_Pop_Dance)": "Denim pop dance",
             "独轮车跳下 (Unicycle_Jump_Dismount)": "Unicycle jump dismount",
             "生成多个视角的图片": "Generate images from multiple views",
-            "生成数量": "Number of images",
+            "单次出图张数": "Images per generation",
+            "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。": "How many images one generation task produces; billing follows the image count. The number of concept sketches is chosen separately on the concept quantity card.",
             "生成更高精度的几何细节，仅 Meshy 7 支持且仅在预览阶段生效，额外消耗 5 积分": "Generates higher-precision geometric detail; supported by Meshy 7 only and applies only in the preview stage; costs an extra 5 credits",
             "生成更高精度的几何细节，仅 Meshy 7 支持，额外消耗 5 积分": "Generates higher-precision geometric detail; supported by Meshy 7 only; costs an extra 5 credits",
             "生成模式": "Generation mode",
@@ -22898,7 +22905,9 @@
         },
         {
           "name": "n",
-          "label": "生成数量",
+          "label": "单次出图张数",
+          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "user",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
@@ -23236,7 +23245,9 @@
         },
         {
           "name": "n",
-          "label": "生成数量",
+          "label": "单次出图张数",
+          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "user",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
@@ -23610,7 +23621,9 @@
         },
         {
           "name": "n",
-          "label": "生成数量",
+          "label": "单次出图张数",
+          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "user",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
@@ -24003,7 +24016,9 @@
         },
         {
           "name": "n",
-          "label": "生成数量",
+          "label": "单次出图张数",
+          "description": "控制一个生成任务出几张图，按张数计费；概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "user",
           "type": "number",
           "minimum": 1,
           "maximum": 10,
@@ -24786,6 +24801,7 @@
         {
           "name": "sequential_image_generation",
           "label": "组图生成",
+          "adjustment_policy": "user",
           "type": "select",
           "options": [
             {
@@ -24805,7 +24821,9 @@
         },
         {
           "name": "max_images",
-          "label": "最多生成数量",
+          "label": "单次最多出图张数",
+          "description": "开启组图生成时一个任务最多出几张图；概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "user",
           "type": "number",
           "minimum": 1,
           "maximum": 15,
@@ -25132,6 +25150,7 @@
         {
           "name": "sequential_image_generation",
           "label": "组图生成",
+          "adjustment_policy": "user",
           "type": "select",
           "options": [
             {
@@ -25151,7 +25170,9 @@
         },
         {
           "name": "max_images",
-          "label": "最多生成数量",
+          "label": "单次最多出图张数",
+          "description": "开启组图生成时一个任务最多出几张图；概念图要画几张在概念图数量卡里单独选择。",
+          "adjustment_policy": "user",
           "type": "number",
           "minimum": 1,
           "maximum": 15,

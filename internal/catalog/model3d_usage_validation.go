@@ -1014,6 +1014,23 @@ func checkRecommendedShape(offering schemacontract.Offering, shape, viewsArgumen
 // extra-credit consent is set the way the Agent path sets it, because the
 // approval card, not this table, is where the person agrees to the cost.
 func simulateProfileParameters(offering schemacontract.Offering, overrides map[string]json.RawMessage) error {
+	return simulateOfferingOverrides(offering, overrides, offering.AgentParameterAllowed, false)
+}
+
+// simulateSketchParameters validates the concept sketch's per-Offering
+// overrides (#360). Unlike a profile override, a sketch value may fix a
+// parameter only the person can set (adjustment_policy "user"), and a null
+// override omits the parameter instead of freezing it.
+func simulateSketchParameters(offering schemacontract.Offering, overrides map[string]json.RawMessage) error {
+	return simulateOfferingOverrides(offering, overrides, offering.OverrideParameterAllowed, true)
+}
+
+func simulateOfferingOverrides(
+	offering schemacontract.Offering,
+	overrides map[string]json.RawMessage,
+	allowed func(schemacontract.Parameter) bool,
+	omitNull bool,
+) error {
 	if len(overrides) == 0 {
 		return nil
 	}
@@ -1023,10 +1040,13 @@ func simulateProfileParameters(offering schemacontract.Offering, overrides map[s
 		if !exists {
 			return fmt.Errorf("参数 %q 不属于 Offering %q", name, offering.ID)
 		}
-		if !offering.AgentParameterAllowed(parameter) {
+		if !allowed(parameter) {
 			return fmt.Errorf("参数 %q 不是可公开调整的参数", name)
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			if omitNull {
+				continue
+			}
 			return fmt.Errorf("参数 %q 不能用 null 覆盖", name)
 		}
 		normalized, err := ValidateHarnessParameter(parameter, raw)

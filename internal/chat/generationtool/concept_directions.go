@@ -54,9 +54,11 @@ func (executor *Executor) conceptSketchLimit(ctx context.Context, command chat.T
 }
 
 // conceptSketchParameterValues returns the cheap parameter values the Schema
-// declares for this sketch's Offering (#242). Only parameters the Offering
-// exposes to the Agent are applied; an Offering the table does not name, or a
-// parameter it does not declare, is used as is.
+// declares for this sketch's Offering (#242). A sketch value may fix a
+// parameter only the person can set (adjustment_policy "user", #360), but a
+// backend-fixed parameter is never overridden; an Offering the table does not
+// name, or a parameter it does not declare, is used as is. A null override
+// omits the parameter (the Seedream sketch declares no max_images).
 func (executor *Executor) conceptSketchParameterValues(command chat.ToolCommand, offering generation.Offering) map[string]json.RawMessage {
 	concept := executor.chat.ConceptDirections
 	if !concept.Enabled || command.Tool.Name != concept.SketchTool {
@@ -72,11 +74,17 @@ func (executor *Executor) conceptSketchParameterValues(command chat.ToolCommand,
 			if parameter.Name != name {
 				continue
 			}
-			if offering.AgentParameterAllowed(parameter) {
+			if offering.OverrideParameterAllowed(parameter) {
 				values[name] = value
 			}
 			break
 		}
 	}
 	return values
+}
+
+// isNullParameter reports a Schema override that omits a parameter instead of
+// fixing a value.
+func isNullParameter(raw json.RawMessage) bool {
+	return strings.TrimSpace(string(raw)) == "null"
 }

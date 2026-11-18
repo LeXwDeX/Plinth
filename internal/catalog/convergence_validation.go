@@ -258,7 +258,7 @@ func validateConceptDirectionOfferings(directions ChatConceptDirectionsSchema, b
 			}
 		}
 		if len(overrides) > 0 {
-			if err := simulateProfileParameters(offering, overrides); err != nil {
+			if err := simulateSketchParameters(offering, overrides); err != nil {
 				return fmt.Errorf("concept_directions.parameter_overrides[%q]: %w", id, err)
 			}
 		}

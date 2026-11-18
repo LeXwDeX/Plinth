@@ -355,8 +355,17 @@ func validateOffering(
 				parameter.Name,
 			)
 		}
-		if parameter.AdjustmentPolicy != "" && parameter.AdjustmentPolicy != "advised" {
+		if parameter.AdjustmentPolicy != "" && parameter.AdjustmentPolicy != "advised" && parameter.AdjustmentPolicy != "user" {
 			return fmt.Errorf("Offering %q parameter %q has unknown adjustment policy", offering.ID, parameter.Name)
+		}
+		// #360: a user-only parameter is set on the panel and never by the
+		// Agent, so it must stay adjustable by the person and cannot be a
+		// backend-fixed or hidden value.
+		if parameter.AdjustmentPolicy == "user" && (parameter.Fixed || !offering.UserParameterAllowed(parameter) || offering.AgentParameterAllowed(parameter)) {
+			return fmt.Errorf("Offering %q parameter %q has invalid user policy", offering.ID, parameter.Name)
+		}
+		if parameter.AdjustmentPolicy == "user" && parameter.AdjustmentReason != "" {
+			return fmt.Errorf("Offering %q parameter %q has an advice without an advised policy", offering.ID, parameter.Name)
 		}
 		if parameter.AdjustmentPolicy == "advised" && (parameter.Fixed || (parameter.Required && len(bytes.TrimSpace(parameter.Default)) == 0) || strings.TrimSpace(parameter.AdjustmentReason) == "" || parameter.Presentation == nil || parameter.Presentation.Surface != schemacontract.SurfaceReadOnly || !offering.AgentParameterAllowed(parameter)) {
 			return fmt.Errorf("Offering %q parameter %q has invalid advised policy", offering.ID, parameter.Name)
