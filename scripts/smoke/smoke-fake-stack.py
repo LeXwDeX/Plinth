@@ -350,7 +350,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -361,7 +361,11 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
     use that catalog. The background-wait threshold drops to one second so a test
     Task reaches it while the fake still polls; the shipped value stays untouched.
     draft_ttl_seconds shortens the production list's draft TTL (#327), so the
-    expiry arm does not wait the shipped week.
+    expiry arm does not wait the shipped week. The execution_* and continuation
+    options override application.asset_list.execution (#328), which is disabled
+    in the shipped Catalog: a smoke run turns it on and makes polling, presence
+    and the per-item round limit short enough to observe, and replaces the
+    continuation text with the fake script marker that drives each item.
     The default Catalog file and its base URLs stay untouched."""
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
@@ -376,6 +380,21 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
         catalog["application"]["chat"]["context_compaction"]["keep_recent_rounds"] = 1
     if draft_ttl_seconds is not None:
         catalog["application"]["asset_list"]["limits"]["draft_ttl_seconds"] = draft_ttl_seconds
+    execution = catalog["application"]["asset_list"]["execution"]
+    if execution_enabled is not None:
+        execution["enabled"] = execution_enabled
+    if poll_interval_milliseconds is not None:
+        execution["poll_interval_milliseconds"] = poll_interval_milliseconds
+    if presence_heartbeat_seconds is not None:
+        execution["presence"]["heartbeat_seconds"] = presence_heartbeat_seconds
+    if presence_grace_seconds is not None:
+        execution["presence"]["grace_seconds"] = presence_grace_seconds
+    if max_parallel_items is not None:
+        execution["max_parallel_items"] = max_parallel_items
+    if max_rounds_per_item is not None:
+        execution["max_rounds_per_item"] = max_rounds_per_item
+    if continuation_message is not None:
+        execution["continuation"]["message"] = continuation_message
     if manual_image_edits:
         # The mask scenario needs an approval card for a 2D edit step (#244);
         # the shipped policy asks a human only for the listed capabilities.
@@ -5830,6 +5849,459 @@ def scenario_asset_list_expiry(api, work):
            f"decision={decision_status}/{decision.get('code')}")
 
 
+# ---------------------------------------------------------------- asset list runs (#328)
+
+# The dev mock login's owner id (stack_env's DEV_MOCK_USER); the presence rows
+# are owner-scoped, so the heartbeat must name the same person the API sees.
+ASSET_LIST_RUN_OWNER = "fake_stack"
+
+# The continuation a confirmed list's runner writes as each item turn's user
+# message. The fake script advances per assistant tool-call message after that
+# user message: the first round creates one 3D task, then reports it done. The
+# item name and round ride inside the frozen arguments, so two items and two
+# rounds are distinguishable in the Tasks the fake upstream serves.
+ASSET_LIST_RUN_CONTINUATION = (
+    "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+    "先检查已有结果，不要重复提交已完成的步骤。"
+    '[[fake:script:create_model_3d {"prompt":"a production asset for {name}, round {round}",'
+    '"model":"tripo/tripo-p2/text-to-3d"}'
+    '|submit_asset_list_item {"status":"done"}|done]]'
+)
+
+# The failure arm reports every item failed without creating a task; the run
+# must still turn to the next item instead of stopping at the first one.
+ASSET_LIST_RUN_FAILURE_CONTINUATION = (
+    "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+    '[[fake:script:submit_asset_list_item {"status":"failed","reason":"fake run failure"}|done]]'
+)
+
+# The step-cap arm creates one task in round one and ends the turn without a
+# report; round two's second create is refused at the account's one-step cap.
+ASSET_LIST_RUN_CAP_CONTINUATION = (
+    "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+    '[[fake:script:create_model_3d {"prompt":"a production asset for {name}, round {round}",'
+    '"model":"tripo/tripo-p2/text-to-3d"}|done]]'
+)
+
+
+def _asset_list_presence(api, work, stack, project_id, present=True, tab_id="asset-list-run-tab",
+                         age_seconds=0):
+    """Sends one browser tab's heartbeat through the real presence route.
+
+    age_seconds backdates the stored present row instead of waiting the shipped
+    minimum 30-second grace window; backdating only shortens the wait, the route
+    itself has its own unit tests. The runner still compares the row through its
+    real PresenceStore port."""
+    status, _ = api.json("POST", f"/api/v1/projects/{project_id}/presence",
+                         {"tab_id": tab_id, "state": "present" if present else "leave"})
+    if status not in (200, 204):
+        raise RuntimeError(f"presence heartbeat for {project_id}/{tab_id} answered {status}")
+    if not present or age_seconds <= 0:
+        return
+    import sqlite3
+    database = os.path.join(work, stack, "app.db")
+    connection = sqlite3.connect(database, timeout=10)
+    try:
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S",
+                              time.gmtime(time.time() - age_seconds)) + ".000000000Z"
+        changed = connection.execute(
+            "UPDATE asset_list_presence SET last_seen_at = ? "
+            "WHERE owner_id = ? AND project_id = ? AND tab_id = ?",
+            (stamp, ASSET_LIST_RUN_OWNER, project_id, tab_id)).rowcount
+        connection.commit()
+    finally:
+        connection.close()
+    if changed != 1:
+        raise RuntimeError(f"presence row for {project_id}/{tab_id} is missing; cannot backdate it")
+
+
+def _asset_list_detail(api, project_id, list_id):
+    status, detail = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}")
+    return detail if status == 200 else {}
+
+
+def _asset_list_run_of(detail):
+    return (detail or {}).get("run") or {}
+
+
+def _asset_list_counts(detail):
+    return _asset_list_run_of(detail).get("item_counts") or {}
+
+
+def _wait_asset_list_run(api, project_id, list_id, predicate, seconds=120, beat=None):
+    """Polls one list until predicate holds. beat is the simulated browser
+    heartbeat, written about once a second inside the 5-second Catalog interval."""
+    end = time.time() + seconds
+    detail = {}
+    last_beat = 0.0
+    while time.time() < end:
+        detail = _asset_list_detail(api, project_id, list_id)
+        if detail and predicate(detail):
+            return detail
+        if beat is not None and time.time() - last_beat >= 1.0:
+            beat()
+            last_beat = time.time()
+        time.sleep(0.25)
+    return detail
+
+
+def _asset_list_item_tasks(api, item):
+    session = (item or {}).get("session_id") or ""
+    return session_tasks(api, session) if session else []
+
+
+def _asset_list_messages(api, session):
+    status, body = api.json("GET", f"/api/chat/sessions/{session}/messages")
+    if status != 200:
+        return []
+    return body if isinstance(body, list) else body.get("messages") or []
+
+
+def _asset_list_user_messages(api, session):
+    return [message for message in _asset_list_messages(api, session)
+            if message.get("role") == "user"]
+
+
+def _asset_list_turn_rows(work, stack, sessions):
+    """The persisted chat turn rows of the item sessions, read like _tool_results."""
+    import sqlite3
+    if not sessions:
+        return 0
+    try:
+        database = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        placeholders = ",".join("?" for _ in sessions)
+        count = database.execute(
+            f"SELECT COUNT(*) FROM go_chat_turns WHERE session_id IN ({placeholders})",
+            tuple(sessions)).fetchone()[0]
+        database.close()
+        return count
+    except sqlite3.Error:
+        return -1
+
+
+def _asset_list_run_arm_progress(work, stack_binary, processes, catalog):
+    """A confirmed two-item list advances both items to review with no user
+    message, pauses when the heartbeat stops, resumes when it returns, and does
+    not repeat a turn or task when the stack restarts on the same database."""
+    stack = "asset-list-run"
+    child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+    try:
+        session, project_id, why = _asset_list_setup(api, "自动推进清单")
+        if why:
+            record("#328 run: create the project and session", False, why)
+            return
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
+        beat()
+        result, why = _asset_list_turn(api, work, stack, session, "自动推进清单", [
+            {"kind": "prop", "name": "自动长矛", "description": "低模长矛"},
+            {"kind": "prop", "name": "自动盾牌", "description": "低模圆盾"},
+        ])
+        list_id = str((result or {}).get("list_id") or "")
+        if not list_id:
+            record("#328 run: the agent proposes the list", False, why)
+            return
+        status, _ = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                                     {"decision": "confirm"})
+        # The decision answer carries the list but not the freshly stored run
+        # (run summaries decorate the read routes), so read it back at once.
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_run_of(value).get("status") == "running"
+            and _asset_list_counts(value).get("todo") == 2, seconds=10, beat=beat)
+        confirmed_run = _asset_list_run_of(detail)
+        record("#328 run: confirming stores a running run with both items todo",
+               status == 200 and confirmed_run.get("status") == "running"
+               and confirmed_run.get("item_counts", {}).get("todo") == 2
+               and bool(confirmed_run.get("version")),
+               f"status={status} run={json.dumps(confirmed_run, ensure_ascii=False)[:200]}")
+
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_counts(value).get("review") == 2, seconds=120, beat=beat)
+        counts = _asset_list_counts(detail)
+        run = _asset_list_run_of(detail)
+        items = detail.get("items") or []
+        sessions = [item.get("session_id") or "" for item in items]
+        item_tasks = [(item.get("name"), _asset_list_item_tasks(api, item)) for item in items]
+        continuation_users = [message for item in items
+                              for message in _asset_list_user_messages(api, item.get("session_id") or "")] \
+            if all(sessions) else []
+        record("#328 run: both items reach review without a person's message",
+               counts.get("review") == 2 and counts.get("todo") == 0
+               and counts.get("working") == 0 and counts.get("failed") == 0
+               and run.get("status") == "running"
+               and len(items) == 2
+               and all(item.get("state") == "review" and item.get("round") == 1
+                       and not item.get("state_reason") for item in items)
+               and len(_asset_list_user_messages(api, session)) == 1
+               and len(continuation_users) == 2
+               and all("继续制作清单项" in str(message.get("content")) for message in continuation_users),
+               f"counts={counts} items={[(i.get('state'), i.get('round')) for i in items]} "
+               f"source user messages={len(_asset_list_user_messages(api, session))}")
+        record("#328 run: each item ran exactly one fake upstream 3D step",
+               len(items) == 2 and all(sessions)
+               and all(len(tasks) == 1 and tasks[0].get("state") == "SUCCEEDED"
+                       and tasks[0].get("capability") == "text-to-3d"
+                       for _, tasks in item_tasks),
+               f"tasks={[(name, [(task.get('state'), task.get('capability')) for task in tasks]) for name, tasks in item_tasks]}")
+
+        # A heartbeat older than the grace window reads as absent (the Catalog's
+        # minimum grace is 30 seconds, so the row is backdated instead of slept);
+        # a paused run must not create another Task.
+        _asset_list_presence(api, work, stack, project_id, age_seconds=60)
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_run_of(value).get("pause_reason") == "presence", seconds=20)
+        run = _asset_list_run_of(detail)
+        tasks_before = {item.get("id"): len(_asset_list_item_tasks(api, item)) for item in items}
+        time.sleep(2)
+        tasks_after = {item.get("id"): len(_asset_list_item_tasks(api, item)) for item in items}
+        record("#328 run: a stopped heartbeat pauses the run and starts no task",
+               run.get("status") == "paused" and run.get("pause_reason") == "presence"
+               and tasks_before == tasks_after,
+               f"run={run.get('status')}/{run.get('pause_reason')} tasks {tasks_before} -> {tasks_after}")
+
+        beat()
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_run_of(value).get("status") == "running", seconds=20, beat=beat)
+        run = _asset_list_run_of(detail)
+        record("#328 run: a returning heartbeat resumes the run",
+               run.get("status") == "running" and not run.get("pause_reason")
+               and _asset_list_counts(detail).get("review") == 2,
+               f"run={run.get('status')}/{run.get('pause_reason')} counts={_asset_list_counts(detail)}")
+
+        # Restarting on the same database reconciles the finished item turns
+        # without opening another turn or submitting another Task.
+        beat()
+        turns_before = _asset_list_turn_rows(work, stack, sessions)
+        tasks_before = {item.get("id"): sorted(str(task.get("id") or task.get("task_id"))
+                                               for task in _asset_list_item_tasks(api, item))
+                        for item in items}
+        processes.stop(child)
+        child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+        for _ in range(4):
+            beat()
+            time.sleep(0.5)
+        detail = _asset_list_detail(api, project_id, list_id)
+        turns_after = _asset_list_turn_rows(work, stack, sessions)
+        tasks_after = {item.get("id"): sorted(str(task.get("id") or task.get("task_id"))
+                                              for task in _asset_list_item_tasks(api, item))
+                       for item in (detail.get("items") or [])}
+        record("#328 run: restarting on the same database repeats no turn or task",
+               turns_before >= 0 and turns_before == turns_after
+               and tasks_before == tasks_after
+               and _asset_list_counts(detail).get("review") == 2,
+               f"turn rows {turns_before} -> {turns_after} tasks {tasks_before} -> {tasks_after}")
+    finally:
+        processes.stop(child)
+
+
+def _asset_list_run_arm_presence(work, stack_binary, processes, catalog):
+    """No heartbeat before confirmation: the runner pauses the run before its
+    first item turn. One returning heartbeat resumes it and finishes both
+    items, so the resume really continues the work rather than only flipping a
+    status."""
+    stack = "asset-list-run-paused"
+    child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+    try:
+        session, project_id, why = _asset_list_setup(api, "在场推进清单")
+        if why:
+            record("#328 run presence: create the project and session", False, why)
+            return
+        result, why = _asset_list_turn(api, work, stack, session, "在场推进清单", [
+            {"kind": "prop", "name": "在场长矛", "description": "低模长矛"},
+            {"kind": "prop", "name": "在场圆盾", "description": "低模圆盾"},
+        ])
+        list_id = str((result or {}).get("list_id") or "")
+        if not list_id:
+            record("#328 run presence: the agent proposes the list", False, why)
+            return
+        status, _ = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                                     {"decision": "confirm"})
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_run_of(value).get("pause_reason") == "presence", seconds=30)
+        run = _asset_list_run_of(detail)
+        items = detail.get("items") or []
+        record("#328 run presence: a run without presence pauses before its first turn",
+               status == 200 and run.get("status") == "paused"
+               and run.get("pause_reason") == "presence"
+               and _asset_list_counts(detail).get("todo") == 2
+               and all(not item.get("session_id") for item in items),
+               f"status={status} run={run.get('status')}/{run.get('pause_reason')} "
+               f"counts={_asset_list_counts(detail)} sessions={[bool(i.get('session_id')) for i in items]}")
+
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
+        beat()
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_counts(value).get("review") == 2, seconds=120, beat=beat)
+        items = detail.get("items") or []
+        item_tasks = [_asset_list_item_tasks(api, item) for item in items]
+        record("#328 run presence: a returning heartbeat resumes the run and finishes both items",
+               _asset_list_run_of(detail).get("status") == "running"
+               and _asset_list_counts(detail).get("review") == 2
+               and len(items) == 2 and all(item.get("state") == "review" for item in items)
+               and all(len(tasks) == 1 and tasks[0].get("state") == "SUCCEEDED" for tasks in item_tasks),
+               f"run={_asset_list_run_of(detail).get('status')} counts={_asset_list_counts(detail)} "
+               f"tasks={[[task.get('state') for task in tasks] for tasks in item_tasks]}")
+    finally:
+        processes.stop(child)
+
+
+def _asset_list_run_arm_failure(work, stack_binary, processes):
+    """A report of failure fails only its own item: the runner turns to the next
+    item, and two reported failures complete the run instead of pausing it."""
+    stack = "asset-list-run-failure"
+    catalog = private_catalog(
+        work, name="catalog-asset-list-run-failure.json",
+        execution_enabled=True, poll_interval_milliseconds=500,
+        presence_heartbeat_seconds=5, presence_grace_seconds=30,
+        max_parallel_items=1, max_rounds_per_item=2,
+        continuation_message=ASSET_LIST_RUN_FAILURE_CONTINUATION)
+    child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+    try:
+        session, project_id, why = _asset_list_setup(api, "失败隔离清单")
+        if why:
+            record("#328 run failure: create the project and session", False, why)
+            return
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
+        beat()
+        result, why = _asset_list_turn(api, work, stack, session, "失败隔离清单", [
+            {"kind": "prop", "name": "失败长矛", "description": "低模长矛"},
+            {"kind": "prop", "name": "失败圆盾", "description": "低模圆盾"},
+        ])
+        list_id = str((result or {}).get("list_id") or "")
+        if not list_id:
+            record("#328 run failure: the agent proposes the list", False, why)
+            return
+        status, _ = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                             {"decision": "confirm"})
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_counts(value).get("failed") == 2
+            and _asset_list_run_of(value).get("status") == "completed", seconds=60, beat=beat)
+        run = _asset_list_run_of(detail)
+        items = detail.get("items") or []
+        item_tasks = [_asset_list_item_tasks(api, item) for item in items]
+        record("#328 run failure: a reported failure fails only its item and the next still runs",
+               status == 200 and _asset_list_counts(detail).get("failed") == 2
+               and _asset_list_counts(detail).get("todo") == 0
+               and run.get("status") == "completed" and not run.get("pause_reason")
+               and len(items) == 2
+               and all(item.get("state") == "failed" and item.get("session_id")
+                       and item.get("state_reason") == "fake run failure" for item in items)
+               and all(not tasks for tasks in item_tasks),
+               f"run={run.get('status')}/{run.get('pause_reason')} counts={_asset_list_counts(detail)} "
+               f"items={[(i.get('state'), i.get('state_reason')) for i in items]} "
+               f"tasks={[[task.get('state') for task in tasks] for tasks in item_tasks]}")
+    finally:
+        processes.stop(child)
+
+
+def _asset_list_run_arm_step_cap(work, stack_binary, processes):
+    """An account list cap of one lets round one create its task; round two's
+    create is refused, so the item stays working, the run pauses at step_cap and
+    the second item never starts or spends a step."""
+    stack = "asset-list-run-cap"
+    catalog = private_catalog(
+        work, name="catalog-asset-list-run-cap.json",
+        execution_enabled=True, poll_interval_milliseconds=500,
+        presence_heartbeat_seconds=5, presence_grace_seconds=30,
+        max_parallel_items=1, max_rounds_per_item=2,
+        continuation_message=ASSET_LIST_RUN_CAP_CONTINUATION)
+    child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+    try:
+        session, project_id, why = _asset_list_setup(api, "步数上限清单")
+        if why:
+            record("#328 run step cap: create the project and session", False, why)
+            return
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
+        beat()
+        status, policy = api.json("GET", "/api/v1/account/step-policy")
+        if status == 200:
+            status, capped = api.json("PUT", "/api/v1/account/step-policy", {
+                "expected_version": policy.get("version") or 0,
+                "list": {"mode": "cap", "cap": 1},
+                "mcp": {"mode": "unlimited", "cap": 20},
+            })
+        else:
+            capped = {}
+        record("#328 run step cap: the account's list step setting is a cap of one",
+               status == 200 and (capped.get("list") or {}).get("mode") == "cap"
+               and (capped.get("list") or {}).get("cap") == 1,
+               f"status={status} policy={json.dumps(capped, ensure_ascii=False)[:200]}")
+        result, why = _asset_list_turn(api, work, stack, session, "步数上限清单", [
+            {"kind": "prop", "name": "上限长矛", "description": "低模长矛"},
+            {"kind": "prop", "name": "上限圆盾", "description": "低模圆盾"},
+        ])
+        list_id = str((result or {}).get("list_id") or "")
+        if not list_id:
+            record("#328 run step cap: the agent proposes the list", False, why)
+            return
+        status, _ = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                             {"decision": "confirm"})
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_run_of(value).get("pause_reason") == "step_cap", seconds=90, beat=beat)
+        run = _asset_list_run_of(detail)
+        items = detail.get("items") or []
+        first = items[0] if items else {}
+        second = items[1] if len(items) > 1 else {}
+        first_tasks = _asset_list_item_tasks(api, first)
+        second_tasks = _asset_list_item_tasks(api, second)
+        record("#328 run step cap: the second round at the cap blocks the item and pauses the run",
+               status == 200 and run.get("status") == "paused"
+               and run.get("pause_reason") == "step_cap"
+               and first.get("state") == "working" and first.get("round") == 2
+               and second.get("state") == "todo" and not second.get("session_id")
+               and len(first_tasks) == 1 and first_tasks[0].get("state") == "SUCCEEDED"
+               and not second_tasks,
+               f"run={run.get('status')}/{run.get('pause_reason')} "
+               f"items={[(i.get('state'), i.get('round')) for i in items]} "
+               f"tasks={[[task.get('state') for task in tasks] for tasks in (first_tasks, second_tasks)]}")
+        time.sleep(2)
+        detail = _asset_list_detail(api, project_id, list_id)
+        first_after = _asset_list_item_tasks(api, (detail.get("items") or [{}])[0])
+        record("#328 run step cap: the paused run submits no further task",
+               _asset_list_run_of(detail).get("pause_reason") == "step_cap"
+               and len(first_after) == 1,
+               f"pause={_asset_list_run_of(detail).get('pause_reason')} tasks={len(first_after)}")
+    finally:
+        processes.stop(child)
+
+
+def scenario_asset_list_run(work, stack_binary, processes):
+    """#328: a confirmed production list runs itself on the fake stack. Four
+    private stacks: the progress arm (both items reach review with no human
+    message, a stopped heartbeat pauses and a returning one resumes, a restart
+    repeats no turn or task), the presence arm (no heartbeat before
+    confirmation pauses the run before its first turn and a heartbeat finishes
+    it), the failure arm (a reported failure turns to the next item) and the
+    step-cap arm (a one-step account cap blocks round two and pauses the run).
+    No arm sends a chat message after the proposal; the fake script in the
+    runner's continuation drives every item turn."""
+    with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
+        execution_disabled = json.load(handle)["application"]["asset_list"]["execution"]["enabled"]
+    if execution_disabled:
+        record("#328 run: the shipped Catalog keeps execution off", False,
+               f"execution.enabled={execution_disabled!r}")
+        return
+    catalog = private_catalog(
+        work, name="catalog-asset-list-run.json",
+        execution_enabled=True, poll_interval_milliseconds=500,
+        presence_heartbeat_seconds=5, presence_grace_seconds=30,
+        max_parallel_items=1, max_rounds_per_item=2,
+        continuation_message=ASSET_LIST_RUN_CONTINUATION)
+    record("#328 run: the shipped Catalog keeps execution off and the private one turns it on", True,
+           "execution.enabled=false -> true; poll 500ms, heartbeat 5s, grace 30s, parallel 1, rounds 2")
+    _asset_list_run_arm_progress(work, stack_binary, processes, catalog)
+    _asset_list_run_arm_presence(work, stack_binary, processes, catalog)
+    _asset_list_run_arm_failure(work, stack_binary, processes)
+    _asset_list_run_arm_step_cap(work, stack_binary, processes)
+
+
 def scenario_asset_list(work, stack_binary, processes, catalog):
     """#327: the production list workflow on the fake stack. Three private
     stacks: the shipped Catalog for the workflow, every rigging Offering
@@ -5856,7 +6328,7 @@ def scenario_asset_list(work, stack_binary, processes, catalog):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-run,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -5866,7 +6338,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "asset-list", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "asset-list", "asset-list-run", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -5973,6 +6445,10 @@ def main():
             # draft TTL and the availability arm needs every rigging Offering
             # disabled; the workflow arm keeps the shipped Catalog.
             scenario_asset_list(work, stack_binary, processes, catalog)
+        if "asset-list-run" in selected:
+            # #328: its own stacks, because execution is off in the shipped
+            # Catalog and every arm needs a short poll and grace window.
+            scenario_asset_list_run(work, stack_binary, processes)
         check_no_real_upstream(work)
     finally:
         processes.stop_all()
