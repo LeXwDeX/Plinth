@@ -431,6 +431,7 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
                     onDecided={() => void load()}
                     onRunChanged={() => void load()}
                     onEdited={() => void load()}
+                    onStale={() => void load()}
                   />
                 </li>
               ) : (

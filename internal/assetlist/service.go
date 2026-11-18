@@ -288,6 +288,13 @@ func (service *Service) Edit(ctx context.Context, input EditInput) (List, error)
 		return List{}, err
 	}
 	now := service.clock()
+	// The pre-check runs before any crop instruction is cut: a stale version or
+	// a non-draft (or expired) list must not leave new crop assets behind. The
+	// repository's edit transaction re-checks the same rules, so the CAS
+	// remains authoritative.
+	if err := service.precheckEdit(ctx, ownerID, projectID, listID, input.ExpectedVersion, now); err != nil {
+		return List{}, err
+	}
 	items, err := service.buildItems(ctx, ownerID, strings.TrimSpace(input.SessionID), input.Items, now, true)
 	if err != nil {
 		return List{}, err
@@ -308,6 +315,43 @@ func (service *Service) Edit(ctx context.Context, input EditInput) (List, error)
 		return List{}, err
 	}
 	return service.decorate(stored), nil
+}
+
+// precheckEdit reads the draft once and applies the edit's state and version
+// rules before any side effect (a crop instruction cuts and stores an asset).
+// The repository repeats the checks inside its write transaction; this read is
+// only the early refusal that keeps a losing edit from storing crops. An
+// expired draft still goes through the repository's edit transaction with no
+// items, because that transaction records the expiry, exactly as a normal edit
+// would; it refuses before it touches any item.
+func (service *Service) precheckEdit(ctx context.Context, ownerID, projectID, listID string,
+	expectedVersion int64, now time.Time,
+) error {
+	current, err := service.repository.GetList(ctx, ownerID, projectID, listID)
+	if err != nil {
+		return err
+	}
+	if current.Status == StatusExpired {
+		return ErrExpired
+	}
+	if current.Status != StatusDraft {
+		return ErrConflict
+	}
+	if !current.ExpiresAt.IsZero() && !now.Before(current.ExpiresAt) {
+		if _, err := service.repository.EditList(ctx, List{
+			ID:        listID,
+			OwnerID:   ownerID,
+			ProjectID: projectID,
+			UpdatedAt: now,
+		}, nil, expectedVersion); err != nil {
+			return err
+		}
+		return ErrExpired
+	}
+	if current.Version != expectedVersion {
+		return ErrConflict
+	}
+	return nil
 }
 
 // Decide confirms, rejects or replaces a draft. Confirming while another list

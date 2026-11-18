@@ -44,12 +44,14 @@ export interface AssetListCardProps {
 type Conflict = { id: string; title: string };
 
 /**
- * #331: the shortest side a new crop region may have, in source pixels. It
- * mirrors `application.asset_list.decompose.crop.minimum_short_edge`, which the
- * public Schema keeps server-side; the server refuses anything smaller with
+ * #331: the fallback shortest side a crop region may have, in source pixels.
+ * The public Schema carries the current value as
+ * `application.asset_list.limits.minimum_crop_short_edge` (projected from
+ * `decompose.crop.minimum_short_edge`); an older server omits it and the editor
+ * falls back to this constant. The server refuses anything smaller with
  * `asset_list_region_too_small`, so the editor refuses it first.
  */
-const MIN_CROP_SHORT_EDGE = 64;
+export const MIN_CROP_SHORT_EDGE = 64;
 
 /** #331: one item while the card is editing. */
 interface DraftItem {
@@ -85,6 +87,19 @@ interface PendingCrop {
   region: CropRegion;
 }
 
+/**
+ * #331: the list as editing began. A save carries this snapshot's version,
+ * title and brief, never the live detail's: a list that advanced under the
+ * draft must not be overwritten with a version the person never edited.
+ */
+interface EditBaseline {
+  id: string;
+  version: number;
+  title: string;
+  brief: Record<string, unknown>;
+  status: string;
+}
+
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
@@ -117,6 +132,25 @@ export function unionRegion(first: CropRegion, second: CropRegion): CropRegion {
   };
 }
 
+/** #331: a reference's identity while a merge de-duplicates the two sides. */
+function referenceIdentity(reference: AssetListReference): string {
+  if (reference.input_asset_id) return `input:${reference.input_asset_id}`;
+  if (reference.asset_id) return `asset:${reference.asset_id}`;
+  return `task:${reference.task_id ?? ''}`;
+}
+
+/**
+ * #331: the item's crop reference is its last input-asset reference, matching
+ * the server's "last cut picture" rule. A merge keeps every other reference and
+ * drops this one: the merged item gets its own new cut.
+ */
+function cropReferenceIndex(references: AssetListReference[]): number {
+  for (let index = references.length - 1; index >= 0; index -= 1) {
+    if (references[index].input_asset_id) return index;
+  }
+  return -1;
+}
+
 /**
  * #327: one production list as the chat and the project panel show it. The
  * card renders the list's own states and kinds from the Product Schema, offers
@@ -141,6 +175,8 @@ export function AssetListCard({
   const [skipPending, setSkipPending] = useState<string | null>(null);
   // #331: a draft list being edited. Null means the read-only rendering.
   const [draft, setDraft] = useState<DraftItem[] | null>(null);
+  // #331: the snapshot every save is built from, taken when editing began.
+  const [baseline, setBaseline] = useState<EditBaseline | null>(null);
   const [mergeSelection, setMergeSelection] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   // #331: the source picture's drawing surface: a live drag, a drawn region
@@ -192,8 +228,19 @@ export function AssetListCard({
           ? text('ui.asset_list.rejected_hint')
           : '';
   const canDecide = detail.status === 'draft' && !expired;
-  // #331: only an unexpired draft is editable; every other status stays read-only.
-  const canEdit = canDecide;
+  // #331: only an unexpired, un-replaced draft is editable; every other status
+  // stays read-only.
+  const canEdit = canDecide && !detail.superseded_by;
+  // #331: the shared cache advanced past the snapshot this draft was built from
+  // (another tab, the Agent, or a parent re-read). Saving would submit a list
+  // the person never edited, so the editor locks until an explicit reload.
+  const editOutdated = Boolean(draft && baseline
+    && (detail.id !== baseline.id || detail.version !== baseline.version));
+  // #331: a drawn box waiting for its name, or a drag still in flight, is an
+  // unfinished gesture: saving and the entries that would silently clear it are
+  // held back, and only an explicit cancel drops the typed name.
+  const cropFormOpen = Boolean(pendingCrop || drag);
+  const saveDisabled = saving || editOutdated || cropFormOpen;
   const nameMaxLength = schema.asset_list?.limits.name_max_length;
   // #328: only a confirmed, live list runs; stopped and completed are final.
   // Start needs the run row created at confirm: its idle state is the only one
@@ -223,15 +270,23 @@ export function AssetListCard({
     return text(serverDetail) || serverDetail || text('ui.asset_list.edit_save_failed');
   };
 
-  // #331: the first input-asset reference is the item's reference picture.
-  // Task-output references have no input picture; the card then shows no tile.
+  // #331: the item's last input-asset reference is its reference picture,
+  // matching the server's "last cut picture" rule. Task-output references have
+  // no input picture; the card then shows no tile.
   const inputAssetURL = (assetID: string): string => {
     const template = schema.runtime.http.routes.asset_item;
     if (!assetID || !template) return '';
     return previewAssetUrl(template.replace('{assetID}', encodeURIComponent(assetID)));
   };
-  const referenceImageURL = (references: AssetListReference[]): string =>
-    inputAssetURL(references.find((reference) => reference.input_asset_id)?.input_asset_id ?? '');
+  const referenceImageURL = (references: AssetListReference[]): string => {
+    const index = cropReferenceIndex(references);
+    return index >= 0 ? inputAssetURL(references[index].input_asset_id ?? '') : '';
+  };
+  // #331: every reference of a merged item except its own crop reference.
+  const otherReferences = (entry: DraftItem): AssetListReference[] => {
+    const index = cropReferenceIndex(entry.references);
+    return index >= 0 ? entry.references.filter((_, position) => position !== index) : entry.references;
+  };
   // #331: the detail carries the provenance of the item's crop reference; an
 // item without one (no crop, or an older server) offers no merge entry.
   const originOf = (item: AssetListItem): AssetListCrop | undefined => {
@@ -278,6 +333,8 @@ export function AssetListCard({
     ? { width: measuredWidth, height: measuredHeight }
     : naturalSourceSize;
   const maxItemsPerImage = schema.asset_list?.limits.maximum_items_per_image;
+  // The current bound from the public Schema; an older server omits it.
+  const minimumCropShortEdge = schema.asset_list?.limits.minimum_crop_short_edge ?? MIN_CROP_SHORT_EDGE;
   const sourceItemCount = draft
     ? draft.filter((entry) => entry.origin?.source_input_asset_id === sourceID).length
     : 0;
@@ -300,6 +357,13 @@ export function AssetListCard({
     setError(null);
     setMergeSelection([]);
     cancelCropGesture();
+    setBaseline({
+      id: detail.id,
+      version: detail.version,
+      title: detail.title,
+      brief: detail.brief,
+      status: detail.status,
+    });
     setDraft(items.map((item): DraftItem => ({
       key: item.id,
       kind: item.kind,
@@ -314,9 +378,17 @@ export function AssetListCard({
 
   const cancelEditing = () => {
     setDraft(null);
+    setBaseline(null);
     setMergeSelection([]);
     setError(null);
     cancelCropGesture();
+  };
+
+  /** #331: the explicit reload a locked editor asks for: discard the draft and
+   * rebuild it from the latest detail, then let the parent re-read the list. */
+  const reloadLatest = () => {
+    startEditing();
+    onStale?.();
   };
 
   const renameDraft = (key: string, name: string) => {
@@ -345,8 +417,10 @@ export function AssetListCard({
   const mergeMismatch = mergeHasOrigins && !mergeReady;
 
   // Merge is local until save: the first selected item keeps its name,
-  // description and references, and carries one crop instruction over the
-  // united region; the second item leaves the list.
+  // description, kind, route and references, and carries one crop instruction
+  // over the united region; the second item's plain references (everything but
+  // its own crop picture) join the first, de-duplicated; the second item leaves
+  // the list.
   const mergeSelected = () => {
     if (!draft || !mergeReady) return;
     const first = mergeFirst;
@@ -359,9 +433,14 @@ export function AssetListCard({
       source_input_asset_id: origin.source_input_asset_id,
       region: origin.region,
     };
+    const references = [...first.references, ...otherReferences(second)].filter(
+      (reference, position, all) => all.findIndex(
+        (candidate) => referenceIdentity(candidate) === referenceIdentity(reference),
+      ) === position,
+    );
     setDraft(draft
       .filter((entry) => entry.key !== second.key)
-      .map((entry) => (entry.key === first.key ? { ...entry, origin, crop } : entry)));
+      .map((entry) => (entry.key === first.key ? { ...entry, references, origin, crop } : entry)));
     setMergeSelection([]);
   };
 
@@ -379,8 +458,8 @@ export function AssetListCard({
   const cropTooSmall = (region: CropRegion, display: { width: number; height: number }): boolean => {
     const sourceWidth = sourceSize?.width || display.width;
     const sourceHeight = sourceSize?.height || display.height;
-    return region.width * sourceWidth < MIN_CROP_SHORT_EDGE
-      || region.height * sourceHeight < MIN_CROP_SHORT_EDGE;
+    return region.width * sourceWidth < minimumCropShortEdge
+      || region.height * sourceHeight < minimumCropShortEdge;
   };
 
   const pointerPoint = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -395,7 +474,9 @@ export function AssetListCard({
   };
 
   const startCropDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draft || saving) return;
+    // A naming form is an unfinished gesture: a new drag may not silently drop
+    // the typed name; the person confirms or cancels it first.
+    if (!draft || saving || pendingCrop) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     const point = pointerPoint(event);
     if (!point) return;
@@ -444,14 +525,18 @@ export function AssetListCard({
     const region = regionFromDrag(finished);
     if (!usableRegion(region)) return;
     if (cropTooSmall(region, finished)) {
-      setCropError(formatSchemaText(text('ui.asset_list.edit_crop_too_small'), { minimum: MIN_CROP_SHORT_EDGE }));
+      setCropError(formatSchemaText(text('ui.asset_list.edit_crop_too_small'), { minimum: minimumCropShortEdge }));
       return;
     }
     if (recropKey) {
       applyRecrop(recropKey, region);
       return;
     }
-    if (maxItemsPerImage && sourceItemCount >= maxItemsPerImage) {
+    // The drawn region is one pending new item: the edited list already holds
+    // `sourceItemCount` items of this source, so the addition would be
+    // `sourceItemCount + 1`. Merging and re-cropping never reach this check and
+    // never increase the count.
+    if (maxItemsPerImage && sourceItemCount + 1 > maxItemsPerImage) {
       setCropError(formatSchemaText(text('ui.asset_list.edit_crop_image_limit'), { maximum: maxItemsPerImage }));
       return;
     }
@@ -464,6 +549,12 @@ export function AssetListCard({
     if (!draft || !pendingCrop) return;
     const name = newName.trim();
     if (!name || !newKind) return;
+    // The Schema can change while the form is open; the pending item is the
+    // addition the limit counts.
+    if (maxItemsPerImage && sourceItemCount + 1 > maxItemsPerImage) {
+      setCropError(formatSchemaText(text('ui.asset_list.edit_crop_image_limit'), { maximum: maxItemsPerImage }));
+      return;
+    }
     const crop: CropInstruction = { source_input_asset_id: pendingCrop.sourceID, region: pendingCrop.region };
     newItemKey.current += 1;
     setDraft([...draft, {
@@ -483,32 +574,61 @@ export function AssetListCard({
   };
 
   // #331: Esc leaves whichever crop gesture is in flight (a drag, the naming
-  // form, or a re-crop); it never leaves the whole edit.
+  // form, or a re-crop); it never leaves the whole edit. The listener runs in
+  // the capture phase and prevents the default so an enclosing SideDrawer,
+  // which closes on a not-prevented Escape, stays open for as long as the
+  // gesture lasts. With no gesture the listener is not installed and Escape
+  // keeps its usual meaning.
   const selectingCrop = Boolean(drag || pendingCrop || recropKey);
   useEffect(() => {
     if (!draft || !selectingCrop) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      event.stopPropagation();
+      event.preventDefault();
       setDrag(null);
       setPendingCrop(null);
       setRecropKey(null);
       setCropError('');
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [draft, selectingCrop]);
 
+  // #331: a draft stays editable only while the card still shows the same,
+  // unexpired draft the baseline was taken from. A decision elsewhere, an
+  // expiry, a replacement or a different list ends the edit and its gestures;
+  // the parent re-reads its summary so the card and the panel agree.
+  useEffect(() => {
+    if (!draft) return;
+    const editable = detail.status === 'draft'
+      && detail.effective_status === 'draft'
+      && !detail.superseded_by;
+    if (editable && detail.id === baseline?.id) return;
+    setDraft(null);
+    setBaseline(null);
+    setMergeSelection([]);
+    setDrag(null);
+    setPendingCrop(null);
+    setRecropKey(null);
+    setCropError('');
+    setError(null);
+    onStale?.();
+  }, [draft, baseline, detail.id, detail.status, detail.effective_status, detail.superseded_by, onStale]);
+
   const save = async () => {
-    if (!draft || saving) return;
+    // The baseline is the edited list: a cache that advanced under the draft,
+    // an unfinished gesture or an in-flight save all hold the request back.
+    if (!draft || !baseline || saveDisabled) return;
     setSaving(true);
     setError(null);
     try {
       const payload: AssetListEditInput = {
-        title: detail.title,
-        expected_version: detail.version,
+        // The snapshot, not the live detail: the request replaces exactly the
+        // list the person edited.
+        title: baseline.title,
+        expected_version: baseline.version,
         // The route replaces the brief too; omitting it would clear it.
-        brief: detail.brief,
+        brief: baseline.brief,
         items: draft.map((entry): AssetListItemInput => ({
           kind: entry.kind,
           name: entry.name,
@@ -520,17 +640,33 @@ export function AssetListCard({
           ...(entry.crop ? { crop: entry.crop } : {}),
         })),
       };
-      const updated = await client.edit(projectId, detail.id, payload);
+      const updated = await client.edit(projectId, baseline.id, payload);
       setDraft(null);
+      setBaseline(null);
       setMergeSelection([]);
+      cancelCropGesture();
       onEdited?.(updated);
     } catch (failure) {
-      // A concurrent edit is not overwritten: the parent re-reads the list,
-      // the local draft stays on screen and a later save uses its version.
-      if (failure instanceof AssetListError && failure.status === 409) {
+      const code = failure instanceof AssetListError ? failure.code : '';
+      if (failure instanceof AssetListError && failure.status === 409 && code === 'conflict') {
+        // A concurrent edit is not overwritten: the parent re-reads the list,
+        // the local draft stays on screen, and the reload action appears once
+        // the new detail arrives.
         setError(text('ui.asset_list.edit_conflict'));
         onStale?.();
+      } else if (code === 'asset_list_expired') {
+        // The server names the expiry; show its copy and leave the editor, the
+        // draft can no longer be stored.
+        setError(editFailureMessage(failure));
+        setDraft(null);
+        setBaseline(null);
+        setMergeSelection([]);
+        cancelCropGesture();
+        onStale?.();
       } else {
+        // Any other refusal (or a network failure) shows the server's own
+        // detail, or the card's retry copy when there is none. No reload is
+        // promised here.
         setError(editFailureMessage(failure));
       }
     } finally {
@@ -653,7 +789,7 @@ export function AssetListCard({
                 variant="outline"
                 size="xs"
                 className="ml-auto"
-                disabled={saving}
+                disabled={saving || cropFormOpen}
                 onClick={() => {
                   setRecropKey(null);
                   setPendingCrop(null);
@@ -873,7 +1009,7 @@ export function AssetListCard({
                     size="xs"
                     className={canMerge(entry) ? '' : 'ml-auto'}
                     aria-pressed={recropKey === entry.key}
-                    disabled={saving}
+                    disabled={saving || cropFormOpen}
                     onClick={() => {
                       setRecropKey(entry.key);
                       setPendingCrop(null);
@@ -1012,27 +1148,47 @@ export function AssetListCard({
           </p>
         ) : null}
         {draft ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Action
-              type="button"
-              size="sm"
-              loading={saving}
-              disabled={saving}
-              onClick={() => void save()}
-              data-testid="asset-list-save"
-            >
-              {text('ui.asset_list.edit_save')}
-            </Action>
-            <Action
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={saving}
-              onClick={cancelEditing}
-              data-testid="asset-list-cancel"
-            >
-              {text('ui.asset_list.edit_cancel')}
-            </Action>
+          <div className="flex flex-col gap-1.5">
+            {editOutdated ? (
+              <div
+                className="flex flex-wrap items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 p-2 text-[11px] leading-4 text-warning"
+                data-testid="asset-list-edit-stale"
+              >
+                <p>{text('ui.asset_list.edit_stale')}</p>
+                <Action
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={saving}
+                  onClick={reloadLatest}
+                  data-testid="asset-list-edit-reload"
+                >
+                  {text('ui.asset_list.edit_reload')}
+                </Action>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Action
+                type="button"
+                size="sm"
+                loading={saving}
+                disabled={saveDisabled}
+                onClick={() => void save()}
+                data-testid="asset-list-save"
+              >
+                {text('ui.asset_list.edit_save')}
+              </Action>
+              <Action
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={saving}
+                onClick={cancelEditing}
+                data-testid="asset-list-cancel"
+              >
+                {text('ui.asset_list.edit_cancel')}
+              </Action>
+            </div>
           </div>
         ) : null}
         {!draft && canEdit ? (

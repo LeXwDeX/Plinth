@@ -82,12 +82,13 @@ type AssetListLimitsSchema struct {
 }
 
 // AssetListDecomposeSchema 是 application.asset_list.decompose（#331）：从一张
-// 源图拆出多个清单项的边界与文案。maximum_items_per_image 就是裁剪服务的
-// 每图上限，后续提案阶段读同一个 Catalog 值；crop 的数值只用于服务端，不进
+// 源图拆出多个清单项的边界与文案。maximum_items_per_image 是产品口径的每图
+// 项数上限，提案与编辑按它拒绝；裁剪服务另有按它四倍配置的存储护栏，用来
+// 容纳反复重框累积的旧裁图。crop 的区域像素与字节数值只用于服务端，不进
 // 公开投影。
 type AssetListDecomposeSchema struct {
-	// MaximumItemsPerImage 是一张源图最多拆出的资产项（默认 24）：场景图常见
-	// 10–20 个物体，每张裁图都是独立输入资产，需要限制存储与编码成本。
+	// MaximumItemsPerImage 是一张源图最多被清单引用的资产项（默认 24）：场景
+	// 图常见 10–20 个物体，每张裁图都是独立输入资产，需要限制存储与编码成本。
 	MaximumItemsPerImage int                          `json:"maximum_items_per_image"`
 	Crop                 AssetListDecomposeCropSchema `json:"crop"`
 	// DefaultRouteWithReference 是清单项带裁剪参考图时采用的路线：必须先重画
@@ -116,6 +117,8 @@ type AssetListDecomposeMessagesSchema struct {
 	RegionInvalid string `json:"region_invalid"`
 	// RegionTooSmall 拒绝最短边不足的区域。{minimum}
 	RegionTooSmall string `json:"region_too_small"`
+	// ImageTooLarge 拒绝超过字节或像素上限的源图、区域或裁图。
+	ImageTooLarge string `json:"image_too_large"`
 	// ImageItemLimit 拒绝超过单图资产项上限的拆解。{maximum}
 	ImageItemLimit string `json:"image_item_limit"`
 	// ReferenceInvalid 拒绝不存在、非图片或违反每项一张/同一源图规则的裁剪
@@ -230,11 +233,13 @@ type PublicAssetListSchema struct {
 }
 
 // PublicAssetListLimitsSchema 是浏览器可见的清单上限：清单自身的数量与文本
-// 边界，加上可公开的单图拆解上限（浏览器据此解释拆解卡）。裁图几何与字节
-// 限制留在私有 decompose 段。
+// 边界，加上可公开的单图拆解上限（浏览器据此解释拆解卡）。裁图区域的像素与
+// 字节上限留在私有 decompose 段；裁图的最短边是编辑器在本地先拒绝过小框选
+// 所需的公开值。
 type PublicAssetListLimitsSchema struct {
 	AssetListLimitsSchema
 	MaximumItemsPerImage int `json:"maximum_items_per_image"`
+	MinimumCropShortEdge int `json:"minimum_crop_short_edge"`
 }
 
 // PublicAssetListPresenceSchema 是公开的在场参数：只有心跳间隔。

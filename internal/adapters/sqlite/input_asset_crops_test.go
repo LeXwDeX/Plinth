@@ -3,7 +3,9 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -160,6 +162,78 @@ func TestInputAssetCropRepositoryConflictReturnsExistingRow(t *testing.T) {
 	count, err := crops.CountBySource(ctx, "owner-a", "source_1")
 	if err != nil || count != 1 {
 		t.Fatalf("count = %d, %v; want 1", count, err)
+	}
+}
+
+// #331 review: the crop-count guard and the insert share one write
+// transaction, so two batches that both see count = limit-1 cannot both
+// insert. The loser gets a LimitError and the source keeps exactly one row.
+func TestInputAssetCropRepositoryInsertWithinLimitIsSerialized(t *testing.T) {
+	repository, crops := newInputAssetCropRepository(t)
+	seedInputAssetForCrops(t, repository, "crop_1", "owner-a", listcrop.CropAssetType, "image/png")
+	seedInputAssetForCrops(t, repository, "crop_2", "owner-a", listcrop.CropAssetType, "image/png")
+	ctx := context.Background()
+	first := sampleCrop()
+	second := first
+	second.AssetID = "crop_2"
+	second.PixelRect = listcrop.PixelRect{X0: 90, Y0: 120, X1: 330, Y1: 360}
+	second.SHA256 = "sha-crop-2"
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var group sync.WaitGroup
+	for _, crop := range []listcrop.Crop{first, second} {
+		group.Add(1)
+		go func(crop listcrop.Crop) {
+			defer group.Done()
+			<-start
+			_, _, err := crops.InsertOrGetWithinLimit(ctx, crop, 1)
+			results <- err
+		}(crop)
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	inserted, limited := 0, 0
+	for err := range results {
+		var limit *listcrop.LimitError
+		switch {
+		case err == nil:
+			inserted++
+		case errors.As(err, &limit):
+			limited++
+		default:
+			t.Fatalf("concurrent insert error = %v", err)
+		}
+	}
+	if inserted != 1 || limited != 1 {
+		t.Fatalf("inserted=%d limited=%d; want exactly one insert and one LimitError", inserted, limited)
+	}
+	count, err := crops.CountBySource(ctx, "owner-a", "source_1")
+	if err != nil || count != 1 {
+		t.Fatalf("count = %d, %v; want 1", count, err)
+	}
+}
+
+// #331 review: a repeated rectangle still resolves at the limit, because the
+// existing row is returned before the count is checked.
+func TestInputAssetCropRepositoryInsertWithinLimitKeepsExistingRect(t *testing.T) {
+	repository, crops := newInputAssetCropRepository(t)
+	seedInputAssetForCrops(t, repository, "crop_1", "owner-a", listcrop.CropAssetType, "image/png")
+	seedInputAssetForCrops(t, repository, "crop_2", "owner-a", listcrop.CropAssetType, "image/png")
+	ctx := context.Background()
+	crop := sampleCrop()
+	if _, inserted, err := crops.InsertOrGetWithinLimit(ctx, crop, 1); err != nil || !inserted {
+		t.Fatalf("first insert = %v, %v", inserted, err)
+	}
+	repeated := crop
+	repeated.AssetID = "crop_2"
+	stored, inserted, err := crops.InsertOrGetWithinLimit(ctx, repeated, 1)
+	if err != nil {
+		t.Fatalf("repeated insert at the limit: %v", err)
+	}
+	if inserted || stored.AssetID != "crop_1" {
+		t.Fatalf("repeated insert = %+v, inserted=%v; want the existing row", stored, inserted)
 	}
 }
 

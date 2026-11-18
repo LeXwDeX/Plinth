@@ -1870,16 +1870,15 @@ func newHTTPHarnessWithCatalogAndProviders(
 		// service as the crop tool, so the harness assembles it beside the
 		// list service.
 		cropConfig := listcrop.Config{
-			Inputs:                     harnessCropInputs{inputs: inputs, loader: repository},
-			Tasks:                      module,
-			Crops:                      repository.InputAssetCropRepository(),
-			SourceMaxBytes:             applicationSchema.Chat.ImageMask.Limits.MaxBytes,
-			SourceMaxPixels:            applicationSchema.Chat.ImageMask.Limits.MaxPixels,
-			GeneratedReferenceMaxBytes: applicationSchema.Runtime.InputAssets.GeneratedReferenceMaxBytes,
-			SourceAssetType:            applicationSchema.Runtime.InputAssets.DefaultAssetType,
+			Inputs:          harnessCropInputs{inputs: inputs, loader: repository},
+			Tasks:           module,
+			Crops:           repository.InputAssetCropRepository(),
+			SourceMaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+			SourceMaxPixels: applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+			SourceAssetType: applicationSchema.Runtime.InputAssets.DefaultAssetType,
 		}
 		if listSchema.Decompose != nil {
-			cropConfig.MaximumCropsPerSource = listSchema.Decompose.MaximumItemsPerImage
+			cropConfig.MaximumCropsPerSource = listSchema.Decompose.MaximumItemsPerImage * listcrop.StorageCropLimitMultiplier
 			cropConfig.MinimumSide = listSchema.Decompose.Crop.MinimumShortEdge
 			cropConfig.MaximumRegionPixels = listSchema.Decompose.Crop.MaximumRegionPixels
 			cropConfig.UploadMaxBytes = listSchema.Decompose.Crop.MaximumPNGBytes

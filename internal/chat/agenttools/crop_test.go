@@ -186,9 +186,7 @@ type fakeCropStore struct {
 	rows []listcrop.Crop
 }
 
-func (crops *fakeCropStore) InsertOrGet(_ context.Context,
-	crop listcrop.Crop,
-) (listcrop.Crop, bool, error) {
+func (crops *fakeCropStore) insert(crop listcrop.Crop, limit int) (listcrop.Crop, bool, error) {
 	crops.mu.Lock()
 	defer crops.mu.Unlock()
 	for _, row := range crops.rows {
@@ -197,8 +195,44 @@ func (crops *fakeCropStore) InsertOrGet(_ context.Context,
 			return row, false, nil
 		}
 	}
+	if limit > 0 {
+		count := 0
+		for _, row := range crops.rows {
+			if row.OwnerID == crop.OwnerID && row.SourceAssetID == crop.SourceAssetID {
+				count++
+			}
+		}
+		if count >= limit {
+			return listcrop.Crop{}, false, &listcrop.LimitError{Limit: limit}
+		}
+	}
 	crops.rows = append(crops.rows, crop)
 	return crop, true, nil
+}
+
+func (crops *fakeCropStore) InsertOrGet(_ context.Context,
+	crop listcrop.Crop,
+) (listcrop.Crop, bool, error) {
+	return crops.insert(crop, 0)
+}
+
+func (crops *fakeCropStore) InsertOrGetWithinLimit(_ context.Context,
+	crop listcrop.Crop, limit int,
+) (listcrop.Crop, bool, error) {
+	return crops.insert(crop, limit)
+}
+
+func (crops *fakeCropStore) Get(_ context.Context, owner generation.OwnerID,
+	cropAssetID generation.AssetID,
+) (listcrop.Crop, bool, error) {
+	crops.mu.Lock()
+	defer crops.mu.Unlock()
+	for _, row := range crops.rows {
+		if row.OwnerID == owner && row.AssetID == cropAssetID {
+			return row, true, nil
+		}
+	}
+	return listcrop.Crop{}, false, nil
 }
 
 func (crops *fakeCropStore) Find(_ context.Context, owner generation.OwnerID,

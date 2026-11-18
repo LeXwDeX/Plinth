@@ -54,6 +54,12 @@ export interface AssetListProductSchema {
     max_references_per_item: number;
     /** #331: the most asset items one source picture may be split into. Absent on older servers. */
     maximum_items_per_image?: number;
+    /**
+     * #331: the shortest side a crop region may have, in source pixels. The
+     * crop editor refuses smaller boxes before the server does. Absent on
+     * older servers; the editor then falls back to its built-in default.
+     */
+    minimum_crop_short_edge?: number;
   };
   /** Item kinds mapped to a project asset kind and a default route id. */
   kinds: Array<{ id: string; label: string; project_kind: string; default_route: string }>;

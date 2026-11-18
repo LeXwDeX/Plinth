@@ -30,23 +30,33 @@ func Decode(data []byte, limits Limits) (*image.NRGBA, error) {
 	return picture, err
 }
 
+// Config reads the picture header within the byte and pixel limits without
+// decoding the pixels. It lets a caller validate derived geometry before it
+// copies or stores the bytes.
+func Config(data []byte, limits Limits) (image.Config, error) {
+	if limits.MaxBytes > 0 && int64(len(data)) > limits.MaxBytes {
+		return image.Config{}, fmt.Errorf("image is %d bytes, over the %d-byte limit: %w", len(data), limits.MaxBytes, ErrTooLarge)
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return image.Config{}, fmt.Errorf("decode image header: %w", err)
+	}
+	if config.Width <= 0 || config.Height <= 0 {
+		return image.Config{}, errors.New("image has no pixels")
+	}
+	pixels := int64(config.Width) * int64(config.Height)
+	if limits.MaxPixels > 0 && pixels > limits.MaxPixels {
+		return image.Config{}, fmt.Errorf("image is %d pixels, over the %d-pixel limit: %w", pixels, limits.MaxPixels, ErrTooLarge)
+	}
+	return config, nil
+}
+
 // decodeNRGBA is Decode that also names the container format ("png", "jpeg",
 // "webp"), so Inspect and the standalone decoder share one set of limits and
 // one set of refusal messages.
 func decodeNRGBA(data []byte, limits Limits) (*image.NRGBA, string, error) {
-	if limits.MaxBytes > 0 && int64(len(data)) > limits.MaxBytes {
-		return nil, "", fmt.Errorf("image is %d bytes, over the %d-byte limit: %w", len(data), limits.MaxBytes, ErrTooLarge)
-	}
-	config, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return nil, "", fmt.Errorf("decode image header: %w", err)
-	}
-	if config.Width <= 0 || config.Height <= 0 {
-		return nil, "", errors.New("image has no pixels")
-	}
-	pixels := int64(config.Width) * int64(config.Height)
-	if limits.MaxPixels > 0 && pixels > limits.MaxPixels {
-		return nil, "", fmt.Errorf("image is %d pixels, over the %d-pixel limit: %w", pixels, limits.MaxPixels, ErrTooLarge)
+	if _, err := Config(data, limits); err != nil {
+		return nil, "", err
 	}
 	decoded, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {

@@ -127,6 +127,9 @@ type fakeTaskAsset struct {
 	owner     generation.OwnerID
 	mediaType string
 	data      []byte
+	// size overrides the reported Size, so a test can claim an oversized result
+	// without allocating it.
+	size int64
 }
 
 type fakeTasks struct {
@@ -144,6 +147,18 @@ func (tasks *fakeTasks) add(owner generation.OwnerID, taskID, assetID generation
 	tasks.contents[string(taskID)+"/"+string(assetID)] = fakeTaskAsset{owner: owner, mediaType: mediaType, data: body}
 }
 
+// addDeclaredSize stores a small body but reports size as the result's size,
+// which is how a test exercises the byte bound without a 32 MiB allocation.
+func (tasks *fakeTasks) addDeclaredSize(owner generation.OwnerID, taskID, assetID generation.AssetID,
+	mediaType string, body []byte, size int64,
+) {
+	tasks.mu.Lock()
+	defer tasks.mu.Unlock()
+	tasks.contents[string(taskID)+"/"+string(assetID)] = fakeTaskAsset{
+		owner: owner, mediaType: mediaType, data: body, size: size,
+	}
+}
+
 func (tasks *fakeTasks) OpenAsset(_ context.Context, owner generation.OwnerID, taskID generation.TaskID, assetID generation.AssetID) (generation.AssetContent, error) {
 	tasks.mu.Lock()
 	defer tasks.mu.Unlock()
@@ -151,10 +166,14 @@ func (tasks *fakeTasks) OpenAsset(_ context.Context, owner generation.OwnerID, t
 	if !found || content.owner != owner {
 		return generation.AssetContent{}, &generation.Error{Code: generation.ErrNotFound}
 	}
+	size := content.size
+	if size == 0 {
+		size = int64(len(content.data))
+	}
 	return generation.AssetContent{
 		Body:      io.NopCloser(bytes.NewReader(content.data)),
 		MediaType: content.mediaType,
-		Size:      int64(len(content.data)),
+		Size:      size,
 	}, nil
 }
 
@@ -163,7 +182,7 @@ type fakeCrops struct {
 	rows []listcrop.Crop
 }
 
-func (crops *fakeCrops) InsertOrGet(_ context.Context, crop listcrop.Crop) (listcrop.Crop, bool, error) {
+func (crops *fakeCrops) insert(crop listcrop.Crop, limit int) (listcrop.Crop, bool, error) {
 	crops.mu.Lock()
 	defer crops.mu.Unlock()
 	for _, row := range crops.rows {
@@ -172,8 +191,42 @@ func (crops *fakeCrops) InsertOrGet(_ context.Context, crop listcrop.Crop) (list
 			return row, false, nil
 		}
 	}
+	if limit > 0 {
+		count := 0
+		for _, row := range crops.rows {
+			if row.OwnerID == crop.OwnerID && row.SourceAssetID == crop.SourceAssetID {
+				count++
+			}
+		}
+		if count >= limit {
+			return listcrop.Crop{}, false, &listcrop.LimitError{Limit: limit}
+		}
+	}
 	crops.rows = append(crops.rows, crop)
 	return crop, true, nil
+}
+
+func (crops *fakeCrops) InsertOrGet(_ context.Context, crop listcrop.Crop) (listcrop.Crop, bool, error) {
+	return crops.insert(crop, 0)
+}
+
+func (crops *fakeCrops) InsertOrGetWithinLimit(_ context.Context, crop listcrop.Crop,
+	limit int,
+) (listcrop.Crop, bool, error) {
+	return crops.insert(crop, limit)
+}
+
+func (crops *fakeCrops) Get(_ context.Context, owner generation.OwnerID,
+	cropAssetID generation.AssetID,
+) (listcrop.Crop, bool, error) {
+	crops.mu.Lock()
+	defer crops.mu.Unlock()
+	for _, row := range crops.rows {
+		if row.OwnerID == owner && row.AssetID == cropAssetID {
+			return row, true, nil
+		}
+	}
+	return listcrop.Crop{}, false, nil
 }
 
 func (crops *fakeCrops) Find(_ context.Context, owner generation.OwnerID, sourceID generation.AssetID, rect listcrop.PixelRect) (listcrop.Crop, bool, error) {
@@ -717,6 +770,79 @@ func TestCropRegionsRefusesOversizedSourceAndOutput(t *testing.T) {
 		}
 		if uploads := fixture.inputs.uploads(); len(uploads) != 0 {
 			t.Fatalf("uploads = %d; an oversized crop must not be stored", len(uploads))
+		}
+	})
+}
+
+// #331 review: a stored crop is a reference for the re-draw step, so it can
+// never be a crop source. Both the asset type and the provenance row mark it.
+func TestCropRegionsRejectsCropSource(t *testing.T) {
+	fixture := newCropFixture(t, nil)
+	_, encoded := quadrantPicture(t, 128, 128)
+	fixture.inputs.addInputAsset("owner-a", "crop_typed", listcrop.CropAssetType, "image/png", encoded)
+	// A provenance row also marks an asset whose type was written differently.
+	fixture.inputs.addInputAsset("owner-a", "crop_provenanced", "image", "image/png", encoded)
+	fixture.crops.rows = append(fixture.crops.rows,
+		listcrop.Crop{
+			AssetID: "crop_provenanced", OwnerID: "owner-a", SourceAssetID: "scene_1",
+			SourceKind: listcrop.SourceKindInput, SourceInputAssetID: "scene_1",
+			SourceWidth: 128, SourceHeight: 128,
+			Region:    listcrop.Region{X: 0, Y: 0, Width: 0.5, Height: 0.5},
+			PixelRect: listcrop.PixelRect{X0: 0, Y0: 0, X1: 64, Y1: 64},
+		})
+	for _, source := range []generation.AssetID{"crop_typed", "crop_provenanced"} {
+		_, err := fixture.service.CropRegions(context.Background(), listcrop.Request{
+			Owner: "owner-a", Source: source,
+			Regions: []listcrop.Region{{X: 0, Y: 0, Width: 0.5, Height: 0.5}},
+		})
+		if !errors.Is(err, listcrop.ErrInvalidSource) {
+			t.Fatalf("source %s err = %v; want ErrInvalidSource", source, err)
+		}
+	}
+	if uploads := fixture.inputs.uploads(); len(uploads) != 0 {
+		t.Fatalf("uploads = %d; a crop source must write nothing", len(uploads))
+	}
+}
+
+// #331 review: a Task source is header-checked and its regions are validated
+// before the copy is uploaded, so a refused batch stores nothing; the copy and
+// the decode share the image_mask byte cap, not the larger generated-reference
+// cap.
+func TestCropRegionsValidatesTaskSourceBeforeCopy(t *testing.T) {
+	t.Run("invalid region", func(t *testing.T) {
+		fixture := newCropFixture(t, nil)
+		_, encoded := quadrantPicture(t, 128, 128)
+		fixture.inputs.projectTask("owner-a", "task_asset_1", "task_1", "image/png", encoded)
+		fixture.tasks.add("owner-a", "task_1", "task_asset_1", "image/png", encoded)
+		_, err := fixture.service.CropRegions(context.Background(), listcrop.Request{
+			Owner: "owner-a", Source: "task_asset_1",
+			Regions: []listcrop.Region{{X: 0.8, Y: 0.1, Width: 0.5, Height: 0.2}},
+		})
+		if !errors.Is(err, listcrop.ErrInvalidRegion) {
+			t.Fatalf("err = %v; want ErrInvalidRegion", err)
+		}
+		if uploads := fixture.inputs.uploads(); len(uploads) != 0 {
+			t.Fatalf("uploads = %d; an invalid region must not copy the source", len(uploads))
+		}
+		if rows := fixture.crops.rowsSnapshot(); len(rows) != 0 {
+			t.Fatalf("provenance rows = %d; an invalid region must store nothing", len(rows))
+		}
+	})
+	t.Run("over the source byte cap", func(t *testing.T) {
+		fixture := newCropFixture(t, nil)
+		_, encoded := quadrantPicture(t, 32, 32)
+		fixture.inputs.projectTask("owner-a", "task_asset_1", "task_1", "image/png", encoded)
+		fixture.tasks.addDeclaredSize("owner-a", "task_1", "task_asset_1", "image/png",
+			encoded, listcrop.DefaultSourceMaxBytes+1)
+		_, err := fixture.service.CropRegions(context.Background(), listcrop.Request{
+			Owner: "owner-a", Source: "task_asset_1",
+			Regions: []listcrop.Region{{X: 0, Y: 0, Width: 1, Height: 1}},
+		})
+		if !errors.Is(err, listcrop.ErrTooLarge) {
+			t.Fatalf("err = %v; want ErrTooLarge", err)
+		}
+		if uploads := fixture.inputs.uploads(); len(uploads) != 0 {
+			t.Fatalf("uploads = %d; an oversized Task source must not be copied", len(uploads))
 		}
 	})
 }

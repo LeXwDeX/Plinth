@@ -243,7 +243,7 @@ var assetListDecompose2DCapabilities = []schemacontract.Capability{
 }
 
 // validateAssetListDecompose 校验可选的拆解段（#331）。未声明时放行；声明后
-// 数值必须在既定范围内，缺省路线必须已声明且第一步是 2D 能力，四条拒绝文案
+// 数值必须在既定范围内，缺省路线必须已声明且第一步是 2D 能力，五条拒绝文案
 // 与 Agent 拆解要领都必须完整；子会话的裁图/源图标签也必须在 chat.context
 // 中成对声明，否则清单项会被读成「用户上传」。
 func validateAssetListDecompose(
@@ -287,6 +287,7 @@ func validateAssetListDecompose(
 	for field, text := range map[string]string{
 		"region_invalid":    decompose.Messages.RegionInvalid,
 		"region_too_small":  decompose.Messages.RegionTooSmall,
+		"image_too_large":   decompose.Messages.ImageTooLarge,
 		"image_item_limit":  decompose.Messages.ImageItemLimit,
 		"reference_invalid": decompose.Messages.ReferenceInvalid,
 	} {

@@ -498,6 +498,13 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 			return messages.RegionTooSmall
 		}, map[string]string{"minimum": strconv.Itoa(s.assetListCropMinimumSide())})
 		writeProblem(writer, http.StatusBadRequest, "asset_list_region_too_small", detail, err)
+	case errors.Is(err, assetlist.ErrCropImageTooLarge):
+		// #331: an edit crop instruction refused by a byte or pixel limit (the
+		// source picture, the region area or the encoded crop).
+		detail := s.assetListDecomposeMessage(func(messages catalog.AssetListDecomposeMessagesSchema) string {
+			return messages.ImageTooLarge
+		}, nil)
+		writeProblem(writer, http.StatusBadRequest, "asset_list_image_too_large", detail, err)
 	case errors.Is(err, assetlist.ErrCropRegionInvalid):
 		detail := s.assetListDecomposeMessage(func(messages catalog.AssetListDecomposeMessagesSchema) string {
 			return messages.RegionInvalid

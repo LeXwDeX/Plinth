@@ -477,6 +477,7 @@ func TestDefaultAssetListDecomposeDeclaresCropContract(t *testing.T) {
 	for field, text := range map[string]string{
 		"region_invalid":    decompose.Messages.RegionInvalid,
 		"region_too_small":  decompose.Messages.RegionTooSmall,
+		"image_too_large":   decompose.Messages.ImageTooLarge,
 		"image_item_limit":  decompose.Messages.ImageItemLimit,
 		"reference_invalid": decompose.Messages.ReferenceInvalid,
 	} {
@@ -520,14 +521,15 @@ func TestDefaultAssetListDecomposeDeclaresCropContract(t *testing.T) {
 		}
 	}
 	public := application.Public().AssetList
-	if public == nil || public.Limits.MaximumItemsPerImage != 24 {
+	if public == nil || public.Limits.MaximumItemsPerImage != 24 ||
+		public.Limits.MinimumCropShortEdge != 64 {
 		t.Fatalf("public limits = %+v", public)
 	}
 	encoded, err := json.Marshal(public)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, private := range []string{"minimum_short_edge", "maximum_region_pixels", "maximum_png_bytes", "reference_invalid"} {
+	for _, private := range []string{"maximum_region_pixels", "maximum_png_bytes", "reference_invalid"} {
 		if strings.Contains(string(encoded), private) {
 			t.Fatalf("public asset_list leaks decompose field %q", private)
 		}
@@ -572,6 +574,9 @@ func TestAssetListDecomposeValidationRejectsBadDeclarations(t *testing.T) {
 		},
 		"region too small message empty": func(app *catalog.ApplicationSchema) {
 			app.AssetList.Decompose.Messages.RegionTooSmall = ""
+		},
+		"image too large message empty": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Decompose.Messages.ImageTooLarge = " "
 		},
 		"image item limit message empty": func(app *catalog.ApplicationSchema) {
 			app.AssetList.Decompose.Messages.ImageItemLimit = ""

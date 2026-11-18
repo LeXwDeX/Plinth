@@ -1001,33 +1001,112 @@ func TestProjectAssetListEditCropInstructionRefusalCodes(t *testing.T) {
 	}
 }
 
-// #331: the crop instruction counts against maximum_items_per_image while
-// cutting; a second region of the same source over the limit is refused with
-// the image item limit copy.
+// #331 review: maximum_items_per_image is a product cap over the items of one
+// list, not a storage cap on re-framing. One item re-framed repeatedly stays
+// below the cap; a second item cut from the same picture is refused.
 func TestProjectAssetListEditCropInstructionHonorsPerImageLimit(t *testing.T) {
 	t.Parallel()
 	harness := newAssetListHTTPHarnessWith(t, func(schema *catalog.ApplicationSchema) {
 		schema.AssetList.Decompose.MaximumItemsPerImage = 1
 	})
 	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
-		"Draft", defaultListItem())
+		"Draft", []assetlist.ItemInput{
+			{Kind: "character", Name: "Knight"},
+			{Kind: "image", Name: "Icon"},
+		})
 	source := harness.uploadScene(t, assetListCropPicture())
 	first := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"First",`+
 		`"expected_version":0,"items":[{"kind":"character","name":"Knight",`+
 		`"crop":{"source_input_asset_id":%q,`+
-		`"region":{"x":0.1,"y":0.1,"width":0.4,"height":0.4}}}]}`, source))
+		`"region":{"x":0.1,"y":0.1,"width":0.4,"height":0.4}}},`+
+		`{"kind":"image","name":"Icon"}]}`, source))
 	if first.Code != http.StatusOK {
 		t.Fatalf("first crop = %d %s", first.Code, first.Body.String())
 	}
-	second := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"Second",`+
+	// Re-framing the same item is one item in the list, so the cap still holds.
+	reframed := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"Reframed",`+
 		`"expected_version":1,"items":[{"kind":"character","name":"Knight",`+
 		`"crop":{"source_input_asset_id":%q,`+
-		`"region":{"x":0.5,"y":0.5,"width":0.4,"height":0.4}}}]}`, source))
+		`"region":{"x":0.5,"y":0.5,"width":0.4,"height":0.4}}},`+
+		`{"kind":"image","name":"Icon"}]}`, source))
+	if reframed.Code != http.StatusOK {
+		t.Fatalf("reframed crop = %d %s", reframed.Code, reframed.Body.String())
+	}
+	second := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"Second",`+
+		`"expected_version":2,"items":[{"kind":"character","name":"Knight",`+
+		`"crop":{"source_input_asset_id":%q,`+
+		`"region":{"x":0.5,"y":0.5,"width":0.4,"height":0.4}}},`+
+		`{"kind":"image","name":"Icon",`+
+		`"crop":{"source_input_asset_id":%q,`+
+		`"region":{"x":0.1,"y":0.5,"width":0.4,"height":0.4}}}]}`, source, source))
 	if second.Code != http.StatusBadRequest {
-		t.Fatalf("second crop = %d %s", second.Code, second.Body.String())
+		t.Fatalf("second item = %d %s", second.Code, second.Body.String())
 	}
 	if problem := decodeAssetListTestProblem(t, second); problem.Code != "asset_list_image_item_limit" {
-		t.Fatalf("second crop problem = %+v", problem)
+		t.Fatalf("second item problem = %+v", problem)
+	}
+}
+
+// #331 review: the storage guardrail is a multiple of maximum_items_per_image,
+// so repeatedly re-framing a full list keeps saving: three rounds of 24 items
+// cut 72 distinct rectangles, far past the product cap but under the guard.
+func TestProjectAssetListEditCropStorageGuardAllowsRepeatedRecrops(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarness(t)
+	source := harness.uploadScene(t, assetListCropPicture())
+	items := func(round int) string {
+		parts := make([]string, 24)
+		for index := 0; index < 24; index++ {
+			// A 6x4 grid with a 2-pixel per-round offset: every round cuts 24
+			// rectangles that collide neither within the round nor across rounds.
+			x := 0.16*float64(index%6) + 0.002*float64(round)
+			y := 0.22*float64(index/6) + 0.002*float64(round)
+			parts[index] = fmt.Sprintf(
+				`{"kind":"image","name":"Item %d","crop":{"source_input_asset_id":%q,`+
+					`"region":{"x":%v,"y":%v,"width":0.1,"height":0.1}}}`,
+				index+1, source, x, y)
+		}
+		return "[" + strings.Join(parts, ",") + "]"
+	}
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", []assetlist.ItemInput{{Kind: "image", Name: "Seed"}})
+	version := list.Version
+	for round := 0; round < 3; round++ {
+		response := harness.editDraft(t, list.ID, fmt.Sprintf(
+			`{"title":"Round %d","expected_version":%d,"items":%s}`, round+1, version, items(round)))
+		if response.Code != http.StatusOK {
+			t.Fatalf("round %d edit = %d %s", round+1, response.Code, response.Body.String())
+		}
+		version = decodeAssetListTestWire(t, response).Version
+	}
+	count, err := harness.repository.InputAssetCropRepository().CountBySource(
+		context.Background(), generation.OwnerID("owner-a"), generation.AssetID(source))
+	if err != nil || count != 72 {
+		t.Fatalf("stored crops = %d, %v; want 72 accumulated reframes", count, err)
+	}
+}
+
+// #331 review: a region over the pixel limit is its own refusal code and copy,
+// not the generic malformed-region one.
+func TestProjectAssetListEditCropInstructionTooLarge(t *testing.T) {
+	t.Parallel()
+	harness := newAssetListHTTPHarnessWith(t, func(schema *catalog.ApplicationSchema) {
+		schema.AssetList.Decompose.Crop.MaximumRegionPixels = 5_000
+	})
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID,
+		"Draft", defaultListItem())
+	source := harness.uploadScene(t, assetListCropPicture())
+	response := harness.editDraft(t, list.ID, fmt.Sprintf(`{"title":"Too large",`+
+		`"expected_version":0,"items":[{"kind":"character","name":"Knight",`+
+		`"crop":{"source_input_asset_id":%q,`+
+		`"region":{"x":0,"y":0,"width":1,"height":1}}}]}`, source))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("too large = %d %s", response.Code, response.Body.String())
+	}
+	want := harness.product.AssetList.Decompose.Messages.ImageTooLarge
+	if problem := decodeAssetListTestProblem(t, response); problem.Code != "asset_list_image_too_large" ||
+		problem.Detail != want {
+		t.Fatalf("too large problem = %+v; want code asset_list_image_too_large and %q", problem, want)
 	}
 }
 

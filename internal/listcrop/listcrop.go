@@ -37,11 +37,26 @@ const (
 	// SourceKindTask marks a source copied from a Task result.
 	SourceKindTask = "task_asset"
 
-	// DefaultMaximumCropsPerSource bounds the crops one source keeps. It is the
-	// fallback for application.asset_list.decompose.maximum_items_per_image when
-	// the Catalog declares no decompose section.
-	DefaultMaximumCropsPerSource = 24
-	// DefaultSourceMaxBytes mirrors image.mask.limits.max_bytes.
+	// DefaultMaximumItemsPerImage is the product cap of
+	// application.asset_list.decompose.maximum_items_per_image: one list may
+	// reference at most this many items cut from one source picture. The
+	// storage layer deliberately keeps more (see StorageCropLimitMultiplier).
+	DefaultMaximumItemsPerImage = 24
+	// StorageCropLimitMultiplier scales the storage guardrail of one source:
+	// re-framing and merging keep cutting new crop assets, and old crops are
+	// never garbage-collected, so the storage layer allows this many times the
+	// product cap before refusing new rectangles. It is a storage guardrail,
+	// not the product limit; asset-list proposal and edit keep enforcing
+	// maximum_items_per_image.
+	StorageCropLimitMultiplier = 4
+	// DefaultMaximumCropsPerSource bounds the crop assets one source keeps at
+	// the storage layer. It is the fallback for
+	// maximum_items_per_image * StorageCropLimitMultiplier when the Catalog
+	// declares no decompose section, and it is deliberately not the product
+	// item cap.
+	DefaultMaximumCropsPerSource = DefaultMaximumItemsPerImage * StorageCropLimitMultiplier
+	// DefaultSourceMaxBytes mirrors image.mask.limits.max_bytes. A Task source
+	// is copied and decoded under this same cap.
 	DefaultSourceMaxBytes int64 = 32 << 20
 	// DefaultSourceMaxPixels mirrors image.mask.limits.max_pixels.
 	DefaultSourceMaxPixels int64 = 40_000_000
@@ -232,12 +247,17 @@ type TaskAssets interface {
 
 // CropStore persists crop provenance.
 type CropStore interface {
-	// InsertOrGet inserts one row and returns it; when the unique
+	// InsertOrGetWithinLimit inserts one row and returns it; when the unique
 	// (owner, source, pixel rect) row already exists it returns that row
-	// instead, so parallel calls share one asset.
-	InsertOrGet(context.Context, Crop) (Crop, bool, error)
+	// instead, so parallel calls share one asset. The count and the insert run
+	// in one write transaction, and a source that already keeps limit crops
+	// (limit <= 0 means no bound) returns a LimitError instead of inserting.
+	InsertOrGetWithinLimit(context.Context, Crop, int) (Crop, bool, error)
 	// Find returns the stored crop of one source rectangle.
 	Find(context.Context, generation.OwnerID, generation.AssetID, PixelRect) (Crop, bool, error)
+	// Get returns one crop by its crop asset id. It is how a source is
+	// recognised as a stored crop, whatever its asset_type says.
+	Get(context.Context, generation.OwnerID, generation.AssetID) (Crop, bool, error)
 	// CountBySource counts every crop of one source, across calls.
 	CountBySource(context.Context, generation.OwnerID, generation.AssetID) (int, error)
 	// SourceInputCopy returns the input asset a Task source was copied into
@@ -252,31 +272,29 @@ type Config struct {
 	Tasks  TaskAssets
 	Crops  CropStore
 
-	UploadMaxBytes             int64
-	GeneratedReferenceMaxBytes int64
-	SourceMaxBytes             int64
-	SourceMaxPixels            int64
-	MinimumSide                int
-	MaximumRegionPixels        int64
-	MaximumCropsPerSource      int
-	SourceAssetType            string
-	Now                        func() time.Time
+	UploadMaxBytes        int64
+	SourceMaxBytes        int64
+	SourceMaxPixels       int64
+	MinimumSide           int
+	MaximumRegionPixels   int64
+	MaximumCropsPerSource int
+	SourceAssetType       string
+	Now                   func() time.Time
 }
 
 // Service implements the batch crop.
 type Service struct {
-	inputs                     InputAssets
-	tasks                      TaskAssets
-	crops                      CropStore
-	uploadMaxBytes             int64
-	generatedReferenceMaxBytes int64
-	sourceMaxBytes             int64
-	sourceMaxPixels            int64
-	minimumSide                int
-	maximumRegionPixels        int64
-	maximumCropsPerSource      int
-	sourceAssetType            string
-	now                        func() time.Time
+	inputs                InputAssets
+	tasks                 TaskAssets
+	crops                 CropStore
+	uploadMaxBytes        int64
+	sourceMaxBytes        int64
+	sourceMaxPixels       int64
+	minimumSide           int
+	maximumRegionPixels   int64
+	maximumCropsPerSource int
+	sourceAssetType       string
+	now                   func() time.Time
 }
 
 // New builds the service.
@@ -285,24 +303,20 @@ func New(config Config) (*Service, error) {
 		return nil, errors.New("listcrop: incomplete dependencies")
 	}
 	service := &Service{
-		inputs:                     config.Inputs,
-		tasks:                      config.Tasks,
-		crops:                      config.Crops,
-		uploadMaxBytes:             config.UploadMaxBytes,
-		generatedReferenceMaxBytes: config.GeneratedReferenceMaxBytes,
-		sourceMaxBytes:             config.SourceMaxBytes,
-		sourceMaxPixels:            config.SourceMaxPixels,
-		minimumSide:                config.MinimumSide,
-		maximumRegionPixels:        config.MaximumRegionPixels,
-		maximumCropsPerSource:      config.MaximumCropsPerSource,
-		sourceAssetType:            strings.TrimSpace(config.SourceAssetType),
-		now:                        config.Now,
+		inputs:                config.Inputs,
+		tasks:                 config.Tasks,
+		crops:                 config.Crops,
+		uploadMaxBytes:        config.UploadMaxBytes,
+		sourceMaxBytes:        config.SourceMaxBytes,
+		sourceMaxPixels:       config.SourceMaxPixels,
+		minimumSide:           config.MinimumSide,
+		maximumRegionPixels:   config.MaximumRegionPixels,
+		maximumCropsPerSource: config.MaximumCropsPerSource,
+		sourceAssetType:       strings.TrimSpace(config.SourceAssetType),
+		now:                   config.Now,
 	}
 	if service.uploadMaxBytes <= 0 {
 		service.uploadMaxBytes = DefaultUploadMaxBytes
-	}
-	if service.generatedReferenceMaxBytes <= 0 {
-		service.generatedReferenceMaxBytes = service.uploadMaxBytes
 	}
 	if service.sourceMaxBytes <= 0 {
 		service.sourceMaxBytes = DefaultSourceMaxBytes
@@ -343,23 +357,12 @@ func (service *Service) CropRegions(ctx context.Context, request Request) ([]Res
 	if len(request.Regions) > service.maximumCropsPerSource {
 		return nil, &LimitError{Limit: service.maximumCropsPerSource}
 	}
-	source, err := service.resolveSource(ctx, request.Owner, sourceID)
+	source, rects, err := service.resolveSource(ctx, request.Owner, sourceID, request.Regions)
 	if err != nil {
 		return nil, err
 	}
-	rects := make([]PixelRect, len(request.Regions))
-	for index, region := range request.Regions {
-		rect, err := PixelRectForRegion(region, source.width, source.height)
-		if err != nil {
-			return nil, &RegionFailure{Index: index, Err: err}
-		}
-		if err := service.validateRect(rect); err != nil {
-			return nil, &RegionFailure{Index: index, Err: err}
-		}
-		rects[index] = rect
-	}
-	// Refuse an over-limit batch before storing any of it; the per-region
-	// check in cropOne still guards a race between parallel batches.
+	// Refuse an over-limit batch before storing any of it; the atomic
+	// count-and-insert in cropOne still guards a race between parallel batches.
 	count, err := service.crops.CountBySource(ctx, request.Owner, source.assetID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
@@ -446,52 +449,76 @@ type sourcePicture struct {
 	picture      *image.NRGBA
 }
 
+// resolveSource reads and decodes the source picture and converts every
+// region to source pixels. A Task result is validated through its header
+// before it is copied into an input asset, so an invalid batch never uploads
+// the copy.
 func (service *Service) resolveSource(
 	ctx context.Context,
 	owner generation.OwnerID,
 	sourceID generation.AssetID,
-) (*sourcePicture, error) {
+	regions []Region,
+) (*sourcePicture, []PixelRect, error) {
 	loaded, err := service.inputs.LoadInputAssets(ctx, owner, []generation.AssetID{sourceID})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	asset, found := loaded[sourceID]
 	if !found || asset.ID != sourceID || asset.OwnerID != owner {
-		return nil, fmt.Errorf("%w: %s", ErrNotFound, sourceID)
+		return nil, nil, fmt.Errorf("%w: %s", ErrNotFound, sourceID)
+	}
+	// A stored crop is a reference for the re-draw step, never a crop source:
+	// re-cropping a crop would blur the provenance chain and the geometry.
+	if asset.AssetType == CropAssetType {
+		return nil, nil, fmt.Errorf("%w: %s is a stored crop", ErrInvalidSource, sourceID)
+	}
+	if _, isCrop, err := service.crops.Get(ctx, owner, sourceID); err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	} else if isCrop {
+		return nil, nil, fmt.Errorf("%w: %s is a stored crop", ErrInvalidSource, sourceID)
 	}
 	mediaType := asset.MediaType
 	inputAssetID := sourceID
 	kind := SourceKindInput
 	var data []byte
+	var rects []PixelRect
 	if asset.TaskID != "" {
-		copied, body, resolvedMediaType, err := service.taskSourceBytes(ctx, owner, sourceID, asset)
+		copied, body, resolvedMediaType, taskRects, err :=
+			service.taskSourceBytes(ctx, owner, sourceID, asset, regions)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		inputAssetID = copied
 		mediaType = resolvedMediaType
 		kind = SourceKindTask
 		data = body
+		rects = taskRects
 	} else {
 		if !isImageMediaType(mediaType) {
-			return nil, fmt.Errorf("%w: %s", ErrInvalidSource, mediaType)
+			return nil, nil, fmt.Errorf("%w: %s", ErrInvalidSource, mediaType)
 		}
 		opened, body, err := service.inputs.OpenOwned(ctx, owner, sourceID)
 		if err != nil {
-			return nil, service.openError(err, sourceID)
+			return nil, nil, service.openError(err, sourceID)
 		}
 		defer body.Close()
 		mediaType = defaultString(opened.MediaType, mediaType)
 		data, err = readAtMost(body, service.sourceMaxBytes)
 		if err != nil {
-			return nil, service.readError(err)
+			return nil, nil, service.readError(err)
 		}
 	}
 	picture, err := service.decode(data, mediaType)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	bounds := picture.Bounds()
+	if rects == nil {
+		rects, err = service.regionsToRects(regions, bounds.Dx(), bounds.Dy())
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	return &sourcePicture{
 		assetID:      sourceID,
 		kind:         kind,
@@ -499,23 +526,44 @@ func (service *Service) resolveSource(
 		width:        bounds.Dx(),
 		height:       bounds.Dy(),
 		picture:      picture,
-	}, nil
+	}, rects, nil
+}
+
+// regionsToRects converts and validates every normalized region against one
+// source size. A refused region is a RegionFailure carrying its batch index.
+func (service *Service) regionsToRects(regions []Region, width, height int) ([]PixelRect, error) {
+	rects := make([]PixelRect, len(regions))
+	for index, region := range regions {
+		rect, err := PixelRectForRegion(region, width, height)
+		if err != nil {
+			return nil, &RegionFailure{Index: index, Err: err}
+		}
+		if err := service.validateRect(rect); err != nil {
+			return nil, &RegionFailure{Index: index, Err: err}
+		}
+		rects[index] = rect
+	}
+	return rects, nil
 }
 
 // taskSourceBytes returns the input asset and bytes one Task result is cropped
-// from. The copy is remembered through an existing crop row so a repeated call
-// crops the same input asset and the unique index keeps its identity; without
-// one the result is copied under the generated-reference limit, like
-// references.Resolver.uploadGenerated (#276).
+// from, plus the validated pixel rectangles when this call made the copy. The
+// bytes are read and header-checked under the same source limits as an input
+// source, and every region is validated before the copy is uploaded, so a
+// refused batch stores nothing. The copy is remembered through an existing
+// crop row so a repeated call crops the same input asset and the unique index
+// keeps its identity. No input-asset delete port exists yet, so a copy whose
+// later write fails stays stored (the storage guardrail bounds that).
 func (service *Service) taskSourceBytes(
 	ctx context.Context,
 	owner generation.OwnerID,
 	sourceID generation.AssetID,
 	asset generation.InputAsset,
-) (generation.AssetID, []byte, string, error) {
+	regions []Region,
+) (generation.AssetID, []byte, string, []PixelRect, error) {
 	copied, found, err := service.crops.SourceInputCopy(ctx, owner, sourceID)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return "", nil, "", nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if found {
 		copiedAsset, body, err := service.inputs.OpenOwned(ctx, owner, copied)
@@ -523,42 +571,55 @@ func (service *Service) taskSourceBytes(
 			data, readErr := readAtMost(body, service.sourceMaxBytes)
 			body.Close()
 			if readErr != nil {
-				return "", nil, "", service.readError(readErr)
+				return "", nil, "", nil, service.readError(readErr)
 			}
-			return copied, data, defaultString(copiedAsset.MediaType, asset.MediaType), nil
+			// The copy is decoded below like an input source; its regions are
+			// converted from the decoded size.
+			return copied, data, defaultString(copiedAsset.MediaType, asset.MediaType), nil, nil
 		}
 		// The remembered copy is gone; fall through and copy the Task result
 		// again.
 	}
 	content, err := service.tasks.OpenAsset(ctx, owner, asset.TaskID, sourceID)
 	if err != nil {
-		return "", nil, "", service.openError(err, sourceID)
+		return "", nil, "", nil, service.openError(err, sourceID)
 	}
 	defer content.Body.Close()
-	if content.Size > service.generatedReferenceMaxBytes {
-		return "", nil, "", &TooLargeError{Reason: fmt.Sprintf(
+	if content.Size > service.sourceMaxBytes {
+		return "", nil, "", nil, &TooLargeError{Reason: fmt.Sprintf(
 			"source picture is %d bytes, over the %d-byte limit",
-			content.Size, service.generatedReferenceMaxBytes)}
+			content.Size, service.sourceMaxBytes)}
 	}
 	mediaType := defaultString(content.MediaType, asset.MediaType)
 	if !isImageMediaType(mediaType) {
-		return "", nil, "", fmt.Errorf("%w: %s", ErrInvalidSource, mediaType)
+		return "", nil, "", nil, fmt.Errorf("%w: %s", ErrInvalidSource, mediaType)
 	}
-	data, err := readAtMost(content.Body, service.generatedReferenceMaxBytes)
+	data, err := readAtMost(content.Body, service.sourceMaxBytes)
 	if err != nil {
-		return "", nil, "", service.readError(err)
+		return "", nil, "", nil, service.readError(err)
+	}
+	config, err := imageinspect.Config(data, imageinspect.Limits{
+		MaxBytes:  service.sourceMaxBytes,
+		MaxPixels: service.sourceMaxPixels,
+	})
+	if err != nil {
+		return "", nil, "", nil, service.configError(err)
+	}
+	rects, err := service.regionsToRects(regions, config.Width, config.Height)
+	if err != nil {
+		return "", nil, "", nil, err
 	}
 	uploaded, err := service.inputs.UploadAsset(ctx, owner, generation.InputAssetUpload{
 		Body:             bytes.NewReader(data),
 		OriginalFilename: sourceFilename(mediaType),
 		AssetType:        service.sourceAssetType,
 		MediaType:        mediaType,
-		MaxBytes:         service.generatedReferenceMaxBytes,
+		MaxBytes:         service.sourceMaxBytes,
 	})
 	if err != nil {
-		return "", nil, "", service.uploadError(err)
+		return "", nil, "", nil, service.uploadError(err)
 	}
-	return uploaded.ID, data, defaultString(uploaded.MediaType, mediaType), nil
+	return uploaded.ID, data, defaultString(uploaded.MediaType, mediaType), rects, nil
 }
 
 func (service *Service) decode(data []byte, mediaType string) (*image.NRGBA, error) {
@@ -570,12 +631,19 @@ func (service *Service) decode(data []byte, mediaType string) (*image.NRGBA, err
 		MaxPixels: service.sourceMaxPixels,
 	})
 	if err != nil {
-		if errors.Is(err, imageinspect.ErrTooLarge) {
-			return nil, &TooLargeError{Reason: err.Error()}
-		}
-		return nil, fmt.Errorf("%w: %v", ErrInvalidSource, err)
+		return nil, service.configError(err)
 	}
 	return picture, nil
+}
+
+// configError maps an imageinspect header or decode refusal to the service's
+// vocabulary: a byte or pixel limit stays ErrTooLarge, anything else is an
+// unusable source.
+func (service *Service) configError(err error) error {
+	if errors.Is(err, imageinspect.ErrTooLarge) {
+		return &TooLargeError{Reason: err.Error()}
+	}
+	return fmt.Errorf("%w: %v", ErrInvalidSource, err)
 }
 
 func (service *Service) cropOne(
@@ -592,6 +660,9 @@ func (service *Service) cropOne(
 	if found {
 		return stored.Result(), nil
 	}
+	// The count is an advisory fast refusal that avoids encoding and
+	// uploading a crop the store is about to refuse; the insert below counts
+	// and inserts in one write transaction, which is the actual bound.
 	count, err := service.crops.CountBySource(ctx, owner, source.assetID)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
@@ -635,8 +706,16 @@ func (service *Service) cropOne(
 		SHA256:             sha,
 		CreatedAt:          service.now().UTC(),
 	}
-	stored, _, err = service.crops.InsertOrGet(ctx, crop)
+	// The insert is atomic with the limit count. A parallel call that stored the
+// same rectangle first wins and this call's uploaded asset is left unused;
+// there is no input-asset delete port yet, so that rare orphan stays stored
+// (the storage guardrail bounds how many can accumulate).
+	stored, _, err = service.crops.InsertOrGetWithinLimit(ctx, crop, service.maximumCropsPerSource)
 	if err != nil {
+		var limit *LimitError
+		if errors.As(err, &limit) {
+			return Result{}, err
+		}
 		return Result{}, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return stored.Result(), nil

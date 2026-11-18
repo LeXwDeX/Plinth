@@ -216,10 +216,12 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			itemStates = append(itemStates, PublicAssetListStateSchema{ID: state.ID, Label: state.Label, Role: state.Role})
 		}
 		publicLimits := PublicAssetListLimitsSchema{AssetListLimitsSchema: cloned.AssetList.Limits}
-		// #331: the per-image item cap is public; the crop geometry and byte
-		// limits stay in the private decompose section.
+		// #331: the per-image item cap and the crop editor's shortest side are
+		// public; the region pixel and byte limits stay in the private
+		// decompose section.
 		if decompose := cloned.AssetList.Decompose; decompose != nil {
 			publicLimits.MaximumItemsPerImage = decompose.MaximumItemsPerImage
+			publicLimits.MinimumCropShortEdge = decompose.Crop.MinimumShortEdge
 		}
 		publicAssetList = &PublicAssetListSchema{
 			Limits:     publicLimits,

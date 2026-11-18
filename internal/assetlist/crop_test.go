@@ -318,6 +318,10 @@ func TestEditCropInstructionRefusals(t *testing.T) {
 			want: []error{assetlist.ErrReferenceInvalid},
 		},
 		{
+			name: "a stored crop is not a crop source", crop: cropInstruction("old_crop", valid),
+			want: []error{assetlist.ErrReferenceInvalid},
+		},
+		{
 			name: "region extends past the picture",
 			crop: cropInstruction("scene_1", listcrop.Region{X: 0.8, Y: 0.1, Width: 0.5, Height: 0.2}),
 			want: []error{assetlist.ErrCropRegionInvalid, assetlist.ErrInvalid},
@@ -331,6 +335,25 @@ func TestEditCropInstructionRefusals(t *testing.T) {
 			name: "region is too small",
 			crop: cropInstruction("scene_1", listcrop.Region{X: 0.1, Y: 0.1, Width: 0.01, Height: 0.01}),
 			want: []error{assetlist.ErrCropRegionTooSmall, assetlist.ErrInvalid},
+		},
+		{
+			name: "region is over the pixel limit",
+			crop: cropInstruction("scene_1", listcrop.Region{X: 0.1, Y: 0.1, Width: 0.5, Height: 0.5}),
+			mutate: func(cropper *fakeCropper) {
+				cropper.maximumPixels = 100
+			},
+			want:      []error{assetlist.ErrCropImageTooLarge, assetlist.ErrInvalid},
+			notWanted: []error{assetlist.ErrReferenceInvalid, assetlist.ErrCropRegionInvalid},
+		},
+		{
+			name: "crop budget inside a region failure",
+			crop: cropInstruction("scene_1", valid),
+			mutate: func(cropper *fakeCropper) {
+				cropper.fail = &listcrop.RegionFailure{Index: 0,
+					Err: &listcrop.LimitError{Limit: 24}}
+			},
+			want:      []error{assetlist.ErrImageItemLimit, assetlist.ErrInvalid},
+			notWanted: []error{assetlist.ErrReferenceInvalid, assetlist.ErrCropRegionInvalid},
 		},
 		{
 			name: "source crop budget is exhausted",
@@ -462,6 +485,10 @@ func TestCropEditKeepsCASAndTerminalRules(t *testing.T) {
 	}); !errors.Is(err, assetlist.ErrConflict) {
 		t.Fatalf("stale version error = %v; want ErrConflict", err)
 	}
+	// #331 review: the stale edit is refused before any crop instruction is cut.
+	if len(fixture.cropper.requests) != 0 {
+		t.Fatalf("a stale edit cut crops: %+v", fixture.cropper.requests)
+	}
 	edited, err := fixture.service.Edit(context.Background(), assetlist.EditInput{
 		Owner: "owner-a", ProjectID: "prj_1", ListID: stored.ID,
 		ExpectedVersion: stored.Version, Title: "Edited", Items: items,
@@ -480,5 +507,81 @@ func TestCropEditKeepsCASAndTerminalRules(t *testing.T) {
 		ExpectedVersion: edited.Version, Title: "Too late", Items: items,
 	}); !errors.Is(err, assetlist.ErrConflict) {
 		t.Fatalf("confirmed edit error = %v; want ErrConflict", err)
+	}
+	// The terminal-state refusal is also checked before the crop port is used.
+	if len(fixture.cropper.requests) != 1 {
+		t.Fatalf("the confirmed edit cut crops: requests = %+v", fixture.cropper.requests)
+	}
+}
+
+// #331 review: an item that gets a new crop drops a reference whose asset was
+// deleted instead of letting the list-wide validation refuse the whole edit;
+// items without a new crop keep the previous refusal.
+func TestEditCropDropsUnresolvableReferencesOfTheCroppedItem(t *testing.T) {
+	t.Parallel()
+	fixture := newCropFixture(t, nil)
+	stored := fixture.proposeForEdit(t, "Draft", []assetlist.ItemInput{
+		{Kind: "character", Name: "Hero", References: inputReferences("input_1")},
+		{Kind: "image", Name: "Icon", References: inputReferences("input_1")},
+	})
+	region := listcrop.Region{X: 0.2, Y: 0.2, Width: 0.5, Height: 0.5}
+	edited, err := fixture.service.Edit(context.Background(), assetlist.EditInput{
+		Owner: "owner-a", ProjectID: "prj_1", ListID: stored.ID,
+		ExpectedVersion: stored.Version, Title: "Recropped",
+		Items: []assetlist.ItemInput{
+			{Kind: "character", Name: "Hero",
+				References: []project.Reference{
+					{InputAssetID: "deleted_input"}, {InputAssetID: "input_1"},
+				},
+				Crop: cropInstruction("scene_1", region)},
+			{Kind: "image", Name: "Icon", References: inputReferences("input_1")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("edit with a deleted plain reference on the cropped item: %v", err)
+	}
+	references := edited.Items[0].References
+	if len(references) != 2 || references[0].InputAssetID != "input_1" ||
+		references[1].InputAssetID != "cut_1" {
+		t.Fatalf("cropped item references = %+v; want the kept picture and the new crop", references)
+	}
+	// Another item that keeps its references still refuses an unresolvable one.
+	_, err = fixture.service.Edit(context.Background(), assetlist.EditInput{
+		Owner: "owner-a", ProjectID: "prj_1", ListID: stored.ID,
+		ExpectedVersion: edited.Version, Title: "Unchanged",
+		Items: []assetlist.ItemInput{
+			{Kind: "character", Name: "Hero", References: inputReferences("input_1")},
+			{Kind: "image", Name: "Icon", References: inputReferences("deleted_input")},
+		},
+	})
+	if !errors.Is(err, assetlist.ErrReferenceInvalid) {
+		t.Fatalf("deleted reference without a new crop = %v; want ErrReferenceInvalid", err)
+	}
+}
+
+// #331 review: maximum_items_per_image is a product cap over the list, not the
+// storage guardrail. Twenty-four items cut from one picture are accepted and
+// the twenty-fifth item is refused.
+func TestEditCropInstructionsEnforceProductItemCap(t *testing.T) {
+	t.Parallel()
+	fixture := newCropFixture(t, func(config *assetlist.Config) { config.ProjectMaxItems = 100 })
+	items := make([]assetlist.ItemInput, 24)
+	for index := range items {
+		items[index] = assetlist.ItemInput{Kind: "image", Name: fmt.Sprintf("Item %d", index+1),
+			References: inputReferences("crop_a")}
+	}
+	stored := fixture.proposeForEdit(t, "Twenty-four", items)
+	if len(stored.Items) != 24 {
+		t.Fatalf("proposed items = %d; want 24", len(stored.Items))
+	}
+	over := append([]assetlist.ItemInput(nil), items...)
+	over = append(over, assetlist.ItemInput{Kind: "image", Name: "Item 25",
+		References: inputReferences("crop_a")})
+	_, err := fixture.service.Edit(context.Background(), assetlist.EditInput{
+		Owner: "owner-a", ProjectID: "prj_1", ListID: stored.ID,
+		ExpectedVersion: stored.Version, Title: "Twenty-five", Items: over,
+	})
+	if !errors.Is(err, assetlist.ErrImageItemLimit) || !errors.Is(err, assetlist.ErrInvalid) {
+		t.Fatalf("twenty-fifth item error = %v; want ErrImageItemLimit", err)
 	}
 }

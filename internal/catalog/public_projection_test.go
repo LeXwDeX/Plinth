@@ -63,7 +63,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// and the reserved item blocks stay server-side.
 		// #328: only the presence heartbeat is public from execution.
 		"asset_list":          {"limits", "kinds", "routes", "states", "item_states", "presence"},
-		"asset_list.limits":   {"max_lists_per_project", "draft_ttl_seconds", "name_max_length", "description_max_length", "max_references_per_item", "maximum_items_per_image"},
+		"asset_list.limits":   {"max_lists_per_project", "draft_ttl_seconds", "name_max_length", "description_max_length", "max_references_per_item", "maximum_items_per_image", "minimum_crop_short_edge"},
 		"asset_list.presence": {"heartbeat_seconds"},
 		// #330: the browser sees the modes with their labels, the defaults and
 		// the cap range; the counted capabilities, the Agent-facing message and
@@ -232,6 +232,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// #327: the work list card and project panel read these.
 		"asset_list.limits.max_lists_per_project",
 		"asset_list.limits.maximum_items_per_image",
+		"asset_list.limits.minimum_crop_short_edge",
 		"asset_list.kinds",
 		"asset_list.routes",
 		"asset_list.states",

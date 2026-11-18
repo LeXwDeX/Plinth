@@ -2264,6 +2264,7 @@ export function ChatColumn() {
                           variant="chat"
                           onDecided={sessionAssetLists.refresh}
                           onEdited={sessionAssetLists.refresh}
+                          onStale={sessionAssetLists.refresh}
                         />
                       ))}
                     </div>
@@ -2295,6 +2296,7 @@ export function ChatColumn() {
                     variant="chat"
                     onDecided={sessionAssetLists.refresh}
                     onEdited={sessionAssetLists.refresh}
+                    onStale={sessionAssetLists.refresh}
                   />
                 ))}
               </div>

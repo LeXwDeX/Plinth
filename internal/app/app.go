@@ -203,6 +203,12 @@ func (port cropProvenance) CropSource(ctx context.Context,
 	if err != nil || !found {
 		return "", false, err
 	}
+	// A Task source is copied into an input asset before it is cropped, and the
+	// copy is the picture the crop actually came from. Naming the copy keeps
+	// the source attachment openable; for an input source both ids are equal.
+	if crop.SourceInputAssetID != "" {
+		return crop.SourceInputAssetID, true, nil
+	}
 	return crop.SourceAssetID, true, nil
 }
 
@@ -841,22 +847,25 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	})
 	// #331: the read-only crop_image_regions tool cuts normalized regions out
 	// of one owned picture at original resolution and stores every crop as a
-	// list_crop input asset. The decompose section declares the per-source crop
-	// limit and the crop size bounds; a Catalog without it keeps the package
-	// defaults. The source decode bounds are the mask tool's. The same service
-	// backs the edit crop instruction, through the asset-list Config port.
+	// list_crop input asset. The decompose section declares the product item
+	// cap and the crop size bounds; a Catalog without it keeps the package
+	// defaults. The source decode bounds are the mask tool's, and a Task source
+	// is copied and decoded under that same byte cap. The storage guardrail is
+	// a multiple of the product cap because re-framing accumulates crop assets
+	// and old crops are never collected; the asset-list rules keep enforcing
+	// maximum_items_per_image itself. The same service backs the edit crop
+	// instruction, through the asset-list Config port.
 	cropConfig := listcrop.Config{
-		Inputs:                     cropInputAssets{inputs: inputAssetService, loader: repository},
-		Tasks:                      module,
-		Crops:                      repository.InputAssetCropRepository(),
-		SourceMaxBytes:             applicationSchema.Chat.ImageMask.Limits.MaxBytes,
-		SourceMaxPixels:            applicationSchema.Chat.ImageMask.Limits.MaxPixels,
-		GeneratedReferenceMaxBytes: applicationSchema.Runtime.InputAssets.GeneratedReferenceMaxBytes,
-		SourceAssetType:            applicationSchema.Runtime.InputAssets.DefaultAssetType,
+		Inputs:          cropInputAssets{inputs: inputAssetService, loader: repository},
+		Tasks:           module,
+		Crops:           repository.InputAssetCropRepository(),
+		SourceMaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+		SourceMaxPixels: applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+		SourceAssetType: applicationSchema.Runtime.InputAssets.DefaultAssetType,
 	}
 	if applicationSchema.AssetList != nil && applicationSchema.AssetList.Decompose != nil {
 		decompose := applicationSchema.AssetList.Decompose
-		cropConfig.MaximumCropsPerSource = decompose.MaximumItemsPerImage
+		cropConfig.MaximumCropsPerSource = decompose.MaximumItemsPerImage * listcrop.StorageCropLimitMultiplier
 		cropConfig.MinimumSide = decompose.Crop.MinimumShortEdge
 		cropConfig.MaximumRegionPixels = decompose.Crop.MaximumRegionPixels
 		cropConfig.UploadMaxBytes = decompose.Crop.MaximumPNGBytes
@@ -1032,14 +1041,21 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// #331: the read-only crop_image_regions tool cuts normalized regions out
 	// of one owned picture. The service is built above, beside the asset list,
 	// because an edit crop instruction reuses it through the asset-list port.
-	cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
-		Context:  applicationSchema.Chat.Context,
-		Schema:   applicationSchema.Chat.ImageCrop,
-		Crops:    cropService,
-		Localize: texts.Text,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("裁剪工具: %w", err)
+	// A custom Catalog without application.chat.image_crop leaves the tool
+	// unassembled instead of refusing startup: the executor answers its calls
+	// with the unavailable result.
+	var cropToolExecute func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	if strings.TrimSpace(applicationSchema.Chat.ImageCrop.Tool) != "" {
+		cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
+			Context:  applicationSchema.Chat.Context,
+			Schema:   applicationSchema.Chat.ImageCrop,
+			Crops:    cropService,
+			Localize: texts.Text,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("裁剪工具: %w", err)
+		}
+		cropToolExecute = cropTool.Execute
 	}
 	toolExecutor, err := generationtool.New(generationtool.Config{
 		Logger:          logger,
@@ -1134,7 +1150,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ReviseProcessingPlan:  toolExecutor.ReviseProcessingPlan,
 		InspectImage:          imageReview.Inspect,
 		CreateSelectionMask:   imageMask.Execute,
-		CropImageRegions:      cropTool.Execute,
+		CropImageRegions:      cropToolExecute,
 		InspectModel:          toolExecutor.InspectModel,
 		RenderModelViews:      toolExecutor.RenderModelViews,
 		CompareModels:         toolExecutor.CompareModels,
