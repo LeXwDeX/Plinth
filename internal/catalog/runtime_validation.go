@@ -682,6 +682,8 @@ func validateRuntime(schema RuntimeSchema) error {
 		frontend.TaskIdentifierPreviewCharacters <= 0 ||
 		frontend.CountdownTickMilliseconds <= 0 ||
 		frontend.TaskPollingIntervalMilliseconds <= 0 ||
+		frontend.HarnessRefreshMilliseconds <= 0 ||
+		frontend.PendingApprovalsRefreshMilliseconds <= 0 ||
 		frontend.SessionMenuPageSize <= 0 ||
 		frontend.SessionMenuSearchDebounceMilliseconds <= 0 ||
 		frontend.SessionTitleRefreshAttempts <= 0 ||
@@ -709,6 +711,9 @@ func validateRuntime(schema RuntimeSchema) error {
 	}
 	if err := validateSessionReadRetry(frontend.SessionReadRetry); err != nil {
 		return fmt.Errorf("frontend.session_read_retry: %w", err)
+	}
+	if err := validateIdlePolling(frontend); err != nil {
+		return fmt.Errorf("frontend.idle_polling: %w", err)
 	}
 	switch frontend.AdvancedModelDefaultMode {
 	case "regular", "parts":
@@ -749,6 +754,29 @@ func validateSessionReadRetry(retry SessionReadRetrySchema) error {
 		retry.MaxBackoffMilliseconds < retry.InitialDelayMilliseconds ||
 		retry.MaxRetryAfterMilliseconds < retry.MaxBackoffMilliseconds {
 		return errors.New("须满足 100 <= initial_delay_milliseconds <= max_backoff_milliseconds <= max_retry_after_milliseconds")
+	}
+	return nil
+}
+
+// maxIdlePollingIntervalMilliseconds caps frontend.idle_polling.max_interval_milliseconds
+// (one hour): a read slower than that is a stale page, not a slow poll.
+const maxIdlePollingIntervalMilliseconds = 3_600_000
+
+func validateIdlePolling(frontend FrontendRuntimeSchema) error {
+	polling := frontend.IdlePolling
+	if polling.BackoffFactor <= 1 || polling.BackoffFactor > 10 {
+		return errors.New("backoff_factor 必须大于 1 且不超过 10")
+	}
+	// The ceiling must not be below the interval of any read that backs off,
+	// or the "slower" wait would be shorter than the read's own.
+	longest := max(
+		frontend.TaskPollingIntervalMilliseconds,
+		frontend.HarnessRefreshMilliseconds,
+		frontend.PendingApprovalsRefreshMilliseconds,
+		frontend.BalanceRefreshMilliseconds,
+	)
+	if polling.MaxIntervalMilliseconds < longest || polling.MaxIntervalMilliseconds > maxIdlePollingIntervalMilliseconds {
+		return fmt.Errorf("max_interval_milliseconds 必须在 %d（各轮询间隔的最大值）到 %d 之间", longest, maxIdlePollingIntervalMilliseconds)
 	}
 	return nil
 }

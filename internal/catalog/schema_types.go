@@ -6920,6 +6920,13 @@ type FrontendRuntimeSchema struct {
 	TaskPollingIntervalMilliseconds      int                         `json:"task_polling_interval_milliseconds"`
 	HarnessRefreshMilliseconds           int                         `json:"harness_refresh_milliseconds"`
 	HarnessSaveDebounceMilliseconds      int                         `json:"harness_save_debounce_milliseconds"`
+	// PendingApprovalsRefreshMilliseconds is how often the page re-reads the
+	// pending paid steps of the session while a turn or a task is running
+	// (#385; it was a constant in the page). It slows down the same way the
+	// other repeating reads do (IdlePolling).
+	PendingApprovalsRefreshMilliseconds int `json:"pending_approvals_refresh_milliseconds"`
+	// IdlePolling is how the repeating reads slow down while nothing changes.
+	IdlePolling IdlePollingSchema `json:"idle_polling"`
 	// SessionMenuPageSize is how many sessions the top-bar switcher shows per
 	// page; a page is requested only when the person turns to it. The debounce
 	// delays the search request after typing.
@@ -6949,6 +6956,18 @@ type FrontendRuntimeSchema struct {
 	// or restored pick is a retired model switches to the successor and says
 	// so; frozen tasks keep the model they ran with.
 	RetiredGenerationModels []RetiredGenerationModel `json:"retired_generation_models,omitempty"`
+}
+
+// IdlePollingSchema is how the page slows its repeating reads (agent parameters,
+// consent, SkillRuns, pending approvals, provider balance) while they find
+// nothing new and no turn or task of the session is running (#385). After each
+// read that found nothing new the wait is multiplied by BackoffFactor, up to
+// MaxIntervalMilliseconds, and it returns to the read's own interval on a
+// change, when the tab becomes visible again, or while a turn or task runs. A
+// hidden tab and an ended login do not poll at all; that is not configurable.
+type IdlePollingSchema struct {
+	BackoffFactor           float64 `json:"backoff_factor"`
+	MaxIntervalMilliseconds int     `json:"max_interval_milliseconds"`
 }
 
 // SessionReadRetrySchema is how the browser reads a chat session's chat model

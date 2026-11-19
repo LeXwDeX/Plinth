@@ -885,6 +885,21 @@ Go shell 安全注入 Product Schema
 
 **展开编辑框的受理回调（#188）。** `Composer` 的 `onSend` 从无参改为接收 `onAccepted` 回调；Enter、折叠发送按钮和展开对话框发送按钮统一走 `submit`，只有父级确认已被服务端接管或进入发送队列后才调用回调关闭展开编辑框。拒绝或失败不调用，编辑框和原文保留；`chat-column.tsx` 把回调包在发起发送的会话身份检查里，发送期间切换会话不会关闭新会话的编辑框。排队分支在清空输入与草稿后同样算受理。验证：`composer-editor.test.tsx`（受理关闭/拒绝保留/再次打开/IME 与 Shift+Enter）、`chat-column-wiring.test.ts`（回调接线与排队分支）、`chat-choice-wiring.test.ts`（选择卡答复不受影响）。未部署，未做浏览器人工验收。
 
+### 重复读取的节奏与登录失效（#385；源码已实现，本机测试覆盖，未部署验收）
+
+**要解决的问题。** 自行部署实例的一份日志（约 34.6 万条请求）里，`agent/consent`（31.4%）、`agent/params`（24.3%）、`skill-runs`（23.0%）三个重复读取占 78.7%；一个空闲标签页约每小时 4,400 次，退出登录后留在后台的标签页仍每分钟读一次同意状态（一段 20 小时、1,615 次 401）。
+
+**前端数据流。** 页面所有重复读取的共同规则在 `src/lib/polling.ts`，不在各读取里重复：
+
+- **隐藏的标签页不读，重新显示时读一次。** SWR 读取经 `web/src/main.tsx` 的 `SWRConfig`（`swrPollingConfig.isVisible`）统一受约束：定时、聚焦、重连与出错重试都只在页面可见且登录有效时运行，已显示的数据保留；非 SWR 的读取（`startPoller`：同意状态 `SessionConsentController`、"转后台"询问、会话恢复轮询）在闸门关闭时不排下一次，闸门打开时立即读一次、再回到自己的间隔。任务跟踪（`useTaskTracker`）是例外：用户发起、正在等待的任务在隐藏的标签页里照常读取，因为任务结束要由后台页面用标题和浏览器通知提醒（`useTaskCompletionNotice`），它只受登录失效约束。
+- **401 即停。** 页面自己 API 的第一个 401 已由 `connectivity-watch` 记入 `useConnectivityStore.sessionExpired`（顶部"登录已过期"横幅，未发送的草稿保留，不自动跳转以免丢失画布等未保存状态）；它同时关闭上述闸门，之后不再有任何重复读取，直到重新登录（整页刷新）。登出状态仍由该 store 与 `useAuth` 持有，没有第二份。
+- **没有变化就放慢。** 读取结果与上一次相同时，下次等待乘以 Schema 的 `runtime.frontend.idle_polling.backoff_factor`，上限 `max_interval_milliseconds`；结果变化、标签页重新显示、本会话有回合在流式输出或有任务未结束（`useSessionBusy`）时回到该读取自己的间隔，进入忙碌状态时立刻重读一次，不等长间隔走完。读取自己的间隔仍是各自 Schema 字段（`harness_refresh_milliseconds`、`task_polling_interval_milliseconds`、`chat.frontend.fallback_poll_milliseconds`、新增的 `pending_approvals_refresh_milliseconds`——原为页面里的常量 20 秒、`balance_refresh_milliseconds`），前端没有第二份产品常量表。受影响的读取：`agent/params`、`agent/consent`、`skill-runs`、`pending-approvals`、余额；任务详情、转后台询问和会话恢复保持固定间隔，只受隐藏与登录失效的约束（任务跟踪只受登录失效约束）。
+- **没有走 SSE 驱动。** 对话 SSE 里没有同意状态或参数变更事件，把它们改成由流推送需要新的服务端事件契约，不属本次范围；流存续期间（`useSessionBusy`）读取保持原间隔作为替代。`/readyz` 是容器健康探针，不是标签页读取。
+
+**服务端。** `GET /api/meshy/balance`（Schema 的 `provider_balance` 路由）改经共享余额缓存（`application.step_policy.balance_cache_seconds` 的 TTL、`balance_read_timeout_seconds` 的单次读取上限，与外部 MCP 服务及 Agent 共用同一个 `provideraccounts.Cache`）：各账户并发读取、失败同样缓存到 TTL，同一 Provider 一个 TTL 内只问一次；原先逐账户串行、各自 30 秒超时，三个账户都静默时一次请求最长 90 秒（日志里 35 次不低于 60 秒）。账户未按 Provider 自己的单位显示时用 `Plain` 读取，与精确原生金额分开缓存。Schema 没有声明该缓存时保留原来的直接读取。访问日志里，请求上下文已被客户端取消（刷新页面、关闭标签）且处理结果是 5xx 的请求，记为 `status=499`、`client_canceled=true`、INFO 级，保留请求 ID 与原因；`domain operation failed` 的 ERROR 行同样降为 DEBUG。响应本身不变，也不透露取消；真正的 4xx/5xx 与服务端自设超时（DeadlineExceeded）照旧按 WARN/ERROR 记录。仍有直接写 ERROR 的个别 Handler（如画布）未统一处理，其取消失败可能仍记为错误。
+
+**验证范围。** `src/lib/polling.test.ts`（闸门、退避、忙碌、刷新、停止）、`src/hooks/__tests__/use-polling.test.tsx`（SWR 在隐藏标签页与 401 后不发请求、退避序列、`useSessionBusy`）、`idle-polling-load.test.tsx`（用真实 hooks 模拟一个空闲标签页一小时：旧节奏 4,446 次，现在 380 次，隐藏 1 分钟后为 26 次；登录失效后 20 小时零请求）；Go：`request_client_cancel_test.go`、`provider_balance_compat_test.go`（静默 Provider 不拖住页面、TTL 内只读一次）、`provideraccounts/cache_test.go`、`catalog/idle_polling_test.go`。没有部署到 `dev-test`，没有浏览器实测。
+
 ### 对话消息的 Markdown 子集（#333；源码已实现，本机 Mock 栈 Chromium/WebKit 验收，未部署验收）
 
 助手消息按 Markdown 子集显示，用户消息仍按输入原样显示（`whitespace-pre-wrap` 纯文本，句柄照旧是标签）。不引入新依赖：

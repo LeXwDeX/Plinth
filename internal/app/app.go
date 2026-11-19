@@ -2137,6 +2137,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		},
 		PromptEnhancer:        promptEnhancer,
 		ProviderAccounts:      providerAccountService,
+		ProviderBalances:      providerBalanceReader(stepBalanceCache),
 		AssetProxy:            assetProxy,
 		LegacyGeneratedImages: legacyGeneratedImages,
 		Application:           transportApplicationSchema,
@@ -2307,6 +2308,16 @@ func configuredRuntimeSetting(
 		return value
 	}
 	return strings.TrimSpace(setting.Default)
+}
+
+// providerBalanceReader hands the shared balance cache to the web balance route
+// (#385), or nothing when the Schema does not declare one. The check keeps a nil
+// *Cache from becoming a non-nil interface.
+func providerBalanceReader(cache *provideraccounts.Cache) httpapi.ProviderBalanceReader {
+	if cache == nil {
+		return nil
+	}
+	return cache
 }
 
 func buildProviderAccounts(

@@ -5,6 +5,7 @@ import useSWR, { mutate as mutateGlobal } from 'swr';
 import { toast } from 'sonner';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useAuth } from '@/hooks/use-auth';
+import { useIdleInterval, useSessionBusy } from '@/hooks/use-polling';
 import { createAgentHarnessClient, mergeAgentParams, type AgentParamValues, type AgentParameterProjection, type AgentParameterState } from '@/lib/agent-params';
 import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import type { ParamSchema } from '@/lib/providers/types';
@@ -108,13 +109,17 @@ export function useSessionAgentParams(sessionId: string | null, paramSchemas: Pa
   const harness = useMemo(() => client(schema), [schema]);
   const key = sessionId && ownerId ? sessionAgentParamsKey(schema, ownerId, sessionId, offeringId) : null;
   const scope = JSON.stringify(key);
+  // The Agent may set parameters during a turn; otherwise they change only from another tab, so the reads slow down.
+  const busy = useSessionBusy(sessionId);
+  const refreshInterval = useIdleInterval<AgentParameterProjection>(
+    schema.runtime.frontend.harness_refresh_milliseconds,
+    schema.runtime.frontend.idle_polling,
+    { busy },
+  );
   const { data: projection, error, isLoading } = useSWR<AgentParameterProjection>(
     key,
     () => harness.getParamsWithState(sessionId as string, undefined, offeringId),
-    {
-      refreshInterval: schema.runtime.frontend.harness_refresh_milliseconds || 4000,
-      revalidateOnFocus: false,
-    },
+    { refreshInterval },
   );
   const serverParams = projection?.params ?? {};
   const local = useSyncExternalStore(subscribe, () => (key ? pendingScopes.get(scope)?.values ?? EMPTY : EMPTY), () => EMPTY);

@@ -1,3 +1,4 @@
+import { pageGate, pollingAllowed } from '@/lib/polling';
 import { useChatStore, type StreamingBuffer } from '@/store/chat-store';
 import type { ChatBrowserClient } from './browser-client';
 
@@ -35,13 +36,24 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
     ownedBuffer = undefined;
   };
 
+  // #385: a hidden tab or an ended login does not read; the read it owed is made once the page may read again.
+  let parked = false;
   const schedulePoll = () => {
     if (!current() || pollTimer !== undefined) return;
     pollTimer = setTimeout(() => {
       pollTimer = undefined;
+      if (!pollingAllowed()) {
+        parked = true;
+        return;
+      }
       void load(false);
     }, pollMilliseconds);
   };
+  const unsubscribeGate = pageGate.subscribe(() => {
+    if (!parked || !pollingAllowed()) return;
+    parked = false;
+    void load(false);
+  });
 
   // #177: a reconnected stream also ends by swapping the stored page in place of its buffer, so the
   // replayed turn never disappears for a frame.
@@ -109,6 +121,7 @@ export function recoverChatSession(options: SessionRecoveryOptions): () => void 
   void load(true);
   return () => {
     stopped = true;
+    unsubscribeGate();
     controller.abort();
     if (pollTimer !== undefined) clearTimeout(pollTimer);
     closeStream?.();
