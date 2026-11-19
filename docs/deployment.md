@@ -277,6 +277,32 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 
 **升级说明：资产清单（#327）。** 迁移 `0100_asset_lists.sql` 新增 `asset_lists` 与 `asset_list_items` 两张表及索引、唯一性与外键约束：`request_key` 唯一、每项目至多一份 `confirmed` 的部分唯一索引、`source_session_id`/`session_id` 的 `ON DELETE SET NULL` 与项目外键 `ON DELETE CASCADE`；不修改旧表、不回填数据，随启动迁移自动应用。未声明 `application.asset_list` 的旧 Catalog 启动后不装配清单服务，四条清单路由不注册，Agent 工具也不会出现（旧 Catalog 本身没有声明 `propose_asset_list`），所以升级后旧 Catalog 仍可启动。使用自定义 `CATALOG_FILE` 并要启用该功能时，须补上 `application.asset_list`，并同时声明 `application.project`、`application.step_policy`（3D 计划步数口径）与四条 `runtime.http.routes` 键；缺项会使 Catalog 校验失败、进程拒绝启动。回滚到旧版本不需要删表：旧版本不读取这两张表，保留的新表不影响启动或既有数据。功能尚未在 dev-test 验收，验收记录见 Issue #327。
 
+**升级说明：3D 步数结果对象（#330 第 3B 步）。** 本版本起，声明了 `application.step_policy` 的自定义 `CATALOG_FILE`（包括从 3A 升级来的文档）还必须声明 `step_policy.result.schema`：校验要求 `mode`（string）与 `used`（integer）两个属性存在、带说明并列入 `required`，`cap` 与 `remaining`（均为 integer）可声明但不得列入 `required`，`required` 中也不能出现这四个以外的键；缺 `result` 或声明不合规时 Catalog 校验失败、进程拒绝启动。要让生成类工具的结果带上步数对象，还须在该工具的 `result_fields` 中声明 `steps` 键（不能是保留键，也不能与同一工具的其他结果键重名）；不声明仍可启动，只是该工具的结果不带这个对象。默认 Catalog 已全部声明。最小片段：
+
+```json
+"step_policy": {
+  "result": {
+    "schema": {
+      "type": "object",
+      "description": "本资产在 3D 步数模式下的步数现状；读取不到时不出现这个对象",
+      "properties": {
+        "mode": {"type": "string", "description": "agent=由 Agent 自己管理，unlimited=不限，cap=有硬上限"},
+        "used": {"type": "integer", "description": "本资产已用的 3D 步数"},
+        "cap": {"type": "integer", "description": "硬上限模式下的上限；其他模式不出现"},
+        "remaining": {"type": "integer", "description": "硬上限模式下的剩余步数；其他模式不出现"}
+      },
+      "required": ["mode", "used"]
+    }
+  }
+}
+```
+
+工具侧只需一个键（其余结果键按各工具原有声明保留）：
+
+```json
+"result_fields": {"success": "success", "steps": "steps"}
+```
+
 ## 7. 冒烟失败后的手工回滚
 
 自动回滚只覆盖发布脚本内的失败。冒烟失败且已有前一版本时（首次 bootstrap 版本没有前一版本，只能停止服务并保留现场）：

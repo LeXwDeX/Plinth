@@ -657,6 +657,9 @@ func (executor *Executor) executeProcessing(
 			return executor.reject(command, executor.fillText(command, messages.StepUnknown, "{step}", step))
 		}
 	}
+	// The result's steps object follows this call's real capability, not the
+	// tool's main one (#330 step 3B review).
+	recordStepCapability(ctx, capability)
 	allowed := map[string]bool{processing.SourceTaskArgument: true, processing.SourceAssetArgument: true,
 		processing.SourceAssetsArgument: true,
 		processing.StepArgument:         true, processing.PromptArgument: true, processing.ReferenceArgument: true,

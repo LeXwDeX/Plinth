@@ -301,6 +301,9 @@ func (executor *Executor) resumeAgentOperation(
 		prepared.OfferingID != op.OfferingID || prepared.OfferingRevision != op.OfferingRevision {
 		return chat.ToolResult{NoSubmission: true}, ErrOperationConflict
 	}
+	// The frozen input carries the capability the step really runs, including a
+	// replayed process_model call whose step argument is not re-resolved here.
+	recordStepCapability(ctx, prepared.Capability)
 	command, err = executor.verifyAgentHarnessPreparedSource(ctx, command, prepared)
 	if err != nil {
 		return executor.harnessRefusal(command, err)
@@ -347,7 +350,7 @@ func (executor *Executor) resumeAgentOperation(
 				// no approval card exists and nothing is submitted; the Agent
 				// reads why and tells the person.
 				cardSettled()
-				return executor.stepCapResult(command, *decision.Steps), nil
+				return executor.stepCapResult(ctx, command, *decision.Steps), nil
 			}
 		}
 		if grant.Status == executiongrant.Pending {
@@ -401,7 +404,7 @@ func (executor *Executor) resumeAgentOperation(
 			if err != nil {
 				return chat.ToolResult{NoSubmission: true}, err
 			}
-			return executor.stepCapResult(command, summary), nil
+			return executor.stepCapResult(ctx, command, summary), nil
 		}
 		return chat.ToolResult{AgentContent: executor.chat.Agent.ConsentDeniedContent, NoSubmission: true}, nil
 	case executiongrant.Claimed:
@@ -518,8 +521,10 @@ func (executor *Executor) abandonBudgetReservation(ctx context.Context, op Opera
 
 // stepCapResult is the tool result of a 3D step the steps mode refused (#330):
 // a failure whose text is the Schema's step-cap message with the asset's used
-// steps and its cap, in the turn's locale. Nothing was submitted.
-func (executor *Executor) stepCapResult(command chat.ToolCommand, summary executiongrant.StepSummary) chat.ToolResult {
+// steps and its cap, in the turn's locale. Nothing was submitted. The deciding
+// standing is recorded so the result's steps object repeats the same numbers.
+func (executor *Executor) stepCapResult(ctx context.Context, command chat.ToolCommand, summary executiongrant.StepSummary) chat.ToolResult {
+	recordStepSummary(ctx, summary)
 	text := ""
 	if executor.stepPolicy != nil {
 		text = executor.stepPolicy.Messages.CapReached

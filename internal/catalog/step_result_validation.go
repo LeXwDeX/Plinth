@@ -43,16 +43,19 @@ func validateStepPolicyResult(policy *StepPolicySchema) error {
 	}
 	required := make(map[string]bool, len(parsed.Required))
 	for _, name := range parsed.Required {
+		switch name {
+		case StepResultMode, StepResultUsed:
+		case StepResultCap, StepResultRemaining:
+			return fmt.Errorf("step_policy.result.schema 不能把 %s 列为必填：只有硬上限模式写出它", name)
+		default:
+			return fmt.Errorf("step_policy.result.schema 的 required 只能含 %s 与 %s，不能含 %q",
+				StepResultMode, StepResultUsed, name)
+		}
 		required[name] = true
 	}
 	for _, name := range []string{StepResultMode, StepResultUsed} {
 		if !required[name] {
 			return fmt.Errorf("step_policy.result.schema 必须把 %s 列为必填（每种模式都写出它）", name)
-		}
-	}
-	for _, name := range []string{StepResultCap, StepResultRemaining} {
-		if required[name] {
-			return fmt.Errorf("step_policy.result.schema 不能把 %s 列为必填：只有硬上限模式写出它", name)
 		}
 	}
 	return nil

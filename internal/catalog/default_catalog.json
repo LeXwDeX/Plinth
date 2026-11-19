@@ -9227,7 +9227,7 @@
           "result_attachment_kind": "model",
           "result_asset_roles": ["thumbnail"],
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note","steps":"steps"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","error":"error","warning":"warning","estimated_credits":"estimated_credits","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note"}
         },
         {
           "name": "convert_model_format",

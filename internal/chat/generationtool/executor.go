@@ -403,8 +403,9 @@ func (executor *Executor) Execute(
 	command chat.ToolCommand,
 	observe func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
+	ctx, state := withStepStandingState(ctx)
 	result, err := executor.execute(ctx, command, observe)
-	executor.attachStepStanding(ctx, command, &result)
+	executor.attachStepStanding(ctx, command, &result, state)
 	return result, err
 }
 
@@ -1048,6 +1049,9 @@ func (executor *Executor) observeBoundTask(
 		return executor.executionFailure(command, command.BoundTaskID),
 			errors.New("generation tool: bound task belongs to another session")
 	}
+	// The observed Task names the capability the step really ran
+	// (process_model whose step was, say, a uv-unwrap).
+	recordStepCapability(ctx, task.Capability)
 	if observe != nil {
 		if err := observe(chat.ToolObservation{
 			Registered:  true,

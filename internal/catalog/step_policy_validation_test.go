@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -302,18 +303,42 @@ func TestStepPolicyPromptCopyIsPairedInEnglish(t *testing.T) {
 	}
 }
 
-// #330 step 3B: every generation tool's result declares the steps key the
-// executor writes, and the shipped Schema declares the object it carries.
+// #330 step 3B: a tool may leave result_fields.steps out (the plan tool's
+// steps key carries its own step array), but a declared key must be its own and
+// must not take a reserved result key. The shipped Schema still declares the
+// object the tools that do carry it write.
 func TestDefaultStepResultIsDeclaredForGenerationTools(t *testing.T) {
 	t.Parallel()
 	application := defaultApplication(t)
 	if len(application.StepPolicy.Result.Schema) == 0 {
 		t.Fatal("default Catalog declares no application.step_policy.result")
 	}
+	declared := 0
 	for _, tool := range application.Chat.Tools {
-		if strings.TrimSpace(tool.ResultFields.Steps) == "" {
-			t.Fatalf("tool %q declares no result_fields.steps", tool.Name)
+		key := tool.ResultFields.Steps
+		if key == "" {
+			continue
 		}
+		declared++
+		if key == "native_quote" {
+			t.Fatalf("tool %q takes the reserved result key %q", tool.Name, key)
+		}
+		if tool.Name == "plan_model_processing" {
+			t.Fatalf("the plan tool declares result_fields.steps; its steps key holds the plan's step array")
+		}
+		fields := reflect.ValueOf(tool.ResultFields)
+		for position := 0; position < fields.NumField(); position++ {
+			name := fields.Type().Field(position).Name
+			if name == "Steps" || fields.Field(position).Kind() != reflect.String {
+				continue
+			}
+			if fields.Field(position).String() == key {
+				t.Fatalf("tool %q declares result_fields.steps with the key of %s (%q)", tool.Name, name, key)
+			}
+		}
+	}
+	if declared == 0 {
+		t.Fatal("no chat tool declares result_fields.steps")
 	}
 	if err := catalog.ValidateApplicationSchema(application); err != nil {
 		t.Fatalf("default step result invalid: %v", err)
@@ -381,6 +406,16 @@ func TestStepResultValidationRejectsIncompleteDeclarations(t *testing.T) {
 		"remaining is required": func(t *testing.T, app *catalog.ApplicationSchema) {
 			schema := stepResultSchema(t, *app)
 			schema["required"] = []any{catalog.StepResultMode, catalog.StepResultUsed, catalog.StepResultRemaining}
+			storeStepResultSchema(t, app, schema)
+		},
+		"cap is required": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			schema["required"] = []any{catalog.StepResultMode, catalog.StepResultUsed, catalog.StepResultCap}
+			storeStepResultSchema(t, app, schema)
+		},
+		"required names a key the code never writes": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			schema["required"] = []any{catalog.StepResultMode, catalog.StepResultUsed, "quota"}
 			storeStepResultSchema(t, app, schema)
 		},
 		"result key collides with success": func(_ *testing.T, app *catalog.ApplicationSchema) {
