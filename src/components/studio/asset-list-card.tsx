@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { ListChecks } from 'lucide-react';
 
 import { Action } from '@/components/ui/button';
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
   AssetListError,
@@ -840,13 +841,14 @@ export function AssetListCard({
                           targeted ? 'border-warning bg-warning/15' : 'border-primary bg-primary/10'
                         }`}
                         style={regionStyle(box.region)}
-                        title={box.name}
                         aria-hidden
                         data-testid={`asset-list-crop-box-${box.index}`}
                       >
-                        <span className="absolute left-0 top-0 rounded-sm bg-primary px-0.5 text-[9px] leading-3 text-primary-foreground">
-                          {box.index + 1}
-                        </span>
+                        <HintTooltip name={box.name} className="absolute left-0 top-0">
+                          <span className="rounded-sm bg-primary px-0.5 text-[9px] leading-3 text-primary-foreground">
+                            {box.index + 1}
+                          </span>
+                        </HintTooltip>
                       </div>
                     );
                   })}
