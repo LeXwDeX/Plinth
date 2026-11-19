@@ -117,6 +117,125 @@ export interface AssetListDetail extends AssetListSummary {
   items: AssetListItem[];
 }
 
+/** #329: one stored result file of the acceptance snapshot. */
+export interface AssetListBoardArtifact {
+  asset_id: string;
+  role?: string;
+  variant?: string;
+  media_type?: string;
+  size?: number;
+  sha256?: string;
+}
+
+/**
+ * #329: one acceptance criterion as the server judged it. `status` is pass,
+ * fail or unknown; unknown is a fact (no readable GLB, an unusable threshold),
+ * never a pass. `actual` is whatever the judge measured for that criterion.
+ */
+export interface AssetListBoardCheck {
+  check: string;
+  status: string;
+  actual?: unknown;
+  budget?: string;
+  detail?: string;
+}
+
+/** #329: the 3D judgment; an empty asset_id means the results held no GLB. */
+export interface AssetListBoardModel3D {
+  asset_id?: string;
+  checks: AssetListBoardCheck[];
+}
+
+/** #329: the 2D delivery judgment of the cover picture. */
+export interface AssetListBoardImage2D {
+  asset_id?: string;
+  width?: number;
+  height?: number;
+  checks: AssetListBoardCheck[];
+}
+
+/** #329: the Agent's persisted self-check conclusion, when one exists. */
+export interface AssetListBoardSelfCheck {
+  status?: string;
+  summary?: string;
+  remaining?: string[];
+}
+
+/** #329: the step summary of the item's sub-session (#330 wording: steps, not credits). */
+export interface AssetListBoardSteps {
+  used: number;
+  model3d: number;
+  cap?: number;
+  mode?: string;
+}
+
+/** #329: the snapshot taken when the item entered review. */
+export interface AssetListBoardReview {
+  captured_at?: string;
+  round?: number;
+  task_id?: string;
+  cover_asset_id?: string;
+  artifacts?: AssetListBoardArtifact[];
+  model3d?: AssetListBoardModel3D;
+  image2d?: AssetListBoardImage2D;
+  self_check?: AssetListBoardSelfCheck;
+  steps?: AssetListBoardSteps;
+}
+
+/** #329: the server-built completion snapshot stored with a reported-done item. */
+export interface AssetListBoardResult {
+  task_id?: string;
+  assets?: Array<{ id: string; name?: string; role?: string }>;
+}
+
+/** #329: one recorded acceptance decision (the latest round shown on the board). */
+export interface AssetListBoardDecision {
+  id: string;
+  round: number;
+  verdict: string;
+  reason?: string;
+  reasons?: string[];
+  note?: string;
+  reviewer_id?: string;
+  review?: Record<string, unknown>;
+  created_at: string;
+}
+
+/** #329c: where one crop of the item was cut from. */
+export interface AssetListBoardSource {
+  source_input_asset_id: string;
+  source_kind?: string;
+  source_width?: number;
+  source_height?: number;
+}
+
+/** #329c: the cut geometry: the normalized region and its source-pixel rectangle. */
+export interface AssetListBoardRegion extends CropRegion {
+  pixel_rect?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+/**
+ * #329: one item of the acceptance board: the list item plus its produced
+ * artifacts, its acceptance snapshot, the latest decision and the crop
+ * provenance (#331). `result` and `review` are `{}` before the item has them;
+ * `latest_review` is null until the person decides.
+ */
+export interface AssetListBoardItem extends AssetListItem {
+  result?: AssetListBoardResult | null;
+  review?: AssetListBoardReview | null;
+  latest_review?: AssetListBoardDecision | null;
+  reference_asset_id?: string;
+  source?: AssetListBoardSource;
+  region?: AssetListBoardRegion;
+  representative_asset_id?: string;
+}
+
+/** #329: the read-only acceptance board: the list summary plus every item in position order. */
+export interface AssetListBoard {
+  list: AssetListSummary & { version: number };
+  items: AssetListBoardItem[];
+}
+
 /** #331: a normalized region relative to its source picture, right and bottom edges exclusive. */
 export interface CropRegion {
   x: number;
@@ -213,6 +332,8 @@ export type AssetListPresenceState = 'present' | 'leave';
 export interface AssetListClient {
   listProjectLists(projectID: string): Promise<AssetListSummary[]>;
   getList(projectID: string, listID: string): Promise<AssetListDetail>;
+  /** #329: the read-only acceptance board of one list, every item from one aggregate read. */
+  getBoard(projectID: string, listID: string): Promise<AssetListBoard>;
   decide(projectID: string, listID: string, decision: AssetListDecision, reason?: string): Promise<AssetListDetail>;
   listSessionLists(sessionID: string): Promise<AssetListSummary[]>;
   /**
@@ -286,6 +407,8 @@ export function createAssetListClient(
   const projectListsRoute = () => required(routes.project_asset_lists);
   const listRoute = (projectID: string, listID: string) =>
     route(required(routes.project_asset_list), { projectID, listID });
+  const boardRoute = (projectID: string, listID: string) =>
+    route(required(routes.project_asset_list_board), { projectID, listID });
   const decisionRoute = (projectID: string, listID: string) =>
     route(required(routes.project_asset_list_decision), { projectID, listID });
   const runRoute = (projectID: string, listID: string) =>
@@ -319,6 +442,7 @@ export function createAssetListClient(
   };
   const summaries = (payload: unknown): AssetListSummary[] => array(object(payload).data) as AssetListSummary[];
   const detailOf = (payload: unknown): AssetListDetail => object(payload) as unknown as AssetListDetail;
+  const boardOf = (payload: unknown): AssetListBoard => object(payload) as unknown as AssetListBoard;
   const runOf = (payload: unknown): AssetListRunState => object(payload) as unknown as AssetListRunState;
   const itemOf = (payload: unknown): AssetListItem => object(payload) as unknown as AssetListItem;
 
@@ -334,6 +458,12 @@ export function createAssetListClient(
       const payload = await payloadOf(response);
       if (!response.ok) failure(response, payload);
       return detailOf(payload);
+    },
+    async getBoard(projectID, listID) {
+      const response = await fetcher(boardRoute(projectID, listID));
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return boardOf(payload);
     },
     async decide(projectID, listID, decision, reason) {
       const body = reason ? { decision, reason } : { decision };

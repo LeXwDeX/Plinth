@@ -24,6 +24,7 @@ import { runIsTerminal, runProgressText, runStatusText } from '@/lib/asset-lists
 import {
   formatSchemaText, schemaCountMessage, schemaText, type ProductSchema,
 } from '@/lib/product-schema';
+import { useStudioStore } from '@/store/studio-store';
 
 export interface AssetListCardProps {
   detail: AssetListDetail;
@@ -1191,6 +1192,23 @@ export function AssetListCard({
                 {text('ui.asset_list.edit_cancel')}
               </Action>
             </div>
+          </div>
+        ) : null}
+        {!draft && detail.status === 'confirmed' ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Action
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => useStudioStore.getState().openAssetBoard({
+                projectId,
+                listId: detail.id,
+                title: detail.title,
+              })}
+              data-testid="asset-list-open-board"
+            >
+              {text('ui.asset_list.board.open')}
+            </Action>
           </div>
         ) : null}
         {!draft && canEdit ? (

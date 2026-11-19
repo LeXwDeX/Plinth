@@ -74,6 +74,7 @@ function clientWith(overrides: Partial<AssetListClient> = {}): AssetListClient {
   return {
     listProjectLists: vi.fn(async () => [summary()]),
     getList: vi.fn(async () => ({ ...summary(), version: 4, brief: {}, items: [] })),
+    getBoard: vi.fn(async () => ({ list: { ...summary(), version: 4 }, items: [] })),
     decide: vi.fn(async () => ({ ...summary(), version: 4, brief: {}, items: [] })),
     controlRun: vi.fn(async () => run({ status: 'paused', pause_reason: 'user' })),
     skipItem: vi.fn(async () => item({ state: 'skipped', version: 5 })),

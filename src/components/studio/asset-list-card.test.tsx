@@ -17,6 +17,7 @@ import {
   type CropInstruction,
 } from '@/lib/asset-lists/client';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { useStudioStore } from '@/store/studio-store';
 
 vi.mock('@/hooks/use-asset-url-rewriter', () => ({
   useAssetURLRewriter: () => ({ previewAssetUrl: (url: string) => url }),
@@ -51,7 +52,10 @@ beforeAll(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useStudioStore.setState({ assetBoard: null });
+});
 
 function item(overrides: Partial<AssetListItem> = {}): AssetListItem {
   return {
@@ -125,6 +129,7 @@ function clientWith(
   return {
     listProjectLists: vi.fn(async () => []),
     getList: vi.fn(async () => detail()),
+    getBoard: vi.fn(async () => ({ list: { ...detail(), version: 1 }, items: [] })),
     decide: decide as unknown as AssetListClient['decide'],
     controlRun: (controls.controlRun ?? vi.fn(async () => run())) as unknown as AssetListClient['controlRun'],
     skipItem: (controls.skipItem ?? vi.fn(async () => item({ state: 'skipped' }))) as unknown as AssetListClient['skipItem'],
@@ -208,6 +213,19 @@ describe('AssetListCard (#327)', () => {
 
     // #327: a production list never quotes a price or a budget.
     expect(screen.getByTestId('asset-list-card').textContent).not.toMatch(/价格|积分|price|credit/i);
+  });
+
+  it('offers the acceptance board only on a confirmed list (#329)', () => {
+    renderCard();
+    // A draft has nothing to review yet.
+    expect(screen.queryByTestId('asset-list-open-board')).toBeNull();
+    cleanup();
+
+    renderCard({ detail: detail({ status: 'confirmed', effective_status: 'confirmed' }) });
+    fireEvent.click(screen.getByTestId('asset-list-open-board'));
+    expect(useStudioStore.getState().assetBoard).toEqual({
+      projectId: 'proj', listId: 'listid', title: '英雄套装',
+    });
   });
 
   it('confirms through the client and tells the parent to refresh', async () => {

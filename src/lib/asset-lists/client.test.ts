@@ -92,6 +92,7 @@ describe('asset list schema contract', () => {
       project_asset_lists: '/api/v1/projects/{projectID}/asset-lists',
       project_asset_list: '/api/v1/projects/{projectID}/asset-lists/{listID}',
       project_asset_list_decision: '/api/v1/projects/{projectID}/asset-lists/{listID}/decision',
+      project_asset_list_board: '/api/v1/projects/{projectID}/asset-lists/{listID}/board',
       project_asset_list_run: '/api/v1/projects/{projectID}/asset-lists/{listID}/run',
       project_asset_list_item: '/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}',
       chat_session_asset_lists: '/api/v1/chat/sessions/{sessionID}/asset-lists',
@@ -113,6 +114,14 @@ describe('asset list client', () => {
     const client = createAssetListClient(schema, { fetcher });
     await expect(client.getList('prj/1', 'al 1')).resolves.toEqual(detail);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%2F1/asset-lists/al%201');
+  });
+
+  it('reads the acceptance board from its own route with encoded ids', async () => {
+    const board = { list: { ...summary, version: 3 }, items: [{ ...detail.items[0], result: {}, review: {}, latest_review: null }] };
+    const fetcher = vi.fn(async () => jsonResponse(board)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.getBoard('prj/1', 'al 1')).resolves.toEqual(board);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%2F1/asset-lists/al%201/board');
   });
 
   it('puts a decision with and without a reason and returns the detail', async () => {

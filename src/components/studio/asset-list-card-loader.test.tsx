@@ -73,6 +73,7 @@ function clientWith(getList: ReturnType<typeof vi.fn>): AssetListClient {
   return {
     listProjectLists: vi.fn(async () => []),
     getList: getList as unknown as AssetListClient['getList'],
+    getBoard: vi.fn(async () => ({ list: { ...detail(), version: 1 }, items: [] })),
     decide: vi.fn(async () => detail()),
     controlRun: vi.fn(async () => ({
       status: 'running',
