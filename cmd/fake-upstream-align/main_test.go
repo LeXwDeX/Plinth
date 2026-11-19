@@ -42,6 +42,26 @@ func TestOfficialRecorderIsOffByDefaultAndRefusesHalfSetSwitches(t *testing.T) {
 	}
 }
 
+// The labeled Rodin request (#376) is one paid submission with a status and a
+// download step behind it. Without -confirm-paid the official run refuses before
+// it reads a key or sends anything, and says how many paid requests it would
+// send: the one submission.
+func TestOfficialRefusesTheLabeledRodinRequestWithoutConfirmation(t *testing.T) {
+	private := t.TempDir()
+	if err := os.Chmod(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HYPER3D_API_KEY", "dummy-not-a-key")
+	err := run([]string{"official", "-version", "hyper3d/api-v2", "-key-env", "HYPER3D_API_KEY", "-private", private,
+		"-steps", "rodin-labeled,rodin-labeled-status,rodin-labeled-download"})
+	if err == nil || !strings.Contains(err.Error(), "sends 1 paid request(s)") || !strings.Contains(err.Error(), "-confirm-paid") {
+		t.Fatalf("an unconfirmed official run must refuse and count its paid request, got %v", err)
+	}
+	if entries, readErr := os.ReadDir(private); readErr != nil || len(entries) != 0 {
+		t.Fatalf("a refused run leaves nothing behind: %v %v", entries, readErr)
+	}
+}
+
 func TestDraftCommandRequiresPrivateDirectories(t *testing.T) {
 	if err := run([]string{"draft"}); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("draft without flags must fail, got %v", err)

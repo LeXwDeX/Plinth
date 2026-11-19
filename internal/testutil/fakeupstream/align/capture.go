@@ -229,7 +229,9 @@ func (c *Capture) Export(worktree, out, name, offering string, bundle *Bundle) (
 }
 
 // finalPolicy registers the keys of every body in the bundle and every plain
-// scalar outside the projected fields.
+// scalar outside the projected fields. A multipart request's record lists every
+// value of a repeated field name as an array, and each element is registered
+// like any other scalar.
 func (c *Capture) finalPolicy(bundle *Bundle) wirefixture.Policy {
 	policy := wirefixture.Policy{
 		MaxBodyBytes: 4 << 20,

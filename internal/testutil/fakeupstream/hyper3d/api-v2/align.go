@@ -17,7 +17,14 @@ const OfficialBase = "https://api.hyper3d.com/api/v2"
 
 // referencePNG is a shaded sphere on a white background: an object the image to
 // 3D endpoint can find.
-func referencePNG() []byte {
+func referencePNG() []byte { return spherePNG(nil) }
+
+// markRadius is the radius of the dark mark viewPNG draws on the sphere.
+const markRadius = 28
+
+// spherePNG is referencePNG with, when mark is not nil, a dark disc of
+// markRadius centered there.
+func spherePNG(mark *image.Point) []byte {
 	const size = 512
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	for y := 0; y < size; y++ {
@@ -28,11 +35,32 @@ func referencePNG() []byte {
 				shade := uint8(220 - int(d2/180/180*140))
 				img.Set(x, y, color.RGBA{R: shade, G: shade / 2, B: 60, A: 255})
 			}
+			if mark != nil {
+				mx, my := x-mark.X, y-mark.Y
+				if mx*mx+my*my < markRadius*markRadius {
+					img.Set(x, y, color.RGBA{R: 30, G: 20, B: 20, A: 255})
+				}
+			}
 		}
 	}
 	var out bytes.Buffer
 	_ = png.Encode(&out, img)
 	return out.Bytes()
+}
+
+// viewPNG is one of the three pictures of the labeled request: the shaded
+// sphere of referencePNG with a dark mark that sits in a different place in
+// each (front: the middle, left: right of the middle, back: no mark). The
+// request needs three pictures that differ in their bytes and in what they show,
+// as three views of one object do; it says nothing about the model produced.
+func viewPNG(label string) []byte {
+	switch label {
+	case "F":
+		return spherePNG(&image.Point{X: 256, Y: 256})
+	case "L":
+		return spherePNG(&image.Point{X: 256 + 110, Y: 256})
+	}
+	return spherePNG(nil)
 }
 
 func statusPoll() *align.Poll {
@@ -107,6 +135,24 @@ func Profile() align.Profile {
 		{Field: "model", Filename: "model.glb", MediaType: "model/gltf-binary", Data: tinyGLB},
 		{Field: "image", Filename: "reference.png", MediaType: "image/png", Data: referencePNG()},
 	}, "")...)
+	// Labeled multi-view request (#376). Rodin Gen-2.5 takes image_label as an
+	// array that matches images by position (F, FL, FR, B, BL, BR, L, R, U, D or
+	// ?; more labels than images is IMAGE_LABEL_LENGTH_TOO_LONG). The docs do not
+	// say how a multipart request encodes the array. This request sends the
+	// encoding `images` already uses: one part per value, image_label repeated in
+	// picture order, the labels ahead of the files. Everything else is the
+	// cheapest Gen-2.5 request (the Catalog's own tier is Extreme-High). Run these
+	// three steps alone, once, after the user approved the real call
+	// (-steps rodin-labeled,rodin-labeled-status,rodin-labeled-download).
+	views := []align.File{
+		{Field: "images", Filename: "front.png", MediaType: "image/png", Data: viewPNG("F")},
+		{Field: "images", Filename: "left.png", MediaType: "image/png", Data: viewPNG("L")},
+		{Field: "images", Filename: "back.png", MediaType: "image/png", Data: viewPNG("B")},
+	}
+	steps = append(steps, submitSteps("rodin-labeled", "rodin", cheapGeneration(
+		align.Field{Name: "image_label", Value: "F"}, align.Field{Name: "image_label", Value: "L"},
+		align.Field{Name: "image_label", Value: "B"},
+	), views, "")...)
 	return align.Profile{
 		Provider: "hyper3d", API: "api-v2", Official: OfficialBase, Steps: steps,
 		Capture: align.CaptureConfig{

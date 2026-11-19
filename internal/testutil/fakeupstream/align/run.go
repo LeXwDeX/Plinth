@@ -132,9 +132,11 @@ type Obs struct {
 	RetryAfter string          `json:"retry_after,omitempty"`
 	Body       json.RawMessage `json:"body,omitempty"`
 	// Request is the JSON request body that was sent (after placeholder
-	// expansion); PollBodies holds every poll response. Both exist so the
-	// sanitizing exporter can register the structure it will meet; they are
-	// never compared and never committed.
+	// expansion); for a multipart request it is an object of the text fields
+	// and file field names, where a name sent more than once holds the array
+	// of its values in the order sent. PollBodies holds every poll response.
+	// Both exist so the sanitizing exporter can register the structure it will
+	// meet; they are never compared and never committed.
 	// Chunks are the JSON payloads of an SSE response, Done whether it ended
 	// with the [DONE] sentinel.
 	Chunks     []json.RawMessage `json:"chunks,omitempty"`
@@ -347,8 +349,9 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 		var buffer bytes.Buffer
 		writer := multipart.NewWriter(&buffer)
 		// sent lists the text fields and the file field names, so the sanitizing
-		// exporter registers the part names and values it will meet.
-		fields := map[string]string{}
+		// exporter registers the part names and values it will meet; a name sent
+		// more than once lists every value, one part each.
+		fields := formRecord{}
 		for _, field := range step.Form {
 			value := expand(field.Value, vars)
 			if target.FormHook != nil {
@@ -357,7 +360,7 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 			if err := writer.WriteField(field.Name, value); err != nil {
 				return 0, nil, nil, nil, err
 			}
-			fields[field.Name] = value
+			fields.add(field.Name, value)
 		}
 		files := append([]File(nil), step.Files...)
 		if step.Multipart != nil {
@@ -392,9 +395,9 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 			return 0, nil, nil, nil, err
 		}
 		for _, file := range files {
-			fields[file.Field] = ""
+			fields.add(file.Field, "")
 		}
-		sent, _ = json.Marshal(fields)
+		sent = fields.encode()
 		body, contentType = &buffer, writer.FormDataContentType()
 	case step.Body != nil:
 		value := step.Body
@@ -426,6 +429,32 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 	defer response.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	return response.StatusCode, response.Header, raw, sent, err
+}
+
+// formRecord is what a multipart request put on the wire, by part name, in
+// the order the parts were written: the value of every text part and an empty
+// string for every file part (file bytes are never recorded). A name can repeat
+// (an array of values such as Rodin's image_label, one part per picture); the
+// upstream sees one part per value, so the record keeps them all.
+type formRecord map[string][]string
+
+func (f formRecord) add(name, value string) { f[name] = append(f[name], value) }
+
+// encode writes the record as a JSON object. A name sent once keeps its plain
+// string, so the record of a step without repeated names is what it always
+// was; a name sent more than once is the array of its values in the order they
+// were sent, which the sanitizing exporter registers one by one.
+func (f formRecord) encode() json.RawMessage {
+	fields := make(map[string]any, len(f))
+	for name, values := range f {
+		if len(values) == 1 {
+			fields[name] = values[0]
+			continue
+		}
+		fields[name] = values
+	}
+	raw, _ := json.Marshal(fields)
+	return raw
 }
 
 func download(ctx context.Context, client *http.Client, url string) ([]byte, error) {
