@@ -9,6 +9,8 @@
     "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
     "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-label-overflow.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
@@ -299,6 +301,7 @@
       "evidence": "real",
       "evidence_files": [
         "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [
@@ -322,6 +325,8 @@
       "evidence": "derived",
       "evidence_files": [
         "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-label-overflow.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [
@@ -345,6 +350,7 @@
       "evidence": "real",
       "evidence_files": [
         "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [

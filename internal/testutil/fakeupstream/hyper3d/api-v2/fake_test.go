@@ -394,9 +394,11 @@ func TestUnknownTaskReferencesAnswerNoSuchTask(t *testing.T) {
 }
 
 // IMAGE_LABEL_LENGTH_TOO_LONG is documented as more image_label entries than
-// uploaded images (https://docs.hyper3d.ai/en/api-specification/errors,
-// checked 2026-11-08); the rejection is constructed from the docs and no wire
-// sample covers it.
+// uploaded images (https://docs.hyper3d.ai/en/api-specification/errors) and was
+// observed on 2026-11-19 (#376): two pictures with three repeated image_label
+// parts were refused with HTTP 201 and the message "Input is invalid"
+// (evidence_376_test.go holds the fake to the recorded exchange). Fewer labels
+// than pictures were not observed; the fake accepts them.
 func TestImageLabelCountIsValidated(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	fields := map[string]string{"tier": "Gen-2.5-Extreme-Low", "geometry_file_format": "glb", "material": "PBR"}
@@ -409,6 +411,9 @@ func TestImageLabelCountIsValidated(t *testing.T) {
 		status, _, body := f.Do("POST", Prefix+"/rodin", key, labeledForm(fields, tc.labels, "images", "images"))
 		if status != http.StatusCreated || (tc.code == "" && body["error"] != nil) || (tc.code != "" && body["error"] != tc.code) {
 			t.Fatalf("%d labels for 2 images = %d %v", tc.labels, status, body)
+		}
+		if tc.code != "" && body["message"] != "Input is invalid" {
+			t.Fatalf("%d labels for 2 images: message %v, the real service said \"Input is invalid\"", tc.labels, body["message"])
 		}
 	}
 }

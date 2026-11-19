@@ -20,8 +20,9 @@ import (
 // #376: the labeled multi-view step of the alignment script. Rodin Gen-2.5 takes
 // image_label as an array that matches images by position, and the docs do not
 // say how a multipart request encodes it. The step sends one part per label, in
-// picture order, as `images` is sent; one approved real run confirms or refutes
-// that. These tests pin what the step puts on the wire and what it can spend.
+// picture order, as `images` is sent; the two approved real runs of 2026-11-19
+// confirmed that (evidence_376_test.go). These tests pin what the step puts on
+// the wire and what it can spend.
 
 func profileSteps(t *testing.T, names ...string) []align.Step {
 	t.Helper()

@@ -143,7 +143,9 @@ func Profile() align.Profile {
 	// picture order, the labels ahead of the files. Everything else is the
 	// cheapest Gen-2.5 request (the Catalog's own tier is Extreme-High). Run these
 	// three steps alone, once, after the user approved the real call
-	// (-steps rodin-labeled,rodin-labeled-status,rodin-labeled-download).
+	// (-steps rodin-labeled,rodin-labeled-status,rodin-labeled-download). Both this
+	// request and the probe below ran on 2026-11-19 (#376): the probe was refused
+	// and this request accepted, so the encoding is confirmed (see RequestNotes).
 	views := []align.File{
 		{Field: "images", Filename: "front.png", MediaType: "image/png", Data: viewPNG("F")},
 		{Field: "images", Filename: "left.png", MediaType: "image/png", Data: viewPNG("L")},
@@ -180,6 +182,7 @@ func Profile() align.Profile {
 			"第一段的 texture 用了过小的占位 GLB，三个子作业以 Failed 结束（status 响应带顶层 message `Invalid input.`），已计费；第三段改用 bang 产出的 GLB 重发，是新的输入而非重放。该 Failed 响应未入库为样本，fake 的 Failed 状态按它的结构构造。",
 			"官方在请求缺少提示词与图片时返回 HTTP 201 + `{\"error\":\"INVALID_REQUEST\"}`（不是 4xx）；fake 复现。",
 			"第三阶段（2026-10-29）补采 Failed 状态：`texture-failed` 三步（提交、轮询、下载）单独成段运行了两次（标签 failed1、failed2）。texture 请求的模型用测试夹具里 400 字节的单三角形 GLB，官方受理（HTTP 201）后第一次轮询三个子作业全部 `Failed`，顶层 `message` 为 `Invalid input.`，`download` 返回空列表；两次结果相同，各计 1 次付费请求。这一段不在上面三段合并的报告里（原始运行已不在工作树外保留），Failed 响应作为独立样本 `hyper3d-api-v2-texture-failed` 入库，漂移测试 `TestFailedPollMatchesTheRealSample` 对它逐字段比较。",
+			"2026-11-19（#376）补采 image_label：两次真实请求都经用户批准，各自单独成段运行（标签 probe376、labeled376），不在上面合并的报告里，共 2 个付费步骤、实际花费 0.5 credit。`rodin-label-overflow`：两张图加重复的三个 image_label 部分（F、L、B），官方在生成前以 HTTP 201 + `{\"error\":\"IMAGE_LABEL_LENGTH_TOO_LONG\",\"message\":\"Input is invalid\"}` 拒绝，未扣费（余额前后相同），说明同名的重复部分被读成一个数组，其长度与图片数比较；fake 此前的 message 是文档里的描述，已改为 `Input is invalid`。`rodin-labeled`：前、左、后三张图，三个 image_label 部分 F、L、B 按图序排在文件之前（Gen-2.5-Extreme-Low、texture_mode=extreme-low、quality=medium、Raw、PBR、glb），官方受理，consumed 0.5，响应带自动生成的 `prompt`，6 个子作业由 Generating 与 Waiting 走到 Done，交付 19,371,768 字节的 PBR GLB 与 2,034 字节的 WebP 预览（fake 不复现文件大小）。fake 不校验标签取值，也不校验少于图片数的标签：没有观察到被拒绝的取值，不编造错误码。脱敏样本入库为 `evidence-376-rodin-label-overflow` 与 `evidence-376-rodin-labeled`（对照证据，不是 fake 取模板的样本；采集把金额换成占位，样本里 consumed 为 0，真实回执为 0.5），`evidence_376_test.go` 逐项核对 fake 的回答。",
 		},
 		Notes: align.Notes{},
 	}
