@@ -63,7 +63,7 @@ export function AssetBoardDetail({ item, schema, onClose }: AssetBoardDetailProp
   const region = item.region ? regionText(item.region) : null;
   const decision = item.latest_review ?? null;
   // One list separator per locale, so the English copy does not carry a Chinese 、.
-  const listSeparator = activeLocale(schema).startsWith('zh') ? '、' : ', ';
+  const listSeparator = text('ui.asset_list.board.list_separator');
   const reasonLabels = (ids: readonly string[]) => ids
     .map((id) => schema.asset_list?.review?.return_reasons.find((reason) => reason.id === id)?.label || id)
     .join(listSeparator);

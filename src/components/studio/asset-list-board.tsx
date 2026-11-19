@@ -231,7 +231,9 @@ export function AssetListBoard({
           title: text('ui.asset_list.board.accept_partial'),
           details: refused.map((entry) => {
             const name = names.get(entry.item_id) || entry.item_id;
-            return `${name}：${entry.error}`;
+            return formatSchemaText(text('ui.asset_list.board.item_error'), {
+              name, detail: entry.error ?? '',
+            });
           }),
         });
       }
@@ -638,7 +640,7 @@ function BoardCell({
         >
           <span className="flex aspect-square w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-md bg-muted">
             {coverURL ? (
-              <img src={coverURL} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
+              <img src={coverURL} alt={''} loading="lazy" decoding="async" className="size-full object-cover" />
             ) : (
               <>
                 {model ? <Box aria-hidden className="size-8 text-muted-foreground" /> : <ImageIcon aria-hidden className="size-8 text-muted-foreground" />}

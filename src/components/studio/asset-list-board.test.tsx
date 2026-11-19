@@ -581,10 +581,13 @@ describe('AssetListBoard board actions (#329d)', () => {
 
     const box = screen.getByTestId('asset-board-compare-box-crop-accepted');
     expect(box.getAttribute('aria-label')).toBe('第 1 项「主角」，已验收');
-    expect(box.style.left).toBe('10%');
-    expect(box.style.top).toBe('10%');
-    expect(box.style.width).toBe('30%');
-    expect(box.style.height).toBe('30%');
+    // The absolute placement belongs to the hint wrapper; the button fills it.
+    const boxWrapper = box.parentElement;
+    expect(boxWrapper?.className).toContain('absolute');
+    expect(boxWrapper?.style.left).toBe('10%');
+    expect(boxWrapper?.style.top).toBe('10%');
+    expect(boxWrapper?.style.width).toBe('30%');
+    expect(boxWrapper?.style.height).toBe('30%');
 
     // Clicking a box focuses its result; clicking a result highlights its box.
     fireEvent.click(screen.getByTestId('asset-board-compare-box-crop-review'));

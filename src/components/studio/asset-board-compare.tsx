@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
 
+import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
   boardCropGroups,
@@ -133,36 +134,41 @@ export function AssetBoardCompare({ schema, items, shown, focusedID, onFocus }: 
                         if (!region) return null;
                         const index = boardItemIndex(items, item.id);
                         const label = stateLabel(item.state);
+                        const boxLabel = formatSchemaText(text('ui.asset_list.board.compare_box'), {
+                          index, name: item.name, state: label,
+                        });
                         return (
-                          <button
+                          <HintTooltip
                             key={item.id}
-                            type="button"
-                            ref={(element) => { boxRefs.current.set(item.id, element); }}
-                            onClick={() => onFocus(item.id)}
-                            aria-pressed={focusedID === item.id}
-                            aria-label={formatSchemaText(text('ui.asset_list.board.compare_box'), {
-                              index, name: item.name, state: label,
-                            })}
-                            title={formatSchemaText(text('ui.asset_list.board.compare_box'), {
-                              index, name: item.name, state: label,
-                            })}
-                            data-testid={`asset-board-compare-box-${item.id}`}
-                            data-state={item.state}
-                            data-focused={focusedID === item.id ? 'true' : undefined}
-                            className={cn(
-                              'absolute flex min-h-11 min-w-11 items-start justify-start rounded-sm border-2 p-0.5 text-left text-[11px] font-medium transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-                              stateTone(item.state),
-                              focusedID === item.id && 'ring-2 ring-ring ring-offset-1 ring-offset-background',
-                            )}
-                            style={{
-                              left: `${region.x * 100}%`,
-                              top: `${region.y * 100}%`,
-                              width: `${region.width * 100}%`,
-                              height: `${region.height * 100}%`,
+                            name={boxLabel}
+                            className="absolute flex"
+                            triggerProps={{
+                              style: {
+                                left: `${region.x * 100}%`,
+                                top: `${region.y * 100}%`,
+                                width: `${region.width * 100}%`,
+                                height: `${region.height * 100}%`,
+                              },
                             }}
                           >
-                            <span className="rounded-sm bg-background/90 px-1 tabular-nums text-foreground">{index}</span>
-                          </button>
+                            <button
+                              type="button"
+                              ref={(element) => { boxRefs.current.set(item.id, element); }}
+                              onClick={() => onFocus(item.id)}
+                              aria-pressed={focusedID === item.id}
+                              aria-label={boxLabel}
+                              data-testid={`asset-board-compare-box-${item.id}`}
+                              data-state={item.state}
+                              data-focused={focusedID === item.id ? 'true' : undefined}
+                              className={cn(
+                                'flex size-full min-h-11 min-w-11 items-start justify-start rounded-sm border-2 p-0.5 text-left text-[11px] font-medium transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                                stateTone(item.state),
+                                focusedID === item.id && 'ring-2 ring-ring ring-offset-1 ring-offset-background',
+                              )}
+                            >
+                              <span className="rounded-sm bg-background/90 px-1 tabular-nums text-foreground">{index}</span>
+                            </button>
+                          </HintTooltip>
                         );
                       })}
                     </span>
@@ -202,7 +208,7 @@ export function AssetBoardCompare({ schema, items, shown, focusedID, onFocus }: 
                           >
                             <span className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-muted">
                               {coverURL ? (
-                                <img src={coverURL} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
+                                <img src={coverURL} alt={''} loading="lazy" decoding="async" className="size-full object-cover" />
                               ) : (
                                 <ImageIcon aria-hidden className="size-6 text-muted-foreground" />
                               )}
