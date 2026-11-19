@@ -803,11 +803,118 @@ func (r *Repository) fillSessionCredits(ctx context.Context, ownerID string, ses
 	return nil
 }
 
+// The bulk rows of a session are deleted in batches of this many rows per
+// transaction (#384). A message goes with its turn, whose checkpoint holds the
+// whole model request and is the largest row of the database, so messages go
+// in small batches; events are tiny.
+const (
+	sessionDeleteMessageBatchRows = 25
+	sessionDeleteEventBatchRows   = 500
+)
+
+// drainSessionBulkRows deletes the stream replay and the messages (with their
+// turns) of a session in short transactions of their own. The repository keeps
+// one connection, so any open transaction makes every other read wait for it;
+// one transaction over a large session held everyone for its whole length
+// (4.6 to 7.6 seconds in the log of #384, readiness checks included). Each
+// batch commits and frees the connection before the next begins. The session
+// row and everything else go in DeleteSession's final transaction, which is
+// small by then. A deletion that stops half way leaves a valid, shorter
+// session, never an orphan, and running it again finishes the job.
+func (r *Repository) drainSessionBulkRows(ctx context.Context, sessionID string) error {
+	for _, bulk := range []struct {
+		label string
+		query string
+		rows  int
+	}{
+		{"events", `DELETE FROM go_chat_events WHERE rowid IN (
+			SELECT rowid FROM go_chat_events WHERE session_id = ? LIMIT ?)`, sessionDeleteEventBatchRows},
+		{"messages", `DELETE FROM go_chat_messages WHERE rowid IN (
+			SELECT rowid FROM go_chat_messages WHERE session_id = ? LIMIT ?)`, sessionDeleteMessageBatchRows},
+	} {
+		limit := bulk.rows
+		if r.deleteBatchRows > 0 {
+			limit = r.deleteBatchRows
+		}
+		for {
+			result, err := r.db.ExecContext(ctx, bulk.query, sessionID, limit)
+			if err != nil {
+				return fmt.Errorf("delete chat session %s: %w", bulk.label, err)
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("chat session %s deletion rows: %w", bulk.label, err)
+			}
+			if affected == 0 {
+				break
+			}
+			if r.afterDeleteBatch != nil {
+				r.afterDeleteBatch()
+			}
+			if affected < int64(limit) {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("delete chat session %s: %w", bulk.label, err)
+			}
+		}
+	}
+	return nil
+}
+
+// sessionDeletionBlockers are the tables whose rows keep a session from being
+// deleted: their foreign key to the session is ON DELETE RESTRICT and no
+// deletion path clears them. A SkillRun is a durable recipe and lineage
+// ledger; deleting a session that has one fails in the final transaction with
+// a foreign key violation (the one 500 of the log in #384).
+var sessionDeletionBlockers = []struct {
+	label string
+	query string
+}{
+	{"skill runs", `SELECT 1 FROM skill_runs WHERE owner_id = ? AND session_id = ? LIMIT 1`},
+}
+
+// PreflightSessionDeletion reports ErrSessionDeletionBlocked for a session
+// that has records no deletion path clears, so a deletion that is bound to
+// fail is refused before anything is stopped or deleted. The bulk rows are
+// deleted by transactions of their own; running them first would lose the
+// conversation of a session that then stays.
+func (r *Repository) PreflightSessionDeletion(ctx context.Context, ownerID, sessionID string) error {
+	for _, blocker := range sessionDeletionBlockers {
+		var found int
+		err := r.db.QueryRowContext(ctx, blocker.query, ownerID, sessionID).Scan(&found)
+		switch {
+		case err == nil:
+			return fmt.Errorf("%w: %s", chat.ErrSessionDeletionBlocked, blocker.label)
+		case errors.Is(err, sql.ErrNoRows):
+		default:
+			return fmt.Errorf("check chat session %s: %w", blocker.label, err)
+		}
+	}
+	return nil
+}
+
 func (r *Repository) DeleteSession(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
 ) (bool, error) {
+	owned, err := r.OwnsSession(ctx, ownerID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	// A session that is not the owner's (or is gone) has no bulk rows to drain
+	// and nothing to refuse; the final transaction still clears the
+	// session-scoped rows the owner may have left under that ID, as it always
+	// did.
+	if owned {
+		if err := r.PreflightSessionDeletion(ctx, ownerID, sessionID); err != nil {
+			return false, err
+		}
+		if err := r.drainSessionBulkRows(ctx, sessionID); err != nil {
+			return false, err
+		}
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin chat session deletion: %w", err)
@@ -1169,6 +1276,18 @@ func (r *Repository) StartTurn(
 		return chat.Message{}, chat.Event{}, err
 	}
 	defer tx.Rollback()
+	// The session is busy while the stream row is active and the turn that owns
+	// it is in a busy state. A stream row the finished turn left active is
+	// stale and gives way to the new turn (#384); without the states the stream
+	// row alone decides, as before.
+	turnBusy := `SELECT 1 FROM go_chat_turns WHERE assistant_message_id = go_chat_streams.assistant_message_id`
+	args := []any{stream.SessionID, assistant.ID, stream.Status, user.SessionID, ownerID}
+	if len(stream.BusyTurnStates) > 0 {
+		turnBusy += ` AND state IN (` + strings.TrimSuffix(strings.Repeat("?,", len(stream.BusyTurnStates)), ",") + `)`
+		for _, state := range stream.BusyTurnStates {
+			args = append(args, state)
+		}
+	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO go_chat_streams (session_id, assistant_message_id, status, cleanup_at)
 		SELECT ?, ?, ?, NULL
@@ -1177,8 +1296,8 @@ func (r *Repository) StartTurn(
 			assistant_message_id = excluded.assistant_message_id,
 			status = excluded.status, cleanup_at = NULL
 		WHERE go_chat_streams.status <> excluded.status
-		 OR NOT EXISTS (SELECT 1 FROM go_chat_turns WHERE assistant_message_id = go_chat_streams.assistant_message_id)`,
-		stream.SessionID, assistant.ID, stream.Status, user.SessionID, ownerID,
+		 OR NOT EXISTS (`+turnBusy+`)`,
+		args...,
 	)
 	if err != nil {
 		return chat.Message{}, chat.Event{}, err

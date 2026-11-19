@@ -351,6 +351,9 @@ type Orchestrator struct {
 	// key = turnKey(ownerID, sessionID)，同会话同时只有一个活动轮次。
 	activeMu     sync.Mutex
 	activeCancel map[string]context.CancelFunc
+	// activeDone is closed when the active turn of the key has left Process,
+	// so deleting a session can wait for its turn (#384).
+	activeDone   map[string]chan struct{}
 	canceledTurn map[string]struct{}
 
 	// consentWaits 是因等待同意而挂起的轮次登记表（AGT-12）：
@@ -386,12 +389,17 @@ func (orchestrator *Orchestrator) registerActiveTurn(
 	orchestrator.activeMu.Lock()
 	defer orchestrator.activeMu.Unlock()
 	orchestrator.activeCancel[key] = cancel
+	orchestrator.activeDone[key] = make(chan struct{})
 }
 
 func (orchestrator *Orchestrator) unregisterActiveTurn(key string) {
 	orchestrator.activeMu.Lock()
 	defer orchestrator.activeMu.Unlock()
 	delete(orchestrator.activeCancel, key)
+	if done := orchestrator.activeDone[key]; done != nil {
+		close(done)
+		delete(orchestrator.activeDone, key)
+	}
 }
 
 func (orchestrator *Orchestrator) turnCanceled(key string) bool {
@@ -692,7 +700,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 	}
 	registry.offeringAllowed = config.OfferingAllowed
 	registry.offerings = config.Offerings
-	return &Orchestrator{
+	orchestrator := &Orchestrator{
 		service:            config.Service,
 		schema:             config.Schema,
 		project:            config.Project,
@@ -723,12 +731,16 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
 		queued:             map[string]struct{}{},
 		activeCancel:       map[string]context.CancelFunc{},
+		activeDone:         map[string]chan struct{}{},
 		canceledTurn:       map[string]struct{}{},
 		consentWaits:       map[string]*consentSuspend{},
 		compacting:         map[string]*compactionLock{},
 
 		backgroundWarned: map[string]time.Time{},
-	}, nil
+	}
+	// Deleting a session takes this runner's work off it first (#384).
+	config.Service.addSessionQuiescer(orchestrator)
+	return orchestrator, nil
 }
 
 // suspendForConsent 把因等待同意而中断的轮次登记进挂起表并安排超时
@@ -1032,14 +1044,21 @@ func (orchestrator *Orchestrator) Run(ctx context.Context) error {
 		return err
 	}
 	for _, turn := range turns {
+		command := ProcessTurn{
+			OwnerID:            turn.OwnerID,
+			SessionID:          turn.SessionID,
+			AssistantMessageID: turn.AssistantMessageID,
+			Options:            turn.Options,
+		}
+		// A turn whose session is gone is not resumed (#384). A failed read
+		// proceeds as before: a recoverable turn is never dropped on a doubt.
+		if orchestrator.sessionGone(runCtx, turn.OwnerID, turn.SessionID) {
+			orchestrator.discardOrphanTurn(runCtx, command)
+			continue
+		}
 		if err := orchestrator.enqueueRecovered(
 			runCtx,
-			ProcessTurn{
-				OwnerID:            turn.OwnerID,
-				SessionID:          turn.SessionID,
-				AssistantMessageID: turn.AssistantMessageID,
-				Options:            turn.Options,
-			},
+			command,
 		); err != nil {
 			cancel()
 			workers.Wait()
@@ -1059,10 +1078,22 @@ func (orchestrator *Orchestrator) runWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case command := <-orchestrator.queue:
+			// A session being deleted has nothing for a worker to run (#384).
+			if orchestrator.service.sessionDeleting(command.OwnerID, command.SessionID) {
+				orchestrator.unmarkQueued(command.AssistantMessageID)
+				continue
+			}
 			dispatch, err := orchestrator.turnAwaitsDispatch(context.WithoutCancel(ctx), command)
 			if err != nil || !dispatch {
 				if err != nil {
-					orchestrator.logger.Error(
+					// The turn row goes with its session or message: gone is
+					// not a failure.
+					level := slog.LevelError
+					if errors.Is(err, ErrMessageNotFound) {
+						level = slog.LevelDebug
+					}
+					orchestrator.logger.Log(
+						ctx, level,
 						"读取 Chat Agent Turn 状态失败",
 						"assistant_message_id", command.AssistantMessageID,
 						"error", err,
@@ -1075,7 +1106,12 @@ func (orchestrator *Orchestrator) runWorker(ctx context.Context) {
 				context.WithoutCancel(ctx),
 				command.AssistantMessageID,
 			); err != nil {
-				orchestrator.logger.Error(
+				level := slog.LevelError
+				if errors.Is(err, ErrMessageNotFound) {
+					level = slog.LevelDebug
+				}
+				orchestrator.logger.Log(
+					ctx, level,
 					"更新 Chat Agent Turn 状态失败",
 					"assistant_message_id", command.AssistantMessageID,
 					"error", err,
@@ -1174,11 +1210,28 @@ func (orchestrator *Orchestrator) Process(
 	ctx context.Context,
 	command ProcessTurn,
 ) (processErr error) {
+	// A turn whose session or message was deleted under it ends without an
+	// error (#384): whatever it failed on is gone with the rows it was writing.
+	// This runs last, after the deferred finalizer below.
+	defer func() {
+		if processErr != nil && orchestrator.turnAbandoned(ctx, command) {
+			processErr = nil
+		}
+	}()
+	if orchestrator.service.sessionDeleting(command.OwnerID, command.SessionID) {
+		return nil
+	}
 	messages, err := orchestrator.service.ListMessages(
 		ctx,
 		command.OwnerID,
 		command.SessionID,
 	)
+	if errors.Is(err, ErrSessionNotFound) {
+		// The turn of a session that is gone (a queued command, or a turn row
+		// a restart finds): finish it so nothing offers it again.
+		orchestrator.discardOrphanTurn(ctx, command)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -1276,6 +1329,11 @@ func (orchestrator *Orchestrator) Process(
 	defer orchestrator.unregisterActiveTurn(turnKey)
 	defer orchestrator.clearTurnCanceled(turnKey)
 	defer cancelProcess()
+	// Check after registering: a deletion that began before the registration
+	// could not interrupt this turn, and one that begins from now on will.
+	if orchestrator.service.sessionDeleting(command.OwnerID, command.SessionID) {
+		return nil
+	}
 	failed := false
 	// suspended=true 表示轮次已挂起等待用户输入（AGT-12）：返回时不
 	// 收尾流与轮次，等唤醒方重新入队续跑。
@@ -1301,6 +1359,10 @@ func (orchestrator *Orchestrator) Process(
 		// 收尾流。挂起轮次由唤醒方重新入队，重启后由 RecoverTurns
 		// 重新入队续跑。
 		if suspended || ctx.Err() != nil {
+			return
+		}
+		// The session is being deleted: its stream and turn rows go with it.
+		if orchestrator.service.sessionDeleting(command.OwnerID, command.SessionID) {
 			return
 		}
 		requested, err := orchestrator.service.TurnStopRequested(
@@ -1463,6 +1525,10 @@ func (orchestrator *Orchestrator) Process(
 				// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
 				return nil
 			}
+			if orchestrator.turnAbandoned(ctx, command) {
+				// The session or the message was deleted under the turn.
+				return nil
+			}
 			failed = true
 			orchestrator.logger.Error(
 				"Chat Agent 请求失败",
@@ -1520,6 +1586,9 @@ func (orchestrator *Orchestrator) Process(
 			}
 			if ctx.Err() != nil {
 				// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
+				return true, nil
+			}
+			if orchestrator.turnAbandoned(ctx, command) {
 				return true, nil
 			}
 			orchestrator.logger.Warn(
@@ -1768,6 +1837,10 @@ func (orchestrator *Orchestrator) Process(
 				// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
 				return nil
 			}
+			if orchestrator.turnAbandoned(ctx, command) {
+				// The session or the message was deleted under the turn.
+				return nil
+			}
 			failed = true
 			orchestrator.logger.Error(
 				"对话生成工具执行失败",
@@ -1818,6 +1891,10 @@ func (orchestrator *Orchestrator) Process(
 			}
 			if ctx.Err() != nil {
 				// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
+				return nil
+			}
+			if orchestrator.turnAbandoned(ctx, command) {
+				// The session or the message was deleted under the turn.
 				return nil
 			}
 			orchestrator.logger.Error(
