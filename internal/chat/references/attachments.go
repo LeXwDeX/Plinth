@@ -2,6 +2,7 @@ package references
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -51,6 +52,12 @@ func (resolver *Resolver) VerifyAttachment(
 // session's turn by design. It accepts exactly the frozen references and
 // still checks the owner (and that a Task picture is a file of that Task);
 // VerifyAttachment stays as strict as before and never reads item context.
+//
+// A stored crop is attached with the crop role (#331), and the scene picture
+// it was cut from follows once per item set with the source_scene role, so the
+// Agent reads the crop as the identity/composition reference and the scene as
+// the style reference. A source that cannot be read any more (deleted after
+// the cut) is left out; the crop is still usable.
 func (resolver *Resolver) ItemReferenceAttachments(
 	ctx context.Context,
 	ownerID string,
@@ -61,52 +68,81 @@ func (resolver *Resolver) ItemReferenceAttachments(
 		return nil, chat.ErrAttachmentRejected
 	}
 	result := make([]chat.Attachment, 0, len(references))
+	attached := map[generation.AssetID]bool{}
+	var sources []generation.AssetID
 	for _, reference := range references {
-		attachment, err := resolver.itemReferenceAttachment(ctx, owner, reference)
+		attachment, source, err := resolver.itemReferenceAttachment(ctx, owner, reference)
 		if err != nil {
 			return nil, err
+		}
+		if attachment.AssetID != "" {
+			attached[generation.AssetID(attachment.AssetID)] = true
+		}
+		if source != "" && !attached[source] && !slices.Contains(sources, source) {
+			sources = append(sources, source)
+		}
+		result = append(result, attachment)
+	}
+	for _, source := range sources {
+		if attached[source] {
+			// A later explicit reference already attached this picture.
+			continue
+		}
+		attachment, err := resolver.itemSourceAttachment(ctx, owner, source)
+		if err != nil {
+			continue
 		}
 		result = append(result, attachment)
 	}
 	return result, nil
 }
 
+// itemReferenceAttachment turns one frozen reference into its attachment and
+// reports the source scene of a crop (empty for other references). The crop
+// role comes from the stored provenance, never from a client claim.
 func (resolver *Resolver) itemReferenceAttachment(
 	ctx context.Context,
 	owner generation.OwnerID,
 	reference project.Reference,
-) (chat.Attachment, error) {
+) (chat.Attachment, generation.AssetID, error) {
 	if !reference.Valid() {
-		return chat.Attachment{}, chat.ErrAttachmentRejected
+		return chat.Attachment{}, "", chat.ErrAttachmentRejected
 	}
 	if reference.InputAssetID != "" {
-		asset, body, err := resolver.inputs.OpenOwned(ctx, owner, generation.AssetID(reference.InputAssetID))
+		id := generation.AssetID(reference.InputAssetID)
+		asset, body, err := resolver.inputs.OpenOwned(ctx, owner, id)
 		if err != nil {
-			return chat.Attachment{}, err
+			return chat.Attachment{}, "", err
 		}
 		if err := body.Close(); err != nil {
-			return chat.Attachment{}, err
+			return chat.Attachment{}, "", err
 		}
-		role := chat.AttachmentRoleUpload
-		if resolver.renderAssetType != "" && asset.AssetType == resolver.renderAssetType {
+		role, source := chat.AttachmentRoleUpload, generation.AssetID("")
+		if resolver.crops != nil {
+			if cropSource, found, err := resolver.crops.CropSource(ctx, owner, id); err != nil {
+				return chat.Attachment{}, "", err
+			} else if found {
+				role, source = chat.AttachmentRoleCrop, cropSource
+			}
+		}
+		if role == chat.AttachmentRoleUpload && resolver.renderAssetType != "" && asset.AssetType == resolver.renderAssetType {
 			role = chat.AttachmentRoleRender
 		}
-		id := generation.AssetID(reference.InputAssetID)
 		return chat.Attachment{
 			Kind:    chat.AttachmentKindImage,
 			Role:    role,
 			AssetID: string(id),
 			URL:     resolver.inputAssetURL(id),
-		}, nil
+		}, source, nil
 	}
 	taskID := generation.TaskID(reference.TaskID)
 	assetID := generation.AssetID(reference.AssetID)
 	task, err := resolver.tasks.Get(ctx, owner, taskID)
 	if err != nil {
-		return chat.Attachment{}, err
+		return chat.Attachment{}, "", err
 	}
 	if task.ID != taskID || task.OwnerID != owner {
-		return chat.Attachment{}, chat.ErrAttachmentRejected
+		return chat.Attachment{}, "", chat.ErrAttachmentRejected
 	}
 	found := false
 	for _, asset := range task.Assets {
@@ -116,7 +152,7 @@ func (resolver *Resolver) itemReferenceAttachment(
 		}
 	}
 	if !found {
-		return chat.Attachment{}, chat.ErrAttachmentRejected
+		return chat.Attachment{}, "", chat.ErrAttachmentRejected
 	}
 	return chat.Attachment{
 		Kind:    chat.AttachmentKindImage,
@@ -124,6 +160,29 @@ func (resolver *Resolver) itemReferenceAttachment(
 		AssetID: string(assetID),
 		TaskID:  string(taskID),
 		URL:     resolver.taskAssetURL(taskID, assetID),
+	}, "", nil
+}
+
+// itemSourceAttachment attaches the scene picture a crop was cut from with the
+// source_scene role. The owner check is the ordinary input-asset one; a source
+// that cannot be opened is an error the caller skips.
+func (resolver *Resolver) itemSourceAttachment(
+	ctx context.Context,
+	owner generation.OwnerID,
+	id generation.AssetID,
+) (chat.Attachment, error) {
+	_, body, err := resolver.inputs.OpenOwned(ctx, owner, id)
+	if err != nil {
+		return chat.Attachment{}, err
+	}
+	if err := body.Close(); err != nil {
+		return chat.Attachment{}, err
+	}
+	return chat.Attachment{
+		Kind:    chat.AttachmentKindImage,
+		Role:    chat.AttachmentRoleSourceScene,
+		AssetID: string(id),
+		URL:     resolver.inputAssetURL(id),
 	}, nil
 }
 

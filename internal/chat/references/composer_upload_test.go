@@ -64,6 +64,7 @@ type resolverLimits struct {
 	tasks          *fakeTasks
 	derivative     *visionimage.Deriver
 	project        references.ProjectReferenceChecker
+	crops          references.CropProvenance
 }
 
 func composerResolver(t *testing.T, inputs *storedInputs) *references.Resolver {
@@ -93,6 +94,7 @@ func limitedResolver(t *testing.T, inputs *storedInputs, limits resolverLimits) 
 		VisionDerivative:                   limits.derivative,
 		VisionFallbackMediaType:            "image/png",
 		ProjectReferences:                  limits.project,
+		Crops:                              limits.crops,
 	})
 	if err != nil {
 		t.Fatal(err)

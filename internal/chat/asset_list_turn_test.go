@@ -322,6 +322,54 @@ func (refs *itemTurnAttachments) ItemReferenceAttachments(
 	return append([]chat.Attachment(nil), refs.attachments...), nil
 }
 
+// A crop-reference item starts with both pictures its model needs: the crop
+// (identity and composition reference) and the source scene (style reference),
+// each carrying the service-assigned role and its own handle (#331).
+func TestStartItemTurnInjectsCropAndSourceSceneAttachments(t *testing.T) {
+	repository := newItemTurnRepository()
+	item := workingItemTurnItem()
+	item.References = []project.Reference{{InputAssetID: "crop_1"}}
+	resolver := &itemTurnAttachments{attachments: []chat.Attachment{{
+		Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleCrop,
+		AssetID: "crop_1", URL: "/configured/inputs/crop_1",
+	}, {
+		Kind: chat.AttachmentKindImage, Role: chat.AttachmentRoleSourceScene,
+		AssetID: "scene_1", URL: "/configured/inputs/scene_1",
+	}}}
+	service := newItemTurnServiceWith(t, itemTurnRunsWith(item), repository, resolver)
+	_, options, err := service.StartItemTurn(context.Background(), itemTurnInput("开始"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolver.calls != 1 || len(resolver.references) != 1 ||
+		resolver.references[0] != (project.Reference{InputAssetID: "crop_1"}) {
+		t.Fatalf("resolver calls=%d references=%+v", resolver.calls, resolver.references)
+	}
+	want := []struct{ handle, role, assetID string }{
+		{"@img1", chat.AttachmentRoleCrop, "crop_1"},
+		{"@img2", chat.AttachmentRoleSourceScene, "scene_1"},
+	}
+	if len(options.Selection) != len(want) {
+		t.Fatalf("selection = %+v", options.Selection)
+	}
+	for index, expected := range want {
+		got := options.Selection[index]
+		if got.Handle != expected.handle || got.Role != expected.role || got.AssetID != expected.assetID {
+			t.Fatalf("selection[%d] = %+v; want %+v", index, got, expected)
+		}
+	}
+	messages := repository.messages[itemTurnSessionID]
+	if len(messages) != 2 || len(messages[0].Attachments) != len(want) {
+		t.Fatalf("user message attachments = %+v", messages)
+	}
+	for index, expected := range want {
+		got := messages[0].Attachments[index]
+		if got.Handle != expected.handle || got.Role != expected.role || got.AssetID != expected.assetID {
+			t.Fatalf("message attachment[%d] = %+v; want %+v", index, got, expected)
+		}
+	}
+}
+
 // The item sub-session starts with its frozen references as handled
 // attachments: the stored turn and the user message carry the same handle, so
 // the Agent can name @imgN and the ordinary handle lookup returns the picture

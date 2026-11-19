@@ -2889,6 +2889,33 @@
       "ui.asset_list.expired": "已过期",
       "ui.asset_list.item_unavailable": "不可用",
       "ui.asset_list.chat_card_title": "资产清单",
+      "ui.asset_list.edit": "编辑清单",
+      "ui.asset_list.edit_save": "保存",
+      "ui.asset_list.edit_cancel": "取消编辑",
+      "ui.asset_list.edit_delete": "删除",
+      "ui.asset_list.edit_name": "名称",
+      "ui.asset_list.edit_reference": "裁剪参考图",
+      "ui.asset_list.edit_merge": "合并",
+      "ui.asset_list.edit_merge_selected": "合并所选",
+      "ui.asset_list.edit_merge_hint": "选择两项合并：保留第一项的名称与描述，合并两边的其它引用，区域取并集后重新裁剪。",
+      "ui.asset_list.edit_merge_source_mismatch": "两项来自不同原图，不能合并。",
+      "ui.asset_list.edit_save_failed": "保存失败，请重试。",
+      "ui.asset_list.edit_conflict": "清单已在别处更新，当前草稿基于旧版本；你的修改仍保留，请重新加载最新版本。",
+      "ui.asset_list.edit_stale": "清单已在别处更新，当前草稿基于旧版本，不能直接保存。",
+      "ui.asset_list.edit_reload": "重新加载最新版本",
+      "ui.asset_list.edit_kind": "类型",
+      "ui.asset_list.edit_crop_title": "原图框选",
+      "ui.asset_list.edit_crop_source": "源图",
+      "ui.asset_list.edit_crop_hint": "在原图上拖出方框，填好名称和类型后新增一项；Esc 取消当前框选。",
+      "ui.asset_list.edit_crop_recrop_hint": "在原图上拖出新框，替换这一项的区域。",
+      "ui.asset_list.edit_crop_add": "添加项",
+      "ui.asset_list.edit_crop_recrop": "重框",
+      "ui.asset_list.edit_crop_cancel": "取消框选",
+      "ui.asset_list.edit_crop_name_required": "名称必填。",
+      "ui.asset_list.edit_crop_too_small": "框选区域太小：最短边至少 {minimum} 像素，请拖大一些。",
+      "ui.asset_list.edit_crop_image_limit": "这张图最多拆出 {maximum} 个资产项，请合并相邻区域或减少拆解数量。",
+      "ui.asset_list.edit_crop_no_source": "这份清单没有可用的源图，无法在原图上框选新增项。",
+      "ui.asset_list.edit_crop_mixed_source": "部分项来自其他源图，框选只显示当前源图上的区域。",
       "ui.asset_list.run_status": "制作进度",
       "ui.asset_list.run_running": "制作中",
       "ui.asset_list.run_paused_presence": "用户离开，已暂停",
@@ -5526,6 +5553,23 @@
         "description_max_length": 1000,
         "max_references_per_item": 4
       },
+      "decompose": {
+        "maximum_items_per_image": 24,
+        "crop": {
+          "minimum_short_edge": 64,
+          "maximum_region_pixels": 4000000,
+          "maximum_png_bytes": 16777216
+        },
+        "default_route_with_reference": "reference-to-3d",
+        "agent_prompt": "【场景图拆解】\n当用户上传的图里有多个可独立制作的物体，并要求「都做出来」「拆开做」时，先出资产清单：不画概念图，也不先问数量——数量卡只在单项需要探索方向时出现。\n步骤：\n1. 先用 inspect_image 按相对原图的归一化 region（0..1，右/下边界不含）逐块查看候选物体，并用 show_picture 看图确认；\n2. 再用 crop_image_regions 批量裁剪候选区域，记下每块返回的输入资产 ID；\n3. 最后用 propose_asset_list 提交清单，每项用 reference_input_asset_ids 引用对应裁图。\n每项只放一条区域，名称、类型、描述齐全；不要漏掉物体，也不要把同一物体拆成多项；区域重叠或被遮挡的物体，在描述里写明看不到的部分。\n同一张图最多拆 {maximum} 项。裁图只是参考，不是最终交付：制作时必须先重画成干净、完整的单主体图，再做 3D；不得让裁图直接作为 3D 输入。不要为了拆解调用付费的生成工具。",
+        "messages": {
+          "region_invalid": "拆解区域无效：请用相对原图的归一化坐标（0..1）框选，右/下边界不含，且区域面积大于 0。",
+          "region_too_small": "拆解区域太小：最短边至少 {minimum} 像素，请把这块区域框得更大一些。",
+          "image_too_large": "拆解图片或区域太大：超过了允许的字节或像素上限，请换一张更小的图或缩小框选范围。",
+          "image_item_limit": "这张图最多拆出 {maximum} 个资产项，请合并相邻区域或减少拆解数量。",
+          "reference_invalid": "裁剪参考图不合法：只能引用本人持有、来自同一张源图且每项至多一张的裁剪图。"
+        }
+      },
       "kinds": [
         {"id": "character", "label": "角色", "project_kind": "character", "default_route": "text-to-3d"},
         {"id": "weapon", "label": "武器", "project_kind": "prop", "default_route": "text-to-3d"},
@@ -5540,7 +5584,8 @@
         {"id": "text-to-3d-remesh", "label": "文生 3D 后重拓扑", "kinds": ["character", "weapon", "prop", "vehicle", "scene"], "steps": [{"capability": "text-to-3d"}, {"capability": "remesh"}]},
         {"id": "text-to-3d-rig", "label": "文生 3D 后绑骨", "kinds": ["character"], "steps": [{"capability": "text-to-3d"}, {"capability": "rigging"}]},
         {"id": "text-to-image", "label": "文生 2D", "kinds": ["image"], "steps": [{"capability": "text-to-image"}]},
-        {"id": "image-edit", "label": "图生 2D", "kinds": ["image"], "steps": [{"capability": "image-to-image"}]}
+        {"id": "image-edit", "label": "图生 2D", "kinds": ["image"], "steps": [{"capability": "image-to-image"}]},
+        {"id": "reference-to-3d", "label": "参考图重画 → 三视图 → 图生 3D → 重拓扑", "kinds": ["character", "weapon", "prop", "vehicle", "scene"], "steps": [{"capability": "image-to-image"}, {"capability": "image-to-multiview"}, {"capability": "image-to-3d"}, {"capability": "remesh"}]}
       ],
       "states": [
         {"id": "draft", "label": "草稿", "role": "pending"},
@@ -6735,12 +6780,16 @@
           "image.generated": "\n[历史图片 {index}，句柄 {handle}：AI 生成，来源任务 {task_id}]",
           "image.capture": "\n[历史图片 {index}，句柄 {handle}：3D 视图截图，来源模型任务 {task_id}，截图记录 {capture_id}]",
           "image.render": "\n[历史图片 {index}，句柄 {handle}：模型自检渲染图，来源模型任务 {task_id}]",
+          "image.crop": "\n[历史图片 {index}，句柄 {handle}：从场景图裁出的参考图，只用于身份与构图参考，不是最终交付]",
+          "image.source_scene": "\n[历史图片 {index}，句柄 {handle}：场景原图，只用于风格参考]",
           "model.generated": "\n[历史图片 {index}，句柄 {handle}：3D 模型的预览缩略图（平台生成的结果，不是用户附的图），模型任务 {task_id}]"
         },
         "unpictured_attachment_templates": {
           "image": "\n[图片 句柄 {handle}：用户在工作区选中，来源任务 {task_id}]",
           "model": "\n[3D 模型 句柄 {handle}：任务 {task_id}]",
-          "image.canvas": "\n[图片 句柄 {handle}：用户发送这一轮时的画板版面（{layout}），由画板上的可见图层拍平得到]"
+          "image.canvas": "\n[图片 句柄 {handle}：用户发送这一轮时的画板版面（{layout}），由画板上的可见图层拍平得到]",
+          "image.crop": "\n[图片 句柄 {handle}：从场景图裁出的参考图，只用于身份与构图参考，不是最终交付]",
+          "image.source_scene": "\n[图片 句柄 {handle}：场景原图，只用于风格参考]"
         },
         "kind_labels": { "image": "图片", "model": "3D 模型" },
         "selection_template": "\n\n当前选中对象：用户在工作区里正选中下列对象。用户说“这个”“这张”“选中的”“这个模型”时指它们；工具参数中用 {alias} 引用全部选中对象，或用各自的句柄。直接用它们做用户要的事，不再追问；它们做不了这一步时，先说明原因并问用户是否改用别的对象，不要自行换成别的对象付费提交。{items}",
@@ -7194,6 +7243,18 @@
           "invalid_region": "矩形区域无效：需要 x0、y0、x1、y1，且在图片范围内且 x1>x0、y1>y0。请重新给一个有效区域。",
           "no_subject": "这张图里没有可分离的主体，按主体生成蒙版失败。请改用 region 指定矩形区域，或让用户先提供主体清晰的图片。",
           "result_note": "已生成选区蒙版（{url}），尺寸 {width}×{height}，覆盖 {coverage}。把它作为 refine_image 的 mask 参数即可只改这个区域；透明=重画，不透明=保持。先让用户确认蒙版无误再提交付费步骤。"
+        }
+      },
+      "image_crop": {
+        "tool": "crop_image_regions",
+        "texts": {
+          "invalid_arguments": "裁剪参数无效：{detail}。image 只接受 @imgN、@selected 或本人输入资产 ID，不接受 @projectN。",
+          "invalid_region": "裁图区域无效：{detail}。区域用相对原图的归一化坐标（0..1）表示，右/下边界不含。",
+          "image_too_small": "裁图区域太小：{detail}。请把这块区域框得更大一些。",
+          "image_too_large": "图片或裁图区域超过大小上限：{detail}。",
+          "crop_limit_reached": "这张源图的裁图数量已达上限 {limit} 张，不能再新增区域；已裁过的矩形仍会返回原来的资产。",
+          "image_not_found": "找不到可裁剪的源图：{detail}。只能裁剪本人上传或生成的图片；@projectN 和他人资产不可用。",
+          "image_unavailable": "源图暂时无法读取，或不是可裁剪的图片：{detail}。"
         }
       },
       "work_ledger": {
@@ -7704,6 +7765,50 @@
           }
         },
         {
+          "name": "crop_image_regions",
+          "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. The result gives each crop's input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "string",
+                "description": "Picture handle (such as @img3) or @selected for the selected picture, or one of your own input asset ids. @projectN is not accepted."
+              },
+              "regions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 24,
+                "description": "The rectangles to cut, in request order. Normalized (0..1) relative to the source picture: x and y start the rectangle, width and height extend it; x+width and y+height must not exceed 1 and both sizes must be positive. The server converts each to source pixels with the right and bottom edges exclusive, and refuses a region whose shortest side is under the Schema minimum or whose area is over the Schema maximum.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "description": "Optional short name echoed in the result so you can match a crop to your list item."
+                    },
+                    "region": {
+                      "type": "object",
+                      "properties": {
+                        "x": {"type": "number", "minimum": 0, "maximum": 1},
+                        "y": {"type": "number", "minimum": 0, "maximum": 1},
+                        "width": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+                        "height": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}
+                      },
+                      "required": ["x", "y", "width", "height"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["region"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["image", "regions"],
+            "additionalProperties": false
+          }
+        },
+        {
           "name": "get_production_step",
           "execution": {"implementation_key":"ledger.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read one production step of this session's work ledger in full. Pass the step handle shown in the ledger summary (such as @step3) or the Task ID. The result returns the step's capability, offering and model, state and progress, failure class, the exact prompt the Agent asked for and the final prompt that was frozen for the upstream (including the style lock and any template rewriting), the negative prompt, every declared parameter with its effective value and where it came from (agent, default, style_lock or unknown), input pictures by handle and purpose, result handles and roles, the read-only self-check conclusions (inspect_model leftovers with fix hints, inspect_image pass/fail counts, render/compare failed views) and the adopted or rejected decision. The ledger is a projection of the session's public Tasks and persisted tool calls: it never creates a Task, charges credits or changes the session.",
@@ -8096,8 +8201,9 @@
                     "kind": {"type": "string", "enum": ["character", "weapon", "prop", "vehicle", "scene", "image"], "description": "Asset kind"},
                     "name": {"type": "string", "description": "Unique name within the list"},
                     "description": {"type": "string", "description": "What this asset is"},
-                    "route_id": {"type": "string", "description": "Optional route id; defaults by kind"},
-                    "reference_handles": {"type": "array", "items": {"type": "string"}, "description": "Optional @imgN or @projectN handles (max 4)"}
+                    "route_id": {"type": "string", "description": "Optional route id; defaults by kind. An item that references a crop and omits this takes the reference-based route."},
+                    "reference_handles": {"type": "array", "items": {"type": "string"}, "description": "Optional @imgN or @projectN handles (max 4)"},
+                    "reference_input_asset_ids": {"type": "array", "items": {"type": "string"}, "description": "Optional input asset ids of crops cut from one source picture by crop_image_regions. At most one crop per item, and every crop in the list must come from the same source picture."}
                   },
                   "required": ["kind", "name", "description"],
                   "additionalProperties": false
@@ -16331,6 +16437,11 @@
         "chat.pending_approvals",
         "chat.model3d_usage",
         "chat.image2d_usage",
+        "chat.image_crop",
+        "chat.context.attachment_label_templates[image.crop]",
+        "chat.context.attachment_label_templates[image.source_scene]",
+        "chat.context.unpictured_attachment_templates[image.crop]",
+        "chat.context.unpictured_attachment_templates[image.source_scene]",
         "chat.choice.kinds",
         "model_delivery",
         "asset_list",
@@ -16485,6 +16596,33 @@
             "ui.asset_list.expired": "Expired",
             "ui.asset_list.item_unavailable": "Unavailable",
             "ui.asset_list.chat_card_title": "Asset list",
+            "ui.asset_list.edit": "Edit list",
+            "ui.asset_list.edit_save": "Save",
+            "ui.asset_list.edit_cancel": "Cancel editing",
+            "ui.asset_list.edit_delete": "Delete",
+            "ui.asset_list.edit_name": "Name",
+            "ui.asset_list.edit_reference": "Cropped reference",
+            "ui.asset_list.edit_merge": "Merge",
+            "ui.asset_list.edit_merge_selected": "Merge selected",
+            "ui.asset_list.edit_merge_hint": "Select two items to merge: the first item's name and description are kept, the other references from both sides are combined, and the united region is cut again.",
+            "ui.asset_list.edit_merge_source_mismatch": "The two items come from different source pictures; they cannot be merged.",
+            "ui.asset_list.edit_save_failed": "Saving failed; try again.",
+            "ui.asset_list.edit_conflict": "The list changed elsewhere and this draft is based on an older version; your changes are kept — reload the latest version.",
+            "ui.asset_list.edit_stale": "The list changed elsewhere; this draft is based on an older version and cannot be saved as is.",
+            "ui.asset_list.edit_reload": "Reload latest version",
+            "ui.asset_list.edit_kind": "Kind",
+            "ui.asset_list.edit_crop_title": "Crop regions",
+            "ui.asset_list.edit_crop_source": "Source picture",
+            "ui.asset_list.edit_crop_hint": "Drag a box on the source picture, then name the new item and choose its kind; Esc cancels the current selection.",
+            "ui.asset_list.edit_crop_recrop_hint": "Drag a new box to replace this item's region.",
+            "ui.asset_list.edit_crop_add": "Add item",
+            "ui.asset_list.edit_crop_recrop": "Re-crop",
+            "ui.asset_list.edit_crop_cancel": "Cancel selection",
+            "ui.asset_list.edit_crop_name_required": "A name is required.",
+            "ui.asset_list.edit_crop_too_small": "The selection is too small: its shortest edge must be at least {minimum} px; drag a larger box.",
+            "ui.asset_list.edit_crop_image_limit": "This picture can be split into at most {maximum} asset items; merge nearby regions or split fewer items.",
+            "ui.asset_list.edit_crop_no_source": "This list has no source picture, so no new region can be drawn.",
+            "ui.asset_list.edit_crop_mixed_source": "Some items come from another source picture; only regions on the current source are shown.",
             "ui.asset_list.run_status": "Production progress",
             "ui.asset_list.run_running": "Producing",
             "ui.asset_list.run_paused_presence": "Paused: you left",
@@ -19888,6 +20026,7 @@
             "asset_list.routes[id=text-to-3d-rig].label": "Text to 3D, then rig",
             "asset_list.routes[id=text-to-image].label": "Text to 2D",
             "asset_list.routes[id=image-edit].label": "Image to 2D",
+            "asset_list.routes[id=reference-to-3d].label": "Redraw from reference → three views → image to 3D → remesh",
             "asset_list.states[id=draft].label": "Draft",
             "asset_list.states[id=confirmed].label": "Confirmed",
             "asset_list.states[id=rejected].label": "Rejected",
@@ -19919,6 +20058,16 @@
             "asset_list.messages.propose_invalid_items": "The production list arguments are invalid: check the item count, duplicate names, asset kinds, routes and the reference limit.",
             "asset_list.messages.propose_reference_unresolved": "Some reference handles could not be resolved; check that the referenced pictures or project assets exist.",
             "asset_list.messages.propose_failed": "The production list could not be submitted because the service is temporarily unavailable; try again later.",
+            "asset_list.decompose.agent_prompt": "[Scene decomposition]\nWhen the picture the user uploaded contains several independently makeable objects and they ask to \"make everything in it\" or \"split it up\", produce the asset list first: do not draw concept images and do not ask a quantity question first — a quantity choice only belongs to exploring the direction of a single item.\nSteps:\n1. Use inspect_image with normalized regions relative to the source picture (0..1, right/bottom edges exclusive) to look at candidate objects, with show_picture to see them;\n2. Then use crop_image_regions to cut all candidate regions in one batch and keep each returned input asset ID;\n3. Finally use propose_asset_list, referencing each item's crop through reference_input_asset_ids.\nOne region per item, with name, kind and description; do not miss objects and do not split one object into several items; for overlapping or occluded objects, state in the description which parts cannot be seen.\nOne picture yields at most {maximum} items. A crop is only a reference, never the final deliverable: redraw it into a clean, complete single-subject picture before 3D, and never let a crop enter the 3D input gate directly. Do not call paid generation tools just to decompose.",
+            "asset_list.decompose.messages.region_invalid": "The decompose region is invalid: use normalized coordinates (0..1) relative to the source picture, with exclusive right/bottom edges and a region area greater than 0.",
+            "asset_list.decompose.messages.region_too_small": "The decompose region is too small: its shortest side must be at least {minimum} pixels; frame a larger region.",
+            "asset_list.decompose.messages.image_too_large": "The decompose picture or region is too large: it exceeds the allowed byte or pixel limit; use a smaller picture or frame a smaller region.",
+            "asset_list.decompose.messages.image_item_limit": "This picture can be split into at most {maximum} asset items; merge nearby regions or split fewer items.",
+            "asset_list.decompose.messages.reference_invalid": "The crop reference is invalid: only crops the person holds, cut from the same source picture and at most one per item, may be referenced.",
+            "chat.context.attachment_label_templates[image.crop]": "\n[History image {index}, handle {handle}: reference cropped from the scene picture, for identity and composition only; not the final deliverable]",
+            "chat.context.attachment_label_templates[image.source_scene]": "\n[History image {index}, handle {handle}: original scene picture, style reference only]",
+            "chat.context.unpictured_attachment_templates[image.crop]": "\n[Image handle {handle}: reference cropped from the scene picture, for identity and composition only; not the final deliverable]",
+            "chat.context.unpictured_attachment_templates[image.source_scene]": "\n[Image handle {handle}: original scene picture, style reference only]",
             "asset_list.messages.pause_presence": "The user left (presence heartbeat stopped), so automatic production is paused; it continues when the user comes back.",
             "asset_list.messages.pause_user": "The user paused automatic production.",
             "asset_list.messages.pause_step_cap": "Item \"{name}\" reached the step limit, so automatic production is paused.",
@@ -20146,6 +20295,13 @@
             "chat.image2d_usage.requirements_note.pose_texts.t-pose": "T-pose",
             "chat.image2d_usage.requirements_note.tileable_text": "must tile seamlessly",
             "chat.image2d_usage.requirements_note.guidance_template": "prompt tips: {value}",
+            "chat.image_crop.texts.invalid_arguments": "The crop arguments are invalid: {detail}. image accepts only @imgN, @selected or one of your own input asset ids; @projectN is not accepted.",
+            "chat.image_crop.texts.invalid_region": "The crop region is invalid: {detail}. Regions use normalized coordinates (0..1) relative to the source picture, and the right and bottom edges are exclusive.",
+            "chat.image_crop.texts.image_too_small": "The crop region is too small: {detail}. Make the box larger.",
+            "chat.image_crop.texts.image_too_large": "The picture or the crop region is over a size limit: {detail}.",
+            "chat.image_crop.texts.crop_limit_reached": "This source picture already keeps the maximum of {limit} crops, so no new region can be added; rectangles cropped before still return their stored asset.",
+            "chat.image_crop.texts.image_not_found": "No crop source was found: {detail}. Only your own uploaded or generated pictures can be cropped; @projectN and another owner's assets are not available.",
+            "chat.image_crop.texts.image_unavailable": "The source picture cannot be read right now, or it is not a supported picture: {detail}.",
             "chat.model3d_usage.profiles[id=render].label": "Display / rendering",
             "chat.model3d_usage.profiles[id=render].description": "A model for display, preview or promotion; not aimed at real-time use or printing.",
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",

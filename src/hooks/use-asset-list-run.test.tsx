@@ -79,6 +79,7 @@ function clientWith(overrides: Partial<AssetListClient> = {}): AssetListClient {
     skipItem: vi.fn(async () => item({ state: 'skipped', version: 5 })),
     listSessionLists: vi.fn(async () => []),
     presence: vi.fn(async () => {}),
+    edit: vi.fn(async () => ({ ...summary(), version: 4, brief: {}, items: [] })),
     ...overrides,
   };
 }

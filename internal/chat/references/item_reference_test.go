@@ -177,6 +177,81 @@ func TestItemReferencesBecomeHandledAttachmentsThatResolveBack(t *testing.T) {
 	}
 }
 
+// itemCropProvenance answers the stored source of the test crops.
+type itemCropProvenance map[generation.AssetID]generation.AssetID
+
+func (provenance itemCropProvenance) CropSource(_ context.Context,
+	_ generation.OwnerID, cropAssetID generation.AssetID,
+) (generation.AssetID, bool, error) {
+	source, found := provenance[cropAssetID]
+	return source, found, nil
+}
+
+// #331: an item's stored crop is attached with the crop role, and its source
+// scene follows once per item set with the source_scene role, so the
+// sub-session does not read either picture as an ordinary upload. A source
+// that cannot be read any more is skipped and the crop still resolves.
+func TestItemCropReferencesBecomeCropAndSourceSceneAttachments(t *testing.T) {
+	ctx := context.Background()
+	picture := []byte("\x89PNG\r\n\x1a\nitem-crop")
+	inputs := &storedInputs{
+		assets: map[generation.AssetID]generation.InputAsset{
+			"crop-a":    {ID: "crop-a", OwnerID: "owner-a", AssetType: "list_crop"},
+			"crop-b":    {ID: "crop-b", OwnerID: "owner-a", AssetType: "list_crop"},
+			"scene-a":   {ID: "scene-a", OwnerID: "owner-a"},
+			"scene-old": {ID: "scene-old", OwnerID: "owner-a"},
+		},
+		bodies: map[generation.AssetID][]byte{
+			"crop-a": picture, "crop-b": picture, "scene-a": picture, "scene-old": picture,
+		},
+	}
+	resolver := limitedResolver(t, inputs, resolverLimits{
+		upload: 1024, vision: 1024,
+		crops: itemCropProvenance{
+			"crop-a": "scene-a", "crop-b": "scene-a", "crop-old": "scene-gone",
+		},
+	})
+	attachments, err := resolver.ItemReferenceAttachments(ctx, "owner-a", []project.Reference{
+		{InputAssetID: "crop-a"},
+		{InputAssetID: "crop-b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 3 {
+		t.Fatalf("attachments = %+v; want two crops and one source scene", attachments)
+	}
+	for index, want := range []struct{ role, assetID string }{
+		{chat.AttachmentRoleCrop, "crop-a"},
+		{chat.AttachmentRoleCrop, "crop-b"},
+		{chat.AttachmentRoleSourceScene, "scene-a"},
+	} {
+		attachment := attachments[index]
+		if attachment.Kind != chat.AttachmentKindImage || attachment.Role != want.role ||
+			attachment.AssetID != want.assetID || attachment.TaskID != "" ||
+			attachment.URL != "/configured/assets/"+want.assetID {
+			t.Fatalf("attachment %d = %+v; want role %s of %s", index, attachment, want.role, want.assetID)
+		}
+	}
+
+	// A crop whose source has been deleted still attaches as a crop; the
+	// missing source picture is left out instead of failing the turn.
+	orphaned, err := resolver.ItemReferenceAttachments(ctx, "owner-a", []project.Reference{
+		{InputAssetID: "crop-old"},
+	})
+	if err == nil {
+		t.Fatal("a crop asset without a stored row must be refused")
+	}
+	inputs.assets["crop-old"] = generation.InputAsset{ID: "crop-old", OwnerID: "owner-a", AssetType: "list_crop"}
+	inputs.bodies["crop-old"] = picture
+	orphaned, err = resolver.ItemReferenceAttachments(ctx, "owner-a", []project.Reference{
+		{InputAssetID: "crop-old"},
+	})
+	if err != nil || len(orphaned) != 1 || orphaned[0].Role != chat.AttachmentRoleCrop {
+		t.Fatalf("orphaned source attachments = %+v err=%v", orphaned, err)
+	}
+}
+
 // The item path never becomes a client claim: VerifyAttachment still applies
 // the session rule of an ordinary turn, including for captures.
 func TestItemContextDoesNotRelaxClientAttachmentsOrCaptures(t *testing.T) {

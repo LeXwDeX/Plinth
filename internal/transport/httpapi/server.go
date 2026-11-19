@@ -41,6 +41,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 	"github.com/LeXwDeX/Plinth/internal/lineage"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/llmsettings"
 	"github.com/LeXwDeX/Plinth/internal/mcp"
 	"github.com/LeXwDeX/Plinth/internal/mcppublic"
@@ -87,6 +88,13 @@ type MCPImageInspector interface {
 // needs it because the input-asset open path only holds direct uploads.
 type MCPPictureAssetLookup interface {
 	LoadInputAssets(context.Context, generation.OwnerID, []generation.AssetID) (map[generation.AssetID]generation.InputAsset, error)
+}
+
+// AssetListCropStore reads the crop provenance of the input assets one list
+// item references (#331). The SQLite provenance repository is the production
+// store; nil leaves every list detail item without the optional crop object.
+type AssetListCropStore interface {
+	Load(context.Context, generation.OwnerID, []generation.AssetID) (map[generation.AssetID]listcrop.Crop, error)
 }
 
 type Config struct {
@@ -171,6 +179,9 @@ type Config struct {
 	// AssetListPresence is the per-tab browser heartbeat (#328); nil leaves
 	// the presence route unregistered even when the Catalog declares execution.
 	AssetListPresence assetlist.PresenceStore
+	// AssetListCrops is the owner-scoped crop provenance store (#331); nil
+	// leaves every list detail item without the optional crop object.
+	AssetListCrops AssetListCropStore
 	// DirectStyleReferences resolves a project session's frozen style pictures
 	// for a direct prepare; nil refuses a request that would need them.
 	DirectStyleReferences DirectStyleReferenceResolver
@@ -311,6 +322,7 @@ type Server struct {
 	projects                          *project.Service
 	assetLists                        *assetlist.Service
 	assetListPresence                 assetlist.PresenceStore
+	assetListCrops                    AssetListCropStore
 	directStyleReferences             DirectStyleReferenceResolver
 	chatScheduler                     ChatTurnScheduler
 	chatContext                       ChatContextCompactor
@@ -539,6 +551,7 @@ func New(config Config) (*Server, error) {
 		projects:              config.Projects,
 		assetLists:            config.AssetLists,
 		assetListPresence:     config.AssetListPresence,
+		assetListCrops:        config.AssetListCrops,
 		directStyleReferences: config.DirectStyleReferences,
 		chatScheduler:         config.ChatScheduler,
 		chatContext:           config.ChatContext,

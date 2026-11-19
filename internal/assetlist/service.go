@@ -35,7 +35,14 @@ type Config struct {
 	Presence PresenceStore
 	// Reviews reads the recorded acceptance decisions of the board (#329a).
 	// nil leaves every item with an empty latest review.
-	Reviews         ReviewStore
+	Reviews ReviewStore
+	// References resolves input-asset references against the owner's stored
+	// assets and crop provenance (#331), so proposals and edits share one
+	// validation. nil keeps the #327 shape checks only.
+	References ReferenceAssets
+	// Crops cuts the optional per-item edit crop instruction (#331). nil
+	// refuses crop instructions; the proposal path never accepts them.
+	Crops           Cropper
 	Schema          catalog.AssetListSchema
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
@@ -65,23 +72,33 @@ type Config struct {
 
 // Service implements the list workflow over a Repository.
 type Service struct {
-	repository         Repository
-	runs               RunStore
-	presence           PresenceStore
-	reviews            ReviewStore
-	presenceGrace      time.Duration
-	executionEnabled   bool
-	limits             catalog.AssetListLimitsSchema
-	projectMaxItems    int
-	maxListsPerProject int
-	kinds              map[string]catalog.AssetListKindSchema
-	routes             map[string]catalog.AssetListRouteSchema
-	counted            map[generation.Capability]bool
-	resolveStep        func(capability string) (RouteStep, error)
-	resolveStepFor     func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
-	validateBrief      func(json.RawMessage) error
-	clock              func() time.Time
-	newID              func(prefix string) (string, error)
+	repository      Repository
+	runs            RunStore
+	presence        PresenceStore
+	reviews         ReviewStore
+	referenceAssets ReferenceAssets
+	crops           Cropper
+	// imageItemLimit is application.asset_list.decompose.maximum_items_per_image
+	// (#331); 0 leaves the proposal-time per-image bound unwired.
+	imageItemLimit int
+	// defaultRouteWithReference is
+	// application.asset_list.decompose.default_route_with_reference (#331): the
+	// route an item with a crop reference and no explicit route_id takes. Empty
+	// keeps the kind's default_route.
+	defaultRouteWithReference string
+	presenceGrace             time.Duration
+	executionEnabled          bool
+	limits                    catalog.AssetListLimitsSchema
+	projectMaxItems           int
+	maxListsPerProject        int
+	kinds                     map[string]catalog.AssetListKindSchema
+	routes                    map[string]catalog.AssetListRouteSchema
+	counted                   map[generation.Capability]bool
+	resolveStep               func(capability string) (RouteStep, error)
+	resolveStepFor            func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
+	validateBrief             func(json.RawMessage) error
+	clock                     func() time.Time
+	newID                     func(prefix string) (string, error)
 }
 
 // New builds the service. A Catalog that declares application.asset_list is
@@ -135,24 +152,34 @@ func New(config Config) (*Service, error) {
 	if config.Schema.Execution != nil {
 		presenceGrace = time.Duration(config.Schema.Execution.Presence.GraceSeconds) * time.Second
 	}
+	var imageItemLimit int
+	var defaultRouteWithReference string
+	if config.Schema.Decompose != nil {
+		imageItemLimit = config.Schema.Decompose.MaximumItemsPerImage
+		defaultRouteWithReference = strings.TrimSpace(config.Schema.Decompose.DefaultRouteWithReference)
+	}
 	return &Service{
-		repository:         config.Repository,
-		runs:               config.Runs,
-		presence:           config.Presence,
-		reviews:            config.Reviews,
-		presenceGrace:      presenceGrace,
-		executionEnabled:   executionEnabled,
-		limits:             limits,
-		projectMaxItems:    config.ProjectMaxItems,
-		maxListsPerProject: config.MaxListsPerProject,
-		kinds:              kinds,
-		routes:             routes,
-		counted:            counted,
-		resolveStep:        config.ResolveStep,
-		resolveStepFor:     config.ResolveStepFor,
-		validateBrief:      config.ValidateBrief,
-		clock:              clock,
-		newID:              newID,
+		repository:                config.Repository,
+		runs:                      config.Runs,
+		presence:                  config.Presence,
+		reviews:                   config.Reviews,
+		referenceAssets:           config.References,
+		crops:                     config.Crops,
+		imageItemLimit:            imageItemLimit,
+		defaultRouteWithReference: defaultRouteWithReference,
+		presenceGrace:             presenceGrace,
+		executionEnabled:          executionEnabled,
+		limits:                    limits,
+		projectMaxItems:           config.ProjectMaxItems,
+		maxListsPerProject:        config.MaxListsPerProject,
+		kinds:                     kinds,
+		routes:                    routes,
+		counted:                   counted,
+		resolveStep:               config.ResolveStep,
+		resolveStepFor:            config.ResolveStepFor,
+		validateBrief:             config.ValidateBrief,
+		clock:                     clock,
+		newID:                     newID,
 	}, nil
 }
 
@@ -208,7 +235,7 @@ func (service *Service) Propose(ctx context.Context, input ProposeInput) (List, 
 		return List{}, err
 	}
 	now := service.clock()
-	items, err := service.buildItems(ctx, ownerID, sessionID, input.Items, now)
+	items, err := service.buildItems(ctx, ownerID, sessionID, input.Items, now, false)
 	if err != nil {
 		return List{}, err
 	}
@@ -261,7 +288,14 @@ func (service *Service) Edit(ctx context.Context, input EditInput) (List, error)
 		return List{}, err
 	}
 	now := service.clock()
-	items, err := service.buildItems(ctx, ownerID, strings.TrimSpace(input.SessionID), input.Items, now)
+	// The pre-check runs before any crop instruction is cut: a stale version or
+	// a non-draft (or expired) list must not leave new crop assets behind. The
+	// repository's edit transaction re-checks the same rules, so the CAS
+	// remains authoritative.
+	if err := service.precheckEdit(ctx, ownerID, projectID, listID, input.ExpectedVersion, now); err != nil {
+		return List{}, err
+	}
+	items, err := service.buildItems(ctx, ownerID, strings.TrimSpace(input.SessionID), input.Items, now, true)
 	if err != nil {
 		return List{}, err
 	}
@@ -281,6 +315,43 @@ func (service *Service) Edit(ctx context.Context, input EditInput) (List, error)
 		return List{}, err
 	}
 	return service.decorate(stored), nil
+}
+
+// precheckEdit reads the draft once and applies the edit's state and version
+// rules before any side effect (a crop instruction cuts and stores an asset).
+// The repository repeats the checks inside its write transaction; this read is
+// only the early refusal that keeps a losing edit from storing crops. An
+// expired draft still goes through the repository's edit transaction with no
+// items, because that transaction records the expiry, exactly as a normal edit
+// would; it refuses before it touches any item.
+func (service *Service) precheckEdit(ctx context.Context, ownerID, projectID, listID string,
+	expectedVersion int64, now time.Time,
+) error {
+	current, err := service.repository.GetList(ctx, ownerID, projectID, listID)
+	if err != nil {
+		return err
+	}
+	if current.Status == StatusExpired {
+		return ErrExpired
+	}
+	if current.Status != StatusDraft {
+		return ErrConflict
+	}
+	if !current.ExpiresAt.IsZero() && !now.Before(current.ExpiresAt) {
+		if _, err := service.repository.EditList(ctx, List{
+			ID:        listID,
+			OwnerID:   ownerID,
+			ProjectID: projectID,
+			UpdatedAt: now,
+		}, nil, expectedVersion); err != nil {
+			return err
+		}
+		return ErrExpired
+	}
+	if current.Version != expectedVersion {
+		return ErrConflict
+	}
+	return nil
 }
 
 // Decide confirms, rejects or replaces a draft. Confirming while another list
@@ -533,9 +604,11 @@ func (service *Service) brief(raw json.RawMessage) (json.RawMessage, error) {
 
 // buildItems validates the whole item set before any row is written: the
 // project's item bound, unique names (trimmed, case-insensitive), kinds and
-// routes from the Schema, the per-item reference bound and shape, and the
-// availability snapshot of every route step.
-func (service *Service) buildItems(ctx context.Context, ownerID, sessionID string, inputs []ItemInput, now time.Time) ([]Item, error) {
+// routes from the Schema, the per-item reference bound, shape and (when the
+// port is wired) the owner's stored assets and crop provenance, the optional
+// edit crop instruction, and the availability snapshot of every route step.
+// Only edits may carry crop instructions; a proposal refuses them.
+func (service *Service) buildItems(ctx context.Context, ownerID, sessionID string, inputs []ItemInput, now time.Time, allowCrop bool) ([]Item, error) {
 	if len(inputs) == 0 {
 		return nil, fmt.Errorf("%w: at least one item is required", ErrInvalid)
 	}
@@ -544,7 +617,12 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 	}
 	seen := make(map[string]bool, len(inputs))
 	items := make([]Item, 0, len(inputs))
+	// The crop rules are list-wide: one crop per item, one source picture per
+	// list and at most maximum_items_per_image items cut from one source. The
+	// scope carries the source across the item loop.
+	crops := &cropReferenceScope{maximum: service.imageItemLimit}
 	for index, input := range inputs {
+		crops.resetItem()
 		kindID := strings.TrimSpace(input.Kind)
 		kind, exists := service.kinds[kindID]
 		if !exists {
@@ -566,18 +644,26 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 		if utf8.RuneCountInString(description) > service.limits.DescriptionMaxLength {
 			return nil, fmt.Errorf("%w: item %d description is too long", ErrInvalid, index+1)
 		}
-		routeID := strings.TrimSpace(input.RouteID)
-		if routeID == "" {
-			routeID = kind.DefaultRoute
+		// The references are validated before the route is chosen: a crop
+		// reference with no explicit route_id takes the Schema's reference
+		// route (#331). Detecting a crop needs the ReferenceAssets port; a
+		// deployment or test without it keeps the #327 behavior.
+		references := input.References
+		var err error
+		if input.Crop != nil {
+			if !allowCrop {
+				return nil, fmt.Errorf("%w: item %d cannot carry a crop instruction in a proposal", ErrInvalid, index+1)
+			}
+			references, err = service.applyCrop(ctx, ownerID, input.Crop, references)
+			if err != nil {
+				return nil, err
+			}
 		}
-		route, exists := service.routes[routeID]
-		if !exists {
-			return nil, fmt.Errorf("%w: item %d has unknown route %q", ErrInvalid, index+1, routeID)
+		references, err = service.references(ctx, ownerID, references, crops)
+		if err != nil {
+			return nil, err
 		}
-		if !slices.Contains(route.Kinds, kindID) {
-			return nil, fmt.Errorf("%w: route %q does not serve kind %q", ErrInvalid, routeID, kindID)
-		}
-		references, err := service.references(input.References)
+		routeID, route, err := service.resolveRoute(kind, kindID, input.RouteID, crops.itemCrops > 0, index)
 		if err != nil {
 			return nil, err
 		}
@@ -635,17 +721,57 @@ func (service *Service) buildItems(ctx context.Context, ownerID, sessionID strin
 	return items, nil
 }
 
-// references bounds and shape-checks the item's references. Resolution from
-// @imgN/@projectN handles to project.Reference belongs to the caller (#327
-// PR3); this package never widens the owner's scope.
-func (service *Service) references(values []project.Reference) ([]project.Reference, error) {
+// resolveRoute picks one item's route. An explicit route_id always wins. An
+// item that carries a crop reference and names no route takes
+// application.asset_list.decompose.default_route_with_reference (#331), so a
+// crop never enters a 3D route directly. The reference route applies only when
+// it serves the item's kind; another kind keeps its default_route. A Catalog
+// without the decompose section keeps the #327 behavior.
+func (service *Service) resolveRoute(kind catalog.AssetListKindSchema, kindID, explicitRouteID string,
+	hasCrop bool, index int,
+) (string, catalog.AssetListRouteSchema, error) {
+	routeID := strings.TrimSpace(explicitRouteID)
+	if routeID == "" && hasCrop && service.defaultRouteWithReference != "" {
+		if route, found := service.routes[service.defaultRouteWithReference]; found &&
+			slices.Contains(route.Kinds, kindID) {
+			routeID = service.defaultRouteWithReference
+		}
+	}
+	if routeID == "" {
+		routeID = kind.DefaultRoute
+	}
+	route, exists := service.routes[routeID]
+	if !exists {
+		return "", catalog.AssetListRouteSchema{},
+			fmt.Errorf("%w: item %d has unknown route %q", ErrInvalid, index+1, routeID)
+	}
+	if !slices.Contains(route.Kinds, kindID) {
+		return "", catalog.AssetListRouteSchema{},
+			fmt.Errorf("%w: route %q does not serve kind %q", ErrInvalid, routeID, kindID)
+	}
+	return routeID, route, nil
+}
+
+// references bounds and shape-checks the item's references and, when the
+// ReferenceAssets port is wired, validates every input-asset reference against
+// the owner's stored assets and crop provenance (#331). Task-shaped references
+// keep the #327 contract. Proposals and edits share this implementation, so a
+// bare references list on an edit PUT cannot bypass the crop rules.
+func (service *Service) references(ctx context.Context, ownerID string,
+	values []project.Reference, crops *cropReferenceScope,
+) ([]project.Reference, error) {
 	if len(values) > service.limits.MaxReferencesPerItem {
 		return nil, fmt.Errorf("%w: at most %d references per item", ErrLimit, service.limits.MaxReferencesPerItem)
 	}
 	result := make([]project.Reference, 0, len(values))
 	for _, reference := range values {
 		if !reference.Valid() {
-			return nil, fmt.Errorf("%w: invalid reference", ErrInvalid)
+			return nil, invalidReference("a reference must name exactly one source")
+		}
+		if reference.InputAssetID != "" {
+			if err := service.validateInputReference(ctx, ownerID, reference, crops); err != nil {
+				return nil, err
+			}
 		}
 		result = append(result, reference)
 	}

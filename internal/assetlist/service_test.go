@@ -287,6 +287,13 @@ func testSchema() catalog.AssetListSchema {
 				Steps: []catalog.AssetListStepSchema{{Capability: "text-to-3d"}, {Capability: "rigging"}}},
 			{ID: "text-to-image", Label: "Text to image", Kinds: []string{"image"},
 				Steps: []catalog.AssetListStepSchema{{Capability: "text-to-image"}}},
+			{ID: "reference-to-3d", Label: "Reference to 3D", Kinds: []string{"character"},
+				Steps: []catalog.AssetListStepSchema{
+					{Capability: "image-to-image"},
+					{Capability: "image-to-multiview"},
+					{Capability: "image-to-3d"},
+					{Capability: "remesh"},
+				}},
 		},
 	}
 }
@@ -308,8 +315,10 @@ func newService(t *testing.T, mutate func(*assetlist.Config)) (*assetlist.Servic
 		Schema:          testSchema(),
 		ProjectMaxItems: 3,
 		Counted: map[generation.Capability]bool{
-			"text-to-3d": true,
-			"rigging":    true,
+			"text-to-3d":  true,
+			"rigging":     true,
+			"image-to-3d": true,
+			"remesh":      true,
 		},
 		Now: clock.Now,
 		NewID: func(prefix string) (string, error) {

@@ -3149,6 +3149,10 @@ type ChatSchema struct {
 	// local deterministic region mask it builds and the texts the Agent reads.
 	// Server side only; the browser never reads it.
 	ImageMask ChatImageMaskSchema `json:"image_mask"`
+	// ImageCrop declares the read-only crop_image_regions tool (#331): the
+	// normalized-region crop service's Agent-facing refusal copy. Server side
+	// only; the crop limits join application.asset_list.decompose in #331b.
+	ImageCrop ChatImageCropSchema `json:"image_crop"`
 	// WorkLedger declares the session production ledger (#248): the read-only
 	// projection of the session's public Tasks, the summary it adds to the
 	// system prompt, the get_production_step tool's texts and the style anchor

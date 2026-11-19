@@ -57,6 +57,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/imaging"
 	"github.com/LeXwDeX/Plinth/internal/legacythumbnail"
 	"github.com/LeXwDeX/Plinth/internal/lineage"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/llmsettings"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
@@ -145,6 +146,99 @@ func (s renderAssetStore) UploadPNG(ctx context.Context, owner string, pixels []
 		Body: bytes.NewReader(pixels), MediaType: "image/png", OriginalFilename: "render-frame.png",
 		AssetType: "render-frame", MaxBytes: s.maxBytes})
 	return string(asset.ID), err
+}
+
+// cropInputAssets is the crop service's input port (#331): the input asset
+// service owns uploads and opens real uploads, while the repository's
+// LoadInputAssets also projects a finished Task's outputs, which is how a Task
+// source is resolved before it is copied into an input asset.
+type cropInputAssets struct {
+	inputs *inputassets.Service
+	loader interface {
+		LoadInputAssets(context.Context, generation.OwnerID,
+			[]generation.AssetID) (map[generation.AssetID]generation.InputAsset, error)
+	}
+}
+
+func (store cropInputAssets) UploadAsset(ctx context.Context, owner generation.OwnerID,
+	upload generation.InputAssetUpload,
+) (generation.InputAsset, error) {
+	return store.inputs.UploadAsset(ctx, owner, upload)
+}
+
+func (store cropInputAssets) OpenOwned(ctx context.Context, owner generation.OwnerID,
+	id generation.AssetID,
+) (generation.InputAsset, io.ReadCloser, error) {
+	return store.inputs.OpenOwned(ctx, owner, id)
+}
+
+func (store cropInputAssets) LoadInputAssets(ctx context.Context, owner generation.OwnerID,
+	ids []generation.AssetID,
+) (map[generation.AssetID]generation.InputAsset, error) {
+	return store.loader.LoadInputAssets(ctx, owner, ids)
+}
+
+// assetListReferenceAssets is the production-list reference port (#331): the
+// input asset service resolves an owner's stored uploads without opening their
+// bytes, and the crop repository supplies the provenance that marks an asset as
+// a crop and names its source. The asset-list package validates the crop rules
+// over this; it never reads the asset tables itself.
+type assetListReferenceAssets struct {
+	inputs *inputassets.Service
+	crops  *sqlite.InputAssetCropRepository
+}
+
+// cropProvenance is the attachment resolver's crop port (#331): it names the
+// source picture of one stored list crop, so a sub-session's first turn reads
+// the crop as the identity/composition reference and the scene as the style
+// reference.
+type cropProvenance struct {
+	crops *sqlite.InputAssetCropRepository
+}
+
+func (port cropProvenance) CropSource(ctx context.Context,
+	owner generation.OwnerID, cropAssetID generation.AssetID,
+) (generation.AssetID, bool, error) {
+	crop, found, err := port.crops.Get(ctx, owner, cropAssetID)
+	if err != nil || !found {
+		return "", false, err
+	}
+	// A Task source is copied into an input asset before it is cropped, and the
+	// copy is the picture the crop actually came from. Naming the copy keeps
+	// the source attachment openable; for an input source both ids are equal.
+	if crop.SourceInputAssetID != "" {
+		return crop.SourceInputAssetID, true, nil
+	}
+	return crop.SourceAssetID, true, nil
+}
+
+func (port assetListReferenceAssets) ResolveInputAsset(ctx context.Context,
+	owner generation.OwnerID, inputAssetID generation.AssetID,
+) (assetlist.InputAssetReference, bool, error) {
+	asset, err := port.inputs.OwnedInputAsset(ctx, owner, inputAssetID)
+	if err != nil {
+		var domain *generation.Error
+		if errors.As(err, &domain) &&
+			(domain.Code == generation.ErrNotFound || domain.Code == generation.ErrForbidden) {
+			return assetlist.InputAssetReference{}, false, nil
+		}
+		return assetlist.InputAssetReference{}, false, err
+	}
+	reference := assetlist.InputAssetReference{MediaType: asset.MediaType}
+	crop, found, err := port.crops.Get(ctx, owner, inputAssetID)
+	if err != nil {
+		return assetlist.InputAssetReference{}, false, err
+	}
+	switch {
+	case found:
+		reference.IsCrop = true
+		reference.CropSourceAssetID = crop.SourceAssetID
+	case asset.AssetType == listcrop.CropAssetType:
+		// A list_crop row without provenance is inconsistent stored data; the
+		// service refuses it instead of accepting it as a plain picture.
+		reference.IsCrop = true
+	}
+	return reference, true, nil
 }
 
 type preparedSceneContext struct {
@@ -647,6 +741,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// be read from any session of that project. The exact (task, asset)
 		// pair is checked here; no request can name its own scope.
 		ProjectReferences: projectReferenceChecker,
+		// #331: a production-list item's stored crop is attached with its own
+		// role, and its source scene follows as the style reference.
+		Crops: cropProvenance{crops: repository.InputAssetCropRepository()},
 		// #244: the frozen selection mask and its server-composed preview.
 		SelectionMaskLimits: imageinspect.Limits{
 			MaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
@@ -748,6 +845,35 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Usage:      applicationSchema.Chat.Model3DUsage,
 		Production: applicationSchema.Chat.ModelReview.Inspect.Production,
 	})
+	// #331: the read-only crop_image_regions tool cuts normalized regions out
+	// of one owned picture at original resolution and stores every crop as a
+	// list_crop input asset. The decompose section declares the product item
+	// cap and the crop size bounds; a Catalog without it keeps the package
+	// defaults. The source decode bounds are the mask tool's, and a Task source
+	// is copied and decoded under that same byte cap. The storage guardrail is
+	// a multiple of the product cap because re-framing accumulates crop assets
+	// and old crops are never collected; the asset-list rules keep enforcing
+	// maximum_items_per_image itself. The same service backs the edit crop
+	// instruction, through the asset-list Config port.
+	cropConfig := listcrop.Config{
+		Inputs:          cropInputAssets{inputs: inputAssetService, loader: repository},
+		Tasks:           module,
+		Crops:           repository.InputAssetCropRepository(),
+		SourceMaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+		SourceMaxPixels: applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+		SourceAssetType: applicationSchema.Runtime.InputAssets.DefaultAssetType,
+	}
+	if applicationSchema.AssetList != nil && applicationSchema.AssetList.Decompose != nil {
+		decompose := applicationSchema.AssetList.Decompose
+		cropConfig.MaximumCropsPerSource = decompose.MaximumItemsPerImage * listcrop.StorageCropLimitMultiplier
+		cropConfig.MinimumSide = decompose.Crop.MinimumShortEdge
+		cropConfig.MaximumRegionPixels = decompose.Crop.MaximumRegionPixels
+		cropConfig.UploadMaxBytes = decompose.Crop.MaximumPNGBytes
+	}
+	cropService, err := listcrop.New(cropConfig)
+	if err != nil {
+		return nil, fmt.Errorf("裁剪服务: %w", err)
+	}
 	// Production lists (#327): the service reuses the plan's offering
 	// selection through the chat adapters, so an explicit model lock and an
 	// unavailable provider are reflected in the availability snapshot. The
@@ -766,10 +892,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			counted[generation.Capability(capability)] = true
 		}
 		assetListService, err = assetlist.New(assetlist.Config{
-			Repository:         repository.AssetListRepository(),
-			Runs:               repository.AssetListRunRepository(),
-			Presence:           repository.AssetListPresenceRepository(),
-			Reviews:            repository.AssetListReviewRepository(),
+			Repository: repository.AssetListRepository(),
+			Runs:       repository.AssetListRunRepository(),
+			Presence:   repository.AssetListPresenceRepository(),
+			Reviews:    repository.AssetListReviewRepository(),
+			References: assetListReferenceAssets{
+				inputs: inputAssetService,
+				crops:  repository.InputAssetCropRepository(),
+			},
+			Crops:              cropService,
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
@@ -907,6 +1038,25 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
+	// #331: the read-only crop_image_regions tool cuts normalized regions out
+	// of one owned picture. The service is built above, beside the asset list,
+	// because an edit crop instruction reuses it through the asset-list port.
+	// A custom Catalog without application.chat.image_crop leaves the tool
+	// unassembled instead of refusing startup: the executor answers its calls
+	// with the unavailable result.
+	var cropToolExecute func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	if strings.TrimSpace(applicationSchema.Chat.ImageCrop.Tool) != "" {
+		cropTool, err := agenttools.NewCropTool(agenttools.CropToolConfig{
+			Context:  applicationSchema.Chat.Context,
+			Schema:   applicationSchema.Chat.ImageCrop,
+			Crops:    cropService,
+			Localize: texts.Text,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("裁剪工具: %w", err)
+		}
+		cropToolExecute = cropTool.Execute
+	}
 	toolExecutor, err := generationtool.New(generationtool.Config{
 		Logger:          logger,
 		Choices:         repository,
@@ -1000,6 +1150,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ReviseProcessingPlan:  toolExecutor.ReviseProcessingPlan,
 		InspectImage:          imageReview.Inspect,
 		CreateSelectionMask:   imageMask.Execute,
+		CropImageRegions:      cropToolExecute,
 		InspectModel:          toolExecutor.InspectModel,
 		RenderModelViews:      toolExecutor.RenderModelViews,
 		CompareModels:         toolExecutor.CompareModels,
@@ -1974,6 +2125,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Projects:                          projectService,
 		AssetLists:                        assetListService,
 		AssetListPresence:                 assetListPresence,
+		AssetListCrops:                    repository.InputAssetCropRepository(),
 		DirectStyleReferences:             referenceResolver,
 		AgentParams:                       paramsStore,
 		AgentState:                        agentStateStore,

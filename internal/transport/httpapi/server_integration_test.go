@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -50,6 +51,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 	"github.com/LeXwDeX/Plinth/internal/lineage"
+	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/pendingapproval"
 	"github.com/LeXwDeX/Plinth/internal/processing"
@@ -779,6 +781,33 @@ type fixtureExecutionState struct {
 	sequence     int
 	sessions     map[generation.OwnerID]string
 	approvals    map[string]fixtureApproval
+}
+
+// harnessCropInputs adapts the harness's input asset service and repository to
+// listcrop.InputAssets (#331), mirroring internal/app's cropInputAssets: the
+// service owns uploads and opens real uploads, the repository projects a
+// finished Task's outputs.
+type harnessCropInputs struct {
+	inputs *inputassets.Service
+	loader *sqlite.Repository
+}
+
+func (store harnessCropInputs) UploadAsset(ctx context.Context, owner generation.OwnerID,
+	upload generation.InputAssetUpload,
+) (generation.InputAsset, error) {
+	return store.inputs.UploadAsset(ctx, owner, upload)
+}
+
+func (store harnessCropInputs) OpenOwned(ctx context.Context, owner generation.OwnerID,
+	id generation.AssetID,
+) (generation.InputAsset, io.ReadCloser, error) {
+	return store.inputs.OpenOwned(ctx, owner, id)
+}
+
+func (store harnessCropInputs) LoadInputAssets(ctx context.Context, owner generation.OwnerID,
+	ids []generation.AssetID,
+) (map[generation.AssetID]generation.InputAsset, error) {
+	return store.loader.LoadInputAssets(ctx, owner, ids)
 }
 
 // hookedGrantRepository is the API's grant repository with a test hook before
@@ -1837,10 +1866,36 @@ func newHTTPHarnessWithCatalogAndProviders(
 		for _, capability := range applicationSchema.StepPolicy.CountedCapabilities {
 			counted[generation.Capability(capability)] = true
 		}
+		// #331: the edit crop instruction cuts through the same listcrop
+		// service as the crop tool, so the harness assembles it beside the
+		// list service.
+		cropConfig := listcrop.Config{
+			Inputs:          harnessCropInputs{inputs: inputs, loader: repository},
+			Tasks:           module,
+			Crops:           repository.InputAssetCropRepository(),
+			SourceMaxBytes:  applicationSchema.Chat.ImageMask.Limits.MaxBytes,
+			SourceMaxPixels: applicationSchema.Chat.ImageMask.Limits.MaxPixels,
+			SourceAssetType: applicationSchema.Runtime.InputAssets.DefaultAssetType,
+		}
+		if listSchema.Decompose != nil {
+			cropConfig.MaximumCropsPerSource = listSchema.Decompose.MaximumItemsPerImage * listcrop.StorageCropLimitMultiplier
+			cropConfig.MinimumSide = listSchema.Decompose.Crop.MinimumShortEdge
+			cropConfig.MaximumRegionPixels = listSchema.Decompose.Crop.MaximumRegionPixels
+			cropConfig.UploadMaxBytes = listSchema.Decompose.Crop.MaximumPNGBytes
+		}
+		cropService, err := listcrop.New(cropConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
 		assetListService, err = assetlist.New(assetlist.Config{
-			Repository:         repository.AssetListRepository(),
-			Runs:               repository.AssetListRunRepository(),
-			Reviews:            repository.AssetListReviewRepository(),
+			Repository: repository.AssetListRepository(),
+			Runs:       repository.AssetListRunRepository(),
+			Reviews:    repository.AssetListReviewRepository(),
+			References: assetListReferenceAssets{
+				inputs: inputs,
+				crops:  repository.InputAssetCropRepository(),
+			},
+			Crops:              cropService,
 			Schema:             *listSchema,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
@@ -1899,6 +1954,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		Projects:                          projectService,
 		AssetLists:                        assetListService,
 		AssetListPresence:                 assetListPresence,
+		AssetListCrops:                    repository.InputAssetCropRepository(),
 		ChatScheduler:                     chatScheduler,
 		ChatContext:                       harnessCompactor(chatScheduler),
 		OwnsAgentSession: func(ctx context.Context, ownerID, sessionID string) bool {
@@ -2134,4 +2190,38 @@ func harnessCompactor(scheduler httpapi.ChatTurnScheduler) httpapi.ChatContextCo
 		return compactor
 	}
 	return nil
+}
+
+// assetListReferenceAssets is the harness copy of app's #331 reference port:
+// the harness composes services directly instead of calling app.New.
+type assetListReferenceAssets struct {
+	inputs *inputassets.Service
+	crops  *sqlite.InputAssetCropRepository
+}
+
+func (port assetListReferenceAssets) ResolveInputAsset(ctx context.Context,
+	owner generation.OwnerID, inputAssetID generation.AssetID,
+) (assetlist.InputAssetReference, bool, error) {
+	asset, err := port.inputs.OwnedInputAsset(ctx, owner, inputAssetID)
+	if err != nil {
+		var domain *generation.Error
+		if errors.As(err, &domain) &&
+			(domain.Code == generation.ErrNotFound || domain.Code == generation.ErrForbidden) {
+			return assetlist.InputAssetReference{}, false, nil
+		}
+		return assetlist.InputAssetReference{}, false, err
+	}
+	reference := assetlist.InputAssetReference{MediaType: asset.MediaType}
+	crop, found, err := port.crops.Get(ctx, owner, inputAssetID)
+	if err != nil {
+		return assetlist.InputAssetReference{}, false, err
+	}
+	switch {
+	case found:
+		reference.IsCrop = true
+		reference.CropSourceAssetID = crop.SourceAssetID
+	case asset.AssetType == listcrop.CropAssetType:
+		reference.IsCrop = true
+	}
+	return reference, true, nil
 }

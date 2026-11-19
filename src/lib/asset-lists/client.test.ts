@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
-import type { ProductSchema } from '@/lib/product-schema';
+import type { AssetListProductSchema, ProductSchema } from '@/lib/product-schema';
 import {
   AssetListError,
   createAssetListClient,
   type AssetListDetail,
+  type AssetListEditInput,
   type AssetListSummary,
 } from './client';
 
@@ -52,6 +53,21 @@ const detail: AssetListDetail = {
 };
 
 describe('asset list schema contract', () => {
+  // #331: the public limits carry the per-image decompose cap. The raw Catalog
+  // declares the value under asset_list.decompose; the server's public
+  // projection copies it into limits, which this type mirrors.
+  it('types the public per-image decompose cap', () => {
+    const limits: AssetListProductSchema['limits'] = {
+      max_lists_per_project: 20,
+      draft_ttl_seconds: 604800,
+      name_max_length: 120,
+      description_max_length: 1000,
+      max_references_per_item: 4,
+      maximum_items_per_image: 24,
+    };
+    expect(limits.maximum_items_per_image).toBe(24);
+  });
+
   it('publishes the asset list section and the four route templates', () => {
     expect(schema.asset_list).toMatchObject({
       limits: {
@@ -304,5 +320,64 @@ describe('asset list client', () => {
     const fetcher = vi.fn(async () => { throw new TypeError('Failed to fetch'); }) as unknown as typeof fetch;
     const client = createAssetListClient(schema, { fetcher });
     await expect(client.listSessionLists('s1')).rejects.toBeInstanceOf(TypeError);
+  });
+
+  // #331: an edit is one whole-list replacement on the detail route, with the
+  // list version as the CAS token and each item's optional crop instruction.
+  it('puts a whole-list edit and returns the stored detail', async () => {
+    const updated = { ...detail, version: 5, title: 'Hero set' };
+    const fetcher = vi.fn(async () => jsonResponse(updated)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    const input: AssetListEditInput = {
+      title: 'Hero set',
+      expected_version: 4,
+      brief: { purpose: 'character' },
+      items: [
+        {
+          kind: 'character',
+          name: 'Hero renamed',
+          description: 'one crop',
+          route_id: 'text-to-3d',
+          references: [{ input_asset_id: 'crop_2' }],
+          crop: {
+            source_input_asset_id: 'scene_1',
+            region: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+          },
+        },
+        {
+          kind: 'weapon',
+          name: 'Sword',
+          references: [],
+        },
+      ],
+    };
+
+    await expect(client.edit('prj 1', 'al 1', input)).resolves.toEqual(updated);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%201/asset-lists/al%201', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  });
+
+  it.each([
+    ['asset_list_region_invalid', 400],
+    ['asset_list_region_too_small', 400],
+    ['asset_list_reference_invalid', 400],
+    ['asset_list_image_item_limit', 400],
+    ['conflict', 409],
+  ])('passes the %s refusal of an edit through', async (code: string, status: number) => {
+    const fetcher = vi.fn(async () => jsonResponse({ code, detail: `refused: ${code}` }, status)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    const edit = client.edit('prj_1', 'al_1', {
+      title: 'Hero set', expected_version: 4, items: [],
+    });
+    await expect(edit).rejects.toBeInstanceOf(AssetListError);
+    await expect(edit).rejects.toMatchObject({
+      status,
+      code,
+      detail: `refused: ${code}`,
+      message: `refused: ${code}`,
+    });
   });
 });

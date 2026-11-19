@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -61,13 +62,16 @@ type proposedAssetListArguments struct {
 
 // proposedAssetListItem is one declared asset. ReferenceHandles are the
 // @imgN/@projectN tokens the turn's frozen history and project snapshot
-// resolve; the Schema's kind and route ids are validated by assetlist.
+// resolve; ReferenceInputAssetIDs are directly named input assets, which is how
+// the Agent passes crops cut by crop_image_regions (#331). The Schema's kind
+// and route ids are validated by assetlist.
 type proposedAssetListItem struct {
-	Kind             string   `json:"kind"`
-	Name             string   `json:"name"`
-	Description      string   `json:"description"`
-	RouteID          string   `json:"route_id"`
-	ReferenceHandles []string `json:"reference_handles"`
+	Kind                   string   `json:"kind"`
+	Name                   string   `json:"name"`
+	Description            string   `json:"description"`
+	RouteID                string   `json:"route_id"`
+	ReferenceHandles       []string `json:"reference_handles"`
+	ReferenceInputAssetIDs []string `json:"reference_input_asset_ids"`
 }
 
 // ProposeAssetList validates and stores one draft list for the Agent's own
@@ -114,6 +118,22 @@ func (service *Service) ProposeAssetList(ctx context.Context, command ToolComman
 			return assetListRefusal(assetListMessage(messages.ProposeReferenceUnresolved,
 				"a reference handle could not be resolved")), nil
 		}
+		// Directly named input assets (crops, #331) merge into the same set and
+		// share its per-item bound. The assetlist service validates what they
+		// name; here only the shape is checked.
+		for _, raw := range item.ReferenceInputAssetIDs {
+			reference := project.Reference{InputAssetID: strings.TrimSpace(raw)}
+			if !reference.Valid() {
+				return assetListRefusal(invalid), nil
+			}
+			if slices.Contains(references, reference) {
+				continue
+			}
+			references = append(references, reference)
+			if limit := policy.Schema.Limits.MaxReferencesPerItem; limit > 0 && len(references) > limit {
+				return assetListRefusal(invalid), nil
+			}
+		}
 		items = append(items, assetlist.ItemInput{
 			Kind:        item.Kind,
 			Name:        item.Name,
@@ -136,6 +156,14 @@ func (service *Service) ProposeAssetList(ctx context.Context, command ToolComman
 		case errors.Is(err, assetlist.ErrSessionNotInProject):
 			return assetListRefusal(assetListMessage(messages.ProposeSessionNotInProject,
 				"the session is not in the project")), nil
+		case errors.Is(err, assetlist.ErrImageItemLimit):
+			// #331: the proposal counts the items cut from one source too; the
+			// Agent gets the decompose limit copy with its maximum.
+			return assetListRefusal(assetListImageItemLimitRefusal(policy.Schema, invalid)), nil
+		case errors.Is(err, assetlist.ErrReferenceInvalid):
+			// #331: the decompose section owns the reference refusal copy; a
+			// Catalog without it keeps the generic invalid-items copy.
+			return assetListRefusal(assetListReferenceRefusal(policy.Schema, invalid)), nil
 		case errors.Is(err, assetlist.ErrInvalid), errors.Is(err, assetlist.ErrLimit):
 			return assetListRefusal(invalid), nil
 		default:
@@ -331,6 +359,30 @@ func buildAssetListContent(list assetlist.List, messages catalog.AssetListMessag
 		UnavailableItems:        unavailable,
 		Message:                 message,
 	}
+}
+
+// assetListReferenceRefusal words a refused crop reference with the decompose
+// section's copy (#331), falling back to the generic invalid-items copy when
+// the Catalog declares no decompose section.
+func assetListReferenceRefusal(schema catalog.AssetListSchema, fallback string) string {
+	if schema.Decompose != nil {
+		if text := strings.TrimSpace(schema.Decompose.Messages.ReferenceInvalid); text != "" {
+			return text
+		}
+	}
+	return fallback
+}
+
+// assetListImageItemLimitRefusal words a list refused for taking more items
+// from one source picture than maximum_items_per_image allows (#331).
+func assetListImageItemLimitRefusal(schema catalog.AssetListSchema, fallback string) string {
+	if schema.Decompose != nil {
+		if text := strings.TrimSpace(schema.Decompose.Messages.ImageItemLimit); text != "" {
+			return strings.ReplaceAll(text, "{maximum}",
+				strconv.Itoa(schema.Decompose.MaximumItemsPerImage))
+		}
+	}
+	return fallback
 }
 
 // assetListMessage keeps a historical Catalog's empty copy readable instead of

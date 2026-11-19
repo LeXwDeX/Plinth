@@ -121,6 +121,10 @@ func validateAssetList(
 		}
 	}
 
+	if err := validateAssetListDecompose(list.Decompose, declaredRoutes, schema.Chat.Context); err != nil {
+		return err
+	}
+
 	if err := validateAssetListStates("asset_list.states", list.States, assetListStateIDs); err != nil {
 		return err
 	}
@@ -229,6 +233,89 @@ func validateAssetList(
 		}
 	}
 	return nil
+}
+
+// assetListDecompose2DCapabilities 是可以作为拆解参考路线第一步的 2D 能力：
+// 先把裁图重画成干净单主体图，再进入三视图或 3D。
+var assetListDecompose2DCapabilities = []schemacontract.Capability{
+	schemacontract.TextToImage,
+	schemacontract.ImageToImage,
+}
+
+// validateAssetListDecompose 校验可选的拆解段（#331）。未声明时放行；声明后
+// 数值必须在既定范围内，缺省路线必须已声明且第一步是 2D 能力，五条拒绝文案
+// 与 Agent 拆解要领都必须完整；子会话的裁图/源图标签也必须在 chat.context
+// 中成对声明，否则清单项会被读成「用户上传」。
+func validateAssetListDecompose(
+	decompose *AssetListDecomposeSchema,
+	declaredRoutes map[string]AssetListRouteSchema,
+	context ChatContextSchema,
+) error {
+	if decompose == nil {
+		return nil
+	}
+	if decompose.MaximumItemsPerImage < 1 || decompose.MaximumItemsPerImage > 100 {
+		return errors.New("asset_list.decompose.maximum_items_per_image 必须在 1 到 100 之间")
+	}
+	crop := decompose.Crop
+	if crop.MinimumShortEdge < 1 || crop.MinimumShortEdge > 4096 {
+		return errors.New("asset_list.decompose.crop.minimum_short_edge 必须在 1 到 4096 之间")
+	}
+	minimumArea := int64(crop.MinimumShortEdge) * int64(crop.MinimumShortEdge)
+	if crop.MaximumRegionPixels < minimumArea || crop.MaximumRegionPixels > 100_000_000 {
+		return fmt.Errorf("asset_list.decompose.crop.maximum_region_pixels 必须在 %d 到 100000000 之间", minimumArea)
+	}
+	if crop.MaximumPNGBytes < 1 || crop.MaximumPNGBytes > 256<<20 {
+		return errors.New("asset_list.decompose.crop.maximum_png_bytes 必须在 1 到 268435456 之间")
+	}
+	route, exists := declaredRoutes[decompose.DefaultRouteWithReference]
+	if !exists {
+		return fmt.Errorf(
+			"asset_list.decompose.default_route_with_reference 引用了未知路线 %q",
+			decompose.DefaultRouteWithReference,
+		)
+	}
+	first := route.Steps[0].Capability
+	if !containsCapability(assetListDecompose2DCapabilities, first) {
+		return fmt.Errorf(
+			"asset_list.decompose.default_route_with_reference %q 的第一步必须是 2D 能力 %v，实际是 %q",
+			route.ID,
+			assetListDecompose2DCapabilities,
+			first,
+		)
+	}
+	for field, text := range map[string]string{
+		"region_invalid":    decompose.Messages.RegionInvalid,
+		"region_too_small":  decompose.Messages.RegionTooSmall,
+		"image_too_large":   decompose.Messages.ImageTooLarge,
+		"image_item_limit":  decompose.Messages.ImageItemLimit,
+		"reference_invalid": decompose.Messages.ReferenceInvalid,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("asset_list.decompose.messages.%s 不能为空", field)
+		}
+	}
+	if strings.TrimSpace(decompose.AgentPrompt) == "" || !strings.Contains(decompose.AgentPrompt, "{maximum}") {
+		return errors.New("asset_list.decompose.agent_prompt 必须声明并包含 {maximum}")
+	}
+	for _, role := range []string{"image.crop", "image.source_scene"} {
+		if !strings.Contains(context.AttachmentLabelTemplates[role], "{handle}") {
+			return fmt.Errorf("asset_list.decompose 需要 context.attachment_label_templates[%q]（含 {handle}）", role)
+		}
+		if !strings.Contains(context.UnpicturedAttachmentTemplates[role], "{handle}") {
+			return fmt.Errorf("asset_list.decompose 需要 context.unpictured_attachment_templates[%q]（含 {handle}）", role)
+		}
+	}
+	return nil
+}
+
+func containsCapability(values []schemacontract.Capability, target schemacontract.Capability) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // validateAssetListExecution 校验可选的自动制作段（#328）。未声明时放行；

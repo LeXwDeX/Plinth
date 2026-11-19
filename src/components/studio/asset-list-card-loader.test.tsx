@@ -7,8 +7,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { AssetListCardLoader } from '@/components/studio/asset-list-card-loader';
-import type { AssetListClient, AssetListDetail, AssetListItem, AssetListSummary } from '@/lib/asset-lists/client';
+import {
+  AssetListError,
+  type AssetListClient,
+  type AssetListDetail,
+  type AssetListItem,
+  type AssetListSummary,
+} from '@/lib/asset-lists/client';
 import type { ProductSchema } from '@/lib/product-schema';
+
+vi.mock('@/hooks/use-asset-url-rewriter', () => ({
+  useAssetURLRewriter: () => ({ previewAssetUrl: (url: string) => url }),
+}));
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
 const messages = defaultCatalog.application.content.messages as Record<string, string>;
@@ -72,10 +82,18 @@ function clientWith(getList: ReturnType<typeof vi.fn>): AssetListClient {
     skipItem: vi.fn(async () => item({ state: 'skipped' })) as unknown as AssetListClient['skipItem'],
     listSessionLists: vi.fn(async () => []),
     presence: vi.fn(async () => {}),
+    edit: vi.fn(async () => detail()) as unknown as AssetListClient['edit'],
   };
 }
 
-function renderLoader(client: AssetListClient, onDecided?: () => void) {
+function renderLoader(
+  client: AssetListClient,
+  callbacks: {
+    onDecided?: () => void;
+    onEdited?: (updated: AssetListDetail) => void;
+    onStale?: () => void;
+  } = {},
+) {
   return render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
       <AssetListCardLoader
@@ -83,7 +101,9 @@ function renderLoader(client: AssetListClient, onDecided?: () => void) {
         schema={schema}
         client={client}
         variant="chat"
-        onDecided={onDecided}
+        onDecided={callbacks.onDecided}
+        onEdited={callbacks.onEdited}
+        onStale={callbacks.onStale}
       />
     </SWRConfig>,
   );
@@ -119,5 +139,51 @@ describe('asset list card loader', () => {
     fireEvent.click(screen.getByTestId('asset-list-retry'));
     await waitFor(() => expect(screen.getByTestId('asset-list-card').textContent).toContain('Hero set'));
     expect(getList).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the detail an edit returned without a second read and tells the parent', async () => {
+    const updated = detail({ version: 2, title: 'Hero set v2', items: [item({ name: 'Role B' })] });
+    const client = clientWith(vi.fn(async () => detail()));
+    client.edit = vi.fn(async () => updated) as unknown as AssetListClient['edit'];
+    const onEdited = vi.fn();
+    renderLoader(client, { onEdited });
+
+    await screen.findByTestId('asset-list-card');
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+
+    await waitFor(() => expect(onEdited).toHaveBeenCalledWith(updated));
+    // The returned detail replaces the cached one; the loader does not re-read.
+    await waitFor(() => expect(screen.getByTestId('asset-list-card').textContent).toContain('Hero set v2'));
+    expect(client.getList).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-reads the list on an edit conflict and locks the stale draft', async () => {
+    const getList = vi.fn()
+      .mockResolvedValueOnce(detail())
+      .mockResolvedValue(detail({ version: 2, items: [item({ name: 'Server role' })] }));
+    const client = clientWith(getList);
+    client.edit = vi.fn().mockRejectedValue(
+      new AssetListError('conflict', 409, { code: 'conflict', detail: 'error.conflict' }),
+    ) as unknown as AssetListClient['edit'];
+    const onStale = vi.fn();
+    renderLoader(client, { onStale });
+
+    await screen.findByTestId('asset-list-card');
+    fireEvent.click(screen.getByTestId('asset-list-edit'));
+    fireEvent.change(screen.getByTestId('asset-list-item-name-0'), { target: { value: 'Local role' } });
+    fireEvent.click(screen.getByTestId('asset-list-save'));
+
+    await waitFor(() => expect(screen.getByTestId('asset-list-error').textContent).toBe(
+      messages['ui.asset_list.edit_conflict'],
+    ));
+    // The conflict re-reads the detail and tells the parent to refresh its
+    // summary; the newer version locks the draft until the person explicitly
+    // reloads, and the local edit is still there.
+    await waitFor(() => expect(getList).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onStale).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('asset-list-edit-stale')).toBeTruthy());
+    expect((screen.getByTestId('asset-list-item-name-0') as HTMLInputElement).value).toBe('Local role');
+    expect((screen.getByTestId('asset-list-save') as HTMLButtonElement).disabled).toBe(true);
   });
 });

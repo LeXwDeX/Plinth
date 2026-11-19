@@ -44,6 +44,7 @@ var shippedToolScopes = map[string]string{
 	"find_history_images":        "utility",
 	"inspect_image":              "utility",
 	"create_selection_mask":      "utility",
+	"crop_image_regions":         "utility",
 	"get_production_step":        "utility",
 	"set_visual_anchor":          "utility",
 	"recover_task_result":        "utility",

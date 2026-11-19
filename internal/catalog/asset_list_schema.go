@@ -16,6 +16,10 @@ import schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 // 避免出现两个同名上限。
 type AssetListSchema struct {
 	Limits AssetListLimitsSchema `json:"limits"`
+	// Decompose 是 #331 的单图拆解段：一张源图最多拆出多少资产项、裁图尺寸
+	// 限制、带参考图时的缺省路线与拒绝文案。可选：未声明时拆解与参考图校验
+	// 仍按服务端默认值工作。
+	Decompose *AssetListDecomposeSchema `json:"decompose,omitempty"`
 	// Kinds 是清单项的类型词表（character|weapon|prop|vehicle|scene|image）。
 	// 每个 kind 的 default_route 就是缺省路线，不再另设 default_route_by_kind
 	// 映射：一处声明、一处校验，公开投影直接读取它。
@@ -75,6 +79,51 @@ type AssetListLimitsSchema struct {
 	// MaxReferencesPerItem 是单项引用的上限：接受本会话/分支的 @imgN 与本
 	// 项目的 @projectN，提案时解析成项目引用只存 ID。
 	MaxReferencesPerItem int `json:"max_references_per_item"`
+}
+
+// AssetListDecomposeSchema 是 application.asset_list.decompose（#331）：从一张
+// 源图拆出多个清单项的边界与文案。maximum_items_per_image 是产品口径的每图
+// 项数上限，提案与编辑按它拒绝；裁剪服务另有按它四倍配置的存储护栏，用来
+// 容纳反复重框累积的旧裁图。crop 的区域像素与字节数值只用于服务端，不进
+// 公开投影。
+type AssetListDecomposeSchema struct {
+	// MaximumItemsPerImage 是一张源图最多被清单引用的资产项（默认 24）：场景
+	// 图常见 10–20 个物体，每张裁图都是独立输入资产，需要限制存储与编码成本。
+	MaximumItemsPerImage int                          `json:"maximum_items_per_image"`
+	Crop                 AssetListDecomposeCropSchema `json:"crop"`
+	// DefaultRouteWithReference 是清单项带裁剪参考图时采用的路线：必须先重画
+	// 成干净单主体图再进 3D，所以它必须是本段已声明的路线且第一步为 2D 能力。
+	DefaultRouteWithReference string `json:"default_route_with_reference"`
+	// AgentPrompt 是拆解要领，由服务端注入 Agent 系统提示（与 step_policy 同类
+	// 注入，不承担用户/工具结果文案）；{maximum} 由 maximum_items_per_image
+	// 填充。它只进 Schema，不进公开投影。
+	AgentPrompt string `json:"agent_prompt"`
+	// Messages 是拆解与参考图校验的拒绝文案。占位符 {minimum} 是区域最短边，
+	// {maximum} 是单图资产项上限。
+	Messages AssetListDecomposeMessagesSchema `json:"messages"`
+}
+
+// AssetListDecomposeCropSchema 是裁图的尺寸限制：区域最短边像素、单块区域
+// 最大像素与编码后 PNG 字节上限。
+type AssetListDecomposeCropSchema struct {
+	MinimumShortEdge    int   `json:"minimum_short_edge"`
+	MaximumRegionPixels int64 `json:"maximum_region_pixels"`
+	MaximumPNGBytes     int64 `json:"maximum_png_bytes"`
+}
+
+// AssetListDecomposeMessagesSchema 是单图拆解的拒绝文案。
+type AssetListDecomposeMessagesSchema struct {
+	// RegionInvalid 拒绝越界或没有面积的区域。
+	RegionInvalid string `json:"region_invalid"`
+	// RegionTooSmall 拒绝最短边不足的区域。{minimum}
+	RegionTooSmall string `json:"region_too_small"`
+	// ImageTooLarge 拒绝超过字节或像素上限的源图、区域或裁图。
+	ImageTooLarge string `json:"image_too_large"`
+	// ImageItemLimit 拒绝超过单图资产项上限的拆解。{maximum}
+	ImageItemLimit string `json:"image_item_limit"`
+	// ReferenceInvalid 拒绝不存在、非图片或违反每项一张/同一源图规则的裁剪
+	// 参考图。
+	ReferenceInvalid string `json:"reference_invalid"`
 }
 
 // AssetListKindSchema 是清单项类型到项目库类型的映射：character→character，
@@ -173,7 +222,7 @@ type AssetListUISchema struct {
 // routes（id/label/kinds/steps 的能力 id）与 states/item_states（id/label/role）。
 // 服务端文案 messages、UI 文案、审计与预留的 item_blocks 不公开。
 type PublicAssetListSchema struct {
-	Limits     AssetListLimitsSchema        `json:"limits"`
+	Limits     PublicAssetListLimitsSchema  `json:"limits"`
 	Kinds      []PublicAssetListKindSchema  `json:"kinds"`
 	Routes     []PublicAssetListRouteSchema `json:"routes"`
 	States     []PublicAssetListStateSchema `json:"states"`
@@ -181,6 +230,16 @@ type PublicAssetListSchema struct {
 	// Presence 只在声明 execution 时出现：浏览器需要心跳间隔；grace、
 	// 轮询间隔、并行/轮数/重试与续轮文案都不公开。
 	Presence *PublicAssetListPresenceSchema `json:"presence,omitempty"`
+}
+
+// PublicAssetListLimitsSchema 是浏览器可见的清单上限：清单自身的数量与文本
+// 边界，加上可公开的单图拆解上限（浏览器据此解释拆解卡）。裁图区域的像素与
+// 字节上限留在私有 decompose 段；裁图的最短边是编辑器在本地先拒绝过小框选
+// 所需的公开值。
+type PublicAssetListLimitsSchema struct {
+	AssetListLimitsSchema
+	MaximumItemsPerImage int `json:"maximum_items_per_image"`
+	MinimumCropShortEdge int `json:"minimum_crop_short_edge"`
 }
 
 // PublicAssetListPresenceSchema 是公开的在场参数：只有心跳间隔。
