@@ -2,6 +2,7 @@ package catalog_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -202,9 +203,11 @@ func TestStepPolicyCloneDoesNotShareSlices(t *testing.T) {
 	first.StepPolicy.Modes[0].Value = "mutated"
 	first.StepPolicy.CountedCapabilities[0] = "mutated"
 	first.StepPolicy.Prompt.ModeRules[0].Rule = "mutated"
+	first.StepPolicy.Result.Schema = json.RawMessage(`{"type":"object"}`)
 	second := source.Application()
 	if second.StepPolicy.Modes[0].Value == "mutated" || second.StepPolicy.CountedCapabilities[0] == "mutated" ||
-		second.StepPolicy.Prompt.ModeRules[0].Rule == "mutated" {
+		second.StepPolicy.Prompt.ModeRules[0].Rule == "mutated" ||
+		string(second.StepPolicy.Result.Schema) == `{"type":"object"}` {
 		t.Fatal("Catalog Application() shares step policy slices with a previous copy")
 	}
 }
@@ -285,6 +288,11 @@ func TestStepPolicyPromptCopyIsPairedInEnglish(t *testing.T) {
 		"step_policy.prompt.costs_line",
 		"step_policy.prompt.costs_unknown",
 		"step_policy.prompt.guidance",
+		"step_policy.result.schema.description",
+		"step_policy.result.schema.properties.mode.description",
+		"step_policy.result.schema.properties.used.description",
+		"step_policy.result.schema.properties.cap.description",
+		"step_policy.result.schema.properties.remaining.description",
 	} {
 		if strings.TrimSpace(fields[key]) == "" {
 			t.Errorf("english bundle misses %q", key)
@@ -292,5 +300,138 @@ func TestStepPolicyPromptCopyIsPairedInEnglish(t *testing.T) {
 	}
 	if template := fields["step_policy.prompt.context_template"]; !strings.Contains(template, "[3D steps]") {
 		t.Errorf("english step segment lost its name: %q", template)
+	}
+}
+
+// #330 step 3B: a tool may leave result_fields.steps out (the plan tool's
+// steps key carries its own step array), but a declared key must be its own and
+// must not take a reserved result key. The shipped Schema still declares the
+// object the tools that do carry it write.
+func TestDefaultStepResultIsDeclaredForGenerationTools(t *testing.T) {
+	t.Parallel()
+	application := defaultApplication(t)
+	if len(application.StepPolicy.Result.Schema) == 0 {
+		t.Fatal("default Catalog declares no application.step_policy.result")
+	}
+	declared := 0
+	for _, tool := range application.Chat.Tools {
+		key := tool.ResultFields.Steps
+		if key == "" {
+			continue
+		}
+		declared++
+		if key == "native_quote" {
+			t.Fatalf("tool %q takes the reserved result key %q", tool.Name, key)
+		}
+		if tool.Name == "plan_model_processing" {
+			t.Fatalf("the plan tool declares result_fields.steps; its steps key holds the plan's step array")
+		}
+		fields := reflect.ValueOf(tool.ResultFields)
+		for position := 0; position < fields.NumField(); position++ {
+			name := fields.Type().Field(position).Name
+			if name == "Steps" || fields.Field(position).Kind() != reflect.String {
+				continue
+			}
+			if fields.Field(position).String() == key {
+				t.Fatalf("tool %q declares result_fields.steps with the key of %s (%q)", tool.Name, name, key)
+			}
+		}
+	}
+	if declared == 0 {
+		t.Fatal("no chat tool declares result_fields.steps")
+	}
+	if err := catalog.ValidateApplicationSchema(application); err != nil {
+		t.Fatalf("default step result invalid: %v", err)
+	}
+}
+
+// stepResultSchema reads the shipped steps object declaration as a document a
+// test can break in one place.
+func stepResultSchema(t *testing.T, application catalog.ApplicationSchema) map[string]any {
+	t.Helper()
+	var schema map[string]any
+	if err := json.Unmarshal(application.StepPolicy.Result.Schema, &schema); err != nil {
+		t.Fatalf("step result schema: %v", err)
+	}
+	return schema
+}
+
+func storeStepResultSchema(t *testing.T, application *catalog.ApplicationSchema, schema map[string]any) {
+	t.Helper()
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	application.StepPolicy.Result.Schema = encoded
+}
+
+// #330 step 3B: the declaration covers what the executor writes: each
+// property, its type, its description, and the required keys; a declaration
+// the code could not fill is refused.
+func TestStepResultValidationRejectsIncompleteDeclarations(t *testing.T) {
+	t.Parallel()
+	properties := func(schema map[string]any) map[string]any {
+		properties, _ := schema["properties"].(map[string]any)
+		return properties
+	}
+	for name, mutate := range map[string]func(*testing.T, *catalog.ApplicationSchema){
+		"no result schema": func(_ *testing.T, app *catalog.ApplicationSchema) {
+			app.StepPolicy.Result.Schema = nil
+		},
+		"no mode property": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			delete(properties(schema), catalog.StepResultMode)
+			storeStepResultSchema(t, app, schema)
+		},
+		"used is a string": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			properties(schema)[catalog.StepResultUsed].(map[string]any)["type"] = "string"
+			storeStepResultSchema(t, app, schema)
+		},
+		"mode has no description": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			delete(properties(schema)[catalog.StepResultMode].(map[string]any), "description")
+			storeStepResultSchema(t, app, schema)
+		},
+		"root has no description": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			delete(schema, "description")
+			storeStepResultSchema(t, app, schema)
+		},
+		"used is optional": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			schema["required"] = []any{catalog.StepResultMode}
+			storeStepResultSchema(t, app, schema)
+		},
+		"remaining is required": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			schema["required"] = []any{catalog.StepResultMode, catalog.StepResultUsed, catalog.StepResultRemaining}
+			storeStepResultSchema(t, app, schema)
+		},
+		"cap is required": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			schema["required"] = []any{catalog.StepResultMode, catalog.StepResultUsed, catalog.StepResultCap}
+			storeStepResultSchema(t, app, schema)
+		},
+		"required names a key the code never writes": func(t *testing.T, app *catalog.ApplicationSchema) {
+			schema := stepResultSchema(t, *app)
+			schema["required"] = []any{catalog.StepResultMode, catalog.StepResultUsed, "quota"}
+			storeStepResultSchema(t, app, schema)
+		},
+		"result key collides with success": func(_ *testing.T, app *catalog.ApplicationSchema) {
+			app.Chat.Tools[0].ResultFields.Steps = app.Chat.Tools[0].ResultFields.Success
+		},
+		"result key takes a reserved key": func(_ *testing.T, app *catalog.ApplicationSchema) {
+			app.Chat.Tools[0].ResultFields.Steps = "native_quote"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			application := defaultApplication(t)
+			mutate(t, &application)
+			if err := catalog.ValidateApplicationSchema(application); err == nil {
+				t.Fatal("invalid step result declaration was accepted")
+			}
+		})
 	}
 }

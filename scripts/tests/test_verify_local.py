@@ -1,8 +1,11 @@
 import importlib.util
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -607,6 +610,119 @@ class GitReplaceTests(PushAndFilesystemTests):
         self.assertEqual(self.git('status', '--porcelain'), '')
         with self.assertRaises(v.GateError):
             v.verify_push(self.root, self.push_line(original))
+
+
+class PreStartReplayDecisionTests(unittest.TestCase):
+    """The monitor ignores FSEvents replayed from before its stream started.
+
+    The rule is a pure Node function, driven here through `node -e` with fake
+    lstat results, so every branch is deterministic and none depends on an
+    FSEvents timing race.
+    """
+    PROBE = r"""
+const startedAt = Number(process.argv[1]);
+const target = JSON.parse(process.argv[2]);
+const parent = JSON.parse(process.argv[3]);
+const readStat = path => {
+  const spec = path === 'target' ? target : parent;
+  if (spec.error) { const error = new Error(spec.error); error.code = spec.error; throw error; }
+  return {ctimeMs: spec.ctime};
+};
+process.stdout.write(decidePreStartReplay(startedAt, readStat, 'target', 'parent') ? 'ignore' : 'dirty');
+"""
+    EVENT_PROBE = r"""
+const kind = process.argv[1];
+const startedAt = Number(process.argv[2]);
+const target = JSON.parse(process.argv[3]);
+const parent = JSON.parse(process.argv[4]);
+const readStat = path => {
+  const spec = path === 'target' ? target : parent;
+  if (spec.error) { const error = new Error(spec.error); error.code = spec.error; throw error; }
+  return {ctimeMs: spec.ctime};
+};
+process.stdout.write(decideEvent(kind, startedAt, readStat, 'target', 'parent') ? 'ignore' : 'dirty');
+"""
+    RENAME_PROBE = r"""
+const fs = require('node:fs');
+const path = require('node:path');
+fs.writeFileSync(process.argv[2], 'package test');
+fs.renameSync(process.argv[2], process.argv[1]);
+// A start far in the future makes every real ctime look older than the
+// stream: the old rule would ignore it, the rename rule must not.
+const startedAt = Date.now() + 60000;
+process.stdout.write(decideEvent('rename', startedAt, p => fs.lstatSync(p),
+  process.argv[1], path.dirname(process.argv[1])) ? 'ignore' : 'dirty');
+"""
+    def decide(self, started_at, target, parent):
+        completed = subprocess.run(
+            ['node', '-e', v.InputMonitor.DECISION + self.PROBE,
+             str(started_at), json.dumps(target), json.dumps(parent)],
+            capture_output=True, text=True, check=True)
+        return completed.stdout
+    def decide_event(self, kind, started_at, target, parent):
+        completed = subprocess.run(
+            ['node', '-e', v.InputMonitor.DECISION + self.EVENT_PROBE,
+             kind, str(started_at), json.dumps(target), json.dumps(parent)],
+            capture_output=True, text=True, check=True)
+        return completed.stdout
+    def test_change_event_before_start_is_ignored(self):
+        self.assertEqual(self.decide_event('change', 1_000_000, {'ctime': 999_999}, {'ctime': 999_999}), 'ignore')
+    def test_rename_event_is_always_dirty(self):
+        # POSIX only promises the parent directories' timestamps advance on a
+        # move, so a real rename into the tree can look stale; it is kept dirty.
+        for ctime in (999_999, 1_000_000, 1_000_001):
+            self.assertEqual(self.decide_event('rename', 1_000_000, {'ctime': ctime}, {'ctime': 999_999}), 'dirty')
+    def test_stale_ctime_is_ignored(self):
+        # A replayed event can only be stale when every relevant timestamp is
+        # older than the stream start.
+        self.assertEqual(self.decide(1_000_000, {'ctime': 999_999}, {'ctime': 999_999}), 'ignore')
+    def test_newer_ctime_is_dirty(self):
+        self.assertEqual(self.decide(1_000_000, {'ctime': 1_000_001}, {'ctime': 999_999}), 'dirty')
+    def test_equal_ctime_stays_dirty(self):
+        self.assertEqual(self.decide(1_000_000, {'ctime': 1_000_000}, {'ctime': 999_999}), 'dirty')
+    def test_zero_ctime_stays_dirty(self):
+        # A missing/zero timestamp proves nothing and must not hide a change.
+        self.assertEqual(self.decide(1_000_000, {'ctime': 0}, {'ctime': 999_999}), 'dirty')
+    def test_real_rename_in_is_dirty_even_with_a_stale_looking_ctime(self):
+        # No event stream: a real rename into a tree is dirty by kind alone.
+        # The start is placed in the future so the real ctime looks older than
+        # the stream, which the removed ctime-only rule would have ignored.
+        with tempfile.TemporaryDirectory() as tree, tempfile.TemporaryDirectory() as outside:
+            target = Path(tree) / 'renamed.go'
+            incoming = Path(outside) / 'incoming.go'
+            completed = subprocess.run(
+                ['node', '-e', v.InputMonitor.DECISION + self.RENAME_PROBE, str(target), str(incoming)],
+                capture_output=True, text=True, check=True)
+            self.assertEqual(completed.stdout, 'dirty')
+    def test_failed_stat_is_dirty(self):
+        self.assertEqual(self.decide(1_000_000, {'error': 'EACCES'}, {'ctime': 999_999}), 'dirty')
+    def test_missing_target_falls_back_to_the_parent(self):
+        self.assertEqual(self.decide(1_000_000, {'error': 'ENOENT'}, {'ctime': 999_999}), 'ignore')
+    def test_unreadable_parent_is_dirty(self):
+        self.assertEqual(self.decide(1_000_000, {'error': 'ENOENT'}, {'error': 'ENOENT'}), 'dirty')
+
+
+@requires_macos
+class NativeMonitorReplayTests(VerificationTests):
+    def test_rename_into_the_watched_tree_after_start_is_dirty(self):
+        # A rename event is never treated as pre-start replay, so a real rename
+        # in after the stream is live must make the monitor dirty. FSEvents can
+        # coalesce or drop an event delivered right after the stream starts, so
+        # each attempt uses a fresh monitor and a fresh file; only a monitor
+        # that never reports a real post-start rename fails. The decision rule
+        # itself is covered deterministically by PreStartReplayDecisionTests.
+        for attempt in range(5):
+            monitor = v.InputMonitor(self.root.resolve())
+            time.sleep(0.5)
+            name = f'renamed-{attempt}.go'
+            with tempfile.TemporaryDirectory() as outside:
+                incoming = Path(outside) / name
+                incoming.write_text('package test')
+                os.rename(incoming, self.root / name)
+            time.sleep(0.3)
+            if not monitor.stop():
+                return
+        self.fail('a rename into the watched tree was not observed')
 
 
 @requires_macos

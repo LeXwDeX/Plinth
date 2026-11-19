@@ -58,6 +58,7 @@ func cloneStepPolicy(source *StepPolicySchema) *StepPolicySchema {
 	result.Modes = append([]ValueLabel(nil), source.Modes...)
 	result.CountedCapabilities = append([]schemacontract.Capability(nil), source.CountedCapabilities...)
 	result.Prompt.ModeRules = append([]StepPolicyPromptMode(nil), source.Prompt.ModeRules...)
+	result.Result.Schema = append(json.RawMessage(nil), source.Result.Schema...)
 	return &result
 }
 

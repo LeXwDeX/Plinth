@@ -931,6 +931,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateTaskNoticeField(schema); err != nil {
 		return err
 	}
+	if err := validateStepResultField(schema); err != nil {
+		return err
+	}
 	return nil
 }
 

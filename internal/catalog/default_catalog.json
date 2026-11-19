@@ -5717,6 +5717,19 @@
       "messages": {
         "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。"
       },
+      "result": {
+        "schema": {
+          "type": "object",
+          "description": "本资产在 3D 步数模式下的步数现状，随生成类工具的每个成功或失败结果返回；读取不到时不出现这个对象，不代表 0 步",
+          "properties": {
+            "mode": {"type": "string", "description": "用户的 3D 步数模式：agent=由 Agent 自己管理，不设硬上限；unlimited=不限；cap=每个资产有硬上限"},
+            "used": {"type": "integer", "minimum": 0, "description": "本资产已用的 3D 步数，包含已扣费或可能已扣费的任务与已批准但还没有任务的步骤"},
+            "cap": {"type": "integer", "minimum": 1, "description": "硬上限模式下每个资产最多可用的 3D 步数；其他模式不出现这个键"},
+            "remaining": {"type": "integer", "minimum": 0, "description": "硬上限模式下本资产还能用的 3D 步数，最小为 0；其他模式不出现这个键"}
+          },
+          "required": ["mode", "used"]
+        }
+      },
       "audit": {
         "update_action": "set_step_policy",
         "resource_type": "account_step_policy"
@@ -8333,7 +8346,8 @@
             "final_prompt": "final_prompt",
             "prompt_note": "prompt_note",
             "reference_note": "reference_note",
-            "style_sources": "style_sources"
+            "style_sources": "style_sources",
+            "steps": "steps"
           }
         },
         {
@@ -8389,7 +8403,8 @@
             "estimated_credits": "estimated_credits",
             "approval": "approval",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "steps": "steps"
           }
         },
         {
@@ -8473,7 +8488,8 @@
             "reason": "reason",
             "purpose_budget_note": "purpose_budget_note",
             "final_prompt": "final_prompt",
-            "prompt_note": "prompt_note"
+            "prompt_note": "prompt_note",
+            "steps": "steps"
           }
         },
         {
@@ -8589,7 +8605,8 @@
             "reason": "reason",
             "purpose_budget_note": "purpose_budget_note",
             "final_prompt": "final_prompt",
-            "prompt_note": "prompt_note"
+            "prompt_note": "prompt_note",
+            "steps": "steps"
           }
         },
         {
@@ -8674,7 +8691,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","parameters":"parameters","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note","final_prompt":"final_prompt","prompt_note":"prompt_note"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","parameters":"parameters","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","model_note":"model_note","model_choice":"model_choice","reference_note":"reference_note","budget":"budget","reason":"reason","purpose_budget_note":"purpose_budget_note","final_prompt":"final_prompt","prompt_note":"prompt_note","steps":"steps"}
         },
         {
           "name": "retexture_model",
@@ -8789,7 +8806,8 @@
             "purpose_budget_note": "purpose_budget_note",
             "final_prompt": "final_prompt",
             "prompt_note": "prompt_note",
-            "style_sources": "style_sources"
+            "style_sources": "style_sources",
+            "steps": "steps"
           }
         },
         {
@@ -9093,7 +9111,8 @@
             "model_formats": "model_formats",
             "budget": "budget",
             "reason": "reason",
-            "purpose_budget_note": "purpose_budget_note"
+            "purpose_budget_note": "purpose_budget_note",
+            "steps": "steps"
           }
         },
         {
@@ -9282,7 +9301,8 @@
             "approval": "approval",
             "model_formats": "model_formats",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "steps": "steps"
           }
         },
         {
@@ -9367,7 +9387,8 @@
             "budget": "budget",
             "reason": "reason",
             "final_prompt": "final_prompt",
-            "prompt_note": "prompt_note"
+            "prompt_note": "prompt_note",
+            "steps": "steps"
           },
           "ignore_user_model": true,
           "accept_reference_images": false,
@@ -9463,7 +9484,8 @@
             "model_fallback": "model_fallback",
             "reference_note": "reference_note",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "steps": "steps"
           }
         },
         {
@@ -9486,7 +9508,7 @@
           "prompt_with_reference_template": "{prompt}",
           "prompt_with_previous_template": "{previous_prompt} {prompt}",
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","parameters":"parameters","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","budget":"budget","reason":"reason"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","parameters":"parameters","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","budget":"budget","reason":"reason","steps":"steps"}
         },
         {
           "name": "edit_multiview_images",
@@ -9506,7 +9528,7 @@
           "default_parameters": {},
           "result_asset_roles": ["image"],
           "idempotency_key_template": "chat:{session_id}:{call_id}",
-          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","parameters":"parameters","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","budget":"budget","reason":"reason"}
+          "result_fields": {"success":"success","task_id":"task_id","image_urls":"image_urls","parameters":"parameters","error":"error","warning":"warning","estimated_credits":"estimated_credits","extra_credits":"extra_credits","approval":"approval","model":"model","model_fallback":"model_fallback","budget":"budget","reason":"reason","steps":"steps"}
         },
         {
           "name": "create_creative_lab_design",
@@ -9629,7 +9651,8 @@
             "estimated_credits": "estimated_credits",
             "approval": "approval",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "steps": "steps"
           }
         },
         {
@@ -9695,7 +9718,8 @@
             "estimated_credits": "estimated_credits",
             "approval": "approval",
             "budget": "budget",
-            "reason": "reason"
+            "reason": "reason",
+            "steps": "steps"
           }
         },
         {
@@ -9766,7 +9790,8 @@
             "reason": "reason",
             "purpose_budget_note": "purpose_budget_note",
             "final_prompt": "final_prompt",
-            "prompt_note": "prompt_note"
+            "prompt_note": "prompt_note",
+            "steps": "steps"
           }
         }
       ],
@@ -20184,6 +20209,11 @@
             "step_policy.prompt.costs_line": "Approximate cost per step of the services this asset has used: {costs}.",
             "step_policy.prompt.costs_unknown": "This asset has no 3D service whose per-step cost is cheaply known yet.",
             "step_policy.prompt.guidance": "How to decide: stop once the result meets the bar and deliver it; when it does not, first look for a remedy, how many steps it takes and whether the balances cover it; when the remedy is hopeless or not worth it, stop and tell the person honestly what missed the bar and why you stopped, instead of redoing the work to force a result. The interface shows progress by steps, not credits.",
+            "step_policy.result.schema.description": "This asset's 3D step standing, carried by every success and failure result of a generation tool in the step mode; the object is absent when the standing cannot be read, which does not mean 0 steps",
+            "step_policy.result.schema.properties.mode.description": "The person's 3D step mode: agent=the Agent manages the steps itself with no hard cap; unlimited=unlimited; cap=each asset has a hard cap",
+            "step_policy.result.schema.properties.used.description": "The 3D steps this asset has used: Tasks that were or may have been charged plus approved steps that have no Task yet",
+            "step_policy.result.schema.properties.cap.description": "Under the cap mode, the most 3D steps one asset may use; the key is absent in the other modes",
+            "step_policy.result.schema.properties.remaining.description": "Under the cap mode, the 3D steps this asset can still use, at least 0; the key is absent in the other modes",
 "chat.model_review.inspect.production.remedy_template": "Fixable: {capabilities}, {steps} step(s)",
             "audit_actions[value=continue_turn_in_background].label": "Stop waiting, keep the task running",
             "audit_actions[value=change_own_password].label": "Change own password",
