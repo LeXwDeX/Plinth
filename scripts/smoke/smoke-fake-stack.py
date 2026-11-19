@@ -6227,14 +6227,16 @@ def scenario_asset_list_crops(api, work, stack):
     first_references = [reference.get("input_asset_id")
                         for reference in (edited_items[0].get("references") or [])] if edited_items else []
     union_id = first_references[0] if len(first_references) == 1 else ""
+    references_detail = [[reference.get("input_asset_id")
+                          for reference in (item.get("references") or [])]
+                         for item in edited_items]
     record("#331 the edit's crop instruction re-cuts the merged region",
            status == 200 and (edited or {}).get("version") == 1 and len(edited_items) == 2
            and bool(union_id) and union_id not in (hero_id, sword_id) and first_references == [union_id]
            and [reference.get("input_asset_id")
                 for reference in (edited_items[1].get("references") or [])] == [sword_id],
            f"status={status} version={(edited or {}).get('version')} union={union_id} "
-           f"references={[[reference.get('input_asset_id') for reference in item.get('references') or []]
-                          for item in edited_items]}")
+           f"references={references_detail}")
     union_ok, union_detail = _crop_asset_check(api, source_rows, union_id, CROP_PIXEL_UNION)
     count_edit = _sqlite_count(work, stack,
                                "SELECT COUNT(*) FROM input_asset_crops WHERE source_asset_id=?", (source_id,))
