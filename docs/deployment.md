@@ -259,7 +259,7 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 
 ### 外部 MCP 监听（#332）
 
-外部 MCP 客户端用本人的个人访问 Key 直连进程里的独立监听（只挂 MCP 路由，不经 Web 服务，也不经反向代理）。默认关闭，要同时满足三件事才可达：
+外部 MCP 客户端用本人的个人访问 Key 直连进程里的独立监听（只挂 MCP 路由，不经 Web 服务，也不经反向代理）。接入方的连接、鉴权、工具、Tasks 扩展与示例见 [外部 MCP 使用文档](external-mcp.md)。默认关闭，要同时满足三件事才可达：
 
 1. Schema `application.mcp_public.enabled` 为真（默认 Catalog 为真）。
 2. 运行环境文件 `production/runtime.env` 设 `MCP_PUBLIC_LISTEN_ADDR=0.0.0.0:13343`。缺省为空，空就不监听；容器内的地址必须是 `0.0.0.0:13343`，与 `docker-compose.go-production.yml` 固定的容器端口 13343 对应，改成别的端口映射就对不上。
