@@ -153,6 +153,16 @@ func Profile() align.Profile {
 		align.Field{Name: "image_label", Value: "F"}, align.Field{Name: "image_label", Value: "L"},
 		align.Field{Name: "image_label", Value: "B"},
 	), views, "")...)
+	// Probe for the same encoding, run before rodin-labeled: two pictures and
+	// three repeated labels. If Rodin reads the repeated parts as one array it
+	// refuses the request with IMAGE_LABEL_LENGTH_TOO_LONG before generating;
+	// if it accepts it, the parts were not read as an array and rodin-labeled
+	// must not be sent with this encoding. Counted as paid, since an accepted
+	// request is billed.
+	steps = append(steps, submitSteps("rodin-label-overflow", "rodin", cheapGeneration(
+		align.Field{Name: "image_label", Value: "F"}, align.Field{Name: "image_label", Value: "L"},
+		align.Field{Name: "image_label", Value: "B"},
+	), views[:2], "")...)
 	return align.Profile{
 		Provider: "hyper3d", API: "api-v2", Official: OfficialBase, Steps: steps,
 		Capture: align.CaptureConfig{

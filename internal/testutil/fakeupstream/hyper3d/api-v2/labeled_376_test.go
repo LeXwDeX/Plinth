@@ -49,7 +49,7 @@ func TestPaidStepsOfTheProfile(t *testing.T) {
 			paid = append(paid, step.Name)
 		}
 	}
-	want := []string{"rodin-text", "rodin-image", "bang", "texture", "texture-failed", "rodin-labeled"}
+	want := []string{"rodin-text", "rodin-image", "bang", "texture", "texture-failed", "rodin-labeled", "rodin-label-overflow"}
 	if !reflect.DeepEqual(paid, want) {
 		t.Fatalf("paid steps = %v, want %v", paid, want)
 	}
@@ -202,6 +202,28 @@ func TestLabeledRodinStepsRunAgainstTheFake(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("part %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// The overflow probe sends two pictures with the three labels: the fake, like
+// Rodin, refuses it as IMAGE_LABEL_LENGTH_TOO_LONG, so the follow-up steps are
+// skipped and nothing is generated.
+func TestLabelOverflowProbeIsRefusedByTheFake(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	bundle, err := align.Run(context.Background(), "hyper3d", "api-v2", align.Target{
+		Name: "fake", BaseURL: f.Server.URL + Prefix, Key: key, NoPollDelay: true,
+	}, profileSteps(t, "rodin-label-overflow", "rodin-label-overflow-status", "rodin-label-overflow-download"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	submit := bundle.Obs[0]
+	if !bytes.Contains(submit.Body, []byte("IMAGE_LABEL_LENGTH_TOO_LONG")) {
+		t.Fatalf("submission = %d %s, want IMAGE_LABEL_LENGTH_TOO_LONG", submit.Status, submit.Body)
+	}
+	for _, follow := range bundle.Obs[1:] {
+		if follow.Skipped == "" {
+			t.Errorf("%s ran after a refused submission: %+v", follow.Step, follow)
 		}
 	}
 }
