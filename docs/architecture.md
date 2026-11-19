@@ -324,6 +324,8 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 
 **完成与状态。** 完成工具 `submit_asset_list_item` 只在项自己的子会话里可用：`done` 要求本会话存在成功 Task，服务端把 Task ID 与资产引用快照写入 `result_json`，项进入 `review`（待验收，Schema `messages.awaiting_review` 的 `{count}` 提示即指这一状态）；`failed` 可带失败 Task 的分类，项进入 `failed`。Agent 不能指定 Task 或资产；重复报告按同一终态幂等返回。项状态为 `todo|working|review|accepted|returned|failed|skipped`，另有独立的 block 轴 `awaiting_approval|paused|step_cap`（不改变状态；`awaiting_approval` 释放并行槽位）；`accepted|returned` 与验收登记留 #329。run 状态为 `idle|running|paused|stopped|completed`：同一 owner 同时只有一份 running 清单，另一份确认后先 `idle` 等人启动；仍有 `todo|working|review|returned` 项时 run 不完成，全部终态后变 `completed`。
 
+**运行摘要的计数（#390；源码已实现，本机测试与 fake 冒烟覆盖，未部署验收）。** 清单读路由给每份有 run 的清单附 `run` 摘要（`status`、`pause_reason`、`version`、`item_counts`）。条目和摘要分两次读取，条目可能在两次之间换状态。所以响应带条目时（单份 `GET` 与验收看板），`item_counts` 用同一次读到的条目重新计数，保证同一个响应里计数和条目一致；`status`、`pause_reason`、`version` 仍取 run 行。项目列表与会话列表不带条目，计数仍用 SQL 按状态汇总。两处用同一个 `assetlist.ItemCounts.Add` 计数，未知状态都不计入。
+
 **重启对账。** 调度器不保存内存进度，重启后从库里的 run/item/turn 对账：认领后尚无会话的项重建子会话；会话被删除时重新创建并重新绑定；已有未记录轮次的 turn 按 assistant 消息 ID 幂等重新 `Schedule`，只有 schedule 成功才记录轮次；入队失败会记住该 assistant 消息，若编排器把这一轮终结为错误，下一拍在同一轮重开，不把本地排队失败当成项失败；列表或项已不在对应状态时按冲突结束本拍，不重复写。装配只在 Catalog 声明并启用 `application.asset_list.execution` 时创建调度器（默认 `enabled:false`，未声明的旧 Catalog 保持手工清单），它与完成工具共用同一个 Task 读取源，应用停机时随运行上下文退出。
 
 ### 凭据种类与个人访问 Key（#332 第 1–2 步；源码已实现，本机 Go 测试覆盖；第 1–5 步已在 dev-test 验收，第 6 步的部署验收记录见 #332；管理端（每 Key 最近使用与调用量、整体关闭）与使用者文档尚未做）

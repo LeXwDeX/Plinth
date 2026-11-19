@@ -79,6 +79,27 @@ type ItemCounts struct {
 	Skipped  int `json:"skipped"`
 }
 
+// Add counts n items in state. A state outside the documented ones is not
+// counted, so the counts sum to at most the item total.
+func (counts *ItemCounts) Add(state string, n int) {
+	switch state {
+	case StateTodo:
+		counts.Todo += n
+	case StateWorking:
+		counts.Working += n
+	case StateReview:
+		counts.Review += n
+	case StateAccepted:
+		counts.Accepted += n
+	case StateReturned:
+		counts.Returned += n
+	case StateFailed:
+		counts.Failed += n
+	case StateSkipped:
+		counts.Skipped += n
+	}
+}
+
 // Run is the execution state of one confirmed list. It carries no list
 // content: the runner reads the list and its items from the list repository.
 // PauseReason is empty unless Status is RunPaused.

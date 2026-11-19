@@ -370,22 +370,7 @@ func (r *AssetListRunRepository) RunSummaries(
 				Status: status, PauseReason: pauseReason, Version: updated,
 			}
 		}
-		switch state.String {
-		case assetlist.StateTodo:
-			summary.ItemCounts.Todo += count
-		case assetlist.StateWorking:
-			summary.ItemCounts.Working += count
-		case assetlist.StateReview:
-			summary.ItemCounts.Review += count
-		case assetlist.StateAccepted:
-			summary.ItemCounts.Accepted += count
-		case assetlist.StateReturned:
-			summary.ItemCounts.Returned += count
-		case assetlist.StateFailed:
-			summary.ItemCounts.Failed += count
-		case assetlist.StateSkipped:
-			summary.ItemCounts.Skipped += count
-		}
+		summary.ItemCounts.Add(state.String, count)
 		result[listID] = summary
 	}
 	return result, rows.Err()
