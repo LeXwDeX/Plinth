@@ -99,31 +99,42 @@ func (service *Service) sessionQuiescers() []SessionQuiescer {
 	return append([]SessionQuiescer(nil), service.quiescers...)
 }
 
-// DeleteSession deletes the owner's session. The session is marked first, so
-// no new turn starts on it and the turn runner's leftovers end quietly; then
-// its running turn is interrupted and awaited; only then are the rows deleted,
-// in short transactions (see the repository), so the deletion neither fights a
-// live turn for its rows nor holds the database against everyone else.
-func (service *Service) DeleteSession(
+// RunSessionDeletion runs deleteRows, which removes the rows of the owner's
+// session, under the protocol every deletion of a session follows, so that the
+// session's turn is never left running on rows that are going away (#384).
+// The session is marked first, so no new turn starts on it and the turn
+// runner's leftovers end quietly; then its running turn is interrupted and
+// awaited; only then do the rows go, in short transactions where the repository
+// can split them, so the deletion neither fights a live turn for its rows nor
+// holds the database against everyone else. deleteRows reports whether it
+// deleted anything; when it did not, or failed, the session stays, the mark is
+// cleared and the interrupted turns go on. The deletion that is bound to be
+// refused (ErrSessionDeletionBlocked) is refused before the turn is touched.
+//
+// DeleteSession is the chat session's own deletion; the canvas project that
+// owns a session deletes the project and the session in one transaction and
+// runs that through here too.
+func (service *Service) RunSessionDeletion(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
-) error {
+	deleteRows func(context.Context) (bool, error),
+) (bool, error) {
 	end := service.deletions.begin(ownerID, sessionID)
 	defer end()
 	owned, err := service.repository.OwnsSession(ctx, ownerID, sessionID)
 	if err != nil {
-		return err
+		return false, err
 	}
-	// A session that is not the owner's (or is gone) has no turn to stop; the
-	// repository is still asked, as before, so that it clears what the owner
-	// left under that ID and reports not found.
+	// A session that is not the owner's (or is gone) has no turn to stop;
+	// deleteRows is still run, as before, so that it clears what the owner left
+	// under that ID and reports that nothing was deleted.
 	var quiescers []SessionQuiescer
 	if owned {
 		// A deletion that is bound to be refused must not stop the running turn.
 		if preflight, ok := service.repository.(sessionDeletionPreflight); ok {
 			if err := preflight.PreflightSessionDeletion(ctx, ownerID, sessionID); err != nil {
-				return err
+				return false, err
 			}
 		}
 		quiescers = service.sessionQuiescers()
@@ -133,7 +144,7 @@ func (service *Service) DeleteSession(
 	}
 	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionDeleteTimeout)
 	defer cancel()
-	deleted, err := service.repository.DeleteSession(deleteCtx, ownerID, sessionID)
+	deleted, err := deleteRows(deleteCtx)
 	if err != nil || !deleted {
 		// The session stays: clear the mark first (work enqueued while it is
 		// set is skipped), then let the interrupted turns go on.
@@ -141,9 +152,26 @@ func (service *Service) DeleteSession(
 		for _, quiescer := range quiescers {
 			quiescer.ResumeSession(deleteCtx, ownerID, sessionID)
 		}
-		if err != nil {
-			return err
-		}
+		return false, err
+	}
+	return true, nil
+}
+
+// DeleteSession deletes the owner's session: ErrSessionNotFound when there was
+// none, ErrSessionDeletionBlocked when a SkillRun still has work in flight.
+func (service *Service) DeleteSession(
+	ctx context.Context,
+	ownerID string,
+	sessionID string,
+) error {
+	deleted, err := service.RunSessionDeletion(ctx, ownerID, sessionID,
+		func(ctx context.Context) (bool, error) {
+			return service.repository.DeleteSession(ctx, ownerID, sessionID)
+		})
+	if err != nil {
+		return err
+	}
+	if !deleted {
 		return ErrSessionNotFound
 	}
 	return nil

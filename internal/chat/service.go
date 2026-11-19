@@ -54,11 +54,12 @@ var (
 	// ErrProjectNotFound reports an unknown or foreign project. The HTTP
 	// boundary answers the same 404 as a missing project (#240).
 	ErrProjectNotFound = errors.New("chat: project not found")
-	// ErrSessionDeletionBlocked reports a session that cannot be deleted
-	// because it has records that no deletion path clears (a SkillRun is a
-	// durable ledger kept by a foreign key with ON DELETE RESTRICT). Nothing
-	// was stopped or deleted (#384).
-	ErrSessionDeletionBlocked = errors.New("chat: session has records that keep it from being deleted")
+	// ErrSessionDeletionBlocked reports a session that cannot be deleted now
+	// because a SkillRun of it has work in flight: a human grant waiting for
+	// its decision, or a Task that has not ended. The person can wait, cancel
+	// or decide, and delete again. Nothing was stopped or deleted (#384); the
+	// HTTP boundary answers 409 with the Schema text.
+	ErrSessionDeletionBlocked = errors.New("chat: session has work in flight that keeps it from being deleted")
 )
 
 // ProjectSource is the narrow port the chat service uses to attribute a

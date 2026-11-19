@@ -5986,6 +5986,10 @@ type ChatPresentationSchema struct {
 
 type ChatMessageTexts struct {
 	TurnActive string `json:"turn_active"`
+	// SessionDeleteBlocked answers 409 to the deletion of a session (or of the
+	// canvas project that owns one) while a SkillRun of it has work in flight:
+	// a Task that has not ended or a grant waiting for its decision (#384).
+	SessionDeleteBlocked string `json:"session_delete_blocked"`
 	// ChoiceAnswered refuses an answer to a choice card that is no longer open;
 	// ChoiceRejected one whose option the card does not offer (#321).
 	ChoiceAnswered    string `json:"choice_answered"`

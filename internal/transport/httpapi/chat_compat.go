@@ -304,6 +304,14 @@ func (s *Server) legacyDeleteChatSession(
 			http.StatusNotFound,
 			s.application.Chat.Presentation.Messages.SessionNotFound,
 		)
+	case errors.Is(err, chat.ErrSessionDeletionBlocked):
+		// A SkillRun of the session has work in flight (#384). Nothing was
+		// stopped or deleted; the person can wait or decide and delete again.
+		s.writeChatError(
+			writer,
+			http.StatusConflict,
+			s.application.Chat.Presentation.Messages.SessionDeleteBlocked,
+		)
 	case err != nil:
 		s.writeChatInternalError(writer, err)
 	default:

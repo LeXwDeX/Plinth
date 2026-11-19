@@ -352,9 +352,11 @@ type Orchestrator struct {
 	activeMu     sync.Mutex
 	activeCancel map[string]context.CancelFunc
 	// activeDone is closed when the active turn of the key has left Process,
-	// so deleting a session can wait for its turn (#384).
-	activeDone   map[string]chan struct{}
-	canceledTurn map[string]struct{}
+	// so deleting a session can wait for its turn; activeAssistant names that
+	// turn (#384).
+	activeDone      map[string]chan struct{}
+	activeAssistant map[string]string
+	canceledTurn    map[string]struct{}
 
 	// consentWaits 是因等待同意而挂起的轮次登记表（AGT-12）：
 	// key = turnKey(ownerID, sessionID)。挂起不占用 worker；唤醒
@@ -384,18 +386,21 @@ func (orchestrator *Orchestrator) turnKey(ownerID, sessionID string) string {
 
 func (orchestrator *Orchestrator) registerActiveTurn(
 	key string,
+	assistantMessageID string,
 	cancel context.CancelFunc,
 ) {
 	orchestrator.activeMu.Lock()
 	defer orchestrator.activeMu.Unlock()
 	orchestrator.activeCancel[key] = cancel
 	orchestrator.activeDone[key] = make(chan struct{})
+	orchestrator.activeAssistant[key] = assistantMessageID
 }
 
 func (orchestrator *Orchestrator) unregisterActiveTurn(key string) {
 	orchestrator.activeMu.Lock()
 	defer orchestrator.activeMu.Unlock()
 	delete(orchestrator.activeCancel, key)
+	delete(orchestrator.activeAssistant, key)
 	if done := orchestrator.activeDone[key]; done != nil {
 		close(done)
 		delete(orchestrator.activeDone, key)
@@ -732,6 +737,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		queued:             map[string]struct{}{},
 		activeCancel:       map[string]context.CancelFunc{},
 		activeDone:         map[string]chan struct{}{},
+		activeAssistant:    map[string]string{},
 		canceledTurn:       map[string]struct{}{},
 		consentWaits:       map[string]*consentSuspend{},
 		compacting:         map[string]*compactionLock{},
@@ -1325,7 +1331,7 @@ func (orchestrator *Orchestrator) Process(
 	// 与工具执行；进程停机沿用 worker 的 runCtx，语义不变。
 	processCtx, cancelProcess := context.WithCancel(ctx)
 	turnKey := orchestrator.turnKey(command.OwnerID, command.SessionID)
-	orchestrator.registerActiveTurn(turnKey, cancelProcess)
+	orchestrator.registerActiveTurn(turnKey, command.AssistantMessageID, cancelProcess)
 	defer orchestrator.unregisterActiveTurn(turnKey)
 	defer orchestrator.clearTurnCanceled(turnKey)
 	defer cancelProcess()

@@ -462,3 +462,131 @@ func TestDeleteSessionRefusedLeavesTheRunningTurnAlone(t *testing.T) {
 		t.Fatalf("Process: %v", err)
 	}
 }
+
+// resumingAgent blocks its first request until the turn is canceled and answers
+// the next ones, as a model does when its turn is run again from the persisted
+// state.
+type resumingAgent struct {
+	mu      sync.Mutex
+	calls   int
+	entered chan struct{}
+}
+
+func (agent *resumingAgent) Stream(
+	ctx context.Context,
+	_ agents.Request,
+	emit func(agents.Delta) error,
+) (agents.Completion, error) {
+	agent.mu.Lock()
+	agent.calls++
+	call := agent.calls
+	agent.mu.Unlock()
+	if call == 1 {
+		close(agent.entered)
+		<-ctx.Done()
+		return agents.Completion{}, ctx.Err()
+	}
+	if emit != nil {
+		if err := emit(agents.Delta{Content: "configured response"}); err != nil {
+			return agents.Completion{}, err
+		}
+	}
+	return agents.Completion{Content: "configured response"}, nil
+}
+
+func (*resumingAgent) Complete(context.Context, agents.Request) (agents.Completion, error) {
+	return agents.Completion{}, context.Canceled
+}
+
+// RunSessionDeletion is the protocol DeleteSession and the canvas project
+// deletion share: mark, stop the turn, delete, clear. When the rows were not
+// deleted (a storage failure, or a project that was already gone) the session
+// stays, so the turn it interrupted must go on from its persisted state and
+// finish, not stay stopped until the next restart.
+func TestRunSessionDeletionResumesTheInterruptedTurnWhenNothingWasDeleted(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	schema.Agent.WorkerCount = 1
+	schema.Agent.QueueSize = 2
+	agent := &resumingAgent{entered: make(chan struct{})}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service,
+		Schema:  schema,
+		Model:   "configured-model",
+		Agent:   agent,
+		Tools:   scriptedToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, stopRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- orchestrator.Run(runCtx) }()
+	defer func() {
+		stopRun()
+		<-runDone
+	}()
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "draw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Enqueue(chat.ProcessTurn{
+		OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-agent.entered
+
+	deleted, err := service.RunSessionDeletion(ctx, "owner-a", session.ID, func(context.Context) (bool, error) {
+		return false, nil
+	})
+	if err != nil || deleted {
+		t.Fatalf("RunSessionDeletion = %v, %v, want false and no error", deleted, err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(messages) == 2 && messages[1].Content == "configured response" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the interrupted turn was not resumed: messages = %#v", messages)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// What the deletion function reports reaches the caller: the canvas project
+// deletion answers "project not found" from it.
+func TestRunSessionDeletionReportsWhatTheDeletionDid(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("storage failure")
+	if deleted, err := service.RunSessionDeletion(ctx, "owner-a", session.ID, func(context.Context) (bool, error) {
+		return false, failure
+	}); deleted || !errors.Is(err, failure) {
+		t.Fatalf("a failing deletion = %v, %v", deleted, err)
+	}
+	if owns, err := service.OwnsSession(ctx, "owner-a", session.ID); err != nil || !owns {
+		t.Fatalf("the session after a failed deletion owns=%v err=%v", owns, err)
+	}
+	if deleted, err := service.RunSessionDeletion(ctx, "owner-a", session.ID, func(ctx context.Context) (bool, error) {
+		return repository.DeleteSession(ctx, "owner-a", session.ID)
+	}); err != nil || !deleted {
+		t.Fatalf("a deletion that removed the rows = %v, %v", deleted, err)
+	}
+}

@@ -22,12 +22,13 @@ func (orchestrator *Orchestrator) QuiesceSession(ctx context.Context, ownerID, s
 	orchestrator.popConsentWait(ownerID, sessionID)
 	key := orchestrator.turnKey(ownerID, sessionID)
 	orchestrator.activeMu.Lock()
-	cancel, done := orchestrator.activeCancel[key], orchestrator.activeDone[key]
+	cancel, done, assistantID := orchestrator.activeCancel[key], orchestrator.activeDone[key], orchestrator.activeAssistant[key]
 	orchestrator.activeMu.Unlock()
 	if cancel == nil {
 		return
 	}
 	cancel()
+	deadline := time.Now().Add(sessionQuiesceTimeout)
 	timer := time.NewTimer(sessionQuiesceTimeout)
 	defer timer.Stop()
 	select {
@@ -35,8 +36,24 @@ func (orchestrator *Orchestrator) QuiesceSession(ctx context.Context, ownerID, s
 	case <-timer.C:
 		orchestrator.logger.Warn("删除会话时等待轮次退出超时，轮次将在发现会话已删除后自行结束",
 			"session_id", sessionID)
+		return
 	case <-ctx.Done():
+		return
 	}
+	// The worker forgets a turn right after Process returns, and a resume that
+	// enqueued the turn before then would be dropped as a duplicate of it.
+	for orchestrator.queuedMarked(assistantID) && time.Now().Before(deadline) && ctx.Err() == nil {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// queuedMarked reports whether a worker still holds the turn: it was enqueued
+// and has not been unmarked since.
+func (orchestrator *Orchestrator) queuedMarked(assistantMessageID string) bool {
+	orchestrator.queueMu.Lock()
+	defer orchestrator.queueMu.Unlock()
+	_, marked := orchestrator.queued[assistantMessageID]
+	return marked
 }
 
 // ResumeSession implements SessionQuiescer: the deletion did not happen, so

@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
+	"github.com/LeXwDeX/Plinth/internal/skillrun"
 )
 
 func (r *Repository) ListSessions(
@@ -862,36 +864,42 @@ func (r *Repository) drainSessionBulkRows(ctx context.Context, sessionID string)
 	return nil
 }
 
-// sessionDeletionBlockers are the tables whose rows keep a session from being
-// deleted: their foreign key to the session is ON DELETE RESTRICT and no
-// deletion path clears them. A SkillRun is a durable recipe and lineage
-// ledger; deleting a session that has one fails in the final transaction with
-// a foreign key violation (the one 500 of the log in #384).
-var sessionDeletionBlockers = []struct {
-	label string
-	query string
-}{
-	{"skill runs", `SELECT 1 FROM skill_runs WHERE owner_id = ? AND session_id = ? LIMIT 1`},
-}
+// sessionSkillRunInFlight finds a step of the session's SkillRuns that has work
+// in flight: a human grant still waiting for its decision, or a bound Task that
+// has not reached a terminal state. It is skillrun.Step.InFlight as one query
+// (a test holds the two together), and it reads the Task and the grant, the
+// only authorities for their states, without writing either.
+const sessionSkillRunInFlight = `
+	SELECT 1
+	FROM skill_runs sr
+	JOIN skill_run_steps ss ON ss.run_id = sr.id
+	LEFT JOIN generation_tasks t ON t.id = ss.task_id
+	LEFT JOIN execution_grants g ON g.request_id = ss.grant_request_id
+	WHERE sr.owner_id = ? AND sr.session_id = ?
+	  AND ((ss.phase = ? AND g.status = ?)
+	    OR (ss.phase = ? AND COALESCE(t.state, '') NOT IN (?, ?, ?)))
+	LIMIT 1`
 
 // PreflightSessionDeletion reports ErrSessionDeletionBlocked for a session
-// that has records no deletion path clears, so a deletion that is bound to
-// fail is refused before anything is stopped or deleted. The bulk rows are
-// deleted by transactions of their own; running them first would lose the
-// conversation of a session that then stays.
+// whose SkillRun has work in flight, so that the deletion is refused before
+// anything is stopped or deleted (#384). Resting SkillRuns do not block: they
+// go with the session. The bulk rows are deleted by transactions of their own;
+// running them first would lose the conversation of a session that then stays.
 func (r *Repository) PreflightSessionDeletion(ctx context.Context, ownerID, sessionID string) error {
-	for _, blocker := range sessionDeletionBlockers {
-		var found int
-		err := r.db.QueryRowContext(ctx, blocker.query, ownerID, sessionID).Scan(&found)
-		switch {
-		case err == nil:
-			return fmt.Errorf("%w: %s", chat.ErrSessionDeletionBlocked, blocker.label)
-		case errors.Is(err, sql.ErrNoRows):
-		default:
-			return fmt.Errorf("check chat session %s: %w", blocker.label, err)
-		}
+	var found int
+	err := r.db.QueryRowContext(ctx, sessionSkillRunInFlight, ownerID, sessionID,
+		string(skillrun.GrantPending), string(executiongrant.Pending),
+		string(skillrun.TaskBound),
+		string(schema.TaskSucceeded), string(schema.TaskFailed), string(schema.TaskCanceled),
+	).Scan(&found)
+	switch {
+	case err == nil:
+		return fmt.Errorf("%w: a skill run has work in flight", chat.ErrSessionDeletionBlocked)
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	default:
+		return fmt.Errorf("check chat session skill runs: %w", err)
 	}
-	return nil
 }
 
 func (r *Repository) DeleteSession(
@@ -938,13 +946,21 @@ func (r *Repository) DeleteSession(
 
 // sessionDependentDeletes clears the session-scoped tables that carry no
 // foreign key to go_chat_sessions (tables with ON DELETE CASCADE clear
-// themselves). Every path that deletes a chat session runs these in the same
+// themselves) and the SkillRun ledger, whose RESTRICT foreign key would
+// otherwise refuse the session. Every path that deletes a chat session runs these in the same
 // transaction so no deletion path leaves orphans behind (#334); a new
 // session-scoped table without a cascading foreign key belongs here.
 var sessionDependentDeletes = []struct {
 	label string
 	query string
 }{
+	// The SkillRun ledger has a RESTRICT foreign key to the session, so it does
+	// not clear itself: a session whose runs are all at rest takes them with it
+	// (the preflight refuses one with work in flight), steps before runs. A
+	// step only points at its Task and assets; deleting it rewrites neither.
+	{"skill run steps", `DELETE FROM skill_run_steps WHERE run_id IN (
+		SELECT id FROM skill_runs WHERE owner_id = ? AND session_id = ?)`},
+	{"skill runs", `DELETE FROM skill_runs WHERE owner_id = ? AND session_id = ?`},
 	{"agent state", `DELETE FROM go_agent_state WHERE owner_id = ? AND scope = ?`},
 	{"choices", `DELETE FROM chat_choices WHERE owner_id = ? AND session_id = ?`},
 	{"preferences", `DELETE FROM chat_session_preferences WHERE owner_id = ? AND session_id = ?`},

@@ -4,6 +4,9 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/skillrun"
 )
 
 // sessionDependentTables lists every session-scoped table that has no
@@ -14,6 +17,11 @@ var sessionDependentTables = map[string]string{
 	"chat_choices":             `SELECT COUNT(*) FROM chat_choices WHERE owner_id = ? AND session_id = ?`,
 	"chat_context_compactions": `SELECT COUNT(*) FROM chat_context_compactions WHERE owner_id = ? AND session_id = ?`,
 	"go_agent_state":           `SELECT COUNT(*) FROM go_agent_state WHERE owner_id = ? AND scope = ?`,
+	// The SkillRun ledger refuses the session by a RESTRICT foreign key, so a
+	// session whose runs are all at rest clears it explicitly (#384).
+	"skill_runs": `SELECT COUNT(*) FROM skill_runs WHERE owner_id = ? AND session_id = ?`,
+	"skill_run_steps": `SELECT COUNT(*) FROM skill_run_steps WHERE run_id IN
+		(SELECT id FROM skill_runs WHERE owner_id = ? AND session_id = ?)`,
 }
 
 func seedSessionWithDependents(t *testing.T, r *Repository, ownerID, sessionID string) {
@@ -44,6 +52,7 @@ func seedSessionWithDependents(t *testing.T, r *Repository, ownerID, sessionID s
 			t.Fatalf("seed %s: %v", sessionID, err)
 		}
 	}
+	seedSkillRun(t, r, ownerID, sessionID, "run-"+sessionID, skillRunStepSeed{skillrun.TaskBound, generation.TaskSucceeded, ""})
 }
 
 func seedOwningCanvasProject(t *testing.T, r *Repository, ownerID, projectID, sessionID string) {

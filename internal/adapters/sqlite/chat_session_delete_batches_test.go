@@ -2,14 +2,11 @@ package sqlite
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
 // seedBulkChatSession gives a session the rows that make a deletion long: many
@@ -136,49 +133,5 @@ func TestDeleteSessionOfAnotherOwnerDeletesNothing(t *testing.T) {
 	}
 	if rows := countSessionRows(t, r, "mine"); rows["messages"] != 30 || rows["events"] != 100 || rows["sessions"] != 1 {
 		t.Fatalf("a refused deletion removed rows: %v", rows)
-	}
-}
-
-// A SkillRun is a durable ledger kept by a foreign key with ON DELETE RESTRICT
-// and no deletion path clears it, so the final transaction of a deletion fails
-// for a session that has one (the one 500 of the log in #384: "commit chat
-// session deletion: FOREIGN KEY constraint failed"). The bulk rows are deleted
-// by transactions of their own, so a deletion that is bound to fail must be
-// refused before it drains anything: a refused deletion changes nothing.
-func TestDeleteSessionKeptBySkillRunsIsRefusedAndLosesNothing(t *testing.T) {
-	r, err := openTestRepository(filepath.Join(t.TempDir(), "chat.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	seedBulkChatSession(t, r, "owner-a", "kept", 30, 100)
-	if _, err := r.db.Exec(`INSERT INTO skill_runs (id, owner_id, session_id, recipe_id, recipe_revision, recipe_hash,
-		selected_offering_id, source_asset_id, idempotency_key, request_hash, created_at, updated_at)
-		VALUES ('run-1', 'owner-a', 'kept', 'recipe', 'rev', 'hash', 'offering', 'asset', 'key', 'request',
-		'2026-10-22T00:00:00Z', '2026-10-22T00:00:00Z')`); err != nil {
-		t.Fatal(err)
-	}
-	r.deleteBatchRows = 10
-	batches := 0
-	r.afterDeleteBatch = func() { batches++ }
-
-	if err := r.PreflightSessionDeletion(context.Background(), "owner-a", "kept"); !errors.Is(err, chat.ErrSessionDeletionBlocked) {
-		t.Fatalf("PreflightSessionDeletion = %v, want ErrSessionDeletionBlocked", err)
-	}
-	deleted, err := r.DeleteSession(context.Background(), "owner-a", "kept")
-	if deleted || !errors.Is(err, chat.ErrSessionDeletionBlocked) {
-		t.Fatalf("DeleteSession = %v, %v, want a refusal with ErrSessionDeletionBlocked", deleted, err)
-	}
-	if batches != 0 {
-		t.Fatalf("a refused deletion drained %d batches of rows first", batches)
-	}
-	rows := countSessionRows(t, r, "kept")
-	if rows["sessions"] != 1 || rows["messages"] != 30 || rows["turns"] != 30 || rows["events"] != 100 {
-		t.Fatalf("a refused deletion changed the session: %v", rows)
-	}
-	// A session without a SkillRun is deletable as before.
-	seedBulkChatSession(t, r, "owner-a", "free", 5, 5)
-	if err := r.PreflightSessionDeletion(context.Background(), "owner-a", "free"); err != nil {
-		t.Fatalf("PreflightSessionDeletion of a plain session = %v", err)
 	}
 }
