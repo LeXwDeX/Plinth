@@ -51,13 +51,15 @@ type modelChoice struct {
 }
 
 // offeringChoice is one selection and why it was made. A Refusal is the
-// Schema's message for the Agent; nothing is submitted then.
+// Schema's message for the Agent, and Code the refusal's name in the server
+// log (#378); nothing is submitted then.
 type offeringChoice struct {
 	Offering generation.Offering
 	Source   string
 	Profile  string
 	Reason   string
 	Refusal  string
+	Code     string
 }
 
 // modelInput is the part of a call's input that decides whether an Offering
@@ -290,20 +292,20 @@ func (executor *Executor) chooseOffering(
 	if locked != "" {
 		offering, matched := matchOffering(candidates, locked)
 		if !matched {
-			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, locked)}, nil
+			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, locked), Code: refusalModelUnavailable}, nil
 		}
 		// A named or locked model is not filtered by the input shape here: the
 		// ordinary reference and view checks refuse an input it cannot take
 		// with their precise messages (#103).
 		if named != "" && !modelMatches(offering, named) {
-			return offeringChoice{Refusal: executor.modelConflictText(command, offering, named)}, nil
+			return offeringChoice{Refusal: executor.modelConflictText(command, offering, named), Code: refusalModelConflict}, nil
 		}
 		return offeringChoice{Offering: offering, Source: "user"}, nil
 	}
 	if named != "" {
 		offering, matched := matchOffering(candidates, named)
 		if !matched {
-			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, named)}, nil
+			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, named), Code: refusalModelUnavailable}, nil
 		}
 		source := "agent"
 		if request := command.Options.Multiview; request != nil && request.Model != "" && modelMatches(offering, request.Model) {
@@ -327,7 +329,7 @@ func (executor *Executor) chooseOffering(
 				return offeringChoice{Offering: recommended, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
 			}
 			if text := executor.modelWorkspaceConflictText(command, workspace, offering, profile); text != "" {
-				return offeringChoice{Refusal: text}, nil
+				return offeringChoice{Refusal: text, Code: refusalModelWorkspaceConflict}, nil
 			}
 		}
 		return offeringChoice{Offering: offering, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
@@ -349,7 +351,7 @@ func (executor *Executor) chooseOffering(
 		if len(declared) > 0 {
 			name = declared[0]
 		}
-		return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, name)}, nil
+		return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, name), Code: refusalModelUnavailable}, nil
 	}
 	// Without a purpose recommendation (or a brief at all), the workspace's
 	// selected model is still the legacy fallback. It competes only here,
@@ -470,8 +472,10 @@ func (executor *Executor) modelWorkspaceConflictText(
 }
 
 // modelChoiceFailure is the Schema's refusal with no submission: the Agent
-// sees the reason and that the person must decide, not a generic failure.
-func (executor *Executor) modelChoiceFailure(command chat.ToolCommand, message string) chat.ToolResult {
+// sees the reason and that the person must decide, not a generic failure. The
+// server log records the refusal under code (#378).
+func (executor *Executor) modelChoiceFailure(command chat.ToolCommand, code, message string) chat.ToolResult {
+	executor.logRefusal(command, code)
 	message = executor.localized(command, message)
 	content, _ := json.Marshal(map[string]any{
 		command.Tool.ResultFields.Success: false,
