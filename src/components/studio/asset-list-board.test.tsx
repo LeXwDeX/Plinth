@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
@@ -16,6 +16,13 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({
     previewAssetUrl: (url: string) => url,
     proxyAssetUrl: (url: string) => url,
   }),
+}));
+
+// The browser save is a DOM side effect; the board's contract is the archive
+// bytes and filename it hands over.
+const saved = vi.hoisted(() => ({ calls: [] as Array<{ blob: Blob; filename: string }> }));
+vi.mock('@/lib/workspace/batch-export', () => ({
+  saveArchive: (blob: Blob, filename: string) => { saved.calls.push({ blob, filename }); },
 }));
 
 // The real viewer needs WebGL; the board's contract is only which cell holds
@@ -170,11 +177,17 @@ function boardFixture(): AssetListBoardData {
   ]);
 }
 
-function clientWith(getBoard: ReturnType<typeof vi.fn>): AssetListClient {
-  return { getBoard } as unknown as AssetListClient;
+function clientWith(
+  getBoard: ReturnType<typeof vi.fn>,
+  overrides: Partial<AssetListClient> = {},
+): AssetListClient {
+  return { getBoard, ...overrides } as unknown as AssetListClient;
 }
 
-function renderBoard(value: AssetListBoardData | Error, overrides: { getBoard?: ReturnType<typeof vi.fn> } = {}) {
+function renderBoard(
+  value: AssetListBoardData | Error,
+  overrides: { getBoard?: ReturnType<typeof vi.fn>; client?: Partial<AssetListClient>; pollIntervalMs?: number } = {},
+) {
   const getBoard = overrides.getBoard ?? vi.fn(async () => {
     if (value instanceof Error) throw value;
     return value;
@@ -183,18 +196,24 @@ function renderBoard(value: AssetListBoardData | Error, overrides: { getBoard?: 
     <AssetListBoard
       target={{ projectId: 'proj', listId: 'listid', title: '英雄套装' }}
       schema={schema}
-      client={clientWith(getBoard)}
+      client={clientWith(getBoard, overrides.client)}
+      pollIntervalMs={overrides.pollIntervalMs}
     />,
   );
   return { getBoard };
 }
 
 beforeEach(() => {
+  saved.calls = [];
   useInlineModelPreviewStore.setState({ taskId: null });
   useStudioStore.setState({ assetBoard: null });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('AssetListBoard (#329)', () => {
   it('renders every item with its name, state, check summary, steps and round', async () => {
@@ -331,5 +350,293 @@ describe('AssetListBoard (#329)', () => {
     // Opening through the button's own click is what Enter and Space fire on a native button.
     fireEvent.click(cell);
     expect(screen.getByTestId('asset-board-detail')).toBeTruthy();
+  });
+});
+
+function withRun(value: AssetListBoardData, status: string): AssetListBoardData {
+  return {
+    ...value,
+    list: {
+      ...value.list,
+      run: {
+        status,
+        version: '2026-11-18T01:00:00Z',
+        item_counts: { todo: 0, working: 0, review: 2, accepted: 1, returned: 0, failed: 0, skipped: 0 },
+      },
+    },
+  };
+}
+
+function compareBoard(): AssetListBoardData {
+  const source = { source_input_asset_id: 'input_1', source_kind: 'upload', source_width: 2048, source_height: 1024 };
+  return board([
+    boardItem({
+      id: 'crop-accepted',
+      name: '主角',
+      state: 'accepted',
+      source,
+      region: { x: 0.1, y: 0.1, width: 0.3, height: 0.3 },
+      review: {
+        task_id: 'task_c1',
+        cover_asset_id: 'cover_c1',
+        artifacts: [{ asset_id: 'cover_c1', role: 'image', media_type: 'image/png' }],
+      },
+    }),
+    boardItem({
+      id: 'crop-review',
+      name: '长剑',
+      state: 'review',
+      source,
+      region: { x: 0.5, y: 0.2, width: 0.2, height: 0.4 },
+      review: {
+        task_id: 'task_c2',
+        cover_asset_id: 'cover_c2',
+        artifacts: [{ asset_id: 'cover_c2', role: 'image', media_type: 'image/png' }],
+      },
+    }),
+    boardItem({ id: 'plain', name: '图标', kind: 'image', state: 'failed' }),
+  ]);
+}
+
+describe('AssetListBoard board actions (#329d)', () => {
+  it('accepts the selected reviewed items in one batch with the list version', async () => {
+    const value = boardFixture();
+    const review = vi.fn(async () => ({
+      list: { ...value.list, version: 4, brief: {}, items: [] },
+      items: [],
+    }));
+    renderBoard(value, { client: { review } as Partial<AssetListClient> });
+    await waitFor(() => expect(screen.getByTestId('asset-board-accept-selected')).toBeTruthy());
+
+    const accept = screen.getByTestId('asset-board-accept-selected') as HTMLButtonElement;
+    expect(accept.disabled).toBe(true);
+
+    fireEvent.click(screen.getByTestId('asset-board-select-item-2d'));
+    fireEvent.click(screen.getByTestId('asset-board-select-item-model-b'));
+    expect(accept.disabled).toBe(false);
+    expect(accept.textContent).toContain('2');
+    expect(screen.getByTestId('asset-board-selected-count').textContent)
+      .toBe(messages['ui.asset_list.board.selected_count'].replace('{count}', '2'));
+
+    fireEvent.click(accept);
+    await waitFor(() => expect(review).toHaveBeenCalledTimes(1));
+    expect(review).toHaveBeenCalledWith('proj', 'listid', {
+      decision: 'accept',
+      item_ids: ['item-2d', 'item-model-b'],
+      expected_version: 3,
+    });
+    await waitFor(() => expect(screen.getByTestId('asset-board-selected-count').textContent)
+      .toBe(messages['ui.asset_list.board.selected_count'].replace('{count}', '0')));
+  });
+
+  // A stale list version (409) is not a per-item refusal: the board re-reads
+  // and says so, and the person decides again on the refreshed board.
+  it('re-reads the board and explains a stale 409', async () => {
+    const value = boardFixture();
+    const getBoard = vi.fn(async () => value);
+    const review = vi.fn(async () => {
+      throw new AssetListError('conflict', 409, { code: 'conflict', detail: '当前状态不允许执行此操作' });
+    });
+    renderBoard(value, { getBoard, client: { review } as Partial<AssetListClient> });
+    await waitFor(() => expect(screen.getByTestId('asset-board-select-item-2d')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('asset-board-select-item-2d'));
+    fireEvent.click(screen.getByTestId('asset-board-accept-selected'));
+
+    const alert = await waitFor(() => screen.getByTestId('asset-board-action-error'));
+    expect(alert.textContent).toContain(messages['ui.asset_list.board.stale']);
+    expect(alert.textContent).toContain('当前状态不允许执行此操作');
+    await waitFor(() => expect(getBoard).toHaveBeenCalledTimes(2));
+    // The selection survives the reload; nothing was decided.
+    expect(screen.getByTestId('asset-board-selected-count').textContent)
+      .toBe(messages['ui.asset_list.board.selected_count'].replace('{count}', '1'));
+  });
+
+  it('keeps the other accepts when one item is refused by the server', async () => {
+    const value = boardFixture();
+    const review = vi.fn(async () => ({
+      list: { ...value.list, version: 4, brief: {}, items: [] },
+      items: [
+        { item_id: 'item-2d', verdict: 'approved', project_asset_id: 'pa_2d' },
+        { item_id: 'item-model-b', error: '项目资产已达上限 200 个' },
+      ],
+    }));
+    renderBoard(value, { client: { review } as Partial<AssetListClient> });
+    await waitFor(() => expect(screen.getByTestId('asset-board-select-item-2d')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('asset-board-select-item-2d'));
+    fireEvent.click(screen.getByTestId('asset-board-select-item-model-b'));
+    fireEvent.click(screen.getByTestId('asset-board-accept-selected'));
+
+    const alert = await waitFor(() => screen.getByTestId('asset-board-action-error'));
+    expect(alert.textContent).toContain(messages['ui.asset_list.board.accept_partial']);
+    expect(alert.textContent).toContain('长剑');
+    expect(alert.textContent).toContain('项目资产已达上限 200 个');
+    // Only the refused item stays selected for the retry.
+    expect(screen.getByTestId('asset-board-selected-count').textContent)
+      .toBe(messages['ui.asset_list.board.selected_count'].replace('{count}', '1'));
+  });
+
+  it('returns one item only after a reason is picked and sends it with the note', async () => {
+    const value = boardFixture();
+    const review = vi.fn(async () => ({
+      list: { ...value.list, version: 4, brief: {}, items: [] },
+      items: [{ item_id: 'item-2d', verdict: 'returned' }],
+    }));
+    renderBoard(value, { client: { review } as Partial<AssetListClient> });
+    await waitFor(() => expect(screen.getByTestId('asset-board-return-item-2d')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('asset-board-return-item-2d'));
+    const dialog = await waitFor(() => screen.getByTestId('asset-board-return-dialog'));
+    expect(dialog.textContent).toContain('打回「图标」');
+    // The image kind sees the general reasons, never the 3D-only ones.
+    for (const id of ['style', 'proportion', 'details', 'reference', 'other']) {
+      expect(within(dialog).getByTestId(`asset-board-return-reason-${id}`)).toBeTruthy();
+    }
+    for (const id of ['topology', 'texture', 'rig']) {
+      expect(within(dialog).queryByTestId(`asset-board-return-reason-${id}`)).toBeNull();
+    }
+
+    const submit = within(dialog).getByTestId('asset-board-return-submit') as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(within(dialog).getByTestId('asset-board-return-reason-style'));
+    expect(submit.disabled).toBe(false);
+    fireEvent.change(within(dialog).getByTestId('asset-board-return-note'), { target: { value: '参考图偏冷' } });
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(review).toHaveBeenCalledWith('proj', 'listid', {
+      decision: 'return',
+      item_ids: ['item-2d'],
+      reason_ids: ['style'],
+      note: '参考图偏冷',
+      expected_version: 3,
+    }));
+    await waitFor(() => expect(screen.queryByTestId('asset-board-return-dialog')).toBeNull());
+  });
+
+  it('shows the 3D-only reasons for a character item', async () => {
+    renderBoard(boardFixture());
+    await waitFor(() => expect(screen.getByTestId('asset-board-return-item-model-b')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('asset-board-return-item-model-b'));
+    const dialog = await waitFor(() => screen.getByTestId('asset-board-return-dialog'));
+    for (const id of ['topology', 'texture', 'rig']) {
+      expect(within(dialog).getByTestId(`asset-board-return-reason-${id}`)).toBeTruthy();
+    }
+  });
+
+  it('downloads the accepted batch through the existing save trigger', async () => {
+    const value = boardFixture();
+    const downloadArchive = vi.fn(async () => ({
+      blob: new Blob(['zip-bytes'], { type: 'application/zip' }),
+      filename: 'asset-list-listid.zip',
+    }));
+    renderBoard(value, { client: { downloadArchive } as Partial<AssetListClient> });
+    await waitFor(() => expect(screen.getByTestId('asset-board-download')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('asset-board-download'));
+    await waitFor(() => expect(downloadArchive).toHaveBeenCalledWith('proj', 'listid', []));
+    await waitFor(() => expect(saved.calls).toHaveLength(1));
+    expect(saved.calls[0].filename).toBe('asset-list-listid.zip');
+  });
+
+  it('offers a narrowed retry after a 413 and downloads only the selection', async () => {
+    // Two accepted items, so a one-item selection really narrows the batch.
+    const value = board([
+      ...boardFixture().items,
+      boardItem({ id: 'item-model-c', name: '盾牌', state: 'accepted' }),
+    ]);
+    const downloadArchive = vi.fn()
+      .mockRejectedValueOnce(new AssetListError('too large', 413, {
+        code: 'asset_list_archive_too_large',
+        detail: '已通过项超出整批下载上限；请用 item_ids 分批下载。',
+      }))
+      .mockResolvedValueOnce({ blob: new Blob(['zip']), filename: 'batch.zip' });
+    renderBoard(value, { client: { downloadArchive } as Partial<AssetListClient> });
+    await waitFor(() => expect(screen.getByTestId('asset-board-download')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('asset-board-download'));
+    const alert = await waitFor(() => screen.getByTestId('asset-board-download-error'));
+    expect(alert.textContent).toContain('已通过项超出整批下载上限');
+    // Without a filter or a selection the scope is still every accepted item.
+    expect(screen.queryByTestId('asset-board-download-batch')).toBeNull();
+    expect(alert.textContent).toContain(messages['ui.asset_list.board.download_scope_hint']);
+
+    fireEvent.click(screen.getByTestId('asset-board-select-item-model-a'));
+    const batch = await waitFor(() => screen.getByTestId('asset-board-download-batch'));
+    fireEvent.click(batch);
+    await waitFor(() => expect(downloadArchive).toHaveBeenLastCalledWith('proj', 'listid', ['item-model-a']));
+    await waitFor(() => expect(saved.calls).toHaveLength(1));
+    expect(saved.calls[0].filename).toBe('batch.zip');
+  });
+
+  it('draws the crop boxes over the original and links them to the results', async () => {
+    renderBoard(compareBoard());
+    await waitFor(() => expect(screen.getByTestId('asset-board-compare-toggle')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('asset-board-compare-toggle'));
+
+    expect(await waitFor(() => screen.getByTestId('asset-board-compare'))).toBeTruthy();
+    // The text legend names every state that appears; color is never alone.
+    expect(screen.getByTestId('asset-board-compare-legend-accepted').textContent).toContain('已验收');
+    expect(screen.getByTestId('asset-board-compare-legend-review').textContent).toContain('待验收');
+
+    const box = screen.getByTestId('asset-board-compare-box-crop-accepted');
+    expect(box.getAttribute('aria-label')).toBe('第 1 项「主角」，已验收');
+    expect(box.style.left).toBe('10%');
+    expect(box.style.top).toBe('10%');
+    expect(box.style.width).toBe('30%');
+    expect(box.style.height).toBe('30%');
+
+    // Clicking a box focuses its result; clicking a result highlights its box.
+    fireEvent.click(screen.getByTestId('asset-board-compare-box-crop-review'));
+    expect(screen.getByTestId('asset-board-compare-box-crop-review').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('asset-board-compare-cell-crop-review').getAttribute('data-focused')).toBe('true');
+    expect(screen.getByTestId('asset-board-compare-cell-crop-review').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('asset-board-compare-cell-crop-accepted'));
+    expect(screen.getByTestId('asset-board-compare-box-crop-accepted').getAttribute('data-focused')).toBe('true');
+    expect(screen.getByTestId('asset-board-compare-cell-crop-review').getAttribute('data-focused')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('asset-board-compare-toggle'));
+    expect(screen.getByTestId('asset-board-grid')).toBeTruthy();
+  });
+
+  it('hides the comparison entry for a list without crop provenance', async () => {
+    renderBoard(board([boardItem({ id: 'plain', name: '图标', kind: 'image', state: 'failed' })]));
+    await waitFor(() => expect(screen.getByTestId('asset-board-cell-plain')).toBeTruthy());
+    expect(screen.queryByTestId('asset-board-compare-toggle')).toBeNull();
+  });
+
+  it('polls while the list produces, pauses while hidden and stops when done', async () => {
+    vi.useFakeTimers();
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const running = withRun(boardFixture(), 'running');
+    // Every item terminal: the run is complete and nothing still needs polling.
+    const done = withRun(board([boardItem({ id: 'item-2d', name: '图标', kind: 'image', state: 'accepted' })]), 'completed');
+    const getBoard = vi.fn()
+      .mockResolvedValueOnce(running)
+      .mockResolvedValueOnce(running)
+      .mockResolvedValue(done);
+    renderBoard(running, { getBoard, pollIntervalMs: 5000 });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(getBoard).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(getBoard).toHaveBeenCalledTimes(2);
+
+    visibility = 'hidden';
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(getBoard).toHaveBeenCalledTimes(2);
+
+    visibility = 'visible';
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(getBoard).toHaveBeenCalledTimes(3);
+
+    // The last read returned a completed run, so the interval is gone.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(getBoard).toHaveBeenCalledTimes(3);
   });
 });

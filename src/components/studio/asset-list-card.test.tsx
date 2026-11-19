@@ -130,6 +130,8 @@ function clientWith(
     listProjectLists: vi.fn(async () => []),
     getList: vi.fn(async () => detail()),
     getBoard: vi.fn(async () => ({ list: { ...detail(), version: 1 }, items: [] })),
+    review: vi.fn(async () => ({ list: detail(), items: [] })),
+    downloadArchive: vi.fn(async () => ({ blob: new Blob(), filename: 'asset-list.zip' })),
     decide: decide as unknown as AssetListClient['decide'],
     controlRun: (controls.controlRun ?? vi.fn(async () => run())) as unknown as AssetListClient['controlRun'],
     skipItem: (controls.skipItem ?? vi.fn(async () => item({ state: 'skipped' }))) as unknown as AssetListClient['skipItem'],

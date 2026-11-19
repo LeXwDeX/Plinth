@@ -74,6 +74,8 @@ function clientWith(getList: ReturnType<typeof vi.fn>): AssetListClient {
     listProjectLists: vi.fn(async () => []),
     getList: getList as unknown as AssetListClient['getList'],
     getBoard: vi.fn(async () => ({ list: { ...detail(), version: 1 }, items: [] })),
+    review: vi.fn(async () => ({ list: detail(), items: [] })),
+    downloadArchive: vi.fn(async () => ({ blob: new Blob(), filename: 'asset-list.zip' })),
     decide: vi.fn(async () => detail()),
     controlRun: vi.fn(async () => ({
       status: 'running',

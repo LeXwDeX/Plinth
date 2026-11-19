@@ -236,6 +236,42 @@ export interface AssetListBoard {
   items: AssetListBoardItem[];
 }
 
+/** #329d: the two board decisions; a return names one item, an accept may name many. */
+export type AssetListReviewDecision = 'accept' | 'return';
+
+/**
+ * #329d: one board submission. `expected_version` is the list version the
+ * board read; a stale one is a 409 and nothing is written. A return needs at
+ * least one `reason_ids` entry; an accept may carry a note but never reasons.
+ */
+export interface AssetListReviewInput {
+  decision: AssetListReviewDecision;
+  item_ids: string[];
+  reason_ids?: string[];
+  note?: string;
+  expected_version: number;
+}
+
+/** #329d: one item's outcome of a batch; `error` is the server's per-item refusal. */
+export interface AssetListItemReview {
+  item_id: string;
+  verdict?: string;
+  project_asset_id?: string;
+  error?: string;
+}
+
+/** #329d: the refreshed list plus one outcome per submitted item. */
+export interface AssetListReviewResult {
+  list: AssetListDetail;
+  items: AssetListItemReview[];
+}
+
+/** #329d: a downloaded archive and the filename the server suggested. */
+export interface AssetListArchiveDownload {
+  blob: Blob;
+  filename: string;
+}
+
 /** #331: a normalized region relative to its source picture, right and bottom edges exclusive. */
 export interface CropRegion {
   x: number;
@@ -334,6 +370,16 @@ export interface AssetListClient {
   getList(projectID: string, listID: string): Promise<AssetListDetail>;
   /** #329: the read-only acceptance board of one list, every item from one aggregate read. */
   getBoard(projectID: string, listID: string): Promise<AssetListBoard>;
+  /**
+   * #329d: accept one or many reviewed items, or return exactly one with its
+   * declared reasons. The list version gates the whole batch.
+   */
+  review(projectID: string, listID: string, input: AssetListReviewInput): Promise<AssetListReviewResult>;
+  /**
+   * #329d: the batch archive of the accepted items. `itemIDs` narrows it to a
+   * subset after the server refused a whole-list download as too large.
+   */
+  downloadArchive(projectID: string, listID: string, itemIDs?: readonly string[]): Promise<AssetListArchiveDownload>;
   decide(projectID: string, listID: string, decision: AssetListDecision, reason?: string): Promise<AssetListDetail>;
   listSessionLists(sessionID: string): Promise<AssetListSummary[]>;
   /**
@@ -384,6 +430,21 @@ function route(template: string, parameters: Record<string, string>): string {
   });
 }
 
+/** The server's `Content-Disposition` name, preferring RFC 5987 when present. */
+export function archiveFilename(header: string | null): string {
+  if (!header) return '';
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      return encoded[1];
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain ? plain[1] : '';
+}
+
 /**
  * #328: the presence URL for `navigator.sendBeacon`. Empty when the Catalog has
  * no route; the heartbeat then falls back to the client's fetch.
@@ -409,6 +470,16 @@ export function createAssetListClient(
     route(required(routes.project_asset_list), { projectID, listID });
   const boardRoute = (projectID: string, listID: string) =>
     route(required(routes.project_asset_list_board), { projectID, listID });
+  const reviewRoute = (projectID: string, listID: string) =>
+    route(required(routes.project_asset_list_item_review), { projectID, listID });
+  const archiveRoute = (projectID: string, listID: string, itemIDs: readonly string[]) => {
+    const base = route(required(routes.project_asset_list_archive), { projectID, listID });
+    const query = itemIDs
+      .filter((id) => id !== '')
+      .map((id) => `item_ids=${encodeURIComponent(id)}`)
+      .join('&');
+    return query ? `${base}?${query}` : base;
+  };
   const decisionRoute = (projectID: string, listID: string) =>
     route(required(routes.project_asset_list_decision), { projectID, listID });
   const runRoute = (projectID: string, listID: string) =>
@@ -464,6 +535,32 @@ export function createAssetListClient(
       const payload = await payloadOf(response);
       if (!response.ok) failure(response, payload);
       return boardOf(payload);
+    },
+    async review(projectID, listID, input) {
+      const body: Record<string, unknown> = {
+        decision: input.decision,
+        item_ids: input.item_ids,
+      };
+      if (input.reason_ids && input.reason_ids.length > 0) body.reason_ids = input.reason_ids;
+      if (input.note) body.note = input.note;
+      body.expected_version = input.expected_version;
+      const response = await fetcher(reviewRoute(projectID, listID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return object(payload) as unknown as AssetListReviewResult;
+    },
+    async downloadArchive(projectID, listID, itemIDs) {
+      const response = await fetcher(archiveRoute(projectID, listID, itemIDs ?? []));
+      if (!response.ok) failure(response, await payloadOf(response));
+      const blob = await response.blob();
+      return {
+        blob,
+        filename: archiveFilename(response.headers.get('content-disposition')) || `asset-list-${listID}.zip`,
+      };
     },
     async decide(projectID, listID, decision, reason) {
       const body = reason ? { decision, reason } : { decision };

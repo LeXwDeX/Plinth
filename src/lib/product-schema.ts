@@ -221,6 +221,10 @@ export interface ProductSchema {
          project_asset_list_decision?: string;
          /** #329: the read-only acceptance board of one list (GET). */
          project_asset_list_board?: string;
+         /** #329d: accept/return reviewed items (PUT). */
+         project_asset_list_item_review?: string;
+         /** #329d: the batch ZIP of the accepted items (GET, optional item_ids). */
+         project_asset_list_archive?: string;
          /** #327: the lists proposed in one chat session (GET). */
          chat_session_asset_lists?: string;
          /** #328: a list's run (POST start/pause/resume/stop). */

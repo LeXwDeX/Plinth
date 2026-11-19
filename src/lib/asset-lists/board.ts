@@ -227,3 +227,99 @@ export function regionText(region: AssetListBoardRegion): {
 export function boardItems(board: AssetListBoard | null): AssetListBoardItem[] {
   return Array.isArray(board?.items) ? board.items : [];
 }
+
+/** #329d: one declared return reason, visible for the given item kinds. */
+export interface BoardReturnReason {
+  id: string;
+  label: string;
+  kinds: string[];
+}
+
+/**
+ * #329d: the reasons the picker offers for one kind. The server refuses a
+ * reason outside the item's kinds, so the picker never shows one; an empty
+ * `kinds` means the reason applies to every kind.
+ */
+export function returnReasonsForKind(schema: ProductSchema, kind: string): BoardReturnReason[] {
+  const declared = schema.asset_list?.review?.return_reasons ?? [];
+  return declared.filter((reason) => reason.kinds.length === 0 || reason.kinds.includes(kind));
+}
+
+/** The 1-based position of one item on the board; 0 when it is not listed. */
+export function boardItemIndex(items: readonly AssetListBoardItem[], itemID: string): number {
+  const index = items.findIndex((item) => item.id === itemID);
+  return index < 0 ? 0 : index + 1;
+}
+
+/** The accepted items; the batch archive packs exactly these. */
+export function acceptedBoardItems(items: readonly AssetListBoardItem[]): AssetListBoardItem[] {
+  return items.filter((item) => item.state === 'accepted');
+}
+
+/**
+ * #329d: whether the board should keep re-reading while it is open. A running
+ * run is producing, and items in working or review keep the run running, so
+ * the board stays current until every item is terminal; a paused or finished
+ * list with no such item stops polling.
+ */
+export function boardPollingActive(board: AssetListBoard | null): boolean {
+  if (!board) return false;
+  if (board.list.run?.status === 'running') return true;
+  return board.items.some((item) => item.state === 'working' || item.state === 'review');
+}
+
+/**
+ * #329d: the item ids a batch download takes. An explicit selection of
+ * accepted items wins; otherwise the accepted items the current filter shows.
+ * The archive route narrows to exactly these ids.
+ */
+export function boardDownloadScope(
+  items: readonly AssetListBoardItem[],
+  filter: AssetListBoardFilter,
+  selectedIDs: ReadonlySet<string>,
+): string[] {
+  const accepted = new Map(acceptedBoardItems(items).map((item) => [item.id, item.id]));
+  const selected = [...selectedIDs].filter((id) => accepted.has(id));
+  if (selected.length > 0) return selected;
+  return filterBoardItems(items, filter)
+    .filter((item) => item.state === 'accepted')
+    .map((item) => item.id);
+}
+
+/** #329d: the crop provenance of one group's source picture. */
+export interface BoardCropGroup {
+  sourceAssetID: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  items: AssetListBoardItem[];
+}
+
+/** The items that carry both a crop source picture and its region. */
+export function boardCropItems(items: readonly AssetListBoardItem[]): AssetListBoardItem[] {
+  return items.filter((item) => Boolean(item.source?.source_input_asset_id) && Boolean(item.region));
+}
+
+/**
+ * #329d: the crop items grouped by their source picture, in board order. One
+ * list may cut from several pictures; each group draws its own boxes.
+ */
+export function boardCropGroups(items: readonly AssetListBoardItem[]): BoardCropGroup[] {
+  const groups: BoardCropGroup[] = [];
+  const bySource = new Map<string, BoardCropGroup>();
+  for (const item of boardCropItems(items)) {
+    const sourceAssetID = item.source?.source_input_asset_id ?? '';
+    let group = bySource.get(sourceAssetID);
+    if (!group) {
+      group = {
+        sourceAssetID,
+        sourceWidth: item.source?.source_width ?? 0,
+        sourceHeight: item.source?.source_height ?? 0,
+        items: [],
+      };
+      bySource.set(sourceAssetID, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
+}
