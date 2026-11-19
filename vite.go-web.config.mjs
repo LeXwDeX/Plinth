@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { copyFileSync, readFileSync } from 'node:fs';
+import { buildTargets } from './scripts/browser-floor.mjs';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const goWebOutputRoot = path.join(projectRoot, 'build', 'go-web');
@@ -109,6 +110,9 @@ export default {
     },
   },
   build: {
+    // Syntax lowering and the CSS target follow package.json's browserslist (#387). Vite 8's default target is close
+    // to it; stating it makes the declared minimum browser the build target rather than a coincidence of defaults.
+    target: buildTargets(),
     outDir: goWebOutputRoot,
     emptyOutDir: true,
     assetsDir: 'assets',

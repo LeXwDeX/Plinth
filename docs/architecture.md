@@ -885,6 +885,13 @@ Go shell 安全注入 Product Schema
 
 **展开编辑框的受理回调（#188）。** `Composer` 的 `onSend` 从无参改为接收 `onAccepted` 回调；Enter、折叠发送按钮和展开对话框发送按钮统一走 `submit`，只有父级确认已被服务端接管或进入发送队列后才调用回调关闭展开编辑框。拒绝或失败不调用，编辑框和原文保留；`chat-column.tsx` 把回调包在发起发送的会话身份检查里，发送期间切换会话不会关闭新会话的编辑框。排队分支在清空输入与草稿后同样算受理。验证：`composer-editor.test.tsx`（受理关闭/拒绝保留/再次打开/IME 与 Shift+Enter）、`chat-column-wiring.test.ts`（回调接线与排队分支）、`chat-choice-wiring.test.ts`（选择卡答复不受影响）。未部署，未做浏览器人工验收。
 
+### 浏览器最低版本与错误上报的请求 ID（#387；源码已实现，本机测试覆盖，未部署验收）
+
+- **最低版本**：Chrome / Edge 111、Firefox 128、Safari 16.4（只面向 PC 桌面浏览器），唯一真源是 `package.json` 的 `browserslist`。取值不是随意的：Tailwind v4 把 CSS 编译到这组版本（`@layer`、`color-mix()`、`oklch()`、`@property`），构建产物里约 93% 的样式在 `@layer` 内，Chrome 99 之前的浏览器会整体丢弃，Vite 8 的默认构建目标同样是 chrome111 / safari16.4。线上曾有 Chrome / Edge 92 报 `Object.hasOwn is not a function`，改 API 不能让它可用：脚本全兼容，页面仍没有样式。
+- **构建与检查跟随它**：`vite.go-web.config.mjs` 的 `build.target` 由 `scripts/browser-floor.mjs` 从 `browserslist` 派生；`tsconfig.json` 的 `lib` 固定为该版本能运行的最新 ES 库（现为 `es2023`，不再是 `esnext`），所以 `pnpm exec tsc --noEmit` 按真实类型拒绝 `Object.groupBy`、`Promise.withResolvers` 这类超出版本的内置 API。`lib.dom.d.ts` 总是最新，DOM 一侧管不到：`src/__tests__/browser-support.test.ts`（随 `pnpm test`）扫描一张已知较新 Web API 表（`AbortSignal.any`、`URL.canParse`、Popover 等；有特性检测保护的用法在该行或上一行写 `browser-support: allow`），并校验 `browserslist`、构建目标、`lib` 与低版本提示文案里的版本号一致。依赖包里的代码、表外的 Web API 不在检查范围内。
+- **低于最低版本时**：`public/browser-support.js` 是不经构建的 ES5 经典脚本，由 `web/index.html` 在 Schema 内联脚本之后、应用脚本之前同源加载（满足 `script-src 'self'`，不需要新的内联哈希）。它探测 `Object.hasOwn`、`Array.prototype.toSorted`、`structuredClone`、`@layer`、`color-mix()`、`oklch()`；缺任一项就把 Schema 文案 `ui.browser_unsupported.title` / `description`（中英，写明最低版本）画进页面并置 `window.__PLINTH_UNSUPPORTED_BROWSER__`，`web/src/main.tsx` 随之不启动应用；取不到文案时不拦截。
+- **错误上报带请求 ID**：错误边界与 window 监听不知道出错前最后一个请求是哪个，此前只有 3D 查看器加载失败等少数调用方传 ID，`related_request_id` 总是空。`installRequestIdTracking()`（`main.tsx` 在渲染前调用）包装全局 `fetch`，记住最近一次响应的 `X-Request-ID`（只认服务端格式；响应与拒绝原样透传；上报自身的响应不计入）；`reportClientError` 在调用方没有给出 ID 时把它作为 `request_id` 发送。EventSource 读不到响应头，对话事件流的 ID 不在其中。
+
 ### 对话消息的 Markdown 子集（#333；源码已实现，本机 Mock 栈 Chromium/WebKit 验收，未部署验收）
 
 助手消息按 Markdown 子集显示，用户消息仍按输入原样显示（`whitespace-pre-wrap` 纯文本，句柄照旧是标签）。不引入新依赖：
@@ -2747,7 +2754,7 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - `internal/transport/httpapi` 的访问日志中间件位于最外层，为每个请求生成 `req_` 前缀 ID 写入 `X-Request-ID`，并通过 `statusRecorder` 上的 `requestTrace` 收集：身份解析得到的 owner、`writeProblem` 的公开错误码与可变参数内部原因、各领域错误 writer 经 `noteCause` 记下的 error 链。`logging.ErrChain` 在错误文字后追加其未包含的被包装原因（领域错误 `Error()` 只返回 Detail，不追加会让日志缺少触发原因，例如上传大小上限，#274）。
 - 错误体只追加 `request_id`；带 Schema 拒绝原因的 400 另有 `user_facing: true`（#288，见 §7「参考图的大小、像素与压缩」）。
 - 路由模板 `route` 与 `session_id` 由紧贴 ServeMux 的 `routeTraceMiddleware` 在 mux 匹配后写入 trace（中间件经 `WithContext` 复制请求后，mux 只在副本上设置 `Pattern`，最外层读不到）；`request_trace_test` 经 `Server.Handler()` 全链验证。
-- `POST runtime.http.routes.client_errors` 接收前端错误边界与全局错误，受 `client_error_report` 的体积、每分钟条数和文本长度约束；日志行带本次上报的 `request_id`。未登录请求（登录页、会话过期后）在 `anonymous_global_per_minute` > 0 时也接受，改用 `anonymous_*` 的更小体积与文本上限、每客户端（`rateLimitClientKey`）与全体两级每分钟限额，`page` 去掉查询串与片段，日志记 `anonymous=true`、不记 owner；为 0 时返回 401（#317，滥用评估见 [自部署安全配置](self-deploy-security.md) §5）。
+- `POST runtime.http.routes.client_errors` 接收前端错误边界与全局错误，受 `client_error_report` 的体积、每分钟条数和文本长度约束；日志行带本次上报请求自己的 `request_id`；上报体里的 `request_id` 是浏览器最近收到的响应 ID，日志记为 `related_request_id`，两者并列（#387，见 §4「浏览器最低版本与错误上报的请求 ID」）。未登录请求（登录页、会话过期后）在 `anonymous_global_per_minute` > 0 时也接受，改用 `anonymous_*` 的更小体积与文本上限、每客户端（`rateLimitClientKey`）与全体两级每分钟限额，`page` 去掉查询串与片段，日志记 `anonymous=true`、不记 owner；为 0 时返回 401（#317，滥用评估见 [自部署安全配置](self-deploy-security.md) §5）。
 - 后台路径沿用各模块已注入的同一 logger（Generation 的 Attempt 失败、物化拒绝，Chat 的 Agent 请求与续跑失败等）。运维细节见 `dev_ops.md`。DEBUG 不得改变公开响应合同。
 - 所有 ≥ 400 的响应都应带 `request_id`：Chat 兼容错误体（`writeChatError`）附 `request_id`；其他兼容接口（登录、管理后台、兼容资产、画布等各自拼 `{"error":…}` 的 writer）由唯一出口 `writeJSON` 统一补齐，即状态码 ≥ 400 且正文是没有 `request_id` 的 JSON 对象时追加与 `X-Request-ID` 相同的值，已有 `request_id` 的正文与非对象正文不变（#316）。管理后台的审计日志与生成记录 writer 也走 `writeJSON`（#118；自行编码会使 403/401 缺 `request_id`）；`TestEveryAdministrationRouteErrorCarriesTheRequestID` 按 Schema 的 `/api/admin*` 路由全量验证普通用户的 403。
 - 前端 `src/lib/problem-reference.ts` 的 `RequestFailure` / `responseRequestId` 从错误体或 `X-Request-ID` 头取 ID；对话发送失败、去背景提交失败、个人 Skill 删除失败的提示后附「错误 ID」（#240）。
