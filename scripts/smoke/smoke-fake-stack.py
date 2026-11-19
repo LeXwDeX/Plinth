@@ -56,10 +56,18 @@ same HTTP API the browser uses:
     edit's crop instruction, proposes with reference_input_asset_ids and confirms
     the list onto the board, all with no Task, step or charge (the
     "asset-list-crops" group).
+  * the direction card (#374, kind next_step) under a fixed function: the session
+    fixes a function the way the Harness panel saves it, the Agent still opens a
+    two-option card whose first option clears the selection, a tool outside the
+    function (update_production_brief) is not offered and writes nothing, the
+    page's order (clear the selection with the latest revision, then answer the
+    card) keeps the enabled operations, marks the card answered and hands the
+    chosen direction to the Agent, and the same call then runs (the "next-step"
+    group).
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, faults;
+agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, faults;
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
@@ -75,6 +83,8 @@ the framed block surviving compaction, edit/delete effects, and a second owner's
 "p2" the Tripo P2 quote/chain, "agent-background" the batched wait that keeps both Tasks running,
 "project" the #240 project inheritance: promote a finished picture, new session, reused style reference,
 "image-purpose" the #239 2D purpose card, brief, purpose-driven model and 2D lock,
+"next-step" the #374 direction card under a fixed function: the card opens, a tool outside the function
+is not offered, clearing the selection and answering the card follow the page's order and give every tool back,
 "offering-knowledge" the #249 knowledge projection, derived model list, purpose coverage,
 over-limit refusal and final_prompt report,
 "work-ledger" the #248 frozen prompts, compaction, style anchor and self-check leftovers,
@@ -2286,6 +2296,219 @@ def scenario_image_purpose(api, offerings, work):
         record("#239 default 2D purpose applies", ok,
                f"offering={task.get('offering_id')} state={task.get('state')} "
                f"aspect_ratio={normalized.get('aspect_ratio')} model_choice={model_choice}")
+
+
+# ---- #374: the direction card (kind next_step) under a fixed function ----
+
+# The function the scenario fixes. UV unwrap has one available service in the shipped Catalog and takes no parameter
+# besides its source model, so the Harness panel adopts that service by itself (harnessAutoSelectOffering) and saves
+# no fixed or fillable parameter. With no source model in the session the harness reports needs_input and the
+# function's own tool stays hidden: the scenario needs the tool set a fixed function leaves, not a runnable step.
+NEXT_STEP_OPERATION = "uv-unwrap"
+# A free session write that belongs to no function and is not among chat.harness.base_tools. Its effect is one GET
+# away, so it shows whether the Agent was offered the tool without a Task, an approval or a charge in the way.
+NEXT_STEP_BRIEF_CALL = '[[fake:tool:update_production_brief {"purpose":"game_prop"}]]'
+NEXT_STEP_BRIEF_REQUEST = "这个模型是游戏道具，把用途记进简报 "
+
+
+def _harness_source_role(parameter):
+    """sourceParameterRole of src/lib/workspace/processing-source.ts: which source a parameter takes, or None."""
+    semantic = parameter.get("semantic")
+    if semantic:
+        return {"source-task": "task", "source-asset": "asset", "source-url": "url"}.get(semantic)
+    name, kind = parameter.get("name"), parameter.get("type")
+    if (name, kind) == ("source_task", "task"):
+        return "task"
+    if (name, kind) == ("source_asset", "asset") or name == "source_assets":
+        return "asset"
+    if (name, kind) == ("source_url", "text"):
+        return "url"
+    return None
+
+
+def _harness_pin_selection(saved, declaration, operation, offering):
+    """The selection the Harness panel saves when the person picks `operation` and its only available service:
+    harnessOperationSelection (the first explicit goal adopts the Schema's allowed-operation defaults), then
+    harnessOfferingSelection and harnessSelectionInput (src/components/workspace/harness-panel.tsx). The default
+    source is the Agent's own choice among the session's models (harnessDefaultModelSources). Only valid for an
+    offering that takes no parameter besides its source, which the caller checks."""
+    started = bool(saved.get("operation_id")) or bool(saved.get("enabled_operations"))
+    enabled = saved.get("enabled_operations") if started else declaration.get("default_enabled_operations")
+    agent_source = (declaration.get("default_task_source_mode") == "agent"
+                    and any(mode.get("id") == "agent" for mode in declaration.get("task_source_modes") or [])
+                    and any(_harness_source_role(parameter) in ("task", "asset") for parameter in offering.get("parameters") or []))
+    pinned = dict(saved)
+    pinned.update({
+        "operation_id": operation["id"], "enabled_operations": sorted(set(enabled or []) | {operation["id"]}),
+        "allow_prerequisites": (saved.get("allow_prerequisites") if saved.get("operation_id")
+                                else declaration.get("default_allow_prerequisites")),
+        "offering_id": offering["id"], "offering_revision": offering["revision"],
+        "sources": [{"kind": "task_asset", "selection_mode": "agent", "parameter": "*"}] if agent_source else [],
+        "fixed_parameters": {}, "fillable_parameters": []})
+    return pinned
+
+
+def _harness_clear_selection(saved):
+    """harnessClearSelection: the saved selection without its operation, service, sources and parameters. The
+    enabled operations stay exactly as saved, so clearing changes nothing else."""
+    cleared = {key: value for key, value in saved.items() if key not in ("operation_id", "offering_id", "offering_revision")}
+    cleared.update({"enabled_operations": list(saved.get("enabled_operations") or []), "sources": [],
+                    "fixed_parameters": {}, "fillable_parameters": []})
+    return cleared
+
+
+def _session_brief(api, session):
+    """The session's production brief, or None when it cannot be read."""
+    status, body = api.json("GET", f"/api/v1/chat/sessions/{session}/brief")
+    return ((body or {}).get("brief") or {}) if status == 200 else None
+
+
+def _session_tool_names(api, session):
+    """Every tool the session's assistant messages called, oldest first (the browser's tool-call list)."""
+    messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+    messages = messages if isinstance(messages, list) else messages.get("messages", [])
+    names = []
+    for message in messages:
+        raw = message.get("toolCalls")
+        try:
+            calls = (json.loads(raw) if isinstance(raw, str) else raw) or []
+        except ValueError:
+            continue
+        names.extend(call.get("name") for call in calls if isinstance(call, dict))
+    return names
+
+
+def _next_step_turn(api, session, content, domain="3d", seconds=60, **fields):
+    """One chat turn whose fake LLM answer is the tool call embedded in content; retries while another turn still
+    owns the session and waits for this turn's reply. Returns (finished, why)."""
+    before = assistant_reply_count(api, session)
+    status, _ = _send_chat(api, session, {"content": content, "creative_domain": domain, **fields})
+    if status not in (200, 201, 202):
+        return False, f"send {status}"
+    end = time.time() + seconds
+    while time.time() < end:
+        if assistant_reply_count(api, session) > before:
+            return True, ""
+        time.sleep(0.4)
+    return False, f"no reply within {seconds}s"
+
+
+def scenario_next_step(api):
+    """#374: the direction card under a fixed function. A fixed function leaves the Agent its own tool and the
+    base tools (chat.harness.base_tools, ask_choice among them). The Agent opens a next_step card whose first
+    option clears the function selection; the page saves that selection first, with the latest revision and
+    every other setting as saved, and sends the answer after it. Until then a tool outside the function is not
+    offered; once the selection is clear the same call runs. The Agent here is the fake OpenAI-compatible LLM,
+    so every call is a [[fake:tool:...]] marker, and no real upstream is involved."""
+    session = new_session(api)
+    harness = f"/api/v1/chat/sessions/{session}/harness"
+    status, schema = api.json("GET", "/api/v1/schema")
+    schema = schema.get("schema", schema) if status == 200 and isinstance(schema, dict) else {}
+    declaration = (schema.get("chat") or {}).get("harness") or {}
+    messages = (schema.get("content") or {}).get("messages") or {}
+
+    # (1) fix the function the way the Harness panel does: the operation and its only available service, the
+    # Agent's own choice of source model, the allowed operations the Schema defaults to.
+    operation = next((item for item in declaration.get("operations") or [] if item.get("id") == NEXT_STEP_OPERATION), {})
+    listed = api.json("GET", "/api/v1/offerings?capability=" + urllib.parse.quote(operation.get("capability") or "-"))[1]
+    services = [item for item in (listed or {}).get("offerings") or []
+                if item.get("available") and item.get("capability") == operation.get("capability")
+                and (not operation.get("model_ids") or item.get("model_id") in operation["model_ids"])]
+    extra = [parameter.get("name") for parameter in (services[0].get("parameters") or []) if _harness_source_role(parameter) is None] if services else []
+    if not operation or operation.get("unavailable_reason") or len(services) != 1 or extra:
+        record("#374 next-step: the function is fixed through the session harness", False,
+               f"operation={operation.get('id')} unavailable_reason={operation.get('unavailable_reason')} "
+               f"available services={[item.get('id') for item in services]} parameters besides the source={extra}: "
+               f"the scenario needs a declared, available function with exactly one service and no other parameter")
+        return
+    status, view = api.json("GET", harness)
+    saved = view.get("selection") or {}
+    status_put, put = api.json("PUT", harness, {
+        "expected_revision": saved.get("revision", -1),
+        "selection": _harness_pin_selection(saved, declaration, operation, services[0])})
+    pinned = put.get("selection") or {}
+    ok = (status == 200 and status_put == 200 and pinned.get("operation_id") == operation["id"]
+          and pinned.get("offering_id") == services[0]["id"] and pinned.get("revision") == saved.get("revision", -1) + 1)
+    record("#374 next-step: the function is fixed through the session harness", ok,
+           f"GET {status}, PUT {status_put}, operation={pinned.get('operation_id')} service={pinned.get('offering_id')} "
+           f"sources={pinned.get('sources')} revision {saved.get('revision')} -> {pinned.get('revision')} "
+           f"status={put.get('status')} enabled={pinned.get('enabled_operations')}")
+    if not ok:
+        return
+
+    # (2) under the fixed function the Agent can still open the direction card.
+    card_arguments = {
+        "kind": "next_step", "recommended": "clear_selection",
+        "options": [
+            {"id": "clear_selection", "label": "清空功能选择", "action": {"type": "clear_operation"},
+             "description": "回到自由模式，所有工具重新可用，再按你的需求继续。"},
+            {"id": "stay_in_function", "label": "保持当前功能", "description": "继续只做当前固定的功能。"}]}
+    marker = "[[fake:tool:ask_choice " + json.dumps(card_arguments, ensure_ascii=False) + "]]"
+    finished, why = _next_step_turn(api, session, "先画一张角色立绘，再给它建模 " + marker)
+    cards = [item for item in _choice_cards(api, session) if item.get("kind") == "next_step"]
+    card = cards[0] if cards else {}
+    options = card.get("options") or []
+    first_action = (options[0].get("action") if options else None) or {}
+    still_fixed = ((api.json("GET", harness)[1].get("selection") or {}).get("operation_id") == operation["id"])
+    ok = (finished and len(cards) == 1 and card.get("state") == "pending" and len(options) == 2
+          and first_action == {"type": "clear_operation"} and not options[1].get("action") and still_fixed)
+    record("#374 next-step: ask_choice opens the direction card under the fixed function", ok,
+           f"turn finished={finished} {why}; cards={len(cards)} state={card.get('state')} tool={card.get('tool')!r} "
+           f"options={[(option.get('id'), option.get('action')) for option in options]} still fixed={still_fixed}")
+    if not ok:
+        return
+
+    # (3) a tool outside the fixed function is not offered: the same marker writes nothing.
+    brief_before, called_before = _session_brief(api, session), _session_tool_names(api, session)
+    finished, why = _next_step_turn(api, session, NEXT_STEP_BRIEF_REQUEST + NEXT_STEP_BRIEF_CALL)
+    brief_fixed, called_fixed = _session_brief(api, session), _session_tool_names(api, session)
+    # Not even attempted: the fake LLM only calls a tool the request offers, so a refused call would show up in
+    # the tool-call list; the empty brief alone would not tell "not offered" from "offered and refused".
+    ok = finished and brief_before == {} and brief_fixed == {} and called_fixed == called_before
+    record("#374 next-step: a tool outside the fixed function is not offered and writes nothing", ok,
+           f"turn finished={finished} {why}; brief before={brief_before} after the call={brief_fixed}; "
+           f"tools called before={called_before} after={called_fixed}")
+
+    # (4) the page's order: clear the selection with the latest revision, then answer the card.
+    view = api.json("GET", harness)[1]
+    saved = view.get("selection") or {}
+    status_put, _ = api.json("PUT", harness, {"expected_revision": saved.get("revision", -1),
+                                              "selection": _harness_clear_selection(saved)})
+    view = api.json("GET", harness)[1]
+    after = view.get("selection") or {}
+    ok = (status_put == 200 and not after.get("operation_id") and not after.get("offering_id")
+          and not after.get("offering_revision") and not after.get("sources") and not after.get("fixed_parameters")
+          and not after.get("fillable_parameters") and after.get("enabled_operations") == saved.get("enabled_operations")
+          and after.get("revision") == saved.get("revision", -1) + 1 and view.get("status") == "free")
+    record("#374 next-step: clearing the selection keeps the enabled operations", ok,
+           f"PUT {status_put}, operation={after.get('operation_id')!r} service={after.get('offering_id')!r} "
+           f"sources={after.get('sources')} revision {saved.get('revision')} -> {after.get('revision')} status={view.get('status')} "
+           f"enabled before={saved.get('enabled_operations')} after={after.get('enabled_operations')} "
+           f"allow_prerequisites {saved.get('allow_prerequisites')} -> {after.get('allow_prerequisites')}")
+    if not ok:
+        return
+    pick = options[0]
+    template = messages.get("ui.chat.choice.answer_text") or "选择：{title}"
+    finished, why = _next_step_turn(api, session, template.replace("{title}", pick.get("label") or pick["id"]),
+                                    choiceAnswer={"choice_id": card["id"], "option_id": pick["id"]})
+    answered = next((item for item in _choice_cards(api, session) if item.get("id") == card["id"]), {})
+    answer = answered.get("answer") or {}
+    # The Agent reads the chosen direction as the card kind's answer text, appended to the person's message.
+    told = last_request_with(lambda texts: bool(texts) and texts[-1].get("role") == "user"
+                             and "[Direction card answer]" in (texts[-1].get("text") or "")) is not None
+    ok = (finished and answered.get("state") == "answered" and answer.get("option_id") == pick["id"]
+          and answer.get("use_default") is False and answer.get("source") == "card" and told)
+    record("#374 next-step: the answer marks the card answered and reaches the Agent", ok,
+           f"turn finished={finished} {why}; state={answered.get('state')} answer={answer} direction text sent to the LLM={told}")
+
+    # (5) with the selection clear the same call runs.
+    finished, why = _next_step_turn(api, session, NEXT_STEP_BRIEF_REQUEST + NEXT_STEP_BRIEF_CALL)
+    brief_free, called_free = _session_brief(api, session), _session_tool_names(api, session)
+    ok = (finished and called_free[len(called_fixed):] == ["update_production_brief"]
+          and (brief_free or {}).get("purpose") == "game_prop")
+    record("#374 next-step: the same call runs once the selection is cleared", ok,
+           f"turn finished={finished} {why}; brief under the fixed function={brief_fixed} now={brief_free}; "
+           f"new tool calls={called_free[len(called_fixed):]}")
 
 
 def scenario_fault(api, offerings, scenario):
@@ -6774,7 +6997,7 @@ def scenario_asset_list(work, stack_binary, processes, catalog):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -6784,7 +7007,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -6800,7 +7023,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -6843,6 +7066,8 @@ def main():
                 scenario_reroll(api, offerings, work)
             if "image-purpose" in selected:
                 scenario_image_purpose(api, offerings, work)
+            if "next-step" in selected:
+                scenario_next_step(api)
             if "work-ledger" in selected:
                 scenario_work_ledger(api, offerings, work)
             if "vision-budget" in selected:
