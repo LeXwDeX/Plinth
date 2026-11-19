@@ -34,6 +34,11 @@ func standardSpecificationURI(value string) bool {
 		case "/package/2006/content-types", "/package/2006/relationships", "/package/2006/relationships/metadata/thumbnail",
 			"/package/2006/relationships/metadata/core-properties", "/package/2006/relationships/mustpreserve":
 			return true
+		// The namespace of the core-properties part that the relationship type
+		// above names (ECMA-376 Part 2, 11.1). Listing only the relationship would
+		// admit the pointer and refuse the part it points to (#386).
+		case "/package/2006/metadata/core-properties":
+			return true
 		}
 	case "www.w3.org":
 		switch parsed.Path {
@@ -41,9 +46,15 @@ func standardSpecificationURI(value string) bool {
 			return true
 		}
 	case "purl.org":
-		return parsed.Path == "/dc/elements/1.1/" || parsed.Path == "/dc/terms/"
+		// Dublin Core elements and terms, and the DCMI type vocabulary the core
+		// properties part declares next to them.
+		return parsed.Path == "/dc/elements/1.1/" || parsed.Path == "/dc/terms/" || parsed.Path == "/dc/dcmitype/"
 	case "schemas.bambulab.com":
 		return parsed.Path == "/package/2021"
+	case "schemas.slic3r.org":
+		// Slic3r and PrusaSlicer's slic3rpe vocabulary (XMLNS_SLIC3R_VALUE in
+		// PrusaSlicer's Model3mf.cpp).
+		return parsed.Path == "/3mf/2017/06"
 	}
 	return false
 }

@@ -77,6 +77,9 @@ func TestPublicMetadataExceptionsRequireCompleteIdentifiers(t *testing.T) {
 		"http://www.w3.org/2001/XMLSchema",
 		"http://purl.org/dc/terms/",
 		"http://schemas.bambulab.com/package/2021",
+		"http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+		"http://purl.org/dc/dcmitype/",
+		"http://schemas.slic3r.org/3mf/2017/06",
 	} {
 		for _, suffix := range []string{"/https://private.example/resource", "/%68%74%74%70%73%3A%2F%2Fprivate.example/resource", "//localhost/resource", "/%252F%252Flocalhost/resource", "?", "#"} {
 			if standardSpecificationURI(prefix + suffix) {
@@ -140,6 +143,7 @@ func TestCompletePublicMetadataIdentifiersPreserveExactBytes(t *testing.T) {
 		"http://schemas.openxmlformats.org/package/2006/content-types",
 		"http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail",
 		"http://www.w3.org/XML/1998/namespace", "http://purl.org/dc/terms/", "http://schemas.bambulab.com/package/2021",
+		"http://schemas.openxmlformats.org/package/2006/metadata/core-properties", "http://purl.org/dc/dcmitype/", "http://schemas.slic3r.org/3mf/2017/06",
 	} {
 		if !standardSpecificationURI(address) {
 			t.Fatal("complete specification identifier rejected")
