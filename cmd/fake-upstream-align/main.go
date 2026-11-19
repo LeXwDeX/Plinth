@@ -2,7 +2,7 @@
 // official upstream API and to the fake, and reports every structural
 // difference (issue #96). Test tooling only: never built into an image.
 //
-//	fake-upstream-align official -version tripo/v3 -key-env TRIPO_API_KEY -base-url URL -confirm-paid -private DIR
+//	fake-upstream-align official -version tripo/v3 -key-env TRIPO_API_KEY -base-url URL -confirm-paid -private DIR [-artifacts DIR]
 //	fake-upstream-align export   -version tripo/v3 -private DIR -out DIR
 //	fake-upstream-align fake     -version tripo/v3 -private DIR
 //	fake-upstream-align compare  -version tripo/v3 -private DIR -report-dir DIR
@@ -10,7 +10,9 @@
 // The official run spends credits (paid steps are counted and listed) and
 // refuses to start without -confirm-paid. Its raw output stays under -private
 // (outside the worktree, mode 0700); only the sanitized sample and the
-// comparison report are committed.
+// comparison report are committed. With -artifacts the bytes of every artifact
+// the run fetches (a model the paid API delivered) are kept as files in another
+// such directory, never in the worktree.
 package main
 
 import (
@@ -21,6 +23,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -33,6 +36,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/align"
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/registry"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
+	"github.com/LeXwDeX/Plinth/internal/wirecapture"
 )
 
 func main() {
@@ -67,6 +71,7 @@ func run(args []string) error {
 	only := flags.String("steps", "", "official/export: comma-separated step names to run (default all)")
 	resume := flags.String("resume-from", "", "official: seed variables from an earlier run's bundle (its -tags value, or - for the untagged run)")
 	tags := flags.String("tags", "", "official/export: a single tag naming this partial run; compare: comma-separated tags to merge")
+	artifacts := flags.String("artifacts", "", "official: existing absolute directory (mode 0700, outside the worktree) that keeps the bytes of every fetched artifact")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -89,6 +94,16 @@ func run(args []string) error {
 	if info, err := os.Stat(*private); err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
 		return errors.New("-private must be an existing directory with mode 0700")
 	}
+	if *artifacts != "" {
+		if command != "official" {
+			return errors.New("-artifacts applies to the official command only")
+		}
+		dir, err := artifactsDir(*artifacts, *worktree)
+		if err != nil {
+			return err
+		}
+		*artifacts = dir
+	}
 	stem := strings.ReplaceAll(*version, "/", "-")
 	allSteps := profile.Steps
 	if *only != "" && command != "fake" && command != "compare" {
@@ -109,7 +124,7 @@ func run(args []string) error {
 			}
 			vars = seeded
 		}
-		return runOfficial(profile, *private, stem+tagSuffix(*tags), *keyEnv, *baseURL, *worktree, *confirm, vars)
+		return runOfficial(profile, *private, stem+tagSuffix(*tags), *keyEnv, *baseURL, *worktree, *confirm, vars, *artifacts)
 	case "export":
 		return runExport(profile, allSteps, *private, stem+tagSuffix(*tags), *out, *name, *worktree, *seed, *offering, *resume)
 	case "fake":
@@ -178,15 +193,69 @@ func captureConfig(profile align.Profile, worktree, baseURL string) (align.Captu
 	return config, nil
 }
 
-func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL, worktree string, confirm bool, vars map[string]string) error {
+// artifactsDir checks the directory that keeps the bytes of the artifacts an
+// official run fetches, which are real models the paid API delivered: an
+// absolute path to an existing directory (not a link) with mode 0700 that is
+// neither the worktree nor inside it, so none of it can be committed by
+// accident. It returns the resolved path. The checks are those of the upstream
+// record directory (wirecapture) and run before any request is sent.
+func artifactsDir(dir, worktree string) (string, error) {
+	if !filepath.IsAbs(dir) {
+		return "", errors.New("-artifacts must be an absolute path")
+	}
+	dir = filepath.Clean(dir)
+	info, err := os.Lstat(dir)
+	switch {
+	case err != nil:
+		return "", errors.New("-artifacts must be an existing directory")
+	case info.Mode()&os.ModeSymlink != 0:
+		return "", errors.New("-artifacts must not be a symbolic link")
+	case !info.IsDir():
+		return "", errors.New("-artifacts must be an existing directory")
+	case info.Mode().Perm() != 0o700:
+		return "", errors.New("-artifacts must have mode 0700")
+	}
+	root, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		return "", errors.New("-worktree is unavailable")
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil || wirecapture.PathInside(root, resolved) {
+		return "", errors.New("-artifacts must be outside the worktree")
+	}
+	if same, err := wirecapture.SameFileAncestor(root, resolved); err != nil || same {
+		return "", errors.New("-artifacts must be outside the worktree")
+	}
+	return resolved, nil
+}
+
+// reportArtifacts lists what an official run kept (out) and what it fetched but
+// could not keep (errOut), and returns how many it could not keep.
+func reportArtifacts(out, errOut io.Writer, bundle *align.Bundle) int {
+	unsaved := 0
+	for _, obs := range bundle.Obs {
+		for _, artifact := range obs.Artifacts {
+			if artifact.File != "" {
+				fmt.Fprintf(out, "artifact %s  %s  %d bytes  sha256:%s  (%s %s)\n",
+					artifact.File, artifact.Format, artifact.Size, artifact.SHA256, obs.Step, artifact.Field)
+				continue
+			}
+			unsaved++
+			fmt.Fprintf(errOut, "artifact not saved: %s %s: %s\n", obs.Step, artifact.Field, artifact.Error)
+		}
+	}
+	return unsaved
+}
+
+func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL, worktree string, confirm bool, vars map[string]string, artifacts string) error {
 	if !confirm {
-		paid := 0
+		var paid []string
 		for _, step := range profile.Steps {
 			if step.Paid {
-				paid++
+				paid = append(paid, step.Name)
 			}
 		}
-		return fmt.Errorf("the official run sends %d paid request(s); pass -confirm-paid", paid)
+		return fmt.Errorf("the official run sends %d paid request(s) (%s); pass -confirm-paid", len(paid), strings.Join(paid, ", "))
 	}
 	key := os.Getenv(keyEnv)
 	if keyEnv == "" || key == "" {
@@ -217,13 +286,20 @@ func runOfficial(profile align.Profile, private, stem, keyEnv, baseURL, worktree
 	bundle, runErr := align.Run(context.Background(), profile.Provider, profile.API, align.Target{
 		Name: "official", BaseURL: baseURL, Key: key,
 		Client:   &http.Client{Transport: transport, Timeout: 5 * time.Minute},
-		Download: &http.Client{Timeout: 5 * time.Minute},
+		Download: &http.Client{Timeout: 5 * time.Minute}, ArtifactDir: artifacts,
 	}, profile.Steps, nil, vars)
 	if bundle != nil {
+		unsaved := 0
+		if artifacts != "" {
+			unsaved = reportArtifacts(os.Stdout, os.Stderr, bundle)
+		}
 		if err := align.SaveBundle(filepath.Join(private, stem+".official.bundle.json"), bundle); err != nil {
 			return err
 		}
 		fmt.Printf("official: %d request(s), %d paid, bundle saved\n", bundle.Requests, bundle.PaidRequests)
+		if runErr == nil && unsaved > 0 {
+			runErr = fmt.Errorf("%d fetched artifact(s) were not saved", unsaved)
+		}
 	}
 	return runErr
 }

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
+	"sync"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/align"
@@ -21,6 +23,16 @@ func taskPoll() *align.Poll {
 	return &align.Poll{
 		StatusPath: "data.status", ProgressPath: "data.progress",
 		Terminal: taskTerminal, Max: 240, Interval: 4 * time.Second,
+	}
+}
+
+// generationPoll is taskPoll with the budget of the multiview Offering: its
+// timeout_seconds is 3600 and it polls every 5 seconds. A poll is free, and a
+// run that gave up on a paid generation would leave the model unfetched.
+func generationPoll() *align.Poll {
+	return &align.Poll{
+		StatusPath: "data.status", ProgressPath: "data.progress",
+		Terminal: taskTerminal, Max: 720, Interval: 5 * time.Second,
 	}
 }
 
@@ -71,10 +83,62 @@ func figurePNG() []byte {
 	return out.Bytes()
 }
 
-// Profile is the alignment script of the Tripo v3 fake. Every paid request is
-// the cheapest option of its endpoint and is sent once. The chain mirrors what
-// Plinth drives: generation, rig check, rigging, animation, segmentation,
-// a model export and part completion.
+// viewPNG is the block figure of figurePNG seen from one side, 512x512 on white:
+// front and back are wide with both arms (the front has a face band, the back a
+// darker body), the left view is narrow with one arm. Three different pictures of
+// one object for a multiview upload; what they show decides nothing about the
+// protocol under test. They are drawn once per process, because every Profile()
+// call (and each test that makes one) builds the script again.
+func viewPNG(view string) []byte { return viewPictures()[view] }
+
+var viewPictures = sync.OnceValue(func() map[string][]byte {
+	return map[string][]byte{"front": drawView("front"), "left": drawView("left"), "back": drawView("back")}
+})
+
+func drawView(view string) []byte {
+	const size = 512
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	fill := func(x0, y0, x1, y1 int, c color.RGBA) {
+		draw.Draw(img, image.Rect(x0, y0, x1, y1), &image.Uniform{C: c}, image.Point{}, draw.Src)
+	}
+	fill(0, 0, size, size, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	body := color.RGBA{R: 200, G: 40, B: 40, A: 255}
+	arm := color.RGBA{R: 40, G: 90, B: 200, A: 255}
+	leg := color.RGBA{R: 40, G: 150, B: 60, A: 255}
+	if view == "left" {
+		fill(221, 170, 291, 330, body) // body, seen from the side
+		fill(236, 180, 276, 300, arm)  // the near arm
+		fill(226, 330, 286, 460, leg)  // the legs, one behind the other
+	} else {
+		if view == "back" {
+			body = color.RGBA{R: 140, G: 30, B: 30, A: 255}
+		}
+		fill(196, 170, 316, 330, body)
+		fill(80, 180, 196, 220, arm)
+		fill(316, 180, 432, 220, arm)
+		fill(206, 330, 250, 460, leg)
+		fill(262, 330, 306, 460, leg)
+	}
+	for y := 60; y < 170; y++ { // head
+		for x := 201; x < 311; x++ {
+			if dx, dy := x-256, y-115; dx*dx+dy*dy < 55*55 {
+				img.SetRGBA(x, y, color.RGBA{R: 240, G: 190, B: 40, A: 255})
+			}
+		}
+	}
+	if view == "front" {
+		fill(231, 105, 281, 117, color.RGBA{R: 30, G: 30, B: 30, A: 255}) // the face band
+	}
+	var out bytes.Buffer
+	_ = png.Encode(&out, img)
+	return out.Bytes()
+}
+
+// Profile is the alignment script of the Tripo v3 fake. Every paid request,
+// except the two of the multiview run at the end (#386), is the cheapest option
+// of its endpoint and is sent once. The chain mirrors what Plinth drives:
+// generation, rig check, rigging, animation, segmentation, a model export and
+// part completion.
 func Profile() align.Profile {
 	return align.Profile{
 		Provider: "tripo", API: "v3", Official: OfficialBase,
@@ -238,6 +302,45 @@ func Profile() align.Profile {
 				},
 				Capture: map[string]string{"mseg": "data.task_id"}},
 			{Name: "smartsegment-model-poll", Method: "GET", Path: "/tasks/{mseg}", RequireVar: "mseg", Poll: taskPoll(),
+				Fetch: []string{"data.output.*"}},
+			// A third partial run (#386): the multiview model Plinth requests with its
+			// production defaults and its 3MF export, run with -artifacts to keep the real
+			// bytes of the 3MF: -steps mv-upload-front,mv-upload-left,mv-upload-back,
+			// multiview-to-model,multiview-to-model-poll,convert-3mf,convert-3mf-poll.
+			// Unlike the cheapest-option steps above these are the most expensive options
+			// of the endpoint (about 75 credits: the generation at the Offering's defaults,
+			// 70, and one export, 5), and two requests are paid. The uploads are chained
+			// through RequireVar, so a missing token skips everything after it. The bodies
+			// are what the adapter sends for the Offering
+			// tripo/tripo-v3.1-multiview/image-to-3d at its defaults with three views
+			// (TestAlignmentScriptSendsWhatTheAdapterSends in internal/providers/tripo).
+			{Name: "mv-upload-front", Method: "POST", Path: "/files",
+				Multipart: &align.File{Field: "file", Filename: "input.png", MediaType: "image/png", Data: viewPNG("front")},
+				Capture:   map[string]string{"mv_front": "data.file_token"}},
+			{Name: "mv-upload-left", Method: "POST", Path: "/files", RequireVar: "mv_front",
+				Multipart: &align.File{Field: "file", Filename: "input.png", MediaType: "image/png", Data: viewPNG("left")},
+				Capture:   map[string]string{"mv_left": "data.file_token"}},
+			{Name: "mv-upload-back", Method: "POST", Path: "/files", RequireVar: "mv_left",
+				Multipart: &align.File{Field: "file", Filename: "input.png", MediaType: "image/png", Data: viewPNG("back")},
+				Capture:   map[string]string{"mv_back": "data.file_token"}},
+			{Name: "multiview-to-model", Method: "POST", Path: "/generation/multiview-to-model", Paid: true, RequireVar: "mv_back",
+				Body: map[string]any{
+					"model": "v3.1-20260211",
+					"inputs": []map[string]string{
+						{"front": "{mv_front}"}, {"left": "{mv_left}"}, {"back": "{mv_back}"},
+					},
+					"texture": true, "pbr": true, "texture_quality": "extreme", "texture_version": "v3.5-20260815",
+					"texture_alignment": "original_image", "geometry_quality": "detailed", "orientation": "default",
+					"face_limit": 2000000, "quad": false, "smart_low_poly": false, "auto_size": false,
+					"export_uv": true, "generate_parts": false,
+				},
+				Capture: map[string]string{"m2m": "data.task_id"}},
+			{Name: "multiview-to-model-poll", Method: "GET", Path: "/tasks/{m2m}", RequireVar: "m2m", Poll: generationPoll(),
+				Fetch: []string{"data.output.*"}},
+			{Name: "convert-3mf", Method: "POST", Path: "/models/convert", Paid: true, RequireVar: "m2m",
+				Body:    map[string]any{"input": "{m2m}", "format": "3MF"},
+				Capture: map[string]string{"m2m_convert": "data.task_id"}},
+			{Name: "convert-3mf-poll", Method: "GET", Path: "/tasks/{m2m_convert}", RequireVar: "m2m_convert", Poll: taskPoll(),
 				Fetch: []string{"data.output.*"}},
 		},
 		Capture: align.CaptureConfig{
