@@ -203,6 +203,9 @@ func validateAssetList(
 	if err := validateAssetListExecution(list.Execution); err != nil {
 		return err
 	}
+	if err := validateAssetListReview(list.Review, declaredKinds); err != nil {
+		return err
+	}
 
 	// 路由键只为 #327 PR3 使用；声明清单时这几条都必须存在，注册与否由 HTTP
 	// 层决定。
@@ -217,6 +220,13 @@ func validateAssetList(
 	} {
 		if strings.TrimSpace(route) == "" {
 			return fmt.Errorf("application.asset_list 需要 runtime.http.routes.%s", name)
+		}
+	}
+	// #329b：声明 review 段就必须声明验收决定路由；路由的注册仍由 HTTP 层
+	// 决定，未声明 review 的旧 Catalog 保持只读看板。
+	if list.Review != nil {
+		if strings.TrimSpace(routes.ProjectAssetListItemReview) == "" {
+			return errors.New("application.asset_list 声明 review 时需要 runtime.http.routes.project_asset_list_item_review")
 		}
 	}
 	// #328：开启自动制作时，在场与运行/单项控制路由必须声明；路由的注册
@@ -356,6 +366,58 @@ func validateAssetListExecution(execution *AssetListExecutionSchema) error {
 		if !placeholders[name] {
 			return fmt.Errorf("asset_list.execution.continuation.message 缺少占位符 {%s}", name)
 		}
+	}
+	return nil
+}
+
+// validateAssetListReview 校验可选的验收段（#329b）。未声明时放行：看板只读，
+// 通过仍可用，打回不可用。声明后原因 id 唯一、label 非空、kinds 必须是已声明
+// 的清单项类型，重做上限在 1 到 10 之间，三条文案必须完整且带各自占位符。
+func validateAssetListReview(review *AssetListReviewSchema, kinds map[string]AssetListKindSchema) error {
+	if review == nil {
+		return nil
+	}
+	if len(review.ReturnReasons) == 0 {
+		return errors.New("asset_list.review.return_reasons 不能为空")
+	}
+	seen := make(map[string]bool, len(review.ReturnReasons))
+	for index, reason := range review.ReturnReasons {
+		id := strings.TrimSpace(reason.ID)
+		if id == "" || strings.TrimSpace(reason.Label) == "" {
+			return fmt.Errorf("asset_list.review.return_reasons[%d] 的 id 和 label 不能为空", index)
+		}
+		if seen[id] {
+			return fmt.Errorf("asset_list.review.return_reasons 的 id 重复: %q", id)
+		}
+		seen[id] = true
+		for _, kind := range reason.Kinds {
+			if _, declared := kinds[kind]; !declared {
+				return fmt.Errorf("asset_list.review.return_reasons[%d].kinds 引用了未知类型 %q", index, kind)
+			}
+		}
+	}
+	if review.MaxReworkRounds < 1 || review.MaxReworkRounds > 10 {
+		return errors.New("asset_list.review.max_rework_rounds 必须在 1 到 10 之间")
+	}
+	for field, text := range map[string]string{
+		"rework_message": review.Messages.ReworkMessage,
+		"return_limit":   review.Messages.ReturnLimit,
+		"asset_limit":    review.Messages.AssetLimit,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("asset_list.review.messages.%s 不能为空", field)
+		}
+	}
+	for _, name := range []string{"name", "description", "round", "reasons", "note"} {
+		if !placeholderSet(review.Messages.ReworkMessage)[name] {
+			return fmt.Errorf("asset_list.review.messages.rework_message 缺少占位符 {%s}", name)
+		}
+	}
+	if !placeholderSet(review.Messages.ReturnLimit)["round"] {
+		return errors.New("asset_list.review.messages.return_limit 缺少占位符 {round}")
+	}
+	if !placeholderSet(review.Messages.AssetLimit)["maximum"] {
+		return errors.New("asset_list.review.messages.asset_limit 缺少占位符 {maximum}")
 	}
 	return nil
 }

@@ -378,9 +378,15 @@ func (service *Service) CreateAsset(ctx context.Context, ownerID, projectID stri
 	if err != nil {
 		return Asset{}, err
 	}
-	id, err := service.newID("passet_")
-	if err != nil {
-		return Asset{}, err
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		var err error
+		id, err = service.newID("passet_")
+		if err != nil {
+			return Asset{}, err
+		}
+	} else if !strings.HasPrefix(id, "passet_") {
+		return Asset{}, ErrInvalid
 	}
 	now := service.clock()
 	return service.repository.CreateAsset(ctx, projectID, Asset{

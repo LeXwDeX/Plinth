@@ -32,7 +32,8 @@ const assetListItemColumns = `id, list_id, owner_id, kind, name, description, re
 	route_id, route_json, planned_step_count, planned_model3d_step_count, state,
 	state_reason, version, COALESCE(session_id, ''), project_asset_id, round,
 	last_turn_message_id, next_action_at, block,
-	result_json, review_json, created_at, updated_at`
+	result_json, review_json, accepted_at, return_reason, return_note,
+	created_at, updated_at`
 
 type assetListQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -459,14 +460,16 @@ func insertAssetListItem(ctx context.Context, conn *sql.Conn, listID string, pos
 			references_json, route_id, route_json, planned_step_count, planned_model3d_step_count,
 			state, state_reason, version, session_id, project_asset_id, round,
 			last_turn_message_id, next_action_at, block, result_json, review_json,
-			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			accepted_at, return_reason, return_note, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.ID, item.OwnerID, listID, position, item.Kind, item.Name, item.Description,
 		references, item.RouteID, string(routeJSON), item.PlannedStepCount,
 		item.PlannedModel3DStepCount, item.State, item.StateReason, item.Version,
 		nullString(item.SessionID), item.ProjectAssetID, item.Round,
 		item.LastTurnMessageID, formatTaskTimeOrEmpty(item.NextActionAt), item.Block,
-		string(result), string(review), formatTime(item.CreatedAt), formatTime(item.UpdatedAt)); err != nil {
+		string(result), string(review), formatOptionalListTime(item.AcceptedAt),
+		item.ReturnReason, item.ReturnNote,
+		formatTime(item.CreatedAt), formatTime(item.UpdatedAt)); err != nil {
 		return fmt.Errorf("insert asset list item: %w", err)
 	}
 	return nil
@@ -475,6 +478,15 @@ func insertAssetListItem(ctx context.Context, conn *sql.Conn, listID string, pos
 func nullAssetListTime(value *time.Time) any {
 	if value == nil {
 		return nil
+	}
+	return formatTime(*value)
+}
+
+// formatOptionalListTime stores a non-null marker column: the empty string is
+// the "not happened" value, matching next_action_at and the other item times.
+func formatOptionalListTime(value *time.Time) string {
+	if value == nil {
+		return ""
 	}
 	return formatTime(*value)
 }
@@ -635,13 +647,14 @@ func finishAssetList(
 
 func scanAssetListItem(scanner interface{ Scan(...any) error }) (assetlist.Item, error) {
 	var value assetlist.Item
-	var references, route, result, review, nextActionAt, created, updated string
+	var references, route, result, review, acceptedAt, nextActionAt, created, updated string
 	if err := scanner.Scan(
 		&value.ID, &value.ListID, &value.OwnerID, &value.Kind, &value.Name, &value.Description,
 		&references, &value.RouteID, &route, &value.PlannedStepCount, &value.PlannedModel3DStepCount,
 		&value.State, &value.StateReason, &value.Version, &value.SessionID, &value.ProjectAssetID,
 		&value.Round, &value.LastTurnMessageID, &nextActionAt, &value.Block,
-		&result, &review, &created, &updated,
+		&result, &review, &acceptedAt, &value.ReturnReason, &value.ReturnNote,
+		&created, &updated,
 	); err != nil {
 		return assetlist.Item{}, err
 	}
@@ -649,6 +662,11 @@ func scanAssetListItem(scanner interface{ Scan(...any) error }) (assetlist.Item,
 	value.Route = decodeAssetListRoute(route)
 	if nextActionAt != "" {
 		value.NextActionAt, _ = parseTime(nextActionAt)
+	}
+	if acceptedAt != "" {
+		if parsed, err := parseTime(acceptedAt); err == nil {
+			value.AcceptedAt = &parsed
+		}
 	}
 	if result == "" {
 		result = "{}"

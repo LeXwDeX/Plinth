@@ -233,6 +233,55 @@ func (r *memoryRepository) Decide(_ context.Context, decision assetlist.Decision
 	return r.withItems(existing), nil
 }
 
+func (r *memoryRepository) DecideItems(_ context.Context, batch assetlist.DecisionBatch) (assetlist.List, error) {
+	existing, exists := r.lists[batch.ListID]
+	if !exists || existing.OwnerID != batch.OwnerID || existing.ProjectID != batch.ProjectID {
+		return assetlist.List{}, assetlist.ErrNotFound
+	}
+	if existing.Version != batch.ExpectedVersion {
+		return assetlist.List{}, assetlist.ErrConflict
+	}
+	items := r.items[batch.ListID]
+	for _, decision := range batch.Items {
+		index := -1
+		for position := range items {
+			if items[position].ID == decision.ItemID {
+				index = position
+				break
+			}
+		}
+		if index < 0 {
+			return assetlist.List{}, assetlist.ErrNotFound
+		}
+		item := items[index]
+		if item.State != assetlist.StateReview {
+			return assetlist.List{}, assetlist.ErrItemState
+		}
+		switch decision.Verdict {
+		case assetlist.ReviewVerdictApproved:
+			item.State = assetlist.StateAccepted
+			item.ProjectAssetID = decision.ProjectAssetID
+			item.AcceptedAt = &batch.At
+			item.ReturnReason, item.ReturnNote = "", ""
+		case assetlist.ReviewVerdictReturned:
+			item.State = assetlist.StateReturned
+			item.Round++
+			item.ReturnReason = decision.Reason
+			item.ReturnNote = decision.Note
+		default:
+			return assetlist.List{}, assetlist.ErrInvalid
+		}
+		item.Version++
+		item.UpdatedAt = batch.At
+		items[index] = item
+	}
+	existing.Version++
+	existing.UpdatedAt = batch.At
+	r.lists[existing.ID] = existing
+	r.items[existing.ID] = items
+	return r.withItems(existing), nil
+}
+
 func (r *memoryRepository) put(list assetlist.List, items []assetlist.Item) {
 	list.Items = nil
 	r.lists[list.ID] = list

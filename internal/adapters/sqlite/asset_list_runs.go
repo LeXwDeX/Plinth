@@ -415,23 +415,31 @@ func (r *AssetListRunRepository) ClaimItem(
 		if status != assetlist.RunRunning {
 			return nil
 		}
-		var itemID string
+		// A returned item is work again (#329b): it is claimed before fresh todo
+		// work and keeps the round the return already counted, so the same sub-session
+		// continues instead of starting over.
+		var itemID, state string
 		err = conn.QueryRowContext(ctx, `
-			SELECT id FROM asset_list_items
-			WHERE owner_id = ? AND list_id = ? AND state = ?
-			ORDER BY position LIMIT 1`,
-			ownerID, listID, assetlist.StateTodo).Scan(&itemID)
+			SELECT id, state FROM asset_list_items
+			WHERE owner_id = ? AND list_id = ? AND state IN (?, ?)
+			ORDER BY CASE state WHEN ? THEN 0 ELSE 1 END, position LIMIT 1`,
+			ownerID, listID, assetlist.StateReturned, assetlist.StateTodo,
+			assetlist.StateReturned).Scan(&itemID, &state)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("read next asset list item: %w", err)
 		}
+		roundIncrement := 0
+		if state == assetlist.StateTodo {
+			roundIncrement = 1
+		}
 		result, err := conn.ExecContext(ctx, `
-			UPDATE asset_list_items SET state = ?, round = round + 1,
+			UPDATE asset_list_items SET state = ?, round = round + ?,
 				version = version + 1, next_action_at = '', updated_at = ?
 			WHERE id = ? AND state = ?`,
-			assetlist.StateWorking, formatTime(at), itemID, assetlist.StateTodo)
+			assetlist.StateWorking, roundIncrement, formatTime(at), itemID, state)
 		if err != nil {
 			return fmt.Errorf("claim asset list item: %w", err)
 		}
@@ -479,7 +487,8 @@ func (r *AssetListRunRepository) FinishItem(ctx context.Context, input assetlist
 	err := r.withWrite(ctx, func(conn *sql.Conn) error {
 		update, err := conn.ExecContext(ctx, `
 			UPDATE asset_list_items SET state = ?, state_reason = ?, result_json = ?,
-				review_json = ?, next_action_at = ?, version = version + 1, updated_at = ?
+				review_json = ?, next_action_at = ?, return_reason = '', return_note = '',
+				version = version + 1, updated_at = ?
 			WHERE id = ? AND owner_id = ? AND list_id = ? AND state = ?`,
 			input.State, input.StateReason, string(result), string(review),
 			formatTaskTimeOrEmpty(input.NextActionAt), formatTime(input.At),

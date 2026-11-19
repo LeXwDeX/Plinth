@@ -36,6 +36,14 @@ type Config struct {
 	// Reviews reads the recorded acceptance decisions of the board (#329a).
 	// nil leaves every item with an empty latest review.
 	Reviews ReviewStore
+	// Snapshots and ProjectAssets are the write side of the board (#329b).
+	// Application assembly installs them with SetReview after the inspection
+	// services exist; nil keeps accept working without a project asset and
+	// stores an empty snapshot.
+	Snapshots     ReviewSnapshots
+	ProjectAssets ProjectAssets
+	// ProjectAssetLimits bounds the references one accepted item registers.
+	ProjectAssetLimits ProjectAssetLimits
 	// References resolves input-asset references against the owner's stored
 	// assets and crop provenance (#331), so proposals and edits share one
 	// validation. nil keeps the #327 shape checks only.
@@ -72,12 +80,18 @@ type Config struct {
 
 // Service implements the list workflow over a Repository.
 type Service struct {
-	repository      Repository
-	runs            RunStore
-	presence        PresenceStore
-	reviews         ReviewStore
-	referenceAssets ReferenceAssets
-	crops           Cropper
+	repository Repository
+	runs       RunStore
+	presence   PresenceStore
+	reviews    ReviewStore
+	review     *catalog.AssetListReviewSchema
+	// reviewSnapshots and projectAssets are the acceptance write ports
+	// (#329b); nil keeps the board read-only.
+	reviewSnapshots    ReviewSnapshots
+	projectAssets      ProjectAssets
+	projectAssetLimits ProjectAssetLimits
+	referenceAssets    ReferenceAssets
+	crops              Cropper
 	// imageItemLimit is application.asset_list.decompose.maximum_items_per_image
 	// (#331); 0 leaves the proposal-time per-image bound unwired.
 	imageItemLimit int
@@ -163,6 +177,10 @@ func New(config Config) (*Service, error) {
 		runs:                      config.Runs,
 		presence:                  config.Presence,
 		reviews:                   config.Reviews,
+		review:                    config.Schema.Review,
+		reviewSnapshots:           config.Snapshots,
+		projectAssets:             config.ProjectAssets,
+		projectAssetLimits:        config.ProjectAssetLimits,
 		referenceAssets:           config.References,
 		crops:                     config.Crops,
 		imageItemLimit:            imageItemLimit,

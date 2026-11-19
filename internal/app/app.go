@@ -33,6 +33,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/assetlinks"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/assetlistrunner"
+	"github.com/LeXwDeX/Plinth/internal/assetreview"
 	inputassets "github.com/LeXwDeX/Plinth/internal/assets/input"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacygenerated"
 	"github.com/LeXwDeX/Plinth/internal/assets/legacyinput"
@@ -880,6 +881,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// feature is absent when the Catalog declares no asset_list section.
 	var assetListService *assetlist.Service
 	var assetListPresence assetlist.PresenceStore
+	// assetListCounted is the step policy's 3D capability set; the list
+	// service and the review snapshot share it.
+	var assetListCounted map[generation.Capability]bool
 	// assetListTasks reads the terminal Tasks of an item's own sub-session. The
 	// completion tool and the runner (#328) share it.
 	var assetListTasks chat.AssetListTaskSource
@@ -891,6 +895,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		for _, capability := range applicationSchema.StepPolicy.CountedCapabilities {
 			counted[generation.Capability(capability)] = true
 		}
+		assetListCounted = counted
 		assetListService, err = assetlist.New(assetlist.Config{
 			Repository: repository.AssetListRepository(),
 			Runs:       repository.AssetListRunRepository(),
@@ -905,6 +910,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
 			Counted:            counted,
+			ProjectAssets:      projectService,
+			ProjectAssetLimits: assetlist.ProjectAssetLimits{
+				MaximumAssets: applicationSchema.Project.Limits.MaximumAssetsPerProject,
+				MaximumImages: applicationSchema.Project.Limits.MaximumAssetImages,
+				MaximumModels: applicationSchema.Project.Limits.MaximumAssetModels,
+			},
 			ResolveStepFor: func(ctx context.Context, ownerID, sessionID, capability string) (assetlist.RouteStep, error) {
 				return chatService.ResolveAssetListStep(ctx, ownerID, sessionID, generation.Capability(capability))
 			},
@@ -1124,6 +1135,23 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// A planned step is checked against the session purpose's budget by the
 	// generation tools that own it (#129).
 	chatService.SetProductionPlanPurposeBudget(toolExecutor.PlanStepPurposeBudgetNote)
+	// #329b: the acceptance snapshot reuses the tool executor's model reading,
+	// the image review service, the persisted self-check records and the chat
+	// service's purpose thresholds. The write ports are optional: without them
+	// the board still reads and every item keeps waiting.
+	if assetListService != nil {
+		assetListService.SetReview(assetlist.ReviewConfig{
+			Snapshots: assetreview.New(assetreview.Config{
+				Checks:          chatService.AssetListReviewChecks,
+				Models:          toolExecutor,
+				Images:          imageReview,
+				SelfChecks:      chatService,
+				SelfCheckSchema: applicationSchema.Chat.SelfCheck,
+				Steps:           executionGrants.StepStatus,
+				Counted:         assetListCounted,
+			}),
+		})
+	}
 	// B10：agent 状态（参数/绑定/同意）写穿透 SQLite——重启后同意
 	// 门禁仍然生效；会话删除时级联清理（chat_repository.DeleteSession）。
 	agentStateStore := agentparams.NewPersistentStore(repository, logger)

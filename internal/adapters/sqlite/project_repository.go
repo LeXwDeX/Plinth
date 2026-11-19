@@ -361,6 +361,32 @@ func (r *ProjectRepository) CreateAsset(ctx context.Context, projectID string, v
 		if err != nil {
 			return fmt.Errorf("read project for asset: %w", err)
 		}
+		// A caller-supplied id is a deterministic identity (#329b): a retried
+		// registration returns the stored row instead of inserting a second
+		// one. A row of another owner is a bug, never an idempotent replay.
+		var storedOwner, storedProject string
+		err = conn.QueryRowContext(ctx,
+			`SELECT owner_id, project_id FROM project_assets WHERE id = ?`, value.ID).
+			Scan(&storedOwner, &storedProject)
+		if err == nil {
+			if storedOwner != value.OwnerID || storedProject != projectID {
+				return project.ErrInvalid
+			}
+			existing, err := scanProjectAsset(conn.QueryRowContext(ctx, `
+				SELECT a.id, a.project_id, a.owner_id, a.kind, a.name, a.description,
+				       a.images_json, a.models_json, a.created_at, a.updated_at
+				FROM project_assets a JOIN projects p ON p.id = a.project_id
+				WHERE a.id = ? AND a.project_id = ? AND p.owner_id = ?`,
+				value.ID, projectID, value.OwnerID))
+			if err != nil {
+				return err
+			}
+			value = existing
+			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("read asset by id: %w", err)
+		}
 		var count int
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_assets WHERE project_id = ?`, projectID).Scan(&count); err != nil {
 			return fmt.Errorf("count project assets: %w", err)

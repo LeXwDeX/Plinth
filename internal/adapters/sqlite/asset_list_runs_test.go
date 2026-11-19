@@ -208,6 +208,36 @@ func TestAssetListRunRepositoryClaimItemClaimsInPositionOrder(t *testing.T) {
 	}
 }
 
+func TestAssetListRunRepositoryClaimItemResumesAReturnedItem(t *testing.T) {
+	_, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	seedRunList(t, lists, "alist_1", 2)
+	if _, err := runs.CreateRun(ctx, newAssetListRun("run_1", "owner-a", "prj_1", "alist_1", assetlist.RunRunning)); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	// The first item was returned after round one; its round already counted
+	// the rework, so claiming must not count it again.
+	if _, err := runs.db.Exec(`UPDATE asset_list_items
+		SET state = ?, round = 2, return_reason = '风格不对', return_note = '修脸'
+		WHERE id = ?`, assetlist.StateReturned, "aitem_alist_1_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	item, found, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil || !found {
+		t.Fatalf("claim returned item = %+v, %v, %v", item, found, err)
+	}
+	if item.ID != "aitem_alist_1_1" || item.State != assetlist.StateWorking ||
+		item.Round != 2 || item.ReturnReason != "风格不对" || item.ReturnNote != "修脸" {
+		t.Fatalf("claimed = %+v; want the returned item working at round 2", item)
+	}
+	// Fresh work is claimed after the rework and still starts at round one.
+	fresh, found, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil || !found || fresh.ID != "aitem_alist_1_2" || fresh.Round != 1 {
+		t.Fatalf("fresh claim = %+v, %v, %v; want item 2 at round 1", fresh, found, err)
+	}
+}
+
 func TestAssetListRunRepositoryClaimItemRaceClaimsOnce(t *testing.T) {
 	_, lists, runs, _ := newAssetListRunRepositories(t)
 	ctx := context.Background()

@@ -98,10 +98,13 @@ type assetListWire struct {
 // assetListReviewWire is one recorded acceptance decision (#329). The review
 // snapshot is opaque to the transport; #329b owns its shape.
 type assetListReviewWire struct {
-	ID         string          `json:"id"`
-	Round      int             `json:"round"`
-	Verdict    string          `json:"verdict"`
-	Reason     string          `json:"reason,omitempty"`
+	ID      string   `json:"id"`
+	Round   int      `json:"round"`
+	Verdict string   `json:"verdict"`
+	Reason  string   `json:"reason,omitempty"`
+	Reasons []string `json:"reasons,omitempty"`
+	Note    string   `json:"note,omitempty"`
+	// ReviewerID is the browser principal that decided (#329b).
 	ReviewerID string          `json:"reviewer_id,omitempty"`
 	Review     json.RawMessage `json:"review"`
 	CreatedAt  time.Time       `json:"created_at"`
@@ -141,11 +144,18 @@ type assetListBoardRegionWire struct {
 	PixelRect listcrop.PixelRect `json:"pixel_rect"`
 }
 
+// assetListBoardListWire is the board's list summary. Version is the list
+// version a review decision echoes as expected_version (#329b).
+type assetListBoardListWire struct {
+	assetListSummaryWire
+	Version int64 `json:"version"`
+}
+
 // assetListBoardWire is the read-only acceptance board: the list summary plus
 // every item in position order. A decision is absent, not zeroed, until the
 // person makes one.
 type assetListBoardWire struct {
-	List  assetListSummaryWire     `json:"list"`
+	List  assetListBoardListWire   `json:"list"`
 	Items []assetListBoardItemWire `json:"items"`
 }
 
@@ -180,6 +190,32 @@ type assetListItemControlBody struct {
 	Reason          string `json:"reason"`
 }
 
+// assetListItemReviewBody is the acceptance decision body (#329b). item_ids is
+// one item for a return and one or more for an accept; expected_version is the
+// list version the browser read.
+type assetListItemReviewBody struct {
+	Decision        string   `json:"decision"`
+	ItemIDs         []string `json:"item_ids"`
+	ReasonIDs       []string `json:"reason_ids"`
+	Note            string   `json:"note"`
+	ExpectedVersion *int64   `json:"expected_version"`
+}
+
+// assetListItemReviewWire is one item's batch outcome.
+type assetListItemReviewWire struct {
+	ItemID         string `json:"item_id"`
+	Verdict        string `json:"verdict,omitempty"`
+	ProjectAssetID string `json:"project_asset_id,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// assetListReviewDecisionWire is the answer of a board decision: the refreshed
+// list summary and one outcome per submitted item.
+type assetListReviewDecisionWire struct {
+	List  assetListWire             `json:"list"`
+	Items []assetListItemReviewWire `json:"items"`
+}
+
 func assetListRunFields(summary assetlist.RunSummary) assetListRunWire {
 	return assetListRunWire{
 		Status: summary.Status, PauseReason: summary.PauseReason,
@@ -192,6 +228,26 @@ func (s *Server) assetListMessages() catalog.AssetListMessagesSchema {
 		return catalog.AssetListMessagesSchema{}
 	}
 	return s.application.AssetList.Messages
+}
+
+// assetListReviewMessage fills one review copy from the Catalog, with the
+// conflict text as the fallback a Catalog without the review section gets.
+func (s *Server) assetListReviewMessage(
+	pick func(catalog.AssetListReviewMessagesSchema) string,
+	replacements map[string]string,
+) string {
+	text := ""
+	if s.application.AssetList != nil && s.application.AssetList.Review != nil {
+		text = pick(s.application.AssetList.Review.Messages)
+	}
+	if text == "" {
+		return s.message("error.conflict")
+	}
+	pairs := make([]string, 0, len(replacements)*2)
+	for key, value := range replacements {
+		pairs = append(pairs, "{"+key+"}", value)
+	}
+	return strings.NewReplacer(pairs...).Replace(text)
 }
 
 // assetListOwner refuses a request without a real browser session. A
@@ -290,8 +346,9 @@ func assetListReviewFields(review assetlist.ItemReview) assetListReviewWire {
 	}
 	return assetListReviewWire{
 		ID: review.ID, Round: review.Round, Verdict: review.Verdict,
-		Reason: review.Reason, ReviewerID: review.ReviewerID,
-		Review: raw, CreatedAt: review.CreatedAt.UTC(),
+		Reason: review.Reason, Reasons: review.Reasons, Note: review.Note,
+		ReviewerID: review.ReviewerID,
+		Review:     raw, CreatedAt: review.CreatedAt.UTC(),
 	}
 }
 
@@ -360,7 +417,13 @@ func assetListBoardFields(board assetlist.Board,
 		}
 		items = append(items, wire)
 	}
-	return assetListBoardWire{List: assetListSummaryFields(board.List), Items: items}
+	return assetListBoardWire{
+		List: assetListBoardListWire{
+			assetListSummaryWire: assetListSummaryFields(board.List),
+			Version:              board.List.Version,
+		},
+		Items: items,
+	}
 }
 
 // assetListResultWire renders the list detail. crops is the owner-scoped
@@ -427,6 +490,7 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 	invalid := s.application.Chat.Presentation.Messages.InvalidParameters
 	var activeConflict *assetlist.ErrActiveConflict
 	var activeWorking *assetlist.ErrActiveWorking
+	var reworkLimit *assetlist.ReworkLimitError
 	switch {
 	case errors.As(err, &activeConflict):
 		detail := s.message("error.conflict")
@@ -459,6 +523,16 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 			"{days}", strconv.Itoa(s.assetListTTLDays()),
 		).Replace(detail)
 		writeProblem(writer, http.StatusConflict, "asset_list_expired", detail, err)
+	case errors.As(err, &reworkLimit):
+		// #329b: the item used its declared rework rounds; the Schema copy
+		// names the item and the round, the person can still accept or skip.
+		detail := s.assetListReviewMessage(func(messages catalog.AssetListReviewMessagesSchema) string {
+			return messages.ReturnLimit
+		}, map[string]string{
+			"name":  reworkLimit.Name,
+			"round": strconv.Itoa(reworkLimit.Round),
+		})
+		writeProblem(writer, http.StatusConflict, "asset_list_rework_limit", detail, err)
 	case errors.Is(err, assetlist.ErrConflict):
 		writeProblem(writer, http.StatusConflict, "conflict", s.message("error.conflict"), err)
 	case errors.Is(err, assetlist.ErrItemState):
@@ -654,6 +728,50 @@ func (s *Server) getProjectAssetListBoard(writer http.ResponseWriter, request *h
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
 	writeJSON(writer, http.StatusOK, assetListBoardFields(board, crops))
+}
+
+// putProjectAssetListItemReview is the person's board decision (#329b): one
+// accept of many item ids, or one return with the declared reasons. The
+// expected_version is the list version the board read; a stale one is 409.
+func (s *Server) putProjectAssetListItemReview(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
+	owner, ok := s.assetListOwner(writer, request, principal)
+	if !ok {
+		return
+	}
+	var body assetListItemReviewBody
+	if err := s.decodeJSON(writer, request, &body); err != nil {
+		return
+	}
+	if body.ExpectedVersion == nil || *body.ExpectedVersion < 0 {
+		s.writeAssetListError(writer, fmt.Errorf("%w: expected_version", assetlist.ErrInvalid), "")
+		return
+	}
+	outcome, err := s.assetLists.Review(request.Context(), assetlist.ReviewInput{
+		OwnerID:         owner,
+		ProjectID:       request.PathValue("projectID"),
+		ListID:          request.PathValue("listID"),
+		ReviewerID:      owner,
+		Decision:        body.Decision,
+		ItemIDs:         body.ItemIDs,
+		ReasonIDs:       body.ReasonIDs,
+		Note:            body.Note,
+		ExpectedVersion: *body.ExpectedVersion,
+	})
+	if err != nil {
+		s.writeAssetListError(writer, err, "")
+		return
+	}
+	items := make([]assetListItemReviewWire, 0, len(outcome.Results))
+	for _, result := range outcome.Results {
+		items = append(items, assetListItemReviewWire{
+			ItemID: result.ItemID, Verdict: result.Verdict,
+			ProjectAssetID: result.ProjectAssetID, Error: result.Error,
+		})
+	}
+	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
+	writeJSON(writer, http.StatusOK, assetListReviewDecisionWire{
+		List: assetListResultWire(outcome.List, nil), Items: items,
+	})
 }
 
 func (s *Server) putProjectAssetList(writer http.ResponseWriter, request *http.Request, principal access.Principal) {

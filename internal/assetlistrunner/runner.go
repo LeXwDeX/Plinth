@@ -48,6 +48,10 @@ const (
 	// the Catalog copy. The declared message always carries the four
 	// placeholders.
 	defaultContinuation = "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+
+	// defaultRework is the returned-item turn when the Catalog declares no
+	// rework copy (#329b).
+	defaultRework = "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请按原因修正后重新自检并重新申报。"
 )
 
 // Runs is the run store port. It is the narrow subset of assetlist.RunStore
@@ -149,10 +153,13 @@ type Runner struct {
 	maxRounds    int
 	grace        time.Duration
 	continuation string
-	clock        func() time.Time
-	logger       *slog.Logger
-	streaks      map[string]failureStreak
-	deferred     map[string]deferredTurn
+	// rework is the continuation of a returned item (#329b); rework falls
+	// back to the default when the Catalog has no review section.
+	rework   string
+	clock    func() time.Time
+	logger   *slog.Logger
+	streaks  map[string]failureStreak
+	deferred map[string]deferredTurn
 }
 
 // New builds the loop. Callers must not run two instances over one database.
@@ -170,6 +177,7 @@ func New(config Config) *Runner {
 		maxRounds:    defaultMaxRounds,
 		grace:        defaultGrace,
 		continuation: defaultContinuation,
+		rework:       defaultRework,
 		clock:        config.Clock,
 		logger:       config.Logger,
 		streaks:      map[string]failureStreak{},
@@ -196,6 +204,11 @@ func New(config Config) *Runner {
 		}
 		if message := strings.TrimSpace(execution.Continuation.Message); message != "" {
 			runner.continuation = message
+		}
+	}
+	if review := config.Schema.Review; review != nil {
+		if message := strings.TrimSpace(review.Messages.ReworkMessage); message != "" {
+			runner.rework = message
 		}
 	}
 	return runner
@@ -828,12 +841,22 @@ func (runner *Runner) continuationText(item assetlist.Item, round int) string {
 		}
 		route = strings.Join(steps, " → ")
 	}
-	return strings.NewReplacer(
+	replacements := []string{
 		"{name}", item.Name,
 		"{description}", item.Description,
 		"{route}", route,
 		"{round}", strconv.Itoa(round),
-	).Replace(runner.continuation)
+	}
+	if item.ReturnReason != "" {
+		// A claimed returned item carries its return context (#329b): the
+		// next turn of the same sub-session quotes it word for word.
+		replacements = append(replacements,
+			"{reasons}", item.ReturnReason,
+			"{note}", item.ReturnNote,
+		)
+		return strings.NewReplacer(replacements...).Replace(runner.rework)
+	}
+	return strings.NewReplacer(replacements...).Replace(runner.continuation)
 }
 
 func transientTurnError(err error) bool {

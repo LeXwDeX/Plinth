@@ -197,8 +197,10 @@ type FinishItemInput struct {
 //   - TransitionRun is the person's control write: the same transition rules
 //     plus a CAS on the run's updated_at token. Repeating the target status is
 //     idempotent; a presence pause may upgrade to the sticky user pause.
-//   - ClaimItem picks the first todo item by position only while the run is
-//     running, then moves it todo→working with round+1 and version+1.
+//   - ClaimItem picks the first returned or todo item by position only while
+//     the run is running, then moves it to working. A returned item keeps its
+//     round (the return already counted it, #329b); a todo item gets round+1.
+//     Both bump the version.
 //   - FinishItem moves working→review|failed|skipped only.
 //   - SkipItem moves todo|working→skipped under the item version CAS and never
 //     touches the item's session or its bound Tasks.

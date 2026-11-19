@@ -433,6 +433,9 @@ var assetListItemReviewsMigration string
 //go:embed migrations/0103_input_asset_crops.sql
 var inputAssetCropsMigration string
 
+//go:embed migrations/0104_asset_list_item_review_writes.sql
+var assetListItemReviewWritesMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -527,7 +530,8 @@ func migrations() []migration {
 		migration{version: 100, name: "asset_lists", sql: assetListsMigration},
 		migration{version: 101, name: "asset_list_runs", sql: assetListRunsMigration},
 		migration{version: 102, name: "asset_list_item_reviews", sql: assetListItemReviewsMigration},
-		migration{version: 103, name: "input_asset_crops", sql: inputAssetCropsMigration})
+		migration{version: 103, name: "input_asset_crops", sql: inputAssetCropsMigration},
+		migration{version: 104, name: "asset_list_item_review_writes", sql: assetListItemReviewWritesMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in

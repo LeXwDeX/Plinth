@@ -86,19 +86,32 @@ func (runs *fakeRuns) ClaimItem(
 	if run.Status != assetlist.RunRunning {
 		return assetlist.Item{}, false, nil
 	}
-	for index := range runs.items {
-		item := &runs.items[index]
-		if item.ListID != listID || item.State != assetlist.StateTodo {
-			continue
-		}
-		item.State = assetlist.StateWorking
-		item.Round++
-		item.Version++
-		item.UpdatedAt = at
-		runs.claims++
-		return *item, true, nil
+	claimable := func(item assetlist.Item) bool {
+		return item.ListID == listID &&
+			(item.State == assetlist.StateTodo || item.State == assetlist.StateReturned)
 	}
-	return assetlist.Item{}, false, nil
+	index := -1
+	for position := range runs.items {
+		if runs.items[position].State == assetlist.StateReturned && claimable(runs.items[position]) {
+			index = position
+			break
+		}
+		if index < 0 && claimable(runs.items[position]) {
+			index = position
+		}
+	}
+	if index < 0 {
+		return assetlist.Item{}, false, nil
+	}
+	item := &runs.items[index]
+	if item.State == assetlist.StateTodo {
+		item.Round++
+	}
+	item.State = assetlist.StateWorking
+	item.Version++
+	item.UpdatedAt = at
+	runs.claims++
+	return *item, true, nil
 }
 
 func (runs *fakeRuns) FinishItem(
@@ -546,6 +559,37 @@ func TestAdvanceClaimsOneItemCreatesItsSessionAndSchedulesTheFirstTurn(t *testin
 		!strings.Contains(fixture.chat.continuations[0], "第 1 轮") {
 		t.Fatalf("continuation = %q; want the four placeholders filled",
 			fixture.chat.continuations)
+	}
+}
+
+func TestAdvanceClaimsAReturnedItemWithItsReworkReason(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	item := newItem("aitem_1", "角色")
+	item.State = assetlist.StateReturned
+	item.Round = 2
+	item.SessionID = "ses_1"
+	item.ReturnReason = "风格不对、贴图有问题"
+	item.ReturnNote = "把脸修好"
+	fixture.chat.sessions["ses_1"] = chat.Session{
+		ID: "ses_1", OwnerID: testOwner, ProjectID: testProject,
+	}
+	fixture.seedRun(assetlist.RunRunning, item)
+
+	fixture.advance(t)
+
+	claimed := fixture.item(t, "aitem_1")
+	if claimed.State != assetlist.StateWorking || claimed.Round != 2 || fixture.runs.claims != 1 {
+		t.Fatalf("returned item = %+v, claims = %d; want working round 2",
+			claimed, fixture.runs.claims)
+	}
+	if len(fixture.chat.continuations) != 1 {
+		t.Fatalf("continuations = %q; want one rework turn", fixture.chat.continuations)
+	}
+	continuation := fixture.chat.continuations[0]
+	for _, want := range []string{"风格不对", "把脸修好", "第 2 轮", "角色"} {
+		if !strings.Contains(continuation, want) {
+			t.Fatalf("continuation = %q; want %q", continuation, want)
+		}
 	}
 }
 

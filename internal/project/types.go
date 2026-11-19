@@ -88,8 +88,13 @@ type Asset struct {
 	UpdatedAt   time.Time
 }
 
-// AssetInput is one create or update request.
+// AssetInput is one create or update request. ID optionally names the stored
+// asset instead of letting the service generate one; a caller that retries a
+// deterministic ID gets the existing asset back instead of a second row
+// (#329b registers one asset per reviewed item and round). An empty ID keeps
+// the generated "passet_" identity.
 type AssetInput struct {
+	ID          string
 	Kind        string
 	Name        string
 	Description string

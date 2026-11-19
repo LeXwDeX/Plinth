@@ -119,6 +119,12 @@ func (repo *memoryAssetLists) Decide(context.Context, assetlist.Decision) (asset
 	return assetlist.List{}, assetlist.ErrInvalid
 }
 
+// DecideItems is the #329b board decision write. The proposal/session tests
+// never decide an item, so it stays a refusal.
+func (repo *memoryAssetLists) DecideItems(context.Context, assetlist.DecisionBatch) (assetlist.List, error) {
+	return assetlist.List{}, assetlist.ErrInvalid
+}
+
 func defaultAssetListSchema(t *testing.T) catalog.AssetListSchema {
 	t.Helper()
 	product, err := catalog.LoadDefault()

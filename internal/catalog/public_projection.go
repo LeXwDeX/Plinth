@@ -237,6 +237,19 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 				HeartbeatSeconds: execution.Presence.HeartbeatSeconds,
 			}
 		}
+		// #329b: the board lists the return reasons and shows the rework cap;
+		// the continuation, limit and asset-limit copy stays server-side.
+		if review := cloned.AssetList.Review; review != nil {
+			reasons := make([]PublicAssetListReturnReasonSchema, 0, len(review.ReturnReasons))
+			for _, reason := range review.ReturnReasons {
+				reasons = append(reasons, PublicAssetListReturnReasonSchema{
+					ID: reason.ID, Label: reason.Label, Kinds: reason.Kinds,
+				})
+			}
+			publicAssetList.Review = &PublicAssetListReviewSchema{
+				ReturnReasons: reasons, MaxReworkRounds: review.MaxReworkRounds,
+			}
+		}
 	}
 	var publicStepPolicy *PublicStepPolicySchema
 	if cloned.StepPolicy != nil {

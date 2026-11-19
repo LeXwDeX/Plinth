@@ -47,6 +47,15 @@ func cloneAssetList(source *AssetListSchema) *AssetListSchema {
 		decompose := *source.Decompose
 		result.Decompose = &decompose
 	}
+	if source.Review != nil {
+		review := *source.Review
+		review.ReturnReasons = make([]AssetListReturnReasonSchema, len(source.Review.ReturnReasons))
+		for index, reason := range source.Review.ReturnReasons {
+			review.ReturnReasons[index] = reason
+			review.ReturnReasons[index].Kinds = append([]string(nil), reason.Kinds...)
+		}
+		result.Review = &review
+	}
 	return &result
 }
 

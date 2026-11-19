@@ -2162,6 +2162,7 @@
           "project_asset_list": "/api/v1/projects/{projectID}/asset-lists/{listID}",
           "project_asset_list_decision": "/api/v1/projects/{projectID}/asset-lists/{listID}/decision",
           "project_asset_list_board": "/api/v1/projects/{projectID}/asset-lists/{listID}/board",
+          "project_asset_list_item_review": "/api/v1/projects/{projectID}/asset-lists/{listID}/review",
           "chat_session_asset_lists": "/api/v1/chat/sessions/{sessionID}/asset-lists",
           "project_presence": "/api/v1/projects/{projectID}/presence",
           "project_asset_list_run": "/api/v1/projects/{projectID}/asset-lists/{listID}/run",
@@ -5608,6 +5609,24 @@
         {"value": "paused", "label": "已暂停"},
         {"value": "step_cap", "label": "步数上限"}
       ],
+      "review": {
+        "return_reasons": [
+          {"id": "style", "label": "风格不对", "kinds": []},
+          {"id": "proportion", "label": "比例不对", "kinds": []},
+          {"id": "details", "label": "细节崩坏", "kinds": []},
+          {"id": "reference", "label": "与参考不符", "kinds": []},
+          {"id": "topology", "label": "面数或布线不合要求", "kinds": ["character", "weapon", "prop", "vehicle", "scene"]},
+          {"id": "texture", "label": "贴图有问题", "kinds": ["character", "weapon", "prop", "vehicle", "scene"]},
+          {"id": "rig", "label": "骨骼或姿态有问题", "kinds": ["character"]},
+          {"id": "other", "label": "其他", "kinds": []}
+        ],
+        "max_rework_rounds": 3,
+        "messages": {
+          "rework_message": "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请先看上一版结果，只修正被指出的问题；能用加工步骤修正的不要整体重新生成，修正后重新自检并调用 report_list_item 重新申报。",
+          "return_limit": "清单项「{name}」已经重做 {round} 轮，达到上限；只能通过、跳过或从头重试。",
+          "asset_limit": "项目资产已达上限 {maximum} 个，未能把清单项「{name}」登记为项目资产；请先清理项目资产再通过。"
+        }
+      },
       "messages": {
         "confirmed": "制作清单「{title}」已确认，共 {count} 项，计划 {steps} 个 3D 步骤。",
         "rejected": "制作清单「{title}」已拒绝，未开始任何制作。",
@@ -20067,6 +20086,17 @@
             "asset_list.item_blocks[value=awaiting_approval].label": "Awaiting approval",
             "asset_list.item_blocks[value=paused].label": "Paused",
             "asset_list.item_blocks[value=step_cap].label": "Step limit reached",
+            "asset_list.review.return_reasons[id=style].label": "The style is off",
+            "asset_list.review.return_reasons[id=proportion].label": "The proportions are off",
+            "asset_list.review.return_reasons[id=details].label": "Details are broken",
+            "asset_list.review.return_reasons[id=reference].label": "Does not match the reference",
+            "asset_list.review.return_reasons[id=topology].label": "Triangle count or topology does not meet the requirement",
+            "asset_list.review.return_reasons[id=texture].label": "Textures have problems",
+            "asset_list.review.return_reasons[id=rig].label": "Skeleton or pose has problems",
+            "asset_list.review.return_reasons[id=other].label": "Other",
+            "asset_list.review.messages.rework_message": "List item \"{name}\" ({description}) was returned; this is rework round {round}. Reasons: {reasons}. Note: {note}. Look at the previous result first and fix only what was pointed out; when a processing step can fix it, do not regenerate everything. After fixing, self-check again and call report_list_item to report the item again.",
+            "asset_list.review.messages.return_limit": "List item \"{name}\" has used its {round} rework rounds; it can only be accepted, skipped or retried from scratch.",
+            "asset_list.review.messages.asset_limit": "The project already has its maximum of {maximum} assets, so list item \"{name}\" could not be registered as a project asset; clean up project assets before accepting.",
             "asset_list.messages.confirmed": "The list \"{title}\" was confirmed: {count} items, {steps} planned 3D steps.",
             "asset_list.messages.rejected": "The list \"{title}\" was rejected; nothing was started.",
             "asset_list.messages.replaced": "A new list replaced \"{title}\".",

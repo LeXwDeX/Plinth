@@ -151,10 +151,17 @@ type Item struct {
 	Block                   string              `json:"block,omitempty"`
 	ProjectAssetID          string              `json:"project_asset_id,omitempty"`
 	Round                   int                 `json:"round"`
-	Result                  json.RawMessage     `json:"result"`
-	Review                  json.RawMessage     `json:"review"`
-	CreatedAt               time.Time           `json:"created_at"`
-	UpdatedAt               time.Time           `json:"updated_at"`
+	// AcceptedAt is when the person accepted the item (#329b); nil until then.
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+	// ReturnReason and ReturnNote are the return context of the latest rework
+	// (#329b): the same sub-session's next turn quotes them, and the per-round
+	// history stays in the review rows.
+	ReturnReason string          `json:"return_reason,omitempty"`
+	ReturnNote   string          `json:"return_note,omitempty"`
+	Result       json.RawMessage `json:"result"`
+	Review       json.RawMessage `json:"review"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
 // RouteStep is one planned capability of an item, with the runtime offering
@@ -262,4 +269,36 @@ type Repository interface {
 	Propose(ctx context.Context, list List, items []Item, maximum int) (List, error)
 	EditList(ctx context.Context, list List, items []Item, expectedVersion int64) (List, error)
 	Decide(ctx context.Context, decision Decision) (List, error)
+	// DecideItems applies one batch of acceptance decisions in one write
+	// transaction (#329b): the list_version CAS gates the whole batch, every
+	// item must still be awaiting review, and a return reopens a completed
+	// run. A stale version is ErrConflict and an item in the wrong state is
+	// ErrItemState, with no partial write.
+	DecideItems(ctx context.Context, batch DecisionBatch) (List, error)
+}
+
+// DecisionBatch is one person's accept-or-return submission of the board
+// (#329b). ExpectedVersion is the list version the browser read; Items holds
+// one decision per item (accept may carry several, return exactly one).
+type DecisionBatch struct {
+	OwnerID         string
+	ProjectID       string
+	ListID          string
+	ExpectedVersion int64
+	ReviewerID      string
+	At              time.Time
+	Items           []ItemDecision
+}
+
+// ItemDecision is one item's write. ReviewID is the new review row id;
+// ProjectAssetID is the idempotent project asset an accept registered;
+// Reasons and Note are the return context.
+type ItemDecision struct {
+	ReviewID       string
+	ItemID         string
+	Verdict        string
+	ProjectAssetID string
+	Reasons        []string
+	Reason         string
+	Note           string
 }
