@@ -794,6 +794,10 @@ func (s *Server) routes() {
 		if route := routes.ProjectAssetListItemReview; route != "" {
 			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.putProjectAssetListItemReview))
 		}
+		// The batch ZIP of accepted items (#329c).
+		if route := routes.ProjectAssetListArchive; route != "" {
+			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.downloadProjectAssetListArchive))
+		}
 		// Run and item control (#328). The route keys exist in the Catalog from
 		// its declaration but stay unregistered without the list service.
 		if route := routes.ProjectAssetListRun; route != "" {

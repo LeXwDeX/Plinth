@@ -906,6 +906,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				crops:  repository.InputAssetCropRepository(),
 			},
 			Crops:              cropService,
+			Archive:            module,
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,

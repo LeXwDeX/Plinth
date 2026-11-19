@@ -54,6 +54,11 @@ func cloneAssetList(source *AssetListSchema) *AssetListSchema {
 			review.ReturnReasons[index] = reason
 			review.ReturnReasons[index].Kinds = append([]string(nil), reason.Kinds...)
 		}
+		if source.Review.Archive != nil {
+			archive := *source.Review.Archive
+			archive.StoredMediaTypes = append([]string(nil), source.Review.Archive.StoredMediaTypes...)
+			review.Archive = &archive
+		}
 		result.Review = &review
 	}
 	return &result

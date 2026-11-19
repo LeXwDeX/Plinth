@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
+	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -248,6 +249,36 @@ func (s *Server) assetListReviewMessage(
 		pairs = append(pairs, "{"+key+"}", value)
 	}
 	return strings.NewReplacer(pairs...).Replace(text)
+}
+
+// assetListArchiveMessage fills one batch-archive copy from the Catalog
+// (#329c). A Catalog without the section falls back to the conflict text.
+func (s *Server) assetListArchiveMessage(
+	pick func(catalog.AssetListArchiveMessagesSchema) string,
+	values map[string]string,
+) string {
+	text := ""
+	if archive := s.assetListArchiveSchema(); archive != nil {
+		text = strings.TrimSpace(pick(archive.Messages))
+	}
+	if text == "" {
+		return s.message("error.conflict")
+	}
+	if len(values) == 0 {
+		return text
+	}
+	pairs := make([]string, 0, len(values)*2)
+	for name, value := range values {
+		pairs = append(pairs, "{"+name+"}", value)
+	}
+	return strings.NewReplacer(pairs...).Replace(text)
+}
+
+func (s *Server) assetListArchiveSchema() *catalog.AssetListArchiveSchema {
+	if s.application.AssetList == nil || s.application.AssetList.Review == nil {
+		return nil
+	}
+	return s.application.AssetList.Review.Archive
 }
 
 // assetListOwner refuses a request without a real browser session. A
@@ -535,6 +566,27 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 		writeProblem(writer, http.StatusConflict, "asset_list_rework_limit", detail, err)
 	case errors.Is(err, assetlist.ErrConflict):
 		writeProblem(writer, http.StatusConflict, "conflict", s.message("error.conflict"), err)
+	case errors.Is(err, assetlist.ErrArchiveEmpty):
+		// #329c: nothing accepted (or nothing stored) yet; not a server failure.
+		detail := s.assetListArchiveMessage(func(messages catalog.AssetListArchiveMessagesSchema) string {
+			return messages.Empty
+		}, nil)
+		writeProblem(writer, http.StatusConflict, "asset_list_archive_empty", detail, err)
+	case errors.Is(err, assetlist.ErrArchiveTooLarge):
+		// #329c: the precheck refused before any byte was sent; the copy tells
+		// the person to download the accepted items in batches.
+		values := map[string]string{}
+		if archive := s.assetListArchiveSchema(); archive != nil {
+			values["maximum_entries"] = strconv.Itoa(archive.MaxEntries)
+			values["maximum_bytes"] = strconv.FormatInt(archive.MaxBytes, 10)
+		}
+		detail := s.assetListArchiveMessage(func(messages catalog.AssetListArchiveMessagesSchema) string {
+			return messages.TooLarge
+		}, values)
+		writeProblem(writer, http.StatusRequestEntityTooLarge, "asset_list_archive_too_large", detail, err)
+	case errors.Is(err, assetlist.ErrArchiveUnavailable):
+		writeProblem(writer, http.StatusConflict, "asset_list_archive_unavailable",
+			s.message("error.conflict"), err)
 	case errors.Is(err, assetlist.ErrItemState):
 		writeProblem(writer, http.StatusConflict, "asset_list_item_state", s.message("error.conflict"), err)
 	case errors.Is(err, assetlist.ErrRunUnavailable), errors.Is(err, assetlist.ErrExecutionDisabled):
@@ -772,6 +824,70 @@ func (s *Server) putProjectAssetListItemReview(writer http.ResponseWriter, reque
 	writeJSON(writer, http.StatusOK, assetListReviewDecisionWire{
 		List: assetListResultWire(outcome.List, nil), Items: items,
 	})
+}
+
+// downloadProjectAssetListArchive streams the batch ZIP of the list's
+// accepted items (#329c). Only accepted items with stored files are packed;
+// the optional item_ids query narrows the selection so an oversized list can
+// be downloaded in batches after the 413 precheck.
+func (s *Server) downloadProjectAssetListArchive(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
+	owner, ok := s.assetListOwner(writer, request, principal)
+	if !ok {
+		return
+	}
+	archive, err := s.assetLists.PrepareArchive(request.Context(), owner,
+		request.PathValue("projectID"), request.PathValue("listID"),
+		assetListArchiveItemIDs(request))
+	if err != nil {
+		s.writeAssetListError(writer, err, "")
+		return
+	}
+	defer archive.Close()
+	if audit := s.assetListArchiveSchema(); audit != nil {
+		fields := audit.Audit
+		s.recordProductAudit(request, administration.AuditEvent{
+			Action:       fields.Action,
+			ActorID:      principal.ID(),
+			ActorName:    principal.Claims.Name,
+			ResourceType: fields.ResourceType,
+			ResourceID:   request.PathValue("listID"),
+			Detail: map[string]any{
+				fields.DetailFields.ListID:  request.PathValue("listID"),
+				fields.DetailFields.Items:   archive.ItemCount,
+				fields.DetailFields.Entries: archive.Entries,
+				fields.DetailFields.Bytes:   archive.Bytes,
+			},
+		})
+	}
+	s.setPrivateAssetCacheControl(writer)
+	writer.Header().Set("Content-Type", archive.MediaType)
+	writer.Header().Set("Content-Disposition",
+		`attachment; filename="`+safeDownloadFilename(archive.Filename)+`"`)
+	setSandboxedBytesHeaders(writer)
+	writer.WriteHeader(http.StatusOK)
+	// Send the status and headers as soon as Prepare has finished instead of
+	// letting them sit in the server's buffer until the first file chunk.
+	_ = http.NewResponseController(writer).Flush()
+	if _, err := archive.WriteTo(writer); err != nil && s.logger != nil {
+		s.logger.WarnContext(request.Context(), "资产清单压缩包写出中断",
+			"list_id", request.PathValue("listID"),
+			"entries", strconv.Itoa(archive.Entries), "error", err)
+	}
+}
+
+// assetListArchiveItemIDs reads the optional item_ids query. Both a repeated
+// parameter and one comma-separated value select the same subset.
+func assetListArchiveItemIDs(request *http.Request) []string {
+	values := request.URL.Query()["item_ids"]
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, id := range strings.Split(value, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
 }
 
 func (s *Server) putProjectAssetList(writer http.ResponseWriter, request *http.Request, principal access.Principal) {

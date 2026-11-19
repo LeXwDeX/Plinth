@@ -54,9 +54,8 @@ type BoardItem struct {
 
 // Board is the read-only acceptance board of one list (#329a): the list
 // summary (including the run state when it has one), every item in position
-// order with its produced-artifact reference and latest decision. It writes
-// nothing: snapshot generation, accept/return and the batch archive are later
-// steps (#329b).
+// order with its produced-artifact reference and latest decision. The batch
+// ZIP of accepted items lives in archive.go (#329c).
 type Board struct {
 	List  List        `json:"list"`
 	Items []BoardItem `json:"items"`

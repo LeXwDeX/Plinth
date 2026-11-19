@@ -249,6 +249,11 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			publicAssetList.Review = &PublicAssetListReviewSchema{
 				ReturnReasons: reasons, MaxReworkRounds: review.MaxReworkRounds,
 			}
+			if archive := review.Archive; archive != nil {
+				publicAssetList.Review.Archive = &PublicAssetListArchiveSchema{
+					MaxEntries: archive.MaxEntries, MaxBytes: archive.MaxBytes,
+				}
+			}
 		}
 	}
 	var publicStepPolicy *PublicStepPolicySchema

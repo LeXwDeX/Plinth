@@ -48,6 +48,10 @@ type Config struct {
 	// assets and crop provenance (#331), so proposals and edits share one
 	// validation. nil keeps the #327 shape checks only.
 	References ReferenceAssets
+	// Archive opens the stored result files of the batch delivery (#329c).
+	// Application assembly installs the generation module; nil leaves the
+	// archive unavailable and the route unregistered.
+	Archive ArchiveAssets
 	// Crops cuts the optional per-item edit crop instruction (#331). nil
 	// refuses crop instructions; the proposal path never accepts them.
 	Crops           Cropper
@@ -91,7 +95,11 @@ type Service struct {
 	projectAssets      ProjectAssets
 	projectAssetLimits ProjectAssetLimits
 	referenceAssets    ReferenceAssets
-	crops              Cropper
+	// archive and archiveAssets are the batch delivery's schema and reader
+	// (#329c); nil leaves PrepareArchive reporting ErrArchiveUnavailable.
+	archive       *catalog.AssetListArchiveSchema
+	archiveAssets ArchiveAssets
+	crops         Cropper
 	// imageItemLimit is application.asset_list.decompose.maximum_items_per_image
 	// (#331); 0 leaves the proposal-time per-image bound unwired.
 	imageItemLimit int
@@ -172,6 +180,10 @@ func New(config Config) (*Service, error) {
 		imageItemLimit = config.Schema.Decompose.MaximumItemsPerImage
 		defaultRouteWithReference = strings.TrimSpace(config.Schema.Decompose.DefaultRouteWithReference)
 	}
+	var archive *catalog.AssetListArchiveSchema
+	if config.Schema.Review != nil {
+		archive = config.Schema.Review.Archive
+	}
 	return &Service{
 		repository:                config.Repository,
 		runs:                      config.Runs,
@@ -182,6 +194,8 @@ func New(config Config) (*Service, error) {
 		projectAssets:             config.ProjectAssets,
 		projectAssetLimits:        config.ProjectAssetLimits,
 		referenceAssets:           config.References,
+		archive:                   archive,
+		archiveAssets:             config.Archive,
 		crops:                     config.Crops,
 		imageItemLimit:            imageItemLimit,
 		defaultRouteWithReference: defaultRouteWithReference,

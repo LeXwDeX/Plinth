@@ -2163,6 +2163,7 @@
           "project_asset_list_decision": "/api/v1/projects/{projectID}/asset-lists/{listID}/decision",
           "project_asset_list_board": "/api/v1/projects/{projectID}/asset-lists/{listID}/board",
           "project_asset_list_item_review": "/api/v1/projects/{projectID}/asset-lists/{listID}/review",
+          "project_asset_list_archive": "/api/v1/projects/{projectID}/asset-lists/{listID}/archive",
           "chat_session_asset_lists": "/api/v1/chat/sessions/{sessionID}/asset-lists",
           "project_presence": "/api/v1/projects/{projectID}/presence",
           "project_asset_list_run": "/api/v1/projects/{projectID}/asset-lists/{listID}/run",
@@ -5625,6 +5626,37 @@
           "rework_message": "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请先看上一版结果，只修正被指出的问题；能用加工步骤修正的不要整体重新生成，修正后重新自检并调用 report_list_item 重新申报。",
           "return_limit": "清单项「{name}」已经重做 {round} 轮，达到上限；只能通过、跳过或从头重试。",
           "asset_limit": "项目资产已达上限 {maximum} 个，未能把清单项「{name}」登记为项目资产；请先清理项目资产再通过。"
+        },
+        "archive": {
+          "filename_template": "asset-list-{list_id}.zip",
+          "media_type": "application/zip",
+          "manifest_filename": "manifest.json",
+          "readme_filename": "README.txt",
+          "directory_name_max_bytes": 80,
+          "max_entries": 512,
+          "max_bytes": 1073741824,
+          "stored_media_types": [
+            "model/gltf-binary",
+            "model/vnd.usdz+zip",
+            "application/zip",
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ],
+          "messages": {
+            "empty": "这份清单还没有已通过且带产物的项，暂无可打包内容。",
+            "too_large": "已通过项超出整批下载上限（最多 {maximum_entries} 个文件、共 {maximum_bytes} 字节）；请用 item_ids 分批下载。"
+          },
+          "audit": {
+            "action": "download_asset_list_archive",
+            "resource_type": "asset_list_archive",
+            "detail_fields": {
+              "list_id": "listId",
+              "items": "items",
+              "entries": "entries",
+              "bytes": "bytes"
+            }
+          }
         }
       },
       "messages": {
@@ -13842,6 +13874,7 @@
             "download_asset": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
             "access_asset": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
             "download_model_archive": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+            "download_asset_list_archive": "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
             "upload_file": "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
           },
           "action_prefix_badge_classes": {
@@ -15350,6 +15383,10 @@
       {
         "value": "download_model_archive",
         "label": "下载模型压缩包"
+      },
+      {
+        "value": "download_asset_list_archive",
+        "label": "下载资产清单压缩包"
       },
       {
         "value": "upload_file",
@@ -20038,6 +20075,7 @@
             "audit_actions[value=download_asset].label": "Download asset",
             "audit_actions[value=access_asset].label": "Access asset",
             "audit_actions[value=download_model_archive].label": "Download model archive",
+            "audit_actions[value=download_asset_list_archive].label": "Download asset list archive",
             "audit_actions[value=upload_file].label": "Upload file",
             "audit_actions[value=admin_create_user].label": "Administrator created user",
             "audit_actions[value=admin_update_user].label": "Administrator updated user",
@@ -20097,6 +20135,8 @@
             "asset_list.review.messages.rework_message": "List item \"{name}\" ({description}) was returned; this is rework round {round}. Reasons: {reasons}. Note: {note}. Look at the previous result first and fix only what was pointed out; when a processing step can fix it, do not regenerate everything. After fixing, self-check again and call report_list_item to report the item again.",
             "asset_list.review.messages.return_limit": "List item \"{name}\" has used its {round} rework rounds; it can only be accepted, skipped or retried from scratch.",
             "asset_list.review.messages.asset_limit": "The project already has its maximum of {maximum} assets, so list item \"{name}\" could not be registered as a project asset; clean up project assets before accepting.",
+            "asset_list.review.archive.messages.empty": "This list has no accepted items with stored files, so there is nothing to package.",
+            "asset_list.review.archive.messages.too_large": "The accepted items exceed the batch download limits ({maximum_entries} entries and {maximum_bytes} bytes in total); download them in batches with item_ids.",
             "asset_list.messages.confirmed": "The list \"{title}\" was confirmed: {count} items, {steps} planned 3D steps.",
             "asset_list.messages.rejected": "The list \"{title}\" was rejected; nothing was started.",
             "asset_list.messages.replaced": "A new list replaced \"{title}\".",

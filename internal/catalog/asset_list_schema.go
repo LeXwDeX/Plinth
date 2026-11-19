@@ -219,6 +219,56 @@ type AssetListReviewSchema struct {
 	ReturnReasons   []AssetListReturnReasonSchema `json:"return_reasons"`
 	MaxReworkRounds int                           `json:"max_rework_rounds"`
 	Messages        AssetListReviewMessagesSchema `json:"messages"`
+	// Archive is the batch delivery of accepted items (#329c), optional so a
+	// Catalog without it keeps the route unregistered: without it there is no
+	// server-side packaging, no limits and no error copy.
+	Archive *AssetListArchiveSchema `json:"archive,omitempty"`
+}
+
+// AssetListArchiveSchema 是已通过项的整批 ZIP（#329c）：文件名模板、每个清单项
+// 一个目录的命名边界、包内清单文件与文件数/字节上限。上限在预检阶段生效，超出
+// 时返回 413 并提示用 item_ids 分批下载。
+type AssetListArchiveSchema struct {
+	// FilenameTemplate uses {list_id}.
+	FilenameTemplate string `json:"filename_template"`
+	MediaType        string `json:"media_type"`
+	// ManifestFilename and ReadmeFilename are the two root entries of the ZIP.
+	ManifestFilename string `json:"manifest_filename"`
+	ReadmeFilename   string `json:"readme_filename"`
+	// DirectoryNameMaxBytes bounds one item directory's name (after the
+	// sanitized item name), so a long Agent-written name cannot exceed filesystem
+	// limits after extraction.
+	DirectoryNameMaxBytes int `json:"directory_name_max_bytes"`
+	// MaxEntries counts every ZIP entry including manifest and README.
+	MaxEntries int   `json:"max_entries"`
+	MaxBytes   int64 `json:"max_bytes"`
+	// StoredMediaTypes are already compressed and are stored, not deflated.
+	StoredMediaTypes []string                       `json:"stored_media_types"`
+	Messages         AssetListArchiveMessagesSchema `json:"messages"`
+	Audit            AssetListArchiveAuditSchema    `json:"audit"`
+}
+
+// AssetListArchiveMessagesSchema 是整批 ZIP 的拒绝文案。empty 是没有任何已通过
+// 且带产物的项；too_large 超过上限并用 {maximum_entries}/{maximum_bytes} 指明
+// 边界。
+type AssetListArchiveMessagesSchema struct {
+	Empty    string `json:"empty"`
+	TooLarge string `json:"too_large"`
+}
+
+// AssetListArchiveAuditSchema 是整批下载的审计事件：动作值必须在
+// application.audit_actions 中声明。
+type AssetListArchiveAuditSchema struct {
+	Action       string                            `json:"action"`
+	ResourceType string                            `json:"resource_type"`
+	DetailFields AssetListArchiveAuditDetailFields `json:"detail_fields"`
+}
+
+type AssetListArchiveAuditDetailFields struct {
+	ListID  string `json:"list_id"`
+	Items   string `json:"items"`
+	Entries string `json:"entries"`
+	Bytes   string `json:"bytes"`
 }
 
 // AssetListReturnReasonSchema 是一条打回原因。id 是固定的服务端值，label 由
@@ -268,11 +318,19 @@ type PublicAssetListSchema struct {
 	Review *PublicAssetListReviewSchema `json:"review,omitempty"`
 }
 
-// PublicAssetListReviewSchema 是验收看板的公开参数：打回原因与重做上限。
-// 续轮、上限拒绝与资产上限文案都留在服务端。
+// PublicAssetListReviewSchema 是验收看板的公开参数：打回原因、重做上限与整批
+// 下载的文件数/字节上限（浏览器据此提示分批下载）。续轮、拒绝文案与审计留在
+// 服务端。
 type PublicAssetListReviewSchema struct {
 	ReturnReasons   []PublicAssetListReturnReasonSchema `json:"return_reasons"`
 	MaxReworkRounds int                                 `json:"max_rework_rounds"`
+	Archive         *PublicAssetListArchiveSchema       `json:"archive,omitempty"`
+}
+
+// PublicAssetListArchiveSchema 是整批 ZIP 的公开上限。
+type PublicAssetListArchiveSchema struct {
+	MaxEntries int   `json:"max_entries"`
+	MaxBytes   int64 `json:"max_bytes"`
 }
 
 // PublicAssetListReturnReasonSchema 是一条公开的打回原因。

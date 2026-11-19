@@ -203,7 +203,7 @@ func validateAssetList(
 	if err := validateAssetListExecution(list.Execution); err != nil {
 		return err
 	}
-	if err := validateAssetListReview(list.Review, declaredKinds); err != nil {
+	if err := validateAssetListReview(list.Review, declaredKinds, schema.AuditActions); err != nil {
 		return err
 	}
 
@@ -227,6 +227,10 @@ func validateAssetList(
 	if list.Review != nil {
 		if strings.TrimSpace(routes.ProjectAssetListItemReview) == "" {
 			return errors.New("application.asset_list 声明 review 时需要 runtime.http.routes.project_asset_list_item_review")
+		}
+		// #329c：声明整批 ZIP 段就必须声明归档路由。
+		if list.Review.Archive != nil && strings.TrimSpace(routes.ProjectAssetListArchive) == "" {
+			return errors.New("application.asset_list.review.archive 需要 runtime.http.routes.project_asset_list_archive")
 		}
 	}
 	// #328：开启自动制作时，在场与运行/单项控制路由必须声明；路由的注册
@@ -373,7 +377,7 @@ func validateAssetListExecution(execution *AssetListExecutionSchema) error {
 // validateAssetListReview 校验可选的验收段（#329b）。未声明时放行：看板只读，
 // 通过仍可用，打回不可用。声明后原因 id 唯一、label 非空、kinds 必须是已声明
 // 的清单项类型，重做上限在 1 到 10 之间，三条文案必须完整且带各自占位符。
-func validateAssetListReview(review *AssetListReviewSchema, kinds map[string]AssetListKindSchema) error {
+func validateAssetListReview(review *AssetListReviewSchema, kinds map[string]AssetListKindSchema, auditActions []ValueLabel) error {
 	if review == nil {
 		return nil
 	}
@@ -418,6 +422,64 @@ func validateAssetListReview(review *AssetListReviewSchema, kinds map[string]Ass
 	}
 	if !placeholderSet(review.Messages.AssetLimit)["maximum"] {
 		return errors.New("asset_list.review.messages.asset_limit 缺少占位符 {maximum}")
+	}
+	return validateAssetListArchive(review.Archive, auditActions)
+}
+
+// validateAssetListArchive 校验可选的整批 ZIP 段（#329c）。未声明时放行：服务端
+// 不注册归档路由。声明后文件名模板必须带 {list_id}，两个根文件必须是不含路径
+// 的独立名字，目录名上限与包上限必须为正数，两条拒绝文案必须完整，审计动作必须
+// 在 audit_actions 中声明。
+func validateAssetListArchive(archive *AssetListArchiveSchema, auditActions []ValueLabel) error {
+	if archive == nil {
+		return nil
+	}
+	if !strings.Contains(archive.FilenameTemplate, "{list_id}") {
+		return errors.New("asset_list.review.archive.filename_template 缺少占位符 {list_id}")
+	}
+	if strings.TrimSpace(archive.MediaType) == "" {
+		return errors.New("asset_list.review.archive.media_type 不能为空")
+	}
+	for field, name := range map[string]string{
+		"manifest_filename": archive.ManifestFilename,
+		"readme_filename":   archive.ReadmeFilename,
+	} {
+		name = strings.TrimSpace(name)
+		if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+			return fmt.Errorf("asset_list.review.archive.%s 必须是不含路径的文件名", field)
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(archive.ManifestFilename), strings.TrimSpace(archive.ReadmeFilename)) {
+		return errors.New("asset_list.review.archive 的 manifest_filename 与 readme_filename 不能相同")
+	}
+	if archive.DirectoryNameMaxBytes < 1 || archive.DirectoryNameMaxBytes > 255 {
+		return errors.New("asset_list.review.archive.directory_name_max_bytes 必须在 1 到 255 之间")
+	}
+	if archive.MaxEntries < 1 || archive.MaxEntries > 10000 {
+		return errors.New("asset_list.review.archive.max_entries 必须在 1 到 10000 之间")
+	}
+	if archive.MaxBytes < 1 || archive.MaxBytes > 8<<30 {
+		return errors.New("asset_list.review.archive.max_bytes 必须在 1 到 8589934592 之间")
+	}
+	if strings.TrimSpace(archive.Messages.Empty) == "" {
+		return errors.New("asset_list.review.archive.messages.empty 不能为空")
+	}
+	if !placeholderSet(archive.Messages.TooLarge)["maximum_entries"] ||
+		!placeholderSet(archive.Messages.TooLarge)["maximum_bytes"] {
+		return errors.New("asset_list.review.archive.messages.too_large 需要 {maximum_entries} 与 {maximum_bytes}")
+	}
+	audit := archive.Audit
+	if strings.TrimSpace(audit.Action) == "" || strings.TrimSpace(audit.ResourceType) == "" ||
+		audit.DetailFields.ListID == "" || audit.DetailFields.Items == "" ||
+		audit.DetailFields.Entries == "" || audit.DetailFields.Bytes == "" {
+		return errors.New("asset_list.review.archive.audit 不完整")
+	}
+	declaredActions := make(map[string]struct{}, len(auditActions))
+	for _, action := range auditActions {
+		declaredActions[action.Value] = struct{}{}
+	}
+	if _, exists := declaredActions[audit.Action]; !exists {
+		return fmt.Errorf("asset_list.review.archive.audit.action 引用了未知 audit action %q", audit.Action)
 	}
 	return nil
 }

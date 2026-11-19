@@ -1896,6 +1896,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 				crops:  repository.InputAssetCropRepository(),
 			},
 			Crops:              cropService,
+			Archive:            module,
 			Schema:             *listSchema,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
