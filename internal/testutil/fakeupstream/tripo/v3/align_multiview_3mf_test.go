@@ -290,7 +290,7 @@ func TestMultiviewTo3MFScriptRunsAgainstTheFakeAndKeepsTheBytes(t *testing.T) {
 	}
 
 	// The kept bytes: the generation's model and picture, and the 3MF.
-	threeMF, err := fakeupstream.ModelFile("3mf")
+	threeMF, err := fakeupstream.ModelFile("3mf:tripo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestMultiviewTo3MFScriptRunsAgainstTheFakeAndKeepsTheBytes(t *testing.T) {
 		t.Errorf("the 3MF observation: %+v", exported)
 	}
 	generated := byStep["multiview-to-model-poll"].Artifacts
-	if len(generated) != 2 || generated[0].File != "multiview-to-model-poll-1.glb" || generated[1].File != "multiview-to-model-poll-2.png" {
+	if len(generated) != 2 || generated[0].File != "multiview-to-model-poll-1.glb" || generated[1].File != "multiview-to-model-poll-2.webp" {
 		t.Errorf("the generation's artifacts: %+v", generated)
 	}
 	entries, err := os.ReadDir(dir)
