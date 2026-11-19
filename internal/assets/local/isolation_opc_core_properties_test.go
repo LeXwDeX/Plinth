@@ -5,14 +5,16 @@ import (
 	"testing"
 )
 
-// #386: the isolation already treats the OPC core-properties relationship type
-// as a specification identifier, yet the part that relationship points to
-// declares the core-properties namespace (and the DCMI type vocabulary), which
-// were not on the same list. A package carrying a standard docProps/core.xml was
-// therefore rejected as holding "external addresses" and, before the archive
-// rules were named, reported only archive_rejected. These tests keep the two
-// halves consistent: the standard namespace identifiers are accepted, and every
-// address in a value, a text node or a foreign namespace is still refused.
+// Found while investigating #386, and not its cause (that was Tripo's own
+// namespace, isolation_tripo_aigc_test.go): the isolation already treats the OPC
+// core-properties relationship type as a specification identifier, yet the part
+// that relationship points to declares the core-properties namespace (and the
+// DCMI type vocabulary), which were not on the same list. A package carrying a
+// standard docProps/core.xml was therefore rejected as holding "external
+// addresses". These tests keep the two halves consistent: the standard namespace
+// identifiers are accepted, and every address in a value, a text node or a
+// foreign namespace is still refused. The real Tripo 3MF of 2026-11-19 holds no
+// core-properties part at all.
 
 const opcCoreProperties = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
