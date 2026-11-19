@@ -273,6 +273,7 @@ WEB_ASSETS_ROOT=build/go-web go run ./cmd/art-ai
 | [docs/partner-deployment.md](docs/partner-deployment.md) | 合作方部署指南：统一部署方式、DEBUG 日志、脱敏录制与诊断包 |
 | [docs/storage-maintenance.md](docs/storage-maintenance.md) | 存储维护 |
 | [docs/architecture.md](docs/architecture.md) | 架构与职责 |
+| [docs/external-mcp.md](docs/external-mcp.md) | 外部 MCP 接入：访问 Key、协议、工具、Tasks 扩展与示例 |
 | [docs/acceptance-1.0.md](docs/acceptance-1.0.md) | 1.0 功能验收清单 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 参与开发 |
 | [SECURITY.md](SECURITY.md) | 报告安全漏洞 |
