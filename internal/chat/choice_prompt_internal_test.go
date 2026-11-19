@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 )
 
@@ -68,5 +69,72 @@ func TestAgentRequestCarriesChoiceCards(t *testing.T) {
 	if !strings.Contains(system, `"choice_id":"choice_b"`) || !strings.Contains(system, `"use_default_offering":true`) ||
 		strings.Contains(system, `"choice_id":"choice_a"`) {
 		t.Fatalf("system context does not carry exactly the open card: %q", system)
+	}
+}
+
+// #374: the answer to a card that names no target tool reaches the Agent as
+// the chosen direction (with its action), not as a call to repeat, and the open
+// card lists its options for a typed pick. A card of a kind the Schema no
+// longer declares says nothing.
+func TestAgentRequestCarriesNextStepCards(t *testing.T) {
+	schema := suspendTestSchema()
+	registry, err := compileToolRegistry(schema, func(string, string) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := newChatServiceForInternal(t)
+	service.repository = choicePromptRepository{}
+	options := []ChoiceOption{
+		{ID: "clear_and_draw", Label: "清空功能选择，先出三视图图片", Description: "回到自由模式",
+			Arguments: json.RawMessage(`{}`), Action: &ChoiceAction{Type: "clear_operation"}},
+		{ID: "switch_retexture", Label: "改为换贴图", Arguments: json.RawMessage(`{}`),
+			Action: &ChoiceAction{Type: "switch_operation", OperationID: "retexture"}},
+		{ID: "keep", Label: "保持当前功能", Arguments: json.RawMessage(`{}`)},
+	}
+	answered := Choice{ID: "choice_n1", Kind: "next_step", Capability: "next_step", State: ChoiceAnswered,
+		Options: options, AnswerOptionID: "clear_and_draw", AnswerSource: ChoiceAnsweredOnCard, AnswerMessageID: "user-2"}
+	open := Choice{ID: "choice_n2", Kind: "next_step", Capability: "next_step", State: ChoicePending, Options: options}
+	stale := Choice{ID: "choice_gone", Kind: "removed_kind", Capability: "removed_kind", State: ChoiceAnswered,
+		Options: options, AnswerOptionID: "keep", AnswerSource: ChoiceAnsweredOnCard, AnswerMessageID: "user-3"}
+	history := []Message{
+		{ID: "user-1", Role: schema.Roles.User, Content: "把这三张图生成 3D"},
+		{ID: "assistant-1", Role: schema.Roles.Assistant, Content: "请在卡片上选择"},
+		{ID: "user-2", Role: schema.Roles.User, Content: "选择：清空功能选择，先出三视图图片"},
+	}
+	build := func(cards ...Choice) agents.Request {
+		service.SetChoices(fixedChoices{choices: cards}, 20)
+		o := &Orchestrator{schema: schema, registry: registry, agentScope: agentscope.FromSchema(schema.AgentScope), service: service}
+		return o.agentRequest(context.Background(), history, TurnOptions{AgentScope: "auto"}, "owner", "session")
+	}
+
+	request := build(open, answered)
+	last := request.Messages[len(request.Messages)-1].Content
+	for _, want := range []string{
+		"[Direction card answer]",
+		`"chosen":{"id":"clear_and_draw","title":"清空功能选择，先出三视图图片","description":"回到自由模式","action":{"type":"clear_operation"}}`,
+		`"kind":"next_step"`,
+	} {
+		if !strings.Contains(last, want) {
+			t.Fatalf("answer message lacks %q: %q", want, last)
+		}
+	}
+	if strings.Contains(last, `"tool"`) || strings.Contains(last, "call the tool") || strings.Contains(last, "switch_retexture") {
+		t.Fatalf("a direction answer reads like a tool call or lists the other options: %q", last)
+	}
+	system := request.Messages[0].Content
+	for _, want := range []string{"Open direction card", `"choice_id":"choice_n2"`, `"id":"switch_retexture"`,
+		`"action":{"type":"switch_operation","operation_id":"retexture"}`} {
+		if !strings.Contains(system, want) {
+			t.Fatalf("system context lacks %q: %q", want, system)
+		}
+	}
+	if strings.Contains(system, `"choice_id":"choice_n1"`) || strings.Contains(system, "tool named") {
+		t.Fatalf("system context carries the answered card or a call template: %q", system)
+	}
+
+	history[2].ID = "user-3"
+	request = build(stale)
+	if last := request.Messages[len(request.Messages)-1].Content; strings.Contains(last, "choice_gone") || strings.Contains(last, "Direction card") {
+		t.Fatalf("a card of an undeclared kind reached the Agent: %q", last)
 	}
 }

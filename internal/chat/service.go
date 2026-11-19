@@ -329,6 +329,11 @@ type ServiceConfig struct {
 	// so an Agent-supplied option can only carry arguments the target tool
 	// really declares (#242). Nil accepts none when arguments are present.
 	ChoiceTargetArguments map[string][]string
+	// HarnessOperations are the function operations of
+	// application.chat.harness. A choice option's switch_operation action may
+	// only name one of them that is wired, available and enabled in the
+	// session's selection (#374). Nil accepts no switch.
+	HarnessOperations []catalog.HarnessOperationSchema
 	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
 	// the ledger and the get_production_step tool unavailable.
 	WorkLedger catalog.ChatWorkLedgerSchema
@@ -394,6 +399,7 @@ type Service struct {
 	choiceMaxOptions      int
 	conceptDirections     catalog.ChatConceptDirectionsSchema
 	choiceTargetArguments map[string]map[string]bool
+	harnessOperations     []catalog.HarnessOperationSchema
 
 	harnessSnapshotResolver HarnessSnapshotResolver
 
@@ -554,6 +560,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		choiceMaxOptions:           config.ChoiceMaxOptions,
 		conceptDirections:          config.ConceptDirections,
 		choiceTargetArguments:      choiceTargetArgumentIndex(config.ChoiceTargetArguments),
+		harnessOperations:          config.HarnessOperations,
 		models:                     config.Models,
 		visualAnchors:              config.VisualAnchors,
 		visualAnchorKind:           choiceKindOf(config.ChoiceKinds, "agent_proposal"),

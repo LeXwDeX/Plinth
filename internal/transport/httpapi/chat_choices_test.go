@@ -163,3 +163,76 @@ func TestGenericChoiceCardsCarryTheSchemaQuestion(t *testing.T) {
 		t.Fatalf("generic card = %+v, want question %q", card, wantQuestion)
 	}
 }
+
+// #374: a direction card names no target tool; its options carry the action
+// the page performs before it sends the answer, and an option without one
+// leaves the field out. The wire still carries no call arguments.
+func TestNextStepChoiceCardCarriesOptionActionsOnTheWire(t *testing.T) {
+	t.Parallel()
+	module, handler, cookie, sessionID := grantTestBrowserWithApplication(t, nil, []string{"user"})
+	value, ok := fixtureExecutions.Load(module)
+	if !ok {
+		t.Fatal("missing fixture repository")
+	}
+	repository := value.(*fixtureExecutionState).repository
+	options := []chat.ChoiceOption{
+		{ID: "clear_and_draw", Label: "清空功能选择，先出三视图图片", Description: "回到自由模式", Arguments: json.RawMessage(`{}`),
+			Action: &chat.ChoiceAction{Type: "clear_operation"}},
+		{ID: "switch_retexture", Label: "改为换贴图", Arguments: json.RawMessage(`{}`),
+			Action: &chat.ChoiceAction{Type: "switch_operation", OperationID: "retexture"}},
+		{ID: "keep", Label: "保持当前功能", Arguments: json.RawMessage(`{}`)},
+	}
+	if _, err := repository.CreateChoice(context.Background(), chat.Choice{
+		OwnerID: "owner-a", SessionID: sessionID, AssistantMessageID: "turn-3", CallID: "call-3",
+		Kind: "next_step", Capability: "next_step", StepIndex: -1, Options: options, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defaultCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantQuestion := ""
+	for _, kind := range defaultCatalog.Application().Chat.Choice.Kinds {
+		if kind.ID == "next_step" {
+			wantQuestion = kind.Question
+		}
+	}
+	if wantQuestion == "" {
+		t.Fatal("the default Catalog declares no next_step question")
+	}
+	read := grantTestRequest(t, handler, cookie, http.MethodGet, choicesPath(sessionID), "", "")
+	if read.Code != http.StatusOK || strings.Contains(read.Body.String(), "arguments") {
+		t.Fatalf("list = %d %s", read.Code, read.Body.String())
+	}
+	var listed struct {
+		Choices []struct {
+			Kind     string `json:"kind"`
+			Tool     string `json:"tool"`
+			Question string `json:"question"`
+			Options  []struct {
+				ID     string `json:"id"`
+				Action *struct {
+					Type        string `json:"type"`
+					OperationID string `json:"operation_id"`
+				} `json:"action"`
+			} `json:"options"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &listed); err != nil || len(listed.Choices) != 1 {
+		t.Fatalf("listed = %s err=%v", read.Body.String(), err)
+	}
+	card := listed.Choices[0]
+	if card.Kind != "next_step" || card.Tool != "" || card.Question != wantQuestion || len(card.Options) != 3 {
+		t.Fatalf("direction card = %+v, want question %q", card, wantQuestion)
+	}
+	if action := card.Options[0].Action; action == nil || action.Type != "clear_operation" || action.OperationID != "" {
+		t.Fatalf("clear action = %+v", card.Options[0].Action)
+	}
+	if action := card.Options[1].Action; action == nil || action.Type != "switch_operation" || action.OperationID != "retexture" {
+		t.Fatalf("switch action = %+v", card.Options[1].Action)
+	}
+	if card.Options[2].Action != nil || strings.Count(read.Body.String(), `"action"`) != 2 {
+		t.Fatalf("an option without an action gained one: %s", read.Body.String())
+	}
+}

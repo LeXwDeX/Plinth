@@ -30,6 +30,16 @@ type choiceOptionWire struct {
 	CreditsMetered   bool           `json:"credits_metered,omitempty"`
 	EstimatedCredits int            `json:"estimated_credits,omitempty"`
 	NativeQuote      map[string]any `json:"native_quote,omitempty"`
+	// Action is what the page does when the person picks the option, before
+	// it sends the answer (#374): save the session's function selection with
+	// the named function (switch_operation) or without one (clear_operation).
+	// The server never performs it.
+	Action *choiceActionWire `json:"action,omitempty"`
+}
+
+type choiceActionWire struct {
+	Type        string `json:"type"`
+	OperationID string `json:"operation_id,omitempty"`
 }
 
 type choiceAnswerWire struct {
@@ -67,6 +77,9 @@ func choiceToWire(choice chat.Choice, question string) choiceWire {
 		if quote := option.NativeQuote; quote != nil {
 			encoded, _ := json.Marshal(quote)
 			_ = json.Unmarshal(encoded, &view.NativeQuote)
+		}
+		if action := option.Action; action != nil {
+			view.Action = &choiceActionWire{Type: action.Type, OperationID: action.OperationID}
 		}
 		wire.Options = append(wire.Options, view)
 	}

@@ -158,3 +158,41 @@ func TestChoiceCardsListNewestFirstAcrossFractionalSeconds(t *testing.T) {
 		t.Fatalf("newest first = %s (%s), want call-b", choices[0].CallID, choices[0].CreatedAt)
 	}
 }
+
+// #374: an option's action and a card that names no target tool persist in the
+// existing options document and kind column, so no migration is needed, and an
+// option without an action reads back without one.
+func TestChoiceCardPersistsOptionActionsWithoutATargetTool(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := choiceRepository(t)
+	created, err := repo.CreateChoice(ctx, chat.Choice{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		CallID: "call-next", Kind: "next_step", Capability: "next_step", StepIndex: -1,
+		Options: []chat.ChoiceOption{
+			{ID: "clear_and_draw", Label: "清空功能选择", Description: "回到自由模式", Arguments: json.RawMessage(`{}`),
+				Action: &chat.ChoiceAction{Type: "clear_operation"}},
+			{ID: "switch_retexture", Label: "改为换贴图", Arguments: json.RawMessage(`{}`),
+				Action: &chat.ChoiceAction{Type: "switch_operation", OperationID: "retexture"}},
+			{ID: "keep", Label: "保持当前功能", Arguments: json.RawMessage(`{}`)},
+		}, CreatedAt: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := repo.GetChoice(ctx, "owner-a", "session-a", created.ID)
+	if err != nil || read.Kind != "next_step" || read.ToolName != "" || len(read.Options) != 3 {
+		t.Fatalf("read = %+v %v", read, err)
+	}
+	if action := read.Options[0].Action; action == nil || action.Type != "clear_operation" || action.OperationID != "" {
+		t.Fatalf("clear action = %+v", read.Options[0].Action)
+	}
+	if action := read.Options[1].Action; action == nil || action.Type != "switch_operation" || action.OperationID != "retexture" {
+		t.Fatalf("switch action = %+v", read.Options[1].Action)
+	}
+	if read.Options[2].Action != nil {
+		t.Fatalf("an option without an action gained %+v", read.Options[2].Action)
+	}
+	answered, err := repo.AnswerChoice(ctx, "owner-a", "session-a", created.ID, chat.ChoiceRecord{
+		OptionID: "switch_retexture", Source: chat.ChoiceAnsweredOnCard, MessageID: "user-1", AnsweredAt: time.Now().UTC()})
+	if err != nil || answered.State != chat.ChoiceAnswered || answered.Options[1].Action == nil {
+		t.Fatalf("answered = %+v %v", answered, err)
+	}
+}

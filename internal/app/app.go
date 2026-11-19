@@ -529,6 +529,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// exact refine_image arguments, checked against the declared tool.
 		ConceptDirections:     applicationSchema.Chat.ConceptDirections,
 		ChoiceTargetArguments: chatToolArgumentNames(applicationSchema.Chat.Tools),
+		// A direction card option may switch the session to one of these
+		// functions (#374).
+		HarnessOperations: applicationSchema.Chat.Harness.Operations,
 		// The session production ledger and its summary bounds (#248).
 		WorkLedger: applicationSchema.Chat.WorkLedger,
 		// The deployment's chat model, its thinking profile and context
