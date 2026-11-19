@@ -6205,6 +6205,10 @@ type ChatStatusTexts struct {
 	// QueuedSubmission is shown while a paid step waits to be submitted again
 	// because the in-flight task admission is full.
 	QueuedSubmission string `json:"queued_submission,omitempty"`
+	// PreparingTool is shown from the first fragment of a tool call the model
+	// is writing until the call runs, so a long argument stream does not keep
+	// showing the thinking status (#375).
+	PreparingTool string `json:"preparing_tool,omitempty"`
 }
 
 type ChatAuditSchema struct {

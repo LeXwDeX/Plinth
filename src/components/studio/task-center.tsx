@@ -236,6 +236,7 @@ export function TaskDrawer() {
       open: text('ui.workspace.tasks.open'),
       close: text('ui.workspace.tasks.close'),
       agentPreparing: text('ui.workspace.tasks.agent_preparing'),
+      agentNoTask: text('ui.workspace.tasks.agent_no_task'),
       skillRunsLoadFailed: text('ui.workspace.tasks.skill_runs_load_failed'),
       noticeEnable: text('ui.workspace.notice.enable'),
       noticeRequesting: text('ui.workspace.notice.requesting'),
@@ -404,7 +405,13 @@ export function TaskDrawer() {
       </div>
       {agentPending && showLiveRows ? <Surface as="article" variant="inset" radius="xl" padding="md" className="flex items-center gap-3" data-testid="workspace-agent-progress">
         <Loader2 className="size-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
-        <span className="min-w-0 truncate text-sm">{agentStatus}</span>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="truncate text-sm">{agentStatus}</span>
+          {/* #375: the row is the Agent's own work, not a Task. Until the session tracks one, say so. */}
+          {allTasks.length === 0
+            ? <span className="truncate text-xs text-muted-foreground" data-testid="workspace-agent-no-task">{ui.agentNoTask}</span>
+            : null}
+        </div>
       </Surface> : null}
       {/* A failed load is reported under every filter, with its retry: the 失败 filter would otherwise hide the very failure. */}
       {skillRunsError ? <p role="alert" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-destructive" data-testid="workspace-task-load-error">

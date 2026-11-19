@@ -167,6 +167,10 @@ func (adapter *Adapter) Stream(
 	// content arrives, so each stretch of reasoning yields one content-free
 	// Thinking delta whatever the model's thinking profile (#285).
 	thinking := false
+	// toolCalling is set once the first tool call fragment has been reported:
+	// a model writes call arguments for a long while before the call can run,
+	// so the caller learns of the call at its first fragment (#375).
+	toolCalling := false
 	calls := map[int]*agents.ToolCall{}
 	var callOrder []int
 	// inlineImage is set when the model drew a picture itself (delta.images,
@@ -232,6 +236,14 @@ func (adapter *Adapter) Stream(
 				}
 			}
 			for _, fragment := range choice.Delta.ToolCalls {
+				if !toolCalling {
+					toolCalling = true
+					if emit != nil {
+						if err := emit(agents.Delta{ToolCalling: true}); err != nil {
+							return agents.Completion{}, err
+						}
+					}
+				}
 				call, found := calls[fragment.Index]
 				if !found {
 					call = &agents.ToolCall{}

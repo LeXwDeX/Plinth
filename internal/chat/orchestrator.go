@@ -2462,11 +2462,17 @@ func truncateRunes(value string, maximum int) string {
 // adapter reports reasoning after visible text of the same round. Visible text
 // ends it. The event carries only the Schema status text: reasoning never
 // reaches the stream, the stored message or the log.
+//
+// A tool call the model starts writing replaces the status once per round with
+// the Schema preparing-tool status (#375): the model writes the call's
+// arguments for a long while before the call can run, and without it the
+// thinking status would stay on screen until the generating status of the run.
 type thinkingRound struct {
 	orchestrator *Orchestrator
 	ctx          context.Context
 	sessionID    string
 	active       bool
+	toolShown    bool
 }
 
 func (orchestrator *Orchestrator) startThinkingRound(
@@ -2500,11 +2506,28 @@ func (round *thinkingRound) announce() {
 	}
 }
 
+// announceToolCall shows the preparing-tool status once per round, replacing
+// the thinking status (#375). It is best effort and optional like announce: a
+// Schema without the text shows nothing.
+func (round *thinkingRound) announceToolCall() {
+	status := round.orchestrator.schema.Presentation.Status.PreparingTool
+	if round.toolShown || status == "" {
+		return
+	}
+	round.toolShown = true
+	round.active = false
+	round.orchestrator.statusEvent(round.ctx, round.sessionID, status)
+}
+
 // receive handles one adapter delta: a reasoning signal (re)announces the
-// status, content goes through the round's DSML filter to emitText.
+// status, a tool call signal replaces it, content goes through the round's
+// DSML filter to emitText.
 func (round *thinkingRound) receive(delta agents.Delta, filter *dsml.Filter) error {
 	if delta.Thinking {
 		round.announce()
+	}
+	if delta.ToolCalling {
+		round.announceToolCall()
 	}
 	if delta.Content == "" {
 		return nil

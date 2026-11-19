@@ -60,12 +60,17 @@ func (*thinkingAgent) Complete(context.Context, agents.Request) (agents.Completi
 
 func runThinkingTurn(t *testing.T, schema catalog.ChatSchema) ([]chat.Event, chat.Message) {
 	t.Helper()
+	return runAgentTurn(t, schema, &thinkingAgent{tool: schema.Tools[0].Name})
+}
+
+func runAgentTurn(t *testing.T, schema catalog.ChatSchema, agent agents.Adapter) ([]chat.Event, chat.Message) {
+	t.Helper()
 	service := newChatService(t, newMemoryChatRepository())
 	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Service: service,
 		Schema:  schema,
 		Model:   "configured-model",
-		Agent:   &thinkingAgent{tool: schema.Tools[0].Name},
+		Agent:   agent,
 		Tools:   scriptedToolExecutor{},
 	})
 	if err != nil {
@@ -157,6 +162,99 @@ func TestOrchestratorThinkingStatusIsOptional(t *testing.T) {
 	for _, event := range events {
 		if event.Data["configured-type"] == "thinking" || event.Data["configured-content"] == "思考中…" {
 			t.Fatalf("unexpected thinking event: %#v", event.Data)
+		}
+	}
+}
+
+// toolCallingAgent plays a model that reasons and then writes a tool call
+// (#375): the adapter reports the first call fragment with a content-free
+// ToolCalling delta, long before the call is complete. The second round
+// summarizes.
+type toolCallingAgent struct {
+	tool  string
+	calls int
+}
+
+func (agent *toolCallingAgent) Stream(
+	_ context.Context,
+	_ agents.Request,
+	emit func(agents.Delta) error,
+) (agents.Completion, error) {
+	agent.calls++
+	if agent.calls == 1 {
+		for _, delta := range []agents.Delta{{Thinking: true}, {ToolCalling: true}} {
+			if err := emit(delta); err != nil {
+				return agents.Completion{}, err
+			}
+		}
+		return agents.Completion{ToolCalls: []agents.ToolCall{{
+			ID: "configured-call", Name: agent.tool, Arguments: []byte(`{"prompt":"paint"}`),
+		}}}, nil
+	}
+	if err := emit(agents.Delta{Content: "configured summary"}); err != nil {
+		return agents.Completion{}, err
+	}
+	return agents.Completion{Content: "configured summary"}, nil
+}
+
+func (*toolCallingAgent) Complete(context.Context, agents.Request) (agents.Completion, error) {
+	return agents.Completion{}, nil
+}
+
+// TestOrchestratorShowsPreparingToolStatusWhileTheCallStreams pins #375: the
+// ToolCalling signal becomes one Schema status event that replaces the
+// thinking status while the call's arguments stream in, before the generating
+// status and the task registration of the tool run.
+func TestOrchestratorShowsPreparingToolStatusWhileTheCallStreams(t *testing.T) {
+	schema := configuredChatSchema(t)
+	schema.Stream.EventTypes.Thinking = "configured-thinking"
+	schema.Presentation.Status.Thinking = "configured thinking"
+	schema.Stream.EventTypes.Status = "configured-status-event"
+	schema.Presentation.Status.Generating = "configured generating"
+	schema.Presentation.Status.PreparingTool = "configured preparing tool"
+	schema.Stream.EventTypes.TaskRegistered = "configured-registered"
+	events, _ := runAgentTurn(t, schema, &toolCallingAgent{tool: schema.Tools[0].Name})
+
+	var sequence []string
+	for _, event := range events {
+		kind, _ := event.Data["configured-type"].(string)
+		content, _ := event.Data["configured-content"].(string)
+		switch kind {
+		case "configured-thinking":
+			sequence = append(sequence, "thinking")
+		case "configured-status-event":
+			sequence = append(sequence, "status:"+content)
+		case "configured-registered":
+			if len(sequence) == 0 || sequence[len(sequence)-1] != "registered" {
+				sequence = append(sequence, "registered")
+			}
+		case "configured-text":
+			if strings.TrimSpace(content) != "" {
+				sequence = append(sequence, "text:"+strings.TrimSpace(content))
+			}
+		}
+	}
+	want := []string{
+		"thinking", "status:configured preparing tool", "status:configured generating",
+		"registered", "thinking", "text:configured summary",
+	}
+	if strings.Join(sequence, "|") != strings.Join(want, "|") {
+		t.Fatalf("sequence = %v, want %v", sequence, want)
+	}
+}
+
+// TestOrchestratorPreparingToolStatusIsOptional pins that a Schema without the
+// text streams as before: the signal shows nothing.
+func TestOrchestratorPreparingToolStatusIsOptional(t *testing.T) {
+	schema := configuredChatSchema(t)
+	schema.Stream.EventTypes.Status = "configured-status-event"
+	schema.Presentation.Status.Generating = "configured generating"
+	schema.Presentation.Status.PreparingTool = ""
+	events, _ := runAgentTurn(t, schema, &toolCallingAgent{tool: schema.Tools[0].Name})
+	for _, event := range events {
+		if event.Data["configured-type"] == "configured-status-event" &&
+			event.Data["configured-content"] != "configured generating" {
+			t.Fatalf("unexpected status event: %#v", event.Data)
 		}
 	}
 }

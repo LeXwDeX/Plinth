@@ -1946,6 +1946,8 @@ export interface ChatProductSchema {
       generating: string;
       /** Shown while a model round has no visible output yet (#285). */
       thinking?: string;
+      /** Shown from the first fragment of a tool call the model writes until it runs (#375). */
+      preparing_tool?: string;
     };
   };
 }

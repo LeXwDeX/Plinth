@@ -59,6 +59,36 @@ describe('workspace task registration', () => {
     expect(useWorkspaceStore.getState().currentObject).toMatchObject({ taskId: 'step', kind: 'model', assetId: 'output' });
   });
 
+  // #375: a task first registered by the history restore carries no session when the list
+  // did not name one; the Agent stream registers it again with the session. The drawer lists
+  // a task only under its session, so the second registration must complete the first.
+  it('completes the session of a task first registered without one', () => {
+    const { registerTask } = useWorkspaceStore.getState();
+    registerTask({ taskId: 'late', capability: 'text-to-3d', progressMaximum: 100 });
+    expect(useWorkspaceStore.getState().trackedTasks[0].sessionId).toBeUndefined();
+    registerTask({ taskId: 'late', sessionId: 'session-a', capability: 'text-to-3d', progressMaximum: 100 });
+    const { trackedTasks } = useWorkspaceStore.getState();
+    expect(trackedTasks).toHaveLength(1);
+    expect(trackedTasks[0].sessionId).toBe('session-a');
+  });
+
+  it('treats an empty session like a missing one when completing', () => {
+    const { registerTask } = useWorkspaceStore.getState();
+    registerTask({ taskId: 'late', sessionId: '', capability: 'text-to-3d', progressMaximum: 100 });
+    registerTask({ taskId: 'late', sessionId: 'session-a', capability: 'text-to-3d', progressMaximum: 100 });
+    expect(useWorkspaceStore.getState().trackedTasks[0].sessionId).toBe('session-a');
+  });
+
+  it('never replaces a session a task already has', () => {
+    const { registerTask } = useWorkspaceStore.getState();
+    registerTask({ taskId: 'owned', sessionId: 'session-a', capability: 'text-to-3d', progressMaximum: 100 });
+    registerTask({ taskId: 'owned', sessionId: 'session-b', capability: 'text-to-3d', progressMaximum: 100 });
+    registerTask({ taskId: 'owned', capability: 'text-to-3d', progressMaximum: 100 });
+    const { trackedTasks } = useWorkspaceStore.getState();
+    expect(trackedTasks).toHaveLength(1);
+    expect(trackedTasks[0].sessionId).toBe('session-a');
+  });
+
   it('does not preview a task that belongs to another or an unknown session', () => {
     useWorkspaceStore.getState().registerTask({ taskId: 'step', sessionId: 'session-a', capability: 'text-to-3d', progressMaximum: 100 });
     useWorkspaceStore.getState().applyTaskDetail('step', completedModel, 'session-b');

@@ -180,6 +180,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		"presentation.agent_busy":               schema.Presentation.Messages.AgentBusy,
 		"presentation.status.generating":        schema.Presentation.Status.Generating,
 		"presentation.status.queued_submission": schema.Presentation.Status.QueuedSubmission,
+		"presentation.status.preparing_tool":    schema.Presentation.Status.PreparingTool,
 		"audit.create_action":                   schema.Audit.CreateAction,
 		"audit.delete_action":                   schema.Audit.DeleteAction,
 		"audit.session_resource_type":           schema.Audit.SessionResourceType,

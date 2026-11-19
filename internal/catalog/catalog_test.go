@@ -794,7 +794,7 @@ const minimalApplication = `"application":{
 				"input_shape_text":"{name}={count}","input_shape_list":"{name}[{count}]","input_shape_boolean":"{name}=布尔",
 				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值"
 			},
-			"status":{"generating":"正在生成","queued_submission":"排队等待提交"}
+			"status":{"generating":"正在生成","queued_submission":"排队等待提交","preparing_tool":"正在准备调用工具"}
 		},
 		"audit":{
 			"create_action":"access_asset","delete_action":"access_asset",
