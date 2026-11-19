@@ -41,9 +41,30 @@ type multiviewRun struct {
 	chat     catalog.ChatSchema
 }
 
+// multiviewScenario is what a run adds to the shipped one-Offering harness
+// (#373): the session's explicit 3D lock, further Offerings of the shipped
+// Catalog the gateway also serves, and those without runtime configuration.
+type multiviewScenario struct {
+	locked      string
+	also        []string
+	unavailable []string
+}
+
+const (
+	rodinImageTo3D = "hyper3d/rodin-gen-2.5/image-to-3d"
+	p2Multiview    = "tripo/tripo-p2-multiview/image-to-3d"
+)
+
 // runMultiview runs the shipped multiview tool on the shipped multiview
 // Offering, with the given group views, arguments and structured request.
 func runMultiview(t *testing.T, views *fakeThreeViews, arguments string, request *chat.MultiviewRequest) multiviewRun {
+	t.Helper()
+	return runMultiviewIn(t, multiviewScenario{}, views, arguments, request)
+}
+
+// runMultiviewIn is runMultiview inside a scenario.
+func runMultiviewIn(t *testing.T, scenario multiviewScenario, views *fakeThreeViews, arguments string,
+	request *chat.MultiviewRequest) multiviewRun {
 	t.Helper()
 	product, err := catalog.LoadDefault()
 	if err != nil {
@@ -63,10 +84,21 @@ func runMultiview(t *testing.T, views *fakeThreeViews, arguments string, request
 	// The direct submission path of this harness has no prepared authorization;
 	// the frozen input is what these tests read.
 	offering.NativePricing = nil
+	offerings := []generation.Offering{offering}
+	for _, id := range scenario.also {
+		other, found := product.Get(generation.OfferingID(id))
+		if !found {
+			t.Fatalf("the shipped Catalog has no Offering %q", id)
+		}
+		offerings = append(offerings, other)
+	}
 	gateway := &fakeGateway{
-		offerings: []generation.Offering{offering},
+		offerings: offerings, unavailable: map[generation.OfferingID]bool{},
 		tasks: []generation.Task{{ID: "configured-task", State: generation.TaskSucceeded, Offering: offering,
 			Assets: []generation.Asset{{ID: "model-thumb", Role: "thumbnail"}}}},
+	}
+	for _, id := range scenario.unavailable {
+		gateway.unavailable[generation.OfferingID(id)] = true
 	}
 	resolver := &countingReferences{}
 	now := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
@@ -86,7 +118,7 @@ func runMultiview(t *testing.T, views *fakeThreeViews, arguments string, request
 	result, err := executor.Execute(context.Background(), chat.ToolCommand{
 		OwnerID: "owner-a", SessionID: "session-a", Tool: tool, History: history,
 		Call:    agents.ToolCall{ID: "call-views", Name: tool.Name, Arguments: []byte(arguments)},
-		Options: chat.TurnOptions{Multiview: request},
+		Options: chat.TurnOptions{Multiview: request, ExplicitModel3D: scenario.locked},
 	}, func(chat.ToolObservation) error { return nil })
 	run := multiviewRun{result: result, err: err, resolver: resolver, gateway: gateway, chat: application.Chat}
 	if result.AgentContent != "" {
@@ -241,5 +273,62 @@ func TestMultiviewRequestAcceptsTheOfferingID(t *testing.T) {
 	run := runMultiview(t, groupOfFour(), `{"model":"tripo-v3.1-multiview"}`, &request)
 	if run.err != nil || run.result.NoSubmission {
 		t.Fatalf("a request naming the Offering ID was refused: %+v %v", run.result, run.err)
+	}
+}
+
+// #373: the model the person picked on the multiview panel is the pick of this
+// turn. A session lock on a model that takes no views (Rodin) or on another
+// multiview model neither refuses the step nor replaces the model: the Task is
+// frozen on the requested Offering, and the result says the person chose it.
+func TestMultiviewRequestRunsItsModelWhateverTheSessionLocked(t *testing.T) {
+	request := chat.MultiviewRequest{Model: "tripo-v3.1-multiview", Views: []chat.MultiviewView{
+		{View: "front", AssetID: "upload-1"}, {View: "left", AssetID: "upload-2"}, {View: "back", AssetID: "upload-3"}}}
+	for _, test := range []struct{ name, locked string }{
+		{"a lock on a model that takes no views", "rodin-gen-2.5"},
+		{"a lock on another multiview model", "tripo-p2-multiview"},
+		{"a lock on the requested model", "tripo-v3.1-multiview"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			scenario := multiviewScenario{locked: test.locked, also: []string{rodinImageTo3D, p2Multiview}}
+			// The Agent follows the turn directive: it names the requested model.
+			run := runMultiviewIn(t, scenario, nil, `{"model":"tripo-v3.1-multiview"}`, &request)
+			if run.err != nil || run.result.NoSubmission || run.gateway.submitted.OfferingID != multiviewOffering {
+				t.Fatalf("the requested model must run under lock %q: %+v %v (submitted %q)",
+					test.locked, run.result, run.err, run.gateway.submitted.OfferingID)
+			}
+			if got := run.input["reference_views"]; !reflect.DeepEqual(got, []any{"front", "left", "back"}) {
+				t.Fatalf("reference_views = %v, want the person's labels", got)
+			}
+			if choice, _ := run.content["model_choice"].(map[string]any); choice["source"] != "user" {
+				t.Fatalf("model_choice = %v, want the person's choice", run.content["model_choice"])
+			}
+		})
+	}
+}
+
+// Without a structured request the session's lock still outranks the Agent's
+// model: a call that names a group and another model is refused with the
+// confirmation text and submits nothing (#103).
+func TestMultiviewWithoutARequestStillFollowsTheLock(t *testing.T) {
+	scenario := multiviewScenario{locked: "rodin-gen-2.5", also: []string{rodinImageTo3D}}
+	run := runMultiviewIn(t, scenario, groupOfFour(), `{"model":"tripo-v3.1-multiview","three_view_group":"run-1"}`, nil)
+	if run.err != nil || !run.result.NoSubmission || run.gateway.submitted.OfferingID != "" ||
+		run.content["service_confirmation_required"] != true {
+		t.Fatalf("the Agent's model must not replace the lock: %+v %v", run.result, run.err)
+	}
+}
+
+// A request for a model that cannot run now is refused. The lock does not
+// stand in for it: running Rodin on pictures the person labelled for a
+// multiview model would spend credits on a step they did not choose.
+func TestMultiviewRequestForAnUnavailableModelIsRefusedNotReplacedByTheLock(t *testing.T) {
+	request := chat.MultiviewRequest{Model: "tripo-p2-multiview", Views: []chat.MultiviewView{
+		{View: "front", AssetID: "upload-1"}, {View: "left", AssetID: "upload-2"}}}
+	scenario := multiviewScenario{locked: "rodin-gen-2.5", also: []string{rodinImageTo3D, p2Multiview}, unavailable: []string{p2Multiview}}
+	run := runMultiviewIn(t, scenario, nil, `{"model":"tripo-p2-multiview"}`, &request)
+	if run.err != nil || !run.result.NoSubmission || run.gateway.submitted.OfferingID != "" ||
+		!strings.Contains(run.result.Error, "当前不可用") {
+		t.Fatalf("an unavailable requested model must refuse the step as unavailable: %+v %v (submitted %q)",
+			run.result, run.err, run.gateway.submitted.OfferingID)
 	}
 }
