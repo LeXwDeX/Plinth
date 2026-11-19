@@ -8,6 +8,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
 type choicePromptRepository struct{ stubRepository }
@@ -136,5 +137,31 @@ func TestAgentRequestCarriesNextStepCards(t *testing.T) {
 	request = build(stale)
 	if last := request.Messages[len(request.Messages)-1].Content; strings.Contains(last, "choice_gone") || strings.Contains(last, "Direction card") {
 		t.Fatalf("a card of an undeclared kind reached the Agent: %q", last)
+	}
+}
+
+// #374: a kind that may switch functions needs the harness operations the
+// service checks the switch against; NewService fails at assembly without them
+// instead of refusing every switch at the first card (the application tests
+// start the real assembly with the shipped Catalog, which exercises the wiring
+// in app.go).
+func TestChoiceActionWiringNeedsHarnessOperationsForSwitchKinds(t *testing.T) {
+	switching := catalog.ChatChoiceKindSchema{ID: "next_step", Actions: []string{catalog.ChoiceActionSwitchOperation, catalog.ChoiceActionClearOperation}}
+	clearing := catalog.ChatChoiceKindSchema{ID: "clear_only", Actions: []string{catalog.ChoiceActionClearOperation}}
+	operations := []catalog.HarnessOperationSchema{{PublicHarnessOperation: catalog.PublicHarnessOperation{ID: "retexture"}, ToolName: "retexture_model"}}
+	if err := checkChoiceActionWiring([]catalog.ChatChoiceKindSchema{switching}, nil); err == nil || !strings.Contains(err.Error(), "next_step") {
+		t.Fatalf("a switch kind without operations = %v", err)
+	}
+	for name, test := range map[string]struct {
+		kinds      []catalog.ChatChoiceKindSchema
+		operations []catalog.HarnessOperationSchema
+	}{
+		"switch kind with operations": {[]catalog.ChatChoiceKindSchema{switching}, operations},
+		"clear-only kind":             {[]catalog.ChatChoiceKindSchema{clearing}, nil},
+		"no kinds":                    {nil, nil},
+	} {
+		if err := checkChoiceActionWiring(test.kinds, test.operations); err != nil {
+			t.Errorf("%s refused: %v", name, err)
+		}
 	}
 }

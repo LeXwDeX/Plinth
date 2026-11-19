@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -237,6 +239,21 @@ func (choice Choice) PendingContinuation() (string, bool) {
 	}
 	encoded, err := json.Marshal(value)
 	return string(encoded), err == nil
+}
+
+// checkChoiceActionWiring refuses a configuration in which a card kind may
+// switch functions but the service knows none (#374): every switch would be
+// refused and the card would quietly lose its point, so assembly fails fast.
+func checkChoiceActionWiring(kinds []catalog.ChatChoiceKindSchema, operations []catalog.HarnessOperationSchema) error {
+	if len(operations) > 0 {
+		return nil
+	}
+	for _, kind := range kinds {
+		if slices.Contains(kind.Actions, catalog.ChoiceActionSwitchOperation) {
+			return fmt.Errorf("chat: choice kind %q may switch functions but no harness operations are configured", kind.ID)
+		}
+	}
+	return nil
 }
 
 // directionContinuation is the JSON the Agent reads about a card whose kind

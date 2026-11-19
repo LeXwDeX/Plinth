@@ -490,6 +490,9 @@ func NewService(config ServiceConfig) (*Service, error) {
 	if err := config.TurnEndReasons.Validate(); err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
 	}
+	if err := checkChoiceActionWiring(config.ChoiceKinds, config.HarnessOperations); err != nil {
+		return nil, err
+	}
 	if config.Clock == nil {
 		config.Clock = time.Now
 	}
