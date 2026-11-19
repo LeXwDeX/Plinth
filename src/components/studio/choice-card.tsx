@@ -9,6 +9,7 @@ import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { fetchCapabilityOfferings } from '@/lib/agent-offerings';
 import {
+  choiceActionLabel,
   choiceAnswerText,
   choiceCardHasDetails,
   choiceCardOfferingCapability,
@@ -40,7 +41,9 @@ export interface ChoiceCardProps {
 /**
  * 对话里的选择卡（#321）：工具有多个可用服务时请用户选一个。单选列表（方向键、
  * Home/End 移动，Enter 确认），「确认」提交所选，「用默认」提交默认项。已答复或
- * 已失效的卡片只读显示结果。所有文字来自 Schema。
+ * 已失效的卡片只读显示结果。所有文字来自 Schema。带动作的选项（#374，方向卡）
+ * 在标题旁用小标识说明会切换或清空功能选择；动作由确认时的 `onAnswer` 调用方先
+ * 保存，卡片本身只展示。
  */
 export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAnswer }: ChoiceCardProps) {
   const { schema } = useProductSchema();
@@ -170,6 +173,12 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
                   {option.id === card.defaultOptionId ? (
                     <span className="whitespace-nowrap rounded bg-muted px-1 py-px text-[10px] font-normal text-muted-foreground" data-testid="chat-choice-default-badge">
                       {schemaText(schema, 'ui.chat.choice.default_badge')}
+                    </span>
+                  ) : null}
+                  {option.action ? (
+                    // #374: picking this option first changes the function selection; the marker says how.
+                    <span className="rounded border border-border px-1 py-px text-[10px] font-normal text-muted-foreground [overflow-wrap:anywhere]" data-testid="chat-choice-action-badge" data-action={option.action.type}>
+                      {choiceActionLabel(schema, option.action)}
                     </span>
                   ) : null}
                 </span>

@@ -67,6 +67,11 @@ var (
 	conceptQuantityAnswerPattern = regexp.MustCompile(`chose (\d+) concept sketch`)
 	imageWorkspaceMarker         = "本轮用户正在 2D 图片工作区"
 	modelWorkspaceMarker         = "本轮用户正在 3D 模型工作区"
+	// #374：直接点名要方向卡的测试用词。固定了功能时，该功能的工具做不了的请求不需要这些词，也会开卡。
+	nextStepPattern = regexp.MustCompile(`下一步怎么走|下一步做什么|(?i)\bnext step\b`)
+	// 固定了功能的回合，服务端在系统上下文里放一段带这个键的快照 JSON（internal/chat 的 harnessPrompt）；
+	// mock 只认这个键，不读模板文字，所以中英文回合都认得出。
+	functionSnapshotMarker = `"executable_tools"`
 )
 
 // multiviewPrompts 是四视角编辑里视角词到 edit_multiview_images 参数的对应，按 front、left、back、right 排列。
@@ -252,8 +257,19 @@ func (adapter *Adapter) routeCalls(request agents.Request, text string) []planne
 	if calls := adapter.conceptDirectionCalls(request, text); len(calls) > 0 {
 		return calls
 	}
+	if nextStepPattern.MatchString(text) {
+		if calls := adapter.nextStepCalls(request); len(calls) > 0 {
+			return calls
+		}
+	}
 	name, arguments := adapter.route(request, text)
 	if name == "" {
+		// #374: no tool of the fixed function can do this request, so the real Agent asks the way forward on a
+		// direction card instead of calling a tool the function does not allow. Without a fixed function the old
+		// default path stays.
+		if functionFixed(request.Messages) {
+			return adapter.nextStepCalls(request)
+		}
 		return nil
 	}
 	if name == toolRefineImage && !explicitImageSpecPattern.MatchString(text) {
@@ -354,6 +370,45 @@ func (adapter *Adapter) conceptDirectionCalls(request agents.Request, text strin
 		"options":  options,
 	}})
 	return calls
+}
+
+// functionFixed reports whether the system context says a function is fixed in
+// this turn (#374): the server puts the function's snapshot there.
+func functionFixed(messages []agents.Message) bool {
+	for _, message := range messages {
+		if message.Role == "system" && strings.Contains(message.Content, functionSnapshotMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+// nextStepCalls opens the direction card (#374) like the real Agent does when
+// the person wants something the fixed function cannot do: one card, two
+// options. Under a fixed function the first option clears the function
+// selection, which the page saves before it sends the answer, and the second
+// keeps the function. Asked for by its words without a fixed function there is
+// nothing to clear, so both directions are plain options.
+func (adapter *Adapter) nextStepCalls(request agents.Request) []plannedCall {
+	if !adapter.wants(request, toolAskChoice) {
+		return nil
+	}
+	arguments := map[string]any{"kind": "next_step"}
+	if functionFixed(request.Messages) {
+		arguments["recommended"] = "clear_selection"
+		arguments["options"] = []map[string]any{
+			{"id": "clear_selection", "label": "清空功能选择", "description": "回到自由模式，所有工具重新可用，再继续这次的请求。",
+				"action": map[string]any{"type": "clear_operation"}},
+			{"id": "keep_function", "label": "保持当前功能", "description": "继续用当前固定的功能，这次的请求先不做。"},
+		}
+	} else {
+		arguments["recommended"] = "concept_first"
+		arguments["options"] = []map[string]any{
+			{"id": "concept_first", "label": "先出概念图", "description": "先画几张低成本概念图，确认方向后再建模。"},
+			{"id": "model_now", "label": "直接做 3D 模型", "description": "跳过概念图，按现有内容直接建模。"},
+		}
+	}
+	return []plannedCall{{name: toolAskChoice, arguments: arguments}}
 }
 
 // route 返回 (工具名, 参数)；空工具名表示没有命中关键词，走默认路径。

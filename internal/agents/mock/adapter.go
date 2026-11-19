@@ -158,6 +158,15 @@ func (adapter *Adapter) stream(
 		if markdownTurn(prompt) {
 			return streamMarkdown(ctx, prompt, emit)
 		}
+		// #374: the person picked an option on a direction card; the mock carries on in words, no tool.
+		if reply, ok := adapter.directionReply(request.Messages); ok {
+			if emit != nil {
+				if err := emit(agents.Delta{Content: reply}); err != nil {
+					return agents.Completion{}, err
+				}
+			}
+			return agents.Completion{Content: reply}, nil
+		}
 		// 意图路由：命中关键词就换成对应的真实工具；没命中沿用历史行为。
 		// 本轮在回答选择卡时，先按卡片给出的下一次调用执行（#321）。
 		calls, answered := adapter.choiceCalls(request.Messages)

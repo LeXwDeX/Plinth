@@ -1,6 +1,7 @@
 import { NO_CREDITS, type OfferingWire } from '@/lib/agent-offerings';
 import { formatNativePrice, parseNativeQuote, type NativeQuote } from '@/lib/pricing';
 import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
+import { unavailableLabel } from '@/lib/unavailable';
 import { offeringQuoteText } from '@/lib/workspace/processing-cost';
 
 /**
@@ -12,6 +13,13 @@ import { offeringQuoteText } from '@/lib/workspace/processing-cost';
  */
 
 export type ChoiceState = 'pending' | 'answered' | 'superseded';
+
+/**
+ * What the page does when the person picks an option, before the answer is sent (#374): it saves a function selection
+ * through the session's Harness. The server only stores the action; clear_operation empties the selection (every tool is
+ * available again) and switch_operation fixes the named function.
+ */
+export type ChoiceAction = { type: 'clear_operation' } | { type: 'switch_operation'; operationId: string };
 
 export interface ChoiceOptionModel {
   id: string;
@@ -25,6 +33,8 @@ export interface ChoiceOptionModel {
   thumbnailUrl?: string;
   /** #103: the server's recommendation for this request. */
   recommended: boolean;
+  /** #374: what the page does when this option is picked, before the answer is sent; absent when it only continues the conversation. */
+  action?: ChoiceAction;
   creditsMetered: boolean;
   estimatedCredits: number | null;
   nativeQuote: NativeQuote | null;
@@ -70,9 +80,22 @@ const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
+/** The action of a wire option: null when it has none, undefined when it names one this page cannot perform. */
+function parseAction(value: unknown): ChoiceAction | null | undefined {
+  if (value === undefined || value === null) return null;
+  const item = record(value);
+  if (item?.type === 'clear_operation') return { type: 'clear_operation' };
+  if (item?.type === 'switch_operation' && text(item.operation_id)) return { type: 'switch_operation', operationId: text(item.operation_id) };
+  return undefined;
+}
+
 function parseOption(value: unknown): ChoiceOptionModel | null {
   const item = record(value);
   if (!item || !text(item.id)) return null;
+  const action = parseAction(item.action);
+  // #374: an option whose action this page cannot perform is left out like a malformed one. Answering it would let the
+  // Agent go on as if the function selection had changed.
+  if (action === undefined) return null;
   return {
     id: text(item.id),
     providerName: text(item.provider_name),
@@ -81,6 +104,7 @@ function parseOption(value: unknown): ChoiceOptionModel | null {
     description: text(item.description),
     thumbnailUrl: text(item.thumbnail_url),
     recommended: item.recommended === true,
+    ...(action ? { action } : {}),
     creditsMetered: item.credits_metered === true,
     estimatedCredits: typeof item.estimated_credits === 'number' ? item.estimated_credits : null,
     nativeQuote: parseNativeQuote(item.native_quote),
@@ -174,6 +198,22 @@ export function choiceOptionQuote(schema: ProductSchema, option: ChoiceOptionMod
 }
 
 const optionOf = (card: ChoiceCardModel, id: string) => card.options.find((option) => option.id === id);
+
+/** The action of the option a selection picks (the default option for "use default"); undefined when it has none (#374). */
+export function choiceSelectionAction(card: ChoiceCardModel, selection: ChoiceSelection): ChoiceAction | undefined {
+  return optionOf(card, selection.useDefault ? card.defaultOptionId : selection.optionId ?? '')?.action;
+}
+
+/**
+ * The small marker an option with an action carries, in the Schema's words (#374): what picking it does to the function
+ * selection. A function the Schema no longer lists is named like the Harness summary names it.
+ */
+export function choiceActionLabel(schema: ProductSchema, action: ChoiceAction): string {
+  if (action.type === 'clear_operation') return schemaText(schema, 'ui.chat.choice.action_clear');
+  const operation = schema.chat.harness?.operations.find((item) => item.id === action.operationId)?.label
+    ?? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.harness.selection_gone'));
+  return formatSchemaText(schemaText(schema, 'ui.chat.choice.action_switch'), { operation });
+}
 
 /** The words of the user message that answers the card. */
 export function choiceAnswerText(schema: ProductSchema, card: ChoiceCardModel, selection: ChoiceSelection, offerings?: readonly OfferingWire[]): string {
