@@ -670,12 +670,40 @@ Catalog 增加图片与模型两个不同 Offering，仍为 `enabled:false` 且�
 STL 与 3MF 槽位还要求格式本身成立（#297；已验收（#297，revision `b1d00405`）：本机隔离进程复跑 #264 的场景，dev-test 上已存的 STL/3MF 在新检查下仍可下载；ASCII STL 只有本机构造的样本）。槽位格式取自 Task 冻结的 Schema 输出 variant（`stl`、`3mf` 或 `converted.stl` 这类后缀）或 MIME，文件名和下载 URL 不参与判定，也不按 Offering 写分支。规则如下：
 
 - STL（`isolation_stl.go` 的 `inspectSTL`）：二进制 STL 的 80 字节头、三角形数量与文件长度必须一致，坐标须为有限数值；否则按 ASCII STL 检查，须由 `solid … endsolid` 包住至少一个 `facet normal`、`outer loop`、三个 `vertex`、`endloop`、`endfacet`，数值为有限 float32，最后一个 `endsolid` 之后不能再有内容。外部地址检查保留。STL 槽位不再按魔数或 ZIP 尾分派，所以 HTML 错误页、ZIP、GLB 放进 STL 槽位都会以 `stl_rejected` 被拒。压缩包内名为 `*.stl` 的成员仍只做地址检查。
-- 3MF（`isolation_3mf.go` 的 `inspect3MFIdentity`）：先按 ZIP 做完整隔离检查，再要求包内有 `[Content_Types].xml`（根元素 `Types`），以及 3D 模型部件：`_rels/.rels` 起始关系指向的部件，没有该关系时取 `3D/3dmodel.model`。模型部件须是根元素为 `model` 的良构 XML，DTD 一律拒绝。不满足时以 `3mf_rejected` 拒绝；非 ZIP 字节仍是 `archive_rejected`。声明了 `3mf-package-v1` 的输出继续走更严格的 profile 检查，这一层不影响它。
+- 3MF（`isolation_3mf.go` 的 `inspect3MFIdentity`）：先按 ZIP 做完整隔离检查，再要求包内有 `[Content_Types].xml`（根元素 `Types`），以及 3D 模型部件：`_rels/.rels` 起始关系指向的部件，没有该关系时取 `3D/3dmodel.model`。模型部件须是根元素为 `model` 的良构 XML，DTD 一律拒绝。不满足时以 `3mf_rejected` 拒绝；非 ZIP 字节以 `zip_footer_invalid` 拒绝（#386 之前是 `archive_rejected`）。声明了 `3mf-package-v1` 的输出继续走更严格的 profile 检查，这一层不影响它。
 
 这些检查也只证明格式身份。几何是否可用、能否打印、颜色是否正确，仍属于端点验收。失败语义沿用现有物化规则：可选槽位（如 Meshy 换贴图的 `stl`、`3mf`，`delivery: background`）只记 `materialization.artifact_skipped`（`reason=store`），不落盘，`model_delivery` 把该格式算作缺失、可补齐；必需槽位按完整性失败处理。
 
 旧资产：下载时按下述摘要和解析缓存规则执行交付检查；没有可信摘要的历史文件每次都重新解析。已存的坏 STL/3MF（例如 HTML 错误页）会被拒绝。资产记录本身不改，格式页对这类旧记录仍显示“已有”；不做清理或迁移。按标准写出的二进制/ASCII STL 和 3MF 照常通过。对 dev-test 库中全部无 profile 的 STL/3MF 资产做过只读扫描，结果记在 #297。
 
+
+**归档拒收按规则命名（#386；本机单测与夹具已完成，未部署验收，未取得真实字节）。** 2026-11-16 至 19 的一份自部署实例日志里，Tripo 多视图 Offering（`tripo/tripo-v3.1-multiview/image-to-3d`）的必需槽位 `converted.3mf`（38,044,706 与 38,379,218 字节）三次物化都以 `storage_stage=inspect`、`storage_reason=archive_rejected`、`errno=other` 被拒，其中一次是 Agent 发起的上游结果重新取回（字节相同），任务终态 `integrity_failure`。`archive_rejected` 原先涵盖 ZIP 容器、成员与 XML 的全部规则，日志分不出是字节损坏、触到上限还是写法特殊；当时没有保留候选字节，所以**根因仍未确定**，本次没有放宽任何检查。现在每条规则有自己的白名单原因（容器规则在 `isolation_zip.go`，包与 XML 规则在 `isolation.go`，成员读取在 `isolation_archive_gltf.go`，白名单在 `internal/generation/storage_diagnostics.go`）：
+
+| `storage_reason` | 规则 |
+|---|---|
+| `zip_footer_invalid` | 文件尾缺失、被截断或其后还有字节，分卷或计数不一致（HTML 错误页和其他非 ZIP 字节落在这里） |
+| `zip_directory_invalid` | 中央目录签名、边界、大小或内容无效，目录项携带载荷，文件尾与目录不一致（含前缀） |
+| `zip_layout_invalid` | 本地记录之间有前缀、间隙或重叠，压缩内容前后有未声明字节，Deflate 流之后有多余字节 |
+| `zip_local_header_invalid` | 本地文件头无效，或名称、标志、方法、CRC、大小与中央目录不一致 |
+| `zip_descriptor_invalid` | 数据描述记录长度、签名、CRC 或大小不一致 |
+| `zip64_invalid` | ZIP64 文件尾、定位记录或扩展字段缺失、重复、含未声明的值，或与 32 位字段不一致 |
+| `zip_extra_invalid` | 非 ZIP64 的扩展字段被截断或长度无效 |
+| `zip_unsupported_structure` | 分卷、加密、未支持的压缩方式或标志位 |
+| `zip_truncated` | 记录越过文件边界，或读到文件尾 |
+| `zip_entry_limit` | 成员数超过 10000 |
+| `zip_size_limit` | 成员声明的展开大小，或全部成员之和，超过 1 GiB（绝对上限；与随文件大小放大的 XML 上限 `xml_size_limit` 是两条规则） |
+| `zip_unsafe_path` | 成员名越出包、是绝对路径，或规范化后重名 |
+| `zip_nested_archive` | 成员名以 `.zip` 结尾，或成员内容是未检查的嵌套压缩包 |
+| `zip_member_corrupt` | 成员的 CRC、Deflate 流或声明大小与实际字节不符 |
+| `xml_invalid` | XML 不良构（含未声明字符集的编码） |
+| `xml_dtd` | XML 含 DTD |
+| `xml_external_resource` | 关系声明 `TargetMode="External"` |
+| `external_address`（既有） | 容器元数据（扩展字段、注释、成员名）、XML 属性、文本、注释、处理指令或无专用格式的成员含外部地址 |
+| `inspection_work_limit`（既有） | 同一压缩包各成员的读取总量超过 3 GiB 预算 |
+
+`archive_rejected` 现在只留给没有自己规则的失败，例如 OBJ 包里没有 OBJ，或 USDC、GLB、glTF 成员内部没有类型化原因的错误。`errno` 仍只表示操作系统层面的错误类别（取消、超时、权限、不存在、磁盘、只读、I/O、意外的文件尾），内容裁决一律是 `other`，所以 `errno=other` 与具体的 `storage_reason` 同时出现是预期的；区分规则看 `storage_reason`。读取成员时的取消、超时与 I/O 故障不改成内容裁决，仍按不可用处理并重试。
+
+验收范围没有变：成员数 10000、展开 1 GiB、读取预算 3 GiB，XML 上限随文件大小放大（#81）。回归用小夹具核对了常见写法都被接受：Python `zipfile` 的 `writestr`、可回写的 `open("w")`、`force_zip64`（本地头带 ZIP64 扩展、中央目录为 32 位大小）、不可回写的流产生的数据描述记录（含 ZIP64 的 24 字节描述记录），以及按 Blender 3MF 扩展公开页描述的导出内容构造的 3MF（PBR 贴图用 PNG 与 JPEG、缩略图、生产扩展、三角形集、切片软件元数据）。**这些写法和高面数样本（既有的 `TestHighPoly3MFModelXMLScalesWithArchive`，约 270 MB 模型 XML）都能通过，所以 #386 没有复现，真实 Tripo 字节取得之前不能断定是误判还是上游文件不合规，也没有据此把 `converted.3mf` 降为可选。** 取得字节的办法是经上游结果重新取回（只读、不计费，#295）读取该 Task 的 `converted.3mf`，再用 `local.ValidateDeliveredFile` 复核；任何真实上游读取都按开发规约先取得用户同意。下一次出现同类拒收时，`storage_reason` 会直接指向规则。已知但没有证据与 #386 有关、本次未处理：标准 OPC 核心属性部件（命名空间 `schemas.openxmlformats.org/package/2006/metadata/core-properties` 与 `purl.org/dc/dcmitype/` 不在规范标识符白名单内）、Slic3r 的命名空间，以及 `<metadata>` 文本里的 URL，都会按外部地址拒收，其中 URL 属于设计内的拒收。
 
 输出可声明闭合的 `delivery_profile`，当前包括 `binary-fbx-v1`、`3mf-package-v1` 与 `gaussian-splat-32-v1`。Catalog 要求精确 variant、唯一 MIME 和正大小上限；Generation 从 Task 冻结的必需输出取得 profile，传入普通、内联及成功后资产写入，并在发布前核对存储返回值及复用资产的 profile、格式和身份。SQLite 迁移 `0052_asset_delivery_profile.sql` 将它持久化到 `generation_assets`，读取和导入保留该字段；恢复或下载使用资产记录的 profile，不根据当前 Offering 重新推断。空值保留旧合同，未知或不匹配值拒绝，不能由存储适配器忽略后静默降级。
 
@@ -2339,7 +2367,7 @@ MCP 只注册 Schema 固定的 `READ` / `none` / `session` 工具，并按实际
   - **效果。** 命中的 Task ID 在操作创建时写入 `agent_generation_operations.recharge_task_id`（迁移 0059），只在此时判定一次，重放沿用。该操作不调用 `ApplyPolicy`，直接标记 `policy_evaluated_at`，Grant 保持待决并脱离成批准卡。因此不论会话是自动批准，还是手动批准方式下按策略自动批准的 2D 能力，都必须由人批准。工具结果是 Schema `chat.agent.consent_recharge_content`（`{task_id}`；缺省时用 `consent_waiting_content`），待批准列表项带 `recharge_task_id`，前端卡片显示 Schema 文案 `ui.studio.approval.card.recharge_notice`：上一次已计费、结果未保存，批准会再次计费。
   - **恢复路径。** #294 时没有免费恢复路径；#295 补上了「上游结果重新取回」（见上文同名小节）：Provider 还保留结果时，任务详情的「重新取回结果」或 Agent 工具 `recover_task_result` 只读已受理的上游作业、不调用 Submit、不再计费。`generation_failed_metered_by_class.integrity_failure`、`consent_recharge_content`、批准卡 `recharge_notice` 与系统提示都改为先指向重新取回，不能取回时才需要在批准卡上确认再次计费。任务中心的「重试」（`taskretry`）仍新建付费 Task；`asset-recovery` 仍只物化离线收集器登记过回执的已有字节。
   - **未覆盖。** SkillRun 步骤与 Processing Plan 的批准走各自的 `ApplyPolicy` 路径，本防护不覆盖。已发布的 Agent 配置自带系统提示，提示词里新增的那句要重新发布后才生效；工具层防护不依赖提示词。
-- 不透明二进制与可选格式（BLEND 补齐已验收（#166，revision `95ebc30e`），BLEND 后由 #221 下线；可选格式的标记与正常交付已验收（#264，revision `464d8cd1`），可选格式缺失、下载失败和内容被拒的情形已在本机隔离进程中验收（#264；内容被拒的情形在 #297 修复后复验，revision `b1d00405`，#297），没有真实上游样本）：通用文本地址扫描会把高熵二进制中的随机 `//host/` 误判成外部地址（8 MiB 随机字节约 85% 命中），所以 `.blend`（Blender 容器：`BLENDER` 原始头、Zstandard 或 gzip 压缩）在 `internal/assets/local/isolation_blend.go` 有类型化检查：必须是上述已知头，且只做绝对 `http(s)://` 扫描；头不符以 `blend_magic_missing` 拒绝。Meshy 换贴图的 STL 与 3MF 在 Schema 中改为 `delivery: background` + `minimum: 0`（仍请求并在返回且通过检查时落盘；#297 起检查包括 STL/3MF 的格式结构，见“资产检查与原子写入”。失败只留 `materialization.artifact_skipped` 事件，不使 Task 失败；缺的格式由 `model_delivery` 的补齐机制处理）；GLB 与其余格式保持必需。BLEND 已全局下线（#221）；该类型化检查保留给历史 BLEND 资产的读取、校验与下载。`validateRequiredModelFormats` 因此改为“必需格式必须全选，可选格式可选，不得出现未声明格式”。物化落盘被拒时，日志（`materialization.asset_store_rejected`）、`artifact_skipped` 事件和 Task 失败的内部取证字段（`UpstreamCode=asset_store_rejected`、`UpstreamExcerpt=role=… format=… stage=… reason=… errno=…`）写出角色、格式（变体名）和白名单原因（如 `archive_rejected`、`usdc_rejected`、`blend_magic_missing`、`external_address`、`png_*`、`fbx_*`、`xml_size_limit`、`usdc_size_limit`、`inspection_work_limit`、`non_finite_float`），不含字节、地址或原始错误文本；公开文案仍由 Schema 的 `failure.<class>` 提供，公开事件白名单不变。
+- 不透明二进制与可选格式（BLEND 补齐已验收（#166，revision `95ebc30e`），BLEND 后由 #221 下线；可选格式的标记与正常交付已验收（#264，revision `464d8cd1`），可选格式缺失、下载失败和内容被拒的情形已在本机隔离进程中验收（#264；内容被拒的情形在 #297 修复后复验，revision `b1d00405`，#297），没有真实上游样本）：通用文本地址扫描会把高熵二进制中的随机 `//host/` 误判成外部地址（8 MiB 随机字节约 85% 命中），所以 `.blend`（Blender 容器：`BLENDER` 原始头、Zstandard 或 gzip 压缩）在 `internal/assets/local/isolation_blend.go` 有类型化检查：必须是上述已知头，且只做绝对 `http(s)://` 扫描；头不符以 `blend_magic_missing` 拒绝。Meshy 换贴图的 STL 与 3MF 在 Schema 中改为 `delivery: background` + `minimum: 0`（仍请求并在返回且通过检查时落盘；#297 起检查包括 STL/3MF 的格式结构，见“资产检查与原子写入”。失败只留 `materialization.artifact_skipped` 事件，不使 Task 失败；缺的格式由 `model_delivery` 的补齐机制处理）；GLB 与其余格式保持必需。BLEND 已全局下线（#221）；该类型化检查保留给历史 BLEND 资产的读取、校验与下载。`validateRequiredModelFormats` 因此改为“必需格式必须全选，可选格式可选，不得出现未声明格式”。物化落盘被拒时，日志（`materialization.asset_store_rejected`）、`artifact_skipped` 事件和 Task 失败的内部取证字段（`UpstreamCode=asset_store_rejected`、`UpstreamExcerpt=role=… format=… stage=… reason=… errno=…`）写出角色、格式（变体名）和白名单原因（如 `archive_rejected`、`zip_*` 与 `xml_invalid` 等归档规则原因（#386，见“资产检查与原子写入”）、`usdc_rejected`、`blend_magic_missing`、`external_address`、`png_*`、`fbx_*`、`xml_size_limit`、`usdc_size_limit`、`inspection_work_limit`、`non_finite_float`），不含字节、地址或原始错误文本；公开文案仍由 Schema 的 `failure.<class>` 提供，公开事件白名单不变。
 - 3D 模型及其依赖必须在交付前完成内容级隔离：模型内嵌的绝对上游地址不能随 GLB、glTF、OBJ/MTL、FBX 或压缩容器字节下发。无法安全缓存并改写的外部依赖应拒绝交付，不以 CSP 或前端 URL 过滤代替服务端检查。历史资产读取适用同一交付约束。
 - 当前多格式合同覆盖已启用的 Meshy 与 Tripo Offering。Rodin Gen-2.5（启用，#188）只承诺一份必需的 PBR GLB 和一张后台保存的预览图：上游 `geometry_file_format` 是单选，每多一种格式就要再付一次生成费，所以不在同一 Task 内私有补齐。glTF 走免费本地补齐，其余格式只在 Meshy Convert 的大小合同允许时才能补齐，否则如实显示为不可用。Rodin 不计入全格式验收。
 - dev-test 真实任务验收：Meshy `task_bca1a0500b727800107a15acccb8bc57` 和 Tripo `task_8db24af9cf6786145cbbc9a25bce7f6b` 均达到 `SUCCEEDED`；各自六种必需格式和附属预览经服务端缓存、同源下载与字节/哈希核对。Tripo 上游将 `GLTF` 转换返回为二进制 GLB，平台用这份自包含产物履行主模型角色，避免交付含外部地址的原始模型。（这是 #278 之前的六格式验收；默认请求没有变。之后 Tripo 全格式 Offering 的转换格式可随用途缩小，用途还可以选 PNG 贴图等进阶导出选项，见下文「3D 交付按用途设定格式集与转换参数」，那部分未做 dev-test 验收。）
