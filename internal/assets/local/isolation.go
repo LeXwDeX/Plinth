@@ -603,10 +603,14 @@ func inspectArchiveWithXMLPart(file io.ReaderAt, size int64, xmlPart string) err
 	return nil
 }
 
+// .psmdcp is the OPC core-properties part as System.IO.Packaging names it
+// (package/services/metadata/core-properties/<id>.psmdcp). It is XML, so it
+// takes the same namespace rules as docProps/core.xml instead of the generic
+// address scan that would flag its namespace identifiers (#386).
 func isArchiveXML(name string) bool {
 	name = strings.ToLower(name)
 	return strings.HasSuffix(name, ".xml") || strings.HasSuffix(name, ".rels") ||
-		strings.HasSuffix(name, ".model")
+		strings.HasSuffix(name, ".model") || strings.HasSuffix(name, ".psmdcp")
 }
 
 // 3MF and OPC use HTTP URIs as immutable XML vocabulary identifiers. Only
