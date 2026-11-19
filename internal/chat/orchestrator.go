@@ -1279,7 +1279,8 @@ func (orchestrator *Orchestrator) Process(
 	defer cancelProcess()
 	failed := false
 	// suspended=true 表示轮次已挂起等待用户输入（AGT-12）：返回时不
-	// 收尾流与轮次，等唤醒方重新入队续跑。
+	// 收尾流与轮次，等唤醒方重新入队续跑。读写失败不是挂起：进程内没有
+	// 任何重试，轮次会一直占着会话，见 endUnsaved（#378）。
 	suspended := false
 	stopFinalized := false
 	// backgroundFinalized means the turn ended with its Tasks still running
@@ -1294,6 +1295,48 @@ func (orchestrator *Orchestrator) Process(
 			stopFinalized = true
 		}
 		return err
+	}
+	// endUnsaved ends the turn as failed when something it has to keep cannot
+	// be read or saved before it can go on (#378): the Agent configuration
+	// snapshot, or the round the model just planned. Nothing of what failed to
+	// be saved has run, so nothing paid is lost. A stop or a process shutdown
+	// keeps its own ending, and a write that lost to another writer never gets
+	// here (the callers leave that turn to its writer). Whatever else fails
+	// cannot be waited out: nothing in the live process retries it, and a
+	// suspended turn would keep the session busy and the stream open until the
+	// next restart. The person gets the failure text with the error ID, and the
+	// stream ends with the events that close it.
+	endUnsaved := func(stage string, cause error) error {
+		if orchestrator.turnCanceled(turnKey) {
+			return finalizeStop()
+		}
+		if ctx.Err() != nil {
+			// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
+			return nil
+		}
+		failed = true
+		orchestrator.logger.Error(
+			"对话回合无法读取或保存其状态，轮次以失败结束",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"stage", stage,
+			"error", cause,
+		)
+		failure := orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
+		if failure != nil {
+			// The failure text could not be stored either; the stream
+			// still ends, or its client would wait for an event that
+			// never comes.
+			_ = orchestrator.appendEvent(
+				context.WithoutCancel(ctx),
+				command.SessionID,
+				map[string]any{
+					orchestrator.schema.Stream.EventFields.Type: orchestrator.
+						schema.Stream.EventTypes.Done,
+				},
+			)
+		}
+		return failure
 	}
 	// 进程停机（区别于用户取消：仅 runCtx 被取消）时轮次保持可恢复：
 	// 不落失败、不收尾流，交给重启后的 RecoverTurns 重新入队续跑。
@@ -1369,8 +1412,9 @@ func (orchestrator *Orchestrator) Process(
 				command.OwnerID, command.SessionID, command.AssistantMessageID); checkErr == nil && requested {
 				return finalizeStop()
 			}
-			suspended = true
-			return snapshotErr
+			// #378: the turn has done nothing yet, and nothing here retries the
+			// read.
+			return endUnsaved("读取 Agent 配置快照", snapshotErr)
 		}
 		snapshot.SkillExecution = orchestrator.schema.Skills.Execution
 		turn.Checkpoint.Configuration = &snapshot
@@ -1380,8 +1424,13 @@ func (orchestrator *Orchestrator) Process(
 				command.OwnerID, command.SessionID, command.AssistantMessageID); checkErr == nil && requested {
 				return finalizeStop()
 			}
-			suspended = true
-			return saveErr
+			if errors.Is(saveErr, ErrTurnCheckpointConflict) {
+				// The write lost to another writer: the turn is that writer's
+				// now (or the restart recovery's), not ours to finish.
+				suspended = true
+				return saveErr
+			}
+			return endUnsaved("保存 Agent 配置快照", saveErr)
 		}
 		turn.CheckpointVersion = version
 	}
@@ -1581,45 +1630,15 @@ func (orchestrator *Orchestrator) Process(
 	// malformedCalls are the calls of this round whose arguments the model
 	// wrote as invalid JSON (#378); the checkpoint keeps them.
 	var malformedCalls []string
-	// endUnsavedRound ends the turn as failed when the round the model just
-	// planned cannot be made durable (#378). Nothing of the round ran, so the
-	// calls it added (executed is how many the reply had before it) leave the
-	// reply. A write that lost to another writer never gets here; neither
-	// does a stop or a process shutdown, which keep their own endings.
+	// endUnsavedRound is endUnsaved for the round the model just planned. The
+	// calls the round added (executed is how many the reply had before it)
+	// never ran, so they leave the reply; a round resumed from the checkpoint
+	// keeps its calls, whose Tasks may already be bound.
 	endUnsavedRound := func(stage string, cause error, executed int) error {
-		if orchestrator.turnCanceled(turnKey) {
-			return finalizeStop()
-		}
-		if ctx.Err() != nil {
-			// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
-			return nil
-		}
-		failed = true
-		orchestrator.logger.Error(
-			"对话回合无法保存，轮次以失败结束",
-			"session_id", command.SessionID,
-			"assistant_message_id", command.AssistantMessageID,
-			"stage", stage,
-			"error", cause,
-		)
 		if !parsed {
 			assistant.ToolCalls = assistant.ToolCalls[:executed]
 		}
-		failure := orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
-		if failure != nil {
-			// The failure text could not be stored either; the stream
-			// still ends, or its client would wait for an event that
-			// never comes.
-			_ = orchestrator.appendEvent(
-				context.WithoutCancel(ctx),
-				command.SessionID,
-				map[string]any{
-					orchestrator.schema.Stream.EventFields.Type: orchestrator.
-						schema.Stream.EventTypes.Done,
-				},
-			)
-		}
-		return failure
+		return endUnsaved(stage, cause)
 	}
 	for round := startRound; ; round++ {
 		effectiveRound := resumeRound + round

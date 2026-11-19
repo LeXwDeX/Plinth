@@ -91,6 +91,9 @@ type hungTurn struct {
 	logs    *hungTurnLogs
 	texts   *catalog.TextLocalizer
 	session chat.Session
+	// configuration, when set, reads the Agent configuration snapshot a new
+	// turn freezes before it does anything else.
+	configuration func(context.Context, string) (chat.AgentConfigurationSnapshot, error)
 }
 
 // configuredRejectionTexts gives the two tool results of #378 texts no code
@@ -138,16 +141,23 @@ func (h *hungTurn) start(options ...chat.TurnOptions) chat.ProcessTurn {
 // restarted process) would.
 func (h *hungTurn) process(command chat.ProcessTurn, agent agents.Adapter, tools chat.ToolExecutor) error {
 	h.t.Helper()
+	return h.processWith(context.Background(), command, agent, tools)
+}
+
+// processWith is process under a context the test controls (a shutdown).
+func (h *hungTurn) processWith(ctx context.Context, command chat.ProcessTurn, agent agents.Adapter, tools chat.ToolExecutor) error {
+	h.t.Helper()
 	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Service: h.service, Schema: h.schema, Model: "configured-model", Agent: agent, Tools: tools,
-		Logger: slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
-		Texts:  h.texts,
+		Logger:        slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		Texts:         h.texts,
+		Configuration: h.configuration,
 	})
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	defer orchestrator.WaitForTitles()
-	return orchestrator.Process(context.Background(), command)
+	return orchestrator.Process(ctx, command)
 }
 
 func (h *hungTurn) run(agent agents.Adapter, tools chat.ToolExecutor) (chat.ProcessTurn, error) {
@@ -543,5 +553,125 @@ func TestCheckpointConflictLeavesTheTurnToItsOtherWriter(t *testing.T) {
 	}
 	if status, closed := h.stream(command); status != "configured-active" || closed {
 		t.Fatalf("stream status = %q, terminal event = %v", status, closed)
+	}
+}
+
+// The Agent configuration snapshot is read and saved before the turn does
+// anything else. When that fails the turn ends like any other that cannot be
+// saved: failed, with the terminal event that closes the stream, an error in
+// the log, and a session that takes the next message. The model is never
+// asked: there is nothing it could have been told.
+func TestConfigurationSnapshotFailureEndsTheTurnAsFailed(t *testing.T) {
+	validSnapshot := func(context.Context, string) (chat.AgentConfigurationSnapshot, error) {
+		return chat.AgentConfigurationSnapshot{Revision: "1", SystemPrompt: "frozen prompt"}, nil
+	}
+	for name, test := range map[string]struct {
+		setup func(h *hungTurn)
+		fault string
+	}{
+		"the snapshot cannot be read": {
+			fault: "configuration store unavailable",
+			setup: func(h *hungTurn) {
+				h.configuration = func(context.Context, string) (chat.AgentConfigurationSnapshot, error) {
+					return chat.AgentConfigurationSnapshot{}, errors.New("configuration store unavailable")
+				}
+			},
+		},
+		"the snapshot cannot be saved": {
+			fault: "database is locked",
+			setup: func(h *hungTurn) {
+				h.configuration = validSnapshot
+				h.repo.setFault(func(checkpoint chat.TurnCheckpoint) error {
+					if checkpoint.Configuration != nil {
+						return errors.New("database is locked")
+					}
+					return nil
+				})
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHungTurn(t, configuredRejectionTexts)
+			test.setup(h)
+			agent := &scriptedAgent{}
+			tools := &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)}
+			command, err := h.run(agent, tools)
+			if err != nil {
+				t.Fatalf("Process = %v; the failure is handled, not left for the worker", err)
+			}
+			if len(agent.requests) != 0 || drainPrompts(tools) != "" {
+				t.Fatalf("the turn went on after its snapshot failed: %d requests", len(agent.requests))
+			}
+			wantTurnEnd(t, h.turn(command), "configured-turn-error", configuredEndReasons.Error)
+			if status, closed := h.stream(command); status != "configured-error" || !closed {
+				t.Fatalf("stream status = %q, terminal event = %v", status, closed)
+			}
+			stored := h.assistant(command)
+			if !strings.Contains(stored.Content, h.schema.Presentation.Messages.UnknownError) ||
+				!strings.Contains(stored.Content, command.AssistantMessageID) {
+				t.Fatalf("stored reply = %#v", stored)
+			}
+			for _, want := range []string{"level=ERROR", "session_id=" + h.session.ID,
+				"assistant_message_id=" + command.AssistantMessageID, test.fault} {
+				if !strings.Contains(h.logs.String(), want) {
+					t.Fatalf("log lacks %q: %s", want, h.logs.String())
+				}
+			}
+			h.wantSessionOpen()
+		})
+	}
+}
+
+// A snapshot write that lost to another writer is that writer's turn now, as
+// with the round's checkpoint.
+func TestConfigurationSnapshotConflictLeavesTheTurnToItsOtherWriter(t *testing.T) {
+	h := newHungTurn(t, configuredRejectionTexts)
+	h.configuration = func(context.Context, string) (chat.AgentConfigurationSnapshot, error) {
+		return chat.AgentConfigurationSnapshot{Revision: "1", SystemPrompt: "frozen prompt"}, nil
+	}
+	h.repo.setFault(func(checkpoint chat.TurnCheckpoint) error {
+		if checkpoint.Configuration != nil {
+			return chat.ErrTurnCheckpointConflict
+		}
+		return nil
+	})
+	command, err := h.run(&scriptedAgent{}, &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)})
+	if !errors.Is(err, chat.ErrTurnCheckpointConflict) {
+		t.Fatalf("Process = %v", err)
+	}
+	if state := h.turn(command).State; state != "configured-turn-running" {
+		t.Fatalf("turn state = %q", state)
+	}
+	if status, closed := h.stream(command); status != "configured-active" || closed {
+		t.Fatalf("stream status = %q, terminal event = %v", status, closed)
+	}
+}
+
+// A process shutdown is not a failure of the turn: it stays where the restart
+// recovery finds it, with its stream open, and nothing is logged as an error.
+func TestConfigurationSnapshotReadInterruptedByShutdownKeepsTheTurnRecoverable(t *testing.T) {
+	h := newHungTurn(t, configuredRejectionTexts)
+	ctx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
+	h.configuration = func(ctx context.Context, _ string) (chat.AgentConfigurationSnapshot, error) {
+		shutdown()
+		return chat.AgentConfigurationSnapshot{}, ctx.Err()
+	}
+	command := h.start()
+	if err := h.processWith(ctx, command, &scriptedAgent{}, &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)}); err != nil {
+		t.Fatalf("Process = %v", err)
+	}
+	if state := h.turn(command).State; state != "configured-turn-running" {
+		t.Fatalf("turn state = %q", state)
+	}
+	if status, closed := h.stream(command); status != "configured-active" || closed {
+		t.Fatalf("stream status = %q, terminal event = %v", status, closed)
+	}
+	if strings.Contains(h.logs.String(), "level=ERROR") {
+		t.Fatalf("a shutdown was logged as an error: %s", h.logs.String())
+	}
+	pending, err := h.service.RecoverTurns(context.Background())
+	if err != nil || len(pending) != 1 || pending[0].AssistantMessageID != command.AssistantMessageID {
+		t.Fatalf("recoverable turns = %+v, %v", pending, err)
 	}
 }
