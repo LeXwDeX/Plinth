@@ -209,10 +209,11 @@ func chatContent(content json.RawMessage) any {
 // pairingRefusal checks the items the way the real API does: every
 // function_call_output answers an earlier function_call, every function_call is
 // answered later, and a reasoning item is followed by the item it led to. The
-// answers are constructed from the OpenAI documents and the known wording of
-// the API's errors (no real sample); the observed gateway refusals are in
-// constraints.go and the sample.
-func pairingRefusal(items []inputItem) (map[string]any, bool) {
+// first two answers are the observed ones (the sample's error-orphan-output and
+// error-missing-output, in the gateway's key order, with no code member, the
+// call_id of the request put in); the third is constructed from the documents,
+// in the same envelope, and says so in the endpoint table.
+func (t *responsesTemplates) pairingRefusal(items []inputItem) (string, bool) {
 	called := map[string]bool{}
 	answered := map[string]bool{}
 	for _, item := range items {
@@ -221,16 +222,18 @@ func pairingRefusal(items []inputItem) (map[string]any, bool) {
 			called[item.CallID] = true
 		case "function_call_output":
 			if !called[item.CallID] {
-				return officialErrorBody(fmt.Sprintf("No tool call found for function call output with call_id %s.", item.CallID),
-					"invalid_request_error", "input", nil), true
+				return refusalText(t.orphanOutputRefusal, func(message string) string {
+					return strings.Replace(message, "nope_1", item.CallID, 1)
+				}), true
 			}
 			answered[item.CallID] = true
 		}
 	}
 	for _, item := range items {
 		if item.kind() == "function_call" && !answered[item.CallID] {
-			return officialErrorBody(fmt.Sprintf("No tool output found for function call %s.", item.CallID),
-				"invalid_request_error", "input", nil), true
+			return refusalText(t.missingOutputRefusal, func(message string) string {
+				return strings.Replace(message, "c_1", item.CallID, 1)
+			}), true
 		}
 	}
 	for index, item := range items {
@@ -244,9 +247,13 @@ func pairingRefusal(items []inputItem) (map[string]any, bool) {
 		followed := next < len(items) && (items[next].kind() == "function_call" ||
 			(items[next].kind() == "message" && items[next].Role == "assistant"))
 		if !followed {
-			return officialErrorBody(fmt.Sprintf("Item '%s' of type 'reasoning' was provided without its required following item.", item.ID),
-				"invalid_request_error", "input", nil), true
+			return refusalText(t.orphanOutputRefusal, func(string) string {
+				if item.ID == "" {
+					return "Item of type 'reasoning' was provided without its required following item."
+				}
+				return fmt.Sprintf("Item '%s' of type 'reasoning' was provided without its required following item.", item.ID)
+			}), true
 		}
 	}
-	return nil, false
+	return "", false
 }

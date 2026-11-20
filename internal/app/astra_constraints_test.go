@@ -23,8 +23,9 @@ import (
 // #401 on the production wiring: the chat agent the application builds from
 // the shipped Catalog talks to the fake upstream, whose gpt-astra refuses what
 // the real gateway refused on 2026-11-20 (a temperature, function tools with a
-// thinking level on Chat Completions, and, from the OpenAI documents, the level
-// none). The shipped gpt-astra profile omits the temperature on every request
+// thinking level on Chat Completions, and the levels none and minimal, which
+// the later probes showed it refuses on Responses). The shipped gpt-astra
+// profile omits the temperature on every request
 // path and is served on the Responses API (step 2), so every kind of request of
 // Plinth, the Agent turn with its tools and level included, is served; the
 // same Agent request shape on Chat Completions is still refused with the

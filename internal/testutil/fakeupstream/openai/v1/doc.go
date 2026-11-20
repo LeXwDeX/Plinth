@@ -36,17 +36,20 @@
 //
 // POST /responses (#401, responses*.go) is the wire those models serve
 // function tools on. Its answers are cloned from
-// testdata/responses-2026-11-20.sample.json, a sanitized excerpt of a real
-// probe of the gateway: the streamed tool call and text answer (an event: line
-// equal to data.type, no [DONE]), the non-stream response and the two 400s the
-// constrained models answer (temperature present, an unknown
-// reasoning.effort), byte for byte. The probe is not a wirefixture candidate,
-// because the capture pipeline refuses SSE with event: lines, so the endpoint
-// is declared constructed and says what the sample does not cover (reasoning
-// items, response.incomplete and response.failed, the in-stream error event,
-// input_image, parallel calls, the call/output pairing errors): those parts
-// are built from the OpenAI documents. A Responses request is also read as a
-// Chat Completions one (responsesRequest.chatView), so the fake-only request
-// conventions work on both wires, and the Responses ones are
-// ReasoningMarker, IncompleteMarker, FailedMarker and UnknownEventMarker.
+// testdata/responses-2026-11-20.sample.json, a sanitized excerpt of two real
+// probes of the gateway: the streamed tool call, text answer and parallel
+// calls (an event: line equal to data.type, no [DONE]), the reasoning item and
+// its events, an input_image request, the non-stream response and the 400s the
+// constrained models answer (temperature present, an unknown reasoning.effort,
+// none, minimal, a function_call_output or function_call without its pair), byte
+// for byte. The probes are not wirefixture candidates, because the capture
+// pipeline refuses SSE with event: lines, so the endpoint is declared
+// constructed and says what the sample does not cover (response.incomplete and
+// response.failed, the in-stream error event, response.refusal.delta, the
+// reasoning summary events, a stream line over the bound, the 400 for a
+// reasoning item without its following item): those parts are built from the
+// OpenAI documents. A Responses request is also read as a Chat Completions
+// one (responsesRequest.chatView), so the fake-only request conventions work on
+// both wires, and the Responses ones are ReasoningMarker, IncompleteMarker,
+// FailedMarker and UnknownEventMarker.
 package openaiv1

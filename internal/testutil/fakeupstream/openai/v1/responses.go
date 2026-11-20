@@ -20,9 +20,15 @@ import (
 const (
 	// ReasoningMarker adds a reasoning item (with encrypted_content when the
 	// request includes reasoning.encrypted_content) ahead of the answer, and
-	// reasoning and cached token counts to the usage. No real sample shows a
-	// reasoning item (the probe's requests at effort medium and high returned
-	// none): the item and its events are constructed from the OpenAI documents.
+	// reasoning and cached token counts to the usage. The real model returned
+	// one at effort xhigh (sample reasoning-tool-stream, observed): the item
+	// has content and summary as empty arrays, an id, encrypted_content and no
+	// status; response.output_item.added already carries a shorter
+	// encrypted_content than response.output_item.done, and the item of
+	// response.completed a third value; there is no summary event when no
+	// summary was requested. The fake gives those three values (the Fixed
+	// constants below); the summary events and the usage counts are not from a
+	// sample.
 	ReasoningMarker = "[[fake:reasoning]]"
 	// IncompleteMarker cuts the answer: the stream ends with
 	// response.incomplete (reason max_output_tokens) before any item is done,
@@ -36,11 +42,19 @@ const (
 	UnknownEventMarker = "[[fake:unknown-event]]"
 )
 
-// The fixed values of the fake's reasoning answers.
+// The fixed encrypted_content values of the fake's reasoning item, in the form
+// the real ones take (a token that begins gAAAAAB). The real gateway sent three
+// different values for one item: a shorter one with response.output_item.added,
+// the whole one with response.output_item.done and another of the done one's
+// length in the output of response.completed; a client that sends the item
+// back must take the done one (the replay of it was accepted).
 const (
-	fakeEncryptedReasoning = "ZmFrZS1lbmNyeXB0ZWQtcmVhc29uaW5n"
-	incompleteReason       = "max_output_tokens"
+	FixedEncryptedPartial = "gAAAAABrFAKE_partial_token"
+	FixedEncryptedDone    = "gAAAAABrFAKE_done_token_complete"
+	FixedEncryptedFinal   = "gAAAAABrFAKE_final_token_complete"
 )
+
+const incompleteReason = "max_output_tokens"
 
 // fakeItem is one output item of a planned response.
 type fakeItem struct {
@@ -51,15 +65,20 @@ type fakeItem struct {
 	name      string
 	arguments string
 	text      string
-	// encrypted: a reasoning item carries encrypted_content.
+	// encrypted: a reasoning item carries encrypted_content. summary: it
+	// carries a summary part (the request asked for one).
 	encrypted bool
+	summary   bool
 }
 
 type itemStage int
 
 const (
 	stageAdded itemStage = iota
+	// stageDone is the item of its own done event; stageFinal the same item in
+	// the output of response.completed or of a non-stream answer.
 	stageDone
+	stageFinal
 	stageCut
 )
 
@@ -113,8 +132,8 @@ func (h *handler) createResponse(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, status, body)
 		return
 	}
-	if refusal, refused := pairingRefusal(items); refused {
-		writeJSON(w, http.StatusBadRequest, refusal)
+	if refusal, refused := h.responses.pairingRefusal(items); refused {
+		writeRaw(w, http.StatusBadRequest, refusal)
 		return
 	}
 	if scenario == fakeupstream.ScenarioLostResponse {
@@ -131,7 +150,7 @@ func (h *handler) createResponse(w http.ResponseWriter, r *http.Request) {
 	case "failed":
 		writeJSON(w, http.StatusOK, h.responseObject(request, plan, "failed", nil, number))
 	default:
-		writeJSON(w, http.StatusOK, h.responseObject(request, plan, plan.status, h.outputObjects(plan, stageDone), number))
+		writeJSON(w, http.StatusOK, h.responseObject(request, plan, plan.status, h.outputObjects(plan, stageFinal), number))
 	}
 }
 
@@ -172,15 +191,16 @@ func (h *handler) planResponse(request responsesRequest, chat chatRequest, items
 			existing++
 		}
 	}
+	// The identifiers have the real shapes: a prefix and 50 characters.
 	if plan.reasoning {
-		plan.items = append(plan.items, fakeItem{kind: "reasoning", id: placeholderID("rs_", 48, number),
-			encrypted: request.includes("reasoning.encrypted_content")})
+		plan.items = append(plan.items, fakeItem{kind: "reasoning", id: placeholderID("rs_", 50, number),
+			encrypted: request.includes("reasoning.encrypted_content"), summary: request.summaryRequested()})
 	}
 	if len(calls) == 0 {
-		plan.items = append(plan.items, fakeItem{kind: "message", id: placeholderID("msg_", 48, number), text: reply})
+		plan.items = append(plan.items, fakeItem{kind: "message", id: placeholderID("msg_", 50, number), text: reply})
 	}
 	for index, call := range calls {
-		plan.items = append(plan.items, fakeItem{kind: "function_call", id: placeholderID("fc_", 48, number*100+int64(index)),
+		plan.items = append(plan.items, fakeItem{kind: "function_call", id: placeholderID("fc_", 50, number*100+int64(index)),
 			callID: fmt.Sprintf("call_fake_%d", existing+index), name: call.name, arguments: call.arguments})
 	}
 	for index := range plan.items {
@@ -221,10 +241,27 @@ func (h *handler) itemObject(item fakeItem, stage itemStage) map[string]any {
 			}
 		}
 		return object
-	default: // reasoning, constructed from the documents
-		object := map[string]any{"id": item.id, "type": "reasoning", "summary": []any{}}
-		if stage == stageDone && item.encrypted {
-			object["encrypted_content"] = fakeEncryptedReasoning
+	default:
+		// The reasoning item of the sample (observed at effort xhigh): content
+		// and summary as empty arrays, id, encrypted_content, type and no
+		// status. With no include the token is left out (not observed). The
+		// summary part of a request that asked for a summary is from the
+		// documents.
+		object := fakeupstream.Clone(h.responses.reasoningEvent("response.output_item.done")["item"].(map[string]any))
+		object["id"] = item.id
+		delete(object, "encrypted_content")
+		if item.encrypted {
+			switch stage {
+			case stageAdded:
+				object["encrypted_content"] = FixedEncryptedPartial
+			case stageFinal:
+				object["encrypted_content"] = FixedEncryptedFinal
+			default:
+				object["encrypted_content"] = FixedEncryptedDone
+			}
+		}
+		if item.summary && stage != stageAdded {
+			object["summary"] = []any{map[string]any{"type": "summary_text", "text": FixedReasoning}}
 		}
 		return object
 	}
@@ -368,7 +405,7 @@ func (h *handler) writeResponsesStream(w http.ResponseWriter, request responsesR
 	if cut {
 		terminal = "response.incomplete"
 	}
-	emit(map[string]any{"type": terminal, "response": response(plan.status, h.outputObjects(plan, stageDone))})
+	emit(map[string]any{"type": terminal, "response": response(plan.status, h.outputObjects(plan, stageFinal))})
 }
 
 // itemEvents are the events of one output item, without sequence numbers. A
@@ -427,10 +464,13 @@ func (h *handler) itemEvents(request responsesRequest, item fakeItem, cut bool) 
 		itemDone["item"], itemDone["output_index"] = h.itemObject(item, stageDone), item.index
 		return append(events, done, partDone, itemDone)
 	default:
-		// Constructed from the documents: the reasoning item's own events. A
-		// summary is streamed only when the request asked for one.
-		events = append(events, map[string]any{"type": "response.output_item.added",
-			"item": h.itemObject(item, stageAdded), "output_index": item.index})
+		// The reasoning item's events of the sample (observed): its
+		// output_item.added, then its output_item.done, and nothing between
+		// them when no summary was asked for. The summary events of a request
+		// that asked for one are from the documents, not from a sample.
+		added := t.reasoningEvent("response.output_item.added")
+		added["item"], added["output_index"] = h.itemObject(item, stageAdded), item.index
+		events = append(events, added)
 		if request.summaryRequested() && !cut {
 			events = append(events,
 				map[string]any{"type": "response.reasoning_summary_part.added", "item_id": item.id, "output_index": item.index,
@@ -445,8 +485,9 @@ func (h *handler) itemEvents(request responsesRequest, item fakeItem, cut bool) 
 		if cut {
 			return events
 		}
-		return append(events, map[string]any{"type": "response.output_item.done",
-			"item": h.itemObject(item, stageDone), "output_index": item.index})
+		done := t.reasoningEvent("response.output_item.done")
+		done["item"], done["output_index"] = h.itemObject(item, stageDone), item.index
+		return append(events, done)
 	}
 }
 

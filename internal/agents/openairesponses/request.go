@@ -8,14 +8,16 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agents"
 )
 
-// The request as the Responses API reads it. Shapes the probe of 2026-11-20
-// sent and the real gateway accepted (observed): instructions, a flat function
-// tool, reasoning.effort, store false, include reasoning.encrypted_content,
-// stream, a user message with string content, a system message in input,
-// max_output_tokens, a function_call item with its function_call_output (a
-// string) in input. Per the documents, not yet seen accepted: input_text and
-// input_image parts, strict on the tool, parallel_tool_calls, reasoning items
-// in input.
+// The request as the Responses API reads it. Every shape here was sent in the
+// probes of 2026-11-20 and accepted by the real gateway (observed):
+// instructions, a flat function tool with strict false and an optional
+// property, reasoning.effort, store false, include
+// reasoning.encrypted_content, stream, parallel_tool_calls, a user message with
+// string content or with an input_text and an input_image part (a data URL,
+// detail low), a system message in input, max_output_tokens, a function_call
+// item with no id and no status under a rewritten call_id with its
+// function_call_output (a string), a reasoning item replayed without its id,
+// and a round with no reasoning item at all.
 type wireRequest struct {
 	Model        string `json:"model,omitempty"`
 	Instructions string `json:"instructions,omitempty"`
@@ -28,8 +30,9 @@ type wireRequest struct {
 	Store  bool `json:"store"`
 	// Include asks for the encrypted reasoning items of a tool loop, the only
 	// way to carry the model's reasoning from one round to the next when
-	// nothing is stored. Sent only with tools: a request without them has no
-	// next round.
+	// nothing is stored (observed: a round that sends none back is accepted
+	// too, and the model reasons again). Sent only with tools: a request
+	// without them has no next round.
 	Include   []string       `json:"include,omitempty"`
 	Reasoning *wireReasoning `json:"reasoning,omitempty"`
 	// Temperature is a pointer so that 0 is still sent; nil (a model whose
@@ -83,8 +86,10 @@ type wireTool struct {
 	// enforces strict parameter validation by default, which needs every
 	// property required and additionalProperties false at every level; the
 	// Agent's tool schemas are written for Chat Completions, where the
-	// default is not strict, and have optional properties. The probe's schema
-	// happened to be strict-compatible, so the default was not exercised.
+	// default is not strict, and have optional properties. Observed: a schema
+	// with an optional property and strict false was accepted, and the model
+	// called the tool with the optional argument. What the gateway does with
+	// strict left out (the documents' default true) was not probed.
 	Strict bool `json:"strict"`
 }
 
@@ -226,12 +231,17 @@ func userContent(message agents.Message) (content any, ok bool) {
 // model produced them: the reasoning items it returned (when the Adapter
 // carried them), its text as an assistant message, then one function_call item
 // per tool call, with the reasoning items that came between two calls kept
-// between them. A reasoning item that no item follows is dropped: the API
-// refuses one that leads nowhere (per the documents).
+// between them. A reasoning item that no item follows is dropped: the API is
+// documented to refuse one that leads nowhere (the gateway's answer to that
+// was not probed).
 //
 // The function_call items are built from the Port's ToolCall (call_id, name,
 // arguments); the id and status the upstream gave are not sent back, so no item
-// refers to a response the upstream never stored.
+// refers to a response the upstream never stored. Observed: a function_call
+// with no id and no status, under the orchestrator's rewritten call_id and
+// answered by a function_call_output of the same call_id, is accepted. The
+// assistant's text goes without the phase the upstream gave it (the probes
+// replayed no assistant message, so its effect is not known).
 func assistantItems(message agents.Message) []any {
 	carried := decodeReasoning(message.ReasoningContent)
 	var items []any

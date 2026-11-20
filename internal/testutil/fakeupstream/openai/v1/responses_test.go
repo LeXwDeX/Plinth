@@ -163,6 +163,13 @@ func TestResponsesStreamsMatchTheRealSample(t *testing.T) {
 		// The second round of the sample: the function_call and its output are
 		// in input, so no marker is needed for the model to answer in text.
 		{"tool-output-stream", ""},
+		// Two calls in one answer: each is its own run of events.
+		{"parallel-call-stream", ToolMarkerFor("get_weather", `{"city":"Paris","unit":"c"}`) + " " + ToolMarkerFor("get_weather", `{"city":"Tokyo","unit":"c"}`)},
+		// A picture in the request, answered in text.
+		{"input-image-stream", ""},
+		// A reasoning item ahead of the call, as the real model returned one at
+		// effort xhigh.
+		{"reasoning-tool-stream", ReasoningMarker + " " + ToolMarkerFor("get_weather", `{"city":"Kyoto","unit":"c"}`)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			exchange, found := sample.exchange(test.name)
@@ -189,6 +196,89 @@ func TestResponsesStreamsMatchTheRealSample(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Every request the real gateway answered with 200 is answered with 200 by the
+// fake too: it is never stricter than the real one. The sample's requests
+// include the shapes Plinth's Adapter sends: a tool with strict false and an
+// optional property, a function_call with no id or status under a rewritten
+// call_id, a reasoning item replayed without its id, a round with no reasoning
+// item and an input_image part.
+func TestResponsesAcceptTheRequestsTheRealGatewayAccepted(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	checked := 0
+	for _, exchange := range f.sample().Exchanges {
+		if exchange.Response.Status != http.StatusOK {
+			continue
+		}
+		body := sampleRequest(t, exchange, "")
+		response, raw := f.respond(body)
+		if response.StatusCode != http.StatusOK {
+			t.Errorf("%s: %d %s", exchange.Name, response.StatusCode, raw)
+			continue
+		}
+		if stream, _ := body["stream"].(bool); stream {
+			frames := responsesStream(t, raw)
+			if last := frames[len(frames)-1]; last.event != "response.completed" {
+				t.Errorf("%s ends with %s", exchange.Name, last.event)
+			}
+		}
+		checked++
+	}
+	if checked < 9 {
+		t.Fatalf("only %d requests of the sample were checked", checked)
+	}
+}
+
+// The reasoning item of the sample (observed at effort xhigh) is what the fake
+// returns for the reasoning marker: content and summary as empty arrays, an
+// id, the token, no status; the token of the added event is not the one of the
+// done event, and the one in the output of response.completed is a third; a
+// request that asked for no token gets an item without one.
+func TestResponsesReasoningItemHasTheObservedShapeAndThreeTokens(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	request := map[string]any{"model": "gpt-astra", "include": []string{"reasoning.encrypted_content"},
+		"tools": []map[string]any{{"type": "function", "name": "get_weather"}},
+		"input": "go " + ReasoningMarker + " " + ToolMarkerFor("get_weather", `{"city":"Kyoto"}`)}
+	frames := f.respondStream(request)
+	if got := types(frames)[2:5]; !slices.Equal(got, []string{"response.output_item.added", "response.output_item.done", "response.output_item.added"}) {
+		t.Fatalf("events = %v", types(frames))
+	}
+	keys := func(item any) string {
+		var names []string
+		for key := range item.(map[string]any) {
+			names = append(names, key)
+		}
+		slices.Sort(names)
+		return strings.Join(names, ",")
+	}
+	added, done := dig(t, frames[2].data, "item"), dig(t, frames[3].data, "item")
+	final := dig(t, frames[len(frames)-1].data, "response", "output", 0)
+	for name, item := range map[string]any{"added": added, "done": done, "final": final} {
+		if keys(item) != "content,encrypted_content,id,summary,type" || dig(t, item, "type") != "reasoning" ||
+			len(dig(t, item, "content").([]any)) != 0 || len(dig(t, item, "summary").([]any)) != 0 {
+			t.Errorf("%s item = %v", name, item)
+		}
+	}
+	if dig(t, added, "encrypted_content") != FixedEncryptedPartial || dig(t, done, "encrypted_content") != FixedEncryptedDone ||
+		dig(t, final, "encrypted_content") != FixedEncryptedFinal || FixedEncryptedPartial == FixedEncryptedDone || FixedEncryptedDone == FixedEncryptedFinal {
+		t.Errorf("tokens: added %v, done %v, final %v", dig(t, added, "encrypted_content"), dig(t, done, "encrypted_content"), dig(t, final, "encrypted_content"))
+	}
+	if dig(t, added, "id") != dig(t, done, "id") || dig(t, done, "id") != dig(t, final, "id") {
+		t.Errorf("the item changes id: %v %v %v", dig(t, added, "id"), dig(t, done, "id"), dig(t, final, "id"))
+	}
+	// The non-stream answer carries the final form; with no include there is
+	// no token at all.
+	delete(request, "stream")
+	_, body := f.respondJSON(request)
+	if dig(t, body, "output", 0, "encrypted_content") != FixedEncryptedFinal {
+		t.Errorf("non-stream token = %v", dig(t, body, "output", 0))
+	}
+	delete(request, "include")
+	_, body = f.respondJSON(request)
+	if keys(dig(t, body, "output", 0)) != "content,id,summary,type" {
+		t.Errorf("item without include = %v", dig(t, body, "output", 0))
 	}
 }
 
@@ -244,13 +334,17 @@ func TestResponsesJSONMatchesTheRealSample(t *testing.T) {
 	}
 }
 
-// The two 400s of the probe, byte for byte, for both names of the model; an
-// unknown level is named in the message.
-func TestResponsesRefuseTemperatureAndUnknownLevelOnTheConstrainedModel(t *testing.T) {
+// The 400s of the probes, byte for byte, for every name of the model: a
+// temperature, an unknown level (named in the message), and none and minimal,
+// which the gateway knows and the model does not support.
+func TestResponsesRefuseTemperatureAndUnsupportedLevelsOnTheConstrainedModel(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	sample := f.sample()
 	temperature, _ := sample.exchange("error-temperature")
 	effort, _ := sample.exchange("error-effort")
+	minimal, _ := sample.exchange("error-effort-minimal")
+	none, _ := sample.exchange("error-effort-none")
+	tools := []map[string]any{{"type": "function", "name": "get_weather"}}
 	for _, model := range []string{"gpt-astra", "gpt-6.2-astra", "GPT-Astra"} {
 		for name, test := range map[string]struct {
 			body map[string]any
@@ -261,6 +355,9 @@ func TestResponsesRefuseTemperatureAndUnknownLevelOnTheConstrainedModel(t *testi
 			"streamed":                 {map[string]any{"input": "hi", "temperature": 0.7, "stream": true}, temperature.Response.BodyText},
 			"unknown level":            {map[string]any{"input": "hi", "reasoning": map[string]any{"effort": "bogus"}}, effort.Response.BodyText},
 			"level before temperature": {map[string]any{"input": "hi", "temperature": 0, "reasoning": map[string]any{"effort": "bogus"}, "stream": true}, effort.Response.BodyText},
+			"minimal":                  {map[string]any{"input": "hi", "reasoning": map[string]any{"effort": "minimal"}, "store": false, "max_output_tokens": 50}, minimal.Response.BodyText},
+			"none with tools":          {map[string]any{"input": "hi", "tools": tools, "reasoning": map[string]any{"effort": "none"}, "include": []string{"reasoning.encrypted_content"}, "stream": true}, none.Response.BodyText},
+			"none before temperature":  {map[string]any{"input": "hi", "temperature": 0, "reasoning": map[string]any{"effort": "none"}}, none.Response.BodyText},
 		} {
 			body := map[string]any{"model": model}
 			for key, value := range test.body {
@@ -277,6 +374,18 @@ func TestResponsesRefuseTemperatureAndUnknownLevelOnTheConstrainedModel(t *testi
 	if !strings.Contains(string(raw), "Invalid value: 'extreme'. Supported values are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', and 'max'.") ||
 		!strings.Contains(string(raw), `"param":"reasoning.effort"`) || !strings.Contains(string(raw), `"code":"invalid_value"`) {
 		t.Fatalf("unknown level = %s", raw)
+	}
+	// The levels the model supports are served, and another model is not judged
+	// by these rules.
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		if status, body := f.respondJSON(map[string]any{"model": "gpt-astra", "input": "hi", "reasoning": map[string]any{"effort": level}}); status != http.StatusOK {
+			t.Errorf("level %s: %d %v", level, status, body)
+		}
+	}
+	for _, level := range []string{"none", "minimal"} {
+		if status, body := f.respondJSON(map[string]any{"model": "deepseek", "input": "hi", "reasoning": map[string]any{"effort": level}}); status != http.StatusOK {
+			t.Errorf("another model, level %s: %d %v", level, status, body)
+		}
 	}
 }
 
@@ -312,19 +421,32 @@ func TestResponsesServeTheConstrainedModelItsAgentRequestShape(t *testing.T) {
 	if status, _ := f.respondJSON(map[string]any{"model": "deepseek", "input": "hi", "temperature": 0}); status != http.StatusOK {
 		t.Fatalf("unconstrained model: %d", status)
 	}
-	// none is refused (constructed from the documents), with the field path of
-	// this wire.
+	// none is refused as an unsupported value (observed), with the field path
+	// of this wire.
 	response, raw := f.respond(map[string]any{"model": "gpt-astra", "input": "hi", "reasoning": map[string]any{"effort": "none"}})
 	if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(raw), `"param":"reasoning.effort"`) ||
-		!strings.Contains(string(raw), `"code":"unsupported_value"`) {
+		!strings.Contains(string(raw), `"code":"unsupported_value"`) || !strings.Contains(string(raw), "'gpt-6.2-astra-2026-11-17' model") {
 		t.Fatalf("none = %d %s", response.StatusCode, raw)
 	}
 }
 
-// A function call and its output must pair; a reasoning item needs the item it
-// led to. Constructed from the API's documented behavior.
+// A function call and its output must pair (the two refusals are the observed
+// ones, with the call_id of the request put in), and a reasoning item needs the
+// item it led to (constructed from the documents, in the same envelope).
 func TestResponsesPairFunctionCallsAndOutputs(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
+	// The probes' own requests are answered byte for byte; no code member.
+	for name, want := range map[string]string{"error-orphan-output": "orphan", "error-missing-output": "missing"} {
+		exchange, found := f.sample().exchange(name)
+		if !found {
+			t.Fatalf("the sample has no %s", name)
+		}
+		response, raw := f.respond(sampleRequest(t, exchange, ""))
+		if response.StatusCode != http.StatusBadRequest || strings.TrimSpace(string(raw)) != exchange.Response.BodyText ||
+			strings.Contains(string(raw), `"code"`) || !strings.Contains(string(raw), `"param":"input"`) {
+			t.Errorf("%s (%s): %d %s\nwant %s", name, want, response.StatusCode, raw, exchange.Response.BodyText)
+		}
+	}
 	user := map[string]any{"role": "user", "content": "hi"}
 	call := func(id string) map[string]any {
 		return map[string]any{"type": "function_call", "call_id": id, "name": "lookup_note", "arguments": "{}"}
@@ -351,6 +473,10 @@ func TestResponsesPairFunctionCallsAndOutputs(t *testing.T) {
 		"dangling reasoning":     {[]map[string]any{user, reasoning}, "Item 'rs_1' of type 'reasoning' was provided without its required following item."},
 		"reasoning before an output": {[]map[string]any{user, call("a"), reasoning, output("a")},
 			"Item 'rs_1' of type 'reasoning' was provided without its required following item."},
+		// The replay of the probe: the item without its id (accepted when a call
+		// follows); one with no call or text after it is refused too.
+		"reasoning without an id then a call": {[]map[string]any{user, {"type": "reasoning", "summary": []any{}, "encrypted_content": "abc"}, call("a"), output("a")}, ""},
+		"dangling reasoning without an id":    {[]map[string]any{user, {"type": "reasoning", "summary": []any{}, "encrypted_content": "abc"}}, "Item of type 'reasoning' was provided without its required following item."},
 	} {
 		status, body := f.respondJSON(map[string]any{"model": "gpt-astra", "input": test.input})
 		if test.want == "" {
@@ -477,9 +603,11 @@ func TestResponsesSystemContainsReadsTheInstructions(t *testing.T) {
 	}
 }
 
-// The reasoning item is constructed from the documents: it carries encrypted
-// content only when the request asked for it, and the usage reports the
-// reasoning and cached counts.
+// The reasoning marker adds the reasoning item the real model returned at effort
+// xhigh (its shape is checked against the sample by
+// TestResponsesReasoningItemHasTheObservedShapeAndThreeTokens): it carries
+// encrypted content only when the request asked for it, and the usage reports
+// the reasoning and cached counts (the counts are not from a sample).
 func TestResponsesReasoningMarkerAddsAReasoningItem(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	input := []map[string]any{{"role": "user", "content": "think " + ReasoningMarker + " " + ToolMarkerFor("lookup_note", "")}}
@@ -658,7 +786,15 @@ func TestResponsesIdentifiersArePlaceholdersOfTheRealShapes(t *testing.T) {
 		t.Fatalf("ids = %q %q", id, other)
 	}
 	messageID := dig(t, first, "output", 0, "id").(string)
-	if !strings.HasPrefix(messageID, "msg_") || len(messageID) != 52 {
+	if !strings.HasPrefix(messageID, "msg_") || len(messageID) != 54 {
 		t.Fatalf("message id = %q", messageID)
+	}
+	// The sample's own identifiers have these shapes (resp_, msg_, fc_ and rs_
+	// with 50 characters, call_ with 24): the fake's are the same length.
+	_, calls := f.respondJSON(map[string]any{"model": "m", "tools": []map[string]any{{"type": "function", "name": "t"}},
+		"input": "go " + ReasoningMarker + " " + ToolMarkerFor("t", ""), "include": []string{"reasoning.encrypted_content"}})
+	reasoningID, callItemID := dig(t, calls, "output", 0, "id").(string), dig(t, calls, "output", 1, "id").(string)
+	if !strings.HasPrefix(reasoningID, "rs_") || len(reasoningID) != 53 || !strings.HasPrefix(callItemID, "fc_") || len(callItemID) != 53 {
+		t.Fatalf("reasoning id = %q, function call id = %q", reasoningID, callItemID)
 	}
 }

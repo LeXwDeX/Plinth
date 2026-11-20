@@ -26,9 +26,14 @@ import (
 // output. An event of a type the Adapter does not know is ignored, so are the
 // members it does not read.
 //
-// Per the documents, no real sample yet: the reasoning item and its summary
-// events, response.refusal.delta, response.incomplete, response.failed and the
-// error event (a flat object, or one with the error nested).
+// Observed since: two parallel calls (each its own run of events, output_index 0
+// and 1) and a reasoning item (response.output_item.added and
+// response.output_item.done, nothing between them, at output_index 0, the
+// message or the call after it).
+//
+// Per the documents, no real sample yet: the reasoning summary events,
+// response.refusal.delta, response.incomplete, response.failed and the error
+// event (a flat object, or one with the error nested).
 func (adapter *Adapter) Stream(
 	ctx context.Context,
 	request agents.Request,
@@ -230,7 +235,10 @@ func (state *streamState) text(delta string) error {
 
 // finish handles the event that ends the response. The response object carries
 // the usage and the complete output, which settles every item the stream did
-// not finish.
+// not finish. An item the stream did close keeps its own done item: the
+// reasoning item of the output of response.completed was observed to carry an
+// encrypted_content of its own (the done event's was the one replayed and
+// accepted), so the output only fills the gaps.
 func (state *streamState) finish(eventType string, event streamEvent) error {
 	state.terminal = true
 	body := event.Response
@@ -248,6 +256,9 @@ func (state *streamState) finish(eventType string, event streamEvent) error {
 		body.Status = statusFailed
 	}
 	for index, raw := range body.Output {
+		if state.outputs.isSettled(index) {
+			continue
+		}
 		if err := state.outputs.settle(index, raw); err != nil {
 			return err
 		}

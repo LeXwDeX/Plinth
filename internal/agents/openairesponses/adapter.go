@@ -4,11 +4,14 @@
 // declares wire_api responses is served here for every kind of request (Agent
 // turn, title, compaction summary, prompt enhancement, connection test).
 //
-// What the real gateway was seen to do (a probe of 2026-11-20 through the
-// dev-test stack, model gpt-astra; its sanitized excerpt is the fake's
+// What the real gateway was seen to do (two probes of 2026-11-20 through the
+// dev-test stack, model gpt-astra; their sanitized excerpt is the fake's
 // testdata/responses-2026-11-20.sample.json) and what is only from the OpenAI
-// documents is kept apart in the comments below: a comment that says "per the
-// documents" marks behavior no real sample has shown yet.
+// documents is kept apart in the comments below: "observed" marks what the
+// probes showed, a comment that says "per the documents" marks behavior no real
+// sample has shown yet (response.incomplete, response.failed, an error event in
+// a stream, response.refusal.delta and the reasoning summary events, and the
+// Adapter's own handling of a stream line over the bound).
 //
 // The Adapter is stateless on the wire: store is always false and nothing
 // refers to an earlier response, so every request carries the whole
@@ -39,7 +42,9 @@ type Options struct {
 	// EffortLevels and DefaultEffort are the thinking levels the model offers
 	// and the one sent when the request chose none, or one the model does not
 	// offer (#322). The chosen level is written to reasoning.effort. Empty
-	// levels: no reasoning member is sent.
+	// levels: no reasoning member is sent. Observed for gpt-astra: low, medium,
+	// high, xhigh and max are served; none and minimal are refused as
+	// unsupported values, so a profile must not offer them.
 	EffortLevels  []string
 	DefaultEffort string
 	// OmitTemperature leaves temperature out of every request to the model: its
@@ -86,8 +91,9 @@ type Config struct {
 	OptionsFor func(model string) *Options
 	// ParallelToolCalls sends parallel_tool_calls=true on requests that carry
 	// tools, so the model may emit independent calls in one reply
-	// (chat.agent.parallel_tool_calls). Per the documents; the probe's requests
-	// did not send it (the response objects show the default true).
+	// (chat.agent.parallel_tool_calls). Observed: a request that sent it true
+	// was accepted and answered with two function calls, each its own run of
+	// events (output_index 0 and 1).
 	ParallelToolCalls bool
 	// ExhaustedQuota, when set, reports whether a refusal (HTTP status and
 	// body) is a used-up account balance or key quota and names its failure

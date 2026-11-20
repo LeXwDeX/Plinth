@@ -123,3 +123,46 @@ func TestDecodeReasoningKeepsOnlyReasoningItems(t *testing.T) {
 		t.Error("no items must encode to the empty string")
 	}
 }
+
+// A reasoning item goes back in the form the probe of 2026-11-20 replayed and
+// the gateway accepted: type, summary and encrypted_content, without the id and
+// the content the item came with. A summary that has parts is kept; a null or
+// absent one is an empty list; an item with no encrypted content is not kept.
+func TestReplayReasoningKeepsTheAcceptedMembersOnly(t *testing.T) {
+	for name, test := range map[string]struct {
+		item itemBody
+		want string // "" is not kept
+	}{
+		"as the gateway returned it": {itemBody{Type: "reasoning", Content: json.RawMessage(`[]`), Summary: json.RawMessage(`[]`), EncryptedContent: "gAAAAAB-token"},
+			`{"type":"reasoning","summary":[],"encrypted_content":"gAAAAAB-token"}`},
+		"a summary with a part": {itemBody{Type: "reasoning", Summary: json.RawMessage(`[{"type":"summary_text","text":"plan"}]`), EncryptedContent: "t"},
+			`{"type":"reasoning","summary":[{"type":"summary_text","text":"plan"}],"encrypted_content":"t"}`},
+		"a null summary":   {itemBody{Type: "reasoning", Summary: json.RawMessage(`null`), EncryptedContent: "t"}, `{"type":"reasoning","summary":[],"encrypted_content":"t"}`},
+		"no summary":       {itemBody{Type: "reasoning", EncryptedContent: "t"}, `{"type":"reasoning","summary":[],"encrypted_content":"t"}`},
+		"no encrypted one": {itemBody{Type: "reasoning", Summary: json.RawMessage(`[]`)}, ""},
+	} {
+		got := replayReasoning(test.item)
+		if string(got) != test.want {
+			t.Errorf("%s: %s, want %s", name, got, test.want)
+		}
+	}
+}
+
+// The done item closes an item and the output of the terminal event only fills
+// the gaps: a reasoning item that no done event closed is taken from the
+// output, one that a done event closed keeps its own token.
+func TestTheTerminalOutputOnlyFillsTheGapsOfDoneItems(t *testing.T) {
+	outputs := newOutputs()
+	done := json.RawMessage(`{"type":"reasoning","id":"rs_1","summary":[],"content":[],"encrypted_content":"from-the-done-event"}`)
+	if err := outputs.settle(0, done); err != nil {
+		t.Fatal(err)
+	}
+	if !outputs.isSettled(0) || outputs.isSettled(1) {
+		t.Fatalf("settled: %t %t", outputs.isSettled(0), outputs.isSettled(1))
+	}
+	completion := outputs.completion(false)
+	carried := decodeReasoning(completion.ReasoningContent)
+	if len(carried) != 1 || !strings.Contains(string(carried[0].Item), "from-the-done-event") || strings.Contains(string(carried[0].Item), "rs_1") {
+		t.Fatalf("carried = %s", completion.ReasoningContent)
+	}
+}

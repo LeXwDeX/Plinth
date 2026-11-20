@@ -191,3 +191,27 @@ func TestNoOptionsSendsTheTemperatureAndNoReasoning(t *testing.T) {
 		t.Fatalf("request = %s", got)
 	}
 }
+
+// A reasoning item whose done event never came is taken from the output of
+// response.completed, and one whose done event came keeps its own token (the
+// gateway's output carried another value for the same item).
+func TestReasoningTokenComesFromTheDoneEventElseFromTheOutput(t *testing.T) {
+	for name, test := range map[string]struct {
+		done  string // the done event of the reasoning item, or ""
+		token string
+	}{
+		"closed by its done event": {frames("response.output_item.done",
+			`{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[],"content":[],"encrypted_content":"token-of-the-done-event"}}`), "token-of-the-done-event"},
+		"closed by the output only": {"", "token-of-the-output"},
+	} {
+		body := frames("response.output_item.added", `{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[],"content":[],"encrypted_content":"token-of-the-added-event"}}`) +
+			test.done + frames("response.completed", `{"type":"response.completed","response":{"status":"completed","output":[`+
+			`{"type":"reasoning","id":"rs_1","summary":[],"content":[],"encrypted_content":"token-of-the-output"}]}}`)
+		adapter, _ := scripted(t, http.StatusOK, "text/event-stream", body)
+		completion, err := adapter.Stream(ctx, agents.Request{Model: "m", Messages: userHello}, nil)
+		if err != nil || !strings.Contains(completion.ReasoningContent, `"encrypted_content":"`+test.token+`"`) ||
+			strings.Contains(completion.ReasoningContent, "token-of-the-added-event") {
+			t.Errorf("%s: %#v %v", name, completion, err)
+		}
+	}
+}

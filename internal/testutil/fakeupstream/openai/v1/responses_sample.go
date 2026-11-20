@@ -12,11 +12,11 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
 
-// The sanitized excerpt of the 2026-11-20 probe of /v1/responses (#401). It is
-// not a wirefixture candidate: the wire capture pipeline refuses SSE with
+// The sanitized excerpt of the two 2026-11-20 probes of /v1/responses (#401). It
+// is not a wirefixture candidate: the wire capture pipeline refuses SSE with
 // event: lines and without [DONE], so a Responses stream cannot be recorded
 // by it. responses_test.go keeps the fake's output identical to it, event by
-// event; the file's own "provenance" lists what is verbatim from the probe
+// event; the file's own "provenance" lists what is verbatim from the probes
 // and what was completed from the non-stream response.
 //
 //go:embed testdata/responses-2026-11-20.sample.json
@@ -42,6 +42,11 @@ type responsesExchange struct {
 		Body        map[string]any `json:"body"`
 		// BodyText is a body kept as text, in the gateway's own key order.
 		BodyText string `json:"body_text"`
+		// Summary stands for a stream whose events are not kept: the types of
+		// its output items and the text of its answer.
+		Summary *struct {
+			Output []map[string]any `json:"output"`
+		} `json:"summary"`
 	} `json:"response"`
 }
 
@@ -79,14 +84,21 @@ type responsesTemplates struct {
 	sample *responsesSample
 	// envelope is the complete response object of the non-stream exchange.
 	envelope map[string]any
-	// callEvents and textEvents are the first event of each type of the
-	// streamed tool-call and text exchanges.
-	callEvents map[string]map[string]any
-	textEvents map[string]map[string]any
-	// temperatureRefusal and effortRefusal are the observed 400 bodies as text.
-	temperatureRefusal string
-	effortRefusal      string
-	responseCounter    atomic.Int64
+	// callEvents, textEvents and reasoningEvents are the first event of each
+	// type of the streamed tool-call, text and reasoning-with-a-tool exchanges
+	// (the reasoning item's events are the first output_item events of the
+	// last one).
+	callEvents      map[string]map[string]any
+	textEvents      map[string]map[string]any
+	reasoningEvents map[string]map[string]any
+	// The observed 400 bodies as text, in the gateway's own key order.
+	temperatureRefusal   string
+	effortRefusal        string
+	minimalRefusal       string
+	noneRefusal          string
+	orphanOutputRefusal  string
+	missingOutputRefusal string
+	responseCounter      atomic.Int64
 }
 
 func newResponsesTemplates() (*responsesTemplates, error) {
@@ -110,8 +122,9 @@ func newResponsesTemplates() (*responsesTemplates, error) {
 		return nil, errors.New("responses sample: json-text has no body")
 	}
 	for name, target := range map[string]*map[string]map[string]any{
-		"tool-call-stream":   &templates.callEvents,
-		"tool-output-stream": &templates.textEvents,
+		"tool-call-stream":      &templates.callEvents,
+		"tool-output-stream":    &templates.textEvents,
+		"reasoning-tool-stream": &templates.reasoningEvents,
 	} {
 		exchange, err := need(name)
 		if err != nil {
@@ -125,8 +138,12 @@ func newResponsesTemplates() (*responsesTemplates, error) {
 		}
 	}
 	for name, target := range map[string]*string{
-		"error-temperature": &templates.temperatureRefusal,
-		"error-effort":      &templates.effortRefusal,
+		"error-temperature":    &templates.temperatureRefusal,
+		"error-effort":         &templates.effortRefusal,
+		"error-effort-minimal": &templates.minimalRefusal,
+		"error-effort-none":    &templates.noneRefusal,
+		"error-orphan-output":  &templates.orphanOutputRefusal,
+		"error-missing-output": &templates.missingOutputRefusal,
 	} {
 		exchange, err := need(name)
 		if err != nil {
@@ -156,6 +173,10 @@ func (t *responsesTemplates) callEvent(eventType string) map[string]any {
 
 func (t *responsesTemplates) textEvent(eventType string) map[string]any {
 	return t.event(t.textEvents, eventType)
+}
+
+func (t *responsesTemplates) reasoningEvent(eventType string) map[string]any {
+	return t.event(t.reasoningEvents, eventType)
 }
 
 // nextResponseNumber is the number of the next response, from 1.

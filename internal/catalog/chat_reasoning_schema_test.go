@@ -46,6 +46,9 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	// gpt-6-astra (alias gpt-astra): OpenAI's model page lists low/medium/high/xhigh/max, and on
 	// 2026-11-09 the dev-test proxy rejected "minimal" with "valid levels: low, medium, high, xhigh,
 	// max" and accepted xhigh and max. The rest of the gpt-6 family is not re-verified (#213).
+	// On 2026-11-20 /v1/responses answered "none" and "minimal" for gpt-astra with 400 "Unsupported
+	// value ... Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'" and served xhigh
+	// (#401): the profile offers exactly these five and never none or minimal.
 	astra := []string{"low", "medium", "high", "xhigh", "max"}
 	wants := []want{
 		{prefix: "qwen-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},

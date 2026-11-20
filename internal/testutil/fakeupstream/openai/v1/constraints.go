@@ -46,8 +46,13 @@ type modelConstraint struct {
 	// an alias before the model judges the request, and the refusal names the
 	// resolved model.
 	resolved string
-	// noEffortNone refuses reasoning_effort "none" (documented).
+	// noEffortNone refuses reasoning_effort "none": documented, and observed on
+	// /v1/responses (responses_constraints.go); the Chat Completions answer is
+	// constructed.
 	noEffortNone bool
+	// noEffortMinimal refuses "minimal" as well. Observed on /v1/responses only:
+	// it is not a rule of the Chat Completions wire here.
+	noEffortMinimal bool
 	// noFunctionTools refuses function tools on /v1/chat/completions. The
 	// observed text blames the combination with a reasoning_effort other than
 	// none; because the model refuses none as well (noEffortNone), no tools
@@ -67,6 +72,7 @@ var constrainedModels = map[string]modelConstraint{
 var astraConstraint = modelConstraint{
 	resolved:               "gpt-6.2-astra",
 	noEffortNone:           true,
+	noEffortMinimal:        true,
 	noFunctionTools:        true,
 	defaultTemperatureOnly: true,
 }

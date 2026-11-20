@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -442,9 +443,22 @@ func TestReasoningItemsAreSentBackAheadOfTheirFunctionCall(t *testing.T) {
 	if strings.Join(kinds, ",") != "user,reasoning,function_call,function_call_output" {
 		t.Fatalf("input = %v", kinds)
 	}
+	// The item goes back in the form the probe's replay had and the gateway
+	// accepted: type, summary and encrypted_content, without the item's id and
+	// content, with the token of the done event (the added event's was shorter,
+	// and the one in the output of response.completed another).
 	reasoning := input[1].(map[string]any)
-	if reasoning["encrypted_content"] != "ZmFrZS1lbmNyeXB0ZWQtcmVhc29uaW5n" || reasoning["id"] == nil || reasoning["summary"] == nil {
-		t.Fatalf("the reasoning item is not sent as returned: %v", reasoning)
+	var members []string
+	for member := range reasoning {
+		members = append(members, member)
+	}
+	slices.Sort(members)
+	if strings.Join(members, ",") != "encrypted_content,summary,type" || reasoning["type"] != "reasoning" ||
+		reasoning["encrypted_content"] != openaiv1.FixedEncryptedDone || len(reasoning["summary"].([]any)) != 0 {
+		t.Fatalf("the reasoning item is not sent in the replayed form: %v", reasoning)
+	}
+	if strings.Contains(s.recorder.raw(0), openaiv1.FixedEncryptedPartial) || strings.Contains(s.recorder.raw(0), openaiv1.FixedEncryptedFinal) {
+		t.Fatalf("a token other than the done event's was sent: %s", s.recorder.raw(0))
 	}
 	// Without the carried reasoning (a resumed turn) the same loop still works.
 	request.Messages[1] = agents.Message{Role: "assistant", ToolCalls: first.ToolCalls}

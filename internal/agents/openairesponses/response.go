@@ -1,6 +1,7 @@
 package openairesponses
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,7 +93,7 @@ func (body responseBody) failure() *wireError {
 // used-up quota agents.QuotaExhaustion (#120). It is the same reading as of an
 // HTTP refusal, applied to the error object (status is the HTTP status of the
 // response that carried it, 200 in a stream). The upstream's wording stays in
-// the error, which only the log reads. Per the documents: the probe saw
+// the error, which only the log reads. Per the documents: the probes saw
 // neither a failed response nor an error event.
 func (adapter *Adapter) failure(status int, wire *wireError) error {
 	if wire == nil {
@@ -120,7 +121,10 @@ func (adapter *Adapter) failure(status int, wire *wireError) error {
 	return err
 }
 
-// itemBody is an output item. Members of other item types are ignored.
+// itemBody is an output item. Members of other item types are ignored: the
+// real gateway's reasoning item also carries id and content (an empty array),
+// its message item phase, role and annotations, and a future version may add
+// more.
 type itemBody struct {
 	Type             string          `json:"type"`
 	Status           string          `json:"status"`
@@ -128,7 +132,34 @@ type itemBody struct {
 	Name             string          `json:"name"`
 	Arguments        string          `json:"arguments"`
 	Content          json.RawMessage `json:"content"`
+	Summary          json.RawMessage `json:"summary"`
 	EncryptedContent string          `json:"encrypted_content"`
+}
+
+// replayReasoning is a reasoning item as it is sent back: the three members the
+// probe of 2026-11-20 replayed and the gateway accepted (type, summary,
+// encrypted_content), without the item's id and its content. The id names an
+// item of a stored response, and nothing is stored (store false); the replay
+// without it, ahead of the function_call it led to, was accepted, so that is
+// the form kept. Nil for an item with no encrypted_content: nothing a later
+// request could send would stand for it.
+func replayReasoning(item itemBody) json.RawMessage {
+	if item.EncryptedContent == "" {
+		return nil
+	}
+	summary := bytes.TrimSpace(item.Summary)
+	if len(summary) == 0 || bytes.Equal(summary, []byte("null")) {
+		summary = []byte("[]")
+	}
+	encoded, err := json.Marshal(struct {
+		Type             string          `json:"type"`
+		Summary          json.RawMessage `json:"summary"`
+		EncryptedContent string          `json:"encrypted_content"`
+	}{Type: "reasoning", Summary: summary, EncryptedContent: item.EncryptedContent})
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 // visibleText is the text of a message item: its output_text parts and a
@@ -230,12 +261,17 @@ func (o *outputs) settle(index int, raw json.RawMessage) error {
 		text := body.visibleText()
 		item.text = &text
 	case "reasoning":
-		// Only an item with encrypted content can be sent back (reasoning.go).
-		if body.EncryptedContent != "" {
-			item.reasoning = slices.Clone(raw)
-		}
+		// Only an item with encrypted content can be sent back, in the form
+		// that was accepted (reasoning.go).
+		item.reasoning = replayReasoning(body)
 	}
 	return nil
+}
+
+// isSettled reports whether the item at an index was closed by a done item.
+func (o *outputs) isSettled(index int) bool {
+	item, found := o.items[index]
+	return found && item.settled
 }
 
 // completion assembles the Port's Completion from the items, in output order.

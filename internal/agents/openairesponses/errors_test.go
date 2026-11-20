@@ -37,8 +37,12 @@ func TestAnObservedRefusalOfAFieldIsARejectedParameter(t *testing.T) {
 		"temperature": {openairesponses.Options{}, "", "temperature", "Unsupported parameter: 'temperature' is not supported with this model."},
 		"unknown level": {openairesponses.Options{OmitTemperature: true, EffortLevels: []string{"bogus"}, DefaultEffort: "bogus"}, "bogus", "reasoning.effort",
 			"Invalid value: 'bogus'. Supported values are: 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', and 'max'."},
-		"none (constructed)": {openairesponses.Options{OmitTemperature: true, EffortLevels: []string{"none"}, DefaultEffort: "none"}, "none", "reasoning.effort",
-			"'reasoning.effort' does not support 'none'"},
+		// Observed: the gateway knows none and minimal and the model does not
+		// support them, which is not the Invalid value of an unknown level.
+		"none": {openairesponses.Options{OmitTemperature: true, EffortLevels: []string{"none"}, DefaultEffort: "none"}, "none", "reasoning.effort",
+			"Unsupported value: 'none' is not supported with the 'gpt-6.2-astra-2026-11-17' model. Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'."},
+		"minimal": {openairesponses.Options{OmitTemperature: true, EffortLevels: []string{"minimal"}, DefaultEffort: "minimal"}, "minimal", "reasoning.effort",
+			"Unsupported value: 'minimal' is not supported with the 'gpt-6.2-astra-2026-11-17' model. Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'."},
 	} {
 		options := test.options
 		adapter := s.adapter(func(config *openairesponses.Config) {
@@ -104,7 +108,7 @@ func TestOtherRefusalsKeepTheirClasses(t *testing.T) {
 // A response that failed on its own, in the status of a 200 stream, an error
 // event or a failed response object, is an error without an HTTP status, and a
 // content-safety or used-up-quota failure is told as on a refusal. Per the
-// documents: the probe saw none of these.
+// documents: the probes saw none of these.
 func TestAFailedResponseIsAnError(t *testing.T) {
 	s := newStack(t)
 	adapter := s.adapter(nil)
