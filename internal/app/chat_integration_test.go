@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -101,32 +102,35 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer grantRepository.Close()
-	deadline := time.Now().Add(20 * time.Second)
+	rawDatabase := openRawAppDatabase(t, filepath.Join(root, "art-ai.db"))
 	var assistantMessageID string
-	for time.Now().Before(deadline) && assistantMessageID == "" {
+	waitForChat(t, "the assistant message to be created", func() (bool, string) {
 		listed := appChatRequest(handler, http.MethodGet, "/api/chat/sessions/"+sessionID+"/messages", "")
 		var current []map[string]any
 		if err := json.Unmarshal(listed.Body.Bytes(), &current); err == nil && len(current) == 2 {
 			assistantMessageID, _ = current[1]["id"].(string)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if assistantMessageID == "" {
-		t.Fatal("assistant message was not created")
-	}
-	turnDeadline := time.Now().Add(20 * time.Second)
+		return assistantMessageID != "", fmt.Sprintf("%d messages", len(current))
+	})
+	// The turn runs the Agent twice, before and after the Task: running,
+	// waiting_task, queued, running, done. The wait is on the end state. A
+	// timeout lists the turn and Task states seen with their times, so a slow
+	// phase can be told from a turn that never wakes after its Task finished.
 	turnState, turnEndReason := "", ""
-	for time.Now().Before(turnDeadline) {
+	waitForChat(t, "the Agent turn to end after the Task completed", func() (bool, string) {
 		turn, readErr := grantRepository.GetTurn(context.Background(), "owner-a", sessionID, assistantMessageID)
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
 		turnState, turnEndReason = turn.State, turn.EndReason
-		if turnState == application.schema.Chat.State.TurnDone || turnState == application.schema.Chat.State.TurnError {
-			break
+		var taskStates string
+		if err := rawDatabase.QueryRow(`SELECT COALESCE(group_concat(state), 'none') FROM generation_tasks
+			WHERE owner_id='owner-a' AND session_id=?`, sessionID).Scan(&taskStates); err != nil {
+			taskStates = "unreadable"
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		ended := turnState == application.schema.Chat.State.TurnDone || turnState == application.schema.Chat.State.TurnError
+		return ended, "turn " + turnState + ", task " + taskStates
+	})
 	if turnState != application.schema.Chat.State.TurnDone {
 		t.Fatalf("agent turn did not finish after task completion: %s", turnState)
 	}
@@ -135,7 +139,6 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		t.Fatalf("finished turn end reason = %q, want the Schema's %q", turnEndReason, want)
 	}
 
-	rawDatabase := openRawAppDatabase(t, filepath.Join(root, "art-ai.db"))
 	var grantStatus, grantDecidedBy, grantSource string
 	if err := rawDatabase.QueryRow(`SELECT status, COALESCE(decided_by,''), source FROM execution_grants
 		WHERE owner_id='owner-a' AND session_id=?`, sessionID).Scan(&grantStatus, &grantDecidedBy, &grantSource); err != nil {
@@ -149,7 +152,10 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 		t.Fatalf("policy approval audit actor = %q, %v", auditActor, err)
 	}
 
-	streamContext, stopStream := context.WithTimeout(context.Background(), 5*time.Second)
+	// The turn has ended, so the stream replays the stored events and returns at
+	// the done event without waiting for more. The timeout only bounds a stream
+	// that does not end; it is not an expectation of how fast the replay is.
+	streamContext, stopStream := context.WithTimeout(context.Background(), chatWaitBudget)
 	defer stopStream()
 	streamRequest := httptest.NewRequest(http.MethodGet,
 		"/api/chat/sessions/"+sessionID+"/stream?fromId=0", nil).WithContext(streamContext)
@@ -208,6 +214,48 @@ func TestMockChatAgentRunsHTTPTaskAndSSEToCompletion(t *testing.T) {
 	}
 	if credits, _ := approval["estimatedCredits"].(float64); credits <= 0 {
 		t.Fatalf("session estimated credits = %v", approval["estimatedCredits"])
+	}
+}
+
+// chatWaitBudget bounds each wait in the chat integration tests (#411). Every
+// wait polls a condition and returns the moment it holds, so a long budget
+// costs nothing on a healthy stack and only decides when a real hang is
+// reported. It is sized for the slowest runner, not for the fast case: every
+// Agent request copies the Offering catalog many times over, so one Agent pass
+// takes about 4.5 s under -race on an idle 14-core machine and a whole turn
+// (Agent, Task, Agent) about 11 s. The hosted CI runner has far fewer cores
+// and shares them with the race tests of other packages, and the fixed 20 s
+// windows these tests used before ran out there.
+const (
+	chatWaitBudget = 3 * time.Minute
+	// chatWaitPoll is kept coarse on purpose: a poll is a database read made
+	// while the CPU is the scarce resource, so a fast poll only slows the stack
+	// it is waiting for.
+	chatWaitPoll = 50 * time.Millisecond
+)
+
+// waitForChat polls until check reports done or chatWaitBudget runs out. check
+// also returns a short description of what it sees; the changes of that
+// description are kept with their times and printed when the wait times out,
+// so the report says which phase was slow instead of only that time ran out.
+func waitForChat(t *testing.T, what string, check func() (done bool, observed string)) {
+	t.Helper()
+	started := time.Now()
+	var trail []string
+	last := ""
+	for {
+		done, observed := check()
+		if observed != last {
+			trail = append(trail, fmt.Sprintf("%s (%.1fs)", observed, time.Since(started).Seconds()))
+			last = observed
+		}
+		if done {
+			return
+		}
+		if time.Since(started) >= chatWaitBudget {
+			t.Fatalf("timed out after %s waiting for %s; observed: %s", chatWaitBudget, what, strings.Join(trail, " -> "))
+		}
+		time.Sleep(chatWaitPoll)
 	}
 }
 
@@ -310,18 +358,17 @@ func TestMockChatAgentAppliesSelectedSkillFromRuntimeCatalog(t *testing.T) {
 	defer repository.Close()
 	rawDatabase := openRawAppDatabase(t, filepath.Join(root, "art-ai.db"))
 	var preparedInputID generation.PreparedInputID
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) && preparedInputID == "" {
+	waitForChat(t, "the skill request to prepare an agent operation", func() (bool, string) {
 		var id string
 		if rawDatabase.QueryRow(`SELECT prepared_input_id FROM agent_generation_operations
 			WHERE owner_id='owner-a' AND session_id=?`, sessionID).Scan(&id) == nil {
 			preparedInputID = generation.PreparedInputID(id)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if preparedInputID == "" {
-		t.Fatal("skill request did not prepare an agent operation")
-	}
+		if preparedInputID == "" {
+			return false, "no operation yet"
+		}
+		return true, "operation prepared"
+	})
 	prepared, err := repository.GetPreparedInput(context.Background(), "owner-a", preparedInputID)
 	if err != nil {
 		t.Fatal(err)
