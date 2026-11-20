@@ -339,7 +339,7 @@ func (policy *ProductionPlanPolicy) buildPlan(command ToolCommand, arguments pro
 		return budget.Plan{}, nil, "the plan expands to " + strconv.Itoa(len(plan.Steps)) +
 			" steps, over the declared maximum of " + strconv.Itoa(maxSteps) + "; reduce the candidates or steps"
 	}
-	acceptance, refusal := policy.acceptanceFor(command)
+	acceptance, refusal := policy.acceptanceFor(command, plan.Steps)
 	if refusal != "" {
 		return budget.Plan{}, nil, refusal
 	}
