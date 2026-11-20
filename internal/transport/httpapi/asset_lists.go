@@ -522,6 +522,7 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 	var activeConflict *assetlist.ErrActiveConflict
 	var activeWorking *assetlist.ErrActiveWorking
 	var reworkLimit *assetlist.ReworkLimitError
+	var assetLimit *assetlist.ReviewAssetLimitError
 	switch {
 	case errors.As(err, &activeConflict):
 		detail := s.message("error.conflict")
@@ -555,15 +556,26 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 		).Replace(detail)
 		writeProblem(writer, http.StatusConflict, "asset_list_expired", detail, err)
 	case errors.As(err, &reworkLimit):
-		// #329b: the item used its declared rework rounds; the Schema copy
-		// names the item and the round, the person can still accept or skip.
+		// #329b: the item used its declared returns; the Schema copy names the
+		// item and the returns used, the person can still accept or skip.
 		detail := s.assetListReviewMessage(func(messages catalog.AssetListReviewMessagesSchema) string {
 			return messages.ReturnLimit
 		}, map[string]string{
 			"name":  reworkLimit.Name,
-			"round": strconv.Itoa(reworkLimit.Round),
+			"round": strconv.Itoa(reworkLimit.Returns),
 		})
 		writeProblem(writer, http.StatusConflict, "asset_list_rework_limit", detail, err)
+	case errors.As(err, &assetLimit):
+		// #329b: the project asset bound no longer held when the decision
+		// transaction checked it; nothing was written. The Schema copy names
+		// the item and the bound; a refetch answers the items per item.
+		detail := s.assetListReviewMessage(func(messages catalog.AssetListReviewMessagesSchema) string {
+			return messages.AssetLimit
+		}, map[string]string{
+			"name":    assetLimit.Name,
+			"maximum": strconv.Itoa(assetLimit.Maximum),
+		})
+		writeProblem(writer, http.StatusConflict, "asset_list_asset_limit", detail, err)
 	case errors.Is(err, assetlist.ErrConflict):
 		writeProblem(writer, http.StatusConflict, "conflict", s.message("error.conflict"), err)
 	case errors.Is(err, assetlist.ErrArchiveEmpty):

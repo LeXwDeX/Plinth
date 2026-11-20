@@ -62,7 +62,7 @@ type Runs interface {
 	ClaimItem(ctx context.Context, ownerID, listID string, at time.Time) (assetlist.Item, bool, error)
 	FinishItem(ctx context.Context, input assetlist.FinishItemInput) (assetlist.Item, error)
 	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (assetlist.Item, error)
-	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round int, expectedVersion int64, at time.Time) (assetlist.Item, error)
+	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round, workRound int, expectedVersion int64, at time.Time) (assetlist.Item, error)
 }
 
 // Lists reads one list with its items. assetlist.Service implements it.
@@ -402,21 +402,16 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 			// it ran. Open a fresh turn at the same round instead of failing
 			// the item for a local scheduling failure.
 			delete(runner.deferred, item.ID)
-			round := item.Round
-			if item.LastTurnMessageID != "" {
-				round++
-			}
-			return false, runner.openTurn(ctx, run, item, sessionID, round, now)
+			round, workRound := runner.nextRounds(item)
+			return false, runner.openTurn(ctx, run, item, sessionID, round, workRound, now)
 		}
 		if item.LastTurnMessageID != turn.AssistantMessageID {
-			round := item.Round
-			if item.LastTurnMessageID != "" {
-				round++
-			}
-			if err := runner.recordTurn(ctx, run, item, turn.AssistantMessageID, round, now); err != nil {
+			round, workRound := runner.nextRounds(item)
+			if err := runner.recordTurn(ctx, run, item, turn.AssistantMessageID, round, workRound, now); err != nil {
 				return false, err
 			}
 			item.Round = round
+			item.WorkRound = workRound
 			item.LastTurnMessageID = turn.AssistantMessageID
 		}
 		// A turn refused at the owner's 3D step cap ended while the item still
@@ -441,17 +436,34 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 		if failed {
 			return runner.failItem(ctx, run, item, report, now)
 		}
-		if item.Round >= runner.maxRounds {
+		// max_rounds_per_item bounds the turns of one work session. Reading
+		// the item's whole-life round here would fail a returned item after a
+		// single turn when its first make used the allowance (#329b).
+		if item.WorkRound >= runner.maxRounds {
 			return false, runner.finishItem(ctx, run, item, assetlist.StateFailed, roundLimitReason, now)
 		}
-		return false, runner.openTurn(ctx, run, item, sessionID, item.Round+1, now)
+		return false, runner.openTurn(ctx, run, item, sessionID, item.Round+1, item.WorkRound+1, now)
 	}
-	// A claimed item with no turn yet: claim already counted round one.
-	return false, runner.openTurn(ctx, run, item, sessionID, item.Round, now)
+	// A claimed item with no turn yet: claim already counted the session's first
+	// round.
+	return false, runner.openTurn(ctx, run, item, sessionID, max(item.Round, 1), max(item.WorkRound, 1), now)
+}
+
+// nextRounds is the round pair of a turn the server is about to record: one
+// beyond the stored numbers once an earlier turn of this session was recorded,
+// or the stored round itself for a turn that was started but never recorded.
+func (runner *Runner) nextRounds(item assetlist.Item) (round, workRound int) {
+	round = max(item.Round, 1)
+	workRound = max(item.WorkRound, 1)
+	if item.LastTurnMessageID != "" {
+		round++
+		workRound++
+	}
+	return round, workRound
 }
 
 // startItem opens the first turn of a just-claimed item. ClaimItem already
-// counted its round.
+// counted the session's first round.
 func (runner *Runner) startItem(ctx context.Context, run assetlist.Run, item assetlist.Item, now time.Time) error {
 	sessionID := item.SessionID
 	if sessionID == "" {
@@ -464,7 +476,7 @@ func (runner *Runner) startItem(ctx context.Context, run assetlist.Run, item ass
 		}
 		sessionID = session.ID
 	}
-	return runner.openTurn(ctx, run, item, sessionID, item.Round, now)
+	return runner.openTurn(ctx, run, item, sessionID, max(item.Round, 1), max(item.WorkRound, 1), now)
 }
 
 // ensureSession creates or reuses the item's sub-session. An item that is no
@@ -496,12 +508,15 @@ func (runner *Runner) openTurn(
 	run assetlist.Run,
 	item assetlist.Item,
 	sessionID string,
-	round int,
+	round, workRound int,
 	now time.Time,
 ) error {
 	if round < 1 {
 		// A manual "continue" resets round to zero before the item is reopened.
 		round = 1
+	}
+	if workRound < 1 {
+		workRound = 1
 	}
 	assistant, options, err := runner.chat.StartItemTurn(ctx, chat.StartItemTurnInput{
 		OwnerID:      run.OwnerID,
@@ -509,7 +524,7 @@ func (runner *Runner) openTurn(
 		ProjectID:    run.ProjectID,
 		ListID:       run.ListID,
 		ItemID:       item.ID,
-		Continuation: runner.continuationText(item, round),
+		Continuation: runner.continuationText(item, workRound),
 	})
 	if err != nil {
 		if transientTurnError(err) {
@@ -533,7 +548,7 @@ func (runner *Runner) openTurn(
 		return nil
 	}
 	delete(runner.deferred, item.ID)
-	return runner.recordTurn(ctx, run, item, assistant.ID, round, now)
+	return runner.recordTurn(ctx, run, item, assistant.ID, round, workRound, now)
 }
 
 // scheduleTurn re-schedules an observed turn whose round was never recorded.
@@ -559,14 +574,11 @@ func (runner *Runner) scheduleTurn(
 		return nil
 	}
 	delete(runner.deferred, item.ID)
-	round := item.Round
-	if item.LastTurnMessageID != "" {
-		round++
-	}
-	return runner.recordTurn(ctx, run, item, turn.AssistantMessageID, round, now)
+	round, workRound := runner.nextRounds(item)
+	return runner.recordTurn(ctx, run, item, turn.AssistantMessageID, round, workRound, now)
 }
 
-// recordTurn stores the round of a scheduled turn. An item that a completion
+// recordTurn stores the rounds of a scheduled turn. An item that a completion
 // report or a control action moved meanwhile keeps its turn: an in-flight turn
 // is allowed to finish.
 func (runner *Runner) recordTurn(
@@ -574,11 +586,11 @@ func (runner *Runner) recordTurn(
 	run assetlist.Run,
 	item assetlist.Item,
 	assistantMessageID string,
-	round int,
+	round, workRound int,
 	now time.Time,
 ) error {
 	_, err := runner.runs.RecordItemTurn(ctx, run.OwnerID, run.ListID, item.ID,
-		assistantMessageID, round, assetlist.VersionUnchecked, now)
+		assistantMessageID, round, workRound, assetlist.VersionUnchecked, now)
 	if errors.Is(err, assetlist.ErrItemState) || errors.Is(err, assetlist.ErrConflict) ||
 		errors.Is(err, assetlist.ErrNotFound) {
 		return nil
@@ -831,8 +843,8 @@ func workingSlots(items []assetlist.Item) int {
 
 // continuationText fills the Catalog copy. The route placeholder uses the
 // declared route id and falls back to the capability chain when an item has
-// only a route snapshot.
-func (runner *Runner) continuationText(item assetlist.Item, round int) string {
+// only a route snapshot. workRound is the turn of the current work session.
+func (runner *Runner) continuationText(item assetlist.Item, workRound int) string {
 	route := item.RouteID
 	if route == "" {
 		steps := make([]string, 0, len(item.Route))
@@ -841,22 +853,26 @@ func (runner *Runner) continuationText(item assetlist.Item, round int) string {
 		}
 		route = strings.Join(steps, " → ")
 	}
-	replacements := []string{
+	if item.ReturnReason != "" {
+		// A claimed returned item carries its return context (#329b): the
+		// next turn of the same sub-session quotes it word for word. {round}
+		// here is the rework ordinal (which rework this is), not the turn of
+		// the rework session: return_count is that number.
+		return strings.NewReplacer(
+			"{name}", item.Name,
+			"{description}", item.Description,
+			"{route}", route,
+			"{round}", strconv.Itoa(max(item.ReturnCount, 1)),
+			"{reasons}", item.ReturnReason,
+			"{note}", item.ReturnNote,
+		).Replace(runner.rework)
+	}
+	return strings.NewReplacer(
 		"{name}", item.Name,
 		"{description}", item.Description,
 		"{route}", route,
-		"{round}", strconv.Itoa(round),
-	}
-	if item.ReturnReason != "" {
-		// A claimed returned item carries its return context (#329b): the
-		// next turn of the same sub-session quotes it word for word.
-		replacements = append(replacements,
-			"{reasons}", item.ReturnReason,
-			"{note}", item.ReturnNote,
-		)
-		return strings.NewReplacer(replacements...).Replace(runner.rework)
-	}
-	return strings.NewReplacer(replacements...).Replace(runner.continuation)
+		"{round}", strconv.Itoa(max(workRound, 1)),
+	).Replace(runner.continuation)
 }
 
 func transientTurnError(err error) bool {

@@ -145,14 +145,17 @@ func TestProjectAssetListItemReviewAcceptsAndReturns(t *testing.T) {
 		t.Fatalf("return decision = %+v", returnedWire)
 	}
 	var state, returnReason, returnNote, reasons, note, reviewVerdict, runStatus string
-	var round int
-	if err := db.QueryRow(`SELECT state, round, return_reason, return_note
+	var round, returnCount, workRound int
+	if err := db.QueryRow(`SELECT state, round, return_count, work_round,
+		return_reason, return_note
 		FROM asset_list_items WHERE id = ?`, list.Items[1].ID).
-		Scan(&state, &round, &returnReason, &returnNote); err != nil {
+		Scan(&state, &round, &returnCount, &workRound, &returnReason, &returnNote); err != nil {
 		t.Fatal(err)
 	}
-	if state != assetlist.StateReturned || round != 2 || returnReason != "其他" || returnNote != "请重画" {
-		t.Fatalf("returned item = %s round %d %q %q", state, round, returnReason, returnNote)
+	if state != assetlist.StateReturned || round != 2 || returnCount != 1 || workRound != 0 ||
+		returnReason != "其他" || returnNote != "请重画" {
+		t.Fatalf("returned item = %s round %d returns %d work round %d %q %q",
+			state, round, returnCount, workRound, returnReason, returnNote)
 	}
 	if err := db.QueryRow(`SELECT reasons_json, note, verdict, round
 		FROM asset_list_item_reviews WHERE item_id = ?`, list.Items[1].ID).

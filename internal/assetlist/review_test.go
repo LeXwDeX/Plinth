@@ -34,8 +34,13 @@ func reviewTestSchema() catalog.AssetListSchema {
 	return schema
 }
 
+// fakeProjectAssets is the validation-only port of the accept: it answers the
+// prepared row (or an injected error) and counts the project's assets. The
+// rows themselves are written by the list decision transaction, which the
+// memory repository records.
 type fakeProjectAssets struct {
 	assets map[string]project.Asset
+	count  int
 	calls  int
 	err    error
 }
@@ -44,23 +49,26 @@ func newFakeProjectAssets() *fakeProjectAssets {
 	return &fakeProjectAssets{assets: map[string]project.Asset{}}
 }
 
-func (fake *fakeProjectAssets) CreateAsset(
+func (fake *fakeProjectAssets) PrepareAsset(
 	_ context.Context, ownerID, projectID string, input project.AssetInput,
 ) (project.Asset, error) {
 	fake.calls++
 	if fake.err != nil {
 		return project.Asset{}, fake.err
 	}
-	if existing, found := fake.assets[input.ID]; found {
-		return existing, nil
-	}
 	asset := project.Asset{
 		ID: input.ID, ProjectID: projectID, OwnerID: ownerID, Kind: input.Kind,
 		Name: input.Name, Description: input.Description,
 		Images: input.Images, Models: input.Models,
 	}
-	fake.assets[input.ID] = asset
 	return asset, nil
+}
+
+func (fake *fakeProjectAssets) CountAssets(_ context.Context, _, _ string) (int, error) {
+	if fake.err != nil {
+		return 0, fake.err
+	}
+	return fake.count, nil
 }
 
 // reviewFixture confirms one list and moves its first item to review with a
@@ -69,9 +77,11 @@ func reviewFixture(t *testing.T, fake *fakeProjectAssets) (*assetlist.Service, *
 	t.Helper()
 	service, repository, clock := newService(t, func(config *assetlist.Config) {
 		config.Schema = reviewTestSchema()
-		config.ProjectAssets = fake
-		config.ProjectAssetLimits = assetlist.ProjectAssetLimits{
-			MaximumAssets: 200, MaximumImages: 8, MaximumModels: 4,
+		if fake != nil {
+			config.ProjectAssets = fake
+			config.ProjectAssetLimits = assetlist.ProjectAssetLimits{
+				MaximumAssets: 200, MaximumImages: 8, MaximumModels: 4,
+			}
 		}
 	})
 	ctx := context.Background()
@@ -162,7 +172,7 @@ func TestReviewAcceptRegistersOneDeterministicProjectAsset(t *testing.T) {
 		outcome.Results[0].ProjectAssetID != wantID {
 		t.Fatalf("results = %+v; want approved %s", outcome.Results, wantID)
 	}
-	asset, found := fake.assets[wantID]
+	asset, found := repository.assets[wantID]
 	if !found || fake.calls != 1 {
 		t.Fatalf("project asset = %+v, calls = %d; want one registration", asset, fake.calls)
 	}
@@ -181,8 +191,9 @@ func TestReviewAcceptRegistersOneDeterministicProjectAsset(t *testing.T) {
 		t.Fatalf("list version = %d; want %d", outcome.List.Version, list.Version+1)
 	}
 
-	// A repeated click on the same board version is a conflict, and no second
-	// asset row appears.
+	// A repeated click on the same board version is a conflict, and the whole
+	// write (item and asset) is refused: no second asset row appears and the
+	// accepted item keeps the row the winning write stored.
 	if _, err := service.Review(ctx, assetlist.ReviewInput{
 		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
 		Decision: assetlist.ReviewDecisionAccept, ItemIDs: []string{itemID},
@@ -190,8 +201,8 @@ func TestReviewAcceptRegistersOneDeterministicProjectAsset(t *testing.T) {
 	}); !errors.Is(err, assetlist.ErrConflict) {
 		t.Fatalf("stale accept error = %v; want conflict", err)
 	}
-	if fake.calls != 1 {
-		t.Fatalf("asset registrations = %d; want 1", fake.calls)
+	if len(repository.assets) != 1 {
+		t.Fatalf("project assets = %d; want the one written with the accepted item", len(repository.assets))
 	}
 	// Re-accepting after a refetch finds the item no longer awaiting review.
 	if _, err := service.Review(ctx, assetlist.ReviewInput{
@@ -201,14 +212,75 @@ func TestReviewAcceptRegistersOneDeterministicProjectAsset(t *testing.T) {
 	}); !errors.Is(err, assetlist.ErrItemState) {
 		t.Fatalf("second accept error = %v; want item state", err)
 	}
-	if fake.calls != 1 {
-		t.Fatalf("asset registrations after re-accept = %d; want 1", fake.calls)
+	if len(repository.assets) != 1 {
+		t.Fatalf("project assets after re-accept = %d; want 1", len(repository.assets))
+	}
+}
+
+// A refused decision transaction writes neither the item nor its project
+// asset: the accept prepares the row first but the write is one transaction.
+func TestReviewAcceptWritesNoAssetWhenTheDecisionTransactionFails(t *testing.T) {
+	fake := newFakeProjectAssets()
+	service, repository, list := reviewFixture(t, fake)
+	repository.decisionFail = assetlist.ErrConflict
+	ctx := context.Background()
+	itemID := reviewItemID(list)
+
+	_, err := service.Review(ctx, assetlist.ReviewInput{
+		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Decision: assetlist.ReviewDecisionAccept, ItemIDs: []string{itemID},
+		ExpectedVersion: list.Version,
+	})
+	if !errors.Is(err, assetlist.ErrConflict) {
+		t.Fatalf("accept error = %v; want conflict", err)
+	}
+	if len(repository.assets) != 0 {
+		t.Fatalf("project assets = %+v; want none behind a refused decision", repository.assets)
+	}
+	if item := repository.items[list.ID][0]; item.State != assetlist.StateReview ||
+		item.ProjectAssetID != "" {
+		t.Fatalf("item = %+v; want it still awaiting review", item)
+	}
+}
+
+// The ready transaction then writes both, and a retry after a failed one uses
+// the same deterministic identity.
+func TestReviewAcceptIsRetryableWithTheSameProjectAssetID(t *testing.T) {
+	fake := newFakeProjectAssets()
+	service, repository, list := reviewFixture(t, fake)
+	ctx := context.Background()
+	itemID := reviewItemID(list)
+	repository.decisionFail = assetlist.ErrConflict
+	if _, err := service.Review(ctx, assetlist.ReviewInput{
+		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Decision: assetlist.ReviewDecisionAccept, ItemIDs: []string{itemID},
+		ExpectedVersion: list.Version,
+	}); !errors.Is(err, assetlist.ErrConflict) {
+		t.Fatalf("first accept error = %v; want conflict", err)
+	}
+	repository.decisionFail = nil
+	outcome, err := service.Review(ctx, assetlist.ReviewInput{
+		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Decision: assetlist.ReviewDecisionAccept, ItemIDs: []string{itemID},
+		ExpectedVersion: list.Version,
+	})
+	if err != nil {
+		t.Fatalf("retried accept: %v", err)
+	}
+	wantID := deterministicAssetID(itemID, 1)
+	if len(outcome.Results) != 1 || outcome.Results[0].ProjectAssetID != wantID {
+		t.Fatalf("results = %+v; want %s", outcome.Results, wantID)
+	}
+	if _, found := repository.assets[wantID]; !found || len(repository.assets) != 1 {
+		t.Fatalf("project assets = %+v; want the deterministic row", repository.assets)
 	}
 }
 
 func TestReviewAcceptReportsTheAssetLimitPerItem(t *testing.T) {
 	fake := newFakeProjectAssets()
-	fake.err = project.ErrLimit
+	// The project already stores its 200 assets: the item is refused before
+	// the write transaction, the other items of the list stay untouched.
+	fake.count = 200
 	service, repository, list := reviewFixture(t, fake)
 	outcome, err := service.Review(context.Background(), assetlist.ReviewInput{
 		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
@@ -225,6 +297,50 @@ func TestReviewAcceptReportsTheAssetLimitPerItem(t *testing.T) {
 	}
 	if item := repository.items[list.ID][0]; item.State != assetlist.StateReview {
 		t.Fatalf("item = %s; want it left awaiting review", item.State)
+	}
+}
+
+// A bound that moved between the count and the write transaction rolls the
+// batch back and answers the request-level limit; nothing is written.
+func TestReviewAcceptReportsTheBoundMovedAtWriteTime(t *testing.T) {
+	fake := newFakeProjectAssets()
+	service, repository, list := reviewFixture(t, fake)
+	itemID := reviewItemID(list)
+	repository.decisionFail = &assetlist.ProjectAssetBoundError{ItemID: itemID}
+	_, err := service.Review(context.Background(), assetlist.ReviewInput{
+		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Decision: assetlist.ReviewDecisionAccept, ItemIDs: []string{itemID},
+		ExpectedVersion: list.Version,
+	})
+	var limit *assetlist.ReviewAssetLimitError
+	if !errors.As(err, &limit) || limit.Maximum != 200 || limit.Name != "Hero" {
+		t.Fatalf("accept error = %v; want the request-level asset limit", err)
+	}
+	if len(repository.assets) != 0 {
+		t.Fatalf("project assets = %+v; want none", repository.assets)
+	}
+}
+
+// A deployment without the project service can still settle an item through
+// the board: it is accepted, with no project asset to register.
+func TestReviewAcceptWithoutTheProjectPortSettlesTheItem(t *testing.T) {
+	service, repository, list := reviewFixture(t, nil)
+	itemID := reviewItemID(list)
+	outcome, err := service.Review(context.Background(), assetlist.ReviewInput{
+		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Decision: assetlist.ReviewDecisionAccept, ItemIDs: []string{itemID},
+		ExpectedVersion: list.Version,
+	})
+	if err != nil {
+		t.Fatalf("accept without the project port: %v", err)
+	}
+	if len(outcome.Results) != 1 || outcome.Results[0].Verdict != assetlist.ReviewVerdictApproved ||
+		outcome.Results[0].ProjectAssetID != "" {
+		t.Fatalf("results = %+v", outcome.Results)
+	}
+	if item := repository.items[list.ID][0]; item.State != assetlist.StateAccepted ||
+		item.ProjectAssetID != "" {
+		t.Fatalf("item = %+v; want accepted without a project asset", item)
 	}
 }
 
@@ -275,16 +391,62 @@ func TestReviewReturnValidatesReasonKindAndReworkLimit(t *testing.T) {
 	}
 
 	items[0].Kind = "character"
+	// The first make may take all the Agent rounds it likes: the rework limit
+	// counts returns, so one return is still allowed at round 4.
 	items[0].Round = 4
+	items[0].ReturnCount = 2
 	repository.items[list.ID] = items
+	if _, err := service.Review(ctx, assetlist.ReviewInput{
+		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Decision: assetlist.ReviewDecisionReturn, ItemIDs: []string{itemID},
+		ReasonIDs: []string{"style"}, ExpectedVersion: list.Version,
+	}); err != nil {
+		t.Fatalf("third return at round 4: %v; want it allowed", err)
+	}
+
+	// Three returns used: the next one is refused, whatever the round.
+	items = repository.items[list.ID]
+	items[0].State = assetlist.StateReview
+	items[0].Round = 7
+	items[0].ReturnCount = 3
+	repository.items[list.ID] = items
+	list = repository.withItems(repository.lists[list.ID])
 	_, err := service.Review(ctx, assetlist.ReviewInput{
 		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
 		Decision: assetlist.ReviewDecisionReturn, ItemIDs: []string{itemID},
 		ReasonIDs: []string{"style"}, ExpectedVersion: list.Version,
 	})
 	var limit *assetlist.ReworkLimitError
-	if !errors.As(err, &limit) || limit.Round != 4 || limit.Maximum != 3 {
+	if !errors.As(err, &limit) || limit.Returns != 3 || limit.Maximum != 3 {
 		t.Fatalf("rework limit error = %v", err)
+	}
+}
+
+// A first make that used the Agent rounds still gets its reworks: the return
+// limit reads return_count, not round.
+func TestReviewReturnCountsReturnsNotAgentRounds(t *testing.T) {
+	fake := newFakeProjectAssets()
+	service, repository, list := reviewFixture(t, fake)
+	itemID := reviewItemID(list)
+	items := repository.items[list.ID]
+	items[0].Round = 3
+	repository.items[list.ID] = items
+
+	outcome, err := service.Review(context.Background(), assetlist.ReviewInput{
+		OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Decision: assetlist.ReviewDecisionReturn, ItemIDs: []string{itemID},
+		ReasonIDs: []string{"style"}, ExpectedVersion: list.Version,
+	})
+	if err != nil {
+		t.Fatalf("first return after a three-round make: %v", err)
+	}
+	if len(outcome.Results) != 1 || outcome.Results[0].Verdict != assetlist.ReviewVerdictReturned {
+		t.Fatalf("results = %+v", outcome.Results)
+	}
+	item := repository.items[list.ID][0]
+	if item.State != assetlist.StateReturned || item.ReturnCount != 1 || item.Round != 4 ||
+		item.WorkRound != 0 {
+		t.Fatalf("returned item = %+v; want return_count 1, round 4, work round 0", item)
 	}
 }
 

@@ -908,6 +908,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			counted[generation.Capability(capability)] = true
 		}
 		assetListCounted = counted
+		// The batch archive (#329c) reuses the model delivery's OBJ rules
+		// (application.model_delivery.archive.obj_package) so a packed OBJ keeps
+		// its library and texture names; a Catalog without that section keeps
+		// the plain layout.
+		var assetListObjPackage *catalog.ModelObjPackageSchema
+		if !applicationSchema.ModelDelivery.Disabled() {
+			if spec := applicationSchema.ModelDelivery.Archive.ObjPackage; spec.FormatID != "" &&
+				strings.TrimSpace(spec.LibraryStatement) != "" {
+				assetListObjPackage = &spec
+			}
+		}
 		assetListService, err = assetlist.New(assetlist.Config{
 			Repository: repository.AssetListRepository(),
 			Runs:       repository.AssetListRunRepository(),
@@ -919,6 +930,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			},
 			Crops:              cropService,
 			Archive:            module,
+			ObjPackage:         assetListObjPackage,
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,

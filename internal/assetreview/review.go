@@ -299,10 +299,32 @@ func coverAsset(assets []generation.Asset) string {
 	return firstModelAsset(assets)
 }
 
+// firstModelAsset picks the model the board judges and previews. Stored assets
+// are ordered by role, which puts converted_model (FBX/OBJ) before model, so
+// the order is explicit: the GLB of the task's own model role first, then any
+// GLB, then the model role's other files. The GLB is the file the inspector
+// can actually read; a conversion output is a delivery copy, not the judged
+// result.
 func firstModelAsset(assets []generation.Asset) string {
-	for _, asset := range assets {
-		if asset.StorageKey != "" && strings.HasPrefix(asset.MediaType, "model/") {
-			return string(asset.ID)
+	candidates := []func(generation.Asset) bool{
+		func(asset generation.Asset) bool {
+			return asset.Role == "model" && asset.MediaType == "model/gltf-binary"
+		},
+		func(asset generation.Asset) bool {
+			return asset.MediaType == "model/gltf-binary"
+		},
+		func(asset generation.Asset) bool {
+			return asset.Role == "model" && strings.HasPrefix(asset.MediaType, "model/")
+		},
+		func(asset generation.Asset) bool {
+			return strings.HasPrefix(asset.MediaType, "model/")
+		},
+	}
+	for _, matches := range candidates {
+		for _, asset := range assets {
+			if asset.StorageKey != "" && matches(asset) {
+				return string(asset.ID)
+			}
 		}
 	}
 	return ""

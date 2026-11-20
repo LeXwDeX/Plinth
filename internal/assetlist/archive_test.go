@@ -43,10 +43,13 @@ func archiveTestSchema() catalog.AssetListSchema {
 	return schema
 }
 
-// fakeArchiveAssets is the owner-scoped reader over in-memory stored files.
+// fakeArchiveAssets is the owner-scoped reader over in-memory stored files. A
+// file it never received answers the delivery layer's not-found code; fail is
+// a store that cannot be read at all.
 type fakeArchiveAssets struct {
 	files map[string]fakeArchiveBlob
 	opens []string
+	fail  error
 }
 
 type fakeArchiveBlob struct {
@@ -60,9 +63,14 @@ func (fake *fakeArchiveAssets) OpenAssetScoped(
 ) (generation.AssetContent, error) {
 	key := string(taskID) + "/" + string(assetID)
 	fake.opens = append(fake.opens, key)
+	if fake.fail != nil {
+		return generation.AssetContent{}, fake.fail
+	}
 	blob, found := fake.files[key]
 	if !found {
-		return generation.AssetContent{}, errors.New("asset not found")
+		return generation.AssetContent{}, &generation.Error{
+			Code: generation.ErrNotFound, Operation: "open_asset",
+		}
 	}
 	sum := sha256.Sum256(blob.data)
 	return generation.AssetContent{
@@ -87,6 +95,17 @@ func archiveFixture(
 	mutate func(*catalog.AssetListArchiveSchema),
 ) (*assetlist.Service, *memoryRepository, assetlist.List, *fakeArchiveAssets) {
 	t.Helper()
+	return archiveFixtureWith(t, mutate, objPackageRules())
+}
+
+// archiveFixtureWith is archiveFixture with a chosen OBJ rule set (nil keeps a
+// Catalog that declares no model delivery section).
+func archiveFixtureWith(
+	t *testing.T,
+	mutate func(*catalog.AssetListArchiveSchema),
+	rules *catalog.ModelObjPackageSchema,
+) (*assetlist.Service, *memoryRepository, assetlist.List, *fakeArchiveAssets) {
+	t.Helper()
 	fake := &fakeArchiveAssets{}
 	schema := archiveTestSchema()
 	if mutate != nil {
@@ -95,6 +114,7 @@ func archiveFixture(
 	service, repository, _ := newService(t, func(config *assetlist.Config) {
 		config.Schema = schema
 		config.Archive = fake
+		config.ObjPackage = rules
 	})
 	ctx := context.Background()
 	input := proposal()
