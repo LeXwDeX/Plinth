@@ -12,6 +12,9 @@
     <script>
       window.__ART_AI_PRODUCT_SCHEMA__={{.Schema}};
     </script>
+    <!-- Classic script, same origin (CSP script-src 'self'): it runs before the module bundle and, below the
+         supported browser minimum, draws the Schema notice instead of letting the app white-screen (#387). -->
+    <script src="/browser-support.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
+	"sync"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/align"
@@ -21,6 +23,16 @@ func taskPoll() *align.Poll {
 	return &align.Poll{
 		StatusPath: "data.status", ProgressPath: "data.progress",
 		Terminal: taskTerminal, Max: 240, Interval: 4 * time.Second,
+	}
+}
+
+// generationPoll is taskPoll with the budget of the multiview Offering: its
+// timeout_seconds is 3600 and it polls every 5 seconds. A poll is free, and a
+// run that gave up on a paid generation would leave the model unfetched.
+func generationPoll() *align.Poll {
+	return &align.Poll{
+		StatusPath: "data.status", ProgressPath: "data.progress",
+		Terminal: taskTerminal, Max: 720, Interval: 5 * time.Second,
 	}
 }
 
@@ -71,10 +83,62 @@ func figurePNG() []byte {
 	return out.Bytes()
 }
 
-// Profile is the alignment script of the Tripo v3 fake. Every paid request is
-// the cheapest option of its endpoint and is sent once. The chain mirrors what
-// Plinth drives: generation, rig check, rigging, animation, segmentation,
-// a model export and part completion.
+// viewPNG is the block figure of figurePNG seen from one side, 512x512 on white:
+// front and back are wide with both arms (the front has a face band, the back a
+// darker body), the left view is narrow with one arm. Three different pictures of
+// one object for a multiview upload; what they show decides nothing about the
+// protocol under test. They are drawn once per process, because every Profile()
+// call (and each test that makes one) builds the script again.
+func viewPNG(view string) []byte { return viewPictures()[view] }
+
+var viewPictures = sync.OnceValue(func() map[string][]byte {
+	return map[string][]byte{"front": drawView("front"), "left": drawView("left"), "back": drawView("back")}
+})
+
+func drawView(view string) []byte {
+	const size = 512
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	fill := func(x0, y0, x1, y1 int, c color.RGBA) {
+		draw.Draw(img, image.Rect(x0, y0, x1, y1), &image.Uniform{C: c}, image.Point{}, draw.Src)
+	}
+	fill(0, 0, size, size, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	body := color.RGBA{R: 200, G: 40, B: 40, A: 255}
+	arm := color.RGBA{R: 40, G: 90, B: 200, A: 255}
+	leg := color.RGBA{R: 40, G: 150, B: 60, A: 255}
+	if view == "left" {
+		fill(221, 170, 291, 330, body) // body, seen from the side
+		fill(236, 180, 276, 300, arm)  // the near arm
+		fill(226, 330, 286, 460, leg)  // the legs, one behind the other
+	} else {
+		if view == "back" {
+			body = color.RGBA{R: 140, G: 30, B: 30, A: 255}
+		}
+		fill(196, 170, 316, 330, body)
+		fill(80, 180, 196, 220, arm)
+		fill(316, 180, 432, 220, arm)
+		fill(206, 330, 250, 460, leg)
+		fill(262, 330, 306, 460, leg)
+	}
+	for y := 60; y < 170; y++ { // head
+		for x := 201; x < 311; x++ {
+			if dx, dy := x-256, y-115; dx*dx+dy*dy < 55*55 {
+				img.SetRGBA(x, y, color.RGBA{R: 240, G: 190, B: 40, A: 255})
+			}
+		}
+	}
+	if view == "front" {
+		fill(231, 105, 281, 117, color.RGBA{R: 30, G: 30, B: 30, A: 255}) // the face band
+	}
+	var out bytes.Buffer
+	_ = png.Encode(&out, img)
+	return out.Bytes()
+}
+
+// Profile is the alignment script of the Tripo v3 fake. Every paid request,
+// except the two of the multiview run at the end (#386), is the cheapest option
+// of its endpoint and is sent once. The chain mirrors what Plinth drives:
+// generation, rig check, rigging, animation, segmentation, a model export and
+// part completion.
 func Profile() align.Profile {
 	return align.Profile{
 		Provider: "tripo", API: "v3", Official: OfficialBase,
@@ -239,6 +303,45 @@ func Profile() align.Profile {
 				Capture: map[string]string{"mseg": "data.task_id"}},
 			{Name: "smartsegment-model-poll", Method: "GET", Path: "/tasks/{mseg}", RequireVar: "mseg", Poll: taskPoll(),
 				Fetch: []string{"data.output.*"}},
+			// A third partial run (#386): the multiview model Plinth requests with its
+			// production defaults and its 3MF export, run with -artifacts to keep the real
+			// bytes of the 3MF: -steps mv-upload-front,mv-upload-left,mv-upload-back,
+			// multiview-to-model,multiview-to-model-poll,convert-3mf,convert-3mf-poll.
+			// Unlike the cheapest-option steps above these are the most expensive options
+			// of the endpoint (about 75 credits: the generation at the Offering's defaults,
+			// 70, and one export, 5), and two requests are paid. The uploads are chained
+			// through RequireVar, so a missing token skips everything after it. The bodies
+			// are what the adapter sends for the Offering
+			// tripo/tripo-v3.1-multiview/image-to-3d at its defaults with three views
+			// (TestAlignmentScriptSendsWhatTheAdapterSends in internal/providers/tripo).
+			{Name: "mv-upload-front", Method: "POST", Path: "/files",
+				Multipart: &align.File{Field: "file", Filename: "input.png", MediaType: "image/png", Data: viewPNG("front")},
+				Capture:   map[string]string{"mv_front": "data.file_token"}},
+			{Name: "mv-upload-left", Method: "POST", Path: "/files", RequireVar: "mv_front",
+				Multipart: &align.File{Field: "file", Filename: "input.png", MediaType: "image/png", Data: viewPNG("left")},
+				Capture:   map[string]string{"mv_left": "data.file_token"}},
+			{Name: "mv-upload-back", Method: "POST", Path: "/files", RequireVar: "mv_left",
+				Multipart: &align.File{Field: "file", Filename: "input.png", MediaType: "image/png", Data: viewPNG("back")},
+				Capture:   map[string]string{"mv_back": "data.file_token"}},
+			{Name: "multiview-to-model", Method: "POST", Path: "/generation/multiview-to-model", Paid: true, RequireVar: "mv_back",
+				Body: map[string]any{
+					"model": "v3.1-20260211",
+					"inputs": []map[string]string{
+						{"front": "{mv_front}"}, {"left": "{mv_left}"}, {"back": "{mv_back}"},
+					},
+					"texture": true, "pbr": true, "texture_quality": "extreme", "texture_version": "v3.5-20260815",
+					"texture_alignment": "original_image", "geometry_quality": "detailed", "orientation": "default",
+					"face_limit": 2000000, "quad": false, "smart_low_poly": false, "auto_size": false,
+					"export_uv": true, "generate_parts": false,
+				},
+				Capture: map[string]string{"m2m": "data.task_id"}},
+			{Name: "multiview-to-model-poll", Method: "GET", Path: "/tasks/{m2m}", RequireVar: "m2m", Poll: generationPoll(),
+				Fetch: []string{"data.output.*"}},
+			{Name: "convert-3mf", Method: "POST", Path: "/models/convert", Paid: true, RequireVar: "m2m",
+				Body:    map[string]any{"input": "{m2m}", "format": "3MF"},
+				Capture: map[string]string{"m2m_convert": "data.task_id"}},
+			{Name: "convert-3mf-poll", Method: "GET", Path: "/tasks/{m2m_convert}", RequireVar: "m2m_convert", Poll: taskPoll(),
+				Fetch: []string{"data.output.*"}},
 		},
 		Capture: align.CaptureConfig{
 			Connection: "tripo", Scenario: "tripo-v3-alignment", APIVersion: "v3",
@@ -251,11 +354,11 @@ func Profile() align.Profile {
 			},
 		},
 		RequestNotes: []string{
-			"第二段官方运行（#89，2026-10-29，标签 seven、seg2、mseg）补采七个原先按文档构造的端点：`image-to-model`、`image-to-splat`、`image-to-multiview`、`edit-multiview`、`models/texture`、`mesh/decimate`、`mesh/smartsegment`（image 与 model 两种 seg_type）。每个端点取最便宜且保留 Plinth 请求体字段的选项，只发一次；付费 10 次共 260 积分（余额 3010 → 2750）：text-to-model 源任务 10、image-to-model 20、image-to-splat 30、image-to-multiview 10、edit-multiview 5、texture 10、decimate 35、smartsegment-image 85、smartsegment-model 55；第一个 smartsegment-image 请求失败未计费。",
-			"七个端点的任务 type 有两处与原先的假设不同：mesh/decimate 是 `highpoly_to_lowpoly`（不是 `mesh_decimation`），mesh/smartsegment 按 seg_type 是 `smartsegment_image` 或 `smartsegment_model`（不是 `mesh_smart_segmentation`）；其余五个沿用相近类型的假设成立。输出字段与原假设也不同：image-to-model、texture 没有 `generated_image_url`，image-to-splat 只有 `model_url`，两个 multiview 的输出是嵌套对象 `generate_multiview_image`（edit 只含被编辑的视图），smartsegment 输出 `seg_model_url`、`mask_url`、`prompt`、`seg_task_id`、`model_task_id`；部分任务类型的部分状态没有 `progress`。fake 按样本改正。",
-			"第一个 smartsegment-image 请求（球体示意图）受理后约四分钟以 `failed`、error_code 1001、`Segmentation pipeline failed` 结束，未计费；换一张有头、身体、手臂和腿的图片的第二个请求成功。两次都入库为样本（`tripo-v3-smartsegment-image-failed`、`tripo-v3-smartsegment-image`）。第一次的失败是官方对该输入的观测，原因未证；报告里 `smartsegment-image-poll` 步骤的差异就是 fake 对同一请求返回成功。",
+			"第三段官方运行（#386，2026-11-19，标签 mv386、conv386，经用户同意）：三次视角图上传、按 Plinth 生产默认参数的 multiview-to-model（三个视角，纹理与 PBR 开、extreme 质量、detailed 几何、200 万面）及其轮询，再对该任务做一次 3MF 转换（请求只有 input 与 format）及其轮询，立即取回产物。两次付费共 75 积分：多视图生成 70、3MF 转换 5；两者在 queued 轮询里就已报出全价，fake 在 queued 轮询里仍沿用样本的值（值层面，本报告不比较值）。",
+			"这次运行补出了 multiview-to-model 原先只按文档构造的结构：任务轮询的 `input` 是请求自己的参数（texture、pbr、texture_quality、texture_version、texture_alignment、geometry_quality、orientation、face_limit、quad、smart_low_poly、auto_size、export_uv、generate_parts）、请求的 model 以 `model_version` 出现，另有 `files` 数组（front、left、back、right 四项，发送过的视角是 `{object:{bucket,key}}`，没发的是 null）；渲染图是 WebP，不是其他生成任务（2026-10-29）的 PNG；真实运行里渲染图在 progress 99 时先于模型出现。运行前 fake 的这一轮询取自绑骨任务的模板（`input` 里是 original_model_id、out_format、spec、topology），渲染图是 PNG：24 项未说明差异，已按证据改正为 0 项（脱敏证据 `evidence-386-multiview-model.candidate.json`、`evidence-386-convert-3mf.candidate.json`，由 `evidence_multiview_3mf_test.go` 钉住）。",
+			"3MF 转换（task type `convert_model`，`input` 为 `{format, original_model_id}`，output 只有 `model_url`）的轮询与 fake 没有结构差异。取回的 3MF 是 35,952,441 字节的 ZIP64 包：三个成员（`3D/3dmodel.model`、`[Content_Types].xml`、`_rels/.rels`），每个成员都按 ZIP64 成帧，模型根元素声明 Tripo 的厂商命名空间 `https://www.tripo3d.ai/ns/aigc/1.0` 并带一条 AIGC 标签。Plinth 的归档隔离原先把这个命名空间当外部地址拒收，这就是 #386 的根因；名单加入该标识符后真实文件通过。fake 现在交付同结构的小包（`internal/testutil/fakeupstream/tripo3mf.go`），不再是通用的 3MF 夹具。字节本身（真实产物含约 96 万个顶点）不入库。",
 			"产物 CDN 对不同文件返回不同的 content-type：模型、渲染图和 multiview 图片是 `binary/octet-stream`，分割遮罩 `mask.png` 是 `image/png`，edit-multiview 的视图是 `image/jpeg`；fake 照此返回。CDN 是 CloudFront 签名 URL，无效或过期都是 403 `text/xml` 的 AccessDenied。",
-			"这一段报告只含第二段官方运行的步骤：第一阶段的官方原始运行（余额、生成、绑骨、分割等）没有保留在工作树外，本次不能重新生成那份报告，它仍在 `alignment-report.md`。",
+			"这一段报告只含第三段官方运行的步骤；第一段（余额、生成、绑骨、分割等）与第二段（#89，七个补采端点）的报告仍在 `alignment-report.md` 与 `alignment-report-89.md`。",
 		},
 		Notes: smartSegmentFailureNotes(),
 	}

@@ -6374,6 +6374,15 @@ def _asset_list_counts(detail):
     return _asset_list_run_of(detail).get("item_counts") or {}
 
 
+def _asset_list_all_in(detail, state, count):
+    """The run counts and the items of one answer both show count items in
+    state. The detail derives its counts from its own items (#390); checking
+    both keeps a wait from settling on a torn answer."""
+    items = (detail or {}).get("items") or []
+    return (_asset_list_counts(detail).get(state) == count
+            and len(items) == count and all(item.get("state") == state for item in items))
+
+
 def _wait_asset_list_run(api, project_id, list_id, predicate, seconds=120, beat=None):
     """Polls one list until predicate holds. beat is the simulated browser
     heartbeat, written about once a second inside the 5-second Catalog interval."""
@@ -6463,7 +6472,7 @@ def _asset_list_run_arm_progress(work, stack_binary, processes, catalog):
 
         detail = _wait_asset_list_run(
             api, project_id, list_id,
-            lambda value: _asset_list_counts(value).get("review") == 2, seconds=120, beat=beat)
+            lambda value: _asset_list_all_in(value, "review", 2), seconds=120, beat=beat)
         counts = _asset_list_counts(detail)
         run = _asset_list_run_of(detail)
         items = detail.get("items") or []
@@ -6582,7 +6591,7 @@ def _asset_list_run_arm_presence(work, stack_binary, processes, catalog):
         beat()
         detail = _wait_asset_list_run(
             api, project_id, list_id,
-            lambda value: _asset_list_counts(value).get("review") == 2, seconds=120, beat=beat)
+            lambda value: _asset_list_all_in(value, "review", 2), seconds=120, beat=beat)
         items = detail.get("items") or []
         item_tasks = [_asset_list_item_tasks(api, item) for item in items]
         record("#328 run presence: a returning heartbeat resumes the run and finishes both items",
@@ -6591,6 +6600,7 @@ def _asset_list_run_arm_presence(work, stack_binary, processes, catalog):
                and len(items) == 2 and all(item.get("state") == "review" for item in items)
                and all(len(tasks) == 1 and tasks[0].get("state") == "SUCCEEDED" for tasks in item_tasks),
                f"run={_asset_list_run_of(detail).get('status')} counts={_asset_list_counts(detail)} "
+               f"items={[item.get('state') for item in items]} "
                f"tasks={[[task.get('state') for task in tasks] for tasks in item_tasks]}")
     finally:
         processes.stop(child)

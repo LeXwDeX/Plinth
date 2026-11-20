@@ -30,6 +30,7 @@ func TestSmallModelFilesPassDeliveryChecksAndAreDeterministic(t *testing.T) {
 		"stl":              {"converted_model", "stl", "model/stl"},
 		"usdz":             {"converted_model", "usdz", "model/vnd.usdz+zip"},
 		"3mf":              {"converted_model", "3mf", "model/3mf"},
+		"3mf:tripo":        {"converted_model", "converted.3mf", "model/3mf"},
 		"png":              {"texture", "texture.base_color", "image/png"},
 	} {
 		file, ok := files[format]

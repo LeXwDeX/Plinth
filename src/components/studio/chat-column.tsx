@@ -132,7 +132,7 @@ import { useSessionContextStore } from '@/store/session-context-store';
 import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
-import { buildMultiviewRequest, chosenViewLabels, multiviewOffering } from '@/lib/workspace/multiview-upload';
+import { buildMultiviewRequest, chosenViewLabels, multiviewLockNote, multiviewOffering } from '@/lib/workspace/multiview-upload';
 import { withErrorReference } from '@/lib/problem-reference';
 import { referenceLimit } from '@/lib/workspace/reference-limit';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
@@ -278,9 +278,16 @@ export function ChatColumn() {
   // Several uploaded pictures may be views of one object when a 3D Offering takes them (found by its Schema parameter).
   const { offeringsByCapability: model3dOfferings } = useWorkspaceOfferings(schema, 'model-3d');
   const picked3dModel = useWorkspaceStore((state) => state.modelByDomain['model-3d']);
+  const multiviewOfferings = useMemo(() => Object.values(model3dOfferings ?? {}).flat(), [model3dOfferings]);
   const multiviewTarget = useMemo(
-    () => multiviewOffering(Object.values(model3dOfferings ?? {}).flat(), picked3dModel ?? undefined),
-    [model3dOfferings, picked3dModel],
+    () => multiviewOffering(multiviewOfferings, picked3dModel ?? undefined),
+    [multiviewOfferings, picked3dModel],
+  );
+  // #373: the panel makes its target even when the 3D model the person picked takes no views; the request names the
+  // target and the server leaves the session's pick as it is, so the panel says which model it uses and why.
+  const multiviewNote = useMemo(
+    () => (multiviewTarget ? multiviewLockNote(multiviewOfferings, multiviewTarget, picked3dModel) : null),
+    [multiviewOfferings, multiviewTarget, picked3dModel],
   );
   useRestoreSessionModels();
   const registerTask = useWorkspaceStore((state) => state.registerTask);
@@ -2378,7 +2385,7 @@ export function ChatColumn() {
 
           {multiviewTarget && attachedImages.length >= 2 && attachedImages.length <= 4 && !editing ? (
             <MultiviewUploadPanel
-              images={attachedImages} target={multiviewTarget} disabled={uploading || preparing || isStreaming}
+              images={attachedImages} target={multiviewTarget} lockNote={multiviewNote} disabled={uploading || preparing || isStreaming}
               onDismiss={() => setMultiviewDismissedFor(attachedImages.join('\n'))}
               onConfirm={(choices) => {
                 const picked = attachedImages.flatMap((url, index) => (choices[index] ? [url] : []));

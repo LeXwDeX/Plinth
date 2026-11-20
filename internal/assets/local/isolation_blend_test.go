@@ -77,15 +77,26 @@ func TestBlendRejectsWrongMagicAndAbsoluteAddresses(t *testing.T) {
 }
 
 func TestInspectionFailuresNameTheirWireFamily(t *testing.T) {
-	broken := bytes.Repeat([]byte("PK\x03\x04"), 4)
-	store, err := New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	_, err = store.Put(context.Background(), modelWrite(broken, "usdz", "model/vnd.usdz+zip"))
-	var diagnosed generation.DiagnosedAssetStorageError
-	if err == nil || !errors.As(err, &diagnosed) || diagnosed.StorageDiagnostic().Reason != "archive_rejected" {
-		t.Fatalf("err=%v", err)
+	// A broken ZIP names the container rule that fired (#386); a failure with no
+	// rule of its own still names the wire family, here an OBJ package with no OBJ.
+	for _, test := range []struct {
+		name, variant, mediaType, reason string
+		body                             []byte
+	}{
+		{"broken ZIP container", "usdz", "model/vnd.usdz+zip", "zip_footer_invalid", bytes.Repeat([]byte("PK\x03\x04"), 4)},
+		{"OBJ package without an OBJ", "obj", "application/zip", "archive_rejected", zipModel(t, map[string]string{"model.mtl": "newmtl base\n"})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, err := New(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			_, err = store.Put(context.Background(), modelWrite(test.body, test.variant, test.mediaType))
+			var diagnosed generation.DiagnosedAssetStorageError
+			if err == nil || !errors.As(err, &diagnosed) || diagnosed.StorageDiagnostic().Reason != test.reason {
+				t.Fatalf("err=%v, want reason %s", err, test.reason)
+			}
+		})
 	}
 }

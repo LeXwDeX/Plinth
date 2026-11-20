@@ -28,7 +28,8 @@ var (
 )
 
 // ModelFile returns the fixed bytes of a model container: "glb", "gltf",
-// "fbx", "obj" (OBJ ZIP), "stl", "usdz", "3mf" or the texture "png". They are
+// "fbx", "obj" (OBJ ZIP), "stl", "usdz", "3mf", "3mf:tripo" (the 3MF package
+// Tripo's conversion writes) or the texture "png". They are
 // written by the same format writers Mock generation uses (providers/mock/modelfiles),
 // so Plinth's delivery checks accept them.
 func ModelFile(format string) (File, error) {

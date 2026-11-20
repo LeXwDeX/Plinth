@@ -303,8 +303,19 @@ export const useWorkspaceStore = create<WorkspaceState>()(
   },
   registerTask: (input) =>
     set((state) => {
-      if (state.trackedTasks.some((task) => task.taskId === input.taskId)) {
-        return state;
+      const known = state.trackedTasks.find((task) => task.taskId === input.taskId);
+      if (known) {
+        // #375: the first registration wins, except for the session. A task the history
+        // restore registered without one (its list named none) is listed under no session,
+        // so the Agent stream's later registration completes it; a session already set
+        // is never replaced.
+        if (known.sessionId || !input.sessionId) return state;
+        return {
+          trackedTasks: patchTask(state.trackedTasks, input.taskId, (task) => ({
+            ...task,
+            sessionId: input.sessionId,
+          })),
+        };
       }
       return {
         trackedTasks: [...state.trackedTasks, emptyTask(input)],

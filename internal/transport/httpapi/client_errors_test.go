@@ -55,6 +55,11 @@ func TestClientErrorReportsAreAuthenticatedBoundedAndRedacted(t *testing.T) {
 	if !strings.Contains(logs.String(), `"kind":"error-boundary"`) || !strings.Contains(logs.String(), `"owner_id":"owner-a"`) || strings.Contains(logs.String(), "topsecret") {
 		t.Fatalf("report log = %s", logs.String())
 	}
+	// #387: the browser sends the ID of the request just before the error as `request_id`; the log keeps it as
+	// `related_request_id`, apart from the ID of the report request itself, so both can be looked up.
+	if !strings.Contains(logs.String(), `"related_request_id":"req_1"`) {
+		t.Fatalf("report log lacks the related request ID = %s", logs.String())
+	}
 	if code := send(`{"kind":"x","unexpected":true}`); code != http.StatusBadRequest {
 		t.Fatalf("unknown field = %d", code)
 	}

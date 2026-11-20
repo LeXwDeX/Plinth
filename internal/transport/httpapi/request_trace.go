@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"sync"
 
@@ -34,6 +35,18 @@ type requestTrace struct {
 	// (problem details, authentication errors, pending session titles).
 	locale string
 	texts  *catalog.TextLocalizer
+	// ctx is the request's own context, which ends when the client goes away
+	// (page refresh, closed tab, aborted fetch). Set once by requestLogMiddleware
+	// before any handler runs and read-only afterwards.
+	ctx context.Context
+}
+
+// clientCanceled reports whether the client abandoned the request. Nobody reads
+// the answer then, so a failure caused by the cancellation is not a server
+// error and the access log does not rank it as one (#385). A deadline the
+// server set itself ends with context.DeadlineExceeded and is not this.
+func (trace *requestTrace) clientCanceled() bool {
+	return trace != nil && trace.ctx != nil && errors.Is(trace.ctx.Err(), context.Canceled)
 }
 
 // localeText returns the request locale's copy of a default-locale Schema

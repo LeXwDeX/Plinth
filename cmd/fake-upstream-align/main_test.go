@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/align"
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/registry"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 	"github.com/LeXwDeX/Plinth/internal/wirecapture"
@@ -193,5 +197,184 @@ func TestDraftCommandReadsTheApplicationsRecords(t *testing.T) {
 				t.Errorf("%s holds %q", name, secret)
 			}
 		}
+	}
+}
+
+func privateTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// An "official" upstream that counts its requests, so a refused flag can be shown
+// never to have reached it.
+func countingUpstream(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = fmt.Fprint(w, `{}`)
+	}))
+	t.Cleanup(server.Close)
+	return server, &hits
+}
+
+// -artifacts holds real models the paid API delivered: it must be an absolute path
+// to an existing 0700 directory, not a link, outside the worktree (#386).
+func TestArtifactsDirMustBePrivateAndOutsideTheWorktree(t *testing.T) {
+	worktree := privateTempDir(t)
+	good := privateTempDir(t)
+	inside := filepath.Join(worktree, "arts")
+	if err := os.Mkdir(inside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	open := t.TempDir()
+	if err := os.Chmod(open, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(good, link); err != nil {
+		t.Fatal(err)
+	}
+	// A linked ancestor hides a directory that is inside the worktree.
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(worktree, alias); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct{ dir, want string }{
+		"relative":                   {"arts", "absolute"},
+		"missing":                    {filepath.Join(t.TempDir(), "nope"), "existing directory"},
+		"a file":                     {file, "existing directory"},
+		"a symbolic link":            {link, "symbolic link"},
+		"a directory open to others": {open, "0700"},
+		"inside the worktree":        {inside, "outside the worktree"},
+		"the worktree itself":        {worktree, "outside the worktree"},
+		"inside it through a link":   {filepath.Join(alias, "arts"), "outside the worktree"},
+	} {
+		if _, err := artifactsDir(tc.dir, worktree); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+		}
+	}
+	resolved, err := artifactsDir(good, worktree)
+	if want, _ := filepath.EvalSymlinks(good); err != nil || resolved != want {
+		t.Fatalf("a good directory: %q, %v", resolved, err)
+	}
+}
+
+// The flag is checked before a single request is sent, and only the official
+// command takes it.
+func TestArtifactsFlagIsCheckedBeforeAnyRequest(t *testing.T) {
+	t.Setenv("FAKE_ALIGN_KEY", "k")
+	upstream, hits := countingUpstream(t)
+	private, worktree := privateTempDir(t), privateTempDir(t)
+	good := privateTempDir(t)
+	inside := filepath.Join(worktree, "arts")
+	if err := os.Mkdir(inside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	args := func(command, dir string, more ...string) []string {
+		return append([]string{command, "-version", "tripo/v3", "-key-env", "FAKE_ALIGN_KEY", "-base-url", upstream.URL,
+			"-private", private, "-worktree", worktree, "-artifacts", dir, "-steps", "multiview-to-model,convert-3mf"}, more...)
+	}
+	// Confirmed and refused: the directory is checked first.
+	if err := run(args("official", inside, "-confirm-paid")); err == nil || !strings.Contains(err.Error(), "outside the worktree") {
+		t.Errorf("a directory inside the worktree: err = %v", err)
+	}
+	if err := run(args("fake", good, "-confirm-paid")); err == nil || !strings.Contains(err.Error(), "official command only") {
+		t.Errorf("another command: err = %v", err)
+	}
+	// A good directory is accepted: the run then stops at the paid-request check.
+	if err := run(args("official", good)); err == nil || !strings.Contains(err.Error(), "2 paid request(s) (multiview-to-model, convert-3mf)") {
+		t.Errorf("a good directory: err = %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("%d request(s) were sent", hits.Load())
+	}
+}
+
+// An official run with -artifacts leaves the bytes of what it fetched in the
+// directory and their digests in the private bundle; what it fetched but could not
+// keep ends the run with an error after the bundle is saved.
+func TestOfficialRunKeepsArtifactsAndRefusesToCallItDoneWithoutThem(t *testing.T) {
+	t.Setenv("FAKE_ALIGN_KEY", "k")
+	t.Setenv(wirefixture.EnvUpstreamRecordDir, "")
+	t.Setenv(wirefixture.EnvUpstreamRecordAck, "")
+	model := append([]byte("glTF\x02\x00\x00\x00"), bytes.Repeat([]byte{5}, 1500)...)
+	refused := false
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/task":
+			if refused {
+				_, _ = fmt.Fprintf(w, `{"data":{"model":%q,"gone":%q}}`, server.URL+"/m.glb", server.URL+"/gone.png")
+				return
+			}
+			_, _ = fmt.Fprintf(w, `{"data":{"model":%q}}`, server.URL+"/m.glb")
+		case "/m.glb":
+			_, _ = w.Write(model)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	defer server.Close()
+	profile := align.Profile{Provider: "t", API: "v1", Official: "https://official.example",
+		Steps: []align.Step{{Name: "task", Method: "GET", Path: "/task", Fetch: []string{"data.*"}}}}
+	private, arts := privateTempDir(t), privateTempDir(t)
+
+	if err := runOfficial(profile, private, "kept", "FAKE_ALIGN_KEY", server.URL, worktreeRoot(t), true, nil, arts); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(arts, "task-1.glb"))
+	if err != nil || !bytes.Equal(got, model) {
+		t.Fatalf("the model was not kept: %v", err)
+	}
+	if info, _ := os.Stat(filepath.Join(arts, "task-1.glb")); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v, want 0600", info.Mode().Perm())
+	}
+	bundle, err := align.LoadBundle(filepath.Join(private, "kept.official.bundle.json"))
+	if err != nil || len(bundle.Obs[0].Artifacts) != 1 || bundle.Obs[0].Artifacts[0].File != "task-1.glb" || len(bundle.Obs[0].Artifacts[0].SHA256) != 64 {
+		t.Fatalf("bundle: %+v, %v", bundle, err)
+	}
+
+	refused = true
+	err = runOfficial(profile, private, "unsaved", "FAKE_ALIGN_KEY", server.URL, worktreeRoot(t), true, nil, arts)
+	if err == nil || !strings.Contains(err.Error(), "1 fetched artifact(s) were not saved") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(private, "unsaved.official.bundle.json")); statErr != nil {
+		t.Errorf("the bundle must be saved before the run reports the unsaved artifact: %v", statErr)
+	}
+
+	// Without -artifacts the same run keeps nothing and does not complain about it.
+	if err := runOfficial(profile, private, "observed", "FAKE_ALIGN_KEY", server.URL, worktreeRoot(t), true, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := os.ReadDir(arts); len(names) != 2 { // the first run's model, and the second run's after its refused picture
+		t.Errorf("directory holds %d files, want 2", len(names))
+	}
+}
+
+func TestReportArtifactsListsWhatWasKeptAndCountsTheRest(t *testing.T) {
+	bundle := &align.Bundle{Obs: []align.Obs{
+		{Step: "poll", Artifacts: []align.ArtifactObs{
+			{Field: "data.model", Format: "glb", Size: 12, File: "poll-1.glb", SHA256: "ab"},
+			{Field: "data.mask", Error: "status 403: not saved"},
+		}},
+		{Step: "none"},
+	}}
+	var out, errOut bytes.Buffer
+	if unsaved := reportArtifacts(&out, &errOut, bundle); unsaved != 1 {
+		t.Fatalf("unsaved = %d", unsaved)
+	}
+	if !strings.Contains(out.String(), "artifact poll-1.glb  glb  12 bytes  sha256:ab  (poll data.model)") ||
+		!strings.Contains(errOut.String(), "artifact not saved: poll data.mask: status 403: not saved") {
+		t.Fatalf("out %q, err %q", out.String(), errOut.String())
 	}
 }

@@ -96,29 +96,54 @@ func NewCache(source BalanceSource, config CacheConfig) (*Cache, error) {
 // timeout.
 var ErrInvalidCache = errors.New("provider accounts: invalid balance cache configuration")
 
+// Request is one account's read. Plain asks for the plain number only, for a
+// caller that shows the balance as a number whatever the reader could say in
+// the provider's own unit; otherwise the exact native amount is read when the
+// reader offers one (#385).
+type Request struct {
+	AccountID string
+	Plain     bool
+}
+
 // Read returns one reading per account, in the order asked. The accounts are
 // read concurrently.
 func (c *Cache) Read(ctx context.Context, accountIDs []string) []Reading {
-	readings := make([]Reading, len(accountIDs))
-	var group sync.WaitGroup
+	requests := make([]Request, len(accountIDs))
 	for index, id := range accountIDs {
+		requests[index] = Request{AccountID: id}
+	}
+	return c.ReadRequests(ctx, requests)
+}
+
+// ReadRequests is Read for callers that need the plain number of some accounts.
+// The two kinds of one account are cached apart: they are different reads of
+// the provider.
+func (c *Cache) ReadRequests(ctx context.Context, requests []Request) []Reading {
+	readings := make([]Reading, len(requests))
+	var group sync.WaitGroup
+	for index, request := range requests {
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			readings[index] = c.one(ctx, id)
+			readings[index] = c.one(ctx, request)
 		}()
 	}
 	group.Wait()
 	return readings
 }
 
-func (c *Cache) one(ctx context.Context, id string) Reading {
+func (c *Cache) one(ctx context.Context, request Request) Reading {
+	id := request.AccountID
+	key := id
+	if request.Plain {
+		key = id + "\x00plain"
+	}
 	c.mu.Lock()
-	if entry, found := c.entries[id]; found && c.clock().Before(entry.expires) {
+	if entry, found := c.entries[key]; found && c.clock().Before(entry.expires) {
 		c.mu.Unlock()
 		return entry.reading
 	}
-	if running, found := c.inflight[id]; found {
+	if running, found := c.inflight[key]; found {
 		c.mu.Unlock()
 		select {
 		case <-running.done:
@@ -128,7 +153,7 @@ func (c *Cache) one(ctx context.Context, id string) Reading {
 		}
 	}
 	running := &flight{done: make(chan struct{})}
-	c.inflight[id] = running
+	c.inflight[key] = running
 	c.mu.Unlock()
 
 	// However the read ends, even in a panic of the reader, the flight is
@@ -137,19 +162,20 @@ func (c *Cache) one(ctx context.Context, id string) Reading {
 	reading := Reading{AccountID: id, ReadAt: c.clock()}
 	defer func() {
 		c.mu.Lock()
-		c.entries[id] = cacheEntry{reading: reading, expires: reading.ReadAt.Add(c.ttl)}
-		delete(c.inflight, id)
+		c.entries[key] = cacheEntry{reading: reading, expires: reading.ReadAt.Add(c.ttl)}
+		delete(c.inflight, key)
 		c.mu.Unlock()
 		running.reading = reading
 		close(running.done)
 	}()
 	// The read is shared with whoever asks while it runs, so it must not be
 	// cut short by the first caller's own deadline.
-	reading = c.fetch(id)
+	reading = c.fetch(request)
 	return reading
 }
 
-func (c *Cache) fetch(id string) (reading Reading) {
+func (c *Cache) fetch(request Request) (reading Reading) {
+	id := request.AccountID
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 	reading = Reading{AccountID: id, ReadAt: c.clock()}
@@ -163,7 +189,11 @@ func (c *Cache) fetch(id string) (reading Reading) {
 			}
 		}
 	}()
-	native, err := c.source.NativeBalance(ctx, id)
+	var native *schema.NativeAmount
+	var err error
+	if !request.Plain {
+		native, err = c.source.NativeBalance(ctx, id)
+	}
 	if err == nil && native != nil {
 		reading.Known, reading.Native = true, native
 		return reading

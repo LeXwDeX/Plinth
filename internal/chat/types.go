@@ -214,6 +214,11 @@ type TurnCheckpoint struct {
 	Completion    agents.Completion           `json:"completion"`
 	Completed     []agents.Message            `json:"completed,omitempty"`
 	ImageURLs     []string                    `json:"image_urls,omitempty"`
+	// MalformedCalls lists the calls of this round whose arguments the model
+	// wrote as invalid JSON (#378). Completion holds them with an empty object
+	// as arguments, never the raw text; the round answers each of them with the
+	// Schema's error text instead of running the tool, also after a restart.
+	MalformedCalls []string `json:"malformed_calls,omitempty"`
 	// Waiting lists the calls of this round that have no receipt yet: tasks
 	// in flight and submissions queued for a retry. It replaces the single
 	// WaitingTaskID/WaitingCallID/WaitDeadline of older checkpoints.
@@ -441,6 +446,13 @@ type Stream struct {
 	SessionID          string
 	Status             string
 	CleanupAt          *time.Time
+	// BusyTurnStates is an input of StartTurn only: the turn states in which
+	// the turn that owns the session's current stream still keeps the session
+	// busy (#384). A stream row that says active while its turn is in any other
+	// state is stale (its finishing write was late or lost) and does not
+	// refuse the next turn. Empty keeps the older rule, where the stream row
+	// alone decides.
+	BusyTurnStates []string
 }
 
 type Subscription struct {

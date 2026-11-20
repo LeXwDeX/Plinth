@@ -4897,6 +4897,15 @@ type ChatFrontendSchema struct {
 	// deployment without runtime.http.legacy_routes.chat_turn_background,
 	// keeps the single stop button.
 	BackgroundWaitPollMilliseconds int `json:"background_wait_poll_milliseconds,omitempty"`
+	// StreamSilenceMilliseconds is how long the open chat stream may deliver no
+	// frame before the client closes it and reconnects from its last event id
+	// (#375). It must outlast chat.stream.heartbeat_milliseconds, or a healthy
+	// quiet turn would read as a dead connection.
+	StreamSilenceMilliseconds int `json:"stream_silence_milliseconds"`
+	// StreamReconnectAttempts bounds those reconnects in a row without any frame
+	// arriving on the new connection; past it the client reports the stream as
+	// interrupted and recovers by polling (#375).
+	StreamReconnectAttempts int `json:"stream_reconnect_attempts"`
 }
 
 type ChatThinkingSchema struct {
@@ -5420,6 +5429,13 @@ type ChatStreamEventTypes struct {
 	// (#285). It carries only the Schema status text, never reasoning. Empty
 	// turns the status off.
 	Thinking string `json:"thinking,omitempty"`
+	// Heartbeat names the visible heartbeat event (#375): while a turn streams,
+	// the handler writes a data frame {"<event_fields.type>":"<heartbeat>"} every
+	// heartbeat_milliseconds, with no id line. An EventSource can observe it, which
+	// it cannot with the comment frame, so the client tells a quiet turn from a
+	// dead connection. It is never stored, takes no event id and carries no
+	// progress. Empty keeps the comment frame (heartbeat_frame) alone.
+	Heartbeat string `json:"heartbeat,omitempty"`
 }
 
 type ChatToolSchema struct {
@@ -6005,6 +6021,10 @@ type ChatPresentationSchema struct {
 
 type ChatMessageTexts struct {
 	TurnActive string `json:"turn_active"`
+	// SessionDeleteBlocked answers 409 to the deletion of a session (or of the
+	// canvas project that owns one) while a SkillRun of it has work in flight:
+	// a Task that has not ended or a grant waiting for its decision (#384).
+	SessionDeleteBlocked string `json:"session_delete_blocked"`
 	// ChoiceAnswered refuses an answer to a choice card that is no longer open;
 	// ChoiceRejected one whose option the card does not offer (#321).
 	ChoiceAnswered    string `json:"choice_answered"`
@@ -6014,6 +6034,11 @@ type ChatMessageTexts struct {
 	EmptyTitle        string `json:"empty_title"`
 	EmptyMessage      string `json:"empty_message"`
 	InvalidParameters string `json:"invalid_parameters"`
+	// MultiviewModelUnavailable refuses, when the turn starts, a structured
+	// multiview request whose model is not an available Offering that takes
+	// several views of one object (#373). Empty falls back to
+	// InvalidParameters.
+	MultiviewModelUnavailable string `json:"multiview_model_unavailable,omitempty"`
 	// ProductionBriefConflict refuses a whole-brief replacement that lost
 	// every bounded retry to a concurrent writer, so the caller retries instead
 	// of overwriting the other change (#103 review C5).
@@ -6162,6 +6187,13 @@ type ChatMessageTexts struct {
 	ToolRoundLimitPending     string `json:"tool_round_limit_pending"`
 	ToolRoundLimitPendingItem string `json:"tool_round_limit_pending_item"`
 	ToolRoundLimitPendingTool string `json:"tool_round_limit_pending_tool"`
+	// ToolArgumentsInvalid is the tool result of a call whose arguments the
+	// model wrote as invalid JSON: the tool did not run, and the Agent writes
+	// the call again. ToolUnavailable ({tool}) is the result of a call to a tool
+	// this reply cannot run. Both are ordinary tool results, not a failed turn
+	// (#378).
+	ToolArgumentsInvalid string `json:"tool_arguments_invalid"`
+	ToolUnavailable      string `json:"tool_unavailable"`
 	// The InputGap* texts are how a processing tool names a required input its
 	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
 	// {options} and {supply}. {type} is built from InputGapReferenceImage, or
@@ -6224,6 +6256,10 @@ type ChatStatusTexts struct {
 	// QueuedSubmission is shown while a paid step waits to be submitted again
 	// because the in-flight task admission is full.
 	QueuedSubmission string `json:"queued_submission,omitempty"`
+	// PreparingTool is shown from the first fragment of a tool call the model
+	// is writing until the call runs, so a long argument stream does not keep
+	// showing the thinking status (#375).
+	PreparingTool string `json:"preparing_tool,omitempty"`
 }
 
 type ChatAuditSchema struct {
@@ -6939,6 +6975,13 @@ type FrontendRuntimeSchema struct {
 	TaskPollingIntervalMilliseconds      int                         `json:"task_polling_interval_milliseconds"`
 	HarnessRefreshMilliseconds           int                         `json:"harness_refresh_milliseconds"`
 	HarnessSaveDebounceMilliseconds      int                         `json:"harness_save_debounce_milliseconds"`
+	// PendingApprovalsRefreshMilliseconds is how often the page re-reads the
+	// pending paid steps of the session while a turn or a task is running
+	// (#385; it was a constant in the page). It slows down the same way the
+	// other repeating reads do (IdlePolling).
+	PendingApprovalsRefreshMilliseconds int `json:"pending_approvals_refresh_milliseconds"`
+	// IdlePolling is how the repeating reads slow down while nothing changes.
+	IdlePolling IdlePollingSchema `json:"idle_polling"`
 	// SessionMenuPageSize is how many sessions the top-bar switcher shows per
 	// page; a page is requested only when the person turns to it. The debounce
 	// delays the search request after typing.
@@ -6968,6 +7011,18 @@ type FrontendRuntimeSchema struct {
 	// or restored pick is a retired model switches to the successor and says
 	// so; frozen tasks keep the model they ran with.
 	RetiredGenerationModels []RetiredGenerationModel `json:"retired_generation_models,omitempty"`
+}
+
+// IdlePollingSchema is how the page slows its repeating reads (agent parameters,
+// consent, SkillRuns, pending approvals, provider balance) while they find
+// nothing new and no turn or task of the session is running (#385). After each
+// read that found nothing new the wait is multiplied by BackoffFactor, up to
+// MaxIntervalMilliseconds, and it returns to the read's own interval on a
+// change, when the tab becomes visible again, or while a turn or task runs. A
+// hidden tab and an ended login do not poll at all; that is not configurable.
+type IdlePollingSchema struct {
+	BackoffFactor           float64 `json:"backoff_factor"`
+	MaxIntervalMilliseconds int     `json:"max_interval_milliseconds"`
 }
 
 // SessionReadRetrySchema is how the browser reads a chat session's chat model
