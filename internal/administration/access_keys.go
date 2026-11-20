@@ -157,12 +157,25 @@ func (s *AccessKeyAdminService) List(ctx context.Context, actor Actor, query Acc
 	}
 	sortAccessKeysNewest(records)
 	total := len(records)
-	start := min((query.Page-1)*query.PageSize, total)
+	start := pageStart(query.Page, query.PageSize, total)
 	end := min(start+query.PageSize, total)
 	page := make([]AccessKeyRecord, end-start)
 	copy(page, records[start:end])
 	s.recordAudit(ctx, actor, s.auditActions.Read, "", nil)
 	return AccessKeyPage{Records: page, Total: total, Page: query.Page, PageSize: query.PageSize}, nil
+}
+
+// pageStart is (page-1)*pageSize without overflowing: a page past the last one
+// of total rows starts at the end. A huge page number cannot wrap into the
+// first page, and the multiplication only runs when its result is <= total.
+func pageStart(page, pageSize, total int) int {
+	if page <= 1 {
+		return 0
+	}
+	if page-1 > total/pageSize {
+		return total
+	}
+	return (page - 1) * pageSize
 }
 
 // sortAccessKeysNewest orders the keys by creation time, newest first, with

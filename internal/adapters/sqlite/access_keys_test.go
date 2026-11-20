@@ -196,7 +196,9 @@ func TestAccessKeyStoreRevokeIsOwnerScopedAndIdempotent(t *testing.T) {
 	}
 }
 
-func TestAccessKeyStoreRecordsUsesOfALiveKeyOnly(t *testing.T) {
+// The count is recorded for every authenticated request, a revoke included,
+// while the last use time is only set while the key is not revoked.
+func TestAccessKeyStoreCountsEveryRequestAndRecordsLastUseOfALiveKey(t *testing.T) {
 	r := openAccessKeyRepo(t)
 	ctx := context.Background()
 	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
@@ -210,23 +212,24 @@ func TestAccessKeyStoreRecordsUsesOfALiveKeyOnly(t *testing.T) {
 	}
 	used := now.Add(5 * time.Minute)
 	for _, id := range []string{"live", "dead", "missing"} {
-		if err := r.RecordAccessKeyUse(ctx, id, used, 2); err != nil {
-			t.Fatalf("record use %s: %v", id, err)
+		if err := r.RecordAccessKeyLastUse(ctx, id, used); err != nil {
+			t.Fatalf("record last use %s: %v", id, err)
+		}
+		if err := r.IncrementAccessKeyRequests(ctx, id); err != nil {
+			t.Fatalf("count request %s: %v", id, err)
 		}
 	}
 	live, _, _ := r.AccessKey(ctx, "live")
 	dead, _, _ := r.AccessKey(ctx, "dead")
-	if !live.LastUsedAt.Equal(used) || live.RequestCount != 2 || !dead.LastUsedAt.IsZero() || dead.RequestCount != 0 {
-		t.Fatalf("live last used %v count %d, revoked last used %v count %d", live.LastUsedAt, live.RequestCount, dead.LastUsedAt, dead.RequestCount)
-	}
-	if err := r.RecordAccessKeyUse(ctx, "live", used, -1); !errors.Is(err, accesskeys.ErrInvalid) {
-		t.Fatalf("negative uses: %v", err)
+	if !live.LastUsedAt.Equal(used) || live.RequestCount != 1 || !dead.LastUsedAt.IsZero() || dead.RequestCount != 1 {
+		t.Fatalf("live last used %v count %d, revoked last used %v count %d; a counted request is never dropped",
+			live.LastUsedAt, live.RequestCount, dead.LastUsedAt, dead.RequestCount)
 	}
 }
 
-// Concurrent use writes never lose a count: the column is incremented in the
-// database, not read and written back.
-func TestAccessKeyStoreCountsConcurrentUses(t *testing.T) {
+// Concurrent count writes never lose a request: the column is incremented in
+// the database, not read and written back.
+func TestAccessKeyStoreCountsConcurrentRequests(t *testing.T) {
 	r := openAccessKeyRepo(t)
 	ctx := context.Background()
 	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
@@ -239,8 +242,8 @@ func TestAccessKeyStoreCountsConcurrentUses(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			for use := 0; use < 5; use++ {
-				if err := r.RecordAccessKeyUse(ctx, "hot", now, 1); err != nil {
-					t.Errorf("record use: %v", err)
+				if err := r.IncrementAccessKeyRequests(ctx, "hot"); err != nil {
+					t.Errorf("count request: %v", err)
 				}
 			}
 		}()
@@ -248,7 +251,7 @@ func TestAccessKeyStoreCountsConcurrentUses(t *testing.T) {
 	wait.Wait()
 	record, found, err := r.AccessKey(ctx, "hot")
 	if err != nil || !found || record.RequestCount != 80 {
-		t.Fatalf("record = %+v found=%v err=%v; want 80 uses", record, found, err)
+		t.Fatalf("record = %+v found=%v err=%v; want 80 requests", record, found, err)
 	}
 }
 

@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1071,6 +1072,44 @@ func TestMCPListenerRefusesEverythingWhileAccessKeysAreOff(t *testing.T) {
 	}
 	if result := f.call(key, "get_status", nil); result.code != http.StatusOK || result.isError {
 		t.Fatalf("after re-enabling = %d %s", result.code, result.raw)
+	}
+}
+
+// A switch that cannot be read is an internal failure, never an implicit "on"
+// (#332): the listener answers 503 with the JSON-RPC internal error and does
+// not fall through to the key, the rate limit or the tool.
+func TestMCPListenerRefusesWhenTheAccessKeySwitchCannotBeRead(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	key := f.issueKey("owner-a", "read")
+	database, err := sql.Open("sqlite", f.databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(`DROP TABLE access_key_settings`); err != nil {
+		t.Fatal(err)
+	}
+	refusals := map[string]*httptest.ResponseRecorder{
+		"endpoint": f.post(key, "tools/call", map[string]any{"name": "get_status", "arguments": map[string]any{}}),
+		"signed download": func() *httptest.ResponseRecorder {
+			recorder := httptest.NewRecorder()
+			f.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/mcp/signed-assets/garbage", nil))
+			return recorder
+		}(),
+	}
+	for name, recorder := range refusals {
+		if recorder.Code != http.StatusServiceUnavailable ||
+			!strings.Contains(recorder.Body.String(), `"code":-32603`) {
+			t.Errorf("%s with an unreadable switch = %d %s; want 503 internal error", name, recorder.Code, recorder.Body.String())
+		}
+		if strings.Contains(recorder.Body.String(), key) {
+			t.Errorf("%s echoes the key", name)
+		}
+	}
+	// The refused request never reached the key: no usage was counted.
+	if record := findAccessKey(t, f, "owner-a"); record.RequestCount != 0 {
+		t.Fatalf("a refused request was counted: %+v", record)
 	}
 }
 

@@ -47,7 +47,12 @@ func adminAccessKeys(t *testing.T) (*Repository, time.Time) {
 			t.Fatalf("create %s: %v", key.id, err)
 		}
 		if index == 0 {
-			if err := r.RecordAccessKeyUse(context.Background(), key.id, now.Add(3*time.Minute), 7); err != nil {
+			for use := int64(0); use < 7; use++ {
+				if err := r.IncrementAccessKeyRequests(context.Background(), key.id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.RecordAccessKeyLastUse(context.Background(), key.id, now.Add(3*time.Minute)); err != nil {
 				t.Fatal(err)
 			}
 		}

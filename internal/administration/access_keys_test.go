@@ -3,6 +3,7 @@ package administration_test
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -95,6 +96,25 @@ func TestAccessKeyAdminListPagesFiltersAndAuditsTheRead(t *testing.T) {
 	clamped, err := service.List(context.Background(), actor, administration.AccessKeyQuery{Page: 0, PageSize: 99})
 	if err != nil || clamped.Page != 1 || clamped.PageSize != 3 || len(clamped.Records) != 3 {
 		t.Fatalf("clamped = %+v err=%v", clamped, err)
+	}
+}
+
+// A page past the end is empty: (page-1)*pageSize must not overflow into the
+// first page for a page number no data could ever reach (#332 review).
+func TestAccessKeyAdminListHugePageIsEmpty(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 18, 8, 0, 0, 0, time.UTC)
+	store := &accessKeyAdminStore{records: []administration.AccessKeyRecord{
+		{ID: "a", CreatedAt: now}, {ID: "b", CreatedAt: now.Add(time.Minute)},
+	}}
+	service, err := administration.NewAccessKeyAdminService(accessKeyAdminConfig(store, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := service.List(context.Background(), administration.Actor{ID: "admin"},
+		administration.AccessKeyQuery{Page: math.MaxInt, PageSize: math.MaxInt})
+	if err != nil || page.Total != 2 || len(page.Records) != 0 || page.Page != math.MaxInt {
+		t.Fatalf("page = %+v err=%v; a huge page is past the end and empty", page, err)
 	}
 }
 

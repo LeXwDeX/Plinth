@@ -1,4 +1,4 @@
-import type { AdministrationProductSchema } from '../product-schema';
+import type { AdministrationAccessKeysSchema } from '../product-schema';
 import { responseRequestId } from '../problem-reference';
 
 export interface AdministrationAccessKey {
@@ -44,7 +44,7 @@ type Fetcher = (
 ) => Promise<Response>;
 
 export interface AdministrationAccessKeysBrowserClientConfig {
-  schema: AdministrationProductSchema['access_keys'];
+  schema: AdministrationAccessKeysSchema;
   routes: AdministrationAccessKeysBrowserRoutes;
   fetcher?: Fetcher;
 }

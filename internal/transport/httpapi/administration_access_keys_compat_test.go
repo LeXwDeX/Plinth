@@ -52,7 +52,12 @@ func seedAdministrationAccessKeys(t *testing.T, repository *sqlite.Repository) t
 			t.Fatal(err)
 		}
 	}
-	if err := repository.RecordAccessKeyUse(context.Background(), "key-old", now.Add(5*time.Minute), 12); err != nil {
+	for index := 0; index < 12; index++ {
+		if err := repository.IncrementAccessKeyRequests(context.Background(), "key-old"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repository.RecordAccessKeyLastUse(context.Background(), "key-old", now.Add(5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	return now

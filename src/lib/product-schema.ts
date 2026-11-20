@@ -976,10 +976,10 @@ export interface AdministrationProductSchema {
    * #332: the administrator's view of every person's access keys. The browser
    * builds the list, the owner filter, the revoke dialog and the overall
    * switch from these names, limits and texts; `permission` and the audit
-   * declaration stay server-side. Absent on older servers: the page has
-   * nothing to manage.
+   * declaration stay server-side. Absent on older servers: the page shows an
+   * unavailable state instead of a list.
    */
-  access_keys: {
+  access_keys?: {
     api: {
       fields: {
         data: string;
@@ -1034,6 +1034,15 @@ export interface AdministrationProductSchema {
     };
   };
 }
+
+/**
+ * The administrator's access key view when the deployment declares it (#332).
+ * The section is optional in the public projection; a page or client that
+ * renders or calls it receives the present section, never `undefined`.
+ */
+export type AdministrationAccessKeysSchema = NonNullable<
+  AdministrationProductSchema['access_keys']
+>;
 
 export interface ProviderDiscoveryProductSchema {
   api: {

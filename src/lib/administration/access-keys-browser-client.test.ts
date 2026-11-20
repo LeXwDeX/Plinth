@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AdministrationProductSchema } from '@/lib/product-schema';
+import type { AdministrationAccessKeysSchema } from '@/lib/product-schema';
 import {
   AdministrationAccessKeysBrowserError,
   createAdministrationAccessKeysBrowserClient,
@@ -46,7 +46,7 @@ const schema = {
     key_not_found: 'configured missing',
     internal_error: 'configured internal',
   },
-} as unknown as AdministrationProductSchema['access_keys'];
+} as unknown as AdministrationAccessKeysSchema;
 
 const routes = {
   collection: '/configured/keys',

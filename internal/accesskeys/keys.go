@@ -128,11 +128,14 @@ type Store interface {
 	// whether this call revoked it (false when it was already revoked);
 	// ErrNotFound when the owner has no such key.
 	RevokeAccessKey(ctx context.Context, ownerID, id string, now time.Time) (Record, bool, error)
-	// RecordAccessKeyUse records uses authenticated requests of the key at
-	// at: it sets the last use time and adds uses to the cumulative count.
-	// The count is added atomically, so concurrent calls never lose one. A
-	// revoked key is left as it was.
-	RecordAccessKeyUse(ctx context.Context, id string, at time.Time, uses int64) error
+	// IncrementAccessKeyRequests adds one to the key's cumulative count. The
+	// count is added atomically, so concurrent calls never lose one. The
+	// write does not require the key to be active: it counts a request that
+	// was authenticated before a revoke could land.
+	IncrementAccessKeyRequests(ctx context.Context, id string) error
+	// RecordAccessKeyLastUse sets the key's last use time. Authentication
+	// calls it at most once per interval. A revoked key is left as it was.
+	RecordAccessKeyLastUse(ctx context.Context, id string, at time.Time) error
 }
 
 // Config is the Schema's application.access_keys in the form the service uses.
@@ -149,17 +152,17 @@ type Config struct {
 	// Scopes are the scopes a key may be issued with.
 	Scopes []string
 	// LastUsedInterval is the least time between two writes of one key's last
-	// use; authentication in between writes nothing.
+	// use; authentication in between writes none. The request count is
+	// written for every authenticated request regardless of this interval.
 	LastUsedInterval time.Duration
 	// Clock is the time source; nil means time.Now.
 	Clock func() time.Time
 	// Random is the entropy source; nil means crypto/rand.
 	Random io.Reader
-	// Logger receives the warning of a failed last-use write; nil discards it.
+	// Logger receives the warning of a failed use write; nil discards it.
 	// Nothing logged contains a key.
 	Logger *slog.Logger
-	// Async runs the last-use write; nil starts a goroutine. Tests run it
-	// inline.
+	// Async runs each use write; nil starts a goroutine. Tests run it inline.
 	Async func(func())
 }
 
@@ -169,16 +172,12 @@ type Service struct {
 	config Config
 
 	mu   sync.Mutex
-	uses map[string]keyUse
+	uses map[string]time.Time
 }
 
-// keyUse is what one key accumulated since its last write: the time of that
-// write and the uses recorded after it. Batching keeps one hot key from
-// turning every request into a database write.
-type keyUse struct {
-	last    time.Time
-	pending int64
-}
+// The uses map holds, per key, when its last use time was last written. It is
+// only the throttle of that one column: every request's count goes to the
+// store at once, so nothing here is a count waiting to be flushed.
 
 // New builds the service. Every bound must be set; the Schema validates them
 // before a Catalog loads.
@@ -204,7 +203,7 @@ func New(store Store, config Config) (*Service, error) {
 		config.Async = func(f func()) { go f() }
 	}
 	config.Scopes = slices.Clone(config.Scopes)
-	return &Service{store: store, config: config, uses: map[string]keyUse{}}, nil
+	return &Service{store: store, config: config, uses: map[string]time.Time{}}, nil
 }
 
 // validPrefix accepts a short lowercase word: it is followed by an underscore
@@ -334,6 +333,8 @@ func (s *Service) Revoke(ctx context.Context, ownerID, id string) (Record, bool,
 	if err != nil {
 		return Record{}, false, err
 	}
+	// Only the next last-use deadline is forgotten: every request's count was
+	// already handed to the store, so a revoke loses no counted request.
 	s.mu.Lock()
 	delete(s.uses, id)
 	s.mu.Unlock()
@@ -354,9 +355,9 @@ var dummyDigest [sha256.Size]byte
 
 // Authenticate resolves a presented key to its owner. Every refusal is
 // ErrUnauthorized: the key is malformed, unknown, wrong, revoked or expired.
-// Any other error is a failure to look the key up. A success records the
-// key's last use and adds one to its request count at most once per interval,
-// after the fact and never failing the authentication.
+// Any other error is a failure to look the key up. A success adds one to the
+// key's request count at once and writes its last use at most once per
+// interval, both after the fact and never failing the authentication.
 func (s *Service) Authenticate(ctx context.Context, presented string) (Authentication, error) {
 	id, wellFormed := s.parse(presented)
 	digest := sha256.Sum256([]byte(presented))
@@ -419,29 +420,35 @@ func (s *Service) LooksLikeKey(token string) bool {
 	return ok
 }
 
-// touch records one authenticated request of the key. The last use time is
-// written at most once per interval; the uses in between are added to that
-// write, so the cumulative count stays exact while the write rate stays low.
-// The write runs after the request and never fails it.
+// touch records one authenticated request of the key. The request count goes
+// to the store for every request, in one atomic increment, so a request can
+// never be left waiting for a later one to be counted; the last use time is
+// written at most once per interval. Both writes run after the request and
+// never fail it.
 func (s *Service) touch(id string, now time.Time) {
 	s.mu.Lock()
-	use := s.uses[id]
-	use.pending++
-	if !use.last.IsZero() && now.Sub(use.last) < s.config.LastUsedInterval {
-		s.uses[id] = use
-		s.mu.Unlock()
-		return
+	last, written := s.uses[id]
+	recordLastUse := !written || now.Sub(last) >= s.config.LastUsedInterval
+	if recordLastUse {
+		s.uses[id] = now
 	}
-	use.last = now
-	uses := use.pending
-	use.pending = 0
-	s.uses[id] = use
 	s.mu.Unlock()
+	s.write(func(ctx context.Context) error { return s.store.IncrementAccessKeyRequests(ctx, id) },
+		"access key request not recorded", id)
+	if recordLastUse {
+		s.write(func(ctx context.Context) error { return s.store.RecordAccessKeyLastUse(ctx, id, now) },
+			"access key last use not recorded", id)
+	}
+}
+
+// write runs one use write after the request. A failure is logged without the
+// key and never reaches the caller.
+func (s *Service) write(record func(context.Context) error, message, id string) {
 	s.config.Async(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.store.RecordAccessKeyUse(ctx, id, now, uses); err != nil {
-			s.config.Logger.Warn("access key use not recorded", "key_id", id, "error", err)
+		if err := record(ctx); err != nil {
+			s.config.Logger.Warn(message, "key_id", id, "error", err)
 		}
 	})
 }

@@ -1474,6 +1474,7 @@ var requiredAdministrationAccessKeyTextKeys = []string{
 	"status_expired",
 	"status_revoked",
 	"revoke",
+	"revoke_key",
 	"revoke_confirm",
 	"revoked",
 	"switch_title",

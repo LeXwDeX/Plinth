@@ -32,18 +32,63 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { useProductSchema } from '@/components/product-schema-provider';
+import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import {
   AdministrationAccessKeysBrowserError,
   createAdministrationAccessKeysBrowserClient,
   type AdministrationAccessKey,
 } from '@/lib/administration/access-keys-browser-client';
 import { createAdministrationUsersBrowserClient } from '@/lib/administration/users-browser-client';
-import { formatSchemaText } from '@/lib/product-schema';
+import {
+  formatSchemaText,
+  schemaText,
+  type AdministrationAccessKeysSchema,
+  type ProductSchema,
+} from '@/lib/product-schema';
 import { withErrorReference } from '@/lib/problem-reference';
+import { unavailableLabel } from '@/lib/unavailable';
 
 export default function AdminAccessKeysPage() {
   const { schema, text: productText } = useProductSchema();
   const accessKeysSchema = schema.administration.access_keys;
+  if (!accessKeysSchema) {
+    // An older deployment that does not declare the view: say so in the
+    // Schema's words, request nothing and never touch a missing section.
+    return (
+      <div
+        className="flex flex-col items-center justify-center py-20 text-center"
+        data-testid="admin-access-keys-unavailable"
+      >
+        <UnavailableNotice
+          label={unavailableLabel(
+            schema,
+            schemaText(
+              schema,
+              'ui.unavailable.reason.admin.access_keys_undeclared',
+            ),
+          )}
+        />
+      </div>
+    );
+  }
+  return (
+    <AdminAccessKeysView
+      schema={schema}
+      accessKeysSchema={accessKeysSchema}
+      productText={productText}
+    />
+  );
+}
+
+function AdminAccessKeysView({
+  schema,
+  accessKeysSchema,
+  productText,
+}: {
+  schema: ProductSchema;
+  accessKeysSchema: AdministrationAccessKeysSchema;
+  productText: (key: string) => string;
+}) {
   const presentation = accessKeysSchema.presentation;
   const copy = presentation.text;
   const limits = accessKeysSchema.limits;
@@ -210,6 +255,11 @@ export default function AdminAccessKeysPage() {
         ? text('status_revoked')
         : text('status_expired');
 
+  // The name a person sees and hears: the key's own name, or what identifies
+  // it when a record somehow has none.
+  const keyLabel = (accessKey: AdministrationAccessKey): string =>
+    accessKey.name || accessKey.prefix || accessKey.id;
+
   return (
     <div className="space-y-4">
       <Card>
@@ -311,37 +361,37 @@ export default function AdminAccessKeysPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="pb-2 font-medium text-muted-foreground">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground">
                       {text('column_owner')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground">
                       {text('column_name')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground">
                       {text('column_prefix')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground">
                       {text('column_scopes')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground text-right">
                       {text('column_created_at')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground text-right">
                       {text('column_last_used_at')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground text-right">
                       {text('column_request_count')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground text-right">
                       {text('column_expires_at')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground text-right">
                       {text('column_revoked_at')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground text-center">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground text-center">
                       {text('column_status')}
                     </th>
-                    <th className="pb-2 font-medium text-muted-foreground text-right">
+                    <th scope="col" className="pb-2 font-medium text-muted-foreground text-right">
                       {text('column_actions')}
                     </th>
                   </tr>
@@ -410,7 +460,9 @@ export default function AdminAccessKeysPage() {
                           variant="ghost"
                           size="icon-sm"
                           disabled={!accessKey.active || revoking}
-                          aria-label={text('revoke')}
+                          aria-label={text('revoke_key', {
+                            name: keyLabel(accessKey),
+                          })}
                           onClick={() => setRevokingKey(accessKey)}
                         >
                           <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -467,7 +519,12 @@ export default function AdminAccessKeysPage() {
         >
           <DialogHeader>
             <DialogTitle>{text('revoke')}</DialogTitle>
-            <DialogDescription>{text('revoke_confirm')}</DialogDescription>
+            <DialogDescription>
+              {text('revoke_confirm', {
+                name: revokingKey ? keyLabel(revokingKey) : '',
+                prefix: revokingKey?.prefix ?? '',
+              })}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Action
@@ -480,6 +537,7 @@ export default function AdminAccessKeysPage() {
               variant="destructive"
               onClick={handleRevoke}
               loading={revoking}
+              data-testid="access-keys-revoke-confirm"
             >
               {text('revoke')}
             </Action>
@@ -512,6 +570,7 @@ export default function AdminAccessKeysPage() {
               variant={pendingSwitch ? 'default' : 'destructive'}
               onClick={handleSwitch}
               loading={switching}
+              data-testid="access-keys-switch-confirm"
             >
               {text(pendingSwitch ? 'switch_on' : 'switch_off')}
             </Action>

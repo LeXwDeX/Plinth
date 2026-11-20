@@ -177,14 +177,20 @@ func (r *Repository) RevokeAccessKey(ctx context.Context, ownerID, id string, no
 	return record, changed == 1, nil
 }
 
-// RecordAccessKeyUse records uses of the key: the last use time and an
-// atomic addition to the cumulative count. A revoked key is left as it was.
-func (r *Repository) RecordAccessKeyUse(ctx context.Context, id string, at time.Time, uses int64) error {
-	if uses < 0 {
-		return accesskeys.ErrInvalid
-	}
+// IncrementAccessKeyRequests records one authenticated request of the key.
+// The count is incremented in the database, so concurrent calls never lose
+// one. The key does not have to be active: the request was authenticated
+// before a revoke could land, and a revoke must not drop it.
+func (r *Repository) IncrementAccessKeyRequests(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE access_keys SET request_count = request_count + 1 WHERE id = ?`, id)
+	return err
+}
+
+// RecordAccessKeyLastUse sets the last use time of the key. A revoked key is
+// left as it was.
+func (r *Repository) RecordAccessKeyLastUse(ctx context.Context, id string, at time.Time) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE access_keys SET last_used_at = ?, request_count = request_count + ? WHERE id = ? AND revoked_at = ''`,
-		formatTime(at), uses, id)
+		`UPDATE access_keys SET last_used_at = ? WHERE id = ? AND revoked_at = ''`,
+		formatTime(at), id)
 	return err
 }
