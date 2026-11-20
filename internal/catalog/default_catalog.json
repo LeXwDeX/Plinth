@@ -2592,6 +2592,11 @@
         },
         "harness_refresh_milliseconds": 4000,
         "harness_save_debounce_milliseconds": 500,
+        "pending_approvals_refresh_milliseconds": 20000,
+        "idle_polling": {
+          "backoff_factor": 2,
+          "max_interval_milliseconds": 60000
+        },
         "session_menu_page_size": 15,
         "session_menu_search_debounce_milliseconds": 250,
         "session_title_refresh_attempts": 6,
