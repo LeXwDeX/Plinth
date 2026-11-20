@@ -199,7 +199,7 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	}
 	messages := service.Messages
 	for name, text := range map[string]string{
-		"unauthenticated": messages.Unauthenticated,
+		"unauthenticated":      messages.Unauthenticated,
 		"access_keys_disabled": messages.AccessKeysDisabled, "insufficient_scope": messages.InsufficientScope,
 		"invalid_arguments": messages.InvalidArguments, "task_not_found": messages.TaskNotFound,
 		"asset_not_found": messages.AssetNotFound, "not_found": messages.NotFound,
