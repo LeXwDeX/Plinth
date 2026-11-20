@@ -734,6 +734,44 @@ class BudgetClient:
         return [(path, body) for verb, path, body in self.calls if verb == method]
 
 
+class SessionModeClient:
+    """Creates a session and answers the approval PUT with a fixed status."""
+
+    def __init__(self, approval_status=200):
+        self.approval_status = approval_status
+        self.calls = []
+
+    def call(self, method, path, body=None, **_):
+        self.calls.append((method, path, body))
+        if method == "POST" and path == "/api/chat/sessions":
+            return 201, {"id": "session-new"}
+        if method == "PUT" and path.endswith("/approval"):
+            return self.approval_status, {}
+        return 202, {}
+
+
+class LiveSessionModes(unittest.TestCase):
+    """#415: a script names the approval mode it needs; it never relies on the server default."""
+
+    def new_session(self, client, approval="auto"):
+        arguments = type("Arguments", (), {"turn_timeout": 60, "task_timeout": 60})()
+        return c.Live(client, report=None, arguments=arguments).new_session(approval=approval)
+
+    def test_new_session_sets_the_requested_mode(self):
+        client = SessionModeClient()
+        self.assertEqual(self.new_session(client), "session-new")
+        self.assertEqual(client.calls[-1], ("PUT", "/api/v1/chat/sessions/session-new/approval",
+                                           {"approvalMode": "auto"}))
+
+    def test_new_session_fails_when_the_mode_switch_is_refused(self):
+        self.assertIsNone(self.new_session(SessionModeClient(approval_status=400)))
+
+    def test_new_session_can_skip_the_mode_switch(self):
+        client = SessionModeClient()
+        self.assertEqual(self.new_session(client, approval=None), "session-new")
+        self.assertFalse(any(method == "PUT" for method, _, _ in client.calls))
+
+
 class BudgetLive(unittest.TestCase):
     def live(self, client):
         arguments = type("Arguments", (), {"turn_timeout": 60, "task_timeout": 60})()
