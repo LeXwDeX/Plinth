@@ -536,6 +536,14 @@ func (s *Server) legacySendChatMessage(
 		)
 	case errors.Is(err, chat.ErrInvalidMultiview):
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+	case errors.Is(err, chat.ErrMultiviewModelUnavailable):
+		// The person's model of this turn cannot run: say so now (#373). A
+		// Schema without the text keeps the generic parameter refusal.
+		message := s.application.Chat.Presentation.Messages.MultiviewModelUnavailable
+		if message == "" {
+			message = s.application.Chat.Presentation.Messages.InvalidParameters
+		}
+		s.writeChatError(writer, http.StatusBadRequest, message)
 	case errors.Is(err, chat.ErrInvalidInputSource):
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidInputSource)
 	case errors.Is(err, chat.ErrCanvasSourceMissing):

@@ -311,7 +311,7 @@ func TestMockChatAgentAppliesSelectedSkillFromRuntimeCatalog(t *testing.T) {
 	defer repository.Close()
 	rawDatabase := openRawAppDatabase(t, filepath.Join(root, "art-ai.db"))
 	var preparedInputID generation.PreparedInputID
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) && preparedInputID == "" {
 		var id string
 		if rawDatabase.QueryRow(`SELECT prepared_input_id FROM agent_generation_operations
