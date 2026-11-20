@@ -1,9 +1,11 @@
 package generationtool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -152,6 +154,7 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 		source    string
 		profile   string
 		refusal   string
+		code      string
 	}{
 		{name: "the person's explicit pick wins over the purpose", locked: choiceFullID,
 			purpose: "game_character", wantID: choiceFullID, source: "user"},
@@ -160,10 +163,11 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 			source: "profile", profile: "game_character"},
 		{name: "the defaults when nothing chose", wantID: choiceFullID, source: "default"},
 		{name: "a conflict with the person's pick is refused", locked: choiceP2ID, named: choiceMeshyID,
-			refusal: "锁定"},
-		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用"},
+			refusal: "锁定", code: "model_choice_conflict"},
+		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用",
+			code: "model_choice_unavailable"},
 		{name: "a purpose step that differs from the workspace model asks first", purpose: "game_character",
-			workspace: choiceFullID, refusal: "确认"},
+			workspace: choiceFullID, refusal: "确认", code: "model_choice_workspace_conflict"},
 		{name: "the purpose step runs when the workspace model already matches", purpose: "render",
 			workspace: choiceFullID, wantID: choiceFullID, source: "profile", profile: "render"},
 		{name: "the Agent outranks the workspace picker value", named: choiceMeshyID,
@@ -175,7 +179,10 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			gateway := &choiceTestGateway{offerings: []generation.Offering{full, p2, meshy}}
 			executor := choiceTestExecutor(gateway)
+			var logs bytes.Buffer
+			executor.logger = slog.New(slog.NewTextHandler(&logs, nil))
 			command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
+			command.AssistantMessageID = "turn-1"
 			command.Options.ExplicitModel3D = test.locked
 			command.Options.AIModel = test.workspace
 			command.Options.ProductionBrief = choiceTestBrief(test.purpose)
@@ -189,9 +196,24 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 				}
 				// The tool turns a refusal into the Agent's confirmation result;
 				// nothing is submitted there.
-				result := executor.modelChoiceFailure(command, choice.Refusal)
+				result := executor.modelChoiceFailure(command, choice.Code, choice.Refusal)
 				if !result.NoSubmission || result.TaskID != "" || result.Error == "" {
 					t.Fatalf("refusal result = %+v", result)
+				}
+				// #378: the refusal is a warning in the server log, with the
+				// session, the turn, the tool and the refusal's code, and none of
+				// the Agent's text.
+				if choice.Code != test.code {
+					t.Fatalf("refusal code = %q, want %q", choice.Code, test.code)
+				}
+				for _, want := range []string{"level=WARN", "session_id=session", "assistant_message_id=turn-1",
+					"tool=create_model_3d", "call_id=call-1", "code=" + test.code} {
+					if !strings.Contains(logs.String(), want) {
+						t.Fatalf("refusal log lacks %q: %s", want, logs.String())
+					}
+				}
+				if strings.Contains(logs.String(), result.Error) {
+					t.Fatalf("refusal log repeats the Agent's text: %s", logs.String())
 				}
 				return
 			}

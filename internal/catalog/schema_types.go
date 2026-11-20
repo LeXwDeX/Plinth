@@ -6148,6 +6148,13 @@ type ChatMessageTexts struct {
 	ToolRoundLimitPending     string `json:"tool_round_limit_pending"`
 	ToolRoundLimitPendingItem string `json:"tool_round_limit_pending_item"`
 	ToolRoundLimitPendingTool string `json:"tool_round_limit_pending_tool"`
+	// ToolArgumentsInvalid is the tool result of a call whose arguments the
+	// model wrote as invalid JSON: the tool did not run, and the Agent writes
+	// the call again. ToolUnavailable ({tool}) is the result of a call to a tool
+	// this reply cannot run. Both are ordinary tool results, not a failed turn
+	// (#378).
+	ToolArgumentsInvalid string `json:"tool_arguments_invalid"`
+	ToolUnavailable      string `json:"tool_unavailable"`
 	// The InputGap* texts are how a processing tool names a required input its
 	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
 	// {options} and {supply}. {type} is built from InputGapReferenceImage, or

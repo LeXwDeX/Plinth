@@ -214,6 +214,11 @@ type TurnCheckpoint struct {
 	Completion    agents.Completion           `json:"completion"`
 	Completed     []agents.Message            `json:"completed,omitempty"`
 	ImageURLs     []string                    `json:"image_urls,omitempty"`
+	// MalformedCalls lists the calls of this round whose arguments the model
+	// wrote as invalid JSON (#378). Completion holds them with an empty object
+	// as arguments, never the raw text; the round answers each of them with the
+	// Schema's error text instead of running the tool, also after a restart.
+	MalformedCalls []string `json:"malformed_calls,omitempty"`
 	// Waiting lists the calls of this round that have no receipt yet: tasks
 	// in flight and submissions queued for a retry. It replaces the single
 	// WaitingTaskID/WaitingCallID/WaitDeadline of older checkpoints.

@@ -190,9 +190,7 @@ func (executor *Executor) promptOverLimitFailure(
 		"{excess}", fmt.Sprint(length-maximum),
 		"{unit}", "characters",
 	).Replace(executor.localized(command, template))
-	result := executor.failure(command, "", message)
-	result.NoSubmission = true
-	return result
+	return executor.refusal(command, refusalPromptTooLong, message)
 }
 
 // defaultNegativePromptValue is the default negative prompt a tool injects
