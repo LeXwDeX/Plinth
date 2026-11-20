@@ -5,12 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { Composer, type ComposerProps } from '@/components/studio/composer';
-import { CHIP_WIDTH_CAP_CLASS, ChipSquare, ContextChip, chipLines } from '@/components/studio/composer-chips';
+import { CHIP_WIDTH_CLASS, ChipSquare, ContextChip, CutHint, chipLines } from '@/components/studio/composer-chips';
 import { useChatStore } from '@/store/chat-store';
 
 // #405 (the scope note): the strips that show what a turn is about (the picture on the stage or board, the pictures
-// attached, the mask, the branch, the Skill) take their width from their content, never more than half the row, sit
-// side by side and wrap, say a repeated word once, and show their whole text on hover when it is cut.
+// attached, the mask, the branch, the Skill) sit on a two-column grid and are all exactly as wide, say a repeated word
+// once, and show their whole text on hover when it is cut; the purpose rows under them share one label column and one
+// segmented control width.
 const schema = defaultCatalog.application;
 const messages = schema.content.messages as Record<string, string>;
 const hints: Array<Record<string, unknown>> = [];
@@ -72,21 +73,37 @@ describe('one chip', () => {
     <ContextChip testId="chip" accent square={<ChipSquare>x</ChipSquare>} title="当前：画布" subtitle="画布" remove={{ label: '本轮不带这个对象', onClick: noop }} {...extra} />,
   );
 
-  it('is never wider than half of its row, whichever element is the outermost one', () => {
-    expect(CHIP_WIDTH_CAP_CLASS).toBe('max-w-[calc(50%-3px)]');
-    // Hint wrapper outermost: the wrapper carries the cap and the frame only fills it (a second cap would halve it again).
+  it('fills the grid cell it is in, whichever element is the outermost one', () => {
+    expect(CHIP_WIDTH_CLASS).toBe('w-full min-w-0');
+    // Hint wrapper outermost: the wrapper is the grid item and the frame fills it, so both are as wide as the cell.
     chip();
     const frame = screen.getByTestId('chip');
     const wrapper = frame.parentElement as HTMLElement;
     expect(wrapper.getAttribute('data-testid')).toBe('hint-wrapper');
-    expect(wrapper.className).toContain(CHIP_WIDTH_CAP_CLASS);
-    expect(frame.className).not.toContain(CHIP_WIDTH_CAP_CLASS);
-    expect(frame.className).toContain('max-w-full');
+    for (const element of [wrapper, frame]) {
+      expect(element.className).toMatch(/\bw-full\b/);
+      expect(element.className).toMatch(/\bmin-w-0\b/);
+      // No width of its own: not from its content, not capped.
+      expect(element.className).not.toMatch(/(^|\s)(max-w-|w-(?!full\b))/);
+    }
     cleanup();
-    // A chip whose own button carries the hint (an attachment): the frame is outermost and carries the cap.
+    // A chip whose own button carries the hint (an attachment): the frame is outermost and is the grid item.
     chip({ open: { label: '预览附件 1', onClick: noop } });
-    expect(screen.getByTestId('chip').className).toContain(CHIP_WIDTH_CAP_CLASS);
+    expect(screen.getByTestId('chip').className).toMatch(/\bw-full\b/);
+    expect(screen.getByTestId('chip').className).toMatch(/\bmin-w-0\b/);
     expect(screen.getByTestId('chip').parentElement?.getAttribute('data-testid')).not.toBe('hint-wrapper');
+  });
+
+  it('keeps the remove button at the right edge: the text takes the room that is left', () => {
+    chip();
+    const frame = screen.getByTestId('chip');
+    expect(frame.querySelector('.truncate.font-medium')?.parentElement?.className).toMatch(/\bflex-1\b/);
+    expect(frame.lastElementChild?.tagName).toBe('SPAN');
+    expect(within(frame).getByRole('button', { name: '本轮不带这个对象' })).toBeTruthy();
+    cleanup();
+    chip({ open: { label: '预览附件 1', onClick: noop, testId: 'open' } });
+    expect(screen.getByTestId('open').className).toMatch(/\bflex-1\b/);
+    expect(screen.getByTestId('open').parentElement?.className).toMatch(/\bflex-1\b/);
   });
 
   it('merges a repeated second line into one and keeps the picture, the badge slot and the remove button', () => {
@@ -146,14 +163,40 @@ describe('one chip', () => {
   });
 });
 
+describe('the text that is cut', () => {
+  it('shows the whole text on hover only when it is cut', () => {
+    render(<CutHint text="Composition reference"><span data-testid="cell" className="truncate">Composition reference</span></CutHint>);
+    const wrapper = screen.getByTestId('hint-wrapper');
+    expect(wrapper.getAttribute('data-name')).toBe('Composition reference');
+    // The wrapper may be narrower than the text, so it fits a cell that is.
+    expect(wrapper.className).toMatch(/\bmin-w-0\b/);
+    fireEvent.pointerEnter(wrapper);
+    expect(wrapper.getAttribute('data-suppressed')).toBe('true');
+    Object.defineProperty(screen.getByTestId('cell'), 'scrollWidth', { configurable: true, value: 140 });
+    Object.defineProperty(screen.getByTestId('cell'), 'clientWidth', { configurable: true, value: 90 });
+    fireEvent.pointerEnter(wrapper);
+    expect(wrapper.getAttribute('data-suppressed')).toBe('false');
+  });
+});
+
 describe('the strips above the box', () => {
-  it('lays the stage picture, the board picture and the attachments out in one row that wraps', () => {
+  it('lays the stage picture, the board picture and the attachments out on one two-column grid, every cell as wide as the others', () => {
     render(<Composer {...props}
       chip={{ kind: 'image', thumbnail: '/t.png', label: messages['ui.studio.composer.chip.canvas'], handle: '' }}
       images={['/a.png', '/b.png']} pinnedImage="/board.png" />);
     const row = screen.getByTestId('composer-chips');
-    expect(row.className).toMatch(/\bflex-wrap\b/);
-    expect(row.className).toMatch(/\bflex\b/);
+    expect(row.className).toMatch(/\bgrid\b/);
+    expect(row.className).toMatch(/\bgrid-cols-2\b/);
+    expect(row.className).toMatch(/\bgap-1\.5\b/);
+    expect(row.className).not.toMatch(/\bflex(-wrap)?\b/);
+    // Four chips, four cells: each one fills its cell, so an odd one out (the fourth here is alone in its row) is not wider.
+    const cells = [...row.children] as HTMLElement[];
+    expect(cells).toHaveLength(4);
+    for (const cell of cells) {
+      expect(cell.className).toMatch(/\bw-full\b/);
+      expect(cell.className).toMatch(/\bmin-w-0\b/);
+      expect(cell.className).not.toMatch(/\bcol-span-/);
+    }
     // The picture on the stage, the pinned board picture and both uploads are children of that one row.
     expect(within(row).getByTestId('composer-object-chip')).toBeTruthy();
     expect(within(row).getAllByTestId('composer-attachment-chip')).toHaveLength(3);
@@ -197,6 +240,43 @@ describe('the strips above the box', () => {
     expect(Boolean(row.compareDocumentPosition(purposes) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(within(purposes).getByTestId('composer-attachment-purposes')).toBeTruthy();
     expect(within(purposes).queryByTestId('composer-attachment-chip')).toBeNull();
+  });
+
+  it('puts every purpose row on one shared grid: one label column and equally wide segmented controls of three equal segments', () => {
+    render(<Composer {...props} images={['/a.png', '/b.png']} pinnedImage="/board.png"
+      attachmentPurposes={['style', null]} pinnedPurpose="input" onAttachmentPurposeAt={noop} onPinnedPurpose={noop} onAttachmentPurpose={noop} />);
+    const group = screen.getByTestId('composer-attachments');
+    // Labels in a column as wide as the longest of them (at most two fifths of the row), the controls in the rest.
+    expect(group.className).toMatch(/\bgrid\b/);
+    expect(group.className).toContain('grid-cols-[fit-content(40%)_minmax(0,1fr)]');
+    const rows = within(group).getAllByTestId('composer-attachment-purpose-row');
+    expect(rows).toHaveLength(3);
+    const overall = within(group).getByTestId('composer-attachment-purpose');
+    const segmented = [...rows, overall].map((row) => {
+      // The row has no box of its own: its label and its control are cells of the shared grid.
+      expect(row.className).toMatch(/\bcontents\b/);
+      const control = row.querySelector('[role=group], [role=radiogroup]') as HTMLElement;
+      expect(control.className).toMatch(/\bgrid-cols-3\b/);
+      const segments = [...control.querySelectorAll('button')] as HTMLElement[];
+      expect(segments.map((button) => button.textContent)).toEqual(['参考风格', '参考构图', '当作输入图']);
+      for (const button of segments) for (const name of [/\bw-full\b/, /\bmin-w-0\b/, /\btruncate\b/]) expect(button.className).toMatch(name);
+      return control.className;
+    });
+    // The same control class on every row (the "用途" row of the whole set included), so they start at one edge and are equally wide.
+    expect(new Set(segmented).size).toBe(1);
+    // The label of each row is one cell that is cut, with its whole text on hover, instead of widening the column.
+    for (const row of rows) expect(within(row).getAllByTestId('hint-wrapper')[0].getAttribute('data-name')).toMatch(/上传的图 \d|画板上的图/);
+    expect(within(overall).getAllByTestId('hint-wrapper')[0].getAttribute('data-name')).toBe(messages['ui.studio.composer.attachment.purpose']);
+    // The note about the whole set sits under its control, in the second column.
+    expect(within(overall).getByText(messages['ui.studio.composer.attachment.purpose_note']).className).toMatch(/\bcol-start-2\b/);
+  });
+
+  it('keeps the notices full width between the purpose rows and the whole-set row, without an empty gap when there are none', () => {
+    const view = render(<Composer {...props} images={['/a.png']} onAttachmentPurpose={noop} />);
+    const group = within(view.container).getByTestId('composer-attachments');
+    const notices = [...group.children].find((child) => /\bcol-span-2\b/.test(child.className)) as HTMLElement;
+    expect(notices.className).toMatch(/\bempty:hidden\b/);
+    expect(notices.childElementCount).toBe(0);
   });
 
   it('shows no chip row at all when there is nothing to show', () => {

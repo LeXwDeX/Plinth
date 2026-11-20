@@ -11,7 +11,7 @@ import { ContextMeter } from '@/components/studio/context-meter';
 import { ChatModelNotice } from '@/components/studio/chat-model-picker';
 import { AttachmentThumb } from '@/components/studio/attachment-thumb';
 import { ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
-import { ChipSquare, ContextChip } from '@/components/studio/composer-chips';
+import { ChipSquare, ContextChip, CutHint } from '@/components/studio/composer-chips';
 import { KindBadge } from '@/components/studio/kind-badge';
 import { ComposerSettings } from '@/components/studio/composer-settings';
 import { GenerationModelNotice } from '@/components/studio/model-picker';
@@ -148,6 +148,32 @@ function polylinePoints(flat: readonly number[]): string {
   const pairs: string[] = [];
   for (let at = 0; at + 1 < flat.length; at += 2) pairs.push(`${flat[at]},${flat[at + 1]}`);
   return pairs.join(' ');
+}
+
+/** The three purposes as one segmented control: a grid of equal thirds, so the control is as wide on every row. */
+const PURPOSE_SEGMENTS_CLASS = 'grid min-w-0 grid-cols-3 rounded-md border border-border bg-surface p-0.5';
+
+/** One segment of a purpose control: as wide as the others, its text cut (and shown whole on hover) when it does not fit. */
+function PurposeSegment({ text, selected, disabled, onClick, radio = false, testId }: {
+  text: string; selected: boolean; disabled: boolean; onClick: () => void; radio?: boolean; testId?: string;
+}) {
+  return (
+    <CutHint text={text}>
+      <button
+        type="button"
+        {...(radio ? { role: 'radio', 'aria-checked': selected } : { 'aria-pressed': selected })}
+        disabled={disabled}
+        onClick={onClick}
+        data-testid={testId}
+        className={cn(
+          'h-6 w-full min-w-0 truncate rounded px-1 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
+          selected ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
+        )}
+      >
+        {text}
+      </button>
+    </CutHint>
+  );
 }
 
 /**
@@ -506,7 +532,7 @@ export function Composer({
         </div>
       ) : null}
       {hasChipRow ? (
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="composer-chips">
+      <div className="grid min-w-0 grid-cols-2 gap-1.5" data-testid="composer-chips">
         {chip ? (
           chipSkipped ? (
             <ContextChip
@@ -633,24 +659,22 @@ export function Composer({
       </div>
       ) : null}
       {hasAttachments ? (
-        <div className="flex flex-col gap-1.5" data-testid="composer-attachments">
-          <div className="flex flex-col gap-1.5" data-testid="composer-attachment-purposes">
+        // #405: one two-column grid carries every purpose row, so the labels share one column (as wide as the longest label,
+        // at most two fifths of the row) and the segmented controls all start at the same edge and are equally wide.
+        <div className="grid grid-cols-[fit-content(40%)_minmax(0,1fr)] items-center gap-x-1.5 gap-y-1.5" data-testid="composer-attachments">
+          <div className="contents" data-testid="composer-attachment-purposes">
             {attachments.map((item) => {
               const selected = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
               const change = item.pinned ? onPinnedPurpose : onAttachmentPurposeAt && ((purpose: AttachmentPurpose | null) => onAttachmentPurposeAt(item.index, purpose));
               const label = item.pinned ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
                 : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number });
               return (
-                <div key={`${item.index}-${item.url}`} className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="composer-attachment-purpose-row">
-                  <span>{label}</span>
-                  <div role="group" aria-label={`${label} ${schemaText(schema, 'ui.studio.composer.attachment.purpose')}`} className="flex flex-wrap items-center rounded-md border border-border bg-surface p-0.5">
+                <div key={`${item.index}-${item.url}`} className="contents" data-testid="composer-attachment-purpose-row">
+                  <CutHint text={label}><span className="truncate text-[11px] text-muted-foreground">{label}</span></CutHint>
+                  <div role="group" aria-label={`${label} ${schemaText(schema, 'ui.studio.composer.attachment.purpose')}`} className={PURPOSE_SEGMENTS_CLASS}>
                     {ATTACHMENT_PURPOSES.map((purpose) => (
-                      <button key={purpose} type="button" aria-pressed={selected === purpose} disabled={disabled || !change}
-                        onClick={() => change?.(selected === purpose ? null : purpose)}
-                        className={cn('h-6 rounded px-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
-                          selected === purpose ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-                        {schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)}
-                      </button>
+                      <PurposeSegment key={purpose} text={schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)} selected={selected === purpose}
+                        disabled={disabled || !change} onClick={() => change?.(selected === purpose ? null : purpose)} />
                     ))}
                   </div>
                 </div>
@@ -658,39 +682,30 @@ export function Composer({
             })}
           </div>
           {/* #296: what an edit of the one attached picture outputs when no size was chosen. */}
-          <ReferenceSizeNotice delivery={params.canvas?.delivery} />
-          {referenceLimitText ? (
-            <UnavailableNotice
-              testId="composer-reference-limit"
-              className="text-[11px] leading-4"
-              label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.composer.reference_unused'))}
-              detail={referenceLimitText}
-            />
-          ) : null}
-          {onAttachmentPurpose ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="composer-attachment-purpose">
-            <span id={purposeLabelId}>{schemaText(schema, 'ui.studio.composer.attachment.purpose')}</span>
-            <div role="radiogroup" aria-labelledby={purposeLabelId} className="flex items-center rounded-md border border-border bg-surface p-0.5">
-              {ATTACHMENT_PURPOSES.map((purpose) => (
-                <button
-                  key={purpose}
-                  type="button"
-                  role="radio"
-                  aria-checked={attachmentPurpose === purpose}
-                  disabled={disabled}
-                  onClick={() => onAttachmentPurpose(attachmentPurpose === purpose ? null : purpose)}
-                  data-testid={`composer-attachment-purpose-${purpose}`}
-                  className={cn(
-                    'h-6 rounded px-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
-                    attachmentPurpose === purpose ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)}
-                </button>
-              ))}
-            </div>
-            <span>{schemaText(schema, 'ui.studio.composer.attachment.purpose_note')}</span>
+          <div className="col-span-2 flex flex-col gap-1.5 empty:hidden">
+            <ReferenceSizeNotice delivery={params.canvas?.delivery} />
+            {referenceLimitText ? (
+              <UnavailableNotice
+                testId="composer-reference-limit"
+                className="text-[11px] leading-4"
+                label={unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.composer.reference_unused'))}
+                detail={referenceLimitText}
+              />
+            ) : null}
           </div>
+          {onAttachmentPurpose ? (
+            <div className="contents" data-testid="composer-attachment-purpose">
+              <CutHint text={schemaText(schema, 'ui.studio.composer.attachment.purpose')}>
+                <span id={purposeLabelId} className="truncate text-[11px] text-muted-foreground">{schemaText(schema, 'ui.studio.composer.attachment.purpose')}</span>
+              </CutHint>
+              <div role="radiogroup" aria-labelledby={purposeLabelId} className={PURPOSE_SEGMENTS_CLASS}>
+                {ATTACHMENT_PURPOSES.map((purpose) => (
+                  <PurposeSegment key={purpose} radio text={schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`)} selected={attachmentPurpose === purpose}
+                    disabled={disabled} onClick={() => onAttachmentPurpose(attachmentPurpose === purpose ? null : purpose)} testId={`composer-attachment-purpose-${purpose}`} />
+                ))}
+              </div>
+              <span className="col-start-2 text-[11px] text-muted-foreground">{schemaText(schema, 'ui.studio.composer.attachment.purpose_note')}</span>
+            </div>
           ) : null}
         </div>
       ) : null}

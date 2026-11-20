@@ -72,7 +72,9 @@ describe('per-attachment purpose controls', () => {
     expect(chips[2].textContent).toContain(schema.content.messages['ui.studio.composer.attachment.purpose_input']);
     const rows = within(view.getByTestId('composer-attachment-purposes')).getAllByTestId('composer-attachment-purpose-row');
     const label = (purpose: string) => schema.content.messages[`ui.studio.composer.attachment.purpose_${purpose}`];
-    expect(rows.every((row) => row.classList.contains('flex-wrap'))).toBe(true);
+    // #405: a row is a label and a three-segment control, laid on the grid the whole group shares.
+    expect(rows.every((row) => row.classList.contains('contents'))).toBe(true);
+    expect(rows.every((row) => within(row).getAllByRole('button').length === 3)).toBe(true);
     fireEvent.click(within(rows[1]).getByRole('button', { name: label('input') }));
     expect(chips[0].textContent).toContain(label('style'));
     expect(chips[1].textContent).toContain(label('input'));
