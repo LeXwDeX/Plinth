@@ -264,9 +264,12 @@ func (executor *Executor) recommendedWorkspaceOffering(
 // chooseOffering selects the Offering of a generation tool call by the
 // model-choice layers: the person's explicit pick for the tool's workspace
 // domain, the Agent's model argument, the purpose recommendation, the
-// workspace pick and the Offering default, in that order (#103, #239). It
-// returns a Refusal when a named model conflicts with the person's explicit
-// pick or is unavailable; nothing is submitted in that case.
+// workspace pick and the Offering default, in that order (#103, #239). The
+// multiview tool of a turn that carries the person's structured multiview
+// request takes the request's model as that explicit pick instead of the
+// session lock (#373). It returns a Refusal when a named model conflicts with
+// the person's explicit pick or is unavailable; nothing is submitted in that
+// case.
 func (executor *Executor) chooseOffering(
 	command chat.ToolCommand,
 	capability generation.Capability,
@@ -287,6 +290,14 @@ func (executor *Executor) chooseOffering(
 	// the multiview tool included: ignore_user_model only keeps the workspace
 	// picker out of its fallback.
 	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
+	// The person's structured multiview request names the model of its own
+	// turn: they chose it on the multiview panel or the three-view card, so it
+	// is their explicit pick for this step and replaces the session lock here,
+	// where the lock would refuse a model that takes the views or one the
+	// session's lock cannot serve (#373). The stored lock is not touched.
+	if requested := executor.requestedMultiviewModel(command); requested != "" {
+		locked = requested
+	}
 	if locked != "" {
 		offering, matched := matchOffering(candidates, locked)
 		if !matched {
@@ -364,6 +375,19 @@ func (executor *Executor) chooseOffering(
 		source = "user"
 	}
 	return offeringChoice{Offering: offering, Source: source}, nil
+}
+
+// requestedMultiviewModel is the model the person's structured multiview
+// request names for this call (#373), empty for any other tool or a turn
+// without the request. The request binds only the multiview tool: another 3D
+// tool of the same turn still follows the session's lock.
+func (executor *Executor) requestedMultiviewModel(command chat.ToolCommand) string {
+	request := command.Options.Multiview
+	tool := executor.chat.ThreeView.Multiview.Tool
+	if request == nil || tool == "" || command.Tool.Name != tool {
+		return ""
+	}
+	return strings.TrimSpace(request.Model)
 }
 
 // declaredModelChoices is the model choices of the tool's model argument, in
