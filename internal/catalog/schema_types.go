@@ -5999,6 +5999,11 @@ type ChatMessageTexts struct {
 	EmptyTitle        string `json:"empty_title"`
 	EmptyMessage      string `json:"empty_message"`
 	InvalidParameters string `json:"invalid_parameters"`
+	// MultiviewModelUnavailable refuses, when the turn starts, a structured
+	// multiview request whose model is not an available Offering that takes
+	// several views of one object (#373). Empty falls back to
+	// InvalidParameters.
+	MultiviewModelUnavailable string `json:"multiview_model_unavailable,omitempty"`
 	// ProductionBriefConflict refuses a whole-brief replacement that lost
 	// every bounded retry to a concurrent writer, so the caller retries instead
 	// of overwriting the other change (#103 review C5).
@@ -6147,6 +6152,13 @@ type ChatMessageTexts struct {
 	ToolRoundLimitPending     string `json:"tool_round_limit_pending"`
 	ToolRoundLimitPendingItem string `json:"tool_round_limit_pending_item"`
 	ToolRoundLimitPendingTool string `json:"tool_round_limit_pending_tool"`
+	// ToolArgumentsInvalid is the tool result of a call whose arguments the
+	// model wrote as invalid JSON: the tool did not run, and the Agent writes
+	// the call again. ToolUnavailable ({tool}) is the result of a call to a tool
+	// this reply cannot run. Both are ordinary tool results, not a failed turn
+	// (#378).
+	ToolArgumentsInvalid string `json:"tool_arguments_invalid"`
+	ToolUnavailable      string `json:"tool_unavailable"`
 	// The InputGap* texts are how a processing tool names a required input its
 	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
 	// {options} and {supply}. {type} is built from InputGapReferenceImage, or

@@ -1,9 +1,11 @@
 package generationtool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -152,6 +154,7 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 		source    string
 		profile   string
 		refusal   string
+		code      string
 	}{
 		{name: "the person's explicit pick wins over the purpose", locked: choiceFullID,
 			purpose: "game_character", wantID: choiceFullID, source: "user"},
@@ -160,10 +163,11 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 			source: "profile", profile: "game_character"},
 		{name: "the defaults when nothing chose", wantID: choiceFullID, source: "default"},
 		{name: "a conflict with the person's pick is refused", locked: choiceP2ID, named: choiceMeshyID,
-			refusal: "锁定"},
-		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用"},
+			refusal: "锁定", code: "model_choice_conflict"},
+		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用",
+			code: "model_choice_unavailable"},
 		{name: "a purpose step that differs from the workspace model asks first", purpose: "game_character",
-			workspace: choiceFullID, refusal: "确认"},
+			workspace: choiceFullID, refusal: "确认", code: "model_choice_workspace_conflict"},
 		{name: "the purpose step runs when the workspace model already matches", purpose: "render",
 			workspace: choiceFullID, wantID: choiceFullID, source: "profile", profile: "render"},
 		{name: "the Agent outranks the workspace picker value", named: choiceMeshyID,
@@ -175,7 +179,10 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			gateway := &choiceTestGateway{offerings: []generation.Offering{full, p2, meshy}}
 			executor := choiceTestExecutor(gateway)
+			var logs bytes.Buffer
+			executor.logger = slog.New(slog.NewTextHandler(&logs, nil))
 			command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
+			command.AssistantMessageID = "turn-1"
 			command.Options.ExplicitModel3D = test.locked
 			command.Options.AIModel = test.workspace
 			command.Options.ProductionBrief = choiceTestBrief(test.purpose)
@@ -189,9 +196,24 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 				}
 				// The tool turns a refusal into the Agent's confirmation result;
 				// nothing is submitted there.
-				result := executor.modelChoiceFailure(command, choice.Refusal)
+				result := executor.modelChoiceFailure(command, choice.Code, choice.Refusal)
 				if !result.NoSubmission || result.TaskID != "" || result.Error == "" {
 					t.Fatalf("refusal result = %+v", result)
+				}
+				// #378: the refusal is a warning in the server log, with the
+				// session, the turn, the tool and the refusal's code, and none of
+				// the Agent's text.
+				if choice.Code != test.code {
+					t.Fatalf("refusal code = %q, want %q", choice.Code, test.code)
+				}
+				for _, want := range []string{"level=WARN", "session_id=session", "assistant_message_id=turn-1",
+					"tool=create_model_3d", "call_id=call-1", "code=" + test.code} {
+					if !strings.Contains(logs.String(), want) {
+						t.Fatalf("refusal log lacks %q: %s", want, logs.String())
+					}
+				}
+				if strings.Contains(logs.String(), result.Error) {
+					t.Fatalf("refusal log repeats the Agent's text: %s", logs.String())
 				}
 				return
 			}
@@ -331,6 +353,84 @@ func TestTheExplicitModelLockAppliesToTheMultiviewTool(t *testing.T) {
 	}
 	if locked.Offering.ID != multiview.ID || locked.Source != "user" {
 		t.Fatalf("locked multiview choice = %+v", locked)
+	}
+}
+
+// #373: a structured multiview request is the person's own pick of its turn:
+// they chose the model on the multiview panel or the three-view card, so it
+// outranks the session's lock without editing it. The lock still decides every
+// other tool of the turn and every turn that carries no such request.
+func TestAStructuredMultiviewRequestOutranksTheSessionLock(t *testing.T) {
+	rodin := choiceTestOffering("hyper3d/rodin-gen-2.5/image-to-3d", "rodin-gen-2.5", generation.ImageTo3D)
+	v31 := choiceTestOffering("tripo/tripo-v3.1-multiview/image-to-3d", "tripo-v3.1-multiview", generation.ImageTo3D)
+	p2 := choiceTestOffering("tripo/tripo-p2-multiview/image-to-3d", "tripo-p2-multiview", generation.ImageTo3D)
+	tests := []struct {
+		name        string
+		tool        string
+		locked      string
+		requested   string
+		named       string
+		unavailable []generation.OfferingID
+		wantID      generation.OfferingID
+		refusal     string
+	}{
+		{name: "a lock on a model that takes no views", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: p2.ModelID, named: p2.ModelID, wantID: p2.ID},
+		{name: "a lock on another multiview model", tool: "create_model_3d_from_views",
+			locked: v31.ModelID, requested: p2.ModelID, named: p2.ModelID, wantID: p2.ID},
+		{name: "the request names the Offering ID", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: string(p2.ID), named: p2.ModelID, wantID: p2.ID},
+		{name: "the request names the lock itself", tool: "create_model_3d_from_views",
+			locked: p2.ModelID, requested: p2.ModelID, named: p2.ModelID, wantID: p2.ID},
+		{name: "a lock the call cannot serve does not stop it", tool: "create_model_3d_from_views",
+			locked: "retired-model", requested: p2.ModelID, wantID: p2.ID},
+		{name: "a turn without the request keeps the lock", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, named: p2.ModelID, refusal: "锁定"},
+		{name: "another tool of the turn keeps the lock", tool: "create_model_3d_from_image",
+			locked: rodin.ModelID, requested: p2.ModelID, wantID: rodin.ID},
+		{name: "another tool still refuses a conflicting model", tool: "create_model_3d_from_image",
+			locked: rodin.ModelID, requested: p2.ModelID, named: p2.ModelID, refusal: "锁定"},
+		{name: "an unavailable requested model is refused, not replaced by the lock", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: p2.ModelID, named: p2.ModelID, unavailable: []generation.OfferingID{p2.ID},
+			refusal: "不可用"},
+		{name: "a model no Offering carries is refused", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: "missing-model", refusal: "不可用"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			unavailable := map[generation.OfferingID]bool{}
+			for _, id := range test.unavailable {
+				unavailable[id] = true
+			}
+			executor := choiceTestExecutor(&choiceTestGateway{
+				offerings: []generation.Offering{rodin, v31, p2}, unavailable: unavailable,
+			})
+			command := choiceTestCommand(choiceTestTool(test.tool, generation.ImageTo3D))
+			command.Tool.IgnoreUserModel = test.tool == "create_model_3d_from_views"
+			command.Options.ExplicitModel3D = test.locked
+			if test.requested != "" {
+				command.Options.Multiview = &chat.MultiviewRequest{Model: test.requested}
+			}
+			choice, err := executor.chooseOffering(command, generation.ImageTo3D, choiceTestArguments(test.named), modelInput{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.refusal != "" {
+				if choice.Offering.ID != "" || !strings.Contains(choice.Refusal, test.refusal) {
+					t.Fatalf("choice = %q from %q (refusal %q), want a refusal mentioning %q and no Offering",
+						choice.Offering.ID, choice.Source, choice.Refusal, test.refusal)
+				}
+				return
+			}
+			if choice.Refusal != "" || choice.Offering.ID != test.wantID || choice.Source != "user" {
+				t.Fatalf("choice = %q from %q (refusal %q), want %s from the person",
+					choice.Offering.ID, choice.Source, choice.Refusal, test.wantID)
+			}
+			// The lock is the session's: reading the turn's choice never rewrites it.
+			if command.Options.ExplicitModel3D != test.locked {
+				t.Fatalf("the session lock changed to %q", command.Options.ExplicitModel3D)
+			}
+		})
 	}
 }
 

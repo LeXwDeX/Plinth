@@ -37,3 +37,17 @@ func TestInspectionLimitReasonsAreAllowlisted(t *testing.T) {
 		}
 	}
 }
+
+// #386: every archive rule names itself in the log instead of archive_rejected.
+func TestArchiveRuleReasonsAreAllowlisted(t *testing.T) {
+	for _, reason := range []string{
+		"zip_footer_invalid", "zip_directory_invalid", "zip_layout_invalid", "zip_local_header_invalid",
+		"zip_descriptor_invalid", "zip64_invalid", "zip_extra_invalid", "zip_unsupported_structure", "zip_truncated",
+		"zip_entry_limit", "zip_size_limit", "zip_unsafe_path", "zip_nested_archive", "zip_member_corrupt",
+		"xml_invalid", "xml_dtd", "xml_external_resource", "archive_rejected", "external_address",
+	} {
+		if got := safeStorageDiagnostic(AssetStorageDiagnostic{Stage: "inspect", Reason: reason, Errno: "other"}).Reason; got != reason {
+			t.Errorf("reason %q logged as %q", reason, got)
+		}
+	}
+}

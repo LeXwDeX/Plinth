@@ -16,10 +16,10 @@ import (
 // smallModelFiles builds one small, fixed humanoid in every model container the delivery checks know
 // (and, for the rigging and animation flows, the "glb:skeleton", "glb:animation", "fbx:skeleton" and
 // "fbx:animation" variants that carry a skin and keyframes): "glb", "gltf", "fbx", "obj" (an OBJ ZIP with
-// its material library and texture), "stl", "usdz" and "3mf", plus the texture "png". The mesh and the
-// format writers are Mock generation's (internal/providers/mock/modelfiles); only the texture is drawn
-// here. The fixture lives in testutil, not in the Mock adapter, so no production package carries a
-// test-only export.
+// its material library and texture), "stl", "usdz" and "3mf" (and "3mf:tripo", the package Tripo's
+// conversion writes, tripo3mf.go), plus the texture "png". The mesh and the format writers are Mock
+// generation's (internal/providers/mock/modelfiles); only the texture is drawn here. The fixture lives
+// in testutil, not in the Mock adapter, so no production package carries a test-only export.
 func smallModelFiles() (map[string]File, error) {
 	seed := sha256.Sum256([]byte("fixture\x00"))
 	mesh := modelfiles.BuildHumanoid(seed, 1)
@@ -51,6 +51,10 @@ func smallModelFiles() (map[string]File, error) {
 	if err != nil {
 		return nil, err
 	}
+	tripoThreeMF, err := tripoStyle3MF(mesh)
+	if err != nil {
+		return nil, err
+	}
 	objZip, err := modelfiles.BuildZIP(map[string][]byte{
 		"model.obj":   modelfiles.BuildOBJ(mesh, "FIXTURE", modelfiles.OBJDeliveredLibrary),
 		"model.mtl":   modelfiles.BuildMTL(),
@@ -79,6 +83,7 @@ func smallModelFiles() (map[string]File, error) {
 		"stl":              {"model/stl", modelfiles.BuildSTL(mesh)},
 		"usdz":             {"model/vnd.usdz+zip", usdz},
 		"3mf":              {"model/3mf", threeMF},
+		"3mf:tripo":        {"model/3mf", tripoThreeMF},
 		"png":              {"image/png", texture},
 	}, nil
 }

@@ -789,6 +789,7 @@ const minimalApplication = `"application":{
 				"tool_round_limit":"上限 {limit}","tool_round_limit_pending":"未执行：",
 				"tool_round_limit_pending_item":"{tool} {intent}",
 				"tool_round_limit_pending_tool":"{tool}",
+				"tool_arguments_invalid":"参数不是合法 JSON","tool_unavailable":"工具 {tool} 不可用",
 				"input_gap_missing":"缺少 {name} ({type}){options}: {supply}","input_gap_reference_image":"图片","input_gap_text_limit":"文本 {max}",
 				"input_gap_labeled":"{label}, {type}","input_gap_options":" 可选 {values}","input_gap_supply_reference":"用 {argument}",
 				"input_gap_supply_argument":"用 {argument}","input_gap_supply_unavailable":"不可设置","input_shape":"字段 {fields}",

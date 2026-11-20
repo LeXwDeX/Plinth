@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -42,4 +43,21 @@ func explicitModelValid(offerings []generation.Offering, model string, domain ge
 		}
 	}
 	return false
+}
+
+// multiviewToolCapabilities are the capabilities of the Agent tool that makes
+// one 3D model from several views (#373); empty when the Catalog declares no
+// such tool, which leaves a structured multiview request unchecked at turn
+// start.
+func multiviewToolCapabilities(chat catalog.ChatSchema) []generation.Capability {
+	name := chat.ThreeView.Multiview.Tool
+	if name == "" {
+		return nil
+	}
+	for _, tool := range chat.Tools {
+		if tool.Name == name {
+			return tool.Execution.Capabilities
+		}
+	}
+	return nil
 }

@@ -15,6 +15,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -101,6 +102,12 @@ type Target struct {
 	SkipFetch bool
 	// NoPollDelay polls without waiting (offline export replays).
 	NoPollDelay bool
+	// ArtifactDir, when set, keeps the bytes of every fetched artifact: each is
+	// written to a new file (mode 0600) of this existing directory, named
+	// <step>-<n>.<ext>, and its observation records the file name and SHA-256.
+	// The caller checks the directory (private, outside the worktree). Unset, an
+	// artifact is only observed (status, content type, format, size).
+	ArtifactDir string
 }
 
 // PollObs is one observed poll.
@@ -116,6 +123,12 @@ type ArtifactObs struct {
 	ContentType string `json:"content_type"`
 	Format      string `json:"format"`
 	Size        int64  `json:"size"`
+	// File and SHA256 name the bytes kept under Target.ArtifactDir (a base name
+	// and the hex digest); Error says why a fetch run with an ArtifactDir kept
+	// none. All three are empty without an ArtifactDir.
+	File   string `json:"file,omitempty"`
+	SHA256 string `json:"sha256,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // Obs is the recorded outcome of one Step.
@@ -329,11 +342,34 @@ func runStep(ctx context.Context, target Target, step Step, vars map[string]stri
 		}
 	}
 	if obs.Status/100 == 2 && len(step.Fetch) > 0 && !target.SkipFetch {
+		// The fields are fetched in name order, so the n of <step>-<n>.<ext> names
+		// the same artifact in every run. An artifact that could not be written
+		// locally ends the step (and the run) after every artifact was tried: the
+		// poll that handed out the URLs is free to repeat, the paid steps after it
+		// are not.
+		var keepErr error
+		n := 0
 		for _, dot := range step.Fetch {
-			for field, url := range urlsAt(final, dot) {
-				obs.Artifacts = append(obs.Artifacts, fetch(ctx, target.Download, field, url))
+			urls := urlsAt(final, dot)
+			fields := make([]string, 0, len(urls))
+			for field := range urls {
+				fields = append(fields, field)
+			}
+			sort.Strings(fields)
+			for _, field := range fields {
+				n++
+				var save *artifactSave
+				if target.ArtifactDir != "" {
+					save = &artifactSave{Dir: target.ArtifactDir, Step: step.Name, N: n}
+				}
+				artifact, err := fetch(ctx, target.Download, field, urls[field], save)
+				obs.Artifacts = append(obs.Artifacts, artifact)
+				if err != nil && keepErr == nil {
+					keepErr = err
+				}
 			}
 		}
+		return keepErr
 	}
 	return nil
 }
@@ -447,45 +483,71 @@ func download(ctx context.Context, client *http.Client, url string) ([]byte, err
 	return io.ReadAll(io.LimitReader(response.Body, 64<<20))
 }
 
-func fetch(ctx context.Context, client *http.Client, field, url string) ArtifactObs {
+// fetch downloads one artifact URL and records what it served. With save set
+// the bytes of a 200 answer are also kept in a new file. The error is only for a
+// file that could not be written locally; a network failure, a status other than
+// 200 or an artifact over the cap is recorded in the observation (Error) and the
+// run goes on.
+func fetch(ctx context.Context, client *http.Client, field, url string, save *artifactSave) (ArtifactObs, error) {
 	obs := ArtifactObs{Field: field}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return obs
+		return obs, nil
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return obs
+		if save != nil {
+			obs.Error = "fetch: " + withoutURL(err)
+		}
+		return obs, nil
 	}
 	defer response.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(response.Body, 256<<20))
 	obs.Status = response.StatusCode
 	obs.ContentType = baseMedia(response.Header.Get("Content-Type"))
-	obs.Size = int64(len(data))
-	obs.Format = DetectFormat(data)
-	return obs
+	if save != nil && response.StatusCode == http.StatusOK {
+		err := save.keep(&obs, url, response.Body)
+		return obs, err
+	}
+	head := &headWriter{}
+	_, _ = io.Copy(head, io.LimitReader(response.Body, fetchCap))
+	obs.Size = head.total
+	obs.Format = detectFormat(head.head, head.total)
+	if save != nil {
+		obs.Error = fmt.Sprintf("status %d: not saved", response.StatusCode)
+	}
+	return obs, nil
 }
 
 // DetectFormat names a delivered file's format from its bytes.
 func DetectFormat(data []byte) string {
+	return detectFormat(data[:min(len(data), formatHead)], int64(len(data)))
+}
+
+// formatHead is how many leading bytes detectFormat reads.
+const formatHead = 512
+
+// detectFormat is DetectFormat for a file of total bytes whose first bytes are
+// head (at least min(total, formatHead) of them): a large artifact is named
+// without holding it in memory.
+func detectFormat(head []byte, total int64) string {
 	switch {
-	case bytes.HasPrefix(data, []byte("glTF")):
+	case bytes.HasPrefix(head, []byte("glTF")):
 		return "glb"
-	case bytes.HasPrefix(data, []byte("Kaydara FBX Binary")):
+	case bytes.HasPrefix(head, []byte("Kaydara FBX Binary")):
 		return "fbx-binary"
-	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
+	case bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")):
 		return "png"
-	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+	case len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WEBP":
 		return "webp"
-	case bytes.HasPrefix(data, []byte("\xff\xd8\xff")):
+	case bytes.HasPrefix(head, []byte("\xff\xd8\xff")):
 		return "jpeg"
-	case bytes.HasPrefix(data, []byte("PK\x03\x04")), bytes.HasPrefix(data, []byte("PK\x05\x06")):
+	case bytes.HasPrefix(head, []byte("PK\x03\x04")), bytes.HasPrefix(head, []byte("PK\x05\x06")):
 		return "zip"
-	case bytes.HasPrefix(data, []byte("solid")):
+	case bytes.HasPrefix(head, []byte("solid")):
 		return "stl-ascii"
-	case len(data) >= 84 && int(uint32(data[80])|uint32(data[81])<<8|uint32(data[82])<<16|uint32(data[83])<<24)*50+84 == len(data):
+	case total >= 84 && len(head) >= 84 && int64(uint32(head[80])|uint32(head[81])<<8|uint32(head[82])<<16|uint32(head[83])<<24)*50+84 == total:
 		return "stl-binary"
-	case len(data) > 0 && !bytes.Contains(data[:min(len(data), 512)], []byte{0}):
+	case total > 0 && !bytes.Contains(head, []byte{0}):
 		return "text"
 	}
 	return "binary"

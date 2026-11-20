@@ -1,0 +1,283 @@
+{
+  "provider": "tripo",
+  "api": "v3",
+  "official_base": "https://openapi.tripo3d.ai/v3",
+  "checked_at": "2026-11-19",
+  "official_requests": 48,
+  "official_paid_requests": 2,
+  "fake_requests": 96,
+  "steps": [
+    {
+      "step": "balance",
+      "method": "GET",
+      "path": "/account/balance",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 6,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "mv-upload-front",
+      "method": "POST",
+      "path": "/files",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "mv-upload-left",
+      "method": "POST",
+      "path": "/files",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "mv-upload-back",
+      "method": "POST",
+      "path": "/files",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 5,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "multiview-to-model",
+      "method": "POST",
+      "path": "/generation/multiview-to-model",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "multiview-to-model-poll",
+      "method": "GET",
+      "path": "/tasks/{m2m}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 34,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream glb",
+        "data.output.rendered_image_url binary/octet-stream webp"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "balance",
+      "method": "GET",
+      "path": "/account/balance",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 6,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "convert-3mf",
+      "method": "POST",
+      "path": "/models/convert",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 7,
+      "diffs": 0,
+      "unexplained": 0
+    },
+    {
+      "step": "convert-3mf-poll",
+      "method": "GET",
+      "path": "/tasks/{m2m_convert}",
+      "auth": "Authorization: Bearer \u003ckey\u003e",
+      "official_status": 200,
+      "fake_status": 200,
+      "official_fields": 16,
+      "official_task_statuses": [
+        "queued",
+        "running",
+        "success"
+      ],
+      "artifacts": [
+        "data.output.model_url binary/octet-stream zip"
+      ],
+      "diffs": 0,
+      "unexplained": 0
+    }
+  ],
+  "diffs": null,
+  "request_notes": [
+    "第三段官方运行（#386，2026-11-19，标签 mv386、conv386，经用户同意）：三次视角图上传、按 Plinth 生产默认参数的 multiview-to-model（三个视角，纹理与 PBR 开、extreme 质量、detailed 几何、200 万面）及其轮询，再对该任务做一次 3MF 转换（请求只有 input 与 format）及其轮询，立即取回产物。两次付费共 75 积分：多视图生成 70、3MF 转换 5；两者在 queued 轮询里就已报出全价，fake 在 queued 轮询里仍沿用样本的值（值层面，本报告不比较值）。",
+    "这次运行补出了 multiview-to-model 原先只按文档构造的结构：任务轮询的 `input` 是请求自己的参数（texture、pbr、texture_quality、texture_version、texture_alignment、geometry_quality、orientation、face_limit、quad、smart_low_poly、auto_size、export_uv、generate_parts）、请求的 model 以 `model_version` 出现，另有 `files` 数组（front、left、back、right 四项，发送过的视角是 `{object:{bucket,key}}`，没发的是 null）；渲染图是 WebP，不是其他生成任务（2026-10-29）的 PNG；真实运行里渲染图在 progress 99 时先于模型出现。运行前 fake 的这一轮询取自绑骨任务的模板（`input` 里是 original_model_id、out_format、spec、topology），渲染图是 PNG：24 项未说明差异，已按证据改正为 0 项（脱敏证据 `evidence-386-multiview-model.candidate.json`、`evidence-386-convert-3mf.candidate.json`，由 `evidence_multiview_3mf_test.go` 钉住）。",
+    "3MF 转换（task type `convert_model`，`input` 为 `{format, original_model_id}`，output 只有 `model_url`）的轮询与 fake 没有结构差异。取回的 3MF 是 35,952,441 字节的 ZIP64 包：三个成员（`3D/3dmodel.model`、`[Content_Types].xml`、`_rels/.rels`），每个成员都按 ZIP64 成帧，模型根元素声明 Tripo 的厂商命名空间 `https://www.tripo3d.ai/ns/aigc/1.0` 并带一条 AIGC 标签。Plinth 的归档隔离原先把这个命名空间当外部地址拒收，这就是 #386 的根因；名单加入该标识符后真实文件通过。fake 现在交付同结构的小包（`internal/testutil/fakeupstream/tripo3mf.go`），不再是通用的 3MF 夹具。字节本身（真实产物含约 96 万个顶点）不入库。",
+    "产物 CDN 对不同文件返回不同的 content-type：模型、渲染图和 multiview 图片是 `binary/octet-stream`，分割遮罩 `mask.png` 是 `image/png`，edit-multiview 的视图是 `image/jpeg`；fake 照此返回。CDN 是 CloudFront 签名 URL，无效或过期都是 403 `text/xml` 的 AccessDenied。",
+    "这一段报告只含第三段官方运行的步骤；第一段（余额、生成、绑骨、分割等）与第二段（#89，七个补采端点）的报告仍在 `alignment-report.md` 与 `alignment-report-89.md`。"
+  ],
+  "endpoints": [
+    {
+      "endpoint": "GET /account/balance",
+      "evidence": "real",
+      "sample": "GET /v3/account/balance",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/introduction",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /files",
+      "evidence": "real",
+      "sample": "POST /v3/files",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/files",
+      "checked_at": "2026-10-29",
+      "note": "the sample's multipart reference picture is replaced by a fixed recipe; the response is real; the 400/code 2003 (empty file) and 400/code 2004 (unsupported type) refusals have no sample and are constructed from https://developers.tripo3d.ai/en/docs/files and https://developers.tripo3d.ai/en/docs/error-handling (read 2026-11-08); uploads never carry the credit scenarios, which the error page defines for task creation only"
+    },
+    {
+      "endpoint": "GET /tasks/{task_id}",
+      "evidence": "real",
+      "sample": "GET /v3/tasks/{id}",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/task-query",
+      "checked_at": "2026-10-29",
+      "note": "queued, running, success and failed poll bodies are real for the real kinds; the cancelled (task-canceled) and unknown (task-unknown) terminals have no sample and are constructed from https://developers.tripo3d.ai/en/docs/task-lifecycle and https://developers.tripo3d.ai/en/docs/task-query (read 2026-11-08) by deriving the real failed poll without error_code/error_message; the legacy banned/expired words are never emitted because the lifecycle page reports them as failed"
+    },
+    {
+      "endpoint": "GET /artifacts/{task_id}/{name}",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/task-query",
+      "checked_at": "2026-09-30",
+      "note": "the official artifact CDN host is not part of the API; this route serves the fixed files its task output URLs name (content type binary/octet-stream as observed)"
+    },
+    {
+      "endpoint": "POST /generation/text-to-model",
+      "evidence": "real",
+      "sample": "POST /v3/generation/text-to-model",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard",
+      "checked_at": "2026-10-29",
+      "note": "a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go); the rest is the captured text_to_model structure"
+    },
+    {
+      "endpoint": "POST /animations/rig-check",
+      "evidence": "real",
+      "sample": "POST /v3/animations/rig-check",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-rig-check",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /animations/rig",
+      "evidence": "real",
+      "sample": "POST /v3/animations/rig",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-rig",
+      "checked_at": "2026-10-29",
+      "note": "the response is captured (rig_type biped, spec tripo, both v2.5 and v3.0; 25 credits on v3.0-20260909, shown while the task runs, observed 2026-11-16); the request values beyond that are constructed from the official page read on 2026-11-12 and not yet observed: rig_type (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic, others), spec (tripo, mixamo, actorcore, unity, unreal, vrm), out_format, which of them exist only under v3.0, and a spec having no effect on a non-biped rig; a poll repeats spec, out_format and the rig type (named topology, as captured)"
+    },
+    {
+      "endpoint": "POST /animations/retarget",
+      "evidence": "real",
+      "sample": "POST /v3/animations/retarget",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/animations-retarget",
+      "checked_at": "2026-10-29",
+      "note": "the response is captured (preset:walk on a v3.0 biped rig; a v2 rig ended failed, code 1004); the request values beyond that are constructed from the official page read on 2026-11-12 and not yet observed: animation XOR animations (at most 5), the 11 v3.0 biped presets, the five creature presets (quadruped walk, hexapod walk, octopod walk, serpentine march, aquatic march) and the v1.0 preset:biped: names; a preset that does not fit its rig ends failed with code 1004 like the captured v2 case, which is an assumption"
+    },
+    {
+      "endpoint": "POST /mesh/segment",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/segment",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-segment",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /mesh/complete",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/complete",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-complete",
+      "checked_at": "2026-10-29"
+    },
+    {
+      "endpoint": "POST /models/convert",
+      "evidence": "real",
+      "sample": "POST /v3/models/convert",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/models-convert",
+      "checked_at": "2026-10-29",
+      "note": "captured twice. 2026-10-29: an STL export of a segmentation result with PNG textures of 512 pixels (the task echoes its request under input, the output has only model_url). 2026-11-16 (#305, evidence-305-rig-convert.candidate.json): a GLTF and an FBX export of a v3.0 rig's GLB with PNG textures of 2048 pixels and with_animation, 10 credits each, shown already while the task runs (creation from a URL took 47 to 48 seconds; the poll names a new original_model_id); the finished GLTF and FBX tasks add output.normalize_scale and output.normalize_translation, the move that put the middle of the bounding box on the origin because pivot_to_center_bottom was not set; the GLB keeps the skin, the textures follow the request. What the fake writes for pivot_to_center_bottom, for a texture larger than the source's and for the formats the runs did not cover is constructed from the official page (convert.go). A third capture, 2026-11-19 (#386, evidence-386-convert-3mf.candidate.json): a 3MF export of a multiview model named by its task id, with nothing in the request but input and format, 5 credits shown from the queued poll on; the task echoes {format, original_model_id}, the output has only model_url (no normalize_scale or normalize_translation for a 3MF), and the delivered file is a 35,952,441-byte ZIP64 3MF package with a Tripo vendor namespace (AIGC label) that the archive isolation refused until the namespace was listed. The fake delivers a package of that structure (tripo3mf.go), not the generic 3MF fixture"
+    },
+    {
+      "endpoint": "POST /generation/image-to-model",
+      "evidence": "real",
+      "sample": "POST /v3/generation/image-to-model",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go)"
+    },
+    {
+      "endpoint": "POST /generation/image-to-splat",
+      "evidence": "real",
+      "sample": "POST /v3/generation/image-to-splat",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-splat",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type image_to_splat, 30 credits; the only output is model_url (a .splat file)"
+    },
+    {
+      "endpoint": "POST /generation/image-to-multiview",
+      "evidence": "real",
+      "sample": "POST /v3/generation/image-to-multiview",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-image-to-multiview",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type image_to_multiview, 10 credits; the output is the object generate_multiview_image with front/left/back/right_view_url (JPEG)"
+    },
+    {
+      "endpoint": "POST /generation/edit-multiview",
+      "evidence": "real",
+      "sample": "POST /v3/generation/edit-multiview",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-edit-multiview",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)"
+    },
+    {
+      "endpoint": "POST /models/texture",
+      "evidence": "real",
+      "sample": "POST /v3/models/texture",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/models-texture",
+      "checked_at": "2026-10-29",
+      "note": "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url"
+    },
+    {
+      "endpoint": "POST /mesh/decimate",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/decimate",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-decimate",
+      "checked_at": "2026-10-29",
+      "note": "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url"
+    },
+    {
+      "endpoint": "POST /generation/multiview-to-model",
+      "evidence": "constructed-from-docs",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard",
+      "checked_at": "2026-11-02",
+      "note": "constructed from the official documentation read on 2026-11-02: inputs is an array of single-key view objects (front is required, 2-4 images) instead of input; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go). Checked against one real task on 2026-11-19 (#386, evidence-386-multiview-model.candidate.json, not a template sample, so the endpoint stays constructed): three views at Plinth's production defaults (texture and PBR at extreme quality, detailed geometry, 2,000,000 faces), 70 credits shown from the queued poll on. The create envelope, the task type multiview_to_model and the queued \u003e running \u003e success flow are as assumed; the task object shows the request's own parameters under input, the request's model as model_version and a files array of four entries (front, left, back, right; a stored object each, null for the view that was not sent), the output holds model_url (a GLB) and rendered_image_url (a WebP, not the PNG of the other generation tasks), and the real running poll shows the render from progress 99, before the model, which the fake does not (multiview.go). What the real API shows for a parameter the request left out is not known"
+    },
+    {
+      "endpoint": "POST /mesh/smartsegment",
+      "evidence": "real",
+      "sample": "POST /v3/mesh/smartsegment",
+      "doc_url": "https://developers.tripo3d.ai/en/docs/mesh-smartsegment",
+      "checked_at": "2026-10-29",
+      "note": "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id"
+    }
+  ]
+}

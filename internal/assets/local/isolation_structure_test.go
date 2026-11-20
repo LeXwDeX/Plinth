@@ -195,10 +195,10 @@ func Test3MFSlotRequires3MFPackage(t *testing.T) {
 		{"start part missing", "3mf", "model/3mf", zipModel(t, with3MFEntries(map[string]string{
 			"_rels/.rels": `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/Models/absent.model" Id="r" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`,
 		})), "3mf_rejected"},
-		{"HTML error page", "3mf", "model/3mf", []byte(errorPageHTML), "archive_rejected"},
-		{"HTML error page in converted slot", "converted.3mf", "application/octet-stream", []byte(errorPageHTML), "archive_rejected"},
+		{"HTML error page", "3mf", "model/3mf", []byte(errorPageHTML), "zip_footer_invalid"},
+		{"HTML error page in converted slot", "converted.3mf", "application/octet-stream", []byte(errorPageHTML), "zip_footer_invalid"},
 		// The existing whole-package isolation still runs first.
-		{"external texture address", "3mf", "model/3mf", zipModel(t, with3MFEntries(map[string]string{"3D/3dmodel.model": `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" texture="https://private.example/t.png"/>`})), "archive_rejected"},
+		{"external texture address", "3mf", "model/3mf", zipModel(t, with3MFEntries(map[string]string{"3D/3dmodel.model": `<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" texture="https://private.example/t.png"/>`})), "external_address"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			checkFormatSlot(t, test.body, test.variant, test.mediaType, test.reason)
@@ -223,8 +223,8 @@ func TestOBJArchiveSlotRequiresAnOBJMember(t *testing.T) {
 		{"upper-case member name", "obj", "application/zip", zipModel(t, map[string]string{"Mesh/MODEL.OBJ": "v 0 0 0\n"}), ""},
 		{"ZIP without OBJ", "obj", "application/zip", zipModel(t, map[string]string{"model.mtl": "map_Kd base.png\n"}), "archive_rejected"},
 		{"directory named like OBJ", "obj", "application/zip", zipModel(t, map[string]string{"model.obj/readme.txt": "safe"}), "archive_rejected"},
-		{"plain OBJ declared as ZIP", "obj", "application/zip", []byte("v 0 0 0\n"), "archive_rejected"},
-		{"HTML error page", "obj", "application/zip", []byte(errorPageHTML), "archive_rejected"},
+		{"plain OBJ declared as ZIP", "obj", "application/zip", []byte("v 0 0 0\n"), "zip_footer_invalid"},
+		{"HTML error page", "obj", "application/zip", []byte(errorPageHTML), "zip_footer_invalid"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			checkFormatSlot(t, test.body, test.variant, test.mediaType, test.reason)
