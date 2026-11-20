@@ -381,8 +381,16 @@ def reply_is_final(messages):
     return bool(content) and content != GENERATING_PLACEHOLDER
 
 
+# Schema chat.stream.event_types.heartbeat (#375): the visible heartbeat, a data frame without an id.
+HEARTBEAT_EVENT_TYPE = "heartbeat"
+
+
 def parse_sse_events(lines):
-    """Decode the JSON payloads of `data:` lines of a text/event-stream (id/retry/heartbeat lines ignored)."""
+    """Decode the JSON payloads of `data:` lines of a text/event-stream.
+
+    id and retry lines and both heartbeats are ignored: the comment frame, and the data frame
+    {"type":"heartbeat"} that the stream writes while a turn is quiet (#375). Neither is a turn event.
+    """
     events = []
     for raw in lines:
         line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
@@ -393,7 +401,7 @@ def parse_sse_events(lines):
             payload = json.loads(line[len("data:"):].strip())
         except ValueError:
             continue
-        if isinstance(payload, dict):
+        if isinstance(payload, dict) and payload.get("type") != HEARTBEAT_EVENT_TYPE:
             events.append(payload)
     return events
 

@@ -1794,6 +1794,14 @@ export interface ChatProductSchema {
     connection_timeout_milliseconds: number;
     fallback_poll_milliseconds: number;
     reconnect_check_delay_milliseconds: number;
+    /**
+     * #375: how long an open chat stream may deliver no frame (the visible heartbeat counts) before
+     * the client closes it and reconnects from its last event id. Always longer than the server's
+     * heartbeat interval.
+     */
+    stream_silence_milliseconds: number;
+    /** #375: how many such reconnects in a row may get no frame before the stream counts as interrupted. */
+    stream_reconnect_attempts: number;
     option_storage_key: string;
     add_images_event_name: string;
     image_mime_prefix: string;
@@ -1956,6 +1964,8 @@ export interface ChatProductSchema {
       generating: string;
       /** Shown while a model round has no visible output yet (#285). */
       thinking?: string;
+      /** Shown from the first fragment of a tool call the model writes until it runs (#375). */
+      preparing_tool?: string;
     };
   };
 }
@@ -2075,6 +2085,12 @@ export interface ChatStreamEventTypesSchema {
   done: string;
   /** Content-free "the model is thinking" status event (#285); optional. */
   thinking?: string;
+  /**
+   * #375: the visible heartbeat the server writes while a turn is quiet: a data frame without an
+   * id, so it never moves the replay cursor and never carries progress. The client only uses it to
+   * tell a quiet stream from a dead one. Optional: absent, the server writes an invisible comment.
+   */
+  heartbeat?: string;
 }
 
 export interface ChatSkillCatalogFieldsSchema {

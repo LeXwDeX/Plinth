@@ -138,6 +138,12 @@ type Delta struct {
 	// visible output. It carries no reasoning text: the caller only shows a
 	// status, and the reasoning itself never leaves the adapter (#285).
 	Thinking bool `json:",omitempty"`
+	// ToolCalling reports that the model started writing a tool call: the
+	// first call fragment of a completion arrived, long before the call's
+	// arguments are complete (#375). Like Thinking it carries no content; the
+	// caller only shows a status. Complete has no such signal: it returns the
+	// whole completion at once.
+	ToolCalling bool `json:",omitempty"`
 }
 
 type Completion struct {

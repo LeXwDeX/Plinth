@@ -728,6 +728,7 @@ func (s *Server) legacyChatStream(
 		) * time.Millisecond,
 	)
 	defer heartbeat.Stop()
+	heartbeatFrame := s.chatHeartbeatFrame()
 	for {
 		select {
 		case <-request.Context().Done():
@@ -746,10 +747,7 @@ func (s *Server) legacyChatStream(
 			if !setDeadline() {
 				return
 			}
-			if _, err := io.WriteString(
-				writer,
-				s.application.Chat.Stream.HeartbeatFrame,
-			); err != nil {
+			if _, err := io.WriteString(writer, heartbeatFrame); err != nil {
 				return
 			}
 			if !flush() {
@@ -757,6 +755,27 @@ func (s *Server) legacyChatStream(
 			}
 		}
 	}
+}
+
+// chatHeartbeatFrame is what the stream writes while a turn is quiet. With
+// stream.event_types.heartbeat declared (#375) it is a data frame an EventSource
+// can observe, {"<event_fields.type>":"<heartbeat>"} in the Schema's prefix and
+// suffix, written without an id line: it is not a stored event, takes no event
+// id and so never moves the client's replay cursor, and it carries no progress.
+// Without that declaration it stays the comment frame, which no EventSource
+// handler sees.
+func (s *Server) chatHeartbeatFrame() string {
+	stream := s.application.Chat.Stream
+	if stream.EventTypes.Heartbeat == "" {
+		return stream.HeartbeatFrame
+	}
+	encoded, err := json.Marshal(map[string]string{
+		stream.EventFields.Type: stream.EventTypes.Heartbeat,
+	})
+	if err != nil {
+		return stream.HeartbeatFrame
+	}
+	return stream.EventPrefix + string(encoded) + stream.EventSuffix
 }
 
 func (s *Server) writeChatEvent(

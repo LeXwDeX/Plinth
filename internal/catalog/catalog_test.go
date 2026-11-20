@@ -598,6 +598,8 @@ const minimalApplication = `"application":{
 			"connection_timeout_milliseconds":15000,
 			"fallback_poll_milliseconds":3000,
 			"reconnect_check_delay_milliseconds":300,
+			"stream_silence_milliseconds":30000,
+			"stream_reconnect_attempts":3,
 			"option_storage_key":"test-chat-options",
 			"add_images_event_name":"test:add-images",
 			"image_mime_prefix":"image/",
@@ -799,7 +801,7 @@ const minimalApplication = `"application":{
 				"input_shape_text":"{name}={count}","input_shape_list":"{name}[{count}]","input_shape_boolean":"{name}=布尔",
 				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值"
 			},
-			"status":{"generating":"正在生成","queued_submission":"排队等待提交"}
+			"status":{"generating":"正在生成","queued_submission":"排队等待提交","preparing_tool":"正在准备调用工具"}
 		},
 		"audit":{
 			"create_action":"access_asset","delete_action":"access_asset",

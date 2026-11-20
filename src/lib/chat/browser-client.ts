@@ -233,6 +233,11 @@ export interface ChatSubscriptionOptions {
 }
 
 export interface EventSourceAdapter {
+  /**
+   * `event.lastEventId` is the id of the newest `id:` line the stream has sent (empty before the
+   * first one) and keeps its value across frames that carry no id, like the visible heartbeat;
+   * `subscribe` reconnects from it (#375).
+   */
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event?: Event) => void) | null;
   close(): void;
@@ -832,6 +837,9 @@ function decodeEvent(
   const fields = schema.chat.stream.event_fields;
   const types = schema.chat.stream.event_types;
   const wireType = source[fields.type];
+  // #375: the visible heartbeat only proves the stream is alive (subscribe re-arms its silence
+  // timer on every frame); it is not a semantic event and never carries progress.
+  if (types.heartbeat && wireType === types.heartbeat) return null;
   // #285: the thinking event carries only the Schema status text.
   if (types.thinking && wireType === types.thinking) {
     return {
@@ -1688,52 +1696,101 @@ export function createChatBrowserClient(
         schema.runtime.http.legacy_routes.chat_stream,
         { sessionID },
       );
-      const query = new URLSearchParams({
-        [fields.from_id]: String(fromID),
-      });
-      const source = eventSourceFactory(`${baseURL}?${query.toString()}`);
+      const streamURL = (cursor: number): string => {
+        const query = new URLSearchParams({ [fields.from_id]: String(cursor) });
+        return `${baseURL}?${query.toString()}`;
+      };
+      const frontend = schema.chat.frontend;
+      // #375: silence is only evidence of a stalled stream when the server sends a heartbeat the
+      // browser can see. Without the Schema's heartbeat event a long quiet turn (a model thinking
+      // past the window) would be taken for a dead connection, so no silence window is armed and
+      // only the first-frame timeout and connection errors apply, as before.
+      const watchdog = Boolean(schema.chat.stream.event_types.heartbeat);
       let finished = false;
-      const connectionTimeout = setTimeout(() => {
+      // #375: the newest event id the stream delivered, and how many reconnects in a row have
+      // got no frame since. One timer is armed at a time: the first-frame timeout until the first
+      // frame, then the silence window after every frame.
+      let lastEventID: number | undefined;
+      let reconnects = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      type StreamSource = ReturnType<typeof eventSourceFactory>;
+      let source: StreamSource;
+      const arm = (milliseconds: number, expired: () => void): void => {
+        clearTimeout(timer);
+        timer = setTimeout(expired, milliseconds);
+      };
+      const fail = (): void => {
         if (finished) return;
         finished = true;
+        clearTimeout(timer);
         source.close();
         options.onError?.(
           new Error(schema.chat.presentation.messages.sse_interrupted),
         );
-      }, schema.chat.frontend.connection_timeout_milliseconds);
+      };
       const finish = (): void => {
         if (finished) return;
         finished = true;
-        clearTimeout(connectionTimeout);
+        clearTimeout(timer);
         source.close();
         options.onDone?.();
       };
-      source.onmessage = (message: MessageEvent<string>) => {
-        clearTimeout(connectionTimeout);
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(message.data) as unknown;
-        } catch {
+      const open = (cursor: number): StreamSource => {
+        const opened = eventSourceFactory(streamURL(cursor));
+        opened.onmessage = (message: MessageEvent<string>) => {
+          // A source this subscription has already replaced or ended is ignored.
+          if (finished || opened !== source) return;
+          // Any frame proves the connection is alive, the visible heartbeat included, which
+          // decodeEvent drops: re-arm before decoding. The id is the browser's last event id,
+          // which keeps its value across frames without an id line.
+          reconnects = 0;
+          if (watchdog) arm(frontend.stream_silence_milliseconds, reconnect);
+          else clearTimeout(timer);
+          if (typeof message.lastEventId === 'string' && /^\d+$/.test(message.lastEventId)) {
+            const id = Number(message.lastEventId);
+            if (Number.isSafeInteger(id)) lastEventID = id;
+          }
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(message.data) as unknown;
+          } catch {
+            return;
+          }
+          const event = decodeEvent(schema, parsed);
+          if (event === null) return;
+          options.onEvent(event);
+          if (event.type === 'done') finish();
+        };
+        opened.onerror = () => {
+          if (opened === source) fail();
+        };
+        return opened;
+      };
+      // #375: a silent stream is closed and opened again from the event after the last one
+      // delivered, so nothing is delivered twice. Past the Schema's number of reconnects in a
+      // row without any frame it is reported as interrupted, the same as a connection error.
+      const reconnect = (): void => {
+        if (finished) return;
+        if (reconnects >= frontend.stream_reconnect_attempts) {
+          fail();
           return;
         }
-        const event = decodeEvent(schema, parsed);
-        if (event === null) return;
-        options.onEvent(event);
-        if (event.type === 'done') finish();
-      };
-      source.onerror = () => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(connectionTimeout);
+        reconnects += 1;
         source.close();
-        options.onError?.(
-          new Error(schema.chat.presentation.messages.sse_interrupted),
-        );
+        try {
+          source = open(lastEventID === undefined ? fromID : lastEventID + 1);
+        } catch {
+          fail();
+          return;
+        }
+        arm(frontend.stream_silence_milliseconds, reconnect);
       };
+      source = open(fromID);
+      arm(frontend.connection_timeout_milliseconds, fail);
       return () => {
         if (finished) return;
         finished = true;
-        clearTimeout(connectionTimeout);
+        clearTimeout(timer);
         source.close();
       };
     },

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { ProductSchema } from '@/lib/product-schema';
-import { createChatBrowserClient } from '@/lib/chat/browser-client';
+import { createChatBrowserClient, type ChatSemanticEvent } from '@/lib/chat/browser-client';
 
 function schemaFixture(): ProductSchema {
   return structuredClone(defaultCatalog.application) as ProductSchema;
@@ -1044,14 +1044,21 @@ class FakeEventSource {
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
+  readonly url: string;
+
+  constructor(url = '') {
+    this.url = url;
+  }
 
   close(): void {
     this.closed = true;
   }
 
-  emit(payload: unknown): void {
+  /** One frame; `lastEventId` is what a real EventSource reports: the newest `id:` seen, '' before any. */
+  emit(payload: unknown, lastEventId?: string): void {
     this.onmessage?.({
       data: JSON.stringify(payload),
+      ...(lastEventId === undefined ? {} : { lastEventId }),
     } as MessageEvent<string>);
   }
 }
@@ -1143,5 +1150,263 @@ describe('session preferences (#241)', () => {
     });
     await expect(client.rejectCandidate('s', { kind: 'image', taskId: 't1', assetId: 'a2' }, 'style', ''))
       .rejects.toMatchObject({ status: 400, message: '生成参数格式无效' });
+  });
+});
+
+describe('chat stream silence watchdog (#375)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  interface WatchOptions {
+    configure?: (schema: ProductSchema) => void;
+    fromID?: number;
+    /** The factory throws once this many sources have been opened. */
+    maxSources?: number;
+  }
+
+  /** Subscribes with short Schema thresholds (first frame 50 ms, silence 100 ms, 2 reconnects). */
+  function watch({ configure, fromID = 3, maxSources = Number.POSITIVE_INFINITY }: WatchOptions = {}) {
+    vi.useFakeTimers();
+    const schema = schemaFixture();
+    schema.chat.frontend.connection_timeout_milliseconds = 50;
+    schema.chat.frontend.stream_silence_milliseconds = 100;
+    schema.chat.frontend.stream_reconnect_attempts = 2;
+    schema.chat.presentation.messages.sse_interrupted = 'configured stream interruption';
+    configure?.(schema);
+    const sources: FakeEventSource[] = [];
+    const client = createChatBrowserClient(schema, {
+      eventSourceFactory: (url) => {
+        if (sources.length >= maxSources) throw new Error('cannot open');
+        const source = new FakeEventSource(url);
+        sources.push(source);
+        return source;
+      },
+    });
+    const events: ChatSemanticEvent[] = [];
+    const errors: string[] = [];
+    let doneCalls = 0;
+    const unsubscribe = client.subscribe('session-a', {
+      fromID,
+      onEvent: (event) => events.push(event),
+      onDone: () => { doneCalls += 1; },
+      onError: (error) => errors.push(error.message),
+    });
+    const fields = schema.chat.stream.event_fields;
+    const types = schema.chat.stream.event_types;
+    const route = schema.runtime.http.legacy_routes.chat_stream.replace('{sessionID}', 'session-a');
+    return {
+      sources, events, errors, unsubscribe,
+      doneCalls: () => doneCalls,
+      fromIDField: schema.chat.api.fields.from_id,
+      url: (cursor: number) => `${route}?${schema.chat.api.fields.from_id}=${cursor}`,
+      text: (content: string) => ({ [fields.type]: types.text, [fields.content]: content }),
+      heartbeat: { [fields.type]: types.heartbeat },
+      done: { [fields.type]: types.done },
+    };
+  }
+
+  it('reconnects from the event after the last one delivered once the stream is silent for the Schema window', () => {
+    const watched = watch();
+    expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3)]);
+    watched.sources[0].emit(watched.text('a'), '3');
+    watched.sources[0].emit(watched.text('b'), '4');
+    vi.advanceTimersByTime(99);
+    expect(watched.sources).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(5)]);
+    expect(watched.sources.map((source) => source.closed)).toEqual([true, false]);
+    // A late frame of the closed source is dropped; the new one carries on.
+    watched.sources[0].emit(watched.text('stale'), '9');
+    watched.sources[1].emit(watched.text('c'), '5');
+    expect(watched.events).toEqual([
+      { type: 'text', content: 'a' }, { type: 'text', content: 'b' }, { type: 'text', content: 'c' },
+    ]);
+    expect(watched.errors).toEqual([]);
+  });
+
+  it('replays only the events the stream missed, never one twice', () => {
+    const watched = watch();
+    const log = [{ id: 3, content: 'a' }, { id: 4, content: 'b' }];
+    // The server side: the events from the cursor in the URL on, like the stream route.
+    const serve = (source: FakeEventSource) => {
+      const cursor = Number(new URL(source.url, 'http://localhost').searchParams.get(watched.fromIDField));
+      for (const entry of log.filter((item) => item.id >= cursor)) {
+        source.emit(watched.text(entry.content), String(entry.id));
+      }
+    };
+    serve(watched.sources[0]);
+    // Written while the connection was dead: the client never saw them.
+    log.push({ id: 5, content: 'c' }, { id: 6, content: 'd' });
+    vi.advanceTimersByTime(100);
+    serve(watched.sources[1]);
+    expect(watched.events).toEqual(['a', 'b', 'c', 'd'].map((content) => ({ type: 'text', content })));
+  });
+
+  it('reconnects from the original cursor when no frame carried an event id', () => {
+    const watched = watch();
+    watched.sources[0].emit(watched.heartbeat, '');
+    vi.advanceTimersByTime(100);
+    expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(3)]);
+  });
+
+  it('keeps a quiet stream open while visible heartbeats arrive and never delivers them', () => {
+    const watched = watch();
+    watched.sources[0].emit(watched.text('a'), '3');
+    for (let beat = 0; beat < 6; beat += 1) {
+      vi.advanceTimersByTime(60);
+      // The heartbeat has no id line: the browser keeps reporting the last real one.
+      watched.sources[0].emit(watched.heartbeat, '3');
+    }
+    expect(watched.sources).toHaveLength(1);
+    expect(watched.errors).toEqual([]);
+    expect(watched.events).toEqual([{ type: 'text', content: 'a' }]);
+    // The beats stop: the cursor is still the last real event, not a heartbeat.
+    vi.advanceTimersByTime(100);
+    expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(4)]);
+  });
+
+  it('reads the heartbeat event name from the Schema', () => {
+    const watched = watch({
+      configure: (schema) => {
+        schema.chat.stream.event_types.heartbeat = 'configured-beat';
+      },
+    });
+    watched.sources[0].emit(watched.heartbeat, '');
+    watched.sources[0].emit(watched.text('a'), '3');
+    expect(watched.heartbeat).toMatchObject({ type: 'configured-beat' });
+    expect(watched.events).toEqual([{ type: 'text', content: 'a' }]);
+  });
+
+  it('arms no silence window when the Schema declares no visible heartbeat', () => {
+    const watched = watch({
+      configure: (schema) => {
+        delete schema.chat.stream.event_types.heartbeat;
+      },
+    });
+    watched.sources[0].emit(watched.text('a'), '3');
+    // A quiet turn far past the silence window: the server's comment heartbeat is invisible,
+    // so silence proves nothing and the stream is neither reopened nor reported.
+    vi.advanceTimersByTime(10_000);
+    expect(watched.sources).toHaveLength(1);
+    expect(watched.sources[0].closed).toBe(false);
+    expect(watched.errors).toEqual([]);
+    watched.sources[0].emit(watched.done, '4');
+    expect(watched.doneCalls()).toBe(1);
+  });
+
+  it('keeps the first-frame timeout when the Schema declares no visible heartbeat', () => {
+    const watched = watch({
+      configure: (schema) => {
+        delete schema.chat.stream.event_types.heartbeat;
+      },
+    });
+    vi.advanceTimersByTime(50);
+    expect(watched.errors).toEqual(['configured stream interruption']);
+  });
+
+  it('reports the stream as interrupted after the Schema number of reconnects without a frame', () => {
+    const watched = watch();
+    watched.sources[0].emit(watched.text('a'), '3');
+    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(100);
+    expect(watched.sources).toHaveLength(3);
+    expect(watched.errors).toEqual([]);
+    vi.advanceTimersByTime(100);
+    expect(watched.errors).toEqual(['configured stream interruption']);
+    expect(watched.sources.map((source) => source.closed)).toEqual([true, true, true]);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(watched.sources).toHaveLength(3);
+    expect(watched.errors).toHaveLength(1);
+    expect(watched.doneCalls()).toBe(0);
+  });
+
+  it('counts reconnects only until a frame arrives on the new connection', () => {
+    const watched = watch({
+      configure: (schema) => {
+        schema.chat.frontend.stream_reconnect_attempts = 1;
+      },
+    });
+    watched.sources[0].emit(watched.text('a'), '3');
+    vi.advanceTimersByTime(100);
+    expect(watched.sources).toHaveLength(2);
+    watched.sources[1].emit(watched.heartbeat, '');
+    vi.advanceTimersByTime(100);
+    expect(watched.sources.map((source) => source.url)).toEqual([watched.url(3), watched.url(4), watched.url(4)]);
+    expect(watched.errors).toEqual([]);
+    vi.advanceTimersByTime(100);
+    expect(watched.errors).toEqual(['configured stream interruption']);
+    expect(watched.sources).toHaveLength(3);
+  });
+
+  it('reports the stream as interrupted when the reconnect cannot be opened', () => {
+    const watched = watch({ maxSources: 1 });
+    watched.sources[0].emit(watched.text('a'), '3');
+    vi.advanceTimersByTime(100);
+    expect(watched.errors).toEqual(['configured stream interruption']);
+    expect(watched.sources.map((source) => source.closed)).toEqual([true]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the first-frame timeout: a connection without any frame fails without reconnecting', () => {
+    const watched = watch();
+    vi.advanceTimersByTime(49);
+    expect(watched.errors).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(watched.errors).toEqual(['configured stream interruption']);
+    expect(watched.sources.map((source) => source.closed)).toEqual([true]);
+    vi.advanceTimersByTime(1000);
+    expect(watched.sources).toHaveLength(1);
+  });
+
+  it('ends on the done event without reconnecting', () => {
+    const watched = watch();
+    watched.sources[0].emit(watched.text('a'), '3');
+    watched.sources[0].emit(watched.done, '4');
+    expect(watched.doneCalls()).toBe(1);
+    expect(watched.sources[0].closed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(watched.sources).toHaveLength(1);
+    expect(watched.errors).toEqual([]);
+  });
+
+  it('still reports a connection error at once, and only for the current source', () => {
+    const watched = watch();
+    watched.sources[0].emit(watched.text('a'), '3');
+    vi.advanceTimersByTime(100);
+    watched.sources[0].onerror?.();
+    expect(watched.errors).toEqual([]);
+    watched.sources[1].onerror?.();
+    expect(watched.errors).toEqual(['configured stream interruption']);
+    expect(watched.sources[1].closed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(watched.sources).toHaveLength(2);
+  });
+
+  it('closes the current source and clears every timer when the subscriber leaves', () => {
+    const watched = watch();
+    watched.sources[0].emit(watched.text('a'), '3');
+    vi.advanceTimersByTime(100);
+    expect(watched.sources).toHaveLength(2);
+    watched.unsubscribe();
+    expect(watched.sources[1].closed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(watched.sources).toHaveLength(2);
+    expect(watched.errors).toEqual([]);
+    expect(watched.doneCalls()).toBe(0);
+  });
+
+  it('clears the first-frame timeout when the subscriber leaves before any frame', () => {
+    const watched = watch();
+    watched.unsubscribe();
+    expect(watched.sources[0].closed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(watched.errors).toEqual([]);
+    expect(watched.sources).toHaveLength(1);
   });
 });

@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "81c17731e49633ee1bc56f81425771fddea9c248ed47cb7ee88ff924e026e01e",
+  "catalog_sha256": "833851c58d4ad4c049fa6d30b13eccc731f7ff80324f88d60084643c66de8415",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
