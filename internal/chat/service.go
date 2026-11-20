@@ -297,7 +297,8 @@ type ServiceConfig struct {
 	// RetiredModels are the generation models no longer offered and the model
 	// that replaces each (Schema runtime.frontend.retired_generation_models,
 	// #329 follow-up). A turn's pick of a retired model is moved to its
-	// successor and the turn records the switch.
+	// successor and the turn records the switch; the session's explicit 3D
+	// and 2D locks are moved the same way, unrecorded (#380).
 	RetiredModels []catalog.RetiredModelSuccessor
 	// Model3DUsage is application.chat.model3d_usage (#103): the purposes a
 	// production brief may name, their parameter overrides and the brief's
@@ -1278,7 +1279,8 @@ func (service *Service) startTurn(
 	}
 	command.Options.VisualAnchors = cloneVisualAnchors(visualAnchors)
 	// A pick of a retired generation model runs on its successor; the turn
-	// records the switch (#329 follow-up).
+	// records the switch (#329 follow-up). The explicit locks frozen above
+	// move with it, so this stays after them (#380).
 	service.moveRetiredModels(&command.Options)
 	// The turn's model and thinking level are frozen from the stored session,
 	// never taken from the request (#322).
