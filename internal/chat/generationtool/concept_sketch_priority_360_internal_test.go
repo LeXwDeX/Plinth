@@ -28,7 +28,7 @@ func pointerFloat(value float64) *float64 { return &value }
 func buildInputValues(t *testing.T, executor *Executor, command chat.ToolCommand, offering generation.Offering) map[string]any {
 	t.Helper()
 	raw, _, err := executor.buildInput(context.Background(), command, offering,
-		map[string]json.RawMessage{}, "draw", nil, nil, nil)
+		map[string]json.RawMessage{}, "draw", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

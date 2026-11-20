@@ -1,0 +1,40 @@
+{
+  "MaxBodyBytes": 4194304,
+  "Keys": {
+    "error": true,
+    "file": true,
+    "geometry_file_format": true,
+    "image_label": true,
+    "images": true,
+    "material": true,
+    "mesh_mode": true,
+    "message": true,
+    "quality": true,
+    "texture_mode": true,
+    "tier": true
+  },
+  "Allowed": {
+    "B": true,
+    "F": true,
+    "Gen-2.5-Extreme-Low": true,
+    "IMAGE_LABEL_LENGTH_TOO_LONG": true,
+    "Input is invalid": true,
+    "L": true,
+    "PBR": true,
+    "Raw": true,
+    "api": true,
+    "application/json": true,
+    "extreme-low": true,
+    "glb": true,
+    "medium": true,
+    "rodin": true,
+    "v2": true
+  },
+  "Aliases": null,
+  "PublicHosts": {
+    "api.hyper3d.com": true,
+    "file.hyper3d.com": true
+  },
+  "Projection": null,
+  "QueryKeys": {}
+}

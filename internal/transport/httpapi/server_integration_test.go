@@ -1709,6 +1709,21 @@ func newHTTPHarnessWithCatalogAndProviders(
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The web balance route reads through the shared cache the Schema declares,
+	// as the application does (#385).
+	var providerBalances httpapi.ProviderBalanceReader
+	if policy := applicationSchema.StepPolicy; policy != nil &&
+		policy.BalanceCacheSeconds > 0 && policy.BalanceReadTimeoutSeconds > 0 {
+		balanceCache, cacheErr := provideraccounts.NewCache(providerAccountService, provideraccounts.CacheConfig{
+			TTL:     time.Duration(policy.BalanceCacheSeconds) * time.Second,
+			Timeout: time.Duration(policy.BalanceReadTimeoutSeconds) * time.Second,
+			Logger:  harnessLogger(t),
+		})
+		if cacheErr != nil {
+			t.Fatal(cacheErr)
+		}
+		providerBalances = balanceCache
+	}
 	administrationBalanceSummaryService, err :=
 		administration.NewBalanceSummaryService(
 			administration.BalanceSummaryServiceConfig{
@@ -1965,6 +1980,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		},
 		PromptEnhancer:        promptEnhancer,
 		ProviderAccounts:      providerAccountService,
+		ProviderBalances:      providerBalances,
 		AssetProxy:            notFoundAssetProxy{},
 		LegacyGeneratedImages: legacyGeneratedImages,
 		Application:           applicationSchema,

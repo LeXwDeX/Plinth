@@ -464,6 +464,16 @@ export interface ProductSchema {
       task_polling_interval_milliseconds: number;
       harness_refresh_milliseconds: number;
       harness_save_debounce_milliseconds: number;
+      /** #385: how often the session's pending paid steps are read while a turn or task runs. */
+      pending_approvals_refresh_milliseconds: number;
+      /**
+       * #385: how the repeating reads slow down while nothing changes and nothing runs: the wait is multiplied by
+       * `backoff_factor` after each read that found nothing new, up to `max_interval_milliseconds`.
+       */
+      idle_polling: {
+        backoff_factor: number;
+        max_interval_milliseconds: number;
+      };
       session_menu_page_size: number;
       session_menu_search_debounce_milliseconds: number;
       session_title_refresh_attempts: number;
@@ -1784,6 +1794,14 @@ export interface ChatProductSchema {
     connection_timeout_milliseconds: number;
     fallback_poll_milliseconds: number;
     reconnect_check_delay_milliseconds: number;
+    /**
+     * #375: how long an open chat stream may deliver no frame (the visible heartbeat counts) before
+     * the client closes it and reconnects from its last event id. Always longer than the server's
+     * heartbeat interval.
+     */
+    stream_silence_milliseconds: number;
+    /** #375: how many such reconnects in a row may get no frame before the stream counts as interrupted. */
+    stream_reconnect_attempts: number;
     option_storage_key: string;
     add_images_event_name: string;
     image_mime_prefix: string;
@@ -1946,6 +1964,8 @@ export interface ChatProductSchema {
       generating: string;
       /** Shown while a model round has no visible output yet (#285). */
       thinking?: string;
+      /** Shown from the first fragment of a tool call the model writes until it runs (#375). */
+      preparing_tool?: string;
     };
   };
 }
@@ -2065,6 +2085,12 @@ export interface ChatStreamEventTypesSchema {
   done: string;
   /** Content-free "the model is thinking" status event (#285); optional. */
   thinking?: string;
+  /**
+   * #375: the visible heartbeat the server writes while a turn is quiet: a data frame without an
+   * id, so it never moves the replay cursor and never carries progress. The client only uses it to
+   * tell a quiet stream from a dead one. Optional: absent, the server writes an invisible comment.
+   */
+  heartbeat?: string;
 }
 
 export interface ChatSkillCatalogFieldsSchema {

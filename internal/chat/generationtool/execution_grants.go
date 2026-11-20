@@ -539,7 +539,5 @@ func (executor *Executor) stepCapResult(ctx context.Context, command chat.ToolCo
 		"{used}", strconv.Itoa(summary.Used),
 		"{cap}", strconv.Itoa(summary.Cap),
 	).Replace(text)
-	result := executor.failure(command, "", text)
-	result.NoSubmission = true
-	return result
+	return executor.refusal(command, refusalStepCap, text)
 }

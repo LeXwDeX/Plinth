@@ -393,6 +393,7 @@ func (executor *Executor) SelectionError(command chat.ToolCommand) string {
 		return ""
 	}
 	if executor.userModel(command) == "" && command.Tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
+		executor.logRefusal(command, refusalModelRequired)
 		return executor.localized(command, command.Tool.ModelRequiredMessage)
 	}
 	return ""
@@ -462,9 +463,7 @@ func (executor *Executor) execute(
 	// starts a fresh count. An already accepted Task is observed above and is
 	// never refused by this limit.
 	if refusal := executor.conceptSketchLimit(ctx, command); refusal != "" {
-		result := executor.failure(command, "", refusal)
-		result.NoSubmission = true
-		return result, nil
+		return executor.refusal(command, refusalConceptSketchLimit, refusal), nil
 	}
 	var arguments map[string]json.RawMessage
 	if err := json.Unmarshal(command.Call.Arguments, &arguments); err != nil {
@@ -477,9 +476,7 @@ func (executor *Executor) execute(
 	if executor.canvasTurn(command) && command.Tool.CanvasSource == canvasSourceRefuse {
 		// The person chose the canvas; a tool that reads no image would drop
 		// it. Nothing is submitted and the Agent is told which tools fit.
-		result := executor.failure(command, "", executor.canvasRefusal(command))
-		result.NoSubmission = true
-		return result, nil
+		return executor.refusal(command, refusalCanvasSource, executor.canvasRefusal(command)), nil
 	}
 	var turnReferenceURLs []string
 	// A multiview step (#65) takes its pictures and views from the person's
@@ -491,9 +488,7 @@ func (executor *Executor) execute(
 		return result, err
 	}
 	if refusal != "" {
-		result := executor.failure(command, "", refusal)
-		result.NoSubmission = true
-		return result, nil
+		return executor.refusal(command, refusalMultiviewSelection, refusal), nil
 	}
 	if multiview != nil {
 		for _, name := range []string{executor.chat.ThreeView.Multiview.ViewsArgument,
@@ -525,15 +520,11 @@ func (executor *Executor) execute(
 		anchorRefusal = executor.anchorInvalid(command, "锚点参考图不可用")
 	}
 	if anchorRefusal != "" {
-		result := executor.failure(command, "", anchorRefusal)
-		result.NoSubmission = true
-		return result, nil
+		return executor.refusal(command, refusalVisualAnchor, anchorRefusal), nil
 	}
 	styleReferenceURLs, stylePurposes, styleReferenceErr := executor.styleReferenceURLs(command)
 	if styleReferenceErr != nil {
-		result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
-		result.NoSubmission = true
-		return result, nil
+		return executor.refusal(command, refusalStyleLock, executor.styleLockUnavailableMessage(command)), nil
 	}
 	// A style anchor is auto-attached without an argument, so its handles join
 	// the identity anchors' for the unavailable-picture refusal (#250). The
@@ -559,9 +550,7 @@ func (executor *Executor) execute(
 			}
 			if position < 0 || slices.Contains(referenceURLs[position+1:], resolved[0].URL) || (executor.canvasTurn(command) && position != 0) {
 				message := strings.ReplaceAll(executor.chat.Context.ReferencePurposeInvalidTemplate, "{handle}", handle)
-				result := executor.failure(command, "", message)
-				result.NoSubmission = true
-				return result, nil
+				return executor.refusal(command, refusalReferencePurpose, message), nil
 			}
 		}
 	}
@@ -580,9 +569,7 @@ func (executor *Executor) execute(
 			return result, err
 		}
 		if refusal != "" {
-			result := executor.failure(command, "", refusal)
-			result.NoSubmission = true
-			return result, nil
+			return executor.refusal(command, refusalOfferingChoice, refusal), nil
 		}
 		offering, capability = selected, selected.Capability
 	} else if command.Tool.ModelArgument != "" {
@@ -596,15 +583,13 @@ func (executor *Executor) execute(
 			return result, err
 		}
 		if choice.Refusal != "" {
-			return executor.modelChoiceFailure(command, choice.Refusal), nil
+			return executor.modelChoiceFailure(command, choice.Code, choice.Refusal), nil
 		}
 		offering = choice.Offering
 	} else {
 		model := executor.userModel(command)
 		if model == "" && command.Tool.RequireUserModel && !executor.fallbackModelAllowed(command) {
-			result := executor.failure(command, "", command.Tool.ModelRequiredMessage)
-			result.NoSubmission = true
-			return result, nil
+			return executor.refusal(command, refusalModelRequired, command.Tool.ModelRequiredMessage), nil
 		}
 		offering, err = executor.selectOffering(
 			capability,
@@ -624,16 +609,12 @@ func (executor *Executor) execute(
 	offering, maskRefusal := executor.ensureMaskOffering(command, capability,
 		modelInputFor(command, referenceURLs, multiview), offering)
 	if maskRefusal != "" {
-		result := executor.failure(command, "", maskRefusal)
-		result.NoSubmission = true
-		return result, nil
+		return executor.refusal(command, refusalMask, maskRefusal), nil
 	}
 	if multiview != nil {
 		group := !multiview.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
 		if refusal := executor.fitMultiviewViews(command, offering, multiview, group); refusal != "" {
-			result := executor.failure(command, "", refusal)
-			result.NoSubmission = true
-			return result, nil
+			return executor.refusal(command, refusalMultiviewViews, refusal), nil
 		}
 		if declaresReferenceViews(offering) {
 			// An order-only Offering has no view-label parameter: the pictures
@@ -646,9 +627,7 @@ func (executor *Executor) execute(
 	}
 	if groups.Identity+groups.Style > 0 {
 		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {
-			result := executor.failure(command, "", executor.styleLockUnavailableMessage(command))
-			result.NoSubmission = true
-			return result, nil
+			return executor.refusal(command, refusalStyleLock, executor.styleLockUnavailableMessage(command)), nil
 		}
 	}
 	// references records a cut of the pictures to fewer than the turn gave.
@@ -682,9 +661,7 @@ func (executor *Executor) execute(
 				return result, err
 			}
 			if refusal != "" {
-				result := executor.failure(command, "", refusal)
-				result.NoSubmission = true
-				return result, nil
+				return executor.refusal(command, refusalModelSource, refusal), nil
 			}
 			referenceURLs = selection.urls()
 		}
@@ -732,9 +709,7 @@ func (executor *Executor) execute(
 		}
 		override, refusal := executor.review3DInput(ctx, command, gateReferences)
 		if refusal != "" {
-			result := executor.failure(command, "", refusal)
-			result.NoSubmission = true
-			return result, nil
+			return executor.refusal(command, refusalInputGate, refusal), nil
 		}
 		if override != "" {
 			executor.logger.Info("image-to-3D input gate overridden",
@@ -745,7 +720,13 @@ func (executor *Executor) execute(
 
 	purposes, refusal := executor.referencePurposes(command, arguments, referenceURLs, serverPurposes)
 	if refusal != "" {
-		result := executor.failure(command, "", refusal)
+		return executor.refusal(command, refusalReferencePurpose, refusal), nil
+	}
+	// #376: the marks follow the final reference order, so they are bound only
+	// now, after the model's limit and the three-view replacement are applied.
+	imageLabels, labelRefusal := executor.referenceImageLabels(command, arguments, offering, referenceURLs)
+	if labelRefusal != "" {
+		result := executor.failure(command, "", labelRefusal)
 		result.NoSubmission = true
 		return result, nil
 	}
@@ -814,6 +795,7 @@ func (executor *Executor) execute(
 		referenceURLs,
 		skillOverrides,
 		anchorHandles,
+		imageLabels,
 	)
 	if err != nil {
 		if result, refused := executor.refuseReference(command, err); refused {
@@ -1432,6 +1414,7 @@ func (executor *Executor) buildInput(
 	referenceURLs []string,
 	skillOverrides map[generation.ParameterSemantic]json.RawMessage,
 	anchorHandles map[string]string,
+	imageLabels []string,
 ) (json.RawMessage, []generation.AssetID, error) {
 	allowed := make(
 		map[string]generation.Parameter,
@@ -1621,6 +1604,12 @@ func (executor *Executor) buildInput(
 			input[referenceParameter] = assets[0]
 		} else {
 			input[referenceParameter] = assets
+		}
+		// #376: one mark per picture, in the order of the pictures just resolved.
+		if len(imageLabels) > 0 {
+			if labels, declared := semanticParameter(offering, generation.SemanticReferenceImageLabels); declared {
+				input[labels.Name] = imageLabels
+			}
 		}
 	}
 	overrideValues := map[string]string{

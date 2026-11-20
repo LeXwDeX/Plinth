@@ -794,6 +794,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	chatService.SetContextStore(repository, applicationSchema.Chat.ContextCompaction.ListLimit)
 	harnessResolver := &resolve.Service{UploadedModels: uploadedModels, Store: repository, Schema: applicationSchema.Chat.Harness, Tools: applicationSchema.Chat.Tools, Catalog: taskCatalog, Gateway: module}
 	chatService.SetHarnessSnapshotResolver(harnessResolver.Snapshot)
+	// A structured multiview request names the model of its turn (#373): the
+	// turn starts only when that model is an enabled, runtime-available
+	// Offering that takes several views, so a model that cannot run is refused
+	// before the Agent spends a turn on it.
+	if capabilities := multiviewToolCapabilities(applicationSchema.Chat); len(capabilities) > 0 {
+		chatService.SetMultiviewModelValid(func(model string) bool {
+			return generationtool.MultiviewModelAvailable(module.Offerings(""), capabilities, module.OfferingAvailable, model)
+		})
+	}
 	canvasImageService, err := canvas.NewImageService(
 		canvas.ImageServiceConfig{
 			References:        referenceResolver,
@@ -2140,6 +2149,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		},
 		PromptEnhancer:        promptEnhancer,
 		ProviderAccounts:      providerAccountService,
+		ProviderBalances:      providerBalanceReader(stepBalanceCache),
 		AssetProxy:            assetProxy,
 		LegacyGeneratedImages: legacyGeneratedImages,
 		Application:           transportApplicationSchema,
@@ -2310,6 +2320,16 @@ func configuredRuntimeSetting(
 		return value
 	}
 	return strings.TrimSpace(setting.Default)
+}
+
+// providerBalanceReader hands the shared balance cache to the web balance route
+// (#385), or nothing when the Schema does not declare one. The check keeps a nil
+// *Cache from becoming a non-nil interface.
+func providerBalanceReader(cache *provideraccounts.Cache) httpapi.ProviderBalanceReader {
+	if cache == nil {
+		return nil
+	}
+	return cache
 }
 
 func buildProviderAccounts(

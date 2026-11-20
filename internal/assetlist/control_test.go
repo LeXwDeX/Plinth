@@ -412,14 +412,18 @@ func TestListAndGetAttachRunSummary(t *testing.T) {
 		ItemCounts: assetlist.ItemCounts{Todo: 1, Skipped: 2},
 	}
 
+	// The detail carries its items, so its counts are those items' states
+	// (one todo item), not the separately read summary counts.
 	read, err := service.Get(ctx, "owner-a", "prj_1", list.ID)
 	if err != nil || read.Run == nil || read.Run.Status != assetlist.RunPaused ||
 		read.Run.PauseReason != assetlist.PauseUser || read.Run.Version != "token-1" ||
-		read.Run.ItemCounts.Todo != 1 || read.Run.ItemCounts.Skipped != 2 {
+		read.Run.ItemCounts != (assetlist.ItemCounts{Todo: 1}) {
 		t.Fatalf("get run = %+v, %v", read.Run, err)
 	}
+	// The list summaries carry no items and keep the summary counts.
 	lists, err := service.List(ctx, "owner-a", "prj_1")
-	if err != nil || len(lists) != 1 || lists[0].Run == nil || lists[0].Run.Version != "token-1" {
+	if err != nil || len(lists) != 1 || lists[0].Run == nil || lists[0].Run.Version != "token-1" ||
+		lists[0].Run.ItemCounts != (assetlist.ItemCounts{Todo: 1, Skipped: 2}) {
 		t.Fatalf("list runs = %+v, %v", lists, err)
 	}
 
@@ -443,5 +447,62 @@ func TestListAndGetAttachRunSummary(t *testing.T) {
 	withoutStore, _, _ := newService(t, nil)
 	if _, err := withoutStore.RunSummaryByList(ctx, "owner-a", "prj_1", list.ID); !errors.Is(err, assetlist.ErrRunUnavailable) {
 		t.Fatalf("no run store = %v; want ErrRunUnavailable", err)
+	}
+}
+
+// The detail reads its items and the run summary in two queries, so an item
+// can change state between them (#390). The counts in one answer must agree
+// with the items in that same answer: a summary already counting both items
+// in review must not sit beside items still todo.
+func TestGetCountsTheItemsItReturns(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newControlRunStore()
+	service, _ := newControlService(t, store)
+	input := proposal()
+	input.Items = append(input.Items, assetlist.ItemInput{Kind: "character", Name: "Sidekick"})
+	list, err := service.Propose(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.summaries[list.ID] = assetlist.RunSummary{
+		Status: assetlist.RunRunning, Version: "token-2",
+		ItemCounts: assetlist.ItemCounts{Review: 2},
+	}
+
+	read, err := service.Get(ctx, "owner-a", "prj_1", list.ID)
+	if err != nil || read.Run == nil {
+		t.Fatalf("get = %+v, %v", read.Run, err)
+	}
+	var fromItems assetlist.ItemCounts
+	for _, item := range read.Items {
+		fromItems.Add(item.State, 1)
+	}
+	if len(read.Items) != 2 || read.Run.ItemCounts != fromItems ||
+		read.Run.ItemCounts != (assetlist.ItemCounts{Todo: 2}) {
+		t.Fatalf("counts %+v disagree with items %+v", read.Run.ItemCounts, read.Items)
+	}
+	if read.Run.Status != assetlist.RunRunning || read.Run.Version != "token-2" {
+		t.Fatalf("run state = %+v; want the summary's status and version", read.Run)
+	}
+	if store.summaries[list.ID].ItemCounts != (assetlist.ItemCounts{Review: 2}) {
+		t.Fatal("deriving the detail counts must not change the stored summary")
+	}
+}
+
+// Add counts each documented state and ignores anything else, as the SQL
+// summary does.
+func TestItemCountsAddCountsEveryDocumentedState(t *testing.T) {
+	t.Parallel()
+	var counts assetlist.ItemCounts
+	for _, state := range []string{
+		assetlist.StateTodo, assetlist.StateWorking, assetlist.StateReview, assetlist.StateAccepted,
+		assetlist.StateReturned, assetlist.StateFailed, assetlist.StateSkipped, "unknown", "",
+	} {
+		counts.Add(state, 2)
+	}
+	want := assetlist.ItemCounts{Todo: 2, Working: 2, Review: 2, Accepted: 2, Returned: 2, Failed: 2, Skipped: 2}
+	if counts != want {
+		t.Fatalf("counts = %+v; want %+v", counts, want)
 	}
 }

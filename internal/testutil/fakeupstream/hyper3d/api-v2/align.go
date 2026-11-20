@@ -17,7 +17,14 @@ const OfficialBase = "https://api.hyper3d.com/api/v2"
 
 // referencePNG is a shaded sphere on a white background: an object the image to
 // 3D endpoint can find.
-func referencePNG() []byte {
+func referencePNG() []byte { return spherePNG(nil) }
+
+// markRadius is the radius of the dark mark viewPNG draws on the sphere.
+const markRadius = 28
+
+// spherePNG is referencePNG with, when mark is not nil, a dark disc of
+// markRadius centered there.
+func spherePNG(mark *image.Point) []byte {
 	const size = 512
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	for y := 0; y < size; y++ {
@@ -28,11 +35,32 @@ func referencePNG() []byte {
 				shade := uint8(220 - int(d2/180/180*140))
 				img.Set(x, y, color.RGBA{R: shade, G: shade / 2, B: 60, A: 255})
 			}
+			if mark != nil {
+				mx, my := x-mark.X, y-mark.Y
+				if mx*mx+my*my < markRadius*markRadius {
+					img.Set(x, y, color.RGBA{R: 30, G: 20, B: 20, A: 255})
+				}
+			}
 		}
 	}
 	var out bytes.Buffer
 	_ = png.Encode(&out, img)
 	return out.Bytes()
+}
+
+// viewPNG is one of the three pictures of the labeled request: the shaded
+// sphere of referencePNG with a dark mark that sits in a different place in
+// each (front: the middle, left: right of the middle, back: no mark). The
+// request needs three pictures that differ in their bytes and in what they show,
+// as three views of one object do; it says nothing about the model produced.
+func viewPNG(label string) []byte {
+	switch label {
+	case "F":
+		return spherePNG(&image.Point{X: 256, Y: 256})
+	case "L":
+		return spherePNG(&image.Point{X: 256 + 110, Y: 256})
+	}
+	return spherePNG(nil)
 }
 
 func statusPoll() *align.Poll {
@@ -107,6 +135,36 @@ func Profile() align.Profile {
 		{Field: "model", Filename: "model.glb", MediaType: "model/gltf-binary", Data: tinyGLB},
 		{Field: "image", Filename: "reference.png", MediaType: "image/png", Data: referencePNG()},
 	}, "")...)
+	// Labeled multi-view request (#376). Rodin Gen-2.5 takes image_label as an
+	// array that matches images by position (F, FL, FR, B, BL, BR, L, R, U, D or
+	// ?; more labels than images is IMAGE_LABEL_LENGTH_TOO_LONG). The docs do not
+	// say how a multipart request encodes the array. This request sends the
+	// encoding `images` already uses: one part per value, image_label repeated in
+	// picture order, the labels ahead of the files. Everything else is the
+	// cheapest Gen-2.5 request (the Catalog's own tier is Extreme-High). Run these
+	// three steps alone, once, after the user approved the real call
+	// (-steps rodin-labeled,rodin-labeled-status,rodin-labeled-download). Both this
+	// request and the probe below ran on 2026-11-19 (#376): the probe was refused
+	// and this request accepted, so the encoding is confirmed (see RequestNotes).
+	views := []align.File{
+		{Field: "images", Filename: "front.png", MediaType: "image/png", Data: viewPNG("F")},
+		{Field: "images", Filename: "left.png", MediaType: "image/png", Data: viewPNG("L")},
+		{Field: "images", Filename: "back.png", MediaType: "image/png", Data: viewPNG("B")},
+	}
+	steps = append(steps, submitSteps("rodin-labeled", "rodin", cheapGeneration(
+		align.Field{Name: "image_label", Value: "F"}, align.Field{Name: "image_label", Value: "L"},
+		align.Field{Name: "image_label", Value: "B"},
+	), views, "")...)
+	// Probe for the same encoding, run before rodin-labeled: two pictures and
+	// three repeated labels. If Rodin reads the repeated parts as one array it
+	// refuses the request with IMAGE_LABEL_LENGTH_TOO_LONG before generating;
+	// if it accepts it, the parts were not read as an array and rodin-labeled
+	// must not be sent with this encoding. Counted as paid, since an accepted
+	// request is billed.
+	steps = append(steps, submitSteps("rodin-label-overflow", "rodin", cheapGeneration(
+		align.Field{Name: "image_label", Value: "F"}, align.Field{Name: "image_label", Value: "L"},
+		align.Field{Name: "image_label", Value: "B"},
+	), views[:2], "")...)
 	return align.Profile{
 		Provider: "hyper3d", API: "api-v2", Official: OfficialBase, Steps: steps,
 		Capture: align.CaptureConfig{
@@ -124,6 +182,7 @@ func Profile() align.Profile {
 			"第一段的 texture 用了过小的占位 GLB，三个子作业以 Failed 结束（status 响应带顶层 message `Invalid input.`），已计费；第三段改用 bang 产出的 GLB 重发，是新的输入而非重放。该 Failed 响应未入库为样本，fake 的 Failed 状态按它的结构构造。",
 			"官方在请求缺少提示词与图片时返回 HTTP 201 + `{\"error\":\"INVALID_REQUEST\"}`（不是 4xx）；fake 复现。",
 			"第三阶段（2026-10-29）补采 Failed 状态：`texture-failed` 三步（提交、轮询、下载）单独成段运行了两次（标签 failed1、failed2）。texture 请求的模型用测试夹具里 400 字节的单三角形 GLB，官方受理（HTTP 201）后第一次轮询三个子作业全部 `Failed`，顶层 `message` 为 `Invalid input.`，`download` 返回空列表；两次结果相同，各计 1 次付费请求。这一段不在上面三段合并的报告里（原始运行已不在工作树外保留），Failed 响应作为独立样本 `hyper3d-api-v2-texture-failed` 入库，漂移测试 `TestFailedPollMatchesTheRealSample` 对它逐字段比较。",
+			"2026-11-19（#376）补采 image_label：两次真实请求都经用户批准，各自单独成段运行（标签 probe376、labeled376），不在上面合并的报告里，共 2 个付费步骤、实际花费 0.5 credit。`rodin-label-overflow`：两张图加重复的三个 image_label 部分（F、L、B），官方在生成前以 HTTP 201 + `{\"error\":\"IMAGE_LABEL_LENGTH_TOO_LONG\",\"message\":\"Input is invalid\"}` 拒绝，未扣费（余额前后相同），说明同名的重复部分被读成一个数组，其长度与图片数比较；fake 此前的 message 是文档里的描述，已改为 `Input is invalid`。`rodin-labeled`：前、左、后三张图，三个 image_label 部分 F、L、B 按图序排在文件之前（Gen-2.5-Extreme-Low、texture_mode=extreme-low、quality=medium、Raw、PBR、glb），官方受理，consumed 0.5，响应带自动生成的 `prompt`，6 个子作业由 Generating 与 Waiting 走到 Done，交付 19,371,768 字节的 PBR GLB 与 2,034 字节的 WebP 预览（fake 不复现文件大小）。fake 只许页面列出的标签取值（F、FL、FR、B、BL、BR、L、R、U、D、?），页外取值按 INVALID_REQUEST 拒绝（错误码与文案构造自页面，没有观察到真实的拒绝）；不校验少于图片数的标签：没有观察到被拒绝，不编造错误码（Plinth 在本地拒绝这种请求，从不发送）。脱敏样本入库为 `evidence-376-rodin-label-overflow` 与 `evidence-376-rodin-labeled`（对照证据，不是 fake 取模板的样本；采集把金额换成占位，样本里 consumed 为 0，真实回执为 0.5），`evidence_376_test.go` 逐项核对 fake 的回答。",
 		},
 		Notes: align.Notes{},
 	}

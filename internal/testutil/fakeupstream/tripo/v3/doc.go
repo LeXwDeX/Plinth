@@ -108,6 +108,34 @@
 // delivers a GLB, and the multiview endpoint is assumed to behave like the other
 // two.
 //
+// Multiview model and its 3MF export (#386). One approved real run of 2026-11-19
+// (evidence-386-multiview-model.candidate.json and evidence-386-convert-3mf.candidate.json,
+// held to the fake by evidence_multiview_3mf_test.go) requested a multiview model
+// at Plinth's production defaults from three views and then its 3MF export. It
+// settled what had been constructed from the documentation:
+//
+//   - the poll of a multiview_to_model task shows the request's own parameters under
+//     input, the request's model as model_version and a files array of four
+//     entries (front, left, back, right: a stored object each, null for a view that
+//     was not sent), where the fake used to answer with the input of a rig task
+//     because the poll template skipped the image_to_model base (multiview.go,
+//     pollBody);
+//   - the render of that task is a WebP file (rendered_image.webp, binary/octet-stream
+//     like every artifact), where the text, image, texture and decimation tasks of
+//     2026-10-29 delivered PNG bytes;
+//   - the 3MF a conversion delivers is a package of three ZIP members, every one
+//     framed with ZIP64 however small, whose model root declares Tripo's vendor
+//     namespace https://www.tripo3d.ai/ns/aigc/1.0 for one AIGC label. The fake
+//     delivers a package of that shape (tripo3mf.go), not the generic 3MF fixture,
+//     because Plinth's archive isolation refused the real file for that namespace.
+//
+// Not modelled because the sanitized evidence cannot show it or nothing real backs
+// it: the price of both tasks (70 and 5 credits) shows from the queued poll on in
+// the real run, where the fake keeps the sample's value until the task runs; the
+// real multiview poll shows the render (output.rendered_image_url) from progress 99,
+// before the model, where the fake's finished poll shows both; and a parameter the
+// request leaves out is not echoed, because the run sent every parameter.
+//
 // Balance scenarios. insufficient-balance and key-quota are credit refusals of
 // task creation, so they never apply to POST /files; the files page defines no
 // such refusal for an upload.

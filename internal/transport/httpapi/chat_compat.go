@@ -304,6 +304,14 @@ func (s *Server) legacyDeleteChatSession(
 			http.StatusNotFound,
 			s.application.Chat.Presentation.Messages.SessionNotFound,
 		)
+	case errors.Is(err, chat.ErrSessionDeletionBlocked):
+		// A SkillRun of the session has work in flight (#384). Nothing was
+		// stopped or deleted; the person can wait or decide and delete again.
+		s.writeChatError(
+			writer,
+			http.StatusConflict,
+			s.application.Chat.Presentation.Messages.SessionDeleteBlocked,
+		)
 	case err != nil:
 		s.writeChatInternalError(writer, err)
 	default:
@@ -536,6 +544,14 @@ func (s *Server) legacySendChatMessage(
 		)
 	case errors.Is(err, chat.ErrInvalidMultiview):
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidParameters)
+	case errors.Is(err, chat.ErrMultiviewModelUnavailable):
+		// The person's model of this turn cannot run: say so now (#373). A
+		// Schema without the text keeps the generic parameter refusal.
+		message := s.application.Chat.Presentation.Messages.MultiviewModelUnavailable
+		if message == "" {
+			message = s.application.Chat.Presentation.Messages.InvalidParameters
+		}
+		s.writeChatError(writer, http.StatusBadRequest, message)
 	case errors.Is(err, chat.ErrInvalidInputSource):
 		s.writeChatError(writer, http.StatusBadRequest, s.application.Chat.Presentation.Messages.InvalidInputSource)
 	case errors.Is(err, chat.ErrCanvasSourceMissing):
@@ -712,6 +728,7 @@ func (s *Server) legacyChatStream(
 		) * time.Millisecond,
 	)
 	defer heartbeat.Stop()
+	heartbeatFrame := s.chatHeartbeatFrame()
 	for {
 		select {
 		case <-request.Context().Done():
@@ -730,10 +747,7 @@ func (s *Server) legacyChatStream(
 			if !setDeadline() {
 				return
 			}
-			if _, err := io.WriteString(
-				writer,
-				s.application.Chat.Stream.HeartbeatFrame,
-			); err != nil {
+			if _, err := io.WriteString(writer, heartbeatFrame); err != nil {
 				return
 			}
 			if !flush() {
@@ -741,6 +755,27 @@ func (s *Server) legacyChatStream(
 			}
 		}
 	}
+}
+
+// chatHeartbeatFrame is what the stream writes while a turn is quiet. With
+// stream.event_types.heartbeat declared (#375) it is a data frame an EventSource
+// can observe, {"<event_fields.type>":"<heartbeat>"} in the Schema's prefix and
+// suffix, written without an id line: it is not a stored event, takes no event
+// id and so never moves the client's replay cursor, and it carries no progress.
+// Without that declaration it stays the comment frame, which no EventSource
+// handler sees.
+func (s *Server) chatHeartbeatFrame() string {
+	stream := s.application.Chat.Stream
+	if stream.EventTypes.Heartbeat == "" {
+		return stream.HeartbeatFrame
+	}
+	encoded, err := json.Marshal(map[string]string{
+		stream.EventFields.Type: stream.EventTypes.Heartbeat,
+	})
+	if err != nil {
+		return stream.HeartbeatFrame
+	}
+	return stream.EventPrefix + string(encoded) + stream.EventSuffix
 }
 
 func (s *Server) writeChatEvent(

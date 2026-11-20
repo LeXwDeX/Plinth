@@ -21,7 +21,8 @@ import (
 type Protocol = generation.ImageProtocol
 
 // EncodeMultipart 按 Offering 声明生成 multipart/form-data 请求体。
-// 标量参数写为表单字段，资产参数写为文件分片；编码方式只来自 Schema，
+// 标量参数写为表单字段，资产参数写为文件分片，string-array 参数按元素顺序
+// 重复写同名表单字段（空数组不写）；编码方式只来自 Schema，
 // 不按模型或能力分支。request_template 字段先写（按名称排序）；与模板
 // 字段同名的标量参数以自己的值顶替模板值并保持该字段的位置（参数缺席或
 // 被 omit_when 省略时仍发模板值），其余参数按声明顺序随后写出（#279）。
@@ -158,6 +159,18 @@ func writeMultipartForm(
 			}
 			continue
 		}
+		if p.Type == "string-array" {
+			texts, err := arrayFieldTexts(p, value)
+			if err != nil {
+				return err
+			}
+			for _, text := range texts {
+				if err := form.WriteField(field, text); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		text, err := scalarFieldText(p, value)
 		if err != nil {
 			return err
@@ -167,6 +180,31 @@ func writeMultipartForm(
 		}
 	}
 	return nil
+}
+
+// arrayFieldTexts is the form text of each element of a string-array parameter,
+// in order: the field is written once per element, as the asset parts of an
+// asset-array are (Rodin's image_label, one mark per picture, #376). An empty or
+// null array writes no field at all, so a request without elements is the same
+// as one without the parameter. Each element passes through the same wire_values
+// or wire_template mapping as a scalar value.
+func arrayFieldTexts(p generation.Parameter, value any) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("参数 %s 必须是数组", p.Name)
+	}
+	texts := make([]string, 0, len(items))
+	for _, item := range items {
+		text, err := scalarFieldText(p, item)
+		if err != nil {
+			return nil, err
+		}
+		texts = append(texts, text)
+	}
+	return texts, nil
 }
 
 // scalarFieldText is the form text of a scalar parameter value after its
