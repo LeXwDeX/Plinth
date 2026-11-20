@@ -1762,7 +1762,9 @@ func (orchestrator *Orchestrator) Process(
 				assistant.ToolCalls,
 				agentCallsToMessages(completion.ToolCalls)...,
 			)
-			assistant.Content += completion.Content
+			// #402: a later round's text is a new paragraph, not a
+			// continuation of the sentence before it.
+			assistant.Content = joinNarration(assistant.Content, completion.Content)
 		}
 		orchestrator.freezeToolCallKeys(command.SessionID, assistant.ToolCalls, storedCalls)
 		if len(completion.ToolCalls) == 0 {
@@ -1954,6 +1956,7 @@ func (orchestrator *Orchestrator) Process(
 		// 续跑流同样要过滤 DSML：模型可能在总结中继续发起调用。
 		streamFilter := dsml.NewFilter(dsmlSchema)
 		followUpRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
+		followUpRound.continueAfter(assistant.Content)
 		next, sentFollowUp, streamErr := orchestrator.streamAgent(
 			processCtx,
 			command,
@@ -2633,6 +2636,12 @@ type thinkingRound struct {
 	sessionID    string
 	active       bool
 	toolShown    bool
+	// following and shown are set on a later round of a reply (#402): shown is
+	// the reply's text up to the round's own text, so the round's first visible
+	// text can start a new paragraph. Once that text has been sent, following
+	// is false and shown is no longer kept.
+	following bool
+	shown     string
 }
 
 func (orchestrator *Orchestrator) startThinkingRound(
@@ -2695,10 +2704,30 @@ func (round *thinkingRound) receive(delta agents.Delta, filter *dsml.Filter) err
 	return filter.Push(delta.Content, round.emitText)
 }
 
+// continueAfter marks the round as a later round of a reply whose text so far
+// is shown (#402). The round's first visible text is sent with the paragraph
+// break joinNarration puts in the stored message.
+func (round *thinkingRound) continueAfter(shown string) {
+	round.following, round.shown = true, shown
+}
+
 // emitText appends visible text; text that is not blank ends the status.
 func (round *thinkingRound) emitText(content string) error {
 	if strings.TrimSpace(content) != "" {
 		round.active = false
+	}
+	if round.following {
+		// The break goes before the first visible character and after any
+		// whitespace the round opened with (joinNarration), so the events joined
+		// are the stored text.
+		visible := strings.TrimLeftFunc(content, unicode.IsSpace)
+		leading := content[:len(content)-len(visible)]
+		if visible == "" {
+			round.shown += content
+		} else {
+			content = leading + narrationBreak(round.shown+leading) + visible
+			round.following, round.shown = false, ""
+		}
 	}
 	return round.orchestrator.appendTextEvent(round.ctx, round.sessionID, content)
 }
@@ -3632,7 +3661,9 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // refusal of a request with pictures says the model may not read images
 // (#253), an upstream content-safety refusal says the input tripped it (#35),
 // a used-up upstream balance or key quota says so (#120), a picture the
-// model drew itself says it was not kept;
+// model drew itself says it was not kept, a request field the upstream
+// refused names that field (#401: only the plain field name is shown, the
+// upstream's own wording stays in the log);
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
@@ -3650,6 +3681,9 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	}
 	if errors.Is(err, agents.ErrInlineImageOutput) && messages.AgentInlineImageOutput != "" {
 		return orchestrator.text(ctx, messages.AgentInlineImageOutput)
+	}
+	if param, rejected := agents.RequestRejectedParam(err); rejected && messages.AgentRequestRejected != "" {
+		return strings.ReplaceAll(orchestrator.text(ctx, messages.AgentRequestRejected), "{param}", param)
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
 }

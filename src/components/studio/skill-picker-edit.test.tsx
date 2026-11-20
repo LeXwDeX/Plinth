@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-// #152: personal Skill rows offer a separate edit action that opens the editor and closes the picker.
+// #152: personal Skill rows offer a separate edit action that opens the editor. #405: the picker is the Skills tab of the
+// settings dialog, so there is no popover to close first: the editor is a dialog above it, and the tab stays where it is.
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -28,16 +29,16 @@ const effective = { skills: [{ id: 'three-view' }, { id: 'personal-a' }] } as ne
 describe('personal Skill edit action (#152)', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('shows edit only on the personal row, prefills it and closes the picker', async () => {
+  it('shows edit only on the personal row and prefills the editor, leaving the Skills tab in place', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ skills: [{ id: 'personal-a' }] }), { status: 200 }))));
     render(<SkillPicker sessionId="s" catalog={catalog} effective={effective} selectedId={null}
       unavailable={false} loading={false} failed={false} disabled={false}
       onSelect={() => undefined} onCreated={() => undefined} onUpdated={() => undefined} onDeleted={() => undefined} />);
-    fireEvent.click(screen.getByTestId('workspace-skill-picker'));
     await waitFor(() => expect(screen.getByTestId('skill-edit')).toBeTruthy());
     expect(screen.getAllByTestId('skill-edit')).toHaveLength(1);
     fireEvent.click(screen.getByTestId('skill-edit'));
-    await waitFor(() => expect(screen.queryByTestId('workspace-skill-picker-panel')).toBeNull());
+    // Nothing is closed: the tab is still there under the editor.
+    expect(screen.getByTestId('workspace-skill-picker-panel')).toBeTruthy();
     const editors = screen.getAllByTestId('creator');
     expect(editors).toHaveLength(2);
     expect(editors[1].getAttribute('data-editing')).toBe('personal-a');
@@ -49,7 +50,6 @@ describe('personal Skill edit action (#152)', () => {
     render(<SkillPicker sessionId="s" catalog={catalog} effective={{ skills: [] } as never} selectedId={null}
       unavailable={false} loading={false} failed={false} disabled={false}
       onSelect={() => undefined} onCreated={() => undefined} onUpdated={() => undefined} onDeleted={() => undefined} />);
-    fireEvent.click(screen.getByTestId('workspace-skill-picker'));
     const row = await screen.findByRole('menuitemradio', { name: /我的水彩/ });
     expect(row.getAttribute('aria-disabled')).toBe('true');
     const editButton = await screen.findByTestId('skill-edit');

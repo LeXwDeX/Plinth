@@ -126,8 +126,8 @@ if [ "$C" = 200 ]; then ok "login"; else bad "login ($C)"; echo "=== ABORT ===";
 C=$(req "$T/schema.json" "$BASE/api/v1/schema")
 SCHEMA_STATUS="$C"
 POLICY=$(jget "$T/schema.json" '(lambda p: "%s|%s" % (p["default_mode"], ",".join(sorted(p["manual_approval_capabilities"]))))(d["schema"]["chat"]["approval_policy"])')
-if [ "$C" = 200 ] && [ "$POLICY" = "budget|image-to-3d,image-to-splat,retexture,text-to-3d" ]; then
-  ok "schema approval policy: default budget (#103); manual only for text-to-3d, image-to-3d, image-to-splat, retexture"
+if [ "$C" = 200 ] && [ "$POLICY" = "auto|image-to-3d,image-to-splat,retexture,text-to-3d" ]; then
+  ok "schema approval policy: default auto (#406); manual only for text-to-3d, image-to-3d, image-to-splat, retexture"
 else
   bad "schema approval policy unexpected ($C '$POLICY')"
 fi
@@ -142,15 +142,19 @@ else
   bad "create session ($C)"; echo "=== SMOKE-L1-AGENT-MODE PASS=$PASS FAIL=$FAIL SKIP=$SKIP ==="; exit 1
 fi
 APPROVAL="$BASE/api/v1/chat/sessions/$SID/approval"
-[ "$(jget "$T/sess.json" 'd["approvalMode"]')" = budget ] && ok "new session response carries approvalMode=budget" || bad "new session approvalMode != budget"
+[ "$(jget "$T/sess.json" 'd["approvalMode"]')" = auto ] && ok "new session response carries approvalMode=auto (the Schema default)" || bad "new session approvalMode != auto"
 C=$(req "$T/o.json" "$APPROVAL" -b "$JAR")
-[ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = budget ] && ok "GET approval: default budget" || bad "GET approval default ($C mode=$(jget "$T/o.json" 'd["approvalMode"]'))"
+[ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = auto ] && ok "GET approval: default auto" || bad "GET approval default ($C mode=$(jget "$T/o.json" 'd["approvalMode"]'))"
 
 put_mode() { # $1=mode → HTTP 状态；响应在 $T/mode.json
   req "$T/mode.json" -X PUT "$APPROVAL" -H 'Content-Type: application/json' -H "Origin: $BASE" -b "$JAR" -d "{\"approvalMode\":\"$1\"}"
 }
+C=$(put_mode budget)
+[ "$C" = 200 ] && [ "$(jget "$T/mode.json" 'd["approvalMode"]')" = budget ] && ok "PUT approval budget" || bad "PUT approval budget ($C)"
+C=$(req "$T/o.json" "$APPROVAL" -b "$JAR")
+[ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = budget ] && ok "GET approval: budget" || bad "GET approval after budget ($C)"
 C=$(put_mode auto)
-[ "$C" = 200 ] && [ "$(jget "$T/mode.json" 'd["approvalMode"]')" = auto ] && ok "PUT approval auto" || bad "PUT approval auto ($C)"
+[ "$C" = 200 ] && [ "$(jget "$T/mode.json" 'd["approvalMode"]')" = auto ] && ok "PUT approval auto (back to the default)" || bad "PUT approval auto ($C)"
 C=$(req "$T/o.json" "$APPROVAL" -b "$JAR")
 [ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = auto ] && ok "GET approval: auto" || bad "GET approval after auto ($C)"
 C=$(put_mode manual)

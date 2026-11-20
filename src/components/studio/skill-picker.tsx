@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { TablePopover, type TableRow } from '@/components/studio/table-popover';
+import { TableSections, type TableRow } from '@/components/studio/table-popover';
 import { SkillCreator, type SkillEditTarget } from '@/components/workspace/skill-creator';
 import type { AgentEffectiveConfiguration } from '@/lib/agent-configuration';
 import type { ChatSkill, ChatSkillCatalog } from '@/lib/chat/browser-client';
@@ -61,7 +61,7 @@ export function skillPickerRows({
       ],
       actions: personalIds.has(skill.id)
         ? [
-          { label: editLabel(skill.displayName), onClick: () => onEdit(skill.id), testId: 'skill-edit', kind: 'edit' as const, closeOnClick: true },
+          { label: editLabel(skill.displayName), onClick: () => onEdit(skill.id), testId: 'skill-edit', kind: 'edit' as const },
           { label: deleteLabel(skill.displayName), onClick: () => onDelete(skill.id), busy: deleting.has(skill.id), testId: 'skill-delete', kind: 'delete' as const },
         ]
         : undefined,
@@ -88,7 +88,11 @@ export interface SkillPickerProps {
   onDeleted?: (id: string) => void;
 }
 
-/** Skill 选择：与模型选择同样的小表格；Skill 不可用于当前模型时该行变暗。 */
+/**
+ * 设置页的「Skills」页（#405）：与模型选择同样的小表格；Skill 不可用于当前模型时该行变暗。没有会话，或本轮正在进行、
+ * 准备时，整张表停用并写明原因（原先这些情况下入口按钮是停用的）。新建与编辑的对话框是这一页的子对话框，
+ * 关闭后回到设置页。
+ */
 export function SkillPicker({
   sessionId, catalog, effective, selectedId, unavailable, loading, failed, disabled, onSelect, onCreated, onUpdated, onDeleted, supportingModels,
 }: SkillPickerProps) {
@@ -142,17 +146,11 @@ export function SkillPicker({
     panel.querySelector<HTMLElement>('[role="menuitemradio"]:not([disabled]):not([aria-disabled="true"])')?.focus();
   }, [removed]);
   const selected = catalog?.skills.find((skill) => skill.id === selectedId);
-  const resolvedSelection = selected && !loading && !failed && !unavailable ? selected : null;
   const selectedReason = selectedId && !loading && (failed || unavailable)
     ? failed ? schemaText(schema, 'ui.workspace.skills.load_failed')
       : selected ? skillUnavailableReason(schema, selected, supportingModels?.[selected.id] ?? [])
         : schemaText(schema, 'ui.workspace.skills.unavailable')
     : undefined;
-  const value = resolvedSelection
-    ? formatSchemaText(schemaText(schema, 'ui.studio.skill.selected'), { name: resolvedSelection.displayName })
-    : `${schemaText(schema, 'ui.studio.skill.short')}${selectedReason ? ' !' : ''}`;
-  const fullValue = resolvedSelection?.displayName ?? schemaText(schema, 'ui.studio.skill.label');
-
   const visibleCatalog = catalog && removed.size > 0
     ? { ...catalog, skills: catalog.skills.filter((skill) => !removed.has(skill.id)) }
     : catalog;
@@ -173,17 +171,17 @@ export function SkillPicker({
     reasonForSkill: (skill) => skillUnavailableReason(schema, skill, supportingModels?.[skill.id] ?? []),
   });
 
+  // The table is off while nothing can be chosen; the short reason is the one the shared notice shows (#94).
+  const offReason = !sessionId
+    ? schemaText(schema, 'ui.unavailable.reason.picker.no_session')
+    : disabled ? schemaText(schema, 'ui.unavailable.reason.picker.turn_busy') : '';
+
   return (
     <>
-      <TablePopover
-        testId="workspace-skill-picker"
-        label={schemaText(schema, 'ui.studio.skill.title')}
-        value={value}
-        fullValue={fullValue}
-        hint={selectedReason}
-        triggerDisabledReason={!sessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
-        disabled={disabled || !sessionId}
+      <TableSections
+        testId="workspace-skill-picker-panel"
         sections={[{
+          testId: 'workspace-skill-picker-section',
           title: schemaText(schema, 'ui.studio.skill.title'),
           hint: schemaText(schema, 'ui.studio.skill.hint'),
           head: [schemaText(schema, 'ui.studio.skill.col.name'), schemaText(schema, 'ui.studio.skill.col.prompt'), schemaText(schema, 'ui.studio.skill.col.size')],
@@ -194,8 +192,9 @@ export function SkillPicker({
           loadingText: schemaText(schema, 'ui.workspace.skills.loading'),
           failedText: failed ? schemaText(schema, 'ui.workspace.skills.load_failed') : undefined,
           emptyText: schemaText(schema, 'ui.workspace.skills.empty'),
+          ...(offReason ? { disabledReason: offReason, disabledLabel: unavailableLabel(schema, offReason) } : {}),
           onPick: (key) => onSelect(key === NO_SKILL ? null : key),
-          foot: (close) => (
+          foot: (
             <div className="flex flex-col gap-1">
               {selectedId && !loading && (failed || unavailable)
                 ? (
@@ -210,8 +209,9 @@ export function SkillPicker({
                 ? <p>{selectedReason}</p> : null}
               <button
                 type="button"
-                onClick={() => { close(); setCreating(true); }}
-                className="flex h-6 items-center gap-1 self-start rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-panel-raised hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                disabled={offReason !== ''}
+                onClick={() => setCreating(true)}
+                className="flex h-6 items-center gap-1 self-start rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-panel-raised hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Plus aria-hidden className="size-3" />
                 {schemaText(schema, 'ui.workspace.skills.create')}

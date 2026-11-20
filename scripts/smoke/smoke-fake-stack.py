@@ -1460,6 +1460,12 @@ def scenario_mcp(api, mcp_base):
 def scenario_agent(api, offerings):
     """The L1 Agent equivalent: fake LLM -> tool call -> approval -> 3D task -> reply."""
     session = new_session(api)
+    # A new session is in the auto mode (#406), where nobody approves the 3D step; this scenario is about the
+    # approval card, so it puts the session in the strict mode first.
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    if status != 200:
+        record("agent turn: switch the session to strict approval", False, f"approval mode {status}")
+        return
     marker = '[[fake:tool:create_model_3d {"prompt":"a plain cube"}]]'
     status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
         "content": "make a cube " + marker, "creative_domain": "3d", "ai_model": TEXT_TO_3D})
@@ -1922,6 +1928,29 @@ def scenario_three_view(work, api, offerings):
            f"front {front_asset or 'none'} left source {assets[:1]}")
 
 
+def running_replies(api, session):
+    """#403: the assistant messages the two reads the browser uses (the whole list and the newest page) report as
+    running, as {read: [(message id, stored tool call count)]}. The stored count tells a reply that already holds
+    its first round apart from the placeholder."""
+    found = {}
+    for name, path in (("list", f"/api/chat/sessions/{session}/messages"),
+                       ("page", f"/api/chat/sessions/{session}/messages?limit=50")):
+        body = api.json("GET", path)[1]
+        messages = body if isinstance(body, list) else body.get("messages", [])
+        running = []
+        for message in messages:
+            if message.get("role") != "assistant" or message.get("isPending") is not True:
+                continue
+            raw = message.get("toolCalls") or "[]"
+            try:
+                calls = json.loads(raw) if isinstance(raw, str) else raw
+            except ValueError:
+                calls = []
+            running.append((message.get("id"), len(calls) if isinstance(calls, list) else 0))
+        found[name] = running
+    return found
+
+
 def scenario_agent_background(api, offerings):
     """#189: one assistant completion submits a generation step and the
     three-view SkillRun. With the session in auto mode both submit in that one
@@ -1986,6 +2015,11 @@ def scenario_agent_background(api, offerings):
         return
     record("agent background: three-view front waits in its group", front_status == "running",
            f"front status {front_status!r}, task {three_view_task}")
+    # #403: the turn is parked on its Tasks after its first round stored the tool calls. Reading the messages now
+    # must still report the reply as running; it used to read as finished, because only the placeholder text counted.
+    parked = running_replies(api, session)
+    record("agent background: the parked turn's reply is reported as running, with its stored tool calls (#403)",
+           all(len(parked[name]) == 1 and parked[name][0][1] > 0 for name in ("list", "page")), str(parked))
 
     status, body = api.json("POST", background_path)
     record("agent background: POST ends the wait", status == 200 and body.get(backgrounded_member) is True,
@@ -2019,6 +2053,14 @@ def scenario_agent_background(api, offerings):
         reply = " ".join(str(m.get("content")) for m in messages if m.get("role") == "assistant")
     record("agent background: the ended turn names the background Task",
            "已停止等待" in reply and "三视图卡片" in reply, reply[:160])
+    # #403: the mark goes away with the turn. The reply text is written first, so give the turn's end a moment.
+    ended = running_replies(api, session)
+    deadline = time.time() + 15
+    while time.time() < deadline and any(ended.values()):
+        time.sleep(0.3)
+        ended = running_replies(api, session)
+    record("agent background: the ended turn's reply is no longer reported as running (#403)",
+           not any(ended.values()), str(ended))
 
 
 # scenario -> provider -> (expected state, expected failure class). The fault is

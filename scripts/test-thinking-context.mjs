@@ -19,8 +19,8 @@
  * The mock Agent reports usage like an upstream; "[mock:usage=N]" in a message makes it report N
  * prompt tokens, and "[mock:compact_fail]" in the summarized part makes the summary call fail.
  * Per engine and viewport, in a session that also holds a mock Hyper3D Rodin result:
- *  1. The thinking picker shows DeepSeek's own levels (low default, high, max) with the Schema hover
- *     line; choosing "high" persists across a reload and on another device.
+ *  1. The chat model tab of the settings dialog behind the gear (#405) shows DeepSeek's own levels (low default,
+ *     high, max) with the Schema hint line; choosing "high" persists across a reload and on another device.
  *  2. The token count reads "— / 1M" before any reply and "356K / 1M" after one reporting 355,9xx.
  *  3. Six rounds: an uploaded picture (@img1), notes, and an open choice card. Compacting keeps the
  *     chat history, shows the divider and resets the count to "— / 1M"; a second compaction has
@@ -239,6 +239,37 @@ function studio(page) {
   return { box, meter, idle, say, meterText };
 }
 
+/**
+ * #405: the thinking level is a row of the chat model tab of the settings dialog behind the gear beside the send button.
+ * A pick applies at once and the dialog stays open, so it is closed again before the composer is used. The tab comes with
+ * the session's levels, so until they have arrived there is no level to read.
+ */
+const SETTINGS = '[data-testid=composer-settings-dialog]';
+async function closeSettings(page) {
+  if (!(await page.locator(SETTINGS).count())) return;
+  await page.keyboard.press('Escape');
+  await page.locator(SETTINGS).waitFor({ state: 'detached', timeout: 5000 });
+}
+/** Opens the dialog (when shut) on the chat model tab; false while that tab is not there yet. */
+async function openChatSettings(page) {
+  const dialog = page.locator(SETTINGS);
+  if (!(await dialog.count())) {
+    await page.click('[data-testid=composer-settings-open]');
+    await dialog.waitFor({ timeout: 10000 });
+  }
+  const tab = page.locator('[data-testid=composer-settings-tab-chat]');
+  if (!(await tab.count())) return false;
+  if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
+  await page.locator('[data-testid=workspace-chat-model-picker-panel]').waitFor({ timeout: 5000 });
+  return true;
+}
+/** The level the chat model tab shows as chosen; '' while the tab or its levels are not there. */
+async function shownLevel(page) {
+  if (!(await openChatSettings(page))) return '';
+  const row = page.locator(`${SETTINGS} [data-testid=workspace-reasoning-section] [role=menuitemradio][aria-checked=true]`);
+  return (await row.count()) ? (await row.first().innerText()).trim().split(/\s+/)[0].toLowerCase() : '';
+}
+
 async function checks(engine, browser, [width, height]) {
   const viewport = `${width}x${height}`;
   const outside = [];
@@ -261,43 +292,42 @@ async function checks(engine, browser, [width, height]) {
     }
   });
   const { box, meter, say, meterText } = studio(page);
-  const pickerShows = (locator, level, message) =>
-    waitFor(async () => (await locator.innerText()).trim() === level, message, 20000)
-      .catch(async () => assert.fail(`${message}: picker shows "${(await locator.innerText()).trim()}", want "${level}"`));
+  // The chat model tab shows the level; the dialog is closed again once it has been read.
+  const levelShows = async (on, level, message) => {
+    await waitFor(async () => (await shownLevel(on)) === level, message, 20000)
+      .catch(async () => assert.fail(`${message}: the chat model tab shows "${await shownLevel(on)}", want "${level}"`));
+    await closeSettings(on);
+  };
   const window = tokens(1000000);
   const unknown = text('ui.studio.context.unknown');
-  const picker = page.locator('[data-testid=workspace-chat-model-picker]');
-  const pickerHas = (locator, level) => waitFor(async () => (await locator.innerText().catch(() => '')).includes(level), `level ${level}`);
 
-  await step('the thinking picker lists the model\'s own levels; high persists across a reload and another device', async () => {
-    await picker.waitFor({ timeout: 20000 });
-    await pickerHas(picker, 'low');
-    await picker.hover();
-    await page.getByText(text('ui.studio.reasoning.hint'), { exact: true }).first().waitFor({ timeout: 5000 });
-    await picker.click();
+  await step('the chat model tab lists the model\'s own levels; high persists across a reload and another device', async () => {
+    await levelShows(page, 'low', 'the default level');
+    await openChatSettings(page);
     const panel = page.locator('[data-testid=workspace-chat-model-picker-panel]');
-    await panel.waitFor({ timeout: 5000 });
     const levels = panel.locator('[data-testid=workspace-reasoning-section]');
+    await levels.getByText(text('ui.studio.reasoning.hint'), { exact: true }).waitFor({ timeout: 5000 });
     const rows = await levels.locator('[role=option], [role=menuitemradio], button').filter({ hasText: /^(low|high|max)/ }).allInnerTexts();
-    assert.deepEqual(rows.map((row) => row.split(/\s/)[0]), ['low', 'high', 'max'], `rows ${rows.join(' | ')}`);
+    assert.deepEqual(rows.map((row) => row.trim().split(/\s/)[0].toLowerCase()), ['low', 'high', 'max'], `rows ${rows.join(' | ')}`);
     assert(rows[0].includes(text('ui.studio.reasoning.default_tag')), `default tag on low: ${rows[0]}`);
     await levels.getByText('high', { exact: true }).click();
-    await pickerHas(picker, 'high');
+    await waitFor(async () => (await shownLevel(page)) === 'high', 'the picked level high is not checked', 10000);
+    assert.equal(await page.locator(SETTINGS).count(), 1, 'picking a level closed the settings dialog');
     await page.screenshot({ path: path.join(OUT, `${engine}-${viewport}-1-reasoning.png`) });
+    await closeSettings(page);
     const stored = await ok(context, 'GET', sessionRoute(routes.chat_session_reasoning, source.sessionID));
     assert.equal(stored[fields.reasoning_effort], 'high');
     assert.deepEqual(stored[fields.reasoning_levels], ['low', 'high', 'max']);
     await page.reload();
     await page.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
-    await pickerHas(picker, 'high');
+    await levelShows(page, 'high', 'the level after a reload');
     const { cookies } = await context.storageState();
     const other = await guardedContext(browser, { width, height }, outside);
     await other.addCookies(cookies);
     const second = await other.newPage();
     await second.goto(`${BASE}/?session=${encodeURIComponent(source.sessionID)}`);
-    const otherPicker = second.locator('[data-testid=workspace-chat-model-picker]');
-    await otherPicker.waitFor({ timeout: 30000 });
-    await waitFor(async () => (await otherPicker.innerText()).includes('high'), 'level on another device');
+    await second.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
+    await levelShows(second, 'high', 'the level on another device');
     await other.close();
   });
 
@@ -364,9 +394,10 @@ async function checks(engine, browser, [width, height]) {
   });
 
   await step('the @ list still offers @img1 and the Agent\'s refine_image call uses that picture', async () => {
-    await page.click('[data-testid=workspace-model-picker]');
+    await page.click('[data-testid=composer-settings-open]');
+    await page.click('[data-testid=composer-settings-tab-models]');
     await page.locator('[data-testid=workspace-model-picker-image] [role=menu] [role=menuitemradio]').first().click();
-    await page.keyboard.press('Escape');
+    await closeSettings(page);
     await box.click();
     await box.fill('');
     await box.type('@img');
@@ -424,13 +455,13 @@ async function checks(engine, browser, [width, height]) {
     await page.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
     await meterText(before.trim());
     await waitFor(async () => (await page.locator('[data-testid=chat-context-compacted]').count()) === 2, 'dividers after a reload');
-    await pickerShows(picker, 'high', 'after the last reload');
+    await levelShows(page, 'high', 'the level after the last reload');
   });
 
   // The failure runs on a fresh page: navigating the busy page away would abort its pending asset loads.
   const overflow = await page.evaluate(() => {
-    const grid = document.querySelector('[data-testid=composer-pickers]');
-    return grid ? grid.scrollWidth - grid.clientWidth : -1;
+    const composer = document.querySelector('[data-testid=studio-composer]');
+    return composer ? composer.scrollWidth - composer.clientWidth : -1;
   });
   await page.close();
   const failurePage = await context.newPage();
@@ -445,9 +476,9 @@ async function checks(engine, browser, [width, height]) {
     for (let attempt = 1; ; attempt += 1) {
       await page.goto(`${BASE}/?session=${encodeURIComponent(session.id)}`);
       await page.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
-      const levelShown = page.locator('[data-testid=workspace-chat-model-picker]');
-      const opened = await waitFor(async () => (await levelShown.innerText().catch(() => '')).includes('low'), 'level', 15000)
+      const opened = await waitFor(async () => (await shownLevel(page).catch(() => '')) === 'low', 'level', 15000)
         .then(() => true, () => false);
+      await closeSettings(page).catch(() => undefined);
       if (opened) break;
       assert(attempt < 4, 'the failure session never opened');
       await page.waitForTimeout(20000);
@@ -466,7 +497,7 @@ async function checks(engine, browser, [width, height]) {
   });
 
   await step('no page errors, no outside requests, no horizontal overflow in the composer', async () => {
-    assert.equal(overflow, 0, `composer pickers overflow by ${overflow}px`);
+    assert.equal(overflow, 0, `the composer overflows by ${overflow}px`);
     assert.equal(errors.length, 0, `page errors: ${errors.join(' | ')}`);
     assert.equal(outside.length, 0, `outside requests: ${outside.join(' | ')}`);
   });

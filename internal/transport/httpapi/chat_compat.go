@@ -949,6 +949,11 @@ func (s *Server) chatMessageWire(locale string, message chat.Message) map[string
 	if message.Multiview != nil && fields.Multiview != "" {
 		wire[fields.Multiview] = message.Multiview
 	}
+	// #403: the reply of a turn that has not ended is pending whatever text it holds. The member is left
+	// out for every other message (the placeholder text still reads as pending to the browser, as before).
+	if message.TurnActive && fields.IsPending != "" {
+		wire[fields.IsPending] = true
+	}
 	return wire
 }
 

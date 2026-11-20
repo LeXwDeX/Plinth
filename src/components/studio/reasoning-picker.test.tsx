@@ -29,14 +29,21 @@ describe('the thinking level section (#322, merged into the model entry in #176)
   });
 });
 
-describe('the composer bottom row (#322, #176)', () => {
-  it('has one combined model-and-thinking entry and no separate thinking picker', async () => {
+describe('the composer settings (#322, #176, #405)', () => {
+  it('has one combined model-and-thinking tab and no separate thinking picker, and the composer keeps only the status row under the box', async () => {
     const { readFileSync } = await import('node:fs');
     const composer = readFileSync(new URL('./composer.tsx', import.meta.url), 'utf8');
-    const bottom = composer.slice(composer.indexOf('data-testid="composer-pickers"'));
+    const settings = readFileSync(new URL('./composer-settings.tsx', import.meta.url), 'utf8');
+    // Under the box there is only the status row (context usage and tool calls); the pickers are behind the gear.
+    const bottom = composer.slice(composer.indexOf('<ChatModelNotice />'));
     expect(bottom).not.toContain('AgentScopePicker');
-    expect(bottom.indexOf('<ParamsPopover {...params}')).toBeLessThan(bottom.indexOf('<ChatModelPicker />'));
-    expect(bottom.indexOf('<ChatModelPicker />')).toBeLessThan(bottom.indexOf('<ContextMeter />'));
-    expect(bottom).not.toContain('<ReasoningPicker />');
+    expect(bottom).not.toContain('<ChatModelPicker');
+    expect(bottom).not.toContain('<ReasoningPicker');
+    expect(bottom.indexOf('<GenerationModelNotice />')).toBeGreaterThan(-1);
+    expect(bottom.indexOf('<GenerationModelNotice />')).toBeLessThan(bottom.indexOf('<ContextMeter />'));
+    // The dialog has one chat model tab (model and levels together) and no tab of its own for the thinking level.
+    expect(settings).toContain('<ChatModelPicker settings={chat} />');
+    expect(settings).not.toContain('<ReasoningPicker');
+    expect(settings.match(/<TabsContent value=/g)).toHaveLength(4);
   });
 });

@@ -49,6 +49,34 @@ func (exhaustion *QuotaExhaustion) Error() string {
 
 func (exhaustion *QuotaExhaustion) Is(target error) bool { return target == ErrQuotaExhausted }
 
+// ErrRequestRejected marks an upstream refusal of one request parameter: an
+// HTTP 400 invalid_request_error that names the request field (#401, for
+// example a model that accepts no temperature other than its default). The
+// model may serve other requests; the person should switch model or an
+// administrator should read the log, which keeps the upstream's own wording.
+var ErrRequestRejected = errors.New("agent upstream rejected a request parameter")
+
+// RequestRejection is an ErrRequestRejected that carries the request field the
+// upstream named, already checked to be a plain field path (never free text).
+type RequestRejection struct {
+	Param string
+}
+
+func (rejection *RequestRejection) Error() string {
+	return ErrRequestRejected.Error() + " (" + rejection.Param + ")"
+}
+
+func (rejection *RequestRejection) Is(target error) bool { return target == ErrRequestRejected }
+
+// RequestRejectedParam is the request field of a parameter refusal in err.
+func RequestRejectedParam(err error) (string, bool) {
+	var rejection *RequestRejection
+	if errors.As(err, &rejection) {
+		return rejection.Param, true
+	}
+	return "", false
+}
+
 // ContentRejectedReasons are the reasons of a content-safety refusal in err.
 func ContentRejectedReasons(err error) []string {
 	var rejection *ContentRejection

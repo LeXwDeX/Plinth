@@ -84,6 +84,7 @@ func pendingApprovalBrowsersWithCatalog(
 		t.Fatalf("session=%s err=%v", created.Body.String(), err)
 	}
 	world.sessionID = session.ID
+	pinSessionApprovalMode(t, module, "owner-a", session.ID, "budget")
 	value, ok := fixtureExecutions.Load(module)
 	if !ok {
 		t.Fatal("missing fixture state")

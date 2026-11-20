@@ -1,15 +1,13 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { Popover } from '@base-ui/react/popover';
-import { ChevronDown, ChevronRight, Minus, Plus, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight, Minus, Plus } from 'lucide-react';
 
 import { SchemaParameters } from '@/components/form/schema-parameters';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { ChoiceChips } from '@/components/ui/choice-chips';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { OptionSelect } from '@/components/ui/option-select';
-import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import type { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective-configuration';
 import type { CanvasDelivery } from '@/hooks/use-canvas-artboard';
 import type { GenerationParams } from '@/hooks/use-generation-params';
@@ -17,18 +15,17 @@ import { CanvasSizeNotice, ReferenceSizeNotice } from '@/components/canvas/canva
 import { canvasResizeForChoice } from '@/lib/workspace/canvas-size';
 import { applyCanvasResize } from '@/lib/canvas/apply-canvas-resize';
 import { CanvasResizeAnchor } from '@/components/canvas/canvas-resize-anchor';
-import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterVisible, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, parameterConditionMatches, parameterDisabled, parameterVisible, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { formatNativePrice, parseNativeQuote } from '@/lib/pricing';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
-import { PICKER_TRIGGER_CLASS } from '@/components/studio/table-popover';
 import { defaultParamsChipText, generationCount, paramsChipText, paramsRatioText, readonlyParameterText, sizeOptionText } from '@/lib/workspace/generation-params';
 import type { ParamSchema } from '@/lib/providers/types';
 
 /** More options than this read better as a list than as a row of chips. */
 const CHIP_LIMIT = 8;
 
-export interface ParamsPopoverProps {
+export interface ParamsPanelProps {
   params: GenerationParams;
   domains: GenerationParams[];
   /** Settings are saved per session; without one there is nothing to save to. */
@@ -90,98 +87,63 @@ export function ParameterOrigin({ params, name, disabled = false, readonly = fal
   </div>;
 }
 
-/** 参数弹层外框：固定高度（不超过可用高度），见 #243。 */
-export const PARAMS_PANEL_CLASS =
-  'flex h-[min(34rem,var(--available-height))] w-[44rem] max-w-(--available-width) flex-col overflow-hidden rounded-lg bg-popover p-3 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10';
+/**
+ * What the next turn would use, in a few words (ratio, size, count of the selected model; the product's defaults
+ * before a model is chosen). The settings dialog's "changed" sentence shows it when a parameter was set by hand.
+ */
+export function paramsSummary(schema: ProductSchema, params: GenerationParams): string {
+  const text = (key: string) => schemaText(schema, key);
+  const countText = (value: number) => schemaCountMessage(schema, 'ui.studio.params.summary_count', value, { count: value });
+  if (params.modelName !== '') {
+    return paramsChipText(params.nextTurn.model, params.nextTurn.values, params.nextTurn.estimate, countText) || text('ui.studio.params.chip_none');
+  }
+  return params.domain === 'image'
+    ? defaultParamsChipText(text('ui.studio.params.default_ratio'), Number(text('ui.studio.params.default_count')), countText)
+    : text('ui.studio.params.chip_pick_model');
+}
 
 /**
- * 参数：比例、尺寸、数量，以及该模型声明的其他设置。内容全部来自所选 Offering 的
- * Schema，只显示模型支持的项；写入与 Agent 的 set_params 共用同一个会话参数 store。
+ * 设置页的「生成参数」页（#405）：比例、尺寸、数量，以及该模型声明的其他设置，2D 与 3D 各一栏。内容全部来自所选
+ * Offering 的 Schema，只显示模型支持的项；写入与 Agent 的 set_params 共用同一个会话参数 store。
  */
-export function ParamsPopover({ params, domains, hasSession, disabled = false, skill, effective, canvas = null }: ParamsPopoverProps) {
+export function ParamsPanel({ params, domains, hasSession, disabled = false, skill, effective, canvas = null }: ParamsPanelProps) {
   const { schema } = useProductSchema();
-  const layer = useAnchoredPositioner();
-  const [open, setOpen] = useState(false);
   const text = (key: string) => schemaText(schema, key);
-  const hasModel = params.modelName !== '';
-  const countText = (value: number) => schemaCountMessage(schema, 'ui.studio.params.summary_count', value, { count: value });
-  // Before a model is chosen the chip still says what a new turn starts from: the product's defaults.
-  const summary = hasModel
-    ? paramsChipText(params.nextTurn.model, params.nextTurn.values, params.nextTurn.estimate, countText) || text('ui.studio.params.chip_none')
-    : params.domain === 'image'
-      ? defaultParamsChipText(text('ui.studio.params.default_ratio'), Number(text('ui.studio.params.default_count')), countText)
-      : text('ui.studio.params.chip_pick_model');
-  const label = text('ui.studio.params.title');
-  const compact = (hasModel ? paramsRatioText(params.nextTurn.model, params.nextTurn.values) : params.domain === 'image' ? text('ui.studio.params.default_ratio') : '') || label;
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      {/* The same frame as the pickers beside it; the full summary is the hover hint, the button shows the ratio only. */}
-      <HintTooltip name={`${label}: ${summary}`} hint={text('ui.studio.params.chip_hint')} className="w-full min-w-0">
-        <Popover.Trigger
-          disabled={disabled}
-          data-testid="composer-params"
-          aria-label={`${label}: ${summary}`}
-          className={PICKER_TRIGGER_CLASS}
-        >
-          <SlidersHorizontal aria-hidden className="size-3 shrink-0 text-primary" />
-          <span className="flex-1 truncate text-left tabular-nums" data-testid="composer-params-summary">{compact}</span>
-          <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-        </Popover.Trigger>
-      </HintTooltip>
-      <Popover.Portal>
-        <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="end" sideOffset={8} collisionPadding={12} className={layer}>
-          <Popover.Popup
-            data-testid="composer-params-panel"
-            // #243：固定外框高度（不超过可用高度），切换适用操作或展开更多参数时外框、标题与操作选择不再移动；
-            // 内容在下方区域内滚动。弹层锚在触发器上方，只用 max-h 时内容一变高上边缘就会上移。
-            className={PARAMS_PANEL_CLASS}
-          >
-            <div className="flex items-baseline justify-between gap-2 pb-2">
-              <Popover.Title className="text-xs font-semibold">{text('ui.studio.params.title')}</Popover.Title>
-              {hasModel ? (
-                <Popover.Description className="truncate text-[11px] text-muted-foreground">
-                  {formatSchemaText(text('ui.studio.params.model'), { model: params.modelName })}
-                </Popover.Description>
-              ) : null}
-            </div>
-            <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-              <div className="grid items-start gap-4 min-[760px]:grid-cols-2" data-testid="params-domains">
-                {domains.map((domain) => (
-                  <ParamsDomainSection
-                    key={domain.domain}
-                    params={domain}
-                    hasSession={hasSession}
-                    disabled={disabled}
-                    skill={domain.domain === params.domain ? skill : null}
-                    canvas={domain.domain === 'image' ? canvas : null}
-                  />
-                ))}
-              </div>
+    <div data-testid="composer-params-panel" className="@container flex min-w-0 flex-col gap-3">
+      <div className="grid items-start gap-4 @[40rem]:grid-cols-2" data-testid="params-domains">
+        {domains.map((domain) => (
+          <ParamsDomainSection
+            key={domain.domain}
+            params={domain}
+            hasSession={hasSession}
+            disabled={disabled}
+            skill={domain.domain === params.domain ? skill : null}
+            canvas={domain.domain === 'image' ? canvas : null}
+          />
+        ))}
+      </div>
 
-              <details className="border-t border-border pt-2 text-[11px] text-muted-foreground" data-testid="params-effective">
-                <summary className="cursor-pointer select-none text-xs font-medium">{schema.agent_configuration.ui.effective_title}</summary>
-                <div className="mt-1.5 flex flex-col gap-1">
-                  {effective.loading ? <p>{text('ui.workspace.harness.loading')}</p> : effective.failed ? <p role="alert">{schema.agent_configuration.ui.load_failed}</p> : effective.data ? (
-                    <>
-                      <p>{schema.agent_configuration.ui.dialogue_model}: {effective.data.model.label}</p>
-                      <p>{schema.agent_configuration.ui.revision}: {effective.data.revision}</p>
-                      <p>{schema.agent_configuration.ui.source}: {effective.data.parameter_source}</p>
-                    </>
-                  ) : <p>{schema.agent_configuration.ui.effective_empty}</p>}
-                </div>
-              </details>
-              <p className="text-[11px] leading-4 text-muted-foreground">{text('ui.workspace.harness.agent_decides')}</p>
-            </div>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+      <details className="border-t border-border pt-2 text-[11px] text-muted-foreground" data-testid="params-effective">
+        <summary className="cursor-pointer select-none text-xs font-medium">{schema.agent_configuration.ui.effective_title}</summary>
+        <div className="mt-1.5 flex flex-col gap-1">
+          {effective.loading ? <p>{text('ui.workspace.harness.loading')}</p> : effective.failed ? <p role="alert">{schema.agent_configuration.ui.load_failed}</p> : effective.data ? (
+            <>
+              <p>{schema.agent_configuration.ui.dialogue_model}: {effective.data.model.label}</p>
+              <p>{schema.agent_configuration.ui.revision}: {effective.data.revision}</p>
+              <p>{schema.agent_configuration.ui.source}: {effective.data.parameter_source}</p>
+            </>
+          ) : <p>{schema.agent_configuration.ui.effective_empty}</p>}
+        </div>
+      </details>
+      <p className="text-[11px] leading-4 text-muted-foreground">{text('ui.workspace.harness.agent_decides')}</p>
+    </div>
   );
 }
 
 /** One capability owns one form and one parameter scope. Read-only exposure is explicitly opt-in. */
-export function ParamsDomainSection({ params, hasSession, disabled, skill, canvas = null }: Pick<ParamsPopoverProps, 'params' | 'hasSession' | 'disabled' | 'skill' | 'canvas'>) {
+export function ParamsDomainSection({ params, hasSession, disabled, skill, canvas = null }: Pick<ParamsPanelProps, 'params' | 'hasSession' | 'disabled' | 'skill' | 'canvas'>) {
   const { schema } = useProductSchema();
   /**
    * #246: a size the person picks (or resets to the default) is the canvas size too: the boundary changes as

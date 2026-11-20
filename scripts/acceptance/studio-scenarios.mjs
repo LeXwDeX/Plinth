@@ -140,8 +140,9 @@ const composerBox = (page) => page.locator('[data-testid=studio-composer] textar
 async function login(page) {
   await page.goto(`${BASE}/`);
   await page.waitForSelector('input[type=password]', { timeout: 20000 });
-  await page.fill('input:not([type=password])', USERNAME);
-  await page.fill('input[type=password]', PASSWORD);
+  // The language switch on the login page has a hidden input of its own, so the fields are named by id.
+  await page.fill('#username', USERNAME);
+  await page.fill('#password', PASSWORD);
   await page.keyboard.press('Enter');
   await page.waitForSelector('[data-testid=studio-shell]', { timeout: 20000 });
   await page.waitForTimeout(800);
@@ -156,56 +157,94 @@ async function newSession(page) {
   await page.waitForTimeout(400);
 }
 
-async function openPicker(page) {
-  if (!(await page.locator('[data-testid=workspace-model-picker-panel]').count())) await page.click('[data-testid=workspace-model-picker]');
+/**
+ * #405: the generation models, Skills, generation parameters and the chat model with its thinking level are the tabs of one
+ * settings dialog behind the gear beside the send button (tabs: models, skills, params, chat). A pick applies at once and the
+ * dialog stays open, so every helper closes it again (Esc) before the composer, the board or a menu is used.
+ */
+const SETTINGS_DIALOG = '[data-testid=composer-settings-dialog]';
+
+async function openSettings(page, tab) {
+  const dialog = page.locator(SETTINGS_DIALOG);
+  if (!(await dialog.count())) {
+    await page.click('[data-testid=composer-settings-open]');
+    await dialog.waitFor();
+  }
+  if (tab) {
+    await page.click(`[data-testid=composer-settings-tab-${tab}]`);
+    await page.waitForSelector(`[data-testid=composer-settings-tab-${tab}][aria-selected=true]`);
+  }
   await page.waitForTimeout(300);
 }
 
-/** Picks a model by (part of) its name in the 2D or 3D table of the one model picker, then closes it. */
+async function closeSettings(page) {
+  const dialog = page.locator(SETTINGS_DIALOG);
+  for (let attempt = 0; attempt < 3 && (await dialog.count()); attempt += 1) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
+}
+
+/** Picks a model by (part of) its name in the 2D or 3D table of the models tab, then closes the settings. */
 async function pickModel(page, which, name) {
-  await openPicker(page);
+  await openSettings(page, 'models');
   await page.locator(`[data-testid=workspace-model-picker-${which}] [role=menu]`).getByText(name).first().click();
-  await page.keyboard.press('Escape');
+  await closeSettings(page);
   await page.waitForTimeout(500);
 }
 
 /** The full name of the model chosen in the 2D or 3D table. */
 async function pickerLabel(page, which) {
-  await openPicker(page);
+  await openSettings(page, 'models');
   const checked = page.locator(`[data-testid=workspace-model-picker-${which}] [role=menuitemradio][aria-checked=true]`);
   const label = (await checked.count()) ? await checked.first().innerText() : '';
-  await page.keyboard.press('Escape');
+  await closeSettings(page);
   return label.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * What the next 2D turn would use, as the parameters tab shows it: the chosen ratio or size and the count, worded like the
+ * former parameters chip ("2048x2048 · 1:1 · 1 张"). Empty before a 2D model is chosen: the tab then only says to choose one.
+ */
 async function paramsChip(page) {
-  return (await page.locator('[data-testid=composer-params]').innerText()).replace(/\s+/g, ' ').trim();
+  await openSettings(page, 'params');
+  const domain = page.locator('[data-testid=params-domain][data-domain=image]');
+  await domain.waitFor();
+  const parts = await domain.evaluate((root) => {
+    const sizes = [...root.querySelectorAll('[role=radiogroup] [role=radio][aria-checked=true]')].map((node) => node.textContent || '');
+    // Besides the sizes' selects there is the one that names the operation (适用操作).
+    for (const select of root.querySelectorAll('[role=combobox]')) {
+      if (select.getAttribute('aria-label') !== '适用操作') sizes.push(select.textContent || '');
+    }
+    const count = root.querySelector('[data-testid=params-count-value]');
+    return [...sizes.map((text) => text.replace(/[▼▾]/g, '').replace(/×/g, 'x').replace(/\s+/g, ' ').trim()).filter(Boolean), ...(count ? [`${(count.textContent || '').trim()} 张`] : [])];
+  });
+  await closeSettings(page);
+  return parts.join(' · ');
 }
 
 async function openParams(page) {
-  if (!(await page.locator('[data-testid=composer-params-panel]').count())) {
-    await page.click('[data-testid=composer-params]');
-    await page.waitForSelector('[data-testid=composer-params-panel]');
-  }
+  await openSettings(page, 'params');
+  await page.waitForSelector('[data-testid=composer-params-panel]');
 }
 
 async function closeParams(page) {
-  if (await page.locator('[data-testid=composer-params-panel]').count()) {
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(250);
-  }
+  await closeSettings(page);
 }
 
 /**
- * Sets size or ratio and count in the parameter panel. GPT Image 2.6 lists pixel sizes in a
- * select (no ratio chips), Gemini and Nano Banana list ratio chips and have no count.
+ * Sets size or ratio and count in the parameter tab. GPT Image 2.6 lists pixel sizes in a select (no ratio chips; it is the
+ * project's own dropdown, not a native select), Gemini and Nano Banana list ratio chips and have no count.
  * The store saves 500 ms after the last edit, so wait before the next send.
  */
 async function setParams(page, { size, ratio, count }) {
   await openParams(page);
   const panel = page.locator('[data-testid=composer-params-panel]');
   if (ratio) await panel.getByRole('radio', { name: ratio }).first().click();
-  if (size) await panel.getByLabel('输出尺寸').selectOption({ label: size });
+  if (size) {
+    await panel.getByLabel('输出尺寸').click();
+    await page.getByRole('option', { name: new RegExp(size.replace(/x/i, '[x×]')) }).first().click();
+  }
   if (count) {
     for (let guard = 0; guard < 20; guard += 1) {
       const value = Number((await panel.locator('[data-testid=params-count-value]').innerText()).trim());
@@ -405,10 +444,11 @@ async function generateOneImage(page, text) {
   await waitStripSettled(page);
 }
 
-/** Chooses the 三视图 Skill in the composer's Skill picker and sends with an empty box (the Schema's default text is used). */
+/** Chooses the 三视图 Skill on the Skills tab of the settings and sends with an empty box (the Schema's default text is used). */
 async function startThreeViewSkill(page) {
-  await page.click('[data-testid=workspace-skill-picker]');
+  await openSettings(page, 'skills');
   await page.locator('[data-testid=workspace-skill-picker-panel]').getByText('三视图', { exact: true }).first().click();
+  await closeSettings(page);
   await page.click('[data-testid=composer-send]');
 }
 
@@ -524,7 +564,7 @@ scenarios.s1 = async (page) => {
   await newSession(page);
   const credits0 = await sessionCredits(page);
 
-  await step(page, S, '1', '新建会话，点起步卡', '输入框被填好，积分不变，参数芯片显示 1:1 · 4 张', async () => {
+  await step(page, S, '1', '新建会话，点起步卡', '输入框被填好，积分不变，选模型后设置页的「生成参数」页显示 1:1', async () => {
     const problems = [];
     const card = page.locator('[data-testid=stage-starter-card]').first();
     const box = await card.boundingBox();
@@ -549,23 +589,23 @@ scenarios.s1 = async (page) => {
     }
     if ((await sessionCredits(page)) !== credits0) problems.push('点起步卡后积分变了');
     const before = await paramsChip(page);
-    // The chip only has a value once a 2D model is chosen.
+    // The parameters tab only has values once a 2D model is chosen.
     await pickModel(page, 'image', 'GPT Image 2.6 Sunburst');
     const afterPick = await paramsChip(page);
-    if (!/\d:\d|\d+x\d+/.test(before)) friction('新会话没选模型时，参数芯片只显示“参数”，没有比例和数量；选了模型才出现。起步卡不会替用户选模型，用户得自己先去模型选择器。');
-    if (!(/1:1/.test(afterPick) && /4/.test(afterPick))) problems.push(`选模型后参数芯片是“${afterPick}”，不是 1:1 · 4 张（选模型前是“${before}”）`);
+    if (!/\d:\d|\d+x\d+/.test(before)) friction('新会话没选模型时，设置页的「生成参数」页只提示先选模型，没有比例和数量；选了模型才出现。起步卡不会替用户选模型，用户得自己先去设置页的「生成模型」页。');
+    if (!(/1:1/.test(afterPick) && /4/.test(afterPick))) problems.push(`选模型后「生成参数」页是“${afterPick}”，不是 1:1 · 4 张（选模型前是“${before}”）`);
     expect(problems.length === 0, problems.join('；'));
-    return `芯片：${afterPick}`;
+    return `生成参数页：${afterPick}`;
   }, { key: true });
 
-  await step(page, S, '2', '把参数改成 2:3 · 6 张', '芯片更新（2:3 即 1024x1536，6 张）；发送按钮旁显示“生成约 36 积分”', async () => {
+  await step(page, S, '2', '把参数改成 2:3 · 6 张', '「生成参数」页更新（2:3 即 1024x1536，6 张）；发送按钮旁显示“生成约 36 积分”', async () => {
     await setParams(page, { size: '1024x1536', count: 6 });
     const chip = await paramsChip(page);
-    expect(/1024x1536/.test(chip) && /6/.test(chip), `芯片是“${chip}”`);
-    if (!/2:3/.test(chip)) friction('GPT Image 2.6 的参数面板只有“输出尺寸”下拉里的像素尺寸（1024x1536），没有 2:3 这样的比例；要出 6 张只有这类模型能选数量（Gemini、Nano Banana 只出 1 张，没有数量）。');
+    expect(/1024x1536/.test(chip) && /6/.test(chip), `生成参数页是“${chip}”`);
+    if (!/2:3/.test(chip)) friction('GPT Image 2.6 的参数页只有“输出尺寸”下拉里的像素尺寸（1024x1536），没有 2:3 这样的比例；要出 6 张只有这类模型能选数量（Gemini、Nano Banana 只出 1 张，没有数量）。');
     const cost = (await page.locator('[data-testid=composer-send-cost]').innerText().catch(() => '')).trim();
     expect(/36/.test(cost), `发送按钮旁显示“${cost || '空'}”，不是 36 积分`);
-    return `芯片：${chip}；发送旁：${cost}`;
+    return `生成参数页：${chip}；发送旁：${cost}`;
   }, {});
 
   await step(page, S, '3', '输入“赛博朋克女刺客，全身立绘”，Enter 发送', '对话出现 6 张候选组；版本条出现 2D v1 · 6 张；本会话积分 +36；输入法组词时 Enter 不发送', async () => {

@@ -197,7 +197,10 @@ var endpoints = []fakeupstream.Endpoint{
 		Note: "the model list and the gateway's text/plain 401 are real samples; the invalid-key 401 ErrorResponse is a constructed-from-docs answer built from the OpenAPI ErrorResponse and the error-code guide (" + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: "https://platform.openai.com/docs/api-reference/chat/create", CheckedAt: "2026-10-29",
-		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go)"},
+		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go). Model constraints (#401, constraints.go): a request for gpt-astra or gpt-6.2-astra is judged by that model's rules and refused with a 400 invalid_request_error before any completion runs; the tools and temperature refusals are observed from the gateway's logs of 2026-11-20 (no committed sample), the reasoning_effort none refusal is constructed from the OpenAI documents checked the same day"},
+	{Method: "POST", Path: "/responses", Evidence: fakeupstream.EvidenceConstructed,
+		DocURL: "https://platform.openai.com/docs/api-reference/responses/create", CheckedAt: "2026-11-20",
+		Note: "the Responses API (#401). Aligned to two real probes of the gateway on 2026-11-20 whose sanitized excerpt is testdata/responses-2026-11-20.sample.json. Observed and in the sample: the streamed tool call, text answer and two parallel calls (event order, field set, the event: line), a reasoning item at effort xhigh (its added and done events, the three different encrypted_content values of added, done and completed, no status, no summary event without a requested summary), an input_image part, the non-stream response, a tool schema with strict false and an optional property, a function_call without id or status under a rewritten call_id, the replay of the reasoning item without its id and a round without any reasoning item (both accepted), and the 400s byte for byte: temperature on gpt-astra, an unknown reasoning.effort, none and minimal (refused as unsupported values, naming the dated snapshot gpt-6.2-astra-2026-11-17), a function_call_output with no function_call and a function_call with no output (no code member). Kept constructed, not real, because the probes are not wirefixture candidates (the capture pipeline cannot record SSE with event: lines and no [DONE], so the sample is hand-sanitized, and its provenance says which parts were completed from the non-stream response) and because some behavior has no sample: response.incomplete, response.failed, the in-stream error event, response.refusal.delta, the reasoning summary events, a stream line over the bound, and the 400 for a reasoning item with no following item. Fake-only request conventions: the chat ones plus " + ReasoningMarker + ", " + IncompleteMarker + ", " + FailedMarker + " and " + UnknownEventMarker + ""},
 }
 
 // Version is the OpenAI-compatible /v1 fake.
@@ -217,6 +220,8 @@ type handler struct {
 	invalid map[string]any
 	stream  []map[string]any
 	toolSSE []map[string]any
+	// responses are the structures POST /responses answers are cloned from.
+	responses *responsesTemplates
 }
 
 func newHandler(env *fakeupstream.Env) (http.Handler, error) {
@@ -260,9 +265,13 @@ func newHandler(env *fakeupstream.Env) (http.Handler, error) {
 	if h.models == nil || h.text == nil || h.tool == nil || h.invalid == nil || len(h.stream) == 0 || len(h.toolSSE) == 0 {
 		return nil, errors.New("openai/v1 sample lacks models, text, tool, stream, tool stream or error exchanges")
 	}
+	if h.responses, err = newResponsesTemplates(); err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /models", h.listModels)
 	mux.HandleFunc("POST /chat/completions", h.chat)
+	mux.HandleFunc("POST /responses", h.createResponse)
 	return mux, nil
 }
 
@@ -412,6 +421,10 @@ type chatRequest struct {
 	} `json:"tools"`
 	Thinking       *json.RawMessage `json:"thinking"`
 	EnableThinking *bool            `json:"enable_thinking"`
+	// Temperature and ReasoningEffort stay raw: a model constraint judges them
+	// as the request wrote them (constraints.go).
+	Temperature     json.RawMessage `json:"temperature"`
+	ReasoningEffort json.RawMessage `json:"reasoning_effort"`
 }
 
 func (r chatRequest) lastText() string {
@@ -760,6 +773,12 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 	h.recordChatRequest(request)
 	if scenario == fakeupstream.ScenarioModelNotFound {
 		writeJSON(w, http.StatusNotFound, officialErrorBody(fmt.Sprintf("The model %q does not exist or you do not have access to it.", request.Model), "invalid_request_error", "model", "model_not_found"))
+		return
+	}
+	// #401: a model with declared constraints refuses a request shape it does
+	// not accept before any completion runs, streamed or not.
+	if refusal, refused := request.modelRefusal(); refused {
+		writeJSON(w, http.StatusBadRequest, refusal)
 		return
 	}
 	if scenario == fakeupstream.ScenarioLostResponse {
