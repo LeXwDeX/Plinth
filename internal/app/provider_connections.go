@@ -15,6 +15,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	agentmock "github.com/LeXwDeX/Plinth/internal/agents/mock"
 	"github.com/LeXwDeX/Plinth/internal/agents/openaicompatible"
+	"github.com/LeXwDeX/Plinth/internal/agents/openairesponses"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -541,6 +542,13 @@ func buildChatAgentWithTransport(
 				adapters[chatConnection.ID] = agents.NotConfigured{Missing: missing}
 				continue
 			}
+			// One client for both wires of the connection (#401), so a
+			// recorded or routed transport applies to every request.
+			client := wireHTTPClient(
+				httpTransport,
+				chatConnection.ID,
+				time.Duration(schema.Chat.Agent.RequestTimeoutSeconds)*time.Second,
+			)
 			liveAdapter, err := openaicompatible.New(
 				openaicompatible.Config{
 					BaseURL:           chatConnection.BaseURL,
@@ -551,11 +559,7 @@ func buildChatAgentWithTransport(
 					RequestTimeout: time.Duration(
 						schema.Chat.Agent.RequestTimeoutSeconds,
 					) * time.Second,
-					Client: wireHTTPClient(
-						httpTransport,
-						chatConnection.ID,
-						time.Duration(schema.Chat.Agent.RequestTimeoutSeconds)*time.Second,
-					),
+					Client:            client,
 					ScannerMaxBytes:   schema.Chat.Agent.ScannerMaxBytes,
 					ErrorBodyMaxBytes: schema.Chat.Agent.ErrorBodyMaxBytes,
 					// Each request's model picks its own profile, so the
@@ -574,7 +578,39 @@ func buildChatAgentWithTransport(
 			if err != nil {
 				return nil, fmt.Errorf("Chat Agent 连接 %s: %w", chatConnection.ID, err)
 			}
-			adapters[chatConnection.ID] = liveAdapter
+			var served agents.Adapter = liveAdapter
+			if schema.Chat.Agent.Thinking.UsesResponses() {
+				// A profile that declares wire_api responses is served by the
+				// Responses Adapter, from the same address, key and client
+				// (#401); the connection picks per request by its model.
+				responsesAdapter, err := openairesponses.New(openairesponses.Config{
+					BaseURL:           chatConnection.BaseURL,
+					APIKey:            chatConnection.APIKey,
+					EndpointPath:      schema.Chat.Agent.ResponsesEndpointPath,
+					AuthorizationName: schema.Chat.Agent.AuthorizationName,
+					AuthorizationType: schema.Chat.Agent.AuthorizationType,
+					RequestTimeout: time.Duration(
+						schema.Chat.Agent.RequestTimeoutSeconds,
+					) * time.Second,
+					Client:            client,
+					ScannerMaxBytes:   schema.Chat.Agent.ScannerMaxBytes,
+					ErrorBodyMaxBytes: schema.Chat.Agent.ErrorBodyMaxBytes,
+					OptionsFor: func(model string) *openairesponses.Options {
+						return responsesOptions(schema.Chat.Agent, model)
+					},
+					ParallelToolCalls: schema.Chat.Agent.ParallelToolCalls,
+					ExhaustedQuota:    chatExhaustedQuota(connection.ErrorMapping),
+				})
+				if err != nil {
+					return nil, fmt.Errorf("Chat Agent 连接 %s: %w", chatConnection.ID, err)
+				}
+				served = chatWire{
+					chatCompletions: liveAdapter,
+					responses:       responsesAdapter,
+					wireFor:         schema.Chat.Agent.Thinking.WireFor,
+				}
+			}
+			adapters[chatConnection.ID] = served
 			configured = true
 		}
 		if !configured {

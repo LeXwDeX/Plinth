@@ -39,11 +39,42 @@ func (profile ChatThinkingModelProfile) EffortFor(chosen string) string {
 	return profile.DefaultEffort
 }
 
+// Wire is the HTTP API the model family is served on: chat_completions unless
+// the profile declares wire_api responses.
+func (profile ChatThinkingModelProfile) Wire() string {
+	if profile.WireAPI == ChatWireResponses {
+		return ChatWireResponses
+	}
+	return ChatWireCompletions
+}
+
 // RunsAgentTools reports whether the model family can run the function tools
-// an Agent turn carries on chat completions (chat_completions_tools); a model
-// that matches no profile can.
+// an Agent turn carries: on the responses wire it always can, on chat
+// completions unless chat_completions_tools says it cannot. A model that
+// matches no profile can (it is served on chat completions).
 func (profile ChatThinkingModelProfile) RunsAgentTools() bool {
-	return profile.ChatCompletionsTools == nil || *profile.ChatCompletionsTools
+	return profile.Wire() == ChatWireResponses || profile.ChatCompletionsTools == nil || *profile.ChatCompletionsTools
+}
+
+// WireFor is the HTTP API a model is served on: its profile's wire_api, and
+// chat completions for a model that matches no profile (#401).
+func (thinking *ChatThinkingSchema) WireFor(model string) string {
+	profile, _ := thinking.ProfileFor(model)
+	return profile.Wire()
+}
+
+// UsesResponses reports whether any model profile is served on the responses
+// wire, so a connection needs an adapter for it.
+func (thinking *ChatThinkingSchema) UsesResponses() bool {
+	if thinking == nil || !thinking.Enabled {
+		return false
+	}
+	for _, profile := range thinking.ModelProfiles {
+		if profile.Wire() == ChatWireResponses {
+			return true
+		}
+	}
+	return false
 }
 
 // IncludeStreamUsage is whether a streamed request of this family asks for

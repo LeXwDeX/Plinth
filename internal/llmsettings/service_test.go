@@ -368,3 +368,49 @@ func TestEffectiveDoesNotOfferAModelThatCannotRunAgentTools(t *testing.T) {
 		t.Fatalf("check = %+v tested = %v err = %v", check, tested, err)
 	}
 }
+
+// #401: a model served on the Responses wire runs the function tools of an
+// Agent turn there, so it is offered to sessions even when the profile also
+// says chat completions cannot run them; the administration read says so too.
+func TestEffectiveOffersAModelServedOnTheResponsesWire(t *testing.T) {
+	cannot := false
+	thinking := testThinking()
+	thinking.ModelProfiles = append(thinking.ModelProfiles, catalog.ChatThinkingModelProfile{
+		ModelPrefixes: []string{"gpt-astra"}, EffortField: "reasoning_effort", EffortLevels: []string{"low", "high"}, DefaultEffort: "high",
+		OmitTemperature: true, WireAPI: catalog.ChatWireResponses, ChatCompletionsTools: &cannot})
+	thinking.ModelProfiles = append(thinking.ModelProfiles, catalog.ChatThinkingModelProfile{
+		ModelPrefixes: []string{"gpt-sol"}, EffortField: "reasoning_effort", EffortLevels: []string{"low"}, DefaultEffort: "low",
+		ChatCompletionsTools: &cannot})
+	service, err := New(Config{Store: &memoryStore{}, Thinking: thinking, HistoryLimit: 10,
+		Connections: []Connection{connection("GPT", "gpt-astra", true), connection("SOL", "gpt-sol", true), connection("LLM", "deepseek", true)},
+		Clock:       func() time.Time { return time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	effective, err := service.Effective(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, model := range effective.Models {
+		ids = append(ids, model.ID)
+	}
+	// SOL is on chat completions and cannot run tools there; GPT is on the
+	// Responses wire and can, and is the default the administrator's preset
+	// names first.
+	if !slices.Equal(ids, []string{"GPT", "LLM"}) || effective.DefaultID != "GPT" {
+		t.Fatalf("offered = %v, default %q", ids, effective.DefaultID)
+	}
+	management, err := service.Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentTools := map[string]bool{}
+	for _, view := range management.Connections {
+		agentTools[view.ID] = view.AgentTools
+	}
+	if !agentTools["GPT"] || agentTools["SOL"] || !agentTools["LLM"] || !management.DefaultAvailable {
+		t.Fatalf("agent tools = %v, default available = %t", agentTools, management.DefaultAvailable)
+	}
+}
