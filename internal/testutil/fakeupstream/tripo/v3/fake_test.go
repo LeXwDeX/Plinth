@@ -751,6 +751,20 @@ func TestFaultScenarios(t *testing.T) {
 			t.Fatal("corrupt bytes passed the delivery check")
 		}
 	})
+	t.Run("artifact mislabeled", func(t *testing.T) {
+		// #418: a CDN labels a GLB from the host's mime table; the bytes are
+		// still the GLB the task produced.
+		f := newFixture(t, short)
+		id := f.create("/generation/text-to-model", textBody(), "fake-artifact-mislabeled")
+		_, body := f.finish(id, "fake-artifact-mislabeled")
+		status, contentType, data := f.download(f.outputURL(body, "model_url"))
+		if status != http.StatusOK || contentType != "application/x-tgif" {
+			t.Fatalf("artifact = %d %q, want 200 application/x-tgif", status, contentType)
+		}
+		if deliveryErr(t, data, "model", "glb", "model/gltf-binary") != nil {
+			t.Fatal("the mislabeled artifact's bytes are not the GLB it claims to be")
+		}
+	})
 	t.Run("artifact URL expired, a later read hands out working URLs", func(t *testing.T) {
 		f := newFixture(t, short)
 		id := f.create("/generation/text-to-model", textBody(), "fake-artifact-expired")

@@ -42,6 +42,12 @@ const (
 	// ScenarioArtifactCorrupt makes the finished task's artifact URLs serve
 	// bytes that no longer match the declared format.
 	ScenarioArtifactCorrupt Scenario = "artifact-corrupt"
+	// ScenarioArtifactMislabeled makes the finished task's GLB artifact answer
+	// with the host mime table's application/x-tgif, as some CDNs do for .obj
+	// and other model files (#418). The bytes are still a valid GLB, so a slot
+	// without a MIME contract stores the wrong label; a slot that declares
+	// model/gltf-binary refuses the response instead.
+	ScenarioArtifactMislabeled Scenario = "artifact-mislabeled"
 	// ScenarioArtifactExpired makes the signed artifact URLs of the first
 	// task reads that offer them answer "expired" (403 with the host's expiry
 	// body): by default the first read's URLs, or the first n when the
@@ -115,7 +121,7 @@ const (
 var Scenarios = []Scenario{
 	ScenarioInsufficientBalance, ScenarioKeyQuota, ScenarioRateLimit, ScenarioServerError,
 	ScenarioTimeout, ScenarioLostResponse, ScenarioTaskFailed, ScenarioArtifactNotFound, ScenarioArtifactCorrupt,
-	ScenarioArtifactExpired, ScenarioPartialFormats,
+	ScenarioArtifactMislabeled, ScenarioArtifactExpired, ScenarioPartialFormats,
 	ScenarioInvalidKey, ScenarioForbidden, ScenarioModelNotFound, ScenarioServiceUnavailable,
 	ScenarioQuotaExceeded, ScenarioTaskCanceled, ScenarioTaskUnknown, ScenarioContentFiltered, ScenarioPartialImages,
 	ScenarioConcurrencyLimit, ScenarioRigNonHumanoid, ScenarioPermissionDenied,
