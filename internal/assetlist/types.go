@@ -24,8 +24,9 @@ const (
 	StatusSuperseded = "superseded"
 )
 
-// Item states. review means waiting for the person's acceptance; only #328
-// moves an item past todo, and paused/blocked stay reserved for #328.
+// Item states. review means waiting for the person's acceptance; the runner
+// (#328) writes working/review/failed/skipped and the board (#329) writes
+// accepted/returned.
 const (
 	StateTodo     = "todo"
 	StateWorking  = "working"
@@ -151,6 +152,14 @@ type Item struct {
 	Block                   string              `json:"block,omitempty"`
 	ProjectAssetID          string              `json:"project_asset_id,omitempty"`
 	Round                   int                 `json:"round"`
+	// ReturnCount counts the returns of this item (max_rework_rounds bounds
+	// it). Round counts the item's Agent turns, so the rework limit reads this
+	// field and never the round.
+	ReturnCount int `json:"return_count"`
+	// WorkRound counts the turns of the current work session. A return starts
+	// a new one, so max_rounds_per_item bounds each session instead of the
+	// item's whole life.
+	WorkRound int `json:"work_round"`
 	// AcceptedAt is when the person accepted the item (#329b); nil until then.
 	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
 	// ReturnReason and ReturnNote are the return context of the latest rework
@@ -271,15 +280,20 @@ type Repository interface {
 	Decide(ctx context.Context, decision Decision) (List, error)
 	// DecideItems applies one batch of acceptance decisions in one write
 	// transaction (#329b): the list_version CAS gates the whole batch, every
-	// item must still be awaiting review, and a return reopens a completed
-	// run. A stale version is ErrConflict and an item in the wrong state is
-	// ErrItemState, with no partial write.
+	// item must still be awaiting review, the accepted items' project assets
+	// are inserted last, and a return reopens a completed run. A stale version
+	// is ErrConflict and an item in the wrong state is ErrItemState, with no
+	// partial write; an asset that no longer fits the bound is
+	// ProjectAssetBoundError with the same rollback.
 	DecideItems(ctx context.Context, batch DecisionBatch) (List, error)
 }
 
 // DecisionBatch is one person's accept-or-return submission of the board
 // (#329b). ExpectedVersion is the list version the browser read; Items holds
 // one decision per item (accept may carry several, return exactly one).
+// Assets are the project asset rows the accepted items register and
+// AssetMaximum is the project's asset bound: the repository inserts both in
+// the same transaction, so a refused version CAS leaves no orphan asset.
 type DecisionBatch struct {
 	OwnerID         string
 	ProjectID       string
@@ -288,6 +302,8 @@ type DecisionBatch struct {
 	ReviewerID      string
 	At              time.Time
 	Items           []ItemDecision
+	Assets          []project.Asset
+	AssetMaximum    int
 }
 
 // ItemDecision is one item's write. ReviewID is the new review row id;

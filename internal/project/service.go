@@ -29,6 +29,8 @@ type Repository interface {
 	SetConventions(ctx context.Context, ownerID, projectID string, conventions Conventions) (Conventions, error)
 	ListAssets(ctx context.Context, ownerID, projectID string, limit int) ([]Asset, error)
 	CreateAsset(ctx context.Context, projectID string, asset Asset, maximum int) (Asset, error)
+	// CountAssets is the project's stored asset count (#329b), owner scoped.
+	CountAssets(ctx context.Context, ownerID, projectID string) (int, error)
 	GetAsset(ctx context.Context, ownerID, projectID, assetID string) (Asset, error)
 	UpdateAsset(ctx context.Context, ownerID, projectID, assetID, kind, name, description string, at time.Time) (Asset, error)
 	DeleteAsset(ctx context.Context, ownerID, projectID, assetID string) (bool, error)
@@ -360,6 +362,19 @@ func (service *Service) GetAsset(ctx context.Context, ownerID, projectID, assetI
 
 // CreateAsset verifies the input references and saves one project asset.
 func (service *Service) CreateAsset(ctx context.Context, ownerID, projectID string, input AssetInput) (Asset, error) {
+	value, err := service.PrepareAsset(ctx, ownerID, projectID, input)
+	if err != nil {
+		return Asset{}, err
+	}
+	return service.repository.CreateAsset(ctx, projectID, value, service.limits.MaximumAssetsPerProject)
+}
+
+// PrepareAsset is CreateAsset without the write: it checks the project, the
+// kind/name/description bounds, every reference and the deterministic id, and
+// returns the row as it would be stored (#329b). The production list's accept
+// prepares its rows with it and writes them in the list decision's own
+// transaction, so a refused decision cannot leave an orphan asset behind.
+func (service *Service) PrepareAsset(ctx context.Context, ownerID, projectID string, input AssetInput) (Asset, error) {
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(projectID) == "" {
 		return Asset{}, ErrNotFound
 	}
@@ -389,10 +404,20 @@ func (service *Service) CreateAsset(ctx context.Context, ownerID, projectID stri
 		return Asset{}, ErrInvalid
 	}
 	now := service.clock()
-	return service.repository.CreateAsset(ctx, projectID, Asset{
+	return Asset{
 		ID: id, ProjectID: projectID, OwnerID: ownerID, Kind: kind, Name: name,
 		Description: description, Images: images, Models: models, CreatedAt: now, UpdatedAt: now,
-	}, service.limits.MaximumAssetsPerProject)
+	}, nil
+}
+
+// CountAssets is the project's stored asset count. The production list's
+// accept reads it before its write transaction to answer the per-item bound;
+// the transaction re-checks the same bound before inserting.
+func (service *Service) CountAssets(ctx context.Context, ownerID, projectID string) (int, error) {
+	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(projectID) == "" {
+		return 0, ErrNotFound
+	}
+	return service.repository.CountAssets(ctx, ownerID, projectID)
 }
 
 // AssetUpdate carries the optional members of a PATCH. Nil leaves a member

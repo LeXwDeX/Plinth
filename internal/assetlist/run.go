@@ -221,7 +221,7 @@ type FinishItemInput struct {
 //   - ClaimItem picks the first returned or todo item by position only while
 //     the run is running, then moves it to working. A returned item keeps its
 //     round (the return already counted it, #329b); a todo item gets round+1.
-//     Both bump the version.
+//     Both start a work session at work_round 1 and bump the version.
 //   - FinishItem moves working→review|failed|skipped only.
 //   - SkipItem moves todo|working→skipped under the item version CAS and never
 //     touches the item's session or its bound Tasks.
@@ -267,11 +267,12 @@ type RunStore interface {
 	SetItemSession(ctx context.Context, ownerID, listID, itemID, sessionID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemNextActionAt(ctx context.Context, ownerID, listID, itemID string, nextActionAt time.Time, expectedVersion int64, at time.Time) (Item, error)
 	// RecordItemTurn stores the assistant message of a turn the server opened
-	// for a working item and sets round to the number of started rounds. The
-	// two change together so a restart can tell a scheduled turn (the stored
-	// message id matches) from one that only has a queued turn row. Only a
-	// working item is updated; a different state is ErrItemState.
-	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round int, expectedVersion int64, at time.Time) (Item, error)
+	// for a working item and sets round (the item's whole life) and workRound
+	// (the current work session). The three change together so a restart can
+	// tell a scheduled turn (the stored message id matches) from one that only
+	// has a queued turn row. Only a working item is updated; a different state
+	// is ErrItemState.
+	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round, workRound int, expectedVersion int64, at time.Time) (Item, error)
 	ItemByID(ctx context.Context, ownerID, listID, itemID string) (Item, error)
 	ItemsByList(ctx context.Context, ownerID, listID string) ([]Item, error)
 	// ItemBySession finds the item whose sub-session is sessionID (#328). An

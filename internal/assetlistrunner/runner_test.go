@@ -35,6 +35,7 @@ type recordedTurn struct {
 	itemID             string
 	assistantMessageID string
 	round              int
+	workRound          int
 }
 
 type fakeRuns struct {
@@ -108,6 +109,7 @@ func (runs *fakeRuns) ClaimItem(
 		item.Round++
 	}
 	item.State = assetlist.StateWorking
+	item.WorkRound = 1
 	item.Version++
 	item.UpdatedAt = at
 	runs.claims++
@@ -151,7 +153,7 @@ func (runs *fakeRuns) SetItemBlock(
 
 func (runs *fakeRuns) RecordItemTurn(
 	_ context.Context, ownerID, listID, itemID, assistantMessageID string,
-	round int, expectedVersion int64, at time.Time,
+	round, workRound int, expectedVersion int64, at time.Time,
 ) (assetlist.Item, error) {
 	item := runs.item(itemID)
 	if item == nil || item.OwnerID != ownerID || item.ListID != listID {
@@ -165,10 +167,11 @@ func (runs *fakeRuns) RecordItemTurn(
 	}
 	item.LastTurnMessageID = assistantMessageID
 	item.Round = round
+	item.WorkRound = workRound
 	item.Version++
 	item.UpdatedAt = at
 	runs.records = append(runs.records, recordedTurn{
-		itemID: itemID, assistantMessageID: assistantMessageID, round: round,
+		itemID: itemID, assistantMessageID: assistantMessageID, round: round, workRound: workRound,
 	})
 	return *item, nil
 }
@@ -566,7 +569,8 @@ func TestAdvanceClaimsAReturnedItemWithItsReworkReason(t *testing.T) {
 	fixture := newFixture(t, 1, 3)
 	item := newItem("aitem_1", "角色")
 	item.State = assetlist.StateReturned
-	item.Round = 2
+	item.Round = 3
+	item.ReturnCount = 1
 	item.SessionID = "ses_1"
 	item.ReturnReason = "风格不对、贴图有问题"
 	item.ReturnNote = "把脸修好"
@@ -578,18 +582,67 @@ func TestAdvanceClaimsAReturnedItemWithItsReworkReason(t *testing.T) {
 	fixture.advance(t)
 
 	claimed := fixture.item(t, "aitem_1")
-	if claimed.State != assetlist.StateWorking || claimed.Round != 2 || fixture.runs.claims != 1 {
-		t.Fatalf("returned item = %+v, claims = %d; want working round 2",
+	if claimed.State != assetlist.StateWorking || claimed.Round != 3 || claimed.WorkRound != 1 ||
+		fixture.runs.claims != 1 {
+		t.Fatalf("returned item = %+v, claims = %d; want working round 3 work round 1",
 			claimed, fixture.runs.claims)
 	}
 	if len(fixture.chat.continuations) != 1 {
 		t.Fatalf("continuations = %q; want one rework turn", fixture.chat.continuations)
 	}
+	// {round} in the rework copy is the rework ordinal (return_count), not the
+	// item's whole-life Agent round.
 	continuation := fixture.chat.continuations[0]
-	for _, want := range []string{"风格不对", "把脸修好", "第 2 轮", "角色"} {
+	for _, want := range []string{"风格不对", "把脸修好", "第 1 轮重做", "角色"} {
 		if !strings.Contains(continuation, want) {
 			t.Fatalf("continuation = %q; want %q", continuation, want)
 		}
+	}
+}
+
+// A returned item gets its own allowance of rounds: its first make already
+// used the item-wide round count, so the gate must read the work session's
+// round, not the item's.
+func TestAdvanceGivesAReturnedItemAFullRoundAllowance(t *testing.T) {
+	fixture := newFixture(t, 1, 2)
+	item := newItem("aitem_1", "角色")
+	item.State = assetlist.StateReturned
+	// The first make used both rounds; the return itself bumped round to 3.
+	item.Round = 3
+	item.ReturnCount = 1
+	item.SessionID = "ses_1"
+	item.ReturnReason = "风格不对"
+	fixture.chat.sessions["ses_1"] = chat.Session{
+		ID: "ses_1", OwnerID: testOwner, ProjectID: testProject,
+	}
+	fixture.seedRun(assetlist.RunRunning, item)
+
+	fixture.advance(t)
+	first := fixture.item(t, "aitem_1")
+	if first.WorkRound != 1 || first.State != assetlist.StateWorking {
+		t.Fatalf("rework turned = %+v; want one started round", first)
+	}
+	fixture.chat.finishTurn(first.SessionID, turnDone)
+	if len(fixture.scheduler.calls) != 1 {
+		t.Fatalf("schedules = %d; want the first rework round", len(fixture.scheduler.calls))
+	}
+
+	// The first rework turn ended without a report: the item gets the second
+	// (and last) round of this work session, not round_limit.
+	fixture.advance(t)
+	second := fixture.item(t, "aitem_1")
+	if second.State != assetlist.StateWorking || second.WorkRound != 2 || second.Round != 4 {
+		t.Fatalf("second rework round = %+v; want working work round 2 (item round 4)", second)
+	}
+	if len(fixture.scheduler.calls) != 2 {
+		t.Fatalf("schedules = %d; want the second rework round", len(fixture.scheduler.calls))
+	}
+	fixture.chat.finishTurn(second.SessionID, turnDone)
+
+	fixture.advance(t)
+	final := fixture.item(t, "aitem_1")
+	if final.State != assetlist.StateFailed || final.StateReason != "round_limit" {
+		t.Fatalf("item = %s/%s; want failed/round_limit after the rework allowance", final.State, final.StateReason)
 	}
 }
 

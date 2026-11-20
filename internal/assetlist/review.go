@@ -30,15 +30,16 @@ const (
 var ErrReworkLimit = errors.New("assetlist: rework limit reached")
 
 // ReworkLimitError is the refused return: the item used MaxReworkRounds
-// return rounds. It carries the name and round the Schema copy interpolates.
+// returns. It carries the name and the returns used, which the Schema copy
+// interpolates.
 type ReworkLimitError struct {
 	Name    string
-	Round   int
+	Returns int
 	Maximum int
 }
 
 func (e *ReworkLimitError) Error() string {
-	return fmt.Sprintf("assetlist: item %q used its %d rework rounds at round %d", e.Name, e.Maximum, e.Round)
+	return fmt.Sprintf("assetlist: item %q used its %d rework rounds", e.Name, e.Maximum)
 }
 
 func (e *ReworkLimitError) Is(target error) bool { return target == ErrReworkLimit }
@@ -47,6 +48,34 @@ func (e *ReworkLimitError) Is(target error) bool { return target == ErrReworkLim
 // asset because the per-project asset bound is reached. It is per item: a
 // batch accept keeps the other items' outcomes.
 var ErrReviewAssetLimit = errors.New("assetlist: project asset limit reached")
+
+// ReviewAssetLimitError is the request-level asset-bound refusal: the bound
+// no longer held when the write transaction checked it, so the whole batch
+// wrote nothing. A refetch then answers the item per item. It carries the item
+// name and the bound for the Schema copy.
+type ReviewAssetLimitError struct {
+	Name    string
+	Maximum int
+}
+
+func (e *ReviewAssetLimitError) Error() string {
+	return fmt.Sprintf("assetlist: project asset bound %d reached while accepting %q", e.Maximum, e.Name)
+}
+
+func (e *ReviewAssetLimitError) Is(target error) bool { return target == ErrReviewAssetLimit }
+
+// ProjectAssetBoundError is what the repository reports when an accepted
+// item's asset row does not fit the project bound inside the decision
+// transaction; ItemID names the item.
+type ProjectAssetBoundError struct {
+	ItemID string
+}
+
+func (e *ProjectAssetBoundError) Error() string {
+	return "assetlist: project asset bound reached while writing the decision"
+}
+
+func (e *ProjectAssetBoundError) Is(target error) bool { return target == ErrReviewAssetLimit }
 
 // ReviewSnapshot is the review_json captured when an item enters review: the
 // produced artifacts and the server's judgment at that instant. It is a fact
@@ -144,11 +173,18 @@ type ReviewSnapshots interface {
 	Snapshot(ctx context.Context, input ReviewSnapshotInput) (json.RawMessage, error)
 }
 
-// ProjectAssets registers an accepted item as a project asset. It is the
-// project service's CreateAsset; a caller-supplied deterministic ID makes a
-// retried registration idempotent.
+// ProjectAssets prepares the project assets an accept registers and counts the
+// project's stored assets. The rows are written by the list repository in the
+// same transaction as the decision (#329b), so a refused version CAS cannot
+// leave an orphan asset behind or consume the project's asset bound.
 type ProjectAssets interface {
-	CreateAsset(ctx context.Context, ownerID, projectID string, input project.AssetInput) (project.Asset, error)
+	// PrepareAsset validates one asset exactly as CreateAsset does and returns
+	// the row it would store (deterministic id, owner-verified references,
+	// timestamps) without writing it.
+	PrepareAsset(ctx context.Context, ownerID, projectID string, input project.AssetInput) (project.Asset, error)
+	// CountAssets is the project's stored asset count, read before the write
+	// transaction so the per-item bound answer keeps its per-item shape.
+	CountAssets(ctx context.Context, ownerID, projectID string) (int, error)
 }
 
 // ProjectAssetLimits are the project asset reference bounds
@@ -230,11 +266,13 @@ type ReviewOutcome struct {
 // Review applies one person's accept or return decision (#329b). Only items
 // awaiting review are decided; the list version the browser read gates the
 // whole batch, so a double click or a stale board is ErrConflict. An accept
-// registers each item's deterministic project asset before the decision
-// write, so a retry never inserts a second row; a project at its asset bound
-// reports that item and leaves it awaiting review. A return bumps the item's
-// round, records every picked reason and the note, and reopens a completed
-// run so the runner continues the same sub-session.
+// prepares each item's deterministic project asset and the repository writes
+// the rows in the decision's own transaction: a retried accept reuses the
+// stored row, and a refused version CAS writes neither the item nor the asset.
+// A project at its asset bound reports that item and leaves it awaiting
+// review. A return bumps the item's round, records every picked reason and the
+// note, and reopens a completed run so the runner continues the same
+// sub-session.
 func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOutcome, error) {
 	ownerID := strings.TrimSpace(input.OwnerID)
 	projectID := strings.TrimSpace(input.ProjectID)
@@ -293,6 +331,20 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 		}
 		returnedContext = returnContext{reasons: reasons, labels: labels}
 	}
+	// assetRows are the project assets the accepted items register; the write
+	// transaction inserts them with the decisions. assetUsed counts the
+	// project's stored assets plus this batch's rows, so a project at its bound
+	// answers each item without entering the transaction.
+	var assetRows []project.Asset
+	assetUsed := 0
+	maximumAssets := service.projectAssetLimits.MaximumAssets
+	if decision == ReviewDecisionAccept && service.projectAssets != nil {
+		used, err := service.projectAssets.CountAssets(ctx, ownerID, projectID)
+		if err != nil {
+			return ReviewOutcome{}, err
+		}
+		assetUsed = used
+	}
 	for _, itemID := range itemIDs {
 		item, found := byID[itemID]
 		if !found {
@@ -327,7 +379,7 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 				Note: strings.TrimSpace(input.Note),
 			})
 		case ReviewDecisionAccept:
-			assetID, err := service.registerReviewAsset(ctx, ownerID, projectID, item)
+			asset, assetID, err := service.prepareReviewAsset(ctx, ownerID, projectID, item)
 			if err != nil {
 				if !errors.Is(err, ErrReviewAssetLimit) {
 					return ReviewOutcome{}, err
@@ -336,6 +388,16 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 					ItemID: item.ID, Error: service.assetLimitText(item),
 				})
 				continue
+			}
+			if assetID != "" {
+				if maximumAssets > 0 && assetUsed >= maximumAssets {
+					outcome.Results = append(outcome.Results, ReviewItemResult{
+						ItemID: item.ID, Error: service.assetLimitText(item),
+					})
+					continue
+				}
+				assetRows = append(assetRows, asset)
+				assetUsed++
 			}
 			reviewID, err := service.newID("arev_")
 			if err != nil {
@@ -361,8 +423,20 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 		OwnerID: ownerID, ProjectID: projectID, ListID: listID,
 		ExpectedVersion: input.ExpectedVersion, ReviewerID: reviewer,
 		At: now, Items: decisions,
+		Assets: assetRows, AssetMaximum: maximumAssets,
 	})
 	if err != nil {
+		var bound *ProjectAssetBoundError
+		if errors.As(err, &bound) {
+			// The bound moved between the count above and the transaction: the
+			// batch wrote nothing (items and assets roll back together). Name
+			// the item so a refetch answers it per item.
+			name := ""
+			if item, found := byID[bound.ItemID]; found {
+				name = item.Name
+			}
+			return ReviewOutcome{}, &ReviewAssetLimitError{Name: name, Maximum: maximumAssets}
+		}
 		return ReviewOutcome{}, err
 	}
 	outcome.List = updated
@@ -419,36 +493,38 @@ func (service *Service) returnReasons(item Item, raw []string) ([]string, []stri
 }
 
 // checkReworkLimit refuses a return once the item used its declared rework
-// rounds. Round 1 is the first make, so round N already means N-1 reworks.
+// rounds. The limit counts returns (return_count), not Agent turns: a first
+// make that took three rounds is still allowed its first rework.
 func (service *Service) checkReworkLimit(item Item) error {
 	if service.review == nil {
 		return nil
 	}
 	maximum := service.review.MaxReworkRounds
-	if maximum <= 0 || item.Round <= maximum {
+	if maximum <= 0 || item.ReturnCount < maximum {
 		return nil
 	}
-	return &ReworkLimitError{Name: item.Name, Round: item.Round, Maximum: maximum}
+	return &ReworkLimitError{Name: item.Name, Returns: item.ReturnCount, Maximum: maximum}
 }
 
-// registerReviewAsset creates the item's deterministic project asset from the
+// prepareReviewAsset builds the item's deterministic project asset from the
 // snapshot's pictures and models. The id is passet_ + sha256(item id, round),
-// so an accept retried after a failed decision write returns the existing row.
+// so an accept retried after a refused decision write names the same row; the
+// decision transaction inserts it, which keeps the item and its asset atomic.
 // A deployment without the port accepts the item without registering.
-func (service *Service) registerReviewAsset(
+func (service *Service) prepareReviewAsset(
 	ctx context.Context,
 	ownerID, projectID string,
 	item Item,
-) (string, error) {
+) (project.Asset, string, error) {
 	if service.projectAssets == nil {
-		return "", nil
+		return project.Asset{}, "", nil
 	}
 	kind := ""
 	if declared, found := service.kinds[item.Kind]; found {
 		kind = declared.ProjectKind
 	}
 	if kind == "" {
-		return "", fmt.Errorf("%w: item kind %q has no project asset kind", ErrInvalid, item.Kind)
+		return project.Asset{}, "", fmt.Errorf("%w: item kind %q has no project asset kind", ErrInvalid, item.Kind)
 	}
 	snapshot := ReviewSnapshot{}
 	if len(item.Review) > 0 {
@@ -456,7 +532,7 @@ func (service *Service) registerReviewAsset(
 	}
 	images, models := reviewAssetReferences(snapshot, service.projectAssetLimits)
 	id := reviewProjectAssetID(item.ID, item.Round)
-	_, err := service.projectAssets.CreateAsset(ctx, ownerID, projectID, project.AssetInput{
+	asset, err := service.projectAssets.PrepareAsset(ctx, ownerID, projectID, project.AssetInput{
 		ID:     id,
 		Kind:   kind,
 		Name:   item.Name,
@@ -472,13 +548,13 @@ func (service *Service) registerReviewAsset(
 			errors.Is(err, project.ErrReferenceLimit):
 			limitMessage = ErrInvalid
 		case errors.Is(err, project.ErrNotFound):
-			return "", ErrNotFound
+			return project.Asset{}, "", ErrNotFound
 		default:
-			return "", err
+			return project.Asset{}, "", err
 		}
-		return "", fmt.Errorf("%w: %v", limitMessage, err)
+		return project.Asset{}, "", fmt.Errorf("%w: %v", limitMessage, err)
 	}
-	return id, nil
+	return asset, id, nil
 }
 
 // assetLimitText is the Schema copy of a project at its asset bound, with the

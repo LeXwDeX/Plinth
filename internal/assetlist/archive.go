@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/modelcheck"
+	"github.com/LeXwDeX/Plinth/internal/modeldelivery/objpackage"
 )
 
 // The batch delivery of the acceptance board (#329c): one ZIP of the list's
@@ -175,6 +175,9 @@ type ArchiveManifestItem struct {
 	TextureMaxEdge *int64                 `json:"texture_max_edge"`
 	Checks         []ArchiveManifestCheck `json:"checks"`
 	Files          []ArchiveManifestFile  `json:"files"`
+	// Missing names the recorded files the store no longer had. They are
+	// absent from the ZIP and from Files.
+	Missing []ArchiveManifestMissing `json:"missing,omitempty"`
 }
 
 // ArchiveManifestFile is one packed file. SHA256 is the snapshot's recorded
@@ -185,6 +188,16 @@ type ArchiveManifestFile struct {
 	Format string `json:"format"`
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256,omitempty"`
+}
+
+// ArchiveManifestMissing is one recorded result file the store no longer has:
+// the acceptance snapshot still names it, but the ZIP cannot carry it. It is a
+// fact of the download, never a reason to fail it.
+type ArchiveManifestMissing struct {
+	AssetID   string `json:"asset_id"`
+	Role      string `json:"role,omitempty"`
+	Variant   string `json:"variant,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
 }
 
 // ArchiveManifestCheck is one acceptance criterion as the board showed it.
@@ -216,6 +229,7 @@ type archivePlannedItem struct {
 	formats        []string
 	sources        []archiveSource
 	files          []*archiveFile
+	missing        []archiveSource
 	checks         []ArchiveManifestCheck
 	triangles      *int64
 	textureMaxEdge *int64
@@ -313,9 +327,17 @@ func (service *Service) PrepareArchive(
 			content, err := service.archiveAssets.OpenAssetScoped(
 				ctx, scope, generation.TaskID(source.taskID), generation.AssetID(source.assetID))
 			if err != nil {
-				// A recorded file the store cannot read is left out; the board's
-				// snapshot stays the truthful record of what should have existed.
-				continue
+				if generation.IsCode(err, generation.ErrNotFound) {
+					// The snapshot still records the file, but the store no
+					// longer has it: pack what is left and name the gap in the
+					// manifest and README instead of failing the download.
+					entry.missing = append(entry.missing, source)
+					continue
+				}
+				// A store that cannot be read is a server failure, never a
+				// quietly short ZIP: the transport answers 5xx with the
+				// request id and this cause in the server log.
+				return nil, fmt.Errorf("assetlist: open %s: %w", source.assetID, err)
 			}
 			mediaType := strings.TrimSpace(content.MediaType)
 			if mediaType == "" {
@@ -354,7 +376,7 @@ func (service *Service) PrepareArchive(
 		name := uniqueArchiveName(usedDirs,
 			sanitizeArchiveName(entry.item.Name, service.archive.DirectoryNameMaxBytes))
 		entry.dir = fmt.Sprintf("%02d-%s", entry.position, name)
-		planArchivePaths(entry)
+		service.planArchivePaths(ctx, scope, entry)
 		facts, checks := archiveItemFacts(entry.item.Review)
 		files := make([]ArchiveManifestFile, 0, len(entry.files))
 		for _, file := range entry.files {
@@ -364,11 +386,19 @@ func (service *Service) PrepareArchive(
 			})
 			totalBytes += file.size
 		}
+		missing := make([]ArchiveManifestMissing, 0, len(entry.missing))
+		for _, source := range entry.missing {
+			missing = append(missing, ArchiveManifestMissing{
+				AssetID: source.assetID, Role: source.role,
+				Variant: source.variant, MediaType: source.mediaType,
+			})
+		}
 		manifest.Items = append(manifest.Items, ArchiveManifestItem{
 			Position: entry.position, Name: entry.item.Name, Kind: entry.item.Kind,
 			Round: entry.item.Round, TaskID: entry.taskID, Directory: entry.dir,
 			Formats: entry.formats, Triangles: facts.triangles,
 			TextureMaxEdge: facts.textureMaxEdge, Checks: checks, Files: files,
+			Missing: missing,
 		})
 	}
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
@@ -512,16 +542,21 @@ func archiveNumber(value any) (int64, bool) {
 }
 
 // planArchivePaths names every packed file inside one item directory. A 3D
-// item follows the single-task archive layout: the main model at model.<ext>
-// (or obj/model.obj with its material and textures beside it) and the rest
-// under other/. A 2D item keeps its pictures at the directory root.
-func planArchivePaths(entry *archivePlannedItem) {
+// item follows the single-task archive layout: the main model at model.<ext>,
+// its material library and textures in obj/ under the names the OBJ and the
+// library reference (so the model still loads after extraction), everything
+// else under other/. A 2D item keeps its pictures at the directory root.
+func (service *Service) planArchivePaths(
+	ctx context.Context,
+	scope generation.TaskListScope,
+	entry *archivePlannedItem,
+) {
 	used := make(map[string]bool, len(entry.files))
 	mainModel := -1
 	mainImage := -1
 	for index, file := range entry.files {
 		switch {
-		case archiveIsModel(file.mediaType):
+		case archiveIsModelFile(file):
 			if mainModel < 0 || (file.mediaType == "model/gltf-binary" &&
 				entry.files[mainModel].mediaType != "model/gltf-binary") {
 				mainModel = index
@@ -533,31 +568,23 @@ func planArchivePaths(entry *archivePlannedItem) {
 	switch {
 	case mainModel >= 0:
 		main := entry.files[mainModel]
-		if archiveIsOBJ(main.mediaType, main.source.variant) {
-			main.path = archiveUniquePath(used, path.Join(entry.dir, "obj", "model.obj"))
-			materials, textures, others := 0, 0, 0
+		if extension, packaged := archivePackagedOBJ(main.mediaType, main.source.variant); packaged {
+			// A packaged OBJ (a ZIP of the OBJ, its library and textures) is
+			// one file: it travels alone and its bytes are not scanned.
+			main.path = archiveUniquePath(used, path.Join(entry.dir, "model"+extension))
+			others := 0
 			for index, file := range entry.files {
 				if index == mainModel {
 					continue
 				}
-				switch {
-				case archiveIsMaterial(file.source):
-					materials++
-					name := "model.mtl"
-					if materials > 1 {
-						name = fmt.Sprintf("material-%d.mtl", materials)
-					}
-					file.path = archiveUniquePath(used, path.Join(entry.dir, "obj", name))
-				case archiveIsImage(file.mediaType) || archiveIsTexture(file.source):
-					textures++
-					file.path = archiveUniquePath(used, path.Join(entry.dir, "obj",
-						fmt.Sprintf("texture-%d%s", textures, archiveExtension(file.mediaType, file.source.variant))))
-				default:
-					others++
-					file.path = archiveUniquePath(used, path.Join(entry.dir, "other",
-						archiveOtherName("model", file.source, file.mediaType, others)))
-				}
+				others++
+				file.path = archiveUniquePath(used, path.Join(entry.dir, "other",
+					archiveOtherName("file", file.source, file.mediaType, others)))
 			}
+			return
+		}
+		if archiveIsOBJ(main.mediaType, main.source.variant) {
+			service.planOBJPaths(ctx, scope, entry, used, mainModel)
 			return
 		}
 		main.path = archiveUniquePath(used, path.Join(entry.dir,
@@ -601,6 +628,123 @@ func planArchivePaths(entry *archivePlannedItem) {
 	}
 }
 
+// planOBJPaths lays out an OBJ item: the model in obj/, its material library
+// and textures under the names the OBJ and the library reference (the
+// model-delivery rules in objpackage), and every other file under other/.
+func (service *Service) planOBJPaths(
+	ctx context.Context,
+	scope generation.TaskListScope,
+	entry *archivePlannedItem,
+	used map[string]bool,
+	mainModel int,
+) {
+	objDir := path.Join(entry.dir, "obj")
+	entry.files[mainModel].path = archiveUniquePath(used, path.Join(objDir, "model.obj"))
+	spec := service.objPackage
+	materialIndex := -1
+	for index, file := range entry.files {
+		if index != mainModel && archiveIsMaterial(file.source) {
+			materialIndex = index
+			break
+		}
+	}
+	library := ""
+	if strings.TrimSpace(spec.LibraryStatement) != "" {
+		library = service.objLibraryName(ctx, scope, entry.files[mainModel].source)
+	}
+	var references []objpackage.Texture
+	if materialIndex >= 0 {
+		material := entry.files[materialIndex]
+		extension := spec.MaterialFileExtension
+		if extension == "" {
+			// A Catalog without the OBJ section keeps a usable file name.
+			extension = ".mtl"
+		}
+		name := library
+		if name == "" {
+			name = "model" + extension
+		}
+		material.path = archiveUniquePath(used, path.Join(objDir, name))
+		references = service.objTextures(ctx, scope, material.source, material.path, objDir)
+	}
+	textures := make([]int, 0, len(entry.files))
+	for index, file := range entry.files {
+		if index == mainModel || index == materialIndex {
+			continue
+		}
+		if archiveIsImage(file.mediaType) || archiveIsTexture(file.source) {
+			textures = append(textures, index)
+		}
+	}
+	variants := make([]string, len(textures))
+	for index, file := range textures {
+		variants[index] = objpackage.VariantKey(entry.files[file].source.variant)
+	}
+	chosen := objpackage.Assign(spec, variants, references)
+	for index, file := range textures {
+		name := ""
+		if reference := chosen[index]; reference >= 0 {
+			name = references[reference].Path
+		}
+		if name == "" {
+			name = path.Join(objDir, fmt.Sprintf("texture-%d%s", index+1,
+				archiveExtension(entry.files[file].mediaType, entry.files[file].source.variant)))
+		}
+		entry.files[file].path = archiveUniquePath(used, name)
+	}
+	others := 0
+	for index, file := range entry.files {
+		if index == mainModel || index == materialIndex {
+			continue
+		}
+		packed := false
+		for _, texture := range textures {
+			if texture == index {
+				packed = true
+				break
+			}
+		}
+		if packed {
+			continue
+		}
+		others++
+		file.path = archiveUniquePath(used, path.Join(entry.dir, "other",
+			archiveOtherName("file", file.source, file.mediaType, others)))
+	}
+}
+
+// objLibraryName reads the material library name the OBJ references. A store
+// that cannot be read keeps the default name: the ZIP is still built.
+func (service *Service) objLibraryName(
+	ctx context.Context,
+	scope generation.TaskListScope,
+	source archiveSource,
+) string {
+	content, err := service.archiveAssets.OpenAssetScoped(
+		ctx, scope, generation.TaskID(source.taskID), generation.AssetID(source.assetID))
+	if err != nil {
+		return ""
+	}
+	defer content.Body.Close()
+	return objpackage.LibraryName(content.Body, service.objPackage)
+}
+
+// objTextures reads the texture references of the packed material library.
+func (service *Service) objTextures(
+	ctx context.Context,
+	scope generation.TaskListScope,
+	source archiveSource,
+	materialPath, directory string,
+) []objpackage.Texture {
+	content, err := service.archiveAssets.OpenAssetScoped(
+		ctx, scope, generation.TaskID(source.taskID), generation.AssetID(source.assetID))
+	if err != nil {
+		return nil
+	}
+	defer content.Body.Close()
+	return objpackage.Textures(content.Body, service.objPackage, materialPath, directory)
+}
+
 func archiveOtherName(base string, source archiveSource, mediaType string, ordinal int) string {
 	label := archiveLabel(source.role)
 	if label == "" {
@@ -624,13 +768,40 @@ func archiveIsModel(mediaType string) bool {
 	return strings.HasPrefix(strings.ToLower(mediaType), "model/")
 }
 
+// archiveIsModelFile reports whether a stored file is the item's model. A
+// packaged model (a provider-native OBJ ZIP) is saved as application/zip, so
+// only its role says what it is.
+func archiveIsModelFile(file *archiveFile) bool {
+	if archiveIsModel(file.mediaType) {
+		return true
+	}
+	switch file.source.role {
+	case "model", "converted_model":
+		return true
+	}
+	return false
+}
+
 func archiveIsImage(mediaType string) bool {
 	return strings.HasPrefix(strings.ToLower(mediaType), "image/")
 }
 
 func archiveIsOBJ(mediaType, variant string) bool {
 	mediaType = strings.ToLower(mediaType)
-	return variant == "obj" || strings.Contains(mediaType, "obj")
+	variant = strings.ToLower(strings.TrimSpace(variant))
+	return variant == "obj" || variant == "obj_zip" || strings.Contains(mediaType, "obj")
+}
+
+// archivePackagedOBJ names the extension of an OBJ delivered as a package: the
+// media type holds a ZIP, so the file is model.obj.zip (the same suffix the
+// model delivery declares in its OBJ format's media_type_extensions) rather
+// than a bare .zip or an OBJ extension the bytes do not have.
+func archivePackagedOBJ(mediaType, variant string) (string, bool) {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if !strings.Contains(mediaType, "zip") || !archiveIsOBJ(mediaType, variant) {
+		return "", false
+	}
+	return ".obj.zip", true
 }
 
 func archiveIsMaterial(source archiveSource) bool {
@@ -642,51 +813,73 @@ func archiveIsTexture(source archiveSource) bool {
 	return source.role == "texture"
 }
 
-// archiveExtension names one file by its media type, preferring a short
-// variant (glb, obj, mtl) when the snapshot recorded one.
+// archiveExtension names one file by its media type. A variant only supplies
+// the extension when it names a file format: a semantic slot such as primary,
+// front or left is never an extension. A packaged OBJ keeps .obj.zip.
 func archiveExtension(mediaType, variant string) string {
-	if archiveShortVariant.MatchString(variant) {
-		return "." + variant
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if extension, packaged := archivePackagedOBJ(mediaType, variant); packaged {
+		return extension
 	}
-	switch strings.ToLower(strings.TrimSpace(mediaType)) {
-	case "model/gltf-binary":
-		return ".glb"
-	case "model/gltf+json":
-		return ".gltf"
-	case "model/vnd.usdz+zip":
-		return ".usdz"
-	case "application/zip":
-		return ".zip"
-	case "image/png":
-		return ".png"
-	case "image/jpeg":
-		return ".jpg"
-	case "image/webp":
-		return ".webp"
-	case "image/gif":
-		return ".gif"
-	case "image/svg+xml":
-		return ".svg"
+	if extension, found := archiveMediaExtensions[mediaType]; found {
+		return extension
 	}
-	if extensions, err := mime.ExtensionsByType(strings.TrimSpace(mediaType)); err == nil && len(extensions) > 0 {
+	if format := strings.ToLower(strings.TrimSpace(variant)); archiveFormatVariants[format] {
+		return "." + format
+	}
+	if extensions, err := mime.ExtensionsByType(mediaType); err == nil && len(extensions) > 0 &&
+		!archiveGenericMediaTypes[mediaType] {
 		return extensions[0]
 	}
 	if subtype := mediaType; strings.Contains(subtype, "/") {
 		subtype = subtype[strings.LastIndex(subtype, "/")+1:]
 		subtype = sanitizeArchiveName(subtype, 8)
-		if subtype != "item" {
+		if subtype != "item" && subtype != "octet-stream" {
 			return "." + subtype
 		}
 	}
 	return ".bin"
 }
 
+// archiveMediaExtensions maps a stored media type to its file extension. The
+// generic types are deliberately absent: their bytes may be any format, so the
+// saved variant decides instead.
+var archiveMediaExtensions = map[string]string{
+	"model/gltf-binary":  ".glb",
+	"model/gltf+json":    ".gltf",
+	"model/obj":          ".obj",
+	"model/mtl":          ".mtl",
+	"model/fbx":          ".fbx",
+	"model/stl":          ".stl",
+	"model/3mf":          ".3mf",
+	"model/vnd.usdz+zip": ".usdz",
+	"application/zip":    ".zip",
+	"image/png":          ".png",
+	"image/jpeg":         ".jpg",
+	"image/webp":         ".webp",
+	"image/gif":          ".gif",
+	"image/svg+xml":      ".svg",
+}
+
+// archiveFormatVariants are the variants that name a file format. Anything
+// else (primary, front, left, right, preview, ...) is a semantic slot.
+var archiveFormatVariants = map[string]bool{
+	"glb": true, "gltf": true, "obj": true, "mtl": true, "fbx": true,
+	"stl": true, "3mf": true, "usdz": true, "zip": true,
+	"png": true, "jpg": true, "jpeg": true, "webp": true, "gif": true, "svg": true,
+}
+
+// archiveGenericMediaTypes name no format; a lookup for them must not decide
+// the extension.
+var archiveGenericMediaTypes = map[string]bool{
+	"application/octet-stream": true,
+	"binary/octet-stream":      true,
+}
+
 // archiveFormat is the manifest's format id: the extension without its dot.
 func archiveFormat(mediaType, variant string) string {
 	return strings.TrimPrefix(archiveExtension(mediaType, variant), ".")
 }
-
-var archiveShortVariant = regexp.MustCompile(`^[a-z0-9]{1,8}$`)
 
 // sanitizeArchiveName makes one item name safe as a directory segment: path
 // separators and control characters become dashes, leading/trailing spaces and
@@ -803,7 +996,28 @@ func archiveReadme(manifest ArchiveManifest, fileCount int) []byte {
 			fmt.Fprintf(builder, "      - %s（%s，%s，%d 字节，sha256 %s）\n",
 				file.Path, file.Role, file.Format, file.Size, file.SHA256)
 		}
+		if len(item.Missing) > 0 {
+			// A recorded result file the store no longer has is named here:
+			// the acceptance snapshot still counts it, the ZIP cannot.
+			builder.WriteString("    缺失（存储中已不存在，未打包）：\n")
+			for _, file := range item.Missing {
+				fmt.Fprintf(builder, "      - %s（%s，%s）\n",
+					file.AssetID, archiveMissingRole(file), file.MediaType)
+			}
+		}
 		builder.WriteString("\n")
 	}
 	return []byte(builder.String())
+}
+
+// archiveMissingRole names a missing file by its role or, without one, its
+// variant.
+func archiveMissingRole(file ArchiveManifestMissing) string {
+	if file.Role != "" {
+		return file.Role
+	}
+	if file.Variant != "" {
+		return file.Variant
+	}
+	return "file"
 }

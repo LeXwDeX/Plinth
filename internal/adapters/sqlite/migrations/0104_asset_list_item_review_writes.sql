@@ -7,6 +7,12 @@
 -- - asset_list_items.return_reason / return_note：最近一次打回的原因与说明。
 --   同一个子会话的续轮靠它们把打回原因写进下一轮的用户消息；历史版本仍以
 --   asset_list_item_reviews 的逐行记录为准。
+-- - asset_list_items.return_count：已打回次数，打回上限（review 的
+--   max_rework_rounds）与打回文案按它计，不按 Agent 轮次 round 计。
+-- - asset_list_items.work_round：当前工作会话已开的轮次。round 是该项累计的
+--   Agent 轮次（也用于展示与资产身份）；被打回项从新的工作会话继续，轮次上限
+--   max_rounds_per_item 按 work_round 计，否则首次制作已用满轮次的项一被打回
+--   就只剩一轮。
 -- - asset_list_item_reviews.reasons_json / note：打回时选中的原因 id 与说明。
 --   reason 列继续保存给人看的合并文案，保持旧读取路径不变。
 --
@@ -15,6 +21,8 @@
 ALTER TABLE asset_list_items ADD COLUMN accepted_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE asset_list_items ADD COLUMN return_reason TEXT NOT NULL DEFAULT '';
 ALTER TABLE asset_list_items ADD COLUMN return_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE asset_list_items ADD COLUMN return_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE asset_list_items ADD COLUMN work_round INTEGER NOT NULL DEFAULT 0;
 
 ALTER TABLE asset_list_item_reviews ADD COLUMN reasons_json TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE asset_list_item_reviews ADD COLUMN note TEXT NOT NULL DEFAULT '';

@@ -420,8 +420,11 @@ func (r *AssetListRunRepository) ClaimItem(
 		if state == assetlist.StateTodo {
 			roundIncrement = 1
 		}
+		// work_round counts the turns of one work session: a fresh item starts
+		// at one, a returned item starts its rework session at one too, so the
+		// round limit never inherits the first make's rounds.
 		result, err := conn.ExecContext(ctx, `
-			UPDATE asset_list_items SET state = ?, round = round + ?,
+			UPDATE asset_list_items SET state = ?, round = round + ?, work_round = 1,
 				version = version + 1, next_action_at = '', updated_at = ?
 			WHERE id = ? AND state = ?`,
 			assetlist.StateWorking, roundIncrement, formatTime(at), itemID, state)
@@ -607,28 +610,29 @@ func (r *AssetListRunRepository) SetItemNextActionAt(
 }
 
 // RecordItemTurn stores the assistant message of a turn the server opened for
-// a working item and sets its started-round count. A missing or foreign item
-// is ErrNotFound; a different state is ErrItemState; a lost CAS guard is
+// a working item and sets its started-round counts: round is the item's whole
+// life, workRound the current work session's. A missing or foreign item is
+// ErrNotFound; a different state is ErrItemState; a lost CAS guard is
 // ErrConflict.
 func (r *AssetListRunRepository) RecordItemTurn(
 	ctx context.Context,
 	ownerID, listID, itemID, assistantMessageID string,
-	round int,
+	round, workRound int,
 	expectedVersion int64,
 	at time.Time,
 ) (assetlist.Item, error) {
 	if ownerID == "" || listID == "" || itemID == "" {
 		return assetlist.Item{}, fmt.Errorf("%w: item identity", assetlist.ErrInvalid)
 	}
-	if assistantMessageID == "" || round <= 0 {
+	if assistantMessageID == "" || round <= 0 || workRound <= 0 {
 		return assetlist.Item{}, fmt.Errorf("%w: item turn", assetlist.ErrInvalid)
 	}
 	var stored assetlist.Item
 	err := r.withWrite(ctx, func(conn *sql.Conn) error {
 		query := `UPDATE asset_list_items SET last_turn_message_id = ?, round = ?,
-			version = version + 1, updated_at = ?
+			work_round = ?, version = version + 1, updated_at = ?
 			WHERE id = ? AND owner_id = ? AND list_id = ? AND state = ?`
-		args := []any{assistantMessageID, round, formatTime(at),
+		args := []any{assistantMessageID, round, workRound, formatTime(at),
 			itemID, ownerID, listID, assetlist.StateWorking}
 		if expectedVersion != assetlist.VersionUnchecked {
 			if expectedVersion < 0 {

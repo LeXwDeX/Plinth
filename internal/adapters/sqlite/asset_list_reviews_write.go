@@ -8,14 +8,17 @@ import (
 	"fmt"
 
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
+	"github.com/LeXwDeX/Plinth/internal/project"
 )
 
 // DecideItems applies one board submission (#329b) in one write transaction:
 // the list version CAS gates the batch, every item must still be awaiting
-// review, the per-round review rows are appended, and a return reopens a
-// completed run so the runner continues the item's sub-session. Any conflict
-// rolls the whole batch back; the service reports per-item asset errors
-// before it gets here.
+// review, the per-round review rows are appended, the accepted items' project
+// asset rows are inserted in the same transaction (the shared
+// insertProjectAsset helper keeps the project route's identity and bound
+// rules), and a return reopens a completed run so the runner continues the
+// item's sub-session. Any conflict rolls the whole batch back; the service
+// reports per-item asset errors before it gets here.
 func (r *AssetListRepository) DecideItems(ctx context.Context, batch assetlist.DecisionBatch) (assetlist.List, error) {
 	if batch.OwnerID == "" || batch.ProjectID == "" || batch.ListID == "" ||
 		len(batch.Items) == 0 || batch.ExpectedVersion < 0 {
@@ -53,9 +56,9 @@ func (r *AssetListRepository) DecideItems(ctx context.Context, batch assetlist.D
 			}
 			switch decision.Verdict {
 			case assetlist.ReviewVerdictApproved:
-				if decision.ProjectAssetID == "" {
-					return fmt.Errorf("%w: accepted item needs its project asset", assetlist.ErrInvalid)
-				}
+				// A deployment without the project service settles the item
+				// without a project asset; when the service prepared rows, the
+				// item names its own.
 				result, err := conn.ExecContext(ctx, `
 					UPDATE asset_list_items SET state = ?, project_asset_id = ?,
 						accepted_at = ?, return_reason = '', return_note = '',
@@ -74,9 +77,12 @@ func (r *AssetListRepository) DecideItems(ctx context.Context, batch assetlist.D
 				if decision.Reason == "" {
 					return fmt.Errorf("%w: a return needs its reason copy", assetlist.ErrInvalid)
 				}
+				// return_count is the rework limit's counter; round stays the
+				// item's Agent-turn count and work_round restarts at the claim.
 				result, err := conn.ExecContext(ctx, `
 					UPDATE asset_list_items SET state = ?, round = round + 1,
-						return_reason = ?, return_note = ?, next_action_at = '',
+						return_count = return_count + 1, return_reason = ?, return_note = ?,
+						work_round = 0, next_action_at = '',
 						block = '', version = version + 1, updated_at = ?
 					WHERE id = ? AND state = ?`,
 					assetlist.StateReturned, decision.Reason, decision.Note,
@@ -133,6 +139,27 @@ func (r *AssetListRepository) DecideItems(ctx context.Context, batch assetlist.D
 				return fmt.Errorf("reopen asset list run: %w", err)
 			}
 		}
+		// The accepted items' project assets are part of the same transaction:
+		// an item and its asset commit together, and a refused CAS leaves
+		// neither behind. The bound is re-checked here because the service's
+		// count is a read outside this transaction.
+		approved := make(map[string]string, len(batch.Items))
+		for _, decision := range batch.Items {
+			if decision.Verdict == assetlist.ReviewVerdictApproved && decision.ProjectAssetID != "" {
+				approved[decision.ProjectAssetID] = decision.ItemID
+			}
+		}
+		for _, asset := range batch.Assets {
+			if approved[asset.ID] == "" {
+				return fmt.Errorf("%w: project asset %q belongs to no accepted item", assetlist.ErrInvalid, asset.ID)
+			}
+			if _, err := insertProjectAsset(ctx, conn, batch.ProjectID, asset, batch.AssetMaximum); err != nil {
+				if errors.Is(err, project.ErrLimit) {
+					return &assetlist.ProjectAssetBoundError{ItemID: assetItemID(batch.Items, asset.ID)}
+				}
+				return fmt.Errorf("register accepted item's project asset: %w", err)
+			}
+		}
 		stored, err = loadAssetList(ctx, conn, batch.OwnerID, batch.ProjectID, batch.ListID)
 		return err
 	})
@@ -140,6 +167,16 @@ func (r *AssetListRepository) DecideItems(ctx context.Context, batch assetlist.D
 		return assetlist.List{}, err
 	}
 	return stored, nil
+}
+
+// assetItemID is the item whose decision carries the project asset row.
+func assetItemID(decisions []assetlist.ItemDecision, assetID string) string {
+	for _, decision := range decisions {
+		if decision.ProjectAssetID == assetID {
+			return decision.ItemID
+		}
+	}
+	return ""
 }
 
 // expectOneRow turns a lost conditional update into ErrConflict.

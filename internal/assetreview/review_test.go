@@ -175,6 +175,61 @@ func TestSnapshotJudgesTheCoverPictureWithTheDeliveryChecklist(t *testing.T) {
 	}
 }
 
+func TestSnapshotJudgesTheModelRoleGlbBeforeConvertedModels(t *testing.T) {
+	models := &fakeModels{report: modelinspect.Report{Triangles: 1200}}
+	service := assetreview.New(assetreview.Config{
+		Checks: func(context.Context, string, string, json.RawMessage) []budget.PlanCheck {
+			return []budget.PlanCheck{{Check: "triangles", Maximum: bound(10000)}}
+		},
+		Models: models,
+	})
+	// Stored assets come back ordered by role, so converted_model (FBX/OBJ)
+	// precedes the task's own model. The GLB is the judged file either way.
+	raw, err := service.Snapshot(context.Background(), snapshotInput(
+		generation.Asset{ID: "asset_fbx", Role: "converted_model", Variant: "converted.fbx",
+			MediaType: "application/octet-stream", StorageKey: "k/model.fbx"},
+		generation.Asset{ID: "asset_obj", Role: "converted_model", Variant: "converted.obj",
+			MediaType: "model/obj", StorageKey: "k/model.obj"},
+		generation.Asset{ID: "asset_glb", Role: "model", Variant: "glb",
+			MediaType: "model/gltf-binary", StorageKey: "k/model.glb"},
+	))
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	snapshot := decode(t, raw)
+	if snapshot.Model3D == nil || snapshot.Model3D.AssetID != "asset_glb" ||
+		snapshot.Model3D.Checks[0].Status != "pass" || models.calls != 1 {
+		t.Fatalf("model judgment = %+v, calls = %d; want the model role's GLB", snapshot.Model3D, models.calls)
+	}
+	if snapshot.CoverAssetID != "asset_glb" {
+		t.Fatalf("cover = %q; want the GLB when the item has no picture", snapshot.CoverAssetID)
+	}
+}
+
+func TestSnapshotFallsBackToAConvertedGlb(t *testing.T) {
+	models := &fakeModels{report: modelinspect.Report{Triangles: 1200}}
+	service := assetreview.New(assetreview.Config{
+		Checks: func(context.Context, string, string, json.RawMessage) []budget.PlanCheck {
+			return []budget.PlanCheck{{Check: "triangles", Maximum: bound(10000)}}
+		},
+		Models: models,
+	})
+	// No model-role GLB: a converted GLB is still a GLB the inspector can read.
+	raw, err := service.Snapshot(context.Background(), snapshotInput(
+		generation.Asset{ID: "asset_fbx", Role: "converted_model", Variant: "fbx",
+			MediaType: "model/fbx", StorageKey: "k/model.fbx"},
+		generation.Asset{ID: "asset_glb", Role: "converted_model", Variant: "glb",
+			MediaType: "model/gltf-binary", StorageKey: "k/model.glb"},
+	))
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	snapshot := decode(t, raw)
+	if snapshot.Model3D == nil || snapshot.Model3D.AssetID != "asset_glb" {
+		t.Fatalf("model judgment = %+v; want the converted GLB", snapshot.Model3D)
+	}
+}
+
 func TestSnapshotCopiesSelfCheckAndUnreadableModel(t *testing.T) {
 	models := &fakeModels{err: errors.New("cannot read")}
 	selfChecks := &fakeSelfChecks{records: []chat.SelfCheckRecord{{
