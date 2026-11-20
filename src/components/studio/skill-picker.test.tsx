@@ -62,7 +62,8 @@ function render(overrides: Partial<React.ComponentProps<typeof SkillPicker>> = {
 // #405: the picker is the Skills tab of the settings dialog now, so there is no trigger label to test: the same states
 // are told by the table itself (the checked row, the loading and failure lines, the notice under the table).
 describe('SkillPicker as the Skills tab', () => {
-  const checked = (html: string) => [...html.matchAll(/<button[^>]*role="menuitemradio"[^>]*aria-checked="true"[^>]*>(.*?)<\/button>/g)].map((match) => match[1].replace(/<[^>]*>/g, ''));
+  // The inner markup of each checked row, as rendered: the assertions only look for the name inside it.
+  const checked = (html: string) => [...html.matchAll(/<button[^>]*role="menuitemradio"[^>]*aria-checked="true"[^>]*>(.*?)<\/button>/g)].map((match) => match[1]);
 
   it('checks the row of the selected skill, in the same table as "none", with no trigger button', () => {
     const html = render();
