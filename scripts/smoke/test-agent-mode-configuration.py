@@ -65,10 +65,14 @@ def conversion_offerings(available=False):
 
 
 class ApprovalPolicyTests(unittest.TestCase):
-    def test_manual_policy_includes_splat_and_rejects_missing_or_extra_capabilities(self):
+    def test_policy_requires_a_declared_default_and_exact_manual_capabilities(self):
         # Independent product policy: docs/product.md approval policy and #190.
         # Do not derive this oracle from the deployed Schema being checked.
+        # #415: the default mode itself is Schema data, so the block accepts any
+        # mode the Schema declares in `modes`; the product's current default
+        # (auto since #406) is fixed by the Go and frontend tests, not here.
         required = ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"]
+        modes = ["auto", "budget", "manual"]
         source = SCRIPT.read_text()
         block = source.split("# Schema 里的批准策略", 1)[1].split("\n", 1)[1].split("# 4. 新会话", 1)[0]
         stub = r'''
@@ -77,14 +81,29 @@ T="$1"; BASE=stub://offline; PASS=0; FAIL=0
 ok() { PASS=$((PASS+1)); }
 bad() { FAIL=$((FAIL+1)); }
 req() { printf 200; }
-jget() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2"; }
+jget() { python3 -c '
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(eval(sys.argv[2]))
+except Exception:
+    print("")' "$1" "$2"; }
 '''
-        cases = [("complete", "manual", required, True), ("automatic default", "auto", required, False)]
-        cases += [("missing " + name, "manual", [x for x in required if x != name], False) for name in required]
-        cases += [("unexpected 2D approval", "manual", required + ["text-to-image"], False)]
-        for name, mode, capabilities, valid in cases:
+        cases = [
+            ("declared auto default", "auto", modes, required, True),
+            ("declared budget default", "budget", modes, required, True),
+            ("declared manual default", "manual", modes, required, True),
+            ("default not declared", "steps", modes, required, False),
+            ("empty default", "", modes, required, False),
+            ("missing modes", "auto", None, required, False),
+        ]
+        cases += [("missing " + name, "auto", modes, [x for x in required if x != name], False) for name in required]
+        cases += [("unexpected 2D approval", "auto", modes, required + ["text-to-image"], False)]
+        for name, mode, declared_modes, capabilities, valid in cases:
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 policy = {"default_mode": mode, "manual_approval_capabilities": capabilities}
+                if declared_modes is not None:
+                    policy["modes"] = declared_modes
                 (pathlib.Path(directory) / "schema.json").write_text(json.dumps({"schema": {"chat": {"approval_policy": policy}}}))
                 result = subprocess.run(["bash", "-s", "--", directory], input=stub + block + '\n[ "$PASS" = 1 ] && [ "$FAIL" = 0 ]\n', text=True, capture_output=True, timeout=10)
                 self.assertEqual(result.stderr, "")
