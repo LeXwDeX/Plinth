@@ -222,3 +222,34 @@ func TestCacheTurnsAReaderPanicIntoAnUnknownBalance(t *testing.T) {
 		}
 	}
 }
+
+// #385: the web balance route shows an account that is not priced in its
+// provider's own unit as a plain number. That read never asks for the native
+// amount, and it is cached apart from the native one: they are different reads.
+func TestCachePlainRequestReadsThePlainNumberAndIsCachedApart(t *testing.T) {
+	t.Parallel()
+	clock := &fakeClock{now: time.Unix(1_000, 0)}
+	source := &fakeSource{
+		native: map[string]*schema.NativeAmount{"meshy": {Unit: "meshy.credit", UnitLabel: "Meshy credits", Amount: "1000"}},
+		plain:  map[string]float64{"meshy": 88.5},
+	}
+	cache := newCache(t, source, clock)
+
+	plain := cache.ReadRequests(context.Background(), []provideraccounts.Request{{AccountID: "meshy", Plain: true}})[0]
+	if !plain.Known || plain.Native != nil || plain.Value != 88.5 {
+		t.Fatalf("plain reading = %+v", plain)
+	}
+	if source.calls.Load() != 0 {
+		t.Fatalf("a plain read asked for the native amount (%d calls)", source.calls.Load())
+	}
+	native := cache.Read(context.Background(), []string{"meshy"})[0]
+	if !native.Known || native.Native == nil || native.Native.Amount != "1000" {
+		t.Fatalf("native reading = %+v", native)
+	}
+	// Both are kept: neither asks the provider again inside the TTL.
+	cache.ReadRequests(context.Background(), []provideraccounts.Request{{AccountID: "meshy", Plain: true}})
+	cache.Read(context.Background(), []string{"meshy"})
+	if source.calls.Load() != 1 {
+		t.Fatalf("native amount read %d times inside the TTL, want 1", source.calls.Load())
+	}
+}

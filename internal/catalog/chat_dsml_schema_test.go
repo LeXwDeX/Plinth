@@ -69,6 +69,10 @@ func TestDSMLSpellingsAndPendingTextsAreValidated(t *testing.T) {
 			`"tool_round_limit_pending_item": "- {tool}"`, "tool_round_limit_pending"},
 		"tool without name": {`"tool_round_limit_pending_tool": "- {tool}"`,
 			`"tool_round_limit_pending_tool": "-"`, "tool_round_limit_pending"},
+		"no invalid-arguments text": {`"tool_arguments_invalid": "工具参数不是合法的 JSON，该工具没有执行。请按工具定义重新生成参数后再调用。"`,
+			`"tool_arguments_invalid": ""`, "tool_arguments_invalid"},
+		"unavailable text without the tool name": {`"tool_unavailable": "工具 {tool} 本回合不可用，没有执行。请改用当前可用的工具，或不用工具直接回答。"`,
+			`"tool_unavailable": "本回合不可用"`, "tool_unavailable"},
 	} {
 		changed := bytes.Replace(source, []byte(test.old), []byte(test.new), 1)
 		if bytes.Equal(changed, source) {

@@ -29,9 +29,7 @@ func (executor *Executor) inputRefusal(command chat.ToolCommand, err error) (cha
 	default:
 		return chat.ToolResult{}, false
 	}
-	result := executor.failure(command, "", executor.refusalDetail(command, err, refusal.Detail))
-	result.NoSubmission = true
-	return result, true
+	return executor.refusal(command, string(refusal.Code), executor.refusalDetail(command, err, refusal.Detail)), true
 }
 
 // refusalDetail is what the Agent is told about a refused step (#321 A). A

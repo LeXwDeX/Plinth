@@ -464,6 +464,16 @@ export interface ProductSchema {
       task_polling_interval_milliseconds: number;
       harness_refresh_milliseconds: number;
       harness_save_debounce_milliseconds: number;
+      /** #385: how often the session's pending paid steps are read while a turn or task runs. */
+      pending_approvals_refresh_milliseconds: number;
+      /**
+       * #385: how the repeating reads slow down while nothing changes and nothing runs: the wait is multiplied by
+       * `backoff_factor` after each read that found nothing new, up to `max_interval_milliseconds`.
+       */
+      idle_polling: {
+        backoff_factor: number;
+        max_interval_milliseconds: number;
+      };
       session_menu_page_size: number;
       session_menu_search_debounce_milliseconds: number;
       session_title_refresh_attempts: number;

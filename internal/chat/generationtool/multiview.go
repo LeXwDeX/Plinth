@@ -244,3 +244,23 @@ func TakesSeveralViews(offering generation.Offering) bool {
 	_, _, declared := multiviewViewsOf(offering, catalog.ChatThreeViewMultiviewSchema{})
 	return declared
 }
+
+// MultiviewModelAvailable reports whether model names an enabled Offering of
+// one of the capabilities that takes several views of one object (TakesSeveralViews)
+// and, when available is given, whose runtime configuration is present (#373).
+// model is any form the generation tools match: the model ID, the Offering ID
+// or the provider/model pair. The chat service uses it to refuse a structured
+// multiview request for a model that cannot run before the turn starts.
+func MultiviewModelAvailable(offerings []generation.Offering, capabilities []generation.Capability,
+	available func(generation.OfferingID) bool, model string) bool {
+	for _, offering := range offerings {
+		if !offering.Enabled || !slices.Contains(capabilities, offering.Capability) ||
+			!modelMatches(offering, model) || !TakesSeveralViews(offering) {
+			continue
+		}
+		if available == nil || available(offering.ID) {
+			return true
+		}
+	}
+	return false
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/canvas"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -230,6 +231,16 @@ func (s *Server) legacyDeleteCanvasProject(
 			writer,
 			http.StatusNotFound,
 			s.application.Canvas.Presentation.Messages.ProjectNotFound,
+		)
+		return
+	}
+	if errors.Is(err, chat.ErrSessionDeletionBlocked) {
+		// The session the project owns has a SkillRun with work in flight
+		// (#384): nothing was stopped or deleted.
+		s.writeCanvasError(
+			writer,
+			http.StatusConflict,
+			traceFromWriter(writer).localeText(s.application.Chat.Presentation.Messages.SessionDeleteBlocked),
 		)
 		return
 	}

@@ -26,7 +26,7 @@ mid-sized teams for internal use; you bring your own Provider API keys.
 - **Users**: administrators and regular users, with username and password sign-in.
 - **UI languages**: Chinese and English, see "UI language" below.
 
-Plinth targets desktop browsers only.
+Plinth targets desktop browsers only: Chrome or Edge 111, Firefox 128, or Safari 16.4, and newer. Older browsers get an upgrade notice.
 
 ## Screenshots
 
@@ -337,7 +337,7 @@ in [docs/deployment.md](docs/deployment.md#内部运维资产自部署不需要)
 - Some user-facing text produced by the server is still Chinese only: task failure reasons,
   rejection reasons before a step is submitted, and tool explanations the Agent passes on. The
   English UI shows these in Chinese; making them follow the UI language is planned after 1.0.
-- Desktop browsers only.
+- Desktop browsers only (Chrome or Edge 111, Firefox 128, Safari 16.4, and newer).
 - Not in 1.0: adding your own Providers (only the built-in Providers listed above), teams and
   organizations (there are only administrators and regular users), encrypted storage of
   Provider keys (keys live in `.env`, protected by file permissions), and chat protocols other

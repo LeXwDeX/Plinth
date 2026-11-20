@@ -34,6 +34,13 @@ func standardSpecificationURI(value string) bool {
 		case "/package/2006/content-types", "/package/2006/relationships", "/package/2006/relationships/metadata/thumbnail",
 			"/package/2006/relationships/metadata/core-properties", "/package/2006/relationships/mustpreserve":
 			return true
+		// The namespace of the core-properties part that the relationship type
+		// above names (ECMA-376 Part 2, 11.1). Listing only the relationship would
+		// admit the pointer and refuse the part it points to. This is consistency of
+		// the standard vocabulary found while investigating #386; it is not what
+		// refused the real Tripo 3MF (see the Tripo namespace below).
+		case "/package/2006/metadata/core-properties":
+			return true
 		}
 	case "www.w3.org":
 		switch parsed.Path {
@@ -41,9 +48,25 @@ func standardSpecificationURI(value string) bool {
 			return true
 		}
 	case "purl.org":
-		return parsed.Path == "/dc/elements/1.1/" || parsed.Path == "/dc/terms/"
+		// Dublin Core elements and terms, and the DCMI type vocabulary the core
+		// properties part declares next to them.
+		return parsed.Path == "/dc/elements/1.1/" || parsed.Path == "/dc/terms/" || parsed.Path == "/dc/dcmitype/"
 	case "schemas.bambulab.com":
 		return parsed.Path == "/package/2021"
+	case "schemas.slic3r.org":
+		// Slic3r and PrusaSlicer's slic3rpe vocabulary (XMLNS_SLIC3R_VALUE in
+		// PrusaSlicer's Model3mf.cpp).
+		return parsed.Path == "/3mf/2017/06"
+	case "www.tripo3d.ai":
+		// Tripo's AI-generated-content label: every 3MF Tripo converts declares
+		// this namespace on the model root for one <metadata name="…:AIGC"> entry
+		// whose value is a JSON label (producer and produce ids, no address). It is
+		// a namespace name, never fetched. Without it the real conversion of
+		// 2026-11-19 was refused as holding an external address (#386). Unlike the
+		// dated paths above it is one literal string: scheme, host case, path
+		// encoding and a trailing slash are all part of the name, so no variant of
+		// it is exempt.
+		return value == "https://www.tripo3d.ai/ns/aigc/1.0"
 	}
 	return false
 }
