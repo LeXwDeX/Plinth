@@ -691,8 +691,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 	if err != nil {
 		return nil, err
 	}
-	registry.offeringAllowed = config.OfferingAllowed
-	registry.offerings = config.Offerings
+	registry.bindOfferingSources(config.OfferingAllowed, config.Offerings)
 	return &Orchestrator{
 		service:            config.Service,
 		schema:             config.Schema,

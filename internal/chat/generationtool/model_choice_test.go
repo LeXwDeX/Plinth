@@ -356,6 +356,84 @@ func TestTheExplicitModelLockAppliesToTheMultiviewTool(t *testing.T) {
 	}
 }
 
+// #373: a structured multiview request is the person's own pick of its turn:
+// they chose the model on the multiview panel or the three-view card, so it
+// outranks the session's lock without editing it. The lock still decides every
+// other tool of the turn and every turn that carries no such request.
+func TestAStructuredMultiviewRequestOutranksTheSessionLock(t *testing.T) {
+	rodin := choiceTestOffering("hyper3d/rodin-gen-2.5/image-to-3d", "rodin-gen-2.5", generation.ImageTo3D)
+	v31 := choiceTestOffering("tripo/tripo-v3.1-multiview/image-to-3d", "tripo-v3.1-multiview", generation.ImageTo3D)
+	p2 := choiceTestOffering("tripo/tripo-p2-multiview/image-to-3d", "tripo-p2-multiview", generation.ImageTo3D)
+	tests := []struct {
+		name        string
+		tool        string
+		locked      string
+		requested   string
+		named       string
+		unavailable []generation.OfferingID
+		wantID      generation.OfferingID
+		refusal     string
+	}{
+		{name: "a lock on a model that takes no views", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: p2.ModelID, named: p2.ModelID, wantID: p2.ID},
+		{name: "a lock on another multiview model", tool: "create_model_3d_from_views",
+			locked: v31.ModelID, requested: p2.ModelID, named: p2.ModelID, wantID: p2.ID},
+		{name: "the request names the Offering ID", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: string(p2.ID), named: p2.ModelID, wantID: p2.ID},
+		{name: "the request names the lock itself", tool: "create_model_3d_from_views",
+			locked: p2.ModelID, requested: p2.ModelID, named: p2.ModelID, wantID: p2.ID},
+		{name: "a lock the call cannot serve does not stop it", tool: "create_model_3d_from_views",
+			locked: "retired-model", requested: p2.ModelID, wantID: p2.ID},
+		{name: "a turn without the request keeps the lock", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, named: p2.ModelID, refusal: "锁定"},
+		{name: "another tool of the turn keeps the lock", tool: "create_model_3d_from_image",
+			locked: rodin.ModelID, requested: p2.ModelID, wantID: rodin.ID},
+		{name: "another tool still refuses a conflicting model", tool: "create_model_3d_from_image",
+			locked: rodin.ModelID, requested: p2.ModelID, named: p2.ModelID, refusal: "锁定"},
+		{name: "an unavailable requested model is refused, not replaced by the lock", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: p2.ModelID, named: p2.ModelID, unavailable: []generation.OfferingID{p2.ID},
+			refusal: "不可用"},
+		{name: "a model no Offering carries is refused", tool: "create_model_3d_from_views",
+			locked: rodin.ModelID, requested: "missing-model", refusal: "不可用"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			unavailable := map[generation.OfferingID]bool{}
+			for _, id := range test.unavailable {
+				unavailable[id] = true
+			}
+			executor := choiceTestExecutor(&choiceTestGateway{
+				offerings: []generation.Offering{rodin, v31, p2}, unavailable: unavailable,
+			})
+			command := choiceTestCommand(choiceTestTool(test.tool, generation.ImageTo3D))
+			command.Tool.IgnoreUserModel = test.tool == "create_model_3d_from_views"
+			command.Options.ExplicitModel3D = test.locked
+			if test.requested != "" {
+				command.Options.Multiview = &chat.MultiviewRequest{Model: test.requested}
+			}
+			choice, err := executor.chooseOffering(command, generation.ImageTo3D, choiceTestArguments(test.named), modelInput{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.refusal != "" {
+				if choice.Offering.ID != "" || !strings.Contains(choice.Refusal, test.refusal) {
+					t.Fatalf("choice = %q from %q (refusal %q), want a refusal mentioning %q and no Offering",
+						choice.Offering.ID, choice.Source, choice.Refusal, test.refusal)
+				}
+				return
+			}
+			if choice.Refusal != "" || choice.Offering.ID != test.wantID || choice.Source != "user" {
+				t.Fatalf("choice = %q from %q (refusal %q), want %s from the person",
+					choice.Offering.ID, choice.Source, choice.Refusal, test.wantID)
+			}
+			// The lock is the session's: reading the turn's choice never rewrites it.
+			if command.Options.ExplicitModel3D != test.locked {
+				t.Fatalf("the session lock changed to %q", command.Options.ExplicitModel3D)
+			}
+		})
+	}
+}
+
 // A multiview call with no purpose recommendation may only run one of its
 // declared models that takes the views. Falling back to the first available
 // Offering could submit an image-to-3D model that declares no views (#103).

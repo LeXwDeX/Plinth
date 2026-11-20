@@ -41,6 +41,16 @@ func (service *Service) currentModel(model string) string {
 // successors, the domain in view (AIModel) and every other domain
 // (DomainModels), and records each switch once per domain. The request's
 // own map is not changed.
+//
+// The session's explicit locks (ExplicitModel3D, ExplicitModelImage), frozen
+// into the options from the stored session before this runs, move the same
+// way and stay locks (#380); a lock left on a retired model would make every
+// tool of its domain refuse. Only the turn's copy changes: the session row is
+// the person's own click and is not rewritten (a restored or replaced pick is
+// not either), so each turn moves it again, and a lock switch is not recorded
+// in RetiredModels, which would repeat its note on every turn. The index holds
+// only models that have a successor, so a model without one, in a lock as in
+// a pick, is left as it is.
 func (service *Service) moveRetiredModels(options *TurnOptions) {
 	options.RetiredModels = nil
 	if len(service.retiredModels) == 0 {
@@ -60,6 +70,8 @@ func (service *Service) moveRetiredModels(options *TurnOptions) {
 	}
 	record(options.CreativeDomain, options.AIModel)
 	options.AIModel = service.currentModel(options.AIModel)
+	options.ExplicitModel3D = service.currentModel(options.ExplicitModel3D)
+	options.ExplicitModelImage = service.currentModel(options.ExplicitModelImage)
 	if len(options.DomainModels) == 0 {
 		return
 	}
