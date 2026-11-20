@@ -177,6 +177,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		"presentation.model_choice_conflict":    schema.Presentation.Messages.ModelChoiceConflict,
 		"presentation.model_choice_unavailable": schema.Presentation.Messages.ModelChoiceUnavailable,
 		"presentation.turn_active":              schema.Presentation.Messages.TurnActive,
+		"presentation.session_delete_blocked":   schema.Presentation.Messages.SessionDeleteBlocked,
 		"presentation.agent_busy":               schema.Presentation.Messages.AgentBusy,
 		"presentation.status.generating":        schema.Presentation.Status.Generating,
 		"presentation.status.queued_submission": schema.Presentation.Status.QueuedSubmission,

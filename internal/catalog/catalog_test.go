@@ -784,6 +784,7 @@ const minimalApplication = `"application":{
 				"unknown_error":"未知错误","sse_interrupted":"连接中断",
 				"internal_error":"内部错误","unauthenticated":"未登录",
 				"turn_active":"当前会话正在处理",
+				"session_delete_blocked":"会话还有进行中的任务",
 				"agent_busy":"任务繁忙",
 				"tool_round_limit":"上限 {limit}","tool_round_limit_pending":"未执行：",
 				"tool_round_limit_pending_item":"{tool} {intent}",

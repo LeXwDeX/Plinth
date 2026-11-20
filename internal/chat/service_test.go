@@ -1170,7 +1170,25 @@ func (r *memoryChatRepository) DeleteSession(
 	delete(r.preferences, sessionID)
 	delete(r.messages, sessionID)
 	delete(r.events, sessionID)
+	// The SQLite schema cascades the stream and the turns with the session.
+	delete(r.streams, sessionID)
+	for id, turn := range r.turns {
+		if turn.SessionID == sessionID {
+			delete(r.turns, id)
+		}
+	}
 	return true, nil
+}
+
+// dropSessionKeepingTurns removes the session and its messages but leaves its
+// turn and stream rows: the orphans a database that ran without foreign key
+// enforcement keeps behind. The turn runner must never resume them.
+func (r *memoryChatRepository) dropSessionKeepingTurns(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.sessions, sessionID)
+	delete(r.messages, sessionID)
+	delete(r.events, sessionID)
 }
 
 func (r *memoryChatRepository) OwnsSession(
@@ -1559,6 +1577,11 @@ func (r *memoryChatRepository) AppendEvent(
 ) (chat.Event, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// The events table has a foreign key to the session: a late write for a
+	// deleted session fails, as it does in SQLite.
+	if _, found := r.sessions[event.SessionID]; !found {
+		return chat.Event{}, chat.ErrSessionNotFound
+	}
 	event.ID = int64(len(r.events[event.SessionID]))
 	r.events[event.SessionID] = append(r.events[event.SessionID], event)
 	return event, nil

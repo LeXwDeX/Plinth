@@ -446,6 +446,13 @@ type Stream struct {
 	SessionID          string
 	Status             string
 	CleanupAt          *time.Time
+	// BusyTurnStates is an input of StartTurn only: the turn states in which
+	// the turn that owns the session's current stream still keeps the session
+	// busy (#384). A stream row that says active while its turn is in any other
+	// state is stale (its finishing write was late or lost) and does not
+	// refuse the next turn. Empty keeps the older rule, where the stream row
+	// alone decides.
+	BusyTurnStates []string
 }
 
 type Subscription struct {

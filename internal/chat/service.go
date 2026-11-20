@@ -58,6 +58,12 @@ var (
 	// ErrProjectNotFound reports an unknown or foreign project. The HTTP
 	// boundary answers the same 404 as a missing project (#240).
 	ErrProjectNotFound = errors.New("chat: project not found")
+	// ErrSessionDeletionBlocked reports a session that cannot be deleted now
+	// because a SkillRun of it has work in flight: a human grant waiting for
+	// its decision, or a Task that has not ended. The person can wait, cancel
+	// or decide, and delete again. Nothing was stopped or deleted (#384); the
+	// HTTP boundary answers 409 with the Schema text.
+	ErrSessionDeletionBlocked = errors.New("chat: session has work in flight that keeps it from being deleted")
 )
 
 // ProjectSource is the narrow port the chat service uses to attribute a
@@ -459,6 +465,12 @@ type Service struct {
 	workLedgerDetail    SessionTaskDetail
 	workDecisions       WorkDecisionReader
 	workParameterSource WorkParameterSource
+
+	// deletions marks the sessions being deleted; quiescers are the turn
+	// runners that take their work off a session before it is deleted (#384).
+	deletions  sessionDeletions
+	quiescerMu sync.RWMutex
+	quiescers  []SessionQuiescer
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
@@ -922,21 +934,6 @@ func (service *Service) ApplyAutoTitle(
 	return service.repository.ApplyAutoTitle(ctx, ownerID, sessionID, title)
 }
 
-func (service *Service) DeleteSession(
-	ctx context.Context,
-	ownerID string,
-	sessionID string,
-) error {
-	deleted, err := service.repository.DeleteSession(ctx, ownerID, sessionID)
-	if err != nil {
-		return err
-	}
-	if !deleted {
-		return ErrSessionNotFound
-	}
-	return nil
-}
-
 // Session 读取单个会话（B16：标题限流需要校验当前标题仍是默认值）。
 func (service *Service) Session(
 	ctx context.Context,
@@ -1207,6 +1204,11 @@ func (service *Service) startTurn(
 	if command.Content == "" && len(command.ImageURLs) == 0 {
 		return Message{}, ErrEmptyMessage
 	}
+	// A session whose deletion has begun takes no new turn: it would write rows
+	// the deletion is about to remove (#384).
+	if service.sessionDeleting(command.OwnerID, command.SessionID) {
+		return Message{}, ErrSessionNotFound
+	}
 	// The turn runs in the scope the stored session has now. The client cannot
 	// name a scope for a turn: whatever Options carries is replaced.
 	scope, found, err := service.repository.SessionAgentScope(ctx, command.OwnerID, command.SessionID)
@@ -1380,6 +1382,9 @@ func (service *Service) startTurn(
 		return Message{}, err
 	}
 	defer unlock()
+	if service.sessionDeleting(command.OwnerID, command.SessionID) {
+		return Message{}, ErrSessionNotFound
+	}
 	if err := service.applyTurnAttachments(ctx, command, verified, &user, &command.Options); err != nil {
 		return Message{}, err
 	}
@@ -1412,6 +1417,9 @@ func (service *Service) startTurn(
 			SessionID:          command.SessionID,
 			AssistantMessageID: assistant.ID,
 			Status:             service.streamActive,
+			// The session is busy while the turn of its stream is in one of
+			// these states; a stream row left active by a finished turn is not.
+			BusyTurnStates: []string{service.turnQueued, service.turnRunning, service.turnWaitingTask},
 		},
 		Turn{
 			OwnerID:            command.OwnerID,

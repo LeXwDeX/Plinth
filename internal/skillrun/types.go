@@ -83,6 +83,24 @@ type Step struct {
 	ReplacementAssetID generation.AssetID `json:"replacement_asset_id,omitempty"`
 }
 
+// InFlight reports whether work is running on the step's behalf that deleting
+// its session would cut off (#384): a human grant still waiting for its
+// decision, or a bound Task that has not reached a terminal state. Every other
+// step is at rest: not started, prepared, denied, finished, or bound to a Task
+// that ended. A run is in flight when any of its steps is. The Generation Task
+// stays the only authority for the Task's state and the execution grant for the
+// grant's, so the caller passes what it read.
+func (step Step) InFlight(taskState generation.TaskState, grantPending bool) bool {
+	switch step.Phase {
+	case GrantPending:
+		return grantPending
+	case TaskBound:
+		return !taskState.Terminal()
+	default:
+		return false
+	}
+}
+
 type Run struct {
 	Harness               harness.Binding            `json:"harness,omitempty"`
 	ID                    string                     `json:"id"`
