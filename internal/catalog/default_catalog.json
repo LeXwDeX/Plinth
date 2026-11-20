@@ -14685,6 +14685,7 @@
         "presentation": {
           "date_locale": "zh-CN",
           "empty_placeholder": "—",
+          "loading_rows": 5,
           "date_time_options": {
             "month": "2-digit",
             "day": "2-digit",
@@ -14695,7 +14696,9 @@
             "title": "访问 Key",
             "empty": "暂无访问 Key",
             "search_placeholder": "搜索 Key 名称、前缀或所有者",
+            "search": "搜索",
             "all_owners": "全部所有者",
+            "total_summary": "共 {total} 个访问 Key",
             "column_owner": "所有者",
             "column_name": "名称",
             "column_prefix": "前缀",
@@ -14703,6 +14706,8 @@
             "column_created_at": "创建时间",
             "column_last_used_at": "最近使用",
             "column_request_count": "调用量",
+            "column_expires_at": "到期时间",
+            "column_revoked_at": "吊销时间",
             "column_status": "状态",
             "column_actions": "操作",
             "status_active": "有效",
@@ -14713,8 +14718,16 @@
             "revoked": "访问 Key 已吊销",
             "switch_title": "对外 MCP 与访问 Key",
             "switch_description": "关闭后，所有访问 Key 与短时签名下载立即被拒绝；重新开启后恢复。",
+            "switch_on": "开启",
+            "switch_off": "关闭",
             "switched_on": "对外 MCP 与访问 Key 已开启",
-            "switched_off": "对外 MCP 与访问 Key 已关闭"
+            "switched_off": "对外 MCP 与访问 Key 已关闭",
+            "cancel": "取消",
+            "forbidden_title": "无权访问",
+            "forbidden_description": "只有管理员可以访问这个页面",
+            "pagination_previous": "上一页",
+            "pagination_next": "下一页",
+            "pagination_summary": "第 {page} / {total_pages} 页（共 {total} 条）"
           }
         }
       }
@@ -16829,7 +16842,8 @@
         "administration.audit_logs.presentation.date_locale",
         "administration.generations.presentation.date_locale",
         "administration.usage.presentation.date_locale",
-        "administration.user_assets.presentation.date_locale"
+        "administration.user_assets.presentation.date_locale",
+        "administration.access_keys.presentation.date_locale"
       ],
       "persisted_defaults": [
         "ui.canvas.layers.initial_name"
@@ -20207,6 +20221,18 @@
             "administration.access_keys.presentation.text.switch_description": "When off, every access key and signed download is refused immediately; turning it on restores them.",
             "administration.access_keys.presentation.text.switched_on": "External MCP and access keys are on",
             "administration.access_keys.presentation.text.switched_off": "External MCP and access keys are off",
+            "administration.access_keys.presentation.text.search": "Search",
+            "administration.access_keys.presentation.text.total_summary": "{total} access keys",
+            "administration.access_keys.presentation.text.column_expires_at": "Expires",
+            "administration.access_keys.presentation.text.column_revoked_at": "Revoked at",
+            "administration.access_keys.presentation.text.switch_on": "Turn on",
+            "administration.access_keys.presentation.text.switch_off": "Turn off",
+            "administration.access_keys.presentation.text.cancel": "Cancel",
+            "administration.access_keys.presentation.text.forbidden_title": "Access denied",
+            "administration.access_keys.presentation.text.forbidden_description": "Only administrators can access this page",
+            "administration.access_keys.presentation.text.pagination_previous": "Previous",
+            "administration.access_keys.presentation.text.pagination_next": "Next",
+            "administration.access_keys.presentation.text.pagination_summary": "Page {page} of {total_pages} ({total} total)",
             "administration.audit_logs.messages.internal_error": "Internal server error. Please try again later",
             "administration.audit_logs.presentation.text.forbidden_title": "Access denied",
             "administration.audit_logs.presentation.text.forbidden_description": "Only administrators can access this page",

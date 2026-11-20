@@ -644,6 +644,7 @@ type AdministrationAccessKeysMessageSchema struct {
 type AdministrationAccessKeysPresentationSchema struct {
 	DateLocale       string            `json:"date_locale"`
 	EmptyPlaceholder string            `json:"empty_placeholder"`
+	LoadingRows      int               `json:"loading_rows"`
 	DateTimeOptions  map[string]string `json:"date_time_options"`
 	Text             map[string]string `json:"text"`
 }

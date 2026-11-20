@@ -1456,7 +1456,9 @@ var requiredAdministrationAccessKeyTextKeys = []string{
 	"title",
 	"empty",
 	"search_placeholder",
+	"search",
 	"all_owners",
+	"total_summary",
 	"column_owner",
 	"column_name",
 	"column_prefix",
@@ -1464,6 +1466,8 @@ var requiredAdministrationAccessKeyTextKeys = []string{
 	"column_created_at",
 	"column_last_used_at",
 	"column_request_count",
+	"column_expires_at",
+	"column_revoked_at",
 	"column_status",
 	"column_actions",
 	"status_active",
@@ -1474,8 +1478,16 @@ var requiredAdministrationAccessKeyTextKeys = []string{
 	"revoked",
 	"switch_title",
 	"switch_description",
+	"switch_on",
+	"switch_off",
 	"switched_on",
 	"switched_off",
+	"cancel",
+	"forbidden_title",
+	"forbidden_description",
+	"pagination_previous",
+	"pagination_next",
+	"pagination_summary",
 }
 
 // validateAdministrationAccessKeys validates the administrator's access key
@@ -1574,8 +1586,8 @@ func validateAdministrationAccessKeys(
 	}
 	presentation := keys.Presentation
 	if strings.TrimSpace(presentation.DateLocale) == "" || strings.TrimSpace(presentation.EmptyPlaceholder) == "" ||
-		len(presentation.DateTimeOptions) == 0 {
-		return errors.New("administration.access_keys.presentation 的日期、空值占位和日期选项必须有效")
+		presentation.LoadingRows <= 0 || len(presentation.DateTimeOptions) == 0 {
+		return errors.New("administration.access_keys.presentation 的日期、空值占位、加载行数与日期选项必须有效")
 	}
 	if presentation.DateTimeOptions["month"] != "2-digit" || presentation.DateTimeOptions["day"] != "2-digit" {
 		return errors.New("administration.access_keys.presentation.date_time_options 的 month 与 day 必须为 2-digit")

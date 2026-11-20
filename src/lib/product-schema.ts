@@ -359,6 +359,9 @@ export interface ProductSchema {
         admin_balance_summary: string;
         admin_user_assets: string;
         admin_backfill_status: string;
+        admin_access_keys: string;
+        admin_access_key: string;
+        admin_access_keys_switch: string;
         meshy_proxy_asset: string;
       };
       legacy_provider_balance: {
@@ -962,6 +965,67 @@ export interface AdministrationProductSchema {
       range_separator: string;
       date_separator: string;
       date_locale: string;
+      date_time_options: Partial<Record<
+        'weekday' | 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second',
+        'numeric' | '2-digit' | 'long' | 'short' | 'narrow'
+      >>;
+      text: Record<string, string>;
+    };
+  };
+  /**
+   * #332: the administrator's view of every person's access keys. The browser
+   * builds the list, the owner filter, the revoke dialog and the overall
+   * switch from these names, limits and texts; `permission` and the audit
+   * declaration stay server-side. Absent on older servers: the page has
+   * nothing to manage.
+   */
+  access_keys: {
+    api: {
+      fields: {
+        data: string;
+        error: string;
+        total: string;
+        page: string;
+        page_size: string;
+        id: string;
+        owner_id: string;
+        owner_username: string;
+        owner_name: string;
+        name: string;
+        prefix: string;
+        scopes: string;
+        created_at: string;
+        last_used_at: string;
+        request_count: string;
+        expires_at: string;
+        revoked_at: string;
+        active: string;
+        enabled: string;
+      };
+      query: {
+        page: string;
+        page_size: string;
+        search: string;
+        owner_id: string;
+      };
+      path_parameters: {
+        key_id: string;
+      };
+    };
+    limits: {
+      default_page_size: number;
+      max_page_size: number;
+      search_max_length: number;
+    };
+    messages: {
+      invalid_request: string;
+      key_not_found: string;
+      internal_error: string;
+    };
+    presentation: {
+      date_locale: string;
+      empty_placeholder: string;
+      loading_rows: number;
       date_time_options: Partial<Record<
         'weekday' | 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second',
         'numeric' | '2-digit' | 'long' | 'short' | 'narrow'
