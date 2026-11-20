@@ -66,7 +66,9 @@ func TestLoadValidatesTheWireAPIOfAModelProfile(t *testing.T) {
 		{name: "responses without a path", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `}]`, wantError: "responses_endpoint_path"},
 		{name: "a path that is not absolute", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `}]`, path: "responses", wantError: "responses_endpoint_path"},
 		{name: "a path with spaces around it", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `}]`, path: " /responses", wantError: "responses_endpoint_path"},
-		{name: "a path nobody uses", profiles: `[{"model_prefixes":["gpt-4"],"omit_temperature":true}]`, path: "/responses", wantError: "responses_endpoint_path"},
+		// Not read, and not required, without a profile on the wire.
+		{name: "a path nobody uses", profiles: `[{"model_prefixes":["gpt-4"],"omit_temperature":true}]`, path: "/responses"},
+		{name: "no path and no responses profile", profiles: `[{"model_prefixes":["gpt-4"],"omit_temperature":true}]`},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -82,14 +84,13 @@ func TestLoadValidatesTheWireAPIOfAModelProfile(t *testing.T) {
 			}
 		})
 	}
-	// Thinking off: no profile, so no wire, and a path is unused.
-	err := mutateDefaultCatalog(t, func(document map[string]any) {
+	// Thinking off: no profile, so no wire and no path needed.
+	if err := mutateDefaultCatalog(t, func(document map[string]any) {
 		agent := document["application"].(map[string]any)["chat"].(map[string]any)["agent"].(map[string]any)
 		agent["thinking"] = map[string]any{"enabled": false}
-		agent["responses_endpoint_path"] = "/responses"
-	})
-	if err == nil || !strings.Contains(err.Error(), "responses_endpoint_path") {
-		t.Fatalf("a path with thinking off: %v", err)
+		delete(agent, "responses_endpoint_path")
+	}); err != nil {
+		t.Fatalf("thinking off without a path: %v", err)
 	}
 }
 

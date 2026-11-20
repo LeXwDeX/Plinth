@@ -81,17 +81,30 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 		}
 	}
 	// #401: the gateway resolves gpt-astra to gpt-6.2-astra, which refuses a
-	// temperature other than its default and (OpenAI's latest-model guide and
-	// model page, read 2026-11-20) runs no function tools on Chat Completions:
-	// tool calling needs the Responses API, which Plinth has no adapter for
-	// yet. So its profile omits the temperature and is not offered for Agent
-	// turns; no other profile changes.
+	// temperature (any value, on the Responses API; a value other than its
+	// default on Chat Completions) and (OpenAI's latest-model guide and model
+	// page, read 2026-11-20) runs function tools only on the Responses API.
+	// So its profile omits the temperature and is served on the Responses wire
+	// (step 2), where it runs Agent tools; it no longer says chat completions
+	// cannot (chat_completions_tools is a field for another model). No other
+	// profile declares a wire, omits the temperature or limits its tools, and
+	// the Schema names the path of the Responses wire.
 	for index, profile := range thinking.ModelProfiles {
 		astraProfile := profile.ModelPrefixes[0] == "gpt-astra"
-		if profile.OmitTemperature != astraProfile || profile.RunsAgentTools() == astraProfile ||
-			(profile.ChatCompletionsTools != nil) != astraProfile {
-			t.Fatalf("profile %d (%s): omit temperature = %t, runs agent tools = %t", index, profile.ModelPrefixes[0], profile.OmitTemperature, profile.RunsAgentTools())
+		wantWire := ChatWireCompletions
+		if astraProfile {
+			wantWire = ChatWireResponses
 		}
+		if profile.OmitTemperature != astraProfile || !profile.RunsAgentTools() || profile.ChatCompletionsTools != nil ||
+			(profile.WireAPI == ChatWireResponses) != astraProfile || profile.Wire() != wantWire {
+			t.Fatalf("profile %d (%s): omit temperature = %t, runs agent tools = %t, wire = %q (declared %q), chat completions tools = %v",
+				index, profile.ModelPrefixes[0], profile.OmitTemperature, profile.RunsAgentTools(), profile.Wire(), profile.WireAPI, profile.ChatCompletionsTools)
+		}
+	}
+	if !thinking.UsesResponses() || thinking.WireFor("GPT-Astra") != ChatWireResponses || thinking.WireFor("deepseek-flash") != ChatWireCompletions ||
+		application.Chat.Agent.ResponsesEndpointPath != "/responses" || application.Chat.Agent.EndpointPath != "/chat/completions" {
+		t.Fatalf("wires: responses used = %t, gpt-astra on %q, deepseek on %q, paths %q and %q", thinking.UsesResponses(),
+			thinking.WireFor("GPT-Astra"), thinking.WireFor("deepseek-flash"), application.Chat.Agent.ResponsesEndpointPath, application.Chat.Agent.EndpointPath)
 	}
 	// Version-less aliases (2026-11-02, #64) resolve to their own profiles.
 	if profile, ok := thinking.ProfileFor("qwen-omni-flash"); !ok || profile.DefaultEffort != "xhigh" ||

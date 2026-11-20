@@ -4986,7 +4986,7 @@ type ChatAgentSchema struct {
 	Stream            bool                `json:"stream"`
 	// ResponsesEndpointPath is the Responses API's path under the connection's
 	// base URL, for the model profiles that declare wire_api responses; it is
-	// required exactly then (#401).
+	// required when one does, and not read otherwise (#401).
 	ResponsesEndpointPath string `json:"responses_endpoint_path,omitempty"`
 	// StreamIncludeUsage asks a streamed request for token usage with
 	// stream_options.include_usage, unless the model's thinking profile says

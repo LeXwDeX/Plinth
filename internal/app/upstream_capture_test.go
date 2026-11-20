@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -355,6 +356,27 @@ func (s *captureStack) recordedConnections(t *testing.T) map[string]int {
 	return counts
 }
 
+// skipMarkers lists the skip markers of the directory as "connection method
+// status reason".
+func (s *captureStack) skipMarkers(t *testing.T) []string {
+	t.Helper()
+	names, err := wirecapture.ListUpstreamRecords(s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var markers []string
+	for _, name := range names {
+		record, err := wirecapture.ReadUpstreamRecord(filepath.Join(s.dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.Skipped != "" {
+			markers = append(markers, fmt.Sprintf("%s %s %d %s", record.Connection, record.Method, record.Status, record.Skipped))
+		}
+	}
+	return markers
+}
+
 // Every Provider connection of the Catalog, and the chat model connection, run
 // against the fake stack with capture on, each leaves a sanitized record, and
 // the independent privacy scan finds nothing in any of them.
@@ -403,8 +425,16 @@ func TestUpstreamCaptureRecordsEveryProviderConnectionAgainstTheFakeStack(t *tes
 		t.Fatalf("only %d connections expected: %v", len(expected), expected)
 	}
 	status := stack.recorder.Status()
-	if status.Skipped != 0 || status.WriteErrors != 0 || status.Written < int64(len(expected)) {
+	// One exchange is skipped, fail-closed, and nothing else: the chat model
+	// gpt-astra is served on the Responses API (#401), whose stream carries
+	// event: lines and no [DONE], a form the sanitizer does not accept. The
+	// skip leaves a marker without any value (connection, method, status), and
+	// the request itself is served (runChatAgainstTheFakeStack checks the reply).
+	if status.Skipped != 1 || status.WriteErrors != 0 || status.Written < int64(len(expected)) {
 		t.Fatalf("status = %+v", status)
+	}
+	if skipped := stack.skipMarkers(t); len(skipped) != 1 || skipped[0] != "LLM POST 200 sanitizer-refused" {
+		t.Fatalf("skip markers = %q", skipped)
 	}
 	findings, covered, err := privacyscan.ScanRecordDir(stack.dir)
 	if err != nil || len(findings) != 0 || covered != int(status.Written) {
@@ -429,18 +459,25 @@ func TestUpstreamCaptureRecordsEveryProviderConnectionAgainstTheFakeStack(t *tes
 	}
 	// Every record is the format fake-upstream-align draft reads.
 	exchanges, skipped, err := wirecapture.LoadUpstreamRecords(stack.dir)
-	if err != nil || skipped != 0 || len(exchanges) != int(status.Written) {
+	if err != nil || skipped != 1 || len(exchanges) != int(status.Written) {
 		t.Fatalf("load: %d exchanges, %d skipped, %v", len(exchanges), skipped, err)
 	}
-	// The chat stream (the adapter stops at [DONE]) is among them.
-	streams := 0
+	// The chat stream (the adapter stops at [DONE]) is among them, and the
+	// Responses answer of gpt-astra left one JSON record and no stream record.
+	streams, responses := 0, 0
 	for _, exchange := range exchanges {
 		if exchange.Metadata.Connection == "LLM" && exchange.Response.Body.Encoding == wirecapture.PayloadSSE {
 			streams++
 		}
+		if exchange.Metadata.Connection == "LLM" && strings.HasSuffix(exchange.Request.Path, "/responses") {
+			responses++
+			if exchange.Response.Body.Encoding != wirecapture.PayloadJSON {
+				t.Fatalf("a Responses record is %q, only the JSON answer can be recorded", exchange.Response.Body.Encoding)
+			}
+		}
 	}
-	if streams != 1 {
-		t.Fatalf("the chat stream left %d SSE records, want 1", streams)
+	if streams != 1 || responses != 1 {
+		t.Fatalf("the chat stream left %d SSE records (want 1) and the Responses answer %d records (want 1)", streams, responses)
 	}
 }
 
@@ -509,7 +546,7 @@ func runChatAgainstTheFakeStack(t *testing.T, stack *captureStack) {
 		t.Fatal(err)
 	}
 	request := agents.Request{
-		Model:    "gpt-astra",
+		Model:    "deepseek",
 		Messages: []agents.Message{{Role: "user", Content: "tell me about the secret castle of alice@example.org"}},
 	}
 	reply, err := adapter.Complete(context.Background(), request)
@@ -525,6 +562,23 @@ func runChatAgainstTheFakeStack(t *testing.T, stack *captureStack) {
 	})
 	if err != nil || reply.Content == "" {
 		t.Fatalf("chat stream: %+v %v", reply, err)
+	}
+	// gpt-astra is served on the Responses API (#401). Its non-stream JSON is
+	// recorded like any other exchange and goes through the privacy scan with
+	// the rest; its stream (event: lines, no [DONE]) is not a form the
+	// sanitizer accepts and is skipped without a value, while the request is
+	// served as usual: the recorder never changes what the application does.
+	request.Model = "gpt-astra"
+	if reply, err = adapter.Complete(context.Background(), request); err != nil || reply.Content == "" {
+		t.Fatalf("responses completion: %+v %v", reply, err)
+	}
+	streamed.Reset()
+	reply, err = adapter.Stream(context.Background(), request, func(delta agents.Delta) error {
+		streamed.WriteString(delta.Content)
+		return nil
+	})
+	if err != nil || reply.Content == "" || streamed.String() != reply.Content {
+		t.Fatalf("responses stream: %+v %q %v", reply, streamed.String(), err)
 	}
 }
 

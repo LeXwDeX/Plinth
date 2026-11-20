@@ -2412,18 +2412,16 @@ func validateThinkingWire(index int, profile ChatThinkingModelProfile) error {
 	return nil
 }
 
-// validateChatResponsesWire requires chat.agent.responses_endpoint_path
-// exactly when a profile is served on the responses wire (#401).
+// validateChatResponsesWire requires chat.agent.responses_endpoint_path when a
+// profile is served on the responses wire (#401): a path that starts with a
+// slash. Without such a profile the path is not read, and not required.
 func validateChatResponsesWire(agent ChatAgentSchema) error {
-	path := agent.ResponsesEndpointPath
 	if !agent.Thinking.UsesResponses() {
-		if path != "" {
-			return errors.New("agent.responses_endpoint_path 只在有 model_profiles 使用 responses 协议时声明")
-		}
 		return nil
 	}
+	path := agent.ResponsesEndpointPath
 	if !strings.HasPrefix(path, "/") || strings.TrimSpace(path) != path {
-		return fmt.Errorf("agent.responses_endpoint_path 必须是以 / 开头的路径: %q", path)
+		return fmt.Errorf("agent.responses_endpoint_path 必须是以 / 开头的路径（有 profile 使用 responses 协议）: %q", path)
 	}
 	return nil
 }

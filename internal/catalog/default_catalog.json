@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-16.305.1",
+    "revision": "2026-11-20.401.2",
     "terminology": {
       "user_facing": [
         {
@@ -6329,6 +6329,7 @@
         "api_key_setting": "llm_api_key",
         "model_setting": "llm_model",
         "endpoint_path": "/chat/completions",
+        "responses_endpoint_path": "/responses",
         "authorization_header": "Authorization",
         "authorization_type": "Bearer",
         "temperature": 0,
@@ -6355,7 +6356,7 @@
               "effort_levels": ["low", "medium", "high", "xhigh", "max"],
               "default_effort": "high",
               "omit_temperature": true,
-              "chat_completions_tools": false
+              "wire_api": "responses"
             },
             {
               "model_prefixes": [
