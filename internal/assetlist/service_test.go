@@ -29,6 +29,10 @@ type memoryRepository struct {
 	sessions map[string]sessionRecord
 	lists    map[string]assetlist.List
 	items    map[string][]assetlist.Item
+	// assets records the project asset rows the decision transaction wrote;
+	// decisionFail fails the next DecideItems like a lost CAS would.
+	assets       map[string]project.Asset
+	decisionFail error
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -39,8 +43,9 @@ func newMemoryRepository() *memoryRepository {
 			"ses_2":   {owner: "owner-a", project: "prj_2"},
 			"ses_own": {owner: "owner-b", project: "prj_1"},
 		},
-		lists: map[string]assetlist.List{},
-		items: map[string][]assetlist.Item{},
+		lists:  map[string]assetlist.List{},
+		items:  map[string][]assetlist.Item{},
+		assets: map[string]project.Asset{},
 	}
 }
 
@@ -230,6 +235,66 @@ func (r *memoryRepository) Decide(_ context.Context, decision assetlist.Decision
 	existing.Version++
 	existing.UpdatedAt = decision.At
 	r.lists[existing.ID] = existing
+	return r.withItems(existing), nil
+}
+
+func (r *memoryRepository) DecideItems(_ context.Context, batch assetlist.DecisionBatch) (assetlist.List, error) {
+	existing, exists := r.lists[batch.ListID]
+	if !exists || existing.OwnerID != batch.OwnerID || existing.ProjectID != batch.ProjectID {
+		return assetlist.List{}, assetlist.ErrNotFound
+	}
+	if existing.Version != batch.ExpectedVersion {
+		return assetlist.List{}, assetlist.ErrConflict
+	}
+	if r.decisionFail != nil {
+		// The transaction wrote nothing, assets included.
+		return assetlist.List{}, r.decisionFail
+	}
+	items := r.items[batch.ListID]
+	for _, decision := range batch.Items {
+		index := -1
+		for position := range items {
+			if items[position].ID == decision.ItemID {
+				index = position
+				break
+			}
+		}
+		if index < 0 {
+			return assetlist.List{}, assetlist.ErrNotFound
+		}
+		item := items[index]
+		if item.State != assetlist.StateReview {
+			return assetlist.List{}, assetlist.ErrItemState
+		}
+		switch decision.Verdict {
+		case assetlist.ReviewVerdictApproved:
+			item.State = assetlist.StateAccepted
+			item.ProjectAssetID = decision.ProjectAssetID
+			item.AcceptedAt = &batch.At
+			item.ReturnReason, item.ReturnNote = "", ""
+		case assetlist.ReviewVerdictReturned:
+			item.State = assetlist.StateReturned
+			item.Round++
+			item.ReturnCount++
+			item.WorkRound = 0
+			item.ReturnReason = decision.Reason
+			item.ReturnNote = decision.Note
+		default:
+			return assetlist.List{}, assetlist.ErrInvalid
+		}
+		item.Version++
+		item.UpdatedAt = batch.At
+		items[index] = item
+	}
+	for _, asset := range batch.Assets {
+		if _, exists := r.assets[asset.ID]; !exists {
+			r.assets[asset.ID] = asset
+		}
+	}
+	existing.Version++
+	existing.UpdatedAt = batch.At
+	r.lists[existing.ID] = existing
+	r.items[existing.ID] = items
 	return r.withItems(existing), nil
 }
 

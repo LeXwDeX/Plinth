@@ -35,7 +35,11 @@ type AssetListSchema struct {
 	// 状态机不可达。
 	ItemBlocks []ValueLabel            `json:"item_blocks"`
 	Messages   AssetListMessagesSchema `json:"messages"`
-	UI         AssetListUISchema       `json:"ui"`
+	// Review is the acceptance board's decision contract (#329b), optional so
+	// older Catalogs keep loading: without it the board can still be read and
+	// items accepted, but no item may be returned for rework.
+	Review *AssetListReviewSchema `json:"review,omitempty"`
+	UI     AssetListUISchema      `json:"ui"`
 	// Execution 是 #328 的自动制作段，可选。未声明时不启动 runner、不注册
 	// 在场/运行路由，清单保持 #327 行为；声明但 enabled=false 时 runner 不
 	// 启动，运行控制返回不可用。
@@ -207,6 +211,86 @@ type AssetListMessagesSchema struct {
 	ItemReportFailed     string `json:"item_report_failed"`
 }
 
+// AssetListReviewSchema 是 application.asset_list.review（#329b）：验收看板的
+// 打回原因、重做上限与文案。打回原因按清单项类型可见：kinds 为空表示对全部
+// 类型可见；显式列出时只对其中类型可见。max_rework_rounds 是同一项可被打回
+// 的次数（版次从 1 起，round 超过它后只能通过或跳过）。
+type AssetListReviewSchema struct {
+	ReturnReasons   []AssetListReturnReasonSchema `json:"return_reasons"`
+	MaxReworkRounds int                           `json:"max_rework_rounds"`
+	Messages        AssetListReviewMessagesSchema `json:"messages"`
+	// Archive is the batch delivery of accepted items (#329c), optional so a
+	// Catalog without it keeps the route unregistered: without it there is no
+	// server-side packaging, no limits and no error copy.
+	Archive *AssetListArchiveSchema `json:"archive,omitempty"`
+}
+
+// AssetListArchiveSchema 是已通过项的整批 ZIP（#329c）：文件名模板、每个清单项
+// 一个目录的命名边界、包内清单文件与文件数/字节上限。上限在预检阶段生效，超出
+// 时返回 413 并提示用 item_ids 分批下载。
+type AssetListArchiveSchema struct {
+	// FilenameTemplate uses {list_id}.
+	FilenameTemplate string `json:"filename_template"`
+	MediaType        string `json:"media_type"`
+	// ManifestFilename and ReadmeFilename are the two root entries of the ZIP.
+	ManifestFilename string `json:"manifest_filename"`
+	ReadmeFilename   string `json:"readme_filename"`
+	// DirectoryNameMaxBytes bounds one item directory's name (after the
+	// sanitized item name), so a long Agent-written name cannot exceed filesystem
+	// limits after extraction.
+	DirectoryNameMaxBytes int `json:"directory_name_max_bytes"`
+	// MaxEntries counts every ZIP entry including manifest and README.
+	MaxEntries int   `json:"max_entries"`
+	MaxBytes   int64 `json:"max_bytes"`
+	// StoredMediaTypes are already compressed and are stored, not deflated.
+	StoredMediaTypes []string                       `json:"stored_media_types"`
+	Messages         AssetListArchiveMessagesSchema `json:"messages"`
+	Audit            AssetListArchiveAuditSchema    `json:"audit"`
+}
+
+// AssetListArchiveMessagesSchema 是整批 ZIP 的拒绝文案。empty 是没有任何已通过
+// 且带产物的项；too_large 超过上限并用 {maximum_entries}/{maximum_bytes} 指明
+// 边界。
+type AssetListArchiveMessagesSchema struct {
+	Empty    string `json:"empty"`
+	TooLarge string `json:"too_large"`
+}
+
+// AssetListArchiveAuditSchema 是整批下载的审计事件：动作值必须在
+// application.audit_actions 中声明。
+type AssetListArchiveAuditSchema struct {
+	Action       string                            `json:"action"`
+	ResourceType string                            `json:"resource_type"`
+	DetailFields AssetListArchiveAuditDetailFields `json:"detail_fields"`
+}
+
+type AssetListArchiveAuditDetailFields struct {
+	ListID  string `json:"list_id"`
+	Items   string `json:"items"`
+	Entries string `json:"entries"`
+	Bytes   string `json:"bytes"`
+}
+
+// AssetListReturnReasonSchema 是一条打回原因。id 是固定的服务端值，label 由
+// 浏览器展示，kinds 限定可见的清单项类型。
+type AssetListReturnReasonSchema struct {
+	ID    string   `json:"id"`
+	Label string   `json:"label"`
+	Kinds []string `json:"kinds"`
+}
+
+// AssetListReviewMessagesSchema 是验收流程的服务端文案。占位符 {name}、
+// {description}、{round}、{reasons}、{note}、{maximum} 由服务端填充；打回
+// 续轮消息会作为该子会话下一轮的用户消息。
+type AssetListReviewMessagesSchema struct {
+	// ReworkMessage 是打回后同一子会话续轮的文案。
+	ReworkMessage string `json:"rework_message"`
+	// ReturnLimit 拒绝超过重做上限的打回。{name}、{round}
+	ReturnLimit string `json:"return_limit"`
+	// AssetLimit 是项目资产达到上限时的通过失败提示。{name}、{maximum}
+	AssetLimit string `json:"asset_limit"`
+}
+
 // AssetListUISchema 是清单卡与项目面板的固定标题和按钮文案。
 type AssetListUISchema struct {
 	CardTitle     string `json:"card_title"`
@@ -230,6 +314,30 @@ type PublicAssetListSchema struct {
 	// Presence 只在声明 execution 时出现：浏览器需要心跳间隔；grace、
 	// 轮询间隔、并行/轮数/重试与续轮文案都不公开。
 	Presence *PublicAssetListPresenceSchema `json:"presence,omitempty"`
+	// Review 只在声明 review 时出现：浏览器要列出打回原因并显示重做上限。
+	Review *PublicAssetListReviewSchema `json:"review,omitempty"`
+}
+
+// PublicAssetListReviewSchema 是验收看板的公开参数：打回原因、重做上限与整批
+// 下载的文件数/字节上限（浏览器据此提示分批下载）。续轮、拒绝文案与审计留在
+// 服务端。
+type PublicAssetListReviewSchema struct {
+	ReturnReasons   []PublicAssetListReturnReasonSchema `json:"return_reasons"`
+	MaxReworkRounds int                                 `json:"max_rework_rounds"`
+	Archive         *PublicAssetListArchiveSchema       `json:"archive,omitempty"`
+}
+
+// PublicAssetListArchiveSchema 是整批 ZIP 的公开上限。
+type PublicAssetListArchiveSchema struct {
+	MaxEntries int   `json:"max_entries"`
+	MaxBytes   int64 `json:"max_bytes"`
+}
+
+// PublicAssetListReturnReasonSchema 是一条公开的打回原因。
+type PublicAssetListReturnReasonSchema struct {
+	ID    string   `json:"id"`
+	Label string   `json:"label"`
+	Kinds []string `json:"kinds"`
 }
 
 // PublicAssetListLimitsSchema 是浏览器可见的清单上限：清单自身的数量与文本

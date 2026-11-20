@@ -36,10 +36,27 @@ type Config struct {
 	// Reviews reads the recorded acceptance decisions of the board (#329a).
 	// nil leaves every item with an empty latest review.
 	Reviews ReviewStore
+	// Snapshots and ProjectAssets are the write side of the board (#329b).
+	// Application assembly installs them with SetReview after the inspection
+	// services exist; nil keeps accept working without a project asset and
+	// stores an empty snapshot.
+	Snapshots     ReviewSnapshots
+	ProjectAssets ProjectAssets
+	// ProjectAssetLimits bounds the references one accepted item registers.
+	ProjectAssetLimits ProjectAssetLimits
 	// References resolves input-asset references against the owner's stored
 	// assets and crop provenance (#331), so proposals and edits share one
 	// validation. nil keeps the #327 shape checks only.
 	References ReferenceAssets
+	// Archive opens the stored result files of the batch delivery (#329c).
+	// Application assembly installs the generation module; nil leaves the
+	// archive unavailable and the route unregistered.
+	Archive ArchiveAssets
+	// ObjPackage is application.model_delivery.archive.obj_package: the
+	// material-library statement and texture bindings the batch archive reuses
+	// so a packed OBJ still loads (#329c). nil keeps the plain layout
+	// (model.obj, model.mtl, numbered textures).
+	ObjPackage *catalog.ModelObjPackageSchema
 	// Crops cuts the optional per-item edit crop instruction (#331). nil
 	// refuses crop instructions; the proposal path never accepts them.
 	Crops           Cropper
@@ -72,12 +89,25 @@ type Config struct {
 
 // Service implements the list workflow over a Repository.
 type Service struct {
-	repository      Repository
-	runs            RunStore
-	presence        PresenceStore
-	reviews         ReviewStore
-	referenceAssets ReferenceAssets
-	crops           Cropper
+	repository Repository
+	runs       RunStore
+	presence   PresenceStore
+	reviews    ReviewStore
+	review     *catalog.AssetListReviewSchema
+	// reviewSnapshots and projectAssets are the acceptance write ports
+	// (#329b); nil keeps the board read-only.
+	reviewSnapshots    ReviewSnapshots
+	projectAssets      ProjectAssets
+	projectAssetLimits ProjectAssetLimits
+	referenceAssets    ReferenceAssets
+	// archive and archiveAssets are the batch delivery's schema and reader
+	// (#329c); nil leaves PrepareArchive reporting ErrArchiveUnavailable.
+	archive       *catalog.AssetListArchiveSchema
+	archiveAssets ArchiveAssets
+	// objPackage is the model-delivery OBJ rules the batch archive reuses
+	// (#329c); nil keeps the plain dependency names.
+	objPackage catalog.ModelObjPackageSchema
+	crops      Cropper
 	// imageItemLimit is application.asset_list.decompose.maximum_items_per_image
 	// (#331); 0 leaves the proposal-time per-image bound unwired.
 	imageItemLimit int
@@ -158,12 +188,27 @@ func New(config Config) (*Service, error) {
 		imageItemLimit = config.Schema.Decompose.MaximumItemsPerImage
 		defaultRouteWithReference = strings.TrimSpace(config.Schema.Decompose.DefaultRouteWithReference)
 	}
+	var archive *catalog.AssetListArchiveSchema
+	if config.Schema.Review != nil {
+		archive = config.Schema.Review.Archive
+	}
+	var objPackage catalog.ModelObjPackageSchema
+	if config.ObjPackage != nil {
+		objPackage = *config.ObjPackage
+	}
 	return &Service{
 		repository:                config.Repository,
 		runs:                      config.Runs,
 		presence:                  config.Presence,
 		reviews:                   config.Reviews,
+		review:                    config.Schema.Review,
+		reviewSnapshots:           config.Snapshots,
+		projectAssets:             config.ProjectAssets,
+		projectAssetLimits:        config.ProjectAssetLimits,
 		referenceAssets:           config.References,
+		archive:                   archive,
+		archiveAssets:             config.Archive,
+		objPackage:                objPackage,
 		crops:                     config.Crops,
 		imageItemLimit:            imageItemLimit,
 		defaultRouteWithReference: defaultRouteWithReference,

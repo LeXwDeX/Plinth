@@ -1913,10 +1913,17 @@ func newHTTPHarnessWithCatalogAndProviders(
 				crops:  repository.InputAssetCropRepository(),
 			},
 			Crops:              cropService,
+			Archive:            module,
 			Schema:             *listSchema,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
 			Counted:            counted,
+			ProjectAssets:      projectService,
+			ProjectAssetLimits: assetlist.ProjectAssetLimits{
+				MaximumAssets: applicationSchema.Project.Limits.MaximumAssetsPerProject,
+				MaximumImages: applicationSchema.Project.Limits.MaximumAssetImages,
+				MaximumModels: applicationSchema.Project.Limits.MaximumAssetModels,
+			},
 			ResolveStepFor: func(_ context.Context, _, _, capability string) (assetlist.RouteStep, error) {
 				if capability == "remesh" {
 					return assetlist.RouteStep{Capability: capability, Available: false,

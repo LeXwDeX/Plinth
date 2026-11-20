@@ -2,7 +2,6 @@ package modeldelivery
 
 import (
 	"archive/zip"
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/assets/samebytes"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/modeldelivery/objpackage"
 )
 
 // Archive is a prepared ZIP of a task's READY local model files. Everything
@@ -621,7 +621,7 @@ func (s *Service) packageMembers(ctx context.Context, scope generation.TaskListS
 		}
 		// An unsafe or unprintable name is counted but not printed: README
 		// text must stay a list of relative names, never an address.
-		name, safe := relativeName(file.Name)
+		name, safe := objpackage.RelativeName(file.Name)
 		if !safe || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 			name = ""
 		}
@@ -707,20 +707,17 @@ func (s *Service) objPackage(
 		unresolved = append(unresolved, path.Join(directory, name))
 	}
 	references := s.textureReferences(ctx, scope, from.ID, material, spec, materialName, directory)
-	assigned := map[int]bool{}
-	for _, texture := range textures {
-		key := texture.Variant
-		if cut := strings.LastIndex(key, "."); cut >= 0 {
-			key = key[cut+1:]
-		}
+	variants := make([]string, len(textures))
+	for index, texture := range textures {
+		variants[index] = objpackage.VariantKey(texture.Variant)
+	}
+	chosen := objpackage.Assign(spec, variants, references)
+	assigned := make([]bool, len(references))
+	for index, texture := range textures {
 		name := ""
-		for index, reference := range references {
-			if assigned[index] || !statementBinds(spec, key, reference.statement) {
-				continue
-			}
-			name = reference.path
-			assigned[index] = true
-			break
+		if reference := chosen[index]; reference >= 0 {
+			name = references[reference].Path
+			assigned[reference] = true
 		}
 		if name == "" {
 			name = path.Join(directory, sanitize(texture.Variant)+s.mediaExtension(texture.MediaType, ".bin"))
@@ -730,59 +727,29 @@ func (s *Service) objPackage(
 	}
 	for index, reference := range references {
 		if !assigned[index] {
-			unresolved = append(unresolved, reference.path)
+			unresolved = append(unresolved, reference.Path)
 		}
 	}
 	return items, unresolved
 }
 
-func statementBinds(spec catalog.ModelObjPackageSchema, variantKey, statement string) bool {
-	for _, binding := range spec.TextureBindings {
-		if !strings.EqualFold(binding.VariantKey, variantKey) {
-			continue
-		}
-		for _, candidate := range binding.Statements {
-			if strings.EqualFold(candidate, statement) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-type textureReference struct {
-	statement string
-	path      string
-}
-
-// referencedLibrary reads the first material library name from the OBJ.
+// referencedLibrary reads the first material library name from the OBJ. The
+// scanning rules live in objpackage, shared with the list batch archive.
 func (s *Service) referencedLibrary(ctx context.Context, scope generation.TaskListScope, taskID generation.TaskID, object generation.Asset, spec catalog.ModelObjPackageSchema) string {
 	content, err := s.gateway.OpenAssetScoped(ctx, scope, taskID, object.ID)
 	if err != nil {
 		return ""
 	}
 	defer content.Body.Close()
-	scanner := newLineScanner(io.LimitReader(content.Body, spec.ReferenceScanBytes))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		keyword, rest, found := strings.Cut(line, " ")
-		if !found || !strings.EqualFold(keyword, spec.LibraryStatement) {
-			continue
-		}
-		if name, ok := relativeName(strings.TrimSpace(rest)); ok {
-			return name
-		}
-	}
-	return ""
+	return objpackage.LibraryName(content.Body, spec)
 }
 
 // textureReferences reads the texture file names a material library uses, in
-// order, with the statement that references each. Names are placed relative to
-// the library's folder, the way a viewer resolves them.
+// order, with the statement that references each.
 func (s *Service) textureReferences(
 	ctx context.Context, scope generation.TaskListScope, taskID generation.TaskID,
 	material *generation.Asset, spec catalog.ModelObjPackageSchema, materialPath, directory string,
-) []textureReference {
+) []objpackage.Texture {
 	if material == nil {
 		return nil
 	}
@@ -791,55 +758,7 @@ func (s *Service) textureReferences(
 		return nil
 	}
 	defer content.Body.Close()
-	base := path.Dir(materialPath)
-	if base == "." || base == "" {
-		base = directory
-	}
-	var references []textureReference
-	seen := map[string]bool{}
-	scanner := newLineScanner(io.LimitReader(content.Body, spec.ReferenceScanBytes))
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 {
-			continue
-		}
-		statement := strings.ToLower(fields[0])
-		if !strings.HasPrefix(statement, "map_") && statement != "bump" && statement != "norm" && statement != "disp" && statement != "decal" && statement != "refl" {
-			continue
-		}
-		name, ok := relativeName(fields[len(fields)-1])
-		if !ok {
-			continue
-		}
-		full := path.Join(base, name)
-		if seen[full] {
-			continue
-		}
-		seen[full] = true
-		references = append(references, textureReference{statement: statement, path: full})
-	}
-	return references
-}
-
-func newLineScanner(reader io.Reader) *bufio.Scanner {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
-	return scanner
-}
-
-// relativeName accepts only a name that stays inside the folder it is
-// extracted to.
-func relativeName(name string) (string, bool) {
-	name = strings.ReplaceAll(name, "\\", "/")
-	name = strings.Trim(name, "\"")
-	if name == "" || strings.ContainsRune(name, 0) || strings.HasPrefix(name, "/") || strings.Contains(name, ":") {
-		return "", false
-	}
-	cleaned := path.Clean(name)
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", false
-	}
-	return cleaned, true
+	return objpackage.Textures(content.Body, spec, materialPath, directory)
 }
 
 func sanitize(value string) string {

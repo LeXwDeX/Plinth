@@ -70,6 +70,17 @@ export interface AssetListProductSchema {
   item_states: Array<{ id: string; label: string; role: string }>;
   /** #328: the heartbeat the browser posts while the project is open; absent on older servers. */
   presence?: { heartbeat_seconds: number };
+  /**
+   * #329: the review section's public parameters. Present only when the
+   * Catalog declares `application.asset_list.review`; the board's decision
+   * copy (return reasons, rework limit) lives here. The board read itself
+   * needs no entry.
+   */
+  review?: {
+    return_reasons: Array<{ id: string; label: string; kinds: string[] }>;
+    max_rework_rounds: number;
+    archive?: { max_entries: number; max_bytes: number };
+  };
 }
 
 /**
@@ -208,6 +219,12 @@ export interface ProductSchema {
          project_asset_lists?: string;
          project_asset_list?: string;
          project_asset_list_decision?: string;
+         /** #329: the read-only acceptance board of one list (GET). */
+         project_asset_list_board?: string;
+         /** #329d: accept/return reviewed items (PUT). */
+         project_asset_list_item_review?: string;
+         /** #329d: the batch ZIP of the accepted items (GET, optional item_ids). */
+         project_asset_list_archive?: string;
          /** #327: the lists proposed in one chat session (GET). */
          chat_session_asset_lists?: string;
          /** #328: a list's run (POST start/pause/resume/stop). */

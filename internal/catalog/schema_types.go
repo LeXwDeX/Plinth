@@ -6576,9 +6576,14 @@ type CoreHTTPRoutesSchema struct {
 	ProjectAssetList         string `json:"project_asset_list,omitempty"`
 	ProjectAssetListDecision string `json:"project_asset_list_decision,omitempty"`
 	// ProjectAssetListBoard is the read-only acceptance board of one list
-	// (#329a).
-	ProjectAssetListBoard string `json:"project_asset_list_board,omitempty"`
-	ChatSessionAssetLists string `json:"chat_session_asset_lists,omitempty"`
+	// (#329a). ProjectAssetListItemReview accepts or returns reviewed items of
+	// one list (#329b); one call may accept several item ids.
+	ProjectAssetListBoard      string `json:"project_asset_list_board,omitempty"`
+	ProjectAssetListItemReview string `json:"project_asset_list_item_review,omitempty"`
+	// ProjectAssetListArchive is the batch ZIP of a list's accepted items
+	// (#329c). Empty leaves the route unregistered.
+	ProjectAssetListArchive string `json:"project_asset_list_archive,omitempty"`
+	ChatSessionAssetLists   string `json:"chat_session_asset_lists,omitempty"`
 	// Project run control routes (#328): presence heartbeats, run control
 	// (pause/resume/stop/start) and per-item skip. PR2 declares the path
 	// templates only; the handlers arrive with the runner. Empty (historical
