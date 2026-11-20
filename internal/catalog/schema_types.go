@@ -5332,6 +5332,15 @@ type ChatContextSchema struct {
 	// ReferencePurposeInvalidTemplate ({handle}) refuses a reference purpose
 	// whose handle is not one of the pictures the call really sends.
 	ReferencePurposeInvalidTemplate string `json:"reference_purpose_invalid_template,omitempty"`
+	// ReferenceLabelPictureTemplate ({handle}) refuses a reference mark
+	// (#376) whose key cannot be placed on one picture: it is not an image of
+	// the session, it is the whole-selection alias, the picture it names is
+	// sent twice, or one picture gets two different marks. A mark for an image
+	// of the session that the call does not send is dropped, not refused.
+	// ReferenceLabelValueTemplate ({handle} {marks}) refuses a mark the chosen
+	// model does not take; {marks} lists the marks that model declares.
+	ReferenceLabelPictureTemplate string `json:"reference_label_picture_template,omitempty"`
+	ReferenceLabelValueTemplate   string `json:"reference_label_value_template,omitempty"`
 }
 
 type ChatDSMLSchema struct {
@@ -5520,6 +5529,16 @@ type ChatToolSchema struct {
 	AnchorArgument         string               `json:"anchor_argument,omitempty"`
 	IdempotencyKeyTemplate string               `json:"idempotency_key_template"`
 	ResultFields           ChatToolResultFields `json:"result_fields"`
+	// ReferenceImageLabelsArgument names the tool argument that maps an image
+	// handle to the mark of the side that picture shows (#376). Once the final
+	// reference order is fixed, the executor writes one mark per picture, in
+	// that order, into the chosen Offering's reference-image-labels parameter
+	// (the picture of a handle gets that handle's mark, every other picture
+	// ReferenceImageLabelUnknown); an Offering that declares none ignores the
+	// argument. The allowed marks are that parameter's options, never a list of
+	// the tool's. Both fields are declared together.
+	ReferenceImageLabelsArgument string `json:"reference_image_labels_argument,omitempty"`
+	ReferenceImageLabelUnknown   string `json:"reference_image_label_unknown,omitempty"`
 	// Processing, when present, makes this a tool that processes an existing
 	// 3D model of the session instead of creating a new one. It is
 	// server-side only and omitted from public projections.

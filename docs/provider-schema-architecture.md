@@ -773,7 +773,7 @@ fake 对齐（`internal/testutil/fakeupstream/meshy/core/generation.go`，v1 `im
 
 **fake。** `hyper3d/api-v2` 的 `/rodin` 仍以观察到的响应拒绝多于图片的标记，并新增：标记取值在页面列表之外按 `INVALID_REQUEST` 拒绝（错误码与文案构造自官方页，没有观察到真实拒绝，写入端点说明与对齐脚本备注）；仍不校验少于图片的标记。
 
-**验证与缺口。** Go：`catalog/hyper3d_rodin_image_labels_376_test.go`（声明形状、隐藏、不是多视图、规范化与重复值的开关）、`providers/hyper3d/rodin_image_label_376_test.go`（wire 顺序与重复值、本地拒绝且不发请求、`ValidateInput`、声明形状校验）、`providers/imagewire/multipart_test.go`（数组写入）、`transport/httpapi/task_input_rodin_labels_376_test.go`（公开任务输入不含标记）、`testutil/fakeupstream/hyper3d/api-v2`（fake 取值校验）。未做：Agent 侧为多视角参考图填写标记（#376 下一步：工具参数，每张图都给一个标记、未知的补 `?`）、部署与端到端验收；没有调用真实上游。
+**验证与缺口。** Go：`catalog/hyper3d_rodin_image_labels_376_test.go`（声明形状、隐藏、不是多视图、规范化与重复值的开关）、`providers/hyper3d/rodin_image_label_376_test.go`（wire 顺序与重复值、本地拒绝且不发请求、`ValidateInput`、声明形状校验）、`providers/imagewire/multipart_test.go`（数组写入）、`transport/httpapi/task_input_rodin_labels_376_test.go`（公开任务输入不含标记）、`testutil/fakeupstream/hyper3d/api-v2`（fake 取值校验）。Agent 侧的填写（#376 第 2b 步）由 `create_model_3d_from_image` 的工具参数 `view_labels` 完成，契约见 `docs/architecture.md`“参考图方位标记 `view_labels`”，测试见 `chat/generationtool/reference_labels_*_376_test.go`（含执行器经真实 Adapter 到 fake 的端到端）与 `generation/reference_limit_labels_376_test.go`（直接提交截断参考图时一并截断标记）。未做：部署与真实 Agent 验收；没有调用真实上游。
 
 ### 数量控件与报价的边界
 

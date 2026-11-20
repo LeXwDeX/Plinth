@@ -749,6 +749,14 @@ func (executor *Executor) execute(
 		result.NoSubmission = true
 		return result, nil
 	}
+	// #376: the marks follow the final reference order, so they are bound only
+	// now, after the model's limit and the three-view replacement are applied.
+	imageLabels, labelRefusal := executor.referenceImageLabels(command, arguments, offering, referenceURLs)
+	if labelRefusal != "" {
+		result := executor.failure(command, "", labelRefusal)
+		result.NoSubmission = true
+		return result, nil
+	}
 	switch {
 	case purposes != "":
 		before := prompt
@@ -814,6 +822,7 @@ func (executor *Executor) execute(
 		referenceURLs,
 		skillOverrides,
 		anchorHandles,
+		imageLabels,
 	)
 	if err != nil {
 		if result, refused := executor.refuseReference(command, err); refused {
@@ -1432,6 +1441,7 @@ func (executor *Executor) buildInput(
 	referenceURLs []string,
 	skillOverrides map[generation.ParameterSemantic]json.RawMessage,
 	anchorHandles map[string]string,
+	imageLabels []string,
 ) (json.RawMessage, []generation.AssetID, error) {
 	allowed := make(
 		map[string]generation.Parameter,
@@ -1621,6 +1631,12 @@ func (executor *Executor) buildInput(
 			input[referenceParameter] = assets[0]
 		} else {
 			input[referenceParameter] = assets
+		}
+		// #376: one mark per picture, in the order of the pictures just resolved.
+		if len(imageLabels) > 0 {
+			if labels, declared := semanticParameter(offering, generation.SemanticReferenceImageLabels); declared {
+				input[labels.Name] = imageLabels
+			}
 		}
 	}
 	overrideValues := map[string]string{
