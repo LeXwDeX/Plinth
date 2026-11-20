@@ -555,9 +555,9 @@ func TestModelReviewRefusesAnExplicitFileThatIsNotAReadableGLB(t *testing.T) {
 				assets.contents["task-a-glb"] = []byte("not a model")
 			},
 			want: func(review catalog.ChatModelReviewSchema) string {
-				return review.Texts.Unsupported[:strings.Index(review.Texts.Unsupported, "{reason}")]
+				return strings.NewReplacer("{asset}", "task-a-glb", "{media}", "model/gltf-binary").
+					Replace(review.Source.SourceNotGLB)
 			},
-			partial: true,
 		},
 	}
 	for _, tt := range cases {

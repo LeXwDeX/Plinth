@@ -122,14 +122,19 @@ C=$(req "$T/o.json" -X POST "$BASE/api/auth/login" -H 'Content-Type: application
   -d "{\"username\":\"${ADMIN_USERNAME:-}\",\"password\":\"${ADMIN_PASSWORD:-}\"}" -c "$JAR")
 if [ "$C" = 200 ]; then ok "login"; else bad "login ($C)"; echo "=== ABORT ==="; echo "=== SMOKE-L1-AGENT-MODE PASS=$PASS FAIL=$FAIL SKIP=$SKIP ==="; exit 1; fi
 
-# Schema 里的批准策略：docs/product.md 规定这四种能力在手工模式需要人工批准
+# Schema 里的批准策略：docs/product.md 规定这四种能力在手工模式需要人工批准。
+# 默认方式以公开 Schema 为准，脚本不写死（#415）；这里只核对它在声明的方式内，
+# 下面的新会话断言再核对会话真的取了这个值。
 C=$(req "$T/schema.json" "$BASE/api/v1/schema")
 SCHEMA_STATUS="$C"
-POLICY=$(jget "$T/schema.json" '(lambda p: "%s|%s" % (p["default_mode"], ",".join(sorted(p["manual_approval_capabilities"]))))(d["schema"]["chat"]["approval_policy"])')
-if [ "$C" = 200 ] && [ "$POLICY" = "auto|image-to-3d,image-to-splat,retexture,text-to-3d" ]; then
-  ok "schema approval policy: default auto (#406); manual only for text-to-3d, image-to-3d, image-to-splat, retexture"
+DEFAULT_MODE=$(jget "$T/schema.json" 'd["schema"]["chat"]["approval_policy"]["default_mode"]')
+MODES=$(jget "$T/schema.json" '",".join(d["schema"]["chat"]["approval_policy"]["modes"])')
+DECLARED_MODE=$(jget "$T/schema.json" '(lambda p: "1" if p["default_mode"] in p["modes"] else "")(d["schema"]["chat"]["approval_policy"])')
+CAPABILITIES=$(jget "$T/schema.json" '",".join(sorted(d["schema"]["chat"]["approval_policy"]["manual_approval_capabilities"]))')
+if [ "$C" = 200 ] && [ -n "$DEFAULT_MODE" ] && [ "$DECLARED_MODE" = 1 ] && [ "$CAPABILITIES" = "image-to-3d,image-to-splat,retexture,text-to-3d" ]; then
+  ok "schema approval policy: default_mode=$DEFAULT_MODE declared in modes; manual only for text-to-3d, image-to-3d, image-to-splat, retexture"
 else
-  bad "schema approval policy unexpected ($C '$POLICY')"
+  bad "schema approval policy unexpected ($C default='$DEFAULT_MODE' modes='$MODES' capabilities='$CAPABILITIES')"
 fi
 
 # 4. 新会话与批准方式
@@ -142,19 +147,20 @@ else
   bad "create session ($C)"; echo "=== SMOKE-L1-AGENT-MODE PASS=$PASS FAIL=$FAIL SKIP=$SKIP ==="; exit 1
 fi
 APPROVAL="$BASE/api/v1/chat/sessions/$SID/approval"
-[ "$(jget "$T/sess.json" 'd["approvalMode"]')" = auto ] && ok "new session response carries approvalMode=auto (the Schema default)" || bad "new session approvalMode != auto"
+[ "$(jget "$T/sess.json" 'd["approvalMode"]')" = "$DEFAULT_MODE" ] && ok "new session carries the Schema default approvalMode=$DEFAULT_MODE" || bad "new session approvalMode $(jget "$T/sess.json" 'd["approvalMode"]') != Schema default '$DEFAULT_MODE'"
 C=$(req "$T/o.json" "$APPROVAL" -b "$JAR")
-[ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = auto ] && ok "GET approval: default auto" || bad "GET approval default ($C mode=$(jget "$T/o.json" 'd["approvalMode"]'))"
+[ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = "$DEFAULT_MODE" ] && ok "GET approval: Schema default $DEFAULT_MODE" || bad "GET approval default ($C mode=$(jget "$T/o.json" 'd["approvalMode"]') want '$DEFAULT_MODE')"
 
 put_mode() { # $1=mode → HTTP 状态；响应在 $T/mode.json
   req "$T/mode.json" -X PUT "$APPROVAL" -H 'Content-Type: application/json' -H "Origin: $BASE" -b "$JAR" -d "{\"approvalMode\":\"$1\"}"
 }
+# 显式切换三种方式并各自回读，不依赖会话默认值（#415）。
 C=$(put_mode budget)
 [ "$C" = 200 ] && [ "$(jget "$T/mode.json" 'd["approvalMode"]')" = budget ] && ok "PUT approval budget" || bad "PUT approval budget ($C)"
 C=$(req "$T/o.json" "$APPROVAL" -b "$JAR")
 [ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = budget ] && ok "GET approval: budget" || bad "GET approval after budget ($C)"
 C=$(put_mode auto)
-[ "$C" = 200 ] && [ "$(jget "$T/mode.json" 'd["approvalMode"]')" = auto ] && ok "PUT approval auto (back to the default)" || bad "PUT approval auto ($C)"
+[ "$C" = 200 ] && [ "$(jget "$T/mode.json" 'd["approvalMode"]')" = auto ] && ok "PUT approval auto" || bad "PUT approval auto ($C)"
 C=$(req "$T/o.json" "$APPROVAL" -b "$JAR")
 [ "$C" = 200 ] && [ "$(jget "$T/o.json" 'd["approvalMode"]')" = auto ] && ok "GET approval: auto" || bad "GET approval after auto ($C)"
 C=$(put_mode manual)

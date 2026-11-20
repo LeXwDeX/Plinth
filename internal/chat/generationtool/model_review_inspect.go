@@ -112,14 +112,10 @@ func (executor *Executor) InspectReviewedModel(
 		return ModelInspectResult{}, refusal
 	}
 	media := strings.ToLower(strings.TrimSpace(asset.MediaType))
-	if media == "" {
-		media = modelReviewMediaType
-	}
-	if media != modelReviewMediaType {
+	if !modelReviewMediaTypeLeavesFormatOpen(media) {
 		return ModelInspectResult{}, &ModelInspectRefusal{
-			Kind: ModelInspectNotGLB,
-			Message: executor.fillText(command, review.Source.SourceNotGLB,
-				"{asset}", string(asset.ID), "{media}", media),
+			Kind:    ModelInspectNotGLB,
+			Message: executor.modelReviewNotGLBRefusal(command, review, reviewedModel{task: task, asset: asset}).Error,
 		}
 	}
 	limits := modelReviewLimits(review)
@@ -132,13 +128,16 @@ func (executor *Executor) InspectReviewedModel(
 		}
 	}
 	source := reviewedModel{task: task, asset: asset}
-	entry, loadRefusal, err := executor.loadReviewedModel(ctx, command, review, source)
+	entry, loadRefusal, kind, err := executor.loadReviewedModelKind(ctx, command, review, source)
 	if err != nil {
 		return ModelInspectResult{}, err
 	}
 	if loadRefusal != nil {
+		if kind == "" {
+			kind = ModelInspectUnreadable
+		}
 		return ModelInspectResult{}, &ModelInspectRefusal{
-			Kind: ModelInspectUnreadable, Message: rejectionMessage(loadRefusal),
+			Kind: kind, Message: rejectionMessage(loadRefusal),
 		}
 	}
 	if entry == nil {
