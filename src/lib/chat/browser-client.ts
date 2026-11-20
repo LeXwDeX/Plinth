@@ -649,9 +649,10 @@ function normalizeMessage(
   const source = record(value);
   const fields = schema.chat.api.response_fields;
   const content = String(source[fields.content] ?? '');
-  const pending =
-    source[fields.is_pending] === true ||
-    content === schema.chat.state.pending_content;
+  // The placeholder is not words. A reply the server marks as pending (#403: its turn has not ended) can
+  // already hold the real text and tool calls of an earlier round, and those are kept.
+  const placeholder = content === schema.chat.state.pending_content;
+  const pending = source[fields.is_pending] === true || placeholder;
   const imageURLs = array(source[fields.image_urls])
     .filter((item): item is string => typeof item === 'string');
   const toolCalls = array(source[fields.tool_calls]).map(record);
@@ -716,7 +717,7 @@ function normalizeMessage(
   return {
     id: String(source[fields.id] ?? ''),
     role: wireRole === schema.chat.roles.user ? 'user' : 'assistant',
-    content: pending ? '' : content,
+    content: placeholder ? '' : content,
     ...(images.length > 0 ? { images } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(multiview ? { multiview } : {}),
