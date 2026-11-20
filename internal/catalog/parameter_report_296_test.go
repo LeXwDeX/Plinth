@@ -105,31 +105,31 @@ func TestCatalogWithoutTheParametersKeyNeedsNoBound(t *testing.T) {
 	}
 }
 
-// The Agent is told once in the system prompt and in the 3D and 2D craft texts
-// to report model parameters only as the tool result lists them.
+// The Agent is told once, in the system prompt, to report model parameters only
+// as the tool result lists them. The craft texts used to repeat the same
+// sentence in three places (#407); the reporting rule is cross-domain, so the
+// system prompt is its single home.
 func TestAgentTextsTellItToReportParametersOnlyFromTheToolResult(t *testing.T) {
 	loaded, err := Load(bytes.NewReader(defaultCatalog))
 	if err != nil {
 		t.Fatal(err)
 	}
 	agent := loaded.Application().Chat.Agent
-	texts := map[string]string{"system_prompt": agent.SystemPrompt}
+	text := agent.SystemPrompt
+	for _, want := range []string{"parameters", "没有列出的参数就是默认值", "不得说成设置过"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("system prompt lacks %q", want)
+		}
+	}
+	if count := strings.Count(text, "没有列出的参数就是默认值"); count != 1 {
+		t.Errorf("system prompt states the rule %d times, want once", count)
+	}
 	for _, craft := range agent.CraftPrompts {
-		if craft.ID == "model3d" || craft.ID == "image2d_production" {
-			texts["craft "+craft.ID] = craft.Text
+		if craft.ID != "model3d" && craft.ID != "image2d_production" {
+			continue
 		}
-	}
-	if len(texts) != 3 {
-		t.Fatalf("texts found: %d", len(texts))
-	}
-	for name, text := range texts {
-		for _, want := range []string{"parameters", "没有列出的参数就是默认值", "不得说成设置过"} {
-			if !strings.Contains(text, want) {
-				t.Errorf("%s lacks %q", name, want)
-			}
-		}
-		if count := strings.Count(text, "没有列出的参数就是默认值"); count != 1 {
-			t.Errorf("%s states the rule %d times, want once", name, count)
+		if strings.Contains(craft.Text, "没有列出的参数就是默认值") {
+			t.Errorf("craft %q repeats the reporting rule that lives in the system prompt", craft.ID)
 		}
 	}
 }
