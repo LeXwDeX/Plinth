@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { OfferingParameterWire, OfferingWire } from '@/lib/agent-offerings';
-import { assetFromURL, buildMultiviewRequest, chosenViewLabels, defaultViewChoices, multiviewOffering, validViewChoices } from '@/lib/workspace/multiview-upload';
+import { assetFromURL, buildMultiviewRequest, chosenViewLabels, defaultViewChoices, multiviewLockNote, multiviewOffering, validViewChoices } from '@/lib/workspace/multiview-upload';
 
 const routes = { asset_item: '/api/v1/assets/{assetID}', task_asset: '/api/v1/tasks/{taskID}/assets/{assetID}' };
 const views = [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }, { value: 'back', label: '背面' }, { value: 'right', label: '右侧' }];
@@ -14,6 +14,9 @@ const multi = (modelId: string, available = true) => offering(modelId, [
   { name: 'views', label: 'v', type: 'string-array', semantic: 'reference-views', options: views },
 ], available);
 const single = offering('single', [{ name: 'reference_assets', label: 'r', type: 'asset-array', semantic: 'reference-image' }]);
+const named = (modelId: string, modelName: string, parameters: OfferingParameterWire[], available = true): OfferingWire => (
+  { ...offering(modelId, parameters, available), model_name: modelName } as OfferingWire
+);
 
 describe('multiviewOffering', () => {
   it('detects by the reference-views semantic only, among available offerings', () => {
@@ -26,6 +29,49 @@ describe('multiviewOffering', () => {
     expect(found.offering.model_id).toBe('m2');
     expect([found.minPictures, found.maxPictures]).toEqual([2, 4]);
     expect(multiviewOffering([multi('m1'), multi('m2')], 'single')?.offering.model_id).toBe('m1');
+  });
+});
+
+// #373: the panel makes the model the person picked for 3D when it takes several views, and otherwise the first
+// multiview model; the request carries that target, whatever the session locked, and the panel says which.
+describe('the multiview target against the picked 3D model', () => {
+  const rodin = named('rodin', 'Rodin Gen-2.5', [{ name: 'reference_assets', label: 'r', type: 'asset-array', semantic: 'reference-image', max_items: 5 }]);
+  const p2 = named('p2-multiview', 'Tripo P2 多视图', [
+    { name: 'reference_assets', label: 'r', type: 'asset-array', semantic: 'reference-image', min_items: 2, max_items: 4 },
+    { name: 'views', label: 'v', type: 'string-array', semantic: 'reference-views', options: views },
+  ]);
+  const v31 = named('v31-multiview', 'Tripo v3.1 多视图', p2.parameters);
+
+  it('uses the picked model when it is a multiview model, with no note', () => {
+    const offerings = [rodin, v31, p2];
+    const target = multiviewOffering(offerings, 'p2-multiview')!;
+    expect(target.offering.model_id).toBe('p2-multiview');
+    expect(multiviewLockNote(offerings, target, 'p2-multiview')).toBeNull();
+  });
+
+  it('falls back to the first multiview model when the pick takes no views, and names both', () => {
+    const offerings = [rodin, v31, p2];
+    const target = multiviewOffering(offerings, 'rodin')!;
+    expect(target.offering.model_id).toBe('v31-multiview');
+    expect(multiviewLockNote(offerings, target, 'rodin')).toEqual({ locked: 'Rodin Gen-2.5', model: 'Tripo v3.1 多视图' });
+    // The request the panel sends names the target, not the pick.
+    const request = buildMultiviewRequest(routes, target.offering.model_id, ['/api/v1/assets/a1', '/api/v1/assets/a2'], ['front', 'left']);
+    expect(request?.model).toBe('v31-multiview');
+  });
+
+  it('explains a picked multiview model that cannot run now by naming it', () => {
+    const offerings = [{ ...p2, available: false } as OfferingWire, v31];
+    const target = multiviewOffering(offerings, 'p2-multiview')!;
+    expect(target.offering.model_id).toBe('v31-multiview');
+    expect(multiviewLockNote(offerings, target, 'p2-multiview')).toEqual({ locked: 'Tripo P2 多视图', model: 'Tripo v3.1 多视图' });
+  });
+
+  it('says nothing without a pick and names a pick no service carries by its id', () => {
+    const target = multiviewOffering([rodin, p2])!;
+    expect(multiviewLockNote([rodin, p2], target, undefined)).toBeNull();
+    expect(multiviewLockNote([rodin, p2], target, null)).toBeNull();
+    expect(multiviewLockNote([rodin, p2], target, '')).toBeNull();
+    expect(multiviewLockNote([rodin, p2], target, 'retired-model')).toEqual({ locked: 'retired-model', model: 'Tripo P2 多视图' });
   });
 });
 

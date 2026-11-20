@@ -22,10 +22,12 @@ import (
 //
 // A running task already reports the whole price as credits_consumed: the credits
 // are frozen when the task is created, and the poll shows the frozen amount
-// (observed, rig and conversions). The queued poll has no real sample and keeps
-// the sample's value. A task that fails or is cancelled is not charged (the
-// pricing page), so it reports 0. The account balance stays the fixed value of
-// the fake: only the task object is billed.
+// (observed, rig and conversions). The queued poll keeps the sample's value; the
+// runs of 2026-11-19 (#386) show the real API does more there: a 3MF conversion
+// (5) and a multiview model (70) already report their price in the queued poll.
+// A task that fails or is cancelled is not charged (the pricing page), so it
+// reports 0. The account balance stays the fixed value of the fake: only the task
+// object is billed.
 const (
 	creditsRig             = 25
 	creditsConvertBasic    = 5

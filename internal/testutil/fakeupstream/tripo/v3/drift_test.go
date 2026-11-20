@@ -362,3 +362,10 @@ func TestAlignmentReportIsCommittedAndClean(t *testing.T) {
 func TestSecondAlignmentReportIsCommittedAndClean(t *testing.T) {
 	testkit.AssertAlignmentReport(t, "testdata/alignment-report-89.json", OfficialBase, true)
 }
+
+// The third official run (#386: a multiview model and its 3MF export) has its own
+// report as well, for the same reason: it holds only that run's steps. It must be
+// clean too, with its two paid requests counted.
+func TestThirdAlignmentReportIsCommittedAndClean(t *testing.T) {
+	testkit.AssertAlignmentReport(t, "testdata/alignment-report-386.json", OfficialBase, true)
+}

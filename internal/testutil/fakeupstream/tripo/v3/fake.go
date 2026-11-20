@@ -119,8 +119,10 @@ var kinds = []kind{
 	{Path: "/models/texture", Type: "texture_model", Base: "texture_model", Required: []string{"input"}, Real: true, DocPage: "models-texture"},
 	// model is optional on the official page (v2.0 when omitted); decimate.go holds the rest of the request.
 	{Path: "/mesh/decimate", Type: "highpoly_to_lowpoly", Base: "highpoly_to_lowpoly", Required: []string{"input"}, Real: true, DocPage: "mesh-decimate"},
-	// multiview-to-model has no captured sample (no paid request yet): it is constructed from the
-	// official documentation and borrows the image_to_model poll structure.
+	// multiview-to-model has no template sample (the real task of 2026-11-19 is evidence, not a sample
+	// in sampleFS: evidence_multiview_3mf_test.go holds the fake to it): it is constructed from the
+	// official documentation, borrows the image_to_model poll structure and adds what that task
+	// showed (multiview.go: the request under input; artifactName: the WebP render).
 	{Path: "/generation/multiview-to-model", Type: "multiview_to_model", Base: "image_to_model", Required: []string{"model"}, DocPage: "generation-multiview-to-model/standard"},
 	// Smart Segmentation reports smartsegment_image or smartsegment_model by seg_type; both were captured.
 	{Path: "/mesh/smartsegment", Type: "smartsegment_image", Base: "smartsegment_image", Required: []string{"input", "seg_type"}, Real: true, DocPage: "mesh-smartsegment"},
@@ -137,7 +139,7 @@ var realKindNotes = map[string]string{
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
 	"/models/texture":                "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url",
 	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url",
-	"/models/convert":                "captured twice. 2026-10-29: an STL export of a segmentation result with PNG textures of 512 pixels (the task echoes its request under input, the output has only model_url). 2026-11-16 (#305, evidence-305-rig-convert.candidate.json): a GLTF and an FBX export of a v3.0 rig's GLB with PNG textures of 2048 pixels and with_animation, 10 credits each, shown already while the task runs (creation from a URL took 47 to 48 seconds; the poll names a new original_model_id); the finished GLTF and FBX tasks add output.normalize_scale and output.normalize_translation, the move that put the middle of the bounding box on the origin because pivot_to_center_bottom was not set; the GLB keeps the skin, the textures follow the request. What the fake writes for pivot_to_center_bottom, for a texture larger than the source's and for the formats the runs did not cover is constructed from the official page (convert.go)",
+	"/models/convert":                "captured twice. 2026-10-29: an STL export of a segmentation result with PNG textures of 512 pixels (the task echoes its request under input, the output has only model_url). 2026-11-16 (#305, evidence-305-rig-convert.candidate.json): a GLTF and an FBX export of a v3.0 rig's GLB with PNG textures of 2048 pixels and with_animation, 10 credits each, shown already while the task runs (creation from a URL took 47 to 48 seconds; the poll names a new original_model_id); the finished GLTF and FBX tasks add output.normalize_scale and output.normalize_translation, the move that put the middle of the bounding box on the origin because pivot_to_center_bottom was not set; the GLB keeps the skin, the textures follow the request. What the fake writes for pivot_to_center_bottom, for a texture larger than the source's and for the formats the runs did not cover is constructed from the official page (convert.go). A third capture, 2026-11-19 (#386, evidence-386-convert-3mf.candidate.json): a 3MF export of a multiview model named by its task id, with nothing in the request but input and format, 5 credits shown from the queued poll on; the task echoes {format, original_model_id}, the output has only model_url (no normalize_scale or normalize_translation for a 3MF), and the delivered file is a 35,952,441-byte ZIP64 3MF package with a Tripo vendor namespace (AIGC label) that the archive isolation refused until the namespace was listed. The fake delivers a package of that structure (tripo3mf.go), not the generic 3MF fixture",
 	"/animations/rig":                "the response is captured (rig_type biped, spec tripo, both v2.5 and v3.0; 25 credits on v3.0-20260909, shown while the task runs, observed 2026-11-16); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: rig_type (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic, others), spec (tripo, mixamo, actorcore, unity, unreal, vrm), out_format, which of them exist only under v3.0, and a spec having no effect on a non-biped rig; a poll repeats spec, out_format and the rig type (named topology, as captured)",
 	"/animations/retarget":           "the response is captured (preset:walk on a v3.0 biped rig; a v2 rig ended failed, code 1004); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: animation XOR animations (at most 5), the 11 v3.0 biped presets, the five creature presets (quadruped walk, hexapod walk, octopod walk, serpentine march, aquatic march) and the v1.0 preset:biped: names; a preset that does not fit its rig ends failed with code 1004 like the captured v2 case, which is an assumption",
 	"/mesh/smartsegment":             "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id",
@@ -148,7 +150,7 @@ const multiviewChecked = "2026-11-02"
 
 // constructedKindNotes explains kinds that have no captured sample.
 var constructedKindNotes = map[string]string{
-	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + " (derived, not captured; no paid request yet): inputs is an array of single-key view objects (front is required, 2-4 images) instead of input, and the task type multiview_to_model and the output structure of image_to_model are assumptions to verify on the first real paid request; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go)",
+	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + ": inputs is an array of single-key view objects (front is required, 2-4 images) instead of input; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go). Checked against one real task on 2026-11-19 (#386, evidence-386-multiview-model.candidate.json, not a template sample, so the endpoint stays constructed): three views at Plinth's production defaults (texture and PBR at extreme quality, detailed geometry, 2,000,000 faces), 70 credits shown from the queued poll on. The create envelope, the task type multiview_to_model and the queued > running > success flow are as assumed; the task object shows the request's own parameters under input, the request's model as model_version and a files array of four entries (front, left, back, right; a stored object each, null for the view that was not sent), the output holds model_url (a GLB) and rendered_image_url (a WebP, not the PNG of the other generation tasks), and the real running poll shows the render from progress 99, before the model, which the fake does not (multiview.go). What the real API shows for a parameter the request left out is not known",
 }
 
 var endpoints = buildEndpoints()
@@ -767,7 +769,10 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]any {
 	template := t.kind
-	template.Type, template.Base = t.typ, t.typ // the sample of the task's own type (seg_type picks one of two)
+	template.Type = t.typ
+	if t.typ != t.kind.Type {
+		template.Base = t.typ // the sample of the task's own type (seg_type picks one of two)
+	}
 	// cancelled and unknown have no real poll sample: their structure is the
 	// real failed poll of the same task type without the failure fields (see
 	// doc.go). The status word in the body is set below.
@@ -894,6 +899,12 @@ func (t *task) parentID() string {
 func (t *task) artifactName(field string) string {
 	switch field {
 	case "rendered_image":
+		if t.typ == "multiview_to_model" {
+			// The multiview model's render is a WebP (observed 2026-11-19, #386: the
+			// bytes of a real task, a textured PBR model). The text, image, texture and
+			// decimation tasks of 2026-10-29 delivered PNG bytes.
+			return "rendered_image.webp"
+		}
 		return "rendered_image.png"
 	case "generated_image":
 		return "generated_image.jpg"
@@ -958,11 +969,15 @@ func artifactFile(name, fidelity, texture string) (fakeupstream.File, error) {
 	case ".usdz":
 		return fakeupstream.ModelFile("usdz")
 	case ".3mf":
-		return fakeupstream.ModelFile("3mf")
+		// The package Tripo's own converter writes, not the generic fixture: its
+		// vendor namespace and ZIP64 framing are what a real delivery has (#386).
+		return fakeupstream.ModelFile("3mf:tripo")
 	case ".splat":
 		return fakeupstream.SplatFile()
 	case ".png":
 		return fakeupstream.ModelFile("png")
+	case ".webp":
+		return fakeupstream.ImageFile("webp")
 	case ".jpg":
 		return fakeupstream.ImageFile("jpeg")
 	}

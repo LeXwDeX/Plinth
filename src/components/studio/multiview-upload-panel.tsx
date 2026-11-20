@@ -9,7 +9,7 @@ import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useSessionMessages } from '@/hooks/use-picture-handles';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
-import { defaultViewChoices, validViewChoices, type MultiviewOffering } from '@/lib/workspace/multiview-upload';
+import { defaultViewChoices, validViewChoices, type MultiviewLockNote, type MultiviewOffering } from '@/lib/workspace/multiview-upload';
 import { handleOfPicture } from '@/lib/workspace/object-handle';
 import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
@@ -18,6 +18,8 @@ import { useWorkspaceStore } from '@/store/workspace-store';
 export interface MultiviewUploadPanelProps {
   images: readonly string[];
   target: MultiviewOffering;
+  /** Set when the target is not the 3D model the person picked (#373): the panel says which model it makes the model with. */
+  lockNote?: MultiviewLockNote | null;
   disabled?: boolean;
   /** The view of each picture, aligned with `images`; an empty view leaves that picture out. */
   onConfirm: (choices: string[]) => void;
@@ -30,7 +32,7 @@ export interface MultiviewUploadPanelProps {
  * change once dismissed. A click on a thumbnail shows that picture large inside the stage area (#87), with its
  * chat handle when the session's messages give it one, so the views can be told apart before labelling.
  */
-export function MultiviewUploadPanel({ images, target, disabled = false, onConfirm, onDismiss }: MultiviewUploadPanelProps) {
+export function MultiviewUploadPanel({ images, target, lockNote = null, disabled = false, onConfirm, onDismiss }: MultiviewUploadPanelProps) {
   const { schema } = useProductSchema();
   const signature = images.join('\n');
   const [choices, setChoices] = useState<string[]>(() => defaultViewChoices(images.length, target.views));
@@ -60,6 +62,11 @@ export function MultiviewUploadPanel({ images, target, disabled = false, onConfi
     >
       <p className="font-medium">{schemaText(schema, 'ui.studio.multiview_upload.question')}</p>
       <p className="text-muted-foreground">{formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.hint'), { model: target.offering.model_name })}</p>
+      {lockNote ? (
+        <p className="text-muted-foreground" data-testid="studio-multiview-upload-lock-note">
+          {formatSchemaText(schemaText(schema, 'ui.studio.multiview_upload.lock_note'), { locked: lockNote.locked, model: lockNote.model })}
+        </p>
+      ) : null}
       <ul className="flex flex-wrap gap-2">
         {images.map((url, index) => (
           <li key={`${index}-${url.slice(-24)}`} className="flex items-center gap-1.5">

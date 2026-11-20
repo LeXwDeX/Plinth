@@ -30,6 +30,7 @@ const target = {
   maxPictures: 4,
 } as unknown as MultiviewOffering;
 const images = ['/api/v1/tasks/t1/assets/a1', '/api/v1/tasks/t1/assets/a2'];
+const messages = (defaultCatalog.application as { content: { messages: Record<string, string> } }).content.messages;
 
 /** Stands in for the chat region's error boundary: records what the real one would have replaced the chat with. */
 class Boundary extends Component<{ caught: Error[]; children: ReactNode }, { failed: boolean }> {
@@ -73,5 +74,24 @@ describe('dismissing the multiview question keeps the hook order (#387)', () => 
     expect(caught.map((error) => error.message)).toEqual([]);
     expect(view.getByTestId('studio-multiview-upload')).toBeTruthy();
     expect(view.getAllByTestId('studio-multiview-upload-thumb')).toHaveLength(3);
+  });
+});
+
+// #373: the panel makes the model it names even when the session's 3D pick takes no views; it says so in one line.
+describe('the multiview panel note about the picked 3D model', () => {
+  it('names the pick that cannot make several views and the model this one uses', () => {
+    const view = render(<MultiviewUploadPanel images={images} target={target} lockNote={{ locked: 'Rodin Gen-2.5', model: 'Tripo P2 多视图' }} onConfirm={vi.fn()} />);
+    const note = view.getByTestId('studio-multiview-upload-lock-note');
+    expect(note.textContent).toBe(messages['ui.studio.multiview_upload.lock_note'].replace('{locked}', 'Rodin Gen-2.5').replace('{model}', 'Tripo P2 多视图'));
+    expect(note.textContent).toContain('Rodin Gen-2.5');
+    expect(note.textContent).toContain('Tripo P2 多视图');
+  });
+
+  it('shows no note when the target is the pick or nothing is picked', () => {
+    const same = render(<MultiviewUploadPanel images={images} target={target} lockNote={null} onConfirm={vi.fn()} />);
+    expect(same.queryByTestId('studio-multiview-upload-lock-note')).toBeNull();
+    same.unmount();
+    const absent = render(<MultiviewUploadPanel images={images} target={target} onConfirm={vi.fn()} />);
+    expect(absent.queryByTestId('studio-multiview-upload-lock-note')).toBeNull();
   });
 });

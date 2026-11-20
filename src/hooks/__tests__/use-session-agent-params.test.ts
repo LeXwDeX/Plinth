@@ -26,6 +26,8 @@ vi.mock('react', () => ({
 const schema = structuredClone(catalog.application) as unknown as ProductSchema;
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: runtime.owner } }) }));
+// The polling pace (#385) is not what this suite is about, and it needs real React hooks that this suite replaces.
+vi.mock('@/hooks/use-polling', () => ({ useIdleInterval: () => () => 0, useSessionBusy: () => false }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('swr', () => ({
   default: (key: any) => { runtime.keys.push(key); return { data: { params: runtime.servers[key?.[3]] ?? {}, parameterStates: Object.fromEntries(Object.entries(runtime.servers[key?.[3]] ?? {}).map(([name,value]) => [name,{value,source:'user'}])) }, isLoading: runtime.loading, error: runtime.error, mutate: runtime.mutate }; },

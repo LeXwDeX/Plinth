@@ -51,13 +51,15 @@ type modelChoice struct {
 }
 
 // offeringChoice is one selection and why it was made. A Refusal is the
-// Schema's message for the Agent; nothing is submitted then.
+// Schema's message for the Agent, and Code the refusal's name in the server
+// log (#378); nothing is submitted then.
 type offeringChoice struct {
 	Offering generation.Offering
 	Source   string
 	Profile  string
 	Reason   string
 	Refusal  string
+	Code     string
 }
 
 // modelInput is the part of a call's input that decides whether an Offering
@@ -264,9 +266,12 @@ func (executor *Executor) recommendedWorkspaceOffering(
 // chooseOffering selects the Offering of a generation tool call by the
 // model-choice layers: the person's explicit pick for the tool's workspace
 // domain, the Agent's model argument, the purpose recommendation, the
-// workspace pick and the Offering default, in that order (#103, #239). It
-// returns a Refusal when a named model conflicts with the person's explicit
-// pick or is unavailable; nothing is submitted in that case.
+// workspace pick and the Offering default, in that order (#103, #239). The
+// multiview tool of a turn that carries the person's structured multiview
+// request takes the request's model as that explicit pick instead of the
+// session lock (#373). It returns a Refusal when a named model conflicts with
+// the person's explicit pick or is unavailable; nothing is submitted in that
+// case.
 func (executor *Executor) chooseOffering(
 	command chat.ToolCommand,
 	capability generation.Capability,
@@ -287,23 +292,31 @@ func (executor *Executor) chooseOffering(
 	// the multiview tool included: ignore_user_model only keeps the workspace
 	// picker out of its fallback.
 	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
+	// The person's structured multiview request names the model of its own
+	// turn: they chose it on the multiview panel or the three-view card, so it
+	// is their explicit pick for this step and replaces the session lock here,
+	// where the lock would refuse a model that takes the views or one the
+	// session's lock cannot serve (#373). The stored lock is not touched.
+	if requested := executor.requestedMultiviewModel(command); requested != "" {
+		locked = requested
+	}
 	if locked != "" {
 		offering, matched := matchOffering(candidates, locked)
 		if !matched {
-			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, locked)}, nil
+			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, locked), Code: refusalModelUnavailable}, nil
 		}
 		// A named or locked model is not filtered by the input shape here: the
 		// ordinary reference and view checks refuse an input it cannot take
 		// with their precise messages (#103).
 		if named != "" && !modelMatches(offering, named) {
-			return offeringChoice{Refusal: executor.modelConflictText(command, offering, named)}, nil
+			return offeringChoice{Refusal: executor.modelConflictText(command, offering, named), Code: refusalModelConflict}, nil
 		}
 		return offeringChoice{Offering: offering, Source: "user"}, nil
 	}
 	if named != "" {
 		offering, matched := matchOffering(candidates, named)
 		if !matched {
-			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, named)}, nil
+			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, named), Code: refusalModelUnavailable}, nil
 		}
 		source := "agent"
 		if request := command.Options.Multiview; request != nil && request.Model != "" && modelMatches(offering, request.Model) {
@@ -327,7 +340,7 @@ func (executor *Executor) chooseOffering(
 				return offeringChoice{Offering: recommended, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
 			}
 			if text := executor.modelWorkspaceConflictText(command, workspace, offering, profile); text != "" {
-				return offeringChoice{Refusal: text}, nil
+				return offeringChoice{Refusal: text, Code: refusalModelWorkspaceConflict}, nil
 			}
 		}
 		return offeringChoice{Offering: offering, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
@@ -349,7 +362,7 @@ func (executor *Executor) chooseOffering(
 		if len(declared) > 0 {
 			name = declared[0]
 		}
-		return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, name)}, nil
+		return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, name), Code: refusalModelUnavailable}, nil
 	}
 	// Without a purpose recommendation (or a brief at all), the workspace's
 	// selected model is still the legacy fallback. It competes only here,
@@ -364,6 +377,19 @@ func (executor *Executor) chooseOffering(
 		source = "user"
 	}
 	return offeringChoice{Offering: offering, Source: source}, nil
+}
+
+// requestedMultiviewModel is the model the person's structured multiview
+// request names for this call (#373), empty for any other tool or a turn
+// without the request. The request binds only the multiview tool: another 3D
+// tool of the same turn still follows the session's lock.
+func (executor *Executor) requestedMultiviewModel(command chat.ToolCommand) string {
+	request := command.Options.Multiview
+	tool := executor.chat.ThreeView.Multiview.Tool
+	if request == nil || tool == "" || command.Tool.Name != tool {
+		return ""
+	}
+	return strings.TrimSpace(request.Model)
 }
 
 // declaredModelChoices is the model choices of the tool's model argument, in
@@ -470,8 +496,10 @@ func (executor *Executor) modelWorkspaceConflictText(
 }
 
 // modelChoiceFailure is the Schema's refusal with no submission: the Agent
-// sees the reason and that the person must decide, not a generic failure.
-func (executor *Executor) modelChoiceFailure(command chat.ToolCommand, message string) chat.ToolResult {
+// sees the reason and that the person must decide, not a generic failure. The
+// server log records the refusal under code (#378).
+func (executor *Executor) modelChoiceFailure(command chat.ToolCommand, code, message string) chat.ToolResult {
+	executor.logRefusal(command, code)
 	message = executor.localized(command, message)
 	content, _ := json.Marshal(map[string]any{
 		command.Tool.ResultFields.Success: false,

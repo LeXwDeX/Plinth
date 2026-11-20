@@ -13,7 +13,7 @@ import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import { useSessionCover } from '@/hooks/use-session-cover';
-import { createChatBrowserClient } from '@/lib/chat/browser-client';
+import { ChatBrowserError, createChatBrowserClient } from '@/lib/chat/browser-client';
 import { renameKeyIntent, resolveRename } from '@/lib/chat/session-rename';
 import {
   clampSessionPage,
@@ -304,9 +304,11 @@ function SessionList({ onClose }: { onClose: () => void }) {
         if (next) open(next);
         else await create();
       }
-    } catch {
+    } catch (error) {
       // Keep the confirmation and its rows so the same button can be tried again.
-      toast.error(schemaText(schema, 'ui.studio.session.delete_failed'));
+      // A 409 carries the Schema's reason (production still running in this session, #384).
+      const refused = error instanceof ChatBrowserError && error.status === 409 && error.message;
+      toast.error(refused || schemaText(schema, 'ui.studio.session.delete_failed'));
     } finally {
       deletingRef.current = false;
       setDeleting(null);

@@ -177,6 +177,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		"presentation.model_choice_conflict":    schema.Presentation.Messages.ModelChoiceConflict,
 		"presentation.model_choice_unavailable": schema.Presentation.Messages.ModelChoiceUnavailable,
 		"presentation.turn_active":              schema.Presentation.Messages.TurnActive,
+		"presentation.session_delete_blocked":   schema.Presentation.Messages.SessionDeleteBlocked,
 		"presentation.agent_busy":               schema.Presentation.Messages.AgentBusy,
 		"presentation.status.generating":        schema.Presentation.Status.Generating,
 		"presentation.status.queued_submission": schema.Presentation.Status.QueuedSubmission,
@@ -364,6 +365,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		return err
 	}
 	if err := validateToolRoundLimitPending(schema.Presentation.Messages); err != nil {
+		return err
+	}
+	if err := validateToolRejectionTexts(schema.Presentation.Messages); err != nil {
 		return err
 	}
 	if err := validateThinkingStatus(schema.Stream.EventTypes, schema.Presentation.Status); err != nil {
@@ -2548,6 +2552,19 @@ func validateToolRoundLimitPending(messages ChatMessageTexts) error {
 		return errors.New(
 			"presentation.tool_round_limit_pending 不能为空，pending_item 须含 {tool} 与 {intent}，pending_tool 须含 {tool}",
 		)
+	}
+	return nil
+}
+
+// validateToolRejectionTexts checks the two tool results the orchestrator
+// writes itself when it does not run a call: arguments the model wrote as
+// invalid JSON, and a call to a tool this reply cannot run ({tool}) (#378).
+func validateToolRejectionTexts(messages ChatMessageTexts) error {
+	if strings.TrimSpace(messages.ToolArgumentsInvalid) == "" {
+		return errors.New("presentation.tool_arguments_invalid 不能为空")
+	}
+	if strings.TrimSpace(messages.ToolUnavailable) == "" || !strings.Contains(messages.ToolUnavailable, "{tool}") {
+		return errors.New("presentation.tool_unavailable 不能为空，且须含 {tool}（不可用的工具名）")
 	}
 	return nil
 }

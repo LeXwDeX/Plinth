@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/schema"
+	"github.com/LeXwDeX/Plinth/internal/skillrun"
 )
 
 func (r *Repository) ListSessions(
@@ -803,11 +805,124 @@ func (r *Repository) fillSessionCredits(ctx context.Context, ownerID string, ses
 	return nil
 }
 
+// The bulk rows of a session are deleted in batches of this many rows per
+// transaction (#384). A message goes with its turn, whose checkpoint holds the
+// whole model request and is the largest row of the database, so messages go
+// in small batches; events are tiny.
+const (
+	sessionDeleteMessageBatchRows = 25
+	sessionDeleteEventBatchRows   = 500
+)
+
+// drainSessionBulkRows deletes the stream replay and the messages (with their
+// turns) of a session in short transactions of their own. The repository keeps
+// one connection, so any open transaction makes every other read wait for it;
+// one transaction over a large session held everyone for its whole length
+// (4.6 to 7.6 seconds in the log of #384, readiness checks included). Each
+// batch commits and frees the connection before the next begins. The session
+// row and everything else go in DeleteSession's final transaction, which is
+// small by then. A deletion that stops half way leaves a valid, shorter
+// session, never an orphan, and running it again finishes the job.
+func (r *Repository) drainSessionBulkRows(ctx context.Context, sessionID string) error {
+	for _, bulk := range []struct {
+		label string
+		query string
+		rows  int
+	}{
+		{"events", `DELETE FROM go_chat_events WHERE rowid IN (
+			SELECT rowid FROM go_chat_events WHERE session_id = ? LIMIT ?)`, sessionDeleteEventBatchRows},
+		{"messages", `DELETE FROM go_chat_messages WHERE rowid IN (
+			SELECT rowid FROM go_chat_messages WHERE session_id = ? LIMIT ?)`, sessionDeleteMessageBatchRows},
+	} {
+		limit := bulk.rows
+		if r.deleteBatchRows > 0 {
+			limit = r.deleteBatchRows
+		}
+		for {
+			result, err := r.db.ExecContext(ctx, bulk.query, sessionID, limit)
+			if err != nil {
+				return fmt.Errorf("delete chat session %s: %w", bulk.label, err)
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("chat session %s deletion rows: %w", bulk.label, err)
+			}
+			if affected == 0 {
+				break
+			}
+			if r.afterDeleteBatch != nil {
+				r.afterDeleteBatch()
+			}
+			if affected < int64(limit) {
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("delete chat session %s: %w", bulk.label, err)
+			}
+		}
+	}
+	return nil
+}
+
+// sessionSkillRunInFlight finds a step of the session's SkillRuns that has work
+// in flight: a human grant still waiting for its decision, or a bound Task that
+// has not reached a terminal state. It is skillrun.Step.InFlight as one query
+// (a test holds the two together), and it reads the Task and the grant, the
+// only authorities for their states, without writing either.
+const sessionSkillRunInFlight = `
+	SELECT 1
+	FROM skill_runs sr
+	JOIN skill_run_steps ss ON ss.run_id = sr.id
+	LEFT JOIN generation_tasks t ON t.id = ss.task_id
+	LEFT JOIN execution_grants g ON g.request_id = ss.grant_request_id
+	WHERE sr.owner_id = ? AND sr.session_id = ?
+	  AND ((ss.phase = ? AND g.status = ?)
+	    OR (ss.phase = ? AND COALESCE(t.state, '') NOT IN (?, ?, ?)))
+	LIMIT 1`
+
+// PreflightSessionDeletion reports ErrSessionDeletionBlocked for a session
+// whose SkillRun has work in flight, so that the deletion is refused before
+// anything is stopped or deleted (#384). Resting SkillRuns do not block: they
+// go with the session. The bulk rows are deleted by transactions of their own;
+// running them first would lose the conversation of a session that then stays.
+func (r *Repository) PreflightSessionDeletion(ctx context.Context, ownerID, sessionID string) error {
+	var found int
+	err := r.db.QueryRowContext(ctx, sessionSkillRunInFlight, ownerID, sessionID,
+		string(skillrun.GrantPending), string(executiongrant.Pending),
+		string(skillrun.TaskBound),
+		string(schema.TaskSucceeded), string(schema.TaskFailed), string(schema.TaskCanceled),
+	).Scan(&found)
+	switch {
+	case err == nil:
+		return fmt.Errorf("%w: a skill run has work in flight", chat.ErrSessionDeletionBlocked)
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	default:
+		return fmt.Errorf("check chat session skill runs: %w", err)
+	}
+}
+
 func (r *Repository) DeleteSession(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
 ) (bool, error) {
+	owned, err := r.OwnsSession(ctx, ownerID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	// A session that is not the owner's (or is gone) has no bulk rows to drain
+	// and nothing to refuse; the final transaction still clears the
+	// session-scoped rows the owner may have left under that ID, as it always
+	// did.
+	if owned {
+		if err := r.PreflightSessionDeletion(ctx, ownerID, sessionID); err != nil {
+			return false, err
+		}
+		if err := r.drainSessionBulkRows(ctx, sessionID); err != nil {
+			return false, err
+		}
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin chat session deletion: %w", err)
@@ -831,13 +946,21 @@ func (r *Repository) DeleteSession(
 
 // sessionDependentDeletes clears the session-scoped tables that carry no
 // foreign key to go_chat_sessions (tables with ON DELETE CASCADE clear
-// themselves). Every path that deletes a chat session runs these in the same
+// themselves) and the SkillRun ledger, whose RESTRICT foreign key would
+// otherwise refuse the session. Every path that deletes a chat session runs these in the same
 // transaction so no deletion path leaves orphans behind (#334); a new
 // session-scoped table without a cascading foreign key belongs here.
 var sessionDependentDeletes = []struct {
 	label string
 	query string
 }{
+	// The SkillRun ledger has a RESTRICT foreign key to the session, so it does
+	// not clear itself: a session whose runs are all at rest takes them with it
+	// (the preflight refuses one with work in flight), steps before runs. A
+	// step only points at its Task and assets; deleting it rewrites neither.
+	{"skill run steps", `DELETE FROM skill_run_steps WHERE run_id IN (
+		SELECT id FROM skill_runs WHERE owner_id = ? AND session_id = ?)`},
+	{"skill runs", `DELETE FROM skill_runs WHERE owner_id = ? AND session_id = ?`},
 	{"agent state", `DELETE FROM go_agent_state WHERE owner_id = ? AND scope = ?`},
 	{"choices", `DELETE FROM chat_choices WHERE owner_id = ? AND session_id = ?`},
 	{"preferences", `DELETE FROM chat_session_preferences WHERE owner_id = ? AND session_id = ?`},
@@ -1169,6 +1292,18 @@ func (r *Repository) StartTurn(
 		return chat.Message{}, chat.Event{}, err
 	}
 	defer tx.Rollback()
+	// The session is busy while the stream row is active and the turn that owns
+	// it is in a busy state. A stream row the finished turn left active is
+	// stale and gives way to the new turn (#384); without the states the stream
+	// row alone decides, as before.
+	turnBusy := `SELECT 1 FROM go_chat_turns WHERE assistant_message_id = go_chat_streams.assistant_message_id`
+	args := []any{stream.SessionID, assistant.ID, stream.Status, user.SessionID, ownerID}
+	if len(stream.BusyTurnStates) > 0 {
+		turnBusy += ` AND state IN (` + strings.TrimSuffix(strings.Repeat("?,", len(stream.BusyTurnStates)), ",") + `)`
+		for _, state := range stream.BusyTurnStates {
+			args = append(args, state)
+		}
+	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO go_chat_streams (session_id, assistant_message_id, status, cleanup_at)
 		SELECT ?, ?, ?, NULL
@@ -1177,8 +1312,8 @@ func (r *Repository) StartTurn(
 			assistant_message_id = excluded.assistant_message_id,
 			status = excluded.status, cleanup_at = NULL
 		WHERE go_chat_streams.status <> excluded.status
-		 OR NOT EXISTS (SELECT 1 FROM go_chat_turns WHERE assistant_message_id = go_chat_streams.assistant_message_id)`,
-		stream.SessionID, assistant.ID, stream.Status, user.SessionID, ownerID,
+		 OR NOT EXISTS (`+turnBusy+`)`,
+		args...,
 	)
 	if err != nil {
 		return chat.Message{}, chat.Event{}, err
