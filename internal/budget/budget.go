@@ -481,20 +481,33 @@ func (p Plan) SortedCapabilities() []string {
 // this quote too low.
 func EstimateOffering(offering schema.Offering) Amount {
 	if pricing := offering.NativePricing; pricing != nil {
-		micros := int64(0)
-		if quote, err := offering.DefaultNativeQuote(nil); err == nil && quote != nil {
-			if parsed, parseErr := schema.ParseNativeAmount(quote.TotalAmount); parseErr == nil && parsed >= 0 {
-				micros = parsed
-			}
-		} else {
+		micros, ok := defaultQuoteMicros(offering)
+		if !ok {
 			// Catalog validation evaluates the default quote when it loads an
 			// Offering, so only a declaration broken after loading lands here;
 			// quoting its bare base amount keeps the step priced instead of free.
 			micros, _ = schema.ParseNativeAmount(pricing.BaseAmount)
 		}
+		if micros < 0 {
+			micros = 0
+		}
 		return Amount{Unit: pricing.Unit, UnitLabel: pricing.UnitLabel, Micros: micros}
 	}
 	return Legacy(offering.QuotedCredits())
+}
+
+// defaultQuoteMicros is the total of the Offering's default native quote; ok
+// is false when the quote cannot be evaluated or read.
+func defaultQuoteMicros(offering schema.Offering) (int64, bool) {
+	quote, err := offering.DefaultNativeQuote(nil)
+	if err != nil || quote == nil {
+		return 0, false
+	}
+	micros, err := schema.ParseNativeAmount(quote.TotalAmount)
+	if err != nil || micros < 0 {
+		return 0, false
+	}
+	return micros, true
 }
 
 // EstimateOfferingCredits is the Offering's base quote as whole credits: the
