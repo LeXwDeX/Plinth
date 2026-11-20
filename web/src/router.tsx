@@ -25,6 +25,7 @@ const administrationPages: Record<
   audit: lazy(() => import('@/app/admin/audit/page')),
   generations: lazy(() => import('@/app/admin/generations/page')),
   'user-assets': lazy(() => import('@/app/admin/user-assets/page')),
+  'access-keys': lazy(() => import('@/app/admin/access-keys/page')),
 };
 
 const administrableKeys = Object.keys(administrationPages);

@@ -341,6 +341,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 				Filters: cloned.Administration.UserAssets.Filters, Messages: cloned.Administration.UserAssets.Messages,
 				Presentation: cloned.Administration.UserAssets.Presentation,
 			},
+			AccessKeys: publicAdministrationAccessKeys(cloned.AccessKeys, cloned.Administration.AccessKeys),
 		},
 		Capabilities:    cloned.Capabilities,
 		TaskStates:      cloned.TaskStates,
@@ -384,4 +385,15 @@ func publicAssetDelivery(source AssetDeliveryRuntimeSchema, proxy PublicAssetPro
 	delivery.AssetPreview.Query = source.AssetPreview.Query
 	delivery.AssetPreview.RequestValue = source.AssetPreview.RequestValue
 	return delivery
+}
+
+// publicAdministrationAccessKeys projects the administrator's access key view
+// only when the Catalog declares it; a historical document carries no section.
+func publicAdministrationAccessKeys(keys *AccessKeysSchema, source AdministrationAccessKeysSchema) *PublicAdministrationAccessKeysSchema {
+	if keys == nil || (source.Permission == "" && source.API.Fields.ID == "") {
+		return nil
+	}
+	return &PublicAdministrationAccessKeysSchema{
+		API: source.API, Limits: source.Limits, Messages: source.Messages, Presentation: source.Presentation,
+	}
 }

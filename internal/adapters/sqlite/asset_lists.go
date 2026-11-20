@@ -33,6 +33,7 @@ const assetListItemColumns = `id, list_id, owner_id, kind, name, description, re
 	state_reason, version, COALESCE(session_id, ''), project_asset_id, round,
 	last_turn_message_id, next_action_at, block,
 	result_json, review_json, accepted_at, return_reason, return_note,
+	return_count, work_round,
 	created_at, updated_at`
 
 type assetListQueryer interface {
@@ -460,15 +461,16 @@ func insertAssetListItem(ctx context.Context, conn *sql.Conn, listID string, pos
 			references_json, route_id, route_json, planned_step_count, planned_model3d_step_count,
 			state, state_reason, version, session_id, project_asset_id, round,
 			last_turn_message_id, next_action_at, block, result_json, review_json,
-			accepted_at, return_reason, return_note, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			accepted_at, return_reason, return_note, return_count, work_round,
+			created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.ID, item.OwnerID, listID, position, item.Kind, item.Name, item.Description,
 		references, item.RouteID, string(routeJSON), item.PlannedStepCount,
 		item.PlannedModel3DStepCount, item.State, item.StateReason, item.Version,
 		nullString(item.SessionID), item.ProjectAssetID, item.Round,
 		item.LastTurnMessageID, formatTaskTimeOrEmpty(item.NextActionAt), item.Block,
 		string(result), string(review), formatOptionalListTime(item.AcceptedAt),
-		item.ReturnReason, item.ReturnNote,
+		item.ReturnReason, item.ReturnNote, item.ReturnCount, item.WorkRound,
 		formatTime(item.CreatedAt), formatTime(item.UpdatedAt)); err != nil {
 		return fmt.Errorf("insert asset list item: %w", err)
 	}
@@ -654,6 +656,7 @@ func scanAssetListItem(scanner interface{ Scan(...any) error }) (assetlist.Item,
 		&value.State, &value.StateReason, &value.Version, &value.SessionID, &value.ProjectAssetID,
 		&value.Round, &value.LastTurnMessageID, &nextActionAt, &value.Block,
 		&result, &review, &acceptedAt, &value.ReturnReason, &value.ReturnNote,
+		&value.ReturnCount, &value.WorkRound,
 		&created, &updated,
 	); err != nil {
 		return assetlist.Item{}, err

@@ -27,6 +27,51 @@ import (
 // parse (internal/modelinspect reads binary glTF).
 const modelReviewMediaType = "model/gltf-binary"
 
+// modelReviewGLBMagic is the first four bytes of every binary glTF file. The
+// saved bytes, not the stored media type, decide whether a file can be
+// reviewed (#418).
+var modelReviewGLBMagic = []byte("glTF")
+
+// errModelReviewNotGLB marks a file whose bytes are not binary glTF, so a
+// call waiting for the same load hears the same refusal instead of reading
+// the file again.
+var errModelReviewNotGLB = errors.New("model review: saved file is not binary glTF")
+
+// modelReviewMediaTypeLeavesFormatOpen reports whether a stored media type
+// does not settle the file's format on its own (#418). Asset CDNs label model
+// files from the host's mime table: Meshy serves .obj as application/x-tgif,
+// and other CDNs answer generic binary types. Such labels carry no format
+// information, so the bytes decide. A specific type such as image/png,
+// application/zip or model/gltf+json is refused without reading the file.
+func modelReviewMediaTypeLeavesFormatOpen(media string) bool {
+	switch media {
+	case "",
+		modelReviewMediaType,
+		"application/octet-stream",
+		"binary/octet-stream",
+		"application/binary",
+		"application/x-tgif":
+		return true
+	}
+	return false
+}
+
+// modelReviewNotGLBRefusal names the saved file and the media type it was
+// stored with. The label is reported for a person to understand the CDN
+// mislabelling; the decision came from the bytes.
+func (executor *Executor) modelReviewNotGLBRefusal(
+	command chat.ToolCommand,
+	review catalog.ChatModelReviewSchema,
+	source reviewedModel,
+) chat.ToolResult {
+	media := strings.ToLower(strings.TrimSpace(source.asset.MediaType))
+	if media == "" {
+		media = "unknown"
+	}
+	return executor.modelReviewRefusal(command, executor.fillText(command, review.Source.SourceNotGLB,
+		"{asset}", string(source.asset.ID), "{media}", media))
+}
+
 // modelReviewCompareGap is the dark column between the two pictures of a
 // comparison; the background colour alone would not separate them.
 const modelReviewCompareGap = 4
@@ -732,21 +777,30 @@ func (executor *Executor) loadReviewedModel(
 	review catalog.ChatModelReviewSchema,
 	source reviewedModel,
 ) (*modelReviewEntry, *chat.ToolResult, error) {
+	entry, refusal, _, err := executor.loadReviewedModelKind(ctx, command, review, source)
+	return entry, refusal, err
+}
+
+// loadReviewedModelKind is loadReviewedModel with the stable ModelInspect*
+// kind of the refusal it returns, so the outward MCP inspection reports
+// model_not_glb for bytes that are not a GLB (#418).
+func (executor *Executor) loadReviewedModelKind(
+	ctx context.Context,
+	command chat.ToolCommand,
+	review catalog.ChatModelReviewSchema,
+	source reviewedModel,
+) (*modelReviewEntry, *chat.ToolResult, string, error) {
 	media := strings.ToLower(strings.TrimSpace(source.asset.MediaType))
-	if media == "" {
-		media = modelReviewMediaType
-	}
-	if media != modelReviewMediaType {
-		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Source.SourceNotGLB,
-			"{asset}", string(source.asset.ID), "{media}", media))
-		return nil, &refusal, nil
+	if !modelReviewMediaTypeLeavesFormatOpen(media) {
+		refusal := executor.modelReviewNotGLBRefusal(command, review, source)
+		return nil, &refusal, ModelInspectNotGLB, nil
 	}
 	limits := modelReviewLimits(review)
 	if source.asset.Size > limits.MaxBytes {
 		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.TooLarge,
 			"{bytes}", strconv.FormatInt(source.asset.Size, 10),
 			"{limit}", strconv.FormatInt(limits.MaxBytes, 10)))
-		return nil, &refusal, nil
+		return nil, &refusal, ModelInspectTooLarge, nil
 	}
 	content, err := executor.modelAssets.OpenAsset(ctx,
 		generation.OwnerID(command.OwnerID), source.task.ID, source.asset.ID)
@@ -755,7 +809,7 @@ func (executor *Executor) loadReviewedModel(
 			"task_id", source.task.ID, "asset_id", source.asset.ID, "error", err)
 		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.SourceReadFailed,
 			"{reason}", "the asset store could not open the saved file"))
-		return nil, &refusal, nil
+		return nil, &refusal, ModelInspectUnreadable, nil
 	}
 	defer content.Body.Close()
 	key := strings.ToLower(strings.TrimSpace(content.SHA256))
@@ -769,8 +823,9 @@ func (executor *Executor) loadReviewedModel(
 	if key == "" {
 		// The digest is only known once the bytes are read.
 		var refusal *chat.ToolResult
-		if data, refusal = executor.readReviewedModel(command, review, source, content.Body, limits); refusal != nil {
-			return nil, refusal, nil
+		var kind string
+		if data, refusal, kind = executor.readReviewedModel(command, review, source, content.Body, limits); refusal != nil {
+			return nil, refusal, kind, nil
 		}
 		digest := sha256.Sum256(data)
 		key = hex.EncodeToString(digest[:])
@@ -779,7 +834,7 @@ func (executor *Executor) loadReviewedModel(
 	for {
 		entry, running, started := cache.begin(key)
 		if entry != nil {
-			return entry, nil, nil
+			return entry, nil, "", nil
 		}
 		if running != nil {
 			// Another call is parsing the same bytes; share its result
@@ -787,19 +842,20 @@ func (executor *Executor) loadReviewedModel(
 			select {
 			case <-running.done:
 			case <-ctx.Done():
-				return nil, nil, ctx.Err()
+				return nil, nil, "", ctx.Err()
 			}
 			if running.entry != nil {
-				return running.entry, nil, nil
+				return running.entry, nil, "", nil
 			}
 			if running.parseErr != nil {
-				return nil, executor.modelReviewParseRefusal(command, review, running.parseErr), nil
+				refusal, kind := executor.modelReviewParseRefusal(command, review, source, running.parseErr)
+				return nil, refusal, kind, nil
 			}
 			// That call could not read the file; load it here.
 			continue
 		}
-		entry, refusal := executor.parseReviewedModel(command, review, source, content.Body, limits, data, key, started)
-		return entry, refusal, nil
+		entry, refusal, kind := executor.parseReviewedModel(command, review, source, content.Body, limits, data, key, started)
+		return entry, refusal, kind, nil
 	}
 }
 
@@ -815,12 +871,16 @@ func (executor *Executor) parseReviewedModel(
 	data []byte,
 	key string,
 	load *modelReviewLoad,
-) (entry *modelReviewEntry, refusal *chat.ToolResult) {
+) (entry *modelReviewEntry, refusal *chat.ToolResult, kind string) {
 	var parseErr error
 	defer func() { executor.modelReview.cache.finish(key, load, entry, parseErr) }()
 	if data == nil {
-		if data, refusal = executor.readReviewedModel(command, review, source, body, limits); refusal != nil {
-			return nil, refusal
+		if data, refusal, kind = executor.readReviewedModel(command, review, source, body, limits); refusal != nil {
+			if kind == ModelInspectNotGLB {
+				// Waiting calls must hear the same verdict, not read the file again.
+				parseErr = errModelReviewNotGLB
+			}
+			return nil, refusal, kind
 		}
 	}
 	model, err := modelinspect.Parse(bytes.NewReader(data), int64(len(data)), limits)
@@ -828,54 +888,78 @@ func (executor *Executor) parseReviewedModel(
 		executor.logger.Warn("model review parse failed",
 			"task_id", source.task.ID, "asset_id", source.asset.ID, "error", err)
 		parseErr = err
-		return nil, executor.modelReviewParseRefusal(command, review, err)
+		refusal, kind := executor.modelReviewParseRefusal(command, review, source, err)
+		return nil, refusal, kind
 	}
-	return newModelReviewEntry(key, model, int64(len(data))), nil
+	return newModelReviewEntry(key, model, int64(len(data))), nil, ""
 }
 
-// readReviewedModel reads the opened file within the Schema's byte limit.
+// readReviewedModel reads the opened file within the Schema's byte limit and
+// judges its format by the GLB magic. An asset store cannot be asked whether
+// the media type came from the CDN's mime table or from the file itself, so
+// the bytes decide (#418).
 func (executor *Executor) readReviewedModel(
 	command chat.ToolCommand,
 	review catalog.ChatModelReviewSchema,
 	source reviewedModel,
 	body io.Reader,
 	limits modelinspect.Limits,
-) ([]byte, *chat.ToolResult) {
-	data, err := io.ReadAll(io.LimitReader(body, limits.MaxBytes+1))
+) ([]byte, *chat.ToolResult, string) {
+	header := make([]byte, len(modelReviewGLBMagic))
+	read, err := io.ReadFull(body, header)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		executor.logger.Warn("model review asset read failed",
+			"task_id", source.task.ID, "asset_id", source.asset.ID, "error", err)
+		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.SourceReadFailed,
+			"{reason}", "the asset bytes could not be read"))
+		return nil, &refusal, ModelInspectUnreadable
+	}
+	if read < len(header) || !bytes.Equal(header[:read], modelReviewGLBMagic) {
+		refusal := executor.modelReviewNotGLBRefusal(command, review, source)
+		return nil, &refusal, ModelInspectNotGLB
+	}
+	data := append([]byte(nil), header...)
+	rest, err := io.ReadAll(io.LimitReader(body, limits.MaxBytes+1-int64(len(header))))
 	if err != nil {
 		executor.logger.Warn("model review asset read failed",
 			"task_id", source.task.ID, "asset_id", source.asset.ID, "error", err)
 		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.SourceReadFailed,
 			"{reason}", "the asset bytes could not be read"))
-		return nil, &refusal
+		return nil, &refusal, ModelInspectUnreadable
 	}
+	data = append(data, rest...)
 	if int64(len(data)) > limits.MaxBytes {
 		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.TooLarge,
 			"{bytes}", strconv.FormatInt(int64(len(data)), 10),
 			"{limit}", strconv.FormatInt(limits.MaxBytes, 10)))
-		return nil, &refusal
+		return nil, &refusal, ModelInspectTooLarge
 	}
-	return data, nil
+	return data, nil, ""
 }
 
 // modelReviewParseRefusal explains why Parse rejected a file. A required
 // mesh compression extension gets its own Schema text, because the file is
 // valid but compressed and the Agent should say so instead of calling it
-// broken.
+// broken. A file another call already judged non-GLB keeps that verdict.
 func (executor *Executor) modelReviewParseRefusal(
 	command chat.ToolCommand,
 	review catalog.ChatModelReviewSchema,
+	source reviewedModel,
 	err error,
-) *chat.ToolResult {
+) (*chat.ToolResult, string) {
+	if errors.Is(err, errModelReviewNotGLB) {
+		refusal := executor.modelReviewNotGLBRefusal(command, review, source)
+		return &refusal, ModelInspectNotGLB
+	}
 	var compressed *modelinspect.CompressionError
 	if errors.As(err, &compressed) {
 		refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.Compressed,
 			"{extension}", compressed.Extension))
-		return &refusal
+		return &refusal, ModelInspectUnreadable
 	}
 	refusal := executor.modelReviewRefusal(command, executor.fillText(command, review.Texts.Unsupported,
 		"{reason}", modelReviewErrorReason(err)))
-	return &refusal
+	return &refusal, ModelInspectUnreadable
 }
 
 // renderReviewedView draws one view through the review state's concurrency

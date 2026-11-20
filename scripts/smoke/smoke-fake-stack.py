@@ -1603,9 +1603,9 @@ def scenario_hyper3d_agent(api, offerings):
     the policy raises is approved (mesh-segmentation itself is granted by the
     shipped manual policy), and every step must deliver its required files."""
     session = new_session(api)
-    # Strict (manual) approval, so every step of the chain waits for its own card
-    # instead of a budget policy approving the cheaper steps automatically.
-    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    # Strict (manual) approval: the steps the shipped manual policy asks about wait for
+    # their own card instead of a budget plan approving them automatically.
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
     if status != 200:
         record("hyper3d agent: switch the session to manual approval", False, f"approval mode {status}")
         return
@@ -1876,7 +1876,10 @@ def scenario_three_view(work, api, offerings):
     # Manual (strict) mode: only the front view starts by itself; the person
     # starts the left view, whose frozen input names the front output.
     strict = new_session(api)
-    api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {"approvalMode": "manual"})
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {"approvalMode": "manual"})
+    if status != 200:
+        record("three-view strict: manual approval mode", False, f"PUT {status}")
+        return
     status, _ = _send_chat(api, strict, {"content": "生成三视图 " + views, "creative_domain": "image",
                                           "ai_model": THREE_VIEW_IMAGE, "image_urls": [picture_url]})
     if status not in (200, 201, 202):
@@ -2185,7 +2188,10 @@ def scenario_image_purpose(api, offerings, work):
     """#239: 2D purpose card, brief, purpose-driven model and parameters, the
     explicit 2D lock, and the 3D input checklist, all through the fake stack."""
     session = new_session(api)
-    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    if status != 200:
+        record("#239 auto approval", False, f"PUT {status}")
+        return
 
     # (a) a new 2D drawing without a brief opens the 2D purpose card, whose
     # options are exactly the declared image2d_usage profiles.
@@ -3894,7 +3900,12 @@ def scenario_mask_selection(api, offerings, work):
     import l5_common
 
     session = new_session(api)
-    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    # The private Catalog puts 2D edits into the manual capabilities, so this scenario asks
+    # for the strict mode itself (#415); the shipped default is auto.
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    if status != 200:
+        record("#244 mask: manual approval mode", False, f"PUT {status}")
+        return
     model = "gpt-image-2.6-sunburst"
     size = 64
     red = (200, 40, 40)
@@ -5745,7 +5756,10 @@ def scenario_concept_candidates(api, offerings, work):
     one step, the card shows the expanded candidate steps, and the approved
     continuation submits both 3D calls in one reply with different seeds."""
     session = new_session(api)
-    api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
+    if status != 200:
+        record("#242 concept sketches", False, f"approval auto {status}")
+        return
     image_text_model, image_edit_model = IMAGE_OFFERINGS["meshy"]
     directions = [
         ("realistic", "写实", "真实材质、自然光与可信比例",

@@ -1505,6 +1505,14 @@ func (orchestrator *Orchestrator) Process(
 		ctx = context.WithValue(ctx, configurationContextKey{}, turn.Checkpoint.Configuration)
 		processCtx = context.WithValue(processCtx, configurationContextKey{}, turn.Checkpoint.Configuration)
 	}
+	// #413: the turn forks its tool registry once and shares it with the
+	// request it builds and the tools it runs, so the Offerings, enum and
+	// offered-tool lookups of one turn happen once. The fork lives in the
+	// turn's contexts only; the Orchestrator's registry is never written.
+	if registry, registryErr := orchestrator.registryForRequest(ctx); registryErr == nil {
+		ctx = context.WithValue(ctx, turnRegistryContextKey{}, registry)
+		processCtx = context.WithValue(processCtx, turnRegistryContextKey{}, registry)
+	}
 
 	// 恢复路径的持久化任务绑定必须在 assistant.ToolCalls 被重赋值
 	// 之前捕获：B11 恢复重放对已绑定调用直进观察等待，不重建输入。
@@ -2178,7 +2186,7 @@ func (orchestrator *Orchestrator) agentRequest(
 	if domainContext := domainContexts[options.CreativeDomain]; domainContext != "" {
 		sections.add("domain", "\n\n"+domainContext)
 	}
-	registry, registryErr := orchestrator.registryFor(ctx)
+	registry, registryErr := orchestrator.registryForRequest(ctx)
 	scope := orchestrator.agentScope.Normalize(options.AgentScope)
 	if registryErr == nil {
 		// A craft brief comes before the scope block: it teaches how to work in
@@ -2501,9 +2509,11 @@ func (orchestrator *Orchestrator) agentRequest(
 		request.Messages = append(request.Messages, messageOut)
 	}
 	if registryErr == nil {
-		request.Tools = registry.describe(scope)
+		// #413: describe hands out the request's shared tool list; the request
+		// gets its own copy because the tool notes append to descriptions.
+		request.Tools = append([]agents.Tool(nil), registry.describe(scope)...)
 		orchestrator.noteTools(registry, request.Tools, options)
-		request.ScopeWithheld = registry.withheld(scope)
+		request.ScopeWithheld = append([]string(nil), registry.withheld(scope)...)
 	}
 	// With compaction on, the request carries the system prompt, the summary
 	// and every message after it: compaction (the token threshold, or the
@@ -2864,7 +2874,7 @@ func (orchestrator *Orchestrator) executeTools(
 	budget visionBudget,
 	spend *visionSpend,
 ) ([]agents.Message, []string, map[string]string, error) {
-	registry, registryErr := orchestrator.registryFor(ctx)
+	registry, registryErr := orchestrator.registryForRequest(ctx)
 	if registryErr != nil {
 		return nil, nil, nil, registryErr
 	}

@@ -158,11 +158,15 @@ type Config struct {
 	AdministrationBalanceSummary      *administration.BalanceSummaryService
 	AdministrationUserAssets          *administration.UserAssetsModule
 	AdministrationBackfillStatus      *administration.BackfillStatusModule
-	Cache                             *cachemanagement.Service
-	Canvas                            *canvas.Service
-	CanvasImages                      *canvas.ImageService
-	Captures                          capture.Recorder
-	SkillRuns                         *skillrun.Runtime
+	// AdministrationAccessKeys is the administrator's view of every personal
+	// access key and the service's overall switch (#332); nil leaves the
+	// routes unregistered and the external listener stays enabled.
+	AdministrationAccessKeys *administration.AccessKeyAdminService
+	Cache                    *cachemanagement.Service
+	Canvas                   *canvas.Service
+	CanvasImages             *canvas.ImageService
+	Captures                 capture.Recorder
+	SkillRuns                *skillrun.Runtime
 	// PendingApprovals serves the approvals that outlive their turn.
 	PendingApprovals PendingApprovals
 	// ThreeViews serves the three-view groups of a session.
@@ -314,6 +318,7 @@ type Server struct {
 	administrationBalanceSummary      *administration.BalanceSummaryService
 	administrationUserAssets          *administration.UserAssetsModule
 	administrationBackfillStatus      *administration.BackfillStatusModule
+	administrationAccessKeys          *administration.AccessKeyAdminService
 	cache                             *cachemanagement.Service
 	canvas                            *canvas.Service
 	canvasImages                      *canvas.ImageService
@@ -550,24 +555,25 @@ func New(config Config) (*Server, error) {
 		administrationUserAssets: config.AdministrationUserAssets,
 		administrationBackfillStatus: config.
 			AdministrationBackfillStatus,
-		cache:                 config.Cache,
-		canvas:                config.Canvas,
-		canvasImages:          config.CanvasImages,
-		chat:                  config.Chat,
-		projects:              config.Projects,
-		assetLists:            config.AssetLists,
-		assetListPresence:     config.AssetListPresence,
-		assetListCrops:        config.AssetListCrops,
-		directStyleReferences: config.DirectStyleReferences,
-		chatScheduler:         config.ChatScheduler,
-		chatContext:           config.ChatContext,
-		ownsAgentSession:      config.OwnsAgentSession,
-		promptEnhancer:        config.PromptEnhancer,
-		providerAccounts:      config.ProviderAccounts,
-		providerBalances:      config.ProviderBalances,
-		assetProxy:            config.AssetProxy,
-		legacyGeneratedImages: config.LegacyGeneratedImages,
-		application:           config.Application,
+		administrationAccessKeys: config.AdministrationAccessKeys,
+		cache:                    config.Cache,
+		canvas:                   config.Canvas,
+		canvasImages:             config.CanvasImages,
+		chat:                     config.Chat,
+		projects:                 config.Projects,
+		assetLists:               config.AssetLists,
+		assetListPresence:        config.AssetListPresence,
+		assetListCrops:           config.AssetListCrops,
+		directStyleReferences:    config.DirectStyleReferences,
+		chatScheduler:            config.ChatScheduler,
+		chatContext:              config.ChatContext,
+		ownsAgentSession:         config.OwnsAgentSession,
+		promptEnhancer:           config.PromptEnhancer,
+		providerAccounts:         config.ProviderAccounts,
+		providerBalances:         config.ProviderBalances,
+		assetProxy:               config.AssetProxy,
+		legacyGeneratedImages:    config.LegacyGeneratedImages,
+		application:              config.Application,
 		taskEventWhitelist: config.Application.Runtime.TaskEvents.
 			PublicEventWhitelist(),
 		skillCatalog:           config.SkillCatalog,
@@ -711,6 +717,7 @@ func (s *Server) routes() {
 	s.registerAdministrationUsageContract()
 	s.registerAdministrationUserAssetsContract()
 	s.registerAdministrationBackfillStatusContract()
+	s.registerAdministrationAccessKeyContracts()
 	s.mux.HandleFunc(
 		"GET "+legacyRoutes.TaskStream,
 		s.withPrincipal(s.legacyTaskStream),

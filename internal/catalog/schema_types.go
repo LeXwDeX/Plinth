@@ -11,6 +11,10 @@ import (
 type Catalog struct {
 	application ApplicationSchema
 	byID        generationMap
+	// sharedLists holds the sorted, enabled Offerings per capability, built
+	// once at Load (#413). They are the Catalog's own immutable values: List
+	// deep-copies, ListShared hands these out as read-only.
+	sharedLists map[schemacontract.Capability][]schemacontract.Offering
 }
 
 type generationMap map[schemacontract.OfferingID]schemacontract.Offering
@@ -566,6 +570,87 @@ type AdministrationSchema struct {
 	Usage          AdministrationUsageSchema          `json:"usage"`
 	UserAssets     AdministrationUserAssetsSchema     `json:"user_assets"`
 	BackfillStatus AdministrationBackfillStatusSchema `json:"backfill_status"`
+	AccessKeys     AdministrationAccessKeysSchema     `json:"access_keys"`
+}
+
+// AdministrationAccessKeysSchema is the administrator's view of the personal
+// access keys (#332): every person's keys with their usage and state, the
+// revoke, and the service's overall switch. The view only ever shows a key's
+// ID, visible prefix, owner and dates; never the key or its digest.
+type AdministrationAccessKeysSchema struct {
+	API          AdministrationAccessKeysAPISchema          `json:"api"`
+	Permission   string                                     `json:"permission"`
+	Limits       AdministrationAccessKeysLimitsSchema       `json:"limits"`
+	Audit        AdministrationAccessKeysAuditSchema        `json:"audit"`
+	Messages     AdministrationAccessKeysMessageSchema      `json:"messages"`
+	Presentation AdministrationAccessKeysPresentationSchema `json:"presentation"`
+}
+
+type AdministrationAccessKeysAPISchema struct {
+	Fields         AdministrationAccessKeyFieldSchema         `json:"fields"`
+	Query          AdministrationAccessKeyQuerySchema         `json:"query"`
+	PathParameters AdministrationAccessKeyPathParameterSchema `json:"path_parameters"`
+}
+
+type AdministrationAccessKeyFieldSchema struct {
+	Data          string `json:"data"`
+	Error         string `json:"error"`
+	Total         string `json:"total"`
+	Page          string `json:"page"`
+	PageSize      string `json:"page_size"`
+	ID            string `json:"id"`
+	OwnerID       string `json:"owner_id"`
+	OwnerUsername string `json:"owner_username"`
+	OwnerName     string `json:"owner_name"`
+	Name          string `json:"name"`
+	Prefix        string `json:"prefix"`
+	Scopes        string `json:"scopes"`
+	CreatedAt     string `json:"created_at"`
+	LastUsedAt    string `json:"last_used_at"`
+	RequestCount  string `json:"request_count"`
+	ExpiresAt     string `json:"expires_at"`
+	RevokedAt     string `json:"revoked_at"`
+	Active        string `json:"active"`
+	Enabled       string `json:"enabled"`
+}
+
+type AdministrationAccessKeyQuerySchema struct {
+	Page     string `json:"page"`
+	PageSize string `json:"page_size"`
+	Search   string `json:"search"`
+	OwnerID  string `json:"owner_id"`
+}
+
+type AdministrationAccessKeyPathParameterSchema struct {
+	KeyID string `json:"key_id"`
+}
+
+type AdministrationAccessKeysLimitsSchema struct {
+	DefaultPageSize int `json:"default_page_size"`
+	MaxPageSize     int `json:"max_page_size"`
+	SearchMaxLength int `json:"search_max_length"`
+}
+
+type AdministrationAccessKeysAuditSchema struct {
+	ReadAction    string `json:"read_action"`
+	RevokeAction  string `json:"revoke_action"`
+	EnableAction  string `json:"enable_action"`
+	DisableAction string `json:"disable_action"`
+	ResourceType  string `json:"resource_type"`
+}
+
+type AdministrationAccessKeysMessageSchema struct {
+	InvalidRequest string `json:"invalid_request"`
+	KeyNotFound    string `json:"key_not_found"`
+	InternalError  string `json:"internal_error"`
+}
+
+type AdministrationAccessKeysPresentationSchema struct {
+	DateLocale       string            `json:"date_locale"`
+	EmptyPlaceholder string            `json:"empty_placeholder"`
+	LoadingRows      int               `json:"loading_rows"`
+	DateTimeOptions  map[string]string `json:"date_time_options"`
+	Text             map[string]string `json:"text"`
 }
 
 type AdministrationNavigationSchema struct {
@@ -1540,6 +1625,17 @@ type PublicAdministrationSchema struct {
 	Generations PublicAdministrationGenerationsSchema `json:"generations"`
 	Usage       PublicAdministrationUsageSchema       `json:"usage"`
 	UserAssets  PublicAdministrationUserAssetsSchema  `json:"user_assets"`
+	AccessKeys  *PublicAdministrationAccessKeysSchema `json:"access_keys,omitempty"`
+}
+
+// PublicAdministrationAccessKeysSchema is the browser-visible part of the
+// administrator's access key view. The permission and the audit declaration
+// stay server-side.
+type PublicAdministrationAccessKeysSchema struct {
+	API          AdministrationAccessKeysAPISchema          `json:"api"`
+	Limits       AdministrationAccessKeysLimitsSchema       `json:"limits"`
+	Messages     AdministrationAccessKeysMessageSchema      `json:"messages"`
+	Presentation AdministrationAccessKeysPresentationSchema `json:"presentation"`
 }
 
 type PublicAdministrationUsersSchema struct {
@@ -6669,6 +6765,9 @@ type LegacyHTTPRoutesSchema struct {
 	AdminBalanceSummary     string `json:"admin_balance_summary"`
 	AdminUserAssets         string `json:"admin_user_assets"`
 	AdminBackfillStatus     string `json:"admin_backfill_status"`
+	AdminAccessKeys         string `json:"admin_access_keys"`
+	AdminAccessKey          string `json:"admin_access_key"`
+	AdminAccessKeysSwitch   string `json:"admin_access_keys_switch"`
 	MeshyProxyAsset         string `json:"meshy_proxy_asset"`
 	// ChatTurnBackground has the shape of chat_turn_cancel (#137): GET reads
 	// whether the session's waiting turn may stop waiting while its Task

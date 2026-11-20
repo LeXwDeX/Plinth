@@ -240,7 +240,8 @@ func TestMigration0097RebuildsExecutionGrantsKeepingEveryRow(t *testing.T) {
 	}
 }
 
-// 0096 adds only the access_keys table and its owner index.
+// 0096 adds the access_keys table and its owner index; 0105 appends the usage
+// column, so the head schema carries it too.
 func TestMigration0096CreatesTheAccessKeysTable(t *testing.T) {
 	r := openAccessKeyRepo(t)
 	rows, err := r.db.Query(`SELECT name, type, "notnull", COALESCE(dflt_value, 'NULL'), pk FROM pragma_table_info('access_keys') ORDER BY cid`)
@@ -261,6 +262,7 @@ func TestMigration0096CreatesTheAccessKeysTable(t *testing.T) {
 		"id|TEXT|0|NULL|1", "owner_id|TEXT|1|NULL|0", "name|TEXT|1|NULL|0", "prefix|TEXT|1|NULL|0",
 		"secret_hash|TEXT|1|NULL|0", "scopes_json|TEXT|1|NULL|0", "created_at|TEXT|1|NULL|0",
 		"last_used_at|TEXT|1|''|0", "expires_at|TEXT|1|''|0", "revoked_at|TEXT|1|''|0",
+		"request_count|INTEGER|1|0|0",
 	}
 	if fmt.Sprint(columns) != fmt.Sprint(want) {
 		t.Fatalf("columns = %v", columns)

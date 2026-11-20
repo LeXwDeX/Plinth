@@ -21,15 +21,20 @@ import (
 )
 
 // memoryStore is the Store contract in memory: a cap counted over the owner's
-// active keys, a revoke that reports whether it changed anything.
+// active keys, a revoke that reports whether it changed anything, and the two
+// use writes of a successful authentication kept apart.
 type memoryStore struct {
-	mu      sync.Mutex
-	rows    map[string]accesskeys.Record
-	touches []string
+	mu   sync.Mutex
+	rows map[string]accesskeys.Record
+	// countWrites and lastUseWrites say how many writes of each kind ran, in
+	// the order they ran.
+	countWrites   int
+	lastUseWrites []time.Time
 	// fail makes every call return the error.
 	fail error
-	// touchFail makes only the last-use write fail.
-	touchFail error
+	// countFail and lastUseFail make only that use write fail.
+	countFail   error
+	lastUseFail error
 }
 
 func newMemoryStore() *memoryStore { return &memoryStore{rows: map[string]accesskeys.Record{}} }
@@ -90,23 +95,50 @@ func (m *memoryStore) RevokeAccessKey(_ context.Context, ownerID, id string, now
 	return row, true, nil
 }
 
-func (m *memoryStore) TouchAccessKey(_ context.Context, id string, at time.Time) error {
+func (m *memoryStore) IncrementAccessKeyRequests(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.touchFail != nil {
-		return m.touchFail
+	if m.countFail != nil {
+		return m.countFail
 	}
-	m.touches = append(m.touches, id)
+	m.countWrites++
 	row := m.rows[id]
-	row.LastUsedAt = at
+	row.RequestCount++
 	m.rows[id] = row
 	return nil
 }
 
-func (m *memoryStore) touchCount() int {
+func (m *memoryStore) RecordAccessKeyLastUse(_ context.Context, id string, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.touches)
+	if m.lastUseFail != nil {
+		return m.lastUseFail
+	}
+	m.lastUseWrites = append(m.lastUseWrites, at)
+	row := m.rows[id]
+	if row.RevokedAt.IsZero() {
+		row.LastUsedAt = at
+		m.rows[id] = row
+	}
+	return nil
+}
+
+func (m *memoryStore) countWriteCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.countWrites
+}
+
+func (m *memoryStore) lastUseWriteCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.lastUseWrites)
+}
+
+func (m *memoryStore) requestCount(id string) int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rows[id].RequestCount
 }
 
 type clock struct{ now time.Time }
@@ -314,8 +346,8 @@ func TestAuthenticateRefusesEveryBadKeyWithTheSameError(t *testing.T) {
 	if err != nil || got.OwnerID != "owner-a" || got.KeyID != good.Record.ID || len(got.Scopes) != 2 {
 		t.Fatalf("good key = %+v err=%v", got, err)
 	}
-	if store.touchCount() != 1 {
-		t.Fatalf("a refused key recorded a use: touches = %v", store.touches)
+	if store.countWriteCount() != 1 || store.lastUseWriteCount() != 1 {
+		t.Fatalf("a refused key recorded a use: %d counts, %d last uses", store.countWriteCount(), store.lastUseWriteCount())
 	}
 }
 
@@ -332,9 +364,10 @@ func TestAuthenticateReportsALookupFailureApartFromARefusal(t *testing.T) {
 	}
 }
 
-// The last use is written at most once per interval per key, after the fact:
-// a failed write neither fails the authentication nor logs the key.
-func TestAuthenticateRecordsTheLastUseThrottledAndNeverFails(t *testing.T) {
+// Every authenticated request is counted at once, whatever the interval; the
+// last use is written at most once per interval. A failed write neither fails
+// the authentication nor logs the key.
+func TestAuthenticateCountsEveryRequestAndThrottlesTheLastUse(t *testing.T) {
 	t.Parallel()
 	store, clk := newMemoryStore(), fixedClock()
 	var logs bytes.Buffer
@@ -349,23 +382,102 @@ func TestAuthenticateRecordsTheLastUseThrottledAndNeverFails(t *testing.T) {
 	authenticate()
 	clk.now = clk.now.Add(30 * time.Second)
 	authenticate()
-	if store.touchCount() != 1 {
-		t.Fatalf("touches within the interval = %d; want 1", store.touchCount())
+	if store.countWriteCount() != 2 || store.lastUseWriteCount() != 1 {
+		t.Fatalf("within the interval: %d counts, %d last uses; want 2 and 1", store.countWriteCount(), store.lastUseWriteCount())
+	}
+	firstUse := store.lastUseWrites[0]
+	if count := store.requestCount(created.Record.ID); count != 2 {
+		t.Fatalf("request count = %d after two requests; want 2", count)
+	}
+	if !store.rows[created.Record.ID].LastUsedAt.Equal(firstUse) {
+		t.Fatalf("last used moved within the interval: %v", store.rows[created.Record.ID].LastUsedAt)
 	}
 	clk.now = clk.now.Add(31 * time.Second)
 	authenticate()
-	if store.touchCount() != 2 || !store.rows[created.Record.ID].LastUsedAt.Equal(clk.now) {
-		t.Fatalf("touches after the interval = %d last=%v", store.touchCount(), store.rows[created.Record.ID].LastUsedAt)
+	if store.countWriteCount() != 3 || store.lastUseWriteCount() != 2 || !store.rows[created.Record.ID].LastUsedAt.Equal(clk.now) {
+		t.Fatalf("after the interval: %d counts, %d last uses, last %v", store.countWriteCount(), store.lastUseWriteCount(),
+			store.rows[created.Record.ID].LastUsedAt)
 	}
 	// A failing write is logged without the key and does not fail anything.
-	store.touchFail = errors.New("database is locked")
+	store.countFail = errors.New("database is locked")
+	store.lastUseFail = errors.New("database is locked")
 	clk.now = clk.now.Add(2 * time.Minute)
 	authenticate()
-	if !strings.Contains(logs.String(), "last use not recorded") || !strings.Contains(logs.String(), created.Record.ID) {
+	if !strings.Contains(logs.String(), "request not recorded") || !strings.Contains(logs.String(), "last use not recorded") ||
+		!strings.Contains(logs.String(), created.Record.ID) {
 		t.Fatalf("log = %q", logs.String())
 	}
 	if strings.Contains(logs.String(), created.Key) || strings.Contains(logs.String(), created.Key[len(created.Record.Prefix)+1:]) {
 		t.Fatal("the log contains the key")
+	}
+}
+
+// A burst of requests is fully counted even when no later request arrives to
+// flush it: nothing waits in memory for the next authentication.
+func TestAuthenticateCountsABurstThatIsNeverUsedAgain(t *testing.T) {
+	t.Parallel()
+	store, clk := newMemoryStore(), fixedClock()
+	service := newService(t, store, clk, nil)
+	created := mustCreate(t, service, "owner-a", "k", "read")
+	for index := 0; index < 5; index++ {
+		if _, err := service.Authenticate(context.Background(), created.Key); err != nil {
+			t.Fatal(err)
+		}
+		clk.now = clk.now.Add(10 * time.Second)
+	}
+	if count := store.requestCount(created.Record.ID); count != 5 {
+		t.Fatalf("request count = %d after five requests; want 5", count)
+	}
+	if store.lastUseWriteCount() != 1 {
+		t.Fatalf("last use writes = %d; want 1 within the interval", store.lastUseWriteCount())
+	}
+	// Revoking the key loses nothing that was counted before it.
+	if _, _, err := service.Revoke(context.Background(), "owner-a", created.Record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if count := store.requestCount(created.Record.ID); count != 5 {
+		t.Fatalf("request count after revoke = %d; want 5", count)
+	}
+}
+
+// Every authenticated request is counted; a refusal of any kind is not. The
+// count is exact under concurrency: each write increments in the store.
+func TestAuthenticateCountsValidRequestsOnly(t *testing.T) {
+	t.Parallel()
+	store, clk := newMemoryStore(), fixedClock()
+	service, err := accesskeys.New(store, accesskeys.Config{
+		KeyPrefix: "plk", MaxKeysPerUser: 3, DefaultTTL: 90 * 24 * time.Hour, MaxTTL: 365 * 24 * time.Hour,
+		NameMaxLength: 20, Scopes: []string{"read"}, LastUsedInterval: 0,
+		Clock: clk.Now, Async: func(f func()) { f() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := mustCreate(t, service, "owner-a", "k", "read")
+	wrong := created.Key[:len(created.Key)-1] + map[bool]string{true: "b", false: "a"}[created.Key[len(created.Key)-1] == 'a']
+	var wait sync.WaitGroup
+	for index := 0; index < 20; index++ {
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			if _, err := service.Authenticate(context.Background(), created.Key); err != nil {
+				t.Errorf("authenticate: %v", err)
+			}
+		}()
+		go func() {
+			defer wait.Done()
+			if _, err := service.Authenticate(context.Background(), wrong); err != accesskeys.ErrUnauthorized {
+				t.Errorf("wrong secret: %v", err)
+			}
+		}()
+	}
+	wait.Wait()
+	stored := store.rows[created.Record.ID]
+	if stored.RequestCount != 20 {
+		t.Fatalf("request count = %d; want 20", stored.RequestCount)
+	}
+	if !stored.LastUsedAt.Equal(clk.now) {
+		t.Fatalf("last used = %v; want %v", stored.LastUsedAt, clk.now)
 	}
 }
 

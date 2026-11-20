@@ -8,7 +8,7 @@ import (
 )
 
 // ConfigFromSchema is the service configuration application.access_keys
-// declares. The logger receives the warning of a failed last-use write.
+// declares. The logger receives the warning of a failed use write.
 func ConfigFromSchema(declared catalog.AccessKeysSchema, logger *slog.Logger) Config {
 	scopes := make([]string, 0, len(declared.Scopes))
 	for _, scope := range declared.Scopes {

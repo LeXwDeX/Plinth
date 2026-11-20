@@ -29,6 +29,10 @@ type memoryRepository struct {
 	sessions map[string]sessionRecord
 	lists    map[string]assetlist.List
 	items    map[string][]assetlist.Item
+	// assets records the project asset rows the decision transaction wrote;
+	// decisionFail fails the next DecideItems like a lost CAS would.
+	assets       map[string]project.Asset
+	decisionFail error
 }
 
 func newMemoryRepository() *memoryRepository {
@@ -39,8 +43,9 @@ func newMemoryRepository() *memoryRepository {
 			"ses_2":   {owner: "owner-a", project: "prj_2"},
 			"ses_own": {owner: "owner-b", project: "prj_1"},
 		},
-		lists: map[string]assetlist.List{},
-		items: map[string][]assetlist.Item{},
+		lists:  map[string]assetlist.List{},
+		items:  map[string][]assetlist.Item{},
+		assets: map[string]project.Asset{},
 	}
 }
 
@@ -241,6 +246,10 @@ func (r *memoryRepository) DecideItems(_ context.Context, batch assetlist.Decisi
 	if existing.Version != batch.ExpectedVersion {
 		return assetlist.List{}, assetlist.ErrConflict
 	}
+	if r.decisionFail != nil {
+		// The transaction wrote nothing, assets included.
+		return assetlist.List{}, r.decisionFail
+	}
 	items := r.items[batch.ListID]
 	for _, decision := range batch.Items {
 		index := -1
@@ -266,6 +275,8 @@ func (r *memoryRepository) DecideItems(_ context.Context, batch assetlist.Decisi
 		case assetlist.ReviewVerdictReturned:
 			item.State = assetlist.StateReturned
 			item.Round++
+			item.ReturnCount++
+			item.WorkRound = 0
 			item.ReturnReason = decision.Reason
 			item.ReturnNote = decision.Note
 		default:
@@ -274,6 +285,11 @@ func (r *memoryRepository) DecideItems(_ context.Context, batch assetlist.Decisi
 		item.Version++
 		item.UpdatedAt = batch.At
 		items[index] = item
+	}
+	for _, asset := range batch.Assets {
+		if _, exists := r.assets[asset.ID]; !exists {
+			r.assets[asset.ID] = asset
+		}
 	}
 	existing.Version++
 	existing.UpdatedAt = batch.At

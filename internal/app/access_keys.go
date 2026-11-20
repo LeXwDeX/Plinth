@@ -2,9 +2,12 @@ package app
 
 import (
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/access"
 	"github.com/LeXwDeX/Plinth/internal/accesskeys"
+	"github.com/LeXwDeX/Plinth/internal/administration"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
@@ -34,4 +37,33 @@ func accessKeysFromSchema(
 // personal access keys; nil when the Catalog declares no access keys.
 func (a *Application) AccessKeyAuthenticator() *accesskeys.Authenticator {
 	return a.accessKeyAuthenticator
+}
+
+// accessKeyAdminFromSchema builds the administrator's view of every personal
+// access key and the service's overall switch (#332). It is nil when the
+// Catalog declares neither the keys nor the administration view, which keeps
+// historical documents working.
+func accessKeyAdminFromSchema(
+	repository administration.AccessKeyAdminRepository, audit administration.AuditRecorder,
+	schema catalog.ApplicationSchema,
+) (*administration.AccessKeyAdminService, error) {
+	declared := schema.AccessKeys
+	view := schema.Administration.AccessKeys
+	if declared == nil || strings.TrimSpace(view.Permission) == "" {
+		return nil, nil
+	}
+	service, err := administration.NewAccessKeyAdminService(administration.AccessKeyAdminConfig{
+		Repository: repository, Audit: audit,
+		DefaultEnabled:  declared.Enabled,
+		DefaultPageSize: view.Limits.DefaultPageSize, MaxPageSize: view.Limits.MaxPageSize,
+		AuditActions: administration.AccessKeyAdminAuditActions{
+			Read: view.Audit.ReadAction, Revoke: view.Audit.RevokeAction,
+			Enable: view.Audit.EnableAction, Disable: view.Audit.DisableAction, Type: view.Audit.ResourceType,
+		},
+		Clock: time.Now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return service, nil
 }

@@ -1001,7 +1001,12 @@ class Live:
         if status not in (200, 201) or not session_id:
             return None
         if approval:
-            self.client.call("PUT", f"/api/v1/chat/sessions/{session_id}/approval", {"approvalMode": approval})
+            # Every script names the mode it needs instead of relying on the server default
+            # (#415). A refused switch must not silently leave the new session in a mode the
+            # scenario did not ask for.
+            status, _ = self.client.call("PUT", f"/api/v1/chat/sessions/{session_id}/approval", {"approvalMode": approval})
+            if status not in (200, 201):
+                return None
         return session_id
 
     def send(self, session_id, content, domain, model, **extra):

@@ -908,6 +908,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			counted[generation.Capability(capability)] = true
 		}
 		assetListCounted = counted
+		// The batch archive (#329c) reuses the model delivery's OBJ rules
+		// (application.model_delivery.archive.obj_package) so a packed OBJ keeps
+		// its library and texture names; a Catalog without that section keeps
+		// the plain layout.
+		var assetListObjPackage *catalog.ModelObjPackageSchema
+		if !applicationSchema.ModelDelivery.Disabled() {
+			if spec := applicationSchema.ModelDelivery.Archive.ObjPackage; spec.FormatID != "" &&
+				strings.TrimSpace(spec.LibraryStatement) != "" {
+				assetListObjPackage = &spec
+			}
+		}
 		assetListService, err = assetlist.New(assetlist.Config{
 			Repository: repository.AssetListRepository(),
 			Runs:       repository.AssetListRunRepository(),
@@ -919,6 +930,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			},
 			Crops:              cropService,
 			Archive:            module,
+			ObjPackage:         assetListObjPackage,
 			Schema:             *applicationSchema.AssetList,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
@@ -1417,16 +1429,19 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			// processing contains both background removal and 3D work.
 			// The registry applies the workspace rule from Schema; this gate
 			// only requires an actually available Offering for the capability.
-			for _, offering := range module.Offerings(generation.Capability(capability)) {
-				if module.OfferingAvailable(offering.ID) {
+			// #413: these three sources are read on every model_choices and
+			// tool-list evaluation, so they borrow the Catalog's values instead
+			// of deep-copying the Offering directory.
+			for _, offering := range module.OfferingsShared(generation.Capability(capability)) {
+				if module.OfferingRunnable(offering) {
 					return true
 				}
 			}
 			return false
 		},
 		OfferingAllowed: func(capability, modelID string) bool {
-			for _, offering := range module.Offerings(generation.Capability(capability)) {
-				if offering.ModelID == modelID && offering.Enabled && module.OfferingAvailable(offering.ID) {
+			for _, offering := range module.OfferingsShared(generation.Capability(capability)) {
+				if offering.ModelID == modelID && module.OfferingRunnable(offering) {
 					return true
 				}
 			}
@@ -1435,7 +1450,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// #249: the model enum and the craft brief follow the Offerings the
 		// deployment can run now.
 		Offerings: func(capability string) []generation.Offering {
-			return module.Offerings(generation.Capability(capability))
+			return module.OfferingsShared(generation.Capability(capability))
 		},
 		// #329 E': a generation tool's description says how many reference
 		// pictures the turn's picked model uses.
@@ -2104,6 +2119,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, fmt.Errorf("个人访问 Key: %w", err)
 	}
+	accessKeyAdminService, err := accessKeyAdminFromSchema(repository, administrationAuditService, applicationSchema)
+	if err != nil {
+		return nil, fmt.Errorf("管理端访问 Key: %w", err)
+	}
 	mcpStatus, err := mcpStatusFromSchema(applicationSchema, accountSettingsService, repository,
 		stepBalanceCache, chatService, texts, logger)
 	if err != nil {
@@ -2137,6 +2156,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		AccountInputAssets:                repository,
 		AccountSettings:                   accountSettingsService,
 		AccessKeys:                        accessKeysService,
+		AdministrationAccessKeys:          accessKeyAdminService,
 		Readiness:                         readiness.check,
 		Generation:                        module,
 		ExecutionGrants:                   executionGrants,

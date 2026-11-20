@@ -360,11 +360,31 @@ export async function run(argv = process.argv.slice(2)) {
     phase = 'empty_session_projection';
     await empty();
     phase = 'manual_approval';
+    // #415: a new session takes the public Schema's default mode (auto since #406), not a
+    // hardcoded manual mode. The preflight therefore checks that relationship; only a live
+    // round switches to the strict mode, through the same menu a person uses, because it
+    // needs the real approval card for this capability.
+    const policy = schema.chat.approval_policy;
+    const modeField = schema.chat.api.response_fields.approval_mode;
+    check(typeof policy.default_mode === 'string' && Array.isArray(policy.modes)
+      && policy.modes.includes(policy.default_mode), 'schema_default_mode_invalid');
     const approval = await json(sessionRoute(routes.chat_session_approval));
-    check(approval[schema.chat.api.response_fields.approval_mode] === 'manual'
-      && schema.chat.approval_policy.manual_approval_capabilities.includes(selected.capability), 'manual_approval_required');
-    await page.getByTestId('studio-approval-menu').filter({ hasText: text('ui.workspace.approval.mode_manual') }).waitFor();
-    report.approval = { mode: 'manual', pending: 0, decision: 'not_requested' };
+    check(approval[modeField] === policy.default_mode, 'session_mode_differs_from_schema_default');
+    await page.getByTestId('studio-approval-menu').filter({ hasText: text(`ui.workspace.approval.mode_${policy.default_mode}`) }).waitFor();
+    report.approval = { default_mode: policy.default_mode, mode: policy.default_mode, pending: 0, decision: 'not_requested' };
+    if (args.live) {
+      check(policy.manual_approval_capabilities.includes(selected.capability), 'manual_capability_missing');
+      await page.getByTestId('studio-approval-menu').click();
+      const manual = page.getByRole('radio').filter({ hasText: text('ui.workspace.approval.mode_manual') });
+      await manual.waitFor();
+      await manual.click();
+      // The menu label changes only after the switch resolves; wait for it before re-reading
+      // the session, so the read cannot race the PUT.
+      await page.getByTestId('studio-approval-menu').filter({ hasText: text('ui.workspace.approval.mode_manual') }).waitFor();
+      const switched = await json(sessionRoute(routes.chat_session_approval));
+      check(switched[modeField] === 'manual', 'manual_approval_switch_failed');
+      report.approval = { default_mode: policy.default_mode, mode: 'manual', pending: 0, decision: 'not_requested' };
+    }
 
     // The generation models and parameters are tabs of the settings dialog behind the gear beside the send button (#405).
     phase = 'meshy_picker';
@@ -410,7 +430,7 @@ export async function run(argv = process.argv.slice(2)) {
       const approve = page.getByTestId('studio-approval-approve');
       await approve.waitFor({ timeout: 180000 });
       await approve.click();
-      report.approval = { mode: 'manual', pending: 0, decision: 'approved' };
+      report.approval = { ...report.approval, mode: 'manual', pending: 0, decision: 'approved' };
       phase = 'live_task';
       const deadline = Date.now() + 1200000;
       let succeeded = false;

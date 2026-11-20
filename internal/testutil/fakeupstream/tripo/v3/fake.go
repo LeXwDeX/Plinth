@@ -994,6 +994,10 @@ const ArtifactContentType = "binary/octet-stream"
 // views of an edit_multiview task (captured 2026-10-29).
 func (t *task) artifactContentType(name string) string {
 	switch {
+	case t.scenario == fakeupstream.ScenarioArtifactMislabeled && path.Ext(name) == ".glb":
+		// The host mime table calls some model files application/x-tgif (#418).
+		// The bytes stay a valid GLB; only the label is wrong.
+		return "application/x-tgif"
 	case name == "mask.png":
 		return "image/png"
 	case t.typ == "edit_multiview":
