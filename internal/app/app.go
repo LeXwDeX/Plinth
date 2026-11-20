@@ -1388,16 +1388,19 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			// processing contains both background removal and 3D work.
 			// The registry applies the workspace rule from Schema; this gate
 			// only requires an actually available Offering for the capability.
-			for _, offering := range module.Offerings(generation.Capability(capability)) {
-				if module.OfferingAvailable(offering.ID) {
+			// #413: these three sources are read on every model_choices and
+			// tool-list evaluation, so they borrow the Catalog's values instead
+			// of deep-copying the Offering directory.
+			for _, offering := range module.OfferingsShared(generation.Capability(capability)) {
+				if module.OfferingRunnable(offering) {
 					return true
 				}
 			}
 			return false
 		},
 		OfferingAllowed: func(capability, modelID string) bool {
-			for _, offering := range module.Offerings(generation.Capability(capability)) {
-				if offering.ModelID == modelID && offering.Enabled && module.OfferingAvailable(offering.ID) {
+			for _, offering := range module.OfferingsShared(generation.Capability(capability)) {
+				if offering.ModelID == modelID && module.OfferingRunnable(offering) {
 					return true
 				}
 			}
@@ -1406,7 +1409,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// #249: the model enum and the craft brief follow the Offerings the
 		// deployment can run now.
 		Offerings: func(capability string) []generation.Offering {
-			return module.Offerings(generation.Capability(capability))
+			return module.OfferingsShared(generation.Capability(capability))
 		},
 		// #329 E': a generation tool's description says how many reference
 		// pictures the turn's picked model uses.

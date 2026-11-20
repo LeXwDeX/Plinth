@@ -1052,6 +1052,14 @@ type Catalog interface {
 	List(Capability) []Offering
 }
 
+// sharedOfferingCatalog is a Catalog that can hand out its immutable Offerings
+// without deep-copying them (#413). The running Catalog
+// (internal/catalog.Catalog) implements it; a test Catalog that does not keeps
+// working through List.
+type sharedOfferingCatalog interface {
+	ListShared(Capability) []Offering
+}
+
 type AssetWrite struct {
 	DeliveryProfile string
 	AssetID         AssetID

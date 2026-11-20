@@ -1167,17 +1167,47 @@ func (m *Module) Offerings(capability Capability) []Offering {
 	return offerings
 }
 
-func (m *Module) Offering(id OfferingID) (Offering, bool) {
-	return m.catalog.Get(id)
+// OfferingsShared returns the enabled Offerings of a capability in Catalog
+// order without deep-copying their declarations (#413). It is the read-only
+// view for a hot path that only reads: the Offering values are the Catalog's
+// own, so a caller must not modify an Offering or anything reachable from one
+// (parameters, knowledge, provider options, limits). The slice itself is
+// fresh, so a caller may reorder it. Use Offerings when the values may be
+// edited; a Catalog without the shared view falls back to it.
+func (m *Module) OfferingsShared(capability Capability) []Offering {
+	shared, ok := m.catalog.(sharedOfferingCatalog)
+	if !ok {
+		return m.Offerings(capability)
+	}
+	offerings := shared.ListShared(capability)
+	if offerings == nil {
+		return []Offering{}
+	}
+	return append([]Offering(nil), offerings...)
 }
 
-func (m *Module) OfferingAvailable(id OfferingID) bool {
-	offering, exists := m.catalog.Get(id)
-	if !exists || !offering.Enabled {
+// OfferingRunnable reports whether a Provider can run the given Offering now.
+// It reads the declaration handed in, so a caller holding OfferingsShared
+// values asks availability without another Catalog lookup; OfferingAvailable
+// applies the same rule through the Catalog.
+func (m *Module) OfferingRunnable(offering Offering) bool {
+	if !offering.Enabled {
 		return false
 	}
 	_, available := m.providers.Provider(offering)
 	return available
+}
+
+func (m *Module) OfferingAvailable(id OfferingID) bool {
+	offering, exists := m.catalog.Get(id)
+	if !exists {
+		return false
+	}
+	return m.OfferingRunnable(offering)
+}
+
+func (m *Module) Offering(id OfferingID) (Offering, bool) {
+	return m.catalog.Get(id)
 }
 
 func (m *Module) OpenAsset(

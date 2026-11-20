@@ -21,6 +21,9 @@ func (o *Orchestrator) harnessRegistry(ctx context.Context, base *toolRegistry) 
 	registry := *base
 	registry.harness = snapshot
 	registry.harnessPolicy = o.schema.Harness
+	// The harness view changes tool declarations, so it must not inherit a
+	// request cache keyed by the base registry's tools (#413).
+	registry.cache = nil
 	registry.ordered = append([]registeredTool(nil), base.ordered...)
 	registry.byName = make(map[string]registeredTool, len(base.byName))
 	for i, tool := range registry.ordered {
