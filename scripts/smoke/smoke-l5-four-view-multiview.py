@@ -131,12 +131,13 @@ def multiview_offering(offerings, model_id):
 def plan_view(card):
     """The plan card facts kept in the evidence: what the person saw before approving (#417)."""
     card = card if isinstance(card, dict) else {}
-    steps = ((card.get("plan") or {}).get("steps") or []) if isinstance(card.get("plan"), dict) else []
+    plan = card.get("plan") if isinstance(card.get("plan"), dict) else {}
+    steps = plan.get("steps") if isinstance(plan.get("steps"), list) else []
     return {
         "request_id": card.get("request_id") or card.get("id"),
         "kind": card.get("kind"),
         "tool": card.get("tool"),
-        "title": (card.get("plan") or {}).get("title"),
+        "title": plan.get("title"),
         "budgets": card.get("budgets"),
         "estimated_totals": card.get("estimated_totals"),
         "steps": [{"capability": step.get("capability"), "offering_id": step.get("offering_id"),
