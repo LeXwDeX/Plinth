@@ -10,23 +10,26 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// The purpose profile, the user's explicit pick and the Agent's own model
-// argument decide which 3D model a step runs (#103). The layers, highest
-// first: the person's explicit pick in the session, the Agent's model
-// argument, the production purpose's recommendation, the Offering defaults.
+// The purpose profile, the person's explicit pick, the Agent's own model
+// argument and the plan's pin decide which model a step runs (#103, #380). The
+// layers, highest first: the person's explicit pick in the session, this
+// turn's structured request, the Agent's model argument, the approved plan's
+// pin, the production purpose's recommendation, the workspace picker and the
+// Offering defaults. chat.ResolveModel owns the order, so the production plan
+// quotes a step with the same rule (#380 step 1).
 
 // Shapes of a 3D input, the keys of model3d_usage.recommended_offerings.
 const (
-	shapeTextTo3D      = "text-to-3d"
-	shapeImageTo3D     = "image-to-3d"
-	shapeMultiviewTo3D = "multiview-to-3d"
+	shapeTextTo3D      = chat.ModelShapeTextTo3D
+	shapeImageTo3D     = chat.ModelShapeImageTo3D
+	shapeMultiviewTo3D = chat.ModelShapeMultiviewTo3D
 )
 
 // Shapes of a 2D input, the keys of image2d_usage.recommended_offerings. They
 // are also the image Capability ids (#239).
 const (
-	shapeTextToImage  = "text-to-image"
-	shapeImageToImage = "image-to-image"
+	shapeTextToImage  = chat.ModelShapeTextToImage
+	shapeImageToImage = chat.ModelShapeImageToImage
 )
 
 // purposeProfile is the part of a 3D or 2D purpose the model-choice layers
@@ -123,29 +126,18 @@ func (executor *Executor) purposeParameterValues(command chat.ToolCommand, offer
 // names the input shape (#103, #239).
 func (executor *Executor) modelShape(command chat.ToolCommand, capability generation.Capability) string {
 	if toolDomain(command) == string(generation.DomainImage) {
-		if capability == generation.TextToImage {
-			return shapeTextToImage
-		}
-		return shapeImageToImage
+		return chat.ModelShapeOfCapability(capability)
 	}
 	if tool := executor.chat.ThreeView.Multiview.Tool; tool != "" && command.Tool.Name == tool {
 		return shapeMultiviewTo3D
 	}
-	if capability == generation.TextTo3D {
-		return shapeTextTo3D
-	}
-	return shapeImageTo3D
+	return chat.ModelShapeOfCapability(capability)
 }
 
 // modelMatches reports whether a name selects an Offering: its model ID, its
 // Offering ID, or the provider and model ID pair the Catalog also shows.
 func modelMatches(offering generation.Offering, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	return name == offering.ModelID || name == string(offering.ID) ||
-		(offering.ModelID != "" && offering.ProviderID != "" && name == offering.ProviderID+"/"+offering.ModelID)
+	return chat.ModelNameMatches(offering, name)
 }
 
 // availableOfferings are the enabled, runtime-available Offerings of one
@@ -162,12 +154,7 @@ func (executor *Executor) availableOfferings(capability generation.Capability) [
 
 // matchOffering finds the Offering a name selects among candidates.
 func matchOffering(candidates []generation.Offering, name string) (generation.Offering, bool) {
-	for _, offering := range candidates {
-		if modelMatches(offering, name) {
-			return offering, true
-		}
-	}
-	return generation.Offering{}, false
+	return chat.MatchModel(candidates, name)
 }
 
 // acceptsModelInput reports whether an Offering can take this call's input: a
@@ -243,43 +230,23 @@ func (executor *Executor) profileOffering(command chat.ToolCommand, capability g
 	return generation.Offering{}, purposeProfile{}, false
 }
 
-// recommendedWorkspaceOffering finds the workspace pick among the purpose's
-// recommendations for this call's input shape, available and accepting the
-// input; false when the pick is not one of them.
-func (executor *Executor) recommendedWorkspaceOffering(
-	command chat.ToolCommand,
-	capability generation.Capability,
-	input modelInput,
-	profile purposeProfile,
-	workspace string,
-) (generation.Offering, bool) {
-	candidates := executor.availableOfferings(capability)
-	for _, name := range profile.RecommendedOfferings[executor.modelShape(command, capability)] {
-		offering, matched := matchOffering(candidates, name)
-		if matched && modelMatches(offering, workspace) && executor.acceptsModelInput(offering, input) {
-			return offering, true
-		}
-	}
-	return generation.Offering{}, false
-}
-
-// chooseOffering selects the Offering of a generation tool call by the
-// model-choice layers: the person's explicit pick for the tool's workspace
-// domain, the Agent's model argument, the purpose recommendation, the
-// workspace pick and the Offering default, in that order (#103, #239). The
-// multiview tool of a turn that carries the person's structured multiview
-// request takes the request's model as that explicit pick instead of the
-// session lock (#373). It returns a Refusal when a named model conflicts with
-// the person's explicit pick or is unavailable; nothing is submitted in that
-// case.
+// chooseOffering selects the Offering of a generation tool call through
+// chat.ResolveModel: the person's explicit pick for the tool's workspace
+// domain, this turn's structured multiview request, the Agent's model
+// argument, the plan's pin, the purpose recommendation, the workspace pick and
+// the Offering default, in that order (#103, #239, #380). The multiview tool of
+// a turn that carries the person's structured multiview request takes the
+// request's model as that explicit pick instead of the session lock (#373). It
+// returns a Refusal when a named model conflicts with the person's explicit
+// pick or is unavailable; nothing is submitted in that case.
 func (executor *Executor) chooseOffering(
 	command chat.ToolCommand,
 	capability generation.Capability,
 	arguments map[string]json.RawMessage,
 	input modelInput,
+	planPin string,
 ) (offeringChoice, error) {
 	tool := command.Tool
-	candidates := executor.availableOfferings(capability)
 	named := ""
 	if tool.ModelArgument != "" {
 		_ = json.Unmarshal(arguments[tool.ModelArgument], &named)
@@ -291,92 +258,175 @@ func (executor *Executor) chooseOffering(
 	// the purpose from choosing. The lock applies to every tool of its domain,
 	// the multiview tool included: ignore_user_model only keeps the workspace
 	// picker out of its fallback.
-	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
+	lock, lockSource := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command))), chat.ModelSourceLock
 	// The person's structured multiview request names the model of its own
 	// turn: they chose it on the multiview panel or the three-view card, so it
 	// is their explicit pick for this step and replaces the session lock here,
 	// where the lock would refuse a model that takes the views or one the
 	// session's lock cannot serve (#373). The stored lock is not touched.
 	if requested := executor.requestedMultiviewModel(command); requested != "" {
-		locked = requested
+		lock, lockSource = requested, chat.ModelSourceTurn
 	}
-	if locked != "" {
-		offering, matched := matchOffering(candidates, locked)
-		if !matched {
-			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, locked), Code: refusalModelUnavailable}, nil
-		}
-		// A named or locked model is not filtered by the input shape here: the
-		// ordinary reference and view checks refuse an input it cannot take
-		// with their precise messages (#103).
-		if named != "" && !modelMatches(offering, named) {
-			return offeringChoice{Refusal: executor.modelConflictText(command, offering, named), Code: refusalModelConflict}, nil
-		}
-		return offeringChoice{Offering: offering, Source: "user"}, nil
+	workspace := ""
+	if !tool.IgnoreUserModel {
+		workspace = strings.TrimSpace(executor.userModel(command))
 	}
-	if named != "" {
-		offering, matched := matchOffering(candidates, named)
-		if !matched {
-			return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, named), Code: refusalModelUnavailable}, nil
+	profile, recommended := executor.purposeRecommendation(command, capability)
+	// The Gateway narrows the Offerings to the capability; the executor keeps
+	// whatever it returns, as the no-model fallback always has (a hand-built
+	// Gateway that lists more keeps the behaviour its tests describe).
+	var candidates []generation.Offering
+	for _, offering := range executor.gateway.Offerings(capability) {
+		if offering.Enabled && executor.gateway.OfferingAvailable(offering.ID) {
+			candidates = append(candidates, offering)
 		}
-		source := "agent"
-		if request := command.Options.Multiview; request != nil && request.Model != "" && modelMatches(offering, request.Model) {
-			// The model came from the person's structured multiview request.
-			source = "user"
-		}
-		return offeringChoice{Offering: offering, Source: source}, nil
 	}
-	if offering, profile, found := executor.profileOffering(command, capability, input); found {
-		// The workspace picker shows a model the person may already consider
-		// chosen, even when it is not an explicit lock. A purpose recommendation
-		// that differs must not replace that visible choice silently: the Agent
-		// asks the person to confirm the switch (#103 review C1).
-		workspace := strings.TrimSpace(executor.userModel(command))
-		if workspace != "" && !modelMatches(offering, workspace) {
-			// The visible pick is itself one of the purpose's recommendations:
-			// run it instead of asking. Nothing is replaced silently, and the 2D
-			// delivery check still names a model that reaches the purpose's
-			// resolution when this one falls short (#282).
-			if recommended, ok := executor.recommendedWorkspaceOffering(command, capability, input, profile, workspace); ok {
-				return offeringChoice{Offering: recommended, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
-			}
-			if text := executor.modelWorkspaceConflictText(command, workspace, offering, profile); text != "" {
-				return offeringChoice{Refusal: text, Code: refusalModelWorkspaceConflict}, nil
-			}
-		}
-		return offeringChoice{Offering: offering, Source: "profile", Profile: profile.ID, Reason: profile.Reason}, nil
+	resolution := chat.ResolveModel(chat.ModelRequest{
+		Candidates:   candidates,
+		Lock:         lock,
+		LockSource:   lockSource,
+		Named:        named,
+		PlanPinned:   planPin,
+		Recommended:  recommended,
+		Profile:      profile.ID,
+		Reason:       profile.Reason,
+		Workspace:    workspace,
+		Fits:         executor.modelFits(command, input),
+		Views:        executor.modelViews(command, input),
+		SupportsMask: executor.maskBinding(command),
+		Default:      executor.modelDefault(tool),
+	})
+	if resolution.Conflict != nil {
+		return executor.modelConflictChoice(command, capability, input, resolution.Conflict), nil
 	}
-	model := ""
-	if tool.IgnoreUserModel {
-		// The tool runs models outside the workspace picker (the multiview
-		// tool): its declared models are the names it can run, and only one
-		// that accepts this input may run. There is no first-available
-		// fallback, which could pick an Offering the input does not fit.
-		declared := executor.declaredModelChoices(tool)
+	choice := offeringChoice{Offering: resolution.Offering, Source: resolution.ChoiceSource()}
+	if resolution.Source == chat.ModelSourcePurpose {
+		choice.Profile, choice.Reason = resolution.Profile, resolution.Reason
+	}
+	// The model came from the person's structured multiview request, even when
+	// another tool of the turn names it as its own argument.
+	if choice.Source == "agent" && executor.namesTurnRequestModel(command, resolution.Offering) {
+		choice.Source = "user"
+	}
+	return choice, nil
+}
+
+// purposeRecommendation is the production purpose of the call's workspace
+// domain and the models it recommends for the call's input shape (#103).
+func (executor *Executor) purposeRecommendation(command chat.ToolCommand, capability generation.Capability) (purposeProfile, []string) {
+	profile, found := executor.purposeOf(command)
+	if !found {
+		return purposeProfile{}, nil
+	}
+	return profile, chat.RecommendedOfferings(profile, executor.modelShape(command, capability))
+}
+
+// bindsMask reports whether this call writes the person's frozen selection
+// mask into the Offering (#244).
+func bindsMask(command chat.ToolCommand) bool {
+	return command.Tool.SelectionMask == selectionMaskBinding && command.Options.SelectionMask != nil
+}
+
+// modelFits is the input test of a purpose recommendation and of the frozen
+// mask: an Offering the call cannot give its reference pictures, its views or
+// its mask to is not a recommendation.
+func (executor *Executor) modelFits(command chat.ToolCommand, input modelInput) func(generation.Offering) bool {
+	mask := bindsMask(command)
+	return func(offering generation.Offering) bool {
+		if !executor.acceptsModelInput(offering, input) {
+			return false
+		}
+		return !mask || offeringSupportsMask(offering)
+	}
+}
+
+// modelViews is the view test of the call's Offering, nil for a step without
+// structured views. Only the model family substitution reads it: the step's own
+// view check words a model that cannot take the views.
+func (executor *Executor) modelViews(command chat.ToolCommand, input modelInput) func(generation.Offering) bool {
+	if len(input.Views) == 0 {
+		return nil
+	}
+	views := modelInput{Views: input.Views, Group: input.Group}
+	return func(offering generation.Offering) bool {
+		return executor.acceptsModelInput(offering, views)
+	}
+}
+
+// maskBinding is the frozen-selection-mask test of the call's Offering, nil
+// when the call binds no mask.
+func (executor *Executor) maskBinding(command chat.ToolCommand) func(generation.Offering) bool {
+	if !bindsMask(command) {
+		return nil
+	}
+	return offeringSupportsMask
+}
+
+// modelDefault is the Offering when no layer above chose one. A tool that
+// ignores the workspace picker (the multiview tool) runs the first of its
+// declared model choices that fits, in Catalog order: its declared models are
+// the names it can run, and there is no first-available fallback that could
+// pick an Offering the input does not fit. Every other tool takes the
+// Offering's default flag, then its recommended flag, then the first.
+func (executor *Executor) modelDefault(tool catalog.ChatToolSchema) func([]generation.Offering) (generation.Offering, bool) {
+	if !tool.IgnoreUserModel {
+		return nil
+	}
+	declared := executor.declaredModelChoices(tool)
+	return func(candidates []generation.Offering) (generation.Offering, bool) {
 		for _, name := range declared {
-			offering, matched := matchOffering(candidates, name)
-			if matched && executor.acceptsModelInput(offering, input) {
-				return offeringChoice{Offering: offering, Source: "default"}, nil
+			for _, candidate := range candidates {
+				if modelMatches(candidate, name) {
+					return candidate, true
+				}
 			}
 		}
-		name := ""
-		if len(declared) > 0 {
-			name = declared[0]
+		return generation.Offering{}, false
+	}
+}
+
+// namesTurnRequestModel reports whether this turn's structured multiview
+// request names the Offering: the request is the person's choice of the turn.
+func (executor *Executor) namesTurnRequestModel(command chat.ToolCommand, offering generation.Offering) bool {
+	request := command.Options.Multiview
+	return request != nil && strings.TrimSpace(request.Model) != "" && modelMatches(offering, request.Model)
+}
+
+// modelConflictChoice words a refused resolution with the Schema's copy: the
+// person's pick against another named model, a frozen mask no chosen model can
+// bind, or a model the call cannot use now.
+func (executor *Executor) modelConflictChoice(
+	command chat.ToolCommand,
+	capability generation.Capability,
+	input modelInput,
+	conflict *chat.ModelConflict,
+) offeringChoice {
+	if conflict.Kind == chat.ModelConflictLocked {
+		return offeringChoice{
+			Refusal: executor.modelConflictText(command, conflict.Locked, conflict.Named),
+			Code:    refusalModelConflict,
 		}
-		return offeringChoice{Refusal: executor.modelUnavailableText(command, candidates, name), Code: refusalModelUnavailable}, nil
 	}
-	// Without a purpose recommendation (or a brief at all), the workspace's
-	// selected model is still the legacy fallback. It competes only here,
-	// below the explicit lock, the Agent and the purpose.
-	model = strings.TrimSpace(executor.userModel(command))
-	offering, err := executor.selectOffering(capability, tool, model)
-	if err != nil {
-		return offeringChoice{}, err
+	if conflict.Offering.ID != "" && bindsMask(command) && !offeringSupportsMask(conflict.Offering) {
+		candidates := executor.maskCapableOfferings(capability, input)
+		if len(candidates) == 0 {
+			return offeringChoice{
+				Refusal: executor.localized(command, executor.chat.Presentation.Messages.MaskNoSupportedModel),
+				Code:    refusalMask,
+			}
+		}
+		return offeringChoice{
+			Refusal: strings.NewReplacer(
+				"{model}", executor.localized(command, OfferingModelName(conflict.Offering)),
+				"{choices}", executor.modelChoicesText(command, candidates),
+			).Replace(executor.localized(command, executor.chat.Presentation.Messages.MaskUnsupportedTemplate)),
+			Code: refusalMask,
+		}
 	}
-	source := "default"
-	if model != "" && modelMatches(offering, model) {
-		source = "user"
+	return offeringChoice{
+		Refusal: executor.modelUnavailableText(command, conflict.Candidates, conflict.Named),
+		Code:    refusalModelUnavailable,
 	}
-	return offeringChoice{Offering: offering, Source: source}, nil
 }
 
 // requestedMultiviewModel is the model the person's structured multiview
@@ -475,26 +525,6 @@ func (executor *Executor) modelConflictText(command chat.ToolCommand, locked gen
 	).Replace(executor.localized(command, template))
 }
 
-// modelWorkspaceConflictText asks the person to confirm a purpose
-// recommendation that differs from the model still selected in the workspace,
-// instead of replacing the visible choice silently (#103 review C1).
-func (executor *Executor) modelWorkspaceConflictText(
-	command chat.ToolCommand,
-	workspace string,
-	recommended generation.Offering,
-	profile purposeProfile,
-) string {
-	template := executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict
-	if template == "" {
-		return ""
-	}
-	return strings.NewReplacer(
-		"{workspace}", executor.modelLabel(command, workspace),
-		"{recommended}", executor.localized(command, OfferingModelName(recommended)),
-		"{profile}", profile.Label,
-	).Replace(executor.localized(command, template))
-}
-
 // modelChoiceFailure is the Schema's refusal with no submission: the Agent
 // sees the reason and that the person must decide, not a generic failure. The
 // server log records the refusal under code (#378).
@@ -559,8 +589,7 @@ func (executor *Executor) modelChoiceOf(command chat.ToolCommand, offering gener
 	if request := command.Options.Multiview; request != nil && request.Model != "" && modelMatches(offering, request.Model) {
 		return &modelChoice{Source: "user"}
 	}
-	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
-	if locked != "" && modelMatches(offering, locked) {
+	if executor.lockChoseOffering(command, offering) {
 		return &modelChoice{Source: "user"}
 	}
 	named := ""
@@ -585,4 +614,19 @@ func (executor *Executor) modelChoiceOf(command chat.ToolCommand, offering gener
 		}
 	}
 	return &modelChoice{Source: "default"}
+}
+
+// lockChoseOffering reports whether the person's lock names the Offering that
+// ran, either itself or the same model family's shape (#417): a lock on Meshy
+// 7.1 chose the multiview shape a multiview step ran.
+func (executor *Executor) lockChoseOffering(command chat.ToolCommand, offering generation.Offering) bool {
+	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
+	if locked == "" {
+		return false
+	}
+	if modelMatches(offering, locked) {
+		return true
+	}
+	named, found := chat.MatchModel(executor.gateway.Offerings(offering.Capability), locked)
+	return found && chat.SameModelFamily(named, offering)
 }

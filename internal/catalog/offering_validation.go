@@ -78,6 +78,8 @@ func validateOffering(
 		return fmt.Errorf("Offering %q 的 provider_short_label 必须非空且不超过 %d 个字符", offering.ID, maximumProviderShortLabelRunes)
 	case offering.ModelID == "":
 		return fmt.Errorf("Offering %q 缺少 model_id", offering.ID)
+	case offering.ModelFamily != "" && !validModelFamily(offering.ModelFamily):
+		return fmt.Errorf("Offering %q 的 model_family %q 不是合法的模型族标识（小写字母、数字、连字符与点）", offering.ID, offering.ModelFamily)
 	case offering.EstimatedCreditsUnitParameter != "":
 		declared := false
 		for _, parameter := range offering.Parameters {
@@ -1852,4 +1854,48 @@ func validateReferenceSelectionPolicy(offering schemacontract.Offering) error {
 	default:
 		return fmt.Errorf("Offering %q has unknown reference_selection_policy %q", offering.ID, offering.ReferenceSelectionPolicy)
 	}
+}
+
+// validateOfferingModelFamilies checks the declared model families (#380 step
+// 1). One family is one model in several step shapes, so it needs at least two
+// members: a family that could substitute for nothing is a typo. The model
+// resolver additionally requires the same provider and domain before it runs a
+// family's shape, so a re-hosted or renamed Offering keeps loading even while
+// its declaration still says the old provider.
+func validateOfferingModelFamilies(offerings generationMap) error {
+	families := map[string][]schemacontract.OfferingID{}
+	for _, offering := range offerings {
+		if offering.ModelFamily == "" {
+			continue
+		}
+		families[offering.ModelFamily] = append(families[offering.ModelFamily], offering.ID)
+	}
+	for family, members := range families {
+		if len(members) < 2 {
+			return fmt.Errorf("model_family %q 只有 Offering %q：同族关系至少在两个 Offering 之间声明", family, members[0])
+		}
+	}
+	return nil
+}
+
+// validModelFamily reports whether a declared model family ID is readable: a
+// short lower-case word of letters, digits, hyphens and dots that does not
+// start or end with a separator. Model IDs carry dots ("meshy-7.1"), so the
+// family ID follows them rather than the stricter Schema identifier rule.
+func validModelFamily(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		letter := character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
+		separator := character == '-' || character == '.'
+		if !letter && !separator {
+			return false
+		}
+		if separator && (index == 0 || index == len(value)-1) {
+			return false
+		}
+	}
+	return true
 }

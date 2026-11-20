@@ -90,6 +90,9 @@ func runMultiviewIn(t *testing.T, scenario multiviewScenario, views *fakeThreeVi
 		if !found {
 			t.Fatalf("the shipped Catalog has no Offering %q", id)
 		}
+		// The harness submits directly, without a prepared authorization, so a
+		// scenario Offering is quoted at its credits like the main one.
+		other.NativePricing = nil
 		offerings = append(offerings, other)
 	}
 	gateway := &fakeGateway{

@@ -125,9 +125,18 @@ type Offering struct {
 	ProviderShortLabel string `json:"provider_short_label"`
 	// ProviderOrder ranks the provider in model tables (ascending, from 1); 0 means undeclared and sorts
 	// last. Every Offering of one provider carries the same value.
-	ProviderOrder    int              `json:"provider_order,omitempty"`
-	ModelID          string           `json:"model_id"`
-	ModelName        string           `json:"model_name"`
+	ProviderOrder int    `json:"provider_order,omitempty"`
+	ModelID       string `json:"model_id"`
+	ModelName     string `json:"model_name"`
+	// ModelFamily names the upstream model an Offering is a step shape of:
+	// the text, single-picture and multiview shapes of one model share it, so
+	// the model resolver can run the shape a request needs instead of
+	// reporting the person's lock as a conflict (#380 step 1). The resolver
+	// only substitutes within one provider and one workspace domain, so a lock
+	// never runs another vendor's model. Empty means the Offering belongs to no
+	// declared family. It is a model-selection declaration only: it does not
+	// change the wire protocol, the price or the frozen input.
+	ModelFamily      string           `json:"model_family,omitempty"`
 	Capability       Capability       `json:"capability"`
 	Domain           CapabilityDomain `json:"domain"`
 	AdapterKey       string           `json:"adapter_key"`

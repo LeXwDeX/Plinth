@@ -245,6 +245,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := validateTaskOfferingReferences(result.byID); err != nil {
 		return nil, err
 	}
+	if err := validateOfferingModelFamilies(result.byID); err != nil {
+		return nil, err
+	}
 	if err := validateTaskSourceDiscovery(result.application.ProviderDiscovery, result.byID); err != nil {
 		return nil, err
 	}
@@ -403,6 +406,7 @@ func (raw rawOffering) toOffering() schemacontract.Offering {
 		ProviderOrder:                 valueOrZero(raw.ProviderOrder),
 		ModelID:                       raw.ModelID,
 		ModelName:                     raw.ModelName,
+		ModelFamily:                   raw.ModelFamily,
 		Description:                   raw.Description,
 		Knowledge:                     raw.Knowledge,
 		Capability:                    raw.Capability,

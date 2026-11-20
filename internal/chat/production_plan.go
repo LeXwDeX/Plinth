@@ -409,8 +409,7 @@ func (policy *ProductionPlanPolicy) planStepCandidates(command ToolCommand, step
 	}
 	planned := make([]budget.PlanStep, 0, len(models))
 	for index, model := range models {
-		offering, locked, refusal := policy.stepOffering(capability, model,
-			strings.TrimSpace(command.Options.ExplicitModel3D), strings.TrimSpace(command.Options.ModelFor("image")))
+		offering, locked, refusal := policy.stepOffering(command, capability, model)
 		if refusal != "" {
 			return nil, refusal
 		}
@@ -526,18 +525,51 @@ func unitAmountsText(amounts []budget.Amount) string {
 	return strings.Join(parts, ", ")
 }
 
-// stepOffering finds the runtime Offering a step is quoted at, in the order a
-// 3D tool chooses its model. The person's explicit 3D model comes first when
-// an Offering of the capability is that model: it is what will run, so the
-// step is quoted at it and pinned to it (locked), and a step naming another
-// model is refused, as the tool would refuse it (#144). An image-domain step
-// uses the workspace's image model for the same reason: create_three_view
-// selects it, so a plan that quoted another 2D Offering could never be
-// continued by the budget (#243). Otherwise the pinned Offering when the
-// Agent named a model, else the capability's default available Offering. A
-// capability without an available Offering cannot be planned.
-func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel, workspaceImageModel string) (offering generation.Offering, locked bool, refusal string) {
-	unavailable := "no available offering for capability " + capability
+// stepOffering resolves the runtime Offering a step is quoted at, through the
+// same chat.ResolveModel rule the generation tools choose their model with
+// (#380 step 1). The layers, highest first: the person's lock for the
+// capability's workspace domain, the model the Agent names in the step, the
+// plan's own pin (none while proposing), the purpose's recommendation (3-D
+// steps, see purposeRecommendation), the workspace picker and the Offering
+// default.
+//
+// The second result reports whether the plan pins the step to the resolved
+// Offering: the plan quoted it, so executiongrant only approves the step on
+// that Offering (budget.Plan.Allows). A bare default pins nothing, because a
+// capability's other shapes (a face-count variant of a remesh, say) are the
+// step planner's to choose and are not this model decision. The third result
+// is the Agent-facing refusal; it is empty when a model was resolved.
+func (policy *ProductionPlanPolicy) stepOffering(command ToolCommand, capability, pinned string) (generation.Offering, bool, string) {
+	candidates := policy.availableOfferings(capability)
+	if len(candidates) == 0 {
+		return generation.Offering{}, false, planUnavailableRefusal(capability)
+	}
+	domain := string(candidates[0].Domain)
+	if domain == "" {
+		// A hand-built Catalog leaves the domain out; every generation
+		// capability then follows the 3-D workspace, as the plan always has.
+		domain = string(generation.DomainModel3D)
+	}
+	profile, recommended := policy.purposeRecommendation(command, capability, domain)
+	lock := policy.planLock(command, capability, domain)
+	resolution := ResolveModel(ModelRequest{
+		Candidates:  candidates,
+		Lock:        lock,
+		Named:       strings.TrimSpace(pinned),
+		Recommended: recommended,
+		Profile:     profile.ID,
+		Reason:      profile.Reason,
+		Workspace:   strings.TrimSpace(command.Options.ModelFor(domain)),
+	})
+	if resolution.Conflict != nil {
+		return generation.Offering{}, false, planModelRefusal(capability, domain, lock, pinned, resolution.Conflict)
+	}
+	return resolution.Offering, resolution.Source != ModelSourceDefault, ""
+}
+
+// availableOfferings are the capability's enabled, runtime-available Offerings,
+// in Catalog order.
+func (policy *ProductionPlanPolicy) availableOfferings(capability string) []generation.Offering {
 	var candidates []generation.Offering
 	for _, offering := range policy.Offerings() {
 		if !offering.Enabled || string(offering.Capability) != capability {
@@ -548,77 +580,86 @@ func (policy *ProductionPlanPolicy) stepOffering(capability, pinned, lockedModel
 		}
 		candidates = append(candidates, offering)
 	}
-	if len(candidates) == 0 {
-		return generation.Offering{}, false, unavailable
-	}
-	imageDomain := candidates[0].Domain == generation.DomainImage
-	if lockedModel != "" {
-		for _, offering := range candidates {
-			if !offeringIsModel(offering, lockedModel) {
-				continue
-			}
-			if pinned != "" && !offeringIsModel(offering, pinned) {
-				return generation.Offering{}, false, "the person locked the 3D model to " + lockedModel + "; step " + capability + " must use it, not " + pinned
-			}
-			return offering, true, ""
-		}
-	}
-	if imageDomain && workspaceImageModel != "" {
-		workspace, matched := matchPlanCandidate(candidates, workspaceImageModel)
-		if !matched {
-			return generation.Offering{}, false, "the workspace image model " + workspaceImageModel +
-				" has no available Offering for capability " + capability
-		}
-		if pinned == "" {
-			// Quote and pin the model create_three_view will actually run.
-			return workspace, true, ""
-		}
-		pinnedOffering, pinnedMatched := matchPlanCandidate(candidates, pinned)
-		if !pinnedMatched {
-			return generation.Offering{}, false, unavailable
-		}
-		if !offeringIsModel(pinnedOffering, workspaceImageModel) {
-			return generation.Offering{}, false, "the workspace image model is " + workspaceImageModel +
-				"; step " + capability + " must use it, not " + pinned
-		}
-		// Pin the resolved Offering: the plan compares Offering IDs when it
-		// decides whether it covers a submitted step.
-		return pinnedOffering, true, ""
-	}
-	if pinned == "" {
-		chosen := candidates[0]
-		for _, offering := range candidates {
-			if offering.Default {
-				chosen = offering
-				break
-			}
-		}
-		return chosen, false, ""
-	}
-	for _, offering := range candidates {
-		if string(offering.ID) == pinned {
-			return offering, false, ""
-		}
-	}
-	return generation.Offering{}, false, unavailable
+	return candidates
 }
 
-// matchPlanCandidate finds an Offering by any name a tool accepts: model_id,
-// Offering ID or provider/model_id.
-func matchPlanCandidate(candidates []generation.Offering, name string) (generation.Offering, bool) {
-	for _, offering := range candidates {
-		if offeringIsModel(offering, name) {
-			return offering, true
-		}
+// purposeRecommendation is the production purpose of a 3-D step and the models
+// it recommends for the step's shape (#103). Only 3-D steps follow it here: an
+// image step's purpose recommendation is the composer's 2-D question, while the
+// three-view recipe and the image tools in a plan run the session's 2-D model,
+// so #243's rule stands and the plan quotes the workspace value. A capability
+// without a generation shape (a processing step) has no recommendation either.
+func (policy *ProductionPlanPolicy) purposeRecommendation(command ToolCommand, capability, domain string) (PurposeProfile, []string) {
+	if domain != string(generation.DomainModel3D) {
+		return PurposeProfile{}, nil
 	}
-	return generation.Offering{}, false
+	resolver := PurposeParameters{Model3D: policy.Usage}
+	profile, found := resolver.Profile(domain, command.Options.ProductionBrief, false)
+	if !found {
+		return PurposeProfile{}, nil
+	}
+	return profile, RecommendedOfferings(profile, ModelShapeOfCapability(generation.Capability(capability)))
 }
 
-// offeringIsModel reports whether name names the Offering's model the ways a
-// 3D tool accepts it: the model ID, the Offering ID or provider/model.
-func offeringIsModel(offering generation.Offering, name string) bool {
-	return name == offering.ModelID || name == string(offering.ID) ||
-		(offering.ModelID != "" && offering.ProviderID != "" && name == offering.ProviderID+"/"+offering.ModelID)
+// planLock is the person's lock when it names a model of the capability. A
+// lock of another domain or capability is not this step's lock: a plan lists
+// remesh, splat and motion steps the lock was never about, and refusing them
+// would make every such plan unproposable. A locked model the capability
+// declares but cannot run now stays a lock, so the step is refused instead of
+// quoted at another model.
+func (policy *ProductionPlanPolicy) planLock(command ToolCommand, capability, domain string) string {
+	if domain != string(generation.DomainModel3D) && domain != string(generation.DomainImage) {
+		return ""
+	}
+	lock := strings.TrimSpace(command.Options.ExplicitModelFor(domain))
+	if lock == "" {
+		return ""
+	}
+	for _, offering := range policy.Offerings() {
+		if string(offering.Capability) == capability && ModelNameMatches(offering, lock) {
+			return lock
+		}
+	}
+	return ""
+}
+
+// planUnavailableRefusal is the Agent's refusal when the capability has no
+// available Offering at all.
+func planUnavailableRefusal(capability string) string {
+	return "no available offering for capability " + capability
+}
+
+// planModelRefusal words a refused plan resolution for the Agent. The lock and the
+// step's own model are the person's and the Agent's decisions, so a step that
+// cannot use them is refused instead of quoted at another model.
+func planModelRefusal(capability, domain, lock, pinned string, conflict *ModelConflict) string {
+	switch conflict.Kind {
+	case ModelConflictLocked:
+		return "the person locked the " + domainLabel(domain) + " model to " + lock +
+			"; step " + capability + " must use it, not " + pinned
+	case ModelConflictInput:
+		return "step " + capability + " cannot run the model the person or the call named (" +
+			conflict.Named + "): it cannot take this step's input"
+	case ModelConflictUnavailable:
+		if conflict.Layer == ModelSourcePlan {
+			return "step " + capability + " pins offering " + conflict.Named + ", which is not available"
+		}
+		if lock != "" && conflict.Named == lock {
+			return "the person locked the " + domainLabel(domain) + " model to " + lock +
+				", which has no available offering"
+		}
+		return planUnavailableRefusal(capability)
+	default:
+		return planUnavailableRefusal(capability)
+	}
+}
+
+// domainLabel names a workspace domain in an Agent-facing refusal.
+func domainLabel(domain string) string {
+	if domain == string(generation.DomainImage) {
+		return "image"
+	}
+	return "3D"
 }
 
 // capabilityKnown reports whether the runtime Catalog declares the capability
