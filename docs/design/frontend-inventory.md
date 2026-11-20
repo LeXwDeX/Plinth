@@ -347,9 +347,11 @@
 | 上传数量上限 | `ui.chat.input.upload_limit` | 最多上传 {count} 张图片 | 超出时提示。 | 180；attachFiles 172-210 |
 | 附件缩略图 | `ui.chat.input.attachment_alt` | 附件 {index} | 图片替代文字。 | 895 |
 | 移除附件 | `ui.chat.input.remove_attachment` | 移除附件 {index} | 悬停时显示的删除按钮。 | 905；889-915 |
-| 模型选择 | `ui.workspace.harness.offering` | 模型 | 模型选择器触发器，`data-testid="workspace-model-picker"`。弹层可搜索，支持方向键。 | model-select.tsx:44-82（44、47、56-60、67-80、71、32-42）；agent-dialog 959 |
+| 设置入口（#405） | `ui.studio.composer.settings.title`、`.hint`、`.close`、`.tabs`、`.changed`、`.label_changed`、`.item_value` | 对话与生成设置 | 发送按钮右侧的齿轮（`data-testid="composer-settings-open"`），是生成模型、Skills、生成参数、对话模型与思考档位的唯一入口；输入区下方原来的四个选择器入口（`workspace-model-picker`、`workspace-skill-picker`、`composer-params`、`workspace-chat-model-picker`）已移除，只留状态行。有设置不同于默认时显示小圆点（`composer-settings-dot`），名称与悬停写明改了哪几类和当前值。源码已实现，未部署验收。 | composer.tsx:779；composer-settings.tsx:50-132（组件）、99-130（齿轮）；context-meter.tsx（状态行）；composer.tsx:807 |
+| 设置页的 TAB（#405） | `ui.studio.composer.settings.tab.models`、`.skills`、`.params`、`.chat` | 生成模型 / Skills / 生成参数 / 对话模型与思考档位 | 居中的大模态页，顶部四个 TAB（`composer-settings-tab-*`），左右方向键切换并选中，Esc 关闭，焦点回到齿轮；打开时回到上次的 TAB；内容区滚动，不随窗口变窄而溢出。每页是原选择器弹层里的内容：模型表（`workspace-model-picker-panel`）、Skill 表（`workspace-skill-picker-panel`）、参数（`composer-params-panel`）、对话模型与档位（`workspace-chat-model-picker-panel`）。 | composer-settings.tsx:133-172（对话框与 TAB）、166-169（四页）；model-picker.tsx:170；skill-picker.tsx:96；params-popover.tsx:109；chat-model-picker.tsx:118-221；table-popover.tsx:101 |
+| 图片条（#405 范围补充） | `ui.studio.composer.chip.current`、`.chip.canvas`、`.attachment.*` | 当前：画布 / 上传的图 1 / 画板上的图 | 当前对象、蒙版、分支、Skill、上传的图与来自画板的图在同一个可换行的行里（`composer-chips`），宽度按内容、至多半行，第二行只是重复名称时合成一行，文字被截断时悬停显示完整内容。 | composer.tsx:186、508-509；composer-chips.tsx:22、84、108 |
 | 请选模型 | `ui.workspace.harness.choose_model` | 请选择生成模型 | 没选模型时发送被拒。 | model-select.tsx:47；agent-dialog.tsx:467 |
-| 参数与模型 | `ui.workspace.harness.settings` | 参数与模型 | 展开或收起参数区（HarnessPanel）。 | 960-976；964-965 |
+| 参数与模型 | `ui.workspace.harness.settings` | 参数与模型 | 展开或收起参数区（HarnessPanel）；#405 起输入区里的生成参数在设置页的「生成参数」页。 | 960-976；964-965；composer-settings.tsx:168 |
 | 参数加载失败 | `ui.workspace.harness.load_failed` | 加载模型参数失败 | Toast。 | 462 |
 | 保存参数失败 | `ui.workspace.harness.save_failed` | 保存参数失败 | Toast（hook 中也有）。 | hooks/use-session-agent-params.ts:89 |
 

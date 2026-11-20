@@ -142,8 +142,8 @@ update, so always pass `--build` when upgrading.
   `AGENT_MODE=mock`, does not understand meaning (it calls generation tools by keywords), is slated
   for removal and is not meant for self-hosting.
 
-To use it, pick a 2D or 3D model in the model picker below the message box, type a description
-and send it. A new session's approval mode is Manual, so text-to-3D shows an approval card;
+To use it, open the settings (the gear beside the send button), pick a 2D or 3D model on the
+Generation models tab, type a description and send it. A new session's approval mode is Manual, so text-to-3D shows an approval card;
 click Approve to run it.
 
 **If startup fails:** when `--wait` reports an error or `docker compose ps` shows `Restarting`,

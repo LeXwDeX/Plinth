@@ -12,17 +12,16 @@ vi.mock('@/components/product-schema-provider', async () => {
 vi.mock('@/components/workspace/skill-creator', () => ({ SkillCreator: () => null }));
 
 describe('unavailable Skill', () => {
-  it('shows the Schema reason on the trigger, row and footer without making the row selectable', async () => {
+  it('shows the Schema reason on the row and the footer without making the row selectable', async () => {
     const onSelect = vi.fn();
     const skill = { id: 'personal', displayName: 'Personal', prompt: 'p', recommendedSize: '' };
     render(<SkillPicker sessionId="s" catalog={{ revision: 'r', skills: [skill] } as never}
       effective={{ skills: [] } as never} selectedId="personal" unavailable loading={false} failed={false}
       disabled={false} onSelect={onSelect} onCreated={() => undefined} supportingModels={{ personal: ['Model A'] }} />);
-    const trigger = screen.getByTestId('workspace-skill-picker');
-    expect(trigger.textContent).toContain('!');
+    // #405: there is no trigger to carry a "!" and the reason any more; the gear says it (composer-settings-405.test.tsx),
+    // and the tab keeps the reason on the row and under the table.
+    expect(screen.queryByTestId('workspace-skill-picker')).toBeNull();
     const reason = defaultCatalog.application.content.messages['ui.workspace.skills.execution_unavailable'].replace('{models}', 'Model A');
-    expect(document.getElementById(trigger.getAttribute('aria-describedby')!)?.textContent).toBe(reason);
-    fireEvent.click(trigger);
     const row = await screen.findByRole('menuitemradio', { name: `Personal: ${reason}` });
     expect(row.getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(row);

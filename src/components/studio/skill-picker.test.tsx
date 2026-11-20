@@ -24,6 +24,9 @@ const schema = {
     'ui.workspace.skills.empty': '没有 Skill',
     'ui.workspace.skills.unavailable': '当前不可用',
     'ui.unavailable.reason.picker.skill_not_enabled': '未启用',
+    'ui.unavailable.reason.picker.no_session': '没有会话',
+    'ui.unavailable.reason.picker.turn_busy': '本轮进行中',
+    'ui.unavailable.label': '无法使用，{reason}',
     'ui.workspace.skills.execution_unavailable': '模型和配置不支持，请检查：{models}',
     'ui.workspace.skills.create': '新建 Skill',
   } },
@@ -56,24 +59,50 @@ function render(overrides: Partial<React.ComponentProps<typeof SkillPicker>> = {
   />);
 }
 
-describe('SkillPicker selected trigger label', () => {
-  it('shows the resolved selected skill using the Schema template and keeps its full name accessible', () => {
+// #405: the picker is the Skills tab of the settings dialog now, so there is no trigger label to test: the same states
+// are told by the table itself (the checked row, the loading and failure lines, the notice under the table).
+describe('SkillPicker as the Skills tab', () => {
+  const checked = (html: string) => [...html.matchAll(/<button[^>]*role="menuitemradio"[^>]*aria-checked="true"[^>]*>(.*?)<\/button>/g)].map((match) => match[1].replace(/<[^>]*>/g, ''));
+
+  it('checks the row of the selected skill, in the same table as "none", with no trigger button', () => {
     const html = render();
-    expect(html).toContain('SKILL：三视图');
-    expect(html).toContain('aria-label="我的 Skill: 三视图"');
+    expect(html).toContain('data-testid="workspace-skill-picker-panel"');
+    expect(checked(html)[0]).toContain('三视图');
+    expect(html).not.toContain('data-testid="workspace-skill-picker"');
+    expect(html).not.toContain('SKILL：三视图');
+    // Uppercase names stay a table treatment (#108): the name cell carries the shared class.
+    expect(html).toContain(PICKER_UPPERCASE_CLASS);
   });
 
   it.each([
-    ['loading', { loading: true }],
-    ['failed', { failed: true }],
-    ['unavailable', { unavailable: true }],
-    ['missing from catalog', { catalog: { skills: [] } as never }],
-  ])('uses a neutral label when selection is %s', (_state, overrides) => {
+    ['loading', { loading: true }, 'role="status"', '加载中'],
+    ['failed', { failed: true }, 'role="alert"', '加载失败'],
+  ])('says so in the table while the Skills are %s', (_state, overrides, role, text) => {
     const html = render(overrides);
-    expect(html).toContain(_state === 'unavailable' || _state === 'failed' ? '>Skills !</span>' : '>Skills</span>');
-    expect(html.match(/<button[^>]*data-testid="workspace-skill-picker"[^>]*>/)?.[0]).toContain(PICKER_UPPERCASE_CLASS);
-    expect(html).not.toContain('SKILL：三视图');
-    expect(html).not.toContain('aria-label="我的 Skill: three-view"');
+    expect(html).toContain(role);
+    expect(html).toContain(text);
+    expect(html).not.toContain('role="menuitemradio"');
+  });
+
+  it('keeps the selected row checked and says under the table that it cannot be used', () => {
+    const html = render({ unavailable: true });
+    expect(checked(html)[0]).toContain('三视图');
+    expect(html).toContain('data-testid="skill-picker-unavailable"');
+  });
+
+  it('checks no row when the selected skill is missing from the catalog', () => {
+    const html = render({ catalog: { skills: [] } as never });
+    expect(checked(html)).toEqual([]);
+  });
+
+  it('turns the table off with the short reason when there is no session, or a turn is running (#94)', () => {
+    const noSession = render({ sessionId: null });
+    expect(noSession).toContain('disabled=""');
+    expect(noSession).toContain('data-testid="workspace-skill-picker-section-unavailable"');
+    const busy = render({ disabled: true });
+    expect(busy).toContain('disabled=""');
+    expect(busy).toContain('data-testid="workspace-skill-picker-section-unavailable"');
+    expect(render({})).not.toContain('disabled=""');
   });
 });
 
@@ -130,7 +159,9 @@ describe('skillPickerRows', () => {
     expect(rows[0].actions).toBeUndefined();
     expect(rows[2].actions).toBeUndefined();
     expect(rows[1].actions?.map((action) => action.kind)).toEqual(['edit', 'delete']);
-    expect(rows[1].actions?.[0]).toMatchObject({ label: '编辑 Skill「我的水彩」', closeOnClick: true });
+    // #405: nothing closes before the editor opens (the editor is a dialog above the settings dialog), so no close flag.
+    expect(rows[1].actions?.[0]).toMatchObject({ label: '编辑 Skill「我的水彩」' });
+    expect(rows[1].actions?.[0]).not.toHaveProperty('closeOnClick');
     expect(rows[1].actions?.[1]?.label).toBe('删除 Skill「我的水彩」');
     rows[1].actions?.[0].onClick();
     rows[1].actions?.[1].onClick();

@@ -8,14 +8,15 @@ import { HarnessSummary } from '@/components/workspace/harness-summary';
 import { useAuth } from '@/hooks/use-auth';
 import { useSessionHarness } from '@/hooks/use-session-harness';
 import { ContextMeter } from '@/components/studio/context-meter';
-import { ChatModelNotice, ChatModelPicker } from '@/components/studio/chat-model-picker';
+import { ChatModelNotice } from '@/components/studio/chat-model-picker';
 import { AttachmentThumb } from '@/components/studio/attachment-thumb';
 import { ReferenceSizeNotice } from '@/components/canvas/canvas-size-notice';
 import { ChipSquare, ContextChip } from '@/components/studio/composer-chips';
 import { KindBadge } from '@/components/studio/kind-badge';
-import { GenerationModelNotice, ModelPicker } from '@/components/studio/model-picker';
-import { ParamsPopover, type ParamsPopoverProps } from '@/components/studio/params-popover';
-import { SkillPicker, type SkillPickerProps } from '@/components/studio/skill-picker';
+import { ComposerSettings } from '@/components/studio/composer-settings';
+import { GenerationModelNotice } from '@/components/studio/model-picker';
+import type { ParamsPanelProps } from '@/components/studio/params-popover';
+import type { SkillPickerProps } from '@/components/studio/skill-picker';
 import { StopChoices } from '@/components/studio/stop-choices';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -126,9 +127,10 @@ export interface ComposerProps {
   onPasteImages: (urls: string[]) => void;
   editing: boolean;
   onCancelEdit: () => void;
+  /** The Skills tab of the settings dialog behind the gear (#405). */
   skill: SkillPickerProps;
-  /** The 参数 popover: aspect ratio, size and count of the selected model. */
-  params: ParamsPopoverProps;
+  /** The generation parameters tab of the settings dialog: aspect ratio, size and count of the selected models. */
+  params: ParamsPanelProps;
   /** The next turn's 3D model uses fewer of the attached pictures than are attached (#329 follow-up); null when not. */
   referenceLimit?: ReferenceLimit | null;
   /** Estimated credits of the next turn, shown on the send button; null when unknown. */
@@ -149,8 +151,8 @@ function polylinePoints(flat: readonly number[]): string {
 }
 
 /**
- * 对话输入区：当前对象芯片、附件、文字框、2D / 3D 合一的模型选择、Skill 选择和发送。
- * Enter 发送，但输入法组词时的 Enter 只是确认候选字。输入 `@` 列出本会话的句柄
+ * 对话输入区：当前对象芯片、附件、文字框、发送，以及发送键右侧的设置齿轮（#405：生成模型、Skills、生成参数、
+ * 对话模型与思考档位都在齿轮打开的设置页里）。Enter 发送，但输入法组词时的 Enter 只是确认候选字。输入 `@` 列出本会话的句柄
  * （带缩略图），选中后把句柄写进文字；句柄由服务端在消息附件里给出，用到时由
  * 服务端按本人和本会话核对。
  */
@@ -180,6 +182,8 @@ export function Composer({
   const base = schema.chat.context.image_index_base;
   const hasAttachments = images.length > 0 || pinnedImage !== null;
   const hasContextChips = chip !== null || mask !== null || branch !== null || Boolean(skill.selectedId);
+  // #405: what the turn is about (stage picture, mask, branch, Skill) and the pictures attached share one wrapping row.
+  const hasChipRow = hasContextChips || hasAttachments;
   const attachments = [
     ...images.map((url, index) => ({ url, index, pinned: false, number: index + base })),
     ...(pinnedImage ? [{ url: pinnedImage, index: -1, pinned: true, number: images.length + base }] : []),
@@ -429,7 +433,7 @@ export function Composer({
 
   return (
     <div
-      className={cn('relative flex flex-col gap-2 border-t border-border bg-panel p-3', dragging && 'ring-2 ring-inset ring-primary')}
+      className={cn('@container relative flex flex-col gap-2 border-t border-border bg-panel p-3', dragging && 'ring-2 ring-inset ring-primary')}
       data-testid="studio-composer"
       onDragOver={(event) => {
         if (disabled || !composerDragKind(event.dataTransfer?.types)) return;
@@ -501,8 +505,8 @@ export function Composer({
           ) : null}
         </div>
       ) : null}
-      {hasContextChips ? (
-      <div className="flex flex-wrap items-center gap-1.5" data-testid="composer-chips">
+      {hasChipRow ? (
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5" data-testid="composer-chips">
         {chip ? (
           chipSkipped ? (
             <ContextChip
@@ -526,9 +530,11 @@ export function Composer({
                   {chip.thumbnail ? <img src={chip.thumbnail} alt={''} className="size-full object-cover" /> : null}
                 </ChipSquare>
               )}
+              label={formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label })}
               title={(
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <KindBadge kind={chip.kind} />
+                <span className="flex min-w-0 items-center gap-1">
+                  {/* In a narrow column the chip is only half a row wide: the badge keeps its "2D" and gives up its icon so the name fits. */}
+                  <KindBadge kind={chip.kind} className="@max-[24rem]:[&_svg]:hidden" />
                   <span className="truncate">{formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label })}</span>
                 </span>
               )}
@@ -594,42 +600,40 @@ export function Composer({
             remove={{ label: schemaText(schema, 'ui.studio.composer.chip.skill_clear'), onClick: () => skill.onSelect(null) }}
           />
         ) : null}
+        {attachments.map((item) => {
+          const purpose = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
+          return (
+            <ContextChip
+              key={`${item.index}-${item.url.slice(0, 32)}`}
+              testId="composer-attachment-chip"
+              flash={item.url === flashUrl}
+              onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
+              open={{
+                label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
+                onClick: () => previewAttachment(item.url, item.number),
+                testId: 'composer-attachment-open',
+              }}
+              square={(
+                <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} />
+              )}
+              title={item.pinned
+                ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
+                : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number })}
+              subtitle={[
+                schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
+                purpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`) : '',
+              ].filter(Boolean).join(' · ')}
+              remove={{
+                label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
+                onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
+              }}
+            />
+          );
+        })}
       </div>
       ) : null}
       {hasAttachments ? (
         <div className="flex flex-col gap-1.5" data-testid="composer-attachments">
-          <div className="flex flex-wrap items-center gap-1.5" data-testid="composer-attachment-list">
-            {attachments.map((item) => {
-              const purpose = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
-              return (
-                <ContextChip
-                  key={`${item.index}-${item.url.slice(0, 32)}`}
-                  testId="composer-attachment-chip"
-                  flash={item.url === flashUrl}
-                  onDragStart={item.pinned ? undefined : (event) => dragAttachment(event, item.url, item.number)}
-                  open={{
-                    label: schemaMessage(schema, 'ui.studio.composer.attachment.preview', { index: item.number }),
-                    onClick: () => previewAttachment(item.url, item.number),
-                    testId: 'composer-attachment-open',
-                  }}
-                  square={(
-                    <AttachmentThumb url={item.url} alt={schemaMessage(schema, 'ui.chat.input.attachment_alt', { index: item.number })} />
-                  )}
-                  title={item.pinned
-                    ? schemaText(schema, 'ui.studio.composer.attachment.pinned')
-                    : formatSchemaText(schemaText(schema, 'ui.studio.composer.attachment.title'), { index: item.number })}
-                  subtitle={[
-                    schemaText(schema, item.pinned ? 'ui.studio.composer.attachment.from_board' : 'ui.studio.composer.attachment.upload'),
-                    purpose ? schemaText(schema, `ui.studio.composer.attachment.purpose_${purpose}`) : '',
-                  ].filter(Boolean).join(' · ')}
-                  remove={{
-                    label: schemaMessage(schema, 'ui.chat.input.remove_attachment', { index: item.number }),
-                    onClick: item.pinned ? onUnpin : () => onRemoveImage(item.index),
-                  }}
-                />
-              );
-            })}
-          </div>
           <div className="flex flex-col gap-1.5" data-testid="composer-attachment-purposes">
             {attachments.map((item) => {
               const selected = item.pinned ? pinnedPurpose : attachmentPurposes?.[item.index] ?? null;
@@ -771,6 +775,8 @@ export function Composer({
               {sendCredits === null ? null : <span className="tabular-nums" data-testid="composer-send-cost">{formatSchemaText(schemaText(schema, 'ui.studio.composer.send_cost'), { credits: sendCredits })}</span>}
             </Action>
           </HintTooltip>
+          {/* #405: the one entry to the generation models, Skills, parameters and chat model; the settings dialog is its own layer. */}
+          <ComposerSettings skill={skill} params={params} locked={disabled} />
         </div>
       </div>
       <Dialog open={expanded} onOpenChange={setExpanded}>
@@ -795,28 +801,10 @@ export function Composer({
       ) : null}
       <ChatModelNotice />
       <GenerationModelNotice />
-      {/* Fixed column tracks, so a cell's width depends only on the track, never on the chosen name, and every
-          cell is one picker row high (h-7). The DOM order is the reading order in both widths, and pickers pair
-          up left to right: two tracks when the column is narrow, three when it is wide (>= 40rem).
-            narrow: models | Skill / parameters | chat model / thinking level / context usage (full row)
-            wide:   models | Skill | parameters / chat model | thinking level | context usage
-          The chat model picker only shows when the administrator offers two or more models; without it the
-          thinking level moves up into its track (narrow: alone in the left track of that row, the context usage
-          still takes the full row below), so no row ever has a hole in front of a picker. The context usage is
-          not a picker: it spans the narrow row so the figure and the compact action sit on the grid's left and
-          right edges, and takes one wide track beside the thinking level. The short names carry the full name in
-          their tooltip. */}
-      <div className="@container min-w-0">
-        <div className="grid min-w-0 grid-cols-2 items-center gap-1.5 @[40rem]:grid-cols-3" data-testid="composer-pickers">
-          <ModelPicker />
-          <SkillPicker {...skill} />
-          <div className="min-w-0" data-testid="composer-params-slot">
-            <ParamsPopover {...params} disabled={disabled} />
-          </div>
-          <ChatModelPicker />
-          <ContextMeter />
-        </div>
-      </div>
+      {/* The status row under the box: the context usage and the compact action on the left, the tool call counter on the
+          right edge, all one control high (#275, #322). The four pickers that shared this area moved into the settings
+          dialog behind the gear (#405). */}
+      <ContextMeter />
     </div>
   );
 }

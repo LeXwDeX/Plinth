@@ -5,12 +5,12 @@ import useSWR from 'swr';
 import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { TablePopover, type TableCell, type TableSection } from '@/components/studio/table-popover';
+import { TableSections, type TableCell, type TableSection } from '@/components/studio/table-popover';
 import { useWorkspaceOfferings } from '@/hooks/use-workspace-offerings';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
 import { createChatBrowserClient } from '@/lib/chat/browser-client';
 import { pickExplicitModel3D, pickExplicitModelImage } from '@/lib/chat/explicit-model';
-import { formatSchemaText, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { RETEXTURE, buildModelPickerTable, pickerTriggerNames, type PickerCellValue } from '@/lib/workspace/model-picker';
@@ -36,9 +36,9 @@ function cellText(cell: PickerCellValue, unknownPrice: string): { text: string; 
   return { text: cell.credits == null ? '—' : String(cell.credits), muted: false };
 }
 
-interface DomainPick {
+export interface DomainPick {
   section: TableSection;
-  /** 触发按钮上的简称和悬停里的全名；未选时都是"选择模型"。 */
+  /** 选中模型的简称和全名（供应商只在同名时才带上，#324）；未选时都是"选择模型"。 */
   short: string;
   full: string;
 }
@@ -157,26 +157,18 @@ export function useDomainModelPick(domain: WorkspaceDomain): DomainPick {
 }
 
 /**
- * 生成模型选择：一个按钮显示 2D 和 3D 各自选中的模型，点开是左 2D、右 3D 两张小表格，
- * 每张各单选一项，互不影响。
+ * 2D 与 3D 各自选中的简称，按 Schema 的「{image} · {model}」写成一句（设置页的「已更改」提示用它）。
  */
-export function ModelPicker() {
-  const { schema } = useProductSchema();
-  const image = useDomainModelPick('image');
-  const model = useDomainModelPick('model-3d');
-  const pair = schemaText(schema, 'ui.studio.picker.pair');
+export function generationModelPair(schema: ProductSchema, image: DomainPick, model: DomainPick): string {
+  return formatSchemaText(schemaText(schema, 'ui.studio.picker.pair'), { image: image.short, model: model.short });
+}
 
-  return (
-    <TablePopover
-      testId="workspace-model-picker"
-      label={schemaText(schema, 'ui.studio.picker.title')}
-      value={formatSchemaText(pair, { image: image.short, model: model.short })}
-      // Each name is cut on its own, so a long 2D name never hides the 3D one (#324); the separator is the pair's own.
-      valueParts={{ parts: [image.short, model.short], separator: formatSchemaText(pair, { image: '', model: '' }) }}
-      fullValue={formatSchemaText(pair, { image: image.full, model: model.full })}
-      sections={[image.section, model.section]}
-    />
-  );
+/**
+ * 设置页的「生成模型」页：左 2D、右 3D 两张小表格，每张各单选一项，互不影响。两个域的取数与选择逻辑
+ * （`useDomainModelPick`）由常驻的 ComposerSettings 持有，这里只摆内容：页面关着时，停用模型的改用与提示照常工作。
+ */
+export function ModelPicker({ image, model }: { image: DomainPick; model: DomainPick }) {
+  return <TableSections testId="workspace-model-picker-panel" sections={[image.section, model.section]} />;
 }
 
 /**

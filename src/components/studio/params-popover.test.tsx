@@ -8,7 +8,7 @@ import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import { buildGenerationParams, effectiveOfferingValues, estimateCredits } from '@/lib/workspace/generation-params';
 const schema = catalog.application as unknown as ProductSchema;
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema, text: (key: string) => schemaText(schema, key) }) }));
-import { ParameterOrigin, ParamsDomainSection } from './params-popover';
+import { ParameterOrigin, ParamsDomainSection, ParamsPanel, paramsSummary } from './params-popover';
 const offering = (domain: string): OfferingWire => ({ id: `${domain}/selected`, revision: 'changed', provider_id: 'fixture', provider_name: 'Fixture', model_id: domain, model_name: `Selected ${domain}`, capability: domain === 'image' ? 'text-to-image' : 'text-to-3d', available: true, parameters: [
   { name: 'count', label: `${domain} count`, type: 'number', default: 1, minimum: 1, maximum: 5 },
   { name: 'quality', label: `${domain} definition`, type: 'select', fixed: true, default: 'ultra', options: [{ value: 'ultra', label: `${domain} exact maximum` }], presentation: { surface: 'readonly', visible_when: [{ parameter: 'count', operator: 'equals', value: 1 }] } },
@@ -116,14 +116,44 @@ describe('parameter origin of a plain boolean', () => {
   });
 });
 
-// #243: the panel opens above its trigger; a content-sized height moved its top
-// edge (title, operation select) whenever the operation changed.
-describe('params panel frame', () => {
-  it('has a fixed height bounded by the available space', async () => {
-    const { PARAMS_PANEL_CLASS } = await import('./params-popover');
-    const classes = PARAMS_PANEL_CLASS.split(/\s+/);
-    expect(classes).toContain('h-[min(34rem,var(--available-height))]');
-    expect(classes.some((name) => name.startsWith('max-h-'))).toBe(false);
-    expect(classes).toContain('overflow-hidden');
+// #243 (the popover frame) is replaced by the settings dialog's own frame (#405): the dialog has a fixed height bounded by the
+// window, its head (title, tabs) stays and its body scrolls, so switching the operation or opening "more parameters" never
+// moves the top edge (composer-settings-405.test.tsx asserts that frame). What is left to prove here is the tab's content.
+describe('the generation parameters tab (#405)', () => {
+  const effective = { loading: false, failed: false, data: { model: { label: 'glm' }, revision: 'r1', parameter_source: 'session' } } as never;
+  const tab = () => renderToStaticMarkup(<ParamsPanel params={params(offering('image'))} domains={[params(offering('image')), params(offering('model'))]} hasSession skill={null} effective={effective} />);
+
+  it('shows both domains side by side when the tab is wide, one under the other when it is not (a container query, not the window)', () => {
+    const html = tab();
+    expect(html).toContain('data-testid="composer-params-panel"');
+    expect(html).toMatch(/data-testid="composer-params-panel" class="(?:[^"]*\s)?@container(?:\s|")/);
+    expect(html).toMatch(/class="[^"]*@\[40rem\]:grid-cols-2[^"]*" data-testid="params-domains"/);
+    expect(html).not.toContain('min-[760px]');
+    expect(html.match(/data-testid="params-domain"/g)).toHaveLength(2);
+    expect(html).toContain('Selected image');
+    expect(html).toContain('Selected model');
+  });
+
+  it('keeps the effective configuration and the note that the Agent decides what is left alone', () => {
+    const html = tab();
+    expect(html).toContain('data-testid="params-effective"');
+    expect(html).toContain('glm');
+    expect(html).toContain(schemaText(schema, 'ui.workspace.harness.agent_decides'));
+  });
+
+  it('is not a popover any more: no trigger, no anchored frame, no title of its own', () => {
+    const html = tab();
+    expect(html).not.toContain('data-testid="composer-params"');
+    expect(html).not.toContain('data-testid="composer-params-summary"');
+    expect(html).not.toContain('aria-haspopup');
+  });
+
+  it('puts the Skill on the domain it was made for, and summarises what the next turn would use', () => {
+    const html = renderToStaticMarkup(<ParamsPanel params={params(offering('image'))} domains={[params(offering('image')), params(offering('model'))]} hasSession skill={{ name: '三视图', recommendedSize: '' }} effective={effective} />);
+    expect(html.match(/data-testid="params-domain"/g)).toHaveLength(2);
+    // Before a model is chosen the summary is the product's defaults; with one it is the model's own values.
+    expect(paramsSummary(schema, { ...params(offering('image')), modelName: '' })).toContain(schemaText(schema, 'ui.studio.params.default_ratio'));
+    expect(paramsSummary(schema, { ...params(offering('model')), modelName: '' })).toBe(schemaText(schema, 'ui.studio.params.chip_pick_model'));
+    expect(typeof paramsSummary(schema, params(offering('image')))).toBe('string');
   });
 });
