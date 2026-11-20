@@ -301,3 +301,130 @@ func TestEncodeMultipartRefusesUnnamedFormatsBeforeReading(t *testing.T) {
 		t.Fatalf("assets opened before refusal: %#v", assets.urls)
 	}
 }
+
+// A string-array parameter is written as one text field per element, in order,
+// and keeps its place among the parameters (#376: Rodin's image_label is one
+// mark per picture, sent ahead of the pictures because the Schema declares the
+// parameter first). Repeated values stay, an empty or null array writes nothing,
+// and the parameter's wire mapping applies to each element.
+func TestEncodeMultipartWritesAStringArrayAsOneFieldPerElement(t *testing.T) {
+	offering := func(changes ...func(*generation.Offering)) generation.Offering {
+		protocol := generation.ImageProtocol{
+			Endpoint:        "rodin",
+			RequestEncoding: "multipart",
+			RequestTemplate: json.RawMessage(`{"tier":"fixed"}`),
+		}
+		encoded, _ := json.Marshal(protocol)
+		result := generation.Offering{
+			ID:              "configured/offering",
+			ModelID:         "configured-model",
+			ProviderOptions: encoded,
+			Parameters: []generation.Parameter{
+				{Name: "labels", Type: "string-array", WireName: "image_label", AllowDuplicateValues: true},
+				{Name: "reference_assets", Type: "asset-array", WireName: "images", MaxBytes: 64},
+				{Name: "prompt", Type: "text"},
+			},
+		}
+		for _, change := range changes {
+			change(&result)
+		}
+		return result
+	}
+	pictures := map[string][]generation.InputAsset{"reference_assets": {
+		{ID: "a", MediaType: "image/png", OriginalFilename: "a.png"},
+		{ID: "b", MediaType: "image/png", OriginalFilename: "b.png"},
+		{ID: "c", MediaType: "image/png", OriginalFilename: "c.png"},
+	}}
+	encode := func(offering generation.Offering, input string) (io.Reader, string, error) {
+		return imagewire.EncodeMultipart(context.Background(), generation.StartRequest{
+			Offering: offering, Input: json.RawMessage(input), InputAssets: pictures,
+		}, &fixtureAssets{data: []byte("fixture")})
+	}
+	files := []string{"images=<file>", "images=<file>", "images=<file>"}
+	join := func(parts ...[]string) []string {
+		var all []string
+		for _, part := range parts {
+			all = append(all, part...)
+		}
+		return all
+	}
+	for name, test := range map[string]struct {
+		input string
+		want  []string
+	}{
+		"one field per element in order, ahead of the pictures": {
+			`{"labels":["F","L","B"],"reference_assets":["a","b","c"],"prompt":"p"}`,
+			join([]string{"tier=fixed", "image_label=F", "image_label=L", "image_label=B"}, files, []string{"prompt=p"}),
+		},
+		"repeated values are kept": {
+			`{"labels":["?","?","F"],"reference_assets":["a","b","c"],"prompt":"p"}`,
+			join([]string{"tier=fixed", "image_label=?", "image_label=?", "image_label=F"}, files, []string{"prompt=p"}),
+		},
+		"an empty array writes nothing": {
+			`{"labels":[],"reference_assets":["a","b","c"],"prompt":"p"}`,
+			join([]string{"tier=fixed"}, files, []string{"prompt=p"}),
+		},
+		"a null array writes nothing": {
+			`{"labels":null,"reference_assets":["a","b","c"],"prompt":"p"}`,
+			join([]string{"tier=fixed"}, files, []string{"prompt=p"}),
+		},
+		"an absent parameter writes nothing": {
+			`{"reference_assets":["a","b","c"],"prompt":"p"}`,
+			join([]string{"tier=fixed"}, files, []string{"prompt=p"}),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader, contentType, err := encode(offering(), test.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := partOrder(t, reader, contentType); !equalStrings(got, test.want) {
+				t.Fatalf("parts = %v, want %v", got, test.want)
+			}
+		})
+	}
+	t.Run("the declaration order decides the position", func(t *testing.T) {
+		after := offering(func(o *generation.Offering) {
+			o.Parameters[0], o.Parameters[1] = o.Parameters[1], o.Parameters[0]
+		})
+		reader, contentType, err := encode(after, `{"labels":["F","L","B"],"reference_assets":["a","b","c"],"prompt":"p"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := join([]string{"tier=fixed"}, files, []string{"image_label=F", "image_label=L", "image_label=B", "prompt=p"})
+		if got := partOrder(t, reader, contentType); !equalStrings(got, want) {
+			t.Fatalf("parts = %v, want %v", got, want)
+		}
+	})
+	t.Run("the wire mapping applies to each element", func(t *testing.T) {
+		mapped := offering(func(o *generation.Offering) {
+			o.Parameters[0].WireValues = map[string]json.RawMessage{"F": json.RawMessage(`"front"`)}
+		})
+		reader, contentType, err := encode(mapped, `{"labels":["F","L","F"],"reference_assets":["a","b","c"]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := join([]string{"tier=fixed", "image_label=front", "image_label=L", "image_label=front"}, files)
+		if got := partOrder(t, reader, contentType); !equalStrings(got, want) {
+			t.Fatalf("parts = %v, want %v", got, want)
+		}
+	})
+	t.Run("a value that is not an array is refused while the body is built", func(t *testing.T) {
+		reader, _, err := encode(offering(), `{"labels":"F","reference_assets":["a","b","c"]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, readErr := io.ReadAll(reader); readErr == nil || !strings.Contains(readErr.Error(), "必须是数组") {
+			t.Fatalf("refusal = %v", readErr)
+		}
+	})
+	t.Run("an element that is not a scalar is refused", func(t *testing.T) {
+		reader, _, err := encode(offering(), `{"labels":[["F"]],"reference_assets":["a","b","c"]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, readErr := io.ReadAll(reader); readErr == nil || !strings.Contains(readErr.Error(), "标量") {
+			t.Fatalf("refusal = %v", readErr)
+		}
+	})
+}

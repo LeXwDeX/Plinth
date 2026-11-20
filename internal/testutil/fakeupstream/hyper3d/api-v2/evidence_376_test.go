@@ -532,7 +532,7 @@ func TestRodinEndpointNoteRecordsTheLabelRuns(t *testing.T) {
 	for _, want := range []string{
 		"image_label (#376)", labelRun, "the name repeated", "IMAGE_LABEL_LENGTH_TOO_LONG", "Input is invalid", "was not charged",
 		"consumed 0.5", "19,371,768 bytes", "no code is invented", "evidence-376-rodin-label-overflow", "evidence-376-rodin-labeled",
-		"evidence_376_test.go",
+		"evidence_376_test.go", "refuses a label outside the page's list", "constructed from the page, not recorded",
 	} {
 		if !strings.Contains(notes["POST /rodin"], want) {
 			t.Errorf("the /rodin note does not record %q", want)

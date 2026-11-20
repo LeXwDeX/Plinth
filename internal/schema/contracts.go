@@ -158,6 +158,13 @@ const (
 	// reference picture, in the same order. An Offering that declares it takes
 	// several views of one object (#65); its options are the view keys.
 	SemanticReferenceViews ParameterSemantic = "reference-views"
+	// SemanticReferenceImageLabels names the orientation mark of each reference
+	// picture, in the same order, for an upstream that takes marks next to
+	// plain pictures (Hyper3D Rodin's image_label, #376). Unlike
+	// SemanticReferenceViews it does not make an Offering a multi-view step:
+	// the pictures stay one plain reference set and the marks only hint the
+	// service which side each shows.
+	SemanticReferenceImageLabels ParameterSemantic = "reference-image-labels"
 	// SemanticTextureSize marks the texture resolution a 3D step delivers, by
 	// its edge in pixels; a session purpose's max_texture_size bounds it (#129).
 	SemanticTextureSize ParameterSemantic = "texture-size"
@@ -180,6 +187,7 @@ func (semantic ParameterSemantic) Valid() bool {
 		SemanticOutputSize,
 		SemanticQuality,
 		SemanticReferenceViews,
+		SemanticReferenceImageLabels,
 		SemanticTextureSize,
 		SemanticSourceTask,
 		SemanticSourceAsset,

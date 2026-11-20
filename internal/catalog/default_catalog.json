@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-16.305.1",
+    "revision": "2026-11-20.376.1",
     "terminology": {
       "user_facing": [
         {
@@ -20794,6 +20794,15 @@
             "左侧": "Left",
             "正面": "Front",
             "背面": "Back",
+            "左前": "Front left",
+            "右前": "Front right",
+            "左后": "Back left",
+            "右后": "Back right",
+            "顶部": "Top",
+            "底部": "Bottom",
+            "不确定": "Unsure",
+            "参考图方位标记": "Reference image angle marks",
+            "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。该设置不在设置面板里显示。": "Marks, in order, which side each reference picture shows (front, front left, front right, back, back left, back right, left, right, top, bottom, or unsure when it cannot be told), so Rodin matches the pictures to different angles of one object. When filled in, every reference picture needs one mark and marks may repeat; when empty nothing is sent. This setting is not shown in the settings panel.",
             "按选择顺序依次对应正面、左侧、背面、右侧视角（可用“视角”参数改写对应关系）；正面图必须有，至少 2 张、最多 4 张，均为同一物体。": "Images map to Front, Left, Back, Right in the order selected (override with the Reference image views parameter). A front image is required; send 2 to 4 images of the same object.",
             "Tripo Smart Segmentation · 图片": "Tripo Smart Segmentation · Image",
             "Tripo Smart Segmentation · 模型": "Tripo Smart Segmentation · Model",
@@ -38701,7 +38710,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/image-to-3d",
-      "revision": "2026-11-16.304.1",
+      "revision": "2026-11-20.376.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -38817,6 +38826,66 @@
       },
       "capability": "image-to-3d",
       "parameters": [
+        {
+          "name": "reference_image_labels",
+          "label": "参考图方位标记",
+          "type": "string-array",
+          "wire_name": "image_label",
+          "max_items": 5,
+          "allow_duplicate_values": true,
+          "options": [
+            {
+              "value": "F",
+              "label": "正面"
+            },
+            {
+              "value": "FL",
+              "label": "左前"
+            },
+            {
+              "value": "FR",
+              "label": "右前"
+            },
+            {
+              "value": "B",
+              "label": "背面"
+            },
+            {
+              "value": "BL",
+              "label": "左后"
+            },
+            {
+              "value": "BR",
+              "label": "右后"
+            },
+            {
+              "value": "L",
+              "label": "左侧"
+            },
+            {
+              "value": "R",
+              "label": "右侧"
+            },
+            {
+              "value": "U",
+              "label": "顶部"
+            },
+            {
+              "value": "D",
+              "label": "底部"
+            },
+            {
+              "value": "?",
+              "label": "不确定"
+            }
+          ],
+          "semantic": "reference-image-labels",
+          "description": "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。该设置不在设置面板里显示。",
+          "presentation": {
+            "surface": "hidden",
+            "control": "multi-select"
+          }
+        },
         {
           "name": "reference_assets",
           "label": "参考图",

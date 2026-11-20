@@ -28,15 +28,26 @@ func form(fields map[string]string, files ...string) testkit.Body {
 	return labeledForm(fields, 0, files...)
 }
 
-// labeledForm is form plus count image_label text fields.
+// labeledForm is form plus count image_label text fields, each a mark of the
+// page's list.
 func labeledForm(fields map[string]string, labels int, files ...string) testkit.Body {
+	marks := make([]string, 0, labels)
+	for i := 0; i < labels; i++ {
+		marks = append(marks, generationImageLabels[i%len(generationImageLabels)])
+	}
+	return markedForm(fields, marks, files...)
+}
+
+// markedForm is form plus one image_label text field per mark, in order, ahead
+// of the files (the wire of the real requests of #376).
+func markedForm(fields map[string]string, marks []string, files ...string) testkit.Body {
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
 	for name, value := range fields {
 		_ = writer.WriteField(name, value)
 	}
-	for i := 0; i < labels; i++ {
-		_ = writer.WriteField("image_label", "label")
+	for _, mark := range marks {
+		_ = writer.WriteField("image_label", mark)
 	}
 	for _, name := range files {
 		header := textproto.MIMEHeader{}
@@ -415,6 +426,48 @@ func TestImageLabelCountIsValidated(t *testing.T) {
 		if tc.code != "" && body["message"] != "Input is invalid" {
 			t.Fatalf("%d labels for 2 images: message %v, the real service said \"Input is invalid\"", tc.labels, body["message"])
 		}
+	}
+}
+
+// The marks of image_label are the page's list: F, FL, FR, B, BL, BR, L, R, U, D
+// and ? (docsRoot+"rodin-gen2-5", checked formDocs). A mark outside it is
+// answered INVALID_REQUEST like the other constructed value rules; the real
+// rejection was not observed (rodinLabelNote). A repeated mark is fine, and the
+// observed count refusal still comes first.
+func TestImageLabelValuesAreValidated(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	fields := map[string]string{"tier": "Gen-2.5-Extreme-Low", "geometry_file_format": "glb", "material": "PBR"}
+	send := func(marks []string, files ...string) (int, map[string]any) {
+		status, _, body := f.Do("POST", Prefix+"/rodin", key, markedForm(fields, marks, files...))
+		return status, body
+	}
+	for _, mark := range []string{"F", "FL", "FR", "B", "BL", "BR", "L", "R", "U", "D", "?"} {
+		if status, body := send([]string{mark}, "images"); status != http.StatusCreated || body["error"] != nil {
+			t.Errorf("mark %q = %d %v, want accepted", mark, status, body)
+		}
+	}
+	if status, body := send([]string{"?", "?", "F"}, "images", "images", "images"); status != http.StatusCreated || body["error"] != nil {
+		t.Errorf("repeated marks = %d %v, want accepted", status, body)
+	}
+	for name, marks := range map[string][]string{
+		"an unknown mark":         {"X"},
+		"a lowercase mark":        {"f"},
+		"a word":                  {"front"},
+		"an empty mark":           {""},
+		"a bad mark after a good": {"F", "label"},
+	} {
+		status, body := send(marks, "images", "images")
+		if status != http.StatusCreated || body["error"] != "INVALID_REQUEST" || !strings.Contains(body["message"].(string), "image_label") {
+			t.Errorf("%s = %d %v, want INVALID_REQUEST naming image_label", name, status, body)
+		}
+	}
+	// The observed refusal is not replaced by the constructed one.
+	if _, body := send([]string{"F", "label", "B"}, "images", "images"); body["error"] != "IMAGE_LABEL_LENGTH_TOO_LONG" {
+		t.Errorf("three marks for two pictures, one of them bad = %v, want the observed count refusal", body)
+	}
+	// Fewer marks than pictures was not observed to be refused: accepted.
+	if status, body := send([]string{"F"}, "images", "images", "images"); status != http.StatusCreated || body["error"] != nil {
+		t.Errorf("one mark for three pictures = %d %v, want accepted", status, body)
 	}
 }
 

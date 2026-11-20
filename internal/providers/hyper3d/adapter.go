@@ -243,6 +243,9 @@ func ValidateOffering(offering generation.Offering) error {
 	if _, err := parseDownloadFiles(options.DownloadFiles, offering); err != nil {
 		return err
 	}
+	if err := validateImageLabelsDeclaration(offering); err != nil {
+		return err
+	}
 	if options.Endpoint == bangEndpoint {
 		return validateBangOffering(offering, options)
 	}
@@ -375,14 +378,14 @@ func (a *Adapter) Start(ctx context.Context, request generation.StartRequest) (g
 			return generation.Observation{}, fail(generation.FailureInvalidInput, false, "文生 3D 缺少提示词")
 		}
 	} else {
-		imageCount := 0
-		for _, parameter := range request.Offering.Parameters {
-			if effectiveWireName(parameter) == "images" {
-				imageCount += len(request.InputAssets[parameter.Name])
-			}
-		}
-		if imageCount < 1 || imageCount > 5 || a.inputs == nil {
+		pictures := pictureCount(request.Offering, request.InputAssets)
+		if pictures < 1 || pictures > 5 || a.inputs == nil {
 			return generation.Observation{}, fail(generation.FailureInvalidInput, false, "图生 3D 输入图片数量或归属不合法")
+		}
+		// The marks are checked again here: an earlier preparation never
+		// authorizes marks that no longer match the pictures (#376).
+		if err := checkImageLabels(request.Offering, input, pictures); err != nil {
+			return generation.Observation{}, err
 		}
 	}
 	// Preflight the complete multipart body before writing a paid-dispatch intent.
