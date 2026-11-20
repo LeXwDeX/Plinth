@@ -153,7 +153,7 @@ func (reader archiveInspectionReader) Read(body []byte) (int, error) {
 		return 0, nil
 	}
 	if reader.work.remaining <= 0 {
-		return 0, errors.New("模型压缩包内容检查工作量超出限制")
+		return 0, rejectInspection("inspection_work_limit", errors.New("模型压缩包内容检查工作量超出限制"))
 	}
 	body = body[:min(int64(len(body)), reader.work.remaining)]
 	count, err := reader.reader.Read(body)
@@ -164,7 +164,7 @@ func (reader archiveInspectionReader) Read(body []byte) (int, error) {
 func openArchiveInspectionEntry(entry *zip.File, work *archiveInspectionWork) (io.ReadCloser, *bufio.Reader, error) {
 	body, err := entry.Open()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, archiveMemberReadFailure(err)
 	}
 	return body, bufio.NewReader(archiveInspectionReader{body, work}), nil
 }
@@ -174,7 +174,9 @@ func closeArchiveInspectionEntry(body io.ReadCloser, inspection error) error {
 	if inspection != nil {
 		return inspection
 	}
-	return closeErr
+	// Close reports a failure the entry's own stream already hit (a damaged
+	// Deflate stream surfaces here when only the magic was peeked).
+	return archiveMemberReadFailure(closeErr)
 }
 
 func archiveModelMember(magic []byte, name string) bool {
@@ -230,10 +232,21 @@ func inspectArchiveBufferMember(entry *zip.File, names map[string]struct{}, budg
 	return closeArchiveInspectionEntry(body, err)
 }
 
+// scanArchiveMemberAddresses is the generic scan of a member with no wire
+// format of its own (a slicer config, an attachment). A hit is reported as the
+// address it is rather than as a rule of the container.
+func scanArchiveMemberAddresses(reader io.Reader) error {
+	err := scanExternalAddresses(reader)
+	if errors.Is(err, errModelContentAddress) {
+		return rejectInspection("external_address", err)
+	}
+	return err
+}
+
 func inspectArchiveMemberReader(reader *bufio.Reader, entry *zip.File, names map[string]struct{}, budget *inlineInspectionBudget, layout *archiveBufferLayout) error {
 	magic, _ := reader.Peek(8)
 	if bytes.HasPrefix(magic, []byte("PK\x03\x04")) {
-		return errors.New("模型压缩包不能包含未检查的嵌套压缩包")
+		return rejectArchiveRule("zip_nested_archive", "模型压缩包不能包含未检查的嵌套压缩包")
 	}
 	limited := &io.LimitedReader{R: reader, N: int64(entry.UncompressedSize64) + 1}
 	var err error
@@ -254,18 +267,18 @@ func inspectArchiveMemberReader(reader *bufio.Reader, entry *zip.File, names map
 	} else if isSTLFormat(entry.Name, "") {
 		err = inspectSTLAddresses(bufio.NewReader(limited), int64(entry.UncompressedSize64))
 	} else {
-		err = scanExternalAddresses(limited)
+		err = scanArchiveMemberAddresses(limited)
 	}
 	if err != nil {
-		return err
+		return archiveMemberReadFailure(err)
 	}
 	var extra [1]byte
 	count, err := limited.Read(extra[:])
 	if count != 0 || err != io.EOF || limited.N != 1 {
 		if err != nil && err != io.EOF {
-			return err // Includes a CRC failure reported only at EOF.
+			return archiveMemberReadFailure(err) // Includes a CRC failure reported only at EOF.
 		}
-		return errors.New("模型压缩包成员内容与声明大小不一致")
+		return rejectArchiveRule("zip_member_corrupt", "模型压缩包成员内容与声明大小不一致")
 	}
 	return nil
 }

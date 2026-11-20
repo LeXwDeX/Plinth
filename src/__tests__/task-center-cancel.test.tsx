@@ -153,6 +153,49 @@ it('shows a real pending Agent turn and unbound SkillRun steps without inventing
   }
 });
 
+// #375: the drawer shows the Agent's own work as one row. Without a tracked Task of the session
+// that row is not a task, so it says so; with one, the two rows sit side by side without it.
+it('says an Agent turn without a tracked Task has submitted no task, with no invented progress', () => {
+  const previous = storeState.trackedTasks;
+  storeState.trackedTasks = [{ ...trackedTask('foreign-running', 'RUNNING', false), sessionId: 'session-b' }];
+  chatState.streamingBuffers = { 'session-a': { genState: { statusText: 'configured tool status' } } };
+  try {
+    const html = renderToStaticMarkup(<TaskDrawer />);
+    expect(html).toContain('data-testid="workspace-agent-progress"');
+    expect(html).toContain('configured tool status');
+    expect(html).toContain('data-testid="workspace-agent-no-task"');
+    expect(html).toContain(msg('ui.workspace.tasks.agent_no_task'));
+    expect(html).not.toContain('data-testid="workspace-task-card"');
+    expect(html).not.toContain('role="progressbar"');
+  } finally {
+    storeState.trackedTasks = previous;
+    chatState.streamingBuffers = {};
+  }
+});
+
+it('keeps the Agent row beside the Task rows without the no-task note', () => {
+  chatState.streamingBuffers = { 'session-a': { genState: { statusText: 'configured tool status' } } };
+  try {
+    const html = renderToStaticMarkup(<TaskDrawer />);
+    expect(html).toContain('data-testid="workspace-agent-progress"');
+    expect(html).toContain('configured tool status');
+    expect(html).toContain('data-testid="workspace-task-card"');
+    expect(html).not.toContain('data-testid="workspace-agent-no-task"');
+    expect(html).not.toContain(msg('ui.workspace.tasks.agent_no_task'));
+  } finally {
+    chatState.streamingBuffers = {};
+  }
+});
+
+it('declares the no-task note in the schema in Chinese and English', () => {
+  expect(msg('ui.workspace.tasks.agent_no_task')).toBe('尚未提交生成任务');
+  const bundles = (defaultCatalog.application as unknown as {
+    localization: { bundles: Record<string, { messages: Record<string, string>; fields: Record<string, string> }> };
+  }).localization.bundles;
+  expect(bundles.en.messages['ui.workspace.tasks.agent_no_task']).toBe('No task submitted yet');
+  expect(bundles.en.fields['chat.presentation.status.preparing_tool']).toBe('Preparing to call a tool…');
+});
+
 it('keeps durable SkillRun checkpoints visible without an activity count or invented percentage', () => {
   const originalTasks = storeState.trackedTasks;
   storeState.trackedTasks = [];

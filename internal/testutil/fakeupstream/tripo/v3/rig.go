@@ -249,6 +249,8 @@ func (t *task) echoedInput(input map[string]any) {
 		}
 	}
 	switch t.kind.Type {
+	case "multiview_to_model":
+		t.echoMultiviewInput(input)
 	case "highpoly_to_lowpoly":
 		// The sample repeats these three; the page's defaults stand in for a field the request left out (decimate.go).
 		set("bake", boolOr(t.request["bake"], true))

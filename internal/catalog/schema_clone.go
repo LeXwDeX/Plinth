@@ -549,6 +549,10 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 				include := *profile.StreamIncludeUsage
 				copied.StreamIncludeUsage = &include
 			}
+			if profile.ChatCompletionsTools != nil {
+				runs := *profile.ChatCompletionsTools
+				copied.ChatCompletionsTools = &runs
+			}
 			copied.RequestFields = make(map[string]json.RawMessage, len(profile.RequestFields))
 			for field, value := range profile.RequestFields {
 				copied.RequestFields[field] = slices.Clone(value)

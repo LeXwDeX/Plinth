@@ -318,6 +318,9 @@ const minimalApplication = `"application":{
 			"task_identifier_preview_characters":12,
 			"countdown_tick_milliseconds":1000,
 			"task_polling_interval_milliseconds":3000,
+			"harness_refresh_milliseconds":4000,
+			"pending_approvals_refresh_milliseconds":20000,
+			"idle_polling":{"backoff_factor":2,"max_interval_milliseconds":60000},
 			"session_menu_page_size":15,
 			"session_menu_search_debounce_milliseconds":250,
 			"session_title_refresh_attempts":6,
@@ -595,6 +598,8 @@ const minimalApplication = `"application":{
 			"connection_timeout_milliseconds":15000,
 			"fallback_poll_milliseconds":3000,
 			"reconnect_check_delay_milliseconds":300,
+			"stream_silence_milliseconds":30000,
+			"stream_reconnect_attempts":3,
 			"option_storage_key":"test-chat-options",
 			"add_images_event_name":"test:add-images",
 			"image_mime_prefix":"image/",
@@ -784,17 +789,19 @@ const minimalApplication = `"application":{
 				"unknown_error":"未知错误","sse_interrupted":"连接中断",
 				"internal_error":"内部错误","unauthenticated":"未登录",
 				"turn_active":"当前会话正在处理",
+				"session_delete_blocked":"会话还有进行中的任务",
 				"agent_busy":"任务繁忙",
 				"tool_round_limit":"上限 {limit}","tool_round_limit_pending":"未执行：",
 				"tool_round_limit_pending_item":"{tool} {intent}",
 				"tool_round_limit_pending_tool":"{tool}",
+				"tool_arguments_invalid":"参数不是合法 JSON","tool_unavailable":"工具 {tool} 不可用",
 				"input_gap_missing":"缺少 {name} ({type}){options}: {supply}","input_gap_reference_image":"图片","input_gap_text_limit":"文本 {max}",
 				"input_gap_labeled":"{label}, {type}","input_gap_options":" 可选 {values}","input_gap_supply_reference":"用 {argument}",
 				"input_gap_supply_argument":"用 {argument}","input_gap_supply_unavailable":"不可设置","input_shape":"字段 {fields}",
 				"input_shape_text":"{name}={count}","input_shape_list":"{name}[{count}]","input_shape_boolean":"{name}=布尔",
 				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值"
 			},
-			"status":{"generating":"正在生成","queued_submission":"排队等待提交"}
+			"status":{"generating":"正在生成","queued_submission":"排队等待提交","preparing_tool":"正在准备调用工具"}
 		},
 		"audit":{
 			"create_action":"access_asset","delete_action":"access_asset",
@@ -3803,6 +3810,20 @@ func TestLoadValidatesChatThinkingDeclaration(t *testing.T) {
 			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["deepseek"],"request_fields":{"thinking":{"type":"enabled"},"reasoning_effort":"max"},"reasoning_passback":true}]}`,
 		},
 		{
+			// #401: a request constraint alone is a declaration.
+			name:        "profile that only omits the temperature",
+			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"omit_temperature":true}]}`,
+		},
+		{
+			name:        "profile that only says the model runs no tools on chat completions",
+			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"chat_completions_tools":false}]}`,
+		},
+		{
+			name:        "profile that declares nothing",
+			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"omit_temperature":false}]}`,
+			wantError:   "omit_temperature",
+		},
+		{
 			name:        "profile overrides a reserved request field",
 			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["deepseek"],"request_fields":{"model":"other"}}]}`,
 			wantError:   "model",
@@ -3871,6 +3892,30 @@ func TestLoadValidatesChatThinkingDeclaration(t *testing.T) {
 		!thinking.Enabled ||
 		len(thinking.ModelProfiles) != 1 || !thinking.ModelProfiles[0].DSMLToolCalls {
 		t.Fatalf("typed thinking = %#v", thinking)
+	}
+	// #401: the request constraints load typed, and a profile that does not
+	// declare chat_completions_tools runs Agent tools.
+	if thinking.ModelProfiles[0].OmitTemperature || !thinking.ModelProfiles[0].RunsAgentTools() {
+		t.Fatalf("undeclared constraints = %#v", thinking.ModelProfiles[0])
+	}
+	constrained := bytes.Replace(
+		document,
+		[]byte(anchor),
+		[]byte(anchor+`,"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"omit_temperature":true,"chat_completions_tools":false}]}`),
+		1,
+	)
+	loaded, err := catalog.Load(bytes.NewReader(constrained))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := loaded.Application().Chat.Agent.Thinking.ModelProfiles[0]
+	if !profile.OmitTemperature || profile.ChatCompletionsTools == nil || *profile.ChatCompletionsTools || profile.RunsAgentTools() {
+		t.Fatalf("declared constraints = %#v", profile)
+	}
+	// Application() hands out a copy: changing it leaves the Catalog as it was.
+	*profile.ChatCompletionsTools = true
+	if again := loaded.Application().Chat.Agent.Thinking.ModelProfiles[0]; again.RunsAgentTools() {
+		t.Fatal("Application() did not defensively clone chat_completions_tools")
 	}
 }
 

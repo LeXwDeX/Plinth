@@ -167,3 +167,60 @@ func TestAskChoiceToolForwardsBoundedDirectionOptions(t *testing.T) {
 		}
 	}
 }
+
+// #374: a kind that names no target tool opens without one: the answer is
+// text, so no tool has to be available in this turn (a fixed function leaves
+// only the base tools). The option's action is forwarded for the service to
+// check, and a kind with a target tool is still refused when that tool is
+// unavailable.
+func TestAskChoiceToolOpensAKindWithoutATargetToolAndForwardsActions(t *testing.T) {
+	nextStep := catalog.ChatChoiceKindSchema{ID: "next_step", OptionSource: "agent"}
+	direction := catalog.ChatChoiceKindSchema{ID: "direction", OptionSource: "agent", ToolName: ToolUpdateProductionBrief}
+	var receivedKind catalog.ChatChoiceKindSchema
+	var received chat.AskChoiceArguments
+	executor, err := New(Config{
+		Params: agentparams.NewStore(), Generate: &fakeGenerate{},
+		ChoiceKinds:         []catalog.ChatChoiceKindSchema{nextStep, direction},
+		ChoiceOptionInvalid: "选项无效。",
+		AskChoice: func(_ context.Context, _ chat.ToolCommand, chosen catalog.ChatChoiceKindSchema,
+			arguments chat.AskChoiceArguments,
+		) (chat.ToolResult, error) {
+			receivedKind, received = chosen, arguments
+			return chat.ToolResult{AgentContent: `{"choice_required":true}`, NoSubmission: true}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := func(arguments string) chat.ToolCommand {
+		return chat.ToolCommand{OwnerID: testOwner, SessionID: "s1",
+			Call: agents.ToolCall{ID: "call-choice", Name: ToolAskChoice, Arguments: json.RawMessage(arguments)},
+			// A fixed function: nothing but the base tools is available.
+			ToolAvailable: func(name string) bool { return name == ToolAskChoice }}
+	}
+	result, err := executor.Execute(context.Background(), command(`{"kind":"next_step","options":[
+		{"id":"clear_and_draw","label":"清空功能选择","description":"回到自由模式","action":{"type":" clear_operation "}},
+		{"id":"switch","label":"改为换贴图","action":{"type":"switch_operation","operation_id":"retexture"}},
+		{"id":"keep","label":"保持当前功能"}]}`), nil)
+	if err != nil || !result.NoSubmission || result.Error != "" || receivedKind.ID != "next_step" || len(received.Options) != 3 {
+		t.Fatalf("next_step = %+v %+v %v", result, received, err)
+	}
+	if action := received.Options[0].Action; action == nil || action.Type != "clear_operation" || action.OperationID != "" {
+		t.Fatalf("clear action = %+v", received.Options[0].Action)
+	}
+	if action := received.Options[1].Action; action == nil || action.Type != "switch_operation" || action.OperationID != "retexture" {
+		t.Fatalf("switch action = %+v", received.Options[1].Action)
+	}
+	if received.Options[2].Action != nil {
+		t.Fatalf("an option without an action gained %+v", received.Options[2].Action)
+	}
+	// The other kinds keep their target-tool check.
+	if result, _ := executor.Execute(context.Background(), command(`{"kind":"direction"}`), nil); result.Error != "choice target tool unavailable" {
+		t.Fatalf("direction in a fixed function = %+v", result)
+	}
+	// Option ids stay bounded tokens on every kind.
+	if result, _ := executor.Execute(context.Background(), command(
+		`{"kind":"next_step","options":[{"id":"free text","label":"带空格"},{"id":"b","label":"B"}]}`), nil); result.Error != "选项无效。" {
+		t.Fatalf("free-text id = %+v", result)
+	}
+}

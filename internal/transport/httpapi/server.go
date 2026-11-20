@@ -191,12 +191,17 @@ type Config struct {
 	ChatContext ChatContextCompactor
 	// OwnsAgentSession 校验 harness 的 scope 是当前用户自己的会话；
 	// 参数/同意/绑定写入全部经此守卫。
-	OwnsAgentSession      func(context.Context, string, string) bool
-	AgentParams           *agentparams.Store
-	AgentState            *agentparams.Store
-	AgentOperations       AgentOperationReader
-	PromptEnhancer        *promptenhance.Service
-	ProviderAccounts      *provideraccounts.Service
+	OwnsAgentSession func(context.Context, string, string) bool
+	AgentParams      *agentparams.Store
+	AgentState       *agentparams.Store
+	AgentOperations  AgentOperationReader
+	PromptEnhancer   *promptenhance.Service
+	ProviderAccounts *provideraccounts.Service
+	// ProviderBalances reads the provider balances through the shared short
+	// cache (#385): the web balance route is polled by every open page, so it
+	// must not wait on a slow provider once per request. Nil keeps the direct
+	// reads of ProviderAccounts, bounded only by each account's own timeout.
+	ProviderBalances      ProviderBalanceReader
 	AssetProxy            AssetProxy
 	LegacyGeneratedImages LegacyGeneratedImageStore
 	Application           catalog.ApplicationSchema
@@ -329,6 +334,7 @@ type Server struct {
 	ownsAgentSession                  func(context.Context, string, string) bool
 	promptEnhancer                    *promptenhance.Service
 	providerAccounts                  *provideraccounts.Service
+	providerBalances                  ProviderBalanceReader
 	assetProxy                        AssetProxy
 	legacyGeneratedImages             LegacyGeneratedImageStore
 	application                       catalog.ApplicationSchema
@@ -558,6 +564,7 @@ func New(config Config) (*Server, error) {
 		ownsAgentSession:      config.OwnsAgentSession,
 		promptEnhancer:        config.PromptEnhancer,
 		providerAccounts:      config.ProviderAccounts,
+		providerBalances:      config.ProviderBalances,
 		assetProxy:            config.AssetProxy,
 		legacyGeneratedImages: config.LegacyGeneratedImages,
 		application:           config.Application,
@@ -3677,12 +3684,22 @@ func (s *Server) writeDomainError(writer http.ResponseWriter, err error) {
 		)
 	}
 	if status >= http.StatusInternalServerError && s.logger != nil {
-		s.logger.Error(
-			"domain operation failed",
-			"operation", domainErr.Operation,
-			"code", domainErr.Code,
-			"cause", domainErr.Cause,
-		)
+		if traceFromWriter(writer).clientCanceled() {
+			// The client left (#385); the access log line carries the request ID.
+			s.logger.Debug(
+				"domain operation canceled by client",
+				"operation", domainErr.Operation,
+				"code", domainErr.Code,
+				"cause", domainErr.Cause,
+			)
+		} else {
+			s.logger.Error(
+				"domain operation failed",
+				"operation", domainErr.Operation,
+				"code", domainErr.Code,
+				"cause", domainErr.Cause,
+			)
+		}
 	}
 	if reason := userFacingReason(writer, status, err); reason != "" {
 		writeReasonProblem(writer, status, string(domainErr.Code), reason)
@@ -3845,6 +3862,11 @@ func recoverMiddleware(
 	})
 }
 
+// statusClientClosedRequest is the access log's status for a request the client
+// abandoned before the answer was ready (the nginx convention). It is only
+// logged: no response carries it.
+const statusClientClosedRequest = 499
+
 func requestLogMiddleware(
 	logger *slog.Logger,
 	secretRoutes []routing.One,
@@ -3855,11 +3877,19 @@ func requestLogMiddleware(
 		trace := newRequestTrace()
 		writer.Header().Set(requestIDHeader, trace.id)
 		traced := request.WithContext(context.WithValue(request.Context(), requestTraceKey{}, trace))
+		trace.ctx = traced.Context()
 		recorder := &statusRecorder{ResponseWriter: writer, trace: trace}
 		next.ServeHTTP(recorder, traced)
 		status := recorder.status
 		if status == 0 {
 			status = http.StatusOK
+		}
+		// A 5xx that only reflects the client leaving (a page refresh cancels
+		// every request in flight) is logged under the conventional 499, not as
+		// a server error. The response itself is unchanged and nobody reads it.
+		canceled := status >= http.StatusInternalServerError && trace.clientCanceled()
+		if canceled {
+			status = statusClientClosedRequest
 		}
 		attributes := []any{
 			"request_id", trace.id,
@@ -3884,12 +3914,17 @@ func requestLogMiddleware(
 		if trace.code != "" {
 			attributes = append(attributes, "error_code", trace.code, "error_detail", trace.detail)
 		}
+		if canceled {
+			attributes = append(attributes, "client_canceled", true)
+		}
 		if len(trace.causes) > 0 {
 			attributes = append(attributes, "cause", strings.Join(trace.causes, "; "))
 		}
 		trace.mu.Unlock()
 		level := slog.LevelInfo
 		switch {
+		case canceled:
+			// Info: the request is still accounted for, with its ID and cause.
 		case status >= 500:
 			level = slog.LevelError
 		case status >= 400:

@@ -32,7 +32,11 @@ describe('session delete confirmation wiring', () => {
 
   it('keeps the confirmation and its rows on a failed delete, guarded against double submission', () => {
     expect(source).toContain('deletingRef.current');
-    expect(source).toMatch(/catch \{[\s\S]{0,200}toast\.error\(schemaText\(schema, 'ui\.studio\.session\.delete_failed'\)\)/);
+    expect(source).toMatch(/catch \(error\) \{[\s\S]{0,400}toast\.error\(refused \|\| schemaText\(schema, 'ui\.studio\.session\.delete_failed'\)\)/);
+  });
+
+  it('shows the server reason of a refused delete (409, #384) instead of the generic failure', () => {
+    expect(source).toMatch(/error instanceof ChatBrowserError && error\.status === 409 && error\.message/);
     expect(source).toMatch(/finally \{[\s\S]{0,120}setDeleting\(null\)/);
     expect(source).toMatch(/await chat\.deleteSession[\s\S]{0,600}setConfirming\(null\)/);
   });

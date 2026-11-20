@@ -594,11 +594,15 @@ func (e *Executor) setParams(command chat.ToolCommand) chat.ToolResult {
 		if selected.ID == "" || !selected.Enabled {
 			return chat.ToolResult{Error: "parameter offering unavailable", NoSubmission: true}
 		}
-		normalized, err := catalog.ValidateParameterPatch(selected, args.Params, true, args.Reasons)
+		normalized, kept, err := catalog.NormalizeParameterPatch(selected, args.Params, true, args.Reasons)
 		if err != nil {
 			return chat.ToolResult{Error: err.Error(), NoSubmission: true}
 		}
-		args.Params = normalized
+		// #402: a reason for a parameter that is not advised was ignored by
+		// the validation. It is not stored either: the generation that freezes
+		// this Offering's input would refuse a reason that no advised
+		// parameter takes.
+		args.Params, args.Reasons = normalized, kept
 	}
 	if args.OfferingID == "" {
 		e.params.Set(e.scopeKey(command), args.Params)
@@ -770,7 +774,9 @@ func (e *Executor) briefInvalid(reason string) string {
 // askChoiceCard opens a generic choice card declared by chat.choice.kinds
 // (#103). The Agent names the kind only; the options and their arguments come
 // from the Schema and the service. The card's answer would call its target
-// tool, so that tool must be registered and available in this turn's scope.
+// tool, so that tool must be registered and available in this turn's scope; a
+// kind with no target tool (#374) continues the conversation as text and has
+// none to check.
 // boundedChoiceToken reports whether an Agent-supplied direction option id is
 // a bounded token the answer can pass to a tool argument: a letter or digit
 // followed by at most 63 letters, digits, dots, underscores, colons, slashes
@@ -804,6 +810,10 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 			Description string          `json:"description"`
 			Thumbnail   string          `json:"thumbnail"`
 			Arguments   json.RawMessage `json:"arguments"`
+			Action      *struct {
+				Type        string `json:"type"`
+				OperationID string `json:"operation_id"`
+			} `json:"action"`
 		} `json:"options"`
 		Proposal struct {
 			Arguments json.RawMessage `json:"arguments"`
@@ -816,7 +826,7 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	if !declared {
 		return chat.ToolResult{Error: "choice kind unavailable", NoSubmission: true}
 	}
-	if command.ToolAvailable != nil && !command.ToolAvailable(kind.ToolName) {
+	if kind.ToolName != "" && command.ToolAvailable != nil && !command.ToolAvailable(kind.ToolName) {
 		return chat.ToolResult{Error: "choice target tool unavailable", NoSubmission: true}
 	}
 	options := make([]chat.ChoiceOptionInput, 0, len(arguments.Options))
@@ -832,8 +842,12 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 			}
 			return chat.ToolResult{Error: message, NoSubmission: true}
 		}
-		options = append(options, chat.ChoiceOptionInput{ID: id, Label: label, Description: strings.TrimSpace(option.Description),
-			Thumbnail: thumbnail, Arguments: append(json.RawMessage(nil), option.Arguments...)})
+		input := chat.ChoiceOptionInput{ID: id, Label: label, Description: strings.TrimSpace(option.Description),
+			Thumbnail: thumbnail, Arguments: append(json.RawMessage(nil), option.Arguments...)}
+		if option.Action != nil {
+			input.Action = &chat.ChoiceAction{Type: strings.TrimSpace(option.Action.Type), OperationID: strings.TrimSpace(option.Action.OperationID)}
+		}
+		options = append(options, input)
 	}
 	result, err := e.askChoice(ctx, command, kind, chat.AskChoiceArguments{
 		Kind: arguments.Kind, Question: arguments.Question, Recommended: arguments.Recommended,

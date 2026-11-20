@@ -74,6 +74,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		"api.response_fields.error":        schema.API.ResponseFields.Error,
 		"api.response_fields.tool_name":    schema.API.ResponseFields.ToolName,
 		"api.response_fields.tool_args":    schema.API.ResponseFields.ToolArguments,
+		"api.response_fields.is_pending":   schema.API.ResponseFields.IsPending,
 		"api.prompt_enhance.prompt":        schema.API.PromptEnhance.PromptField,
 		"api.prompt_enhance.capability":    schema.API.PromptEnhance.CapabilityField,
 		"api.prompt_enhance.model":         schema.API.PromptEnhance.ModelField,
@@ -177,9 +178,11 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		"presentation.model_choice_conflict":    schema.Presentation.Messages.ModelChoiceConflict,
 		"presentation.model_choice_unavailable": schema.Presentation.Messages.ModelChoiceUnavailable,
 		"presentation.turn_active":              schema.Presentation.Messages.TurnActive,
+		"presentation.session_delete_blocked":   schema.Presentation.Messages.SessionDeleteBlocked,
 		"presentation.agent_busy":               schema.Presentation.Messages.AgentBusy,
 		"presentation.status.generating":        schema.Presentation.Status.Generating,
 		"presentation.status.queued_submission": schema.Presentation.Status.QueuedSubmission,
+		"presentation.status.preparing_tool":    schema.Presentation.Status.PreparingTool,
 		"audit.create_action":                   schema.Audit.CreateAction,
 		"audit.delete_action":                   schema.Audit.DeleteAction,
 		"audit.session_resource_type":           schema.Audit.SessionResourceType,
@@ -366,7 +369,13 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateToolRoundLimitPending(schema.Presentation.Messages); err != nil {
 		return err
 	}
+	if err := validateToolRejectionTexts(schema.Presentation.Messages); err != nil {
+		return err
+	}
 	if err := validateThinkingStatus(schema.Stream.EventTypes, schema.Presentation.Status); err != nil {
+		return err
+	}
+	if err := validateHeartbeatEvent(schema.Stream.EventTypes); err != nil {
 		return err
 	}
 	if reasons := schema.Presentation.Messages.ContentRejectedReasons; reasons != "" && !strings.Contains(reasons, "{reasons}") {
@@ -596,6 +605,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			return err
 		}
 	}
+	if err := validateChatResponsesWire(schema.Agent); err != nil {
+		return err
+	}
 	for _, setting := range []string{
 		schema.Agent.BaseURLSetting,
 		schema.Agent.APIKeySetting,
@@ -648,6 +660,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			"{milliseconds}",
 		) {
 		return errors.New("stream 的时间、Headers 或 retry 模板无效")
+	}
+	if err := validateStreamWatchdog(schema.Frontend, schema.Stream); err != nil {
+		return err
 	}
 	if len(schema.Tools) == 0 {
 		return errors.New("tools 不能为空")
@@ -894,6 +909,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			return fmt.Errorf("tools[%d] 配置不完整", index)
 		}
 		if err := validateReferencePurposes(tool, acceptReferences, schema.Context); err != nil {
+			return fmt.Errorf("tools[%d]: %w", index, err)
+		}
+		if err := validateReferenceImageLabels(tool, acceptReferences, schema.Context); err != nil {
 			return fmt.Errorf("tools[%d]: %w", index, err)
 		}
 		if err := validateAnchorArgument(tool, acceptReferences); err != nil {
@@ -2338,11 +2356,15 @@ func validateChatThinkingProfiles(thinking *ChatThinkingSchema) error {
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 必须声明 model_prefixes", index)
 		}
 		if len(profile.RequestFields) == 0 && profile.EffortField == "" && len(profile.EffortLevels) == 0 &&
-			profile.DefaultEffort == "" && profile.ContextWindowTokens == 0 {
+			profile.DefaultEffort == "" && profile.ContextWindowTokens == 0 &&
+			!profile.OmitTemperature && profile.ChatCompletionsTools == nil && profile.WireAPI == "" {
 			return fmt.Errorf(
-				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field 或 context_window_tokens",
+				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field、context_window_tokens、omit_temperature、chat_completions_tools 或 wire_api",
 				index,
 			)
+		}
+		if err := validateThinkingWire(index, profile); err != nil {
+			return err
 		}
 		for _, prefix := range profile.ModelPrefixes {
 			if prefix == "" || prefix != strings.ToLower(strings.TrimSpace(prefix)) {
@@ -2375,6 +2397,43 @@ func validateChatThinkingProfiles(thinking *ChatThinkingSchema) error {
 		if profile.ContextWindowTokens < 0 {
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 context_window_tokens 必须为正数（不声明时省略）", index)
 		}
+	}
+	return nil
+}
+
+// validateThinkingWire checks a profile's wire_api (#401): a known value, and
+// on the responses wire none of the members that only mean something on chat
+// completions (vendor request fields, reasoning_content passback, the stream
+// usage option), so that nothing the Schema declares is silently not sent.
+func validateThinkingWire(index int, profile ChatThinkingModelProfile) error {
+	switch profile.WireAPI {
+	case "", ChatWireCompletions:
+		return nil
+	case ChatWireResponses:
+	default:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 的 wire_api %q 无效（chat_completions 或 responses）", index, profile.WireAPI)
+	}
+	switch {
+	case len(profile.RequestFields) > 0:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 request_fields", index)
+	case profile.ReasoningPassback:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 reasoning_passback（推理项由协议自己回传）", index)
+	case profile.StreamIncludeUsage != nil:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 stream_include_usage（用量总在结束事件里）", index)
+	}
+	return nil
+}
+
+// validateChatResponsesWire requires chat.agent.responses_endpoint_path when a
+// profile is served on the responses wire (#401): a path that starts with a
+// slash. Without such a profile the path is not read, and not required.
+func validateChatResponsesWire(agent ChatAgentSchema) error {
+	if !agent.Thinking.UsesResponses() {
+		return nil
+	}
+	path := agent.ResponsesEndpointPath
+	if !strings.HasPrefix(path, "/") || strings.TrimSpace(path) != path {
+		return fmt.Errorf("agent.responses_endpoint_path 必须是以 / 开头的路径（有 profile 使用 responses 协议）: %q", path)
 	}
 	return nil
 }
@@ -2552,6 +2611,19 @@ func validateToolRoundLimitPending(messages ChatMessageTexts) error {
 	return nil
 }
 
+// validateToolRejectionTexts checks the two tool results the orchestrator
+// writes itself when it does not run a call: arguments the model wrote as
+// invalid JSON, and a call to a tool this reply cannot run ({tool}) (#378).
+func validateToolRejectionTexts(messages ChatMessageTexts) error {
+	if strings.TrimSpace(messages.ToolArgumentsInvalid) == "" {
+		return errors.New("presentation.tool_arguments_invalid 不能为空")
+	}
+	if strings.TrimSpace(messages.ToolUnavailable) == "" || !strings.Contains(messages.ToolUnavailable, "{tool}") {
+		return errors.New("presentation.tool_unavailable 不能为空，且须含 {tool}（不可用的工具名）")
+	}
+	return nil
+}
+
 // validateThinkingStatus checks the optional thinking status (#285): the
 // event type and its text are declared together, and the event type does not
 // reuse another event's name (the client would read it as that event).
@@ -2564,13 +2636,57 @@ func validateThinkingStatus(types ChatStreamEventTypes, status ChatStatusTexts) 
 	if event == "" || text == "" {
 		return errors.New("stream.event_types.thinking 与 presentation.status.thinking 须同时声明")
 	}
-	for _, other := range []string{
-		types.Text, types.Status, types.Progress, types.Images, types.Title,
-		types.MessageCreated, types.TaskRegistered, types.TaskUpdate, types.Error, types.Done,
-	} {
+	for _, other := range baseChatStreamEventTypes(types) {
 		if event == other {
 			return fmt.Errorf("stream.event_types.thinking %q 与其他事件类型重名", event)
 		}
+	}
+	return nil
+}
+
+// baseChatStreamEventTypes lists the names of the event types every Catalog
+// declares, without the optional thinking and heartbeat events.
+func baseChatStreamEventTypes(types ChatStreamEventTypes) []string {
+	return []string{
+		types.Text, types.Status, types.Progress, types.Images, types.Title,
+		types.MessageCreated, types.TaskRegistered, types.TaskUpdate, types.Error, types.Done,
+	}
+}
+
+// validateHeartbeatEvent checks the optional visible heartbeat event (#375): its
+// name is a plain event type name that no other event type uses, because the
+// client would read the heartbeat as that event, or that event as a heartbeat.
+// Empty keeps the comment frame alone.
+func validateHeartbeatEvent(types ChatStreamEventTypes) error {
+	event := types.Heartbeat
+	if event == "" {
+		return nil
+	}
+	if strings.TrimSpace(event) != event {
+		return fmt.Errorf("stream.event_types.heartbeat %q 不能含首尾空白", event)
+	}
+	for _, other := range append(baseChatStreamEventTypes(types), types.Thinking) {
+		if event == other {
+			return fmt.Errorf("stream.event_types.heartbeat %q 与其他事件类型重名", event)
+		}
+	}
+	return nil
+}
+
+// validateStreamWatchdog checks the thresholds of the client's silence watchdog
+// (#375). The silence window must outlast the heartbeat interval, or a healthy
+// quiet turn would read as a dead connection, and at least one reconnect must
+// be allowed.
+func validateStreamWatchdog(frontend ChatFrontendSchema, stream ChatStreamSchema) error {
+	if frontend.StreamSilenceMilliseconds <= 0 ||
+		frontend.StreamSilenceMilliseconds <= stream.HeartbeatMilliseconds {
+		return fmt.Errorf(
+			"chat.frontend.stream_silence_milliseconds 必须为正数且大于 chat.stream.heartbeat_milliseconds（%d）",
+			stream.HeartbeatMilliseconds,
+		)
+	}
+	if frontend.StreamReconnectAttempts < 1 {
+		return errors.New("chat.frontend.stream_reconnect_attempts 必须至少为 1")
 	}
 	return nil
 }
@@ -2658,6 +2774,107 @@ func validateReferencePurposes(tool ChatToolSchema, acceptReferences bool, conte
 		!strings.Contains(tool.ReferencePurposeItemTemplate, "{purpose}") ||
 		!strings.Contains(context.ReferencePurposeInvalidTemplate, "{handle}") {
 		return errors.New("参考图用途模板缺少占位符")
+	}
+	return nil
+}
+
+// referenceImageLabelsProperty is the shape of the argument that maps a handle
+// to its mark: an object whose values are strings, optionally an enum.
+type referenceImageLabelsProperty struct {
+	Type                 string `json:"type"`
+	AdditionalProperties struct {
+		Type string   `json:"type"`
+		Enum []string `json:"enum"`
+	} `json:"additionalProperties"`
+}
+
+func referenceImageLabelsArgument(tool ChatToolSchema) (referenceImageLabelsProperty, bool) {
+	var parameters struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	var property referenceImageLabelsProperty
+	if json.Unmarshal(tool.Parameters, &parameters) != nil ||
+		json.Unmarshal(parameters.Properties[tool.ReferenceImageLabelsArgument], &property) != nil {
+		return property, false
+	}
+	return property, true
+}
+
+// validateReferenceImageLabels checks a tool that lets the Agent mark which
+// side each reference picture shows (#376): the argument must be a declared
+// object of strings that no Offering parameter maps, the mark of a picture the
+// Agent leaves out must be declared, and the refusal templates must carry their
+// placeholders. Which models take marks, and which marks, is the Offerings'
+// own declaration, checked against the tool with them.
+func validateReferenceImageLabels(tool ChatToolSchema, acceptReferences bool, context ChatContextSchema) error {
+	if tool.ReferenceImageLabelsArgument == "" {
+		if tool.ReferenceImageLabelUnknown != "" {
+			return errors.New("reference_image_label_unknown 需要 reference_image_labels_argument")
+		}
+		return nil
+	}
+	if !acceptReferences || tool.Processing != nil {
+		return errors.New("reference_image_labels_argument 只适用于读取参考图的生成工具")
+	}
+	if !toolSchemaDeclaresParameter(tool, tool.ReferenceImageLabelsArgument) {
+		return fmt.Errorf("reference_image_labels_argument %q 不是工具参数", tool.ReferenceImageLabelsArgument)
+	}
+	if _, mapped := tool.ArgumentMappings[tool.ReferenceImageLabelsArgument]; mapped {
+		return fmt.Errorf("reference_image_labels_argument %q 不是 Offering 参数，不能映射", tool.ReferenceImageLabelsArgument)
+	}
+	if property, ok := referenceImageLabelsArgument(tool); !ok || property.Type != "object" || property.AdditionalProperties.Type != "string" {
+		return fmt.Errorf("reference_image_labels_argument %q 必须是值为字符串的对象参数", tool.ReferenceImageLabelsArgument)
+	}
+	if strings.TrimSpace(tool.ReferenceImageLabelUnknown) == "" {
+		return errors.New("reference_image_labels_argument 需要 reference_image_label_unknown：没有给标记的参考图用它补位")
+	}
+	if !strings.Contains(context.ReferenceLabelPictureTemplate, "{handle}") ||
+		!strings.Contains(context.ReferenceLabelValueTemplate, "{handle}") ||
+		!strings.Contains(context.ReferenceLabelValueTemplate, "{marks}") {
+		return errors.New("参考图标记的拒绝文案缺少占位符")
+	}
+	return nil
+}
+
+// validateChatToolReferenceImageLabels checks the tools that take reference
+// marks against the Offerings they can run (#376). Each Offering of the tool's
+// capabilities that declares the reference-image-labels semantic must offer the
+// mark that fills a picture the Agent left out, and no mark the argument's enum
+// does not list (the enum is what the Agent is told); a tool that no Offering
+// can use the argument with is a declaration that never does anything.
+func validateChatToolReferenceImageLabels(tools []ChatToolSchema, offerings generationMap) error {
+	for index, tool := range tools {
+		if tool.ReferenceImageLabelsArgument == "" {
+			continue
+		}
+		property, _ := referenceImageLabelsArgument(tool)
+		taking := 0
+		for _, offering := range offeringsList(offerings) {
+			if !slices.Contains(tool.Execution.Capabilities, offering.Capability) {
+				continue
+			}
+			for _, parameter := range offering.Parameters {
+				if parameter.Semantic != schemacontract.SemanticReferenceImageLabels {
+					continue
+				}
+				taking++
+				offered := make([]string, 0, len(parameter.Options))
+				for _, option := range parameter.Options {
+					offered = append(offered, option.Value)
+					if len(property.AdditionalProperties.Enum) > 0 && !slices.Contains(property.AdditionalProperties.Enum, option.Value) {
+						return fmt.Errorf("chat.tools[%d] %s 的标记 %q 不在参数 %q 的 enum 里，Agent 不会知道可以用它",
+							index, offering.ID, option.Value, tool.ReferenceImageLabelsArgument)
+					}
+				}
+				if !slices.Contains(offered, tool.ReferenceImageLabelUnknown) {
+					return fmt.Errorf("chat.tools[%d] %s 的标记没有 %q，没有标记的参考图无法补位",
+						index, offering.ID, tool.ReferenceImageLabelUnknown)
+				}
+			}
+		}
+		if taking == 0 {
+			return fmt.Errorf("chat.tools[%d] 声明了 reference_image_labels_argument，但工具能力内没有 Offering 声明 reference-image-labels", index)
+		}
 	}
 	return nil
 }

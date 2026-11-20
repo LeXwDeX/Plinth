@@ -263,15 +263,27 @@ async function runCell(engine, loc, [W, H]) {
     return `blank session rows=${own}; session "${target.title}" rows=${rows} (label ${label}); row click opened detail (${detail.join('').length} chars)`;
   };
 
+  // #405: the generation models, Skills, generation parameters and the chat model with its thinking level are the tabs of one
+  // settings dialog behind the gear beside the send button (tabs: models, skills, params, chat). A pick applies at once and the
+  // dialog stays open, so it is closed again (Esc, up to three times: a Skill dialog may sit on top of it) before the composer,
+  // the canvas or a menu is used.
+  const settings = page.locator('[data-testid=composer-settings-dialog]');
+  const openSettings = async (tabId) => {
+    if (!(await settings.count())) { await tid('composer-settings-open').click({ timeout: 15000 }); await settings.waitFor({ timeout: 10000 }); }
+    if (tabId) { await tid(`composer-settings-tab-${tabId}`).click({ timeout: 15000 }); await page.locator(`[data-testid=composer-settings-tab-${tabId}][aria-selected=true]`).waitFor({ timeout: 10000 }); }
+    await page.waitForTimeout(600);
+  };
+  const closeSettings = async () => { for (let i = 0; i < 3 && await settings.count(); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(400); } };
+  const skillChipText = async () => ((await tid('composer-skill-chip').count()) ? (await tid('composer-skill-chip').innerText()).replace(/\s+/g, ' ').trim() : '');
   const skillRow = (name) => page.locator('[role=dialog],[role=listbox],[data-base-ui-popup]').locator('tr,[role=row],li,[role=option],div').filter({ hasText: name }).last();
-  const openSkills = async () => { await page.keyboard.press('Escape').catch(() => {}); await page.mouse.move(700, 500); await page.waitForTimeout(200); await tid('workspace-skill-picker').click({ timeout: 15000 }).catch(async () => { await tid('workspace-skill-picker').click({ force: true }); }); await page.waitForTimeout(600); };
+  const openSkills = async () => { await closeSettings(); await page.mouse.move(700, 500); await page.waitForTimeout(200); await openSettings('skills'); };
   const delSkill = (n) => page.locator('[data-testid=workspace-skill-picker-panel] div.relative').filter({ has: page.locator('[role=menuitemradio]', { hasText: n }) }).locator('[data-testid=skill-delete]').click();
 
   items['SKL-01'] = async () => {
     await goSession();
     await openSkills(); await shot('skills');
     const txt = (await page.locator('[role=dialog],[role=listbox],[data-base-ui-popup]').allInnerTexts()).join('\n');
-    await page.keyboard.press('Escape');
+    await closeSettings();
     const sys = (await get('/api/v1/chat/skills'))?.skills?.filter((s) => s.id.startsWith('system-')) || [];
     const mine = await apiSkills();
     // acceptance text: "new user: empty, no built-in Skill or category". A new user cannot be created on dev-test
@@ -290,11 +302,13 @@ async function runCell(engine, loc, [W, H]) {
     await page.locator('#personal-skill-prompt').fill('b3 acceptance prompt');
     await page.getByText(L('保存并使用', 'Save and use'), { exact: false }).first().click();
     await page.waitForTimeout(1500);
+    await closeSettings();
   };
   const pickModel2D = async () => {
-    await tid('workspace-model-picker').click(); await page.waitForTimeout(500);
+    await openSettings('models');
     await page.locator('[role=dialog],[data-base-ui-popup]').getByText(/GPT Image/).first().click();
     await page.waitForTimeout(800);
+    await closeSettings();
   };
   const cleanupSkills = async () => {
     for (const s of await apiSkills()) if (s.name.startsWith('b3-') && s.name.endsWith(tag)) await ctx.request.delete(base + '/api/v1/chat/skills/personal/' + encodeURIComponent(s.id), { headers: { Origin: new URL(base).origin } });
@@ -309,21 +323,22 @@ async function runCell(engine, loc, [W, H]) {
     const mine = (await apiSkills()).find((s) => s.name === name);
     ok(mine, 'skill saved server side');
     ok(mine.recommended_size === '2048x2048', `recommended_size=${mine.recommended_size}`);
-    await tid('composer-params').click(); await page.waitForTimeout(800);
+    await openSettings('params'); await page.waitForTimeout(800);
     await shot('params');
     const t = (await page.locator('[role=dialog],[data-base-ui-popup]').allInnerTexts()).join('\n');
     ok(/2048/.test(t), 'size default 2048 shown in params');
     ok(new RegExp(L('来自 Skill|来自\\s*Skill', 'from (the )?Skill'), 'i').test(t), `"from Skill" label present: ${t.replace(/\n+/g, ' | ').slice(0, 200)}`);
-    await page.keyboard.press('Escape');
+    await closeSettings();
     state.skillName = name;
-    return `created via UI, recommended_size=${mine.recommended_size}, params popover shows 2048 + from-Skill label`;
+    return `created via UI, recommended_size=${mine.recommended_size}, params tab shows 2048 + from-Skill label`;
   };
 
   items['SKL-03'] = async () => {
     const a = `b3-skill-a-${tag}`; const b = `b3-skill-b-${tag}`;
     await goSession(); await cleanupSkills(); await goSession();
     await createSkill(a); await createSkill(b); // b is the selected one now
-    const chipText = async () => (await tid('workspace-skill-picker').innerText()).trim();
+    // The selected Skill shows on the composer's Skill chip (the former Skills trigger named it); no chip means none selected.
+    const chipText = skillChipText;
     const sel1 = await chipText();
     // delete the other (a): selection must stay b
     await openSkills();
@@ -331,8 +346,8 @@ async function runCell(engine, loc, [W, H]) {
     await page.waitForTimeout(1200);
     const mine1 = (await apiSkills()).map((s) => s.name);
     ok(!mine1.includes(a) && mine1.includes(b), 'other skill deleted, selected kept');
-    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-    const sel2 = await tid('workspace-skill-picker').innerText();
+    await closeSettings(); await page.waitForTimeout(300);
+    const sel2 = await chipText();
     ok(sel2.toLowerCase().includes('b3-skill-b'),`selected skill still shown after deleting other ("${sel2.slice(0, 40)}")`);
     // delete the selected (b)
     await openSkills();
@@ -341,8 +356,8 @@ async function runCell(engine, loc, [W, H]) {
     const mine2 = (await apiSkills()).map((s) => s.name);
     ok(!mine2.includes(b), 'selected skill deleted');
     await shot('after-delete');
-    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-    const sel3 = await tid('workspace-skill-picker').innerText();
+    await closeSettings(); await page.waitForTimeout(300);
+    const sel3 = await chipText();
     ok(!sel3.includes('b3-skill-b'), `selection back to none after deleting selected ("${sel3.slice(0, 40)}")`);
     return `deleted other (selection kept: chip "${sel1.slice(0, 30)}"), then deleted selected -> back to none`;
   };
@@ -754,9 +769,11 @@ async function runCell(engine, loc, [W, H]) {
     if (!isLogin) found.push('login: residual other-language text'); await anon.close();
     await goSession();
     await note('workspace', async () => {});
-    await note('skill-picker', async () => { await openSkills(); }); await page.keyboard.press('Escape');
-    await note('model-picker', async () => { await tid('workspace-model-picker').click(); await page.waitForTimeout(600); }); await page.keyboard.press('Escape');
-    await note('params', async () => { await pickModel2D(); await tid('composer-params').click(); await page.waitForTimeout(600); }); await page.keyboard.press('Escape');
+    await note('skill-picker', async () => { await openSkills(); }); await closeSettings();
+    await note('model-picker', async () => { await openSettings('models'); await page.waitForTimeout(600); }); await closeSettings();
+    await note('params', async () => { await pickModel2D(); await openSettings('params'); await page.waitForTimeout(600); }); await closeSettings();
+    // The chat model tab only exists when the session has a model choice or levels to show.
+    await note('chat-model-picker', async () => { await openSettings(); if (await tid('composer-settings-tab-chat').count()) await openSettings('chat'); await page.waitForTimeout(600); }); await closeSettings();
     await note('task-center', async () => { await tid('workspace-task-center').click(); await page.waitForTimeout(600); }); await page.keyboard.press('Escape');
     await note('session-menu', async () => { await tid('studio-session-menu').click(); await page.waitForTimeout(600); }); await page.keyboard.press('Escape');
     await note('approval-menu', async () => { await tid('studio-approval-menu').click(); await page.waitForTimeout(500); }); await page.keyboard.press('Escape');
@@ -764,7 +781,7 @@ async function runCell(engine, loc, [W, H]) {
     await note('shortcuts', async () => { await tid('canvas-tool-select').click(); await page.mouse.click(Math.round(W * 0.5), Math.round(H * 0.5)); await page.keyboard.press('?'); await page.waitForTimeout(600); }); await page.keyboard.press('Escape');
     await note('harness-panel', async () => { await tid('right-panel-tab-operations').click(); await page.waitForTimeout(800); });
     await note('persona-panel', async () => { await openNotes(); });
-    await note('skill-creator', async () => { await openSkills(); await page.getByText(L('创建 Skill', 'Create Skill'), { exact: true }).click(); await page.waitForTimeout(500); }); await page.keyboard.press('Escape');
+    await note('skill-creator', async () => { await openSkills(); await page.getByText(L('创建 Skill', 'Create Skill'), { exact: true }).click(); await page.waitForTimeout(500); }); await closeSettings();
     for (const [label, route] of [['account', '/account'], ['admin', '/admin'], ['admin-users', '/admin/users'], ['admin-generations', '/admin/generations'], ['admin-audit', '/admin/audit'], ['admin-user-assets', '/admin/user-assets'], ['admin-agent-config', '/admin/agent-configuration'], ['admin-llm', '/admin/llm']]) {
       await note(label, async () => { await page.goto(base + route); await page.waitForTimeout(2200); });
     }
@@ -780,15 +797,15 @@ async function runCell(engine, loc, [W, H]) {
 
   items['I18N-04'] = async () => {
     await goSession();
-    await pickModel2D(); await tid('composer-params').click(); await page.waitForTimeout(600);
-    const iss = await textIssues('[role=dialog],[data-base-ui-popup]'); await shot('params-popover'); await page.keyboard.press('Escape');
+    await pickModel2D(); await openSettings('params'); await page.waitForTimeout(600);
+    const iss = await textIssues('[role=dialog],[data-base-ui-popup]'); await shot('params-dialog'); await closeSettings();
     await tid('right-panel-tab-operations').click(); await page.waitForTimeout(500);
     const iss2 = await textIssues('[data-testid=harness-panel]');
     const errs = state.m3dErrors;
     const errBad = errs ? errs.filter((e) => (zh ? !CJK.test(e) : CJK.test(e))) : [];
     const all = [...iss, ...iss2, ...errBad.map((e) => 'error text in wrong language: ' + e)];
     if (all.length) throw new Error(`${all.length} issues: ${all.slice(0, 8).join(' || ')}`);
-    return `params popover, harness panel and upload-rejection errors are all ${zh ? 'Chinese' : 'English'} (${errs ? errs.length + ' error strings' : 'M3D-06 errors not collected'})`;
+    return `params tab of the settings dialog, harness panel and upload-rejection errors are all ${zh ? 'Chinese' : 'English'} (${errs ? errs.length + ' error strings' : 'M3D-06 errors not collected'})`;
   };
 
   items['I18N-06'] = async () => {

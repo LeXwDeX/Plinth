@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "packageManager": "pnpm@12.5.1",
   "private": true,
+  "browserslist": [
+    "chrome >= 111",
+    "edge >= 111",
+    "firefox >= 128",
+    "safari >= 16.4"
+  ],
   "license": "Apache-2.0",
   "scripts": {
     "build": "vite build --config vite.go-web.config.mjs && node scripts/check-build-external-links.mjs",

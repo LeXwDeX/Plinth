@@ -210,6 +210,30 @@ async function sample(page, client, label) {
     windowDocumentListeners: result.value, domNodes: domCounters.nodes, jsEventListeners: domCounters.jsEventListeners };
 }
 
+/**
+ * #405: the generation models, Skills, generation parameters and the chat model with its thinking level are the tabs of one
+ * settings dialog behind the gear beside the send button (`tab`: models, skills, params or chat). A pick applies at once and
+ * the dialog stays open, so it is closed again before the composer, the board or the stage is used.
+ */
+async function openComposerSettings(page, tab) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) {
+    await page.click('[data-testid=composer-settings-open]');
+    await dialog.waitFor({ timeout: 10000 });
+  }
+  if (tab) {
+    await page.click(`[data-testid=composer-settings-tab-${tab}]`);
+    await page.locator(`[data-testid=composer-settings-tab-${tab}][aria-selected=true]`).waitFor({ timeout: 10000 });
+  }
+}
+
+async function closeComposerSettings(page) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) return;
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+}
+
 const browser = await pw.chromium.launch({ headless: true, args: ['--js-flags=--expose-gc'] });
 const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
 await context.addInitScript(TRACK_IMAGES);
@@ -222,9 +246,9 @@ const client = await context.newCDPSession(page);
 
 await page.goto(`${BASE}/`);
 await page.waitForSelector('[data-testid=canvas-tool-rail]', { timeout: 30000 });
-await page.click('[data-testid=workspace-model-picker]');
+await openComposerSettings(page, 'models');
 await page.locator('[data-testid=workspace-model-picker-image] [role=menu] [role=menuitemradio]').first().click();
-await page.keyboard.press('Escape');
+await closeComposerSettings(page);
 
 const samples = [];
 for (let turn = 0; turn < TURNS; turn += 1) {

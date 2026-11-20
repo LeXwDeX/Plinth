@@ -26,40 +26,48 @@ func decodeApproval(t *testing.T, body string) (mode string, credits float64) {
 	return mode, credits
 }
 
-func TestChatApprovalModeDefaultsToBudgetAndSwitchesForOwner(t *testing.T) {
+func TestChatApprovalModeDefaultsToAutoAndSwitchesForOwner(t *testing.T) {
 	t.Parallel()
-	handler, cookie, sessionID := grantTestBrowser(t)
+	handler, cookie, _ := grantTestBrowser(t)
+	sessionID := newDefaultModeSession406(t, handler, cookie)
 
 	read := grantTestRequest(t, handler, cookie, http.MethodGet, approvalPath(sessionID), "", "")
-	if mode, credits := decodeApproval(t, read.Body.String()); read.Code != http.StatusOK || mode != "budget" || credits != 0 {
+	if mode, credits := decodeApproval(t, read.Body.String()); read.Code != http.StatusOK || mode != "auto" || credits != 0 {
 		t.Fatalf("default mode: %d %s", read.Code, read.Body.String())
 	}
-	put := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"auto"}`, "")
-	if mode, _ := decodeApproval(t, put.Body.String()); put.Code != http.StatusOK || mode != "auto" {
-		t.Fatalf("switch to auto: %d %s", put.Code, put.Body.String())
+	put := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"manual"}`, "")
+	if mode, _ := decodeApproval(t, put.Body.String()); put.Code != http.StatusOK || mode != "manual" {
+		t.Fatalf("switch to manual: %d %s", put.Code, put.Body.String())
 	}
 	reread := grantTestRequest(t, handler, cookie, http.MethodGet, approvalPath(sessionID), "", "")
-	if mode, _ := decodeApproval(t, reread.Body.String()); mode != "auto" {
+	if mode, _ := decodeApproval(t, reread.Body.String()); mode != "manual" {
 		t.Fatalf("mode not persisted: %s", reread.Body.String())
 	}
 	list := grantTestRequest(t, handler, cookie, http.MethodGet, "/api/chat/sessions", "", "")
-	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"approvalMode":"auto"`) ||
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"approvalMode":"manual"`) ||
 		!strings.Contains(list.Body.String(), `"estimatedCredits":0`) {
 		t.Fatalf("session list lacks the mode and credits: %d %s", list.Code, list.Body.String())
-	}
-	back := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"manual"}`, "")
-	if mode, _ := decodeApproval(t, back.Body.String()); back.Code != http.StatusOK || mode != "manual" {
-		t.Fatalf("switch back: %d %s", back.Code, back.Body.String())
 	}
 	planned := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"budget"}`, "")
 	if mode, _ := decodeApproval(t, planned.Body.String()); planned.Code != http.StatusOK || mode != "budget" {
 		t.Fatalf("switch to budget: %d %s", planned.Code, planned.Body.String())
+	}
+	back := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"auto"}`, "")
+	if mode, _ := decodeApproval(t, back.Body.String()); back.Code != http.StatusOK || mode != "auto" {
+		t.Fatalf("switch back to auto: %d %s", back.Code, back.Body.String())
 	}
 }
 
 func TestChatApprovalModeRejectsInvalidAndCredentialOnlyRequests(t *testing.T) {
 	t.Parallel()
 	handler, cookie, sessionID := grantTestBrowser(t)
+	// The session is in the strict mode, so a request that wrongly raised it
+	// shows. The helper's session is in budget mode; make it strict through the
+	// browser session, the only way a mode changes.
+	strict := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), `{"approvalMode":"manual"}`, "")
+	if mode, _ := decodeApproval(t, strict.Body.String()); strict.Code != http.StatusOK || mode != "manual" {
+		t.Fatalf("make the session strict: %d %s", strict.Code, strict.Body.String())
+	}
 	for _, body := range []string{`{"approvalMode":"yolo"}`, `{"approvalMode":""}`, `{}`, `not json`} {
 		response := grantTestRequest(t, handler, cookie, http.MethodPut, approvalPath(sessionID), body, "")
 		if response.Code != http.StatusBadRequest {
@@ -72,7 +80,7 @@ func TestChatApprovalModeRejectsInvalidAndCredentialOnlyRequests(t *testing.T) {
 		t.Fatalf("credential-only switch accepted: %s", bare.Body.String())
 	}
 	read := grantTestRequest(t, handler, cookie, http.MethodGet, approvalPath(sessionID), "", "")
-	if mode, _ := decodeApproval(t, read.Body.String()); mode != "budget" {
+	if mode, _ := decodeApproval(t, read.Body.String()); mode != "manual" {
 		t.Fatalf("rejected requests changed the mode: %s", read.Body.String())
 	}
 }

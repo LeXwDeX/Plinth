@@ -75,6 +75,12 @@ export interface PlanCardProps {
   onCompareCandidates?: (taskIds: readonly string[]) => void;
   /** #242: open one candidate on the stage. */
   onSelectCandidate?: (taskId: string) => void;
+  /**
+   * #403: a step of an approved plan that has no task can still get one (its turn still runs, or a decision it waits
+   * for is open). When false such a step reads "not run" instead of "waiting to run". Read from the running-turn
+   * projection of the session's messages; a plan that still waits for approval always reads "waiting".
+   */
+  stepsMayStillRun?: boolean;
 }
 
 function capabilityLabel(schema: ReturnType<typeof useProductSchema>['schema'], id: string): string {
@@ -101,7 +107,7 @@ function planCheckLabel(schema: ProductSchema, id: string): string {
  * approved the same card shows the live budget and each step's Task state.
  */
 export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null,
-  stepTotals = [], contingencyTotals = [], onCompareCandidates, onSelectCandidate }: PlanCardProps) {
+  stepTotals = [], contingencyTotals = [], onCompareCandidates, onSelectCandidate, stepsMayStillRun = true }: PlanCardProps) {
   const { schema } = useProductSchema();
   const text = (key: string) => schemaText(schema, key);
   const capabilities = useMemo(
@@ -116,7 +122,14 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
     { revalidateOnFocus: false },
   );
   const decidedAt = progress?.decidedAt ?? '';
-  const stepProgress = useMemo(() => planStepProgress(plan, tasks, decidedAt), [plan, tasks, decidedAt]);
+  // #403: only a plan the person has decided can have steps that were never run; one still waiting for the decision
+  // waits for that, not for a turn.
+  const decided = progress !== null && budgetStateRole(schema, progress.state) !== 'pending';
+  const mayStillRun = decided ? stepsMayStillRun : true;
+  const stepProgress = useMemo(
+    () => planStepProgress(plan, tasks, decidedAt, mayStillRun),
+    [plan, tasks, decidedAt, mayStillRun],
+  );
   const isCompleteTask = (task: PlanTask) => taskStatePresentation(schema, task.state).outcome === 'success';
   // #242: candidate steps are shown as their own parallel groups; every other
   // step keeps the ordinary ordered list.
@@ -191,7 +204,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                 className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2"
                 data-testid="studio-plan-step"
                 data-capability={entry.step.capability}
-                data-state={entry.task?.state ?? 'pending'}
+                data-state={entry.task?.state ?? (entry.notRun ? 'not_run' : 'pending')}
               >
                 <span className="tabular-nums text-muted-foreground">{index + 1}.</span>
                 <HintTooltip name={`${capabilityLabel(schema, entry.step.capability)} · ${modelName(entry.step.capability, entry.step.offeringId)}`} className="block min-w-0 max-w-full">
@@ -205,7 +218,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                     <span>{formatSchemaText(text('ui.studio.plan.estimated'), { amount: priceTotalsAmountsText(schema, [estimate]) })}</span>
                   ) : null}
                   <span className={cn('text-[11px]', state?.outcome === 'success' && 'text-success', state?.outcome === 'failure' && 'text-destructive')}>
-                    {state ? state.label : text('ui.studio.plan.step_pending')}
+                    {state ? state.label : text(entry.notRun ? 'ui.studio.plan.step_not_run' : 'ui.studio.plan.step_pending')}
                   </span>
                 </span>
                 {entry.step.purposeBudgetNote ? (
@@ -254,7 +267,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                         key={`${group.group}-${index}-${entry.step.offeringId}`}
                         className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2"
                         data-testid="studio-plan-candidate"
-                        data-state={entry.task?.state ?? 'pending'}
+                        data-state={entry.task?.state ?? (entry.notRun ? 'not_run' : 'pending')}
                       >
                         <span className="tabular-nums text-muted-foreground">
                           {formatSchemaText(text('ui.studio.plan.candidate_n'), { index: entry.step.candidateIndex ?? index + 1 })}
@@ -268,7 +281,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                             <span>{formatSchemaText(text('ui.studio.plan.estimated'), { amount: priceTotalsAmountsText(schema, [estimate]) })}</span>
                           ) : null}
                           <span className={cn('text-[11px]', state?.outcome === 'success' && 'text-success', state?.outcome === 'failure' && 'text-destructive')}>
-                            {state ? state.label : text('ui.studio.plan.step_pending')}
+                            {state ? state.label : text(entry.notRun ? 'ui.studio.plan.step_not_run' : 'ui.studio.plan.step_pending')}
                           </span>
                         </span>
                       </li>

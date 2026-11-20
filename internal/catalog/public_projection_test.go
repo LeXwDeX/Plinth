@@ -189,6 +189,11 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"chat.api.fields.content",
 		"chat.api.prompt_enhance.prompt_field",
 		"chat.stream.event_types.done",
+		// #375: the client skips the visible heartbeat and watches the stream
+		// for silence with these thresholds.
+		"chat.stream.event_types.heartbeat",
+		"chat.frontend.stream_silence_milliseconds",
+		"chat.frontend.stream_reconnect_attempts",
 		"chat.context.image_index_base",
 		"chat.skills.fields.skills",
 		"chat.presentation.messages.internal_error",

@@ -311,9 +311,32 @@ async function clickEmpty(page) {
   throw new Error('no empty stage point');
 }
 
+/**
+ * #405: the generation models and the generation parameters are tabs of the settings dialog behind the gear beside the send
+ * button (`tab`: models or params). A pick applies at once and the dialog stays open, so it is closed again before the
+ * board is used.
+ */
+async function openComposerSettings(page, tab) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) {
+    await page.click('[data-testid=composer-settings-open]');
+    await dialog.waitFor({ timeout: 10000 });
+  }
+  if (tab) {
+    await page.click(`[data-testid=composer-settings-tab-${tab}]`);
+    await page.locator(`[data-testid=composer-settings-tab-${tab}][aria-selected=true]`).waitFor({ timeout: 10000 });
+  }
+}
+async function closeComposerSettings(page) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) return;
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+}
+
 async function openParams(page) {
   if (!(await page.locator('[data-testid=composer-params-panel]').isVisible().catch(() => false))) {
-    await page.click('[data-testid=composer-params]');
+    await openComposerSettings(page, 'params');
     await page.locator('[data-testid=composer-params-panel]').waitFor();
   }
 }
@@ -385,9 +408,10 @@ async function checks(engine, browser, [width, height]) {
   await page.goto(`${BASE}/`);
   await page.waitForSelector('[data-canvas-drawing-area]', { timeout: 30000 });
   await upload(page, 1);
-  await page.click('[data-testid=workspace-model-picker]');
-  await page.locator('[data-testid=workspace-model-picker-image] [role=menu] [role=menuitemradio]').first().click();
-  await page.keyboard.press('Escape');
+  await openComposerSettings(page, 'models');
+  // The size control is the one with pixel sizes: a model that lists ratios only (the first row today) has none.
+  await page.locator('[data-testid=workspace-model-picker-image] [role=menu] [role=menuitemradio]').filter({ hasText: 'GPT Image' }).first().click();
+  await closeComposerSettings(page);
   await page.click('[data-testid=canvas-tool-select]');
   const [picture] = await pictures(page);
   const { index, sizes } = await sizeOptions(page);

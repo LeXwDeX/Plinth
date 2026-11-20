@@ -387,7 +387,8 @@ class Waiting(unittest.TestCase):
         self.assertTrue(c.reply_is_final([failed]))
 
     # Wire of GET /api/chat/sessions/{id}/stream (writeChatEvent: "id: N\ndata: {json}\n\n", retry and
-    # heartbeat frames). Planning text is persisted before tools run, so only the done event ends a turn.
+    # heartbeat frames: the comment frame, and the data frame of the visible heartbeat, #375). Planning
+    # text is persisted before tools run, so only the done event ends a turn.
     STREAM = [b"retry: 86400000\n", b"\n", b'id: 1\n', b'data: {"type":"msg_created","msgId":"m1"}\n', b"\n",
               b'id: 2\n', b'data: {"type":"text","content":"\xe5\xa5\xbd\xe7\x9a\x84\xef\xbc\x8c\xe6\x88\x91\xe6\x9d\xa5\xe7\x94\x9f\xe6\x88\x90"}\n', b"\n",
               b": heartbeat\n", b"\n"]
@@ -397,6 +398,16 @@ class Waiting(unittest.TestCase):
         self.assertEqual([e["type"] for e in events], ["msg_created", "text"])
         self.assertFalse(c.stream_finished(events))
         events = c.parse_sse_events(self.STREAM + [b"id: 3\n", b'data: {"type":"done"}\n', b"\n"])
+        self.assertTrue(c.stream_finished(events))
+
+    def test_stream_parser_ignores_the_visible_heartbeat(self):
+        # #375: a quiet turn writes {"type":"heartbeat"} as a data frame without an id line.
+        beat = [b'data: {"type":"heartbeat"}\n', b"\n"]
+        events = c.parse_sse_events(self.STREAM + beat + beat)
+        self.assertEqual([e["type"] for e in events], ["msg_created", "text"])
+        self.assertFalse(c.stream_finished(events))
+        events = c.parse_sse_events(self.STREAM + beat + [b"id: 3\n", b'data: {"type":"done"}\n', b"\n"])
+        self.assertEqual([e["type"] for e in events], ["msg_created", "text", "done"])
         self.assertTrue(c.stream_finished(events))
 
     def test_stream_parser_ignores_garbage(self):

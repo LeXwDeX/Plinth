@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,6 +190,12 @@ type Repository struct {
 	// 产生"出生即过期"的租约（lease_until < 提交 UpdatedAt → CAS 恒冲突）。
 	// 默认墙钟；合成时间线的测试必须注入与 generation.Module 相同的时钟。
 	clock func() time.Time
+	// deleteBatchRows is the number of bulk rows one transaction of
+	// DeleteSession removes; zero means the sessionDelete*BatchRows constants.
+	// afterDeleteBatch runs between two such transactions while the connection
+	// is free. Both exist for tests.
+	deleteBatchRows  int
+	afterDeleteBatch func()
 }
 
 func Open(path string) (*Repository, error) {
@@ -201,7 +208,7 @@ func Open(path string) (*Repository, error) {
 			return nil, fmt.Errorf("创建数据库目录: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", withConnectionPragmas(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("打开 SQLite: %w", err)
 	}
@@ -223,6 +230,29 @@ func (r *Repository) SetClock(now func() time.Time) {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	r.clock = now
+}
+
+// connectionPragmas are the per-connection settings every connection of the
+// pool must carry. The driver applies a DSN _pragma to each connection it
+// opens, unlike a PRAGMA statement, which reaches only the connection that ran
+// it: the pool opens a replacement whenever the driver discards a connection
+// (modernc.org/sqlite does so after a statement was interrupted by a canceled
+// request context), and a replacement without these would run with foreign key
+// enforcement off, so deletions stop cascading and leave orphans (#384).
+var connectionPragmas = []string{"foreign_keys(1)", "busy_timeout(5000)", "synchronous(NORMAL)"}
+
+// withConnectionPragmas adds connectionPragmas to a file DSN. The bare
+// ":memory:" name takes no query, and a DSN that already names pragmas keeps
+// them.
+func withConnectionPragmas(dsn string) string {
+	if dsn == ":memory:" || strings.Contains(dsn, "_pragma=") {
+		return dsn
+	}
+	separator := "?"
+	if strings.Contains(dsn, "?") {
+		separator = "&"
+	}
+	return dsn + separator + url.Values{"_pragma": connectionPragmas}.Encode()
 }
 
 func normalizeDSN(value string) (dsn string, filePath string, err error) {

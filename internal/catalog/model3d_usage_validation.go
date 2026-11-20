@@ -530,9 +530,10 @@ func validateProductionBriefMessages(messages ChatProductionBriefMessages, hasSe
 }
 
 // validateChoiceKinds checks the generic choice kinds declared by
-// application.chat.choice.kinds. Every kind must take its options from the
-// usage profiles, the only option source the service builds, and name a
-// declared tool and one of its string arguments. The usage-profile kind may
+// application.chat.choice.kinds. Every kind must take its options from an
+// option source the service builds and name a declared tool and one of its
+// string arguments; the one exception is an agent kind with no tool_name (#374),
+// whose answer continues the conversation as text. The usage-profile kind may
 // sit at any position (#103 review C3).
 func validateChoiceKinds(schema ChatSchema) error {
 	if len(schema.Choice.Kinds) == 0 {
@@ -541,6 +542,7 @@ func validateChoiceKinds(schema ChatSchema) error {
 	ids := make([]string, 0, len(schema.Choice.Kinds))
 	seen := map[string]bool{}
 	agentOptions := false
+	declaredActions := map[string]bool{}
 	for index, kind := range schema.Choice.Kinds {
 		if strings.TrimSpace(kind.ID) == "" {
 			return fmt.Errorf("choice.kinds[%d].id 不能为空", index)
@@ -557,14 +559,26 @@ func validateChoiceKinds(schema ChatSchema) error {
 		default:
 			return fmt.Errorf("choice.kinds[%d].option_source %q 未实现", index, kind.OptionSource)
 		}
-		for name, value := range map[string]string{
-			"tool_name": kind.ToolName,
-			"question":  kind.Question,
-			"message":   kind.Message,
-		} {
+		targetless := strings.TrimSpace(kind.ToolName) == ""
+		required := map[string]string{"question": kind.Question, "message": kind.Message}
+		if !targetless {
+			required["tool_name"] = kind.ToolName
+		}
+		for name, value := range required {
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf("choice.kinds[%d].%s 不能为空", index, name)
 			}
+		}
+		if err := validateChoiceKindShape(index, kind, targetless, schema.Choice.MaxOptions); err != nil {
+			return err
+		}
+		for _, action := range kind.Actions {
+			declaredActions[action] = true
+		}
+		if targetless {
+			// No target tool: the answer is text, so there is no tool or
+			// argument to look up.
+			continue
 		}
 		// An agent kind may carry no single answer argument: its options carry
 		// the exact target-tool arguments instead (#242). The quantity card's
@@ -616,6 +630,11 @@ func validateChoiceKinds(schema ChatSchema) error {
 			return fmt.Errorf("choice.kinds 含 option_source=agent 时必须声明 ask_choice.options 数组参数")
 		}
 	}
+	if len(declaredActions) > 0 {
+		if err := validateChoiceActionParameter(parameters, declaredActions); err != nil {
+			return err
+		}
+	}
 	kindProperty, ok := properties["kind"].(map[string]any)
 	if !ok || kindProperty["type"] != "string" {
 		return fmt.Errorf("ask_choice.kind 必须是字符串参数")
@@ -627,6 +646,79 @@ func validateChoiceKinds(schema ChatSchema) error {
 	for index, value := range values {
 		if value != ids[index] {
 			return fmt.Errorf("ask_choice.kind 的 enum 第 %d 项必须是 %q", index+1, ids[index])
+		}
+	}
+	return nil
+}
+
+// validateChoiceKindShape checks what one kind declares beyond its tool and
+// argument (#374): a kind with no target tool is an agent kind that carries no
+// argument and words its own answer and pending text; the option bounds only
+// narrow the card default; the actions are the implemented ones.
+func validateChoiceKindShape(index int, kind ChatChoiceKindSchema, targetless bool, schemaMaxOptions int) error {
+	if targetless {
+		if kind.OptionSource != "agent" || kind.Argument != "" {
+			return fmt.Errorf("choice.kinds[%d] 没有 tool_name 时必须是 option_source=agent 且不声明 argument", index)
+		}
+		for name, value := range map[string]string{"answer_template": kind.AnswerTemplate, "pending_template": kind.PendingTemplate} {
+			if !strings.Contains(value, "{continuation}") {
+				return fmt.Errorf("choice.kinds[%d].%s 必须包含 {continuation}", index, name)
+			}
+		}
+	} else if kind.AnswerTemplate != "" || kind.PendingTemplate != "" {
+		return fmt.Errorf("choice.kinds[%d] 只有没有 tool_name 的 kind 才能声明 answer_template 与 pending_template", index)
+	}
+	if kind.MinOptions != 0 || kind.MaxOptions != 0 {
+		if kind.OptionSource != "agent" {
+			return fmt.Errorf("choice.kinds[%d].min_options 与 max_options 只用于 option_source=agent", index)
+		}
+		if (kind.MinOptions != 0 && kind.MinOptions < 2) ||
+			(kind.MaxOptions != 0 && (kind.MaxOptions < 2 || kind.MaxOptions < kind.MinOptions ||
+				(schemaMaxOptions > 0 && kind.MaxOptions > schemaMaxOptions))) {
+			return fmt.Errorf("choice.kinds[%d] 的选项数界限必须满足 2 <= min_options <= max_options <= choice.max_options", index)
+		}
+	}
+	if len(kind.Actions) == 0 {
+		return nil
+	}
+	if kind.OptionSource != "agent" {
+		return fmt.Errorf("choice.kinds[%d].actions 只用于 option_source=agent", index)
+	}
+	seen := map[string]bool{}
+	for _, action := range kind.Actions {
+		if (action != ChoiceActionSwitchOperation && action != ChoiceActionClearOperation) || seen[action] {
+			return fmt.Errorf("choice.kinds[%d].actions 含未实现或重复的动作 %q", index, action)
+		}
+		seen[action] = true
+	}
+	return nil
+}
+
+// validateChoiceActionParameter checks that ask_choice offers the Agent
+// exactly the actions the kinds allow (#374): an object parameter on each
+// option whose type enum is the declared set, and an operation_id for
+// switch_operation.
+func validateChoiceActionParameter(parameters map[string]any, declared map[string]bool) error {
+	option := askChoiceOptionSchema(parameters)
+	action, _ := option["action"].(map[string]any)
+	actionProperties, _ := action["properties"].(map[string]any)
+	if action == nil || action["type"] != "object" || actionProperties == nil {
+		return fmt.Errorf("choice.kinds 声明 actions 时 ask_choice.options 的选项必须声明对象参数 action")
+	}
+	typeProperty, _ := actionProperties["type"].(map[string]any)
+	values, _ := typeProperty["enum"].([]any)
+	if typeProperty["type"] != "string" || len(values) != len(declared) {
+		return fmt.Errorf("ask_choice.options.action.type 的 enum 必须与 choice.kinds 声明的 actions 一一对应")
+	}
+	for _, value := range values {
+		name, _ := value.(string)
+		if !declared[name] {
+			return fmt.Errorf("ask_choice.options.action.type 的 enum 含未声明的动作 %v", value)
+		}
+	}
+	if declared[ChoiceActionSwitchOperation] {
+		if _, ok := actionProperties["operation_id"].(map[string]any); !ok {
+			return fmt.Errorf("ask_choice.options.action 必须声明 operation_id（switch_operation 需要它）")
 		}
 	}
 	return nil

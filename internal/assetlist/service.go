@@ -579,9 +579,21 @@ func (service *Service) FinishItem(
 
 // decorateWithRun derives the read-time list fields and attaches the list's
 // run summary when it has one (#328). A list without a run keeps Run nil.
+//
+// The items and the summary come from two separate reads, so an item can
+// change state between them. When the list carries its items, the counts are
+// recounted from those items, so one answer never shows counts that disagree
+// with its own items (#390); the run status and version stay the summary's.
 func (service *Service) decorateWithRun(list List, summaries map[string]RunSummary) List {
 	list = service.decorate(list)
 	if summary, found := summaries[list.ID]; found {
+		if list.Items != nil {
+			var counts ItemCounts
+			for _, item := range list.Items {
+				counts.Add(item.State, 1)
+			}
+			summary.ItemCounts = counts
+		}
 		list.Run = &summary
 	}
 	return list

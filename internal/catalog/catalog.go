@@ -281,6 +281,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := validateChatToolOfferingSelection(result.application.Chat, result.byID); err != nil {
 		return nil, fmt.Errorf("application.chat: %w", err)
 	}
+	if err := validateChatToolReferenceImageLabels(result.application.Chat.Tools, result.byID); err != nil {
+		return nil, fmt.Errorf("application.chat: %w", err)
+	}
 	if err := validateOfferingKnowledgeCoverage(result.application.Chat.Agent.OfferingKnowledge, result.byID); err != nil {
 		return nil, fmt.Errorf("application.chat: %w", err)
 	}

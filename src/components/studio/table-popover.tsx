@@ -1,23 +1,18 @@
 'use client';
 
-import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Popover } from '@base-ui/react/popover';
-import { Check, ChevronDown, Pencil, Trash2 } from 'lucide-react';
+import { useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { Check, Pencil, Trash2 } from 'lucide-react';
 
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
-import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { cn } from '@/lib/utils';
 
 /**
  * Latin letters of the composer's pickers read in capitals through CSS only (#108): the Schema text, the data,
- * the accessible names and the values sent stay as they are, and Chinese is unaffected. Shared by the trigger
- * frame, the option cells that carry names and the context meter.
+ * the accessible names and the values sent stay as they are, and Chinese is unaffected. Shared by the option cells
+ * that carry names and the context meter under the composer.
  */
 export const PICKER_UPPERCASE_CLASS = 'uppercase tracking-wide';
-
-/** The trigger frame the composer's pickers share (also used by the parameters button). */
-export const PICKER_TRIGGER_CLASS = `flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md border border-input bg-secondary px-2 text-xs text-foreground transition-colors hover:bg-panel-raised focus-visible:outline-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 data-popup-open:border-primary data-popup-open:bg-primary/15 data-popup-open:text-primary ${PICKER_UPPERCASE_CLASS}`;
 
 export interface TableCell {
   text: string;
@@ -42,8 +37,6 @@ export interface TableRowAction {
   testId?: string;
   /** 行尾按钮的图标；缺省为删除。 */
   kind?: 'edit' | 'delete';
-  /** 点击后收起弹层（例如打开编辑对话框）；删除保持弹层打开。 */
-  closeOnClick?: boolean;
 }
 
 export interface TableRow {
@@ -63,7 +56,7 @@ export interface TableRow {
   actions?: TableRowAction[];
 }
 
-/** 弹层里的一张小表格：一组单选行。模型选择把 2D 和 3D 两张并排放，Skill 和 Agent 模式各一张。 */
+/** 设置页里的一张小表格：一组单选行。模型选择把 2D 和 3D 两张并排放，Skill 和对话模型各占一页。 */
 export interface TableSection {
   title: string;
   hint?: string;
@@ -72,7 +65,7 @@ export interface TableSection {
   columns: string;
   rows: TableRow[];
   selectedKey: string | null;
-  foot?: ReactNode | ((close: () => void) => ReactNode);
+  foot?: ReactNode;
   emptyText?: string;
   loadingText?: string;
   loading?: boolean;
@@ -84,65 +77,28 @@ export interface TableSection {
   disabledReason?: string;
   disabledLabel?: string;
   testId?: string;
-  /** 选中后是否收起弹层；缺省：单表收起，多表保持打开。 */
-  closeOnPick?: boolean;
   onPick: (key: string) => void;
 }
 
-export interface TablePopoverProps {
-  /** 触发按钮的无障碍名称与悬停提示。 */
-  label: string;
-  /** 触发按钮上的当前值。 */
-  value: string;
-  /**
-   * 触发按钮上分段显示的值（如 2D、3D 两个模型名，#324）：每段各自截断，前一段至多占一半宽，
-   * 所以一个长名字不会把后一段整个挤掉。缺省时整体显示 value。
-   */
-  valueParts?: { parts: string[]; separator: string };
-  /** 悬停提示与无障碍名称里的完整值（触发按钮只显示简称时用）；缺省同 value。 */
-  fullValue?: string;
-  icon?: ReactNode;
-  disabled?: boolean;
-  /** 悬停提示里名称下的一行说明（如思考强度的“档位越高…”），也作为触发按钮的无障碍描述。 */
-  hint?: string;
-  /** 触发按钮为什么停用；停用时写在悬停提示第一行，也作为无障碍描述。 */
-  triggerDisabledReason?: string;
-  testId?: string;
-  /** 一张表时选中即关闭；多张表并排时弹层保持打开，方便每张各选一项。 */
+export interface TableSectionsProps {
+  /** 一张表时占满一栏；多张表并排（容器够宽时）或上下排。 */
   sections: TableSection[];
   /**
-   * 一个入口里的两步选择（#223，对话模型与思考档位）：两张表左右两栏，左右方向键在两栏之间移动焦点
-   * （落到该栏当前选中行，没有则第一行）；弹层放不下两栏时退化为上下堆叠。
+   * 一个页里的两步选择（#223，对话模型与思考档位）：两张表左右两栏，左右方向键在两栏之间移动焦点
+   * （落到该栏当前选中行，没有则第一行）；容器放不下两栏时退化为上下堆叠。
    */
   columns?: boolean;
+  /** 整个内容区的 test id（原来各弹层的 `…-panel`）。 */
+  testId?: string;
+  className?: string;
 }
 
 /**
- * 紧凑的"小表格"锚定弹层：每行一项，列出模型 / Skill 的关键差异，选中项有勾，
- * 不可用的行变暗且不可点。模型选择（2D、3D 两列）、Skill 选择和 Agent 模式共用。
+ * 紧凑的"小表格"：每行一项，列出模型 / Skill 的关键差异，选中项有勾，不可用的行变暗且不可点。
+ * 它是设置页（#405）各页的内容区，原先输入区的四个选择器弹层里装的就是它：模型选择（2D、3D 两张）、
+ * Skill、对话模型与思考档位共用。选择即时生效，不收起任何东西；列数随内容区宽度（容器查询）而变。
  */
-export function TablePopover({
-  label, value, valueParts, fullValue, icon, disabled = false, hint, triggerDisabledReason, testId, sections, columns = false,
-}: TablePopoverProps) {
-  const layer = useAnchoredPositioner();
-  const descriptionId = useId();
-  const reason = disabled ? triggerDisabledReason : undefined;
-  const description = [reason, hint].filter(Boolean).join(' ');
-  const [open, setOpen] = useState(false);
-  // Closing the panel (Esc, a pick, a click outside) hands focus back to the trigger. Base UI treats that
-  // focus like keyboard focus and opened the hint above the trigger, over the neighbouring pickers, where
-  // it stayed until something else took focus (#324, #322 note 99059). The hint stays closed from the
-  // moment the panel opens until the pointer enters or leaves the trigger or focus moves on; it is passive,
-  // so even when shown it never takes a click meant for the controls beside it.
-  const [hintHeld, setHintHeld] = useState(false);
-  const openRef = useRef(false);
-  const changeOpen = (next: boolean) => {
-    openRef.current = next;
-    setOpen(next);
-    if (next) setHintHeld(true);
-  };
-  const releaseHint = () => { if (!openRef.current) setHintHeld(false); };
-  const close = () => changeOpen(false);
+export function TableSections({ sections, columns = false, testId, className }: TableSectionsProps) {
   const paired = sections.length > 1;
   const sideBySide = paired && !columns;
   const twoColumns = paired && columns;
@@ -157,60 +113,15 @@ export function TablePopover({
   };
 
   return (
-    <Popover.Root open={open} onOpenChange={changeOpen}>
-      {/* The trigger fills the cell its parent gives it and cuts a long name; hovering shows the whole name. */}
-      <HintTooltip
-        name={`${label}: ${fullValue ?? value}`} hint={hint} reason={reason} className="w-full min-w-0"
-        suppressed={open || hintHeld} passive
-        triggerProps={{
-          // A pointer that comes back after the panel closed hovers as usual.
-          onPointerEnter: releaseHint,
-          onPointerLeave: releaseHint,
-          onBlur: releaseHint,
-        }}
-      >
-        <Popover.Trigger
-          data-testid={testId}
-          disabled={disabled}
-          aria-label={`${label}: ${fullValue ?? value}`}
-          aria-describedby={description ? descriptionId : undefined}
-          className={PICKER_TRIGGER_CLASS}
-        >
-          {icon}
-          {valueParts && valueParts.parts.length === 2 ? (
-            <span className="grid min-w-0 flex-1 grid-cols-[fit-content(50%)_auto_minmax(0,1fr)] text-left" data-testid={testId ? `${testId}-value` : undefined}>
-              <span className="truncate" data-part="0">{valueParts.parts[0]}</span>
-              <span aria-hidden className="whitespace-pre text-muted-foreground">{valueParts.separator}</span>
-              <span className="truncate" data-part="1">{valueParts.parts[1]}</span>
-            </span>
-          ) : <span className="flex-1 truncate text-left">{value}</span>}
-          <ChevronDown aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-        </Popover.Trigger>
-        {description ? <span id={descriptionId} className="sr-only">{description}</span> : null}
-      </HintTooltip>
-      <Popover.Portal>
-        <Popover.Positioner positionMethod={anchoredPositionMethod} side="top" align="start" sideOffset={8} collisionPadding={12} className={layer}>
-          <Popover.Popup
-            data-testid={testId ? `${testId}-panel` : undefined}
-            data-layout={twoColumns ? 'columns' : undefined}
-            aria-label={label}
-            className={cn(
-              '@container flex max-h-(--available-height) max-w-(--available-width) flex-col overflow-y-auto rounded-lg bg-popover p-1.5 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10',
-              sideBySide ? 'w-[59rem]' : twoColumns ? 'w-[40rem]' : 'w-[36rem]',
-            )}
-          >
-            {/* Side by side when the panel is wide enough, otherwise one table under the other. */}
-            <div ref={sectionsRef} className={cn('grid gap-x-3 gap-y-2', sideBySide && '@[52rem]:grid-cols-2', twoColumns && '@[30rem]:grid-cols-2')}>
-              {sections.map((section, index) => (
-                <Section key={section.testId ?? section.title} section={section} close={close} index={index}
-                  closeOnPick={section.closeOnPick ?? !paired}
-                  onCross={twoColumns ? (direction) => focusSection(index + direction) : undefined} />
-              ))}
-            </div>
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+    <div data-testid={testId} data-layout={twoColumns ? 'columns' : undefined} className={cn('@container min-w-0', className)}>
+      {/* Side by side when the content is wide enough, otherwise one table under the other. */}
+      <div ref={sectionsRef} className={cn('grid gap-x-3 gap-y-2', sideBySide && '@[52rem]:grid-cols-2', twoColumns && '@[30rem]:grid-cols-2')}>
+        {sections.map((section, index) => (
+          <Section key={section.testId ?? section.title} section={section} index={index}
+            onCross={twoColumns ? (direction) => focusSection(index + direction) : undefined} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -225,10 +136,8 @@ export function pickerRowClass(selected: boolean): string {
   );
 }
 
-function Section({ section, close, closeOnPick, index, onCross }: {
+function Section({ section, index, onCross }: {
   section: TableSection;
-  close: () => void;
-  closeOnPick: boolean;
   index: number;
   /** Two-column layout only: the left and right arrows move focus to the neighbouring column. */
   onCross?: (direction: -1 | 1) => boolean;
@@ -307,7 +216,7 @@ function Section({ section, close, closeOnPick, index, onCross }: {
               aria-label={row.disabled && row.focusableDisabled ? `${row.cells[0]?.text ?? ''}: ${row.disabledReason ?? ''}` : undefined}
               disabled={off || (row.disabled && !row.focusableDisabled)}
               onKeyDown={(event) => navigate(event, index)}
-              onClick={() => { if (row.disabled) return; onPick(row.key); if (closeOnPick) close(); }}
+              onClick={() => { if (row.disabled) return; onPick(row.key); }}
               style={{ gridTemplateColumns: template }}
               className={cn(pickerRowClass(selected), row.disabled && row.focusableDisabled && 'cursor-not-allowed opacity-40 hover:bg-transparent')}
             >
@@ -347,7 +256,7 @@ function Section({ section, close, closeOnPick, index, onCross }: {
                       type="button"
                       aria-label={action.label}
                       disabled={off || action.busy}
-                      onClick={() => { action.onClick(); if (action.closeOnClick) close(); }}
+                      onClick={action.onClick}
                       data-testid={action.testId}
                       className="flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-destructive/15 hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40"
                     >
@@ -361,7 +270,7 @@ function Section({ section, close, closeOnPick, index, onCross }: {
           );
         })}
       </div>
-      {foot ? <div className="mt-1 border-t border-border px-2 pb-0.5 pt-1.5 text-[11px] text-muted-foreground">{typeof foot === 'function' ? foot(close) : foot}</div> : null}
+      {foot ? <div className="mt-1 border-t border-border px-2 pb-0.5 pt-1.5 text-[11px] text-muted-foreground">{foot}</div> : null}
     </div>
   );
 }

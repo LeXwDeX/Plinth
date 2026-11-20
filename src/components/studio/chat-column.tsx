@@ -29,6 +29,7 @@ import { QueuedTurns } from '@/components/studio/queued-turns';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
 import { Composer, type ComposerBranch, type ComposerChip, type ComposerMask, type ComposerMention } from '@/components/studio/composer';
 import { SessionNotesPanel, sessionNotesText } from '@/components/workspace/session-notes-panel';
+import { applyChoiceAction } from '@/components/workspace/harness-choice-action';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective-configuration';
@@ -44,6 +45,7 @@ import { useSessionApproval } from '@/hooks/use-session-approval';
 import { useSessionNotes } from '@/hooks/use-session-notes';
 import { useSessionPendingApprovals } from '@/hooks/use-session-pending-approvals';
 import { useSessionChoices } from '@/hooks/use-session-choices';
+import { useSessionHarness } from '@/hooks/use-session-harness';
 import { useSessionAssetLists } from '@/hooks/use-session-asset-lists';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useSessionPreferences } from '@/hooks/use-session-preferences';
@@ -86,7 +88,8 @@ import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
 import { useElementHeight } from '@/hooks/use-element-height';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
-import { choiceCardPlacement, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { runChoiceAnswer } from '@/lib/chat/choice-actions';
 import { assetListClient } from '@/lib/asset-lists/client';
 import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
@@ -100,6 +103,9 @@ import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
 import { editAttachments, editTarget, regenerateTarget, restoreAttachments, turnPayload } from '@/lib/chat/turn-actions';
+import { followTurnStream, type TurnFollowEnd } from '@/lib/chat/turn-follow';
+import { replaceFailureMessage } from '@/lib/chat/turn-replace-error';
+import { hasSentWords, sessionTurnRunning } from '@/lib/chat/turn-running';
 import { selectedTranscriptText, transcriptClipboard } from '@/lib/chat/transcript-copy';
 import { compactionPlacement } from '@/lib/chat/context-compaction';
 import { ContextCompactedDivider } from '@/components/studio/context-compacted-divider';
@@ -132,7 +138,7 @@ import { useSessionContextStore } from '@/store/session-context-store';
 import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
-import { buildMultiviewRequest, chosenViewLabels, multiviewOffering } from '@/lib/workspace/multiview-upload';
+import { buildMultiviewRequest, chosenViewLabels, multiviewLockNote, multiviewOffering } from '@/lib/workspace/multiview-upload';
 import { withErrorReference } from '@/lib/problem-reference';
 import { referenceLimit } from '@/lib/workspace/reference-limit';
 import { safePreviewURL } from '@/lib/core/tasks/asset-url-rewriter';
@@ -278,9 +284,16 @@ export function ChatColumn() {
   // Several uploaded pictures may be views of one object when a 3D Offering takes them (found by its Schema parameter).
   const { offeringsByCapability: model3dOfferings } = useWorkspaceOfferings(schema, 'model-3d');
   const picked3dModel = useWorkspaceStore((state) => state.modelByDomain['model-3d']);
+  const multiviewOfferings = useMemo(() => Object.values(model3dOfferings ?? {}).flat(), [model3dOfferings]);
   const multiviewTarget = useMemo(
-    () => multiviewOffering(Object.values(model3dOfferings ?? {}).flat(), picked3dModel ?? undefined),
-    [model3dOfferings, picked3dModel],
+    () => multiviewOffering(multiviewOfferings, picked3dModel ?? undefined),
+    [multiviewOfferings, picked3dModel],
+  );
+  // #373: the panel makes its target even when the 3D model the person picked takes no views; the request names the
+  // target and the server leaves the session's pick as it is, so the panel says which model it uses and why.
+  const multiviewNote = useMemo(
+    () => (multiviewTarget ? multiviewLockNote(multiviewOfferings, multiviewTarget, picked3dModel) : null),
+    [multiviewOfferings, multiviewTarget, picked3dModel],
   );
   useRestoreSessionModels();
   const registerTask = useWorkspaceStore((state) => state.registerTask);
@@ -308,6 +321,7 @@ export function ChatColumn() {
     addStreamPaidStep,
     updateStreamGenState,
     finishStreaming,
+    rewindStreaming,
   } = useChatStore();
 
   const approval = useSessionApproval(
@@ -357,6 +371,11 @@ export function ChatColumn() {
   const effective = useAgentEffectiveConfiguration(schema, activeSessionId, stageDomain, selectedGenerationModel, skillRefreshVersion);
   const skillCatalog = useAgentSkillCatalog(schema, effective.data?.revision, skillRefreshVersion);
   const { user } = useAuth();
+  // #374: a direction-card option may save the function selection before its answer is sent. This is the 功能 panel's own
+  // session Harness state (one SWR key, so the panel and the summary above the input follow the save) and its CAS save.
+  const sessionHarness = useSessionHarness(activeSessionId, user?.id ?? '');
+  const sessionHarnessRef = useRef(sessionHarness);
+  sessionHarnessRef.current = sessionHarness;
   const { data: supportingModels, error: supportingModelsError } = useSWR(
     user?.id && activeSessionId && modelChoices.length
       ? ['skill-supporting-models', schema.revision, user.id, activeSessionId, stageDomain, skillRefreshVersion,
@@ -683,7 +702,9 @@ export function ChatColumn() {
   // The sent words shown until the server has stored them: one object for the whole turn, so the
   // memoized message is not redrawn with every streamed chunk (#291).
   const streamUserMessage = streamBuf?.userMessage;
-  const optimisticUser = useMemo((): ChatMessageType | null => (streamUserMessage ? {
+  // #403: a stream joined after a reload has no sent words of its own (the stored user message is already in the
+  // list), so an empty one is not shown as a blank message.
+  const optimisticUser = useMemo((): ChatMessageType | null => (streamUserMessage && hasSentWords(streamUserMessage) ? {
     id: schema.chat.frontend.optimistic_user_message_id,
     role: 'user',
     content: streamUserMessage.content,
@@ -871,6 +892,10 @@ export function ChatColumn() {
 
   // An expired card stays in the chat (with 重新发起) but no longer counts as pending.
   const pendingCount = pending.pendingCount + (consentAwaiting && consent.pending ? 1 : 0);
+  // #403: a step of an approved plan that has no task can still get one while the session's turn runs (the running
+  // projection of the messages, or a stream this browser follows) or while a decision it may wait for is open.
+  // Otherwise nothing will submit it and the plan card says it was not run instead of waiting for ever.
+  const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming) || pendingCount > 0;
   const lastDisplayed = displayMessages[displayMessages.length - 1];
   const [floatingRef, floatingHeight] = useElementHeight<HTMLDivElement>();
   const {
@@ -1235,11 +1260,12 @@ export function ChatColumn() {
             const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
             try {
               for (const id of replaceIds) await chatClient.deleteMessage(sessionId, id);
-            } catch {
+            } catch (error) {
               const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
               if (page) applyNewestMessagePage(sessionId, page);
               else setMessages(sessionId, previous);
-              toast.error(schemaText(schema, 'ui.chat.toast.turn_replace_failed'));
+              // #403: a 409 is the server saying why (the turn still runs); anything else keeps the general text.
+              toast.error(replaceFailureMessage(error, schemaText(schema, 'ui.chat.toast.turn_replace_failed')));
               return;
             }
             for (const id of replaceIds) deleteMessage(sessionId, id);
@@ -1257,7 +1283,8 @@ export function ChatColumn() {
           const controller = new AbortController();
           controllers.current.set(sessionId, controller);
           let closeEventSource: (() => void) | undefined;
-          let removeAbortListener: (() => void) | undefined;
+          // How following the turn's stream ended; unset when the turn never reached a stream.
+          let followed: TurnFollowEnd | undefined;
           // Set once the server has the turn: from then on nothing is put back into the box.
           let sent = false;
           // Only a message taken from the queue was typed by the person and already left the box. A stage action
@@ -1317,24 +1344,22 @@ export function ChatColumn() {
             } else {
               void refreshChoices();
             }
-            await new Promise<void>((resolve, reject) => {
-              if (controller.signal.aborted) { resolve(); return; }
-              closeEventSource = connectEventSource(sessionId, {
-                fromId: 0,
-                onDone: () => resolve(),
-                onError: () =>
-                  reject(
-                    new Error(schema.chat.presentation.messages.sse_interrupted),
-                  ),
-              });
-              const onAbort = () => {
-                closeEventSource?.();
-                resolve();
-              };
-              controller.signal.addEventListener('abort', onAbort, { once: true });
-              removeAbortListener = () => controller.signal.removeEventListener('abort', onAbort);
-              if (controller.signal.aborted) onAbort();
+            // #403: a stream that breaks is not the end of the turn. The server is asked whether it still runs;
+            // if it does the stream is attached again from the turn's first event, up to the Schema's bound.
+            followed = await followTurnStream({
+              connect: (callbacks) => {
+                closeEventSource = connectEventSource(sessionId, { fromId: 0, ...callbacks });
+                return closeEventSource;
+              },
+              stillRunning: async (signal) => {
+                const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }, signal);
+                return page.messages.some((message) => message.isPending);
+              },
+              rewind: () => rewindStreaming(sessionId),
+              attempts: schema.chat.frontend.stream_reconnect_attempts,
+              signal: controller.signal,
             });
+            if (followed === 'interrupted') throw new Error(schema.chat.presentation.messages.sse_interrupted);
           } catch (error) {
             // The turn never left: the words were already out of the box (the old round was replaced,
             // or the message had waited in the queue), so they go back, not lost.
@@ -1357,7 +1382,6 @@ export function ChatColumn() {
           } finally {
             if (startingRef.current === starting) startingRef.current = null;
             closeEventSource?.();
-            removeAbortListener?.();
             if (controllers.current.get(sessionId) === controller) controllers.current.delete(sessionId);
             // #177: read the stored turn first and swap it in place of the buffer in one update. Clearing
             // the buffer first dropped the whole turn for a frame, shrinking the list and jumping the view.
@@ -1371,6 +1395,10 @@ export function ChatColumn() {
                 settled = true;
                 window.clearTimeout(settleFallback);
                 settleStreaming(sessionId, page);
+                // #403: the stream is over without saying the turn ended, yet the server still runs it (the stream
+                // was given up or stopped, or another turn holds the session). The session recovery reconnects it
+                // and keeps reading until it ends.
+                if (followed !== 'done' && page.messages.some((message) => message.isPending)) setServerTurnTick((tick) => tick + 1);
               })
               .catch(() => {
                 settled = true;
@@ -1409,6 +1437,7 @@ export function ChatColumn() {
       connectEventSource,
       finishStreaming,
       settleStreaming,
+      rewindStreaming,
       initStreaming,
       modelChoices,
       modelsError,
@@ -1835,13 +1864,29 @@ export function ChatColumn() {
     setAnsweringChoice(card.id);
     let accepted = false;
     try {
-      await sendRef.current(text, [], [], undefined, [], [], undefined, {
-        choiceAnswer: selection.useDefault
-          ? { choiceId: card.id, useDefault: true }
-          : { choiceId: card.id, optionId: selection.optionId },
-        onSent: () => { accepted = true; },
+      // #374: an option with an action saves the function selection first and the answer goes out only once it is
+      // saved. A selection that cannot be saved (a revision conflict included) says so on the card, sends nothing and
+      // leaves the card answerable. The Harness is read at the moment of the save, not as of this callback's render.
+      const outcome = await runChoiceAnswer(choiceSelectionAction(card, selection), {
+        apply: (action) => applyChoiceAction(action, {
+          schema,
+          harness: { selection: sessionHarnessRef.current.view?.selection ?? null, save: sessionHarnessRef.current.save },
+        }),
+        stillHere: () => isCurrentSessionScope(scope),
+        send: async () => {
+          await sendRef.current(text, [], [], undefined, [], [], undefined, {
+            choiceAnswer: selection.useDefault
+              ? { choiceId: card.id, useDefault: true }
+              : { choiceId: card.id, optionId: selection.optionId },
+            onSent: () => { accepted = true; },
+          });
+        },
       });
-      if (!accepted) setChoiceError({ cardId: card.id, text: schemaText(schema, 'ui.chat.choice.failed') });
+      if (outcome.status === 'action_failed') {
+        setChoiceError({ cardId: card.id, text: schemaText(schema, outcome.failureKey) });
+      } else if (outcome.status === 'sent') {
+        if (!accepted) setChoiceError({ cardId: card.id, text: schemaText(schema, 'ui.chat.choice.failed') });
+      }
     } catch {
       setChoiceError({ cardId: card.id, text: schemaText(schema, 'ui.chat.choice.failed') });
     } finally {
@@ -2329,6 +2374,7 @@ export function ChatColumn() {
                     plan={sessionBudget.plan}
                     tasks={sessionTasks}
                     progress={sessionBudget}
+                    stepsMayStillRun={planStepsMayStillRun}
                     onCompareCandidates={compareCandidates}
                     onSelectCandidate={selectCandidate}
                   />
@@ -2378,7 +2424,7 @@ export function ChatColumn() {
 
           {multiviewTarget && attachedImages.length >= 2 && attachedImages.length <= 4 && !editing ? (
             <MultiviewUploadPanel
-              images={attachedImages} target={multiviewTarget} disabled={uploading || preparing || isStreaming}
+              images={attachedImages} target={multiviewTarget} lockNote={multiviewNote} disabled={uploading || preparing || isStreaming}
               onDismiss={() => setMultiviewDismissedFor(attachedImages.join('\n'))}
               onConfirm={(choices) => {
                 const picked = attachedImages.flatMap((url, index) => (choices[index] ? [url] : []));

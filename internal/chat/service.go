@@ -26,8 +26,12 @@ var (
 	ErrInvalidInputSource = errors.New("chat: invalid input source")
 	// ErrInvalidMultiview rejects a multiview request without a model or with
 	// fewer than two, more than four or repeated views (#65).
-	ErrInvalidMultiview    = errors.New("chat: invalid multiview request")
-	ErrCanvasSourceMissing = errors.New("chat: canvas input source without a snapshot")
+	ErrInvalidMultiview = errors.New("chat: invalid multiview request")
+	// ErrMultiviewModelUnavailable rejects a multiview request whose model is
+	// not an enabled, runtime-available Offering that takes several views of
+	// one object; the turn does not start (#373).
+	ErrMultiviewModelUnavailable = errors.New("chat: multiview model unavailable")
+	ErrCanvasSourceMissing       = errors.New("chat: canvas input source without a snapshot")
 	// ErrSelectionMaskWithoutCanvas rejects a selection mask on a turn that is
 	// not a canvas turn or whose snapshots did not verify; ErrSelectionMaskInvalid
 	// a mask asset that cannot be read or is not owned; ErrSelectionMaskSizeMismatch
@@ -54,6 +58,12 @@ var (
 	// ErrProjectNotFound reports an unknown or foreign project. The HTTP
 	// boundary answers the same 404 as a missing project (#240).
 	ErrProjectNotFound = errors.New("chat: project not found")
+	// ErrSessionDeletionBlocked reports a session that cannot be deleted now
+	// because a SkillRun of it has work in flight: a human grant waiting for
+	// its decision, or a Task that has not ended. The person can wait, cancel
+	// or decide, and delete again. Nothing was stopped or deleted (#384); the
+	// HTTP boundary answers 409 with the Schema text.
+	ErrSessionDeletionBlocked = errors.New("chat: session has work in flight that keeps it from being deleted")
 )
 
 // ProjectSource is the narrow port the chat service uses to attribute a
@@ -297,7 +307,8 @@ type ServiceConfig struct {
 	// RetiredModels are the generation models no longer offered and the model
 	// that replaces each (Schema runtime.frontend.retired_generation_models,
 	// #329 follow-up). A turn's pick of a retired model is moved to its
-	// successor and the turn records the switch.
+	// successor and the turn records the switch; the session's explicit 3D
+	// and 2D locks are moved the same way, unrecorded (#380).
 	RetiredModels []catalog.RetiredModelSuccessor
 	// Model3DUsage is application.chat.model3d_usage (#103): the purposes a
 	// production brief may name, their parameter overrides and the brief's
@@ -329,6 +340,11 @@ type ServiceConfig struct {
 	// so an Agent-supplied option can only carry arguments the target tool
 	// really declares (#242). Nil accepts none when arguments are present.
 	ChoiceTargetArguments map[string][]string
+	// HarnessOperations are the function operations of
+	// application.chat.harness. A choice option's switch_operation action may
+	// only name one of them that is wired, available and enabled in the
+	// session's selection (#374). Nil accepts no switch.
+	HarnessOperations []catalog.HarnessOperationSchema
 	// WorkLedger is application.chat.work_ledger (#248). A zero value leaves
 	// the ledger and the get_production_step tool unavailable.
 	WorkLedger catalog.ChatWorkLedgerSchema
@@ -386,6 +402,9 @@ type Service struct {
 	image2DUsage               catalog.ChatImage2DUsageSchema
 	explicitModel3DValid       func(string) bool
 	explicitModelImageValid    func(string) bool
+	// multiviewModelValid is the check a structured multiview request's model
+	// passes when a turn starts (#373); nil accepts any model.
+	multiviewModelValid func(string) bool
 	// usageProfileKind and imageUsageProfileKind are the declared cards the
 	// brief write settles; their IDs and argument names come from the Schema,
 	// not from code (#103, #239).
@@ -394,6 +413,7 @@ type Service struct {
 	choiceMaxOptions      int
 	conceptDirections     catalog.ChatConceptDirectionsSchema
 	choiceTargetArguments map[string]map[string]bool
+	harnessOperations     []catalog.HarnessOperationSchema
 
 	harnessSnapshotResolver HarnessSnapshotResolver
 
@@ -451,6 +471,12 @@ type Service struct {
 	workLedgerDetail    SessionTaskDetail
 	workDecisions       WorkDecisionReader
 	workParameterSource WorkParameterSource
+
+	// deletions marks the sessions being deleted; quiescers are the turn
+	// runners that take their work off a session before it is deleted (#384).
+	deletions  sessionDeletions
+	quiescerMu sync.RWMutex
+	quiescers  []SessionQuiescer
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
@@ -483,6 +509,9 @@ func NewService(config ServiceConfig) (*Service, error) {
 	}
 	if err := config.TurnEndReasons.Validate(); err != nil {
 		return nil, fmt.Errorf("chat: %w", err)
+	}
+	if err := checkChoiceActionWiring(config.ChoiceKinds, config.HarnessOperations); err != nil {
+		return nil, err
 	}
 	if config.Clock == nil {
 		config.Clock = time.Now
@@ -554,6 +583,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		choiceMaxOptions:           config.ChoiceMaxOptions,
 		conceptDirections:          config.ConceptDirections,
 		choiceTargetArguments:      choiceTargetArgumentIndex(config.ChoiceTargetArguments),
+		harnessOperations:          config.HarnessOperations,
 		models:                     config.Models,
 		visualAnchors:              config.VisualAnchors,
 		visualAnchorKind:           choiceKindOf(config.ChoiceKinds, "agent_proposal"),
@@ -914,21 +944,6 @@ func (service *Service) ApplyAutoTitle(
 	return service.repository.ApplyAutoTitle(ctx, ownerID, sessionID, title)
 }
 
-func (service *Service) DeleteSession(
-	ctx context.Context,
-	ownerID string,
-	sessionID string,
-) error {
-	deleted, err := service.repository.DeleteSession(ctx, ownerID, sessionID)
-	if err != nil {
-		return err
-	}
-	if !deleted {
-		return ErrSessionNotFound
-	}
-	return nil
-}
-
 // Session 读取单个会话（B16：标题限流需要校验当前标题仍是默认值）。
 func (service *Service) Session(
 	ctx context.Context,
@@ -1008,12 +1023,13 @@ func (service *Service) ListMessages(
 	if err != nil {
 		return nil, err
 	}
-	return service.healPlaceholders(ctx, ownerID, sessionID, messages)
+	return service.applyTurnState(ctx, ownerID, sessionID, messages)
 }
 
 // ListMessagesPage reads one page of the conversation for the workspace. The
-// page gets the same placeholder healing as ListMessages. Callers that need the
-// whole conversation (Agent context, picks, attachments) use ListMessages.
+// page gets the same placeholder healing and running-turn marking as
+// ListMessages. Callers that need the whole conversation (Agent context, picks,
+// attachments) use ListMessages.
 func (service *Service) ListMessagesPage(
 	ctx context.Context,
 	ownerID string,
@@ -1027,16 +1043,21 @@ func (service *Service) ListMessagesPage(
 	if err != nil {
 		return MessagePage{}, err
 	}
-	page.Messages, err = service.healPlaceholders(ctx, ownerID, sessionID, page.Messages)
+	page.Messages, err = service.applyTurnState(ctx, ownerID, sessionID, page.Messages)
 	if err != nil {
 		return MessagePage{}, err
 	}
 	return page, nil
 }
 
-// healPlaceholders replaces the pending placeholder of an assistant message
-// whose turn is no longer active, so a reader never waits on a turn that ended.
-func (service *Service) healPlaceholders(
+// applyTurnState reads the session's unfinished turns once and applies them to
+// the messages a reader gets. The assistant message of a turn that has not ended
+// is marked TurnActive, whatever its stored text is (#403): the Orchestrator
+// stores the real text and tool calls after the first round, so the placeholder
+// alone cannot say that the turn still runs. The pending placeholder of an
+// assistant message whose turn is no longer active is replaced, so a reader
+// never waits on a turn that ended.
+func (service *Service) applyTurnState(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
@@ -1058,11 +1079,12 @@ func (service *Service) healPlaceholders(
 	now := service.clock()
 	for index := range messages {
 		message := &messages[index]
-		if message.Role != service.assistantRole ||
-			message.Content != service.pendingContent {
+		if message.Role != service.assistantRole {
 			continue
 		}
-		if _, active := activeTurns[message.ID]; active {
+		_, active := activeTurns[message.ID]
+		message.TurnActive = active
+		if message.Content != service.pendingContent || active {
 			continue
 		}
 		replacement := ""
@@ -1153,6 +1175,15 @@ type StartTurn struct {
 	ChoiceAnswer *ChoiceAnswer
 }
 
+// SetMultiviewModelValid installs the check a structured multiview request's
+// model must pass when a turn starts (#373): it names an enabled,
+// runtime-available Offering that takes several views of one object. It is
+// wired after the generation module exists, because availability is runtime
+// state; without it any model is accepted, for an assembly with no Catalog.
+func (service *Service) SetMultiviewModelValid(valid func(model string) bool) {
+	service.multiviewModelValid = valid
+}
+
 func (service *Service) StartTurn(
 	ctx context.Context,
 	command StartTurn,
@@ -1189,6 +1220,11 @@ func (service *Service) startTurn(
 	command.Content = strings.TrimSpace(command.Content)
 	if command.Content == "" && len(command.ImageURLs) == 0 {
 		return Message{}, ErrEmptyMessage
+	}
+	// A session whose deletion has begun takes no new turn: it would write rows
+	// the deletion is about to remove (#384).
+	if service.sessionDeleting(command.OwnerID, command.SessionID) {
+		return Message{}, ErrSessionNotFound
 	}
 	// The turn runs in the scope the stored session has now. The client cannot
 	// name a scope for a turn: whatever Options carries is replaced.
@@ -1278,7 +1314,8 @@ func (service *Service) startTurn(
 	}
 	command.Options.VisualAnchors = cloneVisualAnchors(visualAnchors)
 	// A pick of a retired generation model runs on its successor; the turn
-	// records the switch (#329 follow-up).
+	// records the switch (#329 follow-up). The explicit locks frozen above
+	// move with it, so this stays after them (#380).
 	service.moveRetiredModels(&command.Options)
 	// The turn's model and thinking level are frozen from the stored session,
 	// never taken from the request (#322).
@@ -1297,6 +1334,13 @@ func (service *Service) startTurn(
 	}
 	if command.Options.Multiview != nil && !command.Options.Multiview.Valid() {
 		return Message{}, ErrInvalidMultiview
+	}
+	// The request's model is the person's pick of this turn (#373): refuse it
+	// now when no available multiview Offering carries it, instead of letting
+	// the Agent run a whole turn that can only end in a refusal.
+	if request := command.Options.Multiview; request != nil && service.multiviewModelValid != nil &&
+		!service.multiviewModelValid(request.Model) {
+		return Message{}, ErrMultiviewModelUnavailable
 	}
 	if err := validateAttachmentPurposes(command.AttachmentPurposes, len(command.ImageURLs)); err != nil {
 		return Message{}, err
@@ -1355,6 +1399,9 @@ func (service *Service) startTurn(
 		return Message{}, err
 	}
 	defer unlock()
+	if service.sessionDeleting(command.OwnerID, command.SessionID) {
+		return Message{}, ErrSessionNotFound
+	}
 	if err := service.applyTurnAttachments(ctx, command, verified, &user, &command.Options); err != nil {
 		return Message{}, err
 	}
@@ -1387,6 +1434,9 @@ func (service *Service) startTurn(
 			SessionID:          command.SessionID,
 			AssistantMessageID: assistant.ID,
 			Status:             service.streamActive,
+			// The session is busy while the turn of its stream is in one of
+			// these states; a stream row left active by a finished turn is not.
+			BusyTurnStates: []string{service.turnQueued, service.turnRunning, service.turnWaitingTask},
 		},
 		Turn{
 			OwnerID:            command.OwnerID,

@@ -1,0 +1,12 @@
+{
+  "api_version": "v3",
+  "candidate_sha256": "d439e03fed79178eab61cb44fdf7ee527a472c0f477afe70335adf82354a6ff9",
+  "captured_at_utc": "2026-11-19",
+  "exchanges": 7,
+  "offering": "tripo/tripo-v3.1-multiview/image-to-3d",
+  "provenance": "captured",
+  "scenario": "tripo-v3-alignment",
+  "source_revision": "unknown",
+  "transformation": "IDs, signed URLs, timestamps and amounts are deterministic placeholders; media bytes are not stored.",
+  "version": 1
+}

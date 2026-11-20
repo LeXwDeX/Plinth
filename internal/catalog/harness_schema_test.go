@@ -235,3 +235,24 @@ func TestHarnessPublicProjectionOmitsPrivatePolicy(t *testing.T) {
 		}
 	}
 }
+
+// #374: ask_choice only writes the session's choice cards and charges nothing,
+// so it is a valid Harness base tool (a fixed function keeps the next-step
+// card); a base tool is still listed once and never a paid one.
+func TestHarnessBaseToolsCarryTheNonPaidChoiceTool(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.Application()
+	if !slices.Contains(a.Chat.Harness.BaseTools, "ask_choice") {
+		t.Fatalf("harness base_tools = %v lacks ask_choice", a.Chat.Harness.BaseTools)
+	}
+	if err := catalog.ValidateApplicationSchema(a); err != nil {
+		t.Fatalf("shipped base tools refused: %v", err)
+	}
+	a.Chat.Harness.BaseTools = append(slices.Clone(a.Chat.Harness.BaseTools), "ask_choice")
+	if err := catalog.ValidateApplicationSchema(a); err == nil {
+		t.Fatal("a base tool listed twice was accepted")
+	}
+}

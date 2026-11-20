@@ -61,6 +61,24 @@ describe('streaming reply status (#285)', () => {
     expect(state).toEqual({ statusText: '思考中…', progress: null, thinking: true });
   });
 
+  // #375: the model writes a tool call's arguments for a long while; the server swaps 思考中…
+  // for the preparing-tool status at the first fragment, and it holds until the run's own status.
+  it('replaces 思考中… with the preparing-tool status of the same round and keeps it through the text', () => {
+    const schema = schemaFixture();
+    const thinking = schema.chat.presentation.status.thinking ?? '';
+    const preparing = schema.chat.presentation.status.preparing_tool ?? '';
+    const generating = schema.chat.presentation.status.generating;
+    expect(preparing).toBe('正在准备调用工具…');
+    expect(play(schema, [
+      { type: 'thinking', content: thinking },
+      { type: 'status', content: preparing },
+      { type: 'text', content: '顺便说明' },
+      { type: 'status', content: generating },
+    ])).toEqual([
+      '思考中… [thinking]', preparing, preparing, generating,
+    ]);
+  });
+
   it('decodes the Schema thinking event without any reasoning text', () => {
     const schema = schemaFixture();
     schema.chat.stream.event_types.thinking = 'configured-thinking';

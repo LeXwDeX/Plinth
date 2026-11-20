@@ -1383,6 +1383,10 @@ func validateValueDefinition(schema schemacontract.Parameter) (schemacontract.Pa
 	default:
 		return schema, fmt.Errorf("参数 %q 使用未知类型 %q", schema.Name, schema.Type)
 	}
+	// Only a list of values has repeats to allow (#376).
+	if schema.AllowDuplicateValues && schema.Type != "string-array" {
+		return schema, fmt.Errorf("参数 %q 的 allow_duplicate_values 只能用于 string-array", schema.Name)
+	}
 	if schema.ImageSize != nil {
 		c := schema.ImageSize
 		if c.MinPixels <= 0 || c.MaxPixels < c.MinPixels || c.MaxRatio < 1 || c.Multiple < 0 || c.MaxEdge < 0 || (schema.Type != "text" && schema.Type != "select") {

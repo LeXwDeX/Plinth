@@ -44,6 +44,15 @@ import (
 // the bodies POSTed to the paths ending in one of suffixes.
 func fakeStackHarness(t *testing.T, settings func(origin string) map[string]string, suffixes ...string) (*acmeHarness, *catalog.Catalog, *pathLog) {
 	t.Helper()
+	harness, taskCatalog, log, _ := fakeStackHarnessWithInputs(t, settings, suffixes...)
+	return harness, taskCatalog, log
+}
+
+// fakeStackHarnessWithInputs is fakeStackHarness that also returns the input asset
+// service the harness runs on, for a test that has to upload the pictures a step
+// takes as its reference assets.
+func fakeStackHarnessWithInputs(t *testing.T, settings func(origin string) map[string]string, suffixes ...string) (*acmeHarness, *catalog.Catalog, *pathLog, *inputassets.Service) {
+	t.Helper()
 	fake, err := registry.New(fakeupstream.Config{QueuedPolls: 1, RunningPolls: 1, ArtifactOrigin: "https://" + fakeAssetHost})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +80,8 @@ func fakeStackHarness(t *testing.T, settings func(origin string) map[string]stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newInputAwareHarness(t, taskCatalog, settings(server.URL), fakeShapeHTTPTransport(fakeURL)), taskCatalog, log
+	harness, inputs := newInputAwareHarnessWithInputs(t, taskCatalog, settings(server.URL), fakeShapeHTTPTransport(fakeURL))
+	return harness, taskCatalog, log, inputs
 }
 
 // newInputAwareHarness is newAcmeHarnessWithTransport with the input asset
@@ -84,6 +94,19 @@ func newInputAwareHarness(
 	settings map[string]string,
 	transport func(string, http.RoundTripper) http.RoundTripper,
 ) *acmeHarness {
+	t.Helper()
+	harness, _ := newInputAwareHarnessWithInputs(t, taskCatalog, settings, transport)
+	return harness
+}
+
+// newInputAwareHarnessWithInputs is newInputAwareHarness that also returns the
+// input asset service.
+func newInputAwareHarnessWithInputs(
+	t *testing.T,
+	taskCatalog *catalog.Catalog,
+	settings map[string]string,
+	transport func(string, http.RoundTripper) http.RoundTripper,
+) (*acmeHarness, *inputassets.Service) {
 	t.Helper()
 	root := t.TempDir()
 	repository, err := sqlitetest.Open(filepath.Join(root, "test.db"))
@@ -119,7 +142,7 @@ func newInputAwareHarness(
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = module.Close() })
-	return &acmeHarness{module: module, repository: repository, clock: clock, settings: settings}
+	return &acmeHarness{module: module, repository: repository, clock: clock, settings: settings}, inputs
 }
 
 func TestMeshyRiggingRefusesFingersOnAQuadModelBeforePayment(t *testing.T) {

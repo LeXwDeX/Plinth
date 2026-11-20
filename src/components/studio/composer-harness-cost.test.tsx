@@ -13,9 +13,9 @@ vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: mock.ownerId ? { id
 vi.mock('@/hooks/use-session-harness', () => ({ useSessionHarness: (sessionId: string | null, ownerId: string) => { mock.hook(sessionId, ownerId); return { view: mock.view, busy: mock.busy, error: mock.error }; } }));
 vi.mock('@/store/chat-store', () => ({ useChatStore: (select: (state: object) => unknown) => select({ activeSessionId: mock.sessionId }) }));
 vi.mock('@/components/workspace/harness-summary', () => ({ HarnessSummary: () => null }));
-vi.mock('@/components/studio/model-picker', () => ({ ModelPicker: () => null, GenerationModelNotice: () => null }));
-vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => null }));
-vi.mock('@/components/studio/params-popover', () => ({ ParamsPopover: () => null }));
+// #405: the pickers moved into the settings dialog behind the gear; the composer only reaches them through it.
+vi.mock('@/components/studio/composer-settings', () => ({ ComposerSettings: () => null }));
+vi.mock('@/components/studio/model-picker', () => ({ GenerationModelNotice: () => null }));
 vi.mock('@/components/result/result-card-parts', () => ({ openResultDetail: vi.fn() }));
 // Render the tooltip payload as data so its hidden cost is verified with the visible button and aria label.
 vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ name, cost, children }: { name: string; cost?: { text: string }; children: React.ReactNode }) => <span data-hint-name={name} data-hint-cost={cost?.text}>{children}</span> }));

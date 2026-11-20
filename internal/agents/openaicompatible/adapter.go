@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
-	"github.com/LeXwDeX/Plinth/internal/moderation"
+	"github.com/LeXwDeX/Plinth/internal/agents/upstreamhttp"
 )
 
 // ThinkingOptions are the vendor request extensions of the configured model,
@@ -33,6 +33,11 @@ type ThinkingOptions struct {
 	// StreamIncludeUsage asks a streamed request for its token usage with
 	// stream_options.include_usage (#322).
 	StreamIncludeUsage bool
+	// OmitTemperature leaves temperature out of every request to the model:
+	// its upstream accepts only the default value and answers 400 to any other
+	// (#401). Every request path goes through the adapter, so the Agent turn,
+	// the title, the summary and the connection test all follow it.
+	OmitTemperature bool
 }
 
 // effort is the level a request sends for a chosen one.
@@ -159,7 +164,7 @@ func (adapter *Adapter) Stream(
 	if err := adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
-	lines := newStreamLines(response.Body, adapter.scannerMaxBytes)
+	lines := upstreamhttp.NewLines(response.Body, adapter.scannerMaxBytes)
 	options := adapter.options(request.Model)
 	var content, reasoning strings.Builder
 	var usage *agents.Usage
@@ -167,6 +172,10 @@ func (adapter *Adapter) Stream(
 	// content arrives, so each stretch of reasoning yields one content-free
 	// Thinking delta whatever the model's thinking profile (#285).
 	thinking := false
+	// toolCalling is set once the first tool call fragment has been reported:
+	// a model writes call arguments for a long while before the call can run,
+	// so the caller learns of the call at its first fragment (#375).
+	toolCalling := false
 	calls := map[int]*agents.ToolCall{}
 	var callOrder []int
 	// inlineImage is set when the model drew a picture itself (delta.images,
@@ -176,7 +185,7 @@ func (adapter *Adapter) Stream(
 	inlineImage := false
 	for lines.Scan() {
 		if lines.Oversized() {
-			if !lines.OversizedImage() {
+			if !oversizedImage(lines.Head()) {
 				return agents.Completion{}, fmt.Errorf("read agent stream: line exceeds %d bytes", adapter.scannerMaxBytes)
 			}
 			inlineImage = true
@@ -232,6 +241,14 @@ func (adapter *Adapter) Stream(
 				}
 			}
 			for _, fragment := range choice.Delta.ToolCalls {
+				if !toolCalling {
+					toolCalling = true
+					if emit != nil {
+						if err := emit(agents.Delta{ToolCalling: true}); err != nil {
+							return agents.Completion{}, err
+						}
+					}
+				}
 				call, found := calls[fragment.Index]
 				if !found {
 					call = &agents.ToolCall{}
@@ -363,120 +380,31 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 	body, _ := io.ReadAll(
 		io.LimitReader(response.Body, adapter.errorBodyMaxBytes),
 	)
-	// The status travels as agents.StatusError (#322), so a caller can
-	// classify the refusal without reading the body.
-	err := fmt.Errorf(
-		"%w: %s",
-		&agents.StatusError{Status: response.StatusCode},
-		strings.TrimSpace(string(body)),
-	)
-	// #35: a vendor content-safety refusal names its own error code; it
-	// comes first, because its message may mention image data too.
-	if code := moderationRefusal(body); response.StatusCode >= 400 && response.StatusCode < 500 && code != "" {
-		reasons := moderation.Reasons(string(body))
-		if len(reasons) == 0 {
-			reasons = moderation.Tokens(code)
-		}
-		return errors.Join(&agents.ContentRejection{Reasons: reasons}, err)
-	}
-	// #120: a refusal the chat connection's Schema declares as a used-up
-	// balance or key quota (the LLMs gateway's 429 quota_exceeded) is told
-	// as such, not as an unknown error; no other refusal changes.
-	if adapter.exhaustedQuota != nil {
-		if class, exhausted := adapter.exhaustedQuota(response.StatusCode, refusalJSON(body)); exhausted {
-			return errors.Join(&agents.QuotaExhaustion{Class: class}, err)
-		}
-	}
-	// #253: a request with pictures refused as invalid input, whose error
-	// names image/vision/multimodal content, is a model without image input;
-	// the caller can say so instead of an unknown error. Any other refusal
-	// (context too long, a bad parameter, an unknown model) stays generic.
-	if imageRefusalStatus(response.StatusCode) && requestHasImages(request) && mentionsImageInput(body) {
-		return errors.Join(agents.ErrImagesRejected, err)
-	}
-	return err
+	// The refusal's class (content moderation, used-up quota, no image input,
+	// a refused request field) is read by the helper every chat model Adapter
+	// shares; the status always travels as agents.StatusError (#322).
+	return upstreamhttp.Refusal{
+		Status:         response.StatusCode,
+		Body:           body,
+		HasImages:      upstreamhttp.RequestHasImages(request),
+		ExhaustedQuota: adapter.exhaustedQuota,
+	}.Err()
 }
 
-// moderationCodes are the error codes vendors give a content-safety
-// refusal: DashScope's compatible (data_inspection_failed) and native
-// (DataInspectionFailed) endpoints, Azure OpenAI (content_filter) and OpenAI
-// (content_policy_violation).
-var moderationCodes = map[string]bool{
-	"data_inspection_failed":   true,
-	"datainspectionfailed":     true,
-	"content_filter":           true,
-	"content_policy_violation": true,
-}
-
-// moderationRefusal is the content-safety code of an error body, either a
-// plain JSON object or one SSE "data:" line as a streamed refusal sends it;
-// "" for any other refusal.
-func moderationRefusal(body []byte) string {
-	text := refusalJSON(body)
-	var payload struct {
-		Code  any `json:"code"`
-		Error *struct {
-			Code any    `json:"code"`
-			Type string `json:"type"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(text, &payload) != nil {
-		return ""
-	}
-	codes := []any{payload.Code}
-	if payload.Error != nil {
-		codes = append(codes, payload.Error.Code, payload.Error.Type)
-	}
-	for _, code := range codes {
-		if name, ok := code.(string); ok && moderationCodes[strings.ToLower(name)] {
-			return name
-		}
-	}
-	return ""
-}
-
-// refusalJSON is the JSON of an error body, either a plain JSON object or
-// one SSE "data:" line as a streamed refusal sends it.
-func refusalJSON(body []byte) []byte {
-	text := strings.TrimSpace(string(body))
-	return []byte(strings.TrimSpace(strings.TrimPrefix(text, "data:")))
-}
-
-func imageRefusalStatus(status int) bool {
-	switch status {
-	case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
-		return true
-	}
-	return false
-}
-
-func mentionsImageInput(body []byte) bool {
-	text := strings.ToLower(string(body))
-	for _, word := range []string{"image", "vision", "multimodal", "multi-modal"} {
-		if strings.Contains(text, word) {
-			return true
-		}
-	}
-	return false
-}
-
-func requestHasImages(request agents.Request) bool {
-	for _, message := range request.Messages {
-		for _, part := range message.Parts {
-			if part.URL != "" {
-				return true
-			}
-		}
-	}
-	return false
+// oversizedImage reports whether the head of an oversized stream line is a
+// chunk that carries a picture the model drew itself.
+func oversizedImage(head []byte) bool {
+	return bytes.HasPrefix(bytes.TrimSpace(head), []byte("data:")) && bytes.Contains(head, []byte(`"images"`))
 }
 
 type wireRequest struct {
-	Model       string        `json:"model,omitempty"`
-	Messages    []wireMessage `json:"messages"`
-	Tools       []wireTool    `json:"tools,omitempty"`
-	Stream      bool          `json:"stream"`
-	Temperature float64       `json:"temperature"`
+	Model    string        `json:"model,omitempty"`
+	Messages []wireMessage `json:"messages"`
+	Tools    []wireTool    `json:"tools,omitempty"`
+	Stream   bool          `json:"stream"`
+	// Temperature is a pointer so that 0 is still sent; nil (a model that
+	// accepts only its default) leaves it out.
+	Temperature *float64 `json:"temperature,omitempty"`
 	// StreamOptions is sent only with stream=true: DeepSeek answers 400 to
 	// stream_options on a non-streamed request.
 	StreamOptions *wireStreamOptions `json:"stream_options,omitempty"`
@@ -546,9 +474,12 @@ func marshalRequest(
 	thinking *ThinkingOptions,
 ) ([]byte, error) {
 	wire := wireRequest{
-		Model:       request.Model,
-		Stream:      stream,
-		Temperature: request.Temperature,
+		Model:  request.Model,
+		Stream: stream,
+	}
+	if thinking == nil || !thinking.OmitTemperature {
+		temperature := request.Temperature
+		wire.Temperature = &temperature
 	}
 	if stream && includeUsage {
 		wire.StreamOptions = &wireStreamOptions{IncludeUsage: true}

@@ -509,7 +509,10 @@ func hashPreparedInput(prepared PreparedInput) (string, error) {
 // max_items to its first pictures, as the Agent's generation tools do, and
 // reports what it kept (#329 follow-up). An Offering that preserves its
 // picture sequence, or a Schema without the note, keeps the input whole so
-// normalization refuses it.
+// normalization refuses it. The marks of the pictures (the parameter with the
+// reference-image-labels semantic, one per picture by position, #376) are cut
+// to the same count, so the marks that remain are those of the pictures that
+// remain.
 func (m *Module) keepFirstReferences(offeringID OfferingID, input json.RawMessage) (json.RawMessage, *ReferenceLimit) {
 	offering, ok := m.catalog.Get(offeringID)
 	if !ok || offering.ExecutionMessages.ReferenceLimit == "" || offering.ReferenceSelectionPolicy == "preserve" {
@@ -532,6 +535,9 @@ func (m *Module) keepFirstReferences(offeringID OfferingID, input json.RawMessag
 			return input, nil
 		}
 		values[parameter.Name] = kept
+		if !keepFirstImageLabels(offering, values, parameter.MaxItems) {
+			return input, nil
+		}
 		trimmed, err := json.Marshal(values)
 		if err != nil {
 			return input, nil
@@ -544,4 +550,33 @@ func (m *Module) keepFirstReferences(offeringID OfferingID, input json.RawMessag
 			Model: model, Count: parameter.MaxItems, Total: len(pictures)}
 	}
 	return input, nil
+}
+
+// keepFirstImageLabels cuts the marks of the pictures to the first count, in
+// place. A parameter that is absent, null, empty or not longer than count is
+// left alone. It reports false when the marks are not a JSON array it can cut,
+// so the caller keeps the input whole and normalization refuses it.
+func keepFirstImageLabels(offering Offering, values map[string]json.RawMessage, count int) bool {
+	for _, parameter := range offering.Parameters {
+		if parameter.Semantic != SemanticReferenceImageLabels {
+			continue
+		}
+		raw, present := values[parameter.Name]
+		if !present || strings.TrimSpace(string(raw)) == "null" {
+			continue
+		}
+		var marks []json.RawMessage
+		if json.Unmarshal(raw, &marks) != nil {
+			return false
+		}
+		if len(marks) <= count {
+			continue
+		}
+		kept, err := json.Marshal(marks[:count])
+		if err != nil {
+			return false
+		}
+		values[parameter.Name] = kept
+	}
+	return true
 }

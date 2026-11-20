@@ -3283,7 +3283,9 @@ type ChatChoiceSchema struct {
 type ChatChoiceKindSchema struct {
 	ID string `json:"id"`
 	// ToolName is the tool an answer calls; Argument is the name of its
-	// string parameter that receives the option id.
+	// string parameter that receives the option id. An empty ToolName is a
+	// kind with no target tool (#374): option_source agent, no argument, and
+	// the answer continues the conversation as text (AnswerTemplate).
 	ToolName string `json:"tool_name"`
 	Argument string `json:"argument"`
 	// OptionSource names where the server builds the options: "usage_profiles"
@@ -3297,7 +3299,35 @@ type ChatChoiceKindSchema struct {
 	// AcceptLabel and DeclineLabel word an agent_proposal card's two options.
 	AcceptLabel  string `json:"accept_label,omitempty"`
 	DeclineLabel string `json:"decline_label,omitempty"`
+	// MinOptions and MaxOptions bound the options the Agent supplies to a kind
+	// whose option_source is agent (#374). Zero keeps the card default: at
+	// least two options and at most choice.max_options; a declared bound can
+	// only be tighter than that default.
+	MinOptions int `json:"min_options,omitempty"`
+	MaxOptions int `json:"max_options,omitempty"`
+	// Actions lists what an option of this kind may carry (#374): the page
+	// performs the action when the person picks the option, before it sends
+	// the answer. Only ChoiceActionSwitchOperation and
+	// ChoiceActionClearOperation exist; a kind without Actions accepts none.
+	Actions []string `json:"actions,omitempty"`
+	// AnswerTemplate and PendingTemplate word a kind that names no target tool
+	// (ToolName empty, #374): its answer is the chosen option as text, not a
+	// tool call. {continuation} is the card's JSON (the chosen option, or
+	// every option while the card is open). A kind with a target tool uses
+	// choice.answer_template and choice.pending_template instead.
+	AnswerTemplate  string `json:"answer_template,omitempty"`
+	PendingTemplate string `json:"pending_template,omitempty"`
 }
+
+// The actions an option of a choice card may carry (#374). The page performs
+// them, through the session's function selection, before it sends the answer:
+// switch_operation fixes the named function operation, clear_operation clears
+// the selection so the session is in free mode again. The server never
+// changes the selection itself.
+const (
+	ChoiceActionSwitchOperation = "switch_operation"
+	ChoiceActionClearOperation  = "clear_operation"
+)
 
 // ChatConceptDirectionsSchema is application.chat.concept_directions (#242,
 // #360). An open request first asks how many sketches to draw on a quantity
@@ -4897,6 +4927,15 @@ type ChatFrontendSchema struct {
 	// deployment without runtime.http.legacy_routes.chat_turn_background,
 	// keeps the single stop button.
 	BackgroundWaitPollMilliseconds int `json:"background_wait_poll_milliseconds,omitempty"`
+	// StreamSilenceMilliseconds is how long the open chat stream may deliver no
+	// frame before the client closes it and reconnects from its last event id
+	// (#375). It must outlast chat.stream.heartbeat_milliseconds, or a healthy
+	// quiet turn would read as a dead connection.
+	StreamSilenceMilliseconds int `json:"stream_silence_milliseconds"`
+	// StreamReconnectAttempts bounds those reconnects in a row without any frame
+	// arriving on the new connection; past it the client reports the stream as
+	// interrupted and recovers by polling (#375).
+	StreamReconnectAttempts int `json:"stream_reconnect_attempts"`
 }
 
 type ChatThinkingSchema struct {
@@ -4908,6 +4947,12 @@ type ChatThinkingSchema struct {
 	// case-insensitively by prefix; the first matching profile wins.
 	ModelProfiles []ChatThinkingModelProfile `json:"model_profiles,omitempty"`
 }
+
+// The wire APIs a chat model profile can be served on (wire_api).
+const (
+	ChatWireCompletions = "chat_completions"
+	ChatWireResponses   = "responses"
+)
 
 type ChatThinkingModelProfile struct {
 	ModelPrefixes []string `json:"model_prefixes"`
@@ -4932,6 +4977,32 @@ type ChatThinkingModelProfile struct {
 	// model family: whether a streamed request asks for token usage with
 	// stream_options.include_usage. Nil keeps the agent-level value (#322).
 	StreamIncludeUsage *bool `json:"stream_include_usage,omitempty"`
+	// OmitTemperature leaves temperature out of every request to this model
+	// family (Agent turn, title, compaction summary, prompt enhancement and
+	// the connection test): the upstream accepts only its own default value
+	// (#401). Without it a request carries chat.agent.temperature.
+	OmitTemperature bool `json:"omit_temperature,omitempty"`
+	// WireAPI is the HTTP API the model family is served on: chat_completions
+	// (the default, chat.agent.endpoint_path) or responses (the OpenAI
+	// Responses API, chat.agent.responses_endpoint_path, #401). One connection
+	// can carry models of both: each request goes to the wire its model's
+	// profile declares, for every kind of request (Agent turn, title,
+	// compaction summary, prompt enhancement, connection test). On the
+	// responses wire the thinking level is always written to reasoning.effort
+	// whatever effort_field's name says (the field then only declares that the
+	// profile offers levels), and the wire has no request_fields,
+	// reasoning_passback or stream_include_usage: the catalog refuses them
+	// together with it.
+	WireAPI string `json:"wire_api,omitempty"`
+	// ChatCompletionsTools says whether the model family can run function
+	// tools on /v1/chat/completions. false marks a family whose tool calling
+	// needs another wire: an Agent turn always carries tools, so such a model
+	// is not offered for conversation turns on chat completions, while
+	// requests without tools (title, summary, prompt enhancement, the
+	// connection test) may still use it. A family served on the responses wire
+	// (wire_api) runs its tools there, whatever this says. Omitted means it
+	// can (#401).
+	ChatCompletionsTools *bool `json:"chat_completions_tools,omitempty"`
 	// ReasoningPassback returns each assistant message's reasoning_content in
 	// later requests of the same tool loop, as the vendor contract requires.
 	ReasoningPassback bool `json:"reasoning_passback"`
@@ -4952,6 +5023,10 @@ type ChatAgentSchema struct {
 	Temperature       float64             `json:"temperature"`
 	Thinking          *ChatThinkingSchema `json:"thinking,omitempty"`
 	Stream            bool                `json:"stream"`
+	// ResponsesEndpointPath is the Responses API's path under the connection's
+	// base URL, for the model profiles that declare wire_api responses; it is
+	// required when one does, and not read otherwise (#401).
+	ResponsesEndpointPath string `json:"responses_endpoint_path,omitempty"`
 	// StreamIncludeUsage asks a streamed request for token usage with
 	// stream_options.include_usage, unless the model's thinking profile says
 	// otherwise (#322). The usage feeds the composer's context meter.
@@ -5332,6 +5407,15 @@ type ChatContextSchema struct {
 	// ReferencePurposeInvalidTemplate ({handle}) refuses a reference purpose
 	// whose handle is not one of the pictures the call really sends.
 	ReferencePurposeInvalidTemplate string `json:"reference_purpose_invalid_template,omitempty"`
+	// ReferenceLabelPictureTemplate ({handle}) refuses a reference mark
+	// (#376) whose key cannot be placed on one picture: it is not an image of
+	// the session, it is the whole-selection alias, the picture it names is
+	// sent twice, or one picture gets two different marks. A mark for an image
+	// of the session that the call does not send is dropped, not refused.
+	// ReferenceLabelValueTemplate ({handle} {marks}) refuses a mark the chosen
+	// model does not take; {marks} lists the marks that model declares.
+	ReferenceLabelPictureTemplate string `json:"reference_label_picture_template,omitempty"`
+	ReferenceLabelValueTemplate   string `json:"reference_label_value_template,omitempty"`
 }
 
 type ChatDSMLSchema struct {
@@ -5411,6 +5495,13 @@ type ChatStreamEventTypes struct {
 	// (#285). It carries only the Schema status text, never reasoning. Empty
 	// turns the status off.
 	Thinking string `json:"thinking,omitempty"`
+	// Heartbeat names the visible heartbeat event (#375): while a turn streams,
+	// the handler writes a data frame {"<event_fields.type>":"<heartbeat>"} every
+	// heartbeat_milliseconds, with no id line. An EventSource can observe it, which
+	// it cannot with the comment frame, so the client tells a quiet turn from a
+	// dead connection. It is never stored, takes no event id and carries no
+	// progress. Empty keeps the comment frame (heartbeat_frame) alone.
+	Heartbeat string `json:"heartbeat,omitempty"`
 }
 
 type ChatToolSchema struct {
@@ -5520,6 +5611,16 @@ type ChatToolSchema struct {
 	AnchorArgument         string               `json:"anchor_argument,omitempty"`
 	IdempotencyKeyTemplate string               `json:"idempotency_key_template"`
 	ResultFields           ChatToolResultFields `json:"result_fields"`
+	// ReferenceImageLabelsArgument names the tool argument that maps an image
+	// handle to the mark of the side that picture shows (#376). Once the final
+	// reference order is fixed, the executor writes one mark per picture, in
+	// that order, into the chosen Offering's reference-image-labels parameter
+	// (the picture of a handle gets that handle's mark, every other picture
+	// ReferenceImageLabelUnknown); an Offering that declares none ignores the
+	// argument. The allowed marks are that parameter's options, never a list of
+	// the tool's. Both fields are declared together.
+	ReferenceImageLabelsArgument string `json:"reference_image_labels_argument,omitempty"`
+	ReferenceImageLabelUnknown   string `json:"reference_image_label_unknown,omitempty"`
 	// Processing, when present, makes this a tool that processes an existing
 	// 3D model of the session instead of creating a new one. It is
 	// server-side only and omitted from public projections.
@@ -5986,6 +6087,10 @@ type ChatPresentationSchema struct {
 
 type ChatMessageTexts struct {
 	TurnActive string `json:"turn_active"`
+	// SessionDeleteBlocked answers 409 to the deletion of a session (or of the
+	// canvas project that owns one) while a SkillRun of it has work in flight:
+	// a Task that has not ended or a grant waiting for its decision (#384).
+	SessionDeleteBlocked string `json:"session_delete_blocked"`
 	// ChoiceAnswered refuses an answer to a choice card that is no longer open;
 	// ChoiceRejected one whose option the card does not offer (#321).
 	ChoiceAnswered    string `json:"choice_answered"`
@@ -5995,6 +6100,11 @@ type ChatMessageTexts struct {
 	EmptyTitle        string `json:"empty_title"`
 	EmptyMessage      string `json:"empty_message"`
 	InvalidParameters string `json:"invalid_parameters"`
+	// MultiviewModelUnavailable refuses, when the turn starts, a structured
+	// multiview request whose model is not an available Offering that takes
+	// several views of one object (#373). Empty falls back to
+	// InvalidParameters.
+	MultiviewModelUnavailable string `json:"multiview_model_unavailable,omitempty"`
 	// ProductionBriefConflict refuses a whole-brief replacement that lost
 	// every bounded retry to a concurrent writer, so the caller retries instead
 	// of overwriting the other change (#103 review C5).
@@ -6104,6 +6214,12 @@ type ChatMessageTexts struct {
 	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
 	// a picture itself instead of answering or calling a generation tool.
 	AgentInlineImageOutput string `json:"agent_inline_image_output"`
+	// AgentRequestRejected replaces UnknownError when the upstream refused the
+	// request for one of its own parameters (HTTP 400 invalid_request_error
+	// that names the request field); {param} is that field's name. The
+	// upstream's own wording stays in the log (#401). Optional: without it
+	// such a refusal reads as the unknown error.
+	AgentRequestRejected string `json:"agent_request_rejected,omitempty"`
 	// AgentNotConfigured is what the person reads while the live Agent has no
 	// API key or no model: Agent replies and prompt enhancement are off (#253).
 	AgentNotConfigured string `json:"agent_not_configured"`
@@ -6143,6 +6259,13 @@ type ChatMessageTexts struct {
 	ToolRoundLimitPending     string `json:"tool_round_limit_pending"`
 	ToolRoundLimitPendingItem string `json:"tool_round_limit_pending_item"`
 	ToolRoundLimitPendingTool string `json:"tool_round_limit_pending_tool"`
+	// ToolArgumentsInvalid is the tool result of a call whose arguments the
+	// model wrote as invalid JSON: the tool did not run, and the Agent writes
+	// the call again. ToolUnavailable ({tool}) is the result of a call to a tool
+	// this reply cannot run. Both are ordinary tool results, not a failed turn
+	// (#378).
+	ToolArgumentsInvalid string `json:"tool_arguments_invalid"`
+	ToolUnavailable      string `json:"tool_unavailable"`
 	// The InputGap* texts are how a processing tool names a required input its
 	// call did not supply (#92, A3 #121): Missing joins {name}, {type},
 	// {options} and {supply}. {type} is built from InputGapReferenceImage, or
@@ -6205,6 +6328,10 @@ type ChatStatusTexts struct {
 	// QueuedSubmission is shown while a paid step waits to be submitted again
 	// because the in-flight task admission is full.
 	QueuedSubmission string `json:"queued_submission,omitempty"`
+	// PreparingTool is shown from the first fragment of a tool call the model
+	// is writing until the call runs, so a long argument stream does not keep
+	// showing the thinking status (#375).
+	PreparingTool string `json:"preparing_tool,omitempty"`
 }
 
 type ChatAuditSchema struct {
@@ -6925,6 +7052,13 @@ type FrontendRuntimeSchema struct {
 	TaskPollingIntervalMilliseconds      int                         `json:"task_polling_interval_milliseconds"`
 	HarnessRefreshMilliseconds           int                         `json:"harness_refresh_milliseconds"`
 	HarnessSaveDebounceMilliseconds      int                         `json:"harness_save_debounce_milliseconds"`
+	// PendingApprovalsRefreshMilliseconds is how often the page re-reads the
+	// pending paid steps of the session while a turn or a task is running
+	// (#385; it was a constant in the page). It slows down the same way the
+	// other repeating reads do (IdlePolling).
+	PendingApprovalsRefreshMilliseconds int `json:"pending_approvals_refresh_milliseconds"`
+	// IdlePolling is how the repeating reads slow down while nothing changes.
+	IdlePolling IdlePollingSchema `json:"idle_polling"`
 	// SessionMenuPageSize is how many sessions the top-bar switcher shows per
 	// page; a page is requested only when the person turns to it. The debounce
 	// delays the search request after typing.
@@ -6954,6 +7088,18 @@ type FrontendRuntimeSchema struct {
 	// or restored pick is a retired model switches to the successor and says
 	// so; frozen tasks keep the model they ran with.
 	RetiredGenerationModels []RetiredGenerationModel `json:"retired_generation_models,omitempty"`
+}
+
+// IdlePollingSchema is how the page slows its repeating reads (agent parameters,
+// consent, SkillRuns, pending approvals, provider balance) while they find
+// nothing new and no turn or task of the session is running (#385). After each
+// read that found nothing new the wait is multiplied by BackoffFactor, up to
+// MaxIntervalMilliseconds, and it returns to the read's own interval on a
+// change, when the tab becomes visible again, or while a turn or task runs. A
+// hidden tab and an ended login do not poll at all; that is not configurable.
+type IdlePollingSchema struct {
+	BackoffFactor           float64 `json:"backoff_factor"`
+	MaxIntervalMilliseconds int     `json:"max_interval_milliseconds"`
 }
 
 // SessionReadRetrySchema is how the browser reads a chat session's chat model

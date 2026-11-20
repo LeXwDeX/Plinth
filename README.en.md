@@ -14,8 +14,8 @@ mid-sized teams for internal use; you bring your own Provider API keys.
   viewer and multi-format downloads (GLB, glTF, OBJ, STL, FBX, USDZ and more, depending on
   what each Provider supports).
 - **Agent**: describe what you want in plain language; the Agent picks models and
-  parameters and starts the tasks. Paid steps follow the session's approval mode (auto or
-  manual). The Agent works with any multimodal model behind an OpenAI chat completions
+  parameters and starts the tasks. Paid steps follow the session's approval mode (auto, budget
+  plan or strict). The Agent works with any multimodal model behind an OpenAI chat completions
   compatible API.
 - **Built-in Providers**: Meshy, Tripo, Hyper3D, Jimeng, Gemini, plus OpenAI images and a
   self-hosted matting service. Providers become available when a valid key and any
@@ -26,7 +26,7 @@ mid-sized teams for internal use; you bring your own Provider API keys.
 - **Users**: administrators and regular users, with username and password sign-in.
 - **UI languages**: Chinese and English, see "UI language" below.
 
-Plinth targets desktop browsers only.
+Plinth targets desktop browsers only: Chrome or Edge 111, Firefox 128, or Safari 16.4, and newer. Older browsers get an upgrade notice.
 
 ## Screenshots
 
@@ -142,8 +142,10 @@ update, so always pass `--build` when upgrading.
   `AGENT_MODE=mock`, does not understand meaning (it calls generation tools by keywords), is slated
   for removal and is not meant for self-hosting.
 
-To use it, pick a 2D or 3D model in the model picker below the message box, type a description
-and send it. A new session's approval mode is Manual, so text-to-3D shows an approval card;
+To use it, open the settings (the gear beside the send button), pick a 2D or 3D model on the
+Generation models tab, type a description and send it. A new session's approval mode is Auto, so
+paid steps run right away; to get an approval card for text-to-3D, switch the top bar's approval
+mode to Strict (step by step) and
 click Approve to run it.
 
 **If startup fails:** when `--wait` reports an error or `docker compose ps` shows `Restarting`,
@@ -183,7 +185,7 @@ check `docker compose logs art-ai`.
   [Provider configuration](docs/provider-configuration.md).
 - **Agent chat model:** `LLM_BASE_URL` and `LLM_API_KEY` configure only the Agent chat model.
   They do not configure image or 3D Providers. `LLM_MODEL` defaults to the Schema value
-  `qwen-omni-flash`, a version-less alias (a strong multimodal model; the gateway currently resolves it to qwen3.8-omni-flash; thinking levels low/medium/xhigh, default xhigh). A second connection can use `LLM_CONNECTIONS=GPT` with `GPT_MODEL=gpt-astra` (currently resolves to gpt-6-astra; levels low/medium/high/xhigh/max, default high). The aliases let the upstream gateway upgrade versions without the downstream configuration changing (2026-11-02 maintainer decision, #64). Set it to the model name served by your endpoint when needed. The Agent model
+  `qwen-omni-flash`, a version-less alias (a strong multimodal model; the gateway currently resolves it to qwen3.8-omni-flash; thinking levels low/medium/xhigh, default xhigh). A second connection can use `LLM_CONNECTIONS=GPT` with `GPT_MODEL=gpt-astra` (resolves to gpt-6.2-astra since 2026-11-19; it cannot take function tools on Chat Completions, so its profile declares the Responses API and Agent turns use it, #401; levels low/medium/high/xhigh/max, default high). The aliases let the upstream gateway upgrade versions without the downstream configuration changing (2026-11-02 maintainer decision, #64). Set it to the model name served by your endpoint when needed. The Agent model
   must support multimodal input and at least be able to read images.
 - **Gemini images:** set both `GEMINI_API_KEY` and `GEMINI_BASE_URL` to enable Gemini. It has
   no default base URL and never borrows `LLM_BASE_URL`; if all models use one gateway, set
@@ -337,7 +339,7 @@ in [docs/deployment.md](docs/deployment.md#内部运维资产自部署不需要)
 - Some user-facing text produced by the server is still Chinese only: task failure reasons,
   rejection reasons before a step is submitted, and tool explanations the Agent passes on. The
   English UI shows these in Chinese; making them follow the UI language is planned after 1.0.
-- Desktop browsers only.
+- Desktop browsers only (Chrome or Edge 111, Firefox 128, Safari 16.4, and newer).
 - Not in 1.0: adding your own Providers (only the built-in Providers listed above), teams and
   organizations (there are only administrators and regular users), encrypted storage of
   Provider keys (keys live in `.env`, protected by file permissions), and chat protocols other

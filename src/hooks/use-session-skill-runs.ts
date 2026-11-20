@@ -3,6 +3,7 @@
 import useSWR from 'swr';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { useAuth } from '@/hooks/use-auth';
+import { useIdleInterval, useSessionBusy } from '@/hooks/use-polling';
 
 export type SkillStepPhase = 'planned' | 'prepared' | 'grant_pending' | 'task_bound' | 'output_ready';
 
@@ -57,6 +58,13 @@ export function useSessionSkillRuns(sessionId: string | null) {
   const url = route && sessionId
     ? `${route}?session_id=${encodeURIComponent(sessionId)}&limit=${schema.runtime.frontend.session_menu_page_size}`
     : null;
+  // A turn or a task of the session may move a step along; otherwise the reads slow down while the runs stay the same.
+  const busy = useSessionBusy(sessionId);
+  const refreshInterval = useIdleInterval<unknown>(
+    schema.runtime.frontend.task_polling_interval_milliseconds,
+    schema.runtime.frontend.idle_polling,
+    { busy },
+  );
   const { data, error, isLoading, mutate } = useSWR<unknown>(
     user?.id && url ? [url, user.id, sessionId] as const : null,
     async ([requestURL]) => {
@@ -66,7 +74,7 @@ export function useSessionSkillRuns(sessionId: string | null) {
       if (!Array.isArray(record(body)?.runs)) throw new Error('Invalid SkillRun response');
       return body;
     },
-    { refreshInterval: schema.runtime.frontend.task_polling_interval_milliseconds },
+    { refreshInterval },
   );
   return {
     runs: sessionId ? projectSessionSkillRuns(data, sessionId) : [],

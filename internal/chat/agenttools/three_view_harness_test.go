@@ -318,13 +318,16 @@ func TestNewActiveHarnessTurnCannotDispatchThreeViewSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The refusal is the Schema's text for a tool this turn cannot run (#378),
+	// an ordinary tool result: the turn is not marked failed for it.
+	refusal := strings.ReplaceAll(schema.Presentation.Messages.ToolUnavailable, "{tool}", ToolCreateThreeView)
 	rejected := false
 	for _, message := range turn.Checkpoint.Completed {
-		if message.Role == schema.Roles.Tool && message.ToolCallID != "" && strings.Contains(message.Content, `tool "create_three_view" is not available`) {
+		if message.Role == schema.Roles.Tool && message.ToolCallID != "" && message.Content == refusal {
 			rejected = true
 		}
 	}
-	if !rejected {
+	if !rejected || turn.State != schema.State.TurnDone {
 		t.Fatalf("obsolete Skill call has no durable registry refusal: state=%s completed=%+v", turn.State, turn.Checkpoint.Completed)
 	}
 }

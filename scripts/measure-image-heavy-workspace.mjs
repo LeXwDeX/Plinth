@@ -184,10 +184,34 @@ async function imageTurn(page, prompt) {
   await page.waitForTimeout(800);
 }
 
-async function pickImageModel(page) {
-  await page.click('[data-testid=workspace-model-picker]');
-  await page.locator('[data-testid=workspace-model-picker-image] [role=menu] [role=menuitemradio]').first().click();
+/**
+ * #405: the generation models, Skills, generation parameters and the chat model with its thinking level are the tabs of one
+ * settings dialog behind the gear beside the send button (`tab`: models, skills, params or chat). A pick applies at once and
+ * the dialog stays open, so it is closed again before the composer, the board or the stage is used.
+ */
+async function openComposerSettings(page, tab) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) {
+    await page.click('[data-testid=composer-settings-open]');
+    await dialog.waitFor({ timeout: 10000 });
+  }
+  if (tab) {
+    await page.click(`[data-testid=composer-settings-tab-${tab}]`);
+    await page.locator(`[data-testid=composer-settings-tab-${tab}][aria-selected=true]`).waitFor({ timeout: 10000 });
+  }
+}
+
+async function closeComposerSettings(page) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) return;
   await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+}
+
+async function pickImageModel(page) {
+  await openComposerSettings(page, 'models');
+  await page.locator('[data-testid=workspace-model-picker-image] [role=menu] [role=menuitemradio]').first().click();
+  await closeComposerSettings(page);
 }
 
 /** Draws a busy picture in the page (gradients, shapes and grain, so the PNG is several MB like a real one) and uploads it. */

@@ -10,14 +10,14 @@ Plinth 是一个自部署的 AI 美术资产工作台：在一个对话 + 画布
 - **3D**：文生 3D、图生 3D、换贴图、重拓扑、绑骨与动画，3D 查看器与多格式下载
   （GLB、glTF、OBJ、STL、FBX、USDZ 等，以各 Provider 实际支持为准）。
 - **Agent**：用自然语言描述需求，Agent 选择模型和参数并发起任务；付费步骤按会话的
-  批准方式（自动 / 手动）执行。Agent 使用任意 OpenAI chat completions 兼容的多模态模型。
+  批准方式（自动 / 预算 / 严格）执行。Agent 使用任意 OpenAI chat completions 兼容的多模态模型。
 - **内置 Provider**：Meshy、Tripo、Hyper3D、即梦（Jimeng）、Gemini，以及 OpenAI 图像与
   自部署抠图服务。配置有效的 key 和所需地址后才可用；配置缺失时明确显示不可用，不会切换模型。
 - **Provider 默认 Mock**：`PROVIDER_MODE` 默认 `mock`，返回内置示例结果，不调用任何付费上游；Agent 默认 `live`，需要配置 `LLM_*`。
 - **用户**：管理员 + 普通用户，账号密码登录。
 - **界面语言**：中文与英文，见下文「界面语言」。
 
-项目只面向 PC 桌面浏览器。
+项目只面向 PC 桌面浏览器：Chrome / Edge 111、Firefox 128、Safari 16.4 及以上版本；更低版本打开时会提示升级。
 
 ## 截图
 
@@ -122,8 +122,8 @@ docker compose up -d --wait
 - **Mock Agent 只用于开发与测试**：必须显式设 `AGENT_MODE=mock` 才会运行，它不理解语义，按关键词
   调用生成工具，计划移除，不用于自部署。
 
-用法：在输入框下方的模型选择器里选 2D 或 3D 模型，输入描述发送。新会话的批准方式是「手工」，
-文生 3D 会出现批准卡，点「批准」后执行。
+用法：点输入框里发送按钮右侧的齿轮，在「生成模型」页选 2D 或 3D 模型，输入描述发送。新会话的批准方式是「自动」，
+付费步骤直接执行；想让文生 3D 先出批准卡，在顶栏「批准方式」切到「严格（逐步批准）」，点「批准」后执行。
 
 **启动失败时**：`--wait` 报错或 `docker compose ps` 显示 `Restarting` 时，先看
 `docker compose logs art-ai`。常见原因：
@@ -285,7 +285,7 @@ WEB_ASSETS_ROOT=build/go-web go run ./cmd/art-ai
 
 - 部分由服务端生成、展示给用户的文字目前只有中文：任务失败原因、提交前的拒绝原因，以及
   Agent 转述的工具说明。英文界面下这些地方仍会出现中文，计划在 1.0 之后改为按界面语言显示。
-- 只面向 PC 桌面浏览器。
+- 只面向 PC 桌面浏览器（Chrome / Edge 111、Firefox 128、Safari 16.4 及以上）。
 - 1.0 不包含：用户自行添加 Provider（只能使用上文列出的内置 Provider）、团队与组织（只有
   管理员和普通用户两种角色）、Provider key 的加密存储（key 写在 `.env`，靠文件权限保护）、
   OpenAI chat completions 以外的对话协议。

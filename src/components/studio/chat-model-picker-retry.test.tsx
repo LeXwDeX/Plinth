@@ -7,13 +7,15 @@ import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { ProductSchema } from '@/lib/product-schema';
 import { formatSchemaText } from '@/lib/product-schema';
 import { ChatBrowserError, type ChatModelChoice, type ChatReasoning } from '@/lib/chat/browser-client';
-import { ChatModelPicker } from '@/components/studio/chat-model-picker';
+import { ChatModelPicker, useChatModelSettings } from '@/components/studio/chat-model-picker';
 import { useChatStore } from '@/store/chat-store';
 import { useSessionContextStore } from '@/store/session-context-store';
 
 // #314: the first read of a session's chat model or thinking level can fail (a rate limit, a network blip). The picker
 // must not vanish for good: it reads again a bounded number of times, again when the window regains focus or the network
-// comes back, says so while it has nothing to show, and lets the person retry. These tests drive the real hooks and
+// comes back, says so while it has nothing to show, and lets the person retry. #405: the picker is a tab of the settings
+// dialog now; ChatTab is that tab as the dialog builds it (the settings always read, the content shown once there is any),
+// and `value` (what the trigger used to say) is what the gear's marker shows for the chat model. These tests drive the real hooks and
 // stores with a client whose answers each test scripts; the Schema's retry waits are shortened to milliseconds, and
 // every state a test looks at in between is held by a read the test has not answered yet, not by timing.
 
@@ -59,14 +61,22 @@ const client = {
 };
 type Read = typeof client.getChatModel | typeof client.getReasoning;
 
-const TRIGGER = 'workspace-chat-model-picker';
 const PANEL = 'workspace-chat-model-picker-panel';
 const MODEL_RETRY = 'workspace-chat-model-retry';
 const LEVELS_RETRY = 'workspace-reasoning-retry';
 
-const label = (key: string, value: string) => `${messages[key]}: ${value}`;
 const unavailable = (reasonKey: string) => formatSchemaText(messages['ui.unavailable.label'], { reason: messages[reasonKey] });
-const triggerLabel = () => screen.getByTestId(TRIGGER).getAttribute('aria-label');
+
+function ChatTab() {
+  const settings = useChatModelSettings();
+  return (
+    <>
+      <output data-testid="chat-value">{settings.value}</output>
+      {settings.offered ? <ChatModelPicker settings={settings} /> : null}
+    </>
+  );
+}
+const value = () => screen.getByTestId('chat-value').textContent;
 
 /** A read the test answers later. */
 function later<T>() {
@@ -86,10 +96,8 @@ async function expectBound(read: Read, expected: number, session?: string) {
   expect(calls(read, session)).toBe(expected);
 }
 
-async function openPanel() {
-  fireEvent.click(screen.getByTestId(TRIGGER));
-  return screen.findByTestId(PANEL);
-}
+/** The content is there as soon as there is anything to show; nothing to open. */
+const openPanel = () => screen.findByTestId(PANEL);
 
 beforeEach(() => {
   mock.schema = schemaWithFastRetries();
@@ -112,15 +120,15 @@ describe('a first read that fails is read again until the picker shows (#314)', 
   it('says the thinking level could not be read, then shows it when the retry succeeds after a rate limit', async () => {
     const retry = later<ChatReasoning>();
     client.getReasoning.mockRejectedValueOnce(limited()).mockImplementationOnce(() => retry.promise);
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     // The failed read leaves the picker saying so; it does not stay away.
-    await screen.findByTestId(TRIGGER);
+    await screen.findByTestId(PANEL);
     await waitFor(() => expect(calls(client.getReasoning)).toBe(2));
-    expect(triggerLabel()).toBe(label('ui.studio.reasoning.label', 'deepseek'));
+    expect(value()).toBe('deepseek');
     expect(useSessionContextStore.getState().reasoningFailed.s1).toBe(true);
 
     await act(async () => { retry.resolve(levels); });
-    expect(triggerLabel()).toBe(label('ui.studio.reasoning.label', 'deepseek · high'));
+    expect(value()).toBe('deepseek · high');
     expect(useSessionContextStore.getState().reasoningFailed.s1).toBeUndefined();
     await wait(100);
     expect(calls(client.getReasoning)).toBe(2);
@@ -131,26 +139,25 @@ describe('a first read that fails is read again until the picker shows (#314)', 
     const thinking = later<ChatReasoning>();
     client.getChatModel.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockImplementationOnce(() => models.promise);
     client.getReasoning.mockRejectedValueOnce(limited()).mockImplementationOnce(() => thinking.promise);
-    render(<ChatModelPicker />);
-    await screen.findByTestId(TRIGGER);
+    render(<ChatTab />);
+    await screen.findByTestId(PANEL);
     await waitFor(() => expect(calls(client.getChatModel)).toBe(2));
     await waitFor(() => expect(calls(client.getReasoning)).toBe(2));
-    expect(triggerLabel()).toBe(label('ui.studio.chat_model.combined_label', messages['ui.studio.chat_model.load_failed_short']));
-    expect(screen.getByTestId(TRIGGER).textContent).toBe(messages['ui.studio.chat_model.load_failed_short']);
+    expect(value()).toBe(messages['ui.studio.chat_model.load_failed_short']);
 
     await act(async () => { models.resolve(two); thinking.resolve(levels); });
-    expect(triggerLabel()).toBe(label('ui.studio.chat_model.combined_label', 'deepseek · high'));
+    expect(value()).toBe('deepseek · high');
   });
 
   it('waits for the Retry-After the server sent instead of using its retries up inside the limit', async () => {
     // The backoff alone would read again after 20 ms; the server asked for 0.3 s (the Schema here caps a wait at 0.4 s).
     client.getReasoning.mockRejectedValueOnce(limited(0.3));
-    render(<ChatModelPicker />);
-    await screen.findByTestId(TRIGGER);
+    render(<ChatTab />);
+    await screen.findByTestId(PANEL);
     await wait(120);
     expect(calls(client.getReasoning)).toBe(1);
     await waitFor(() => expect(calls(client.getReasoning)).toBe(2), { timeout: 2000 });
-    await waitFor(() => expect(triggerLabel()).toBe(label('ui.studio.reasoning.label', 'deepseek · high')));
+    await waitFor(() => expect(value()).toBe('deepseek · high'));
   });
 });
 
@@ -158,16 +165,15 @@ describe('a read that keeps failing asks a bounded number of times (#314)', () =
   it('stops at the Schema bound while the picker keeps saying the read failed', async () => {
     client.getChatModel.mockRejectedValue(limited());
     client.getReasoning.mockRejectedValue(limited());
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await expectBound(client.getChatModel, 1 + RETRIES);
     await expectBound(client.getReasoning, 1 + RETRIES);
-    expect(triggerLabel()).toBe(label('ui.studio.chat_model.combined_label', messages['ui.studio.chat_model.load_failed_short']));
-    expect(screen.getByTestId(TRIGGER).textContent).toBe(messages['ui.studio.chat_model.load_failed_short']);
+    expect(value()).toBe(messages['ui.studio.chat_model.load_failed_short']);
   });
 
   it('reads again when the window regains focus or the network comes back, and stops again at the bound', async () => {
     client.getReasoning.mockRejectedValue(limited());
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await expectBound(client.getReasoning, 1 + RETRIES);
 
     await act(async () => { window.dispatchEvent(new Event('focus')); });
@@ -177,7 +183,7 @@ describe('a read that keeps failing asks a bounded number of times (#314)', () =
 
     client.getReasoning.mockImplementation(async () => levels);
     await act(async () => { window.dispatchEvent(new Event('online')); });
-    await waitFor(() => expect(triggerLabel()).toBe(label('ui.studio.reasoning.label', 'deepseek · high')));
+    await waitFor(() => expect(value()).toBe('deepseek · high'));
     // Nothing failed any more: another focus reads nothing.
     const reads = calls(client.getReasoning);
     await act(async () => { window.dispatchEvent(new Event('focus')); });
@@ -189,10 +195,10 @@ describe('a read that keeps failing asks a bounded number of times (#314)', () =
 describe('the picker says it could not read, and lets the person retry (#314)', () => {
   it('names the failed model list in its column, and the retry brings the models into the open panel', async () => {
     client.getChatModel.mockRejectedValue(limited());
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await expectBound(client.getChatModel, 1 + RETRIES);
     // The thinking levels arrived; only the model column is unavailable.
-    expect(triggerLabel()).toBe(label('ui.studio.chat_model.combined_label', 'high'));
+    expect(value()).toBe('high');
     const panel = await openPanel();
     const column = within(panel).getByTestId('workspace-chat-model-section');
     expect(within(column).getByRole('alert').textContent).toBe(messages['ui.studio.chat_model.load_failed']);
@@ -209,19 +215,19 @@ describe('the picker says it could not read, and lets the person retry (#314)', 
     expect(within(panel).getByRole('alert')).toBeTruthy();
     await act(async () => { retried.resolve(two); });
     expect(within(panel).getAllByRole('menuitemradio', { name: /deepseek|glm-5.3/ })).toHaveLength(2);
-    // The panel stayed open and the column turned into the model table.
+    // The panel stayed and the column turned into the model table.
     expect(screen.getByTestId(PANEL)).toBe(panel);
     expect(within(panel).queryByTestId(MODEL_RETRY)).toBeNull();
     expect(within(panel).queryByRole('alert')).toBeNull();
-    expect(triggerLabel()).toBe(label('ui.studio.chat_model.combined_label', 'deepseek · high'));
+    expect(value()).toBe('deepseek · high');
   });
 
   it('names the failed thinking levels beside the model list and retries only them', async () => {
     client.getChatModel.mockImplementation(async () => two);
     client.getReasoning.mockRejectedValue(limited());
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await expectBound(client.getReasoning, 1 + RETRIES);
-    expect(triggerLabel()).toBe(label('ui.studio.chat_model.combined_label', 'deepseek'));
+    expect(value()).toBe('deepseek');
     const panel = await openPanel();
     const column = within(panel).getByTestId('workspace-reasoning-section');
     expect(within(column).getByRole('alert').textContent).toBe(messages['ui.studio.reasoning.load_failed']);
@@ -242,7 +248,7 @@ describe('the picker says it could not read, and lets the person retry (#314)', 
   it('offers a retry for each part when both reads failed; the person\'s retry reads a fresh bounded cycle', async () => {
     client.getChatModel.mockRejectedValue(limited());
     client.getReasoning.mockRejectedValue(limited());
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await expectBound(client.getChatModel, 1 + RETRIES);
     await expectBound(client.getReasoning, 1 + RETRIES);
     const panel = await openPanel();
@@ -257,14 +263,13 @@ describe('the picker says it could not read, and lets the person retry (#314)', 
     expect(calls(client.getChatModel)).toBe(1 + RETRIES);
   });
 
-  it('says so in an open panel when a read fails late, without closing it, replacing the trigger or moving the focus', async () => {
+  it('says so in the tab when a read fails late, without replacing the panel or moving the focus', async () => {
     const models = later<ChatModelChoice>();
     client.getChatModel.mockImplementationOnce(() => models.promise);
-    render(<ChatModelPicker />);
-    // The levels arrived first: the picker names the level alone while the model list is still on its way.
-    const trigger = await screen.findByTestId(TRIGGER);
+    render(<ChatTab />);
+    // The levels arrived first: the tab shows the level alone while the model list is still on its way.
     const panel = await openPanel();
-    await waitFor(() => expect(panel.contains(document.activeElement)).toBe(true));
+    within(panel).getAllByRole('menuitemradio')[0].focus();
     const focused = document.activeElement;
     expect(within(panel).queryByTestId('workspace-chat-model-section')).toBeNull();
 
@@ -273,25 +278,22 @@ describe('the picker says it could not read, and lets the person retry (#314)', 
     await act(async () => { models.reject(limited(0.3)); });
     await waitFor(() => expect(within(panel).getByTestId(MODEL_RETRY)).toBeTruthy());
     expect(screen.getByTestId(PANEL)).toBe(panel);
-    expect(screen.getByTestId(TRIGGER)).toBe(trigger);
-    expect(trigger.getAttribute('aria-expanded')).toBe('true');
     expect(panel.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).toBe(focused);
 
-    // And when the retry finds the models, the failed column turns into the table in the same open panel.
+    // And when the retry finds the models, the failed column turns into the table in the same panel.
     await waitFor(() => expect(within(panel).getAllByRole('menuitemradio', { name: /deepseek|glm-5.3/ }).length).toBeGreaterThan(0), { timeout: 2000 });
     expect(screen.getByTestId(PANEL)).toBe(panel);
-    expect(screen.getByTestId(TRIGGER)).toBe(trigger);
   });
 
   it('keeps showing what it holds when a later read fails, without an unavailable state', async () => {
     useSessionContextStore.setState({ chatModel: { s1: two }, reasoning: { s1: levels } });
     client.getChatModel.mockRejectedValue(limited());
     client.getReasoning.mockRejectedValue(limited());
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await expectBound(client.getChatModel, 1 + RETRIES);
     await expectBound(client.getReasoning, 1 + RETRIES);
-    expect(triggerLabel()).toBe(label('ui.studio.chat_model.combined_label', 'deepseek · high'));
+    expect(value()).toBe('deepseek · high');
     const panel = await openPanel();
     expect(within(panel).queryByRole('alert')).toBeNull();
     expect(within(panel).queryByTestId(MODEL_RETRY)).toBeNull();
@@ -311,7 +313,7 @@ describe('a read follows the session it was made for (#314)', () => {
 
   it('cancels the read of the session that was left; its late failure neither shows nor retries', async () => {
     const open = hang();
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await waitFor(() => expect(open).toHaveLength(1));
     expect(open[0].signal.aborted).toBe(false);
 
@@ -327,7 +329,7 @@ describe('a read follows the session it was made for (#314)', () => {
     expect(useSessionContextStore.getState().reasoningFailed.s1).toBeUndefined();
     // The session on the screen is still waiting for its own first answer and shows nothing of s1's failure.
     expect(calls(client.getReasoning, 's2')).toBe(1);
-    expect(screen.queryByTestId(TRIGGER)).toBeNull();
+    expect(screen.queryByTestId(PANEL)).toBeNull();
   });
 
   it('cancels the retry a left session was waiting for', async () => {
@@ -336,7 +338,7 @@ describe('a read follows the session it was made for (#314)', () => {
       if (session === 's1') throw limited(0.3);
       return levels;
     });
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await waitFor(() => expect(calls(client.getReasoning, 's1')).toBe(1));
     await act(async () => { useChatStore.setState({ activeSessionId: 's2' }); });
     await waitFor(() => expect(calls(client.getReasoning, 's2')).toBe(1));
@@ -351,13 +353,13 @@ describe('a read follows the session it was made for (#314)', () => {
 
   it('cancels the read and the waiting retry when the picker leaves the page', async () => {
     const open = hang();
-    const first = render(<ChatModelPicker />);
+    const first = render(<ChatTab />);
     await waitFor(() => expect(open).toHaveLength(1));
     first.unmount();
     expect(open[0].signal.aborted).toBe(true);
 
     client.getReasoning.mockRejectedValue(limited(0.3));
-    const second = render(<ChatModelPicker />);
+    const second = render(<ChatTab />);
     await waitFor(() => expect(client.getReasoning).toHaveBeenCalledTimes(2));
     second.unmount();
     await wait(600);

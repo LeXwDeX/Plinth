@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 
 import { useProductSchema } from '@/components/product-schema-provider';
+import { useIdleInterval, useSessionBusy } from '@/hooks/use-polling';
 import {
   countPending,
   DecisionLedger,
@@ -18,8 +19,11 @@ import {
   type PolledApprovals,
 } from '@/lib/chat/pending-approvals';
 
-/** 过期与新建的待批准步骤都由服务端裁决；这里只定期重读，不在前端倒计时。 */
-const POLL_MILLISECONDS = 20_000;
+/** 过期与新建的待批准步骤都由服务端裁决；这里只定期重读，不在前端倒计时。间隔与空闲退避都来自 Schema（#385）。 */
+function approvalsSignature(data: PolledApprovals | undefined): unknown {
+  // `startedAt` differs on every read; only the cards say whether anything changed.
+  return data ? JSON.stringify(data.items) : undefined;
+}
 
 interface RetainedApprovals { sessionId: string | null; items: PendingApproval[] }
 
@@ -33,13 +37,19 @@ interface RetainedApprovals { sessionId: string | null; items: PendingApproval[]
 export function useSessionPendingApprovals(sessionId: string | null) {
   const { schema } = useProductSchema();
   const enabled = sessionId !== null && pendingApprovalsRoute(schema, sessionId) !== null;
+  const busy = useSessionBusy(sessionId);
+  const refreshInterval = useIdleInterval<PolledApprovals>(
+    schema.runtime.frontend.pending_approvals_refresh_milliseconds,
+    schema.runtime.frontend.idle_polling,
+    { busy, signature: approvalsSignature },
+  );
   const { data, mutate } = useSWR<PolledApprovals>(
     enabled ? ['pending-approvals', sessionId] : null,
     async ([, id]: readonly [string, string]) => {
       const startedAt = Date.now();
       return { startedAt, items: await fetchPendingApprovals(schema, id) };
     },
-    { refreshInterval: POLL_MILLISECONDS, revalidateOnFocus: true, keepPreviousData: false },
+    { refreshInterval, revalidateOnFocus: true, keepPreviousData: false },
   );
   const previous = useRef<RetainedApprovals>({ sessionId, items: [] });
   // Cards this page decided: when one leaves the list it was decided, not expired.

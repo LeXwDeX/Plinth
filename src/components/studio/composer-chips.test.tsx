@@ -61,10 +61,16 @@ describe('every chip above the composer is one component of one size', () => {
     expect(composer).not.toMatch(/h-8 max-w-full|size-9 shrink-0/);
   });
 
-  it('keeps the attachment purpose inside the attachment group, after the attachment chips', () => {
+  it('keeps the attachment purpose controls in the attachment group, after the one row that holds every chip (#405)', () => {
+    // The attachment chips joined the other chips in one wrapping row, so two strips can share a line; the group that
+    // follows keeps the purpose controls and the notices for the pictures attached.
+    const row = composer.slice(composer.indexOf('data-testid="composer-chips"'), composer.indexOf('data-testid="composer-attachments"'));
+    expect(row.indexOf('testId="composer-object-chip"')).toBeGreaterThan(-1);
+    expect(row.indexOf('testId="composer-skill-chip"')).toBeLessThan(row.indexOf('testId="composer-attachment-chip"'));
     const group = composer.slice(composer.indexOf('data-testid="composer-attachments"'), composer.indexOf('<input\n        ref={fileInput}'));
-    expect(group.indexOf('composer-attachment-chip')).toBeGreaterThan(-1);
-    expect(group.indexOf('composer-attachment-chip')).toBeLessThan(group.indexOf('composer-attachment-purpose"'));
+    expect(group).not.toContain('composer-attachment-chip');
+    expect(group.indexOf('data-testid="composer-attachment-purposes"')).toBeGreaterThan(-1);
+    expect(group.indexOf('data-testid="composer-attachment-purposes"')).toBeLessThan(group.indexOf('data-testid="composer-attachment-purpose"'));
   });
 
   it('says a typed handle takes the turn, greys the object chip, and lets the send leave the object out', () => {

@@ -119,7 +119,8 @@ const server = await createServer({
     enforce: 'pre',
     resolveId(value) {
       if (value === 'virtual:composer-paste-pending') return '\0composer-paste-pending';
-      for (const name of ['model-picker', 'skill-picker', 'agent-scope-picker', 'params-popover']) {
+      // #405: the four pickers sit behind the composer's settings gear, so the gear's dialog is what is replaced.
+      for (const name of ['composer-settings', 'model-picker', 'skill-picker', 'agent-scope-picker', 'params-popover']) {
         if (new RegExp(`/studio/${name}(?:\\.tsx)?$`).test(value)) return `\0fixture-${name}`;
       }
       return null;
@@ -128,7 +129,7 @@ const server = await createServer({
       if (value.startsWith('\0fixture-')) {
         const name = value.slice('\0fixture-'.length);
         if (name === 'model-picker') return 'export const ModelPicker = () => null; export const GenerationModelNotice = () => null;';
-        const exportName = { 'skill-picker': 'SkillPicker', 'agent-scope-picker': 'AgentScopePicker', 'params-popover': 'ParamsPopover' }[name];
+        const exportName = { 'composer-settings': 'ComposerSettings', 'skill-picker': 'SkillPicker', 'agent-scope-picker': 'AgentScopePicker', 'params-popover': 'ParamsPopover' }[name];
         return `export const ${exportName} = () => null;`;
       }
       if (value !== '\0composer-paste-pending') return null;

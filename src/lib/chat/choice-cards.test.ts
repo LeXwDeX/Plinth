@@ -4,12 +4,14 @@ import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { OfferingWire } from '@/lib/agent-offerings';
 import type { ProductSchema } from '@/lib/product-schema';
 import {
+  choiceActionLabel,
   choiceAnswerText,
   choiceCardHasDetails,
   choiceCardOfferingCapability,
   choiceCardPlacement,
   choiceOptionQuote,
   choiceOptionTitle,
+  choiceSelectionAction,
   choiceStatusText,
   choicesRoute,
   fetchChoiceCards,
@@ -109,6 +111,77 @@ describe('choice cards (#321)', () => {
     expect(choiceStatusText(schema, card({ state: 'answered', answer: { optionId: wire.default_option_id, useDefault: true, source: 'card' } })))
       .toBe(messages['ui.chat.choice.answered_default'].replace('{title}', 'Tripo3D · Smart Segmentation'));
     expect(choiceStatusText(schema, card({ state: 'superseded' }))).toBe(messages['ui.chat.choice.superseded']);
+  });
+
+  // #374: the direction card (next_step) names no target tool, has no default and lets an option carry an action the
+  // page performs before the answer goes out.
+  describe('direction card option actions (#374)', () => {
+    const direction = {
+      id: 'choice_next', assistant_message_id: 'assistant-2', tool: '', kind: 'next_step', capability: 'next_step',
+      question: '接下来想怎么做？', allow_default: false, default_option_id: '', state: 'pending', created_at: '2026-11-19T00:00:00Z',
+      options: [
+        { id: 'clear_and_draw', label: '清空功能选择', description: '回到自由模式再继续', recommended: true, action: { type: 'clear_operation' } },
+        { id: 'switch_retexture', label: '换贴图', action: { type: 'switch_operation', operation_id: 'retexture' } },
+        { id: 'keep', label: '保持当前功能' },
+      ],
+    };
+    const parsed = () => parseChoiceCards({ choices: [direction] })[0];
+
+    it('reads each option action and leaves an option without one actionless', () => {
+      const card = parsed();
+      expect(card).toMatchObject({ kind: 'next_step', tool: '', question: '接下来想怎么做？', allowDefault: false, defaultOptionId: '' });
+      expect(card.options[0].action).toEqual({ type: 'clear_operation' });
+      expect(card.options[1].action).toEqual({ type: 'switch_operation', operationId: 'retexture' });
+      expect(card.options[2]).not.toHaveProperty('action');
+      // A card of this kind is never priced as an Offering capability.
+      expect(choiceCardOfferingCapability(schema, card)).toBeNull();
+      expect(choiceCardHasDetails(card)).toBe(true);
+    });
+
+    it('leaves out an option whose action this page cannot perform, instead of answering it as a plain option', () => {
+      const card = parseChoiceCards({ choices: [{ ...direction, options: [
+        direction.options[0],
+        { id: 'unknown', label: '未知动作', action: { type: 'reboot_server' } },
+        { id: 'no_target', label: '没有目标功能', action: { type: 'switch_operation' } },
+        { id: 'malformed', label: '动作不是对象', action: 'clear_operation' },
+        direction.options[2],
+      ] }] })[0];
+      expect(card.options.map((option) => option.id)).toEqual(['clear_and_draw', 'keep']);
+      // A card with nothing left to answer is not shown at all.
+      expect(parseChoiceCards({ choices: [{ ...direction, options: [{ id: 'x', label: 'x', action: { type: 'reboot_server' } }] }] })).toEqual([]);
+    });
+
+    it('finds the action of the option a selection picks, and none for an actionless option or an unknown id', () => {
+      const card = parsed();
+      expect(choiceSelectionAction(card, { optionId: 'clear_and_draw' })).toEqual({ type: 'clear_operation' });
+      expect(choiceSelectionAction(card, { optionId: 'switch_retexture' })).toEqual({ type: 'switch_operation', operationId: 'retexture' });
+      expect(choiceSelectionAction(card, { optionId: 'keep' })).toBeUndefined();
+      expect(choiceSelectionAction(card, { optionId: 'gone' })).toBeUndefined();
+      // "Use default" reads the default option like the answer text does.
+      expect(choiceSelectionAction({ ...card, defaultOptionId: 'clear_and_draw', allowDefault: true }, { useDefault: true })).toEqual({ type: 'clear_operation' });
+      expect(choiceSelectionAction(card, { useDefault: true })).toBeUndefined();
+    });
+
+    it('words each action from the Schema, naming the function from its public declaration', () => {
+      const retexture = schema.chat.harness!.operations.find((operation) => operation.id === 'retexture')!;
+      expect(choiceActionLabel(schema, { type: 'clear_operation' })).toBe(messages['ui.chat.choice.action_clear']);
+      expect(choiceActionLabel(schema, { type: 'switch_operation', operationId: 'retexture' }))
+        .toBe(messages['ui.chat.choice.action_switch'].replace('{operation}', retexture.label));
+      // A function the Schema no longer lists reads like the Harness summary words it, never as a raw id.
+      const gone = choiceActionLabel(schema, { type: 'switch_operation', operationId: 'removed_function' });
+      expect(gone).toContain(messages['ui.unavailable.reason.harness.selection_gone']);
+      expect(gone).not.toContain('removed_function');
+    });
+
+    it('declares every Schema word an action shows, in both languages', () => {
+      const english = (defaultCatalog.application.localization.bundles.en.messages as Record<string, string>);
+      for (const key of ['action_switch', 'action_clear', 'action_failed', 'action_conflict', 'action_unavailable', 'action_service_choose', 'action_service_none']) {
+        expect(messages[`ui.chat.choice.${key}`], key).toBeTruthy();
+        expect(english[`ui.chat.choice.${key}`], key).toBeTruthy();
+      }
+      expect(messages['ui.chat.choice.action_switch']).toContain('{operation}');
+      expect(english['ui.chat.choice.action_switch']).toContain('{operation}');
+    });
   });
 
   it('moves through the options with the arrow keys, Home and End, wrapping at the ends', () => {

@@ -1,10 +1,10 @@
 'use client';
 
-import { RotateCw, TriangleAlert } from 'lucide-react';
+import { RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { TablePopover, type TableSection } from '@/components/studio/table-popover';
+import { TableSections, type TableSection } from '@/components/studio/table-popover';
 import { useSessionChatModel } from '@/hooks/use-session-chat-model';
 import { useSessionReasoning } from '@/hooks/use-session-reasoning';
 import type { ChatModelChoice } from '@/lib/chat/browser-client';
@@ -12,6 +12,7 @@ import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-
 import { reasoningSection } from '@/components/studio/reasoning-picker';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
+import { chatSettingsChanged } from '@/lib/workspace/composer-settings';
 import { useChatStore } from '@/store/chat-store';
 import { useSessionContextStore } from '@/store/session-context-store';
 
@@ -84,22 +85,37 @@ function readFailedSection(
         </button>
       </div>
     ),
-    closeOnPick: false,
     testId: failed.testId,
     onPick: () => undefined,
   };
 }
 
+export interface ChatModelSettings {
+  /**
+   * False when there is nothing to choose or show: a single model without levels, no session yet, or an older
+   * server. The settings dialog then leaves the tab out.
+   */
+  offered: boolean;
+  sections: TableSection[];
+  /** "model · level" (or the short word for a failed read), for the dialog's "changed" sentence. */
+  value: string;
+  /** The model or the level differs from the administrator's default. */
+  changed: boolean;
+  /** The short reasons a part could not be read (#314); empty when both parts are fine. */
+  attention: string[];
+}
+
 /**
- * #176: one entry for the chat model and its thinking level. #223: the popover shows them in two columns,
- * the offered models on the left and the levels of the highlighted (session) model on the right. Picking a
- * model keeps it open and the right column follows once the server answers with that model's levels (a level
- * the new model lacks falls back to its default there); picking a level closes it. Neither choice changes the
- * server protocol: the two existing per-session PUTs run in order. A narrow panel stacks the two columns.
+ * #176: the chat model and its thinking level as one choice. #223: shown in two columns, the offered models on the
+ * left and the levels of the highlighted (session) model on the right. Picking a model keeps the right column
+ * following once the server answers with that model's levels (a level the new model lacks falls back to its
+ * default there). Neither choice changes the server protocol: the two existing per-session PUTs run in order.
  * #314: a part whose read failed and that holds nothing yet is not left out: its column says the read failed and
- * offers a retry (the hooks read it again by themselves, bounded), and the trigger carries a warning mark.
+ * offers a retry (the hooks read it again by themselves, bounded), and the gear carries a warning.
+ * #405: this is the data side, mounted with the composer's gear so the session's model and levels keep loading (and
+ * the offline notice keeps working) while the dialog is shut; `ChatModelPicker` only lays the sections out.
  */
-export function ChatModelPicker() {
+export function useChatModelSettings(): ChatModelSettings {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const chatModel = useSessionChatModel(activeSessionId);
@@ -111,23 +127,12 @@ export function ChatModelPicker() {
   const levelsFailed = Boolean(reasoning.supported && reasoning.failed);
   const showsModel = multipleModels || modelFailed;
   const showsLevels = levelsAvailable || levelsFailed;
-  if (!showsModel && !showsLevels) return null;
+  const none: ChatModelSettings = { offered: false, sections: [], value: '', changed: false, attention: [] };
+  if (!showsModel && !showsLevels) return none;
   const soloModel = models.length === 1 ? models[0].model : '';
   const selectedModel = modelName(chatModel.choice, chatModel.choice?.selected ?? '') || soloModel;
   const level = levelsAvailable ? reasoning.reasoning?.effort ?? '' : '';
   const anyFailed = modelFailed || levelsFailed;
-  const label = schemaText(schema, showsModel && showsLevels
-    ? 'ui.studio.chat_model.combined_label'
-    : showsLevels ? 'ui.studio.reasoning.label' : 'ui.studio.chat_model.label');
-  const hint = anyFailed
-    // The shared "unavailable" line for each part that could not be read, in place of the description.
-    ? [
-      modelFailed ? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.picker.chat_model_load_failed')) : '',
-      levelsFailed ? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.picker.reasoning_load_failed')) : '',
-    ].filter(Boolean).join(' ')
-    : schemaText(schema, multipleModels && levelsAvailable
-      ? 'ui.studio.chat_model.combined_hint'
-      : levelsAvailable ? 'ui.studio.reasoning.hint' : 'ui.studio.chat_model.hint');
   const sections: TableSection[] = [];
   const offline = chatModel.choice?.fallback
     ? (
@@ -148,7 +153,6 @@ export function ChatModelPicker() {
     sections.push({
       ...section,
       ...(offline ? { foot: <div className="flex flex-col gap-1">{offline}<span>{schemaText(schema, 'ui.studio.chat_model.note')}</span></div> } : {}),
-      closeOnPick: false,
       testId: 'workspace-chat-model-section',
     });
   } else if (modelFailed) {
@@ -177,7 +181,6 @@ export function ChatModelPicker() {
         emptyText: formatSchemaText(schemaText(schema, 'ui.studio.chat_model.levels_none'), { model: selectedModel }),
         loadingText: schemaText(schema, 'ui.studio.chat_model.levels_loading'),
       } : {}),
-      closeOnPick: true,
       loading: chatModel.busy || reasoning.busy,
       testId: 'workspace-reasoning-section',
     });
@@ -195,28 +198,26 @@ export function ChatModelPicker() {
       onRetry: reasoning.retry,
     }));
   }
-  if (sections.length === 0) return null;
-  // The levels and the model list load separately: until the model name is known the trigger names the level alone
-  // instead of showing a bare separator (#236). The trigger is the same node either way; only its text changes.
+  if (sections.length === 0) return none;
+  // The levels and the model list load separately: until the model name is known the value names the level alone
+  // instead of showing a bare separator (#236).
   const loaded = [selectedModel, level].filter(Boolean).join(' · ');
-  // #314: when nothing could be read the trigger says so in the Schema's words rather than showing an empty value.
-  const value = loaded || (anyFailed ? schemaText(schema, 'ui.studio.chat_model.load_failed_short') : '');
-  const valueParts = level && selectedModel ? { parts: [selectedModel, level], separator: ' · ' } : undefined;
-  return (
-    <TablePopover
-      testId="workspace-chat-model-picker"
-      label={label}
-      value={value}
-      valueParts={valueParts}
-      fullValue={value}
-      icon={anyFailed ? <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" /> : undefined}
-      hint={hint}
-      triggerDisabledReason={!activeSessionId ? schemaText(schema, 'ui.unavailable.reason.picker.no_session') : undefined}
-      disabled={!activeSessionId || chatModel.busy || reasoning.busy}
-      sections={sections}
-      columns
-    />
-  );
+  return {
+    offered: true,
+    sections,
+    // #314: when nothing could be read the value says so in the Schema's words rather than being empty.
+    value: loaded || (anyFailed ? schemaText(schema, 'ui.studio.chat_model.load_failed_short') : ''),
+    changed: chatSettingsChanged(chatModel.choice, reasoning.reasoning),
+    attention: [
+      modelFailed ? schemaText(schema, 'ui.unavailable.reason.picker.chat_model_load_failed') : '',
+      levelsFailed ? schemaText(schema, 'ui.unavailable.reason.picker.reasoning_load_failed') : '',
+    ].filter(Boolean),
+  };
+}
+
+/** 设置页的「对话模型与思考档位」页：左栏对话模型、右栏该模型的思考档位；窄了上下堆叠。 */
+export function ChatModelPicker({ settings }: { settings: ChatModelSettings }) {
+  return <TableSections testId="workspace-chat-model-picker-panel" sections={settings.sections} columns />;
 }
 
 /**

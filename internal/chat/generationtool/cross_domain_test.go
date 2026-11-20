@@ -1,8 +1,10 @@
 package generationtool_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,10 @@ type crossDomainHarness struct {
 	states  []catalog.TaskStatePresentation
 	texts   *catalog.TextLocalizer
 	gateway *fakeGateway
+	// logger, when set, is the Executor's. skipPreflight sends the call
+	// straight to Execute, as a call that no preflight caught would.
+	logger        *slog.Logger
+	skipPreflight bool
 }
 
 func newCrossDomainHarness(t *testing.T, offerings ...generation.Offering) *crossDomainHarness {
@@ -106,18 +112,21 @@ func (h *crossDomainHarness) runErr(options chat.TurnOptions) (chat.ToolResult, 
 	now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
 	executor, err := generationtool.New(generationtool.Config{
 		Gateway: h.gateway, References: &fakeReferences{}, Chat: h.chat, TaskStates: h.states, Texts: h.texts,
-		Clock: func() time.Time { return now },
-		Sleep: func(_ context.Context, duration time.Duration) error { now = now.Add(duration); return nil },
+		Logger: h.logger,
+		Clock:  func() time.Time { return now },
+		Sleep:  func(_ context.Context, duration time.Duration) error { now = now.Add(duration); return nil },
 	})
 	if err != nil {
 		return chat.ToolResult{}, nil, err
 	}
 	command := chat.ToolCommand{
-		OwnerID: "owner-a", SessionID: "session-a", Tool: h.tool, Options: options,
+		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-a", Tool: h.tool, Options: options,
 		Call: agents.ToolCall{ID: "call-a", Name: h.tool.Name, Arguments: json.RawMessage(`{"prompt":"a stone fox"}`)},
 	}
-	if message := executor.SelectionError(command); message != "" {
-		return chat.ToolResult{Error: message, NoSubmission: true}, nil, nil
+	if !h.skipPreflight {
+		if message := executor.SelectionError(command); message != "" {
+			return chat.ToolResult{Error: message, NoSubmission: true}, nil, nil
+		}
 	}
 	result, err := executor.Execute(context.Background(), command, nil)
 	if err != nil {
@@ -232,6 +241,37 @@ func TestSameDomainToolStillRequiresTheUsersModel(t *testing.T) {
 	result, _ = h.run(t, chat.TurnOptions{})
 	if result.Error != h.tool.ModelRequiredMessage || h.gateway.submitted.OfferingID != "" {
 		t.Fatalf("no domain must still ask: %#v", result)
+	}
+}
+
+// #378: a refused call is a warning in the server log, with the session, the
+// turn, the tool and the refusal's code. The preflight and Execute's own check
+// refuse the same missing model, and both say so; neither logs the prompt.
+func TestRefusedCallsAreLoggedWithTheirCode(t *testing.T) {
+	for name, skipPreflight := range map[string]bool{"preflight": false, "Execute": true} {
+		t.Run(name, func(t *testing.T) {
+			h := newCrossDomainHarness(t, generation.Offering{ID: "o/default", ModelID: "default", Default: true})
+			var logs bytes.Buffer
+			h.logger, h.skipPreflight = slog.New(slog.NewTextHandler(&logs, nil)), skipPreflight
+			result, _ := h.run(t, chat.TurnOptions{CreativeDomain: "model-3d"})
+			if result.Error != h.tool.ModelRequiredMessage || h.gateway.submitted.OfferingID != "" {
+				t.Fatalf("the call was not refused: %#v", result)
+			}
+			if strings.Count(logs.String(), "agent tool call refused") != 1 {
+				t.Fatalf("want one refusal in the log: %s", logs.String())
+			}
+			for _, want := range []string{"level=WARN", "session_id=session-a", "assistant_message_id=turn-a",
+				"tool=" + h.tool.Name, "call_id=call-a", "code=model_required"} {
+				if !strings.Contains(logs.String(), want) {
+					t.Fatalf("refusal log lacks %q: %s", want, logs.String())
+				}
+			}
+			for _, leaked := range []string{"stone fox", h.tool.ModelRequiredMessage} {
+				if strings.Contains(logs.String(), leaked) {
+					t.Fatalf("refusal log carries %q: %s", leaked, logs.String())
+				}
+			}
+		})
 	}
 }
 

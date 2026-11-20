@@ -247,6 +247,33 @@ func (r *Repository) DeleteProjectAndSession(
 	ownerID string,
 	projectID string,
 ) (bool, error) {
+	// The session the project owns goes with it, and that is a deletion of the
+	// session like any other (#384): a session with work in flight refuses it,
+	// and the bulk rows go in short transactions before the one that deletes
+	// the project, which then finds a small session.
+	var drainSession sql.NullString
+	var drainOwned bool
+	err := r.db.QueryRowContext(ctx, `
+		SELECT session_id, owns_session
+		FROM go_canvas_projects
+		WHERE id = ? AND owner_id = ?`,
+		projectID,
+		ownerID,
+	).Scan(&drainSession, &drainOwned)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("canvas lookup project for delete: %w", err)
+	}
+	if drainOwned && drainSession.Valid && drainSession.String != "" {
+		if err := r.PreflightSessionDeletion(ctx, ownerID, drainSession.String); err != nil {
+			return false, err
+		}
+		if err := r.drainSessionBulkRows(ctx, drainSession.String); err != nil {
+			return false, err
+		}
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("canvas begin delete transaction: %w", err)

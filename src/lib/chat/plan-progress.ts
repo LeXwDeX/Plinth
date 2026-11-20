@@ -20,6 +20,11 @@ export interface PlanStepProgress {
   step: ProductionPlanStep;
   /** The task that ran this step; null while the step has not started. */
   task: PlanTask | null;
+  /**
+   * #403: the step has no task and nothing can submit one any more (its turn failed, was stopped or ended), so it
+   * will not run. False while the step may still be submitted, and for every step that has a task.
+   */
+  notRun: boolean;
 }
 
 function startedAtMilliseconds(task: PlanTask): number {
@@ -37,11 +42,15 @@ function startedAtMilliseconds(task: PlanTask): number {
  * plan. Historical tasks of the same capability (for example, an older 3D
  * version made before this plan existed) must not fill the first step. When
  * `decidedAt` is empty or unusable, every task stays eligible as before.
+ *
+ * #403: `stepsMayStillRun` says whether a step without a task can still get one. It defaults to true, so a step
+ * waits unless the caller knows better; with false every step that has no task is marked `notRun`.
  */
 export function planStepProgress(
   plan: ProductionPlan,
   tasks: readonly PlanTask[],
   decidedAt = '',
+  stepsMayStillRun = true,
 ): PlanStepProgress[] {
   const threshold = decidedAt ? Date.parse(decidedAt) : Number.NaN;
   const eligible = !Number.isFinite(threshold)
@@ -60,7 +69,8 @@ export function planStepProgress(
       index = eligible.findIndex((task, at) => !used.has(at) && task.capability === step.capability);
     }
     if (index >= 0) used.add(index);
-    return { step, task: index >= 0 ? eligible[index] : null };
+    const task = index >= 0 ? eligible[index] : null;
+    return { step, task, notRun: task === null && !stepsMayStillRun };
   });
 }
 

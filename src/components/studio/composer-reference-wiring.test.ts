@@ -60,11 +60,13 @@ describe('handle tag to composer', () => {
     expect(source('../../lib/chat/send-queue.ts')).toContain('mentions?: ChatMentionClaim[]');
   });
 
-  it('shows the resolved selected Skill inline using Schema text and keeps its full value accessible', () => {
-    const picker = source('./skill-picker.tsx');
-    expect(picker).toContain("schemaText(schema, 'ui.studio.skill.selected')");
-    expect(picker).toContain('value={value}');
-    expect(picker).toContain('fullValue={fullValue}');
-    expect(picker).toContain('resolvedSelection.displayName');
+  it('names the selected Skill from the catalog in the chip under the box and in the settings gear (#405)', () => {
+    // The Skills picker lost its trigger (and the "SKILL：{name}" label on it) with the pickers under the box; the
+    // selected Skill is told by its chip and by the gear's "changed" sentence, both from the catalog's display name.
+    const name = "skill.catalog?.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId";
+    expect(source('./composer.tsx')).toContain(name);
+    expect(source('./composer-settings.tsx')).toContain(name);
+    expect(source('./skill-picker.tsx')).not.toContain('fullValue');
+    expect(source('./skill-picker.tsx')).not.toContain('resolvedSelection');
   });
 });

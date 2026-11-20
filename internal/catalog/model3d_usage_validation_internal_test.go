@@ -357,6 +357,95 @@ func TestChoiceKindsAcceptTheUsageProfileKindAtAnyPosition(t *testing.T) {
 	}
 }
 
+// nextStepChoiceSchema is the small Schema a #374 next_step card needs: one
+// target-tool kind and one agent kind with no target tool, and an ask_choice
+// whose options may carry an action.
+func nextStepChoiceSchema() ChatSchema {
+	return ChatSchema{
+		AgentTools: []ChatAgentToolSchema{
+			{Name: "ask_choice", Parameters: json.RawMessage(`{"type":"object","properties":{
+				"kind":{"type":"string","enum":["direction","next_step"]},
+				"options":{"type":"array","items":{"type":"object","properties":{
+					"id":{"type":"string"},"label":{"type":"string"},
+					"action":{"type":"object","properties":{
+						"type":{"type":"string","enum":["switch_operation","clear_operation"]},
+						"operation_id":{"type":"string"}},"required":["type"],"additionalProperties":false}}}}}}`)},
+			{Name: "update_production_brief", Parameters: json.RawMessage(
+				`{"type":"object","properties":{"style":{"type":"string"}}}`)},
+		},
+		Choice: ChatChoiceSchema{MaxOptions: 8, Kinds: []ChatChoiceKindSchema{
+			{ID: "direction", OptionSource: "agent", ToolName: "update_production_brief", Argument: "style",
+				Question: "Which?", Message: "Choose."},
+			{ID: "next_step", OptionSource: "agent", Question: "Next?", Message: "Choose how to continue.",
+				MinOptions: 2, MaxOptions: 4,
+				Actions:         []string{ChoiceActionSwitchOperation, ChoiceActionClearOperation},
+				AnswerTemplate:  "chose {continuation}",
+				PendingTemplate: "open {continuation}"},
+		}},
+	}
+}
+
+// #374: an agent kind may name no target tool; it words its own answer and
+// pending text, and the actions an option may carry must match ask_choice.
+func TestChoiceKindsAcceptAnAgentKindWithoutATargetTool(t *testing.T) {
+	if err := validateChoiceKinds(nextStepChoiceSchema()); err != nil {
+		t.Fatalf("next_step kind refused: %v", err)
+	}
+}
+
+func TestChoiceKindsRefuseMalformedNextStepDeclarations(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*ChatSchema)
+		want   string
+	}{
+		{"argument without a tool", func(s *ChatSchema) { s.Choice.Kinds[1].Argument = "style" }, "没有 tool_name"},
+		{"usage profile source without a tool", func(s *ChatSchema) { s.Choice.Kinds[1].OptionSource = "usage_profiles" }, "没有 tool_name"},
+		{"answer template without a continuation", func(s *ChatSchema) { s.Choice.Kinds[1].AnswerTemplate = "chose" }, "answer_template"},
+		{"pending template without a continuation", func(s *ChatSchema) { s.Choice.Kinds[1].PendingTemplate = "" }, "pending_template"},
+		{"templates on a kind with a tool", func(s *ChatSchema) { s.Choice.Kinds[0].AnswerTemplate = "chose {continuation}" }, "answer_template"},
+		{"question missing", func(s *ChatSchema) { s.Choice.Kinds[1].Question = " " }, "question"},
+		{"one option minimum", func(s *ChatSchema) { s.Choice.Kinds[1].MinOptions = 1 }, "选项数界限"},
+		{"maximum below minimum", func(s *ChatSchema) { s.Choice.Kinds[1].MinOptions, s.Choice.Kinds[1].MaxOptions = 4, 3 }, "选项数界限"},
+		{"maximum above the card bound", func(s *ChatSchema) { s.Choice.Kinds[1].MaxOptions = 9 }, "选项数界限"},
+		{"bounds on a kind whose options the server builds", func(s *ChatSchema) {
+			s.Choice.Kinds[0].OptionSource, s.Choice.Kinds[0].MaxOptions = "usage_profiles", 3
+		}, "option_source=agent"},
+		{"unknown action", func(s *ChatSchema) { s.Choice.Kinds[1].Actions = []string{"delete_session"} }, "未实现或重复"},
+		{"duplicate action", func(s *ChatSchema) {
+			s.Choice.Kinds[1].Actions = []string{ChoiceActionClearOperation, ChoiceActionClearOperation}
+		}, "未实现或重复"},
+		{"actions on a server-built kind", func(s *ChatSchema) {
+			s.Choice.Kinds[0].OptionSource, s.Choice.Kinds[0].Actions = "usage_profiles", []string{ChoiceActionClearOperation}
+		}, "option_source=agent"},
+		{"tool enum disagrees with the kinds", func(s *ChatSchema) {
+			s.Choice.Kinds[1].Actions = []string{ChoiceActionClearOperation}
+		}, "一一对应"},
+		{"tool declares no action parameter", func(s *ChatSchema) {
+			s.AgentTools[0].Parameters = json.RawMessage(`{"type":"object","properties":{
+				"kind":{"type":"string","enum":["direction","next_step"]},
+				"options":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"}}}}}}`)
+		}, "参数 action"},
+		{"switch_operation without operation_id", func(s *ChatSchema) {
+			s.AgentTools[0].Parameters = json.RawMessage(`{"type":"object","properties":{
+				"kind":{"type":"string","enum":["direction","next_step"]},
+				"options":{"type":"array","items":{"type":"object","properties":{
+					"action":{"type":"object","properties":{
+						"type":{"type":"string","enum":["switch_operation","clear_operation"]}}}}}}}}`)
+		}, "operation_id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := nextStepChoiceSchema()
+			tc.mutate(&schema)
+			err := validateChoiceKinds(schema)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("validateChoiceKinds = %v, want an error naming %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestModel3DUsageOfferingsRefuseUnknownReferences(t *testing.T) {
 	text := schemacontract.Offering{
 		ID: "test/text/text-to-3d", ModelID: "text-model",

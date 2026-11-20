@@ -93,13 +93,37 @@ async function record(engine, viewport, name, fn) {
   }
 }
 
+/**
+ * #405: the generation models, Skills, generation parameters and the chat model with its thinking level are the tabs of one
+ * settings dialog behind the gear beside the send button (`tab`: models, skills, params or chat). A pick applies at once and
+ * the dialog stays open, so it is closed again before the composer, the board or the stage is used.
+ */
+async function openComposerSettings(page, tab) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) {
+    await page.click('[data-testid=composer-settings-open]');
+    await dialog.waitFor({ timeout: 10000 });
+  }
+  if (tab) {
+    await page.click(`[data-testid=composer-settings-tab-${tab}]`);
+    await page.locator(`[data-testid=composer-settings-tab-${tab}][aria-selected=true]`).waitFor({ timeout: 10000 });
+  }
+}
+
+async function closeComposerSettings(page) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) return;
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
+}
+
 /** Opens a fresh session and puts one generated picture (mock provider) on the board as version 1. */
 async function sessionWithPicture(page) {
   await page.goto(`${BASE}/`);
   await page.waitForSelector('[data-testid=canvas-tool-rail]', { timeout: 30000 });
-  await page.click('[data-testid=workspace-model-picker]');
+  await openComposerSettings(page, 'models');
   await page.locator('[data-testid=workspace-model-picker-image] [role=menu] [role=menuitemradio]').first().click();
-  await page.keyboard.press('Escape');
+  await closeComposerSettings(page);
   const box = page.locator('[data-testid=studio-composer] textarea');
   await box.click();
   await box.fill('一只猫，工作室光效');

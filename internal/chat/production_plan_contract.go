@@ -28,8 +28,13 @@ func (policy *ProductionPlanPolicy) localize(locale, text string) string {
 
 // acceptanceFor builds the final-delivery criteria the person approves. It
 // returns none for a Catalog without usage profiles (a historical plan keeps
-// working).
-func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand) ([]budget.AcceptanceCriterion, string) {
+// working), and none for a plan whose steps only make pictures (#402): the
+// criteria are the 3D purpose's standard for a model, and such a plan never
+// delivers one. A plan with any other step keeps them unchanged.
+func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand, steps []budget.PlanStep) ([]budget.AcceptanceCriterion, string) {
+	if policy.picturesOnly(steps) {
+		return nil, ""
+	}
 	profile, purposeBudget, found := policy.purposeProfile(command)
 	if !found || len(policy.Budget.Acceptance.Criteria) == 0 {
 		return nil, ""
@@ -355,6 +360,34 @@ func (policy *ProductionPlanPolicy) planCheck(check string, profile catalog.Chat
 		return budget.PlanCheck{Check: check, MaximumRatio: &ratio}, true
 	}
 	return budget.PlanCheck{}, false
+}
+
+// picturesOnly reports whether every step of the plan runs a capability of the
+// image domain, so the plan delivers pictures and no 3D model (#402). The
+// domain is the one the Catalog declares for the capability's Offerings, read
+// the way processingCapability reads it; a capability without an enabled
+// image-domain Offering (a model, a processing step, an Offering that declares
+// no domain, an unknown capability) is not a picture, and neither is a plan
+// without steps.
+func (policy *ProductionPlanPolicy) picturesOnly(steps []budget.PlanStep) bool {
+	if len(steps) == 0 {
+		return false
+	}
+	for _, step := range steps {
+		if !policy.imageCapability(step.Capability) {
+			return false
+		}
+	}
+	return true
+}
+
+func (policy *ProductionPlanPolicy) imageCapability(capability string) bool {
+	for _, offering := range policy.Offerings() {
+		if offering.Enabled && offering.Domain == generation.DomainImage && string(offering.Capability) == capability {
+			return true
+		}
+	}
+	return false
 }
 
 func (policy *ProductionPlanPolicy) processingCapability(capability string) bool {

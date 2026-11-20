@@ -125,6 +125,8 @@ export function useTaskTracker(): void {
           }
         }),
       );
-    }, schema.runtime.frontend.task_polling_interval_milliseconds);
+      // A task the person started is read in a hidden tab too: its end is announced there (tab title, notification).
+      // Only an ended login stops it (#385).
+    }, schema.runtime.frontend.task_polling_interval_milliseconds, { whileHidden: true });
   }, [activeKey, schema]);
 }

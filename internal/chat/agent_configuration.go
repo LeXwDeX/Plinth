@@ -54,7 +54,7 @@ func (o *Orchestrator) registryFor(ctx context.Context) (*toolRegistry, error) {
 		if err != nil {
 			return nil, err
 		}
-		registry.offeringAllowed = o.registry.offeringAllowed
+		registry.bindOfferingSources(o.registry.offeringAllowed, o.registry.offerings)
 		return o.harnessRegistry(ctx, registry), nil
 	}
 	return o.harnessRegistry(ctx, o.registry), nil

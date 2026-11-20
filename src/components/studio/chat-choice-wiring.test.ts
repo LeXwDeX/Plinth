@@ -43,3 +43,38 @@ describe('a choice answered while attachments are read (#335)', () => {
     expect(render).toContain('disabled={isStreaming || answeringChoice !== null || heldChoice !== null}');
   });
 });
+
+// #374: an option of a direction card may carry an action. The ChatColumn saves the function selection through the
+// session Harness (the 功能 panel's own state and CAS save) first and sends the answer only once it is saved.
+describe('a choice option with an action (#374)', () => {
+  const answer = chatColumn.slice(chatColumn.indexOf('const answerChoice = useCallback('), chatColumn.indexOf('const renderChoiceCard ='));
+  const action = readFileSync(new URL('../workspace/harness-choice-action.ts', import.meta.url), 'utf8');
+
+  it('reads the session Harness of the 功能 panel and keeps its latest state for the save', () => {
+    expect(chatColumn).toContain("import { useSessionHarness } from '@/hooks/use-session-harness';");
+    expect(chatColumn).toMatch(/const sessionHarness = useSessionHarness\(activeSessionId, user\?\.id \?\? ''\);\s*const sessionHarnessRef = useRef\(sessionHarness\);\s*sessionHarnessRef\.current = sessionHarness;/);
+  });
+
+  it('runs the action before the answer goes out, and sends nothing when it fails', () => {
+    const run = answer.indexOf('runChoiceAnswer(choiceSelectionAction(card, selection), {');
+    expect(run).toBeGreaterThan(0);
+    // The only send of the answer is the step `runChoiceAnswer` runs after the action.
+    expect(answer.match(/await sendRef\.current\(/g)).toHaveLength(1);
+    expect(run).toBeLessThan(answer.indexOf('await sendRef.current('));
+    expect(answer).toMatch(/apply: \(action\) => applyChoiceAction\(action, \{\s*schema,\s*harness: \{ selection: sessionHarnessRef\.current\.view\?\.selection \?\? null, save: sessionHarnessRef\.current\.save \},\s*\}\),/);
+    expect(answer).toContain('stillHere: () => isCurrentSessionScope(scope),');
+    // A failed action is worded on the card in its own Schema words; the existing "not sent" words stay for a send that failed.
+    expect(answer).toMatch(/if \(outcome\.status === 'action_failed'\) \{\s*setChoiceError\(\{ cardId: card\.id, text: schemaText\(schema, outcome\.failureKey\) \}\);/);
+    expect(answer).toMatch(/\} else if \(outcome\.status === 'sent'\) \{\s*if \(!accepted\) setChoiceError/);
+    // The busy state spans the save and the send, and the cards are refreshed afterwards either way.
+    expect(answer.indexOf('setAnsweringChoice(card.id);')).toBeLessThan(run);
+    expect(answer.indexOf('setAnsweringChoice(null);')).toBeGreaterThan(answer.indexOf('await sendRef.current('));
+  });
+
+  it('saves with the panel helpers and the existing Harness save, not a second request', () => {
+    expect(action).toContain("from './harness-panel';");
+    for (const helper of ['harnessOperationSelection(', 'harnessClearSelection(', 'harnessAutoSelectOffering(', 'harnessSelectionInput(']) expect(action).toContain(helper);
+    expect(action).toContain('deps.harness.save(');
+    expect(action).not.toMatch(/method: 'PUT'|createHarnessClient|chat_session_harness/);
+  });
+});

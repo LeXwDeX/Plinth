@@ -103,6 +103,39 @@ describe('ChoiceCard (#321)', () => {
     expect(swrKeys.at(-1)).toBeNull();
   });
 
+  // #374: the direction card shows the server's question, each option's own words, the recommended mark and, on an
+  // option with an action, a marker in the Schema's words that picking it changes the function selection.
+  it('renders a direction card with its question, a marker per action, no price and no default button', () => {
+    const direction = parseChoiceCards({ choices: [{
+      id: 'choice_next', assistant_message_id: 'a3', tool: '', kind: 'next_step', capability: 'next_step', question: '接下来想怎么做？',
+      options: [
+        { id: 'clear_and_draw', label: '清空功能选择，先出图', description: '回到自由模式，所有工具重新可用', recommended: true, action: { type: 'clear_operation' } },
+        { id: 'switch_retexture', label: '改做换贴图', action: { type: 'switch_operation', operation_id: 'retexture' } },
+        { id: 'keep', label: '保持当前功能' },
+      ],
+      default_option_id: '', allow_default: false, state: 'pending', created_at: '2026-11-19T00:00:00Z',
+    }] })[0];
+    swrKeys.length = 0;
+    const html = render(direction);
+    const retexture = defaultCatalog.application.chat.harness.operations.find((operation) => operation.id === 'retexture')!.label;
+    expect(html).toContain('接下来想怎么做？');
+    expect(html).toContain('清空功能选择，先出图');
+    expect(html).toContain('回到自由模式，所有工具重新可用');
+    expect(html).toContain('data-testid="chat-choice-recommended-badge"');
+    // One marker per option with an action, and none on the option that only continues the conversation.
+    expect(html.match(/data-testid="chat-choice-action-badge"/g)).toHaveLength(2);
+    expect(html).toMatch(new RegExp(`data-testid="chat-choice-action-badge" data-action="clear_operation"[^>]*>${messages['ui.chat.choice.action_clear']}<`));
+    expect(html).toMatch(new RegExp(`data-action="switch_operation"[^>]*>${messages['ui.chat.choice.action_switch'].replace('{operation}', retexture)}<`));
+    const tiles = html.split('data-testid="chat-choice-option"').slice(1);
+    expect(tiles.map((tile) => tile.includes('chat-choice-action-badge'))).toEqual([true, true, false]);
+    expect(html).not.toContain('data-testid="chat-choice-quote"');
+    expect(html).not.toContain('data-testid="chat-choice-default"');
+    expect(html).not.toContain('next_step');
+    expect(swrKeys.at(-1)).toBeNull();
+    // A card without actions shows no marker.
+    expect(render(base)).not.toContain('chat-choice-action-badge');
+  });
+
   it('keeps the familiar single-column list for an older card without rich option fields (#103)', () => {
     const html = render(base);
     expect(html).toMatch(/data-testid="chat-choice-options"[^>]*data-layout="list"/);
