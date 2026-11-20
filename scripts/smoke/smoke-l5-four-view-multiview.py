@@ -488,6 +488,22 @@ def hydrate_tasks(live, tasks):
     return hydrated
 
 
+def wait_turn_started(live, session, message_id, timeout=90):
+    """Wait for the assistant message of the plan's server-started turn (#134) to appear.
+
+    The approval enqueues the turn; until it starts, the chat stream is not held and the idle rule
+    of the plan watch would otherwise mistake "not started yet" for "ended". Returns whether the
+    message appeared."""
+    if not message_id:
+        return False
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if any(message.get("id") == message_id for message in live.messages(session)):
+            return True
+        time.sleep(3)
+    return False
+
+
 def group_in_flight(group, pending_request_ids=None, abandoned_request_ids=None):
     """A view is still moving (a paid Task or a decidable approval) and may settle on its own.
 
@@ -677,15 +693,18 @@ def run_chain(live, report, evidence, models, image, budget):
     evidence["plan_decision"] = {"http_status": status, "state": decided.get("state"),
                                  "turn_message_id": decided.get("turn_message_id")}
     if not report.check("plan approved on the session budget route",
-                        status == 200 and bool(decided.get("turn_message_id")),
+                        status == 200 and decided.get("state") == "active"
+                        and bool(decided.get("turn_message_id")),
                         f"HTTP {status} state={decided.get('state')!r}"):
         evidence["verdict_reason"] = "the plan decision did not start a turn"
         evidence["tool_calls"] = tool_calls_evidence(live.messages(session))
         return
     plan_started = time.time()
+    turn_started = wait_turn_started(live, session, decided.get("turn_message_id"))
     group, turn_ended = follow_plan(live, report, evidence, session, budget,
                                     plan_started + live.arguments.turn_timeout)
-    evidence["plan_turn"] = {"finished": turn_ended, "elapsed_ms": int((time.time() - plan_started) * 1000)}
+    evidence["plan_turn"] = {"finished": turn_ended, "started": turn_started,
+                             "elapsed_ms": int((time.time() - plan_started) * 1000)}
     tasks = live.tasks(session)
     budget.observe(tasks)
     # A 3D Task the plan started may still be running when the turn ended: its terminal state is
