@@ -103,6 +103,9 @@ import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { recoverChatSession } from '@/lib/chat/session-recovery';
 import { resolveInitialSession, sessionFromAddress, writeSessionToAddress } from '@/lib/chat/session-url';
 import { editAttachments, editTarget, regenerateTarget, restoreAttachments, turnPayload } from '@/lib/chat/turn-actions';
+import { followTurnStream, type TurnFollowEnd } from '@/lib/chat/turn-follow';
+import { replaceFailureMessage } from '@/lib/chat/turn-replace-error';
+import { hasSentWords, sessionTurnRunning } from '@/lib/chat/turn-running';
 import { selectedTranscriptText, transcriptClipboard } from '@/lib/chat/transcript-copy';
 import { compactionPlacement } from '@/lib/chat/context-compaction';
 import { ContextCompactedDivider } from '@/components/studio/context-compacted-divider';
@@ -318,6 +321,7 @@ export function ChatColumn() {
     addStreamPaidStep,
     updateStreamGenState,
     finishStreaming,
+    rewindStreaming,
   } = useChatStore();
 
   const approval = useSessionApproval(
@@ -698,7 +702,9 @@ export function ChatColumn() {
   // The sent words shown until the server has stored them: one object for the whole turn, so the
   // memoized message is not redrawn with every streamed chunk (#291).
   const streamUserMessage = streamBuf?.userMessage;
-  const optimisticUser = useMemo((): ChatMessageType | null => (streamUserMessage ? {
+  // #403: a stream joined after a reload has no sent words of its own (the stored user message is already in the
+  // list), so an empty one is not shown as a blank message.
+  const optimisticUser = useMemo((): ChatMessageType | null => (streamUserMessage && hasSentWords(streamUserMessage) ? {
     id: schema.chat.frontend.optimistic_user_message_id,
     role: 'user',
     content: streamUserMessage.content,
@@ -886,6 +892,10 @@ export function ChatColumn() {
 
   // An expired card stays in the chat (with 重新发起) but no longer counts as pending.
   const pendingCount = pending.pendingCount + (consentAwaiting && consent.pending ? 1 : 0);
+  // #403: a step of an approved plan that has no task can still get one while the session's turn runs (the running
+  // projection of the messages, or a stream this browser follows) or while a decision it may wait for is open.
+  // Otherwise nothing will submit it and the plan card says it was not run instead of waiting for ever.
+  const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming) || pendingCount > 0;
   const lastDisplayed = displayMessages[displayMessages.length - 1];
   const [floatingRef, floatingHeight] = useElementHeight<HTMLDivElement>();
   const {
@@ -1250,11 +1260,12 @@ export function ChatColumn() {
             const previous = useChatStore.getState().messagesBySession[sessionId] ?? [];
             try {
               for (const id of replaceIds) await chatClient.deleteMessage(sessionId, id);
-            } catch {
+            } catch (error) {
               const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }).catch(() => null);
               if (page) applyNewestMessagePage(sessionId, page);
               else setMessages(sessionId, previous);
-              toast.error(schemaText(schema, 'ui.chat.toast.turn_replace_failed'));
+              // #403: a 409 is the server saying why (the turn still runs); anything else keeps the general text.
+              toast.error(replaceFailureMessage(error, schemaText(schema, 'ui.chat.toast.turn_replace_failed')));
               return;
             }
             for (const id of replaceIds) deleteMessage(sessionId, id);
@@ -1272,7 +1283,8 @@ export function ChatColumn() {
           const controller = new AbortController();
           controllers.current.set(sessionId, controller);
           let closeEventSource: (() => void) | undefined;
-          let removeAbortListener: (() => void) | undefined;
+          // How following the turn's stream ended; unset when the turn never reached a stream.
+          let followed: TurnFollowEnd | undefined;
           // Set once the server has the turn: from then on nothing is put back into the box.
           let sent = false;
           // Only a message taken from the queue was typed by the person and already left the box. A stage action
@@ -1332,24 +1344,22 @@ export function ChatColumn() {
             } else {
               void refreshChoices();
             }
-            await new Promise<void>((resolve, reject) => {
-              if (controller.signal.aborted) { resolve(); return; }
-              closeEventSource = connectEventSource(sessionId, {
-                fromId: 0,
-                onDone: () => resolve(),
-                onError: () =>
-                  reject(
-                    new Error(schema.chat.presentation.messages.sse_interrupted),
-                  ),
-              });
-              const onAbort = () => {
-                closeEventSource?.();
-                resolve();
-              };
-              controller.signal.addEventListener('abort', onAbort, { once: true });
-              removeAbortListener = () => controller.signal.removeEventListener('abort', onAbort);
-              if (controller.signal.aborted) onAbort();
+            // #403: a stream that breaks is not the end of the turn. The server is asked whether it still runs;
+            // if it does the stream is attached again from the turn's first event, up to the Schema's bound.
+            followed = await followTurnStream({
+              connect: (callbacks) => {
+                closeEventSource = connectEventSource(sessionId, { fromId: 0, ...callbacks });
+                return closeEventSource;
+              },
+              stillRunning: async (signal) => {
+                const page = await chatClient.listMessagePage(sessionId, { limit: messagePageSize }, signal);
+                return page.messages.some((message) => message.isPending);
+              },
+              rewind: () => rewindStreaming(sessionId),
+              attempts: schema.chat.frontend.stream_reconnect_attempts,
+              signal: controller.signal,
             });
+            if (followed === 'interrupted') throw new Error(schema.chat.presentation.messages.sse_interrupted);
           } catch (error) {
             // The turn never left: the words were already out of the box (the old round was replaced,
             // or the message had waited in the queue), so they go back, not lost.
@@ -1372,7 +1382,6 @@ export function ChatColumn() {
           } finally {
             if (startingRef.current === starting) startingRef.current = null;
             closeEventSource?.();
-            removeAbortListener?.();
             if (controllers.current.get(sessionId) === controller) controllers.current.delete(sessionId);
             // #177: read the stored turn first and swap it in place of the buffer in one update. Clearing
             // the buffer first dropped the whole turn for a frame, shrinking the list and jumping the view.
@@ -1386,6 +1395,10 @@ export function ChatColumn() {
                 settled = true;
                 window.clearTimeout(settleFallback);
                 settleStreaming(sessionId, page);
+                // #403: the stream is over without saying the turn ended, yet the server still runs it (the stream
+                // was given up or stopped, or another turn holds the session). The session recovery reconnects it
+                // and keeps reading until it ends.
+                if (followed !== 'done' && page.messages.some((message) => message.isPending)) setServerTurnTick((tick) => tick + 1);
               })
               .catch(() => {
                 settled = true;
@@ -1424,6 +1437,7 @@ export function ChatColumn() {
       connectEventSource,
       finishStreaming,
       settleStreaming,
+      rewindStreaming,
       initStreaming,
       modelChoices,
       modelsError,
@@ -2360,6 +2374,7 @@ export function ChatColumn() {
                     plan={sessionBudget.plan}
                     tasks={sessionTasks}
                     progress={sessionBudget}
+                    stepsMayStillRun={planStepsMayStillRun}
                     onCompareCandidates={compareCandidates}
                     onSelectCandidate={selectCandidate}
                   />

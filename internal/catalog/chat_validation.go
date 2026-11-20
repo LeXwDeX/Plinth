@@ -74,6 +74,7 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		"api.response_fields.error":        schema.API.ResponseFields.Error,
 		"api.response_fields.tool_name":    schema.API.ResponseFields.ToolName,
 		"api.response_fields.tool_args":    schema.API.ResponseFields.ToolArguments,
+		"api.response_fields.is_pending":   schema.API.ResponseFields.IsPending,
 		"api.prompt_enhance.prompt":        schema.API.PromptEnhance.PromptField,
 		"api.prompt_enhance.capability":    schema.API.PromptEnhance.CapabilityField,
 		"api.prompt_enhance.model":         schema.API.PromptEnhance.ModelField,

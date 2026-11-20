@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-20.374.1",
+    "revision": "2026-11-20.403.1",
     "terminology": {
       "user_facing": [
         {
@@ -4611,6 +4611,7 @@
         "ui.studio.plan.reload_failed": "计划状态读取失败，请重试。",
         "ui.studio.plan.state.unknown": "未知状态",
         "ui.studio.plan.step_pending": "等待执行",
+        "ui.studio.plan.step_not_run": "未执行",
         "ui.studio.plan.decide_failed": "提交计划决定失败，请稍后重试",
         "ui.studio.plan.steps_done": "{done}/{total} 步已完成",
          "ui.studio.brief.title": "制作简报",
@@ -18408,6 +18409,7 @@
             "ui.studio.plan.reload_failed": "Could not load the production plan. Please try again.",
             "ui.studio.plan.state.unknown": "Unknown state",
             "ui.studio.plan.step_pending": "Waiting to run",
+            "ui.studio.plan.step_not_run": "Not run",
             "ui.studio.plan.decide_failed": "Failed to submit the plan decision. Please try again later",
             "ui.studio.plan.steps_done": "{done}/{total} steps done",
              "ui.studio.brief.title": "Production brief",

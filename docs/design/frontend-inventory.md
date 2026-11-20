@@ -363,7 +363,7 @@
 | 重新发送 | `ui.chat.message.resend` | 重新发送 | 再发一次同样的消息。 | chat-message.tsx:491-503（498-499） |
 | 重新生成 | `ui.chat.message.regenerate` | 重新生成 | 替换这一轮后重新发送。 | chat-message.tsx:517-529（524-525）；agent `regenerate` 667-671 |
 | 删除消息 | `ui.chat.message.delete` | 删除此消息 | 删除消息。无确认（见第 9 节）。失败提示 `ui.chat.toast.delete_message_retry`。 | chat-message.tsx:530-542（537-538）；agent `removeMessage` 689-705（700） |
-| 替换失败 | `ui.chat.toast.turn_replace_failed` | 替换上一轮失败，请重试 | Toast。 | agent-dialog.tsx:521 |
+| 替换失败 | `ui.chat.toast.turn_replace_failed` | 替换上一轮失败，请重试 | Toast；服务端返回 409 且带原因时显示该原因（#403）。 | chat-column.tsx:1268 |
 | 操作区 | （无） | — | 消息操作按钮只在悬停时显示（chat-message.tsx:479-544）。 | 479-544 |
 
 #### 3.9.4 发送流程相关提示
@@ -1172,7 +1172,7 @@ Surface 阴影：none、sm、lg、xl。
 | components/workspace/agent-dialog.tsx:467 | `ui.workspace.harness.choose_model` | 请选择生成模型 |
 | components/workspace/agent-dialog.tsx:489 | `ui.workspace.skills.unavailable` | 当前模型不支持该 Skill |
 | components/workspace/agent-dialog.tsx:491 | `ui.workspace.skills.load_failed` | Skill 加载失败 |
-| components/workspace/agent-dialog.tsx:521 | `ui.chat.toast.turn_replace_failed` | 替换上一轮失败，请重试 |
+| components/studio/chat-column.tsx:1268 | `ui.chat.toast.turn_replace_failed` | 替换上一轮失败，请重试 |
 | components/workspace/agent-dialog.tsx:700 | `ui.chat.toast.delete_message_retry` | 删除消息失败，请重试 |
 | components/workspace/agent-dialog.tsx:750 | `ui.workspace.agent.close` | 收起 Agent 对话 |
 | components/workspace/agent-dialog.tsx:750 | `ui.workspace.agent.close` | 收起 Agent 对话 |

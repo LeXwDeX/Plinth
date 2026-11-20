@@ -11,6 +11,7 @@ import { budgetIsShown, budgetUsageText } from '@/lib/chat/budget';
 import { anchoredPositionMethod, useAnchoredPositioner } from '@/components/ui/overlay';
 import { formatSchemaText, schemaText } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
+import { sessionTurnRunning } from '@/lib/chat/turn-running';
 import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
@@ -24,6 +25,12 @@ export function BudgetBadge() {
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const budget = useChatStore((state) => state.sessions.find((session) => session.id === state.activeSessionId)?.budget ?? null);
   const tasks = useWorkspaceStore(useShallow((state) => state.trackedTasks.filter((task) => task.sessionId === activeSessionId)));
+  // #403: a step without a task reads "not run" once the session's turn has ended (the plan area in the chat adds the
+  // open decisions it can see; this summary has only the messages).
+  const stepsMayStillRun = useChatStore((state) => sessionTurnRunning(
+    state.activeSessionId ? state.messagesBySession[state.activeSessionId] : undefined,
+    Boolean(state.activeSessionId && state.streamingBuffers[state.activeSessionId]),
+  ));
   const [open, setOpen] = useState(false);
   const layer = useAnchoredPositioner();
   // #120: a refused plan is hidden by its Schema role, not by a state id.
@@ -47,7 +54,7 @@ export function BudgetBadge() {
         <Popover.Positioner positionMethod={anchoredPositionMethod} side="bottom" align="end" sideOffset={6} collisionPadding={12} className={layer}>
           <Popover.Popup className="flex w-80 max-w-(--available-width) flex-col gap-2 rounded-lg bg-popover p-2 text-popover-foreground shadow-xl outline-none ring-1 ring-foreground/10">
             <Popover.Title className="px-1 text-xs font-semibold">{schemaText(schema, 'ui.studio.budget.title')}</Popover.Title>
-            <PlanCard plan={budget.plan} tasks={tasks} progress={budget} />
+            <PlanCard plan={budget.plan} tasks={tasks} progress={budget} stepsMayStillRun={stepsMayStillRun} />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>

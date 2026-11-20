@@ -1,12 +1,18 @@
 package chat
 
+// ProjectMessage is the stable semantic projection of one message. A message is
+// pending while it is still the placeholder, and also while its turn has not
+// ended (Message.TurnActive, #403): the Orchestrator stores the real text and
+// tool calls after the first round, so an active turn's reply keeps its text
+// and is still pending. Only the placeholder itself is replaced by empty text.
 func ProjectMessage(
 	policy ProjectionPolicy,
 	message Message,
 ) FrontendMessage {
-	pending := message.Content == policy.PendingContent
+	placeholder := message.Content == policy.PendingContent
+	pending := placeholder || message.TurnActive
 	content := message.Content
-	if pending {
+	if placeholder {
 		content = ""
 	}
 	images := make([]Image, 0, len(message.ImageURLs))
