@@ -605,6 +605,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			return err
 		}
 	}
+	if err := validateChatResponsesWire(schema.Agent); err != nil {
+		return err
+	}
 	for _, setting := range []string{
 		schema.Agent.BaseURLSetting,
 		schema.Agent.APIKeySetting,
@@ -2353,11 +2356,15 @@ func validateChatThinkingProfiles(thinking *ChatThinkingSchema) error {
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 必须声明 model_prefixes", index)
 		}
 		if len(profile.RequestFields) == 0 && profile.EffortField == "" && len(profile.EffortLevels) == 0 &&
-			profile.DefaultEffort == "" && profile.ContextWindowTokens == 0 {
+			profile.DefaultEffort == "" && profile.ContextWindowTokens == 0 &&
+			!profile.OmitTemperature && profile.ChatCompletionsTools == nil && profile.WireAPI == "" {
 			return fmt.Errorf(
-				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field 或 context_window_tokens",
+				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field、context_window_tokens、omit_temperature、chat_completions_tools 或 wire_api",
 				index,
 			)
+		}
+		if err := validateThinkingWire(index, profile); err != nil {
+			return err
 		}
 		for _, prefix := range profile.ModelPrefixes {
 			if prefix == "" || prefix != strings.ToLower(strings.TrimSpace(prefix)) {
@@ -2390,6 +2397,43 @@ func validateChatThinkingProfiles(thinking *ChatThinkingSchema) error {
 		if profile.ContextWindowTokens < 0 {
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 context_window_tokens 必须为正数（不声明时省略）", index)
 		}
+	}
+	return nil
+}
+
+// validateThinkingWire checks a profile's wire_api (#401): a known value, and
+// on the responses wire none of the members that only mean something on chat
+// completions (vendor request fields, reasoning_content passback, the stream
+// usage option), so that nothing the Schema declares is silently not sent.
+func validateThinkingWire(index int, profile ChatThinkingModelProfile) error {
+	switch profile.WireAPI {
+	case "", ChatWireCompletions:
+		return nil
+	case ChatWireResponses:
+	default:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 的 wire_api %q 无效（chat_completions 或 responses）", index, profile.WireAPI)
+	}
+	switch {
+	case len(profile.RequestFields) > 0:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 request_fields", index)
+	case profile.ReasoningPassback:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 reasoning_passback（推理项由协议自己回传）", index)
+	case profile.StreamIncludeUsage != nil:
+		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 stream_include_usage（用量总在结束事件里）", index)
+	}
+	return nil
+}
+
+// validateChatResponsesWire requires chat.agent.responses_endpoint_path when a
+// profile is served on the responses wire (#401): a path that starts with a
+// slash. Without such a profile the path is not read, and not required.
+func validateChatResponsesWire(agent ChatAgentSchema) error {
+	if !agent.Thinking.UsesResponses() {
+		return nil
+	}
+	path := agent.ResponsesEndpointPath
+	if !strings.HasPrefix(path, "/") || strings.TrimSpace(path) != path {
+		return fmt.Errorf("agent.responses_endpoint_path 必须是以 / 开头的路径（有 profile 使用 responses 协议）: %q", path)
 	}
 	return nil
 }

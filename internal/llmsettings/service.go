@@ -266,6 +266,15 @@ func (service *Service) Effective(ctx context.Context) (Effective, error) {
 		if !connection.Configured() || !chosen.Enabled {
 			continue
 		}
+		declared, _ := service.thinking.ProfileFor(connection.Model)
+		// #401: every Agent turn carries function tools. A model that cannot
+		// run them on chat completions serves no turn, so sessions are not
+		// offered it (and a session that chose it falls back to the default,
+		// like for any model that is no longer offered); the connection test
+		// and requests without tools still reach it.
+		if !declared.RunsAgentTools() {
+			continue
+		}
 		profile := service.profile(connection.Model)
 		levels := []string{}
 		for _, level := range profile.EffortLevels {
@@ -286,7 +295,6 @@ func (service *Service) Effective(ctx context.Context) (Effective, error) {
 		default:
 			fallback = levels[0]
 		}
-		declared, _ := service.thinking.ProfileFor(connection.Model)
 		window := declared.ContextWindowTokens
 		if connection.WindowOverride > 0 {
 			window = connection.WindowOverride
@@ -423,7 +431,11 @@ type ConnectionView struct {
 	ProfileLevels       []string `json:"profile_levels"`
 	ProfileDefault      string   `json:"profile_default"`
 	ContextWindow       int      `json:"context_window"`
-	Check               *Check   `json:"check"`
+	// AgentTools reports whether the model can run the function tools of an
+	// Agent turn on chat completions (#401). When false the connection is
+	// never offered to sessions, whatever is enabled or published.
+	AgentTools bool   `json:"agent_tools"`
+	Check      *Check `json:"check"`
 }
 
 type History struct {
@@ -477,7 +489,8 @@ func (service *Service) Management(ctx context.Context) (Management, error) {
 		view := ConnectionView{ID: connection.ID, Model: connection.Model, Default: index == 0,
 			Environment: append([]string(nil), connection.Environment[:3]...), BaseURLSet: connection.BaseURLSet, APIKeySet: connection.APIKeySet,
 			ModelSet: connection.Model != "", CredentialsRequired: connection.CredentialsRequired, Configured: connection.Configured(),
-			ProfileLevels: nonNil(slices.Clone(profile.EffortLevels)), ProfileDefault: profile.DefaultEffort, ContextWindow: window}
+			ProfileLevels: nonNil(slices.Clone(profile.EffortLevels)), ProfileDefault: profile.DefaultEffort, ContextWindow: window,
+			AgentTools: declared.RunsAgentTools()}
 		for _, check := range checks {
 			// A check of another model name (the variable changed since) is stale.
 			if check.ConnectionID == connection.ID && check.Model == connection.Model {

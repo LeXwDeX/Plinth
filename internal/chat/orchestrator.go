@@ -3661,7 +3661,9 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // refusal of a request with pictures says the model may not read images
 // (#253), an upstream content-safety refusal says the input tripped it (#35),
 // a used-up upstream balance or key quota says so (#120), a picture the
-// model drew itself says it was not kept;
+// model drew itself says it was not kept, a request field the upstream
+// refused names that field (#401: only the plain field name is shown, the
+// upstream's own wording stays in the log);
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
@@ -3679,6 +3681,9 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	}
 	if errors.Is(err, agents.ErrInlineImageOutput) && messages.AgentInlineImageOutput != "" {
 		return orchestrator.text(ctx, messages.AgentInlineImageOutput)
+	}
+	if param, rejected := agents.RequestRejectedParam(err); rejected && messages.AgentRequestRejected != "" {
+		return strings.ReplaceAll(orchestrator.text(ctx, messages.AgentRequestRejected), "{param}", param)
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
 }

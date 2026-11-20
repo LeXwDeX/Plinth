@@ -4948,6 +4948,12 @@ type ChatThinkingSchema struct {
 	ModelProfiles []ChatThinkingModelProfile `json:"model_profiles,omitempty"`
 }
 
+// The wire APIs a chat model profile can be served on (wire_api).
+const (
+	ChatWireCompletions = "chat_completions"
+	ChatWireResponses   = "responses"
+)
+
 type ChatThinkingModelProfile struct {
 	ModelPrefixes []string `json:"model_prefixes"`
 	// RequestFields are top-level request body fields sent verbatim, e.g. a
@@ -4971,6 +4977,32 @@ type ChatThinkingModelProfile struct {
 	// model family: whether a streamed request asks for token usage with
 	// stream_options.include_usage. Nil keeps the agent-level value (#322).
 	StreamIncludeUsage *bool `json:"stream_include_usage,omitempty"`
+	// OmitTemperature leaves temperature out of every request to this model
+	// family (Agent turn, title, compaction summary, prompt enhancement and
+	// the connection test): the upstream accepts only its own default value
+	// (#401). Without it a request carries chat.agent.temperature.
+	OmitTemperature bool `json:"omit_temperature,omitempty"`
+	// WireAPI is the HTTP API the model family is served on: chat_completions
+	// (the default, chat.agent.endpoint_path) or responses (the OpenAI
+	// Responses API, chat.agent.responses_endpoint_path, #401). One connection
+	// can carry models of both: each request goes to the wire its model's
+	// profile declares, for every kind of request (Agent turn, title,
+	// compaction summary, prompt enhancement, connection test). On the
+	// responses wire the thinking level is always written to reasoning.effort
+	// whatever effort_field's name says (the field then only declares that the
+	// profile offers levels), and the wire has no request_fields,
+	// reasoning_passback or stream_include_usage: the catalog refuses them
+	// together with it.
+	WireAPI string `json:"wire_api,omitempty"`
+	// ChatCompletionsTools says whether the model family can run function
+	// tools on /v1/chat/completions. false marks a family whose tool calling
+	// needs another wire: an Agent turn always carries tools, so such a model
+	// is not offered for conversation turns on chat completions, while
+	// requests without tools (title, summary, prompt enhancement, the
+	// connection test) may still use it. A family served on the responses wire
+	// (wire_api) runs its tools there, whatever this says. Omitted means it
+	// can (#401).
+	ChatCompletionsTools *bool `json:"chat_completions_tools,omitempty"`
 	// ReasoningPassback returns each assistant message's reasoning_content in
 	// later requests of the same tool loop, as the vendor contract requires.
 	ReasoningPassback bool `json:"reasoning_passback"`
@@ -4991,6 +5023,10 @@ type ChatAgentSchema struct {
 	Temperature       float64             `json:"temperature"`
 	Thinking          *ChatThinkingSchema `json:"thinking,omitempty"`
 	Stream            bool                `json:"stream"`
+	// ResponsesEndpointPath is the Responses API's path under the connection's
+	// base URL, for the model profiles that declare wire_api responses; it is
+	// required when one does, and not read otherwise (#401).
+	ResponsesEndpointPath string `json:"responses_endpoint_path,omitempty"`
 	// StreamIncludeUsage asks a streamed request for token usage with
 	// stream_options.include_usage, unless the model's thinking profile says
 	// otherwise (#322). The usage feeds the composer's context meter.
@@ -6178,6 +6214,12 @@ type ChatMessageTexts struct {
 	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
 	// a picture itself instead of answering or calling a generation tool.
 	AgentInlineImageOutput string `json:"agent_inline_image_output"`
+	// AgentRequestRejected replaces UnknownError when the upstream refused the
+	// request for one of its own parameters (HTTP 400 invalid_request_error
+	// that names the request field); {param} is that field's name. The
+	// upstream's own wording stays in the log (#401). Optional: without it
+	// such a refusal reads as the unknown error.
+	AgentRequestRejected string `json:"agent_request_rejected,omitempty"`
 	// AgentNotConfigured is what the person reads while the live Agent has no
 	// API key or no model: Agent replies and prompt enhancement are off (#253).
 	AgentNotConfigured string `json:"agent_not_configured"`

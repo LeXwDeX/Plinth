@@ -62,3 +62,26 @@ func TestAgentVendorBehaviorFollowsModelProfiles(t *testing.T) {
 		t.Fatal("profiles must be off when thinking is disabled")
 	}
 }
+
+// #401: the shipped Catalog makes the adapter leave the temperature out for
+// gpt-astra only; every other profile still sends it.
+func TestOnlyTheAstraProfileOmitsTheTemperature(t *testing.T) {
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := taskCatalog.Application().Chat.Agent
+	for _, model := range []string{"gpt-astra", "GPT-Astra", "gpt-6-astra", "gpt-terra", "gpt-sol", "gpt-luna", "claude-sonnet-4",
+		"deepseek-flash", "qwen-omni-flash", "qwen3.8-flash", "qwen-max", "glm-5.3"} {
+		options := chatThinkingOptions(agent, model)
+		if options == nil {
+			t.Fatalf("%s has no profile", model)
+		}
+		if want := strings.EqualFold(model, "gpt-astra"); options.OmitTemperature != want {
+			t.Errorf("%s: OmitTemperature = %t, want %t", model, options.OmitTemperature, want)
+		}
+	}
+	if options := chatThinkingOptions(agent, "gpt-4o"); options != nil {
+		t.Fatalf("a model without a profile got options %#v", options)
+	}
+}
