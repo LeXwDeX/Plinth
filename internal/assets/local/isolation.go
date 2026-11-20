@@ -197,13 +197,15 @@ func ValidateDeliveredGLBBytes(raw []byte) error {
 	return nil
 }
 
+var errModelContentAddress = errors.New("模型内容含外部地址")
+
 func scanExternalAddresses(reader io.Reader) error {
 	buffer := make([]byte, isolationChunkBytes)
 	scanner := addressScanner{initial: externalAddress, continuation: continuedExternalAddress}
 	for {
 		count, err := reader.Read(buffer)
 		if count > 0 && scanner.contains(buffer[:count]) {
-			return errors.New("模型内容含外部地址")
+			return errModelContentAddress
 		}
 		if err == io.EOF {
 			return nil
@@ -504,35 +506,44 @@ func inspectArchiveWithXMLPart(file io.ReaderAt, size int64, xmlPart string) err
 	}
 	archive, err := zip.NewReader(file, size)
 	if err != nil {
+		if errors.Is(err, zip.ErrInsecurePath) {
+			return rejectInspection("zip_unsafe_path", fmt.Errorf("模型压缩包路径不安全: %w", err))
+		}
+		if errors.Is(err, zip.ErrFormat) {
+			return rejectInspection("zip_directory_invalid", fmt.Errorf("模型压缩包无效: %w", err))
+		}
 		return fmt.Errorf("模型压缩包无效: %w", err)
 	}
 	if len(archive.File) > maxArchiveFiles {
-		return errors.New("模型压缩包文件数量超出限制")
+		return rejectArchiveRule("zip_entry_limit", "模型压缩包文件数量超出限制")
 	}
 	archive.RegisterDecompressor(zip.Deflate, inspectZIPDeflate)
 	if containsExternalAddress([]byte(archive.Comment)) {
-		return errors.New("模型压缩包注释含外部地址")
+		return rejectArchiveRule("external_address", "模型压缩包注释含外部地址")
 	}
 	names := make(map[string]struct{}, len(archive.File))
 	var total uint64
 	for _, entry := range archive.File {
 		if containsExternalAddress([]byte(entry.Comment)) || containsExternalAddress(entry.Extra) {
-			return errors.New("模型压缩包元数据含外部地址")
+			return rejectArchiveRule("external_address", "模型压缩包元数据含外部地址")
 		}
 		name := path.Clean(entry.Name)
-		if name == ".." || strings.HasPrefix(name, "../") || strings.HasPrefix(name, "/") || containsExternalAddress([]byte(name)) {
-			return errors.New("模型压缩包包含不安全路径")
+		if containsExternalAddress([]byte(name)) {
+			return rejectArchiveRule("external_address", "模型压缩包成员名含外部地址")
+		}
+		if name == ".." || strings.HasPrefix(name, "../") || strings.HasPrefix(name, "/") {
+			return rejectArchiveRule("zip_unsafe_path", "模型压缩包包含不安全路径")
 		}
 		if entry.UncompressedSize64 > maxArchiveBytes || total > maxArchiveBytes-entry.UncompressedSize64 {
-			return errors.New("模型压缩包展开大小超出限制")
+			return rejectArchiveRule("zip_size_limit", "模型压缩包展开大小超出限制")
 		}
 		total += entry.UncompressedSize64
 		if _, duplicate := names[name]; duplicate {
-			return errors.New("模型压缩包包含重复的规范化成员名")
+			return rejectArchiveRule("zip_unsafe_path", "模型压缩包包含重复的规范化成员名")
 		}
 		names[name] = struct{}{}
 		if !isZIPDirectory(&entry.FileHeader) && strings.HasSuffix(strings.ToLower(entry.Name), ".zip") {
-			return errors.New("模型压缩包不能嵌套未检查的压缩包")
+			return rejectArchiveRule("zip_nested_archive", "模型压缩包不能嵌套未检查的压缩包")
 		}
 	}
 	// Dependencies must resolve to a file. Keep every name in the framing and
@@ -592,10 +603,15 @@ func inspectArchiveWithXMLPart(file io.ReaderAt, size int64, xmlPart string) err
 	return nil
 }
 
+// .psmdcp is the OPC core-properties part as System.IO.Packaging names it
+// (package/services/metadata/core-properties/<id>.psmdcp). It is XML, so it
+// takes the same namespace rules as docProps/core.xml instead of the generic
+// address scan that would flag its namespace identifiers (consistency of the
+// standard vocabulary found while investigating #386, not its cause).
 func isArchiveXML(name string) bool {
 	name = strings.ToLower(name)
 	return strings.HasSuffix(name, ".xml") || strings.HasSuffix(name, ".rels") ||
-		strings.HasSuffix(name, ".model")
+		strings.HasSuffix(name, ".model") || strings.HasSuffix(name, ".psmdcp")
 }
 
 // 3MF and OPC use HTTP URIs as immutable XML vocabulary identifiers. Only
@@ -618,14 +634,19 @@ func scanArchiveXML(reader io.Reader, size, limit int64) error {
 			return err
 		}
 		if err != nil {
-			return fmt.Errorf("模型 XML 无效: %w", err)
+			// A reader failure (CRC, inflate, size, cancellation) is not a verdict on
+			// the XML; the member reader names it. Everything else is malformed XML.
+			if isZIPMemberFailure(err) || inspectionTransient(err) {
+				return err
+			}
+			return rejectInspection("xml_invalid", fmt.Errorf("模型 XML 无效: %w", err))
 		}
 		switch node := token.(type) {
 		case xml.StartElement:
 			for _, attr := range node.Attr {
 				value := strings.TrimSpace(attr.Value)
 				if strings.EqualFold(attr.Name.Local, "TargetMode") && strings.EqualFold(value, "External") {
-					return errors.New("模型 XML 引用外部资源")
+					return rejectArchiveRule("xml_external_resource", "模型 XML 引用外部资源")
 				}
 				isNamespace := attr.Name.Space == "xmlns" ||
 					(attr.Name.Space == "" && attr.Name.Local == "xmlns")
@@ -633,22 +654,22 @@ func scanArchiveXML(reader io.Reader, size, limit int64) error {
 					continue
 				}
 				if containsExternalAddress([]byte(value)) {
-					return errors.New("模型 XML 含外部地址")
+					return rejectArchiveRule("external_address", "模型 XML 含外部地址")
 				}
 			}
 		case xml.CharData:
 			if containsExternalAddress(node) {
-				return errors.New("模型 XML 含外部地址")
+				return rejectArchiveRule("external_address", "模型 XML 含外部地址")
 			}
 		case xml.Comment:
 			if containsExternalAddress(node) {
-				return errors.New("模型 XML 注释含外部地址")
+				return rejectArchiveRule("external_address", "模型 XML 注释含外部地址")
 			}
 		case xml.Directive:
-			return errors.New("模型 XML 不允许 DTD 声明")
+			return rejectArchiveRule("xml_dtd", "模型 XML 不允许 DTD 声明")
 		case xml.ProcInst:
 			if containsExternalAddress(node.Inst) {
-				return errors.New("模型 XML 处理指令含外部地址")
+				return rejectArchiveRule("external_address", "模型 XML 处理指令含外部地址")
 			}
 		}
 	}
