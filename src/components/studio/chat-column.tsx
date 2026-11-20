@@ -29,6 +29,7 @@ import { QueuedTurns } from '@/components/studio/queued-turns';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
 import { Composer, type ComposerBranch, type ComposerChip, type ComposerMask, type ComposerMention } from '@/components/studio/composer';
 import { SessionNotesPanel, sessionNotesText } from '@/components/workspace/session-notes-panel';
+import { applyChoiceAction } from '@/components/workspace/harness-choice-action';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useAgentEffectiveConfiguration } from '@/hooks/use-agent-effective-configuration';
@@ -44,6 +45,7 @@ import { useSessionApproval } from '@/hooks/use-session-approval';
 import { useSessionNotes } from '@/hooks/use-session-notes';
 import { useSessionPendingApprovals } from '@/hooks/use-session-pending-approvals';
 import { useSessionChoices } from '@/hooks/use-session-choices';
+import { useSessionHarness } from '@/hooks/use-session-harness';
 import { useSessionAssetLists } from '@/hooks/use-session-asset-lists';
 import { useSessionPick } from '@/hooks/use-session-pick';
 import { useSessionPreferences } from '@/hooks/use-session-preferences';
@@ -86,7 +88,8 @@ import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
 import { useElementHeight } from '@/hooks/use-element-height';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
-import { choiceCardPlacement, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
+import { runChoiceAnswer } from '@/lib/chat/choice-actions';
 import { assetListClient } from '@/lib/asset-lists/client';
 import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
@@ -364,6 +367,11 @@ export function ChatColumn() {
   const effective = useAgentEffectiveConfiguration(schema, activeSessionId, stageDomain, selectedGenerationModel, skillRefreshVersion);
   const skillCatalog = useAgentSkillCatalog(schema, effective.data?.revision, skillRefreshVersion);
   const { user } = useAuth();
+  // #374: a direction-card option may save the function selection before its answer is sent. This is the 功能 panel's own
+  // session Harness state (one SWR key, so the panel and the summary above the input follow the save) and its CAS save.
+  const sessionHarness = useSessionHarness(activeSessionId, user?.id ?? '');
+  const sessionHarnessRef = useRef(sessionHarness);
+  sessionHarnessRef.current = sessionHarness;
   const { data: supportingModels, error: supportingModelsError } = useSWR(
     user?.id && activeSessionId && modelChoices.length
       ? ['skill-supporting-models', schema.revision, user.id, activeSessionId, stageDomain, skillRefreshVersion,
@@ -1842,13 +1850,29 @@ export function ChatColumn() {
     setAnsweringChoice(card.id);
     let accepted = false;
     try {
-      await sendRef.current(text, [], [], undefined, [], [], undefined, {
-        choiceAnswer: selection.useDefault
-          ? { choiceId: card.id, useDefault: true }
-          : { choiceId: card.id, optionId: selection.optionId },
-        onSent: () => { accepted = true; },
+      // #374: an option with an action saves the function selection first and the answer goes out only once it is
+      // saved. A selection that cannot be saved (a revision conflict included) says so on the card, sends nothing and
+      // leaves the card answerable. The Harness is read at the moment of the save, not as of this callback's render.
+      const outcome = await runChoiceAnswer(choiceSelectionAction(card, selection), {
+        apply: (action) => applyChoiceAction(action, {
+          schema,
+          harness: { selection: sessionHarnessRef.current.view?.selection ?? null, save: sessionHarnessRef.current.save },
+        }),
+        stillHere: () => isCurrentSessionScope(scope),
+        send: async () => {
+          await sendRef.current(text, [], [], undefined, [], [], undefined, {
+            choiceAnswer: selection.useDefault
+              ? { choiceId: card.id, useDefault: true }
+              : { choiceId: card.id, optionId: selection.optionId },
+            onSent: () => { accepted = true; },
+          });
+        },
       });
-      if (!accepted) setChoiceError({ cardId: card.id, text: schemaText(schema, 'ui.chat.choice.failed') });
+      if (outcome.status === 'action_failed') {
+        setChoiceError({ cardId: card.id, text: schemaText(schema, outcome.failureKey) });
+      } else if (outcome.status === 'sent') {
+        if (!accepted) setChoiceError({ cardId: card.id, text: schemaText(schema, 'ui.chat.choice.failed') });
+      }
     } catch {
       setChoiceError({ cardId: card.id, text: schemaText(schema, 'ui.chat.choice.failed') });
     } finally {

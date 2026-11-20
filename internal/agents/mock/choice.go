@@ -149,3 +149,46 @@ func genericChoiceText(content string) string {
 	}
 	return strings.TrimSpace(result.Message)
 }
+
+// A direction card (#374) names no target tool: its answer is the chosen
+// option as text, so there is no call to repeat. The server follows the
+// person's message with {"choice_id","kind","chosen":{id,title,...}}; the mock
+// takes the chosen direction and carries on in words. The function selection
+// an option's action asks for was saved by the page before the message was
+// sent, so the next turn's tools already are the ones that apply.
+type directionAnswer struct {
+	ChoiceID string `json:"choice_id"`
+	Kind     string `json:"kind"`
+	Tool     string `json:"tool"`
+	Chosen   *struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	} `json:"chosen"`
+}
+
+// directionReply is the mock's reply to a message that picked an option on a
+// direction card, or false when the latest user message did not. A provider
+// choice carries a target tool (and no kind), so it is never taken for one.
+func (adapter *Adapter) directionReply(messages []agents.Message) (string, bool) {
+	for index := len(messages) - 1; index >= 0; index-- {
+		message := messages[index]
+		if message.Role != adapter.userRole || message.PicturesOnly {
+			continue
+		}
+		text := message.Content
+		for _, part := range message.Parts {
+			text += "\n" + part.Text
+		}
+		start := strings.LastIndex(text, `{"choice_id"`)
+		if start < 0 {
+			return "", false
+		}
+		var answer directionAnswer
+		if err := json.NewDecoder(strings.NewReader(text[start:])).Decode(&answer); err != nil ||
+			answer.Kind == "" || answer.Tool != "" || answer.Chosen == nil || answer.Chosen.ID == "" {
+			return "", false
+		}
+		return "好的，按「" + answer.Chosen.Title + "」继续，请告诉我具体要做什么。", true
+	}
+	return "", false
+}

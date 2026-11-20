@@ -1405,7 +1405,9 @@ func newHTTPHarnessWithCatalogAndProviders(
 		},
 		ChoiceKinds:      applicationSchema.Chat.Choice.Kinds,
 		ChoiceMaxOptions: applicationSchema.Chat.Choice.MaxOptions,
-		RetiredModels:    taskCatalog.RetiredModelSuccessors(),
+		// A direction card option may switch the session to one of these (#374).
+		HarnessOperations: applicationSchema.Chat.Harness.Operations,
+		RetiredModels:     taskCatalog.RetiredModelSuccessors(),
 		// The harness deployment chats with the DeepSeek profile (#322).
 		Models:                chat.ModelPolicy{Model: "deepseek", Thinking: applicationSchema.Chat.Agent.Thinking},
 		VisionBudget:          func(model string) int { return chat.EffectiveVisionImages(applicationSchema.Chat, model) },

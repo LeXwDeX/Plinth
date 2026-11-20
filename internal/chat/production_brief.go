@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -280,6 +282,9 @@ type ChoiceOptionInput struct {
 	Description string
 	Thumbnail   string
 	Arguments   json.RawMessage
+	// Action is what the page does when the person picks the option (#374);
+	// only a kind that declares actions accepts one.
+	Action *ChoiceAction
 }
 
 // AskChoice opens a generic card of a kind the Schema declares. The usage
@@ -301,6 +306,7 @@ func (service *Service) AskChoice(
 		id, label, description string
 		thumbnail              string
 		arguments              json.RawMessage
+		action                 *ChoiceAction
 	}
 	var specs []optionSpec
 	var proposalOptions []ChoiceOption
@@ -346,6 +352,13 @@ func (service *Service) AskChoice(
 		isConcept := concept.Enabled && kind.ID == concept.Kind
 		minOptions := 2
 		maxOptions := service.choiceMaxOptions
+		// A kind may only narrow the card's default bounds (#374).
+		if kind.MinOptions >= 2 {
+			minOptions = kind.MinOptions
+		}
+		if kind.MaxOptions > 0 && (maxOptions <= 0 || kind.MaxOptions < maxOptions) {
+			maxOptions = kind.MaxOptions
+		}
 		sketches := 0
 		sketchTasks := map[string]bool{}
 		if isConcept {
@@ -380,7 +393,11 @@ func (service *Service) AskChoice(
 			}
 		}
 		if len(arguments.Options) < minOptions || (maxOptions > 0 && len(arguments.Options) > maxOptions) {
-			return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
+			bound := fmt.Sprintf("at least %d options", minOptions)
+			if maxOptions > 0 {
+				bound = fmt.Sprintf("%d to %d options", minOptions, maxOptions)
+			}
+			return choiceOptionsInvalid("this card takes " + bound), nil
 		}
 		if isConcept && len(arguments.Options) > sketches {
 			return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
@@ -408,6 +425,10 @@ func (service *Service) AskChoice(
 					return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
 				}
 				optionArguments = argumentsObject
+			} else if kind.ToolName == "" {
+				// No target tool (#374): the answer is the chosen option itself,
+				// so the option carries no call arguments.
+				optionArguments = json.RawMessage(`{}`)
 			} else {
 				if kind.Argument == "" {
 					return ToolResult{Error: "choice options invalid", NoSubmission: true}, nil
@@ -424,8 +445,12 @@ func (service *Service) AskChoice(
 				// the card itself stays useful as text (#242).
 				thumbnail = service.conceptThumbnailURL(command, sketchTasks, option.Thumbnail)
 			}
+			action, reason := service.choiceOptionAction(kind, option.Action, command)
+			if reason != "" {
+				return choiceOptionsInvalid(reason), nil
+			}
 			specs = append(specs, optionSpec{id: id, label: label, description: description,
-				thumbnail: thumbnail, arguments: append(json.RawMessage(nil), optionArguments...)})
+				thumbnail: thumbnail, arguments: append(json.RawMessage(nil), optionArguments...), action: action})
 		}
 	case "agent_proposal":
 		// The Agent's confirmation card offers its exact proposal as accept
@@ -478,6 +503,7 @@ func (service *Service) AskChoice(
 				Description:  spec.description,
 				ThumbnailURL: spec.thumbnail,
 				Arguments:    optionArguments,
+				Action:       spec.action,
 			}
 			if recommended != "" && spec.id == recommended {
 				option.Recommended = true
@@ -517,13 +543,17 @@ func (service *Service) AskChoice(
 	}
 	wire := make([]map[string]any, 0, len(choice.Options))
 	for _, option := range choice.Options {
-		wire = append(wire, map[string]any{
+		entry := map[string]any{
 			"id":            option.ID,
 			"label":         option.Label,
 			"description":   option.Description,
 			"thumbnail_url": option.ThumbnailURL,
 			"recommended":   option.Recommended,
-		})
+		}
+		if option.Action != nil {
+			entry["action"] = option.Action
+		}
+		wire = append(wire, entry)
 	}
 	content, err := json.Marshal(map[string]any{
 		"success":         false,
@@ -539,6 +569,50 @@ func (service *Service) AskChoice(
 		return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
 	}
 	return ToolResult{AgentContent: string(content), NoSubmission: true}, nil
+}
+
+// choiceOptionsInvalid refuses an Agent-supplied option list with the reason
+// the Agent needs to correct it (#374).
+func choiceOptionsInvalid(reason string) ToolResult {
+	return ToolResult{Error: "choice options invalid: " + reason, NoSubmission: true}
+}
+
+// choiceOptionAction checks the action an Agent put on an option (#374): the
+// kind must declare the action and, for switch_operation, the operation must
+// be one the session may switch to. It returns the action to store, or the
+// reason the option is refused. The server only stores the action; the page
+// performs it, through the session's function selection, when the person
+// picks the option.
+func (service *Service) choiceOptionAction(
+	kind catalog.ChatChoiceKindSchema,
+	action *ChoiceAction,
+	command ToolCommand,
+) (*ChoiceAction, string) {
+	if action == nil {
+		return nil, ""
+	}
+	if !slices.Contains(kind.Actions, action.Type) {
+		return nil, fmt.Sprintf("action %q is not allowed on this card", action.Type)
+	}
+	operationID := strings.TrimSpace(action.OperationID)
+	switch action.Type {
+	case catalog.ChoiceActionClearOperation:
+		if operationID != "" {
+			return nil, "clear_operation takes no operation_id"
+		}
+		return &ChoiceAction{Type: action.Type}, ""
+	case catalog.ChoiceActionSwitchOperation:
+		targets := SwitchableHarnessOperations(service.harnessOperations, command.Options.Harness)
+		ids := make([]string, 0, len(targets))
+		for _, target := range targets {
+			if target.ID == operationID {
+				return &ChoiceAction{Type: action.Type, OperationID: operationID}, ""
+			}
+			ids = append(ids, target.ID)
+		}
+		return nil, fmt.Sprintf("switch_operation needs an operation_id from switchable_operations (one of: %s)", strings.Join(ids, ", "))
+	}
+	return nil, fmt.Sprintf("action %q is not allowed on this card", action.Type)
 }
 
 // choiceKindOf finds the declared choice kind whose options come from one

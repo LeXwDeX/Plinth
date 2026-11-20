@@ -3283,7 +3283,9 @@ type ChatChoiceSchema struct {
 type ChatChoiceKindSchema struct {
 	ID string `json:"id"`
 	// ToolName is the tool an answer calls; Argument is the name of its
-	// string parameter that receives the option id.
+	// string parameter that receives the option id. An empty ToolName is a
+	// kind with no target tool (#374): option_source agent, no argument, and
+	// the answer continues the conversation as text (AnswerTemplate).
 	ToolName string `json:"tool_name"`
 	Argument string `json:"argument"`
 	// OptionSource names where the server builds the options: "usage_profiles"
@@ -3297,7 +3299,35 @@ type ChatChoiceKindSchema struct {
 	// AcceptLabel and DeclineLabel word an agent_proposal card's two options.
 	AcceptLabel  string `json:"accept_label,omitempty"`
 	DeclineLabel string `json:"decline_label,omitempty"`
+	// MinOptions and MaxOptions bound the options the Agent supplies to a kind
+	// whose option_source is agent (#374). Zero keeps the card default: at
+	// least two options and at most choice.max_options; a declared bound can
+	// only be tighter than that default.
+	MinOptions int `json:"min_options,omitempty"`
+	MaxOptions int `json:"max_options,omitempty"`
+	// Actions lists what an option of this kind may carry (#374): the page
+	// performs the action when the person picks the option, before it sends
+	// the answer. Only ChoiceActionSwitchOperation and
+	// ChoiceActionClearOperation exist; a kind without Actions accepts none.
+	Actions []string `json:"actions,omitempty"`
+	// AnswerTemplate and PendingTemplate word a kind that names no target tool
+	// (ToolName empty, #374): its answer is the chosen option as text, not a
+	// tool call. {continuation} is the card's JSON (the chosen option, or
+	// every option while the card is open). A kind with a target tool uses
+	// choice.answer_template and choice.pending_template instead.
+	AnswerTemplate  string `json:"answer_template,omitempty"`
+	PendingTemplate string `json:"pending_template,omitempty"`
 }
+
+// The actions an option of a choice card may carry (#374). The page performs
+// them, through the session's function selection, before it sends the answer:
+// switch_operation fixes the named function operation, clear_operation clears
+// the selection so the session is in free mode again. The server never
+// changes the selection itself.
+const (
+	ChoiceActionSwitchOperation = "switch_operation"
+	ChoiceActionClearOperation  = "clear_operation"
+)
 
 // ChatConceptDirectionsSchema is application.chat.concept_directions (#242,
 // #360). An open request first asks how many sketches to draw on a quantity

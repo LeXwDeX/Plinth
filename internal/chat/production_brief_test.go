@@ -14,6 +14,8 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/harness"
+	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 )
 
 func briefNumber(value int) *int { return &value }
@@ -869,5 +871,222 @@ func TestConceptDirectionCardCarriesSketchArgumentsAndThumbnails(t *testing.T) {
 		if refused, err := service.AskChoice(ctx, command, conceptKind, bad); err != nil || !refused.NoSubmission || refused.Error == "" {
 			t.Fatalf("bad concept arguments %s = %+v %v", raw, refused, err)
 		}
+	}
+}
+
+// nextStepChoiceKind is the #374 direction card in the shipped shape: an agent
+// kind with no target tool, two to four options and the two actions.
+func nextStepChoiceKind() catalog.ChatChoiceKindSchema {
+	return catalog.ChatChoiceKindSchema{
+		ID: "next_step", OptionSource: "agent", Question: "接下来想怎么做？", Message: "请选择接下来的方向。",
+		MinOptions: 2, MaxOptions: 4,
+		Actions:        []string{catalog.ChoiceActionSwitchOperation, catalog.ChoiceActionClearOperation},
+		AnswerTemplate: "chose {continuation}", PendingTemplate: "open {continuation}",
+	}
+}
+
+func nextStepOperations() []catalog.HarnessOperationSchema {
+	operation := func(id, label, tool, unavailable string) catalog.HarnessOperationSchema {
+		return catalog.HarnessOperationSchema{
+			PublicHarnessOperation: catalog.PublicHarnessOperation{ID: id, Label: label, Description: label + "说明", UnavailableReason: unavailable},
+			ToolName:               tool,
+		}
+	}
+	return []catalog.HarnessOperationSchema{
+		operation("retexture", "换贴图", "retexture_model", ""),
+		operation("remesh", "重拓扑", "process_model", ""),
+		operation("repair-printability", "打印修复", "process_model", "尚未启用"),
+		operation("unwired", "未接线", "", "该功能尚未接线"),
+		operation("multiview-to-3d", "三视图生成", "create_model_3d_from_views", ""),
+	}
+}
+
+func openNextStepService(t *testing.T) (*chat.Service, context.Context) {
+	t.Helper()
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	now := time.Now().UTC()
+	if _, err := repository.CreateSession(ctx, chat.Session{
+		ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{directionChoiceKind(), nextStepChoiceKind()}
+		config.ChoiceMaxOptions = 8
+		config.HarnessOperations = nextStepOperations()
+	})
+	service.SetChoices(repository, 20)
+	return service, ctx
+}
+
+// #374: a next_step card names no target tool, so it opens without one; each
+// option carries no call arguments but may carry an action, which the server
+// stores and shows without performing it.
+func TestNextStepCardNeedsNoTargetToolAndStoresTheActions(t *testing.T) {
+	service, ctx := openNextStepService(t)
+	// multiview-to-3d is fixed; the person enabled retexture and the
+	// unavailable and unwired ones too, but never remesh.
+	snapshot := &resolve.Snapshot{Selection: harness.Selection{OperationID: "multiview-to-3d",
+		EnabledOperations: []string{"multiview-to-3d", "retexture", "repair-printability", "unwired"}}}
+	command := chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call:    agents.ToolCall{ID: "call-1", Name: "ask_choice"},
+		Options: chat.TurnOptions{Harness: snapshot},
+	}
+	result, err := service.AskChoice(ctx, command, nextStepChoiceKind(), chat.AskChoiceArguments{
+		Kind: "next_step", Recommended: "keep",
+		Options: []chat.ChoiceOptionInput{
+			{ID: "clear_and_draw", Label: "清空功能选择，先出三视图图片", Description: "回到自由模式后可以直接生成三视图",
+				Action: &chat.ChoiceAction{Type: "clear_operation"}},
+			{ID: "switch_retexture", Label: "改为换贴图", Action: &chat.ChoiceAction{Type: "switch_operation", OperationID: "retexture"}},
+			// Arguments an Agent puts on a tool-less option are never kept.
+			{ID: "keep", Label: "保持当前功能", Arguments: json.RawMessage(`{"model":"x"}`)},
+		},
+	})
+	if err != nil || result.Error != "" || !result.NoSubmission {
+		t.Fatalf("next_step card = %+v err=%v", result, err)
+	}
+	var opened struct {
+		ChoiceRequired bool   `json:"choice_required"`
+		Kind           string `json:"kind"`
+		Recommended    string `json:"recommended"`
+		Options        []struct {
+			ID     string `json:"id"`
+			Action *struct {
+				Type        string `json:"type"`
+				OperationID string `json:"operation_id"`
+			} `json:"action"`
+		} `json:"options"`
+	}
+	if err := json.Unmarshal([]byte(result.AgentContent), &opened); err != nil || !opened.ChoiceRequired ||
+		opened.Kind != "next_step" || opened.Recommended != "keep" || len(opened.Options) != 3 ||
+		opened.Options[0].Action == nil || opened.Options[0].Action.Type != "clear_operation" || opened.Options[2].Action != nil {
+		t.Fatalf("agent content = %s %v", result.AgentContent, err)
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 {
+		t.Fatalf("stored cards = %+v %v", choices, err)
+	}
+	card := choices[0]
+	if card.Kind != "next_step" || card.ToolName != "" || card.Capability != "next_step" || card.State != chat.ChoicePending ||
+		card.AllowDefault || len(card.Options) != 3 {
+		t.Fatalf("stored card = %+v", card)
+	}
+	if action := card.Options[1].Action; action == nil || action.Type != "switch_operation" || action.OperationID != "retexture" {
+		t.Fatalf("stored action = %+v", card.Options[1].Action)
+	}
+	if card.Options[0].Action == nil || card.Options[0].Action.OperationID != "" || card.Options[2].Action != nil {
+		t.Fatalf("stored actions = %+v %+v", card.Options[0].Action, card.Options[2].Action)
+	}
+	for _, option := range card.Options {
+		if string(option.Arguments) != "{}" {
+			t.Fatalf("option %s keeps call arguments %s", option.ID, option.Arguments)
+		}
+	}
+	if !card.Options[2].Recommended || card.Options[0].Recommended {
+		t.Fatalf("recommended = %+v", card.Options)
+	}
+}
+
+// #374: the option count follows the kind's own bound (2 to 4), and the
+// action whitelist refuses anything the page could not save as a selection.
+func TestNextStepCardRefusesBadOptionCountsAndActions(t *testing.T) {
+	service, ctx := openNextStepService(t)
+	snapshot := &resolve.Snapshot{Selection: harness.Selection{OperationID: "multiview-to-3d",
+		EnabledOperations: []string{"multiview-to-3d", "retexture", "repair-printability", "unwired"}}}
+	command := chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call:    agents.ToolCall{ID: "call-1", Name: "ask_choice"},
+		Options: chat.TurnOptions{Harness: snapshot},
+	}
+	plain := func(ids ...string) []chat.ChoiceOptionInput {
+		options := make([]chat.ChoiceOptionInput, 0, len(ids))
+		for _, id := range ids {
+			options = append(options, chat.ChoiceOptionInput{ID: id, Label: "选项 " + id})
+		}
+		return options
+	}
+	withAction := func(action *chat.ChoiceAction) []chat.ChoiceOptionInput {
+		options := plain("a", "b")
+		options[0].Action = action
+		return options
+	}
+	cases := []struct {
+		name    string
+		kind    catalog.ChatChoiceKindSchema
+		options []chat.ChoiceOptionInput
+		want    string
+	}{
+		{"one option", nextStepChoiceKind(), plain("a"), "2 to 4"},
+		{"five options", nextStepChoiceKind(), plain("a", "b", "c", "d", "e"), "2 to 4"},
+		{"duplicate ids", nextStepChoiceKind(), plain("a", "a"), ""},
+		{"switch to a function that was never enabled", nextStepChoiceKind(),
+			withAction(&chat.ChoiceAction{Type: "switch_operation", OperationID: "remesh"}), "retexture"},
+		{"switch to a function that is declared unavailable", nextStepChoiceKind(),
+			withAction(&chat.ChoiceAction{Type: "switch_operation", OperationID: "repair-printability"}), "retexture"},
+		{"switch to a function with no tool", nextStepChoiceKind(),
+			withAction(&chat.ChoiceAction{Type: "switch_operation", OperationID: "unwired"}), "retexture"},
+		{"switch to the function that is already fixed", nextStepChoiceKind(),
+			withAction(&chat.ChoiceAction{Type: "switch_operation", OperationID: "multiview-to-3d"}), "retexture"},
+		{"switch to an invented function", nextStepChoiceKind(),
+			withAction(&chat.ChoiceAction{Type: "switch_operation", OperationID: "three-view-image"}), "retexture"},
+		{"switch without a function", nextStepChoiceKind(), withAction(&chat.ChoiceAction{Type: "switch_operation"}), "retexture"},
+		{"clear with a function", nextStepChoiceKind(),
+			withAction(&chat.ChoiceAction{Type: "clear_operation", OperationID: "retexture"}), "no operation_id"},
+		{"unknown action", nextStepChoiceKind(), withAction(&chat.ChoiceAction{Type: "delete_session"}), "not allowed"},
+		{"action the kind does not declare", func() catalog.ChatChoiceKindSchema {
+			kind := nextStepChoiceKind()
+			kind.Actions = []string{catalog.ChoiceActionClearOperation}
+			return kind
+		}(), withAction(&chat.ChoiceAction{Type: "switch_operation", OperationID: "retexture"}), "not allowed"},
+		{"action on a kind without actions", directionChoiceKind(),
+			withAction(&chat.ChoiceAction{Type: "clear_operation"}), "not allowed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			refused, err := service.AskChoice(ctx, command, tc.kind, chat.AskChoiceArguments{Kind: tc.kind.ID, Options: tc.options})
+			if err != nil || !refused.NoSubmission || !strings.HasPrefix(refused.Error, "choice options invalid") ||
+				!strings.Contains(refused.Error, tc.want) {
+				t.Fatalf("refusal = %+v %v, want %q", refused, err, tc.want)
+			}
+		})
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 0 {
+		t.Fatalf("a refused card was stored: %+v %v", choices, err)
+	}
+	// Four options is the top of the kind's bound; two is the bottom.
+	for _, ids := range [][]string{{"a", "b"}, {"a", "b", "c", "d"}} {
+		command.AssistantMessageID = "turn-" + strconv.Itoa(len(ids))
+		if opened, err := service.AskChoice(ctx, command, nextStepChoiceKind(), chat.AskChoiceArguments{Kind: "next_step", Options: plain(ids...)}); err != nil || opened.Error != "" {
+			t.Fatalf("%d options = %+v %v", len(ids), opened, err)
+		}
+	}
+}
+
+// #374: a turn that froze no selection (no Harness in the options) still
+// accepts a function that the Schema wires; only the Schema checks apply.
+func TestNextStepActionWithoutAFrozenSelectionUsesTheSchemaOperations(t *testing.T) {
+	service, ctx := openNextStepService(t)
+	command := chat.ToolCommand{
+		OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"},
+	}
+	options := []chat.ChoiceOptionInput{
+		{ID: "a", Label: "A", Action: &chat.ChoiceAction{Type: "switch_operation", OperationID: "remesh"}},
+		{ID: "b", Label: "B", Action: &chat.ChoiceAction{Type: "clear_operation"}},
+	}
+	if opened, err := service.AskChoice(ctx, command, nextStepChoiceKind(), chat.AskChoiceArguments{Kind: "next_step", Options: options}); err != nil || opened.Error != "" {
+		t.Fatalf("schema-wired switch = %+v %v", opened, err)
+	}
+	command.AssistantMessageID = "turn-2"
+	options[0].Action.OperationID = "unwired"
+	if refused, err := service.AskChoice(ctx, command, nextStepChoiceKind(), chat.AskChoiceArguments{Kind: "next_step", Options: options}); err != nil || refused.Error == "" {
+		t.Fatalf("unwired switch = %+v %v", refused, err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/harness"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 )
@@ -53,6 +54,30 @@ func (registry *toolRegistry) harnessPermits(tool registeredTool) bool {
 	return tool.name == registry.harnessPolicy.PrerequisiteTool && snapshot.CanPropose && len(snapshot.PrerequisitePaths) > 0
 }
 
+// SwitchableHarnessOperations lists the function operations a choice option may
+// switch the session to (#374): wired to a tool, not declared unavailable, and,
+// once the turn froze a selection, enabled in it and not the one already fixed.
+// The Agent reads the list in its function context and an option's
+// switch_operation action may only name one of them, so the person's click maps
+// to a selection the resolver can accept; saving it is still checked there
+// (offering identity, availability, parameters).
+func SwitchableHarnessOperations(operations []catalog.HarnessOperationSchema, snapshot *resolve.Snapshot) []catalog.HarnessOperationSchema {
+	var enabled []string
+	active := ""
+	if snapshot != nil {
+		enabled, active = snapshot.Selection.EnabledOperations, snapshot.Selection.OperationID
+	}
+	var switchable []catalog.HarnessOperationSchema
+	for _, operation := range operations {
+		if operation.ToolName == "" || operation.UnavailableReason != "" || operation.ID == active ||
+			(snapshot != nil && !slices.Contains(enabled, operation.ID)) {
+			continue
+		}
+		switchable = append(switchable, operation)
+	}
+	return switchable
+}
+
 func (o *Orchestrator) harnessPrompt(snapshot *resolve.Snapshot, registry *toolRegistry, scope string) string {
 	if snapshot == nil || snapshot.Selection.OperationID == "" {
 		return ""
@@ -76,16 +101,30 @@ func (o *Orchestrator) harnessPrompt(snapshot *resolve.Snapshot, registry *toolR
 	for _, c := range snapshot.SourceCandidates {
 		choices = append(choices, sourceChoice{c.Source.TaskID, c.Source.AssetID, c.Fingerprint.Variant, c.Model, c.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"), c.Preferred})
 	}
+	// The functions a direction card option may switch to (#374). They are only
+	// offered while the Agent can open that card at all.
+	type switchableOperation struct {
+		ID          string `json:"id"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	}
+	var switchable []switchableOperation
+	if slices.Contains(tools, "ask_choice") {
+		for _, operation := range SwitchableHarnessOperations(o.schema.Harness.Operations, snapshot) {
+			switchable = append(switchable, switchableOperation{operation.ID, operation.Label, operation.Description})
+		}
+	}
 	data := struct {
-		Selection harness.Selection `json:"selection"`
-		Status    string            `json:"status"`
-		Missing   []string          `json:"missing_parameters"`
-		Images    []string          `json:"conversation_parameters,omitempty"`
-		Tools     []string          `json:"executable_tools"`
-		Paths     [][]string        `json:"prerequisite_proposals,omitempty"`
-		Sources   []sourceChoice    `json:"source_candidates,omitempty"`
-		Truncated bool              `json:"source_scan_truncated,omitempty"`
-	}{snapshot.Selection, snapshot.Status, snapshot.MissingParameters, snapshot.ConversationParameters, tools, snapshot.PrerequisitePaths, choices, snapshot.SourceScanTruncated}
+		Selection  harness.Selection     `json:"selection"`
+		Status     string                `json:"status"`
+		Missing    []string              `json:"missing_parameters"`
+		Images     []string              `json:"conversation_parameters,omitempty"`
+		Tools      []string              `json:"executable_tools"`
+		Paths      [][]string            `json:"prerequisite_proposals,omitempty"`
+		Sources    []sourceChoice        `json:"source_candidates,omitempty"`
+		Truncated  bool                  `json:"source_scan_truncated,omitempty"`
+		Switchable []switchableOperation `json:"switchable_operations,omitempty"`
+	}{snapshot.Selection, snapshot.Status, snapshot.MissingParameters, snapshot.ConversationParameters, tools, snapshot.PrerequisitePaths, choices, snapshot.SourceScanTruncated, switchable}
 	encoded, err := json.Marshal(data)
 	if err != nil {
 		return ""
