@@ -1460,6 +1460,12 @@ def scenario_mcp(api, mcp_base):
 def scenario_agent(api, offerings):
     """The L1 Agent equivalent: fake LLM -> tool call -> approval -> 3D task -> reply."""
     session = new_session(api)
+    # A new session is in the auto mode (#406), where nobody approves the 3D step; this scenario is about the
+    # approval card, so it puts the session in the strict mode first.
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "manual"})
+    if status != 200:
+        record("agent turn: switch the session to strict approval", False, f"approval mode {status}")
+        return
     marker = '[[fake:tool:create_model_3d {"prompt":"a plain cube"}]]'
     status, _ = api.json("POST", f"/api/chat/sessions/{session}/messages", {
         "content": "make a cube " + marker, "creative_domain": "3d", "ai_model": TEXT_TO_3D})

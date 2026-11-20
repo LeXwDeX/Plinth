@@ -394,6 +394,10 @@ func (s *replayStack) newSession() string {
 		ID string `json:"id"`
 	}
 	s.decode(s.do(http.MethodPost, "/api/chat/sessions", `{}`), http.StatusCreated, &session)
+	// These flows are about the approval card of a 3D step. They were written
+	// when a new session was in the budget mode (no plan: strict's rules), so
+	// they pin it instead of riding the default, which is auto since #406.
+	s.decode(s.do(http.MethodPut, "/api/v1/chat/sessions/"+session.ID+"/approval", `{"approvalMode":"budget"}`), http.StatusOK, nil)
 	return session.ID
 }
 

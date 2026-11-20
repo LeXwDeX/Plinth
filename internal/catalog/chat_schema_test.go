@@ -384,8 +384,8 @@ func TestDefaultCatalogApprovalPolicyMatchesProductRule(t *testing.T) {
 		known = append(known, string(capability.ID))
 	}
 	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
-	if policy.DefaultMode != "budget" {
-		t.Fatalf("default mode = %q, want budget", policy.DefaultMode)
+	if policy.DefaultMode != "auto" {
+		t.Fatalf("default mode = %q, want auto (#406)", policy.DefaultMode)
 	}
 	if !policy.Allows("budget") || !policy.Allows("manual") || !policy.Allows("auto") {
 		t.Fatalf("offered modes = %v", policy.Modes)

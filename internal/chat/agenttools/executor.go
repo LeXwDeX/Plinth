@@ -594,11 +594,15 @@ func (e *Executor) setParams(command chat.ToolCommand) chat.ToolResult {
 		if selected.ID == "" || !selected.Enabled {
 			return chat.ToolResult{Error: "parameter offering unavailable", NoSubmission: true}
 		}
-		normalized, err := catalog.ValidateParameterPatch(selected, args.Params, true, args.Reasons)
+		normalized, kept, err := catalog.NormalizeParameterPatch(selected, args.Params, true, args.Reasons)
 		if err != nil {
 			return chat.ToolResult{Error: err.Error(), NoSubmission: true}
 		}
-		args.Params = normalized
+		// #402: a reason for a parameter that is not advised was ignored by
+		// the validation. It is not stored either: the generation that freezes
+		// this Offering's input would refuse a reason that no advised
+		// parameter takes.
+		args.Params, args.Reasons = normalized, kept
 	}
 	if args.OfferingID == "" {
 		e.params.Set(e.scopeKey(command), args.Params)

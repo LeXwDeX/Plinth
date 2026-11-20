@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""L5: budget approval mode (#103), the default of a new session.
+"""L5: budget approval mode (#103). A new session is in the auto mode since #406, so each chain
+puts its fresh session in the budget mode first.
 
-Two chains, each in a fresh session that keeps its default approval mode:
+Two chains, each in a fresh session the script switches to the budget mode:
   approve  The session reads back "budget". A priced text-to-3D model is locked
            (L5_BUDGET_MODEL=<model_id>, else Tripo P2, else another Tripo
            Offering). A multi-step request (generate a game prop, inspect it,
@@ -54,12 +55,12 @@ def describe_card(card):
 
 
 def propose(live, report, label, model):
-    """Fresh session in its default mode, model locked, request sent; returns (session, plan card) or None."""
-    session = live.new_session(approval=None)
+    """Fresh session switched to the budget mode, model locked, request sent; returns (session, plan card) or None."""
+    session = live.new_session(approval="budget")
     if not report.check(f"{label}: session created", bool(session)):
         return None
     mode = live.approval_mode(session)
-    if not report.check(f"{label}: new session defaults to budget", mode == "budget", f"approvalMode={mode!r}"):
+    if not report.check(f"{label}: the session reads back the budget mode", mode == "budget", f"approvalMode={mode!r}"):
         return None
     live.lock_model_3d(session, model)
     status, _ = live.send(session, REQUEST, "model-3d", model)
