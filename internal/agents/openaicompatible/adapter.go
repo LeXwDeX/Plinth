@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -33,6 +34,11 @@ type ThinkingOptions struct {
 	// StreamIncludeUsage asks a streamed request for its token usage with
 	// stream_options.include_usage (#322).
 	StreamIncludeUsage bool
+	// OmitTemperature leaves temperature out of every request to the model:
+	// its upstream accepts only the default value and answers 400 to any other
+	// (#401). Every request path goes through the adapter, so the Agent turn,
+	// the title, the summary and the connection test all follow it.
+	OmitTemperature bool
 }
 
 // effort is the level a request sends for a chosen one.
@@ -394,7 +400,44 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 	if imageRefusalStatus(response.StatusCode) && requestHasImages(request) && mentionsImageInput(body) {
 		return errors.Join(agents.ErrImagesRejected, err)
 	}
+	// #401: an invalid_request_error that names the request field it refuses
+	// (a parameter the model does not accept) is told as such, with the
+	// field's name, not as an unknown error. The upstream's own wording stays
+	// in err, which only the log reads.
+	if param := rejectedParameter(response.StatusCode, body); param != "" {
+		return errors.Join(&agents.RequestRejection{Param: param}, err)
+	}
 	return err
+}
+
+// safeParameterName bounds what an upstream error may put in front of a
+// person: a request field path such as reasoning_effort or messages[2].content,
+// never free text.
+var safeParameterName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.\[\]-]{0,63}$`)
+
+// rejectedParameter is the request field an HTTP 400/422 invalid_request_error
+// names in its param member; "" for any other refusal, an unnamed field or a
+// name that is not a plain field path. It reads a plain JSON body or one SSE
+// "data:" line.
+func rejectedParameter(status int, body []byte) string {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return ""
+	}
+	var payload struct {
+		Error *struct {
+			Type  string `json:"type"`
+			Param any    `json:"param"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(refusalJSON(body), &payload) != nil || payload.Error == nil ||
+		payload.Error.Type != "invalid_request_error" {
+		return ""
+	}
+	param, _ := payload.Error.Param.(string)
+	if !safeParameterName.MatchString(param) {
+		return ""
+	}
+	return param
 }
 
 // moderationCodes are the error codes vendors give a content-safety
@@ -472,11 +515,13 @@ func requestHasImages(request agents.Request) bool {
 }
 
 type wireRequest struct {
-	Model       string        `json:"model,omitempty"`
-	Messages    []wireMessage `json:"messages"`
-	Tools       []wireTool    `json:"tools,omitempty"`
-	Stream      bool          `json:"stream"`
-	Temperature float64       `json:"temperature"`
+	Model    string        `json:"model,omitempty"`
+	Messages []wireMessage `json:"messages"`
+	Tools    []wireTool    `json:"tools,omitempty"`
+	Stream   bool          `json:"stream"`
+	// Temperature is a pointer so that 0 is still sent; nil (a model that
+	// accepts only its default) leaves it out.
+	Temperature *float64 `json:"temperature,omitempty"`
 	// StreamOptions is sent only with stream=true: DeepSeek answers 400 to
 	// stream_options on a non-streamed request.
 	StreamOptions *wireStreamOptions `json:"stream_options,omitempty"`
@@ -546,9 +591,12 @@ func marshalRequest(
 	thinking *ThinkingOptions,
 ) ([]byte, error) {
 	wire := wireRequest{
-		Model:       request.Model,
-		Stream:      stream,
-		Temperature: request.Temperature,
+		Model:  request.Model,
+		Stream: stream,
+	}
+	if thinking == nil || !thinking.OmitTemperature {
+		temperature := request.Temperature
+		wire.Temperature = &temperature
 	}
 	if stream && includeUsage {
 		wire.StreamOptions = &wireStreamOptions{IncludeUsage: true}

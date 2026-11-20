@@ -39,6 +39,13 @@ func (profile ChatThinkingModelProfile) EffortFor(chosen string) string {
 	return profile.DefaultEffort
 }
 
+// RunsAgentTools reports whether the model family can run the function tools
+// an Agent turn carries on chat completions (chat_completions_tools); a model
+// that matches no profile can.
+func (profile ChatThinkingModelProfile) RunsAgentTools() bool {
+	return profile.ChatCompletionsTools == nil || *profile.ChatCompletionsTools
+}
+
 // IncludeStreamUsage is whether a streamed request of this family asks for
 // token usage; agentDefault is chat.agent.stream_include_usage.
 func (profile ChatThinkingModelProfile) IncludeStreamUsage(agentDefault bool) bool {

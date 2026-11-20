@@ -3804,6 +3804,20 @@ func TestLoadValidatesChatThinkingDeclaration(t *testing.T) {
 			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["deepseek"],"request_fields":{"thinking":{"type":"enabled"},"reasoning_effort":"max"},"reasoning_passback":true}]}`,
 		},
 		{
+			// #401: a request constraint alone is a declaration.
+			name:        "profile that only omits the temperature",
+			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"omit_temperature":true}]}`,
+		},
+		{
+			name:        "profile that only says the model runs no tools on chat completions",
+			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"chat_completions_tools":false}]}`,
+		},
+		{
+			name:        "profile that declares nothing",
+			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"omit_temperature":false}]}`,
+			wantError:   "omit_temperature",
+		},
+		{
 			name:        "profile overrides a reserved request field",
 			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["deepseek"],"request_fields":{"model":"other"}}]}`,
 			wantError:   "model",
@@ -3872,6 +3886,30 @@ func TestLoadValidatesChatThinkingDeclaration(t *testing.T) {
 		!thinking.Enabled ||
 		len(thinking.ModelProfiles) != 1 || !thinking.ModelProfiles[0].DSMLToolCalls {
 		t.Fatalf("typed thinking = %#v", thinking)
+	}
+	// #401: the request constraints load typed, and a profile that does not
+	// declare chat_completions_tools runs Agent tools.
+	if thinking.ModelProfiles[0].OmitTemperature || !thinking.ModelProfiles[0].RunsAgentTools() {
+		t.Fatalf("undeclared constraints = %#v", thinking.ModelProfiles[0])
+	}
+	constrained := bytes.Replace(
+		document,
+		[]byte(anchor),
+		[]byte(anchor+`,"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["gpt-astra"],"omit_temperature":true,"chat_completions_tools":false}]}`),
+		1,
+	)
+	loaded, err := catalog.Load(bytes.NewReader(constrained))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := loaded.Application().Chat.Agent.Thinking.ModelProfiles[0]
+	if !profile.OmitTemperature || profile.ChatCompletionsTools == nil || *profile.ChatCompletionsTools || profile.RunsAgentTools() {
+		t.Fatalf("declared constraints = %#v", profile)
+	}
+	// Application() hands out a copy: changing it leaves the Catalog as it was.
+	*profile.ChatCompletionsTools = true
+	if again := loaded.Application().Chat.Agent.Thinking.ModelProfiles[0]; again.RunsAgentTools() {
+		t.Fatal("Application() did not defensively clone chat_completions_tools")
 	}
 }
 

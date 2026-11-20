@@ -183,7 +183,7 @@ check `docker compose logs art-ai`.
   [Provider configuration](docs/provider-configuration.md).
 - **Agent chat model:** `LLM_BASE_URL` and `LLM_API_KEY` configure only the Agent chat model.
   They do not configure image or 3D Providers. `LLM_MODEL` defaults to the Schema value
-  `qwen-omni-flash`, a version-less alias (a strong multimodal model; the gateway currently resolves it to qwen3.8-omni-flash; thinking levels low/medium/xhigh, default xhigh). A second connection can use `LLM_CONNECTIONS=GPT` with `GPT_MODEL=gpt-astra` (currently resolves to gpt-6-astra; levels low/medium/high/xhigh/max, default high). The aliases let the upstream gateway upgrade versions without the downstream configuration changing (2026-11-02 maintainer decision, #64). Set it to the model name served by your endpoint when needed. The Agent model
+  `qwen-omni-flash`, a version-less alias (a strong multimodal model; the gateway currently resolves it to qwen3.8-omni-flash; thinking levels low/medium/xhigh, default xhigh). A second connection can use `LLM_CONNECTIONS=GPT` with `GPT_MODEL=gpt-astra` (resolves to gpt-6.2-astra since 2026-11-19, which cannot run function tools on Chat Completions, so Agent turns do not use it, #401; levels low/medium/high/xhigh/max, default high). The aliases let the upstream gateway upgrade versions without the downstream configuration changing (2026-11-02 maintainer decision, #64). Set it to the model name served by your endpoint when needed. The Agent model
   must support multimodal input and at least be able to read images.
 - **Gemini images:** set both `GEMINI_API_KEY` and `GEMINI_BASE_URL` to enable Gemini. It has
   no default base URL and never borrows `LLM_BASE_URL`; if all models use one gateway, set

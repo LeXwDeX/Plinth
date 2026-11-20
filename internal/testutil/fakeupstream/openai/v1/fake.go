@@ -197,7 +197,7 @@ var endpoints = []fakeupstream.Endpoint{
 		Note: "the model list and the gateway's text/plain 401 are real samples; the invalid-key 401 ErrorResponse is a constructed-from-docs answer built from the OpenAPI ErrorResponse and the error-code guide (" + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: "https://platform.openai.com/docs/api-reference/chat/create", CheckedAt: "2026-10-29",
-		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go)"},
+		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go). Model constraints (#401, constraints.go): a request for gpt-astra or gpt-6.2-astra is judged by that model's rules and refused with a 400 invalid_request_error before any completion runs; the tools and temperature refusals are observed from the gateway's logs of 2026-11-20 (no committed sample), the reasoning_effort none refusal is constructed from the OpenAI documents checked the same day"},
 }
 
 // Version is the OpenAI-compatible /v1 fake.
@@ -412,6 +412,10 @@ type chatRequest struct {
 	} `json:"tools"`
 	Thinking       *json.RawMessage `json:"thinking"`
 	EnableThinking *bool            `json:"enable_thinking"`
+	// Temperature and ReasoningEffort stay raw: a model constraint judges them
+	// as the request wrote them (constraints.go).
+	Temperature     json.RawMessage `json:"temperature"`
+	ReasoningEffort json.RawMessage `json:"reasoning_effort"`
 }
 
 func (r chatRequest) lastText() string {
@@ -760,6 +764,12 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 	h.recordChatRequest(request)
 	if scenario == fakeupstream.ScenarioModelNotFound {
 		writeJSON(w, http.StatusNotFound, officialErrorBody(fmt.Sprintf("The model %q does not exist or you do not have access to it.", request.Model), "invalid_request_error", "model", "model_not_found"))
+		return
+	}
+	// #401: a model with declared constraints refuses a request shape it does
+	// not accept before any completion runs, streamed or not.
+	if refusal, refused := request.modelRefusal(); refused {
+		writeJSON(w, http.StatusBadRequest, refusal)
 		return
 	}
 	if scenario == fakeupstream.ScenarioLostResponse {

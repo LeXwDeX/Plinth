@@ -23,4 +23,13 @@
 // (https://developers.openai.com/api/docs/guides/error-codes, checked
 // 2026-11-08): invalid-key 401, forbidden 403, model-not-found 404,
 // service-unavailable 503, quota-exceeded 429 and a streamed error frame.
+//
+// Model constraints (#401, constraints.go) are not scenarios: a request that
+// names gpt-astra or gpt-6.2-astra is judged by that model's rules on every
+// call, as the real gateway does. The tools and temperature refusals are the
+// observed answers of the gateway's logs of 2026-11-20 (the bodies, with the
+// gateway's own key order, are kept without request IDs or prompt text); the
+// reasoning_effort none refusal is constructed from OpenAI's latest-model
+// guide and model page (read 2026-11-20). Which of the two sources a rule
+// comes from is stated in constraints.go.
 package openaiv1

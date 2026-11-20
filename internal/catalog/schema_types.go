@@ -4932,6 +4932,19 @@ type ChatThinkingModelProfile struct {
 	// model family: whether a streamed request asks for token usage with
 	// stream_options.include_usage. Nil keeps the agent-level value (#322).
 	StreamIncludeUsage *bool `json:"stream_include_usage,omitempty"`
+	// OmitTemperature leaves temperature out of every request to this model
+	// family (Agent turn, title, compaction summary, prompt enhancement and
+	// the connection test): the upstream accepts only its own default value
+	// (#401). Without it a request carries chat.agent.temperature.
+	OmitTemperature bool `json:"omit_temperature,omitempty"`
+	// ChatCompletionsTools says whether the model family can run function
+	// tools on /v1/chat/completions. false marks a family whose tool calling
+	// needs another wire (the Responses API, for which no adapter exists yet,
+	// #401): an Agent turn always carries tools, so such a model is not
+	// offered for conversation turns, while requests without tools (title,
+	// summary, prompt enhancement, the connection test) may still use it.
+	// Omitted means it can.
+	ChatCompletionsTools *bool `json:"chat_completions_tools,omitempty"`
 	// ReasoningPassback returns each assistant message's reasoning_content in
 	// later requests of the same tool loop, as the vendor contract requires.
 	ReasoningPassback bool `json:"reasoning_passback"`
@@ -6109,6 +6122,12 @@ type ChatMessageTexts struct {
 	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
 	// a picture itself instead of answering or calling a generation tool.
 	AgentInlineImageOutput string `json:"agent_inline_image_output"`
+	// AgentRequestRejected replaces UnknownError when the upstream refused the
+	// request for one of its own parameters (HTTP 400 invalid_request_error
+	// that names the request field); {param} is that field's name. The
+	// upstream's own wording stays in the log (#401). Optional: without it
+	// such a refusal reads as the unknown error.
+	AgentRequestRejected string `json:"agent_request_rejected,omitempty"`
 	// AgentNotConfigured is what the person reads while the live Agent has no
 	// API key or no model: Agent replies and prompt enhancement are off (#253).
 	AgentNotConfigured string `json:"agent_not_configured"`

@@ -80,6 +80,19 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 			t.Fatalf("profile %s stream usage = %v", expected.prefix, profile.StreamIncludeUsage)
 		}
 	}
+	// #401: the gateway resolves gpt-astra to gpt-6.2-astra, which refuses a
+	// temperature other than its default and (OpenAI's latest-model guide and
+	// model page, read 2026-11-20) runs no function tools on Chat Completions:
+	// tool calling needs the Responses API, which Plinth has no adapter for
+	// yet. So its profile omits the temperature and is not offered for Agent
+	// turns; no other profile changes.
+	for index, profile := range thinking.ModelProfiles {
+		astraProfile := profile.ModelPrefixes[0] == "gpt-astra"
+		if profile.OmitTemperature != astraProfile || profile.RunsAgentTools() == astraProfile ||
+			(profile.ChatCompletionsTools != nil) != astraProfile {
+			t.Fatalf("profile %d (%s): omit temperature = %t, runs agent tools = %t", index, profile.ModelPrefixes[0], profile.OmitTemperature, profile.RunsAgentTools())
+		}
+	}
 	// Version-less aliases (2026-11-02, #64) resolve to their own profiles.
 	if profile, ok := thinking.ProfileFor("qwen-omni-flash"); !ok || profile.DefaultEffort != "xhigh" ||
 		!slices.Equal(profile.EffortLevels, []string{"low", "medium", "xhigh"}) {

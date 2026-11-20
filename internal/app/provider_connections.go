@@ -660,6 +660,7 @@ func chatThinkingOptions(
 		EffortLevels:       profile.EffortLevels,
 		DefaultEffort:      profile.DefaultEffort,
 		StreamIncludeUsage: profile.IncludeStreamUsage(agent.StreamIncludeUsage),
+		OmitTemperature:    profile.OmitTemperature,
 	}
 }
 

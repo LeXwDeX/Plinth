@@ -2341,9 +2341,10 @@ func validateChatThinkingProfiles(thinking *ChatThinkingSchema) error {
 			return fmt.Errorf("agent.thinking.model_profiles[%d] 必须声明 model_prefixes", index)
 		}
 		if len(profile.RequestFields) == 0 && profile.EffortField == "" && len(profile.EffortLevels) == 0 &&
-			profile.DefaultEffort == "" && profile.ContextWindowTokens == 0 {
+			profile.DefaultEffort == "" && profile.ContextWindowTokens == 0 &&
+			!profile.OmitTemperature && profile.ChatCompletionsTools == nil {
 			return fmt.Errorf(
-				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field 或 context_window_tokens",
+				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field、context_window_tokens、omit_temperature 或 chat_completions_tools",
 				index,
 			)
 		}

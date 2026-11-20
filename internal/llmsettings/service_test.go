@@ -301,3 +301,70 @@ func TestConnectionTestOfAnUnconfiguredConnectionDoesNotCallUpstream(t *testing.
 		t.Fatalf("check = %+v %v called=%v", check, err, called)
 	}
 }
+
+// #401: every Agent turn carries function tools. A connection whose model
+// cannot run them on chat completions is never offered to sessions, even when
+// it is configured and enabled and the administrator made it the default; the
+// administration read says so and the connection test still reaches it.
+func TestEffectiveDoesNotOfferAModelThatCannotRunAgentTools(t *testing.T) {
+	runs := false
+	thinking := testThinking()
+	thinking.ModelProfiles = append(thinking.ModelProfiles, catalog.ChatThinkingModelProfile{
+		ModelPrefixes: []string{"gpt-astra"}, EffortField: "reasoning_effort", EffortLevels: []string{"low", "high"}, DefaultEffort: "high",
+		OmitTemperature: true, ChatCompletionsTools: &runs})
+	store := &memoryStore{}
+	var tested []string
+	service, err := New(Config{Store: store, Thinking: thinking, HistoryLimit: 10,
+		Connections: []Connection{connection("GPT", "gpt-astra", true), connection("LLM", "deepseek", true), connection("GLM", "glm-5.3", true)},
+		Prober: func(_ context.Context, connection Connection) ProbeResult {
+			tested = append(tested, connection.ID)
+			return ProbeResult{Reachable: true, Vision: VisionUnknown, Outcome: OutcomeOK}
+		},
+		Clock: func() time.Time { return time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// The preset enables every connection and names the first one the default;
+	// that one cannot serve, so the first model that can stands in.
+	effective, err := service.Effective(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, model := range effective.Models {
+		ids = append(ids, model.ID)
+	}
+	if !slices.Equal(ids, []string{"LLM", "GLM"}) || effective.DefaultID != "LLM" {
+		t.Fatalf("offered = %v, default %q", ids, effective.DefaultID)
+	}
+	management, err := service.Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if management.DefaultAvailable || management.EffectiveDefault != "LLM" || management.Settings.DefaultModel != "GPT" {
+		t.Fatalf("management default = %q available=%t effective=%q", management.Settings.DefaultModel, management.DefaultAvailable, management.EffectiveDefault)
+	}
+	agentTools := map[string]bool{}
+	for _, view := range management.Connections {
+		agentTools[view.ID] = view.AgentTools
+	}
+	if agentTools["GPT"] || !agentTools["LLM"] || !agentTools["GLM"] {
+		t.Fatalf("agent tools = %v", agentTools)
+	}
+	// An administrator who makes the unusable model the default publishes
+	// fine (the connection is enabled), and sessions still get a usable one.
+	settings := management.Settings
+	settings.DefaultModel = "GLM"
+	if _, err := service.Publish(ctx, management.Revision, "admin", SourcePublish, settings); err != nil {
+		t.Fatal(err)
+	}
+	if effective, err = service.Effective(ctx); err != nil || effective.DefaultID != "GLM" || len(effective.Models) != 2 {
+		t.Fatalf("after publish: %+v %v", effective, err)
+	}
+	// The test of that connection still sends its request.
+	check, err := service.Test(ctx, "GPT", "admin")
+	if err != nil || !check.Reachable || !slices.Equal(tested, []string{"GPT"}) {
+		t.Fatalf("check = %+v tested = %v err = %v", check, tested, err)
+	}
+}

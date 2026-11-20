@@ -207,7 +207,7 @@ GO_IMAGE_TAG=替换为镜像标签 scripts/deploy-go-candidate.sh
 Plinth 的对话和图片模型出站请求访问 llms 正式服务器
 网关的 `/v1`（地址在 dev-test 运行环境文件 `LLM_BASE_URL`；链路：测试客户端 → `dev-test` Plinth 测试栈 →
 llms 正式服务器；后者不限制客户端与模型）。测试链路上游 key 为
-`<TEST_API_KEY>`（仅适用测试链路；正式生产密钥只存正式生产自身运行环境文件，权限 `0600`）。测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-max`（2026-11-16 起，`formal-test` 相同，#309；网关当前解析为 qwen4-max，普通文本加图片多模态，Agent 不发送音频或视频）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（当前解析为 gpt-6-astra；思考档位 low/medium/high/xhigh/max，默认 high）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-max` 命中通用 `qwen` profile（`enable_thinking=true`，思考档位只有 `xhigh` 一档；未声明上下文窗口，自动压缩按消息条数阈值触发），`gpt-astra` 命中同名 profile（`reasoning_effort` low/medium/high/xhigh/max 五档，默认 `high`）；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
+`<TEST_API_KEY>`（仅适用测试链路；正式生产密钥只存正式生产自身运行环境文件，权限 `0600`）。测试栈使用无版本别名：默认连接 `LLM_MODEL=qwen-max`（2026-11-16 起，`formal-test` 相同，#309；网关当前解析为 qwen4-max，普通文本加图片多模态，Agent 不发送音频或视频）；第二连接 `LLM_CONNECTIONS=GPT`、`GPT_MODEL=gpt-astra`（网关自 2026-11-19 起解析为 gpt-6.2-astra，此前记为 gpt-6-astra；思考档位 low/medium/high/xhigh/max，默认 high；它在 chat/completions 上不能跑函数工具，Agent 回合不使用它，见下）。别名让上游网关升级版本时下游配置无需改动（#64）。请求走 OpenAI 兼容 `chat/completions`。思考参数按 Product Schema `chat.agent.thinking.model_profiles` 的模型前缀发送，`qwen-max` 命中通用 `qwen` profile（`enable_thinking=true`，思考档位只有 `xhigh` 一档；未声明上下文窗口，自动压缩按消息条数阈值触发），`gpt-astra` 命中同名 profile（`reasoning_effort` low/medium/high/xhigh/max 五档，默认 `high`；另声明 `omit_temperature` 与 `chat_completions_tools: false`，#401）；其他中国大陆模型仍用官方最高档。部署只更新 dev-test Compose 项目（环境文件 `compose_project`）的 `art-ai-go`
 服务，不操作同机其他业务或代理测试实例。接口目录可达不能替代真实
 生成、资产落盘和页面回归。
 
