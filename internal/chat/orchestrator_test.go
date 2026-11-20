@@ -302,8 +302,10 @@ func TestOrchestratorResumesPersistedPlanWithoutRecallingPlanner(
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #402: the resumed round's text starts a new paragraph (the space is the
+	// round's own opening whitespace, kept ahead of the break).
 	if messages[1].Content !=
-		"configured persisted plan configured resumed summary" {
+		"configured persisted plan \n\nconfigured resumed summary" {
 		t.Fatalf("messages = %#v", messages)
 	}
 }
@@ -610,7 +612,8 @@ func TestOrchestratorParsesAndSuppressesFragmentedSchemaDSML(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored := messages[1]
-	if stored.Content != "visible configured summary" ||
+	// #402: the summary round is a new paragraph after the visible text.
+	if stored.Content != "visible \n\nconfigured summary" ||
 		len(stored.ToolCalls) != 1 ||
 		stored.ToolCalls[0].ID != assistant.ID+"_tool_0" {
 		t.Fatalf("stored = %#v", stored)
@@ -962,7 +965,8 @@ func TestOrchestratorBridgesAgentToolToTaskEventsAndPersistsBinding(
 		t.Fatal(err)
 	}
 	stored := messages[1]
-	if stored.Content != "configured plan configured summary" ||
+	// #402: the second round's text is a new paragraph after the plan text.
+	if stored.Content != "configured plan \n\nconfigured summary" ||
 		len(stored.ImageURLs) != 1 ||
 		stored.ImageURLs[0] != "/configured/result.png" ||
 		len(stored.ToolCalls) != 1 ||
