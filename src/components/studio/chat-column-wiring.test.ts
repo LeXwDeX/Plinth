@@ -10,15 +10,21 @@ const composer = source('./composer.tsx');
 const chatMessage = source('../../components/chat/chat-message.tsx');
 
 describe('workspace chat message wiring', () => {
-  it('shows the active session Harness summary before the input while retaining the model, Skill and parameter pickers', () => {
+  it('shows the active session Harness summary before the input while retaining the model, Skill and parameter pickers behind the gear (#405)', () => {
     expect(composer).toContain('const activeSessionId = useChatStore((state) => state.activeSessionId);');
     expect(composer).toContain('<HarnessSummary sessionId={activeSessionId} />');
     expect(composer.indexOf('<HarnessSummary')).toBeLessThan(composer.indexOf('<textarea'));
     // #103: the Agent scope picker is gone; every session runs in auto mode.
     expect(composer).not.toContain('AgentScopePicker');
-    expect(composer).toContain('<ModelPicker />');
-    expect(composer).toContain('<ParamsPopover');
-    expect(composer).toContain('<SkillPicker');
+    // #405: the box carries one gear after the send button, and the pickers are the tabs of the dialog behind it.
+    expect(composer).toContain('<ComposerSettings skill={skill} params={params} locked={disabled} />');
+    expect(composer.indexOf('data-testid="composer-send"')).toBeLessThan(composer.indexOf('<ComposerSettings'));
+    for (const picker of ['<ModelPicker', '<ParamsPopover', '<SkillPicker', '<ChatModelPicker']) expect(composer).not.toContain(picker);
+    const settings = readFileSync(new URL('./composer-settings.tsx', import.meta.url), 'utf8');
+    expect(settings).toContain('<ModelPicker image={image} model={model3d} />');
+    expect(settings).toContain('<ParamsPanel {...params} disabled={locked} />');
+    expect(settings).toContain('<SkillPicker {...skill} />');
+    expect(settings).toContain('<ChatModelPicker settings={chat} />');
   });
 
   it('refreshes after editing a personal Skill without changing the selection (#152)', () => {

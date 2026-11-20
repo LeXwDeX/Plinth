@@ -1023,12 +1023,13 @@ func (service *Service) ListMessages(
 	if err != nil {
 		return nil, err
 	}
-	return service.healPlaceholders(ctx, ownerID, sessionID, messages)
+	return service.applyTurnState(ctx, ownerID, sessionID, messages)
 }
 
 // ListMessagesPage reads one page of the conversation for the workspace. The
-// page gets the same placeholder healing as ListMessages. Callers that need the
-// whole conversation (Agent context, picks, attachments) use ListMessages.
+// page gets the same placeholder healing and running-turn marking as
+// ListMessages. Callers that need the whole conversation (Agent context, picks,
+// attachments) use ListMessages.
 func (service *Service) ListMessagesPage(
 	ctx context.Context,
 	ownerID string,
@@ -1042,16 +1043,21 @@ func (service *Service) ListMessagesPage(
 	if err != nil {
 		return MessagePage{}, err
 	}
-	page.Messages, err = service.healPlaceholders(ctx, ownerID, sessionID, page.Messages)
+	page.Messages, err = service.applyTurnState(ctx, ownerID, sessionID, page.Messages)
 	if err != nil {
 		return MessagePage{}, err
 	}
 	return page, nil
 }
 
-// healPlaceholders replaces the pending placeholder of an assistant message
-// whose turn is no longer active, so a reader never waits on a turn that ended.
-func (service *Service) healPlaceholders(
+// applyTurnState reads the session's unfinished turns once and applies them to
+// the messages a reader gets. The assistant message of a turn that has not ended
+// is marked TurnActive, whatever its stored text is (#403): the Orchestrator
+// stores the real text and tool calls after the first round, so the placeholder
+// alone cannot say that the turn still runs. The pending placeholder of an
+// assistant message whose turn is no longer active is replaced, so a reader
+// never waits on a turn that ended.
+func (service *Service) applyTurnState(
 	ctx context.Context,
 	ownerID string,
 	sessionID string,
@@ -1073,11 +1079,12 @@ func (service *Service) healPlaceholders(
 	now := service.clock()
 	for index := range messages {
 		message := &messages[index]
-		if message.Role != service.assistantRole ||
-			message.Content != service.pendingContent {
+		if message.Role != service.assistantRole {
 			continue
 		}
-		if _, active := activeTurns[message.ID]; active {
+		_, active := activeTurns[message.ID]
+		message.TurnActive = active
+		if message.Content != service.pendingContent || active {
 			continue
 		}
 		replacement := ""

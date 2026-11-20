@@ -14,10 +14,10 @@ vi.mock('@/hooks/use-session-harness', () => ({ useSessionHarness: () => ({ view
 vi.mock('@/components/workspace/harness-summary', () => ({ HarnessSummary: () => null }));
 vi.mock('@/components/result/result-card-parts', () => ({ openResultDetail: vi.fn() }));
 vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
-vi.mock('@/components/studio/model-picker', () => ({ ModelPicker: () => null, GenerationModelNotice: () => null }));
-vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => null }));
-vi.mock('@/components/studio/chat-model-picker', () => ({ ChatModelPicker: () => null, ChatModelNotice: () => null }));
-vi.mock('@/components/studio/params-popover', () => ({ ParamsPopover: () => null }));
+// #405: the pickers moved into the settings dialog behind the gear; the composer only reaches them through it.
+vi.mock('@/components/studio/composer-settings', () => ({ ComposerSettings: () => null }));
+vi.mock('@/components/studio/model-picker', () => ({ GenerationModelNotice: () => null }));
+vi.mock('@/components/studio/chat-model-picker', () => ({ ChatModelNotice: () => null }));
 vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({ previewAssetUrl: (url: string) => url }) }));
 
 const noop = () => undefined;

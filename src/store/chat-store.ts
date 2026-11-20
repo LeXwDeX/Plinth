@@ -195,6 +195,11 @@ interface ChatStore {
   addStreamPaidStep: (sessionId: string, step: ChatPaidStep) => void;
   updateStreamGenState: (sessionId: string, statusText: string, progress: number | null, thinking?: boolean) => void;
   finishStreaming: (sessionId: string) => void;
+  /**
+   * #403: the turn's stream is followed again from its first event, so what the broken stream delivered is
+   * dropped (the replay delivers it again). The sent words and the message they follow stay as they were.
+   */
+  rewindStreaming: (sessionId: string) => void;
   /** 回复进行中读到的工具调用数：只升不降（乱序返回的旧读数不能把计数拉回去）。 */
   observeToolCallCount: (sessionId: string, count: number) => void;
 }
@@ -438,6 +443,26 @@ export const useChatStore = create<ChatStore>((set) => ({
       const { [sessionId]: _, ...rest } = s.streamingBuffers;
       // The turn's messages moved the session's updated time, which orders the session list.
       return { streamingBuffers: rest, sessionListRevision: s.sessionListRevision + 1 };
+    }),
+
+  rewindStreaming: (sessionId) =>
+    set((s) => {
+      const buf = s.streamingBuffers[sessionId];
+      if (!buf) return s;
+      return {
+        streamingBuffers: {
+          ...s.streamingBuffers,
+          [sessionId]: {
+            ...buf,
+            assistantDbId: null,
+            textContent: '',
+            images: [],
+            paidSteps: [],
+            isStreaming: true,
+            genState: { statusText: '', progress: null },
+          },
+        },
+      };
     }),
 
   observeToolCallCount: (sessionId, count) =>

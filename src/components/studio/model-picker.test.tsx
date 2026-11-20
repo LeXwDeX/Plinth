@@ -31,11 +31,14 @@ function withSession(extra: Record<string, unknown> = {}) {
   });
 }
 
-function trigger(html: string, testId: string): string {
-  return html.match(new RegExp(`<button[^>]*data-testid="${testId}"[^>]*>`))?.[0] ?? '';
-}
-
 afterEach(() => useChatStore.setState({ activeSessionId: null, sessions: [] }));
+
+/** The models tab as the settings dialog builds it: both domains' picks (held by the always-mounted dialog), then the content. */
+function Models() {
+  const image = useDomainModelPick('image');
+  const model = useDomainModelPick('model-3d');
+  return <ModelPicker image={image} model={model} />;
+}
 
 /** Prints what each domain's table says about being switched off. */
 function SwitchedOff() {
@@ -52,11 +55,18 @@ describe('the model picker without an Agent scope picker (#103)', () => {
     }
   });
 
-  it('is one trigger for both domains that stays usable whatever the older session stored', () => {
-    withSession({ agentScope: '2d' });
-    const html = renderToStaticMarkup(<ModelPicker />);
-    expect(html.match(/data-testid="workspace-model-picker"/g)?.length).toBe(1);
-    expect(trigger(html, 'workspace-model-picker')).not.toContain('disabled=""');
+  it('is one content for both domains, a table each, that stays usable whatever the older session stored (#405)', () => {
+    for (const extra of [{}, { agentScope: '2d' }, { agentScope: '3d' }]) {
+      withSession(extra);
+      const html = renderToStaticMarkup(<Models />);
+      expect(html.match(/data-testid="workspace-model-picker-panel"/g)?.length).toBe(1);
+      expect(html.match(/data-testid="workspace-model-picker-image"/g)?.length).toBe(1);
+      expect(html.match(/data-testid="workspace-model-picker-model"/g)?.length).toBe(1);
+      // The old entry button is gone with the pickers under the box: nothing to open, no table switched off.
+      expect(html).not.toContain('data-testid="workspace-model-picker"');
+      expect(html).not.toContain('<button');
+      expect(html).not.toContain('disabled=""');
+    }
   });
 
   it('writes a 2D or 3D pick through the serial lock writer and rolls back with a toast on failure', () => {

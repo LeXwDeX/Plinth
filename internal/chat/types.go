@@ -410,6 +410,13 @@ type Message struct {
 	// with (#65); regenerating the reply sends it again. Nil otherwise.
 	Multiview *MultiviewRequest
 	CreatedAt time.Time
+	// TurnActive is a read-time projection, never stored: Service.ListMessages
+	// and ListMessagesPage set it on the assistant message of a turn that has
+	// not ended (queued, running or waiting for its Tasks, #403). Stored text
+	// cannot tell: the Orchestrator writes the real text and tool calls after
+	// the first round while the turn keeps running. Excluded from the
+	// checkpoint encoding, where Message is embedded.
+	TurnActive bool `json:"-"`
 }
 
 type Image struct {

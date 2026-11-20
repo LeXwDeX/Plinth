@@ -474,12 +474,16 @@ uses the real `/` Agent workspace, without an API prepare/submit shortcut:
   (the declared delay is bounded to 0–10 seconds).
 - `studio-approval-menu` must show the public Schema's manual label; the public
   session approval endpoint must agree and require approval for this capability.
-- `workspace-model-picker` → `workspace-model-picker-model` → the unique
-  `menuitemradio` containing the public model label selects Meshy. The default is
+- `composer-settings-open` (the gear beside the send button, #405) → the models tab
+  `composer-settings-tab-models` → `workspace-model-picker-model` → the unique
+  `menuitemradio` containing the public model label selects Meshy; Esc closes the
+  settings dialog (`composer-settings-dialog`). The default is
   the recommended available Meshy text-to-3D Offering, else the first available;
   unavailable/explicitly missing choices fail instead of silently changing model.
-- `composer-params` → `params-domain[data-domain="model-3d"]` must name the exact
-  public Offering in `data-offering`; `params-cost` must match its declared estimate.
+- `composer-settings-open` → the parameters tab `composer-settings-tab-params` →
+  `params-domain[data-domain="model-3d"]` must name the exact
+  public Offering in `data-offering`; `params-cost` must match its declared estimate;
+  Esc closes the dialog.
 - `studio-composer textarea` receives only the fixed non-private synthetic input
   exported as `syntheticPrompt` by this script. Pre-register that **exact** string
   in the reviewed initial policy's `Allowed` map for a capture preflight. Only its

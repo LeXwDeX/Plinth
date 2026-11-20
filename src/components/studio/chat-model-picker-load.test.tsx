@@ -6,14 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import type { ProductSchema } from '@/lib/product-schema';
 import type { ChatModelChoice, ChatReasoning } from '@/lib/chat/browser-client';
-import { ChatModelPicker } from '@/components/studio/chat-model-picker';
+import { ChatModelPicker, useChatModelSettings } from '@/components/studio/chat-model-picker';
+import { ComposerSettings } from '@/components/studio/composer-settings';
 import { useChatStore } from '@/store/chat-store';
+import { useComposerSettingsStore } from '@/store/composer-settings-store';
 import { useSessionContextStore } from '@/store/session-context-store';
 
-// #236: the picker is used while the page is still loading the session's context. Nothing that arrives late (the
-// model, the levels, a revalidated Schema) may close an open panel, replace the trigger a click is landing on, or
-// move the keyboard focus out of the panel. These tests drive the real hooks and stores with a client whose answers
-// the test releases one by one, so "late" means late through the same load path the page uses.
+// #236: the chat model and levels are used while the page is still loading the session's context. Nothing that arrives
+// late (the model, the levels, a revalidated Schema) may close what is open, replace the nodes a click is landing on, or
+// move the keyboard focus. #405: the picker's panel is a tab of the settings dialog, so the same promises are kept at
+// both levels: the content keeps its nodes and the focus (ChatTab), and the dialog stays open on its tab (ComposerSettings).
+// These tests drive the real hooks and stores with a client whose answers the test releases one by one, so "late" means
+// late through the same load path the page uses.
 
 const catalog = defaultCatalog.application as unknown as ProductSchema;
 const messages = catalog.content.messages;
@@ -21,6 +25,14 @@ const messages = catalog.content.messages;
 const mock = vi.hoisted(() => ({ schema: null as unknown, client: null as unknown }));
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema: mock.schema }) }));
+// The dialog's other tabs are stand-ins here: only the chat model tab is under test.
+vi.mock('@/components/studio/model-picker', () => ({
+  useDomainModelPick: (domain: string) => ({ section: { title: domain }, short: domain, full: domain }),
+  generationModelPair: () => '',
+  ModelPicker: () => null,
+}));
+vi.mock('@/components/studio/skill-picker', () => ({ SkillPicker: () => null }));
+vi.mock('@/components/studio/params-popover', () => ({ ParamsPanel: () => null, paramsSummary: () => '' }));
 // Every call builds a new client, like the page does when the Schema object is replaced by a revalidation.
 vi.mock('@/lib/chat/browser-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/chat/browser-client')>();
@@ -61,32 +73,37 @@ const answer = {
   reasoning: async (value: ChatReasoning) => { await act(async () => { waiting.reasoning.splice(0).forEach((request) => request.resolve(value)); }); },
 };
 
-const TRIGGER = 'workspace-chat-model-picker';
+
 const PANEL = 'workspace-chat-model-picker-panel';
+const GEAR = 'composer-settings-open';
+const CHAT_TAB = 'composer-settings-tab-chat';
 
-/** What a click on the trigger hits: the node under the pointer, not the button itself. */
-function hitTarget(trigger: HTMLElement): HTMLElement {
-  return trigger.querySelector('span') as HTMLElement;
+/** The chat model tab as the settings dialog builds it (#405): the settings are always read, the content shows once there is any. */
+function ChatTab() {
+  const settings = useChatModelSettings();
+  return (
+    <>
+      <output data-testid="chat-value">{settings.value}</output>
+      {settings.offered ? <ChatModelPicker settings={settings} /> : null}
+    </>
+  );
+}
+const value = () => screen.getByTestId('chat-value').textContent;
+
+const noop = () => undefined;
+/** The real dialog around the real chat model tab; the other tabs are stand-ins. */
+function Dialog() {
+  return (
+    <ComposerSettings
+      locked={false}
+      skill={{ sessionId: 's1', catalog: null, effective: null, selectedId: null, unavailable: false, loading: false, failed: false, disabled: false, onSelect: noop, onCreated: noop }}
+      params={{ params: { domain: 'image', parameterStates: {} }, domains: [], hasSession: true, skill: null, effective: {}, canvas: null } as never}
+    />
+  );
 }
 
-/** A mouse click as the browser delivers it: press, focus on the button, release, click. */
-function press(trigger: HTMLElement) {
-  const target = hitTarget(trigger);
-  fireEvent.pointerDown(target, { pointerType: 'mouse', button: 0 });
-  fireEvent.mouseDown(target, { button: 0 });
-  trigger.focus();
-  fireEvent.pointerUp(target, { pointerType: 'mouse', button: 0 });
-  fireEvent.mouseUp(target, { button: 0 });
-  fireEvent.click(target, { button: 0 });
-}
-
-async function openPanel(trigger: HTMLElement) {
-  press(trigger);
-  const panel = await screen.findByTestId(PANEL);
-  // The panel takes the keyboard focus on the next frame.
-  await waitFor(() => expect(panel.contains(document.activeElement)).toBe(true));
-  return panel;
-}
+/** A level row is the node a click or the keyboard is on: it must be the same node before and after late data. */
+const levelRow = (name: string) => within(screen.getByTestId(PANEL)).getByRole('menuitemradio', { name });
 
 beforeEach(() => {
   mock.schema = catalog;
@@ -96,164 +113,191 @@ beforeEach(() => {
   Object.values(client).forEach((fn) => fn.mockClear());
   useSessionContextStore.setState({ chatModel: {}, chatModelBusy: {}, reasoning: {}, reasoningBusy: {}, context: {}, compacting: {} });
   useChatStore.setState({ activeSessionId: 's1' });
+  useComposerSettingsStore.setState({ open: false, tab: 'models' });
 });
 afterEach(() => {
   cleanup();
   useChatStore.setState({ activeSessionId: null });
 });
 
-describe('the picker while the session context is still loading (#236)', () => {
-  it('stays open, on the same trigger and focus, when the model name arrives after a click (single model)', async () => {
-    render(<ChatModelPicker />);
-    // The levels answer first: the picker shows with the thinking level alone.
+describe('the tab while the session context is still loading (#236)', () => {
+  it('keeps its nodes and the focus when the model name arrives after the levels (single model)', async () => {
+    render(<ChatTab />);
+    // The levels answer first: the tab shows with the thinking level alone.
     await answer.reasoning(levels);
-    const trigger = await screen.findByTestId(TRIGGER);
-    const hit = hitTarget(trigger);
-
-    const panel = await openPanel(trigger);
-    const focused = document.activeElement;
+    const panel = await screen.findByTestId(PANEL);
+    expect(value()).toBe('high');
+    const row = levelRow('low');
+    row.focus();
 
     await answer.model(solo);
     expect(screen.getByTestId(PANEL)).toBe(panel);
-    expect(screen.getByTestId(TRIGGER)).toBe(trigger);
-    expect(trigger.getAttribute('aria-expanded')).toBe('true');
-    expect(trigger.getAttribute('aria-label')).toBe(`${messages['ui.studio.reasoning.label']}: deepseek · high`);
-    // The node the click landed on is still on the page, and the keyboard focus never left the panel.
-    expect(trigger.contains(hit)).toBe(true);
-    expect(document.activeElement).toBe(focused);
-    expect(panel.contains(document.activeElement)).toBe(true);
+    expect(levelRow('low')).toBe(row);
+    expect(document.activeElement).toBe(row);
+    expect(value()).toBe('deepseek · high');
     expect(screen.queryByTestId('workspace-chat-model-section')).toBeNull();
   });
 
-  it('stays open when the model list arrives and turns the panel into two columns (two models)', async () => {
-    render(<ChatModelPicker />);
+  it('turns into two columns when the model list arrives, keeping the row that had the focus (two models)', async () => {
+    render(<ChatTab />);
     await answer.reasoning(levels);
-    const trigger = await screen.findByTestId(TRIGGER);
-    const panel = await openPanel(trigger);
+    const panel = await screen.findByTestId(PANEL);
     expect(panel.getAttribute('data-layout')).toBeNull();
-    const focused = document.activeElement;
+    const row = levelRow('max');
+    row.focus();
 
     await answer.model(two);
     expect(screen.getByTestId(PANEL)).toBe(panel);
-    expect(screen.getByTestId(TRIGGER)).toBe(trigger);
     expect(panel.getAttribute('data-layout')).toBe('columns');
-    expect(trigger.getAttribute('aria-expanded')).toBe('true');
-    expect(trigger.getAttribute('aria-label')).toBe(`${messages['ui.studio.chat_model.combined_label']}: deepseek · high`);
     expect(within(panel).getByTestId('workspace-chat-model-section')).toBeTruthy();
     // The levels table kept its rows, so the row that had the focus still has it.
-    expect(document.activeElement).toBe(focused);
-    expect(panel.contains(document.activeElement)).toBe(true);
+    expect(levelRow('max')).toBe(row);
+    expect(document.activeElement).toBe(row);
+    expect(value()).toBe('deepseek · high');
   });
 
-  it('stays open when the levels arrive after the model list (two models)', async () => {
-    render(<ChatModelPicker />);
+  it('adds the levels column when they arrive after the model list (two models)', async () => {
+    render(<ChatTab />);
     await answer.model(two);
-    const trigger = await screen.findByTestId(TRIGGER);
-    const panel = await openPanel(trigger);
+    const panel = await screen.findByTestId(PANEL);
     expect(within(panel).queryByTestId('workspace-reasoning-section')).toBeNull();
+    const modelRow = within(panel).getByRole('menuitemradio', { name: /glm-5.3/ });
+    modelRow.focus();
 
     await answer.reasoning(levels);
     expect(screen.getByTestId(PANEL)).toBe(panel);
-    expect(screen.getByTestId(TRIGGER)).toBe(trigger);
-    expect(trigger.getAttribute('aria-expanded')).toBe('true');
     expect(within(panel).getByTestId('workspace-reasoning-section')).toBeTruthy();
-    expect(panel.contains(document.activeElement)).toBe(true);
+    expect(within(panel).getByRole('menuitemradio', { name: /glm-5.3/ })).toBe(modelRow);
+    expect(document.activeElement).toBe(modelRow);
   });
 
-  it('stays open when the Schema is revalidated and every answer is read again', async () => {
-    const view = render(<ChatModelPicker />);
+  it('keeps the tab as it is when the Schema is revalidated and every answer is read again', async () => {
+    const view = render(<ChatTab />);
     await answer.reasoning(levels);
     await answer.model(two);
-    const trigger = await screen.findByTestId(TRIGGER);
-    const panel = await openPanel(trigger);
-    const focused = document.activeElement;
+    const panel = await screen.findByTestId(PANEL);
+    const row = levelRow('low');
+    row.focus();
     const reads = client.getReasoning.mock.calls.length;
 
     // A revalidation hands the page an equal Schema in a new object: a new client, the effects run again and the
-    // answers are read again. While those reads are on their way the panel shows what it already had.
+    // answers are read again. While those reads are on their way the tab shows what it already had.
     mock.schema = structuredClone(catalog);
-    view.rerender(<ChatModelPicker />);
+    view.rerender(<ChatTab />);
     await waitFor(() => expect(client.getReasoning.mock.calls.length).toBeGreaterThan(reads));
     expect(screen.getByTestId(PANEL)).toBe(panel);
-    expect(screen.getByTestId(TRIGGER)).toBe(trigger);
+    expect(levelRow('low')).toBe(row);
 
     await answer.reasoning({ ...levels });
     await answer.model({ ...two });
     expect(screen.getByTestId(PANEL)).toBe(panel);
-    expect(screen.getByTestId(TRIGGER)).toBe(trigger);
-    expect(trigger.getAttribute('aria-expanded')).toBe('true');
-    expect(document.activeElement).toBe(focused);
+    expect(levelRow('low')).toBe(row);
+    expect(document.activeElement).toBe(row);
   });
 
   it('names only the level until the model name arrives, without a dangling separator', async () => {
-    render(<ChatModelPicker />);
+    render(<ChatTab />);
     await answer.reasoning(levels);
-    const trigger = await screen.findByTestId(TRIGGER);
-    expect(trigger.textContent).toBe('high');
-    expect(trigger.getAttribute('aria-label')).toBe(`${messages['ui.studio.reasoning.label']}: high`);
+    await screen.findByTestId(PANEL);
+    expect(value()).toBe('high');
     await answer.model(solo);
-    expect(trigger.textContent).toBe('deepseek · high');
-    expect(trigger.getAttribute('aria-label')).toBe(`${messages['ui.studio.reasoning.label']}: deepseek · high`);
+    expect(value()).toBe('deepseek · high');
   });
 
-  it('keeps the same nodes under a click while the trigger text changes with the data', async () => {
-    render(<ChatModelPicker />);
+  it('keeps the same row nodes under a click while the data arrives', async () => {
+    render(<ChatTab />);
     await answer.reasoning(levels);
-    const trigger = await screen.findByTestId(TRIGGER);
-    const hit = hitTarget(trigger);
+    await screen.findByTestId(PANEL);
+    const row = levelRow('max');
     await answer.model(solo);
     // A click is dropped when the node its press landed on is replaced before the release, so loading must only
     // change what the nodes say.
-    expect(trigger.contains(hit)).toBe(true);
-    expect(hitTarget(trigger)).toBe(hit);
+    expect(levelRow('max')).toBe(row);
+    await answer.model(two);
+    expect(levelRow('max')).toBe(row);
+  });
+
+  it('sends a level pick to the server once, and the table stays for the next pick', async () => {
+    render(<ChatTab />);
+    await answer.reasoning(levels);
+    await screen.findByTestId(PANEL);
+    await answer.model(solo);
+    fireEvent.click(levelRow('low'));
+    await waitFor(() => expect(client.setReasoning).toHaveBeenCalledTimes(1));
+    expect(client.setReasoning).toHaveBeenCalledWith('s1', 'low');
+    // #405: nothing is closed by a pick; the same table is still there.
+    expect(screen.getByTestId(PANEL)).toBeTruthy();
+    expect(screen.getAllByRole('menuitemradio')).toHaveLength(3);
   });
 });
 
-describe('what still closes the panel after late data (#236)', () => {
-  async function openedAfterLateModel() {
-    render(<ChatModelPicker />);
+describe('the settings dialog while the session context is still loading (#236, #405)', () => {
+  async function openedOnChatTab() {
+    render(<Dialog />);
+    const gear = screen.getByTestId(GEAR);
+    gear.focus();
+    // The levels answer first: the chat model tab is offered from then on.
     await answer.reasoning(levels);
-    const trigger = await screen.findByTestId(TRIGGER);
-    const panel = await openPanel(trigger);
-    await answer.model(solo);
-    expect(screen.getByTestId(PANEL)).toBe(panel);
-    return { trigger, panel };
+    fireEvent.click(gear);
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    fireEvent.click(await screen.findByTestId(CHAT_TAB));
+    await screen.findByTestId(PANEL);
+    return { gear, dialog };
   }
 
-  it('closes when a level is picked, and the pick reaches the server once', async () => {
-    const { panel } = await openedAfterLateModel();
-    fireEvent.click(within(panel).getByRole('menuitemradio', { name: 'low' }));
-    await waitFor(() => expect(screen.queryByTestId(PANEL)).toBeNull());
-    expect(client.setReasoning).toHaveBeenCalledTimes(1);
-    expect(client.setReasoning).toHaveBeenCalledWith('s1', 'low');
+  it('stays open on the same gear, tab and focus when the model name arrives after a click (single model)', async () => {
+    const { gear, dialog } = await openedOnChatTab();
+    const row = levelRow('low');
+    row.focus();
+
+    await answer.model(solo);
+    expect(screen.getByRole('dialog')).toBe(dialog);
+    expect(screen.getByTestId(GEAR)).toBe(gear);
+    expect(gear.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId(CHAT_TAB).getAttribute('aria-selected')).toBe('true');
+    expect(levelRow('low')).toBe(row);
+    expect(document.activeElement).toBe(row);
   });
 
-  it('closes on Escape and gives the focus back to the trigger', async () => {
-    const { trigger, panel } = await openedAfterLateModel();
-    fireEvent.keyDown(panel, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByTestId(PANEL)).toBeNull());
-    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  it('stays open on the same tab and focus when the model list arrives and turns the tab into two columns (two models)', async () => {
+    const { gear, dialog } = await openedOnChatTab();
+    const row = levelRow('low');
+    row.focus();
+
+    await answer.model(two);
+    expect(screen.getByRole('dialog')).toBe(dialog);
+    expect(screen.getByTestId(GEAR)).toBe(gear);
+    expect(screen.getByTestId(CHAT_TAB).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId(PANEL).getAttribute('data-layout')).toBe('columns');
+    expect(levelRow('low')).toBe(row);
+    expect(document.activeElement).toBe(row);
   });
 
-  it('closes on a click outside', async () => {
-    await openedAfterLateModel();
-    fireEvent.pointerDown(document.body);
-    fireEvent.mouseDown(document.body);
-    fireEvent.pointerUp(document.body);
-    fireEvent.mouseUp(document.body);
-    fireEvent.click(document.body);
-    await waitFor(() => expect(screen.queryByTestId(PANEL)).toBeNull());
+  it('closes on Escape and hands the focus back to the gear', async () => {
+    const { gear, dialog } = await openedOnChatTab();
+    await answer.model(solo);
+    expect(screen.getByRole('dialog')).toBe(dialog);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(gear));
+    expect(gear.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('opens again on the next click, as often as it is asked', async () => {
-    const { trigger, panel } = await openedAfterLateModel();
-    fireEvent.keyDown(panel, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByTestId(PANEL)).toBeNull());
+  it('opens again from the gear as often as it is asked, on the tab it was left on', async () => {
+    const { gear, dialog } = await openedOnChatTab();
+    await answer.model(solo);
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     for (let round = 0; round < 3; round += 1) {
-      const again = await openPanel(trigger);
-      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      fireEvent.click(gear);
+      const again = await screen.findByRole('dialog');
+      await waitFor(() => expect(again.contains(document.activeElement)).toBe(true));
+      expect(gear.getAttribute('aria-expanded')).toBe('true');
+      expect(screen.getByTestId(CHAT_TAB).getAttribute('aria-selected')).toBe('true');
+      expect(screen.getByTestId(PANEL)).toBeTruthy();
       fireEvent.keyDown(again, { key: 'Escape' });
-      await waitFor(() => expect(screen.queryByTestId(PANEL)).toBeNull());
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     }
   });
 });

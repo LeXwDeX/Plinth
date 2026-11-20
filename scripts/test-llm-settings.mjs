@@ -25,10 +25,11 @@
  *  1. The administrator resets the settings, sees both connections (variables shown as set, never their
  *     values), tests each (DeepSeek reads images, GLM does not), offers GLM only high and max with high
  *     as its default level, and publishes; the stored version says so.
- *  2. A person opens a session: the chat model picker offers both models; picking GLM switches the
- *     thinking levels to high/max (high) and the window to 200K; a reload keeps all three.
+ *  2. A person opens a session: the chat model tab of the settings dialog behind the gear (#405) offers both
+ *     models; picking GLM switches the thinking levels to high/max (high) and the window to 200K, and leaves the
+ *     dialog open; a reload keeps all three.
  *  3. The administrator takes GLM offline; after a reload the session falls back to deepseek with the
- *     Schema notice, the picker is gone (one model left), the level and the window follow deepseek.
+ *     Schema notice, the tab's model column is gone (one model left), the level and the window follow deepseek.
  *  4. No page, network response or console message carries a key or a connection address; no page
  *     errors, no outside requests, no horizontal overflow in the composer.
  */
@@ -207,12 +208,37 @@ async function checks(engine, browser, [width, height]) {
   });
 
   let sessionID = '';
-  const chatPicker = userPage.locator('[data-testid=workspace-chat-model-picker]');
   const meter = userPage.locator('[data-testid=composer-context-meter]');
-  const showsCombined = (locator, ...parts) => waitFor(async () => {
-    const text = (await locator.innerText().catch(() => '')).trim();
-    return parts.every((part) => text.includes(part));
-  }, `shows ${parts.join(' + ')}`).catch(async () => assert.fail(`shows "${(await chatPicker.innerText().catch(() => '')).trim()}", want ${parts.join(' + ')}`));
+  // #405: the chat model and its thinking level are the chat model tab of the settings dialog behind the gear beside the
+  // send button. The dialog is opened on demand and stays open after a pick; the tab comes with the session's data.
+  const SETTINGS = '[data-testid=composer-settings-dialog]';
+  const closeSettings = async () => {
+    if (!(await userPage.locator(SETTINGS).count())) return;
+    await userPage.keyboard.press('Escape');
+    await userPage.locator(SETTINGS).waitFor({ state: 'detached', timeout: 5000 });
+  };
+  /** Opens the dialog (when shut) on the chat model tab and reads the checked rows; null while the tab is not there yet. */
+  const chatSettings = async () => {
+    const dialog = userPage.locator(SETTINGS);
+    if (!(await dialog.count())) {
+      await userPage.click('[data-testid=composer-settings-open]');
+      await dialog.waitFor({ timeout: 10000 });
+    }
+    const tab = userPage.locator('[data-testid=composer-settings-tab-chat]');
+    if (!(await tab.count())) return null;
+    if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
+    await userPage.locator('[data-testid=workspace-chat-model-picker-panel]').waitFor({ timeout: 5000 });
+    const checked = async (section) => {
+      const row = userPage.locator(`${SETTINGS} [data-testid=${section}] [role=menuitemradio][aria-checked=true]`);
+      return (await row.count()) ? (await row.first().innerText()).replace(/\s+/g, ' ').trim().toLowerCase() : '';
+    };
+    // The level is the row's own value; the default's tag ("默认") follows it in the same row.
+    return { model: await checked('workspace-chat-model-section'), level: (await checked('workspace-reasoning-section')).split(' ')[0] };
+  };
+  const showsCombined = (...parts) => waitFor(async () => {
+    const shown = await chatSettings().catch(() => null);
+    return shown !== null && parts.every((part) => `${shown.model} ${shown.level}`.includes(part.toLowerCase()));
+  }, `shows ${parts.join(' + ')}`).catch(async () => assert.fail(`shows ${JSON.stringify(await chatSettings().catch(() => null))}, want ${parts.join(' + ')}`));
   const openSession = async () => {
     await userPage.goto(`${BASE}/?session=${encodeURIComponent(sessionID)}`);
     await userPage.waitForSelector('[data-testid=studio-shell]', { timeout: 30000 });
@@ -224,25 +250,26 @@ async function checks(engine, browser, [width, height]) {
     current = userPage;
     sessionID = (await ok(userContext, 'POST', legacy.chat_sessions, { title: `#322 B ${engine} ${viewport}` })).id;
     await openSession();
-    await showsCombined(chatPicker, 'deepseek', 'low');
+    await showsCombined('deepseek', 'low');
     await meterShows('1M', 'DeepSeek window');
-    await chatPicker.click();
     const panel = userPage.locator('[data-testid=workspace-chat-model-picker-panel]');
     await panel.waitFor({ timeout: 5000 });
     const rows = await panel.locator('button').filter({ hasText: /deepseek|glm/ }).allInnerTexts();
     assert.equal(rows.length, 2, `rows ${rows.join(' | ')}`);
-    assert(rows[0].startsWith('deepseek') && rows[0].includes(text('ui.studio.chat_model.default_tag')), `default tag: ${rows[0]}`);
+    assert(rows[0].toLowerCase().startsWith('deepseek') && rows[0].includes(text('ui.studio.chat_model.default_tag')), `default tag: ${rows[0]}`);
     await panel.getByText(GLM_MODEL, { exact: true }).click();
-    await showsCombined(chatPicker, GLM_MODEL, 'high');
+    await showsCombined(GLM_MODEL, 'high');
+    assert.equal(await userPage.locator(SETTINGS).count(), 1, 'picking a model closed the settings dialog');
     await meterShows('200K', 'GLM window');
     const levels = userPage.locator('[data-testid=workspace-reasoning-section]');
     await levels.waitFor({ timeout: 5000 });
     const offered = await levels.locator('button').filter({ hasText: /^(low|high|max)/ }).allInnerTexts();
-    assert.deepEqual(offered.map((row) => row.split(/\s/)[0]), ['high', 'max'], `levels ${offered.join(' | ')}`);
-    await userPage.keyboard.press('Escape');
+    assert.deepEqual(offered.map((row) => row.trim().split(/\s/)[0].toLowerCase()), ['high', 'max'], `levels ${offered.join(' | ')}`);
     await userPage.screenshot({ path: path.join(OUT, `${engine}-${viewport}-2-glm.png`) });
+    await closeSettings();
     await openSession();
-    await showsCombined(chatPicker, GLM_MODEL, 'high');
+    await showsCombined(GLM_MODEL, 'high');
+    await closeSettings();
     await meterShows('200K', 'window after a reload');
     const stored = await ok(userContext, 'GET', sessionRoute(routes.chat_session_model, sessionID));
     assert.equal(stored[fields.chat_model], 'GLM');
@@ -257,9 +284,17 @@ async function checks(engine, browser, [width, height]) {
     current = userPage;
     await openSession();
     const notice = userPage.locator('[data-testid=workspace-chat-model-notice]');
-    await shows(notice, text('ui.studio.chat_model.fallback').replaceAll('{model}', 'deepseek'), 'fallback notice');
-    assert.equal(await chatPicker.count(), 0, 'the picker shows with one model left');
-    await shows(reasoningPicker, 'low', 'DeepSeek level after the fallback');
+    // The notice is the shared "unavailable" line (#94): the short reason, with the whole sentence beside it for a screen reader.
+    const reason = text('ui.unavailable.label').replace('{reason}', text('ui.unavailable.reason.picker.chat_model_offline'));
+    const sentence = text('ui.studio.chat_model.fallback').replaceAll('{model}', 'deepseek');
+    await waitFor(async () => {
+      const shown = await notice.innerText().catch(() => '');
+      return shown.includes(reason) && shown.includes(sentence);
+    }, `fallback notice shows "${reason}" and "${sentence}"`);
+    // One model left: the chat model tab has no model column any more, only the levels of the model that is used.
+    await waitFor(async () => (await chatSettings().catch(() => null))?.level === 'low', 'DeepSeek level after the fallback');
+    assert.equal(await userPage.locator('[data-testid=workspace-chat-model-section]').count(), 0, 'the model column shows with one model left');
+    await closeSettings();
     await meterShows('1M', 'DeepSeek window after the fallback');
     const stored = await ok(userContext, 'GET', sessionRoute(routes.chat_session_model, sessionID));
     assert.equal(stored[fields.chat_model], 'LLM');
@@ -270,8 +305,8 @@ async function checks(engine, browser, [width, height]) {
 
   await step('no key or connection address in pages, responses or console; no errors, outside requests or overflow', async () => {
     const overflow = await userPage.evaluate(() => {
-      const pickers = document.querySelector('[data-testid=composer-pickers]');
-      return pickers ? pickers.scrollWidth - pickers.clientWidth : 0;
+      const composer = document.querySelector('[data-testid=studio-composer]');
+      return composer ? composer.scrollWidth - composer.clientWidth : -1;
     });
     await Promise.all(watch.pending);
     const pages = [await adminPage.content(), await userPage.content()];
@@ -281,7 +316,7 @@ async function checks(engine, browser, [width, height]) {
       assert.equal(leaked.length, 0, `"${secret.slice(0, 12)}…" reached: ${leaked.join(' | ')}`);
     }
     assert(watch.bodies.some((item) => item.url.includes(admin.admin)), 'no management response was inspected');
-    assert.equal(overflow, 0, `composer pickers overflow by ${overflow}px`);
+    assert.equal(overflow, 0, `the composer overflows by ${overflow}px`);
     assert.equal(watch.errors.length, 0, `page errors: ${watch.errors.join(' | ')}`);
     assert.equal(watch.outside.length, 0, `outside requests: ${watch.outside.join(' | ')}`);
     return `${watch.bodies.length} responses and ${watch.console.length} console lines inspected`;
