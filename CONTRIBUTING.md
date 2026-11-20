@@ -69,6 +69,9 @@ python3 scripts/verify-local.py --race    # 再加上 race 测试（CI 必跑，
   `internal/catalog/default_catalog.json`，不要在前端或 HTTP Handler 里另写一份。新增界面文案要同时
   提供中文与英文译文（Catalog 校验会检查已纳入覆盖范围的文案）。
 - **统一任务内核**：生成与处理任务的状态只由 `internal/generation` 推进。
+- **浏览器最低版本**写在 `package.json` 的 `browserslist`（#387），构建目标、`tsconfig.json` 的 ES `lib` 与 `src/__tests__/browser-support.test.ts` 都跟随它。
+  `tsc --noEmit` 会拒绝超出该版本的 ES 内置 API（如 `Object.groupBy`）；较新的 Web API（`AbortSignal.any`、Popover 等）由该测试扫描，
+  有特性检测保护的用法在该行或上一行写 `browser-support: allow`。
 - 改动模块职责、依赖方向、数据契约或部署结构时，同步更新 `docs/architecture.md`。
 - 不提交密钥、`.env`、数据库或生成的资产；文档和代码里不写具体服务器地址。
 
@@ -163,6 +166,11 @@ check.
   English translations (the Catalog check enforces this for the covered sections).
 - **One task kernel**: only `internal/generation` advances the state of generation and
   processing tasks.
+- **Minimum browser versions** are declared in `package.json`'s `browserslist` (#387); the build
+  target, the ES `lib` in `tsconfig.json` and `src/__tests__/browser-support.test.ts` follow it.
+  `tsc --noEmit` rejects ES built-ins newer than that floor (for example `Object.groupBy`); newer
+  Web APIs (`AbortSignal.any`, Popover, ...) are scanned for by that test. Feature-detected use
+  goes with a `browser-support: allow` comment on that line or the one above.
 - When you change module responsibilities, dependency direction, data contracts or the
   deployment layout, update `docs/architecture.md` in the same change.
 - Never commit secrets, `.env`, databases or generated assets, and do not write concrete

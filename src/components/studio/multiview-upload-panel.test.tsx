@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Component, type ReactNode } from 'react';
+import { cleanup, fireEvent, render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { MultiviewUploadPanel } from '@/components/studio/multiview-upload-panel';
 import type { MultiviewOffering } from '@/lib/workspace/multiview-upload';
+import { useChatStore } from '@/store/chat-store';
+import { useStudioStore } from '@/store/studio-store';
+import { useWorkspaceStore } from '@/store/workspace-store';
 
 vi.hoisted(() => {
   const memory = new Map<string, string>();
@@ -20,15 +24,58 @@ const schema = defaultCatalog.application;
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
 
 const target = {
-  offering: { model_name: 'Tripo P2 多视图' },
-  views: [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }],
+  offering: { model_name: 'Tripo H3' },
+  views: [{ value: 'front', label: '正面' }, { value: 'left', label: '左侧' }, { value: 'back', label: '背面' }, { value: 'right', label: '右侧' }],
   minPictures: 2,
   maxPictures: 4,
 } as unknown as MultiviewOffering;
-const images = ['/api/v1/assets/a1', '/api/v1/assets/a2'];
+const images = ['/api/v1/tasks/t1/assets/a1', '/api/v1/tasks/t1/assets/a2'];
 const messages = (defaultCatalog.application as { content: { messages: Record<string, string> } }).content.messages;
 
-afterEach(cleanup);
+/** Stands in for the chat region's error boundary: records what the real one would have replaced the chat with. */
+class Boundary extends Component<{ caught: Error[]; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error) { this.props.caught.push(error); }
+  render() { return this.state.failed ? <p data-testid="boundary-fallback" /> : this.props.children; }
+}
+
+beforeEach(() => {
+  useStudioStore.setState({ stageImage: null });
+  useChatStore.setState({ activeSessionId: 's1', messagesBySession: { s1: [] } });
+  useWorkspaceStore.setState({ attachmentSources: {} });
+  // React logs a caught render error; the assertions below are what count.
+  vi.spyOn(console, 'error').mockImplementation(() => undefined);
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe('dismissing the multiview question keeps the hook order (#387)', () => {
+  it('hides the panel without a render error and shows it again for different pictures', () => {
+    const caught: Error[] = [];
+    const onDismiss = vi.fn();
+    const panel = (pictures: readonly string[]) => (
+      <Boundary caught={caught}><MultiviewUploadPanel images={pictures} target={target} onConfirm={vi.fn()} onDismiss={onDismiss} /></Boundary>
+    );
+    const view = render(panel(images));
+    expect(view.getByTestId('studio-multiview-upload')).toBeTruthy();
+
+    // "不是": the panel returns null on the next render. Returning before the store hooks ran made React throw
+    // #300 ("Rendered fewer hooks than expected") and the chat region fell back to its error boundary.
+    fireEvent.click(view.getByTestId('studio-multiview-upload-dismiss'));
+    expect(caught.map((error) => error.message)).toEqual([]);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(view.queryByTestId('studio-multiview-upload')).toBeNull();
+
+    // New pictures make the question relevant again; the reverse hook-count change (#310) must not throw either.
+    view.rerender(panel([...images, '/api/v1/tasks/t1/assets/a3']));
+    expect(caught.map((error) => error.message)).toEqual([]);
+    expect(view.getByTestId('studio-multiview-upload')).toBeTruthy();
+    expect(view.getAllByTestId('studio-multiview-upload-thumb')).toHaveLength(3);
+  });
+});
 
 // #373: the panel makes the model it names even when the session's 3D pick takes no views; it says so in one line.
 describe('the multiview panel note about the picked 3D model', () => {

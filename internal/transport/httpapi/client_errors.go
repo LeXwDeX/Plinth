@@ -11,11 +11,15 @@ import (
 // clientErrorReport is what the browser sends for an error boundary,
 // window.onerror or an unhandled rejection (#233).
 type clientErrorReport struct {
-	Kind      string `json:"kind"`
-	Message   string `json:"message"`
-	Stack     string `json:"stack"`
-	Page      string `json:"page"`
-	Revision  string `json:"revision"`
+	Kind     string `json:"kind"`
+	Message  string `json:"message"`
+	Stack    string `json:"stack"`
+	Page     string `json:"page"`
+	Revision string `json:"revision"`
+	// RequestID is the X-Request-ID of the last response the browser received
+	// before the error (#387). It is logged as related_request_id, apart from
+	// the report request's own request_id, so the report can be matched to the
+	// server log lines of the request that preceded it.
 	RequestID string `json:"request_id"`
 }
 

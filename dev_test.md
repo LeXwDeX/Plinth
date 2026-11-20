@@ -52,6 +52,8 @@ CI 作业分组：`frontend`（第 1–3 项，只装一次依赖）、`go check
 
 **第 10 项「fake stack」（#218）**：整栈冒烟全量（全部场景与 7 个故障场景）约 15 分钟，主要是等待 fake 任务轮询而非 CPU，因此门禁只跑稳定子集：余额面板、Meshy 链、图像与抠图、Tripo P2、Agent（含 Hyper3D Agent 链）、后台等待与三视图预算连续执行（#243），以及故障场景 `task-failed`、`artifact-expired-stuck`（失败分类与免费结果取回）；Tripo 生成/处理链、Hyper3D 直提交与其余 5 个故障场景仍由不带参数的全量运行覆盖，改动相关 Adapter 或 fake 时手动跑全量；抠图的文件级故障场景 `matting-faults`（#301，单跑本机约十秒）同样只在全量运行里，fake 与 Adapter 的标记契约由第 5 项 `go test` 守。脚本用 Go 现场构建 fake 与栈测试二进制（构建标签 fakestack），工作目录在系统临时目录，结束即删除，不写入源码树；端口固定为 19410/19411，本机门禁的跨 worktree 槽位保证同一时刻只有一个门禁在跑，主机 CI 容器与 GitHub runner 各自独立。`check_delivery` 与零真实请求判定的离线单测在 `scripts/tests/test_fake_stack_delivery.py`，随第 9 项运行；`scripts/smoke/replay-recovery-on-fake.py` 不在门禁里（它需要受控验收 runner 的源码绑定二进制，单独运行）。
 
+**浏览器最低版本由第 1、2 项守住（#387）。** 最低版本写在 `package.json` 的 `browserslist`（Chrome / Edge 111、Firefox 128、Safari 16.4）；`tsconfig.json` 的 ES `lib` 固定为该版本能运行的最新库（`es2023`），第 1 项因此会拒绝超出版本的 ES 内置 API；较新的 Web API 表、`browserslist` 与构建目标、`lib` 和低版本提示文案的一致性，以及提示脚本 `public/browser-support.js` 的行为由 `src/__tests__/browser-support.test.ts`、`src/__tests__/browser-support-guard.test.ts` 随第 2 项检查。不新增门禁项。
+
 本机门禁对第 5 项（及 `--race` 时的第 6 项）额外加 `-timeout=30m`：同一工作站并行运行多个会话的门禁时，`httpapi`、`sqlite` 等包会超过 Go 默认的单包 10 分钟上限而误报失败。CI 的 race 作业以作业级 `GOFLAGS=-timeout=30m` 做同样放宽（单台 runner 上 `httpapi` 包 race 贴近 10 分钟上限）。这些参数只放宽单包超时，不改变测试集合与判定，门禁命令仍按上面所列。
 
 部分 Generation、Agent 工具和 HTTP 集成测试通过 `internal/adapters/sqlite/sqlitetest.Open` 创建独立数据库：该 helper 在每个测试进程内共享一个惰性构建的真实迁移模板库，关闭连接并确认没有 WAL 后缓存其字节，只为不存在的目标文件复制。每次仍调用真实 `sqlite.Open` 检查迁移版本与 checksum；已有数据库原样打开，重启、恢复和篡改场景不覆盖原文件。SQLite 迁移测试继续直接执行真实迁移，不使用该模板。此优化只减少重复 fixture 初始化，不减少测试集合、断言或 race 检测，也不改变 runner 上限。

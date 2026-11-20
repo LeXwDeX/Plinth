@@ -38,12 +38,14 @@ export function MultiviewUploadPanel({ images, target, lockNote = null, disabled
   const [choices, setChoices] = useState<string[]>(() => defaultViewChoices(images.length, target.views));
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
   useEffect(() => { setChoices(defaultViewChoices(images.length, target.views)); }, [signature, target.views, images.length]);
-  if (dismissedFor === signature) return null;
-  const valid = validViewChoices(choices, target.minPictures, target.maxPictures);
-  const none = schemaText(schema, 'ui.studio.multiview_upload.view_none');
   const messages = useSessionMessages(useChatStore((state) => state.activeSessionId));
   const sources = useWorkspaceStore((state) => state.attachmentSources);
   const openStageImage = useStudioStore((state) => state.openStageImage);
+  // Every hook runs before this return: leaving earlier made the dismissed render call fewer hooks than the one
+  // before it, which is React error #300 and replaced the whole chat region with its error boundary (#387).
+  if (dismissedFor === signature) return null;
+  const valid = validViewChoices(choices, target.minPictures, target.maxPictures);
+  const none = schemaText(schema, 'ui.studio.multiview_upload.view_none');
   const openImage = (url: string, index: number) => {
     const source = sources[url];
     const handle = handleOfPicture(messages, {
