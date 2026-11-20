@@ -370,6 +370,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateThinkingStatus(schema.Stream.EventTypes, schema.Presentation.Status); err != nil {
 		return err
 	}
+	if err := validateHeartbeatEvent(schema.Stream.EventTypes); err != nil {
+		return err
+	}
 	if reasons := schema.Presentation.Messages.ContentRejectedReasons; reasons != "" && !strings.Contains(reasons, "{reasons}") {
 		return errors.New("presentation.content_rejected_reasons 须包含 {reasons}（#35）")
 	}
@@ -649,6 +652,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			"{milliseconds}",
 		) {
 		return errors.New("stream 的时间、Headers 或 retry 模板无效")
+	}
+	if err := validateStreamWatchdog(schema.Frontend, schema.Stream); err != nil {
+		return err
 	}
 	if len(schema.Tools) == 0 {
 		return errors.New("tools 不能为空")
@@ -2565,13 +2571,57 @@ func validateThinkingStatus(types ChatStreamEventTypes, status ChatStatusTexts) 
 	if event == "" || text == "" {
 		return errors.New("stream.event_types.thinking 与 presentation.status.thinking 须同时声明")
 	}
-	for _, other := range []string{
-		types.Text, types.Status, types.Progress, types.Images, types.Title,
-		types.MessageCreated, types.TaskRegistered, types.TaskUpdate, types.Error, types.Done,
-	} {
+	for _, other := range baseChatStreamEventTypes(types) {
 		if event == other {
 			return fmt.Errorf("stream.event_types.thinking %q 与其他事件类型重名", event)
 		}
+	}
+	return nil
+}
+
+// baseChatStreamEventTypes lists the names of the event types every Catalog
+// declares, without the optional thinking and heartbeat events.
+func baseChatStreamEventTypes(types ChatStreamEventTypes) []string {
+	return []string{
+		types.Text, types.Status, types.Progress, types.Images, types.Title,
+		types.MessageCreated, types.TaskRegistered, types.TaskUpdate, types.Error, types.Done,
+	}
+}
+
+// validateHeartbeatEvent checks the optional visible heartbeat event (#375): its
+// name is a plain event type name that no other event type uses, because the
+// client would read the heartbeat as that event, or that event as a heartbeat.
+// Empty keeps the comment frame alone.
+func validateHeartbeatEvent(types ChatStreamEventTypes) error {
+	event := types.Heartbeat
+	if event == "" {
+		return nil
+	}
+	if strings.TrimSpace(event) != event {
+		return fmt.Errorf("stream.event_types.heartbeat %q 不能含首尾空白", event)
+	}
+	for _, other := range append(baseChatStreamEventTypes(types), types.Thinking) {
+		if event == other {
+			return fmt.Errorf("stream.event_types.heartbeat %q 与其他事件类型重名", event)
+		}
+	}
+	return nil
+}
+
+// validateStreamWatchdog checks the thresholds of the client's silence watchdog
+// (#375). The silence window must outlast the heartbeat interval, or a healthy
+// quiet turn would read as a dead connection, and at least one reconnect must
+// be allowed.
+func validateStreamWatchdog(frontend ChatFrontendSchema, stream ChatStreamSchema) error {
+	if frontend.StreamSilenceMilliseconds <= 0 ||
+		frontend.StreamSilenceMilliseconds <= stream.HeartbeatMilliseconds {
+		return fmt.Errorf(
+			"chat.frontend.stream_silence_milliseconds 必须为正数且大于 chat.stream.heartbeat_milliseconds（%d）",
+			stream.HeartbeatMilliseconds,
+		)
+	}
+	if frontend.StreamReconnectAttempts < 1 {
+		return errors.New("chat.frontend.stream_reconnect_attempts 必须至少为 1")
 	}
 	return nil
 }

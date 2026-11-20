@@ -595,6 +595,8 @@ const minimalApplication = `"application":{
 			"connection_timeout_milliseconds":15000,
 			"fallback_poll_milliseconds":3000,
 			"reconnect_check_delay_milliseconds":300,
+			"stream_silence_milliseconds":30000,
+			"stream_reconnect_attempts":3,
 			"option_storage_key":"test-chat-options",
 			"add_images_event_name":"test:add-images",
 			"image_mime_prefix":"image/",

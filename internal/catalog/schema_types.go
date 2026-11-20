@@ -4897,6 +4897,15 @@ type ChatFrontendSchema struct {
 	// deployment without runtime.http.legacy_routes.chat_turn_background,
 	// keeps the single stop button.
 	BackgroundWaitPollMilliseconds int `json:"background_wait_poll_milliseconds,omitempty"`
+	// StreamSilenceMilliseconds is how long the open chat stream may deliver no
+	// frame before the client closes it and reconnects from its last event id
+	// (#375). It must outlast chat.stream.heartbeat_milliseconds, or a healthy
+	// quiet turn would read as a dead connection.
+	StreamSilenceMilliseconds int `json:"stream_silence_milliseconds"`
+	// StreamReconnectAttempts bounds those reconnects in a row without any frame
+	// arriving on the new connection; past it the client reports the stream as
+	// interrupted and recovers by polling (#375).
+	StreamReconnectAttempts int `json:"stream_reconnect_attempts"`
 }
 
 type ChatThinkingSchema struct {
@@ -5411,6 +5420,13 @@ type ChatStreamEventTypes struct {
 	// (#285). It carries only the Schema status text, never reasoning. Empty
 	// turns the status off.
 	Thinking string `json:"thinking,omitempty"`
+	// Heartbeat names the visible heartbeat event (#375): while a turn streams,
+	// the handler writes a data frame {"<event_fields.type>":"<heartbeat>"} every
+	// heartbeat_milliseconds, with no id line. An EventSource can observe it, which
+	// it cannot with the comment frame, so the client tells a quiet turn from a
+	// dead connection. It is never stored, takes no event id and carries no
+	// progress. Empty keeps the comment frame (heartbeat_frame) alone.
+	Heartbeat string `json:"heartbeat,omitempty"`
 }
 
 type ChatToolSchema struct {

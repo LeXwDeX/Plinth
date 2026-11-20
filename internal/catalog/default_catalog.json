@@ -6293,6 +6293,8 @@
         "connection_timeout_milliseconds": 15000,
         "fallback_poll_milliseconds": 3000,
         "reconnect_check_delay_milliseconds": 300,
+        "stream_silence_milliseconds": 30000,
+        "stream_reconnect_attempts": 3,
         "option_storage_key": "chat-image-gen-params",
         "add_images_event_name": "chat:add-images",
         "image_mime_prefix": "image/",
@@ -6921,7 +6923,8 @@
           "task_update": "task_update",
           "error": "error",
           "done": "done",
-          "thinking": "thinking"
+          "thinking": "thinking",
+          "heartbeat": "heartbeat"
         }
       },
       "model_review": {
