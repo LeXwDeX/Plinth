@@ -35,6 +35,10 @@ type toolRegistry struct {
 	scope         agentscope.Policy
 	harness       *resolve.Snapshot
 	harnessPolicy catalog.ChatHarnessSchema
+	// cache is set only on the per-request fork a turn is served from (#413).
+	// The Orchestrator's long-lived registry keeps it nil, so nothing derived
+	// from the runtime Offerings is shared between requests.
+	cache *registryCache
 }
 
 type registeredTool struct {
@@ -158,9 +162,34 @@ func (registry *toolRegistry) scopeBlocks(tool registeredTool, scope string, bou
 
 // describe is the tool list the model is offered for a turn in this scope.
 func (registry *toolRegistry) describe(scope string) []agents.Tool {
-	result := make([]agents.Tool, 0, len(registry.ordered))
+	return registry.offeredInScope(scope).tools
+}
+
+// withheld names the tools that would run but for the Agent scope, in
+// declaration order. The model is told these names so it can explain the
+// refusal instead of guessing why a tool is missing.
+func (registry *toolRegistry) withheld(scope string) []string {
+	return registry.offeredInScope(scope).withheld
+}
+
+// offeredInScope evaluates the registry once per scope: every tool is
+// permitted once, and the same pass splits the permitted tools into the list
+// the model is offered and the names the Agent scope withholds (#413). A turn
+// asks for both lists several times (the request, the scope block, each
+// prompt block), so the result is memoized on the request-scoped fork.
+func (registry *toolRegistry) offeredInScope(scope string) offeredTools {
+	if registry.cache != nil {
+		if offered, ok := registry.cache.loadOffered(scope); ok {
+			return offered
+		}
+	}
+	offered := offeredTools{tools: make([]agents.Tool, 0, len(registry.ordered))}
 	for _, tool := range registry.ordered {
-		if !registry.permits(tool, false) || registry.scopeBlocks(tool, scope, false) {
+		if !registry.permits(tool, false) {
+			continue
+		}
+		if registry.scopeBlocks(tool, scope, false) {
+			offered.withheld = append(offered.withheld, tool.name)
 			continue
 		}
 		parameters := append(json.RawMessage(nil), tool.parameters...)
@@ -170,10 +199,13 @@ func (registry *toolRegistry) describe(scope string) []agents.Tool {
 		if choices, narrowed := registry.modelChoices(tool); narrowed {
 			parameters = narrowArgumentEnum(parameters, tool.generation.ModelArgument, choices)
 		}
-		result = append(result, agents.Tool{Name: tool.name, Description: tool.description,
+		offered.tools = append(offered.tools, agents.Tool{Name: tool.name, Description: tool.description,
 			Parameters: parameters})
 	}
-	return result
+	if registry.cache != nil {
+		registry.cache.storeOffered(scope, offered)
+	}
+	return offered
 }
 
 func (registry *toolRegistry) resolve(name string, bound bool) (catalog.ChatToolSchema, bool) {
@@ -188,22 +220,11 @@ func (registry *toolRegistry) resolve(name string, bound bool) (catalog.ChatTool
 	return *tool.generation, true
 }
 
-// withheld names the tools that would run but for the Agent scope, in
-// declaration order. The model is told these names so it can explain the
-// refusal instead of guessing why a tool is missing.
-func (registry *toolRegistry) withheld(scope string) []string {
-	var names []string
-	for _, tool := range registry.ordered {
-		if registry.permits(tool, false) && registry.scopeBlocks(tool, scope, false) {
-			names = append(names, tool.name)
-		}
-	}
-	return names
-}
-
 // offeringChoices lists the declared offering_argument values whose Offering
 // is enabled and available now, in declaration order. narrowed is false when
 // the tool has no such argument or the registry has no availability source.
+// The result is memoized per tool for the request (#413): the model enum, the
+// tool list and the availability gate all ask for it.
 func (registry *toolRegistry) offeringChoices(tool registeredTool) ([]string, bool) {
 	if tool.generation == nil || tool.generation.OfferingArgument == "" || registry.offeringAllowed == nil {
 		return nil, false
@@ -213,6 +234,19 @@ func (registry *toolRegistry) offeringChoices(tool registeredTool) ([]string, bo
 		// replaces the open choice of service (and its enum) altogether.
 		return nil, false
 	}
+	if registry.cache != nil {
+		if choices, ok := registry.cache.loadOfferingChoices(tool.name); ok {
+			return choices.choices, choices.narrowed
+		}
+	}
+	choices, narrowed := registry.declaredOfferingChoices(tool)
+	if registry.cache != nil {
+		registry.cache.storeOfferingChoices(tool.name, choiceSet{choices: choices, narrowed: narrowed})
+	}
+	return choices, narrowed
+}
+
+func (registry *toolRegistry) declaredOfferingChoices(tool registeredTool) ([]string, bool) {
 	var parameters struct {
 		Properties map[string]struct {
 			Enum []string `json:"enum"`
@@ -235,15 +269,23 @@ func (registry *toolRegistry) offeringChoices(tool registeredTool) ([]string, bo
 
 // modelChoices lists the model ids an enabled, runtime-available Offering
 // gives a ModelArgument tool this turn (#249), in Catalog order. narrowed is
-// false for a historical Catalog whose tool still declares its enum.
+// false for a historical Catalog whose tool still declares its enum. The
+// result is memoized per tool for the request (#413): permits, the tool list
+// and the availability gate all ask for it, and it must not refetch the
+// Offering directory each time (#379 keeps the frozen path bound to it).
 func (registry *toolRegistry) modelChoices(tool registeredTool) ([]string, bool) {
 	if tool.generation == nil || tool.generation.ModelArgument == "" ||
 		tool.generation.ModelChoices == nil || registry.offerings == nil {
 		return nil, false
 	}
+	if registry.cache != nil {
+		if choices, ok := registry.cache.loadModelChoices(tool.name); ok {
+			return choices.choices, choices.narrowed
+		}
+	}
 	var candidates []generation.Offering
 	for _, capability := range tool.execution.Capabilities {
-		for _, offering := range registry.offerings(string(capability)) {
+		for _, offering := range registry.offeringsFor(string(capability)) {
 			if offering.Capability != capability {
 				continue
 			}
@@ -253,7 +295,25 @@ func (registry *toolRegistry) modelChoices(tool registeredTool) ([]string, bool)
 			candidates = append(candidates, offering)
 		}
 	}
-	return catalog.DerivedModelChoices(*tool.generation, candidates, nil), true
+	choices := catalog.DerivedModelChoices(*tool.generation, candidates, nil)
+	if registry.cache != nil {
+		registry.cache.storeModelChoices(tool.name, choiceSet{choices: choices, narrowed: true})
+	}
+	return choices, true
+}
+
+// offeringsFor reads the runtime Offerings of a capability once per request
+// (#413). The source is the server's wiring of the Catalog; without a
+// request-scoped cache (a long-lived registry, a test) it reads straight
+// through.
+func (registry *toolRegistry) offeringsFor(capability string) []generation.Offering {
+	if registry.offerings == nil {
+		return nil
+	}
+	if registry.cache == nil {
+		return registry.offerings(capability)
+	}
+	return registry.cache.offeringsFor(registry.offerings, capability)
 }
 
 // narrowArgumentEnum rewrites only the enum of one string argument, so the

@@ -11,6 +11,10 @@ import (
 type Catalog struct {
 	application ApplicationSchema
 	byID        generationMap
+	// sharedLists holds the sorted, enabled Offerings per capability, built
+	// once at Load (#413). They are the Catalog's own immutable values: List
+	// deep-copies, ListShared hands these out as read-only.
+	sharedLists map[schemacontract.Capability][]schemacontract.Offering
 }
 
 type generationMap map[schemacontract.OfferingID]schemacontract.Offering

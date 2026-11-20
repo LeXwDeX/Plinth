@@ -17,6 +17,7 @@ type AgentConfigurationSnapshot struct {
 	AgentTools     []catalog.ChatAgentToolSchema    `json:"agent_tools"`
 }
 type configurationContextKey struct{}
+type turnRegistryContextKey struct{}
 
 func configurationFromContext(ctx context.Context) *AgentConfigurationSnapshot {
 	value, _ := ctx.Value(configurationContextKey{}).(*AgentConfigurationSnapshot)
@@ -58,4 +59,31 @@ func (o *Orchestrator) registryFor(ctx context.Context) (*toolRegistry, error) {
 		return o.harnessRegistry(ctx, registry), nil
 	}
 	return o.harnessRegistry(ctx, o.registry), nil
+}
+
+// registryForRequest returns the registry one Agent request is served from:
+// the same frozen-configuration and harness view registryFor builds, forked so
+// its Offering lookups and tool lists are memoized for the request (#413).
+// Nothing is written back to the Orchestrator's registry, so no cache crosses
+// requests or sessions. A request whose turn already forked its registry
+// (Orchestrator.Process attaches one) reuses it, so the request and its tool
+// execution share the same lookups.
+func (o *Orchestrator) registryForRequest(ctx context.Context) (*toolRegistry, error) {
+	if turn, ok := ctx.Value(turnRegistryContextKey{}).(*toolRegistry); ok {
+		return turn, nil
+	}
+	registry, err := o.registryFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return forkTurnRegistry(registry), nil
+}
+
+// forkTurnRegistry returns a per-request copy of registry with an empty cache.
+// The tool declarations are shared read-only: a turn never edits ordered or
+// byName (the harness view copies them before it edits).
+func forkTurnRegistry(registry *toolRegistry) *toolRegistry {
+	fork := *registry
+	fork.cache = newRegistryCache()
+	return &fork
 }
