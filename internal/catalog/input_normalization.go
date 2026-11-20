@@ -303,7 +303,8 @@ func validateValue(schema schemacontract.Parameter, value any) (any, error) {
 				return nil, fmt.Errorf("参数 %q 的取值 %q 不在声明的可选范围内", schema.Name, text)
 			}
 			if schema.Type == "string-array" {
-				if _, duplicate := seen[text]; duplicate {
+				// A positional list (allow_duplicate_values) repeats values on purpose.
+				if _, duplicate := seen[text]; duplicate && !schema.AllowDuplicateValues {
 					return nil, fmt.Errorf("参数 %q 的取值 %q 不能重复", schema.Name, text)
 				}
 				seen[text] = struct{}{}

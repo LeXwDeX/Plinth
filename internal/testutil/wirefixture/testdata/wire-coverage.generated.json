@@ -1,7 +1,7 @@
 {
   "version": 2,
   "catalog": "internal/catalog/default_catalog.json",
-  "catalog_sha256": "833851c58d4ad4c049fa6d30b13eccc731f7ff80324f88d60084643c66de8415",
+  "catalog_sha256": "6daf0c3eb62bf4d040f1d483e33bdaef5904f720366331670e67dfe2aeb2c6cf",
   "samples": [
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
@@ -9,6 +9,8 @@
     "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
     "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-label-overflow.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
@@ -298,6 +300,7 @@
       "evidence": "real",
       "evidence_files": [
         "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [
@@ -321,6 +324,8 @@
       "evidence": "derived",
       "evidence_files": [
         "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-label-overflow.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [
@@ -344,6 +349,7 @@
       "evidence": "real",
       "evidence_files": [
         "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
         "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json"
       ],
       "offerings": [

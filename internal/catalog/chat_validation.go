@@ -907,6 +907,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		if err := validateReferencePurposes(tool, acceptReferences, schema.Context); err != nil {
 			return fmt.Errorf("tools[%d]: %w", index, err)
 		}
+		if err := validateReferenceImageLabels(tool, acceptReferences, schema.Context); err != nil {
+			return fmt.Errorf("tools[%d]: %w", index, err)
+		}
 		if err := validateAnchorArgument(tool, acceptReferences); err != nil {
 			return fmt.Errorf("tools[%d]: %w", index, err)
 		}
@@ -2726,6 +2729,107 @@ func validateReferencePurposes(tool ChatToolSchema, acceptReferences bool, conte
 		!strings.Contains(tool.ReferencePurposeItemTemplate, "{purpose}") ||
 		!strings.Contains(context.ReferencePurposeInvalidTemplate, "{handle}") {
 		return errors.New("参考图用途模板缺少占位符")
+	}
+	return nil
+}
+
+// referenceImageLabelsProperty is the shape of the argument that maps a handle
+// to its mark: an object whose values are strings, optionally an enum.
+type referenceImageLabelsProperty struct {
+	Type                 string `json:"type"`
+	AdditionalProperties struct {
+		Type string   `json:"type"`
+		Enum []string `json:"enum"`
+	} `json:"additionalProperties"`
+}
+
+func referenceImageLabelsArgument(tool ChatToolSchema) (referenceImageLabelsProperty, bool) {
+	var parameters struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	var property referenceImageLabelsProperty
+	if json.Unmarshal(tool.Parameters, &parameters) != nil ||
+		json.Unmarshal(parameters.Properties[tool.ReferenceImageLabelsArgument], &property) != nil {
+		return property, false
+	}
+	return property, true
+}
+
+// validateReferenceImageLabels checks a tool that lets the Agent mark which
+// side each reference picture shows (#376): the argument must be a declared
+// object of strings that no Offering parameter maps, the mark of a picture the
+// Agent leaves out must be declared, and the refusal templates must carry their
+// placeholders. Which models take marks, and which marks, is the Offerings'
+// own declaration, checked against the tool with them.
+func validateReferenceImageLabels(tool ChatToolSchema, acceptReferences bool, context ChatContextSchema) error {
+	if tool.ReferenceImageLabelsArgument == "" {
+		if tool.ReferenceImageLabelUnknown != "" {
+			return errors.New("reference_image_label_unknown 需要 reference_image_labels_argument")
+		}
+		return nil
+	}
+	if !acceptReferences || tool.Processing != nil {
+		return errors.New("reference_image_labels_argument 只适用于读取参考图的生成工具")
+	}
+	if !toolSchemaDeclaresParameter(tool, tool.ReferenceImageLabelsArgument) {
+		return fmt.Errorf("reference_image_labels_argument %q 不是工具参数", tool.ReferenceImageLabelsArgument)
+	}
+	if _, mapped := tool.ArgumentMappings[tool.ReferenceImageLabelsArgument]; mapped {
+		return fmt.Errorf("reference_image_labels_argument %q 不是 Offering 参数，不能映射", tool.ReferenceImageLabelsArgument)
+	}
+	if property, ok := referenceImageLabelsArgument(tool); !ok || property.Type != "object" || property.AdditionalProperties.Type != "string" {
+		return fmt.Errorf("reference_image_labels_argument %q 必须是值为字符串的对象参数", tool.ReferenceImageLabelsArgument)
+	}
+	if strings.TrimSpace(tool.ReferenceImageLabelUnknown) == "" {
+		return errors.New("reference_image_labels_argument 需要 reference_image_label_unknown：没有给标记的参考图用它补位")
+	}
+	if !strings.Contains(context.ReferenceLabelPictureTemplate, "{handle}") ||
+		!strings.Contains(context.ReferenceLabelValueTemplate, "{handle}") ||
+		!strings.Contains(context.ReferenceLabelValueTemplate, "{marks}") {
+		return errors.New("参考图标记的拒绝文案缺少占位符")
+	}
+	return nil
+}
+
+// validateChatToolReferenceImageLabels checks the tools that take reference
+// marks against the Offerings they can run (#376). Each Offering of the tool's
+// capabilities that declares the reference-image-labels semantic must offer the
+// mark that fills a picture the Agent left out, and no mark the argument's enum
+// does not list (the enum is what the Agent is told); a tool that no Offering
+// can use the argument with is a declaration that never does anything.
+func validateChatToolReferenceImageLabels(tools []ChatToolSchema, offerings generationMap) error {
+	for index, tool := range tools {
+		if tool.ReferenceImageLabelsArgument == "" {
+			continue
+		}
+		property, _ := referenceImageLabelsArgument(tool)
+		taking := 0
+		for _, offering := range offeringsList(offerings) {
+			if !slices.Contains(tool.Execution.Capabilities, offering.Capability) {
+				continue
+			}
+			for _, parameter := range offering.Parameters {
+				if parameter.Semantic != schemacontract.SemanticReferenceImageLabels {
+					continue
+				}
+				taking++
+				offered := make([]string, 0, len(parameter.Options))
+				for _, option := range parameter.Options {
+					offered = append(offered, option.Value)
+					if len(property.AdditionalProperties.Enum) > 0 && !slices.Contains(property.AdditionalProperties.Enum, option.Value) {
+						return fmt.Errorf("chat.tools[%d] %s 的标记 %q 不在参数 %q 的 enum 里，Agent 不会知道可以用它",
+							index, offering.ID, option.Value, tool.ReferenceImageLabelsArgument)
+					}
+				}
+				if !slices.Contains(offered, tool.ReferenceImageLabelUnknown) {
+					return fmt.Errorf("chat.tools[%d] %s 的标记没有 %q，没有标记的参考图无法补位",
+						index, offering.ID, tool.ReferenceImageLabelUnknown)
+				}
+			}
+		}
+		if taking == 0 {
+			return fmt.Errorf("chat.tools[%d] 声明了 reference_image_labels_argument，但工具能力内没有 Offering 声明 reference-image-labels", index)
+		}
 	}
 	return nil
 }

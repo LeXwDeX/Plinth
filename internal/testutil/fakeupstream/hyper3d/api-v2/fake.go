@@ -64,6 +64,12 @@ const (
 	// extra mesh of the Extreme-High tier (see generationCharge and downloadNames)
 	// are from that reading.
 	realRun = "2026-11-13"
+	// labelRun is the day of the two paid requests of #376, which settled how a
+	// multipart request carries image_label (rodinLabelNote). Their sanitized
+	// exchanges are testdata/evidence-376-*: evidence the fake is held to
+	// (evidence_376_test.go), not samples its templates come from (sampleFS does
+	// not embed them).
+	labelRun = "2026-11-19"
 )
 
 // Job statuses of the official API.
@@ -184,7 +190,17 @@ const rodinRealRunNote = "One paid run of the game-character request was made on
 	"The page's \"tier is required\" callout is advice, not enforcement: an omitted tier is Regular (a Gen-1/1.5 asset), which the fake accepts too, and Plinth always sends an explicit Gen-2.5 tier. The run does not verify a rejected value, TAPose on a subject that is not humanoid, or the Quad ceiling. " +
 	"Since #303 the PBR pack follows the request (DeliveredModel, built by fakeupstream.SizedModelFile): its triangle count is the target face count (quality_override, else the page's quality preset, medium when omitted: Quad 50000, 18000, 8000 and 4000 for high to extra-low, Raw 1000000, 500000, 60000 and 20000, and for a form without a Gen-2.5 tier the Gen-1/1.5 page's 50000, 18000, 8000 and 4000 in both topologies) for a triangle mesh and 2.18 triangles per Quad face (this run's one sample: 10,000 quads gave about 21,800 triangles), held to the fixture's 121,032-triangle ceiling, and it carries three PNG textures (base color, metallic-roughness, normal) at the page's texture resolution table: 2048 for texture_mode extreme-low to high and legacy, 4096 with uhd_texture or the HighPack add-on, 8192 with both, and a 6144 base color for extreme-high (12288 with HighPack) beside two 2048 maps (observed in the #188 acceptance; the maps beside the 8192 and 12288 base colors are 4096, observed for 12288 on Bang). " +
 	"Not modeled: the real files' scale (a display request of 2,000,000 faces delivers the 121,032-triangle ceiling, not millions, and the real pack is megabytes of pixels where the fake's flat textures are about 1 MB at 6144), the shape (the fixture humanoid in its rest pose whatever TAPose, seed, quad_normal or the prompt), material other than PBR (none, shaded, all and hybrid still deliver the PBR pack), geometry_file_format other than glb, the extra mesh of the Extreme-High tier (the plain fixture under its real name, not an untextured Draco mesh), the preview, and the Bang and Texture outputs (the plain fixture). " +
-	"The page was read again on " + formDocs + " as the complete server-rendered HTML (the 2026-11-13 reading was a summarizing fetch that dropped fields): it lists seed 0-65535, TAPose and quad_normal as booleans that default to false, the Quad ceiling of 200000 and the 1000000 ceiling below the High tiers, legacy among the six texture_mode values and tier as required advice, so the value rules above stand. Fields it lists that Plinth cannot send (the length of prompt, bbox_condition, is_micro, detail_level, geometry_instruct_mode, is_symmetric, image_label values) are not enforced here"
+	"The page was read again on " + formDocs + " as the complete server-rendered HTML (the 2026-11-13 reading was a summarizing fetch that dropped fields): it lists seed 0-65535, TAPose and quad_normal as booleans that default to false, the Quad ceiling of 200000 and the 1000000 ceiling below the High tiers, legacy among the six texture_mode values and tier as required advice, so the value rules above stand. Fields it lists that Plinth cannot send (the length of prompt, bbox_condition, is_micro, detail_level, geometry_instruct_mode, is_symmetric) are not enforced here; image_label is the one exception, for its count and its values (see the image_label paragraph below)"
+
+// rodinLabelNote records the two paid requests of labelRun (#376) that settled how
+// a multipart request carries image_label, and what the fake does and does not do
+// with it. Like rodinRealRunNote it is part of the /rodin endpoint note, so it
+// travels with the alignment report.
+const rodinLabelNote = "image_label (#376): on " + labelRun + " two real requests (both approved, 0.5 credit in all) settled how a multipart request carries the array: one part per label, the name repeated, in picture order and ahead of the files, as images is sent. " +
+	"A request of two pictures with three such parts (F, L, B) was refused before any generation with HTTP 201 {\"error\":\"IMAGE_LABEL_LENGTH_TOO_LONG\",\"message\":\"Input is invalid\"} and was not charged (the balance was the same before and after), so the service reads the repeated parts as one array and compares its length with the number of pictures. " +
+	"A request of three pictures (front, left, back) with the labels F, L, B (Gen-2.5-Extreme-Low, texture_mode=extreme-low, quality=medium, mesh_mode=Raw, material=PBR, geometry_file_format=glb) was accepted: the receipt carries the usual fields and an automatic prompt (the fake keeps the sample's for an image request without a prompt), 6 sub-jobs and consumed 0.5 (the labels add nothing to the page's base price), the polls went from Generating and Waiting to Done, and the list named a PBR GLB of 19,371,768 bytes and a WebP preview of 2,034 bytes (the size is not reproduced, see Not modeled above). " +
+	"The fake refuses more labels than pictures with the observed body. It also refuses a label outside the page's list (F, FL, FR, B, BL, BR, L, R, U, D and ?) as INVALID_REQUEST, the code of the other constructed value rules: no rejected value was observed, so that code and its message are constructed from the page, not recorded. It does not check a request with fewer labels than pictures: no rejection was observed, so no code is invented for it (Plinth never sends that, its Adapter refuses it locally). " +
+	"The sanitized exchanges are testdata/evidence-376-rodin-label-overflow and testdata/evidence-376-rodin-labeled (the capture replaces amounts with placeholders, so their consumed reads 0). They are evidence, not the samples the fake derives its templates from, and evidence_376_test.go holds the fake's answers to them"
 
 var endpoints = buildEndpoints()
 
@@ -203,9 +219,9 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			Note: "the official file host is not part of the API; this route serves the files the download list names (content types as observed): the fixed fixtures, except the PBR pack of a Gen-2.5 generation, which follows its request (see the /rodin note)"},
 	}
 	for _, k := range kinds {
-		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). API_NO_ACTIVE_SUBSCRIPTION was observed on 2026-11-12 (#294): a real submission was refused with it and the product recorded no HTTP status for the refusal (upstream_status 0), which is what the HTTP 201 error body sent here gives; the message text of the real body was not kept, so the message stays the documented description. The other documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, IMAGE_LABEL_LENGTH_TOO_LONG, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
+		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). API_NO_ACTIVE_SUBSCRIPTION was observed on 2026-11-12 (#294): a real submission was refused with it and the product recorded no HTTP status for the refusal (upstream_status 0), which is what the HTTP 201 error body sent here gives; the message text of the real body was not kept, so the message stays the documented description. The other documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
 		if k.Need == "prompt-or-images" {
-			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, and the TAPose and quad_normal switches) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed. " + rodinRealRunNote
+			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, the TAPose and quad_normal switches, and the image_label marks) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed. " + rodinRealRunNote + ". " + rodinLabelNote
 		}
 		if k.Need == "model-and-image" {
 			note += ". The receipt's consumed is 2 for texture_mode=extreme-high (real: the Offering's requests at Basic and at High resolution were charged 2, #187) and the base 0.5 for any other mode (the page's table, not observed): " + docsRoot + k.DocPage + " (read in full on " + formDocs + ") lists the two prices without saying they add up, and the receipts say they do not. The delivered GLB is the plain fixture whatever the mode and the resolution"
@@ -466,10 +482,13 @@ type formData struct {
 	fields map[string]string
 	files  map[string]int
 	sizes  map[string]int
-	// labels counts the image_label fields: the documented
-	// IMAGE_LABEL_LENGTH_TOO_LONG rejection compares them with the uploaded
-	// images.
+	// labels counts the image_label parts (the name repeated, one per label, as
+	// the real service reads them, #376): the IMAGE_LABEL_LENGTH_TOO_LONG
+	// rejection compares their number with the uploaded images.
 	labels int
+	// labelValues are those parts' values in wire order (fields keeps only the
+	// last one of a repeated name).
+	labelValues []string
 }
 
 func readForm(r *http.Request) (formData, error) {
@@ -499,6 +518,7 @@ func readForm(r *http.Request) (formData, error) {
 		}
 		if name == "image_label" {
 			parsed.labels++
+			parsed.labelValues = append(parsed.labelValues, string(raw))
 		}
 		parsed.fields[name] = string(raw)
 	}
@@ -598,6 +618,24 @@ func validateGenerationForm(fields map[string]string) string {
 	return ""
 }
 
+// generationImageLabels are the image_label values the Gen-2.5 page lists
+// (docsRoot+"rodin-gen2-5", checked formDocs): front, front-left, front-right,
+// back, back-left, back-right, left, right, up and down, and ? when the side is
+// not known. A value outside the list is answered like the other invalid values;
+// the rejection was not observed, so the code and the message are constructed.
+var generationImageLabels = []string{"F", "FL", "FR", "B", "BL", "BR", "L", "R", "U", "D", "?"}
+
+// validateImageLabels returns the rejection message of the first label outside
+// the page's list, or "" when every label is on it.
+func validateImageLabels(labels []string) string {
+	for _, label := range labels {
+		if !slices.Contains(generationImageLabels, label) {
+			return "image_label must be one of F, FL, FR, B, BL, BR, L, R, U, D, ?."
+		}
+	}
+	return ""
+}
+
 // wholeNumber parses a form value that must be an integer.
 func wholeNumber(value string) (int64, bool) {
 	number, err := strconv.ParseInt(value, 10, 64)
@@ -620,10 +658,18 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		switch k.Need {
 		case "prompt-or-images":
 			// IMAGE_LABEL_LENGTH_TOO_LONG is documented as more image_label
-			// entries than uploaded images (docsRoot+"errors", checked
-			// errorDocs); constructed, no wire sample covers the rejection.
+			// entries than uploaded images (docsRoot+"errors"), and observed on
+			// labelRun (#376): two pictures with three repeated image_label parts
+			// were refused with HTTP 201 and this body, which also shows that the
+			// repeated parts are read as one array (rodinLabelNote). A request
+			// with fewer labels than pictures is not checked: no rejection was
+			// observed.
 			if form.labels > form.files["images"] {
-				h.reject(w, "IMAGE_LABEL_LENGTH_TOO_LONG", "More image_label entries were sent than uploaded images.")
+				h.reject(w, "IMAGE_LABEL_LENGTH_TOO_LONG", "Input is invalid")
+				return
+			}
+			if message := validateImageLabels(form.labelValues); message != "" {
+				h.reject(w, "INVALID_REQUEST", message)
 				return
 			}
 			// The official Rodin page documents 1-5 reference images. The upper

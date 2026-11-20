@@ -187,6 +187,10 @@ const (
 	SemanticAction      = schema.SemanticAction
 )
 
+// SemanticReferenceImageLabels is its own declaration: it is longer than the
+// names above, and adding it to their block would realign every line of it.
+const SemanticReferenceImageLabels = schema.SemanticReferenceImageLabels
+
 type ImageSizeConstraint = schema.ImageSizeConstraint
 
 type Parameter = schema.Parameter

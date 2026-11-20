@@ -280,6 +280,13 @@ type Parameter struct {
 	// the self-contained GLB of the model role). A selection without one is
 	// refused where the input is normalized, before anything is quoted or paid.
 	RequiredItems []string `json:"required_items,omitempty"`
+	// AllowDuplicateValues lets a string-array repeat a value. A string-array is
+	// a set by default (a multi-select such as the export formats), so a
+	// repeated value is refused where the input is normalized. Positional lists
+	// need repeats: Rodin's image_label gives each picture its own mark, and
+	// two pictures can both show the front or both be "?" (#376). Only a
+	// string-array may declare it.
+	AllowDuplicateValues bool `json:"allow_duplicate_values,omitempty"`
 }
 
 // SourceInputRule refuses a source Task when two facts hold together: its own

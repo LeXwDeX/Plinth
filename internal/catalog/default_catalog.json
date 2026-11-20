@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-16.305.1",
+    "revision": "2026-11-20.376.1",
     "terminology": {
       "user_facing": [
         {
@@ -6857,7 +6857,9 @@
         "history_image_view_label_template": "\n[上图是历史图片 {handle}]",
         "history_image_unreadable_template": "\n[历史图片 {handle} 的画面无法读取（可能已失效或无权访问）：不要猜测它的内容，需要它时请用户重新指定或上传]",
         "history_image_vision_off_message": "\n[当前 Agent 配置不读图，没有附上画面：只能根据列表里的文字线索判断；仍不确定时请问用户]",
-        "reference_purpose_invalid_template": "参考图用途里的 {handle} 不是这次实际发送给生成模型的参考图（没有放进 reference_handles、不是本轮附带或选中的图，或超出了所选模型能接收的参考图数量）。没有提交任何任务：请修正 reference_handles 或 reference_purposes 后重试。"
+        "reference_purpose_invalid_template": "参考图用途里的 {handle} 不是这次实际发送给生成模型的参考图（没有放进 reference_handles、不是本轮附带或选中的图，或超出了所选模型能接收的参考图数量）。没有提交任何任务：请修正 reference_handles 或 reference_purposes 后重试。",
+        "reference_label_picture_template": "参考图方位标记 view_labels 里的 {handle} 无法对应到发送给生成模型的某一张参考图（它不是本会话里某张图片的句柄，或是代表整个选区的 @selected，或这张图在参考图里出现了两次，或同一张图被给了两个不同的标记）。没有提交任何任务：请修正 reference_handles 或 view_labels 后重试。",
+        "reference_label_value_template": "参考图方位标记 view_labels 里 {handle} 的标记不是所选模型接受的取值（可用：{marks}；view_labels 须是“图片句柄 → 标记”的对象）。没有提交任何任务：请修正 view_labels 后重试。"
       },
       "dsml": {
         "enabled": false,
@@ -8509,7 +8511,7 @@
           "canvas_source": "bind",
           "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d","text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Generate a 3D model from reference image(s). Without references the images selected on the workspace are used. How many pictures a model uses depends on the model picked for 3D (stated below when known): never say that pictures beyond that number are used, or that they are used as views of one object. When a result has reference_note, including while the step waits on its approval card, it states the facts about the pictures: which pictures are used, how many were given, and that using several pictures needs a model that takes several pictures. Your reply must state each of these facts; put them in your own words if you like. Several views of the same object (a front view plus left, back or right views) belong to create_model_3d_from_views instead.",
+          "description": "Generate a 3D model from reference image(s). Without references the images selected on the workspace are used. How many pictures a model uses depends on the model picked for 3D (stated below when known): never say that pictures beyond that number are used, or that they are used as views of one object. When a result has reference_note, including while the step waits on its approval card, it states the facts about the pictures: which pictures are used, how many were given, and that using several pictures needs a model that takes several pictures. Your reply must state each of these facts; put them in your own words if you like. Several views of the same object (a front view plus left, back or right views) belong to create_model_3d_from_views instead. For a model that takes angle marks for its pictures, say in view_labels which side of the object each picture shows when you can see it; the server ignores view_labels for any other model.",
           "default_to_selection": true,
           "model_argument": "model",
           "model_choices": {"from": "available_offerings", "require_parameters": ["reference-image"], "exclude_parameters": ["reference-views"], "exclude_offerings": ["tripo/geometry/smartsegment-image", "meshy/meshy-7.1-multiview/image-to-3d"]},
@@ -8545,6 +8547,14 @@
                 "items": { "type": "string" },
                 "description": "Optional names of this session's identity anchors (for example a character's standard look). The server adds each named anchor's reference pictures before the turn's own references, so this needs no handle. When the selected model takes fewer pictures, the anchor pictures are kept and ordinary references are dropped first; a result's reference_note states what was dropped."
               },
+              "view_labels": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["F", "FL", "FR", "B", "BL", "BR", "L", "R", "U", "D", "?"]
+                },
+                "description": "Optional. Says which side of the object each reference picture shows, keyed by its handle, so a model that takes angle marks can match the pictures to different views of one object (for example {\"@img3\": \"F\", \"@img4\": \"L\", \"@img5\": \"B\"}). Look at each picture before you mark it: F front, B back, L left, R right, FL front-left, FR front-right, BL back-left, BR back-right, U top, D bottom, and ? when you cannot tell the side. A picture you leave out is sent as ?. Mark only what the picture shows, never from its file name, its place in the list or a guess; leave the argument out when you can tell no side. The server uses it only for a model that takes angle marks and ignores it for any other. Every key must be the handle of a picture of this chat: a key that is not one, or is @selected (it names several pictures), makes the call refused with nothing submitted. A mark for a picture of this chat that this call does not send is ignored, for example when the picture is not one of reference_handles (or of this turn's pictures when you gave none) or is beyond the selected model's picture limit."
+              },
               "input_override_reason": {
                 "type": "string",
                 "maxLength": 300,
@@ -8569,6 +8579,8 @@
             "additionalProperties": false
           },
           "anchor_argument": "anchors",
+          "reference_image_labels_argument": "view_labels",
+          "reference_image_label_unknown": "?",
           "argument_mappings": {
             "prompt": "prompt",
             "reference_image_indices": "reference-indices",
@@ -20820,6 +20832,15 @@
             "左侧": "Left",
             "正面": "Front",
             "背面": "Back",
+            "左前": "Front left",
+            "右前": "Front right",
+            "左后": "Back left",
+            "右后": "Back right",
+            "顶部": "Top",
+            "底部": "Bottom",
+            "不确定": "Unsure",
+            "参考图方位标记": "Reference image angle marks",
+            "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。该设置不在设置面板里显示。": "Marks, in order, which side each reference picture shows (front, front left, front right, back, back left, back right, left, right, top, bottom, or unsure when it cannot be told), so Rodin matches the pictures to different angles of one object. When filled in, every reference picture needs one mark and marks may repeat; when empty nothing is sent. This setting is not shown in the settings panel.",
             "按选择顺序依次对应正面、左侧、背面、右侧视角（可用“视角”参数改写对应关系）；正面图必须有，至少 2 张、最多 4 张，均为同一物体。": "Images map to Front, Left, Back, Right in the order selected (override with the Reference image views parameter). A front image is required; send 2 to 4 images of the same object.",
             "Tripo Smart Segmentation · 图片": "Tripo Smart Segmentation · Image",
             "Tripo Smart Segmentation · 模型": "Tripo Smart Segmentation · Model",
@@ -38727,7 +38748,7 @@
     },
     {
       "id": "hyper3d/rodin-gen-2.5/image-to-3d",
-      "revision": "2026-11-16.304.1",
+      "revision": "2026-11-20.376.1",
       "provider_id": "hyper3d",
       "provider_name": "Hyper3D",
       "provider_short_label": "HYPER3D",
@@ -38843,6 +38864,66 @@
       },
       "capability": "image-to-3d",
       "parameters": [
+        {
+          "name": "reference_image_labels",
+          "label": "参考图方位标记",
+          "type": "string-array",
+          "wire_name": "image_label",
+          "max_items": 5,
+          "allow_duplicate_values": true,
+          "options": [
+            {
+              "value": "F",
+              "label": "正面"
+            },
+            {
+              "value": "FL",
+              "label": "左前"
+            },
+            {
+              "value": "FR",
+              "label": "右前"
+            },
+            {
+              "value": "B",
+              "label": "背面"
+            },
+            {
+              "value": "BL",
+              "label": "左后"
+            },
+            {
+              "value": "BR",
+              "label": "右后"
+            },
+            {
+              "value": "L",
+              "label": "左侧"
+            },
+            {
+              "value": "R",
+              "label": "右侧"
+            },
+            {
+              "value": "U",
+              "label": "顶部"
+            },
+            {
+              "value": "D",
+              "label": "底部"
+            },
+            {
+              "value": "?",
+              "label": "不确定"
+            }
+          ],
+          "semantic": "reference-image-labels",
+          "description": "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。该设置不在设置面板里显示。",
+          "presentation": {
+            "surface": "hidden",
+            "control": "multi-select"
+          }
+        },
         {
           "name": "reference_assets",
           "label": "参考图",
