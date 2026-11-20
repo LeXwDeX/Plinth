@@ -22,6 +22,11 @@ thresholds are recorded without deciding PASS/FAIL.
 The visual rubric lives in scripts/smoke/agent-quality/rubric.json; scores are
 filled by a person or a reviewer model and can be merged with --scores. The
 script never calls a reviewer model itself and never chooses one.
+
+--refusals-log points at a local copy of the stack's structured log: the
+"agent tool call refused" lines are counted per session id and the case's time
+window (#407), because the public chat wire keeps no tool result. The report
+also records the Agent round proxy and the text-question heuristic.
 """
 import argparse
 import json
@@ -57,6 +62,9 @@ def parse_arguments(argv):
     parser.add_argument("--task-timeout", type=int, default=2400, help="seconds to wait for expected tasks")
     parser.add_argument("--only", default="", help="comma-separated request ids (default: the whole set)")
     parser.add_argument("--scores", default="", help="JSON file of visual scores to merge into the report")
+    parser.add_argument("--refusals-log", default="",
+                        help="local copy of the stack's structured log; refused tool calls (#407) are counted "
+                             "per session id and the case's time window")
     return parser.parse_args(argv)
 
 
@@ -310,6 +318,8 @@ def run_case(live, request, schema, offerings, args):
         "image_count": images,
         "turns": turns,
         "sends": sends,
+        "started_epoch": started,
+        "finished_epoch": time.time(),
         "elapsed_ms": int((time.time() - started) * 1000),
         "output_metrics": output_metrics,
         "output_checks": output_checks,
@@ -620,6 +630,13 @@ def run(argv):
         return 2
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=REPO, text=True).strip())
+    refusal_records = []
+    if args.refusals_log:
+        try:
+            refusal_records = quality.read_refusal_log(args.refusals_log)
+        except OSError as error:
+            print(f"--refusals-log {args.refusals_log}: {error}", file=sys.stderr)
+            return 2
     report = common.Report("agent-quality-output-run", args.report)
     cases = []
     try:
@@ -631,6 +648,11 @@ def run(argv):
         offerings = offerings_by_id(live)
         for request in selected:
             case_run = run_case(live, request, schema, offerings, args)
+            if refusal_records:
+                counts = quality.refusal_counts_in_window(
+                    refusal_records, case_run.get("session_id"), case_run.get("started_epoch"), case_run.get("finished_epoch"))
+                if counts:
+                    case_run["refusals"] = {"by_code": counts, "source": "log"}
             case = quality.evaluate_case(request, case_run)
             cases.append(case)
             failed = quality.case_hard_failures(case)

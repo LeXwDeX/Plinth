@@ -12,10 +12,12 @@ Everything that decides a result is a plain function so
 `scripts/tests/test_agent_quality.py` can cover it without a server.
 """
 
+import datetime
 import decimal
 import hashlib
 import json
 import os
+import re
 import time
 
 import l5_common as common
@@ -325,6 +327,130 @@ def interruption_cards(cards):
     return [card for card in cards or [] if card.get("kind") in ("choice", "approval", "plan")]
 
 
+# ------------------------------------------------------------------ #407 metrics
+#
+# The server writes a refused tool call as one JSON log line, "agent tool call refused", with
+# tool, call_id, owner_id, session_id, assistant_message_id and code
+# (internal/chat/generationtool/refusal.go). The public chat wire keeps no tool result, so the
+# counts come from a local copy of that log; if a later wire exposes the refusal on the call, the
+# API is read first. A text question is a heuristic for an Agent that asked in prose instead of
+# using a card; the message wire cannot tell whether a card was shown in the same turn.
+
+REFUSAL_LOG_MESSAGE = "agent tool call refused"
+# The log time comes from the server clock, so a case's window is padded; the session id is the
+# primary key, so a wide pad cannot mix two cases.
+REFUSAL_WINDOW_PAD_SECONDS = 600
+QUESTION_ENDINGS = ("?", "？")
+_LOG_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$")
+
+
+def parse_log_time(value):
+    """Epoch seconds of a structured log's RFC3339 time, or None. Accepts Go's nanosecond fraction."""
+    match = _LOG_TIME.match(str(value or "").strip())
+    if not match:
+        return None
+    fraction = (match.group(2) or "")[:6].ljust(6, "0")
+    zone = "+00:00" if match.group(3) == "Z" else match.group(3)
+    try:
+        parsed = datetime.datetime.fromisoformat(f"{match.group(1)}.{fraction}{zone}")
+    except ValueError:
+        return None
+    return parsed.timestamp()
+
+
+def refusal_records(lines):
+    """Records ({time, session_id, code, tool}) of the refusal lines in a structured server log.
+
+    `lines` is an iterable of text or bytes lines. Malformed JSON, other messages and lines without
+    a code are skipped; `time` is epoch seconds, or None when the line's time cannot be read.
+    """
+    records = []
+    for raw in lines or []:
+        line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw or "")
+        line = line.strip()
+        if not line or REFUSAL_LOG_MESSAGE not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("msg") != REFUSAL_LOG_MESSAGE:
+            continue
+        code = entry.get("code")
+        if not isinstance(code, str) or not code.strip():
+            continue
+        records.append({"time": parse_log_time(entry.get("time")), "session_id": entry.get("session_id"),
+                        "code": code.strip(), "tool": entry.get("tool")})
+    return records
+
+
+def read_refusal_log(path):
+    """The refusal records of a local copy of the stack's structured log."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        return refusal_records(handle)
+
+
+def refusal_counts_in_window(records, session_id, since=None, until=None, pad=REFUSAL_WINDOW_PAD_SECONDS):
+    """{code: count} for one session inside [since - pad, until + pad].
+
+    A record whose time cannot be read is counted on the session id alone; a timed record outside
+    the padded window is dropped. since/until are epoch seconds, or None to ignore that side.
+    """
+    counts = {}
+    for record in records or []:
+        if record.get("session_id") != session_id:
+            continue
+        at = record.get("time")
+        if at is not None and since is not None and at < since - pad:
+            continue
+        if at is not None and until is not None and at > until + pad:
+            continue
+        code = record.get("code")
+        counts[code] = counts.get(code, 0) + 1
+    return counts
+
+
+def agent_rounds(messages):
+    """Assistant messages that carried tool calls: the public wire's proxy for the tool-using
+    rounds of a reply (one assistant message holds every round of a turn, so this counts replies
+    that used tools, not each model call)."""
+    return sum(1 for message in messages or []
+               if (message or {}).get("role") == "assistant" and common.parse_tool_calls(message))
+
+
+def text_questions(messages):
+    """Heuristic count of assistant replies that end with a question and call no tool: the Agent
+    stopped to ask in prose. A reply that also showed a choice card can be counted here because
+    the message wire carries no card; the report keeps the card count next to it."""
+    count = 0
+    for message in messages or []:
+        message = message if isinstance(message, dict) else {}
+        if message.get("role") != "assistant" or common.parse_tool_calls(message):
+            continue
+        content = (message.get("content") or "").strip()
+        if content and content != common.GENERATING_PLACEHOLDER and content.endswith(QUESTION_ENDINGS):
+            count += 1
+    return count
+
+
+def refusal_metrics(messages, external=None):
+    """(by_code, source) of the refused tool calls: the public API first, else the log counts.
+
+    `external` is a runner's {code: count} or {"by_code": {code: count}} read from the server log
+    for this case's session and time window.
+    """
+    api = common.visible_refusal_counts(messages)
+    if api:
+        return dict(sorted(api.items())), "api"
+    if isinstance(external, dict) and isinstance(external.get("by_code"), dict):
+        external = external["by_code"]
+    if isinstance(external, dict):
+        counted = {str(code): int(count) for code, count in external.items() if isinstance(count, int) and count > 0}
+        if counted:
+            return dict(sorted(counted.items())), "log"
+    return {}, "none"
+
+
 # --------------------------------------------------------------- evaluation
 
 # #498: what a run's upstream shape can and cannot compare. Only the shape
@@ -522,6 +648,7 @@ def evaluate_case(request, run):
                 self_check_status[role] = self_check_status.get(role, 0) + 1
     prices = common.call_prices(run.get("messages") or [])
     credits = common.spend_by_unit(prices.values())
+    refusal_by_code, refusal_source = refusal_metrics(run.get("messages") or [], run.get("refusals"))
     metrics = {
         "tool_call_count": len(names),
         "credits": {unit: str(amount) for unit, amount in sorted(credits.items())},
@@ -530,6 +657,10 @@ def evaluate_case(request, run):
         "choice_card_count": sum(1 for card in cards if card.get("kind") == "choice"),
         "approval_card_count": sum(1 for card in cards if card.get("kind") == "approval"),
         "plan_card_count": sum(1 for card in cards if card.get("kind") == "plan"),
+        "agent_rounds": agent_rounds(run.get("messages") or []),
+        "text_questions": text_questions(run.get("messages") or []),
+        "refusals": {"total": sum(refusal_by_code.values()), "by_code": refusal_by_code,
+                     "source": refusal_source},
         "tool_counts": counts,
         "rework": {
             "count": rework_count,
@@ -605,6 +736,13 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
             checkpoint_totals[name] += checkpoints.get(name, 0)
     passed_cases = len(cases) - len({case["id"] for case in cases if case_hard_failures(case)})
     success_rate = round(100.0 * passed_cases / len(cases), 1) if cases else 0.0
+    total_rounds = sum(case["metrics"].get("agent_rounds", 0) for case in cases)
+    total_questions = sum(case["metrics"].get("text_questions", 0) for case in cases)
+    total_refusals = sum((case["metrics"].get("refusals") or {}).get("total", 0) for case in cases)
+    refusal_codes = {}
+    for case in cases:
+        for code, count in ((case["metrics"].get("refusals") or {}).get("by_code") or {}).items():
+            refusal_codes[code] = refusal_codes.get(code, 0) + count
     recorded_checks = sum(1 for case in cases for check in case.get("checks") or []
                           if check.get("status") == CHECK_INFO)
     skipped_checks = sum(1 for case in cases for check in case.get("checks") or []
@@ -658,6 +796,10 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
                 "checkpoint_failed": checkpoint_totals["failed"],
                 "checkpoint_waived": checkpoint_totals["waived"],
                 "checkpoint_unknown": checkpoint_totals["unknown"],
+                "agent_rounds": total_rounds,
+                "text_questions": total_questions,
+                "refusals": total_refusals,
+                "refusal_codes": dict(sorted(refusal_codes.items())),
                 "success_rate": success_rate,
                 # #498: recorded and skipped checks, so a reader of the JSON sees
                 # how much of the case verdict was not measured.
@@ -718,21 +860,25 @@ def report_markdown(report):
         f"- 用例: {summary.get('cases', 0)}；硬失败: {summary.get('hard_failures', 0)}；成功率: {metrics.get('success_rate', 0)}%",
         f"- 仅记录（不参与通过判定）: {metrics.get('recorded_checks', 0)} 项；已跳过（不参与通过判定）: {metrics.get('skipped_checks', 0)} 项",
         f"- 合计: 工具调用 {metrics.get('tool_calls', 0)}，付费调用 {metrics.get('paid_calls', 0)}，打断 {metrics.get('interruptions', 0)}，inspect {metrics.get('inspect_model', 0)}，render {metrics.get('render_model_views', 0)}，对照 {metrics.get('compare_model_reference', 0)}，自检记录 {metrics.get('self_check_records', 0)}，计费 {metrics.get('credits', {})}",
+        f"- 交互形态（#407）: Agent 轮数 {metrics.get('agent_rounds', 0)}，文本反问 {metrics.get('text_questions', 0)}，被拒绝的工具调用 {metrics.get('refusals', 0)} {metrics.get('refusal_codes', {})}",
         f"- 返工: {metrics.get('rework_count', 0)}（修订 {metrics.get('revision_count', 0)}）；检查点 {metrics.get('checkpoint_count', 0)}（失败 {metrics.get('checkpoint_failed', 0)}，放弃 {metrics.get('checkpoint_waived', 0)}，无法判断 {metrics.get('checkpoint_unknown', 0)}）",
         "",
-        "| 用例 | 结果 | 工具 | 付费 | 打断 | inspect | render | 对照 | 自检 | 返工 | 修订 | 检查点 | 耗时 |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "| 用例 | 结果 | 工具 | 付费 | 打断 | 轮数 | 反问 | 拒绝 | inspect | render | 对照 | 自检 | 返工 | 修订 | 检查点 | 耗时 |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for case in report.get("cases") or []:
         case_metrics = case.get("metrics") or {}
         status = "FAIL" if case_hard_failures(case) else "PASS"
         elapsed = case_metrics.get("elapsed_ms")
         lines.append(
-            "| {id} | {status} | {tools} | {paid} | {cards} | {inspect} | {render} | {reference} | {check} | {rework} | {revisions} | {checkpoints} | {elapsed} |".format(
+            "| {id} | {status} | {tools} | {paid} | {cards} | {rounds} | {questions} | {refusals} | {inspect} | {render} | {reference} | {check} | {rework} | {revisions} | {checkpoints} | {elapsed} |".format(
                 id=case.get("id"), status=status,
                 tools=case_metrics.get("tool_call_count", 0),
                 paid=case_metrics.get("paid_call_count", 0),
                 cards=case_metrics.get("interruption_count", 0),
+                rounds=case_metrics.get("agent_rounds", 0),
+                questions=case_metrics.get("text_questions", 0),
+                refusals=(case_metrics.get("refusals") or {}).get("total", 0),
                 inspect=case_metrics.get("self_inspection", {}).get("inspect_model", 0),
                 render=case_metrics.get("self_inspection", {}).get("render_model_views", 0),
                 reference=case_metrics.get("self_inspection", {}).get("compare_model_reference", 0),
@@ -754,6 +900,8 @@ def report_markdown(report):
         lines.append(f"### {case['id']} — {case['title']}")
         lines.append("")
         lines.append(f"- 工具：{case_metrics.get('tool_counts')}")
+        lines.append(f"- 交互形态：轮数 {case_metrics.get('agent_rounds', 0)}，文本反问 {case_metrics.get('text_questions', 0)}，"
+                     f"拒绝 {(case_metrics.get('refusals') or {}).get('total', 0)} {case_metrics.get('refusals')}")
         lines.append(f"- 自检：{case_metrics.get('self_inspection')}")
         lines.append(f"- 返工：{case_metrics.get('rework')}")
         lines.append(f"- 检查点：{case_metrics.get('checkpoints')}")
@@ -959,6 +1107,10 @@ TAIL_METRICS = {
     "tool_calls": "lower",
     "paid_calls": "lower",
     "interruptions": "lower",
+    # #407: a refusal means the Agent asked for something the server refused; a tool-using round
+    # more means more model/tool cycles for the same request.
+    "refusals": "lower",
+    "agent_rounds": "lower",
     "inspect_model": "higher",
     "render_model_views": "higher",
     "compare_model_reference": "higher",
@@ -1085,6 +1237,8 @@ CASE_METRIC_PATHS = {
     "tool_calls": ("tool_call_count",),
     "paid_calls": ("paid_call_count",),
     "interruptions": ("interruption_count",),
+    "refusals": ("refusals", "total"),
+    "agent_rounds": ("agent_rounds",),
     "inspect_model": ("self_inspection", "inspect_model"),
     "render_model_views": ("self_inspection", "render_model_views"),
     "compare_model_reference": ("self_inspection", "compare_model_reference"),
@@ -1152,7 +1306,7 @@ def compare_markdown(baseline, candidate, problems, regressions, improvements, c
     base_summary = (baseline.get("summary") or {}).get("metrics") or {}
     cand_summary = (candidate.get("summary") or {}).get("metrics") or {}
     quality_metrics = ("success_rate", "rework_count", "revision_count", "checkpoint_count",
-                       "checkpoint_failed", "checkpoint_waived")
+                       "checkpoint_failed", "checkpoint_waived", "text_questions")
     if any(name in base_summary or name in cand_summary for name in quality_metrics):
         # #251: recorded for the #238 comparison. Rework is intentionally not
         # a TAIL_METRICS regression gate: a base without checkpoints may rework
