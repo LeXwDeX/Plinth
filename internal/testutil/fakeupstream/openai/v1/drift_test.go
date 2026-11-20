@@ -141,13 +141,27 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 	}
 }
 
-// Every endpoint row names a committed sample, and the table matches the routes.
+// Every endpoint row is a real endpoint with a committed sample, or a
+// constructed one that names the sample of its own it is aligned to (#401), and
+// the table matches the routes.
 func TestEndpointTableIsCompleteAndHonest(t *testing.T) {
 	samples := loadSamples(t)
 	f := newFixture(t, fakeupstream.Config{})
 	for _, endpoint := range endpoints {
-		if endpoint.Evidence != fakeupstream.EvidenceReal || len(samples.Find(endpoint.Sample, "")) == 0 {
-			t.Errorf("%s has no real sample %q", endpoint.Key(), endpoint.Sample)
+		switch endpoint.Evidence {
+		case fakeupstream.EvidenceReal:
+			if len(samples.Find(endpoint.Sample, "")) == 0 {
+				t.Errorf("%s has no real sample %q", endpoint.Key(), endpoint.Sample)
+			}
+		case fakeupstream.EvidenceConstructed:
+			// POST /responses is the one constructed endpoint: its probe sample is
+			// not a wirefixture candidate (see responses_sample.go), and its note
+			// says which parts it does not cover.
+			if endpoint.Key() != "POST /responses" || !strings.Contains(endpoint.Note, responsesSampleFile) {
+				t.Errorf("%s is constructed and does not name its sample", endpoint.Key())
+			}
+		default:
+			t.Errorf("%s has evidence %q", endpoint.Key(), endpoint.Evidence)
 		}
 		if !strings.HasPrefix(endpoint.DocURL, "https://") || endpoint.CheckedAt == "" {
 			t.Errorf("%s: needs a documentation URL and a check date", endpoint.Key())

@@ -31,6 +31,10 @@ import (
 //     requires Responses, and that a Chat Completions request must omit
 //     temperature. The wording of the none refusal is constructed.
 //
+// The rules are those of the model, not of a wire: POST /responses judges the
+// same models by the same table and answers in its own words
+// (responses_constraints.go), and accepts the function tools this wire refuses.
+//
 // A request that breaks several rules is answered with the first one in the
 // order below: none, tools, temperature. The logs pair the Agent turns, which
 // broke the tools and temperature rules at once (tools, a high effort and

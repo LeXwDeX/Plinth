@@ -1,7 +1,8 @@
 // Package openaiv1 is the fake of the OpenAI-compatible /v1 chat API that the
 // Catalog's llm_base_url points at (chat/completions with streaming, tool
-// calls and reasoning_content, and models). It is mounted at /openai/v1 and is
-// frozen once released; another wire version gets a sibling package.
+// calls and reasoning_content, responses, and models). It is mounted at
+// /openai/v1 and is frozen once released; another wire version gets a sibling
+// package.
 //
 // The committed samples record the dev-test gateway's wire. Where that gateway
 // diverges from the OpenAI documents, the fake mirrors the gateway and records
@@ -32,4 +33,20 @@
 // reasoning_effort none refusal is constructed from OpenAI's latest-model
 // guide and model page (read 2026-11-20). Which of the two sources a rule
 // comes from is stated in constraints.go.
+//
+// POST /responses (#401, responses*.go) is the wire those models serve
+// function tools on. Its answers are cloned from
+// testdata/responses-2026-11-20.sample.json, a sanitized excerpt of a real
+// probe of the gateway: the streamed tool call and text answer (an event: line
+// equal to data.type, no [DONE]), the non-stream response and the two 400s the
+// constrained models answer (temperature present, an unknown
+// reasoning.effort), byte for byte. The probe is not a wirefixture candidate,
+// because the capture pipeline refuses SSE with event: lines, so the endpoint
+// is declared constructed and says what the sample does not cover (reasoning
+// items, response.incomplete and response.failed, the in-stream error event,
+// input_image, parallel calls, the call/output pairing errors): those parts
+// are built from the OpenAI documents. A Responses request is also read as a
+// Chat Completions one (responsesRequest.chatView), so the fake-only request
+// conventions work on both wires, and the Responses ones are
+// ReasoningMarker, IncompleteMarker, FailedMarker and UnknownEventMarker.
 package openaiv1

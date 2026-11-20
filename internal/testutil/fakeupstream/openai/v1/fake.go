@@ -198,6 +198,9 @@ var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: "https://platform.openai.com/docs/api-reference/chat/create", CheckedAt: "2026-10-29",
 		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go). Model constraints (#401, constraints.go): a request for gpt-astra or gpt-6.2-astra is judged by that model's rules and refused with a 400 invalid_request_error before any completion runs; the tools and temperature refusals are observed from the gateway's logs of 2026-11-20 (no committed sample), the reasoning_effort none refusal is constructed from the OpenAI documents checked the same day"},
+	{Method: "POST", Path: "/responses", Evidence: fakeupstream.EvidenceConstructed,
+		DocURL: "https://platform.openai.com/docs/api-reference/responses/create", CheckedAt: "2026-11-20",
+		Note: "the Responses API (#401). Aligned to a real probe of the gateway on 2026-11-20 whose sanitized excerpt is testdata/responses-2026-11-20.sample.json: the streamed tool call and text answer (event order, field set, the event: line), the non-stream response, the 400 for temperature on gpt-astra and for an unknown reasoning.effort (byte for byte). Kept constructed because the probe is not a wirefixture candidate: the capture pipeline cannot record SSE with event: lines and no [DONE], so the sample is hand-sanitized (its provenance says which parts were completed from the non-stream response). Constructed from the OpenAI documents, with no sample: reasoning items and their events, response.incomplete, response.failed, the in-stream error event, input_image, parallel function calls, the pairing errors for function_call and function_call_output (No tool call found for function call output / No tool output found for function call) and for a reasoning item without its following item, and the refusal of reasoning.effort none. Fake-only request conventions: the chat ones plus " + ReasoningMarker + ", " + IncompleteMarker + ", " + FailedMarker + " and " + UnknownEventMarker + ""},
 }
 
 // Version is the OpenAI-compatible /v1 fake.
@@ -217,6 +220,8 @@ type handler struct {
 	invalid map[string]any
 	stream  []map[string]any
 	toolSSE []map[string]any
+	// responses are the structures POST /responses answers are cloned from.
+	responses *responsesTemplates
 }
 
 func newHandler(env *fakeupstream.Env) (http.Handler, error) {
@@ -260,9 +265,13 @@ func newHandler(env *fakeupstream.Env) (http.Handler, error) {
 	if h.models == nil || h.text == nil || h.tool == nil || h.invalid == nil || len(h.stream) == 0 || len(h.toolSSE) == 0 {
 		return nil, errors.New("openai/v1 sample lacks models, text, tool, stream, tool stream or error exchanges")
 	}
+	if h.responses, err = newResponsesTemplates(); err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /models", h.listModels)
 	mux.HandleFunc("POST /chat/completions", h.chat)
+	mux.HandleFunc("POST /responses", h.createResponse)
 	return mux, nil
 }
 
