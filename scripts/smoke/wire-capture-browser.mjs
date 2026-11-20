@@ -366,8 +366,10 @@ export async function run(argv = process.argv.slice(2)) {
     await page.getByTestId('studio-approval-menu').filter({ hasText: text('ui.workspace.approval.mode_manual') }).waitFor();
     report.approval = { mode: 'manual', pending: 0, decision: 'not_requested' };
 
+    // The generation models and parameters are tabs of the settings dialog behind the gear beside the send button (#405).
     phase = 'meshy_picker';
-    await page.getByTestId('workspace-model-picker').click();
+    await page.getByTestId('composer-settings-open').click();
+    await page.getByTestId('composer-settings-tab-models').click();
     const row = page.getByTestId('workspace-model-picker-model').getByRole('menuitemradio')
       .filter({ has: page.getByText(selected.model_name, { exact: true }) });
     await row.waitFor();
@@ -375,11 +377,12 @@ export async function run(argv = process.argv.slice(2)) {
     await row.click();
     await row.and(page.locator('[aria-checked="true"]')).waitFor();
     await page.keyboard.press('Escape');
-    await page.getByTestId('workspace-model-picker-panel').waitFor({ state: 'hidden' });
+    await page.getByTestId('composer-settings-dialog').waitFor({ state: 'hidden' });
     report.model_selector = 'pass';
 
     phase = 'offering_cost_panel';
-    await page.getByTestId('composer-params').click();
+    await page.getByTestId('composer-settings-open').click();
+    await page.getByTestId('composer-settings-tab-params').click();
     const panel = page.locator('[data-testid="params-domain"][data-domain="model-3d"]');
     await panel.locator(`[data-testid="params-cost"]`).waitFor();
     check(await panel.getAttribute('data-offering') === selected.id, 'ui_offering_mismatch');
@@ -390,7 +393,7 @@ export async function run(argv = process.argv.slice(2)) {
     check((await panel.getByTestId('params-cost').innerText()).includes(expectedCost), 'ui_price_mismatch');
     report.cost_label = publicLabel(expectedCost);
     await page.keyboard.press('Escape');
-    await page.getByTestId('composer-params-panel').waitFor({ state: 'hidden' });
+    await page.getByTestId('composer-settings-dialog').waitFor({ state: 'hidden' });
     phase = 'synthetic_draft';
     const draft = page.getByTestId('studio-composer').locator('textarea');
     await draft.fill(syntheticPrompt); // fill, never Enter: Enter sends a real Agent turn.

@@ -9,8 +9,9 @@
  * Per engine and viewport (a fresh person each time):
  *  1. Tripo segmentation is quoted 90 in the 加工 panel (service list, step line, total) and after saving it
  *     as the session's 功能 setting; no "40–90" range anywhere.
- *  3. The model picker trigger names both chosen models; the hover holds model and provider. Closing a
- *     picker panel with Esc opens no hint over the neighbouring pickers (#322 note 99059); the hint is passive.
+ *  3. The models tab of the settings dialog behind the gear (#405) names both chosen models and their providers; the
+ *     gear's name and hover hint say what changed. Closing the dialog with Esc opens no hint over the gear or the
+ *     send button beside it (#322 note 99059); the hint is passive.
  *  4. The 格式 tab's completion button says 免费 when only free conversions remain.
  *  5/12. An Agent approval card for Tripo Smart Segmentation names its source model (not a bare
  *     placeholder) and reads the Tripo balance (no "balance unavailable").
@@ -224,58 +225,69 @@ async function checks(engine, browser, [width, height]) {
     return shown.replace(/\s+/g, ' ');
   });
 
-  await step('3: the model picker names both chosen models; the hover names model and provider', async () => {
-    await page.click('[data-testid=workspace-model-picker]');
+  await step('3: the models tab names both chosen models and their providers; the gear says what changed', async () => {
+    // #405: the generation models are the models tab of the settings dialog behind the gear beside the send button; a pick
+    // applies at once and the dialog stays open.
+    const gear = page.locator('[data-testid=composer-settings-open]');
+    await gear.click();
     const popup = page.locator('[data-testid=workspace-model-picker-panel]');
     await popup.waitFor();
     await popup.getByText('Nano Banana Pro (高质量)', { exact: true }).first().click();
     await popup.getByText('Meshy 7.1', { exact: true }).first().click();
-    await page.keyboard.press('Escape');
-    const trigger = page.locator('[data-testid=workspace-model-picker]');
-    const parts = await trigger.locator('[data-part]').allInnerTexts();
-    assert.deepEqual(parts, ['Nano Banana Pro (高质量)', 'Meshy 7.1']);
-    const name = await trigger.getAttribute('aria-label');
-    assert(name.includes('Nano Banana Pro (高质量)（Meshy AI）') && name.includes('Meshy 7.1（Meshy AI）'), `aria-label ${name}`);
-    const box = await trigger.boundingBox();
-    const fits = await trigger.locator('[data-part]').evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().right));
-    assert(fits.every((right) => right <= box.x + box.width), 'a name runs past the trigger');
-    await trigger.hover();
-    await page.locator('[data-testid=hint-tooltip]').first().waitFor({ timeout: 5000 });
+    const checked = async (scope) => (await popup.locator(`[data-testid=workspace-model-picker-${scope}] [role=menuitemradio][aria-checked=true]`).innerText()).replace(/\s+/g, ' ');
+    const image = await checked('image');
+    const model = await checked('model');
+    assert(image.includes('Nano Banana Pro (高质量)') && image.includes('Meshy AI'), `2D row ${image}`);
+    assert(model.includes('Meshy 7.1') && model.includes('Meshy AI'), `3D row ${model}`);
     await shot('3-picker');
-    return `${parts.join(' · ')} | ${name}`;
+    await page.keyboard.press('Escape');
+    await page.locator('[data-testid=composer-settings-dialog]').waitFor({ state: 'detached' });
+    const pair = fill(text('ui.studio.picker.pair'), { image: 'Nano Banana Pro (高质量)', model: 'Meshy 7.1' });
+    const name = await gear.getAttribute('aria-label');
+    assert(name.includes(pair), `aria-label ${name}`);
+    assert.equal(await gear.getAttribute('data-changed'), 'true');
+    const box = await gear.boundingBox();
+    const composer = await page.locator('[data-testid=studio-composer]').boundingBox();
+    assert(box.x >= composer.x && box.x + box.width <= composer.x + composer.width, 'the gear runs past the composer');
+    await gear.hover();
+    const bubble = page.locator('[data-testid=hint-tooltip]').first();
+    await bubble.waitFor({ timeout: 5000 });
+    assert((await bubble.innerText()).includes(pair), `hint ${await bubble.innerText()}`);
+    return `${pair} | ${name}`;
   });
 
-  await step('3: closing a picker panel with Esc opens no hint over the pickers beside it', async () => {
-    // Every composer picker shares the trigger and its hint (TablePopover); the chat model picker appears only
-    // when an administrator offers two chat models, so the ones the mock stack shows stand for it.
-    const pickers = ['workspace-model-picker', 'workspace-skill-picker', 'workspace-agent-scope-picker', 'workspace-reasoning-picker'];
+  await step('3: closing the settings dialog with Esc opens no hint over the gear or the send button beside it', async () => {
+    // The gear and its dialog share one hint (#405): the dialog leaves the focus on the gear when it closes, which must
+    // not open the hint. The chat model tab only exists when the session has a model choice or levels to show.
+    const gear = page.locator('[data-testid=composer-settings-open]');
+    const dialog = page.locator('[data-testid=composer-settings-dialog]');
     const checked = [];
-    for (const id of pickers) {
-      const trigger = page.locator(`[data-testid=${id}]`);
-      if (!(await trigger.count()) || await trigger.isDisabled()) continue;
-      await trigger.click();
-      const popup = page.locator(`[data-testid=${id}-panel]`);
-      await popup.waitFor();
-      // As in #322 note 99059: the pointer is over the panel, not the trigger, when Esc closes it.
-      const inside = await popup.boundingBox();
+    for (const id of ['models', 'skills', 'params', 'chat']) {
+      await gear.click();
+      await dialog.waitFor();
+      const tab = page.locator(`[data-testid=composer-settings-tab-${id}]`);
+      if (!(await tab.count())) { await page.keyboard.press('Escape'); await dialog.waitFor({ state: 'detached' }); continue; }
+      await tab.click();
+      // As in #322 note 99059: the pointer is over the dialog, not the gear, when Esc closes it.
+      const inside = await dialog.boundingBox();
       await page.mouse.move(inside.x + inside.width / 2, inside.y + 12);
       await page.keyboard.press('Escape');
-      await popup.waitFor({ state: 'hidden' });
+      await dialog.waitFor({ state: 'detached' });
       await page.waitForTimeout(600);
       assert.equal(await page.locator('[data-testid=hint-tooltip]').count(), 0, `${id}: a hint opened after Esc`);
-      assert(await trigger.evaluate((node) => node === document.activeElement), `${id}: focus did not return to the trigger`);
-      for (const neighbour of pickers.filter((other) => other !== id)) {
-        const box = await page.locator(`[data-testid=${neighbour}]`).boundingBox().catch(() => null);
-        if (!box) continue;
-        const hit = await page.evaluate(([x, y, other]) => Boolean(document.elementFromPoint(x, y)?.closest(`[data-testid=${other}]`)), [box.x + 8, box.y + box.height / 2, neighbour]);
-        assert(hit, `${id}: ${neighbour} is covered after Esc`);
-      }
+      assert(await gear.evaluate((node) => node === document.activeElement), `${id}: focus did not return to the gear`);
+      const send = await page.locator('[data-testid=composer-send]').boundingBox();
+      // The send button is off while the box is empty and takes no pointer then, so the point lands on its hint wrapper.
+      const hit = await page.evaluate(([x, y]) => {
+        const element = document.elementFromPoint(x, y);
+        return Boolean(element && (element.closest('[data-testid=composer-send]') || element.querySelector('[data-testid=composer-send]')));
+      }, [send.x + send.width / 2, send.y + send.height / 2]);
+      assert(hit, `${id}: the send button is covered after Esc`);
       checked.push(id);
     }
-    assert(checked.includes('workspace-model-picker'), `checked ${checked.join(', ')}`);
-    // Hovering the trigger still shows the hint at once; it never takes the pointer and leaves with it.
-    const trigger = page.locator('[data-testid=workspace-model-picker]');
-    await trigger.hover();
+    assert(checked.includes('models'), `checked ${checked.join(', ')}`);
+    // Hovering the gear still shows the hint at once; it never takes the pointer and leaves with it.
+    await gear.hover();
     const bubble = page.locator('[data-testid=hint-tooltip]').first();
     await bubble.waitFor({ timeout: 5000 });
     assert.equal(await bubble.evaluate((node) => getComputedStyle(node).pointerEvents), 'none', 'the hint takes the pointer');

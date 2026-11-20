@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * Real-browser check for #236: the chat model / thinking level panel opens on the first click after a page load and
- * stays open while the session context (levels, model list, context usage, messages) is still arriving. It closes only
- * when a level is picked, on Esc or on a click outside, and the trigger node is never replaced while it loads.
+ * Real-browser check for #236 (reworked for #405): the settings dialog behind the gear beside the send button opens on the
+ * first press after a page load and stays open while the session context (levels, model list, context usage, messages) is
+ * still arriving, and its chat model / thinking level tab then works. The dialog closes only on Esc, the close button or a
+ * click outside; picking a level does not close it (#405: a pick applies at once and the dialog stays open). The gear node
+ * is never replaced while the context loads.
  *
  * Needs a local server with mock providers, the mock Agent and mock login (no credentials, no paid
  * calls), built from this checkout (`pnpm build` first), e.g.
@@ -11,19 +13,20 @@
  *   DATABASE_PATH=<scratch>/a.db STORAGE_ROOT=<scratch>/storage LOG_DIR=<scratch>/logs go run ./cmd/art-ai
  * then
  *   BASE=http://127.0.0.1:18236 node scripts/test-picker-first-load-236.mjs
- * With one chat model the panel lists the thinking levels alone; with a second connection (LLM_CONNECTIONS, see
+ * With one chat model the chat tab lists the thinking levels alone; with a second connection (LLM_CONNECTIONS, see
  * scripts/test-llm-settings.mjs) it has two columns and the model rows are exercised too.
  *
  * Optional env: ENGINES (default "chromium,webkit"), VIEWPORTS (default "1440x900"), OUT (timeline of a failed case,
  * screenshots and report.json; default a temp folder), PLAYWRIGHT_MODULE_PATH. Every request outside BASE is refused.
  *
- * Per engine and viewport, every case loads the page in a fresh context and clicks the trigger on the first frame it
+ * Per engine and viewport, every case loads the page in a fresh context and presses the gear on the first frame it
  * is on screen, while the server's answers are held back like this:
  *   no delay | the model list +900ms | the levels +900ms | the context usage +900ms | all four staggered.
- * Each case then checks that the panel opened, stayed open (no frame without it) until the held answers had landed,
- * kept the same trigger node and kept the keyboard focus inside; then Esc closes it, a level pick closes it (one PUT),
- * a click outside closes it, and three click/Esc rounds in a row open it every time. When a case fails, the page's own
- * timeline (presses, focus moves, keys, aria-expanded, panel present) is printed, which names what closed the panel.
+ * Each case then checks that the dialog opened, stayed open (no frame without it) until the held answers had landed,
+ * kept the same gear node and kept the keyboard focus inside; the chat model tab appears with the session's data and is
+ * opened; then Esc closes the dialog and hands the focus back to the gear, a level pick (one PUT) applies and leaves the
+ * dialog open, a click outside closes it, and three press/Esc rounds in a row open it every time. When a case fails, the
+ * page's own timeline (presses, focus moves, keys, aria-expanded, dialog present) is printed, which names what closed it.
  */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -72,11 +75,14 @@ const PROFILES = [
   { name: 'context usage +900ms', hold: { context: 900 } },
   { name: 'all staggered', hold: { reasoning: 300, messages: 500, model: 700, context: 1100 } },
 ];
-const TRIGGER = '[data-testid=workspace-chat-model-picker]';
+// #405: the trigger is the gear, the panel is the dialog behind it; the chat model and levels are its chat tab.
+const TRIGGER = '[data-testid=composer-settings-open]';
+const DIALOG = '[data-testid=composer-settings-dialog]';
+const CHAT_TAB = '[data-testid=composer-settings-tab-chat]';
 const PANEL = '[data-testid=workspace-chat-model-picker-panel]';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Runs in the page before its own scripts: a timeline of everything that can close or move a panel. */
+/** Runs in the page before its own scripts: a timeline of everything that can close or move the dialog. */
 function installTimeline() {
   const events = [];
   window.__timeline = events;
@@ -88,9 +94,9 @@ function installTimeline() {
   let count = 0;
   let last = '';
   const frame = () => {
-    const trigger = document.querySelector('[data-testid=workspace-chat-model-picker]');
+    const trigger = document.querySelector('[data-testid=composer-settings-open]');
     if (trigger && !ids.has(trigger)) ids.set(trigger, ++count);
-    const panel = document.querySelector('[data-testid=workspace-chat-model-picker-panel]');
+    const panel = document.querySelector('[data-testid=composer-settings-dialog]');
     const now = `trigger#${trigger ? ids.get(trigger) : '-'} expanded=${trigger ? trigger.getAttribute('aria-expanded') : '-'} panel=${panel ? 'yes' : 'no'}`;
     if (now !== last) { events.push([stamp(), 'state', now]); last = now; }
     requestAnimationFrame(frame);
@@ -150,49 +156,60 @@ async function checks(engine, browser, [width, height]) {
           await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         };
         await press();
-        const panel = page.locator(PANEL);
-        await panel.waitFor({ timeout: 5000 });
+        const dialog = page.locator(DIALOG);
+        await dialog.waitFor({ timeout: 5000 });
         await sleep(Math.max(0, ...Object.values(profile.hold)) + 800);
 
         const frames = await page.evaluate(() => window.__timeline.filter((event) => event[1] === 'state').map((event) => event[2]));
-        assert(frames.some((state) => state.includes('panel=yes')), 'the panel never showed');
+        assert(frames.some((state) => state.includes('panel=yes')), 'the dialog never showed');
         const firstOpen = frames.findIndex((state) => state.includes('panel=yes'));
-        assert(frames.slice(firstOpen).every((state) => state.includes('panel=yes') && state.includes('expanded=true')), `the panel closed by itself: ${frames.slice(firstOpen).join(' > ')}`);
-        assert.equal(new Set(frames.map((state) => state.split(' ')[0]).filter((state) => state !== 'trigger#-')).size, 1, 'the trigger node was replaced');
-        assert(await page.evaluate((selector) => document.querySelector(selector).contains(document.activeElement), PANEL), 'the keyboard focus left the panel');
+        assert(frames.slice(firstOpen).every((state) => state.includes('panel=yes') && state.includes('expanded=true')), `the dialog closed by itself: ${frames.slice(firstOpen).join(' > ')}`);
+        assert.equal(new Set(frames.map((state) => state.split(' ')[0]).filter((state) => state !== 'trigger#-')).size, 1, 'the gear node was replaced');
+        assert(await page.evaluate((selector) => document.querySelector(selector).contains(document.activeElement), DIALOG), 'the keyboard focus left the dialog');
+        // The chat model tab comes with the session's model list and levels, so it can appear after the dialog is open.
+        const chatTab = page.locator(CHAT_TAB);
+        await chatTab.waitFor({ timeout: 10000 });
+        await chatTab.click();
+        const panel = page.locator(PANEL);
+        await panel.waitFor({ timeout: 5000 });
+        assert.equal(await dialog.count(), 1, 'the dialog closed while the chat model tab opened');
         const columns = (await panel.getAttribute('data-layout')) === 'columns';
 
         await page.keyboard.press('Escape');
-        await panel.waitFor({ state: 'detached', timeout: 3000 });
+        await dialog.waitFor({ state: 'detached', timeout: 3000 });
+        assert(await page.evaluate((selector) => document.activeElement === document.querySelector(selector), TRIGGER), 'the focus did not return to the gear');
+        // The gear opens the dialog on the tab it was left on.
+        await press();
+        await panel.waitFor({ timeout: 5000 });
         if (columns) {
-          await press();
-          await panel.waitFor({ timeout: 5000 });
           const other = panel.locator('[data-testid=workspace-chat-model-section] [role=menuitemradio][aria-checked=false]').first();
           await other.click();
           await sleep(900);
-          assert.equal(await panel.count(), 1, 'picking a model closed the panel');
+          assert.equal(await dialog.count(), 1, 'picking a model closed the dialog');
           assert((await panel.locator('[data-testid=workspace-reasoning-section]').count()) === 1, 'the levels column went away');
-        } else {
-          await press();
-          await panel.waitFor({ timeout: 5000 });
         }
         const level = panel.locator('[data-testid=workspace-reasoning-section] [role=menuitemradio][aria-checked=false]').first();
+        const levelName = (await level.innerText()).trim().split(/\s+/)[0].toLowerCase();
         const put = page.waitForRequest((request) => request.method() === 'PUT' && HELD.reasoning.test(new URL(request.url()).pathname), { timeout: 5000 });
         await level.click();
         await put;
-        await panel.waitFor({ state: 'detached', timeout: 3000 });
+        // #405: the pick applies at once and the dialog stays open, with the picked level checked.
+        await page.waitForFunction(([selector, name]) => {
+          const row = document.querySelector(selector);
+          // innerText: the rows' names are capitalised by CSS, the level values are not.
+          return Boolean(row && row.innerText.trim().split(/\s+/)[0].toLowerCase() === name);
+        }, [`${DIALOG} [data-testid=workspace-reasoning-section] [role=menuitemradio][aria-checked=true]`, levelName], { timeout: 5000 });
+        assert.equal(await dialog.count(), 1, 'picking a level closed the dialog');
 
-        await press();
-        await panel.waitFor({ timeout: 5000 });
         await page.mouse.click(6, 6);
-        await panel.waitFor({ state: 'detached', timeout: 3000 });
+        await dialog.waitFor({ state: 'detached', timeout: 3000 });
         for (let round = 0; round < 3; round += 1) {
           await press();
-          await panel.waitFor({ timeout: 5000 });
+          await dialog.waitFor({ timeout: 5000 });
           await sleep(300);
-          assert.equal(await panel.count(), 1, `round ${round + 1}: the panel closed by itself`);
+          assert.equal(await dialog.count(), 1, `round ${round + 1}: the dialog closed by itself`);
           await page.keyboard.press('Escape');
-          await panel.waitFor({ state: 'detached', timeout: 3000 });
+          await dialog.waitFor({ state: 'detached', timeout: 3000 });
         }
         assert.equal(outside.length, 0, `requests outside BASE: ${outside.join(', ')}`);
         return columns ? 'two columns' : 'levels only';

@@ -7,9 +7,10 @@
  *   DATABASE_PATH=<scratch>/a.db STORAGE_ROOT=<scratch>/storage LOG_DIR=<scratch>/logs go run ./cmd/art-ai
  * then  BASE=http://127.0.0.1:18429 OUT=<scratch>/out node scripts/test-meshy-upgrade-329.mjs
  * Per engine and viewport (a fresh person each time):
- *  A. the 3D model picker lists Meshy 7.1 and Meshy T2.5 Smart Topology, and no retired Meshy model;
- *  B. a local pick of the retired Meshy 7 opens on Meshy 7.1 with the Schema notice; picking another model
- *     clears the notice;
+ *  A. the 3D table of the models tab of the settings dialog (the gear beside the send button, #405) lists Meshy 7.1
+ *     and Meshy T2.5 Smart Topology, and no retired Meshy model;
+ *  B. a local pick of the retired Meshy 7 opens on Meshy 7.1 with the Schema notice (the gear's accessible name says
+ *     Meshy 7.1); picking another model clears the notice;
  *  C. a session whose turn used Meshy 7, opened with no local pick, restores Meshy 7.1 with the notice;
  *  D. generating with Meshy 7.1 and Meshy T2.5 (public prepare → grant → submit) succeeds, and the chat with
  *     Meshy T2.5 picked runs a T2.5 task.
@@ -281,17 +282,32 @@ async function modelRows(page) {
   }));
 }
 
+/**
+ * #405: the generation models are the models tab of the settings dialog behind the gear beside the send button. A pick
+ * applies at once and the dialog stays open, so it is closed again before the composer is used.
+ */
 async function openPicker(page) {
-  await page.click('[data-testid=workspace-model-picker]');
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) {
+    await page.click('[data-testid=composer-settings-open]');
+    await dialog.waitFor({ timeout: 10000 });
+  }
+  await page.click('[data-testid=composer-settings-tab-models]');
   await page.locator('[data-testid=workspace-model-picker-panel]').waitFor({ timeout: 10000 });
 }
 
 async function closePicker(page) {
+  const dialog = page.locator('[data-testid=composer-settings-dialog]');
+  if (!(await dialog.count())) return;
   await page.keyboard.press('Escape');
-  await page.locator('[data-testid=workspace-model-picker-panel]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+  await dialog.waitFor({ state: 'detached', timeout: 5000 });
 }
 
-const trigger = (page) => page.locator('[data-testid=workspace-model-picker]');
+/**
+ * What the composer says about the generation models picked: the gear's accessible name, which lists the picked 2D and 3D
+ * models once either is locked (the former trigger showed the same pair).
+ */
+const pickedLabel = async (page) => (await page.locator('[data-testid=composer-settings-open]').getAttribute('aria-label')) ?? '';
 const notice = (page) => page.locator('[data-testid=workspace-model-retired-notice]');
 
 async function checks(engine, browser, [width, height], locale) {
@@ -328,9 +344,9 @@ async function checks(engine, browser, [width, height], locale) {
     await openStudio(page, session.id);
     await notice(page).first().waitFor({ timeout: 20000 });
     const said = (await notice(page).first().innerText()).trim();
-    assert.equal(said, NOTICE);
-    const shown = await trigger(page).innerText();
-    assert(shown.includes(LATEST_NAME) && !RETIRED_NAME.test(shown), `trigger "${shown}"`);
+    assert(said.includes(NOTICE), `notice "${said}" lacks the Schema sentence "${NOTICE}"`);
+    const shown = await pickedLabel(page);
+    assert(shown.includes(LATEST_NAME) && !RETIRED_NAME.test(shown), `gear "${shown}"`);
     const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}'), PREFS_KEY);
     assert.equal(stored?.state?.modelByDomain?.['model-3d'], RETIRED.successor_model_id, `stored ${JSON.stringify(stored)}`);
     await shot(page, 'B-notice');
@@ -357,8 +373,8 @@ async function checks(engine, browser, [width, height], locale) {
     await section.locator('button[role=menuitemradio]', { hasText: T25_NAME }).first().click();
     await closePicker(page);
     await notice(page).first().waitFor({ state: 'detached', timeout: 10000 });
-    const shown = await trigger(page).innerText();
-    assert(shown.includes(T25_NAME) || shown.includes('T2.5'), `trigger "${shown}"`);
+    const shown = await pickedLabel(page);
+    assert(shown.includes(T25_NAME) || shown.includes('T2.5'), `gear "${shown}"`);
     return shown.replace(/\s+/g, ' ');
   });
 
@@ -408,7 +424,7 @@ async function checks(engine, browser, [width, height], locale) {
     const limit = page.locator('[data-testid=composer-reference-limit]');
     await limit.waitFor({ timeout: 10000 });
     const capacity = (await limit.innerText()).trim();
-    assert.equal(capacity, LIMIT_NOTICE);
+    assert(capacity.includes(LIMIT_NOTICE), `capacity notice "${capacity}" lacks "${LIMIT_NOTICE}"`);
     assert(!/(?:只用|使用|选用|采用)\s*第\s*(?:1|一)\s*张|only the first (?:is|will be) used/i.test(capacity), `composer predicts the first picture: ${capacity}`);
     assert(!(await page.locator('[data-testid=composer-send]').isDisabled()), 'the send is off');
     await shot(page, 'E-limit');
@@ -417,7 +433,7 @@ async function checks(engine, browser, [width, height], locale) {
     await limit.waitFor({ state: 'detached', timeout: 10000 });
     await composer.locator('input[type=file]').setInputFiles([{ name: 'view-2.png', mimeType: 'image/png', buffer: PICTURES[1] }]);
     await limit.waitFor({ timeout: 10000 });
-    assert.equal((await limit.innerText()).trim(), LIMIT_NOTICE);
+    assert((await limit.innerText()).includes(LIMIT_NOTICE), 'the capacity notice is gone');
     return LIMIT_NOTICE;
   });
 
@@ -535,7 +551,7 @@ async function checks(engine, browser, [width, height], locale) {
     await openPicker(page);
     await page.locator('[data-testid=workspace-model-picker-model] button[role=menuitemradio]', { hasText: MULTIVIEW_NAME }).first().click();
     await closePicker(page);
-    assert((await trigger(page).innerText()).includes(MULTIVIEW_NAME), `the picker did not select ${MULTIVIEW_NAME}`);
+    assert((await pickedLabel(page)).includes(MULTIVIEW_NAME), `the picker did not select ${MULTIVIEW_NAME}`);
     const composer = page.locator('[data-testid=studio-composer]');
     await waitFor(async () => (await page.locator('[data-testid=composer-attachment-chip]').count()) === 0,
       'an earlier picture is still attached; this check must attach exactly five');
@@ -601,11 +617,11 @@ async function checks(engine, browser, [width, height], locale) {
     await notice(second).first().waitFor({ timeout: 20000 }).catch(async (error) => {
       await shot(second, 'C-failed');
       const stored = await second.evaluate((key) => localStorage.getItem(key), PREFS_KEY);
-      throw new Error(`no notice; trigger "${(await trigger(second).innerText()).replace(/\s+/g, ' ')}", stored ${stored}: ${error.message}`);
+      throw new Error(`no notice; gear "${(await pickedLabel(second)).replace(/\s+/g, ' ')}", stored ${stored}: ${error.message}`);
     });
-    assert.equal((await notice(second).first().innerText()).trim(), NOTICE);
-    const shown = await trigger(second).innerText();
-    assert(shown.includes(LATEST_NAME) && !RETIRED_NAME.test(shown), `trigger "${shown}"`);
+    assert((await notice(second).first().innerText()).includes(NOTICE), 'the retired-model notice lacks the Schema sentence');
+    const shown = await pickedLabel(second);
+    assert(shown.includes(LATEST_NAME) && !RETIRED_NAME.test(shown), `gear "${shown}"`);
     await openPicker(second);
     const names = await modelRows(second);
     const checked = await second.locator('[data-testid=workspace-model-picker-model] button[role=menuitemradio][aria-checked=true]').innerText();
