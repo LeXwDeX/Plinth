@@ -471,6 +471,15 @@ func validateRuntime(schema RuntimeSchema) error {
 		httpRuntime.LegacyRoutes.AdminBackfillStatus,
 		httpRuntime.LegacyRoutes.MeshyProxyAsset,
 	}
+	// The administrator's access key view (#332) is optional with its Schema
+	// section; when it is declared all three routes are required.
+	if route := httpRuntime.LegacyRoutes.AdminAccessKeys; route != "" {
+		legacyRoutes = append(legacyRoutes,
+			route,
+			httpRuntime.LegacyRoutes.AdminAccessKey,
+			httpRuntime.LegacyRoutes.AdminAccessKeysSwitch,
+		)
+	}
 	// The background-continue route (#137) is optional; when declared it is
 	// a distinct route with the stop route's single session parameter.
 	if route := httpRuntime.LegacyRoutes.ChatTurnBackground; route != "" {

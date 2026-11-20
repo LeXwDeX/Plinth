@@ -2119,6 +2119,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, fmt.Errorf("个人访问 Key: %w", err)
 	}
+	accessKeyAdminService, err := accessKeyAdminFromSchema(repository, administrationAuditService, applicationSchema)
+	if err != nil {
+		return nil, fmt.Errorf("管理端访问 Key: %w", err)
+	}
 	mcpStatus, err := mcpStatusFromSchema(applicationSchema, accountSettingsService, repository,
 		stepBalanceCache, chatService, texts, logger)
 	if err != nil {
@@ -2152,6 +2156,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		AccountInputAssets:                repository,
 		AccountSettings:                   accountSettingsService,
 		AccessKeys:                        accessKeysService,
+		AdministrationAccessKeys:          accessKeyAdminService,
 		Readiness:                         readiness.check,
 		Generation:                        module,
 		ExecutionGrants:                   executionGrants,

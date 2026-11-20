@@ -175,6 +175,9 @@ type mcpPrincipalHandler func(http.ResponseWriter, *http.Request, access.Princip
 // address, and an authenticated key is counted before its tool or download runs.
 func (s *Server) withMCPKey(next mcpPrincipalHandler) http.HandlerFunc {
 	return func(writer http.ResponseWriter, request *http.Request) {
+		if !s.mcpAccessKeysAllowed(writer, request) {
+			return
+		}
 		limits := s.mcpRateLimit()
 		client := ""
 		if limits != nil {
@@ -220,6 +223,29 @@ func (s *Server) withMCPKey(next mcpPrincipalHandler) http.HandlerFunc {
 	}
 }
 
+// mcpAccessKeysAllowed answers whether the administrator's overall switch
+// lets the listener serve the request (#332). Off refuses every key request
+// and every signed download before any credential is looked at; the refusal
+// is an explicit JSON-RPC error, not a 401. A switch that cannot be read is
+// an internal failure, never an implicit "on".
+func (s *Server) mcpAccessKeysAllowed(writer http.ResponseWriter, request *http.Request) bool {
+	if s.administrationAccessKeys == nil {
+		return true
+	}
+	enabled, err := s.administrationAccessKeys.Enabled(request.Context())
+	if err != nil {
+		s.writeMCPProblem(writer, request, http.StatusServiceUnavailable, -32603,
+			"internal", "Internal error", s.application.MCPPublic.Messages.Internal, err)
+		return false
+	}
+	if !enabled {
+		s.writeMCPProblem(writer, request, http.StatusForbidden, -32005,
+			"access_keys_disabled", "Access keys disabled", s.application.MCPPublic.Messages.AccessKeysDisabled)
+		return false
+	}
+	return true
+}
+
 // mcpDownload streams one product file of the key owner's Task. It is the web
 // API's own download (the same owner scope, delivery headers, preview and
 // audit), reached with a key; a key without the read scope is refused.
@@ -238,6 +264,9 @@ func (s *Server) mcpDownload(writer http.ResponseWriter, request *http.Request, 
 // which is always a 404. The token's owner is the download's Principal, so the
 // same owner scope, delivery headers and audit apply as on the key route.
 func (s *Server) mcpSignedDownload(writer http.ResponseWriter, request *http.Request) {
+	if !s.mcpAccessKeysAllowed(writer, request) {
+		return
+	}
 	if s.taskAssetLinks == nil {
 		http.NotFound(writer, request)
 		return
@@ -317,6 +346,7 @@ var mcpProblemCodes = map[int]string{
 	-32602: "mcp_invalid_params",
 	-32603: "mcp_internal",
 	-32003: "mcp_insufficient_scope",
+	-32005: "mcp_access_keys_disabled",
 	-32020: "mcp_header_mismatch",
 	-32022: "mcp_unsupported_protocol_version",
 }
