@@ -20,8 +20,8 @@ func TestDefaultSchemaApprovalPolicyAutoApprovesRemeshRiggingAnimation(t *testin
 		t.Fatal(err)
 	}
 	policy := approvalPolicyFromSchema(product.Application())
-	if policy.DefaultMode != approvalpolicy.ModeBudget {
-		t.Fatalf("default approval mode = %q, want budget", policy.DefaultMode)
+	if policy.DefaultMode != approvalpolicy.ModeAuto {
+		t.Fatalf("default approval mode = %q, want auto (#406)", policy.DefaultMode)
 	}
 	for _, capability := range []string{"remesh", "rigging", "animation"} {
 		if !slices.Contains(policy.KnownCapabilities, capability) {

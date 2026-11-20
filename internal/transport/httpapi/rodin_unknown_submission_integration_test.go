@@ -345,5 +345,6 @@ func rodinHTTPTestBrowser(t *testing.T, source *catalog.Catalog, key string, ada
 	if err := json.Unmarshal(response.Body.Bytes(), &session); err != nil || response.Code != http.StatusCreated || session.ID == "" {
 		t.Fatalf("session=%d %s err=%v", response.Code, response.Body.String(), err)
 	}
+	pinSessionApprovalMode(t, module, "owner-a", session.ID, "budget")
 	return module, handler, cookie, foreignCookie, session.ID
 }

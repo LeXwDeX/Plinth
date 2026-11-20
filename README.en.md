@@ -14,8 +14,8 @@ mid-sized teams for internal use; you bring your own Provider API keys.
   viewer and multi-format downloads (GLB, glTF, OBJ, STL, FBX, USDZ and more, depending on
   what each Provider supports).
 - **Agent**: describe what you want in plain language; the Agent picks models and
-  parameters and starts the tasks. Paid steps follow the session's approval mode (auto or
-  manual). The Agent works with any multimodal model behind an OpenAI chat completions
+  parameters and starts the tasks. Paid steps follow the session's approval mode (auto, budget
+  plan or strict). The Agent works with any multimodal model behind an OpenAI chat completions
   compatible API.
 - **Built-in Providers**: Meshy, Tripo, Hyper3D, Jimeng, Gemini, plus OpenAI images and a
   self-hosted matting service. Providers become available when a valid key and any
@@ -143,7 +143,8 @@ update, so always pass `--build` when upgrading.
   for removal and is not meant for self-hosting.
 
 To use it, pick a 2D or 3D model in the model picker below the message box, type a description
-and send it. A new session's approval mode is Manual, so text-to-3D shows an approval card;
+and send it. A new session's approval mode is Auto, so paid steps run right away; to get an
+approval card for text-to-3D, switch the top bar's approval mode to Strict (step by step) and
 click Approve to run it.
 
 **If startup fails:** when `--wait` reports an error or `docker compose ps` shows `Restarting`,

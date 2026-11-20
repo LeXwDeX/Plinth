@@ -123,8 +123,12 @@ a = Api(BASE); a.mock_login()
 s, sch, _ = a.j("GET", "/api/v1/schema")
 S = sch.get("schema", {})
 
-def new_session():
-    s, d, _ = a.j("POST", "/api/chat/sessions", {"title": ""}); return d["id"]
+def new_session(mode=None):
+    # A new session is in the Schema default mode (auto since #406); a scenario that needs approval cards
+    # asks for the strict mode explicitly.
+    s, d, _ = a.j("POST", "/api/chat/sessions", {"title": ""})
+    if mode: a.j("PUT", f"/api/v1/chat/sessions/{d['id']}/approval", {"approvalMode": mode})
+    return d["id"]
 
 def upload(data, name="ref.png", ct="image/png"):
     body, c = multipart(name, ct, data); s, d, _ = a.j("POST", "/api/v1/assets", raw=body, ctype=c); return s, d
@@ -341,7 +345,7 @@ def say(sid, text, **extra):
     s2, ms, _ = a.j("GET", f"/api/chat/sessions/{sid}/messages")
     return s, (ms if isinstance(ms, list) else ms.get("messages", []))
 def pending(sid): return a.j("GET", f"/api/v1/chat/sessions/{sid}/pending-approvals")[1].get("items", [])
-sa = new_session()
+sa = new_session("manual")
 say(sa, "生成骑士3D模型", creative_domain="3d", ai_model=TXT3D)
 say(sa, "再生成一个龙3D模型", creative_domain="3d", ai_model=TXT3D)
 pl = pending(sa)
@@ -361,7 +365,7 @@ if len(pl) >= 2:
 else:
     rec("AGT-05", "FAIL", f"expected 2 pending cards, got {len(pl)}")
 # AGT-06 auto approval
-sb = new_session()
+sb = new_session("manual")
 say(sb, "生成骑士3D模型", creative_domain="3d", ai_model=TXT3D)
 waiting = pending(sb)
 sm, md, _ = a.j("PUT", f"/api/v1/chat/sessions/{sb}/approval", {"approvalMode": "auto"})

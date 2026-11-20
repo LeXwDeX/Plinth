@@ -58,7 +58,27 @@ func grantTestBrowserWithCatalog(t *testing.T, customize func(*catalog.Applicati
 	if err := json.Unmarshal(session.Body.Bytes(), &created); err != nil || created.ID == "" {
 		t.Fatalf("session=%s err=%v", session.Body.String(), err)
 	}
+	pinSessionApprovalMode(t, module, "owner-a", created.ID, "budget")
 	return module, handler, cookie, created.ID
+}
+
+// pinSessionApprovalMode puts a freshly created session in the given approval
+// mode, without an audit entry. The tests built on grantTestBrowserWithCatalog
+// and pendingApprovalBrowsersWithCatalog are about the decisions a person makes
+// and about what an approved plan runs; they were written when a new session
+// was in the budget mode, so they pin it instead of riding the default, which
+// is auto since #406. Tests of the default create their own session (see
+// newDefaultModeSession406).
+func pinSessionApprovalMode(t *testing.T, module *generation.Module, owner, sessionID, mode string) {
+	t.Helper()
+	value, ok := fixtureExecutions.Load(module)
+	if !ok {
+		t.Fatal("missing fixture repository")
+	}
+	repository := value.(*fixtureExecutionState).repository
+	if _, found, err := repository.SetSessionApprovalMode(context.Background(), owner, sessionID, mode); err != nil || !found {
+		t.Fatalf("pin approval mode %q: found=%v err=%v", mode, found, err)
+	}
 }
 
 func grantTestRequest(t *testing.T, handler http.Handler, cookie *http.Cookie, method, path, body, key string) *httptest.ResponseRecorder {

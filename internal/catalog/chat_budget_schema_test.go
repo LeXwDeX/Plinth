@@ -17,7 +17,9 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 	}
 	app := c.Application()
 	policy := app.Chat.ApprovalPolicy
-	if policy.DefaultMode != "budget" {
+	// The budget mode is declared and offered; since #406 it is no longer the
+	// default of a new session.
+	if policy.DefaultMode != "auto" {
 		t.Fatalf("default approval mode = %q", policy.DefaultMode)
 	}
 	offer := map[string]bool{}
@@ -89,7 +91,7 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 	public := app.Public()
 	if public.Chat.API.ResponseFields.Budget != "budget" ||
 		public.Runtime.HTTP.Routes.ChatSessionBudget == "" ||
-		public.Chat.ApprovalPolicy.DefaultMode != "budget" ||
+		public.Chat.ApprovalPolicy.DefaultMode != "auto" ||
 		!slicesContain(public.Chat.ApprovalPolicy.Modes, "budget") {
 		t.Fatalf("public budget schema = %+v / %+v", public.Chat.API.ResponseFields, public.Runtime.HTTP.Routes)
 	}
