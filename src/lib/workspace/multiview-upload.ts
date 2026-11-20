@@ -35,6 +35,25 @@ export function multiviewOffering(offerings: readonly OfferingWire[], preferredM
   return found.find((item) => preferredModelId && item.offering.model_id === preferredModelId) ?? found[0] ?? null;
 }
 
+/** The two models a panel names when it makes a model other than the one picked for 3D (#373). */
+export interface MultiviewLockNote {
+  /** The 3D model the person picked, which cannot make a model from several views right now. */
+  locked: string;
+  /** The multiview model this panel makes the model with. */
+  model: string;
+}
+
+/**
+ * The note for a target that is not the 3D model the person picked: the request carries the target and the
+ * server runs it for this turn without touching the session's pick. Null when nothing is picked or the pick
+ * is the target. A pick no service carries (a retired model) is named by its id.
+ */
+export function multiviewLockNote(offerings: readonly OfferingWire[], target: MultiviewOffering, pickedModelId?: string | null): MultiviewLockNote | null {
+  if (!pickedModelId || pickedModelId === target.offering.model_id) return null;
+  const picked = offerings.find((offering) => offering.model_id === pickedModelId);
+  return { locked: picked?.model_name || pickedModelId, model: target.offering.model_name };
+}
+
 /** Image i gets the i-th view in the Offering's order; pictures beyond the views get none. */
 export function defaultViewChoices(count: number, views: readonly ParamOption[]): string[] {
   return Array.from({ length: count }, (_, index) => views[index]?.value ?? '');

@@ -177,6 +177,76 @@ func TestStartTurnRejectsSemanticallyEmptyInput(t *testing.T) {
 	}
 }
 
+// #373: a structured multiview request names the model of its turn, and the
+// turn is refused at once when that model is not an available multiview
+// Offering: before any message is stored, not after the Agent has run.
+func TestStartTurnRefusesAMultiviewRequestForAModelThatTakesNoViews(t *testing.T) {
+	ctx := context.Background()
+	request := func(model string) *chat.MultiviewRequest {
+		return &chat.MultiviewRequest{Model: model, Views: []chat.MultiviewView{
+			{View: "front", AssetID: "asset-front"}, {View: "left", AssetID: "asset-left"}}}
+	}
+	start := func(service *chat.Service, session chat.Session, model string) error {
+		_, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "3D",
+			Options: chat.TurnOptions{Multiview: request(model)}})
+		return err
+	}
+
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	var asked []string
+	service.SetMultiviewModelValid(func(model string) bool {
+		asked = append(asked, model)
+		return model == "tripo-p2-multiview"
+	})
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := start(service, session, "rodin-gen-2.5"); !errors.Is(err, chat.ErrMultiviewModelUnavailable) {
+		t.Fatalf("a model that takes no views: error = %v", err)
+	}
+	if err := start(service, session, "missing-model"); !errors.Is(err, chat.ErrMultiviewModelUnavailable) {
+		t.Fatalf("an unknown model: error = %v", err)
+	}
+	messages, err := repository.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("a refused request stored messages %#v (%v)", messages, err)
+	}
+	if err := start(service, session, "tripo-p2-multiview"); err != nil {
+		t.Fatalf("an available multiview model was refused: %v", err)
+	}
+	if want := []string{"rodin-gen-2.5", "missing-model", "tripo-p2-multiview"}; !reflect.DeepEqual(asked, want) {
+		t.Fatalf("the check was asked %v, want %v", asked, want)
+	}
+
+	// A malformed request stays the shape error, whatever the check says; a
+	// turn without a request never asks the check.
+	malformed := &chat.MultiviewRequest{Model: "tripo-p2-multiview", Views: []chat.MultiviewView{{View: "front", AssetID: "asset-front"}}}
+	other, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: other.ID, Content: "3D",
+		Options: chat.TurnOptions{Multiview: malformed}}); !errors.Is(err, chat.ErrInvalidMultiview) {
+		t.Fatalf("one view: error = %v", err)
+	}
+	asked = nil
+	if _, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: other.ID, Content: "hello"}); err != nil || len(asked) != 0 {
+		t.Fatalf("a plain turn asked the multiview check %v (%v)", asked, err)
+	}
+
+	// An assembly without the check (no Catalog) accepts any well-formed request.
+	bare := newChatService(t, newMemoryChatRepository())
+	bareSession, err := bare.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := start(bare, bareSession, "rodin-gen-2.5"); err != nil {
+		t.Fatalf("an assembly without the check refused a request: %v", err)
+	}
+}
+
 func TestListMessagesHealsStaleOrphanUsingConfiguredPresentation(
 	t *testing.T,
 ) {
@@ -1100,7 +1170,25 @@ func (r *memoryChatRepository) DeleteSession(
 	delete(r.preferences, sessionID)
 	delete(r.messages, sessionID)
 	delete(r.events, sessionID)
+	// The SQLite schema cascades the stream and the turns with the session.
+	delete(r.streams, sessionID)
+	for id, turn := range r.turns {
+		if turn.SessionID == sessionID {
+			delete(r.turns, id)
+		}
+	}
 	return true, nil
+}
+
+// dropSessionKeepingTurns removes the session and its messages but leaves its
+// turn and stream rows: the orphans a database that ran without foreign key
+// enforcement keeps behind. The turn runner must never resume them.
+func (r *memoryChatRepository) dropSessionKeepingTurns(sessionID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.sessions, sessionID)
+	delete(r.messages, sessionID)
+	delete(r.events, sessionID)
 }
 
 func (r *memoryChatRepository) OwnsSession(
@@ -1489,6 +1577,11 @@ func (r *memoryChatRepository) AppendEvent(
 ) (chat.Event, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// The events table has a foreign key to the session: a late write for a
+	// deleted session fails, as it does in SQLite.
+	if _, found := r.sessions[event.SessionID]; !found {
+		return chat.Event{}, chat.ErrSessionNotFound
+	}
 	event.ID = int64(len(r.events[event.SessionID]))
 	r.events[event.SessionID] = append(r.events[event.SessionID], event)
 	return event, nil

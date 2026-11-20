@@ -88,6 +88,20 @@ func compileToolRegistry(schema catalog.ChatSchema, allowed func(capability, dom
 	return registry, nil
 }
 
+// bindOfferingSources attaches the runtime Offering sources to a registry
+// compiled from the Schema. They are the running server's state, which neither
+// the Schema nor a frozen Agent configuration declares, so every registry the
+// Orchestrator builds takes them through here: its own, and the one recompiled
+// from a frozen configuration (#379). Without them a model enum stays at its
+// declared value and the craft brief loses the Offering knowledge (#249).
+func (registry *toolRegistry) bindOfferingSources(
+	allowed func(capability, modelID string) bool,
+	offerings func(capability string) []generation.Offering,
+) {
+	registry.offeringAllowed = allowed
+	registry.offerings = offerings
+}
+
 // permits applies the one availability rule for the model's tool list and for
 // execution. The workspace domain in view is only a hint for the prompt: a
 // tool of the other domain stays available, as long as the tool can actually

@@ -791,6 +791,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	chatService.SetContextStore(repository, applicationSchema.Chat.ContextCompaction.ListLimit)
 	harnessResolver := &resolve.Service{UploadedModels: uploadedModels, Store: repository, Schema: applicationSchema.Chat.Harness, Tools: applicationSchema.Chat.Tools, Catalog: taskCatalog, Gateway: module}
 	chatService.SetHarnessSnapshotResolver(harnessResolver.Snapshot)
+	// A structured multiview request names the model of its turn (#373): the
+	// turn starts only when that model is an enabled, runtime-available
+	// Offering that takes several views, so a model that cannot run is refused
+	// before the Agent spends a turn on it.
+	if capabilities := multiviewToolCapabilities(applicationSchema.Chat); len(capabilities) > 0 {
+		chatService.SetMultiviewModelValid(func(model string) bool {
+			return generationtool.MultiviewModelAvailable(module.Offerings(""), capabilities, module.OfferingAvailable, model)
+		})
+	}
 	canvasImageService, err := canvas.NewImageService(
 		canvas.ImageServiceConfig{
 			References:        referenceResolver,

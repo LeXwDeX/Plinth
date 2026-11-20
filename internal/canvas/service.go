@@ -398,16 +398,44 @@ func (service *Service) UpdateProject(
 	return project, nil
 }
 
+// SessionDeletionRunner is the part of the chat service that runs a deletion
+// of a session's rows under the protocol that stops the session's running turn
+// first and resumes it if nothing was deleted (#384). The session service of a
+// deployment implements it; one that does not deletes without it.
+type SessionDeletionRunner interface {
+	RunSessionDeletion(
+		ctx context.Context,
+		ownerID string,
+		sessionID string,
+		deleteRows func(context.Context) (bool, error),
+	) (bool, error)
+}
+
+// DeleteProject deletes the project, and the chat session it owns with it in
+// the same transaction. The session's running turn is stopped first, as for a
+// deletion of the chat session itself, and a session whose SkillRun still has
+// work in flight refuses the deletion (chat.ErrSessionDeletionBlocked).
 func (service *Service) DeleteProject(
 	ctx context.Context,
 	ownerID string,
 	projectID string,
 ) error {
-	deleted, err := service.repository.DeleteProjectAndSession(
-		ctx,
-		ownerID,
-		projectID,
-	)
+	project, found, err := service.repository.GetProject(ctx, ownerID, projectID)
+	if err != nil {
+		return fmt.Errorf("canvas: delete project: %w", err)
+	}
+	if !found {
+		return ErrProjectNotFound
+	}
+	deleteRows := func(ctx context.Context) (bool, error) {
+		return service.repository.DeleteProjectAndSession(ctx, ownerID, projectID)
+	}
+	var deleted bool
+	if runner, ok := service.sessions.(SessionDeletionRunner); ok && project.OwnsSession && project.SessionID != "" {
+		deleted, err = runner.RunSessionDeletion(ctx, ownerID, project.SessionID, deleteRows)
+	} else {
+		deleted, err = deleteRows(ctx)
+	}
 	if err != nil {
 		return fmt.Errorf("canvas: delete project: %w", err)
 	}
