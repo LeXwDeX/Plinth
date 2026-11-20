@@ -6177,11 +6177,12 @@ type ChatMessageTexts struct {
 	// submits a Task.
 	ModelChoiceConflict    string `json:"model_choice_conflict,omitempty"`
 	ModelChoiceUnavailable string `json:"model_choice_unavailable,omitempty"`
-	// ModelChoiceWorkspaceConflict was the refusal of a purpose step whose
-	// recommendation differed from the workspace picker's value (#103 review
-	// C1). #380 made the workspace value a fallback that never blocks a
-	// recommendation, so nothing reads it any more; the field stays so a
-	// Catalog that still declares the text keeps loading.
+	// ModelChoiceWorkspaceConflict refuses a purpose step whose recommended
+	// model differs from the model still selected in the workspace, so the
+	// person confirms the switch instead of the purpose silently replacing
+	// their visible choice ({workspace}, {recommended}, {profile}; #103
+	// review C1). A Catalog that declares no text runs the recommendation
+	// instead, as it always has.
 	ModelChoiceWorkspaceConflict string `json:"model_choice_workspace_conflict,omitempty"`
 	// ChoiceOptionInvalid refuses a direction card whose Agent-supplied
 	// options are too few, too many, or not bounded tokens (#239).

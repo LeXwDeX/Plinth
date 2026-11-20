@@ -150,6 +150,53 @@ func TestProductionPlanQuotesThePurposeRecommendation(t *testing.T) {
 	}
 }
 
+// A purpose recommendation that differs from the workspace picker's value is a
+// confirmation here too: the plan must not quote the recommendation while the
+// tool would ask the person which model to keep.
+func TestProductionPlanAsksBeforeThePurposeReplacesTheWorkspaceModel(t *testing.T) {
+	usage := catalog.ChatModel3DUsageSchema{
+		DefaultProfile: "render",
+		Profiles: []catalog.ChatModel3DUsageProfile{{
+			ID: "render", Label: "展示", Description: "展示用。", Reason: "展示用途优先完整细节。",
+			RecommendedOfferings: map[string][]string{
+				chat.ModelShapeImageTo3D: {"meshy/meshy-7.1-multiview/image-to-3d"},
+			},
+		}},
+		Brief: catalog.ChatProductionBriefSchema{Fields: []catalog.ChatProductionBriefField{
+			{Name: "purpose", Type: "profile", Label: "用途"},
+		}},
+	}
+	offerings := familyPlanOfferings()
+	offerings = append(offerings, generation.Offering{
+		ID: "hyper3d/rodin-gen-2.5/image-to-3d", Revision: "v1", ProviderID: "hyper3d", ModelID: "rodin-gen-2.5",
+		Capability: generation.ImageTo3D, Domain: generation.DomainModel3D, Enabled: true, EstimatedCredits: 12,
+	})
+	store := &recordingProductionPlans{}
+	service := resolvePlanService(t, store, offerings, usage)
+	command := planCommand(`{"title":"推荐","steps":[{"capability":"image-to-3d","purpose":"主体"}],
+		"budgets":[{"unit":"legacy.credits","amount":40}]}`)
+	command.Options = chat.TurnOptions{
+		CreativeDomain:  string(generation.DomainModel3D),
+		AIModel:         "rodin-gen-2.5",
+		ProductionBrief: chat.ProductionBrief{"purpose": []byte(`"render"`)},
+	}
+	result, err := service.ProposeProductionPlan(context.Background(), command)
+	want := "the workspace model is rodin-gen-2.5, but purpose render recommends meshy-7.1-multiview; " +
+		"confirm with the user which model to keep before planning step image-to-3d"
+	if err != nil || result.Error != want || len(store.created) != 0 {
+		t.Fatalf("proposal = %q err=%v stored=%d, want %q", result.Error, err, len(store.created), want)
+	}
+
+	// With the picker on the recommendation itself the plan quotes it, as the
+	// tool would run it without asking.
+	command.Options.AIModel = "meshy-7.1-multiview"
+	result, err = service.ProposeProductionPlan(context.Background(), command)
+	if err != nil || result.Error != "" || len(store.created) != 1 ||
+		store.plans[0].Steps[0].OfferingID != "meshy/meshy-7.1-multiview/image-to-3d" {
+		t.Fatalf("matching picker = %+v err=%v plans=%+v", result, err, store.plans)
+	}
+}
+
 // A lock the Catalog no longer serves is refused instead of quoted around: the
 // plan must not budget a step the turn will refuse.
 func TestProductionPlanRefusesARetiredLockInsteadOfQuotingAnotherModel(t *testing.T) {

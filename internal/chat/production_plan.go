@@ -560,6 +560,11 @@ func (policy *ProductionPlanPolicy) stepOffering(command ToolCommand, capability
 		Profile:     profile.ID,
 		Reason:      profile.Reason,
 		Workspace:   strings.TrimSpace(command.Options.ModelFor(domain)),
+		// The plan asks in its own words, so a recommendation that differs
+		// from the workspace picker's value is a confirmation here too: a plan
+		// quoted at the recommendation would be the silent switch the tool
+		// refuses.
+		ConfirmsWorkspace: true,
 	})
 	if resolution.Conflict != nil {
 		return generation.Offering{}, false, planModelRefusal(capability, domain, lock, pinned, resolution.Conflict)
@@ -637,6 +642,10 @@ func planModelRefusal(capability, domain, lock, pinned string, conflict *ModelCo
 	case ModelConflictLocked:
 		return "the person locked the " + domainLabel(domain) + " model to " + lock +
 			"; step " + capability + " must use it, not " + pinned
+	case ModelConflictWorkspace:
+		return "the workspace model is " + conflict.Named + ", but purpose " + conflict.Profile +
+			" recommends " + modelNameOf(conflict.Offering) +
+			"; confirm with the user which model to keep before planning step " + capability
 	case ModelConflictInput:
 		return "step " + capability + " cannot run the model the person or the call named (" +
 			conflict.Named + "): it cannot take this step's input"
@@ -652,6 +661,15 @@ func planModelRefusal(capability, domain, lock, pinned string, conflict *ModelCo
 	default:
 		return planUnavailableRefusal(capability)
 	}
+}
+
+// modelNameOf names an Offering's model in an Agent-facing refusal: its model
+// ID, the name the generation tools accept back.
+func modelNameOf(offering generation.Offering) string {
+	if offering.ModelID != "" {
+		return offering.ModelID
+	}
+	return string(offering.ID)
 }
 
 // domainLabel names a workspace domain in an Agent-facing refusal.

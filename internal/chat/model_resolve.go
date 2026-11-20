@@ -69,6 +69,11 @@ const (
 	// ModelConflictInput: the model that decides cannot run this request (its
 	// views or the frozen selection mask), and no member of its family can.
 	ModelConflictInput ModelConflictKind = "input"
+	// ModelConflictWorkspace: the purpose recommends a model while the
+	// workspace picker shows another one the person can see. The person
+	// confirms which to keep instead of the recommendation replacing their
+	// visible pick silently (#103 review C1).
+	ModelConflictWorkspace ModelConflictKind = "workspace"
 )
 
 // ModelConflict is one refusal of the model resolution: which layer refused,
@@ -86,6 +91,9 @@ type ModelConflict struct {
 	Offering generation.Offering
 	// Locked is the person's Offering when Layer named another model.
 	Locked generation.Offering
+	// Profile is the purpose whose recommendation conflicts with the workspace
+	// value (ModelConflictWorkspace): the caller names it in the confirmation.
+	Profile string
 	// Candidates are the capability's available Offerings, in Catalog order.
 	Candidates []generation.Offering
 }
@@ -146,6 +154,13 @@ type ModelRequest struct {
 	Reason      string
 	// Workspace is the model the workspace picker shows for the step's domain.
 	Workspace string
+	// ConfirmsWorkspace says the caller can word the confirmation of a purpose
+	// recommendation that differs from the workspace value (it declares the
+	// Schema's text, or asks in its own words). Then the recommendation never
+	// replaces the visible pick silently: the two disagreeing is a conflict.
+	// Without it a Catalog that declares no such text keeps the older rule,
+	// where the recommendation runs.
+	ConfirmsWorkspace bool
 	// Fits reports whether an Offering can take the request's whole input: its
 	// reference pictures, its views and the frozen selection mask. The purpose
 	// recommendations are filtered by it, because a recommendation that cannot
@@ -269,6 +284,24 @@ func ResolveModel(request ModelRequest) ModelResolution {
 		if !matched || !fits(chosen) {
 			continue
 		}
+		// The workspace picker shows a model the person may already consider
+		// chosen, even when it is not an explicit lock. A recommendation that
+		// differs must not replace that visible pick silently (#103 review C1):
+		// the person confirms which to keep. A visible pick that is itself one
+		// of the purpose's recommendations runs instead (#282).
+		if workspace := strings.TrimSpace(request.Workspace); request.ConfirmsWorkspace && workspace != "" &&
+			!ModelNameMatches(chosen, workspace) {
+			if visible, found := recommendedWorkspace(candidates, request.Recommended, workspace, fits); found {
+				return ModelResolution{
+					Offering: visible, Source: ModelSourcePurpose,
+					Profile: request.Profile, Reason: request.Reason,
+				}
+			}
+			return ModelResolution{Conflict: &ModelConflict{
+				Kind: ModelConflictWorkspace, Layer: ModelSourcePurpose,
+				Named: workspace, Offering: chosen, Profile: request.Profile, Candidates: candidates,
+			}}
+		}
 		return ModelResolution{
 			Offering: chosen, Source: ModelSourcePurpose,
 			Profile: request.Profile, Reason: request.Reason,
@@ -361,6 +394,23 @@ func MatchModel(candidates []generation.Offering, name string) (generation.Offer
 	for _, offering := range candidates {
 		if ModelNameMatches(offering, name) {
 			return offering, true
+		}
+	}
+	return generation.Offering{}, false
+}
+
+// recommendedWorkspace finds the workspace picker's model among the purpose's
+// recommendations, available and fitting the input (#282): a visible pick the
+// purpose already recommends needs no confirmation.
+func recommendedWorkspace(candidates []generation.Offering, recommended []string, workspace string,
+	fits func(generation.Offering) bool) (generation.Offering, bool) {
+	visible, matched := MatchModel(candidates, workspace)
+	if !matched || !fits(visible) {
+		return generation.Offering{}, false
+	}
+	for _, name := range recommended {
+		if ModelNameMatches(visible, name) {
+			return visible, true
 		}
 	}
 	return generation.Offering{}, false

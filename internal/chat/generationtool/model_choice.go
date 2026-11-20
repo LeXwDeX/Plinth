@@ -282,22 +282,25 @@ func (executor *Executor) chooseOffering(
 		}
 	}
 	resolution := chat.ResolveModel(chat.ModelRequest{
-		Candidates:   candidates,
-		Lock:         lock,
-		LockSource:   lockSource,
-		Named:        named,
-		PlanPinned:   planPin,
-		Recommended:  recommended,
-		Profile:      profile.ID,
-		Reason:       profile.Reason,
-		Workspace:    workspace,
-		Fits:         executor.modelFits(command, input),
-		Views:        executor.modelViews(command, input),
-		SupportsMask: executor.maskBinding(command),
-		Default:      executor.modelDefault(tool),
+		Candidates:  candidates,
+		Lock:        lock,
+		LockSource:  lockSource,
+		Named:       named,
+		PlanPinned:  planPin,
+		Recommended: recommended,
+		Profile:     profile.ID,
+		Reason:      profile.Reason,
+		Workspace:   workspace,
+		// A Catalog that declares the confirmation text asks the person before
+		// a purpose recommendation replaces the model they see (#103 C1).
+		ConfirmsWorkspace: executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict != "",
+		Fits:              executor.modelFits(command, input),
+		Views:             executor.modelViews(command, input),
+		SupportsMask:      executor.maskBinding(command),
+		Default:           executor.modelDefault(tool),
 	})
 	if resolution.Conflict != nil {
-		return executor.modelConflictChoice(command, capability, input, resolution.Conflict), nil
+		return executor.modelConflictChoice(command, capability, input, profile.Label, resolution.Conflict), nil
 	}
 	choice := offeringChoice{Offering: resolution.Offering, Source: resolution.ChoiceSource()}
 	if resolution.Source == chat.ModelSourcePurpose {
@@ -399,12 +402,19 @@ func (executor *Executor) modelConflictChoice(
 	command chat.ToolCommand,
 	capability generation.Capability,
 	input modelInput,
+	profileLabel string,
 	conflict *chat.ModelConflict,
 ) offeringChoice {
 	if conflict.Kind == chat.ModelConflictLocked {
 		return offeringChoice{
 			Refusal: executor.modelConflictText(command, conflict.Locked, conflict.Named),
 			Code:    refusalModelConflict,
+		}
+	}
+	if conflict.Kind == chat.ModelConflictWorkspace {
+		return offeringChoice{
+			Refusal: executor.modelWorkspaceConflictText(command, conflict.Named, conflict.Offering, profileLabel),
+			Code:    refusalModelWorkspaceConflict,
 		}
 	}
 	if conflict.Offering.ID != "" && bindsMask(command) && !offeringSupportsMask(conflict.Offering) {
@@ -522,6 +532,26 @@ func (executor *Executor) modelConflictText(command chat.ToolCommand, locked gen
 	return strings.NewReplacer(
 		"{locked}", executor.localized(command, OfferingModelName(locked)),
 		"{requested}", executor.modelLabel(command, requested),
+	).Replace(executor.localized(command, template))
+}
+
+// modelWorkspaceConflictText asks the person to confirm a purpose
+// recommendation that differs from the model still selected in the workspace,
+// instead of replacing the visible choice silently (#103 review C1).
+func (executor *Executor) modelWorkspaceConflictText(
+	command chat.ToolCommand,
+	workspace string,
+	recommended generation.Offering,
+	profileLabel string,
+) string {
+	template := executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict
+	if template == "" {
+		return ""
+	}
+	return strings.NewReplacer(
+		"{workspace}", executor.modelLabel(command, workspace),
+		"{recommended}", executor.localized(command, OfferingModelName(recommended)),
+		"{profile}", profileLabel,
 	).Replace(executor.localized(command, template))
 }
 

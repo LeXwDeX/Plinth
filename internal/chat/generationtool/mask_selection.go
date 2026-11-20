@@ -39,10 +39,11 @@ func (executor *Executor) maskModelSwitchNote(command chat.ToolCommand, offering
 	if !bindsMask(command) || !offeringSupportsMask(offering) {
 		return ""
 	}
-	// A lock or the Agent's own model is a decision: the resolver refuses a
-	// model that cannot bind the mask instead of switching, so a switch only
+	// A lock, the Agent's own model or the workspace picker is a choice the
+	// resolver refuses rather than switches around (#244), so a switch only
 	// happens below them.
-	if namedModel(command) != "" || strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command))) != "" {
+	if namedModel(command) != "" || strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command))) != "" ||
+		strings.TrimSpace(executor.userModel(command)) != "" {
 		return ""
 	}
 	template := executor.localized(command, executor.chat.Presentation.Messages.MaskModelSwitchNote)

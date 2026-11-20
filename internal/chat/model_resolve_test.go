@@ -123,9 +123,42 @@ func TestResolveModelFollowsTheLayers(t *testing.T) {
 			conflict: chat.ModelConflictUnavailable, conflictN: "removed/offering",
 		},
 		{
-			name:    "the purpose recommendation outranks the workspace picker",
+			// A Catalog whose caller declares no confirmation text keeps the
+			// older rule: the recommendation runs over the picker's value.
+			name:    "without a confirmation the purpose recommendation runs",
 			request: chat.ModelRequest{Recommended: []string{resolveTripoID}, Profile: "render", Workspace: resolveSingleID},
 			wantID:  resolveTripoID, source: chat.ModelSourcePurpose,
+		},
+		{
+			// The visible pick is another model: the person confirms instead of
+			// the recommendation replacing it (#103 review C1).
+			name: "a recommendation over another visible pick is a confirmation",
+			request: chat.ModelRequest{
+				Recommended: []string{resolveTripoID}, Profile: "render", Workspace: resolveSingleID,
+				ConfirmsWorkspace: true,
+			},
+			conflict: chat.ModelConflictWorkspace, conflictN: resolveSingleID,
+		},
+		{
+			// The visible pick is itself one of the purpose's recommendations
+			// (#282): nothing is replaced, so it runs without asking.
+			name: "a visible pick the purpose recommends runs",
+			request: chat.ModelRequest{
+				Recommended: []string{resolveMultiviewID, resolveSingleID}, Profile: "render", Workspace: resolveSingleID,
+				ConfirmsWorkspace: true,
+			},
+			wantID: resolveSingleID, source: chat.ModelSourcePurpose,
+		},
+		{
+			name: "a visible pick that does not fit asks instead of recommendations",
+			request: chat.ModelRequest{
+				Recommended: []string{resolveTripoID}, Profile: "render", Workspace: resolveMultiviewID,
+				ConfirmsWorkspace: true,
+				Fits: func(offering generation.Offering) bool {
+					return offering.ModelID != "meshy-7.1-multiview"
+				},
+			},
+			conflict: chat.ModelConflictWorkspace, conflictN: resolveMultiviewID,
 		},
 		{
 			name: "a recommendation the request does not fit is skipped",

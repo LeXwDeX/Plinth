@@ -166,10 +166,8 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 			refusal: "锁定", code: "model_choice_conflict"},
 		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用",
 			code: "model_choice_unavailable"},
-		// #380: the workspace picker's value is not the person's choice, so a
-		// purpose recommendation replaces it without asking.
-		{name: "the purpose recommendation outranks the workspace model", purpose: "game_character",
-			workspace: choiceFullID, wantID: choiceP2ID, source: "profile", profile: "game_character"},
+		{name: "a purpose step that differs from the workspace model asks first", purpose: "game_character",
+			workspace: choiceFullID, refusal: "确认", code: "model_choice_workspace_conflict"},
 		{name: "the purpose step runs when the workspace model already matches", purpose: "render",
 			workspace: choiceFullID, wantID: choiceFullID, source: "profile", profile: "render"},
 		{name: "the Agent outranks the workspace picker value", named: choiceMeshyID,
@@ -236,10 +234,27 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 	}
 }
 
-// #380: a workspace pick that is itself one of the purpose's recommendations no
-// longer reorders them: the recommendation's own order decides, and the tool
-// result names the purpose as the source.
-func TestChooseOfferingFollowsTheRecommendationOrderOverTheWorkspaceModel(t *testing.T) {
+func TestChooseOfferingDoesNotSilentlyReplaceTheWorkspaceModel(t *testing.T) {
+	full := choiceTestOffering(choiceFullID, "tripo-v3.1-full", generation.TextTo3D)
+	p2 := choiceTestOffering(choiceP2ID, "tripo-p2", generation.TextTo3D)
+	command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
+	command.Options.AIModel = choiceFullID
+	command.Options.ProductionBrief = choiceTestBrief("game_character")
+	choice, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{full, p2}}).
+		chooseOffering(command, generation.TextTo3D, nil, modelInput{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if choice.Offering.ID != "" || !strings.Contains(choice.Refusal, "确认") ||
+		!strings.Contains(choice.Refusal, "tripo-p2") {
+		t.Fatalf("choice = %+v, want a refusal naming the recommended model", choice)
+	}
+}
+
+// A workspace pick that is itself one of the purpose's recommendations runs
+// without asking: nothing is replaced, and the purpose still owns the choice
+// (#282 made the first 2D recommendation differ from the default picker model).
+func TestChooseOfferingRunsAWorkspaceModelThePurposeRecommends(t *testing.T) {
 	p2 := choiceTestOffering(choiceP2ID, "tripo-p2", generation.TextTo3D)
 	meshy := choiceTestOffering(choiceMeshyID, "meshy-t2.5", generation.TextTo3D)
 	command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
@@ -250,8 +265,8 @@ func TestChooseOfferingFollowsTheRecommendationOrderOverTheWorkspaceModel(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if choice.Refusal != "" || choice.Offering.ID != p2.ID || choice.Source != "profile" || choice.Profile != "game_character" {
-		t.Fatalf("choice = %+v, want the purpose's first recommendation", choice)
+	if choice.Refusal != "" || choice.Offering.ID != meshy.ID || choice.Source != "profile" || choice.Profile != "game_character" {
+		t.Fatalf("choice = %+v, want the recommended workspace model without a confirmation", choice)
 	}
 }
 
@@ -765,13 +780,12 @@ func TestChooseOfferingFollowsThe2DModelChoiceLayers(t *testing.T) {
 		choice.Source != "profile" || choice.Profile != "illustration" || choice.Reason == "" {
 		t.Fatalf("purpose choice = %+v %v", choice, err)
 	}
-	// #380: a different visible workspace pick is not the person's choice, so
-	// the recommendation runs and the result names it.
+	// A different visible workspace pick is confirmed, not silently replaced.
 	choice, err = executor.chooseOffering(
 		imageTestCommand(imageTestBrief("illustration"), "gpt-image-2", "", ""),
 		generation.TextToImage, nil, modelInput{}, "")
-	if err != nil || choice.Refusal != "" || choice.Offering.ID != imageProTextID || choice.Source != "profile" {
-		t.Fatalf("workspace recommendation = %+v %v", choice, err)
+	if err != nil || choice.Refusal == "" {
+		t.Fatalf("workspace conflict = %+v %v", choice, err)
 	}
 	// The Agent's model argument sits above the purpose.
 	arguments := imageTestArguments("gpt-image-2")
