@@ -1216,9 +1216,11 @@ type ConversionGuardReport struct {
 
 // ConversionConflictChecker reads one stored Task's report for the guarded
 // conversion admission. It is called inside the Task creation transaction for
-// every active Task of the same owner and session, and for the succeeded
-// source Task whose resources may still be pending. An error aborts creation:
-// a read failure must never admit a second paid conversion.
+// every active Task of the same owner and session, for the succeeded source
+// Task whose resources may still be pending, and for every active Task of the
+// same owner in another session once the source still owes a format (#459). An
+// error aborts creation: a read failure must never admit a second paid
+// conversion.
 type ConversionConflictChecker func(Task) (ConversionGuardReport, error)
 
 // ConversionGuardedRepository creates a Task after checking, in the same

@@ -320,3 +320,38 @@ func TestTripoNativeOBJExportIsDeclaredAsZIP(t *testing.T) {
 		t.Fatalf("Tripo native OBJ exports found: %d", seen)
 	}
 }
+
+// #459: a post-success slot that has not delivered has no bytes, so its media
+// type is unknown. Tripo's converted.gltf is one container for two target
+// formats (a self-contained GLB and the glTF JSON), so the pending mapping must
+// name both: the file that lands is classified by FormatOf once it exists, and
+// naming only the first format in presentation order would leave the other one
+// unguarded against a second paid run.
+func TestPendingFormatsNameEveryFormatAPendingSlotMayFill(t *testing.T) {
+	product, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := product.Application().ModelDelivery
+	formats := delivery.PendingFormats("converted_model", "converted.gltf")
+	if got := strings.Join(formats, ","); got != "glb,gltf" {
+		t.Fatalf("pending formats of the converted.gltf slot = %s; want glb,gltf", got)
+	}
+	// The saved bytes decide: the same slot is GLB as model/gltf-binary and
+	// glTF as model/gltf+json.
+	binary, known := delivery.FormatOf("converted_model", "converted.gltf", "model/gltf-binary")
+	if !known || binary != "glb" {
+		t.Fatalf("GLB bytes = %q, %v; want glb", binary, known)
+	}
+	json, known := delivery.FormatOf("converted_model", "converted.gltf", "model/gltf+json")
+	if !known || json != "gltf" {
+		t.Fatalf("glTF bytes = %q, %v; want gltf", json, known)
+	}
+	// A slot no format claims still maps to nothing.
+	if got := delivery.PendingFormats("model", "glb"); len(got) != 1 || got[0] != "glb" {
+		t.Fatalf("pending formats of the model slot = %v; want only glb", got)
+	}
+	if got := delivery.PendingFormats("converted_model", "converted."); len(got) != 0 {
+		t.Fatalf("pending formats of an aggregate slot = %v; want none", got)
+	}
+}

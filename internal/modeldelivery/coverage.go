@@ -306,24 +306,33 @@ func (s *Service) resolve(ctx context.Context, task generation.Task) view {
 //
 // A READY slot needs no entry: the kernel only writes READY on local asset
 // evidence, and the file is then classified as an asset above.
+//
+// A slot that has not delivered maps to every format its role and variant
+// select, not to one of them: the saved bytes are what tells two containers of
+// the same slot apart (converted.gltf is both the GLB and the glTF export), so
+// until they land no single format can be named (#459).
 func (s *Service) recordResourceFormats(v *view, task generation.Task) {
 	for key, state := range task.Resources {
 		role, scope, _, err := generation.ParseResourceStateKey(key)
 		if err != nil {
 			continue
 		}
-		format, known := s.schema.PendingFormat(role, scope)
-		if !known {
+		formats := s.schema.PendingFormats(role, scope)
+		if len(formats) == 0 {
 			continue
 		}
 		switch state.State {
 		case generation.ResourcePending:
-			if _, taken := v.pending[format]; !taken {
-				v.pending[format] = state
+			for _, format := range formats {
+				if _, taken := v.pending[format]; !taken {
+					v.pending[format] = state
+				}
 			}
 		case generation.ResourceFailed, generation.ResourceIncomplete,
 			generation.ResourceDenied, generation.ResourceAbandoned:
-			v.failed[format] = true
+			for _, format := range formats {
+				v.failed[format] = true
+			}
 		}
 	}
 }
@@ -332,7 +341,8 @@ func (s *Service) recordResourceFormats(v *view, task generation.Task) {
 // post-success resources (#459), sorted. It is the one Schema rule of this
 // package for that question, not a second copy: the mapping is
 // application.model_delivery.formats[].matches, read by the coverage
-// projection, the guarded Task admission and the Agent's conversion route.
+// projection, the guarded Task admission and the Agent's conversion route. A
+// slot names every format it may fill until its bytes say otherwise.
 func PendingResourceFormats(delivery catalog.ModelDeliverySchema, task generation.Task) []string {
 	pending := map[string]bool{}
 	for key, state := range task.Resources {
@@ -343,7 +353,7 @@ func PendingResourceFormats(delivery catalog.ModelDeliverySchema, task generatio
 		if err != nil {
 			continue
 		}
-		if format, known := delivery.PendingFormat(role, scope); known {
+		for _, format := range delivery.PendingFormats(role, scope) {
 			pending[format] = true
 		}
 	}

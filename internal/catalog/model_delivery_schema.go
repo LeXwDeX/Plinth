@@ -552,25 +552,33 @@ func (match ModelAssetMatch) Matches(role, variant, mediaType string) bool {
 	return len(match.MediaTypes) == 0 || slices.ContainsFunc(match.MediaTypes, func(candidate string) bool { return strings.EqualFold(candidate, mediaType) })
 }
 
-// PendingFormat names the target format a post-success resource slot is going
-// to deliver (#459): the first format, in the Schema's presentation order,
+// PendingFormats names every target format a post-success resource slot is
+// going to deliver (#459): all formats, in the Schema's presentation order,
 // whose matches select the slot's role and variant.
 //
 // A pending slot has no saved bytes, so the matches' media types cannot be
-// compared and are left out: which format a pending slot fills is decided by
-// the role and variant the Offering froze, and a Provider that names one slot
-// for two containers (Tripo's converted.gltf is a self-contained GLB, #293)
-// fills the format that lists that slot. An aggregate slot (variant_prefix)
-// maps to no format, because it stands for several formats at once.
-func (schema ModelDeliverySchema) PendingFormat(role, variant string) (string, bool) {
+// compared and are left out: which container the slot fills is decided by the
+// role and variant the Offering froze. One slot can select several formats when
+// a Provider names one container for two of them (Tripo's converted.gltf is a
+// self-contained GLB and also the glTF container, #293): the saved file lands
+// as whichever media type the Provider used, and only FormatOf can tell the two
+// apart once the bytes exist. So every matching format counts as pending until
+// the slot reaches a terminal state, instead of the first one in presentation
+// order: naming one would leave the others unguarded, which is exactly the
+// duplicate paid run this projection exists to prevent. An aggregate slot
+// (variant_prefix) maps to no format, because it stands for several formats at
+// once.
+func (schema ModelDeliverySchema) PendingFormats(role, variant string) []string {
+	formats := make([]string, 0, 2)
 	for _, format := range schema.Formats {
 		for _, match := range format.Matches {
 			if match.matchesVariant(role, variant) {
-				return format.ID, true
+				formats = append(formats, format.ID)
+				break
 			}
 		}
 	}
-	return "", false
+	return formats
 }
 
 // FormatOf is the public format ID of a saved file (#326): the first format

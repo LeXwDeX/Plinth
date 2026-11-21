@@ -1000,6 +1000,40 @@ func TestAdvanceDoesNotCountAnAwaitingApprovalItemAsASlot(t *testing.T) {
 	}
 }
 
+func TestAdvanceDoesNotCountADeferredReportItemAsASlot(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	// #459: item A reported done while one of its formats is still converting.
+	// The report is stored on the item and its next check is an observation
+	// interval away, so it keeps working without holding the one parallel slot:
+	// otherwise item B never opens a turn (default max_parallel_items = 1).
+	deferred := newItem("aitem_1", "角色")
+	deferred.State = assetlist.StateWorking
+	deferred.Round = 1
+	deferred.SessionID = "ses_1"
+	deferred.DeliveryDeferred = true
+	deferred.NextActionAt = fixture.now.Add(5 * time.Minute)
+	fixture.chat.sessions["ses_1"] = chat.Session{
+		ID: "ses_1", OwnerID: testOwner, ProjectID: testProject,
+	}
+	fixture.chat.seedTerminalTurn("ses_1", turnDone)
+	fixture.seedRun(assetlist.RunRunning, deferred, newItem("aitem_2", "武器"))
+
+	fixture.advance(t)
+
+	if second := fixture.item(t, "aitem_2"); second.State != assetlist.StateWorking {
+		t.Fatalf("second item = %s; want working because the deferred item releases the slot", second.State)
+	}
+	if calls := len(fixture.scheduler.calls); calls != 1 {
+		t.Fatalf("schedules = %d; want only the claimed item's turn", calls)
+	}
+	// The deferred item keeps its state and its report: only its delivery
+	// decides when it enters review.
+	if first := fixture.item(t, "aitem_1"); first.State != assetlist.StateWorking ||
+		!first.DeliveryDeferred || first.Block != assetlist.BlockNone {
+		t.Fatalf("deferred item = %+v; want working, deferred, unblocked", first)
+	}
+}
+
 func TestAdvancePausesOnMissingPresenceAndResumesOnlyPresence(t *testing.T) {
 	fixture := newFixture(t, 1, 3)
 	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"))

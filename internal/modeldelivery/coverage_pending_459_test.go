@@ -147,3 +147,50 @@ func TestPendingResourceFormatsUsesTheSchemaMatches459(t *testing.T) {
 		t.Fatalf("aggregate slot added a format: %v", got)
 	}
 }
+
+// #459: the pending mapping is conservative because a slot that has not
+// delivered has no media type. Tripo's converted.gltf slot fills two target
+// formats (a self-contained GLB and the glTF JSON), so both count as pending
+// until the file lands and FormatOf can name the one it is. Naming only the
+// first format in presentation order would leave glTF unguarded, and a person
+// or the future reconciler would start a second paid run for it.
+func TestPendingGltFSlotReadsAsBothContainers459(t *testing.T) {
+	f := newConversionFixture(t)
+	task := f.tripoGlbOnly("tripo-gltf-slot", "owner")
+	task.Resources = map[string]generation.ResourceState{
+		"converted_model|converted.gltf|": {State: generation.ResourcePending},
+	}
+	f.tasks[task.ID] = task
+
+	pending := PendingResourceFormats(f.catalog.Application().ModelDelivery, task)
+	if len(pending) != 2 || pending[0] != "glb" || pending[1] != "gltf" {
+		t.Fatalf("pending formats = %v; want [glb gltf]", pending)
+	}
+
+	coverage, err := f.service.Coverage(context.Background(), generation.OwnTasks("owner"), "tripo-gltf-slot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The main model is already saved as GLB, so that row stays available; the
+	// glTF container is the one this slot still owes and it reads as converting.
+	if row := formatByID(t, coverage, "glb"); row.Status != StatusAvailable {
+		t.Fatalf("glb = %#v; want available from the saved main model", row)
+	}
+	if row := formatByID(t, coverage, "gltf"); row.Status != StatusConverting || row.Reason != reasonConverting {
+		t.Fatalf("gltf = %#v; want converting", row)
+	}
+
+	planned := map[string]bool{}
+	complete, err := f.service.Complete(context.Background(), generation.OwnerID("owner"), "tripo-gltf-slot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range complete.Steps {
+		for _, format := range step.Formats {
+			planned[format] = true
+		}
+	}
+	if planned["gltf"] {
+		t.Fatalf("a plan was started for gltf while the task still owes it: %#v", complete.Steps)
+	}
+}

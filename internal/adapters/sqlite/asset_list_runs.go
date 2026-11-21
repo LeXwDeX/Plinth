@@ -476,7 +476,7 @@ func (r *AssetListRunRepository) FinishItem(ctx context.Context, input assetlist
 		update, err := conn.ExecContext(ctx, `
 			UPDATE asset_list_items SET state = ?, state_reason = ?, result_json = ?,
 				review_json = ?, next_action_at = ?, return_reason = '', return_note = '',
-				version = version + 1, updated_at = ?
+				delivery_deferred = 0, version = version + 1, updated_at = ?
 			WHERE id = ? AND owner_id = ? AND list_id = ? AND state = ?`,
 			input.State, input.StateReason, string(result), string(review),
 			formatTaskTimeOrEmpty(input.NextActionAt), formatTime(input.At),
@@ -544,7 +544,7 @@ func (r *AssetListRunRepository) SkipItem(
 			return assetlist.ErrConflict
 		}
 		query := `UPDATE asset_list_items SET state = ?, state_reason = ?,
-			next_action_at = '', version = version + 1, updated_at = ?
+			next_action_at = '', delivery_deferred = 0, version = version + 1, updated_at = ?
 			WHERE id = ? AND owner_id = ? AND list_id = ? AND state = ?`
 		args := []any{assetlist.StateSkipped, reason, formatTime(at),
 			itemID, ownerID, listID, current.State}
@@ -594,9 +594,12 @@ func (r *AssetListRunRepository) SetItemBlock(
 // SetItemResult stores a done report on a working item without deciding it
 // (#459). The report is kept while the item's delivery is not stable yet; the
 // item keeps its state, its session and its return context, and the runner
-// moves it into review once every post-success format is terminal. An empty
-// report becomes {} (the stored "no result" shape); a missing or foreign item
-// is ErrNotFound; a lost CAS guard is ErrConflict.
+// moves it into review once every post-success format is terminal. Storing
+// the report is also what marks the item as waiting for its delivery, so
+// the write sets delivery_deferred: a deferred item holds no parallel slot
+// (it would otherwise stall a max_parallel_items = 1 list, #459). An empty
+// report becomes {} (the stored "no result" shape); a missing or foreign
+// item is ErrNotFound; a lost CAS guard is ErrConflict.
 func (r *AssetListRunRepository) SetItemResult(
 	ctx context.Context,
 	ownerID, listID, itemID string,
@@ -615,7 +618,7 @@ func (r *AssetListRunRepository) SetItemResult(
 		stored = json.RawMessage("{}")
 	}
 	item, err := r.updateAssetListItem(ctx, ownerID, listID, itemID, expectedVersion, at,
-		`result_json = ?`, string(stored))
+		`result_json = ?, delivery_deferred = 1`, string(stored))
 	if err != nil {
 		return assetlist.Item{}, err
 	}

@@ -1030,7 +1030,11 @@ func (runner *Runner) forgetDeferredTurns(items []assetlist.Item) {
 // workingSlots counts the items that hold a parallel slot. An item waiting for
 // an approval card or blocked at the 3D step cap releases its slot (#328,
 // #330 §6): the person can resolve it later, and the scheduler is free to
-// claim another item meanwhile.
+// claim another item meanwhile. An item whose done report is stored while its
+// delivery is still converting releases it too (#459): the delivery tick
+// advances that item on its own schedule (its next check is one observation
+// interval ahead), so without this a max_parallel_items = 1 list would claim
+// nothing until the delivery settled.
 func workingSlots(items []assetlist.Item) int {
 	slots := 0
 	for _, item := range items {
@@ -1038,6 +1042,9 @@ func workingSlots(items []assetlist.Item) int {
 			continue
 		}
 		if item.Block == assetlist.BlockAwaitingApproval || item.Block == assetlist.BlockStepCap {
+			continue
+		}
+		if item.DeliveryDeferred {
 			continue
 		}
 		slots++
