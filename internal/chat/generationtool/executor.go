@@ -208,6 +208,9 @@ type Executor struct {
 	logger        *slog.Logger
 	modelFormats  ModelFormatStatus
 	modelVersions ModelVersions
+	// isConversion reports whether a Task ran a declared format conversion;
+	// nil keeps conversions in the session model listing.
+	isConversion ConversionRule
 
 	// approvalLocks serialize approval-card creation per session.
 	approvalLocks [32]sync.Mutex

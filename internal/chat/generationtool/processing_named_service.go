@@ -604,7 +604,9 @@ func (executor *Executor) parentModel(ctx context.Context, command chat.ToolComm
 			}
 			parent = found
 		case role == schema.SemanticSourceAsset:
-			tasks, err := executor.sessionModelTasks(ctx, command.OwnerID, command.SessionID, executor.chat.Agent.MaxListedModels)
+			// A converted file is a legitimate parent for a later step, so
+			// conversions stay among the candidates here (#458).
+			tasks, err := executor.sessionSourceTasks(ctx, command.OwnerID, command.SessionID, executor.chat.Agent.MaxListedModels)
 			if err != nil {
 				continue
 			}

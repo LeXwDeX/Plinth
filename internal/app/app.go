@@ -2000,6 +2000,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return formats, nil
 		})
+		// A format conversion delivers files of the model it converted, so the
+		// session model listing and the self-check queue leave it out, using the
+		// same rule the version chain folds conversions with (#458).
+		toolExecutor.SetConversionRule(modelDeliveryService.IsConversion)
 	}
 	lineageConfig := lineage.Config{MaxTasks: applicationSchema.Runtime.HTTP.MaximumLineageTasks}
 	if modelDeliveryService != nil {
