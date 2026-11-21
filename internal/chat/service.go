@@ -209,6 +209,11 @@ type Repository interface {
 	ListTurnsPage(context.Context, []string, TurnPageCursor, int) ([]Turn, error)
 	CompareAndSwapTurnCheckpoint(context.Context, string, string, string, int64, string, string, TurnCheckpoint, bool, time.Time) (int64, error)
 	ListSessionTurns(context.Context, string, string, []string) ([]Turn, error)
+	// PlanTaskFacts reads, for each named session, the Tasks a production plan
+	// step pairs with and whether the session's turn still runs (#410). One
+	// round trip for the whole list, so a session list does not read per
+	// session. A session with neither is absent from the map.
+	PlanTaskFacts(context.Context, string, []string, []string) (map[string]PlanTaskFacts, error)
 	// RecentSessionTurnOptions lists the options of the session's newest
 	// turns, newest first, at most the given number, in any state.
 	RecentSessionTurnOptions(context.Context, string, string, int) ([]TurnOptions, error)

@@ -472,6 +472,9 @@ var accessKeyUsageMigration string
 //go:embed migrations/0106_step_extra_grants.sql
 var stepExtraGrantsMigration string
 
+//go:embed migrations/0107_production_budget_completed.sql
+var productionBudgetCompletedMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -569,7 +572,9 @@ func migrations() []migration {
 		migration{version: 103, name: "input_asset_crops", sql: inputAssetCropsMigration},
 		migration{version: 104, name: "asset_list_item_review_writes", sql: assetListItemReviewWritesMigration},
 		migration{version: 105, name: "access_key_usage", sql: accessKeyUsageMigration},
-		migration{version: 106, name: "step_extra_grants", sql: stepExtraGrantsMigration})
+		migration{version: 106, name: "step_extra_grants", sql: stepExtraGrantsMigration},
+		migration{version: 107, name: "production_budget_completed", sql: productionBudgetCompletedMigration,
+			foreignKeysOff: true})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -589,8 +594,10 @@ func migrations() []migration {
 // acceptance decisions of a list item (#329), 103 the provenance of the
 // crops cut out of a source picture (#331), 104 the review writes of a list
 // item (#329), 105 the personal access key
-// usage count and the overall switch (#332) and 106 the extra 3D steps one
-// asset may be granted (#330 step 5C).
+// usage count and the overall switch (#332), 106 the extra 3D steps one
+// asset may be granted (#330 step 5C) and 107 the `completed` state a
+// production plan reaches when every required step succeeded, which rebuilds
+// production_budgets to widen its state CHECK (#410).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))

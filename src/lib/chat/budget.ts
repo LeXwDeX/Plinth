@@ -27,7 +27,28 @@ export interface ProductionPlanStep {
   candidateGroup?: number;
   /** #242: 1-based place inside the candidate group. */
   candidateIndex?: number;
+  /** #410: the plan is complete without this step; an unrun one reads "optional, not run". */
+  optional?: boolean;
 }
+
+/**
+ * #410: one plan step's standing, as the server projected it from the session's
+ * Tasks. The card reads this instead of pairing steps with Tasks itself; the
+ * ids stay open strings because the Product Schema names the step states.
+ */
+export interface PlanStepStatus {
+  /** 1-based position in the plan. */
+  index: number;
+  state: string;
+  /** The Task that ran the step; empty while none does. */
+  taskId: string;
+  /** The matched Task's own state, for the card's detail. */
+  taskState: string;
+  optional: boolean;
+}
+
+/** The step state ids the server projects (#410). */
+export const PLAN_STEP_STATES = ['pending', 'running', 'done', 'failed', 'not_run', 'optional_not_run'] as const;
 
 /** #120: one credit unit of a plan budget, as the server's decimal strings. */
 export interface BudgetUnit {
@@ -119,6 +140,12 @@ export interface SessionBudget {
   plan: ProductionPlan;
   createdAt: string;
   decidedAt: string;
+  /**
+   * #410: the server's per-step standing, in plan order. Absent on a server
+   * that does not project it (or one whose projection failed), and the card
+   * then pairs steps with Tasks itself as it did before.
+   */
+  steps?: PlanStepStatus[];
 }
 
 /**
@@ -237,7 +264,31 @@ export function parseProductionPlanStep(value: unknown): ProductionPlanStep | nu
     check: text(item.check),
     ...(typeof item.candidate_group === 'number' && item.candidate_group > 0 ? { candidateGroup: item.candidate_group } : {}),
     ...(typeof item.candidate_index === 'number' && item.candidate_index > 0 ? { candidateIndex: item.candidate_index } : {}),
+    ...(item.optional === true ? { optional: true } : {}),
   };
+}
+
+/**
+ * #410: the server's per-step standing. An entry without a state the Schema
+ * names is dropped rather than shown as some other step's state, so a newer
+ * server's unknown state leaves the card with fewer statuses than steps and the
+ * caller falls back to its own pairing.
+ */
+export function parsePlanStepStatuses(value: unknown): PlanStepStatus[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    const item = record(raw);
+    const index = typeof item.index === 'number' && Number.isFinite(item.index) && item.index > 0 ? item.index : 0;
+    const state = text(item.state);
+    if (!index || !PLAN_STEP_STATES.includes(state as (typeof PLAN_STEP_STATES)[number])) return [];
+    return [{
+      index,
+      state,
+      taskId: text(item.task_id),
+      taskState: text(item.task_state),
+      optional: item.optional === true,
+    }];
+  });
 }
 
 function number(value: unknown): number | undefined {
@@ -329,6 +380,7 @@ export function parseSessionBudget(schema: ProductSchema, value: unknown): Sessi
   // Only a missing state falls back, to the Schema's waiting state; a state this
   // build does not know is preserved.
   const state = text(item.state) || budgetStateWithRole(schema, 'pending');
+  const steps = parsePlanStepStatuses(item.steps);
   return {
     id,
     state,
@@ -336,6 +388,7 @@ export function parseSessionBudget(schema: ProductSchema, value: unknown): Sessi
     plan,
     createdAt: text(item.created_at),
     decidedAt: text(item.decided_at),
+    ...(steps.length > 0 ? { steps } : {}),
   };
 }
 

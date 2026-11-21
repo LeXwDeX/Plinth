@@ -351,6 +351,15 @@ func meshyCatalogTasks(h *processingHarness) []generation.Task {
 	}
 }
 
+// tripoProcessingTasks is the session's Tripo image-to-3D result. The Tripo
+// processing Offerings take only their own provider's tasks, by exact Offering
+// (#329), so the fixture names the Offering the task came from.
+func tripoProcessingTasks(h *processingHarness) []generation.Task {
+	task := modelTask("tripo-1", "owner-a", "session-a", h.tripo, "image-to-3d", "glb")
+	task.Offering.ID = "tripo/tripo-v3.1-full/image-to-3d"
+	return []generation.Task{task}
+}
+
 func TestRetextureAutoModeSubmitsFrozenSourceAndReportsCredits(t *testing.T) {
 	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
 	// resolution and enable_pbr stay tool arguments mapped to the offering's
@@ -536,10 +545,15 @@ func TestFormatConversionWithoutExtraCreditsIsAutoApprovedInManualMode(t *testin
 // A step that spends extra credits is the person's to approve in manual mode,
 // even on a capability that is otherwise automatic: it ends at an approval card
 // (nothing is submitted), the frozen input records the exact extra credits the
-// card shows, and the model never supplied the consent flag.
-func TestFormatConversionExtraCreditsNeedAnApprovalCardInManualMode(t *testing.T) {
-	h := newProcessingHarness(t, "manual", meshyCatalogTasks)
-	result, observed := h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX","texture_format":"PNG"}`)
+// card shows, and the model never supplied the consent flag. Format conversion
+// has no extra-credit option left since #432, so the route that still spends
+// them is a Tripo processing step: its extra export formats are fixed in the
+// Offering, so the kernel freezes them into the input and they cost extra.
+func TestProcessingExtraCreditsNeedAnApprovalCardInManualMode(t *testing.T) {
+	h := newProcessingHarness(t, "manual", tripoProcessingTasks)
+	h.gateway.normalize = true // the kernel freezes the fixed export formats
+	result, observed := h.run("process_model",
+		`{"step":"rigging","source_task_id":"tripo-1","offering_id":"tripo/processing/rigging"}`)
 	if result.Suspend || !result.NoSubmission || awaitedMessage(result.AgentContent) != h.app.Chat.Agent.ConsentWaitingContent ||
 		h.gateway.submitCount != 0 || len(observed) != 0 {
 		t.Fatalf("manual extra-credit step must wait on a card without submitting: %+v submits=%d", result, h.gateway.submitCount)
@@ -548,7 +562,7 @@ func TestFormatConversionExtraCreditsNeedAnApprovalCardInManualMode(t *testing.T
 		t.Fatalf("the frozen input must carry the consent the approval decides: %v", h.frozenInput(0))
 	}
 	prepared, err := h.gateway.repo.GetPreparedInput(context.Background(), "owner-a", "prepared-1")
-	if err != nil || prepared.ExtraCredits != 5 {
+	if err != nil || prepared.ExtraCredits != 20 {
 		t.Fatalf("frozen extra credits = %d, %v", prepared.ExtraCredits, err)
 	}
 	op, err := h.gateway.repo.LoadAgentOperation(context.Background(), "owner-a", "session-a", "turn-a", "call-1")
@@ -561,14 +575,16 @@ func TestFormatConversionExtraCreditsNeedAnApprovalCardInManualMode(t *testing.T
 	}
 }
 
-func TestFormatConversionExtraCreditsAreApprovedByAutoMode(t *testing.T) {
-	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
-	result, _ := h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX","texture_format":"PNG"}`)
+func TestProcessingExtraCreditsAreApprovedByAutoMode(t *testing.T) {
+	h := newProcessingHarness(t, "auto", tripoProcessingTasks)
+	h.gateway.normalize = true
+	result, _ := h.run("process_model",
+		`{"step":"rigging","source_task_id":"tripo-1","offering_id":"tripo/processing/rigging"}`)
 	content := h.content(result)
 	if result.Suspend || h.gateway.submitCount != 1 || content["approval"] != "policy" {
 		t.Fatalf("auto mode must approve the extra credits itself: %+v submits=%d", result, h.gateway.submitCount)
 	}
-	if content["estimated_credits"] != float64(10) || content["extra_credits"] != float64(5) {
+	if content["estimated_credits"] != float64(45) || content["extra_credits"] != float64(20) {
 		t.Fatalf("the result must show the extra part of the credits: %v", content)
 	}
 	if h.frozenInput(0)["authorize_extra_credits"] != true {
@@ -576,10 +592,19 @@ func TestFormatConversionExtraCreditsAreApprovedByAutoMode(t *testing.T) {
 	}
 }
 
+// #432: the retired texture_format is not a declared argument any more, so a
+// call that still passes it is refused instead of being dropped or billed as an
+// extra-credit option.
+func TestFormatConversionRefusesTheRetiredTextureFormatArgument(t *testing.T) {
+	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
+	result, _ := h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX","texture_format":"PNG"}`)
+	h.expectRejected(result, "texture_format")
+}
+
 func TestExtraCreditConsentCannotComeFromToolArguments(t *testing.T) {
 	// The model passes the consent flag directly: it is not a declared argument.
 	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
-	result, _ := h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX","texture_format":"PNG","authorize_extra_credits":true}`)
+	result, _ := h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX","authorize_extra_credits":true}`)
 	h.expectRejected(result, "authorize_extra_credits")
 
 	// A Schema that maps a tool argument onto the consent parameter is refused
@@ -587,11 +612,11 @@ func TestExtraCreditConsentCannotComeFromToolArguments(t *testing.T) {
 	h = newProcessingHarness(t, "auto", meshyCatalogTasks)
 	for index := range h.app.Chat.Tools {
 		if h.app.Chat.Tools[index].Name == "convert_model_format" {
-			h.app.Chat.Tools[index].Processing.ParameterArguments["texture_format"] = "authorize_extra_credits"
+			h.app.Chat.Tools[index].Processing.ParameterArguments["format"] = "authorize_extra_credits"
 		}
 	}
-	result, _ = h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX","texture_format":true}`)
-	h.expectRejected(result, "texture_format")
+	result, _ = h.run("convert_model_format", `{"source_task_id":"tripo-1","format":true}`)
+	h.expectRejected(result, "format")
 }
 
 func TestListSessionModelsSkipsUnfinishedTasksWhateverTheStoreReturns(t *testing.T) {

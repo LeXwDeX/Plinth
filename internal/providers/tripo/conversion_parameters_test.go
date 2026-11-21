@@ -27,9 +27,10 @@ import (
 
 const exportOfferingID = "tripo/tripo-v3.1-multiview/image-to-3d"
 
-// gamePurposeExport is what the game purposes declare: the advanced export.
+// gamePurposeExport is what the game purposes declare: since #456 all six
+// formats, each of them on the advanced export.
 var gamePurposeExport = map[string]any{
-	"output_formats": []string{"GLTF", "FBX"}, "export_texture_format": "PNG", "export_texture_size": "2k", "export_pivot_bottom_center": true,
+	"output_formats": []string{"GLTF", "USDZ", "FBX", "OBJ", "STL", "3MF"}, "export_texture_format": "PNG", "export_texture_size": "2k", "export_pivot_bottom_center": true,
 }
 
 // exportRecorder forwards to the Tripo v3 fake and keeps what the adapter sent
@@ -220,17 +221,17 @@ func runExports(t *testing.T, changes map[string]any) (map[string]map[string]any
 	return convertBodies(t, recorder), observation, server
 }
 
-func TestGamePurposeExportsOnlyItsFormatsWithTheAdvancedOptions(t *testing.T) {
+func TestGamePurposeExportsAllSixFormatsWithTheAdvancedOptions(t *testing.T) {
 	bodies, observation, _ := runExports(t, gamePurposeExport)
 	formats := make([]string, 0, len(bodies))
 	for format := range bodies {
 		formats = append(formats, format)
 	}
 	slices.Sort(formats)
-	if !slices.Equal(formats, []string{"FBX", "GLTF"}) {
-		t.Fatalf("converted formats = %v, want only GLTF and FBX", formats)
+	if !slices.Equal(formats, []string{"3MF", "FBX", "GLTF", "OBJ", "STL", "USDZ"}) {
+		t.Fatalf("converted formats = %v, want all six", formats)
 	}
-	// The two exports are the only conversion claims; the GLB of the model role is
+	// Every selected format has its conversion claim; the GLB of the model role is
 	// the GLTF export.
 	variants := map[string]int{}
 	var primary, gltf generation.ArtifactClaim
@@ -246,8 +247,15 @@ func TestGamePurposeExportsOnlyItsFormatsWithTheAdvancedOptions(t *testing.T) {
 			gltf = claim
 		}
 	}
-	if variants["converted_model/converted.gltf"] != 1 || variants["converted_model/converted.fbx"] != 1 || variants["model/"] != 1 || len(variants) != 3 {
-		t.Fatalf("claims = %v, want the model, converted.gltf and converted.fbx", variants)
+	wantClaims := []string{"model/", "converted_model/converted.gltf", "converted_model/converted.usdz",
+		"converted_model/converted.fbx", "converted_model/converted.obj", "converted_model/converted.stl", "converted_model/converted.3mf"}
+	for _, claim := range wantClaims {
+		if variants[claim] != 1 {
+			t.Errorf("claims = %v, want exactly one %s", variants, claim)
+		}
+	}
+	if len(variants) != len(wantClaims) {
+		t.Fatalf("claims = %v, want %v", variants, wantClaims)
 	}
 	// One locator fulfils both slots, and it is the GLTF export: Tripo returns it as
 	// a binary GLB (the fake does since #293), so both claims are typed by its .glb.
@@ -269,6 +277,97 @@ func TestGamePurposeExportsOnlyItsFormatsWithTheAdvancedOptions(t *testing.T) {
 				t.Errorf("%s request %s = %v, want %v", format, name, body[name], value)
 			}
 		}
+	}
+}
+
+// purposeOverrides is the parameter override a purpose declares for one
+// Offering, as the Catalog writes it.
+func purposeOverrides(t *testing.T, c *catalog.Catalog, purpose, offering string) map[string]any {
+	t.Helper()
+	for _, profile := range c.Application().Chat.Model3DUsage.Profiles {
+		if profile.ID != purpose {
+			continue
+		}
+		changes := map[string]any{}
+		for name, raw := range profile.ParameterOverrides[offering] {
+			var value any
+			if err := json.Unmarshal(raw, &value); err != nil {
+				t.Fatal(err)
+			}
+			changes[name] = value
+		}
+		return changes
+	}
+	t.Fatalf("purpose %q is not declared", purpose)
+	return nil
+}
+
+// #456: what a task freezes is read from the shipped Catalog's own purpose
+// declarations, not from a test fixture. Every purpose delivers all six
+// formats now: the game purposes keep the advanced export on each conversion,
+// print and display stay on the basic one, and the requests say exactly that.
+func TestEveryPurposeExportsAllSixFormatsAtItsOwnPrice(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	advanced := map[string]any{"texture_format": "PNG", "texture_size": float64(2048), "pivot_to_center_bottom": true}
+	const plainOffering = "tripo/tripo-v3.1-full/text-to-3d"
+	for _, tc := range []struct {
+		purpose     string
+		offering    string
+		options     map[string]any
+		conversions string
+	}{
+		{"game_character", exportOfferingID, advanced, "60"},
+		{"game_prop", exportOfferingID, advanced, "60"},
+		{"print", plainOffering, nil, "30"},
+		{"render", plainOffering, nil, "30"},
+	} {
+		t.Run(tc.purpose, func(t *testing.T) {
+			server, recorder := newExportUpstream(t)
+			adapter := exportAdapter(t, server)
+			offering, _ := c.Get(schema.OfferingID(tc.offering))
+			input := exportInput(t, c, tc.offering, purposeOverrides(t, c, tc.purpose, tc.offering))
+			observeToCompletion(t, adapter, offering, input, createBaseTask(t, server))
+
+			var formats struct {
+				Formats []string `json:"output_formats"`
+			}
+			if err := json.Unmarshal(input, &formats); err != nil {
+				t.Fatal(err)
+			}
+			if len(formats.Formats) != 6 {
+				t.Fatalf("output_formats = %v, want all six formats", formats.Formats)
+			}
+			bodies := convertBodies(t, recorder)
+			if len(bodies) != 6 {
+				t.Fatalf("converted formats = %v, want all six", bodies)
+			}
+			for format, body := range bodies {
+				if len(body) != 1+len(tc.options) {
+					t.Errorf("%s request = %v, want format plus %v", format, body, tc.options)
+				}
+				for name, value := range tc.options {
+					if body[name] != value {
+						t.Errorf("%s request %s = %v, want %v", format, name, body[name], value)
+					}
+				}
+			}
+			quote, err := offering.EvaluateNativeQuote(input)
+			if err != nil || quote == nil {
+				t.Fatalf("quote = %+v, %v", quote, err)
+			}
+			charged := ""
+			for _, component := range quote.Components {
+				if component.ID == "format_conversions" {
+					charged = component.Amount
+				}
+			}
+			if charged != tc.conversions {
+				t.Errorf("the conversions are priced %q, want %s", charged, tc.conversions)
+			}
+		})
 	}
 }
 
@@ -464,8 +563,8 @@ func TestOfferingWithoutAnExportDeclarationKeepsTheHistoricalRequest(t *testing.
 	observeToCompletion(t, adapter, offering, input, createBaseTask(t, server))
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
-	if len(recorder.converts) != 2 {
-		t.Fatalf("exports = %d", len(recorder.converts))
+	if len(recorder.converts) != 6 {
+		t.Fatalf("exports = %d, want one per selected format", len(recorder.converts))
 	}
 	for _, body := range recorder.converts {
 		if len(body) != 2 || body["input"] == nil || body["format"] == nil {

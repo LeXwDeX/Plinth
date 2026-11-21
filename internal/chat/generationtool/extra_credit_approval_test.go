@@ -111,9 +111,13 @@ func TestExtraExportFormatsInManualModeMakeAnApprovalCard(t *testing.T) {
 // A model that is otherwise automatic in manual mode still asks when the step
 // spends extra credits, and the policy cannot approve it behind the person's back.
 func TestPolicyNeverApprovesExtraCreditsOfAnAgentStepInManualMode(t *testing.T) {
-	h := newProcessingHarness(t, "manual", meshyCatalogTasks)
-	// Format conversion is an automatic capability in manual mode.
-	result, _ := h.run("convert_model_format", `{"source_task_id":"tripo-1","format":"FBX","texture_format":"PNG"}`)
+	h := newProcessingHarness(t, "manual", tripoProcessingTasks)
+	h.gateway.normalize = true // the kernel freezes the fixed export formats
+	// Tripo rigging is an automatic capability in manual mode, and its extra
+	// export formats spend extra credits (#432: format conversion has no such
+	// option left, so this is the route that still does).
+	result, _ := h.run("process_model",
+		`{"step":"rigging","source_task_id":"tripo-1","offering_id":"tripo/processing/rigging"}`)
 	if !result.NoSubmission || h.gateway.submitCount != 0 {
 		t.Fatalf("an automatic capability with extra credits was submitted: %+v", result)
 	}

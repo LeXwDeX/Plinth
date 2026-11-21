@@ -153,6 +153,33 @@ func (s resolvedPlanStore) ProductionBudgetSummaries(ctx context.Context, ownerI
 	return summaries, nil
 }
 
+// CompleteFinishedBudgets is the optional completion write (#410). Without a
+// wrapped completion store there is nothing to complete.
+func (s resolvedPlanStore) CompleteFinishedBudgets(ctx context.Context, now time.Time) ([]budget.ProductionBudget, error) {
+	store, ok := s.ProductionBudgetStore.(budgetCompletionStore)
+	if !ok {
+		return nil, nil
+	}
+	values, err := store.CompleteFinishedBudgets(ctx, now)
+	if err != nil {
+		return values, err
+	}
+	return s.plans(values), nil
+}
+
+// CompleteFinishedBudget is the same for one plan of one owner.
+func (s resolvedPlanStore) CompleteFinishedBudget(ctx context.Context, ownerID, budgetID string, now time.Time) ([]budget.ProductionBudget, error) {
+	store, ok := s.ProductionBudgetStore.(budgetCompletionStore)
+	if !ok {
+		return nil, nil
+	}
+	values, err := store.CompleteFinishedBudget(ctx, ownerID, budgetID, now)
+	if err != nil {
+		return values, err
+	}
+	return s.plans(values), nil
+}
+
 // ProductionBudgetsAwaitingNotice is the optional notice retry read. Without a
 // wrapped notice store there is nothing to retry.
 func (s resolvedPlanStore) ProductionBudgetsAwaitingNotice(ctx context.Context, limit int) ([]budget.ProductionBudget, error) {

@@ -27,7 +27,7 @@
       "transparent_ratio": 0,
       "width": 128
     },
-    "rounds_remaining": 2,
+    "rounds_remaining": 5,
     "usage_check": {
       "checklist": "3d_input",
       "checklist_text": "【3D 输入图自检】用于图生 3D 的图片应单主体、完整不贴边、纯色或透明背景、均匀光、弱透视；角色用 A-pose 或 T-pose，四肢和手指分开。inspect_image 的确定性结果不通过时，先修图（去背景、裁切、重画）再提交。确定性检查看不出姿态、透视和投影阴影：结果里的 visual_items 列出这些要你看图判断的项（用 show_picture 看图），逐项用 visual_review 写出 pass、fail 或 not_applicable 和一句看到了什么，服务端会把它们记入自检记录；任何一项 fail 都先修图再提交。",

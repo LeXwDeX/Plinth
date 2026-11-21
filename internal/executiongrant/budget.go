@@ -99,8 +99,24 @@ type ProductionBudgetStore interface {
 	// charged or released, releases reservations whose grant was denied, and
 	// marks an active plan exhausted once its charged totals reach the limit
 	// of every unit. It returns the plans that became exhausted and need their
-	// one notice posted.
+	// one notice posted. It also completes the plans whose reservations it
+	// settled, so a plan whose last step succeeded reads completed (#410).
 	SettleBudgetReservations(context.Context, time.Time) ([]budget.ProductionBudget, error)
+}
+
+// budgetCompletionStore is the optional data-layer part that marks a finished
+// plan completed (#410). Deployments whose plan store predates it keep working:
+// the sweep still settles reservations, and the plan card shows whatever the
+// settlement reached.
+type budgetCompletionStore interface {
+	// CompleteFinishedBudgets marks every active or exhausted plan whose
+	// required steps all have a succeeded Task as completed and returns them.
+	// It is the one-shot a deployment runs at start-up; the sweep calls it only
+	// for the plans whose reservations it settled.
+	CompleteFinishedBudgets(context.Context, time.Time) ([]budget.ProductionBudget, error)
+	// CompleteFinishedBudget is the same for one plan of one owner, the scope a
+	// plan decision or a continuation turn needs.
+	CompleteFinishedBudget(context.Context, string, string, time.Time) ([]budget.ProductionBudget, error)
 }
 
 // BudgetGrantStore is the data layer's atomic budget authorization: the grant
@@ -353,6 +369,31 @@ func (s Service) SettleBudgets(ctx context.Context) ([]budget.ProductionBudget, 
 		return nil, nil
 	}
 	return s.Budgets.SettleBudgetReservations(ctx, s.now())
+}
+
+// CompleteFinishedBudgets marks every plan whose required steps all have a
+// succeeded Task as completed (#410). It is the one-shot the deployment runs at
+// start-up, so a plan that finished while nothing settled still reads completed.
+// Deployments without completion storage return none.
+func (s Service) CompleteFinishedBudgets(ctx context.Context) ([]budget.ProductionBudget, error) {
+	store, ok := s.Budgets.(budgetCompletionStore)
+	if !ok {
+		return nil, nil
+	}
+	return store.CompleteFinishedBudgets(ctx, s.now())
+}
+
+// CompleteFinishedBudget is CompleteFinishedBudgets for the plan a decision or a
+// continuation concerns. An unknown plan or owner is not found.
+func (s Service) CompleteFinishedBudget(ctx context.Context, ownerID, budgetID string) ([]budget.ProductionBudget, error) {
+	if ownerID == "" || budgetID == "" {
+		return nil, ErrInvalid
+	}
+	store, ok := s.Budgets.(budgetCompletionStore)
+	if !ok {
+		return nil, nil
+	}
+	return store.CompleteFinishedBudget(ctx, ownerID, budgetID, s.now())
 }
 
 // applyBudgetPolicy evaluates one Agent step of a budget-mode session. The

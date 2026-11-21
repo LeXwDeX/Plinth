@@ -33,13 +33,17 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 	if budget.MaxCredits <= 0 || budget.MaxSteps <= 0 || budget.MaxTitleCharacters <= 0 || budget.MaxPurposeCharacters <= 0 {
 		t.Fatalf("budget bounds = %+v", budget)
 	}
-	if len(budget.States) != 5 || budget.Messages.Approved == "" || budget.Messages.Denied == "" ||
+	// #410: a finished plan has its own state, so the plan card can say the
+	// plan is done instead of leaving it "in progress" for ever.
+	if len(budget.States) != 6 || budget.Messages.Approved == "" || budget.Messages.Denied == "" ||
 		budget.Messages.Expired == "" || budget.Messages.Exhausted == "" {
 		t.Fatalf("budget states or messages = %+v", budget)
 	}
-	if app.Chat.API.ResponseFields.Budget != "budget" || app.Runtime.HTTP.Routes.ChatSessionBudget == "" {
-		t.Fatalf("session projection = field %q route %q",
-			app.Chat.API.ResponseFields.Budget, app.Runtime.HTTP.Routes.ChatSessionBudget)
+	if app.Chat.API.ResponseFields.Budget != "budget" || app.Runtime.HTTP.Routes.ChatSessionBudget == "" ||
+		app.Runtime.HTTP.Routes.ChatSessionBudgetContinue == "" {
+		t.Fatalf("session projection = field %q route %q continue %q",
+			app.Chat.API.ResponseFields.Budget, app.Runtime.HTTP.Routes.ChatSessionBudget,
+			app.Runtime.HTTP.Routes.ChatSessionBudgetContinue)
 	}
 	var planTool *catalog.ChatAgentToolSchema
 	for index := range app.Chat.AgentTools {
@@ -103,7 +107,7 @@ func TestDefaultCatalogDeclaresTheBudgetModeAndItsPlanTool(t *testing.T) {
 	want := map[string]string{
 		"pending": catalog.ChatApprovalBudgetRolePending, "active": catalog.ChatApprovalBudgetRoleActive,
 		"exhausted": catalog.ChatApprovalBudgetRoleEnded, "closed": catalog.ChatApprovalBudgetRoleEnded,
-		"denied": catalog.ChatApprovalBudgetRoleDenied,
+		"denied": catalog.ChatApprovalBudgetRoleDenied, "completed": catalog.ChatApprovalBudgetRoleEnded,
 	}
 	if len(roles) != len(want) {
 		t.Fatalf("public budget states = %+v", public.Chat.ApprovalPolicy.BudgetStates)

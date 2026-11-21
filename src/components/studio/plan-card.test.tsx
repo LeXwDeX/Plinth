@@ -68,7 +68,7 @@ describe('a production plan waiting for approval (#103)', () => {
     expect(steps[0].textContent).toContain(capability('text-to-3d'));
     expect(steps[0].textContent).toContain('Tripo v3');
     expect(steps[0].textContent).toContain(words('ui.studio.plan.estimated', { amount: '80 Tripo credits' }));
-    expect(steps[0].textContent).toContain(text('ui.studio.plan.step_pending'));
+    expect(steps[0].textContent).toContain(text('ui.studio.plan.step_state.pending'));
     expect(steps[1].textContent).toContain(text('ui.studio.plan.model_unspecified'));
     expect(steps[1].textContent).toContain(words('ui.studio.plan.estimated', { amount: `20 ${legacyLabel}` }));
     const corrections = view.getByTestId('studio-plan-corrections');
@@ -204,7 +204,7 @@ describe('an approved production plan (#103)', () => {
     const view = render(<PlanCard plan={plan} budgets={budgets} tasks={[historical]} progress={progress} />);
     const steps = view.getAllByTestId('studio-plan-step');
     expect(steps[0].getAttribute('data-state')).toBe('pending');
-    expect(steps[0].textContent).toContain(text('ui.studio.plan.step_pending'));
+    expect(steps[0].textContent).toContain(text('ui.studio.plan.step_state.pending'));
     expect(view.getByTestId('studio-plan-progress').textContent).toContain(
       formatSchemaText(text('ui.studio.plan.steps_done'), { done: 0, total: 2 }),
     );

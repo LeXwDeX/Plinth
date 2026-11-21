@@ -1300,6 +1300,31 @@ func (r *memoryChatRepository) ListSessionTurns(
 	return filtered, nil
 }
 
+// PlanTaskFacts 让内存仓储也满足 chat.Repository：本测试仓储不建 Task，
+// 因此只回报「该会话仍有未结束回合」这一半事实（#410）。
+func (r *memoryChatRepository) PlanTaskFacts(
+	_ context.Context,
+	ownerID string,
+	sessionIDs []string,
+	activeTurnStates []string,
+) (map[string]chat.PlanTaskFacts, error) {
+	turns, err := r.ListTurns(context.Background(), activeTurnStates)
+	if err != nil {
+		return nil, err
+	}
+	facts := make(map[string]chat.PlanTaskFacts, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		entry := facts[sessionID]
+		for _, turn := range turns {
+			if turn.OwnerID == ownerID && turn.SessionID == sessionID {
+				entry.TurnRunning = true
+			}
+		}
+		facts[sessionID] = entry
+	}
+	return facts, nil
+}
+
 func (r *memoryChatRepository) RecentSessionTurnOptions(
 	_ context.Context,
 	ownerID string,

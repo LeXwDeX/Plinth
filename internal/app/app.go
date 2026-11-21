@@ -844,6 +844,16 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// that it can only be requested again in a new turn.
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second,
 	}
+	// #410: collect the plans that finished while nothing settled — a
+	// deployment that was stopped when the last step succeeded, or a plan whose
+	// steps were paid without a reservation. It runs once here; the sweep only
+	// reconsiders the plans whose reservations it settled, so an abandoned plan
+	// is not re-read every two seconds.
+	if completed, err := executionGrants.CompleteFinishedBudgets(context.Background()); err != nil {
+		logger.Warn("启动时收尾已完成的制作计划失败", "error", err)
+	} else if len(completed) > 0 {
+		logger.Info("启动时收尾已完成的制作计划", "count", len(completed))
+	}
 	// Budget-mode plans (#103) need the grant service, which needs the chat
 	// service for the session mode; install the writer once both exist.
 	chatService.SetProductionPlans(chat.ProductionPlanPolicy{
