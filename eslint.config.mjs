@@ -2,10 +2,10 @@
 //
 // 规则选择：只把 `react-hooks/rules-of-hooks` 设为 error。它是 #387 聊天区
 // React #300（Rendered fewer hooks than expected）的静态对应项——条件、循环、
-// 提前 return 之后调用 hook 都会被它报出来。`react-hooks/exhaustive-deps` 显式
-// 关闭：它是建议性规则，存量代码里大量依赖数组刻意不等同于全部闭包变量（store
-// 快照、稳定回调、ref 转发），全量打开会产生大量 warning；本门禁只守 #436 的
-// 失败模式，不改变依赖数组的既有写法，也不引入第二套风格约束。
+// 提前 return 之后调用 hook 都会被它报出来。`react-hooks/exhaustive-deps` 只设
+// 为 warn、不影响退出码：它是建议性规则，存量代码里不少依赖数组刻意不等同于
+// 全部闭包变量（store 快照、稳定回调、ref 转发），改它会改变运行时行为；本门禁
+// 只守 #436 的失败模式，不改变依赖数组的既有写法，也不引入第二套风格约束。
 import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
