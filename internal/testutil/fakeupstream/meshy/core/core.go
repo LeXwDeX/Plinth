@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
@@ -160,6 +161,9 @@ type task struct {
 	polls         int
 	// faces is the triangle count of the model the task delivers (0: none).
 	faces int
+	// textured is whether the model carries textures: the kind's own answer, or
+	// the source task's when this kind only processes another task's model.
+	textured bool
 	// failure is set when the task ends FAILED.
 	failure *taskError
 }
@@ -191,7 +195,7 @@ type engine struct {
 	mux   *http.ServeMux
 	kinds map[string]Kind
 	// polls[type][status] is a real poll body.
-	polls map[string]map[string]map[string]any
+	polls map[string]map[string]pollSample
 	// creates[path] is the real create response.
 	creates   map[string]createSample
 	balance   map[string]any
@@ -200,16 +204,26 @@ type engine struct {
 	errors map[int]map[string]any
 }
 
+// createSample is one real create answer and when it was captured. Several
+// committed samples may answer the same route (a re-capture); the newest wins,
+// so the fake follows the API's current answer.
 type createSample struct {
-	status int
-	body   map[string]any
+	status     int
+	body       map[string]any
+	capturedAt time.Time
+}
+
+// pollSample is one real poll body and when it was captured; see createSample.
+type pollSample struct {
+	body       map[string]any
+	capturedAt time.Time
 }
 
 // New builds the version's handler.
 func New(cfg Config) (http.Handler, error) {
 	e := &engine{
 		cfg: cfg, mux: http.NewServeMux(), kinds: map[string]Kind{},
-		polls: map[string]map[string]map[string]any{}, creates: map[string]createSample{},
+		polls: map[string]map[string]pollSample{}, creates: map[string]createSample{},
 		errors: map[int]map[string]any{},
 	}
 	for _, exchange := range cfg.Samples.Exchanges {
@@ -263,6 +277,7 @@ func (e *engine) index(exchange wirefixture.Exchange) error {
 		return err
 	}
 	status := exchange.Response.Status
+	capturedAt := exchange.Metadata.CapturedAt
 	switch {
 	case exchange.Request.Method == http.MethodGet && apiPath == "/balance" && status == 200:
 		e.balance = body
@@ -271,8 +286,8 @@ func (e *engine) index(exchange wirefixture.Exchange) error {
 			e.errors[status] = body
 		}
 	case exchange.Request.Method == http.MethodPost && status == http.StatusAccepted:
-		if _, has := e.creates[apiPath]; !has {
-			e.creates[apiPath] = createSample{status: status, body: body}
+		if held, has := e.creates[apiPath]; !has || capturedAt.After(held.capturedAt) {
+			e.creates[apiPath] = createSample{status: status, body: body, capturedAt: capturedAt}
 		}
 	case exchange.Request.Method == http.MethodGet && status == http.StatusOK:
 		typ, _ := body["type"].(string)
@@ -281,10 +296,10 @@ func (e *engine) index(exchange wirefixture.Exchange) error {
 			return nil
 		}
 		if e.polls[typ] == nil {
-			e.polls[typ] = map[string]map[string]any{}
+			e.polls[typ] = map[string]pollSample{}
 		}
-		if e.polls[typ][state] == nil {
-			e.polls[typ][state] = body
+		if held, has := e.polls[typ][state]; !has || capturedAt.After(held.capturedAt) {
+			e.polls[typ][state] = pollSample{body: body, capturedAt: capturedAt}
 		}
 	}
 	return nil
@@ -292,7 +307,7 @@ func (e *engine) index(exchange wirefixture.Exchange) error {
 
 // pollTemplate returns the real poll body of a type and status.
 func (e *engine) pollTemplate(typ, status string) map[string]any {
-	return e.polls[typ][status]
+	return e.polls[typ][status].body
 }
 
 // ---- helpers ----
@@ -506,6 +521,16 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 				return
 			}
 			t.faces = found.faces
+			if kind.Textured == nil {
+				// A processing kind keeps the source model as it is; the
+				// capture of 2026-11-20 shows a remesh of a textured model
+				// answering the OBJ material library, so the MTL follows the
+				// source.
+				t.textured = t.textured || found.textured
+			}
+		}
+		if kind.Textured != nil {
+			t.textured = kind.Textured(request)
 		}
 		t.faces = facesOf(t)
 		if kind.Path == "/rigging" && scenario == fakeupstream.ScenarioRigNonHumanoid {
@@ -537,6 +562,19 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 		sample := e.creates[kind.Path]
 		response := fakeupstream.Clone(sample.body)
 		response["result"] = t.id
+		// The v2 text-to-3d create answers the whole task object (captured
+		// 2026-11-20): the task's own id, type and the request it accepted are
+		// part of it, the rest of the template stays. The newest sample may be
+		// either mode, so the type follows the request.
+		if _, has := response["id"]; has {
+			response["id"] = t.id
+		}
+		if _, has := response["input"]; has {
+			response["input"] = fakeupstream.Clone(t.request)
+		}
+		if _, has := response["type"]; has {
+			response["type"] = t.typ
+		}
 		writeJSON(w, sample.status, response)
 	}
 }
@@ -666,6 +704,13 @@ func (e *engine) pollBody(r *http.Request, t *task, status string) map[string]an
 	}
 	body := fakeupstream.Clone(template)
 	body["id"], body["status"] = t.id, status
+	// The v2 text-to-3d task object repeats the request it accepted under
+	// input (captured 2026-11-20); every other version's object has no such
+	// key, so nothing is added there.
+	if _, has := body["input"]; has {
+		body["input"] = fakeupstream.Clone(t.request)
+	}
+	e.shapeResolution(t, body)
 	switch status {
 	case StatusPending:
 		body["progress"] = json.Number("0")
@@ -740,33 +785,70 @@ func (e *engine) setTaskError(body map[string]any, failure *taskError) {
 
 func (e *engine) anyTemplate(typ string) map[string]any {
 	for _, byStatus := range e.polls {
-		for _, body := range byStatus {
-			return body
+		for _, sample := range byStatus {
+			return sample.body
 		}
 	}
 	return nil
 }
 
+// shapeResolution echoes the geometry and texture options the request asked
+// for. The captures of 2026-11-20 show a poll repeating geometry_resolution
+// (image-to-3d, text-to-3d) and texture_resolution (image-to-3d, retexture,
+// text-to-3d refine) as sent, with ultra_mode and hd_texture set: the two
+// deprecated aliases the Catalog dated 2026-09-18/2026-11-20 names, where
+// ultra_mode=true means 2k geometry or more and hd_texture=true means a 4k
+// texture. A body that carries none of the keys (every other kind) is left
+// alone; the Adapter reads none of them.
+func (e *engine) shapeResolution(t *task, body map[string]any) {
+	if _, has := body["geometry_resolution"]; has {
+		resolution, _ := t.request["geometry_resolution"].(string)
+		if resolution != "" {
+			body["geometry_resolution"] = resolution
+		}
+		if _, has := body["ultra_mode"]; has && resolution != "" {
+			body["ultra_mode"] = resolution != "1k"
+		}
+	}
+	if _, has := body["texture_resolution"]; has {
+		resolution, _ := t.request["texture_resolution"].(string)
+		if resolution != "" {
+			body["texture_resolution"] = resolution
+		}
+		if _, has := body["hd_texture"]; has && resolution != "" {
+			body["hd_texture"] = resolution == "4k" || resolution == "8k"
+		}
+	}
+}
+
 // shapeTextures applies the request's texture options to a success body. The
-// committed samples were captured with enable_pbr=false (and, for
+// 2026-10-29 samples were captured with enable_pbr=false (and, for
 // multi-image-to-3d, should_texture=false), so the PBR maps and the texture
 // objects a default Catalog request asks for are constructed from the official
 // field docs (https://docs.meshy.ai/en/api/image-to-3d, /multi-image-to-3d,
 // /retexture and /text-to-3d, checked 2026-11-08): metallic, normal and
 // roughness are present when enable_pbr is true; the emission map needs a
 // model/resolution the default Catalog offerings do not use, so it is not
-// added.
+// added. The 2026-11-20 capture shows a mesh-only text-to-3d preview answering
+// texture_urls with a normal map when enable_pbr was asked for, so an
+// untextured task keeps the sample's entry then.
 func (e *engine) shapeTextures(t *task, body map[string]any) {
 	if t.kind.Textured == nil {
 		return
 	}
-	if !t.kind.Textured(t.request) {
+	enablePBR, _ := t.request["enable_pbr"].(bool)
+	if !t.textured {
+		if enablePBR && meshOnlySample(body) {
+			// The mesh-only sample (the text-to-3d preview) already carries the
+			// only map such a task reports: a normal map. Others keep nothing.
+			return
+		}
 		// An untextured task returns no texture maps.
 		body["texture_urls"] = []any{}
 		return
 	}
 	keys := []string{"base_color"}
-	if enablePBR, _ := t.request["enable_pbr"].(bool); enablePBR {
+	if enablePBR {
 		keys = append(keys, "metallic", "normal", "roughness")
 	}
 	entries, _ := body["texture_urls"].([]any)
@@ -794,6 +876,21 @@ func (e *engine) shapeTextures(t *task, body map[string]any) {
 			}
 		}
 	}
+}
+
+// meshOnlySample reports whether the sample's texture entry is the one a
+// mesh-only task answers: a normal map and no base color.
+func meshOnlySample(body map[string]any) bool {
+	entries, _ := body["texture_urls"].([]any)
+	if len(entries) == 0 {
+		return false
+	}
+	entry, _ := entries[0].(map[string]any)
+	if entry == nil {
+		return false
+	}
+	baseColor, _ := entry["base_color"].(string)
+	return !strings.HasPrefix(baseColor, "http")
 }
 
 // textureSeed is the URL value constructed texture maps start from; fillURLs
@@ -862,9 +959,10 @@ func (e *engine) modelURLs(t *task, template map[string]any) map[string]any {
 			continue
 		}
 		out[name] = sample
-		// The material library is generated with the textured OBJ (the v2
-		// preview is mesh-only; finding #203/#11).
-		if name == "obj" && (t.kind.Textured == nil || t.kind.Textured(t.request)) {
+		// The material library is generated with the OBJ of a textured model
+		// (the v2 preview is mesh-only; finding #203/#11), and a processing kind
+		// keeps its source's texture (captured 2026-11-20).
+		if name == "obj" && t.textured {
 			out["mtl"] = sample
 		}
 	}

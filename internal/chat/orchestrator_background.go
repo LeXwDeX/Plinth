@@ -155,6 +155,16 @@ func (orchestrator *Orchestrator) backgroundEligible(ctx context.Context, turn T
 	return qualifies, nil
 }
 
+// backgroundFinalizeAttempts bounds how often one background turn's ending is
+// tried (#429). Its steps are idempotent, so a write that failed once may
+// succeed again; the caller ends the turn as failed after the last attempt,
+// because nothing else would retry it in the live process.
+const backgroundFinalizeAttempts = 3
+
+// backgroundFinalizeRetryDelay spaces those attempts apart, so a transient
+// storage failure (a locked database, a short outage) can clear.
+const backgroundFinalizeRetryDelay = 100 * time.Millisecond
+
 // finalizeBackgroundTurn ends a turn whose person stopped waiting while its
 // Tasks keep running (#137). Nothing is cancelled: each waited call keeps its
 // Task binding, is marked Background for later turns, and its consent claim
@@ -163,7 +173,42 @@ func (orchestrator *Orchestrator) backgroundEligible(ctx context.Context, turn T
 // reservation stays until the kernel settles the Task. The turn closes as done
 // with the Schema note; the results reach the task tray and the task center,
 // never this conversation.
+//
+// #429: every step is attempted on a copy of the reply, so a failed attempt
+// leaves nothing behind, and the whole ending is retried a bounded number of
+// times before it is reported. The caller then ends the turn as failed; the
+// Tasks keep running either way, since the durable background choice already
+// took them out of this turn's hands.
 func (orchestrator *Orchestrator) finalizeBackgroundTurn(ctx context.Context, command ProcessTurn, turn Turn,
+	assistant *Message) error {
+	var err error
+	for attempt := 1; attempt <= backgroundFinalizeAttempts; attempt++ {
+		candidate := copyMessage(*assistant)
+		err = orchestrator.finalizeBackgroundTurnOnce(ctx, command, turn, &candidate)
+		if err == nil {
+			*assistant = candidate
+			return nil
+		}
+		if ctx.Err() != nil || attempt == backgroundFinalizeAttempts {
+			break
+		}
+		orchestrator.logger.Warn("后台继续的轮次收尾失败，准备重试",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"attempt", attempt,
+			"error", err)
+		select {
+		case <-ctx.Done():
+			// 进程停机：不再尝试，轮次保持排队交给重启后的收尾。
+			return err
+		case <-time.After(backgroundFinalizeRetryDelay):
+		}
+	}
+	return err
+}
+
+// finalizeBackgroundTurnOnce is one attempt of finalizeBackgroundTurn.
+func (orchestrator *Orchestrator) finalizeBackgroundTurnOnce(ctx context.Context, command ProcessTurn, turn Turn,
 	assistant *Message) error {
 	ctx = catalog.WithLocale(context.WithoutCancel(ctx), command.Options.Locale)
 	messages, err := orchestrator.service.ListMessages(ctx, command.OwnerID, command.SessionID)

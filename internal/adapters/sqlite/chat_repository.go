@@ -865,20 +865,50 @@ func (r *Repository) drainSessionBulkRows(ctx context.Context, sessionID string)
 }
 
 // sessionSkillRunInFlight finds a step of the session's SkillRuns that has work
-// in flight: a human grant still waiting for its decision, or a bound Task that
-// has not reached a terminal state. It is skillrun.Step.InFlight as one query
-// (a test holds the two together), and it reads the Task and the grant, the
-// only authorities for their states, without writing either.
+// in flight: a grant waiting for its decision or being claimed, a bound grant
+// whose Task has not reached a terminal state, or a Task bound on the step that
+// has not reached one. An approved grant is at rest: it has no Task and no
+// transition of its own, and the turn that would submit it is the turn a
+// deletion stops. It is skillrun.Step.InFlight as one query (a test holds the
+// two together), and it reads the Task and the grant, the only authorities for
+// their states, without writing either.
 const sessionSkillRunInFlight = `
 	SELECT 1
 	FROM skill_runs sr
 	JOIN skill_run_steps ss ON ss.run_id = sr.id
 	LEFT JOIN generation_tasks t ON t.id = ss.task_id
 	LEFT JOIN execution_grants g ON g.request_id = ss.grant_request_id
+	LEFT JOIN generation_tasks gt ON gt.id = g.task_id
 	WHERE sr.owner_id = ? AND sr.session_id = ?
-	  AND ((ss.phase = ? AND g.status = ?)
+	  AND ((ss.phase = ? AND g.status IN (?, ?))
+	    OR (ss.phase = ? AND g.status = ? AND COALESCE(gt.state, '') NOT IN (?, ?, ?))
 	    OR (ss.phase = ? AND COALESCE(t.state, '') NOT IN (?, ?, ?)))
 	LIMIT 1`
+
+// sessionSkillRunInFlightAt answers sessionSkillRunInFlight on the database or
+// on one of its open transactions. The deletion checks it again inside its
+// final transaction: a submission accepted after the preflight (a detached
+// approval, not the turn the deletion stopped) must not lose the SkillRun it
+// has just advanced.
+func sessionSkillRunInFlightAt(ctx context.Context, db queryer, ownerID, sessionID string) (bool, error) {
+	var found int
+	err := db.QueryRowContext(ctx, sessionSkillRunInFlight, ownerID, sessionID,
+		string(skillrun.GrantPending),
+		string(executiongrant.Pending), string(executiongrant.Claimed),
+		string(skillrun.GrantPending), string(executiongrant.Bound),
+		string(schema.TaskSucceeded), string(schema.TaskFailed), string(schema.TaskCanceled),
+		string(skillrun.TaskBound),
+		string(schema.TaskSucceeded), string(schema.TaskFailed), string(schema.TaskCanceled),
+	).Scan(&found)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	default:
+		return false, fmt.Errorf("check chat session skill runs: %w", err)
+	}
+}
 
 // PreflightSessionDeletion reports ErrSessionDeletionBlocked for a session
 // whose SkillRun has work in flight, so that the deletion is refused before
@@ -886,19 +916,14 @@ const sessionSkillRunInFlight = `
 // go with the session. The bulk rows are deleted by transactions of their own;
 // running them first would lose the conversation of a session that then stays.
 func (r *Repository) PreflightSessionDeletion(ctx context.Context, ownerID, sessionID string) error {
-	var found int
-	err := r.db.QueryRowContext(ctx, sessionSkillRunInFlight, ownerID, sessionID,
-		string(skillrun.GrantPending), string(executiongrant.Pending),
-		string(skillrun.TaskBound),
-		string(schema.TaskSucceeded), string(schema.TaskFailed), string(schema.TaskCanceled),
-	).Scan(&found)
+	inFlight, err := sessionSkillRunInFlightAt(ctx, r.db, ownerID, sessionID)
 	switch {
-	case err == nil:
+	case err != nil:
+		return err
+	case inFlight:
 		return fmt.Errorf("%w: a skill run has work in flight", chat.ErrSessionDeletionBlocked)
-	case errors.Is(err, sql.ErrNoRows):
-		return nil
 	default:
-		return fmt.Errorf("check chat session skill runs: %w", err)
+		return nil
 	}
 }
 
@@ -928,6 +953,15 @@ func (r *Repository) DeleteSession(
 		return false, fmt.Errorf("begin chat session deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Check again with the rows: the preflight ran before the turn was
+	// stopped, and a detached submission can advance a step to a running Task
+	// in between. The refusal rolls the transaction back, and the session and
+	// its SkillRun stay.
+	if inFlight, err := sessionSkillRunInFlightAt(ctx, tx, ownerID, sessionID); err != nil {
+		return false, err
+	} else if inFlight {
+		return false, fmt.Errorf("%w: a skill run has work in flight", chat.ErrSessionDeletionBlocked)
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM go_canvas_projects WHERE owner_id = ? AND session_id = ?`,
 		ownerID, sessionID,

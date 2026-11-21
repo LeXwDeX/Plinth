@@ -131,9 +131,11 @@ func TestShippedHarnessLeadsTheAgentToTheNextStepCard(t *testing.T) {
 	}
 }
 
-// #374: the Agent's standing rules ask for a card whenever the person has two
-// or more directions to choose from, keep explicit instructions free of a
-// separate purpose card, and merge blocking questions into one card per reply.
+// #374/#407: the Agent's standing rule says when a decision needs a card and
+// that a card is used instead of a list; the card vocabulary (kinds, 2 to 4
+// options, one card per reply, switchable operations) lives in the ask_choice
+// description, and the purpose question lives in the brief texts. Each rule is
+// stated once.
 func TestShippedAgentPromptAsksForDirectionCardsAndFewerQuestions(t *testing.T) {
 	loaded, err := catalog.LoadDefault()
 	if err != nil {
@@ -148,15 +150,27 @@ func TestShippedAgentPromptAsksForDirectionCardsAndFewerQuestions(t *testing.T) 
 		}
 	}
 	for _, want := range []string{
-		"两个及以上可选方向", "kind=next_step", "不要写成编号或项目符号列表",
-		"明确的生成指令且输入齐全", "不要单独弹用途卡", "合并成一张 next_step 卡一次问完", "一回合最多一张卡",
-		"switchable_operations",
-		// The purpose card for a vague request is still asked first.
-		"先用 ask_choice 请用户选用途", "一次最多一张选择卡",
+		"一次一张卡", "一回合最多一张", "方向卡", "不要写成编号或列表",
+		"用户给了明确的生成指令且输入齐全时，直接开始",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("system prompt lacks %q", want)
 		}
+	}
+	if strings.Contains(prompt, "kind=next_step") || strings.Contains(prompt, "switchable_operations") {
+		t.Error("the system prompt repeats the card vocabulary that lives in the ask_choice description")
+	}
+	ask := askChoiceDescription(t, app)
+	for _, want := range []string{
+		"two or more directions", "numbered or bulleted list", "at most one card per reply",
+		"2 to 4 options", "switchable_operations", "clear_operation", "usage_profile",
+	} {
+		if !strings.Contains(ask, want) {
+			t.Errorf("ask_choice description lacks %q", want)
+		}
+	}
+	if !strings.Contains(app.Chat.Model3DUsage.Brief.EmptyText, "问清用途") {
+		t.Error("the empty-brief text no longer asks for the purpose")
 	}
 }
 

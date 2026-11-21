@@ -31,6 +31,10 @@ import (
 // response.output_item.done, nothing between them, at output_index 0, the
 // message or the call after it).
 //
+// A function call's start is reported to the caller with one content-free
+// ToolCalling delta per stream (#431), the same signal the Chat Completions
+// Adapter sends on the first delta.tool_calls fragment (#375).
+//
 // Per the documents, no real sample yet: the reasoning summary events,
 // response.refusal.delta, response.incomplete, response.failed and the error
 // event (a flat object, or one with the error nested).
@@ -115,6 +119,9 @@ type streamState struct {
 	// arrives, so each stretch of reasoning yields one content-free Thinking
 	// delta (#285): the reasoning itself never leaves the Adapter.
 	thinking bool
+	// toolCalling is true from the first sign of a function call, so a round
+	// reports a call once however many fragments or calls follow (#431).
+	toolCalling bool
 	// emitted: some text delta was passed on.
 	emitted  bool
 	terminal bool
@@ -169,13 +176,17 @@ func (state *streamState) handle(hint, payload string) error {
 		if err := state.outputs.start(event.OutputIndex, event.Item); err != nil {
 			return err
 		}
-		if item := state.outputs.slot(event.OutputIndex); item.kind == "reasoning" {
+		switch state.outputs.slot(event.OutputIndex).kind {
+		case "reasoning":
 			return state.think()
+		case "function_call":
+			return state.call()
 		}
 	case "response.output_item.done":
 		return state.outputs.settle(event.OutputIndex, event.Item)
 	case "response.function_call_arguments.delta":
 		state.outputs.slot(event.OutputIndex).streamed.WriteString(event.Delta)
+		return state.call()
 	case "response.function_call_arguments.done":
 		// The done item carries the final arguments too, and wins over this.
 		item := state.outputs.slot(event.OutputIndex)
@@ -218,6 +229,22 @@ func (state *streamState) think() error {
 		return nil
 	}
 	return state.emit(agents.Delta{Thinking: true})
+}
+
+// call reports the start of a function call: one content-free ToolCalling delta
+// per round, whether the model writes one call or several (#431). The first
+// sign is the function_call item being added; the first arguments fragment
+// counts too, in case that item was never seen. A call that only appears in the
+// terminal event never streamed, so it reports nothing.
+func (state *streamState) call() error {
+	if state.toolCalling {
+		return nil
+	}
+	state.toolCalling = true
+	if state.emit == nil {
+		return nil
+	}
+	return state.emit(agents.Delta{ToolCalling: true})
 }
 
 // text passes a piece of the visible answer on.
