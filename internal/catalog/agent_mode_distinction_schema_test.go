@@ -25,12 +25,10 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 	}
 	// The prompt no longer explains the Agent scope or the approval-mode
 	// selector; it states only the server's rule and forbids pushing settings
-	// onto the person.
+	// onto the person (#407: the approval block carries the mode facts).
 	require("system prompt", chat.Agent.SystemPrompt,
-		"批准由服务端按批准方式和预算决定", "不要让用户去勾选任何设置或切换任何模式",
-		"approval 只会是 policy 或 human",
-		"policy 表示服务端按批准方式（含预算计划）自动批准，不是用户点的",
-		"budget 对象说明所属计划与剩余额度")
+		"批准由服务端决定", "approval=policy", "不是用户点的",
+		"不要让用户去勾选设置或切换模式")
 	if strings.Contains(chat.Agent.SystemPrompt, "policy 或 budget") {
 		t.Error("system prompt still claims approval can be budget instead of human")
 	}

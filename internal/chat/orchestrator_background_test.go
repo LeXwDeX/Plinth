@@ -26,6 +26,9 @@ type backgroundFacts struct {
 	failures map[string]*generation.Failure
 	canceled []string
 	settled  []string
+	// consentFailures makes that many upcoming consent settlements fail
+	// (#429): the background ending has to retry them.
+	consentFailures int
 	// readErr fails every Task read; logger receives the orchestrator's log.
 	readErr error
 	logger  *slog.Logger
@@ -140,6 +143,11 @@ func backgroundOrchestratorWith(t *testing.T, service *chat.Service, schema cata
 		TaskCanceler: cancel,
 		StopConsent: func(_, _, callID, _, taskID string) error {
 			facts.mu.Lock()
+			if facts.consentFailures > 0 {
+				facts.consentFailures--
+				facts.mu.Unlock()
+				return errors.New("consent store unavailable")
+			}
 			defer facts.mu.Unlock()
 			facts.settled = append(facts.settled, callID+"|"+taskID)
 			return nil

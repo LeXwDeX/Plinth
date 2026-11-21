@@ -68,11 +68,13 @@ func TestPlanCardWordingDoesNotAssumeTheBudgetDefault_406(t *testing.T) {
 	if strings.Contains(prompt, "确认制作简报和预算、验收结果") {
 		t.Errorf("the system prompt still promises every person a budget confirmation")
 	}
-	for _, want := range []string{
-		"预算方式下还要批准制作计划和预算",
-		"只有批准方式是预算制、并且要做付费的多步工作时，才先用 propose_production_plan",
-		"自动模式下直接执行，不提交制作计划",
-	} {
+	// #407: the plan rule lives in the tool description and the approval block,
+	// not in the standing prompt. The prompt only says the server authorises a
+	// paid step by the session's mode, so no text invites a plan outside budget.
+	if strings.Contains(prompt, "propose_production_plan") {
+		t.Errorf("the system prompt duplicates the budget-mode plan rule")
+	}
+	for _, want := range []string{"按会话的「批准方式」授权", "不要让用户去勾选设置或切换模式"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the system prompt lacks %q", want)
 		}

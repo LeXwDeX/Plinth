@@ -387,6 +387,15 @@ func TestTextureOptionsShapeTheSuccessBody(t *testing.T) {
 	if entries, _ := plainBody["texture_urls"].([]any); len(entries) != 0 {
 		t.Errorf("an untextured task returns texture_urls: %v", entries)
 	}
+	// PBR on does not make a non-textured image-to-3d task report maps, even
+	// though the newest sample of the kind was captured with textures.
+	untexturedPBR := f.create("/image-to-3d", map[string]any{
+		"image_url": "https://example.test/a.png", "should_texture": false, "enable_pbr": true,
+	})
+	_, untexturedBody := f.finish("/image-to-3d", untexturedPBR, key)
+	if entries, _ := untexturedBody["texture_urls"].([]any); len(entries) != 0 {
+		t.Errorf("an untextured task with enable_pbr returns texture_urls: %v", entries)
+	}
 
 	multi := f.create("/multi-image-to-3d", map[string]any{
 		"image_urls": []string{"https://example.test/a.png"}, "should_texture": true, "enable_pbr": true,
@@ -640,4 +649,67 @@ func TestConcurrentServersShareNoGlobalState(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// The polls of 2026-11-20 repeat the geometry and texture resolution the
+// request asked for, with the deprecated aliases set (ultra_mode's documented
+// 2k equivalence and hd_texture's 4k one). The fake must echo the request, not
+// the sample's fixed values, or a 1k request would look like a 4k one.
+func TestResolutionOptionsEchoTheRequest(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	id := f.create("/image-to-3d", map[string]any{
+		"image_url": "https://example.test/a.png", "geometry_resolution": "2k",
+	})
+	_, body := f.finish("/image-to-3d", id, key)
+	if body["geometry_resolution"] != "2k" || body["ultra_mode"] != true {
+		t.Fatalf("geometry = %v ultra_mode = %v", body["geometry_resolution"], body["ultra_mode"])
+	}
+	low := f.create("/image-to-3d", map[string]any{
+		"image_url": "https://example.test/a.png", "geometry_resolution": "1k",
+	})
+	_, lowBody := f.finish("/image-to-3d", low, key)
+	if lowBody["geometry_resolution"] != "1k" || lowBody["ultra_mode"] != false {
+		t.Fatalf("a 1k request answers %v %v", lowBody["geometry_resolution"], lowBody["ultra_mode"])
+	}
+	// A retexture's object carries texture_resolution and hd_texture.
+	retextured := f.create("/retexture", map[string]any{"input_task_id": f.source(), "texture_resolution": "4k"})
+	_, retextureBody := f.finish("/retexture", retextured, key)
+	if retextureBody["texture_resolution"] != "4k" || retextureBody["hd_texture"] != true {
+		t.Fatalf("texture = %v hd_texture = %v", retextureBody["texture_resolution"], retextureBody["hd_texture"])
+	}
+	plain := f.create("/retexture", map[string]any{"input_task_id": f.source(), "texture_resolution": "1k"})
+	_, plainBody := f.finish("/retexture", plain, key)
+	if plainBody["texture_resolution"] != "1k" || plainBody["hd_texture"] != false {
+		t.Fatalf("a 1k texture answers %v %v", plainBody["texture_resolution"], plainBody["hd_texture"])
+	}
+	// A kind whose object carries no resolution keys gains none.
+	image := f.create("/text-to-image", map[string]any{"prompt": "p"})
+	_, imageBody := f.finish("/text-to-image", image, key)
+	for _, field := range []string{"geometry_resolution", "texture_resolution", "ultra_mode", "hd_texture"} {
+		if _, has := imageBody[field]; has {
+			t.Errorf("text-to-image carries %s: %v", field, imageBody)
+		}
+	}
+}
+
+// The OBJ material library follows the model's texture: the 2026-11-20 capture
+// shows a remesh of a textured model delivering an MTL and a convert of an
+// untextured one delivering none.
+func TestTheOBJMaterialLibraryFollowsTheSourceTexture(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	textured := f.source()
+	remesh := f.create("/remesh", map[string]any{"input_task_id": textured, "target_formats": []string{"obj"}})
+	_, remeshBody := f.finish("/remesh", remesh, key)
+	models, _ := remeshBody["model_urls"].(map[string]any)
+	if _, has := models["mtl"]; !has {
+		t.Fatalf("a remesh of a textured model has no MTL: %v", models)
+	}
+	plain := f.create("/image-to-3d", map[string]any{"image_url": "https://example.test/b.png", "should_texture": false})
+	f.finish("/image-to-3d", plain, key)
+	convert := f.create("/convert", map[string]any{"input_task_id": plain, "target_formats": []string{"obj"}})
+	_, convertBody := f.finish("/convert", convert, key)
+	converted, _ := convertBody["model_urls"].(map[string]any)
+	if _, has := converted["mtl"]; has {
+		t.Fatalf("a convert of an untextured model carries an MTL: %v", converted)
+	}
 }
