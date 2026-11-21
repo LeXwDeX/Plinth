@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/LeXwDeX/Plinth/internal/canvas"
+	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
 func (r *Repository) ListProjects(
@@ -297,6 +298,15 @@ func (r *Repository) DeleteProjectAndSession(
 		return false, fmt.Errorf("canvas lookup project for delete: %w", err)
 	}
 	if ownsSession && sessionID.Valid && sessionID.String != "" {
+		// The preflight ran before the session's turn was stopped; check again
+		// with the rows, so a step advanced by an accepted submission after
+		// that point refuses the deletion and rolls the transaction back
+		// (#430). The project and the session both stay.
+		if inFlight, err := sessionSkillRunInFlightAt(ctx, tx, ownerID, sessionID.String); err != nil {
+			return false, err
+		} else if inFlight {
+			return false, fmt.Errorf("%w: a skill run has work in flight", chat.ErrSessionDeletionBlocked)
+		}
 		if _, err := deleteSessionAndDependents(ctx, tx, ownerID, sessionID.String); err != nil {
 			return false, fmt.Errorf("canvas delete linked session: %w", err)
 		}
