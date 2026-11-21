@@ -445,8 +445,9 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 	ctx context.Context, ownerID, sessionID, assistantID string, calls []ToolCall, options TurnOptions,
 ) error {
 	var combined error
+	registry := orchestrator.turnRegistry(ctx)
 	for index, call := range calls {
-		tool, known := orchestrator.registry.byName[call.Name]
+		tool, known := registry.byName[call.Name]
 		if known && tool.generation != nil {
 			// A generation call whose approval card was detached belongs to the
 			// pending-approval service: the person may approve it after this
@@ -456,7 +457,8 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 				DetachedOperationForCall(context.Context, ToolCommand) (bool, error)
 			}); ok {
 				detached, err := reader.DetachedOperationForCall(ctx, ToolCommand{OwnerID: ownerID, SessionID: sessionID,
-					AssistantMessageID: assistantID, Call: agents.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments},
+					AssistantMessageID: assistantID, Configuration: configurationFromContext(ctx),
+					Call:        agents.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments},
 					BoundTaskID: call.TaskID, FrozenIdempotencyKey: call.IdempotencyKey, Options: options})
 				if err != nil {
 					combined = errors.Join(combined, fmt.Errorf("read stopped generation call %s: %w", call.ID, err))
@@ -476,7 +478,8 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 				continue
 			}
 			identity, err := reader.TaskIdentityForCall(ctx, ToolCommand{OwnerID: ownerID, SessionID: sessionID,
-				AssistantMessageID: assistantID, Call: agents.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments},
+				AssistantMessageID: assistantID, Configuration: configurationFromContext(ctx),
+				Call:        agents.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments},
 				BoundTaskID: call.TaskID, FrozenIdempotencyKey: call.IdempotencyKey, Options: options})
 			if err != nil {
 				combined = errors.Join(combined, fmt.Errorf("read stopped paid call %s: %w", call.ID, err))
@@ -577,10 +580,19 @@ func (orchestrator *Orchestrator) CancelTurn(
 	// That choice committed before this stop (it requires no stop intent), so
 	// the stop must not cancel them: the queued turn is finished by Process,
 	// which ends it without cancelling.
-	if stored, err := orchestrator.service.GetTurn(ctx, ownerID, sessionID, turn.AssistantMessageID); err != nil {
+	stored, err := orchestrator.service.GetTurn(ctx, ownerID, sessionID, turn.AssistantMessageID)
+	if err != nil {
 		return true, err
-	} else if stored.Checkpoint.Background {
+	}
+	if stored.Checkpoint.Background {
 		return true, nil
+	}
+	if stored.Checkpoint.Configuration != nil {
+		// The turn's calls are reconciled against the registry it ran from:
+		// its frozen Agent configuration, MCP presets included (#453). The
+		// base registry does not know an MCP tool, so a read-only MCP call
+		// would look unknown here and keep a stopped turn running.
+		ctx = context.WithValue(ctx, configurationContextKey{}, stored.Checkpoint.Configuration)
 	}
 	turnKey := orchestrator.turnKey(ownerID, sessionID)
 	orchestrator.activeMu.Lock()
@@ -1262,6 +1274,13 @@ func (orchestrator *Orchestrator) Process(
 	if err != nil {
 		return err
 	}
+	// The turn's frozen Agent configuration is installed before any ending of
+	// the turn can run: a stop that arrives before the tool loop (or the
+	// restart recovery of one) reconciles the calls against the registry the
+	// turn ran from, MCP presets included (#453).
+	if turn.Checkpoint.Configuration != nil {
+		ctx = context.WithValue(ctx, configurationContextKey{}, turn.Checkpoint.Configuration)
+	}
 	// The selection is only ever the one the service verified and stored with
 	// the turn; whatever the caller put in the command is not trusted.
 	command.Options.Selection = turn.Options.Selection
@@ -1839,7 +1858,7 @@ func (orchestrator *Orchestrator) Process(
 			// continuation of the sentence before it.
 			assistant.Content = joinNarration(assistant.Content, completion.Content)
 		}
-		orchestrator.freezeToolCallKeys(command.SessionID, assistant.ToolCalls, storedCalls)
+		orchestrator.freezeToolCallKeys(ctx, command.SessionID, assistant.ToolCalls, storedCalls)
 		if len(completion.ToolCalls) == 0 {
 			break
 		}
@@ -3487,7 +3506,13 @@ func agentCallsToMessages(calls []agents.ToolCall) []ToolCall {
 	return result
 }
 
-func (orchestrator *Orchestrator) freezeToolCallKeys(sessionID string, calls, storedCalls []ToolCall) {
+// freezeToolCallKeys freezes each new call's paid-operation identity from the
+// turn's own registry (#453), so a tool the Schema does not declare (an MCP
+// preset tool of the frozen Agent configuration) is looked up in the same view
+// the call will run from. A tool that is still unknown there gets no key, which
+// is the explicit unreconciled state the stop path protects.
+func (orchestrator *Orchestrator) freezeToolCallKeys(ctx context.Context, sessionID string, calls, storedCalls []ToolCall) {
+	registry := orchestrator.turnRegistry(ctx)
 	for index := range calls {
 		call := &calls[index]
 		if call.IdempotencyKey != "" {
@@ -3505,7 +3530,7 @@ func (orchestrator *Orchestrator) freezeToolCallKeys(sessionID string, calls, st
 			// call without a frozen key remains explicitly unreconciled.
 			continue
 		}
-		tool, found := orchestrator.registry.byName[call.Name]
+		tool, found := registry.byName[call.Name]
 		if !found || tool.generation == nil || tool.generation.IdempotencyKeyTemplate == "" {
 			continue
 		}
