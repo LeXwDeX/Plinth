@@ -710,6 +710,7 @@ func (s *Server) routes() {
 	s.registerMCPContract()
 	s.registerAccountResourcesContracts()
 	s.registerAccountStepPolicyContract()
+	s.registerChatSessionStepsContract()
 	s.registerAccountAccessKeysContract()
 	s.registerAdministrationUserContracts()
 	s.registerAdministrationAuditLogContracts()

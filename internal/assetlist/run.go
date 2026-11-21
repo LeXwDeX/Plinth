@@ -27,8 +27,9 @@ const (
 )
 
 // Run pause reasons. user is sticky until an explicit resume; presence clears
-// with a fresh heartbeat; step_cap needs the blocking item resolved first and
-// failure hands the decision to the person.
+// with a fresh heartbeat; step_cap holds while every remaining item waits at
+// the 3D step cap and no other item can progress (#330 §6); failure hands the
+// decision to the person.
 const (
 	PauseNone     = ""
 	PauseUser     = "user"
@@ -38,8 +39,10 @@ const (
 )
 
 // Item block values are the second axis of an item and never change its
-// state. awaiting_approval releases the parallel slot; step_cap pauses the
-// run; paused stays reserved for a later step.
+// state. awaiting_approval and step_cap release the parallel slot: the person
+// resolves them later and the scheduler keeps claiming other items. step_cap
+// is the "3D steps used up" marker of one item; it pauses the run only while
+// no other item can progress. paused stays reserved for a later step.
 const (
 	BlockNone             = ""
 	BlockAwaitingApproval = "awaiting_approval"

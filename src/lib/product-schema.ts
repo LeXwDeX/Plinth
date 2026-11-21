@@ -235,6 +235,8 @@ export interface ProductSchema {
          project_asset_list_item?: string;
          /** #330 step 5C: one item's asset extra 3D steps (PUT). */
          project_asset_list_item_steps?: string;
+         /** #330 §6: one asset session's extra 3D steps (GET/PUT, real browser session). */
+         chat_session_steps?: string;
          /** #328: the project's presence heartbeat (POST present/leave). */
          project_presence?: string;
          /** #240: assign (PUT) the session to a project. */
