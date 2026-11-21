@@ -34,6 +34,8 @@ FAKE_STACK_SCENARIOS = 'balance,meshy,images,p2,project,agent,agent-background,t
 FAKE_STACK_FAULTS = 'task-failed,artifact-expired-stuck'
 # The gates dev_test.md §2 marks local, in §2 order; the default and pre-push run.
 GATES = [
+    # #436: only react-hooks/rules-of-hooks is an error; the rule that caused #387's React #300.
+    ('frontend lint', ['pnpm', 'lint'], {}),
     ('frontend typecheck', ['pnpm', 'exec', 'tsc', '--noEmit', '--incremental', 'false'], {}),
     ('frontend test', ['pnpm', 'test'], {}),
     ('frontend build', ['pnpm', 'build'], {}),

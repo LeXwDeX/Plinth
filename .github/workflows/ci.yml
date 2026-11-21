@@ -41,6 +41,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # 前端静态门禁（#436）：只拦 react-hooks/rules-of-hooks（#387 的 React #300 根因）
+      - run: pnpm lint
       - run: pnpm exec tsc --noEmit
       - run: pnpm test
       - run: pnpm build
