@@ -1264,7 +1264,7 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 	// #410: the one sentence about budget approval depends on the plan's state,
 	// so the template carries a placeholder and both notes must be declared. A
 	// historical Catalog keeps its inline sentence and declares neither.
-	_, hasAutoApproval := budget.ContextTemplate, strings.Contains(budget.ContextTemplate, "{auto_approval}")
+	hasAutoApproval := strings.Contains(budget.ContextTemplate, "{auto_approval}")
 	if hasAutoApproval || strings.TrimSpace(budget.AutoApprovalNote) != "" ||
 		strings.TrimSpace(budget.CompletedNote) != "" {
 		if !hasAutoApproval {
