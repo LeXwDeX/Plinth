@@ -6195,13 +6195,18 @@ type ChatMessageTexts struct {
 	SessionDeleteBlocked string `json:"session_delete_blocked"`
 	// ChoiceAnswered refuses an answer to a choice card that is no longer open;
 	// ChoiceRejected one whose option the card does not offer (#321).
-	ChoiceAnswered    string `json:"choice_answered"`
-	ChoiceRejected    string `json:"choice_rejected"`
-	SessionNotFound   string `json:"session_not_found"`
-	MessageNotFound   string `json:"message_not_found"`
-	EmptyTitle        string `json:"empty_title"`
-	EmptyMessage      string `json:"empty_message"`
-	InvalidParameters string `json:"invalid_parameters"`
+	ChoiceAnswered string `json:"choice_answered"`
+	ChoiceRejected string `json:"choice_rejected"`
+	// BudgetPlanInactive answers 409 when a continuation is asked of a plan
+	// that is no longer the session's active one (#410): it was replaced by a
+	// newer plan, refused, or already completed. Empty falls back to
+	// InvalidParameters.
+	BudgetPlanInactive string `json:"budget_plan_inactive,omitempty"`
+	SessionNotFound    string `json:"session_not_found"`
+	MessageNotFound    string `json:"message_not_found"`
+	EmptyTitle         string `json:"empty_title"`
+	EmptyMessage       string `json:"empty_message"`
+	InvalidParameters  string `json:"invalid_parameters"`
 	// MultiviewModelUnavailable refuses, when the turn starts, a structured
 	// multiview request whose model is not an available Offering that takes
 	// several views of one object (#373). Empty falls back to
@@ -6630,7 +6635,11 @@ type CoreHTTPRoutesSchema struct {
 	// ChatSessionBudget decides one production plan card of the session (#103):
 	// PUT {sessionID, budgetID} with {"decision": "approve"|"deny"}.
 	ChatSessionBudget string `json:"chat_session_budget,omitempty"`
-	ChatSessionPick   string `json:"chat_session_pick"`
+	// ChatSessionBudgetContinue starts the turn that runs a plan the person left
+	// unfinished (#410): POST {sessionID, budgetID}. Empty (historical Catalogs)
+	// disables the route, and the card offers no continue button.
+	ChatSessionBudgetContinue string `json:"chat_session_budget_continue,omitempty"`
+	ChatSessionPick           string `json:"chat_session_pick"`
 	// ChatSessionPreferences lists the session's active preference records and
 	// receives an explicit rejection or a weak signal (#241);
 	// ChatSessionPreferenceItem edits or deletes one record. Empty (historical

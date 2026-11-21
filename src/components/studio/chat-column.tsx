@@ -97,7 +97,7 @@ import { InFlightGuard } from '@/lib/chat/in-flight-guard';
 import { flushExplicitModel3D, flushExplicitModelImage } from '@/lib/chat/explicit-model';
 import { reloadSessionBudget } from '@/lib/chat/session-budget';
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
-import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
+import { continueSessionBudget, PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { cancelQueuedTurn, enqueueTurn, queuedFor, takeQueuedTurn, type QueueBySession } from '@/lib/chat/send-queue';
 import { ChatHistorySkeleton } from '@/components/chat/chat-history-skeleton';
 import { recoverChatSession } from '@/lib/chat/session-recovery';
@@ -539,6 +539,8 @@ export function ChatColumn() {
   const deciding = useRef(new InFlightGuard());
   const sendPreparation = useRef(new InFlightGuard());
   const [decisionBusy, setDecisionBusy] = useState<ReadonlySet<string>>(() => new Set());
+  // #410: the plan whose continuation turn the server is starting; one at a time.
+  const [continueBusy, setContinueBusy] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   // The clock the cards' "valid for N hours" reads. It is reset whenever the set of
   // cards changes: a clock left at mount time would make a fresh 24-hour card read
@@ -892,10 +894,11 @@ export function ChatColumn() {
 
   // An expired card stays in the chat (with 重新发起) but no longer counts as pending.
   const pendingCount = pending.pendingCount + (consentAwaiting && consent.pending ? 1 : 0);
-  // #403: a step of an approved plan that has no task can still get one while the session's turn runs (the running
-  // projection of the messages, or a stream this browser follows) or while a decision it may wait for is open.
-  // Otherwise nothing will submit it and the plan card says it was not run instead of waiting for ever.
-  const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming) || pendingCount > 0;
+  // #403/#410: a step of an approved plan that has no task can still get one while the session's turn runs (the
+  // running projection of the messages, or a stream this browser follows). An open approval card is deliberately
+  // not counted: the server projects every step's standing and only counts a turn as running, so a plan whose turn
+  // ended reads "not run" instead of waiting for ever.
+  const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming);
   const lastDisplayed = displayMessages[displayMessages.length - 1];
   const [floatingRef, floatingHeight] = useElementHeight<HTMLDivElement>();
   const {
@@ -1803,6 +1806,37 @@ export function ChatColumn() {
     [chatClient, schema],
   );
 
+  // #410: 「继续」runs the session's own plan again. The plan is already approved, so this
+  // starts no new decision and no new spend beyond the approved budget; the server refuses
+  // when the plan is no longer the session's active one or its turn still runs, and the
+  // Schema's text says which. A started turn is followed like any reply.
+  const continuePlan = useCallback(
+    async (budgetId: string) => {
+      if (!activeSessionId || deciding.current.begin(budgetId)) return;
+      const sessionId = activeSessionId;
+      setContinueBusy(budgetId);
+      setDecisionError((current) => {
+        if (!(budgetId in current)) return current;
+        const { [budgetId]: _cleared, ...rest } = current;
+        return rest;
+      });
+      try {
+        await continueSessionBudget(schema, sessionId, budgetId);
+        setServerTurnTick((tick) => tick + 1);
+      } catch (error) {
+        const detail = error instanceof PendingApprovalError ? schemaText(schema, error.detail) : '';
+        setDecisionError((current) => ({
+          ...current,
+          [budgetId]: detail || schemaText(schema, 'ui.studio.plan.continue_failed'),
+        }));
+      } finally {
+        deciding.current.end(budgetId);
+        setContinueBusy(null);
+      }
+    },
+    [activeSessionId, schema],
+  );
+
   // #103: a plan is decided on the session budget route, not on a step grant. After the
   // decision the session is read again so the budget card and the topbar badge show the
   // server's new spent/limit figures without waiting for another turn.
@@ -2375,6 +2409,9 @@ export function ChatColumn() {
                     tasks={sessionTasks}
                     progress={sessionBudget}
                     stepsMayStillRun={planStepsMayStillRun}
+                    error={decisionError[sessionBudget.id] ?? null}
+                    onContinue={() => { void continuePlan(sessionBudget.id); }}
+                    continueBusy={continueBusy === sessionBudget.id}
                     onCompareCandidates={compareCandidates}
                     onSelectCandidate={selectCandidate}
                   />

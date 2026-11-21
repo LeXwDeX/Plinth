@@ -63,8 +63,10 @@ describe('a stream joined after a reload shows no blank message (#403)', () => {
 });
 
 describe('an approved plan whose turn is over says its steps were not run (#403)', () => {
-  it('tells the approved plan card whether a step may still run, from the running projection and the open decisions', () => {
-    expect(column).toContain("const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming) || pendingCount > 0;");
+  it('tells the approved plan card whether a step may still run, from the running projection', () => {
+    // #410: the server projects every step's standing and only counts a turn as
+    // running, so an open approval card no longer keeps a step "waiting".
+    expect(column).toContain("const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming);");
     const approved = column.slice(column.indexOf('plan={sessionBudget.plan}'));
     expect(approved.slice(0, 320)).toContain('stepsMayStillRun={planStepsMayStillRun}');
   });

@@ -19,13 +19,51 @@ import (
 // Budget states. pending waits for the person's decision; active is the one
 // plan the session may spend under; exhausted means the credits actually
 // charged reached the limit of every unit; closed means a newer plan replaced
-// it; denied means the person refused it (or it expired undecided).
+// it; denied means the person refused it (or it expired undecided);
+// completed means every required step has a succeeded Task (#410), so the plan
+// is finished and spends nothing more — like closed it is still shown, and a
+// newer plan replaces it.
 const (
 	StatePending   = "pending"
 	StateActive    = "active"
 	StateExhausted = "exhausted"
 	StateClosed    = "closed"
 	StateDenied    = "denied"
+	StateCompleted = "completed"
+)
+
+// States a session's one current plan may hold: the plan the session shows and
+// the only one that may spend. completed belongs to them so the finished plan
+// stays visible until a newer plan replaces it.
+var currentStates = []string{StateActive, StateExhausted, StateCompleted}
+
+// CurrentStates are the plan states a session's current plan may hold.
+func CurrentStates() []string { return append([]string(nil), currentStates...) }
+
+// IsCurrent reports whether the state is one a session's current plan holds.
+func IsCurrent(state string) bool {
+	for _, current := range currentStates {
+		if state == current {
+			return true
+		}
+	}
+	return false
+}
+
+// Plan step states the session projection reports (#410). The server pairs
+// every plan step with the Task that ran it, so the browser reads the result
+// instead of pairing steps with tasks itself. pending means the step has no
+// Task yet but still may get one; running and failed come from the matched
+// Task; done means it succeeded; not_run and optional_not_run mean nothing can
+// submit the step any more (an optional step says so and never blocks
+// completion).
+const (
+	StepPending        = "pending"
+	StepRunning        = "running"
+	StepDone           = "done"
+	StepFailed         = "failed"
+	StepNotRun         = "not_run"
+	StepOptionalNotRun = "optional_not_run"
 )
 
 // Reservation states of one approved step. reserved holds budget until the
@@ -92,6 +130,12 @@ type PlanStep struct {
 	// Steps that declare no candidates carry zero for both.
 	CandidateGroup int `json:"candidate_group,omitempty"`
 	CandidateIndex int `json:"candidate_index,omitempty"`
+	// Optional marks a step the plan is complete without (#410): the person
+	// may skip it (an extra view of a three-view recipe, say), so it never
+	// blocks completion and an unrun one reads "optional, not run". Its
+	// estimate still counts toward the approved limit, as a contingency's
+	// does, because a step that does run must fit.
+	Optional bool `json:"optional,omitempty"`
 }
 
 // UnmarshalJSON also reads a step stored before #120, whose integer
@@ -108,13 +152,14 @@ func (s *PlanStep) UnmarshalJSON(data []byte) error {
 		Check             string          `json:"check"`
 		CandidateGroup    int             `json:"candidate_group"`
 		CandidateIndex    int             `json:"candidate_index"`
+		Optional          bool            `json:"optional"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 	step := PlanStep{Capability: wire.Capability, OfferingID: wire.OfferingID, Purpose: wire.Purpose,
 		Estimate: Legacy(wire.EstimatedCredits), PurposeBudgetNote: wire.PurposeBudgetNote, Check: wire.Check,
-		CandidateGroup: wire.CandidateGroup, CandidateIndex: wire.CandidateIndex}
+		CandidateGroup: wire.CandidateGroup, CandidateIndex: wire.CandidateIndex, Optional: wire.Optional}
 	if len(wire.Estimate) > 0 && string(wire.Estimate) != "null" {
 		if err := json.Unmarshal(wire.Estimate, &step.Estimate); err != nil {
 			return err
@@ -316,10 +361,15 @@ func (p Plan) CheckpointAfter(capability string) (PlanCheckpoint, bool) {
 // for every unit of the plan, the frozen limit next to what is spent, reserved
 // and still available.
 type Summary struct {
-	ID        string       `json:"id"`
-	State     string       `json:"state"`
-	Units     []UnitBudget `json:"units"`
-	Plan      Plan         `json:"plan"`
+	ID    string       `json:"id"`
+	State string       `json:"state"`
+	Units []UnitBudget `json:"units"`
+	Plan  Plan         `json:"plan"`
+	// Steps is the plan's per-step standing in the session, in plan order
+	// (#410). It is filled by a caller that read the session's Tasks; a reader
+	// without them (the proposal tool's result, a plan that is not projected)
+	// leaves it empty and the browser falls back to its own pairing.
+	Steps     []StepStatus `json:"steps,omitempty"`
 	CreatedAt time.Time    `json:"created_at"`
 	DecidedAt *time.Time   `json:"decided_at,omitempty"`
 }

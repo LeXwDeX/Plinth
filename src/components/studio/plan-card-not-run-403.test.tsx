@@ -50,8 +50,8 @@ afterEach(cleanup);
 
 describe('the steps of an approved plan that have no task (#403)', () => {
   it('has a Schema text of its own for a step that was not run, different from waiting', () => {
-    expect(text('ui.studio.plan.step_not_run')).not.toBe('');
-    expect(text('ui.studio.plan.step_not_run')).not.toBe(text('ui.studio.plan.step_pending'));
+    expect(text('ui.studio.plan.step_state.not_run')).not.toBe('');
+    expect(text('ui.studio.plan.step_state.not_run')).not.toBe(text('ui.studio.plan.step_state.pending'));
   });
 
   it('says a step was not run once the turn that should have submitted it has ended', () => {
@@ -59,8 +59,8 @@ describe('the steps of an approved plan that have no task (#403)', () => {
     const steps = view.getAllByTestId('studio-plan-step');
     for (const step of steps) {
       expect(step.getAttribute('data-state')).toBe('not_run');
-      expect(step.textContent).toContain(text('ui.studio.plan.step_not_run'));
-      expect(step.textContent).not.toContain(text('ui.studio.plan.step_pending'));
+      expect(step.textContent).toContain(text('ui.studio.plan.step_state.not_run'));
+      expect(step.textContent).not.toContain(text('ui.studio.plan.step_state.pending'));
     }
   });
 
@@ -69,8 +69,8 @@ describe('the steps of an approved plan that have no task (#403)', () => {
       const view = render(<PlanCard plan={plan} tasks={[]} progress={decided} {...props} />);
       for (const step of view.getAllByTestId('studio-plan-step')) {
         expect(step.getAttribute('data-state')).toBe('pending');
-        expect(step.textContent).toContain(text('ui.studio.plan.step_pending'));
-        expect(step.textContent).not.toContain(text('ui.studio.plan.step_not_run'));
+        expect(step.textContent).toContain(text('ui.studio.plan.step_state.pending'));
+        expect(step.textContent).not.toContain(text('ui.studio.plan.step_state.not_run'));
       }
       cleanup();
     }
@@ -81,9 +81,9 @@ describe('the steps of an approved plan that have no task (#403)', () => {
     const [first, second] = view.getAllByTestId('studio-plan-step');
     expect(first.getAttribute('data-state')).toBe('SUCCEEDED');
     expect(first.textContent).toContain(taskStatePresentation(schema, 'SUCCEEDED').label);
-    expect(first.textContent).not.toContain(text('ui.studio.plan.step_not_run'));
+    expect(first.textContent).not.toContain(text('ui.studio.plan.step_state.not_run'));
     expect(second.getAttribute('data-state')).toBe('not_run');
-    expect(second.textContent).toContain(text('ui.studio.plan.step_not_run'));
+    expect(second.textContent).toContain(text('ui.studio.plan.step_state.not_run'));
   });
 
   it('does not count a step that was not run as done', () => {
@@ -95,7 +95,7 @@ describe('the steps of an approved plan that have no task (#403)', () => {
     const view = render(<PlanCard plan={plan} budgets={[estimate]} tasks={[]} onDecide={() => {}} stepsMayStillRun={false} />);
     for (const step of view.getAllByTestId('studio-plan-step')) {
       expect(step.getAttribute('data-state')).toBe('pending');
-      expect(step.textContent).toContain(text('ui.studio.plan.step_pending'));
+      expect(step.textContent).toContain(text('ui.studio.plan.step_state.pending'));
     }
   });
 
@@ -112,7 +112,7 @@ describe('the steps of an approved plan that have no task (#403)', () => {
     const [first, second] = view.getAllByTestId('studio-plan-candidate');
     expect(first.getAttribute('data-state')).toBe('SUCCEEDED');
     expect(second.getAttribute('data-state')).toBe('not_run');
-    expect(second.textContent).toContain(text('ui.studio.plan.step_not_run'));
-    expect(first.textContent).not.toContain(text('ui.studio.plan.step_not_run'));
+    expect(second.textContent).toContain(text('ui.studio.plan.step_state.not_run'));
+    expect(first.textContent).not.toContain(text('ui.studio.plan.step_state.not_run'));
   });
 });

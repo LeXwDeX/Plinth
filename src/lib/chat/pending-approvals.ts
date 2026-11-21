@@ -370,3 +370,27 @@ export function decidePendingCard(
     ? decideSessionBudget(schema, sessionId, item.requestId, approve, fetcher)
     : decidePendingApproval(schema, item.requestId, approve, fetcher);
 }
+
+/**
+ * #410: start the turn that runs a plan the person left unfinished again. The
+ * plan is already approved, so this decides nothing: the server refuses with
+ * 409 when the plan is no longer the session's active one or its turn still
+ * runs. The response carries the assistant message of the new turn so the
+ * caller can follow it like any reply.
+ */
+export async function continueSessionBudget(
+  schema: ProductSchema,
+  sessionId: string,
+  budgetId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<{ turnMessageId: string }> {
+  const template = schema.runtime.http.routes.chat_session_budget_continue;
+  if (!template) throw new PendingApprovalError('', 0);
+  const route = template
+    .replace('{sessionID}', encodeURIComponent(sessionId))
+    .replace('{budgetID}', encodeURIComponent(budgetId));
+  const response = await fetcher(route, { method: 'POST' });
+  const payload = record(await response.json().catch(() => null));
+  if (!response.ok) throw new PendingApprovalError(text(payload.detail), response.status);
+  return { turnMessageId: text(payload.turn_message_id) };
+}

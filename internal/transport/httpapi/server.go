@@ -856,6 +856,12 @@ func (s *Server) routes() {
 	if s.pendingApprovals != nil && routes.ChatSessionBudget != "" {
 		s.mux.HandleFunc("PUT "+routes.ChatSessionBudget, s.withIdentity(s.decideChatSessionBudget))
 	}
+	// #410: 「继续」runs the session's own unfinished plan again. It starts no
+	// new plan and no new decision, so it needs the chat service and its
+	// scheduler rather than the pending-approval store.
+	if routes.ChatSessionBudgetContinue != "" {
+		s.mux.HandleFunc("POST "+routes.ChatSessionBudgetContinue, s.withIdentity(s.continueChatSessionBudget))
+	}
 	if s.threeViews != nil && routes.ChatSessionThreeViews != "" && routes.ChatSessionThreeViewItem != "" {
 		s.mux.HandleFunc("GET "+routes.ChatSessionThreeViews, s.withIdentity(s.listThreeViews))
 		s.mux.HandleFunc("POST "+routes.ChatSessionThreeViewItem, s.withIdentity(s.advanceThreeView))

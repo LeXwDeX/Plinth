@@ -2190,6 +2190,7 @@
           "chat_session_model": "/api/v1/chat/sessions/{sessionID}/model",
           "chat_session_pending_approvals": "/api/v1/chat/sessions/{sessionID}/pending-approvals",
           "chat_session_budget": "/api/v1/chat/sessions/{sessionID}/budgets/{budgetID}",
+          "chat_session_budget_continue": "/api/v1/chat/sessions/{sessionID}/budgets/{budgetID}/continue",
           "chat_session_three_views": "/api/v1/chat/sessions/{sessionID}/three-views",
           "chat_session_three_view_item": "/api/v1/chat/sessions/{sessionID}/three-views/{runID}/views/{viewKey}",
           "chat_session_lineage": "/api/v1/chat/sessions/{sessionID}/lineage",
@@ -4710,11 +4711,20 @@
         "ui.studio.plan.state.exhausted": "预算已用完",
         "ui.studio.plan.state.closed": "已被新计划取代",
         "ui.studio.plan.state.denied": "未批准",
+        "ui.studio.plan.state.completed": "已完成",
         "ui.studio.plan.reload": "重新读取",
         "ui.studio.plan.reload_failed": "计划状态读取失败，请重试。",
         "ui.studio.plan.state.unknown": "未知状态",
-        "ui.studio.plan.step_pending": "等待执行",
-        "ui.studio.plan.step_not_run": "未执行",
+        "ui.studio.plan.step_state.pending": "等待执行",
+        "ui.studio.plan.step_state.running": "执行中",
+        "ui.studio.plan.step_state.done": "已完成",
+        "ui.studio.plan.step_state.failed": "未成功",
+        "ui.studio.plan.step_state.not_run": "未执行",
+        "ui.studio.plan.step_state.optional_not_run": "可选，未执行",
+        "ui.studio.plan.stopped": "已停止，还剩 {count} 步",
+        "ui.studio.plan.stopped_one": "已停止，还剩 {count} 步",
+        "ui.studio.plan.continue": "继续",
+        "ui.studio.plan.continue_failed": "继续执行计划失败，请稍后重试",
         "ui.studio.plan.decide_failed": "提交计划决定失败，请稍后重试",
         "ui.studio.plan.steps_done": "{done}/{total} 步已完成",
          "ui.studio.brief.title": "制作简报",
@@ -6876,7 +6886,7 @@
             "text": "【资产类型与风格要点】\n先判断主体属于哪一类，再按要点准备输入图、写提示词和自检；简报里的目标引擎与目标平台决定尺度、面数和贴图的取舍。三视图主体类型：角色 humanoid、动物 quadruped、武器、载具与建筑等硬表面 hard_surface、其他 generic。\n资产类型：\n- 角色：A 姿态（需要绑骨时必须，T 姿态也可），四肢和手指分开、不互相遮挡，中性站姿与表情；手持物、背包、披风、长发分开做或做短，否则会粘连，绑骨后也会穿插。\n- 武器：硬表面，剪影与比例准确，边缘留小倒角让高光成立，刃口不要薄到零厚度；弹匣、鞘、拉栓等会动或可装卸的部件分件；按握持点定原点与朝向。\n- 道具：单件、剪影清晰，细节烘进法线贴图而不是堆面；原点放在底面中心（手持物放握持点）；成套道具统一比例与贴图精度。\n- 载具：左右严格对称，车轮、炮塔、舱门、旋翼等会动的部件分件并把轴心放在转动中心，车头朝向统一，尺度按真实大小（轿车约 4.5 米）；内部不建模。\n- 建筑与场景件：按统一的模块网格建模（如 1、2 或 4 米），两端接口对齐便于引擎拼接；墙面和地面用无缝可平铺的贴图；看不见的内部和背面不建；整栋建筑拆成外墙、屋顶、门窗等件；需要 LOD 时先出最高精度再逐档减面，不要每档单独生成。\n风格：\n- 写实 PBR：贴图只含固有色，不烘光影与阴影；法线、粗糙度、金属度走 PBR 通道；输入图用中性均匀光。\n- 手绘：光影和笔触可以直接画进贴图，材质简单，通常只用一张固有色贴图；轮廓概括，贴图分辨率要够。\n- 卡通渲染（toon/cel）：大块平涂、色阶分明，几何干净，贴图不烘光影；描边和明暗阶交给引擎的着色。\n- 低模：用剪影和转折处的面数表达形体，细节靠贴图；面数以用途预算为准。\n- 像素风：先定网格（每格像素数）与调色板，贴图用最近邻采样、关闭滤波与 mipmap；图生 3D 很难保住像素格，先如实告诉用户，必要时改用体素或低分辨率贴图的低模。"
           }
         ],
-        "system_prompt": "Plinth 是多模型创作平台：用户在对话里说要做什么，你调用平台工具生成或处理 2D 图像与 3D 模型，结果直接进入他们的画布、资产库和项目。付费步骤由服务端按会话的「批准方式」授权，你只负责准备、提交和说明。\n\n用户多是美术、设计或独立开发者。他们清楚自己想要什么，但不必了解平台背后有哪些模型、服务和参数。所以做得好不好只看一件事：用户拿到的图或模型能不能直接用在作品里；某一步跑成功不算完成。\n\n决定权：\n- 用户已经明确说过的（要做什么、本会话锁定的模型、服务、参数、画幅或尺寸、目标引擎与平台、是否绑骨）照办。做不到就说明原因，不换成别的再付费提交，因为那既违背用户的决定，也可能重复扣费。用户选的模型已停用时，服务端会换用可用模型并提示，你照实转告。\n- 其余由你决定：选模型、写提示词、定加工路线、怎么修。工具会按用途给推荐，你可以带理由偏离；结果里的 model_choice 说明模型来源，按实说。用户的模型与用途推荐冲突时，服务端会拒绝并要你先问用户保留哪个；除停用后换用继任模型外，用户锁定的模型不能被换成别的。别把平台内部的模式、服务或参数当成用户该做的决定。\n- 互不依赖的付费步骤在同一次回复里一起发出，有依赖的按顺序等前一步完成：少一次往返，也不会让后一步用到还没定下来的输入。\n\n提问：\n- 只问只有用户知道的事（用途、给谁用、目标引擎与平台、是否绑骨）。能从对话和图片推断的先推断，写进制作简报并说明，用户不满意再改，这样不会为一个可推断的字段多耗一轮。用户给了明确的生成指令且输入齐全时，直接开始。\n- 一次一张卡，一回合最多一张。需要用户在几个方向里选时用 ask_choice 开一张方向卡，不要写成编号或列表让用户打字：卡片上的选择能带着参数继续，文字回答还得再对一次。\n- 用户说的图不在本轮附件里时，先用 find_history_images 在本会话历史里找；找不到或分不清就简短地问。\n\n自检后交付：\n- 每个 2D、3D 结果交付前都要看过（inspect_image、inspect_model，3D 还要渲染或对照参考图），发现问题先修再交付。自检以真实调用为据，3D 自检记录由服务端按真实调用生成；没检查过的结果说成已检查，既误导用户，也会让不能用的东西进项目。轮次和修正次数有上限，到上限就停下并如实列出剩余问题。\n- 汇报说清结果、供应商与模型、关键参数、自检发现、剩余问题和下一步。模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过，因为用户会拿它复现。结果带 notices 时说明哪部分没做出来，并问是否只补那部分；不要把部分完成说成全部完成。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n\n事实与边界：\n- 图片和模型只用句柄引用（@img3、@model2、@selected），不构造 URL，不用上游 ID，服务端只认本会话的句柄。价格、积分、可导出格式、模型能力一律照工具结果写，不估算，因为用户据此决定是否付费。\n- 批准由服务端决定：结果里 approval=policy 表示按批准方式自动批准，不是用户点的；human 才是用户在卡上批准。在等卡时让用户去卡上决定，不要说已提交。不要让用户去勾选设置或切换模式。\n- 某一步失败时说明是哪一步、哪个模型、工具给的原因。余额不足或 Key 额度问题请用户联系管理员，不要换模型重试。可能已扣费的失败先用 get_task 看 result_recovery，能免费取回就取回，否则让用户决定是否重新付费，不要自动重新提交。\n- 写提示词、选模型前先读【偏好摘要】：已选用方向照原文沿用，已否决方向不要换说法重试；用户重新生成过只说明方向还没定，不是确认。\n\n表达：\n- 回复用用户最近一条消息所用的语言，不要中英混杂；工具名、参数名、模型名保持原文。系统指定界面语言时按它来。工具参数中的 prompt 用英文。\n- 普通对话、看图或提问直接回答，不调用生成工具。不输出原始 URL、内部字段、工具诊断或上游错误原文，用户看不懂，也可能泄露内部信息。",
+        "system_prompt": "Plinth 是多模型创作平台：用户在对话里说要做什么，你调用平台工具生成或处理 2D 图像与 3D 模型，结果直接进入他们的画布、资产库和项目。付费步骤由服务端按会话的「批准方式」授权，你只负责准备、提交和说明。\n\n用户多是美术、设计或独立开发者。他们清楚自己想要什么，但不必了解平台背后有哪些模型、服务和参数。所以做得好不好只看一件事：用户拿到的图或模型能不能直接用在作品里；某一步跑成功不算完成。\n\n决定权：\n- 用户已经明确说过的（要做什么、本会话锁定的模型、服务、参数、画幅或尺寸、目标引擎与平台、是否绑骨）照办。做不到就说明原因，不换成别的再付费提交，因为那既违背用户的决定，也可能重复扣费。用户选的模型已停用时，服务端会换用可用模型并提示，你照实转告。\n- 其余由你决定：选模型、写提示词、定加工路线、怎么修。工具会按用途给推荐，你可以带理由偏离；结果里的 model_choice 说明模型来源，按实说。用户的模型与用途推荐冲突时，服务端会拒绝并要你先问用户保留哪个；除停用后换用继任模型外，用户锁定的模型不能被换成别的。别把平台内部的模式、服务或参数当成用户该做的决定。\n- 互不依赖的付费步骤在同一次回复里一起发出，有依赖的按顺序等前一步完成：少一次往返，也不会让后一步用到还没定下来的输入。\n\n提问：\n- 只问只有用户知道的事（用途、给谁用、目标引擎与平台、是否绑骨）。能从对话和图片推断的先推断，写进制作简报并说明，用户不满意再改，这样不会为一个可推断的字段多耗一轮。用户给了明确的生成指令且输入齐全时，直接开始。\n- 一次一张卡，一回合最多一张。需要用户在几个方向里选时用 ask_choice 开一张方向卡，不要写成编号或列表让用户打字：卡片上的选择能带着参数继续，文字回答还得再对一次。\n- 用户说的图不在本轮附件里时，先用 find_history_images 在本会话历史里找；找不到或分不清就简短地问。\n\n自检后交付：\n- 每个 2D、3D 结果交付前都要看过（inspect_image、inspect_model，3D 还要渲染或对照参考图），发现问题先修再交付。自检以真实调用为据，3D 自检记录由服务端按真实调用生成；没检查过的结果说成已检查，既误导用户，也会让不能用的东西进项目。轮次和修正次数有上限，到上限就停下并如实列出剩余问题。\n- 汇报说清结果、供应商与模型、关键参数、自检发现、剩余问题和下一步。模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过，因为用户会拿它复现。结果带 notices 时说明哪部分没做出来，并问是否只补那部分；不要把部分完成说成全部完成。\n- 计划没做完就结束回合时，必须在这一轮的回复里说清三件事：停在哪一步（第几步、什么能力）、为什么停（例如本回合自检次数用完、某一步失败、在等用户决定）、怎么继续（例如在计划卡上点「继续」，或回一句继续）。不要把没做完的计划说成已完成，也不要既不说明就沉默结束。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n\n事实与边界：\n- 图片和模型只用句柄引用（@img3、@model2、@selected），不构造 URL，不用上游 ID，服务端只认本会话的句柄。价格、积分、可导出格式、模型能力一律照工具结果写，不估算，因为用户据此决定是否付费。\n- 批准由服务端决定：结果里 approval=policy 表示按批准方式自动批准，不是用户点的；human 才是用户在卡上批准。在等卡时让用户去卡上决定，不要说已提交。不要让用户去勾选设置或切换模式。\n- 某一步失败时说明是哪一步、哪个模型、工具给的原因。余额不足或 Key 额度问题请用户联系管理员，不要换模型重试。可能已扣费的失败先用 get_task 看 result_recovery，能免费取回就取回，否则让用户决定是否重新付费，不要自动重新提交。\n- 写提示词、选模型前先读【偏好摘要】：已选用方向照原文沿用，已否决方向不要换说法重试；用户重新生成过只说明方向还没定，不是确认。\n\n表达：\n- 回复用用户最近一条消息所用的语言，不要中英混杂；工具名、参数名、模型名保持原文。系统指定界面语言时按它来。工具参数中的 prompt 用英文。\n- 普通对话、看图或提问直接回答，不调用生成工具。不输出原始 URL、内部字段、工具诊断或上游错误原文，用户看不懂，也可能泄露内部信息。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -7394,7 +7404,7 @@
         "override_argument": "input_override_reason",
         "override_note": "已按用户要求照原图提交，理由：{reason}。",
         "unreadable_template": "图片 {handle} 无法检查：{reason}。不要猜测它的内容。",
-        "max_rounds": 3,
+        "max_rounds": 6,
         "rounds_exhausted_template": "本回合的 inspect_image 次数已用完（{maximum} 次）；停止自检，直接如实汇报剩余问题。",
         "usage": {
           "transparent_field": "image_transparent",
@@ -7709,7 +7719,7 @@
         {
           "name": "propose_production_plan",
           "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Use this tool only when the session's approval mode is budget (the approval block of the system context states the mode). A plan and its budget decide nothing in auto mode, where the server approves every paid step itself, or in strict mode, where the steps that need a person get their own approval card, so do not open a plan card there. In budget mode: propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. To let the person compare results, optionally declare candidates on one step (source provider, seed or input_image, with count or models up to the Schema maximum): the server quotes every candidate and the approved continuation submits them in parallel, keeping the losers as assets. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require.",
+          "description": "Use this tool only when the session's approval mode is budget (the approval block of the system context states the mode). A plan and its budget decide nothing in auto mode, where the server approves every paid step itself, or in strict mode, where the steps that need a person get their own approval card, so do not open a plan card there. In budget mode: propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. To let the person compare results, optionally declare candidates on one step (source provider, seed or input_image, with count or models up to the Schema maximum): the server quotes every candidate and the approved continuation submits them in parallel, keeping the losers as assets. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require. A step the person may skip (the optional extra view of a three-view recipe, say) is declared with optional=true: the plan is complete without it, an unrun optional step reads \"optional, not run\" on the card, and its estimate still counts toward the approved limit.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -7719,7 +7729,7 @@
               },
               "steps": {
                 "type": "array",
-                "description": "The paid steps in execution order, one entry per step.",
+                "description": "The paid steps in execution order, one entry per step. Mark a step the person may skip (an optional extra view) with optional=true; only such a step may be left unrun.",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -7734,6 +7744,10 @@
                     "purpose": {
                       "type": "string",
                       "description": "What this step produces, in the person's words."
+                    },
+                    "optional": {
+                      "type": "boolean",
+                      "description": "True for a step the plan is complete without, such as the optional extra view of a three-view recipe. An unrun optional step never blocks completion and reads 'optional, not run' on the plan card; its estimate still counts toward the approved limit."
                     },
                     "estimated_credits": {
                       "type": "integer",
@@ -10263,6 +10277,7 @@
           "internal_error": "服务内部错误，请稍后重试",
           "unauthenticated": "未登录或登录已过期",
           "turn_active": "当前会话仍有任务正在处理，请等待完成后重试",
+          "budget_plan_inactive": "这个制作计划现在不能继续：它已被新计划取代、已被拒绝，或者已经做完。",
           "session_delete_blocked": "会话里还有进行中的任务或待处理的审批，请等它们结束或处理后再删除会话",
           "choice_answered": "这个选择已经作答或已失效，请刷新后查看",
           "choice_rejected": "所选的选项不在这张选择卡里",
@@ -10360,7 +10375,8 @@
             {"id": "active", "label": "执行中", "role": "active"},
             {"id": "exhausted", "label": "预算已用完", "role": "ended"},
             {"id": "closed", "label": "已结束", "role": "ended"},
-            {"id": "denied", "label": "已拒绝", "role": "denied"}
+            {"id": "denied", "label": "已拒绝", "role": "denied"},
+            {"id": "completed", "label": "已完成", "role": "ended"}
           ],
           "messages": {
             "approved": "制作计划「{title}」已批准，预算 {limit}，剩余 {remaining}。计划内的步骤会按预算自动执行，不再逐张出批准卡。",
@@ -18803,11 +18819,20 @@
             "ui.studio.plan.state.exhausted": "Budget used up",
             "ui.studio.plan.state.closed": "Replaced by a newer plan",
             "ui.studio.plan.state.denied": "Not approved",
+            "ui.studio.plan.state.completed": "Completed",
             "ui.studio.plan.reload": "Reload",
             "ui.studio.plan.reload_failed": "Could not load the production plan. Please try again.",
             "ui.studio.plan.state.unknown": "Unknown state",
-            "ui.studio.plan.step_pending": "Waiting to run",
-            "ui.studio.plan.step_not_run": "Not run",
+            "ui.studio.plan.step_state.pending": "Waiting to run",
+            "ui.studio.plan.step_state.running": "Running",
+            "ui.studio.plan.step_state.done": "Done",
+            "ui.studio.plan.step_state.failed": "Not successful",
+            "ui.studio.plan.step_state.not_run": "Not run",
+            "ui.studio.plan.step_state.optional_not_run": "Optional, not run",
+            "ui.studio.plan.stopped": "Stopped, {count} steps left",
+            "ui.studio.plan.stopped_one": "Stopped, {count} step left",
+            "ui.studio.plan.continue": "Continue",
+            "ui.studio.plan.continue_failed": "Could not continue the production plan. Please try again later",
             "ui.studio.plan.decide_failed": "Failed to submit the plan decision. Please try again later",
             "ui.studio.plan.steps_done": "{done}/{total} steps done",
              "ui.studio.brief.title": "Production brief",
@@ -21021,6 +21046,7 @@
             "chat.presentation.messages.internal_error": "Internal server error. Please try again later",
             "chat.presentation.messages.unauthenticated": "Not signed in or sign-in has expired",
             "chat.presentation.messages.turn_active": "This session still has a task in progress. Please wait for it to finish and retry",
+            "chat.presentation.messages.budget_plan_inactive": "This production plan cannot be continued: it was replaced by a newer plan, refused, or already finished",
             "chat.presentation.messages.session_delete_blocked": "This conversation still has a task in progress or an approval waiting. Let it finish or decide it, then delete the conversation",
             "chat.presentation.messages.choice_answered": "This choice has already been answered or is no longer open. Refresh to see it",
             "chat.presentation.messages.choice_rejected": "The chosen option is not on this choice card",

@@ -189,9 +189,10 @@ func (r *Repository) CreateProductionBudget(ctx context.Context, value budget.Pr
 }
 
 // DecideProductionBudget records the person's decision. Approval closes the
-// session's former active plan and releases the reservations of that plan that
-// can no longer be claimed; a reservation of an approved step that may still
-// bind stays reserved until its Task ends.
+// session's former current plan (active, exhausted or completed, #410) and
+// releases the reservations of that plan that can no longer be claimed; a
+// reservation of an approved step that may still bind stays reserved until its
+// Task ends.
 func (r *Repository) DecideProductionBudget(ctx context.Context, ownerID, budgetID, actor string, approve bool, now time.Time) (budget.ProductionBudget, error) {
 	if ownerID == "" || budgetID == "" || actor == "" {
 		return budget.ProductionBudget{}, executiongrant.ErrInvalid
@@ -215,13 +216,13 @@ func (r *Repository) DecideProductionBudget(ctx context.Context, ownerID, budget
 	}
 	stamp := formatTime(now)
 	if approve {
-		former, err := productionBudgetsInStates(ctx, conn, ownerID, value.SessionID, budget.StateActive, budget.StateExhausted)
+		former, err := productionBudgetsInStates(ctx, conn, ownerID, value.SessionID, budget.CurrentStates()...)
 		if err != nil {
 			return budget.ProductionBudget{}, err
 		}
 		for _, old := range former {
 			if _, err := conn.ExecContext(ctx, `UPDATE production_budgets
- SET state = 'closed', decided_at = ?, decided_by = ? WHERE id = ? AND state IN ('active','exhausted')`,
+ SET state = 'closed', decided_at = ?, decided_by = ? WHERE id = ? AND state IN ('active','exhausted','completed')`,
 				stamp, budget.SystemActor, old.ID); err != nil {
 				return budget.ProductionBudget{}, err
 			}
@@ -411,11 +412,118 @@ func settleReservationsOnConn(ctx context.Context, conn *sql.Conn, budgetID stri
 	return nil
 }
 
+// planTaskSelect reads the task facts a plan step pairs with: the Offering ID
+// comes from the frozen Offering the Task was submitted with, and the state
+// from the Task itself. Tasks of other sessions are never read.
+const planTaskSelect = `SELECT session_id, id, capability, json_extract(offering_json, '$.id'), state, created_at
+ FROM generation_tasks`
+
+// sessionStepTasks reads the Tasks of one session in the shape the plan
+// projection pairs. A row that does not scan is skipped rather than failing
+// the whole projection: a plan card is a read model, and the caller falls back
+// to its own pairing when the result is unusable.
+func sessionStepTasks(ctx context.Context, conn queryer, ownerID, sessionID string) []budget.StepTask {
+	rows, err := conn.QueryContext(ctx, planTaskSelect+
+		` WHERE owner_id = ? AND session_id = ? ORDER BY created_at, id`, ownerID, sessionID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	tasks := make([]budget.StepTask, 0, 8)
+	for rows.Next() {
+		var (
+			sessionID  string
+			task       budget.StepTask
+			offeringID sql.NullString
+			created    string
+		)
+		if err := rows.Scan(&sessionID, &task.TaskID, &task.Capability, &offeringID, &task.State, &created); err != nil {
+			return nil
+		}
+		task.OfferingID = offeringID.String
+		task.Succeeded = task.State == string(generation.TaskSucceeded)
+		task.Finished = task.State == string(generation.TaskSucceeded) ||
+			task.State == string(generation.TaskFailed) || task.State == string(generation.TaskCanceled)
+		if when, err := parseTime(created); err == nil {
+			task.CreatedAt = when
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil
+	}
+	return tasks
+}
+
+// completeFinishedPlansOnConn marks a plan whose required steps all have a
+// succeeded Task as completed, and gives back the reservations of its steps
+// that can no longer bind, the same way a replaced plan does (#410). It is
+// idempotent: a plan that is not active or exhausted is left alone, so a
+// completed, closed or denied plan never moves again. A non-empty budgetID
+// limits the work to one plan.
+func completeFinishedPlansOnConn(ctx context.Context, conn *sql.Conn, budgetID string, now time.Time) error {
+	scope := ""
+	args := []any{budget.StateActive, budget.StateExhausted}
+	query := productionBudgetSelect + ` WHERE state IN (?, ?)`
+	if budgetID != "" {
+		scope = " AND id = ?"
+		args = append(args, budgetID)
+		query += scope
+	}
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	var plans []budget.ProductionBudget
+	for rows.Next() {
+		value, err := scanProductionBudget(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		plans = append(plans, value)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	stamp := formatTime(now)
+	for _, value := range plans {
+		// A Task older than the plan's decision did not run one of its steps.
+		var decidedAt time.Time
+		if value.DecidedAt != nil {
+			decidedAt = *value.DecidedAt
+		}
+		tasks := budget.EligibleStepTasks(
+			sessionStepTasks(ctx, conn, value.OwnerID, value.SessionID), decidedAt)
+		statuses := budget.PlanStepStatuses(budget.StepStatusInput{
+			Plan:      value.Plan,
+			PlanState: value.State,
+			Tasks:     tasks,
+		})
+		if !budget.RequiredStepsDone(statuses) {
+			continue
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE production_budgets
+ SET state = '`+budget.StateCompleted+`' WHERE id = ? AND state IN ('`+
+			budget.StateActive+`', '`+budget.StateExhausted+`')`, value.ID); err != nil {
+			return err
+		}
+		if err := releaseUnclaimableReservationsOnConn(ctx, conn, value.ID, stamp); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SettleBudgetReservations settles ended Tasks' reservations, releases the
-// reservations of grants that can no longer spend, and marks an active plan
-// exhausted once its charged totals reached the limit of every unit. It
+// reservations of grants that can no longer spend, marks an active plan
+// exhausted once its charged totals reached the limit of every unit, and marks
+// a plan completed once every required step has a succeeded Task (#410). It
 // returns the plans it marked exhausted in this call, so their notice is
-// posted once.
+// posted once. A completed plan needs no notice: the card reads its state and
+// the session's next turn reads the plan from the same projection.
 func (r *Repository) SettleBudgetReservations(ctx context.Context, now time.Time) ([]budget.ProductionBudget, error) {
 	conn, err := r.grantWriteConn(ctx)
 	if err != nil {
@@ -471,6 +579,9 @@ func (r *Repository) SettleBudgetReservations(ctx context.Context, now time.Time
 			return nil, err
 		}
 	}
+	if err := completeFinishedPlansOnConn(ctx, conn, "", now); err != nil {
+		return nil, err
+	}
 	if err := commitGrantConn(ctx, conn); err != nil {
 		return nil, err
 	}
@@ -496,7 +607,7 @@ func (r *Repository) CurrentProductionBudget(ctx context.Context, ownerID, sessi
 	if ownerID == "" || sessionID == "" {
 		return budget.ProductionBudget{}, false, executiongrant.ErrInvalid
 	}
-	all, err := productionBudgetsInStates(ctx, r.db, ownerID, sessionID, budget.StateActive, budget.StateExhausted)
+	all, err := productionBudgetsInStates(ctx, r.db, ownerID, sessionID, budget.CurrentStates()...)
 	if err != nil || len(all) == 0 {
 		return budget.ProductionBudget{}, false, err
 	}
@@ -535,10 +646,13 @@ func (r *Repository) ProductionBudgetSummaries(ctx context.Context, ownerID stri
 		for _, sessionID := range chunk {
 			args = append(args, sessionID)
 		}
-		args = append(args, budget.StateActive, budget.StateExhausted)
+		for _, state := range budget.CurrentStates() {
+			args = append(args, state)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(budget.CurrentStates())), ",")
 		rows, err := r.db.QueryContext(ctx, productionBudgetSelect+`
  WHERE owner_id = ? AND session_id IN (`+queryPlaceholders(len(chunk))+`)
- AND state IN (?, ?) ORDER BY created_at DESC`, args...)
+ AND state IN (`+placeholders+`) ORDER BY created_at DESC`, args...)
 		if err != nil {
 			return nil, err
 		}

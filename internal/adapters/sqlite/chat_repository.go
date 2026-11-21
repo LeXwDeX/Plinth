@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -1419,6 +1420,100 @@ func (r *Repository) ListSessionTurns(
 	states []string,
 ) ([]chat.Turn, error) {
 	return r.listTurnsFiltered(ctx, states, " AND owner_id = ? AND session_id = ?", ownerID, sessionID)
+}
+
+// PlanTaskFacts 只列指定会话里制作计划步骤要配对的 Task 事实（#410），
+// 以及该会话是否仍有未结束的回合。一次批量查询服务整个列表，
+// 会话清单投影不必逐会话查一次。activeTurnStates 由调用方给出
+// （Catalog 声明的排队/运行/等待任务三态），与 ListSessionTurns 同源。
+func (r *Repository) PlanTaskFacts(
+	ctx context.Context,
+	ownerID string,
+	sessionIDs []string,
+	activeTurnStates []string,
+) (map[string]chat.PlanTaskFacts, error) {
+	facts := make(map[string]chat.PlanTaskFacts, len(sessionIDs))
+	if ownerID == "" || len(sessionIDs) == 0 {
+		return facts, nil
+	}
+	for start := 0; start < len(sessionIDs); start += productionBudgetSummaryBatch {
+		end := min(start+productionBudgetSummaryBatch, len(sessionIDs))
+		chunk := sessionIDs[start:end]
+		args := []any{ownerID}
+		for _, sessionID := range chunk {
+			args = append(args, sessionID)
+		}
+		rows, err := r.db.QueryContext(ctx, planTaskSelect+`
+ WHERE owner_id = ? AND session_id IN (`+queryPlaceholders(len(chunk))+`)
+ ORDER BY created_at, id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var (
+				sessionID  string
+				task       budget.StepTask
+				offeringID sql.NullString
+				created    string
+			)
+			if err := rows.Scan(&sessionID, &task.TaskID, &task.Capability, &offeringID, &task.State, &created); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			task.OfferingID = offeringID.String
+			task.Succeeded = task.State == string(generation.TaskSucceeded)
+			task.Finished = task.State == string(generation.TaskSucceeded) ||
+				task.State == string(generation.TaskFailed) || task.State == string(generation.TaskCanceled)
+			if when, err := parseTime(created); err == nil {
+				task.CreatedAt = when
+			}
+			entry := facts[sessionID]
+			entry.Tasks = append(entry.Tasks, task)
+			facts[sessionID] = entry
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	if len(activeTurnStates) == 0 {
+		return facts, nil
+	}
+	for start := 0; start < len(sessionIDs); start += productionBudgetSummaryBatch {
+		end := min(start+productionBudgetSummaryBatch, len(sessionIDs))
+		chunk := sessionIDs[start:end]
+		args := []any{ownerID}
+		for _, sessionID := range chunk {
+			args = append(args, sessionID)
+		}
+		for _, state := range activeTurnStates {
+			args = append(args, state)
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(activeTurnStates)), ",")
+		rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT session_id FROM go_chat_turns
+ WHERE owner_id = ? AND session_id IN (`+queryPlaceholders(len(chunk))+`)
+ AND state IN (`+placeholders+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var sessionID string
+			if err := rows.Scan(&sessionID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			entry := facts[sessionID]
+			entry.TurnRunning = true
+			facts[sessionID] = entry
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return facts, nil
 }
 
 // RecentSessionTurnOptions returns the options of the session's newest turns,

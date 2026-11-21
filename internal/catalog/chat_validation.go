@@ -1225,6 +1225,9 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 		"exhausted": ChatApprovalBudgetRoleEnded,
 		"closed":    ChatApprovalBudgetRoleEnded,
 		"denied":    ChatApprovalBudgetRoleDenied,
+		// #410: a plan whose required steps all succeeded is finished. It is
+		// still shown (role ended) and spends nothing more, like a closed one.
+		"completed": ChatApprovalBudgetRoleEnded,
 	}
 	seen := make(map[string]bool, len(budget.States))
 	for _, state := range budget.States {

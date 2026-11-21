@@ -120,8 +120,9 @@ func (s *Server) legacyListChatSessions(
 		}
 		result := make([]map[string]any, 0, len(page.Sessions))
 		summaries := s.chatSessionBudgetSummaries(request.Context(), principal.ID(), page.Sessions)
+		progress := s.chatPlanStepProgress(request.Context(), principal.ID(), summaries)
 		for _, session := range page.Sessions {
-			result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries))
+			result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries, progress))
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"sessions": result, "next_cursor": page.NextCursor, "total": page.Total})
 		return
@@ -136,8 +137,9 @@ func (s *Server) legacyListChatSessions(
 	}
 	result := make([]map[string]any, 0, len(sessions))
 	summaries := s.chatSessionBudgetSummaries(request.Context(), principal.ID(), sessions)
+	progress := s.chatPlanStepProgress(request.Context(), principal.ID(), summaries)
 	for _, session := range sessions {
-		result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries))
+		result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries, progress))
 	}
 	writeJSON(writer, http.StatusOK, result)
 }
@@ -807,7 +809,31 @@ func (s *Server) chatSessionWire(
 	session chat.Session,
 	includeCount bool,
 ) map[string]any {
-	return s.chatSessionWireWithBudgets(ctx, writer, session, includeCount, nil)
+	return s.chatSessionWireWithBudgets(ctx, writer, session, includeCount, nil, nil)
+}
+
+// chatPlanStepProgress projects the plan steps of the given sessions (#410).
+// summaries is the same batch the budget member is read from, so the steps and
+// the plan they belong to can never come from two different reads. A failed
+// projection is logged and yields no statuses: the card then pairs steps with
+// Tasks itself, as it did before, instead of showing a half-projected plan.
+func (s *Server) chatPlanStepProgress(
+	ctx context.Context,
+	ownerID string,
+	summaries map[string]budget.Summary,
+) map[string][]budget.StepStatus {
+	if len(summaries) == 0 {
+		return map[string][]budget.StepStatus{}
+	}
+	progress, err := s.chat.ProductionPlanProgress(ctx, ownerID, summaries)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "投影制作计划步骤失败",
+				"owner_id", ownerID, "session_count", len(summaries), "error", err)
+		}
+		return map[string][]budget.StepStatus{}
+	}
+	return progress
 }
 
 // chatSessionWireWithBudgets projects one session. summaries is the list
@@ -821,6 +847,7 @@ func (s *Server) chatSessionWireWithBudgets(
 	session chat.Session,
 	includeCount bool,
 	summaries map[string]budget.Summary,
+	progress map[string][]budget.StepStatus,
 ) map[string]any {
 	fields := s.application.Chat.API.ResponseFields
 	title := session.Title
@@ -895,6 +922,14 @@ func (s *Server) chatSessionWireWithBudgets(
 					"owner_id", session.OwnerID, "session_id", session.ID, "error", err)
 			}
 		} else if found {
+			// #410: the plan's per-step standing, read from the session's
+			// Tasks. A caller that did not project it leaves Steps empty and
+			// the browser pairs steps with Tasks itself.
+			if progress == nil {
+				progress = s.chatPlanStepProgress(ctx, session.OwnerID,
+					map[string]budget.Summary{session.ID: summary})
+			}
+			summary.Steps = progress[session.ID]
 			result[field] = summary
 		}
 	}
