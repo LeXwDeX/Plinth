@@ -1261,6 +1261,19 @@ func validateApprovalBudget(budget ChatApprovalBudgetSchema) error {
 			return fmt.Errorf("approval_policy.budget.messages.approved 缺少占位符 %s", field)
 		}
 	}
+	// #410: the one sentence about budget approval depends on the plan's state,
+	// so the template carries a placeholder and both notes must be declared. A
+	// historical Catalog keeps its inline sentence and declares neither.
+	_, hasAutoApproval := budget.ContextTemplate, strings.Contains(budget.ContextTemplate, "{auto_approval}")
+	if hasAutoApproval || strings.TrimSpace(budget.AutoApprovalNote) != "" ||
+		strings.TrimSpace(budget.CompletedNote) != "" {
+		if !hasAutoApproval {
+			return errors.New("approval_policy.budget.context_template 缺 {auto_approval} 占位符")
+		}
+		if strings.TrimSpace(budget.AutoApprovalNote) == "" || strings.TrimSpace(budget.CompletedNote) == "" {
+			return errors.New("approval_policy.budget 的 auto_approval_note 与 completed_note 不能为空")
+		}
+	}
 	// #134: approving a plan starts the turn that runs it.
 	if strings.TrimSpace(budget.Continuation.Message) == "" || strings.TrimSpace(budget.Continuation.AgentTemplate) == "" {
 		return errors.New("approval_policy.budget.continuation 的 message 与 agent_template 不能为空")

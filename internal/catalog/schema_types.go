@@ -4354,6 +4354,12 @@ type ChatApprovalBudgetSchema struct {
 	// UnitSeparator joins the amounts of different units, which are listed
 	// side by side and never added.
 	UnitSeparator string `json:"unit_separator"`
+	// AutoApprovalNote and CompletedNote fill the ContextTemplate's
+	// {auto_approval} placeholder (#410). They are one sentence each because the
+	// plan's state decides which one is true: a plan that may still spend says
+	// its steps are approved by budget, and a finished one says nothing more is.
+	AutoApprovalNote string `json:"auto_approval_note"`
+	CompletedNote    string `json:"completed_note"`
 	// NoPlanState and NoPlanText render {state} and {plan} before the session
 	// has a plan at all.
 	NoPlanState string `json:"no_plan_state"`

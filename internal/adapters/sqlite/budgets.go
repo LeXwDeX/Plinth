@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -250,6 +251,18 @@ func (r *Repository) DecideProductionBudget(ctx context.Context, ownerID, budget
 	if err != nil {
 		return budget.ProductionBudget{}, err
 	}
+	if approve {
+		// #410: a plan whose steps all succeeded before it was approved is done
+		// at once. It is one plan, so this stays a single read; the sweep's
+		// bounded scope is what keeps the rest of the plans out of the hot path.
+		if _, err := completeFinishedPlansOnConn(ctx, conn, []string{budgetID}, now); err != nil {
+			return budget.ProductionBudget{}, err
+		}
+		stored, err = productionBudgetByID(ctx, conn, ownerID, budgetID)
+		if err != nil {
+			return budget.ProductionBudget{}, err
+		}
+	}
 	if err := commitGrantConn(ctx, conn); err != nil {
 		return budget.ProductionBudget{}, err
 	}
@@ -384,6 +397,15 @@ func settleReservationsOnConn(ctx context.Context, conn *sql.Conn, budgetID stri
 		scope = " AND budget_id = ?"
 		args = append(args, budgetID)
 	}
+	// #410: only a plan whose reservation this pass settles can have changed a
+	// step's charge fact, so only those plans are reconsidered. The sweep runs
+	// every two seconds; re-reading every active plan's Tasks on each tick would
+	// also read the sessions of plans that were abandoned long ago, and it would
+	// do so while holding the single write connection.
+	touched, err := reservedBudgetIDs(ctx, conn, budgetID)
+	if err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, `UPDATE budget_reservations
  SET state = 'released', settled_at = ?
  WHERE state = 'reserved' AND task_id = ''`+scope+`
@@ -409,7 +431,37 @@ func settleReservationsOnConn(ctx context.Context, conn *sql.Conn, budgetID stri
   AND task.state IN ('`+string(generation.TaskSucceeded)+`', '`+string(generation.TaskFailed)+`', '`+string(generation.TaskCanceled)+`'))`, args...); err != nil {
 		return err
 	}
-	return nil
+	if len(touched) == 0 {
+		return nil
+	}
+	_, err = completeFinishedPlansOnConn(ctx, conn, touched, now)
+	return err
+}
+
+// reservedBudgetIDs lists the plans whose reservations a settlement pass may
+// move: those still holding a reserved row. A non-empty budgetID narrows the
+// read to one plan, which is what the atomic budget approval needs.
+func reservedBudgetIDs(ctx context.Context, conn queryer, budgetID string) ([]string, error) {
+	query := `SELECT DISTINCT budget_id FROM budget_reservations WHERE state = 'reserved'`
+	args := []any{}
+	if budgetID != "" {
+		query += ` AND budget_id = ?`
+		args = append(args, budgetID)
+	}
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // planTaskSelect reads the task facts a plan step pairs with: the Offering ID
@@ -459,36 +511,43 @@ func sessionStepTasks(ctx context.Context, conn queryer, ownerID, sessionID stri
 // succeeded Task as completed, and gives back the reservations of its steps
 // that can no longer bind, the same way a replaced plan does (#410). It is
 // idempotent: a plan that is not active or exhausted is left alone, so a
-// completed, closed or denied plan never moves again. A non-empty budgetID
-// limits the work to one plan.
-func completeFinishedPlansOnConn(ctx context.Context, conn *sql.Conn, budgetID string, now time.Time) error {
-	scope := ""
+// completed, closed or denied plan never moves again.
+//
+// budgetIDs names the plans to reconsider, empty for all of them. Callers pass
+// the plans a settlement actually touched (or the one plan a decision or a
+// continuation concerns); the all-plans form is the one-shot a deployment runs
+// at start-up, when a plan that finished while nothing settled must be collected
+// exactly once. Nothing here runs on a timer.
+func completeFinishedPlansOnConn(ctx context.Context, conn *sql.Conn, budgetIDs []string, now time.Time) ([]budget.ProductionBudget, error) {
+	if len(budgetIDs) == 0 {
+		return nil, nil
+	}
 	args := []any{budget.StateActive, budget.StateExhausted}
 	query := productionBudgetSelect + ` WHERE state IN (?, ?)`
-	if budgetID != "" {
-		scope = " AND id = ?"
-		args = append(args, budgetID)
-		query += scope
+	query += ` AND id IN (` + queryPlaceholders(len(budgetIDs)) + `)`
+	for _, id := range budgetIDs {
+		args = append(args, id)
 	}
 	rows, err := conn.QueryContext(ctx, query, args...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var plans []budget.ProductionBudget
 	for rows.Next() {
 		value, err := scanProductionBudget(rows)
 		if err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
 		plans = append(plans, value)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return err
+		return nil, err
 	}
 	rows.Close()
 	stamp := formatTime(now)
+	var completed []budget.ProductionBudget
 	for _, value := range plans {
 		// A Task older than the plan's decision did not run one of its steps.
 		var decidedAt time.Time
@@ -505,16 +564,163 @@ func completeFinishedPlansOnConn(ctx context.Context, conn *sql.Conn, budgetID s
 		if !budget.RequiredStepsDone(statuses) {
 			continue
 		}
+		blocked, err := unfinishedSkillRunStep(ctx, conn, value.OwnerID, value.SessionID, plannedCapabilities(value.Plan))
+		if err != nil {
+			return nil, err
+		}
+		if blocked {
+			continue
+		}
 		if _, err := conn.ExecContext(ctx, `UPDATE production_budgets
  SET state = '`+budget.StateCompleted+`' WHERE id = ? AND state IN ('`+
 			budget.StateActive+`', '`+budget.StateExhausted+`')`, value.ID); err != nil {
-			return err
+			return nil, err
 		}
 		if err := releaseUnclaimableReservationsOnConn(ctx, conn, value.ID, stamp); err != nil {
-			return err
+			return nil, err
 		}
+		value.State = budget.StateCompleted
+		completed = append(completed, value)
 	}
-	return nil
+	return completed, nil
+}
+
+// unfinishedSkillRunStep reports whether the session has a SkillRun step the
+// plan still owes: a step of a capability the plan covers that has not finished
+// (planned, prepared, waiting for its grant or bound to a Task) or whose last
+// review rejected it (#410 with #243). The Task of a rejected view succeeded, so
+// pairing alone would call the plan done while the view must be redrawn — and
+// that redraw is spending the person already approved for the view. An optional
+// step (a recipe's optional view) and a step the person replaced with their own
+// picture hold nothing back.
+func unfinishedSkillRunStep(ctx context.Context, conn queryer, ownerID, sessionID string, capabilities []string) (bool, error) {
+	if ownerID == "" || sessionID == "" || len(capabilities) == 0 {
+		return false, nil
+	}
+	args := []any{ownerID, sessionID}
+	for _, capability := range capabilities {
+		args = append(args, capability)
+	}
+	var pending int
+	err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM skill_run_steps step
+ JOIN skill_runs run ON run.id = step.run_id
+ WHERE run.owner_id = ? AND run.session_id = ?
+   AND COALESCE(json_extract(step.spec_json, '$.optional'), 0) = 0
+   AND json_extract(step.spec_json, '$.capability') IN (`+queryPlaceholders(len(capabilities))+`)
+   AND COALESCE(step.replacement_asset_id, '') = ''
+   AND (step.phase <> 'output_ready' OR step.review = 'rejected')`, args...).Scan(&pending)
+	if err != nil {
+		return false, err
+	}
+	return pending > 0, nil
+}
+
+// plannedCapabilities are the capabilities a plan may spend on: its steps and
+// its declared contingencies, without duplicates and in plan order.
+func plannedCapabilities(plan budget.Plan) []string {
+	capabilities := plan.SortedCapabilities()
+	for _, contingency := range plan.Contingencies {
+		if contingency.Step.Capability == "" ||
+			slices.Contains(capabilities, contingency.Step.Capability) {
+			continue
+		}
+		capabilities = append(capabilities, contingency.Step.Capability)
+	}
+	return capabilities
+}
+
+// CompleteFinishedBudgets marks every active or exhausted plan whose required
+// steps all have a succeeded Task as completed, and returns the plans it moved
+// (#410). It is the one-shot a deployment runs at start-up: a plan whose steps
+// all succeeded while nothing settled — its steps were paid without a
+// reservation, or the settlement that would have collected it never ran — still
+// reads completed afterwards. It is deliberately not called on the sweep's
+// timer; see completeFinishedPlansOnConn.
+func (r *Repository) CompleteFinishedBudgets(ctx context.Context, now time.Time) ([]budget.ProductionBudget, error) {
+	conn, err := r.grantWriteConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackGrantConn(conn)
+		}
+	}()
+	ids, err := planIDsInCurrentStates(ctx, conn, "")
+	if err != nil {
+		return nil, err
+	}
+	completed, err := completeFinishedPlansOnConn(ctx, conn, ids, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := commitGrantConn(ctx, conn); err != nil {
+		return nil, err
+	}
+	committed = true
+	return completed, nil
+}
+
+// CompleteFinishedBudget is CompleteFinishedBudgets for one plan of one owner,
+// the scope a plan decision or a continuation turn needs. A plan of another
+// owner is not found.
+func (r *Repository) CompleteFinishedBudget(ctx context.Context, ownerID, budgetID string, now time.Time) ([]budget.ProductionBudget, error) {
+	if ownerID == "" || budgetID == "" {
+		return nil, executiongrant.ErrInvalid
+	}
+	if _, err := productionBudgetByID(ctx, r.db, ownerID, budgetID); err != nil {
+		return nil, err
+	}
+	conn, err := r.grantWriteConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackGrantConn(conn)
+		}
+	}()
+	completed, err := completeFinishedPlansOnConn(ctx, conn, []string{budgetID}, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := commitGrantConn(ctx, conn); err != nil {
+		return nil, err
+	}
+	committed = true
+	return completed, nil
+}
+
+// planIDsInCurrentStates lists the ids of the plans a session may still show and
+// spend under: the active, exhausted and completed ones. An empty budgetID reads
+// every owner; the all-plans one-shot is the only caller that does.
+func planIDsInCurrentStates(ctx context.Context, conn queryer, budgetID string) ([]string, error) {
+	query := `SELECT id FROM production_budgets WHERE state IN (` +
+		queryPlaceholders(len(budget.CurrentStates())) + `)`
+	args := make([]any, 0, len(budget.CurrentStates())+1)
+	for _, state := range budget.CurrentStates() {
+		args = append(args, state)
+	}
+	if budgetID != "" {
+		query += ` AND id = ?`
+		args = append(args, budgetID)
+	}
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // SettleBudgetReservations settles ended Tasks' reservations, releases the
@@ -578,9 +784,6 @@ func (r *Repository) SettleBudgetReservations(ctx context.Context, now time.Time
 			stamp, value.ID); err != nil {
 			return nil, err
 		}
-	}
-	if err := completeFinishedPlansOnConn(ctx, conn, "", now); err != nil {
-		return nil, err
 	}
 	if err := commitGrantConn(ctx, conn); err != nil {
 		return nil, err

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -48,6 +49,7 @@ func (s *Server) decideChatSessionBudget(writer http.ResponseWriter, request *ht
 		"message_id": outcome.MessageID,
 	}
 	if outcome.State == budget.StateActive {
+		s.completeFinishedPlan(request.Context(), string(owner), outcome.BudgetID)
 		if turnMessageID := s.continueApprovedPlan(request, string(owner), sessionID, outcome.BudgetID); turnMessageID != "" {
 			result["turn_message_id"] = turnMessageID
 		}
@@ -97,6 +99,10 @@ func (s *Server) continueChatSessionBudget(writer http.ResponseWriter, request *
 		}
 		return
 	}
+	// #410: the plan's own turn is about to start, so a plan whose steps are all
+	// done already (its last step paid without a reservation, say) is collected
+	// now instead of waiting for a settlement that may never touch it.
+	s.completeFinishedPlan(request.Context(), principal.OwnerID, budgetID)
 	if s.chatScheduler != nil {
 		// The turn is stored as queued; a failed schedule leaves it for the
 		// turn recovery that picks up queued turns.
@@ -108,6 +114,21 @@ func (s *Server) continueChatSessionBudget(writer http.ResponseWriter, request *
 		}
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"turn_message_id": assistant.ID})
+}
+
+// completeFinishedPlan marks the plan completed when all of its required steps
+// already have a succeeded Task (#410). It runs where a plan's turn starts — a
+// decision and a continuation — so a plan that finished without a reserving step
+// still reads completed; a failure is logged and changes nothing, because the
+// plan is already decided and the sweep's bounded scope will not collect it.
+func (s *Server) completeFinishedPlan(ctx context.Context, ownerID, budgetID string) {
+	if s.executionGrants == nil || ownerID == "" || budgetID == "" {
+		return
+	}
+	if _, err := s.executionGrants.CompleteFinishedBudget(ctx, ownerID, budgetID); err != nil && s.logger != nil {
+		s.logger.WarnContext(ctx, "收尾已完成的制作计划失败",
+			"owner_id", ownerID, "budget_id", budgetID, "error", err)
+	}
 }
 
 // continueApprovedPlan starts and schedules the turn that runs a plan the

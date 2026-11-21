@@ -86,6 +86,14 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 			break
 		}
 	}
+	// #410: a finished plan may not spend any more, so the sentence that says
+	// its steps are approved by budget would be false. The Schema declares both
+	// sentences and the state picks one; a historical Catalog has no
+	// placeholder and keeps its inline wording.
+	autoApproval := config.AutoApprovalNote
+	if state == budget.StateCompleted {
+		autoApproval = config.CompletedNote
+	}
 	report := config.Acceptance.Report
 	if orchestrator.texts != nil {
 		report = orchestrator.text(ctx, report)
@@ -100,6 +108,7 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 		"{acceptance}", acceptance,
 		"{checkpoints}", checkpoints,
 		"{contingencies}", contingencies,
+		"{auto_approval}", autoApproval,
 		"{report}", report,
 	).Replace(config.ContextTemplate)
 }
