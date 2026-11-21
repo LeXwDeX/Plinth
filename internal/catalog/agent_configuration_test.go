@@ -58,7 +58,51 @@ func TestAgentConfigurationDeclarationsAreDefensiveCopies(t *testing.T) {
 	changed.AgentConfiguration.UI["title"] = "changed"
 	changed.AgentConfiguration.MCPPresets[0].Tools[0].Execution.Effects[0] = "PAID_TASK"
 	changed.AgentConfiguration.MCPPresets[0].Tools[0].Parameters[0] = 'x'
+	*changed.AgentConfiguration.MCPPresets[0].DefaultEnabled = true
 	if err := catalog.ValidateApplicationSchema(c.Application()); err != nil {
 		t.Fatalf("caller mutated catalog: %v", err)
+	}
+	if c.Application().AgentConfiguration.MCPPresets[0].EnabledByDefault() {
+		t.Fatal("the default selection is shared between callers")
+	}
+}
+
+// #445: a preset whose tools repeat built-in reads declares both the
+// equivalence and that a fresh configuration leaves it out; Catalog validation
+// makes the pair a load-time rule instead of a data preference.
+func TestAgentConfigurationRejectsDefaultEnabledDuplicateMCPReads(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preset := c.Application().AgentConfiguration.MCPPresets[0]
+	if preset.ID != "workspace-read" || preset.EnabledByDefault() {
+		t.Fatalf("shipped preset = %q default enabled = %v", preset.ID, preset.EnabledByDefault())
+	}
+	equivalences := map[string]string{}
+	for _, tool := range preset.Tools {
+		equivalences[tool.Name] = tool.Duplicates
+	}
+	for tool, builtIn := range map[string]string{
+		"mcp_list_offerings":     "list_offerings",
+		"mcp_get_task_assets":    "get_task",
+		"mcp_list_session_tasks": "",
+	} {
+		if equivalences[tool] != builtIn {
+			t.Fatalf("equivalence for %s = %q, want %q", tool, equivalences[tool], builtIn)
+		}
+	}
+
+	enabled := c.Application()
+	value := true
+	enabled.AgentConfiguration.MCPPresets[0].DefaultEnabled = &value
+	if err := catalog.ValidateApplicationSchema(enabled); err == nil || !strings.Contains(err.Error(), "must not be enabled by default") {
+		t.Fatalf("default-enabled duplicate preset accepted: %v", err)
+	}
+
+	unknown := c.Application()
+	unknown.AgentConfiguration.MCPPresets[0].Tools[0].Duplicates = "no_such_tool"
+	if err := catalog.ValidateApplicationSchema(unknown); err == nil || !strings.Contains(err.Error(), "duplicates unknown built-in tool") {
+		t.Fatalf("unknown duplicate target accepted: %v", err)
 	}
 }
