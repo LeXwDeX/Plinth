@@ -10,6 +10,12 @@ interruption count is a regression; more self-inspection is an improvement.
 fixed request set: new cases are recorded as additions, the request-set
 version/content change no longer blocks, and the summary metrics compare the
 common cases only.
+--exclude-check-prefix names checks whose baseline verdict is void and must not
+count either way, for example `--exclude-check-prefix output:model` after the
+#407 baseline inspected Meshy's 3MF delivery as a GLB (#444). A baseline check
+whose detail is a known broken-baseline marker (`bad GLB magic`) is listed as
+incomparable automatically. The report names every excluded or incomparable
+check; neither changes the exit code.
 """
 import argparse
 import json
@@ -30,11 +36,14 @@ def main(argv=None):
     parser.add_argument("--new-request-set", action="store_true",
                         help="report mode for an intentionally changed request set: new cases are additions, not regressions")
     parser.add_argument("--no-fail", action="store_true", help="always exit 0 (report only)")
+    parser.add_argument("--exclude-check-prefix", action="append", default=[], metavar="PREFIX",
+                        help="checks whose baseline verdict is void (repeatable), for example output:model")
     args = parser.parse_args(argv)
     baseline = quality.load_json(args.baseline)
     candidate = quality.load_json(args.candidate)
     result = quality.compare_reports(baseline, candidate, tolerance=args.tolerance,
-                                     new_request_set=args.new_request_set)
+                                     new_request_set=args.new_request_set,
+                                     exclude_check_prefixes=args.exclude_check_prefix)
     print(result["markdown"], end="")
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
