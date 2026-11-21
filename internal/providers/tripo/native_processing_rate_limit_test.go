@@ -322,14 +322,26 @@ func TestNativeExportRateLimitCheckpointFailsClosed(t *testing.T) {
 	if err := nativeConversionCheckpoint(valid, r.Offering, r.Input, options); err != nil {
 		t.Fatalf("valid rate-limited ledger rejected: %v", err)
 	}
-	budget := units - 2*len(formats)
+	// #460 A2/A5: every format has its own refusal budget, formats may be in
+	// flight at once, and the new private states are checkpointed.
+	for name, l := range map[string]nativeConversionLedger{
+		"retry pending":          ledger(map[string]conversionItem{"FBX": {Status: conversionItemRetryPending, RetryAttempts: 2, RetryWaitSeconds: 4}}, units),
+		"unknown child":          ledger(map[string]conversionItem{"FBX": {Status: conversionItemUnknown}}, units),
+		"per-format budget":      ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 4}, "OBJ": {Status: conversionItemRateLimited, RateLimitRetries: 4}}, units),
+		"two children in flight": ledger(map[string]conversionItem{"FBX": {Status: conversionItemSubmitted, RemoteID: "child_fbx"}, "OBJ": {Status: conversionItemSubmitted, RemoteID: "child_obj"}}, units),
+	} {
+		if err := nativeConversionCheckpoint(l, r.Offering, r.Input, options); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
+	}
+	budget := maximumConversionRateLimitRetries
 	cases := map[string]nativeConversionLedger{
 		"remote id on a refused child": ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RemoteID: "child", RateLimitRetries: 1}}, units),
+		"remote id on a retry pending": ledger(map[string]conversionItem{"FBX": {Status: conversionItemRetryPending, RemoteID: "child"}}, units),
 		"refusal without a count":      ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited}}, units),
 		"count over the budget":        ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: budget + 1}}, units),
-		"total over the budget":        ledger(map[string]conversionItem{"FBX": {Status: conversionItemDone, RemoteID: "child_fbx", Locator: "https://assets.example/fbx", RateLimitRetries: budget}, "OBJ": {Status: conversionItemRateLimited, RateLimitRetries: 1}}, units),
-		"refusal before another child": ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 1}, "OBJ": {Status: conversionItemSubmitted, RemoteID: "child_obj"}}, units),
-		"legacy ledger with refusal":   ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 1}}, 0),
+		"retries over the budget":      ledger(map[string]conversionItem{"FBX": {Status: conversionItemRetryPending, RetryAttempts: maximumConversionChildRetries + 1}}, units),
+		"unknown child with a locator": ledger(map[string]conversionItem{"FBX": {Status: conversionItemUnknown, Locator: "https://assets.example/fbx"}}, units),
 		"forged progress units":        ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 1}}, units+1),
 	}
 	for name, l := range cases {
@@ -337,15 +349,19 @@ func TestNativeExportRateLimitCheckpointFailsClosed(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
+	_ = formats
 }
 
-// Every stage, including each refused child, strictly raises the progress
-// within the private export band for the largest frozen format set.
-func TestNativeExportStagesWithRefusalsStrictlyIncrease(t *testing.T) {
+// Every stage, including each refused child, raises the progress within the
+// private export band and never past it. #460 A2 gives each format its own
+// refusal budget, so a run can spend more stages than the band has points: the
+// reported progress then stops at the top of the band instead of regressing or
+// overflowing.
+func TestNativeExportStagesWithRefusalsNeverRegress(t *testing.T) {
 	for count := 1; count <= maximumNativeConversionFormats; count++ {
 		units := nativeConversionProgressUnits(count)
-		budget := units - 2*count
-		if budget < 1 || budget > maximumConversionRateLimitRetries || units > 18 {
+		budget := maximumConversionRateLimitRetries
+		if units > 18 || units < 2*count {
 			t.Fatalf("count %d: units %d budget %d", count, units, budget)
 		}
 		state := nativeProcessingState{nativeConversionLedger: nativeConversionLedger{Conversions: map[string]conversionItem{}, ProgressUnits: units}}
@@ -353,7 +369,7 @@ func TestNativeExportStagesWithRefusalsStrictlyIncrease(t *testing.T) {
 		last := 80
 		step := func() {
 			obs := nativeConversionRunning(generation.ObserveRequest{}, run, generation.Observation{}, count)
-			if obs.Progress <= last || obs.Progress > 98 {
+			if obs.Progress < last || obs.Progress > 98 {
 				t.Fatalf("count %d: stage %d→%d", count, last, obs.Progress)
 			}
 			last = obs.Progress

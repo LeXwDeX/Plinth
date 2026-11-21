@@ -135,7 +135,11 @@ func TestAmbiguousFullFormatDispatchNeverResendsPaidConversion(t *testing.T) {
 	}
 }
 
-func TestFullFormatChildFailureFailsPublicTaskWithoutMoreCharges(t *testing.T) {
+// #460 A1: a failed conversion child is resubmitted for its own format (the
+// official billing page: failed tasks are not charged), at most five times with
+// 1, 2, 4… second backoff; only when the budget is spent does the public task
+// fail, and every attempt is a new private permit.
+func TestFullFormatChildFailureRetriesThenFailsPublicTask(t *testing.T) {
 	converts := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -164,14 +168,17 @@ func TestFullFormatChildFailureFailsPublicTaskWithoutMoreCharges(t *testing.T) {
 		Input: fullTextFrozenInput(t, c),
 	}
 	adapter := newAdapter(t, upstream)
-	for round := 0; round < 5; round++ {
+	for round := 0; round < 60; round++ {
 		observation, err := adapter.Observe(context.Background(), request)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if observation.Phase == generation.UpstreamFailed {
-			if converts != 1 || len(observation.Artifacts) != 0 {
+			if converts != 6 || len(observation.Artifacts) != 0 {
 				t.Fatalf("unexpected terminal result: %#v, converts=%d", observation, converts)
+			}
+			if observation.Failure == nil || observation.Failure.Retryable || observation.Failure.Ambiguous {
+				t.Fatalf("child failure must be a definite failure: %+v", observation.Failure)
 			}
 			return
 		}

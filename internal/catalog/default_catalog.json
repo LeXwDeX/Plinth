@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-21.407-380-433-330-445-410-432-456.1",
+    "revision": "2026-11-22.456-460.1",
     "terminology": {
       "user_facing": [
         {
@@ -1190,7 +1190,7 @@
           "auth_header": "Authorization",
           "auth_prefix": "Bearer ",
           "request_timeout_seconds": 1800,
-          "result_refetch": {"mode": "observe"},
+          "result_refetch": {"mode": "observe", "retention_hours": 168},
           "capabilities": [
             "text-to-3d",
             "image-to-3d",
@@ -1330,8 +1330,7 @@
               },
               "unknown": {
                 "phase": "running",
-                "class": "upstream_unavailable",
-                "max_consecutive": 20
+                "max_duration_seconds": 300
               }
             }
           }
@@ -26267,9 +26266,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -26590,9 +26590,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "input_rules": [
@@ -27058,9 +27059,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -27503,9 +27505,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -27811,9 +27814,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "input_rules": [
@@ -28245,9 +28249,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -28587,7 +28592,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -29318,6 +29323,7 @@
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "bindings": [
             {
@@ -29453,7 +29459,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -30008,6 +30014,7 @@
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "response_aliases": [
           {
             "key": "model_url",
@@ -30118,7 +30125,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -30925,6 +30932,7 @@
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "bindings": [
             {
@@ -31063,7 +31071,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -31874,6 +31882,7 @@
         "endpoint": "generation/multiview-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "bindings": [
             {
@@ -32014,7 +32023,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -32645,6 +32654,7 @@
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "upload_endpoint": "files",
         "response_aliases": [
           {
@@ -32757,7 +32767,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -33240,7 +33250,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -33743,7 +33753,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -34402,9 +34412,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -38820,7 +38831,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -40193,7 +40204,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 1,
@@ -41413,7 +41424,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -41481,7 +41492,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -41786,6 +41797,7 @@
         ],
         "model": "v3.5-20260815",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -41873,7 +41885,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -42215,7 +42227,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -42594,7 +42606,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -46413,9 +46425,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "input_rules": [
@@ -46929,7 +46942,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -47220,6 +47233,7 @@
         ],
         "model": "v3.0",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -47319,7 +47333,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -47582,6 +47596,7 @@
         ],
         "model": "v3.0",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -47668,7 +47683,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -47918,6 +47933,7 @@
         ],
         "model": "v2.0-20260430",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -48004,7 +48020,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -48235,6 +48251,7 @@
         ],
         "model": "v1.0-20250506",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -48321,7 +48338,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -48552,6 +48569,7 @@
         ],
         "model": "v1.0-20250506",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -48671,7 +48689,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "parameters": [
@@ -48703,6 +48721,7 @@
           {"key": "mask_url", "claim_id": "smartsegment-mask", "role": "mask", "variant": "png", "fields": ["mask_url"]}
         ],
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "seg_model_url",
           "max_source_bytes": 150000000,
@@ -48741,7 +48760,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "parameters": [
@@ -48774,6 +48793,7 @@
           {"key": "mask_url", "claim_id": "smartsegment-mask", "role": "mask", "variant": "png", "fields": ["mask_url"]}
         ],
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "seg_model_url",
           "max_source_bytes": 150000000,
@@ -48812,7 +48832,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -48895,7 +48915,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "credits_metered": true,
@@ -48930,7 +48950,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "credits_metered": true,

@@ -368,6 +368,14 @@ func validateStatusMapping(connectionID string, mapping *schemacontract.StatusMa
 				status,
 			)
 		}
+		if rule.MaxDurationSeconds < 0 ||
+			(rule.MaxDurationSeconds > 0 && rule.Phase != "accepted" && rule.Phase != "running") {
+			return fmt.Errorf(
+				"连接 %q 的 status_mapping[%q] 的 max_duration_seconds 只能用于 accepted/running 相位且不得为负",
+				connectionID,
+				status,
+			)
+		}
 		if rule.Queued && (rule.Phase != "accepted" || rule.Class != "" || rule.MaxConsecutive != 0) {
 			return fmt.Errorf(
 				"连接 %q 的 status_mapping[%q] 的 queued 只能用于不带失败分类与轮询上限的 accepted 相位",

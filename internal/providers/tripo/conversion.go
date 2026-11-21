@@ -21,6 +21,7 @@
 package tripo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -314,19 +315,63 @@ func initialConversionEvidence(
 //   - dispatching：检查点已持久化但发送结果未知（崩溃/歧义）——永不
 //     重发该格式，且后续任何新的付费派发都被 pending 栅栏保守阻止；
 //   - submitted：已取得上游 task_id，轮询中；
+//   - rate_limited：该格式的一次 convert POST 被上游以明确的 HTTP 429
+//     拒绝（未受理、未计费），等待 Retry-After 或退避后以新许可重发；
+//   - retry_pending：该格式的子作业以 failed 或 cancelled 结束（官方
+//     Billing：“Failed and cancelled tasks are not charged.”，读取
+//     2026-11-22），等待退避后以新许可重提；
+//   - unknown：该格式的子作业在连接声明的时间内一直返回 unknown，结果
+//     不明——不再重发，也不断言该格式失败（槽位保持 pending）；
 //   - done / failed / denied / abandoned：终态。
 const (
-	conversionItemDispatching = "dispatching"
-	conversionItemSubmitted   = "submitted"
-	conversionItemDone        = "done"
-	conversionItemFailed      = "failed"
-	conversionItemDenied      = "denied"
-	conversionItemAbandoned   = "abandoned"
+	conversionItemDispatching  = "dispatching"
+	conversionItemSubmitted    = "submitted"
+	conversionItemDone         = "done"
+	conversionItemFailed       = "failed"
+	conversionItemDenied       = "denied"
+	conversionItemAbandoned    = "abandoned"
+	conversionItemRateLimited  = "rate_limited"
+	conversionItemRetryPending = "retry_pending"
+	conversionItemUnknown      = "unknown"
+)
+
+// An explicit HTTP 429 refuses a create request without accepting it (Tripo
+// Rate Limits page, read 2026-11-22: code 1007 for the request rate, code 2000
+// with Retry-After for a full concurrency pool; back off from 1 s, doubling, at
+// most 32 s, up to 5 retries). The budget is per format: the page bounds the
+// retries of one request, not of a whole run. The same private child is sent
+// again under a new permit.
+const (
+	maximumConversionRateLimitRetries = 5
+	maximumConversionRateLimitBackoff = 32 * time.Second
+	maximumConversionRateLimitWait    = 5 * time.Minute
+)
+
+// maximumConversionChildRetries is how often one format's convert child is
+// resubmitted after it ended failed or cancelled. The same 1, 2, 4… second
+// backoff as a refusal applies, capped at 32 s.
+const maximumConversionChildRetries = 5
+
+// 一次私有转换子作业的结局（私有检查点证据，不公开）。
+const (
+	conversionAttemptDone     = "done"
+	conversionAttemptFailed   = "failed"
+	conversionAttemptCanceled = "canceled"
+	conversionAttemptUnknown  = "unknown"
 )
 
 // 资源身份（role/variant）不在 Provider 内硬编码：由冻结快照的 on-demand
 // 输出声明解析（conversionRequirement + generation.SelectionVariant），
 // 避免与目录形成第二真源（回顾性整改 P2）。
+
+// conversionAttempt 是一次私有 convert 提交的计费与身份证据：上游任务 id、
+// 该任务报告的 credits_consumed 与它的结局。检查点保留每一次提交，进程重启
+// 后仍能说明每个格式发过几次、每次的远端身份是什么。
+type conversionAttempt struct {
+	RemoteID        string          `json:"remote_id,omitempty"`
+	CreditsConsumed json.RawMessage `json:"credits_consumed,omitempty"`
+	Outcome         string          `json:"outcome,omitempty"`
+}
 
 // conversionItem 是单个选中格式的私有转换状态。
 type conversionItem struct {
@@ -340,9 +385,158 @@ type conversionItem struct {
 	// DeliveryAttempts 是已就该格式重发产物声明的次数：已重发过而槽位仍
 	// 未兑现时，下一轮先按协议刷新定位符（GET 查询，非付费）再重发。
 	DeliveryAttempts int `json:"delivery_attempts,omitempty"`
-	// RateLimitRetries counts explicit 429 refusals of this private native
-	// export child (never accepted upstream, so never charged).
+	// RateLimitRetries counts explicit 429 refusals of this private child
+	// (never accepted upstream, so never charged). The budget is this
+	// format's own.
 	RateLimitRetries int `json:"rate_limit_retries,omitempty"`
+	// RetryAttempts counts the resubmissions this format already made after a
+	// child ended failed or cancelled.
+	RetryAttempts int `json:"retry_attempts,omitempty"`
+	// RetryWaitSeconds is the backoff the format is waiting out before its
+	// next resubmission (retry_pending only).
+	RetryWaitSeconds int `json:"retry_wait_seconds,omitempty"`
+	// Attempts is the private submission history of this format.
+	Attempts []conversionAttempt `json:"attempts,omitempty"`
+}
+
+// formatConversionOptions declares how an Offering's private format
+// conversions run. Tripo's format-convert pool is shared with texture and
+// refine and holds five jobs (rate-limits page, read 2026-11-22): an Offering
+// that converts several formats declares that number, and the Adapter keeps at
+// most that many private children in flight for one Task. Absent means one at a
+// time, the behavior every Task frozen before the declaration had. The number
+// bounds one Task's in-flight children; the account-wide pool is the upstream's
+// to answer, which it does with code 2000 and Retry-After.
+type formatConversionOptions struct {
+	ConcurrencyLimit int `json:"concurrency_limit,omitempty"`
+}
+
+// conversionConcurrency is how many private convert children one Task keeps in
+// flight at once.
+func conversionConcurrency(options providerOptions) int {
+	if options.FormatConversion != nil && options.FormatConversion.ConcurrencyLimit > 0 {
+		return options.FormatConversion.ConcurrencyLimit
+	}
+	return 1
+}
+
+// conversionRetryBackoff is the wait before the next attempt of a private
+// child: 1, 2, 4… seconds, capped at 32 s (the official rate-limits page).
+// attempt is the 1-based number of the attempt being scheduled.
+func conversionRetryBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > 6 {
+		attempt = 6
+	}
+	return min(time.Second<<(attempt-1), maximumConversionRateLimitBackoff)
+}
+
+// conversionOutcome names how a private convert child ended.
+func conversionOutcome(phase generation.UpstreamPhase) string {
+	switch phase {
+	case generation.UpstreamCompleted:
+		return conversionAttemptDone
+	case generation.UpstreamFailed:
+		return conversionAttemptFailed
+	case generation.UpstreamCanceled:
+		return conversionAttemptCanceled
+	default:
+		return conversionAttemptUnknown
+	}
+}
+
+// applyConversionChild folds one poll of a private convert child into the
+// format's state: a child that is still queued or running changes nothing, and
+// a child that reached an outcome is recorded as one more attempt with its
+// remote id, credits and end state. A completed child becomes done; a failed or
+// cancelled one becomes retry_pending with the documented backoff while its own
+// budget lasts, and failed once it does not (the official billing page: neither
+// is charged, so the same format is worth sending again). A child whose bounded
+// unknown window ran out never reaches here: the caller ends the format as
+// unknown, which is never resent and never asserted as a failure. It returns the
+// updated item and, for a retry, the wait before the resubmission.
+func applyConversionChild(
+	item conversionItem,
+	phase generation.UpstreamPhase,
+	locator string,
+	credits json.RawMessage,
+) (conversionItem, time.Duration) {
+	// A running child already reports the price frozen when it was created, and
+	// the private ledger keeps it as evidence for the stage it belongs to.
+	if len(credits) > 0 {
+		item.CreditsConsumed = bytes.Clone(credits)
+	}
+	switch phase {
+	case generation.UpstreamCompleted, generation.UpstreamFailed, generation.UpstreamCanceled:
+	default:
+		// Still queued or running: the child stays in flight.
+		return item, 0
+	}
+	item.Attempts = append(item.Attempts, conversionAttempt{
+		RemoteID:        item.RemoteID,
+		CreditsConsumed: bytes.Clone(credits),
+		Outcome:         conversionOutcome(phase),
+	})
+	item.RetryWaitSeconds = 0
+	switch phase {
+	case generation.UpstreamCompleted:
+		item.Locator = locator
+		item.Status = conversionItemDone
+		if locator == "" {
+			// 上游报完成却没有产物：与失败一样只终结该格式。
+			item.Status = conversionItemFailed
+			item.RemoteID = ""
+		}
+	default:
+		item.Locator = ""
+		item.RemoteID = ""
+		if item.RetryAttempts >= maximumConversionChildRetries {
+			item.Status = conversionItemFailed
+			return item, 0
+		}
+		item.Status = conversionItemRetryPending
+		item.RetryWaitSeconds = int(conversionRetryBackoff(item.RetryAttempts + 1).Seconds())
+		return item, time.Duration(item.RetryWaitSeconds) * time.Second
+	}
+	return item, 0
+}
+
+// conversionRetryWait is the longest wait the pending retries ask for. The
+// observation carries it as PollAfter, so every pending format has waited at
+// least its own backoff when the next round runs.
+func conversionRetryWait(conversions map[string]conversionItem) time.Duration {
+	wait := time.Duration(0)
+	for _, item := range conversions {
+		if item.Status != conversionItemRetryPending {
+			continue
+		}
+		if item.RetryWaitSeconds <= 0 {
+			continue
+		}
+		if candidate := time.Duration(item.RetryWaitSeconds) * time.Second; candidate > wait {
+			wait = candidate
+		}
+	}
+	return wait
+}
+
+// nextConversionDispatch picks the format to send next: a format whose child
+// ended failed or cancelled and whose backoff has passed first (it is already
+// paid for and planned), then a format that was never started. Both follow the
+// frozen selection order, so the choice never depends on map iteration.
+func nextConversionDispatch(selections []string, conversions map[string]conversionItem) (string, bool) {
+	for _, format := range selections {
+		if item, exists := conversions[format]; exists && item.Status == conversionItemRetryPending {
+			return format, true
+		}
+	}
+	remaining := unstartedFormats(selections, conversions)
+	if len(remaining) == 0 {
+		return "", false
+	}
+	return remaining[0], true
 }
 
 // postSuccessState 是成功后观察期 attempt.Opaque 的载体：完整转换表
@@ -425,137 +619,165 @@ func (a *Adapter) observePostSuccessConversion(
 		return a.postSuccessCompletion(base, request, state, selections), nil
 	}
 
-	// 2) 在途转换：轮询子作业；完成 → 交付产物（下一轮再处理其余格式）。
-	if format, item, found := inflightConversion(state.Conversions); found {
+	// 2) 轮询全部在途子作业（有界并发下通常有多个，顺序稳定）。完成的
+	//    子作业本轮只登记状态，产物从下一轮起交付（每轮至多一个产物
+	//    声明）；失败/取消的子作业进入退避等待，预算用尽才终结自身。
+	backoff := false
+	for _, format := range submittedFormats(selections, state.Conversions) {
+		item := state.Conversions[format]
 		value, err := a.observeTask(ctx, options, item.RemoteID, string(request.AttemptID)+":convert:"+format)
 		if err != nil {
 			return generation.Observation{}, err
 		}
+		status := conversionStatusWord(value.Status)
+		rule, known := declaredStatusRule(a.statusMapping, status)
+		if !known {
+			return generation.Observation{}, failure(generation.FailureProtocol, false, "Tripo 转换返回未知任务状态")
+		}
 		phase, _ := conversionChildPhase(a.statusMapping, value.Status)
-		switch phase {
-		case generation.UpstreamCompleted:
-			locator := firstHTTPOutput(value.Output, "model_url", "model")
-			if locator == "" {
-				state.Conversions[format] = conversionItem{
-					Status:          conversionItemFailed,
-					RemoteID:        item.RemoteID,
-					CreditsConsumed: value.CreditsConsumed,
+		if a.unknownStatusExpired(item.RemoteID, status, rule) {
+			// 结果不明：不重发、不断言失败，槽位保持 pending 由 deadline
+			// 收尾（父任务已成功，语义不回退）。
+			item.Attempts = append(item.Attempts, conversionAttempt{
+				RemoteID:        item.RemoteID,
+				CreditsConsumed: bytes.Clone(value.CreditsConsumed),
+				Outcome:         conversionAttemptUnknown,
+			})
+			item.Status = conversionItemUnknown
+			item.Locator = ""
+			state.Conversions[format] = item
+			continue
+		}
+		locator := ""
+		if phase == generation.UpstreamCompleted {
+			locator = firstHTTPOutput(value.Output, "model_url", "model")
+		}
+		updated, wait := applyConversionChild(item, phase, locator, value.CreditsConsumed)
+		if wait > 0 {
+			backoff = true
+		}
+		if updated.Status == conversionItemDone {
+			// 上游完成 ≠ 本地兑现：本轮交付这一个产物声明，兑现由内核按
+			// 本地资产证据判定（P1）。其余在途子作业下一轮继续。
+			updated.DeliveryAttempts++
+			state.Conversions[format] = updated
+			return a.deliveryObservation(base, request, state, format, updated.Locator, updated.DeliveryAttempts), nil
+		}
+		state.Conversions[format] = updated
+	}
+
+	// 3) 刚进入退避的格式本轮不再派发：先让退避走完（官方 1、2、4… 秒）。
+	if backoff {
+		base.Phase = generation.UpstreamRunning
+		base.Progress = 50
+		base.PollAfter = conversionRetryWait(state.Conversions)
+		base.DedupeKey = privateDedupeKey("convert", "retry-backoff", strconv.Itoa(len(state.Conversions)))
+		base.Opaque = encodePostSuccessState(state)
+		return base, nil
+	}
+	// 派发下一个已同意格式（规划器 → 检查点 → 一次 HTTP）：优先待重提
+	// 格式，其次未开始的格式；同时在途的子作业不超过声明并发。未开始
+	//    的独立已授权转换优先于未兑现重发（A1 整改，resources-review
+	//    REJECT）：某个格式的本地下载永久失败不得占据每一轮观察、饿死其余
+	//    尚未派发的选中格式；重发只在全部选中格式都已开始之后进行。
+	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < conversionConcurrency(options) {
+		if format, ok := nextConversionDispatch(selections, state.Conversions); ok {
+			if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
+				// 未知/超预算/缺同意：零 Checkpoint、零发送；剩余格式 denied。
+				for _, remaining := range unstartedFormats(selections, state.Conversions) {
+					state.Conversions[remaining] = conversionItem{Status: conversionItemDenied}
 				}
 				return a.postSuccessCompletion(base, request, state, selections), nil
 			}
-			state.Conversions[format] = conversionItem{
-				Status:           conversionItemDone,
-				RemoteID:         item.RemoteID,
-				CreditsConsumed:  value.CreditsConsumed,
-				Locator:          locator,
-				DeliveryAttempts: 1,
+			if options.ConvertEndpoint == "" {
+				for _, remaining := range unstartedFormats(selections, state.Conversions) {
+					state.Conversions[remaining] = conversionItem{Status: conversionItemFailed}
+				}
+				return a.postSuccessCompletion(base, request, state, selections), nil
 			}
-			return a.deliveryObservation(base, request, state, format, locator, 1), nil
-		case generation.UpstreamFailed, generation.UpstreamCanceled:
-			// 单个格式失败只终结它自己：其余已授权格式在后续轮次继续
-			// （P0；旧行为在此断言整槽终态，静默取消未开始的格式）。
-			state.Conversions[format] = conversionItem{
-				Status:          conversionItemFailed,
-				RemoteID:        item.RemoteID,
-				CreditsConsumed: value.CreditsConsumed,
+			previous := state.Conversions[format]
+			extras, err := conversionExtras(request.Offering, options, request.Input, format)
+			if err != nil {
+				return generation.Observation{}, err
 			}
-			return a.postSuccessCompletion(base, request, state, selections), nil
-		default:
-			// 子作业仍在运行：父已完成、资源待定（不回滚父进度）。
+			// The retry budget is spent when the resubmission is accepted, not
+			// when it is planned: a 429 refusal never reached the upstream.
+			attempts := previous.RetryAttempts
+			submissionKey := string(request.AttemptID) + ":convert:" + format
+			if previous.Status == conversionItemRetryPending || previous.Status == conversionItemRateLimited {
+				attempts++
+			}
+			if attempts > 0 {
+				submissionKey += ":retry:" + strconv.Itoa(attempts)
+			}
+			state.Conversions[format] = conversionItem{
+				Status:           conversionItemDispatching,
+				RateLimitRetries: previous.RateLimitRetries,
+				RetryAttempts:    attempts,
+				Attempts:         previous.Attempts,
+			}
+			permit, err := privateDispatchPermit(ctx, submissionKey, dispatchIntentStage{
+				Stage: "models/convert",
+				Details: map[string]any{
+					"format":      format,
+					"source_task": request.Job.RemoteID,
+					// intent 自含完整转换表：检查点事务会用 intent 覆盖
+					// opaque_json，部分状态会丢失协调事实（§4.5.2）。
+					"conversions": state.Conversions,
+				},
+			})
+			if err != nil {
+				// ErrDispatchPending 等失败：零发送；返回错误由内核有界重排
+				//（下一轮按 1) 保守 abandoned）。
+				return generation.Observation{}, err
+			}
+			remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
+			if err != nil {
+				// 明确的 HTTP 429 是上游拒绝（未受理）：以 not_dispatched 结算
+				// 许可，按 Retry-After 或退避稍后以新许可重发同一格式；预算用尽
+				// 时该格式以确定失败结束。
+				if retryAfter, refused := explicitRateLimit(err); refused && permit != nil {
+					permit.Result = generation.DispatchResultNotDispatched
+					wait, exhausted := recordConversionRefusal(state.Conversions, format, retryAfter)
+					if exhausted {
+						observation := a.postSuccessCompletion(base, request, state, selections)
+						observation.Dispatch = permit
+						return observation, nil
+					}
+					base.Phase = generation.UpstreamRunning
+					base.Progress = 50
+					base.PollAfter = wait
+					base.DedupeKey = privateDedupeKey("convert", format, "rate_limited", strconv.Itoa(state.Conversions[format].RateLimitRetries))
+					base.Opaque = encodePostSuccessState(state)
+					base.Dispatch = permit
+					return base, nil
+				}
+				// 发送失败/歧义：无回执 → 检查点停留 dispatching，下一轮按 1)
+				// 保守 abandoned；本轮返回错误（内核有界重排，不重发）。
+				return generation.Observation{}, err
+			}
+			state.Conversions[format] = conversionItem{
+				Status:           conversionItemSubmitted,
+				RemoteID:         remoteID,
+				RateLimitRetries: state.Conversions[format].RateLimitRetries,
+				RetryAttempts:    attempts,
+				Attempts:         previous.Attempts,
+			}
+			state.Stage = "models/convert"
+			state.SubmissionKey = submissionKey
+			state.Format = format
 			base.Phase = generation.UpstreamRunning
 			base.Progress = 50
-			base.DedupeKey = privateDedupeKey("convert", format, item.RemoteID, "running")
+			base.DedupeKey = privateDedupeKey("convert", format, remoteID, "submitted")
 			base.Opaque = encodePostSuccessState(state)
+			base.Dispatch = permit
 			return base, nil
 		}
 	}
 
-	// 3) 派发下一个已同意格式（规划器 → 检查点 → 一次 HTTP）。未开始的
-	//    独立已授权转换优先于未兑现重发（A1 整改，resources-review REJECT）：
-	//    某个格式的本地下载永久失败不得占据每一轮观察、饿死其余尚未派发
-	//    的选中格式；重发只在全部选中格式都已开始之后进行。
-	remaining := unstartedFormats(selections, state.Conversions)
-	if len(remaining) > 0 {
-		format := remaining[0]
-		if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
-			// 未知/超预算/缺同意：零 Checkpoint、零发送；剩余格式 denied。
-			for _, remainingFormat := range remaining {
-				state.Conversions[remainingFormat] = conversionItem{Status: conversionItemDenied}
-			}
-			return a.postSuccessCompletion(base, request, state, selections), nil
-		}
-		if options.ConvertEndpoint == "" {
-			for _, remainingFormat := range remaining {
-				state.Conversions[remainingFormat] = conversionItem{Status: conversionItemFailed}
-			}
-			return a.postSuccessCompletion(base, request, state, selections), nil
-		}
-		extras, err := conversionExtras(request.Offering, options, request.Input, format)
-		if err != nil {
-			return generation.Observation{}, err
-		}
-		retries := state.Conversions[format].RateLimitRetries
-		state.Conversions[format] = conversionItem{Status: conversionItemDispatching, RateLimitRetries: retries}
-		submissionKey := string(request.AttemptID) + ":convert:" + format
-		permit, err := privateDispatchPermit(ctx, submissionKey, dispatchIntentStage{
-			Stage: "models/convert",
-			Details: map[string]any{
-				"format":      format,
-				"source_task": request.Job.RemoteID,
-				// intent 自含完整转换表：检查点事务会用 intent 覆盖
-				// opaque_json，部分状态会丢失协调事实（§4.5.2）。
-				"conversions": state.Conversions,
-			},
-		})
-		if err != nil {
-			// ErrDispatchPending 等失败：零发送；返回错误由内核有界重排
-			//（下一轮按 1) 保守 abandoned）。
-			return generation.Observation{}, err
-		}
-		remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
-		if err != nil {
-			// 明确的 HTTP 429 是上游拒绝（未受理）：以 not_dispatched 结算
-			// 许可，按 Retry-After 或退避稍后以新许可重发同一格式；预算用尽
-			// 时该格式以确定失败结束。
-			if retryAfter, refused := explicitRateLimit(err); refused && permit != nil {
-				permit.Result = generation.DispatchResultNotDispatched
-				wait, exhausted := recordConversionRefusal(state.Conversions, format, retryAfter)
-				if exhausted {
-					observation := a.postSuccessCompletion(base, request, state, selections)
-					observation.Dispatch = permit
-					return observation, nil
-				}
-				base.Phase = generation.UpstreamRunning
-				base.Progress = 50
-				base.PollAfter = wait
-				base.DedupeKey = privateDedupeKey("convert", format, "rate_limited", strconv.Itoa(state.Conversions[format].RateLimitRetries))
-				base.Opaque = encodePostSuccessState(state)
-				base.Dispatch = permit
-				return base, nil
-			}
-			// 发送失败/歧义：无回执 → 检查点停留 dispatching，下一轮按 1)
-			// 保守 abandoned；本轮返回错误（内核有界重排，不重发）。
-			return generation.Observation{}, err
-		}
-		state.Conversions[format] = conversionItem{
-			Status:           conversionItemSubmitted,
-			RemoteID:         remoteID,
-			RateLimitRetries: retries,
-		}
-		state.Stage = "models/convert"
-		state.SubmissionKey = submissionKey
-		state.Format = format
-		base.Phase = generation.UpstreamRunning
-		base.Progress = 50
-		base.DedupeKey = privateDedupeKey("convert", format, remoteID, "submitted")
-		base.Opaque = encodePostSuccessState(state)
-		base.Dispatch = permit
-		return base, nil
-	}
-
-	// 4) 无未开始格式。上游已完成但内核回报槽位仍未兑现（下载失败/重启/
-	//    CAS 失败）：重发同一产物声明；多个格式同时未兑现时选
-	//    DeliveryAttempts 最少者（平局取字典序，P1 公平性轮换，进度随
+	// 4) 无未开始格式、无待重提格式。上游已完成但内核回报槽位仍未兑现
+	//    （下载失败/重启/CAS 失败）：重发同一产物声明；多个格式同时未兑现
+	//    时选 DeliveryAttempts 最少者（平局取字典序，P1 公平性轮换，进度随
 	//    私有状态跨重启持久化）；已重发过则先刷新可能过期的签名定位符
 	//    （observe_endpoint 的 GET 查询，非付费，绝不重发 convert）。
 	if format, item, found := undeliveredConversion(state.Conversions, request.ResourceSlots, requirement); found {
@@ -575,11 +797,9 @@ func (a *Adapter) observePostSuccessConversion(
 			}
 		}
 		if locator == "" {
-			state.Conversions[format] = conversionItem{
-				Status:          conversionItemFailed,
-				RemoteID:        item.RemoteID,
-				CreditsConsumed: item.CreditsConsumed,
-			}
+			item.Status = conversionItemFailed
+			item.Locator = ""
+			state.Conversions[format] = item
 			return a.postSuccessCompletion(base, request, state, selections), nil
 		}
 		item.Locator = locator
@@ -588,7 +808,16 @@ func (a *Adapter) observePostSuccessConversion(
 		return a.deliveryObservation(base, request, state, format, locator, item.DeliveryAttempts), nil
 	}
 
-	// 5) 无在途、无未开始、无待兑现：完成断言。
+	// 5) 无在途、无未开始、无待兑现：完成断言。仍有待重提格式时不
+	//    断言终态（下一轮继续），按退避等待。
+	if wait := conversionRetryWait(state.Conversions); wait > 0 && hasPendingRetry(selections, state.Conversions) {
+		base.Phase = generation.UpstreamRunning
+		base.Progress = 50
+		base.PollAfter = wait
+		base.DedupeKey = privateDedupeKey("convert", "retry-pending", strconv.Itoa(len(state.Conversions)))
+		base.Opaque = encodePostSuccessState(state)
+		return base, nil
+	}
 	return a.postSuccessCompletion(base, request, state, selections), nil
 }
 
@@ -995,22 +1224,21 @@ func encodePostSuccessState(state postSuccessState) json.RawMessage {
 }
 
 // recordConversionRefusal records an explicit 429 refusal of a private
-// conversion child. The run's refusals share one budget; within it the format
-// waits as rate_limited (the returned wait is Retry-After or the backoff),
-// after it the format fails.
+// conversion child. Each format has its own budget (the official page bounds
+// the retries of one request, not of a run); within it the format waits as
+// rate_limited (the returned wait is Retry-After, or the backoff), after it the
+// format fails. Retry-After wins whenever the upstream sent one.
 func recordConversionRefusal(conversions map[string]conversionItem, format string, retryAfter time.Duration) (time.Duration, bool) {
-	used := 0
-	for _, item := range conversions {
-		used += item.RateLimitRetries
-	}
-	retries := conversions[format].RateLimitRetries
-	if used >= maximumConversionRateLimitRetries {
-		conversions[format] = conversionItem{Status: conversionItemFailed, RateLimitRetries: retries}
+	item := conversions[format]
+	if item.RateLimitRetries >= maximumConversionRateLimitRetries {
+		item.Status = conversionItemFailed
+		conversions[format] = item
 		return 0, true
 	}
-	retries++
-	conversions[format] = conversionItem{Status: conversionItemRateLimited, RateLimitRetries: retries}
-	return conversionRateLimitWait(retryAfter, retries), false
+	item.Status = conversionItemRateLimited
+	item.RateLimitRetries++
+	conversions[format] = item
+	return conversionRateLimitWait(retryAfter, item.RateLimitRetries), false
 }
 
 // conversionRateLimitFailure is the definite, non-retryable failure of a run
@@ -1029,14 +1257,41 @@ func hasDispatchingRemnant(conversions map[string]conversionItem) bool {
 	return false
 }
 
-// inflightConversion 返回首个 submitted（在途）格式。
-func inflightConversion(conversions map[string]conversionItem) (string, conversionItem, bool) {
-	for _, format := range sortedFormats(conversions) {
-		if conversions[format].Status == conversionItemSubmitted {
-			return format, conversions[format], true
+// submittedFormats 返回在途（submitted）的选中格式，按冻结选择顺序——
+// 有界并发下同一轮要轮询全部在途子作业，顺序与 map 迭代无关。
+func submittedFormats(selections []string, conversions map[string]conversionItem) []string {
+	formats := make([]string, 0, len(conversions))
+	for _, format := range selections {
+		if item, exists := conversions[format]; exists && item.Status == conversionItemSubmitted {
+			formats = append(formats, format)
 		}
 	}
-	return "", conversionItem{}, false
+	return formats
+}
+
+// hasPendingRetry 报告是否仍有格式在等待重提（退避中）。
+func hasPendingRetry(selections []string, conversions map[string]conversionItem) bool {
+	for _, format := range selections {
+		if item, exists := conversions[format]; exists && item.Status == conversionItemRetryPending {
+			return true
+		}
+	}
+	return false
+}
+
+// allFormatsDone 报告选中格式是否都已完成。
+func allFormatsDone(selections []string, conversions map[string]conversionItem) bool {
+	for _, format := range selections {
+		if item, exists := conversions[format]; !exists || item.Status != conversionItemDone {
+			return false
+		}
+	}
+	return true
+}
+
+// conversionStatusWord 归一化上游状态词（小写、去空白）。
+func conversionStatusWord(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
 }
 
 // unstartedFormats 返回尚未出现在状态表中、或上次被明确 429 拒绝（未受理）

@@ -306,18 +306,17 @@ func TestSmartSegmentFailedExportFailsTheDelivery(t *testing.T) {
 	q := f.accept(t)
 	var obs generation.Observation
 	var err error
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 60 && obs.Phase != generation.UpstreamFailed; i++ {
 		obs, err = f.adapter.Observe(f.ctx(t), q)
 		if err != nil {
 			t.Fatal(err)
 		}
 		q.Opaque = obs.Opaque
-		if obs.Phase == generation.UpstreamFailed {
-			break
-		}
 	}
-	if obs.Phase != generation.UpstreamFailed || len(obs.Artifacts) != 0 || len(f.wire().converts) != 1 {
-		t.Fatalf("required export failure not terminal: %+v", obs)
+	// #460 A1: the failed export was resubmitted five times before the
+	// delivery failed.
+	if obs.Phase != generation.UpstreamFailed || len(obs.Artifacts) != 0 || len(f.wire().converts) != 6 {
+		t.Fatalf("required export failure not terminal: %+v, converts=%d", obs, len(f.wire().converts))
 	}
 }
 

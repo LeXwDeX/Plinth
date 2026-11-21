@@ -11,13 +11,15 @@ import (
 
 // The shipped Schema declares which provider connections can have an accepted
 // result fetched again (#295): the job-based 3D and matting protocols, with
-// Meshy's documented 72-hour API retention; never the one-shot image protocols.
+// Meshy's documented 72-hour API retention and Tripo's documented seven days
+// (#460 A8: the asset-retention policy page says at most seven days from
+// 2026-12-01); never the one-shot image protocols.
 func TestShippedResultRefetchDeclarations(t *testing.T) {
 	c, err := catalog.LoadDefault()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, hours := range map[string]int{"meshy.v2": 72, "tripo.v3": 0, "hyper3d.rodin.v1": 0, "matting.v1": 0} {
+	for key, hours := range map[string]int{"meshy.v2": 72, "tripo.v3": 168, "hyper3d.rodin.v1": 0, "matting.v1": 0} {
 		policy, ok := c.ResultRefetchPolicy(key)
 		if !ok || policy.Mode != "observe" || policy.RetentionHours != hours {
 			t.Errorf("%s policy = %#v, %v", key, policy, ok)

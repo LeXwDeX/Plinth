@@ -69,12 +69,58 @@ const (
 	statusUnknown   = "unknown"
 )
 
-// scenarioTaskUnknown is the Tripo-local scenario word for the documented
-// unknown poll status. fakeupstream.Scenario has no task-unknown yet (only
-// task-canceled), so the word is parsed here from the same X-Fake-Scenario
-// header and "fake-" key prefix; it moves to the shared list once another
-// version needs it.
-const scenarioTaskUnknown = "task-unknown"
+// Tripo-local scenario words, parsed from the same X-Fake-Scenario header and
+// "fake-" key prefix as the shared list. They exist because a scenario belongs
+// to a connection's API key, while these faults belong to one request or one
+// private child:
+//
+//   - task-unknown: the documented unknown poll status (fakeupstream.Scenario
+//     has task-canceled but no task-unknown).
+//   - convert-task-failed / convert-task-canceled / convert-task-unknown: a
+//     models/convert child ends failed, cancelled, or unknown forever
+//     (Billing: "Failed and cancelled tasks are not charged.", read
+//     2026-11-22; a failed child reports credits_consumed 0).
+//   - rate-limit-no-retry-after / concurrency-limit-no-retry-after: the same
+//     two 429 answers without a Retry-After header, so the client's own
+//     backoff is exercised (the rate-limits page only says to honour the
+//     header when the response carries one).
+//   - upload-failed: POST /files answers 500. An upload creates no task, so
+//     this is a retryable transport error, never an ambiguous submission.
+const (
+	scenarioTaskUnknown           = "task-unknown"
+	scenarioConvertTask           = "convert-task"
+	scenarioRateLimitNoRetryAfter = "rate-limit-no-retry-after"
+	scenarioConcurrencyNoRetry    = "concurrency-limit-no-retry-after"
+	scenarioUploadFailed          = "upload-failed"
+)
+
+// convertTaskOutcome is the terminal status a convert-task-<outcome> child
+// ends in; any other or missing suffix means failed.
+func convertTaskOutcome(r *http.Request) string {
+	value := strings.TrimSpace(r.Header.Get(fakeupstream.ScenarioHeader))
+	if value == "" {
+		value, _ = strings.CutPrefix(fakeupstream.BearerKey(r), fakeupstream.KeyPrefix)
+	}
+	rest, found := strings.CutPrefix(value, scenarioConvertTask+"-")
+	if !found {
+		return ""
+	}
+	switch rest {
+	case "failed":
+		return statusFailed
+	case "canceled", "cancelled":
+		return statusCancelled
+	case "unknown":
+		return statusUnknown
+	}
+	return statusFailed
+}
+
+// noRetryAfter answers whether the request asks for a 429 without Retry-After.
+func noRetryAfter(r *http.Request) bool {
+	return requestedScenario(r, scenarioRateLimitNoRetryAfter) ||
+		requestedScenario(r, scenarioConcurrencyNoRetry)
+}
 
 // docsChecked is when the official error, status and upload pages behind the
 // constructed responses were read.
@@ -377,7 +423,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 // render writes the Tripo-shaped error of an injected scenario.
-func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeupstream.Scenario) {
+func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeupstream.Scenario) {
 	status, code, message := http.StatusInternalServerError, 1000, "Internal server error"
 	switch scenario {
 	case fakeupstream.ScenarioInsufficientBalance:
@@ -388,15 +434,38 @@ func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeup
 		// Request-rate limiting is 1007; a full concurrency pool is the separate
 		// 2000 answer (rate-limits and error-handling pages, read docsChecked).
 		status, code, message = http.StatusTooManyRequests, 1007, "Rate limit exceeded, you've generated too many requests in a short amount of time"
-		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
-		w.Header().Set("X-RateLimit-Limit", "100")
-		w.Header().Set("X-RateLimit-Remaining", "0")
-		w.Header().Set("X-RateLimit-Reset", h.env.RetryAfterSeconds())
+		if !noRetryAfter(r) {
+			w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+			w.Header().Set("X-RateLimit-Limit", "100")
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", h.env.RetryAfterSeconds())
+		}
 	case fakeupstream.ScenarioConcurrencyLimit:
 		status, code, message = http.StatusTooManyRequests, 2000, "You have exceeded the limit of generation"
-		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+		if !noRetryAfter(r) {
+			w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+		}
 	}
 	writeJSON(w, status, h.envelope(h.taskError, code, message, "Retry later or check the account"))
+}
+
+// renderLocalRateLimit answers the header form of the two 429 words that ask
+// for no Retry-After. ScenarioOf does not know them (the shared list holds only
+// rate-limit and concurrency-limit), so the shared Intercept lets the request
+// through and this handler answers it. The key form ("fake-rate-limit-no-
+// retry-after") resolves to the shared word and is answered by Intercept, whose
+// render omits the header for it.
+func (h *handler) renderLocalRateLimit(w http.ResponseWriter, r *http.Request) bool {
+	value := strings.TrimSpace(r.Header.Get(fakeupstream.ScenarioHeader))
+	switch value {
+	case scenarioRateLimitNoRetryAfter:
+		h.render(w, r, fakeupstream.ScenarioRateLimit)
+		return true
+	case scenarioConcurrencyNoRetry:
+		h.render(w, r, fakeupstream.ScenarioConcurrencyLimit)
+		return true
+	}
+	return false
 }
 
 // auth answers 401 unless the request carries a bearer key.
@@ -427,7 +496,16 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 	// refusal: it is a read-phase request, so insufficient-balance and
 	// key-quota stay with task creation (architecture.md). Request-level
 	// failures (rate limit, server error, timeout) still apply.
-	if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseRead, h.render) {
+	if !h.auth(w, r) {
+		return
+	}
+	if requestedScenario(r, scenarioUploadFailed) {
+		// A free upload creates no task: the official files page defines no
+		// credit refusal, so this is a plain transport failure.
+		writeJSON(w, http.StatusInternalServerError, h.envelope(h.taskError, 1000, "Internal server error", "Retry later"))
+		return
+	}
+	if h.env.Intercept(w, r, fakeupstream.PhaseRead, h.render) {
 		return
 	}
 	mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -517,7 +595,13 @@ func (h *handler) newID() string {
 
 func (h *handler) create(k kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !h.auth(w, r) || h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
+		if !h.auth(w, r) {
+			return
+		}
+		if h.renderLocalRateLimit(w, r) {
+			return
+		}
+		if h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
 			return
 		}
 		// A full concurrency pool refuses task creation only; the shared
@@ -577,6 +661,21 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			t.convert = convertEcho(body)
 		}
 		t.terminal = terminalStatus(r)
+		if k.Path == "/models/convert" {
+			// A convert child can be made to end failed, cancelled or unknown
+			// forever (convert-task-<outcome>): the format's own retry path
+			// then runs against it.
+			switch outcome := convertTaskOutcome(r); outcome {
+			case statusFailed:
+				if t.failCode == 0 {
+					t.failCode, t.failMessage = 3000, "Fake injected convert failure"
+				}
+			case statusCancelled:
+				t.terminal = statusCancelled
+			case statusUnknown:
+				t.terminal = statusUnknown
+			}
+		}
 		if k.Path == "/mesh/smartsegment" {
 			switch segType, _ := body["seg_type"].(string); segType {
 			case "image":

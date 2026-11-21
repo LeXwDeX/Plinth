@@ -1,11 +1,13 @@
 package tripo
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -152,84 +154,181 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 	if hasDispatchingRemnant(state.Conversions) {
 		return preCompletionFailure(base, state, "Tripo 转换提交结果不明，已停止再次付费"), nil
 	}
-	if format, item, found := inflightConversion(state.Conversions); found {
+	// Poll every in-flight child (bounded concurrency, stable order). A child
+	// that ended failed or cancelled is resubmitted under a new permit while its
+	// own budget lasts (Tripo bills neither); a child whose bounded unknown
+	// window ran out leaves the whole task ambiguous, never resent.
+	backoff, changed := false, false
+	for _, format := range submittedFormats(selections, state.Conversions) {
+		item := state.Conversions[format]
 		child, err := a.observeTask(ctx, options, item.RemoteID, string(request.AttemptID)+":convert:"+format)
 		if err != nil {
 			return generation.Observation{}, err
 		}
-		if _, known := declaredStatusRule(a.statusMapping, strings.ToLower(strings.TrimSpace(child.Status))); !known {
+		status := conversionStatusWord(child.Status)
+		rule, known := declaredStatusRule(a.statusMapping, status)
+		if !known {
 			return generation.Observation{}, failure(generation.FailureProtocol, false, "Tripo 转换返回未知任务状态")
 		}
+		if a.unknownStatusExpired(item.RemoteID, status, rule) {
+			item.Status = conversionItemUnknown
+			item.Locator = ""
+			item.RemoteID = ""
+			item.Attempts = append(item.Attempts, conversionAttempt{
+				RemoteID:        child.TaskID,
+				CreditsConsumed: bytes.Clone(child.CreditsConsumed),
+				Outcome:         conversionAttemptUnknown,
+			})
+			state.Conversions[format] = item
+			return preCompletionUnknownFailure(base, state, "Tripo 格式转换结果不明，超过轮询时限"), nil
+		}
 		phase, _ := conversionChildPhase(a.statusMapping, child.Status)
-		switch phase {
-		case generation.UpstreamCompleted:
-			locator := firstHTTPOutput(child.Output, "model_url", "model")
+		locator := ""
+		if phase == generation.UpstreamCompleted {
+			locator = firstHTTPOutput(child.Output, "model_url", "model")
 			if locator == "" {
+				state.Conversions[format] = conversionItem{
+					Status:           conversionItemFailed,
+					RateLimitRetries: item.RateLimitRetries,
+					RetryAttempts:    item.RetryAttempts,
+					Attempts:         append(item.Attempts, conversionAttempt{RemoteID: item.RemoteID, CreditsConsumed: bytes.Clone(child.CreditsConsumed), Outcome: conversionAttemptDone}),
+				}
 				return preCompletionFailure(base, state, "Tripo 转换缺少模型产物"), nil
 			}
-			item.Status = conversionItemDone
-			item.Locator = locator
-			item.CreditsConsumed = child.CreditsConsumed
-			state.Conversions[format] = item
-		case generation.UpstreamFailed, generation.UpstreamCanceled:
-			return preCompletionFailure(base, state, "Tripo 格式转换失败"), nil
 		}
+		updated, wait := applyConversionChild(item, phase, locator, child.CreditsConsumed)
+		if wait > 0 {
+			backoff = true
+		}
+		if updated.Status != item.Status || len(updated.Attempts) != len(item.Attempts) {
+			changed = true
+		}
+		state.Conversions[format] = updated
+	}
+	if allFormatsDone(selections, state.Conversions) {
+		return a.preCompletionClaims(ctx, request, options, base, state, selections)
+	}
+	// A required format spent its retry budget: fail before another paid
+	// export is started.
+	for _, format := range selections {
+		if item, exists := state.Conversions[format]; exists && item.Status == conversionItemFailed {
+			return preCompletionFailure(base, state, "Tripo 必需格式转换失败"), nil
+		}
+	}
+	if changed && !allFormatsDone(selections, state.Conversions) {
+		// A child reached an outcome this round: report it and dispatch
+		// nothing, so one round belongs to one action.
 		return preCompletionRunning(base, state), nil
 	}
-	remaining := unstartedFormats(selections, state.Conversions)
-	if len(remaining) > 0 {
-		if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
-			return generation.Observation{}, err
-		}
-		format := remaining[0]
-		// The export options come from the frozen declaration and input; a
-		// declaration that cannot be written stops here, before any checkpoint.
-		extras, err := conversionExtras(request.Offering, options, request.Input, format)
-		if err != nil {
-			return generation.Observation{}, err
-		}
-		retries := state.Conversions[format].RateLimitRetries
-		state.Conversions[format] = conversionItem{Status: conversionItemDispatching, RateLimitRetries: retries}
-		submissionKey := string(request.AttemptID) + ":convert:" + format
-		permit, err := privateDispatchPermit(ctx, submissionKey, dispatchIntentStage{
-			Stage: "models/convert",
-			Details: map[string]any{
-				"format":      format,
-				"source_task": request.Job.RemoteID,
-				"conversions": state.Conversions,
-			},
-		})
-		if err != nil {
-			return generation.Observation{}, err
-		}
-		remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
-		if err != nil {
-			// An explicit 429 refused the child: settle the permit as not
-			// dispatched and resend the same format after Retry-After or the
-			// backoff. Unknown results still stop here without a resend.
-			if retryAfter, refused := explicitRateLimit(err); refused && permit != nil {
-				permit.Result = generation.DispatchResultNotDispatched
-				wait, exhausted := recordConversionRefusal(state.Conversions, format, retryAfter)
-				if exhausted {
-					observation := preCompletionFailure(base, state, "Tripo 格式转换持续被限流，有限重试已用尽")
-					observation.Failure = conversionRateLimitFailure(observation.Failure.SafeDetail)
+	if backoff {
+		// A format just entered its retry backoff: let the wait pass first
+		// (official 1, 2, 4… seconds).
+		observation := preCompletionRunning(base, state)
+		observation.PollAfter = conversionRetryWait(state.Conversions)
+		return observation, nil
+	}
+	// Dispatch one more format while the in-flight children are below the
+	// declared concurrency: a pending retry first, then a format never started.
+	// One observation carries one permit (§4.3), so a round starts at most one
+	// child and never waits for the others.
+	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < conversionConcurrency(options) {
+		if format, ok := nextConversionDispatch(selections, state.Conversions); ok {
+			if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
+				return generation.Observation{}, err
+			}
+			previous := state.Conversions[format]
+			// The export options come from the frozen declaration and input; a
+			// declaration that cannot be written stops here, before any checkpoint.
+			extras, err := conversionExtras(request.Offering, options, request.Input, format)
+			if err != nil {
+				return generation.Observation{}, err
+			}
+			attempts := previous.RetryAttempts
+			if previous.Status == conversionItemRetryPending || previous.Status == conversionItemRateLimited {
+				attempts++
+			}
+			submissionKey := string(request.AttemptID) + ":convert:" + format
+			if attempts > 0 {
+				submissionKey += ":retry:" + strconv.Itoa(attempts)
+			}
+			state.Conversions[format] = conversionItem{
+				Status:           conversionItemDispatching,
+				RateLimitRetries: previous.RateLimitRetries,
+				RetryAttempts:    attempts,
+				Attempts:         previous.Attempts,
+			}
+			permit, err := privateDispatchPermit(ctx, submissionKey, dispatchIntentStage{
+				Stage: "models/convert",
+				Details: map[string]any{
+					"format":      format,
+					"source_task": request.Job.RemoteID,
+					"conversions": state.Conversions,
+				},
+			})
+			if err != nil {
+				return generation.Observation{}, err
+			}
+			remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
+			if err != nil {
+				// An explicit 429 refused the child: settle the permit as not
+				// dispatched and resend the same format after Retry-After or the
+				// backoff. Unknown results still stop here without a resend.
+				if retryAfter, refused := explicitRateLimit(err); refused && permit != nil {
+					permit.Result = generation.DispatchResultNotDispatched
+					wait, exhausted := recordConversionRefusal(state.Conversions, format, retryAfter)
+					if exhausted {
+						observation := preCompletionFailure(base, state, "Tripo 格式转换持续被限流，有限重试已用尽")
+						observation.Failure = conversionRateLimitFailure(observation.Failure.SafeDetail)
+						observation.Dispatch = permit
+						return observation, nil
+					}
+					observation := preCompletionRunning(base, state)
+					observation.PollAfter = wait
 					observation.Dispatch = permit
 					return observation, nil
 				}
-				observation := preCompletionRunning(base, state)
-				observation.PollAfter = wait
-				observation.Dispatch = permit
-				return observation, nil
+				return generation.Observation{}, err
 			}
-			return generation.Observation{}, err
+			state.Conversions[format] = conversionItem{
+				Status:           conversionItemSubmitted,
+				RemoteID:         remoteID,
+				RateLimitRetries: previous.RateLimitRetries,
+				RetryAttempts:    attempts,
+				Attempts:         previous.Attempts,
+			}
+			observation := preCompletionRunning(base, state)
+			observation.Dispatch = permit
+			return observation, nil
 		}
-		state.Conversions[format] = conversionItem{Status: conversionItemSubmitted, RemoteID: remoteID, RateLimitRetries: retries}
-		observation := preCompletionRunning(base, state)
-		observation.Dispatch = permit
-		return observation, nil
 	}
-	// A completed private conversion may have a short-lived signed URL. Refresh
-	// every child with read-only GET before handing all claims to materialization.
+	if !hasPendingRetry(selections, state.Conversions) &&
+		len(submittedFormats(selections, state.Conversions)) == 0 &&
+		len(unstartedFormats(selections, state.Conversions)) == 0 {
+		// Nothing is in flight, no retry is waiting and no format is left to
+		// start: a required format spent its budget and ended failed.
+		return preCompletionFailure(base, state, "Tripo 必需格式转换失败"), nil
+	}
+	// Waiting on in-flight children or on a retry's backoff.
+	observation := preCompletionRunning(base, state)
+	if wait := conversionRetryWait(state.Conversions); wait > 0 {
+		observation.PollAfter = wait
+	}
+	return observation, nil
+}
+
+// preCompletionClaims hands every converted format to materialization: the
+// source GLB stays the source claim, the GLTF conversion's self-contained GLB
+// replaces the model claim, and each format keeps its own converted-model claim.
+// Every child is refreshed with a read-only GET first, because a signed URL is
+// short-lived.
+func (a *Adapter) preCompletionClaims(
+	ctx context.Context,
+	request generation.ObserveRequest,
+	options providerOptions,
+	base generation.Observation,
+	state postSuccessState,
+	selections []string,
+) (generation.Observation, error) {
 	// Tripo's source GLB can contain upstream URLs in its metadata. The GLTF
 	// conversion is a self-contained binary glTF, so use that conversion for
 	// the primary model claim as well as its declared converted-model claim.
@@ -324,6 +423,23 @@ func preCompletionRunning(base generation.Observation, state postSuccessState) g
 	base.Opaque = encodePostSuccessState(state)
 	digest := sha256.Sum256(base.Opaque)
 	base.DedupeKey = "conversions:" + hex.EncodeToString(digest[:8])
+	return base
+}
+
+// preCompletionUnknownFailure ends the task on an outcome that is not known:
+// the upstream may still be working (or may already have billed), so the task
+// is never sent again and the failure is not offered as a retryable one.
+func preCompletionUnknownFailure(base generation.Observation, state postSuccessState, detail string) generation.Observation {
+	base.Phase = generation.UpstreamFailed
+	base.Artifacts = nil
+	base.Opaque = encodePostSuccessState(state)
+	base.Failure = &generation.Failure{
+		Class:      generation.FailureSubmissionUnknown,
+		Retryable:  false,
+		Ambiguous:  true,
+		SafeDetail: detail,
+	}
+	base.DedupeKey = "conversion-outcome-unknown"
 	return base
 }
 
