@@ -64,10 +64,17 @@ same HTTP API the browser uses:
     card) keeps the enabled operations, marks the card answered and hands the
     chosen direction to the Agent, and the same call then runs (the "next-step"
     group).
+  * the acceptance board (#329): both items of a confirmed list reach review
+    with their snapshot, one item is accepted (project asset registered) and
+    the other is returned with a declared reason, the returned item reworks in
+    its own sub-session to round two, and the batch ZIP then packs both
+    accepted items with a manifest and a README whose bytes match every
+    snapshot digest; only accepted items are ever packed, and a foreign owner
+    reads and decides nothing (the "asset-list-review" group).
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, faults;
+agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, faults;
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
@@ -93,7 +100,11 @@ limits, corrections, compaction and background results,
 "vision-budget" the #247 image detail, contact sheet and vision token accounting,
 "visual-anchors" the #250 system-prompt visibility, confirmation card, priority trim and retexture style reference,
 "mask-selection" the #244 frozen selection mask, mask binding, approval-card note,
-mask-unsupported refusal and create_selection_mask)
+mask-unsupported refusal and create_selection_mask;
+"asset-list-review" the #329 acceptance board: both items reach review with their snapshot,
+one is accepted and one returned with a declared reason, the returned item reworks in its own
+sub-session to round two, and the batch ZIP packs only accepted items with a manifest, a README
+and bytes matching every snapshot digest, all on a private stack with execution turned on)
 Needs `go`. Exit 0 = every selected check passed.
 
 The stack runs inside the internal/app test binary (TestFakeUpstreamStack, built with -tags fakestack), not
@@ -367,7 +378,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None, rework_message=None):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -383,7 +394,9 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
     in the shipped Catalog: a smoke run turns it on and makes polling, presence
     and the per-item round limit short enough to observe, and replaces the
     continuation text with the fake script marker that drives each item.
-    The default Catalog file and its base URLs stay untouched."""
+    rework_message replaces the returned item's rework copy (#329b) the same
+    way, so the second round is driven by the fake too. The default Catalog
+    file and its base URLs stay untouched."""
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
     catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
@@ -412,6 +425,8 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
         execution["max_rounds_per_item"] = max_rounds_per_item
     if continuation_message is not None:
         execution["continuation"]["message"] = continuation_message
+    if rework_message is not None:
+        catalog["application"]["asset_list"]["review"]["messages"]["rework_message"] = rework_message
     if manual_image_edits:
         # The mask scenario needs an approval card for a 2D edit step (#244);
         # the shipped policy asks a human only for the listed capabilities.
@@ -7061,9 +7076,444 @@ def scenario_asset_list(work, stack_binary, processes, catalog):
         processes.stop(child)
 
 
+# ---------------------------------------------------------------- asset list review (#329)
+
+# The runner's continuation and the returned item's rework copy carry the fake
+# LLM script: every item round creates one 3D Task and reports the item done,
+# so each round has its own Task and the board sees the round it was produced
+# in. The rework copy also carries the Schema's return context ({reasons},
+# {note}), which the scenario checks in the sub-session's user messages.
+ASSET_LIST_REVIEW_CONTINUATION = (
+    "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+    '[[fake:script:create_model_3d {"prompt":"a review asset for {name}, round {round}",'
+    '"model":"tripo/tripo-p2/text-to-3d"}'
+    '|submit_asset_list_item {"status":"done"}|done]]'
+)
+
+ASSET_LIST_REVIEW_REWORK = (
+    "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。"
+    "打回原因：{reasons}。说明：{note}。"
+    '[[fake:script:create_model_3d {"prompt":"a reworked asset for {name}, round {round}",'
+    '"model":"tripo/tripo-p2/text-to-3d"}'
+    '|submit_asset_list_item {"status":"done"}|done]]'
+)
+
+
+def _asset_list_task_assets(api, task_id):
+    """The task wire's assets by id: url, size and digest of the delivered bytes."""
+    status, task = api.json("GET", f"/api/v1/tasks/{task_id}")
+    if status != 200:
+        return {}, f"task {task_id}: {status}"
+    return {str(asset.get("id")): asset for asset in task.get("assets") or []}, ""
+
+
+def _asset_list_board(api, project_id, list_id):
+    status, board = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/board")
+    return (board if status == 200 else {}), status
+
+
+def _asset_list_review_decision(api, project_id, list_id, body):
+    status, answer = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/review", body)
+    return status, answer or {}
+
+
+def _asset_list_archive(api, project_id, list_id, item_ids=None):
+    """GET the batch ZIP; item_ids narrows the selection like the browser does."""
+    path = f"/api/v1/projects/{project_id}/asset-lists/{list_id}/archive"
+    if item_ids:
+        path += "?item_ids=" + ",".join(item_ids)
+    return api.call("GET", path)
+
+
+def _asset_list_review_states(detail):
+    return [(item.get("state"), item.get("round")) for item in (detail or {}).get("items") or []]
+
+
+def _asset_list_review_arrived(detail, accepted, review, round_of_returned):
+    """The counts and the items of one answer describe the same board (#394),
+    so a wait never settles on a torn read."""
+    items = (detail or {}).get("items") or []
+    counts = _asset_list_counts(detail)
+    states = [item.get("state") for item in items]
+    return (len(items) == 2 and counts.get("accepted") == accepted
+            and counts.get("review") == review
+            and states.count("accepted") == accepted and states.count("review") == review
+            and items[1].get("round") == round_of_returned)
+
+
+def _asset_list_snapshot(item):
+    review = (item or {}).get("review")
+    return review if isinstance(review, dict) else {}
+
+
+def _header(headers, name):
+    for key, value in (headers or {}).items():
+        if key.lower() == name.lower():
+            return value
+    return ""
+
+
+def _zip_entries(raw):
+    """Decodes the batch ZIP into {name: bytes}; a corrupt archive is refused."""
+    import io
+    import zipfile
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile as error:
+        return None, f"not a ZIP: {error}"
+    corrupt = archive.testzip()
+    if corrupt is not None:
+        return None, f"corrupt entry {corrupt}"
+    return {info.filename: archive.read(info.filename) for info in archive.infolist()}, ""
+
+
+def _zip_manifest(entries):
+    if entries is None or "manifest.json" not in entries:
+        return {}, "no manifest.json"
+    try:
+        return json.loads(entries["manifest.json"]), ""
+    except ValueError as error:
+        return {}, f"manifest.json is not JSON: {error}"
+
+
+def _asset_list_archive_bytes(entries, manifest, snapshots):
+    """Every packed file matches its manifest facts and one artifact of the
+    accepted snapshots; returns (problems, files)."""
+    if entries is None:
+        return ["the archive could not be read"], []
+    files = [file for item in (manifest or {}).get("items") or [] for file in item.get("files") or []]
+    recorded = [(artifact.get("sha256"), artifact.get("size"))
+                for snapshot in snapshots for artifact in snapshot.get("artifacts") or []]
+    problems = []
+    if sorted(recorded) != sorted((file.get("sha256"), file.get("size")) for file in files):
+        problems.append(f"manifest {sorted((f.get('sha256'), f.get('size')) for f in files)} "
+                        f"!= snapshot {sorted(recorded)}")
+    for file in files:
+        body = entries.get(file.get("path"))
+        if body is None:
+            problems.append(f"missing {file.get('path')}")
+        elif len(body) != file.get("size") or hashlib.sha256(body).hexdigest() != file.get("sha256"):
+            problems.append(f"{file.get('path')} holds {len(body)} bytes, sha256 "
+                            f"{hashlib.sha256(body).hexdigest()[:12]}")
+    return problems, files
+
+
+def scenario_asset_list_review(work, stack_binary, processes):
+    """#329: the acceptance board on the fake stack. One private stack with
+    execution on: both items reach review, one is accepted (its project asset
+    is registered) and the other returned with a declared reason, the returned
+    item reworks in its own sub-session to round two, and the batch ZIP packs
+    only accepted items with bytes matching every acceptance snapshot. The
+    bootstrap administrator reads and decides nothing."""
+    stack = "asset-list-review"
+    catalog = private_catalog(
+        work, name="catalog-asset-list-review.json",
+        execution_enabled=True, poll_interval_milliseconds=500,
+        presence_heartbeat_seconds=5, presence_grace_seconds=30,
+        max_parallel_items=1, max_rounds_per_item=2,
+        continuation_message=ASSET_LIST_REVIEW_CONTINUATION,
+        rework_message=ASSET_LIST_REVIEW_REWORK)
+    child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+    try:
+        session, project_id, why = _asset_list_setup(api, "清单验收看板")
+        if why:
+            record("#329 review: create the project and session", False, why)
+            return
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
+        beat()
+        result, why = _asset_list_turn(api, work, stack, session, "清单验收看板", [
+            {"kind": "prop", "name": "验收长剑", "description": "低模单手长剑"},
+            {"kind": "prop", "name": "验收圆盾", "description": "低模圆盾"},
+        ])
+        list_id = str((result or {}).get("list_id") or "")
+        if not list_id:
+            record("#329 review: the agent proposes the list", False, why)
+            return
+        status, _ = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                             {"decision": "confirm"})
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_all_in(value, "review", 2), seconds=120, beat=beat)
+        items = detail.get("items") or []
+        sessions = [item.get("session_id") or "" for item in items]
+        item_tasks = [_asset_list_item_tasks(api, item) for item in items]
+        record("#329 review: both items reach review with one successful step each",
+               status == 200 and _asset_list_counts(detail).get("review") == 2
+               and len(items) == 2
+               and all(item.get("state") == "review" and item.get("round") == 1 for item in items)
+               and len(set(sessions)) == 2 and all(sessions)
+               and all(len(tasks) == 1 and tasks[0].get("state") == "SUCCEEDED" for tasks in item_tasks),
+               f"status={status} counts={_asset_list_counts(detail)} "
+               f"items={_asset_list_review_states(detail)} "
+               f"tasks={[[task.get('state') for task in tasks] for tasks in item_tasks]}")
+
+        board, board_status = _asset_list_board(api, project_id, list_id)
+        board_list = board.get("list") or {}
+        board_items = board.get("items") or []
+        first = board_items[0] if board_items else {}
+        second = board_items[1] if len(board_items) > 1 else {}
+        first_snapshot = _asset_list_snapshot(first)
+        second_snapshot = _asset_list_snapshot(second)
+
+        def snapshot_ready(item, snapshot):
+            item_result = item.get("result") or {}
+            artifacts = snapshot.get("artifacts") or []
+            model = snapshot.get("model3d") or {}
+            return (item.get("state") == "review" and item.get("latest_review") is None
+                    and snapshot.get("round") == 1 and bool(snapshot.get("captured_at"))
+                    and bool(item_result.get("task_id"))
+                    and snapshot.get("task_id") == item_result.get("task_id")
+                    and bool(item.get("representative_asset_id"))
+                    and len(artifacts) > 0
+                    and all(artifact.get("asset_id") and artifact.get("size")
+                            and artifact.get("sha256")
+                            and str(artifact.get("media_type") or "").startswith(("model/", "image/"))
+                            for artifact in artifacts)
+                    and bool(model.get("asset_id"))
+                    and len(model.get("checks") or []) > 0
+                    and all(check.get("check") and check.get("status") in ("pass", "fail", "unknown")
+                            for check in model.get("checks") or [])
+                    and (snapshot.get("steps") or {}).get("model3d", 0) >= 1)
+
+        board_detail = [{
+            "state": item.get("state"),
+            "task": (item.get("result") or {}).get("task_id"),
+            "artifacts": len((item.get("review") or {}).get("artifacts") or []),
+            "checks": len(((item.get("review") or {}).get("model3d") or {}).get("checks") or []),
+        } for item in board_items]
+        record("#329 review: the board renders each item's snapshot before any decision",
+               board_status == 200 and board_list.get("id") == list_id
+               and board_list.get("status") == "confirmed"
+               and isinstance(board_list.get("version"), int)
+               and [item.get("name") for item in board_items] == ["验收长剑", "验收圆盾"]
+               and snapshot_ready(first, first_snapshot) and snapshot_ready(second, second_snapshot),
+               f"board={board_status} list={board_list.get('status')} "
+               f"version={board_list.get('version')} items={board_detail}")
+        version = board_list.get("version")
+
+        empty_status, empty_raw, _empty_headers = _asset_list_archive(api, project_id, list_id)
+        try:
+            empty_body = json.loads(empty_raw)
+        except ValueError:
+            empty_body = {}
+        record("#329 review: the batch archive refuses while nothing is accepted",
+               empty_status == 409 and empty_body.get("code") == "asset_list_archive_empty",
+               f"status={empty_status} code={empty_body.get('code')}")
+
+        stale_status, stale = _asset_list_review_decision(api, project_id, list_id, {
+            "decision": "accept", "item_ids": [first.get("id")],
+            "expected_version": max(0, (version or 0) - 1)})
+        record("#329 review: a stale list version is refused",
+               stale_status == 409 and stale.get("code") == "conflict",
+               f"status={stale_status} code={stale.get('code')}")
+
+        accept_status, accepted = _asset_list_review_decision(api, project_id, list_id, {
+            "decision": "accept", "item_ids": [first.get("id")], "expected_version": version})
+        accepted_results = accepted.get("items") or []
+        accepted_result = accepted_results[0] if accepted_results else {}
+        accepted_list = accepted.get("list") or {}
+        accepted_items = accepted_list.get("items") or []
+        project_asset_id = str(accepted_result.get("project_asset_id") or "")
+        assets_status, assets_body = api.json("GET", f"/api/v1/projects/{project_id}/assets")
+        project_assets = {str(asset.get("id")): asset
+                          for asset in (assets_body or {}).get("assets") or []}
+        project_asset = project_assets.get(project_asset_id) or {}
+        record("#329 review: accepting an item registers its project asset",
+               accept_status == 200 and accepted_result.get("verdict") == "approved"
+               and project_asset_id.startswith("passet_")
+               and len(accepted_items) == 2 and accepted_items[0].get("state") == "accepted"
+               and accepted_list.get("version") == (version or 0) + 1
+               and assets_status == 200
+               and project_asset.get("kind") == "prop" and project_asset.get("name") == "验收长剑"
+               and len(project_asset.get("models") or []) > 0,
+               f"status={accept_status} verdict={accepted_result.get('verdict')} asset={project_asset_id} "
+               f"version={accepted_list.get('version')}/{version} "
+               f"project asset={json.dumps(project_asset, ensure_ascii=False)[:200]}")
+
+        return_status, returned = _asset_list_review_decision(api, project_id, list_id, {
+            "decision": "return", "item_ids": [second.get("id")], "reason_ids": ["style"],
+            "note": "比例要再收一点", "expected_version": accepted_list.get("version")})
+        returned_results = returned.get("items") or []
+        returned_result = returned_results[0] if returned_results else {}
+        returned_list = returned.get("list") or {}
+        returned_items = returned_list.get("items") or []
+        record("#329 review: returning an item records the declared reason and note",
+               return_status == 200 and returned_result.get("verdict") == "returned"
+               and len(returned_items) == 2
+               and returned_items[0].get("state") == "accepted"
+               and returned_items[1].get("state") == "returned"
+               and returned_items[1].get("round") == 2,
+               f"status={return_status} items={[(item.get('state'), item.get('round')) for item in returned_items]}")
+
+        board, _board_status = _asset_list_board(api, project_id, list_id)
+        returned_board = next((item for item in board.get("items") or []
+                               if item.get("id") == second.get("id")), {})
+        latest = returned_board.get("latest_review") or {}
+        record("#329 review: the board keeps the returned reason and note",
+               latest.get("verdict") == "returned" and latest.get("reason") == "风格不对"
+               and latest.get("reasons") == ["style"] and latest.get("note") == "比例要再收一点"
+               and latest.get("round") == 1,
+               json.dumps(latest, ensure_ascii=False)[:240])
+
+        one_status, one_raw, one_headers = _asset_list_archive(api, project_id, list_id)
+        one_entries, one_why = _zip_entries(one_raw) if one_status == 200 else (None, "")
+        one_manifest, _one_manifest_why = _zip_manifest(one_entries)
+        one_problems, one_files = _asset_list_archive_bytes(one_entries, one_manifest, [first_snapshot])
+        one_manifest_items = one_manifest.get("items") or []
+        one_paths = [file.get("path") for file in one_files]
+        record("#329 review: the batch archive packs only the accepted item",
+               one_status == 200 and _header(one_headers, "Content-Type") == "application/zip"
+               and len(one_manifest_items) == 1
+               and one_manifest_items[0].get("name") == "验收长剑"
+               and one_manifest_items[0].get("position") == 1
+               and len(one_files) > 0 and not one_problems
+               and one_entries is not None
+               and list(one_entries) == ["manifest.json", "README.txt"] + one_paths
+               and all(str(path).startswith("01-") for path in one_paths)
+               and not any(str(path).startswith("02-") for path in one_paths),
+               f"status={one_status} zip={one_why} items={[item.get('name') for item in one_manifest_items]} "
+               f"files={len(one_files)} problems={one_problems[:3]}")
+
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_review_arrived(value, 1, 1, 2), seconds=120, beat=beat)
+        reworked_board, reworked_status = _asset_list_board(api, project_id, list_id)
+        reworked_list = reworked_board.get("list") or {}
+        reworked_items = reworked_board.get("items") or []
+        second_after = next((item for item in reworked_items if item.get("id") == second.get("id")), {})
+        second_snapshot = _asset_list_snapshot(second_after)
+        second_tasks = _asset_list_item_tasks(api, second_after)
+        rework_messages = _asset_list_user_messages(api, second_after.get("session_id") or "")
+        record("#329 review: the returned item reworks in its own sub-session to round two",
+               reworked_status == 200 and _asset_list_review_arrived(detail, 1, 1, 2)
+               and second_after.get("state") == "review"
+               and second_after.get("round") == 2
+               and second_after.get("session_id") == (second.get("session_id") or "")
+               and len(second_tasks) == 2
+               and all(task.get("state") == "SUCCEEDED" for task in second_tasks)
+               and second_snapshot.get("round") == 2
+               and second_snapshot.get("task_id") == (second_after.get("result") or {}).get("task_id")
+               and len(rework_messages) == 2
+               and "被打回" in str(rework_messages[-1].get("content"))
+               and "风格不对" in str(rework_messages[-1].get("content"))
+               and "比例要再收一点" in str(rework_messages[-1].get("content"))
+               and len(_asset_list_user_messages(api, session)) == 1,
+               f"items={_asset_list_review_states(detail)} counts={_asset_list_counts(detail)} "
+               f"tasks={[task.get('state') for task in second_tasks]} "
+               f"snapshot_round={(second_snapshot or {}).get('round')} "
+               f"messages={[str(message.get('content'))[:40] for message in rework_messages]}")
+
+        rework_version = reworked_list.get("version")
+        final_status, final = _asset_list_review_decision(api, project_id, list_id, {
+            "decision": "accept", "item_ids": [second_after.get("id")],
+            "expected_version": rework_version})
+        final_results = final.get("items") or []
+        final_result = final_results[0] if final_results else {}
+        final_list = final.get("list") or {}
+        final_items = final_list.get("items") or []
+        final_asset_id = str(final_result.get("project_asset_id") or "")
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_run_of(value).get("status") == "completed"
+            and _asset_list_all_in(value, "accepted", 2), seconds=30, beat=beat)
+        record("#329 review: accepting the reworked item completes both items and the run",
+               final_status == 200 and final_result.get("verdict") == "approved"
+               and final_asset_id.startswith("passet_") and final_asset_id != project_asset_id
+               and len(final_items) == 2
+               and all(item.get("state") == "accepted" for item in final_items)
+               and final_list.get("version") == (rework_version or 0) + 1
+               and _asset_list_run_of(detail).get("status") == "completed"
+               and _asset_list_counts(detail).get("accepted") == 2,
+               f"status={final_status} asset={final_asset_id} "
+               f"items={_asset_list_review_states(detail)} counts={_asset_list_counts(detail)} "
+               f"run={_asset_list_run_of(detail).get('status')}")
+
+        two_status, two_raw, two_headers = _asset_list_archive(api, project_id, list_id)
+        two_entries, two_why = _zip_entries(two_raw) if two_status == 200 else (None, "")
+        two_manifest, _two_manifest_why = _zip_manifest(two_entries)
+        two_problems, two_files = _asset_list_archive_bytes(
+            two_entries, two_manifest, [first_snapshot, second_snapshot])
+        two_manifest_items = two_manifest.get("items") or []
+        expected_paths = ["manifest.json", "README.txt"] + [file.get("path") for file in two_files]
+        readme = two_entries.get("README.txt", b"").decode("utf-8", "replace") if two_entries else ""
+        download_problems = []
+        for snapshot in (first_snapshot, second_snapshot):
+            task_assets, task_why = _asset_list_task_assets(api, snapshot.get("task_id") or "")
+            if task_why:
+                download_problems.append(task_why)
+                continue
+            for artifact in snapshot.get("artifacts") or []:
+                asset = task_assets.get(str(artifact.get("asset_id"))) or {}
+                if not asset.get("url"):
+                    download_problems.append(f"{artifact.get('asset_id')}: no task asset")
+                    continue
+                download_status, artifact_raw, _artifact_headers = api.call("GET", asset["url"])
+                if (download_status != 200 or len(artifact_raw) != artifact.get("size")
+                        or hashlib.sha256(artifact_raw).hexdigest() != artifact.get("sha256")
+                        or asset.get("sha256") != artifact.get("sha256")):
+                    download_problems.append(f"{artifact.get('asset_id')}: status {download_status}")
+        record("#329 review: the batch ZIP lists both accepted items with their round",
+               two_status == 200
+               and [item.get("name") for item in two_manifest_items] == ["验收长剑", "验收圆盾"]
+               and [item.get("position") for item in two_manifest_items] == [1, 2]
+               and [item.get("round") for item in two_manifest_items] == [1, 2]
+               and [item.get("directory") for item in two_manifest_items] == ["01-验收长剑", "02-验收圆盾"]
+               and two_manifest_items[1].get("task_id") == second_snapshot.get("task_id")
+               and all(item.get("formats") and item.get("checks") for item in two_manifest_items),
+               f"status={two_status} manifest={json.dumps(two_manifest_items, ensure_ascii=False)[:400]}")
+        record("#329 review: every packed byte matches its snapshot digest",
+               two_entries is not None and not two_problems and not download_problems
+               and list(two_entries) == expected_paths
+               and len(two_entries or {}) == 2 + len(two_files)
+               and all(item.get("files") for item in two_manifest_items)
+               and all(any(file.get("format") == "glb" for file in item.get("files") or [])
+                       for item in two_manifest_items),
+               f"zip={two_why} entries={len(two_entries or {})} files={len(two_files)} "
+               f"problems={two_problems[:3]} downloads={download_problems[:3]}")
+        disposition = _header(two_headers, "Content-Disposition")
+        record("#329 review: the archive answer carries the declared filename and sandbox headers",
+               two_status == 200
+               and _header(two_headers, "Content-Type") == "application/zip"
+               and f'filename="asset-list-{list_id}.zip"' in disposition
+               and _header(two_headers, "X-Content-Type-Options") == "nosniff"
+               and "sandbox" in _header(two_headers, "Content-Security-Policy")
+               and "只包含已通过验收的清单项" in readme
+               and "验收长剑" in readme and "验收圆盾" in readme
+               and "01-验收长剑" in readme and "02-验收圆盾" in readme
+               and f"共 2 项、{len(two_files)} 个文件" in readme,
+               f"type={_header(two_headers, 'Content-Type')} disposition={disposition!r} "
+               f"readme={readme[:120]!r}")
+
+        selected_status, selected_raw, _selected_headers = _asset_list_archive(
+            api, project_id, list_id, item_ids=[second_after.get("id")])
+        selected_entries, _selected_why = _zip_entries(selected_raw) if selected_status == 200 else (None, "")
+        selected_manifest, _selected_manifest_why = _zip_manifest(selected_entries)
+        selected_items = selected_manifest.get("items") or []
+        record("#329 review: item_ids narrows the batch to the chosen accepted item",
+               selected_status == 200
+               and [item.get("name") for item in selected_items] == ["验收圆盾"]
+               and [item.get("position") for item in selected_items] == [2],
+               f"status={selected_status} items={[item.get('name') for item in selected_items]}")
+
+        owner = Api(api.base)
+        status, _signed_in = owner.json("POST", "/api/auth/login",
+                                        {"username": MCP_OWNER_USERNAME, "password": MCP_OWNER_PASSWORD})
+        board_status, _ = owner.json("GET",
+                                     f"/api/v1/projects/{project_id}/asset-lists/{list_id}/board")
+        archive_status, _archive_raw, _archive_headers = _asset_list_archive(owner, project_id, list_id)
+        review_status, _review = _asset_list_review_decision(owner, project_id, list_id, {
+            "decision": "accept", "item_ids": [second_after.get("id")], "expected_version": 0})
+        record("#329 review: a foreign owner reads and decides nothing",
+               status == 200 and board_status == 404 and archive_status == 404
+               and review_status == 404,
+               f"login={status} board={board_status} archive={archive_status} review={review_status}")
+    finally:
+        processes.stop(child)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -7073,7 +7523,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -7194,6 +7644,10 @@ def main():
             # #328: its own stacks, because execution is off in the shipped
             # Catalog and every arm needs a short poll and grace window.
             scenario_asset_list_run(work, stack_binary, processes)
+        if "asset-list-review" in selected:
+            # #329: its own stack with execution on, because the board needs
+            # items that actually reached review.
+            scenario_asset_list_review(work, stack_binary, processes)
         check_no_real_upstream(work)
     finally:
         processes.stop_all()

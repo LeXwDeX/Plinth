@@ -62,7 +62,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		// the limits, kinds, routes and states by role; the server copy, UI texts
 		// and the reserved item blocks stay server-side.
 		// #328: only the presence heartbeat is public from execution.
-		"asset_list":          {"limits", "kinds", "routes", "states", "item_states", "presence"},
+		// #329b: review publishes the return reasons and the rework cap.
+		"asset_list":          {"limits", "kinds", "routes", "states", "item_states", "presence", "review"},
 		"asset_list.limits":   {"max_lists_per_project", "draft_ttl_seconds", "name_max_length", "description_max_length", "max_references_per_item", "maximum_items_per_image", "minimum_crop_short_edge"},
 		"asset_list.presence": {"heartbeat_seconds"},
 		// #330: the browser sees the modes with their labels, the defaults and
@@ -77,7 +78,8 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"access_keys":                       {"key_prefix", "max_keys_per_user", "default_ttl_days", "max_ttl_days", "name_max_length", "scopes"},
 		"canvas":                            {"api", "defaults", "limits", "frontend", "presentation"},
 		"task_stream":                       {"aliases"},
-		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets"},
+		"administration":                    {"navigation", "users", "audit_logs", "generations", "usage", "user_assets", "access_keys"},
+		"administration.access_keys":        {"api", "limits", "messages", "presentation"},
 		"administration.users":              {"api", "limits", "messages", "presentation"},
 		"administration.audit_logs":         {"api", "limits", "messages", "presentation"},
 		"administration.generations":        {"api", "limits", "assets", "messages", "presentation"},

@@ -237,6 +237,24 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 				HeartbeatSeconds: execution.Presence.HeartbeatSeconds,
 			}
 		}
+		// #329b: the board lists the return reasons and shows the rework cap;
+		// the continuation, limit and asset-limit copy stays server-side.
+		if review := cloned.AssetList.Review; review != nil {
+			reasons := make([]PublicAssetListReturnReasonSchema, 0, len(review.ReturnReasons))
+			for _, reason := range review.ReturnReasons {
+				reasons = append(reasons, PublicAssetListReturnReasonSchema{
+					ID: reason.ID, Label: reason.Label, Kinds: reason.Kinds,
+				})
+			}
+			publicAssetList.Review = &PublicAssetListReviewSchema{
+				ReturnReasons: reasons, MaxReworkRounds: review.MaxReworkRounds,
+			}
+			if archive := review.Archive; archive != nil {
+				publicAssetList.Review.Archive = &PublicAssetListArchiveSchema{
+					MaxEntries: archive.MaxEntries, MaxBytes: archive.MaxBytes,
+				}
+			}
+		}
 	}
 	var publicStepPolicy *PublicStepPolicySchema
 	if cloned.StepPolicy != nil {
@@ -323,6 +341,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 				Filters: cloned.Administration.UserAssets.Filters, Messages: cloned.Administration.UserAssets.Messages,
 				Presentation: cloned.Administration.UserAssets.Presentation,
 			},
+			AccessKeys: publicAdministrationAccessKeys(cloned.AccessKeys, cloned.Administration.AccessKeys),
 		},
 		Capabilities:    cloned.Capabilities,
 		TaskStates:      cloned.TaskStates,
@@ -366,4 +385,15 @@ func publicAssetDelivery(source AssetDeliveryRuntimeSchema, proxy PublicAssetPro
 	delivery.AssetPreview.Query = source.AssetPreview.Query
 	delivery.AssetPreview.RequestValue = source.AssetPreview.RequestValue
 	return delivery
+}
+
+// publicAdministrationAccessKeys projects the administrator's access key view
+// only when the Catalog declares it; a historical document carries no section.
+func publicAdministrationAccessKeys(keys *AccessKeysSchema, source AdministrationAccessKeysSchema) *PublicAdministrationAccessKeysSchema {
+	if keys == nil || (source.Permission == "" && source.API.Fields.ID == "") {
+		return nil
+	}
+	return &PublicAdministrationAccessKeysSchema{
+		API: source.API, Limits: source.Limits, Messages: source.Messages, Presentation: source.Presentation,
+	}
 }

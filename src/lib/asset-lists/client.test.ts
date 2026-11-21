@@ -92,6 +92,7 @@ describe('asset list schema contract', () => {
       project_asset_lists: '/api/v1/projects/{projectID}/asset-lists',
       project_asset_list: '/api/v1/projects/{projectID}/asset-lists/{listID}',
       project_asset_list_decision: '/api/v1/projects/{projectID}/asset-lists/{listID}/decision',
+      project_asset_list_board: '/api/v1/projects/{projectID}/asset-lists/{listID}/board',
       project_asset_list_run: '/api/v1/projects/{projectID}/asset-lists/{listID}/run',
       project_asset_list_item: '/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}',
       chat_session_asset_lists: '/api/v1/chat/sessions/{sessionID}/asset-lists',
@@ -113,6 +114,74 @@ describe('asset list client', () => {
     const client = createAssetListClient(schema, { fetcher });
     await expect(client.getList('prj/1', 'al 1')).resolves.toEqual(detail);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%2F1/asset-lists/al%201');
+  });
+
+  it('reads the acceptance board from its own route with encoded ids', async () => {
+    const board = { list: { ...summary, version: 3 }, items: [{ ...detail.items[0], result: {}, review: {}, latest_review: null }] };
+    const fetcher = vi.fn(async () => jsonResponse(board)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.getBoard('prj/1', 'al 1')).resolves.toEqual(board);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%2F1/asset-lists/al%201/board');
+  });
+
+  // #329d: one accept of many items on the review route, gated by the list
+  // version the board read. Reasons and the note travel only when present.
+  it('puts a batch review with the expected version and unwraps the outcome', async () => {
+    const outcome = {
+      list: { ...detail, version: 5 },
+      items: [{ item_id: 'it_1', verdict: 'approved', project_asset_id: 'pa_1' }],
+    };
+    const fetcher = vi.fn(async () => jsonResponse(outcome)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.review('prj 1', 'al 1', {
+      decision: 'accept', item_ids: ['it_1', 'it_2'], expected_version: 4,
+    })).resolves.toEqual(outcome);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%201/asset-lists/al%201/review', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: 'accept', item_ids: ['it_1', 'it_2'], expected_version: 4 }),
+    });
+
+    await client.review('prj_1', 'al_1', {
+      decision: 'return', item_ids: ['it_2'], reason_ids: ['style', 'details'], note: '偏冷', expected_version: 5,
+    });
+    expect(fetcher).toHaveBeenLastCalledWith('/api/v1/projects/prj_1/asset-lists/al_1/review', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        decision: 'return', item_ids: ['it_2'], reason_ids: ['style', 'details'], note: '偏冷', expected_version: 5,
+      }),
+    });
+  });
+
+  it('downloads the batch archive and reads the server filename', async () => {
+    const fetcher = vi.fn(async () => new Response('zip-bytes', {
+      status: 200,
+      headers: { 'Content-Disposition': 'attachment; filename="asset-list-al_1.zip"' },
+    })) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    const download = await client.downloadArchive('prj 1', 'al 1', ['it 1', 'it_2']);
+    await expect(download.blob.text()).resolves.toBe('zip-bytes');
+    expect(download.filename).toBe('asset-list-al_1.zip');
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/v1/projects/prj%201/asset-lists/al%201/archive?item_ids=it%201&item_ids=it_2',
+    );
+  });
+
+  // #329d: the too-large refusal carries the server's own copy so the board can
+  // offer a narrowed retry instead of a generic failure.
+  it('surfaces a 413 archive refusal with its detail', async () => {
+    const fetcher = vi.fn(async () => jsonResponse({
+      code: 'asset_list_archive_too_large',
+      detail: '已通过项超出整批下载上限；请用 item_ids 分批下载。',
+    }, 413)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.downloadArchive('prj_1', 'al_1')).rejects.toMatchObject({
+      name: 'AssetListError',
+      status: 413,
+      code: 'asset_list_archive_too_large',
+      detail: '已通过项超出整批下载上限；请用 item_ids 分批下载。',
+    });
   });
 
   it('puts a decision with and without a reason and returns the detail', async () => {

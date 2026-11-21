@@ -468,14 +468,27 @@ func (p Plan) SortedCapabilities() []string {
 	return result
 }
 
-// EstimateOffering is the server's quote for one planned step before any
-// optional billed choice, in the Offering's own unit: the provider-native base
-// amount exactly, or the legacy base price plus fixed extras in the legacy
-// bucket. Native amounts are never rounded or converted (#120).
+// EstimateOffering is the server's quote for one planned step in the Offering's
+// own unit: the provider-native quote the step would freeze, or the legacy base
+// price plus fixed extras in the legacy bucket. A plan step names no parameters,
+// so the native quote is the default one — the base amount plus every component
+// whose condition holds at the Offering's defaults and fixed values. It reuses
+// DefaultNativeQuote, the same evaluation PrepareInput freezes, so an approved
+// plan's estimate covers the quote its step reserves (#417: quoting the bare
+// base amount left the default billed components unbudgeted). Native amounts are
+// never rounded or converted (#120). The session purpose's values (#129) only
+// lower a bounded price-carrying value below its default, so they never make
+// this quote too low.
 func EstimateOffering(offering schema.Offering) Amount {
 	if pricing := offering.NativePricing; pricing != nil {
-		micros, err := schema.ParseNativeAmount(pricing.BaseAmount)
-		if err != nil || micros < 0 {
+		micros, ok := defaultQuoteMicros(offering)
+		if !ok {
+			// Catalog validation evaluates the default quote when it loads an
+			// Offering, so only a declaration broken after loading lands here;
+			// quoting its bare base amount keeps the step priced instead of free.
+			micros, _ = schema.ParseNativeAmount(pricing.BaseAmount)
+		}
+		if micros < 0 {
 			micros = 0
 		}
 		return Amount{Unit: pricing.Unit, UnitLabel: pricing.UnitLabel, Micros: micros}
@@ -483,10 +496,26 @@ func EstimateOffering(offering schema.Offering) Amount {
 	return Legacy(offering.QuotedCredits())
 }
 
+// defaultQuoteMicros is the total of the Offering's default native quote; ok
+// is false when the quote cannot be evaluated or read.
+func defaultQuoteMicros(offering schema.Offering) (int64, bool) {
+	quote, err := offering.DefaultNativeQuote(nil)
+	if err != nil || quote == nil {
+		return 0, false
+	}
+	micros, err := schema.ParseNativeAmount(quote.TotalAmount)
+	if err != nil || micros < 0 {
+		return 0, false
+	}
+	return micros, true
+}
+
 // EstimateOfferingCredits is the Offering's base quote as whole credits: the
-// legacy integer estimate, or the native base amount rounded up. It only feeds
-// the prepared input's frozen legacy-compatible EstimatedCredits (part of the
-// input hash); budgets read EstimateOffering in the Offering's own unit.
+// legacy integer estimate, or the native base amount rounded up. It is not the
+// plan estimate (EstimateOffering quotes the full default quote for a plan): it
+// only feeds the prepared input's frozen legacy-compatible EstimatedCredits,
+// the fallback for a metered native quote that came out zero, and that figure
+// is part of the input hash.
 func EstimateOfferingCredits(offering schema.Offering) int {
 	if pricing := offering.NativePricing; pricing != nil {
 		micros, err := schema.ParseNativeAmount(pricing.BaseAmount)

@@ -41,6 +41,13 @@ export interface StageImage {
   handle?: string;
 }
 
+/** #329: the list the acceptance board shows. The board reads the rest by itself. */
+export interface AssetBoardTarget {
+  projectId: string;
+  listId: string;
+  title: string;
+}
+
 export interface GenerationReferenceContext {
   sessionId: string;
   hasReference: boolean;
@@ -107,6 +114,8 @@ interface StudioState extends StudioPrefs {
   setStyleLockOpen: (open: boolean) => void;
   taskDrawerOpen: boolean;
   allOutputsOpen: boolean;
+  /** #329: the list whose acceptance board covers the stage; null when closed. */
+  assetBoard: AssetBoardTarget | null;
   /** The shared 任务详情 dialog (ResultDetail): what it is open on; null when closed. */
   resultDetail: ResultTarget | null;
   /** Derived composer applicability only; parameter values remain in the authoritative Offering store. */
@@ -160,6 +169,9 @@ interface StudioState extends StudioPrefs {
   setPanelCollapsed: (collapsed: boolean) => void;
   setTaskDrawerOpen: (open: boolean) => void;
   setAllOutputsOpen: (open: boolean) => void;
+  /** #329: covers the stage with one list's acceptance board. */
+  openAssetBoard: (target: AssetBoardTarget) => void;
+  closeAssetBoard: () => void;
   openResultDetail: (target: ResultTarget) => void;
   closeResultDetail: () => void;
   /** Moves the open 任务详情 to the previous / next result of its group (no-op without a group or at the ends). */
@@ -214,6 +226,7 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     styleLockOpen: false,
     taskDrawerOpen: false,
     allOutputsOpen: false,
+    assetBoard: null,
     resultDetail: null,
     generationReferenceContext: null,
     shortcutsOpen: false,
@@ -256,6 +269,8 @@ export const useStudioStore = create<StudioState>()((set, get) => {
     setStyleLockOpen: (styleLockOpen) => set({ styleLockOpen }),
     setTaskDrawerOpen: (taskDrawerOpen) => set({ taskDrawerOpen }),
     setAllOutputsOpen: (allOutputsOpen) => set({ allOutputsOpen }),
+    openAssetBoard: (assetBoard) => set({ assetBoard }),
+    closeAssetBoard: () => set({ assetBoard: null }),
     setGenerationReferenceContext: (generationReferenceContext) => set({ generationReferenceContext }),
     openResultDetail: (resultDetail) => set({ resultDetail }),
     closeResultDetail: () => set({ resultDetail: null }),

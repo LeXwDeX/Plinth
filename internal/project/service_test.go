@@ -138,6 +138,19 @@ func (r *memoryRepository) ListAssets(_ context.Context, ownerID, projectID stri
 	return result, nil
 }
 
+func (r *memoryRepository) CountAssets(_ context.Context, ownerID, projectID string) (int, error) {
+	if !r.owns(ownerID, projectID) {
+		return 0, project.ErrNotFound
+	}
+	count := 0
+	for _, existing := range r.assets {
+		if existing.ProjectID == projectID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (r *memoryRepository) CreateAsset(_ context.Context, projectID string, value project.Asset, maximum int) (project.Asset, error) {
 	if !r.owns(value.OwnerID, projectID) {
 		return project.Asset{}, project.ErrNotFound
@@ -448,5 +461,56 @@ func TestAssetsPromoteAndDeleteKeepReferencesOnly(t *testing.T) {
 	}
 	if err := service.DeleteAsset(ctx, "owner-b", value.ID, promoted.ID); !errors.Is(err, project.ErrNotFound) {
 		t.Fatalf("foreign delete err = %v", err)
+	}
+}
+
+// PrepareAsset validates and names a row without writing it: the production
+// list's accept prepares first and lets its own decision transaction insert.
+func TestPrepareAssetDoesNotWriteAndCountAssetsSeesStoredRows(t *testing.T) {
+	ctx := context.Background()
+	repository := newMemoryRepository()
+	sources := sourceVerifier{
+		pictures: map[string]bool{"input:picture-1": true},
+		models:   map[string]bool{"task:task-2/model-1": true},
+	}
+	service := newService(t, repository, sources)
+	value, err := service.Create(ctx, "owner-a", "Star")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := service.PrepareAsset(ctx, "owner-a", value.ID, project.AssetInput{
+		ID: "passet_review_1", Kind: "character", Name: "Hero",
+		Models: []project.Reference{{TaskID: "task-2", AssetID: "model-1"}},
+	})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if prepared.ID != "passet_review_1" || prepared.OwnerID != "owner-a" ||
+		prepared.ProjectID != value.ID || len(prepared.Models) != 1 {
+		t.Fatalf("prepared = %+v", prepared)
+	}
+	if count, err := service.CountAssets(ctx, "owner-a", value.ID); err != nil || count != 0 {
+		t.Fatalf("count after prepare = %d, %v; want the row not written", count, err)
+	}
+	if _, err := service.PrepareAsset(ctx, "owner-a", value.ID, project.AssetInput{
+		Kind: "character", Name: "Foreign", Images: []project.Reference{{InputAssetID: "picture-x"}},
+	}); !errors.Is(err, project.ErrReferenceInvalid) {
+		t.Fatalf("unverified reference err = %v", err)
+	}
+	if _, err := service.PrepareAsset(ctx, "owner-b", value.ID, project.AssetInput{
+		Kind: "character", Name: "Foreign",
+	}); !errors.Is(err, project.ErrNotFound) {
+		t.Fatalf("foreign project err = %v", err)
+	}
+	if _, err := service.CreateAsset(ctx, "owner-a", value.ID, project.AssetInput{
+		ID: "passet_review_1", Kind: "character", Name: "Hero",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if count, err := service.CountAssets(ctx, "owner-a", value.ID); err != nil || count != 1 {
+		t.Fatalf("count after create = %d, %v; want 1", count, err)
+	}
+	if _, err := service.CountAssets(ctx, "owner-b", value.ID); !errors.Is(err, project.ErrNotFound) {
+		t.Fatalf("foreign count err = %v", err)
 	}
 }

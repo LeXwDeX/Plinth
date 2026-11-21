@@ -28,6 +28,43 @@ func testProject(id, owner, name string) project.Project {
 	return project.Project{ID: id, OwnerID: owner, Name: name, CreatedAt: now, UpdatedAt: now}
 }
 
+func TestProjectRepositoryCreateAssetIsIdempotentByCallerID(t *testing.T) {
+	ctx := context.Background()
+	_, projects := openProjectRepository(t)
+	if _, err := projects.CreateProject(ctx, testProject("p1", "owner-a", "One"), 2); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 12, 1, 0, 0, 0, time.UTC)
+	first, err := projects.CreateAsset(ctx, "p1", project.Asset{
+		ID: "passet_abc", OwnerID: "owner-a", Kind: "character", Name: "Hero",
+		CreatedAt: now, UpdatedAt: now,
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same deterministic id is a replay, not a second row and not a new
+	// limit entry.
+	again, err := projects.CreateAsset(ctx, "p1", project.Asset{
+		ID: "passet_abc", OwnerID: "owner-a", Kind: "prop", Name: "Changed",
+	}, 1)
+	if err != nil || again.ID != first.ID || again.Name != "Hero" {
+		t.Fatalf("replay = %+v err=%v", again, err)
+	}
+	if listed, err := projects.ListAssets(ctx, "owner-a", "p1", 10); err != nil || len(listed) != 1 {
+		t.Fatalf("assets = %+v err=%v", listed, err)
+	}
+	if _, err := projects.CreateAsset(ctx, "p1", project.Asset{
+		ID: "passet_other", OwnerID: "owner-a", Kind: "prop", Name: "Second",
+	}, 1); !errors.Is(err, project.ErrLimit) {
+		t.Fatalf("new id over the limit err = %v", err)
+	}
+	if _, err := projects.CreateAsset(ctx, "p1", project.Asset{
+		ID: "passet_abc", OwnerID: "owner-b", Kind: "prop", Name: "Foreign",
+	}, 1); !errors.Is(err, project.ErrNotFound) {
+		t.Fatalf("foreign replay err = %v", err)
+	}
+}
+
 func TestProjectRepositoryIsOwnerScopedAndBounded(t *testing.T) {
 	ctx := context.Background()
 	_, projects := openProjectRepository(t)

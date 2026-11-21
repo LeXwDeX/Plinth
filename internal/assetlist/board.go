@@ -16,26 +16,31 @@ const (
 )
 
 // ItemReview is one recorded acceptance decision of a list item (#329). It is
-// append-only history: each round of an item keeps its own decision, and the
-// board only reads it. Review is the snapshot taken when the decision was
-// made; #329b fills it, so an empty object is the truthful answer for a row
-// written before snapshots existed.
+// append-only history: each round of an item keeps its own decision, the board
+// reads it, and #329b appends one row per decision. Review is the snapshot
+// taken when the item entered review; an empty object is the truthful answer
+// for a row written before snapshots existed.
 type ItemReview struct {
-	ID         string          `json:"id"`
-	OwnerID    string          `json:"owner_id"`
-	ListID     string          `json:"list_id"`
-	ItemID     string          `json:"item_id"`
-	Round      int             `json:"round"`
-	Verdict    string          `json:"verdict"`
+	ID      string `json:"id"`
+	OwnerID string `json:"owner_id"`
+	ListID  string `json:"list_id"`
+	ItemID  string `json:"item_id"`
+	Round   int    `json:"round"`
+	Verdict string `json:"verdict"`
+	// Reason is the human-readable return copy; Reasons keeps the declared
+	// reason ids the person picked (#329b).
 	Reason     string          `json:"reason,omitempty"`
+	Reasons    []string        `json:"reasons,omitempty"`
+	Note       string          `json:"note,omitempty"`
 	ReviewerID string          `json:"reviewer_id,omitempty"`
 	Review     json.RawMessage `json:"review"`
 	CreatedAt  time.Time       `json:"created_at"`
 }
 
 // ReviewStore reads one owner's list decisions, newest first (#329a). It is a
-// read-only port: deciding and generating snapshots belong to #329b. A missing
-// or foreign list has no rows; the service checks list ownership first.
+// read-only port: #329b appends decisions through the list repository. A
+// missing or foreign list has no rows; the service checks list ownership
+// first.
 type ReviewStore interface {
 	ItemReviews(ctx context.Context, ownerID, listID string) ([]ItemReview, error)
 }
@@ -49,9 +54,8 @@ type BoardItem struct {
 
 // Board is the read-only acceptance board of one list (#329a): the list
 // summary (including the run state when it has one), every item in position
-// order with its produced-artifact reference and latest decision. It writes
-// nothing: snapshot generation, accept/return and the batch archive are later
-// steps (#329b).
+// order with its produced-artifact reference and latest decision. The batch
+// ZIP of accepted items lives in archive.go (#329c).
 type Board struct {
 	List  List        `json:"list"`
 	Items []BoardItem `json:"items"`

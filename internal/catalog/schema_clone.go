@@ -47,6 +47,20 @@ func cloneAssetList(source *AssetListSchema) *AssetListSchema {
 		decompose := *source.Decompose
 		result.Decompose = &decompose
 	}
+	if source.Review != nil {
+		review := *source.Review
+		review.ReturnReasons = make([]AssetListReturnReasonSchema, len(source.Review.ReturnReasons))
+		for index, reason := range source.Review.ReturnReasons {
+			review.ReturnReasons[index] = reason
+			review.ReturnReasons[index].Kinds = append([]string(nil), reason.Kinds...)
+		}
+		if source.Review.Archive != nil {
+			archive := *source.Review.Archive
+			archive.StoredMediaTypes = append([]string(nil), source.Review.Archive.StoredMediaTypes...)
+			review.Archive = &archive
+		}
+		result.Review = &review
+	}
 	return &result
 }
 
@@ -393,6 +407,12 @@ func cloneApplication(source ApplicationSchema) ApplicationSchema {
 	result.Administration.BackfillStatus.SyncProviderIDs = append(
 		[]string(nil),
 		source.Administration.BackfillStatus.SyncProviderIDs...,
+	)
+	result.Administration.AccessKeys.Presentation.DateTimeOptions = cloneStringMap(
+		source.Administration.AccessKeys.Presentation.DateTimeOptions,
+	)
+	result.Administration.AccessKeys.Presentation.Text = cloneStringMap(
+		source.Administration.AccessKeys.Presentation.Text,
 	)
 	result.Canvas.Presentation.Text = make(
 		map[string]string,

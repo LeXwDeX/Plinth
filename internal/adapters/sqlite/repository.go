@@ -463,6 +463,12 @@ var assetListItemReviewsMigration string
 //go:embed migrations/0103_input_asset_crops.sql
 var inputAssetCropsMigration string
 
+//go:embed migrations/0104_asset_list_item_review_writes.sql
+var assetListItemReviewWritesMigration string
+
+//go:embed migrations/0105_access_key_usage.sql
+var accessKeyUsageMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -557,7 +563,9 @@ func migrations() []migration {
 		migration{version: 100, name: "asset_lists", sql: assetListsMigration},
 		migration{version: 101, name: "asset_list_runs", sql: assetListRunsMigration},
 		migration{version: 102, name: "asset_list_item_reviews", sql: assetListItemReviewsMigration},
-		migration{version: 103, name: "input_asset_crops", sql: inputAssetCropsMigration})
+		migration{version: 103, name: "input_asset_crops", sql: inputAssetCropsMigration},
+		migration{version: 104, name: "asset_list_item_review_writes", sql: assetListItemReviewWritesMigration},
+		migration{version: 105, name: "access_key_usage", sql: accessKeyUsageMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -574,8 +582,10 @@ func migrations() []migration {
 // task lookup index of the 3D self-check records (#332) and 100 the project
 // production lists and their items (#327), 101 the long-running execution
 // runs, item execution columns and tab presence of a list (#328), 102 the
-// acceptance decisions of a list item (#329) and 103 the provenance of the
-// crops cut out of a source picture (#331).
+// acceptance decisions of a list item (#329), 103 the provenance of the
+// crops cut out of a source picture (#331), 104 the review writes of a list
+// item (#329) and 105 the personal access key
+// usage count and the overall switch (#332).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))

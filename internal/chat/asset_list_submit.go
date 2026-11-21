@@ -142,12 +142,34 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 		if err != nil {
 			return assetListRefusal(reportFailed), nil
 		}
+		// The review snapshot is generated in the same step that moves the
+		// item to waiting for the person (#329b). Its ports resolve the
+		// purpose thresholds and inspect the GLB/picture; a failure leaves the
+		// report stored with an empty snapshot, never a stuck item.
+		brief, _ := json.Marshal(command.Options.ProductionBrief)
+		review, snapshotErr := policy.Service.ReviewSnapshot(ctx, assetlist.ReviewSnapshotInput{
+			OwnerID:   command.OwnerID,
+			SessionID: command.SessionID,
+			ProjectID: strings.TrimSpace(command.Options.ProjectID),
+			ListID:    item.ListID,
+			ItemID:    item.ID,
+			Kind:      item.Kind,
+			Brief:     brief,
+			Round:     item.Round,
+			Task:      task,
+			Tasks:     tasks,
+			At:        service.clock(),
+		})
+		if snapshotErr != nil || len(review) == 0 {
+			review = nil
+		}
 		finished, err := policy.Service.FinishItem(ctx, assetlist.FinishItemInput{
 			OwnerID: command.OwnerID,
 			ListID:  item.ListID,
 			ItemID:  item.ID,
 			State:   assetlist.StateReview,
 			Result:  result,
+			Review:  review,
 			At:      service.clock(),
 		})
 		if err != nil {

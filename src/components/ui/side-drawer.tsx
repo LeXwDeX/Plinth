@@ -61,7 +61,7 @@ export function SideDrawer({
         <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-3">
           <h2 id={titleId} className="text-sm font-semibold">{title}</h2>
           <HintTooltip name={closeLabel}>
-            <Action type="button" variant="ghost" size="icon-sm" onClick={onClose} aria-label={closeLabel}>
+            <Action type="button" variant="ghost" size="icon-lg" className="size-11" onClick={onClose} aria-label={closeLabel}>
               <X className="size-4" />
             </Action>
           </HintTooltip>
