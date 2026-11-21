@@ -69,11 +69,64 @@ func (orchestrator *Orchestrator) ResumeSession(ctx context.Context, ownerID, se
 		return
 	}
 	for _, turn := range turns {
-		if err := orchestrator.Enqueue(ProcessTurn{OwnerID: turn.OwnerID, SessionID: turn.SessionID,
-			AssistantMessageID: turn.AssistantMessageID, Options: turn.Options}); err != nil {
-			orchestrator.logger.Warn("删除会话失败后轮次入队暂失败，等待扫描重试",
-				"session_id", sessionID, "assistant_message_id", turn.AssistantMessageID, "error", err)
+		orchestrator.resumeTurn(ctx, turn)
+	}
+}
+
+// resumeEnqueueAttempts bounds how long ResumeSession waits for a worker to
+// release the turn it just ran. The turn that noticed the deletion mark and
+// returned may stay in the queue's duplicate guard for a moment; that is not a
+// duplicate to drop, so the wake path is used and retried instead.
+const (
+	resumeEnqueueAttempts = 100
+	resumeEnqueueInterval = 2 * time.Millisecond
+)
+
+// resumeTurn puts one interrupted turn back in the queue. A full queue would
+// otherwise leave a running row waiting for the next restart, because the
+// waiting scanner only looks at waiting_task and queued turns (#430); the
+// running row is returned to the queued state the scanner owns and picks up.
+func (orchestrator *Orchestrator) resumeTurn(ctx context.Context, turn Turn) {
+	command := ProcessTurn{OwnerID: turn.OwnerID, SessionID: turn.SessionID,
+		AssistantMessageID: turn.AssistantMessageID, Options: turn.Options}
+	for attempt := 0; attempt < resumeEnqueueAttempts; attempt++ {
+		err := orchestrator.enqueueForWake(command)
+		if err == nil {
+			return
 		}
+		if errors.Is(err, ErrWakeNotReleased) {
+			time.Sleep(resumeEnqueueInterval)
+			continue
+		}
+		orchestrator.returnResumedTurnToScanner(ctx, turn, err)
+		return
+	}
+	orchestrator.logger.Warn("删除会话失败后轮次仍由原 worker 持有，未重复入队",
+		"session_id", turn.SessionID, "assistant_message_id", turn.AssistantMessageID)
+}
+
+// returnResumedTurnToScanner handles an enqueue that failed on a full queue. A
+// queued row is already visible to the waiting scanner and keeps its state; a
+// running row would only be recovered by a restart, so it is put back in the
+// queued state whose next scan re-enqueues it.
+func (orchestrator *Orchestrator) returnResumedTurnToScanner(ctx context.Context, turn Turn, cause error) {
+	if turn.State != orchestrator.service.TurnRunningState() {
+		orchestrator.logger.Warn("删除会话失败后轮次入队暂失败，保留 queued 状态等待扫描器重试",
+			"session_id", turn.SessionID, "assistant_message_id", turn.AssistantMessageID, "error", cause)
+		return
+	}
+	_, err := orchestrator.service.SaveTurnCheckpoint(ctx, turn,
+		orchestrator.service.TurnQueuedState(), turn.Checkpoint, true)
+	switch {
+	case err == nil:
+		orchestrator.logger.Info("删除会话失败后队列已满，轮次改回 queued 等待扫描器重新入队",
+			"session_id", turn.SessionID, "assistant_message_id", turn.AssistantMessageID)
+	case errors.Is(err, ErrTurnCheckpointConflict):
+		// Another writer owns the turn now (for instance the worker that was
+		// still winding down); it is not ours to move back into the queue.
+	default:
+		orchestrator.logger.Warn("删除会话失败后无法把轮次改回 queued，等待重启恢复",
+			"session_id", turn.SessionID, "assistant_message_id", turn.AssistantMessageID, "error", err)
 	}
 }
 

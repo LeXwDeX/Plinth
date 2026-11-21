@@ -102,14 +102,17 @@ func (service *Service) sessionQuiescers() []SessionQuiescer {
 // RunSessionDeletion runs deleteRows, which removes the rows of the owner's
 // session, under the protocol every deletion of a session follows, so that the
 // session's turn is never left running on rows that are going away (#384).
-// The session is marked first, so no new turn starts on it and the turn
-// runner's leftovers end quietly; then its running turn is interrupted and
+// A deletion that is bound to be refused (ErrSessionDeletionBlocked) is refused
+// before the session is marked or its turn is touched; the preflight runs
+// first on purpose, because a turn that ends during the mark would skip its
+// finishing writes and stay running on the surviving session (#430). Once the
+// preflight passed, the session is marked, so no new turn starts on it and the
+// turn runner's leftovers end quietly; then its running turn is interrupted and
 // awaited; only then do the rows go, in short transactions where the repository
 // can split them, so the deletion neither fights a live turn for its rows nor
 // holds the database against everyone else. deleteRows reports whether it
 // deleted anything; when it did not, or failed, the session stays, the mark is
-// cleared and the interrupted turns go on. The deletion that is bound to be
-// refused (ErrSessionDeletionBlocked) is refused before the turn is touched.
+// cleared and the interrupted turns go on.
 //
 // DeleteSession is the chat session's own deletion; the canvas project that
 // owns a session deletes the project and the session in one transaction and
@@ -120,8 +123,6 @@ func (service *Service) RunSessionDeletion(
 	sessionID string,
 	deleteRows func(context.Context) (bool, error),
 ) (bool, error) {
-	end := service.deletions.begin(ownerID, sessionID)
-	defer end()
 	owned, err := service.repository.OwnsSession(ctx, ownerID, sessionID)
 	if err != nil {
 		return false, err
@@ -131,16 +132,19 @@ func (service *Service) RunSessionDeletion(
 	// under that ID and reports that nothing was deleted.
 	var quiescers []SessionQuiescer
 	if owned {
-		// A deletion that is bound to be refused must not stop the running turn.
+		// The refusal must not suppress the turn's own finishing writes: the
+		// deletion mark is set only after it (#430).
 		if preflight, ok := service.repository.(sessionDeletionPreflight); ok {
 			if err := preflight.PreflightSessionDeletion(ctx, ownerID, sessionID); err != nil {
 				return false, err
 			}
 		}
 		quiescers = service.sessionQuiescers()
-		for _, quiescer := range quiescers {
-			quiescer.QuiesceSession(ctx, ownerID, sessionID)
-		}
+	}
+	end := service.deletions.begin(ownerID, sessionID)
+	defer end()
+	for _, quiescer := range quiescers {
+		quiescer.QuiesceSession(ctx, ownerID, sessionID)
 	}
 	deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionDeleteTimeout)
 	defer cancel()

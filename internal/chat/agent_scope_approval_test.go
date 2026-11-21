@@ -53,7 +53,7 @@ func TestScopeRefusalOfARemeshRiggingPlanDoesNotPointAtTheApprovalMode(t *testin
 	}
 	system := rig.agent.requests[0].Messages[0].Content
 	for _, want := range []string{"【Agent 范围】", "【批准方式】", "与付费步骤是否需要批准无关",
-		"不要让用户去勾选任何设置或切换任何模式"} {
+		"不要让用户去勾选设置或切换模式"} {
 		if !strings.Contains(system, want) {
 			t.Errorf("the system context omits %q", want)
 		}
