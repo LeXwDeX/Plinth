@@ -1965,6 +1965,10 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 			return fmt.Errorf("three_view.messages.%s 不能为空", name)
 		}
 	}
+	// #433: the copy that refuses a model taking no several views names it.
+	if views := messages.ViewsUnsupported; strings.TrimSpace(views) != "" && !strings.Contains(views, "{model}") {
+		return errors.New("three_view.messages.views_unsupported 必须包含 {model}")
+	}
 	for _, field := range []string{"{run}", "{view}", "{approval}", "{credits}", "{task}"} {
 		if !strings.Contains(messages.AgentStarted, field) {
 			return fmt.Errorf("three_view.messages.agent_started 必须包含 %s", field)

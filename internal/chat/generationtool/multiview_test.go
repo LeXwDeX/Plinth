@@ -3,6 +3,7 @@ package generationtool_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -43,11 +44,24 @@ type multiviewRun struct {
 
 // multiviewScenario is what a run adds to the shipped one-Offering harness
 // (#373): the session's explicit 3D lock, further Offerings of the shipped
-// Catalog the gateway also serves, and those without runtime configuration.
+// Catalog the gateway also serves, those without runtime configuration, and the
+// session's own pictures, which handles name (#433).
 type multiviewScenario struct {
 	locked      string
 	also        []string
 	unavailable []string
+	// pictures are the session's image URLs, in the order @img1, @img2, …: they
+	// belong to the user's last message, so a handle naming one resolves.
+	pictures []string
+	// purposes are the attachment purposes the person marked, by handle (#250).
+	purposes map[string]string
+	// selection is the workspace selection in its own order, and canvas makes
+	// the turn an artboard-source turn (#266).
+	selection []string
+	canvas    bool
+	// purposeArgument declares the shipped tool's reference_purposes argument,
+	// which the default Catalog leaves out (#433).
+	purposeArgument bool
 }
 
 const (
@@ -84,6 +98,9 @@ func runMultiviewIn(t *testing.T, scenario multiviewScenario, views *fakeThreeVi
 	// The direct submission path of this harness has no prepared authorization;
 	// the frozen input is what these tests read.
 	offering.NativePricing = nil
+	if scenario.purposeArgument {
+		tool.ReferencePurposesArgument = "reference_purposes"
+	}
 	offerings := []generation.Offering{offering}
 	for _, id := range scenario.also {
 		other, found := product.Get(generation.OfferingID(id))
@@ -96,7 +113,7 @@ func runMultiviewIn(t *testing.T, scenario multiviewScenario, views *fakeThreeVi
 		offerings = append(offerings, other)
 	}
 	gateway := &fakeGateway{
-		offerings: offerings, unavailable: map[generation.OfferingID]bool{},
+		offerings: offerings, unavailable: map[generation.OfferingID]bool{}, submittedTask: true,
 		tasks: []generation.Task{{ID: "configured-task", State: generation.TaskSucceeded, Offering: offering,
 			Assets: []generation.Asset{{ID: "model-thumb", Role: "thumbnail"}}}},
 	}
@@ -118,10 +135,29 @@ func runMultiviewIn(t *testing.T, scenario multiviewScenario, views *fakeThreeVi
 		executor.SetThreeViews(views)
 	}
 	history := []chat.Message{{Role: application.Chat.Roles.User, Content: "make it 3D"}}
+	if len(scenario.pictures) > 0 {
+		attachments := make([]chat.Attachment, 0, len(scenario.pictures))
+		for index := range scenario.pictures {
+			attachments = append(attachments, chat.Attachment{
+				Handle: fmt.Sprintf("@img%d", index+1), Kind: chat.AttachmentKindImage,
+				Role: chat.AttachmentRoleUpload, ImageSlot: index + 1,
+			})
+		}
+		last := &history[len(history)-1]
+		last.ImageURLs = append([]string(nil), scenario.pictures...)
+		last.Attachments = attachments
+	}
+	options := chat.TurnOptions{Multiview: request, ExplicitModel3D: scenario.locked, AttachmentPurposes: scenario.purposes}
+	for _, url := range scenario.selection {
+		options.Selection = append(options.Selection, chat.Attachment{Kind: chat.AttachmentKindImage, URL: url})
+	}
+	if scenario.canvas {
+		options.InputSource = application.Chat.Context.CanvasInputSource
+	}
 	result, err := executor.Execute(context.Background(), chat.ToolCommand{
 		OwnerID: "owner-a", SessionID: "session-a", Tool: tool, History: history,
 		Call:    agents.ToolCall{ID: "call-views", Name: tool.Name, Arguments: []byte(arguments)},
-		Options: chat.TurnOptions{Multiview: request, ExplicitModel3D: scenario.locked},
+		Options: options,
 	}, func(chat.ToolObservation) error { return nil })
 	run := multiviewRun{result: result, err: err, resolver: resolver, gateway: gateway, chat: application.Chat}
 	if result.AgentContent != "" {
