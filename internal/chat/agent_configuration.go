@@ -23,6 +23,28 @@ func configurationFromContext(ctx context.Context) *AgentConfigurationSnapshot {
 	value, _ := ctx.Value(configurationContextKey{}).(*AgentConfigurationSnapshot)
 	return value
 }
+
+// turnRegistry is the registry a turn's persisted calls are read against: the
+// same view the turn's tools ran from. A turn runs on the registry compiled
+// from its frozen Agent configuration snapshot (its enabled tools and the MCP
+// presets it turned on, #453), while the Orchestrator's own registry only knows
+// the Schema's declarations. Without a snapshot, or when the snapshot cannot be
+// compiled, the base registry answers, with its original protection of a call
+// it does not know.
+func (orchestrator *Orchestrator) turnRegistry(ctx context.Context) *toolRegistry {
+	if turn, ok := ctx.Value(turnRegistryContextKey{}).(*toolRegistry); ok {
+		return turn
+	}
+	if configurationFromContext(ctx) == nil {
+		return orchestrator.registry
+	}
+	registry, err := orchestrator.registryForRequest(ctx)
+	if err != nil || registry == nil {
+		return orchestrator.registry
+	}
+	return registry
+}
+
 func (o *Orchestrator) registryFor(ctx context.Context) (*toolRegistry, error) {
 	if snapshot := configurationFromContext(ctx); snapshot != nil {
 		schema := o.schema
