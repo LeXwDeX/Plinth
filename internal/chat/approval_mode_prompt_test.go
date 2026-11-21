@@ -257,3 +257,40 @@ func TestApprovalModePromptIsOmittedWhenTheSessionCannotBeRead(t *testing.T) {
 		t.Errorf("a failed lookup still states a mode: %q", system)
 	}
 }
+
+// #410: a finished plan may not spend any more, so the Agent must not read that
+// its steps are still approved by budget. The Schema declares one sentence for
+// a plan that may spend and one for a finished plan, and the state picks it.
+func TestCompletedPlanPromptSaysNothingMoreIsApprovedByBudget(t *testing.T) {
+	summary := budget.Summary{
+		ID: "pb_done", State: budget.StateCompleted,
+		Units: []budget.UnitBudget{budget.NewUnitBudget(budget.Legacy(40), 40, 0)},
+		Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+			{Capability: "text-to-3d", Purpose: "主体模型", Estimate: budget.Legacy(20)},
+		}},
+	}
+	system := approvalPromptSystem(t, approvalPromptCase{mode: "budget", budget: &summary})
+	shipped, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := shipped.Application().Chat.ApprovalPolicy.Budget
+	for _, want := range []string{budgetBlockHead, "当前制作计划：已完成", config.CompletedNote} {
+		if !strings.Contains(system, want) {
+			t.Errorf("the completed plan context omits %q", want)
+		}
+	}
+	for _, unwanted := range []string{config.AutoApprovalNote, "计划内的步骤由系统按预算自动批准"} {
+		if strings.Contains(system, unwanted) {
+			t.Errorf("a completed plan still says %q", unwanted)
+		}
+	}
+	// The active plan keeps the sentence that says its steps are approved.
+	active := summary
+	active.State = budget.StateActive
+	active.ID = "pb_active"
+	system = approvalPromptSystem(t, approvalPromptCase{mode: "budget", budget: &active})
+	if !strings.Contains(system, config.AutoApprovalNote) {
+		t.Error("an active plan lost the sentence that says its steps are approved by budget")
+	}
+}

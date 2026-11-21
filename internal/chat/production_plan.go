@@ -711,6 +711,9 @@ func planProposedContent(stored budget.ProductionBudget, messages catalog.ChatAp
 		if step.Check != "" {
 			item["check"] = step.Check
 		}
+		if step.Optional {
+			item["optional"] = true
+		}
 		steps = append(steps, item)
 	}
 	checkpoints := make([]map[string]any, 0, len(stored.Plan.Checkpoints))

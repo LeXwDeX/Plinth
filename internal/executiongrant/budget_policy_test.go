@@ -338,3 +338,36 @@ func TestBudgetEligibilityDoesNotChangeManualOrAuto(t *testing.T) {
 		t.Fatalf("auto image-to-3d = %+v err=%v grant=%+v", result, err, autoStore.grant)
 	}
 }
+
+// #410: a completed plan spent nothing more. It is no longer active, so a step
+// follows manual's rules exactly as it does under a closed plan: a capability
+// manual approves by itself runs, and everything else waits for a person.
+func TestBudgetModeTreatsACompletedPlanAsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		capability string
+		wantErr    error
+		reason     string
+	}{
+		{"a step manual cards", "image-to-3d", ErrHumanRequired, BudgetReasonNoPlan},
+		{"a step manual approves", "text-to-image", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, budgets := budgetStep(tc.capability)
+			budgets.found = true
+			budgets.summary = budget.Summary{ID: "pb_1", State: budget.StateCompleted,
+				Units: legacyUnits(20, 0, 0), Plan: budget.Plan{Title: "已完成",
+					Steps: []budget.PlanStep{{Capability: tc.capability, Estimate: budget.Legacy(7)}}}}
+			result, err := runBudgetPolicy(t, tc.capability, budgets, store)
+			if !errors.Is(err, tc.wantErr) || result.Reason != tc.reason {
+				t.Fatalf("completed plan step = %+v err=%v", result, err)
+			}
+			if budgets.approve != 0 {
+				t.Fatalf("a completed plan reserved credits: approvals=%d", budgets.approve)
+			}
+			if tc.wantErr == nil && (result.Outcome != PolicyOutcomeApproved || store.approved != 1) {
+				t.Fatalf("manual rule did not run: %+v grant=%+v", result, store.grant)
+			}
+		})
+	}
+}

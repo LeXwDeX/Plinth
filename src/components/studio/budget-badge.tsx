@@ -25,8 +25,8 @@ export function BudgetBadge() {
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const budget = useChatStore((state) => state.sessions.find((session) => session.id === state.activeSessionId)?.budget ?? null);
   const tasks = useWorkspaceStore(useShallow((state) => state.trackedTasks.filter((task) => task.sessionId === activeSessionId)));
-  // #403: a step without a task reads "not run" once the session's turn has ended (the plan area in the chat adds the
-  // open decisions it can see; this summary has only the messages).
+  // #403/#410: a step without a task reads "not run" once the session's turn has ended (the plan area in the chat
+  // reads the same turn state; this summary has only the messages, and the server's own projection wins anyway).
   const stepsMayStillRun = useChatStore((state) => sessionTurnRunning(
     state.activeSessionId ? state.messagesBySession[state.activeSessionId] : undefined,
     Boolean(state.activeSessionId && state.streamingBuffers[state.activeSessionId]),

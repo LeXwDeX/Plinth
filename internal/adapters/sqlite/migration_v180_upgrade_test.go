@@ -1259,4 +1259,20 @@ func assertV180HeadSchema(t *testing.T, r *Repository) {
 	).Scan(&stale); err != nil || stale != 0 {
 		t.Fatalf("历史行在新增列上有非默认值: %d err=%v", stale, err)
 	}
+	// #410: 0107 rebuilds production_budgets to widen its state CHECK and to
+	// keep a finished plan as the session's current one. A v1.8.0 database must
+	// take a completed plan after the upgrade without another rewrite.
+	var tableSQL string
+	if err := r.db.QueryRow(
+		`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'production_budgets'`,
+	).Scan(&tableSQL); err != nil || !strings.Contains(tableSQL, budget.StateCompleted) {
+		t.Fatalf("production_budgets 的 state CHECK 不接受 %q: %s", budget.StateCompleted, tableSQL)
+	}
+	var indexSQL string
+	if err := r.db.QueryRow(
+		`SELECT COALESCE(sql, '') FROM sqlite_master
+ WHERE type = 'index' AND name = 'idx_production_budgets_current'`,
+	).Scan(&indexSQL); err != nil || !strings.Contains(indexSQL, budget.StateCompleted) {
+		t.Fatalf("idx_production_budgets_current 不含 %q: %s", budget.StateCompleted, indexSQL)
+	}
 }

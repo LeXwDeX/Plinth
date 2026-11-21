@@ -249,6 +249,8 @@ export interface ProductSchema {
         chat_session_purpose_parameters?: string;
         /** #103: decide one production plan budget (PUT approve/deny). Absent on older servers. */
         chat_session_budget?: string;
+        /** #410: run the session's own unfinished plan again (POST). Absent on older servers. */
+        chat_session_budget_continue?: string;
         /** #103: the 3D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */
         chat_session_model3d?: string;
         /** #239: the 2D model the person explicitly picked in the session (GET/PUT). Absent on older servers. */

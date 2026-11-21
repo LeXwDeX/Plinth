@@ -382,7 +382,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None, rework_message=None):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None, rework_message=None, plan_continuation_message=None):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -431,6 +431,10 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
         execution["continuation"]["message"] = continuation_message
     if rework_message is not None:
         catalog["application"]["asset_list"]["review"]["messages"]["rework_message"] = rework_message
+    if plan_continuation_message is not None:
+        # #410: the go-ahead of an approved plan is the last user message of its
+        # turn, so the fake marker in it drives the step the plan continues with.
+        catalog["application"]["chat"]["approval_policy"]["budget"]["continuation"]["message"] = plan_continuation_message
     if manual_image_edits:
         # The mask scenario needs an approval card for a 2D edit step (#244);
         # the shipped policy asks a human only for the listed capabilities.
@@ -5793,6 +5797,194 @@ def _wait_processing_plan(work, session, predicate, seconds=150):
     return plan
 
 
+def _plan_step_marker(prompt="a plain cube", model=MESHY_TEXT_TO_3D):
+    """The fake marker that asks for one paid 3D step of a plan."""
+    return "[[fake:tool:create_model_3d " + json.dumps(
+        {"prompt": prompt, "model": model}, ensure_ascii=False, separators=(",", ":")) + "]]"
+
+
+def _wait_tasks(api, session, count, seconds=150):
+    """At least `count` Tasks of the session, as the task list gives them."""
+    end = time.time() + seconds
+    tasks = []
+    while time.time() < end:
+        tasks = session_tasks(api, session)
+        if len(tasks) >= count:
+            return tasks
+        time.sleep(0.5)
+    return tasks
+
+
+def _session_budget(api, session):
+    """The session's current plan as the session projection gives it."""
+    # The session read is the legacy route the browser uses; the plan travels in
+    # its `budget` member with the server's per-step standing (#410).
+    return api.json("GET", f"/api/chat/sessions/{session}")[1].get("budget") or {}
+
+
+def _wait_plan(api, session, check, seconds=90):
+    end = time.time() + seconds
+    budget = {}
+    while time.time() < end:
+        budget = _session_budget(api, session)
+        if check(budget):
+            return budget
+        time.sleep(0.5)
+    return budget
+
+
+def scenario_plan_state(work, stack_binary, processes, catalog):
+    """#410: a plan whose turn ended with steps left says so, and the person
+    continues it from the plan card.
+
+    A five-step plan runs four steps and the turn ends (the fake Agent simply
+    stops). The plan is still active, so it is not done: the session projection
+    shows four steps done and the fifth not run. "Continue" runs the plan's turn
+    again — its go-ahead carries the fifth step — so the fifth step runs, the
+    first four are not redone, and the plan then reads completed. A later step of
+    the same capability finds no budget left in the finished plan and waits for a
+    person, exactly like a step under a replaced plan. Fake only: no real
+    upstream, no paid call.
+    """
+    child, api = start_stack(processes, stack_binary, work, "plan-state", catalog, GOOD_KEY)
+    try:
+        offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
+        if MESHY_TEXT_TO_3D not in offerings:
+            record("plan-state: setup", False, "no Meshy text-to-3d offering")
+            return
+        session = new_session(api)
+        status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+        if status != 200:
+            record("plan-state: budget approval mode", False, f"PUT {status}")
+            return
+        proposal = "[[fake:tool:propose_production_plan " + json.dumps({
+            "title": "五步计划",
+            "steps": [{"capability": "text-to-3d", "model": MESHY_TEXT_TO_3D,
+                       "purpose": f"第 {index} 步"} for index in range(1, 6)],
+            "budgets": [{"unit": "legacy.credits", "amount": 400}],
+        }, ensure_ascii=False, separators=(",", ":")) + "]]"
+        status, _ = _send_chat(api, session, {"content": "做一个五步计划 " + proposal,
+                                              "creative_domain": "model-3d",
+                                              "ai_model": MESHY_TEXT_TO_3D,
+                                              "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+        if status not in (200, 201, 202):
+            record("plan-state: propose the plan", False, f"send {status}")
+            return
+        budget_id = ""
+        end = time.time() + 30
+        while time.time() < end and not budget_id:
+            pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+            card = next((item for item in pending if item.get("kind") == "plan"), None)
+            if card:
+                budget_id = card.get("request_id") or ""
+            else:
+                time.sleep(0.4)
+        if not budget_id:
+            record("plan-state: the plan card appears", False, "no plan card")
+            return
+        status, approved = api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{budget_id}",
+                                    decision_body(api, "approve"))
+        if status != 200 or approved.get("state") != "active":
+            record("plan-state: approve the plan", False, f"PUT {status} {approved}")
+            return
+        record("plan-state: the plan is approved and active", True, f"budget {budget_id}")
+        # The approval starts the plan's own turn, and this stack's go-ahead
+        # carries the first step: the person approves and the work starts.
+        _quality_turn_done(api, session)
+        first = _wait_tasks(api, session, 1)
+        record("plan-state: the approved plan runs its first step by itself",
+               len(first) == 1, f"tasks {[(t.get('id'), t.get('state')) for t in first]}")
+        if len(first) != 1:
+            return
+
+        # Three more turns run the second, third and fourth steps; then the turn
+        # ends with the fifth left.
+        for index in range(2, 5):
+            task, why, _source = agent_tool_turn(api, session, f"第 {index} 步 " + _plan_step_marker(),
+                                                 creative_domain="model-3d", ai_model=MESHY_TEXT_TO_3D)
+            if not task or task.get("state") != "SUCCEEDED":
+                record(f"plan-state: step {index} runs", False, f"{why} {task}")
+                return
+        tasks = session_tasks(api, session)
+        record("plan-state: the first four steps ran once each",
+               len([task for task in tasks if task.get("capability") == "text-to-3d"]) == 4,
+               f"tasks {[(t.get('id'), t.get('capability'), t.get('state')) for t in tasks]}")
+        # The fourth turn ends after its answer: only then may a step read "not
+        # run", because until then the running turn may still submit it.
+        _quality_turn_done(api, session)
+
+        stopped = _wait_plan(api, session, lambda budget: len(budget.get("steps") or []) == 5
+                             and (budget.get("steps") or [])[-1].get("state") == "not_run")
+        states = [step.get("state") for step in (stopped.get("steps") or [])]
+        record("plan-state: the plan is still active with four steps done",
+               stopped.get("state") == "active" and states[:4] == ["done"] * 4,
+               f"state={stopped.get('state')} steps={states}")
+        record("plan-state: the fifth step reads not run, not waiting",
+               states[4:] == ["not_run"], f"steps={states}")
+
+        # The person continues: the go-ahead is the plan's own continuation
+        # text, which carries the fifth step, so the turn the server starts runs
+        # exactly that step.
+        status, started = api.json("POST",
+                                   f"/api/v1/chat/sessions/{session}/budgets/{budget_id}/continue", {})
+        if status != 200 or not started.get("turn_message_id"):
+            record("plan-state: continue the plan", False, f"POST {status} {started}")
+            return
+        record("plan-state: continue starts the plan's turn again", True,
+               f"turn {started.get('turn_message_id')}")
+        fifth = None
+        end = time.time() + 150
+        while time.time() < end and fifth is None:
+            succeeded = [item for item in session_tasks(api, session)
+                         if item.get("capability") == "text-to-3d" and item.get("state") == "SUCCEEDED"]
+            if len(succeeded) >= 5:
+                fifth = succeeded[-1]
+            else:
+                time.sleep(0.5)
+        record("plan-state: the continued turn ran the fifth step", fifth is not None,
+               f"task={(fifth or {}).get('id')}")
+        tasks = session_tasks(api, session)
+        record("plan-state: the first four steps were not redone",
+               len([item for item in tasks if item.get("capability") == "text-to-3d"]) == 5,
+               f"tasks {[(t.get('capability'), t.get('state')) for t in tasks]}")
+
+        done = _wait_plan(api, session, lambda budget: budget.get("state") == "completed")
+        record("plan-state: the plan reads completed once every step succeeded",
+               done.get("state") == "completed"
+               and all(step.get("state") == "done" for step in (done.get("steps") or [])),
+               f"state={done.get('state')} steps={[step.get('state') for step in (done.get('steps') or [])]}")
+
+        # A step of the same capability finds no budget left in the finished
+        # plan, so it waits for a person instead of running by budget.
+        status, _payload = _send_chat(api, session, {"content": "再来一步 " + _plan_step_marker("one more"),
+                                                     "creative_domain": "model-3d",
+                                                     "ai_model": MESHY_TEXT_TO_3D,
+                                                     "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+        if status not in (200, 201, 202):
+            record("plan-state: the next step is sent", False, f"send {status}")
+            return
+        card, pending = None, []
+        end = time.time() + 60
+        while time.time() < end and card is None:
+            pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+            # A step card carries the tool it would run; the plan card is the
+            # one that says kind=plan.
+            card = next((item for item in pending
+                         if item.get("kind") != "plan" and item.get("tool")), None)
+            if card is None:
+                time.sleep(0.5)
+        record("plan-state: a completed plan leaves the next step to the person",
+               card is not None,
+               f"pending={[(item.get('kind'), item.get('tool'), item.get('status')) for item in pending]}")
+        if card:
+            api.json("PUT", f"/api/v1/tasks/grants/{card['request_id']}", decision_body(api, "deny"))
+        record("plan-state: no extra task ran after the plan completed",
+               len([item for item in session_tasks(api, session) if item.get("capability") == "text-to-3d"]) == 5,
+               f"tasks {[(t.get('capability'), t.get('state')) for t in session_tasks(api, session)]}")
+    finally:
+        processes.stop(child)
+
+
 def scenario_plan_checkpoint(work, api, offerings):
     """#251: an approved budget plan stops after a failed checkpoint and the
     Agent revises it with the declared contingency, without a second approval."""
@@ -7902,7 +8094,7 @@ def scenario_asset_list_review(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,auto-approval,plan-checkpoint,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -7993,6 +8185,16 @@ def main():
         if "self-check" in selected:
             self_check_catalog = private_catalog(work, self_check=True, name="catalog-self-check.json")
             scenario_self_check(work, stack_binary, processes, self_check_catalog)
+        if "plan-state" in selected:
+            # #410: the plan's go-ahead is the last user message of its turn, so
+            # this stack's continuation text carries the fake marker of the step
+            # the plan continues with; the shipped text drives a real Agent.
+            plan_state_catalog = private_catalog(
+                work,
+                plan_continuation_message="继续计划 {title} " + _plan_step_marker("the fifth step"),
+                name="catalog-plan-state.json",
+            )
+            scenario_plan_state(work, stack_binary, processes, plan_state_catalog)
         if "faults" in selected:
             for scenario in [name for name in FAULTS if not args.faults or name in args.faults.split(",")]:
                 child, api = start_stack(processes, stack_binary, work, "fault-" + scenario, url_catalog, FAULT_KEYS.get(scenario, f"fake-{scenario}"))

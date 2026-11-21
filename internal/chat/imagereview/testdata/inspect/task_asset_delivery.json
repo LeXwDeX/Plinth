@@ -27,7 +27,7 @@
       "transparent_ratio": 0,
       "width": 128
     },
-    "rounds_remaining": 2,
+    "rounds_remaining": 5,
     "usage_check": {
       "checklist": "delivery",
       "checklist_text": "【2D 交付自检】对照用户要求和制作简报检查：主体是否正确、构图与画面比例、肢体与手部、文字与水印、与参考图或风格锁的一致性。先用 inspect_image 看确定性事实，再看图判断“像不像、对不对”；发现问题先修再交付。",

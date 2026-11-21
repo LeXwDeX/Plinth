@@ -10,11 +10,11 @@ import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { fetchCapabilityOfferings, type OfferingWire } from '@/lib/agent-offerings';
 import {
   budgetStateRole, budgetStateWithRole, budgetUnitTotals, budgetUnitsWith, budgetUsageText, stepEstimate,
-  type ProductionPlan, type SessionBudget,
+  type PlanStepStatus, type ProductionPlan, type ProductionPlanStep, type SessionBudget,
 } from '@/lib/chat/budget';
 import { priceTotalsAmountsText } from '@/lib/chat/approval-modes';
 import type { PriceTotal } from '@/lib/pricing';
-import { completedPlanSteps, planCandidateGroups, planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
+import { planStepProgress, type PlanTask } from '@/lib/chat/plan-progress';
 import { formatSchemaText, schemaCountMessage, schemaText, taskStatePresentation, type ProductSchema } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 
@@ -79,8 +79,19 @@ export interface PlanCardProps {
    * #403: a step of an approved plan that has no task can still get one (its turn still runs, or a decision it waits
    * for is open). When false such a step reads "not run" instead of "waiting to run". Read from the running-turn
    * projection of the session's messages; a plan that still waits for approval always reads "waiting".
+   *
+   * #410: only the fallback path reads this. When the server projected the steps
+   * (`progress.steps`) the card reads that result and ignores this flag.
    */
   stepsMayStillRun?: boolean;
+  /**
+   * #410: the plan is still active, its turn has ended and required steps are
+   * left. The card shows "stopped, N steps left" and, when this is given, a
+   * continue button that starts the plan's turn again. Without it (the top-bar
+   * summary) the card shows the same fact without an action.
+   */
+  onContinue?: () => void;
+  continueBusy?: boolean;
 }
 
 function capabilityLabel(schema: ReturnType<typeof useProductSchema>['schema'], id: string): string {
@@ -102,12 +113,29 @@ function planCheckLabel(schema: ProductSchema, id: string): string {
 }
 
 /**
+ * #410: one rendered plan step. `state` is the Task's own state when the caller
+ * paired one (an older server), and the server's step state otherwise; `label`
+ * is the Schema text for it, `taskId` names the Task the step ran when it has
+ * one.
+ */
+interface PlanRow {
+  step: ProductionPlanStep;
+  state: string;
+  label: string;
+  outcome: 'success' | 'failure' | null;
+  taskId: string;
+  task: PlanTask | null;
+  status: PlanStepStatus | null;
+}
+
+/**
  * #103: one production plan. While it waits for approval it lists the steps,
  * their models and quotes plus the correction capabilities it allows; once
  * approved the same card shows the live budget and each step's Task state.
  */
 export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, error = null, progress = null,
-  stepTotals = [], contingencyTotals = [], onCompareCandidates, onSelectCandidate, stepsMayStillRun = true }: PlanCardProps) {
+  stepTotals = [], contingencyTotals = [], onCompareCandidates, onSelectCandidate, stepsMayStillRun = true,
+  onContinue, continueBusy = false }: PlanCardProps) {
   const { schema } = useProductSchema();
   const text = (key: string) => schemaText(schema, key);
   const capabilities = useMemo(
@@ -126,23 +154,70 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
   // waits for that, not for a turn.
   const decided = progress !== null && budgetStateRole(schema, progress.state) !== 'pending';
   const mayStillRun = decided ? stepsMayStillRun : true;
+  // #410: the server pairs every step with the Task that ran it and the card
+  // only renders the result. A server that projected no steps (an older one, or
+  // one whose projection failed) keeps the browser's own pairing.
+  const serverStatuses = progress?.steps ?? [];
+  const useServerStatuses = serverStatuses.length === plan.steps.length;
   const stepProgress = useMemo(
-    () => planStepProgress(plan, tasks, decidedAt, mayStillRun),
-    [plan, tasks, decidedAt, mayStillRun],
+    () => (useServerStatuses ? [] : planStepProgress(plan, tasks, decidedAt, mayStillRun)),
+    [useServerStatuses, plan, tasks, decidedAt, mayStillRun],
   );
-  const isCompleteTask = (task: PlanTask) => taskStatePresentation(schema, task.state).outcome === 'success';
+  const rows: PlanRow[] = plan.steps.map((step, index) => {
+    const status = useServerStatuses ? serverStatuses[index] : null;
+    if (status) {
+      return {
+        step,
+        taskId: status.taskId,
+        state: status.state,
+        label: text(`ui.studio.plan.step_state.${status.state}`) || text('ui.studio.plan.state.unknown'),
+        outcome: status.state === 'done' ? 'success' : status.state === 'failed' ? 'failure' : null,
+        task: null,
+        status,
+      };
+    }
+    const entry = stepProgress[index];
+    const presentation = entry?.task ? taskStatePresentation(schema, entry.task.state) : null;
+    const state = entry?.task?.state ?? (entry?.notRun ? 'not_run' : 'pending');
+    return {
+      step,
+      taskId: entry?.task?.taskId ?? '',
+      state,
+      label: presentation
+        ? presentation.label
+        : text(entry?.notRun ? 'ui.studio.plan.step_state.not_run' : 'ui.studio.plan.step_state.pending'),
+      outcome: presentation?.outcome === 'success' ? 'success' : presentation?.outcome === 'failure' ? 'failure' : null,
+      task: entry?.task ?? null,
+      status: null,
+    };
+  });
   // #242: candidate steps are shown as their own parallel groups; every other
   // step keeps the ordinary ordered list.
-  const mainProgress = stepProgress.filter((entry) => (entry.step.candidateGroup ?? 0) <= 0);
-  const candidateGroups = planCandidateGroups(stepProgress, isCompleteTask);
+  const mainRows = rows.filter((row) => (row.step.candidateGroup ?? 0) <= 0);
+  const candidateGroups = useMemo(() => {
+    const groups: { group: number; rows: PlanRow[] }[] = [];
+    for (const row of rows) {
+      const group = row.step.candidateGroup ?? 0;
+      if (group <= 0) continue;
+      const last = groups[groups.length - 1];
+      if (last && last.group === group) last.rows.push(row);
+      else groups.push({ group, rows: [row] });
+    }
+    return groups;
+  }, [rows]);
   // #242: the heading counts every declared candidate, not the number of groups.
-  const candidateCount = candidateGroups.reduce((total, group) => total + group.entries.length, 0);
+  const candidateCount = candidateGroups.reduce((total, group) => total + group.rows.length, 0);
   // Every amount is listed per credit unit with its label; the card never adds units.
   const limits = progress ? budgetUnitTotals(progress.units, 'limit') : budgets;
   const reserved = progress ? budgetUnitsWith(progress.units, 'reserved') : [];
-  const done = progress
-    ? completedPlanSteps(stepProgress, isCompleteTask)
-    : 0;
+  const done = rows.filter((row) => row.outcome === 'success').length;
+  // #410: a plan is stopped when it may still spend, its turn has ended and
+  // required steps are left. An optional step never keeps a plan from being
+  // done, so it is not counted here.
+  const remaining = rows.filter((row) =>
+    !row.step.optional && (row.state === 'not_run' || row.state === 'failed')).length;
+  const stopped = progress !== null && budgetStateRole(schema, progress.state) === 'active'
+    && !stepsMayStillRun && remaining > 0;
   const modelName = (capability: string, offeringId: string): string => {
     if (!offeringId) return text('ui.studio.plan.model_unspecified');
     return offeringsByCapability?.[capability]?.find((offering) => offering.id === offeringId)?.model_name || offeringId;
@@ -193,45 +268,44 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
           ) : null}
         </p>
       ) : null}
-      {mainProgress.length > 0 ? (
+      {mainRows.length > 0 ? (
         <ol className="flex flex-col gap-0.5" aria-label={text('ui.studio.plan.step')}>
-          {mainProgress.map((entry, index) => {
-            const state = entry.task ? taskStatePresentation(schema, entry.task.state) : null;
-            const estimate = stepEstimate(entry.step);
+          {mainRows.map((row, index) => {
+            const estimate = stepEstimate(row.step);
             return (
               <li
-                key={`${index}-${entry.step.capability}-${entry.step.offeringId}`}
+                key={`${index}-${row.step.capability}-${row.step.offeringId}`}
                 className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2"
                 data-testid="studio-plan-step"
-                data-capability={entry.step.capability}
-                data-state={entry.task?.state ?? (entry.notRun ? 'not_run' : 'pending')}
+                data-capability={row.step.capability}
+                data-state={row.state}
               >
                 <span className="tabular-nums text-muted-foreground">{index + 1}.</span>
-                <HintTooltip name={`${capabilityLabel(schema, entry.step.capability)} · ${modelName(entry.step.capability, entry.step.offeringId)}`} className="block min-w-0 max-w-full">
+                <HintTooltip name={`${capabilityLabel(schema, row.step.capability)} · ${modelName(row.step.capability, row.step.offeringId)}`} className="block min-w-0 max-w-full">
                   <span className="block truncate">
-                    <span>{capabilityLabel(schema, entry.step.capability)}</span>
-                    <span className="text-muted-foreground"> · {modelName(entry.step.capability, entry.step.offeringId)}</span>
+                    <span>{capabilityLabel(schema, row.step.capability)}</span>
+                    <span className="text-muted-foreground"> · {modelName(row.step.capability, row.step.offeringId)}</span>
                   </span>
                 </HintTooltip>
                 <span className="flex shrink-0 items-baseline gap-1.5 tabular-nums text-muted-foreground">
                   {estimate ? (
                     <span>{formatSchemaText(text('ui.studio.plan.estimated'), { amount: priceTotalsAmountsText(schema, [estimate]) })}</span>
                   ) : null}
-                  <span className={cn('text-[11px]', state?.outcome === 'success' && 'text-success', state?.outcome === 'failure' && 'text-destructive')}>
-                    {state ? state.label : text(entry.notRun ? 'ui.studio.plan.step_not_run' : 'ui.studio.plan.step_pending')}
+                  <span className={cn('text-[11px]', row.outcome === 'success' && 'text-success', row.outcome === 'failure' && 'text-destructive')}>
+                    {row.label}
                   </span>
                 </span>
-                {entry.step.purposeBudgetNote ? (
+                {row.step.purposeBudgetNote ? (
                   // #129: the server says which values of this step are over the purpose's budget.
                   <p className="col-start-2 col-end-4 text-[11px] text-warning [overflow-wrap:anywhere]" data-testid="studio-plan-step-budget-note">
-                    {entry.step.purposeBudgetNote}
+                    {row.step.purposeBudgetNote}
                   </p>
                 ) : null}
-                {entry.step.check ? (
+                {row.step.check ? (
                   // #246: the Schema checkpoint after this step, repeated by the
                   // approved continuation before the next step or delivery.
                   <p className="col-start-2 col-end-4 text-[11px] text-muted-foreground" data-testid="studio-plan-step-check">
-                    {formatSchemaText(schemaText(schema, 'ui.studio.plan.checkpoint'), { check: checkpointLabel(schema, entry.step.check) })}
+                    {formatSchemaText(schemaText(schema, 'ui.studio.plan.checkpoint'), { check: checkpointLabel(schema, row.step.check) })}
                   </p>
                 ) : null}
               </li>
@@ -247,8 +321,7 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
           {candidateGroups.map((group) => {
             // #242: only a succeeded candidate can be compared or opened; a
             // running or failed one is still listed with its own state.
-            const finished = group.entries.flatMap((entry) =>
-              entry.task && isCompleteTask(entry.task) ? [entry.task] : []);
+            const finished = group.rows.filter((row) => row.outcome === 'success' && row.taskId !== '');
             const canCompare = onCompareCandidates !== undefined && finished.length >= 2;
             const canSelect = onSelectCandidate !== undefined && finished.length > 0;
             return (
@@ -259,29 +332,28 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                 data-group={group.group}
               >
                 <ol className="flex flex-col gap-0.5">
-                  {group.entries.map((entry, index) => {
-                    const state = entry.task ? taskStatePresentation(schema, entry.task.state) : null;
-                    const estimate = stepEstimate(entry.step);
+                  {group.rows.map((row, index) => {
+                    const estimate = stepEstimate(row.step);
                     return (
                       <li
-                        key={`${group.group}-${index}-${entry.step.offeringId}`}
+                        key={`${group.group}-${index}-${row.step.offeringId}`}
                         className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-2"
                         data-testid="studio-plan-candidate"
-                        data-state={entry.task?.state ?? (entry.notRun ? 'not_run' : 'pending')}
+                        data-state={row.state}
                       >
                         <span className="tabular-nums text-muted-foreground">
-                          {formatSchemaText(text('ui.studio.plan.candidate_n'), { index: entry.step.candidateIndex ?? index + 1 })}
+                          {formatSchemaText(text('ui.studio.plan.candidate_n'), { index: row.step.candidateIndex ?? index + 1 })}
                         </span>
                         <span className="min-w-0 truncate">
-                          {capabilityLabel(schema, entry.step.capability)}
-                          <span className="text-muted-foreground"> · {modelName(entry.step.capability, entry.step.offeringId)}</span>
+                          {capabilityLabel(schema, row.step.capability)}
+                          <span className="text-muted-foreground"> · {modelName(row.step.capability, row.step.offeringId)}</span>
                         </span>
                         <span className="flex shrink-0 items-baseline gap-1.5 tabular-nums text-muted-foreground">
                           {estimate ? (
                             <span>{formatSchemaText(text('ui.studio.plan.estimated'), { amount: priceTotalsAmountsText(schema, [estimate]) })}</span>
                           ) : null}
-                          <span className={cn('text-[11px]', state?.outcome === 'success' && 'text-success', state?.outcome === 'failure' && 'text-destructive')}>
-                            {state ? state.label : text(entry.notRun ? 'ui.studio.plan.step_not_run' : 'ui.studio.plan.step_pending')}
+                          <span className={cn('text-[11px]', row.outcome === 'success' && 'text-success', row.outcome === 'failure' && 'text-destructive')}>
+                            {row.label}
                           </span>
                         </span>
                       </li>
@@ -295,21 +367,21 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => onCompareCandidates!(finished.map((task) => task.taskId))}
+                        onClick={() => onCompareCandidates!(finished.map((row) => row.taskId))}
                         data-testid="studio-plan-compare-candidates"
                       >
                         {text('ui.studio.plan.compare_candidates')}
                       </Action>
                     ) : null}
-                    {canSelect ? finished.map((task) => (
+                    {canSelect ? finished.map((row) => (
                       <Action
-                        key={task.taskId}
+                        key={row.taskId}
                         type="button"
                         size="sm"
                         variant="ghost"
-                        onClick={() => onSelectCandidate!(task.taskId)}
+                        onClick={() => onSelectCandidate!(row.taskId)}
                         data-testid="studio-plan-select-candidate"
-                        data-task-id={task.taskId}
+                        data-task-id={row.taskId}
                       >
                         {text('ui.studio.plan.select_candidate')}
                       </Action>
@@ -375,6 +447,27 @@ export function PlanCard({ plan, budgets = [], tasks, onDecide, busy = false, er
           : text('ui.studio.plan.corrections_none')}
       </p>
       {error ? <p role="alert" className="text-destructive" data-testid="studio-plan-error">{error}</p> : null}
+      {stopped ? (
+        // #410: the plan may still spend, its turn has ended and required steps
+        // are left. This is a display state, not a stored one: continuing
+        // starts the plan's turn again and the badge goes back to running.
+        <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-warning" data-testid="studio-plan-stopped">
+          <span>{formatSchemaText(text('ui.studio.plan.stopped'), { count: remaining })}</span>
+          {onContinue ? (
+            <Action
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={continueBusy}
+              loading={continueBusy}
+              onClick={onContinue}
+              data-testid="studio-plan-continue"
+            >
+              {text('ui.studio.plan.continue')}
+            </Action>
+          ) : null}
+        </p>
+      ) : null}
       {onDecide ? (
         <footer className="flex items-center gap-1.5">
           <Action type="button" size="sm" disabled={busy} loading={busy} onClick={() => onDecide(true)} data-testid="studio-plan-approve">
