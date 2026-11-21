@@ -492,9 +492,15 @@ func refusedNativeConversion(request generation.ObserveRequest, run *nativeConve
 	return obs
 }
 
-func (a *Adapter) observeNativeConversions(ctx context.Context, request generation.ObserveRequest, options providerOptions, run *nativeConversionRun, base generation.Observation) (generation.Observation, error) {
+func (a *Adapter) observeNativeConversions(ctx context.Context, request generation.ObserveRequest, options providerOptions, run *nativeConversionRun, base generation.Observation) (observation generation.Observation, err error) {
 	c := options.NativeConversion
 	s := run.ledger
+	a.touchPool(request.Offering, request.AttemptID)
+	defer func() {
+		if err == nil && terminalPhase(observation.Phase) {
+			a.releasePool(request.Offering, request.AttemptID)
+		}
+	}()
 	if base.Phase != generation.UpstreamCompleted {
 		if len(s.Conversions) > 0 && (base.Phase == generation.UpstreamAccepted || base.Phase == generation.UpstreamRunning) {
 			return generation.Observation{}, nativeProcessingProtocolError()
@@ -520,7 +526,6 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 	if s.Conversions == nil {
 		s.Conversions = map[string]conversionItem{}
 		s.ConversionRequests = map[string]json.RawMessage{}
-		s.ProgressUnits = nativeConversionProgressUnits(len(c.Formats))
 	}
 	names := nativeFormatNames(c)
 	// Poll every in-flight child (bounded concurrency, stable order). A child
@@ -580,7 +585,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 	}
 	if allFormatsDone(names, s.Conversions) {
 		// Every required format is converted: refresh below.
-	} else if inflight := countSubmitted(names, s.Conversions); inflight < conversionConcurrency(options) {
+	} else if inflight := countSubmitted(names, s.Conversions); inflight < a.conversionConcurrency(options) {
 		if format, ok := nextConversionDispatch(names, s.Conversions); ok {
 			if _, ok := generation.DispatchCheckpointerFromContext(ctx); !ok {
 				return generation.Observation{}, failure(generation.FailureRejected, false, "Tripo 私有转换缺少持久执行派发许可")
@@ -595,13 +600,25 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 			if s.ConversionSource != nil && *s.ConversionSource != binding {
 				return generation.Observation{}, failure(generation.FailureIntegrity, false, "Tripo 处理产物字节与冻结转换来源不一致")
 			}
-			s.ConversionSource = &binding
 			body, err := nativeConversionBody(request.Offering, c, request.Input, source.Locator, format)
 			if err != nil {
 				return generation.Observation{}, err
 			}
+			previousRequest, hadRequest := s.ConversionRequests[format]
+			// Fixed order (C1): take the upstream slot, then change the entry
+			// state, then take the dispatch permit, then send. A full pool
+			// changes nothing and returns a running observation with the upstream
+			// queue clock.
+			slot, acquired, wait := a.acquirePool(ctx, request.Offering, request.AttemptID)
+			if !acquired {
+				return poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), wait), nil
+			}
+			if s.ProgressUnits == 0 {
+				s.ProgressUnits = nativeConversionProgressUnits(len(c.Formats))
+			}
+			s.ConversionSource = &binding
 			s.ConversionRequests[format], _ = json.Marshal(body)
-			previous := s.Conversions[format]
+			previous, existed := s.Conversions[format]
 			attempts := previous.RetryAttempts
 			if previous.Status == conversionItemRetryPending || previous.Status == conversionItemRateLimited {
 				attempts++
@@ -618,10 +635,36 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 			}
 			permit, err := generation.PrivateDispatchPermit(ctx, generation.DispatchIntent{Bytes: run.encode()})
 			if err != nil {
+				slot.Release()
 				return generation.Observation{}, err
 			}
 			var raw json.RawMessage
 			if err := a.client.DoJSON(ctx, http.MethodPost, options.ConvertEndpoint, body, key, &raw, true); err != nil {
+				// The account pool is full (code 2000) and this path is gated by
+				// the pool: restore the entry, release the slot and queue again
+				// without spending the retry budget (C4). Without a pool the
+				// historical per-format budget below applies.
+				if a.poolEnabled() {
+					if retryAfter, full := poolFullRetryAfter(err); full && permit != nil {
+						permit.Result = generation.DispatchResultNotDispatched
+						restoreConversionItem(s.Conversions, format, previous, existed)
+						if hadRequest {
+							s.ConversionRequests[format] = previousRequest
+						} else {
+							delete(s.ConversionRequests, format)
+						}
+						if len(s.Conversions) == 0 {
+							// Nothing was ever dispatched: keep the ledger empty so the
+							// next round starts from a clean checkpoint.
+							s.ConversionSource = nil
+							s.ProgressUnits = 0
+						}
+						slot.Release()
+						obs := poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), retryAfter)
+						obs.Dispatch = permit
+						return obs, nil
+					}
+				}
 				if retryAfter, refused := explicitRateLimit(err); refused && permit != nil && s.ProgressUnits != 0 {
 					var provider *generation.ProviderError
 					errors.As(err, &provider)
@@ -668,6 +711,8 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 				RetryAttempts:    attempts,
 				Attempts:         previous.Attempts,
 			}
+			// The slot now belongs to this attempt's children (C2).
+			a.handoffPool(request.Offering, request.AttemptID)
 			obs := nativeConversionRunning(request, run, base, len(c.Formats))
 			obs.Dispatch = permit
 			return obs, nil

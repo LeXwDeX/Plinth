@@ -23,6 +23,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/httpjson"
 	"github.com/LeXwDeX/Plinth/internal/providers/uploadname"
+	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -51,6 +52,12 @@ type Config struct {
 	// connection bounds by time, #460). Empty means time.Now; tests inject one
 	// so a five-minute bound is a test step rather than five minutes of waiting.
 	Clock func() time.Time
+	// Pool is the optional process-wide upstream concurrency pool (#468). Nil
+	// disables queueing and keeps the previous behavior.
+	Pool *upstreampool.Manager
+	// PoolID names the pool this Adapter acquires slots from; empty disables
+	// queueing even when Pool is set.
+	PoolID string
 }
 
 type Adapter struct {
@@ -63,6 +70,8 @@ type Adapter struct {
 	nativeSourceClient *http.Client
 	scratchDir         string
 	clock              func() time.Time
+	pool               *upstreampool.Manager
+	poolID             string
 	// unknownPolls counts consecutive polls per remote task that returned a
 	// status word with a declared max_consecutive bound (see observation).
 	// unknownSince is when the current run of a status word with a declared
@@ -131,6 +140,8 @@ func New(config Config) (*Adapter, error) {
 		nativeSourceClient: nativeSourceClient,
 		scratchDir:         strings.TrimSpace(config.ScratchDir),
 		clock:              config.Clock,
+		pool:               config.Pool,
+		poolID:             strings.TrimSpace(config.PoolID),
 	}, nil
 }
 
@@ -373,7 +384,18 @@ func privateDispatchPermit(
 func (a *Adapter) Observe(
 	ctx context.Context,
 	request generation.ObserveRequest,
-) (generation.Observation, error) {
+) (observation generation.Observation, err error) {
+	// Public jobs in the shared pool are counted, never blocked (C3): Start
+	// registered them, every Observe refreshes them, and a terminal observation
+	// releases them. The private conversion paths below do their own Acquire.
+	if a.poolEnabled() && poolCountsPublicJob(request.Offering) {
+		a.touchPool(request.Offering, request.AttemptID)
+		defer func() {
+			if err == nil && terminalPhase(observation.Phase) {
+				a.releasePool(request.Offering, request.AttemptID)
+			}
+		}()
+	}
 	if smartSegmentProtocol(request.Offering) {
 		return a.observeSmartSegment(ctx, request)
 	}

@@ -27,6 +27,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers"
 	"github.com/LeXwDeX/Plinth/internal/providers/tripo"
+	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 )
 
 // ───────────────────────── §7.4 新身份 + 新错误/状态词汇零代码证明 ─────────────────────────
@@ -907,5 +908,48 @@ func TestSameProtocolConnectionsIsolateLegacyOfferingRoutes(t *testing.T) {
 	foreign.ProviderOptions = json.RawMessage(`{"model":"v3.1-20260211"}`)
 	if _, err := adapter.Start(context.Background(), generation.StartRequest{Offering: foreign, Input: json.RawMessage(`{"prompt":"foreign"}`), SubmissionKey: "foreign-legacy"}); err == nil {
 		t.Fatal("foreign connection must not restore another adapter's legacy route")
+	}
+}
+
+// #468: a Provider connection's declared pool limit comes from its environment
+// variable when set (dev-test 3, formal-test 2), else the declared default (5).
+func TestUpstreamPoolLimitEnvironmentOverride(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	var tripo catalog.ProviderConnectionSchema
+	for _, connection := range application.Runtime.ProviderConnections {
+		if connection.Protocol == "tripo" {
+			tripo = connection
+		}
+	}
+	if tripo.Concurrency == nil || tripo.Concurrency.Pools["model-processing"].Default != 5 {
+		t.Fatalf("tripo connection does not declare the model-processing pool: %+v", tripo.Concurrency)
+	}
+	offerings := offeringsForAdapter(product.List(""), tripo.AdapterKey)
+	limit := func() int {
+		pool := upstreampool.New(upstreampool.Options{})
+		registerUpstreamPools(pool, tripo, offerings)
+		for _, stat := range pool.Stats().Pools {
+			if stat.Pool == tripo.Concurrency.Pools["model-processing"].LimitEnv ||
+				stat.Connection == tripo.AdapterKey {
+				return stat.Limit
+			}
+		}
+		t.Fatalf("pool not registered: %+v", pool.Stats())
+		return 0
+	}
+	if got := limit(); got != 5 {
+		t.Fatalf("default limit = %d, want 5", got)
+	}
+	t.Setenv("TRIPO_CONVERSION_CONCURRENCY", "3")
+	if got := limit(); got != 3 {
+		t.Fatalf("environment limit = %d, want 3", got)
+	}
+	t.Setenv("TRIPO_CONVERSION_CONCURRENCY", "not-a-number")
+	if got := limit(); got != 5 {
+		t.Fatalf("invalid environment limit = %d, want the default 5", got)
 	}
 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.456-460.1",
+    "revision": "2026-11-22.460-468.1",
     "terminology": {
       "user_facing": [
         {
@@ -1196,6 +1196,7 @@
           "auth_prefix": "Bearer ",
           "request_timeout_seconds": 1800,
           "result_refetch": {"mode": "observe", "retention_hours": 168},
+          "concurrency": {"pools": {"model-processing": {"limit_env": "TRIPO_CONVERSION_CONCURRENCY", "default": 5}}},
           "capabilities": [
             "text-to-3d",
             "image-to-3d",
@@ -10236,6 +10237,7 @@
           "interrupted": "⚠️ 该生成任务已中断。请重新描述需求。",
           "interrupted_prompt": "⚠️ 该生成任务已中断 (prompt: {prompt})。请重新描述需求。",
           "generation_failed": "生成失败",
+          "generation_pending": "任务仍在进行或排队中，请稍后继续查看；任务 ID：{task_id}",
           "generation_failed_by_class": {
             "upstream_queue_timeout": "这一步在服务商的队列里等待太久（超过上游排队等待上限），平台已停止等待，任务记为失败。服务商可能仍会执行并扣除积分，所以系统没有自动重新提交。请如实告诉用户：上游排队过久，可能已经扣费，结果未知。先用 get_task 查看这个任务的最新状态，不要自行重新提交；是否重新生成由用户决定，重新生成会再次计费。",
             "insufficient_balance": "该模型服务商的账户余额不足、已欠费，或没有可用的 API 订阅（未开通，或套餐不含 API 权限），这一步没有执行。请联系管理员处理",
@@ -21026,6 +21028,7 @@
             "chat.presentation.messages.interrupted": "⚠️ This generation task was interrupted. Please describe your request again.",
             "chat.presentation.messages.interrupted_prompt": "⚠️ This generation task was interrupted (prompt: {prompt}). Please describe your request again.",
             "chat.presentation.messages.generation_failed": "Generation failed",
+            "chat.presentation.messages.generation_pending": "This task is still running or queued; check back later. Task ID: {task_id}",
             "chat.presentation.messages.generation_failed_ambiguous": "The provider accepted this step, or may have, but the platform could not confirm the result (for example the job timed out or the submission outcome is unknown); the provider may already have run it and charged credits, so it was not resubmitted automatically. Tell the user plainly that the result is unknown and that credits may already have been charged. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout": "This step waited too long in the provider's queue (past the upstream queue wait limit), so the platform stopped waiting and marked the task failed. The provider may still run it and charge credits, so it was not resubmitted automatically. Tell the user plainly that it waited too long in the provider's queue, that credits may already have been charged and that the result is unknown. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, or the account has no usable API subscription (not activated, or a plan without API access), so this step was not run. Please contact an administrator",

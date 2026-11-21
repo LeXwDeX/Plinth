@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 )
 
 // rateLimitPermit records every private dispatch intent. Like the kernel, it
@@ -388,5 +389,62 @@ func TestNativeExportStagesWithRefusalsNeverRegress(t *testing.T) {
 				step()
 			}
 		}
+	}
+}
+
+// #468: a full account pool (code 2000) on a native export is not a
+// per-format rate limit. The adapter releases the slot, keeps the export
+// ledger, waits for Retry-After and queues again without spending a retry.
+func TestNativeExportFullPoolQueuesWithoutBudget(t *testing.T) {
+	backend := &rateLimitServer{answer: func(n int, w http.ResponseWriter) bool {
+		if n == 1 {
+			rateLimited(w, "7")
+			return true
+		}
+		return false
+	}}
+	server := backend.start(t)
+	pool := upstreampool.New(upstreampool.Options{})
+	pool.Register("tripo.v3", TripoPoolName, upstreampool.PoolConfig{Limit: 5})
+	adapter := rateLimitAdapter(t, server)
+	adapter.pool = pool
+	adapter.poolID = TripoPoolName
+	r := nativeDeliveryFixture(generation.Rigging)
+	p := &rateLimitPermit{}
+	ctx := generation.WithDispatchCheckpointer(context.Background(), p)
+	accepted, err := adapter.Start(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.settle(t, accepted)
+	q := rigObserve(r, accepted)
+
+	refused, err := adapter.Observe(ctx, q)
+	if err != nil {
+		t.Fatalf("full pool became an error: %v", err)
+	}
+	if refused.Phase != generation.UpstreamRunning || refused.Failure != nil || refused.Queue == nil {
+		t.Fatalf("full pool did not return a queued running observation: %+v", refused)
+	}
+	if refused.Dispatch == nil || refused.Dispatch.Result != generation.DispatchResultNotDispatched {
+		t.Fatalf("full pool did not settle the permit as not dispatched: %+v", refused.Dispatch)
+	}
+	state := conversionState(t, refused.Opaque)
+	item := state.Conversions["FBX"]
+	if item.Status == "rate_limited" || item.RateLimitRetries != 0 {
+		t.Fatalf("full pool spent a per-format retry: %+v", item)
+	}
+	p.settle(t, refused)
+
+	q.Opaque = refused.Opaque
+	submitted, err := adapter.Observe(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.Dispatch == nil || submitted.Dispatch.Result != generation.DispatchResultDispatched || len(backend.converts) != 2 {
+		t.Fatalf("the export did not resume after the pool freed: %+v converts=%v", submitted, backend.converts)
+	}
+	if got := conversionState(t, submitted.Opaque).Conversions["FBX"]; got.Status != conversionItemSubmitted || got.RateLimitRetries != 0 {
+		t.Fatalf("resumed child state %+v", got)
 	}
 }

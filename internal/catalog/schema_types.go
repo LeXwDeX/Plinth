@@ -2390,6 +2390,26 @@ type ProviderConnectionSchema struct {
 	// fetched again from its upstream job after the Task failed to store it
 	// (#295). Absent: the provider's results cannot be fetched again.
 	ResultRefetch *schemacontract.ResultRefetchPolicy `json:"result_refetch,omitempty"`
+	// Concurrency declares the connection's upstream concurrency pools (#468).
+	// A pool is enabled by registering it here; a dispatch path that asks for a
+	// registered pool queues when it is full, and one that asks for an
+	// unregistered pool is never queued.
+	Concurrency *ProviderConcurrencySchema `json:"concurrency,omitempty"`
+}
+
+// ProviderConcurrencySchema declares named upstream concurrency pools shared by
+// a connection's dispatch paths.
+type ProviderConcurrencySchema struct {
+	Pools map[string]ProviderPoolSchema `json:"pools,omitempty"`
+}
+
+// ProviderPoolSchema is one upstream pool's limit declaration. LimitEnv names
+// an environment variable that overrides Default per deployment (the stacks
+// share one upstream account, so each sets its own quota, #468); Default is the
+// official default used when the variable is unset.
+type ProviderPoolSchema struct {
+	LimitEnv string `json:"limit_env,omitempty"`
+	Default  int    `json:"default,omitempty"`
 }
 
 // LegacyMigrationRuntimeSchema 只服务一次性旧生产数据迁移。它不进入公开
@@ -6311,10 +6331,15 @@ type ChatMessageTexts struct {
 	Interrupted               string `json:"interrupted"`
 	InterruptedPrompt         string `json:"interrupted_prompt"`
 	GenerationFailed          string `json:"generation_failed"`
-	GenerationError           string `json:"generation_error"`
-	SummaryFailed             string `json:"summary_failed"`
-	NoResult                  string `json:"no_result"`
-	UnknownError              string `json:"unknown_error"`
+	// GenerationPending is the tool result when the Agent's wait deadline passed
+	// while the Task was still running or queued upstream (#468, #460 review 4):
+	// the turn reports that it is still in progress instead of a failure, with
+	// the Task ID ({task_id}) so the Agent can tell the person to keep waiting.
+	GenerationPending string `json:"generation_pending,omitempty"`
+	GenerationError   string `json:"generation_error"`
+	SummaryFailed     string `json:"summary_failed"`
+	NoResult          string `json:"no_result"`
+	UnknownError      string `json:"unknown_error"`
 	// AgentImagesUnsupported replaces UnknownError when the Agent model
 	// refused a request that carried pictures (#253).
 	AgentImagesUnsupported string `json:"agent_images_unsupported"`

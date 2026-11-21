@@ -287,6 +287,9 @@ type task struct {
 	// convert is the documented parameters of a convert request (convert.go),
 	// echoed under input by the task poll and deciding what the export carries.
 	convert map[string]any
+	// done marks a task whose last poll answered a terminal status. The account
+	// concurrency pool (#468) counts tasks that are not done.
+	done bool
 }
 
 type handler struct {
@@ -754,6 +757,13 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			t.failCode, t.failMessage = 3000, "Fake injected task failure"
 		}
 		h.mu.Lock()
+		if h.env.AccountConcurrencyLimit > 0 && h.inflightLocked() >= h.env.AccountConcurrencyLimit {
+			h.mu.Unlock()
+			// The account's shared pool is full: the same 429 code 2000 and
+			// Retry-After the rate-limits page documents (#468).
+			h.render(w, r, fakeupstream.ScenarioConcurrencyLimit)
+			return
+		}
 		h.tasks[t.id] = t
 		h.mu.Unlock()
 		if t.scenario == fakeupstream.ScenarioLostResponse {
@@ -818,6 +828,18 @@ func (h *handler) urlSource(raw string) *task {
 	return nil
 }
 
+// inflightLocked counts tasks that have not reached a terminal poll. The
+// caller holds h.mu.
+func (h *handler) inflightLocked() int {
+	count := 0
+	for _, t := range h.tasks {
+		if !t.done {
+			count++
+		}
+	}
+	return count
+}
+
 func (h *handler) lookup(id string) *task {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -851,7 +873,6 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	t.polls++
 	n := t.polls
-	h.mu.Unlock()
 	status := statusSuccess
 	switch {
 	case n <= h.env.QueuedPolls:
@@ -863,6 +884,10 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 	case t.failCode != 0:
 		status = statusFailed
 	}
+	if status == statusSuccess || status == statusFailed || status == statusCancelled || status == statusUnknown {
+		t.done = true
+	}
+	h.mu.Unlock()
 	writeJSON(w, http.StatusOK, h.pollBody(r, t, status))
 }
 

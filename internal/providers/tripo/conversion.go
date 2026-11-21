@@ -171,6 +171,9 @@ func (a *Adapter) startConversion(
 	if response.Data.TaskID == "" {
 		return generation.Observation{}, submissionUnknown("Tripo 转换响应缺少 task_id")
 	}
+	// A public conversion is a pool job: count it without blocking (C3). Its
+	// terminal observation releases the slot.
+	a.readoptPool(request.Offering, request.AttemptID)
 	return generation.Observation{
 		Phase:     generation.UpstreamAccepted,
 		Job:       &generation.UpstreamJob{ProviderID: request.Offering.ProviderID, RemoteID: response.Data.TaskID},
@@ -420,6 +423,17 @@ func conversionConcurrency(options providerOptions) int {
 	return 1
 }
 
+// conversionConcurrency is the Adapter's effective per-Task child concurrency.
+// When an upstream pool is registered, one attempt holds one slot, so the Task
+// keeps at most one child in flight: the account-wide limit then bounds the sum
+// across Tasks instead of being multiplied by every Task's declared fan-out.
+func (a *Adapter) conversionConcurrency(options providerOptions) int {
+	if a.poolEnabled() {
+		return 1
+	}
+	return conversionConcurrency(options)
+}
+
 // conversionRetryBackoff is the wait before the next attempt of a private
 // child: 1, 2, 4… seconds, capped at 32 s (the official rate-limits page).
 // attempt is the 1-based number of the attempt being scheduled.
@@ -582,6 +596,7 @@ func (a *Adapter) observePostSuccessConversion(
 			"Tripo Offering 缺少 observe_endpoint",
 		)
 	}
+	a.touchPool(request.Offering, request.AttemptID)
 	state := parsePostSuccessState(request.Opaque)
 	selections := frozenConversionSelections(request.Offering, request.Input)
 	base := generation.Observation{
@@ -680,7 +695,7 @@ func (a *Adapter) observePostSuccessConversion(
 	//    的独立已授权转换优先于未兑现重发（A1 整改，resources-review
 	//    REJECT）：某个格式的本地下载永久失败不得占据每一轮观察、饿死其余
 	//    尚未派发的选中格式；重发只在全部选中格式都已开始之后进行。
-	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < conversionConcurrency(options) {
+	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < a.conversionConcurrency(options) {
 		if format, ok := nextConversionDispatch(selections, state.Conversions); ok {
 			if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
 				// 未知/超预算/缺同意：零 Checkpoint、零发送；剩余格式 denied。
@@ -695,10 +710,23 @@ func (a *Adapter) observePostSuccessConversion(
 				}
 				return a.postSuccessCompletion(base, request, state, selections), nil
 			}
-			previous := state.Conversions[format]
+			previous, existed := state.Conversions[format]
 			extras, err := conversionExtras(request.Offering, options, request.Input, format)
 			if err != nil {
 				return generation.Observation{}, err
+			}
+			// Fixed order (C1): take the upstream slot, then change the entry
+			// state, then take the dispatch permit, then send. A full pool
+			// changes nothing and returns a running observation with the
+			// upstream queue clock.
+			slot, acquired, wait := a.acquirePool(ctx, request.Offering, request.AttemptID)
+			if !acquired {
+				queued := base
+				queued.Phase = generation.UpstreamRunning
+				queued.Progress = 50
+				queued.DedupeKey = privateDedupeKey("convert", format, "pool-queued", strconv.Itoa(len(state.Conversions)))
+				queued.Opaque = encodePostSuccessState(state)
+				return poolQueueObservation(queued, wait), nil
 			}
 			// The retry budget is spent when the resubmission is accepted, not
 			// when it is planned: a 429 refusal never reached the upstream.
@@ -729,10 +757,29 @@ func (a *Adapter) observePostSuccessConversion(
 			if err != nil {
 				// ErrDispatchPending 等失败：零发送；返回错误由内核有界重排
 				//（下一轮按 1) 保守 abandoned）。
+				slot.Release()
 				return generation.Observation{}, err
 			}
 			remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
 			if err != nil {
+				// The account pool is full (code 2000) and this path is gated by
+				// the pool: restore the entry, release the slot and queue again
+				// without spending the retry budget (C4). Without a pool the
+				// historical per-format budget below applies.
+				if a.poolEnabled() {
+					if retryAfter, full := poolFullRetryAfter(err); full && permit != nil {
+						permit.Result = generation.DispatchResultNotDispatched
+						restoreConversionItem(state.Conversions, format, previous, existed)
+						slot.Release()
+						queued := base
+						queued.Phase = generation.UpstreamRunning
+						queued.Progress = 50
+						queued.DedupeKey = privateDedupeKey("convert", format, "pool-refused", strconv.Itoa(len(state.Conversions)))
+						queued.Opaque = encodePostSuccessState(state)
+						queued.Dispatch = permit
+						return poolQueueObservation(queued, retryAfter), nil
+					}
+				}
 				// 明确的 HTTP 429 是上游拒绝（未受理）：以 not_dispatched 结算
 				// 许可，按 Retry-After 或退避稍后以新许可重发同一格式；预算用尽
 				// 时该格式以确定失败结束。
@@ -756,6 +803,8 @@ func (a *Adapter) observePostSuccessConversion(
 				// 保守 abandoned；本轮返回错误（内核有界重排，不重发）。
 				return generation.Observation{}, err
 			}
+			// The slot now belongs to this attempt's children (C2).
+			a.handoffPool(request.Offering, request.AttemptID)
 			state.Conversions[format] = conversionItem{
 				Status:           conversionItemSubmitted,
 				RemoteID:         remoteID,
@@ -860,6 +909,8 @@ func (a *Adapter) postSuccessCompletion(
 	state postSuccessState,
 	selections []string,
 ) generation.Observation {
+	// The post-success run is over: free the attempt's upstream slot.
+	a.releasePool(request.Offering, request.AttemptID)
 	base.Phase = generation.UpstreamCompleted
 	base.Progress = 100
 	base.DedupeKey = "post-success:" + string(request.AttemptID) + ":" + strconv.Itoa(len(state.Conversions))

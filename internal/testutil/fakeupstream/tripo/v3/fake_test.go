@@ -1059,3 +1059,34 @@ func TestUploadFailureScenario(t *testing.T) {
 		t.Fatalf("plain upload status = %d, want 200", response2.StatusCode)
 	}
 }
+
+// #468: the account concurrency pool is shared by generation and conversion
+// jobs. When it is full, task creation answers 429 code 2000 with Retry-After;
+// a job that reaches a terminal poll frees its slot.
+func TestAccountConcurrencyPoolRefusesCreationWhenFull(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: 1})
+	first := f.create("/generation/text-to-model", textBody(), key)
+	status, header, body := f.do(http.MethodPost, "/generation/text-to-model", key, textBody())
+	if status != http.StatusTooManyRequests || header.Get("Retry-After") == "" ||
+		field(t, body, "code").(float64) != 2000 {
+		t.Fatalf("full pool = %d %v %v", status, header, body)
+	}
+	f.finish(first, key)
+	second := f.create("/generation/text-to-model", textBody(), key)
+	if second == "" {
+		t.Fatal("creation still refused after the first job finished")
+	}
+}
+
+func TestAccountConcurrencyPoolIsSharedWithConversions(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: 1})
+	parent := f.create("/generation/text-to-model", textBody(), key)
+	if status, _, body := f.do(http.MethodPost, "/models/convert", key, map[string]any{"input": parent, "format": "GLTF"}); status != http.StatusTooManyRequests ||
+		field(t, body, "code").(float64) != 2000 {
+		t.Fatalf("convert under a full pool = %d %v", status, body)
+	}
+	f.finish(parent, key)
+	if status, _, body := f.do(http.MethodPost, "/models/convert", key, map[string]any{"input": parent, "format": "GLTF"}); status != http.StatusOK {
+		t.Fatalf("convert after the pool freed = %d %v", status, body)
+	}
+}

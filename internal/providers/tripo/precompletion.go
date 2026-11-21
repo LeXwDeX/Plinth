@@ -127,11 +127,17 @@ func conversionSelectionDeclared(offering generation.Offering, format string) bo
 	return false
 }
 
-func (a *Adapter) observePreCompletionFormats(ctx context.Context, request generation.ObserveRequest) (generation.Observation, error) {
+func (a *Adapter) observePreCompletionFormats(ctx context.Context, request generation.ObserveRequest) (observation generation.Observation, err error) {
 	options, err := a.optionsFor(request.Offering)
 	if err != nil || strings.Count(options.ObserveEndpoint, "{task_id}") != 1 || options.ConvertEndpoint == "" {
 		return generation.Observation{}, failure(generation.FailureProtocol, false, "Tripo Offering 缺少转换端点")
 	}
+	a.touchPool(request.Offering, request.AttemptID)
+	defer func() {
+		if err == nil && terminalPhase(observation.Phase) {
+			a.releasePool(request.Offering, request.AttemptID)
+		}
+	}()
 	baseTask, err := a.observeTask(ctx, options, request.Job.RemoteID, string(request.AttemptID))
 	if err != nil {
 		return generation.Observation{}, err
@@ -232,17 +238,25 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 	// declared concurrency: a pending retry first, then a format never started.
 	// One observation carries one permit (§4.3), so a round starts at most one
 	// child and never waits for the others.
-	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < conversionConcurrency(options) {
+	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < a.conversionConcurrency(options) {
 		if format, ok := nextConversionDispatch(selections, state.Conversions); ok {
 			if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
 				return generation.Observation{}, err
 			}
-			previous := state.Conversions[format]
+			previous, existed := state.Conversions[format]
 			// The export options come from the frozen declaration and input; a
 			// declaration that cannot be written stops here, before any checkpoint.
 			extras, err := conversionExtras(request.Offering, options, request.Input, format)
 			if err != nil {
 				return generation.Observation{}, err
+			}
+			// Fixed order (C1): take the upstream slot first, then change the
+			// entry state, then take the dispatch permit, then send. A full pool
+			// leaves the entry untouched and returns a running observation that
+			// carries the upstream queue clock.
+			slot, acquired, wait := a.acquirePool(ctx, request.Offering, request.AttemptID)
+			if !acquired {
+				return poolQueueObservation(preCompletionRunning(base, state), wait), nil
 			}
 			attempts := previous.RetryAttempts
 			if previous.Status == conversionItemRetryPending || previous.Status == conversionItemRateLimited {
@@ -267,10 +281,26 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 				},
 			})
 			if err != nil {
+				slot.Release()
 				return generation.Observation{}, err
 			}
 			remoteID, err := a.convertModel(ctx, options.ConvertEndpoint, request.Job.RemoteID, format, submissionKey, extras)
 			if err != nil {
+				// The account pool is full (code 2000) and this path is gated by
+				// the pool: this is not a per-format rate limit. Restore the
+				// entry, release the slot and queue again without spending the
+				// retry budget (C4). Without a pool the historical per-format
+				// budget below applies.
+				if a.poolEnabled() {
+					if retryAfter, full := poolFullRetryAfter(err); full && permit != nil {
+						permit.Result = generation.DispatchResultNotDispatched
+						restoreConversionItem(state.Conversions, format, previous, existed)
+						slot.Release()
+						observation := poolQueueObservation(preCompletionRunning(base, state), retryAfter)
+						observation.Dispatch = permit
+						return observation, nil
+					}
+				}
 				// An explicit 429 refused the child: settle the permit as not
 				// dispatched and resend the same format after Retry-After or the
 				// backoff. Unknown results still stop here without a resend.
@@ -288,8 +318,14 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 					observation.Dispatch = permit
 					return observation, nil
 				}
+				// Any other failure leaves the child's result unknown: the entry
+				// stays dispatching and the slot stays held, because the child may
+				// still be running upstream.
 				return generation.Observation{}, err
 			}
+			// The slot now belongs to this attempt's children (C2): the parent
+			// job hands it over and the children share it idempotently.
+			a.handoffPool(request.Offering, request.AttemptID)
 			state.Conversions[format] = conversionItem{
 				Status:           conversionItemSubmitted,
 				RemoteID:         remoteID,
@@ -310,7 +346,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 		return preCompletionFailure(base, state, "Tripo 必需格式转换失败"), nil
 	}
 	// Waiting on in-flight children or on a retry's backoff.
-	observation := preCompletionRunning(base, state)
+	observation = preCompletionRunning(base, state)
 	if wait := conversionRetryWait(state.Conversions); wait > 0 {
 		observation.PollAfter = wait
 	}
