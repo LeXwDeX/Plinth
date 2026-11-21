@@ -57,8 +57,10 @@ func (orchestrator *Orchestrator) turnEndReason(
 // approval waits for the person from then on), or a production plan this turn
 // proposed that is still undecided. Both come from persisted state, so a turn
 // that was parked and woken again, or restarted, answers the same way as one
-// that ran straight through. The reason is bookkeeping: a read that fails is
-// logged and counts as no card, and never fails the turn.
+// that ran straight through. The calls are read in the turn's own registry
+// (#453), so a generation tool the Schema alone does not declare is still
+// recognized. The reason is bookkeeping: a read that fails is logged and counts
+// as no card, and never fails the turn.
 func (orchestrator *Orchestrator) turnLeftApprovalCard(
 	ctx context.Context,
 	command ProcessTurn,
@@ -67,15 +69,19 @@ func (orchestrator *Orchestrator) turnLeftApprovalCard(
 	if reader, ok := orchestrator.tools.(interface {
 		DetachedOperationForCall(context.Context, ToolCommand) (bool, error)
 	}); ok {
+		registry := orchestrator.turnRegistry(ctx)
 		for _, call := range assistant.ToolCalls {
-			tool, known := orchestrator.registry.byName[call.Name]
+			tool, known := registry.byName[call.Name]
 			if !known || tool.generation == nil {
 				continue
 			}
 			detached, err := reader.DetachedOperationForCall(ctx, ToolCommand{
 				OwnerID: command.OwnerID, SessionID: command.SessionID, AssistantMessageID: command.AssistantMessageID,
-				Call:        agents.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments},
-				BoundTaskID: call.TaskID, FrozenIdempotencyKey: call.IdempotencyKey, Options: command.Options})
+				Configuration:        configurationFromContext(ctx),
+				Call:                 agents.ToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments},
+				BoundTaskID:          call.TaskID,
+				FrozenIdempotencyKey: call.IdempotencyKey,
+				Options:              command.Options})
 			if err != nil {
 				orchestrator.logger.Warn(
 					"读取轮次的批准卡失败，结束原因不记为等待批准",
