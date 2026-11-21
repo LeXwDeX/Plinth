@@ -623,6 +623,15 @@ before committing. The Meshy engine templates from the newest sample of each
 key; the Tripo, matting and OpenAI fakes keep their older templates, and a test
 holds each to the newest capture's structure.
 
+One difference is recorded rather than copied: the 13 `LLM`
+`/v1/chat/completions` answers carry `choices[0].message.reasoning_content` and
+`usage.{prompt,completion}_tokens_details` (including
+`usage.prompt_tokens_details.text_tokens`) and no `system_fingerprint` or
+`prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`, while the fake's committed
+chat sample has the latter two and no `text_tokens`. Those are optional,
+model-specific fields; the fake keeps its own model's body because the
+adapters read none of them.
+
 **Next recording.** To capture the bodies this window missed, raise the per-body
 bound first. The sanitizer policy's `MaxBodyBytes` is capped at **8 MiB**
 (`8388608`, `internal/wirecapture/project.go`) and is configurable for
