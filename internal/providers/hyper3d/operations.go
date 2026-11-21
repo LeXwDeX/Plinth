@@ -69,7 +69,7 @@ func validateBangOffering(offering generation.Offering, options wireOptions) err
 				return fmt.Errorf("Bang reference_scale 必须限定在 0..1")
 			}
 		case "material":
-			if !validSelectParameter(parameter, "PBR", "Shaded", "All", "None") {
+			if !validSelectParameter(parameter, "PBR", "Shaded", "All", "Hybrid", "None") {
 				return fmt.Errorf("Bang material 选项无效")
 			}
 		case "resolution":
@@ -140,7 +140,7 @@ func validateTextureOffering(offering generation.Offering, options wireOptions) 
 				return fmt.Errorf("Texture texture_mode 选项无效")
 			}
 		case "material":
-			if !validSelectParameter(parameter, "PBR", "Shaded", "All") {
+			if !validSelectParameter(parameter, "PBR", "Shaded", "All", "Hybrid") {
 				return fmt.Errorf("Texture material 选项无效")
 			}
 		case "resolution":
@@ -187,7 +187,7 @@ func validTemplateValue(endpoint, field string, value any) bool {
 		format, ok := value.(string)
 		return ok && supportedOutputVariant(format)
 	case "material":
-		allowed := []string{"PBR", "Shaded", "All"}
+		allowed := []string{"PBR", "Shaded", "All", "Hybrid"}
 		if endpoint == bangEndpoint {
 			allowed = append(allowed, "None")
 		}

@@ -292,18 +292,19 @@ func buildProviderAdapterWithTransport(
 		}
 		publisher, _ := inputs.(generation.InputAssetPublisher)
 		return meshy.New(meshy.Config{
-			BaseURL:         baseURL,
-			APIKey:          apiKey,
-			AuthHeader:      connection.AuthHeader,
-			AuthPrefix:      connection.AuthPrefix,
-			RequestTimeout:  timeout,
-			HTTPClient:      wireHTTPClient(httpTransport, connection.ID, timeout),
-			ErrorMapping:    connection.ErrorMapping,
-			StatusMapping:   connection.StatusMapping,
-			AllowHTTPAssets: connection.AllowHTTPAssets,
-			InputAssets:     inputs,
-			ScratchDir:      scratchDir,
-			InputPublisher:  publisher,
+			BaseURL:                baseURL,
+			APIKey:                 apiKey,
+			AuthHeader:             connection.AuthHeader,
+			AuthPrefix:             connection.AuthPrefix,
+			RequestTimeout:         timeout,
+			HTTPClient:             wireHTTPClient(httpTransport, connection.ID, timeout),
+			ErrorMapping:           connection.ErrorMapping,
+			StatusMapping:          connection.StatusMapping,
+			AllowHTTPAssets:        connection.AllowHTTPAssets,
+			InputAssets:            inputs,
+			ScratchDir:             scratchDir,
+			InputPublisher:         publisher,
+			RetrySubmitServerError: connection.RetrySubmitServerError,
 		})
 	case "tripo":
 		for _, offering := range offerings {
@@ -312,21 +313,22 @@ func buildProviderAdapterWithTransport(
 			}
 		}
 		return tripo.New(tripo.Config{
-			BaseURL:               baseURL,
-			APIKey:                apiKey,
-			AuthHeader:            connection.AuthHeader,
-			AuthPrefix:            connection.AuthPrefix,
-			RequestTimeout:        timeout,
-			HTTPClient:            wireHTTPClient(httpTransport, connection.ID, timeout),
-			NativeSourceTransport: nativeSourceTransport(httpTransport, connection.ID),
-			ErrorMapping:          connection.ErrorMapping,
-			StatusMapping:         connection.StatusMapping,
-			AllowHTTPAssets:       connection.AllowHTTPAssets,
-			InputAssets:           inputs,
-			ScratchDir:            scratchDir,
-			OfferingRoutes:        offerings,
-			Pool:                  pool,
-			PoolID:                tripo.TripoPoolName,
+			BaseURL:                baseURL,
+			APIKey:                 apiKey,
+			AuthHeader:             connection.AuthHeader,
+			AuthPrefix:             connection.AuthPrefix,
+			RequestTimeout:         timeout,
+			HTTPClient:             wireHTTPClient(httpTransport, connection.ID, timeout),
+			NativeSourceTransport:  nativeSourceTransport(httpTransport, connection.ID),
+			ErrorMapping:           connection.ErrorMapping,
+			StatusMapping:          connection.StatusMapping,
+			AllowHTTPAssets:        connection.AllowHTTPAssets,
+			InputAssets:            inputs,
+			ScratchDir:             scratchDir,
+			OfferingRoutes:         offerings,
+			Pool:                   pool,
+			PoolID:                 tripo.TripoPoolName,
+			RetrySubmitServerError: connection.RetrySubmitServerError,
 		})
 	case "hyper3d.rodin":
 		for _, offering := range offerings {
@@ -339,17 +341,18 @@ func buildProviderAdapterWithTransport(
 			}
 		}
 		return hyper3d.New(hyper3d.Config{
-			BaseURL:         baseURL,
-			APIKey:          apiKey,
-			AuthHeader:      connection.AuthHeader,
-			AuthPrefix:      connection.AuthPrefix,
-			RequestTimeout:  timeout,
-			HTTPClient:      wireHTTPClient(httpTransport, connection.ID, timeout),
-			ErrorMapping:    connection.ErrorMapping,
-			StatusMapping:   connection.StatusMapping,
-			AllowHTTPAssets: connection.AllowHTTPAssets,
-			InputAssets:     inputs,
-			ScratchDir:      scratchDir,
+			BaseURL:                baseURL,
+			APIKey:                 apiKey,
+			AuthHeader:             connection.AuthHeader,
+			AuthPrefix:             connection.AuthPrefix,
+			RequestTimeout:         timeout,
+			HTTPClient:             wireHTTPClient(httpTransport, connection.ID, timeout),
+			ErrorMapping:           connection.ErrorMapping,
+			StatusMapping:          connection.StatusMapping,
+			AllowHTTPAssets:        connection.AllowHTTPAssets,
+			InputAssets:            inputs,
+			ScratchDir:             scratchDir,
+			RetrySubmitServerError: connection.RetrySubmitServerError,
 		})
 	case "matting":
 		for _, offering := range offerings {
@@ -362,15 +365,16 @@ func buildProviderAdapterWithTransport(
 			}
 		}
 		return matting.New(matting.Config{
-			BaseURL:        baseURL,
-			APIKey:         apiKey,
-			AuthHeader:     connection.AuthHeader,
-			AuthPrefix:     connection.AuthPrefix,
-			RequestTimeout: timeout,
-			HTTPClient:     wireHTTPClient(httpTransport, connection.ID, timeout),
-			ErrorMapping:   connection.ErrorMapping,
-			InputAssets:    inputs,
-			ScratchDir:     scratchDir,
+			BaseURL:                baseURL,
+			APIKey:                 apiKey,
+			AuthHeader:             connection.AuthHeader,
+			AuthPrefix:             connection.AuthPrefix,
+			RequestTimeout:         timeout,
+			HTTPClient:             wireHTTPClient(httpTransport, connection.ID, timeout),
+			ErrorMapping:           connection.ErrorMapping,
+			InputAssets:            inputs,
+			ScratchDir:             scratchDir,
+			RetrySubmitServerError: connection.RetrySubmitServerError,
 		})
 	default:
 		return nil, fmt.Errorf(

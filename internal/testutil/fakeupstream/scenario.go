@@ -133,9 +133,27 @@ const (
 	ScenarioHeader = "X-Fake-Scenario"
 	// FailTimesHeader overrides Config.FailTimes for one request.
 	FailTimesHeader = "X-Fake-Fail-Times"
+	// DelayHeader holds a create response for the given milliseconds before
+	// answering, so a test can prove a client's creation timeout is long
+	// enough (or short enough).
+	DelayHeader = "X-Fake-Delay-Millis"
 	// KeyPrefix starts a test API key that selects a scenario.
 	KeyPrefix = "fake-"
 )
+
+// DelayOf is how long a request asks the fake to hold its answer. A missing,
+// negative or malformed value means no delay.
+func DelayOf(r *http.Request) time.Duration {
+	value := strings.TrimSpace(r.Header.Get(DelayHeader))
+	if value == "" {
+		return 0
+	}
+	millis, err := strconv.Atoi(value)
+	if err != nil || millis <= 0 {
+		return 0
+	}
+	return time.Duration(millis) * time.Millisecond
+}
 
 // ScenarioOf resolves the scenario a request asks for.
 func ScenarioOf(r *http.Request) Scenario {
@@ -289,6 +307,16 @@ func AbortConnection(w http.ResponseWriter) {
 // scenario.
 func (e *Env) RetryAfterSeconds() string {
 	seconds := int(e.RetryAfter / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	return strconv.Itoa(seconds)
+}
+
+// PollRetryAfterSeconds is the Retry-After header value of a non-terminal
+// status poll.
+func (e *Env) PollRetryAfterSeconds() string {
+	seconds := int(e.PollRetryAfter / time.Second)
 	if seconds < 1 {
 		seconds = 1
 	}

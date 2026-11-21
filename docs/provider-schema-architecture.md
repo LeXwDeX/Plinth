@@ -74,7 +74,7 @@ Product Schema 声明 `asset-recovery` 与 `local/existing-assets/recover`，使
 
 ## 上游结果重新取回声明（#295）
 
-Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe", retention_hours}`，表示该连接已受理的上游作业在 Task 因入库失败而终态后，仍可经 Adapter 的 `Observe` 只读取回结果。Catalog 只允许有上游作业的协议声明它（`meshy`、`tripo`、`hyper3d.rodin`、`matting`），拒绝 `image-sync`、本地与对话协议、未知 mode 与越界保留期；声明时 `runtime.generation_messages` 必须带 `refetch_source_unavailable` 与 `refetch_result_unavailable`。`generation_messages.upstream_job_conflict`（可选，缺省时用 `submission_unknown`）是上游返回已被其他任务记录的 Job ID 时的失败文案（#298）。当前 Schema：Meshy `retention_hours: 72`（官方《Asset Retention》：API 结果最多保留 3 天），Tripo `retention_hours: 168`（#460 A8：官方 asset retention 页写明 2026-12-01 起最多保留 7 天，读取 2026-11-22；补齐与重新取回不依赖 7 天之后的 `task_id`），Hyper3D、Matting 不写保留期（官方未写明，以上游回答为准）；三个同步图片连接不声明（结果是一次性的内联字节）。
+Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe", retention_hours}`，表示该连接已受理的上游作业在 Task 因入库失败而终态后，仍可经 Adapter 的 `Observe` 只读取回结果。Catalog 只允许有上游作业的协议声明它（`meshy`、`tripo`、`hyper3d.rodin`、`matting`），拒绝 `image-sync`、本地与对话协议、未知 mode 与越界保留期；声明时 `runtime.generation_messages` 必须带 `refetch_source_unavailable` 与 `refetch_result_unavailable`。`generation_messages.upstream_job_conflict`（可选，缺省时用 `submission_unknown`）是上游返回已被其他任务记录的 Job ID 时的失败文案（#298）。当前 Schema：Meshy `retention_hours: 72`（官方《Asset Retention》：API 结果最多保留 3 天），Tripo `retention_hours: 168`（#460 A8：官方 asset retention 页写明 2026-12-01 起最多保留 7 天，读取 2026-11-22；补齐与重新取回不依赖 7 天之后的 `task_id`），Hyper3D `retention_hours: 168`（#460 C29：官方 Data Retention Policy，2026-08-03 生效，写明 API 请求与生成结果在活跃系统保留 7 天，读取 2026-11-22）；Matting 不写保留期（官方未写明，以上游回答为准）；三个同步图片连接不声明（结果是一次性的内联字节）。
 
 这不新增 Adapter 方法或 Provider 私有分支：内核用来源冻结 Offering、输入、Job 与 Opaque 调既有 `Observe`（拒绝型派发检查点），再用既有 `OpenAsset` 下载；Adapter 看到的仍是来源 Task/Attempt 身份。重新取回 Task 的冻结 Offering 去掉计费与成功后观察声明，只用于展示与输出契约。逐 Provider 能否重取、依据与不确定性见 `docs/architecture.md`「上游结果重新取回（#295）」。
 
@@ -107,11 +107,23 @@ Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe",
 - **B17（L8）Rigging `texture_image_url`**：官方 2026-10-23 起弃用（“Omit it.”）。Offering 删除该参数、发现投影删除对应字段、`provider_deprecations` 登记。已实现。
 - **B18（L9）`pose_mode` 空值不发送**：声明 `omit_when: pose_mode == ""`。已实现。
 - **B19（L10）print/analyze 两个尺寸**：Schema 已有 `minimum:0, maximum:1`（至多一项），与“至多一个”的官方口径一致，未改。
-- **B20（L12）请求超时**：`request_timeout_seconds: 1800` 是连接级、覆盖全部请求（含产物下载）；官方 60 s/120 s 的建议只针对创建请求，本仓库无法只对创建请求设超时，**保持现状**，见下节“未做”。
-- **B21（L13）非终态轮询遵守 `Retry-After`**：未实现（见下节）。
-- **B22（L14）`status_mapping` 多余状态词**：未实现（见下节）。
+- **B20（L12）请求超时**：`request_timeout_seconds: 1800` 仍是连接级、覆盖全部请求（含产物下载）；Meshy 连接额外声明创建请求的 60 s（请求体超过 100 MB 时 120 s），由 `httpjson` 只对 `submitting=true` 的请求加 context 期限，轮询与下载不受影响。官方 `docs.meshy.ai/en/api/task-lifecycle` 的 “How long to wait” 表（读取 2026-11-22）。已实现，测试 `TestMeshyCreateHonoursSubmitTimeout`、`TestSubmitTimeoutUsesLargeTimeoutAboveThreshold`、`TestSubmitTimeoutBoundsOnlyCreationRequests`。
+- **B21（L13）非终态轮询遵守 `Retry-After`**：`httpjson.PollAfter` 读响应头（有则用，否则回退），Meshy 的 `Observe` 与 Hyper3D 的 `status` 轮询都改用 `DoJSONResponse` 取得响应头；Meshy 回退到 Offering 的 5 s，Hyper3D 回退到官方 5→30 s 退避。官方 `docs.meshy.ai/en/api/rate-limits`（读取 2026-11-22）与 `docs.hyper3d.ai/en/api-specification/check-status`。已实现，测试 `TestMeshyNonTerminalPollHonoursRetryAfter`、`TestHyper3DPollHonoursRetryAfter`、`TestPollAfterHonoursRetryAfterHeader`。
+- **B22（L14）`status_mapping` 多余状态词**：逐条核对了已提交样本（`internal/providers/meshy/testdata`、`internal/testutil/fakeupstream/meshy`），只出现 `PENDING`、`IN_PROGRESS`、`SUCCEEDED`、`FAILED`（`CANCELED` 为构造的 Creative Lab 终态），没有 `queued`/`waiting`/`running`/`processing`/`success`/`completed`/`failure`/`cancelled` 的真实样本或历史数据依赖；Meshy 连接收敛为官方 5 个状态词。已实现，测试 `TestMeshyStatusMappingMatchesOfficialFiveWords`。
 - **B23（L15）keychain build 的 `obj`**：`output_format` 增加 `obj`。已实现。
-- **B24（L16）fake 校验**：未实现（见下节）。
+- **B24（L16）fake 校验**：Meshy fake 补了 preview 专属字段（`enable_pbr`、`texture_prompt`、`texture_image_url` 不得出现在 preview）、内联图片的官方像素上下限（每边 ≥32 px、总像素 ≤178,956,970）与 `pose_mode:""` 的拒绝。已实现，测试 `TestTextTo3DCreateValidatesStageFieldsAndPose`、`TestImageTo3DRejectsPicturesOutsideOfficialPixelBounds`。
+
+### Rodin / Hyper3D（C25–C32）
+
+- **C25（F1）429 / 5xx 重试**：官方 `docs.hyper3d.ai/en/api-specification/errors`（“Retry `429` and `5xx` responses with backoff.”，读取 2026-11-22）。5 个 Hyper3D Offering 的 `retry` 改为 `max_attempts: 2`、`retryable: [rate_limited, upstream_unavailable]`。提交阶段 5xx 由连接级 `retry_submit_server_error: true` 声明允许，`httpjson` 在 `submitting && >=500` 处读取；Hyper3D 声明允许，Tripo/Meshy 不声明。**风险**：上游可能已在 5xx 前受理创建，重试有重复扣费风险；这是连接显式接受的取舍，官方原文没有给出幂等键或“5xx 后查询”的替代。已实现，测试 `TestSubmitServerErrorRetryFollowsConnectionDeclaration`、`TestHyper3DRetryCoversRateLimitAndUpstreamUnavailable`、`TestHyper3DSubmit5xxIsRetriedWhenDeclared`。
+- **C26（F4）`API_PARALLELISM_LIMIT_REACHED`**：官方 Errors 写明 “Retry once one finishes.”。Hyper3D 连接 `upstream_code_map` 该码补 `retryable: true`（class 仍是 `rate_limited`），由内核退避或 #468 的上游池排队。已实现，测试 `TestHyper3DParallelismLimitIsRetryable`。
+- **C27（F2）图生 prompt 1024**：`hyper3d/rodin-gen-2.5/image-to-3d` 的 `prompt.max_length` 已是官方 `1024`（`docs.hyper3d.ai/en/api-specification/rodin-gen2-5` 与 FAQ “up to 1,024 characters”，读取 2026-11-22）；本批次补了 Catalog 回归锁定，未改值。
+- **C28（F3）Gen-2.5 sources / checked_at**：两个 Gen-2.5 Offering 的 `knowledge.sources` 改指 `https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5`，`checked_at: 2026-11-22`。官方 2026-08 新增、本平台不发送的参数记录如下：`is_symmetric`、`soft`、`detail_level`、`addons`（HighPack）、`uhd_texture`、`preview_render`、`use_original_alpha`、`geometry_instruct_mode`、`bbox_condition`（来源：官方 Changelog 2026-08 与 rodin-gen2-5 页，读取 2026-11-22）。已实现，测试 `TestHyper3DGen25SourcesPromptAndRetention`。
+- **C29（F5）保留期 7 天**：官方 Data Retention Policy（`docs.hyper3d.ai/en/legal/data-retention-policy`，2026-08-03 生效）写明 API 请求与生成结果在活跃系统保留 **7 天**（读取 2026-11-22）。Hyper3D `result_refetch` 补 `retention_hours: 168`；`result_refetch` 的语义是“上游完成后可再次读取的时长”，与该政策一致。已实现，测试 `TestHyper3DGen25SourcesPromptAndRetention`、`TestShippedResultRefetchDeclarations`。
+- **C30（F6）material 加 `Hybrid`**：Bang 与 Texture 的 `material` 允许集补 `Hybrid`（Bang 仍保留 `None`）。已实现，测试 `TestHyper3DProcessingMaterialAcceptsHybrid`、`TestBangAndTextureFormsValidateMaterialAndRanges`。
+- **C31（F7）`image_label` 少于图片数补 `?`**：官方 `image_label` 用 `?` 表示未知方位；官方页面没有说明短列表的行为。平台改为在 `Start` 发送前把缺少的位置补 `?`，使标记与图片一一对应；`ValidateInput` 不再拒绝短列表。已实现，测试 `TestRodinShortImageLabelsAreCompletedWithUnknownMark`。
+- **C32（F9）fake 值域**：Hyper3D fake 的 Bang/Texture 表单补了 `material`（含 `Hybrid`/`None`）、`resolution`、`geometry_file_format`、`strength`、`quality_override`、`mesh_mode`、`seed`、`escore`、`reference_scale`、`texture_mode` 的值域校验；拒绝码沿用 `INVALID_REQUEST`，消息按官方页面构造（未观测到真实拒绝）。已实现，测试 `TestBangAndTextureFormsValidateMaterialAndRanges`。
+- **F8（`timeout_seconds: 3600`）**：官方没有给出耗时，本 Issue 不改。
 
 ## 上游并发池（#468）
 
@@ -126,19 +138,17 @@ fake Tripo 支持 `AccountConcurrencyLimit`（超出返回 429 code 2000 + `Retr
 Tripo：幂等键；被 429 拒绝的请求是否计费；退款时点；`unknown` 的专门等待上限；并发池满时是排队还是拒绝。
 Rodin：Texture 价格是 2 还是 2.5；各 `material` 实际交付的文件；非 glb 的文件名；四边面换算只有一个样本；`preview_render=false` 时仍返回 `preview.webp`；multipart 中数组的编码方式。
 
-### 本批次未做（交接）
+### 本批次（B20–B22、B24、C25–C32）
 
-- **B20（L12）请求超时**：连接级 `request_timeout_seconds` 同时覆盖创建与产物下载，仓库里无法只对创建请求设 60 s/120 s；**保持现状**，等能按请求类型设超时的方案。
-- **B21（L13）非终态轮询遵守 `Retry-After`**：未实现；需要在内核/httpjson 通用层让轮询失败的重排使用 `Retry-After`（有则用、否则 5 s）。
-- **B22（L14）`status_mapping` 收敛**：未实现；需先确认真实样本与历史数据是否依赖官方 5 个状态之外的词。
-- **B24（L16）fake 校验**：未实现；需要在 Meshy fake 补 preview 专属字段、图片像素与 `pose_mode:""` 的校验。
-- **C25–C32（Rodin / Hyper3D）**：未开始。
-- **门禁**：本批次只跑了 `gofmt`、`go vet` 与 `go test ./...`（含受影响包的回归）；`-race`、前端门禁、wire coverage、fake 栈与公开快照检查未跑。
+- 实现与测试见上面各条；本批次没有改动 F8。
+- 门禁：`gofmt`、`go vet ./...`、`go test ./... -count=1`、`-race ./internal/providers/... ./internal/generation/... -count=1`、wire coverage（`UPDATE_WIRE_COVERAGE=1`）、fake 栈 `--only meshy,hyper3d,hyper3d-agent`、公开快照检查。实际结果见任务回执。
+- **风险**：C25 的提交阶段 5xx 重试可能导致重复扣费（连接级声明已接受该风险）；C31 的短标记补 `?` 是平台对官方未说明行为的补齐，未经真实上游验证；C30 的 `Hybrid` 是当前官方页面未列出的取值（按用户指示加入允许集），平台当前模板仍发送 `PBR`。
 
 ### 本批次的证据边界
 
 - Meshy 的 `internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json` 是捕获样本：响应体保持原样，两个创建请求的请求体按官方 2026-11-22 的 wire 更新（preview 去掉 `enable_pbr`/`pose_mode`，refine 去掉 `ai_model`），交换元数据保持 wirefixture 的原字段集。
 - Rigging 上限 380000 之后，`internal/testutil/fakeupstream/meshy/openapi-v1` 的对齐报告与端点说明里仍保留 2026-10-29 捕获时“320000 面以上被接受后 FAILED”的历史记录，它们记录的是当时的观测，不改为 380000。
+- 本批次新增的 fake 校验（preview 专属字段、图片像素、`pose_mode:""`、Hyper3D 表单值域）是按官方页面构造的拒绝；没有真实拒绝样本，消息与代码按页面写，未声称已观测。
 
 ## Tripo Rig Check 边界
 

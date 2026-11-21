@@ -480,3 +480,29 @@ func TestCreateAndPollEchoTheRequestUnderInput(t *testing.T) {
 		t.Fatalf("poll input lost the mode: %v", polledInput)
 	}
 }
+
+// #460 B24: the preview parameter table has no refine-only fields, and an
+// empty pose_mode is not "leave it out".
+func TestTextTo3DCreateValidatesStageFieldsAndPose(t *testing.T) {
+	f := newFixture(t)
+	cases := []struct {
+		name string
+		body map[string]any
+		want int
+	}{
+		{"preview with enable_pbr", map[string]any{"mode": "preview", "prompt": "p", "enable_pbr": true}, http.StatusBadRequest},
+		{"preview with texture_prompt", map[string]any{"mode": "preview", "prompt": "p", "texture_prompt": "t"}, http.StatusBadRequest},
+		{"preview with texture_image_url", map[string]any{"mode": "preview", "prompt": "p", "texture_image_url": "u"}, http.StatusBadRequest},
+		{"empty pose_mode", map[string]any{"mode": "preview", "prompt": "p", "pose_mode": ""}, http.StatusBadRequest},
+		{"refine with enable_pbr", map[string]any{"mode": "refine", "prompt": "p", "enable_pbr": true}, http.StatusAccepted},
+		{"preview without refine fields", map[string]any{"mode": "preview", "prompt": "p"}, http.StatusAccepted},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			status, _, body := f.Do("POST", Prefix+"/text-to-3d", key, test.body)
+			if status != test.want {
+				t.Fatalf("status = %d %v, want %d", status, body, test.want)
+			}
+		})
+	}
+}

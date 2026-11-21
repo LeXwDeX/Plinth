@@ -21,6 +21,14 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
+// Official Meshy guidance for a task-creation request (docs.meshy.ai
+// /en/api/task-lifecycle, read 2026-11-22): 60 seconds, or 120 seconds when a
+// model_url file is over 100 MB because Meshy downloads it before answering.
+const (
+	officialSubmitTimeout      = 60 * time.Second
+	officialLargeSubmitTimeout = 120 * time.Second
+)
+
 type Config struct {
 	BaseURL         string
 	APIKey          string
@@ -37,38 +45,63 @@ type Config struct {
 	// Empty means os.TempDir(); production passes the storage volume's tmp
 	// directory because the container's /tmp is a small tmpfs (#321 A).
 	ScratchDir string
+	// SubmitTimeout bounds one task-creation request; it does not shorten the
+	// connection timeout that also covers polls and downloads. Zero takes the
+	// official Meshy default (60 s, or 120 s for a body over 100 MB).
+	SubmitTimeout time.Duration
+	// LargeSubmitTimeout is the creation timeout above 100 MB. Zero takes the
+	// official default (120 s).
+	LargeSubmitTimeout time.Duration
+	// RetrySubmitServerError is the connection-level declaration that a 5xx
+	// answer to a create may be retried (#460 C25). Meshy does not declare it.
+	RetrySubmitServerError bool
 }
 
 type Adapter struct {
-	client          *httpjson.Client
-	allowHTTPAssets bool
-	inputAssets     generation.InputAssetResolver
-	inputPublisher  generation.InputAssetPublisher
-	errorMapping    *generation.ErrorMapping
-	statusMapping   *generation.StatusMapping
+	client             *httpjson.Client
+	allowHTTPAssets    bool
+	inputAssets        generation.InputAssetResolver
+	inputPublisher     generation.InputAssetPublisher
+	errorMapping       *generation.ErrorMapping
+	statusMapping      *generation.StatusMapping
+	submitTimeout      time.Duration
+	largeSubmitTimeout time.Duration
 }
 
 func New(config Config) (*Adapter, error) {
+	submitTimeout := config.SubmitTimeout
+	if submitTimeout <= 0 {
+		submitTimeout = officialSubmitTimeout
+	}
+	largeSubmitTimeout := config.LargeSubmitTimeout
+	if largeSubmitTimeout <= 0 {
+		largeSubmitTimeout = officialLargeSubmitTimeout
+	}
 	client, err := httpjson.NewWithConfig(httpjson.Config{
-		BaseURL:        config.BaseURL,
-		APIKey:         config.APIKey,
-		AuthHeader:     config.AuthHeader,
-		AuthPrefix:     config.AuthPrefix,
-		RequestTimeout: config.RequestTimeout,
-		ErrorMapping:   config.ErrorMapping,
-		HTTPClient:     config.HTTPClient,
-		SpoolDir:       config.ScratchDir,
+		BaseURL:                config.BaseURL,
+		APIKey:                 config.APIKey,
+		AuthHeader:             config.AuthHeader,
+		AuthPrefix:             config.AuthPrefix,
+		RequestTimeout:         config.RequestTimeout,
+		ErrorMapping:           config.ErrorMapping,
+		HTTPClient:             config.HTTPClient,
+		SpoolDir:               config.ScratchDir,
+		SubmitTimeout:          submitTimeout,
+		LargeSubmitTimeout:     largeSubmitTimeout,
+		RetrySubmitServerError: config.RetrySubmitServerError,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("meshy: %w", err)
 	}
 	return &Adapter{
-		client:          client,
-		allowHTTPAssets: config.AllowHTTPAssets,
-		inputAssets:     config.InputAssets,
-		inputPublisher:  config.InputPublisher,
-		errorMapping:    config.ErrorMapping,
-		statusMapping:   config.StatusMapping,
+		client:             client,
+		allowHTTPAssets:    config.AllowHTTPAssets,
+		inputAssets:        config.InputAssets,
+		inputPublisher:     config.InputPublisher,
+		errorMapping:       config.ErrorMapping,
+		statusMapping:      config.StatusMapping,
+		submitTimeout:      submitTimeout,
+		largeSubmitTimeout: largeSubmitTimeout,
 	}, nil
 }
 
@@ -241,7 +274,7 @@ func (a *Adapter) Observe(
 		return a.observeWithRefine(ctx, request, endpoint, version)
 	}
 	var response taskResponse
-	if err := a.client.DoJSON(
+	metadata, err := a.client.DoJSONResponse(
 		ctx,
 		http.MethodGet,
 		fmt.Sprintf("openapi/%s/%s/%s", version, endpoint, url.PathEscape(request.Job.RemoteID)),
@@ -249,10 +282,16 @@ func (a *Adapter) Observe(
 		string(request.AttemptID),
 		&response,
 		false,
-	); err != nil {
+	)
+	if err != nil {
 		return generation.Observation{}, err
 	}
-	return a.observation(request, response)
+	observation, err := a.observation(request, response)
+	if err != nil {
+		return generation.Observation{}, err
+	}
+	observation.PollAfter = httpjson.PollAfter(metadata.Header, observation.PollAfter)
+	return observation, nil
 }
 
 func (a *Adapter) DecodeWebhook(

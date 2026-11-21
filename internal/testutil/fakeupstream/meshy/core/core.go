@@ -576,6 +576,15 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 		if _, has := response["type"]; has {
 			response["type"] = t.typ
 		}
+		if delay := fakeupstream.DelayOf(r); delay > 0 {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-r.Context().Done():
+				return
+			case <-timer.C:
+			}
+		}
 		writeJSON(w, sample.status, response)
 	}
 }
@@ -658,7 +667,7 @@ func (e *engine) get(kind Kind) http.HandlerFunc {
 		status := e.statusAt(t, n)
 		if status == StatusPending || status == StatusInProgress {
 			// Observed on every non-final poll (the final one carries no header).
-			w.Header().Set("Retry-After", "5")
+			w.Header().Set("Retry-After", e.cfg.Env.PollRetryAfterSeconds())
 		}
 		writeJSON(w, http.StatusOK, e.pollBody(r, t, status))
 	}

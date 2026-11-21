@@ -618,6 +618,78 @@ func validateGenerationForm(fields map[string]string) string {
 	return ""
 }
 
+// The value domains of the Bang and Texture forms, from
+// docsRoot+"bang" and docsRoot+"generate-texture" (read 2026-11-22): material
+// accepts PBR, Shaded and All (Bang also None and Hybrid), resolution Basic or
+// High, and the geometry format one of the supported model formats.
+var (
+	bangMaterials         = []string{"PBR", "Shaded", "All", "Hybrid", "None"}
+	textureMaterials      = []string{"PBR", "Shaded", "All", "Hybrid"}
+	processingResolutions = []string{"Basic", "High"}
+	processingFormats     = []string{"glb", "usdz", "fbx", "obj", "stl", "usd", "usda", "usdc"}
+)
+
+// validateProcessingForm returns the rejection message of the first Bang or
+// Texture field outside its documented value domain, or "". The rejection was
+// not observed; the code and message are constructed from the pages.
+func validateProcessingForm(endpoint string, fields map[string]string) string {
+	materials := textureMaterials
+	if endpoint == "/bang" {
+		materials = bangMaterials
+	}
+	if value := fields["material"]; value != "" && !slices.Contains(materials, value) {
+		return "material must be one of " + strings.Join(materials, ", ") + "."
+	}
+	if value := fields["resolution"]; value != "" && !slices.Contains(processingResolutions, value) {
+		return "resolution must be Basic or High."
+	}
+	if value := fields["geometry_file_format"]; value != "" && !slices.Contains(processingFormats, value) {
+		return "geometry_file_format must be one of " + strings.Join(processingFormats, ", ") + "."
+	}
+	if endpoint == "/bang" {
+		if value := fields["mesh_mode"]; value != "" && !slices.Contains(generationMeshModes, value) {
+			return "mesh_mode must be one of Raw, Quad."
+		}
+		if value := fields["strength"]; value != "" {
+			if number, ok := wholeNumber(value); !ok || number < 1 || number > 12 {
+				return "strength must be an integer from 1 to 12."
+			}
+		}
+		if value := fields["quality_override"]; value != "" {
+			if number, ok := wholeNumber(value); !ok || number < 500 || number > 2000000 {
+				return "quality_override must be an integer between 500 and 2000000."
+			}
+		}
+	}
+	if endpoint == "/rodin_texture_only" {
+		if value := fields["texture_mode"]; value != "" && !slices.Contains(generationTextureModes, value) {
+			return "texture_mode must be one of " + strings.Join(generationTextureModes, ", ") + "."
+		}
+	}
+	if value := fields["seed"]; value != "" {
+		if number, ok := wholeNumber(value); !ok || number < 0 || number > 65535 {
+			return "seed must be an integer between 0 and 65535."
+		}
+	}
+	if value := fields["escore"]; value != "" {
+		number, err := strconv.ParseFloat(value, 64)
+		if err != nil || number < 0 || number > 10 {
+			return "escore must be a number between 0 and 10."
+		}
+	}
+	if value := fields["reference_scale"]; value != "" {
+		number, err := strconv.ParseFloat(value, 64)
+		minimum := 0.0
+		if endpoint == "/rodin_texture_only" {
+			minimum = 0.5
+		}
+		if err != nil || number < minimum || number > 1 {
+			return "reference_scale must be a number between " + strconv.FormatFloat(minimum, 'f', -1, 64) + " and 1."
+		}
+	}
+	return ""
+}
+
 // generationImageLabels are the image_label values the Gen-2.5 page lists
 // (docsRoot+"rodin-gen2-5", checked formDocs): front, front-left, front-right,
 // back, back-left, back-right, left, right, up and down, and ? when the side is
@@ -689,6 +761,10 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 				return
 			}
 		case "asset":
+			if message := validateProcessingForm(k.Path, form.fields); message != "" {
+				h.reject(w, "INVALID_REQUEST", message)
+				return
+			}
 			if id := form.fields["asset_id"]; id != "" {
 				// A task id that names no task is the documented NO_SUCH_TASK
 				// ("The referenced task does not exist or has expired"); only an
@@ -712,6 +788,10 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 				return
 			}
 		case "model-and-image":
+			if message := validateProcessingForm(k.Path, form.fields); message != "" {
+				h.reject(w, "INVALID_REQUEST", message)
+				return
+			}
 			if form.files["model"] == 0 || form.files["image"] == 0 {
 				h.reject(w, "INVALID_REQUEST", "Please upload one model and one image.")
 				return
@@ -856,6 +936,11 @@ func (h *handler) postStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if t.scenario == fakeupstream.ScenarioTaskFailed && n > h.pollsBeforeDone(t) {
 		body["message"] = "Invalid input."
+	}
+	if !h.finished(t) {
+		// Hyper3D asks clients to honor Retry-After on a non-final poll
+		// (docs.hyper3d.ai/en/api-specification/check-status, read 2026-11-22).
+		w.Header().Set("Retry-After", h.env.PollRetryAfterSeconds())
 	}
 	writeJSON(w, http.StatusCreated, body)
 }

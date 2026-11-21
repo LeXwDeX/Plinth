@@ -29,6 +29,9 @@ type Config struct {
 	RequestTimeout time.Duration
 	HTTPClient     *http.Client
 	InputAssets    generation.InputAssetResolver
+	// RetrySubmitServerError is the connection-level declaration that a 5xx
+	// answer to a create may be retried (#460 C25).
+	RetrySubmitServerError bool
 	// ScratchDir holds private upload copies (spooled multipart bodies).
 	// Empty means os.TempDir(); production passes the storage volume's tmp
 	// directory because the container's /tmp is a small tmpfs (#321 A).
@@ -134,13 +137,14 @@ type wireArtifactProtocol struct {
 
 func New(config Config) (*Adapter, error) {
 	client, err := httpjson.NewWithConfig(httpjson.Config{
-		BaseURL:        config.BaseURL,
-		APIKey:         config.APIKey,
-		AuthHeader:     config.AuthHeader,
-		AuthPrefix:     config.AuthPrefix,
-		RequestTimeout: config.RequestTimeout,
-		HTTPClient:     config.HTTPClient,
-		SpoolDir:       config.ScratchDir,
+		BaseURL:                config.BaseURL,
+		APIKey:                 config.APIKey,
+		AuthHeader:             config.AuthHeader,
+		AuthPrefix:             config.AuthPrefix,
+		RequestTimeout:         config.RequestTimeout,
+		HTTPClient:             config.HTTPClient,
+		SpoolDir:               config.ScratchDir,
+		RetrySubmitServerError: config.RetrySubmitServerError,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("matting: %w", err)

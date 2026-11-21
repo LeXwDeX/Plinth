@@ -52,6 +52,9 @@ type Config struct {
 	// connection bounds by time, #460). Empty means time.Now; tests inject one
 	// so a five-minute bound is a test step rather than five minutes of waiting.
 	Clock func() time.Time
+	// RetrySubmitServerError is the connection-level declaration that a 5xx
+	// answer to a create may be retried (#460 C25).
+	RetrySubmitServerError bool
 	// Pool is the optional process-wide upstream concurrency pool (#468). Nil
 	// disables queueing and keeps the previous behavior.
 	Pool *upstreampool.Manager
@@ -105,14 +108,15 @@ type providerOptions struct {
 
 func New(config Config) (*Adapter, error) {
 	client, err := httpjson.NewWithConfig(httpjson.Config{
-		BaseURL:        config.BaseURL,
-		APIKey:         config.APIKey,
-		AuthHeader:     config.AuthHeader,
-		AuthPrefix:     config.AuthPrefix,
-		RequestTimeout: config.RequestTimeout,
-		HTTPClient:     config.HTTPClient,
-		ClassifyError:  classifyErrorWithMapping(config.ErrorMapping),
-		SpoolDir:       config.ScratchDir,
+		BaseURL:                config.BaseURL,
+		APIKey:                 config.APIKey,
+		AuthHeader:             config.AuthHeader,
+		AuthPrefix:             config.AuthPrefix,
+		RequestTimeout:         config.RequestTimeout,
+		HTTPClient:             config.HTTPClient,
+		ClassifyError:          classifyErrorWithMapping(config.ErrorMapping),
+		SpoolDir:               config.ScratchDir,
+		RetrySubmitServerError: config.RetrySubmitServerError,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tripo: %w", err)

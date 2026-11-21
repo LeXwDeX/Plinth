@@ -42,6 +42,15 @@ const (
 	docsChecked = "2026-11-08"
 )
 
+// imageGenerationRequestError checks the remesh options and the official pixel
+// bounds of every inlined picture (#460 B24).
+func imageGenerationRequestError(request map[string]any) string {
+	if message := core.GenerationRequestError(request); message != "" {
+		return message
+	}
+	return core.ImageRequestError(request)
+}
+
 // texturedUnlessDisabled follows the should_texture default (true).
 func texturedUnlessDisabled(request map[string]any) bool {
 	enabled, ok := request["should_texture"].(bool)
@@ -54,9 +63,9 @@ var kinds = []core.Kind{
 	{Path: "/text-to-image", Type: "text-to-image", Need: [][]string{{"prompt"}}, Real: true},
 	{Path: "/image-to-image", Type: "image-to-image", Need: [][]string{{"prompt"}, {"reference_image_urls"}}, Real: true},
 	{Path: "/image-to-3d", Type: "image-to-3d", Need: [][]string{{"image_url", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true,
-		Textured: texturedUnlessDisabled, Validate: core.GenerationRequestError},
+		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError},
 	{Path: "/multi-image-to-3d", Type: "multi-image-to-3d", Need: [][]string{{"image_urls", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true,
-		Textured: texturedUnlessDisabled},
+		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError},
 	{Path: "/remesh", Type: "remesh", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/convert", Type: "convert", Need: [][]string{{"input_task_id", "model_url"}, {"target_formats"}}, Sources: []string{"input_task_id"}, Real: true},
 	{Path: "/retexture", Type: "retexture", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,

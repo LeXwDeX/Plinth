@@ -816,3 +816,43 @@ func TestEndpointTableIsCompleteAndHonest(t *testing.T) {
 		}
 	}
 }
+
+// #460 C32 / C30: the fake validates the documented Bang and Texture value
+// domains, including material=Hybrid.
+func TestBangAndTextureFormsValidateMaterialAndRanges(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	cases := []struct {
+		name    string
+		route   string
+		fields  map[string]string
+		files   []string
+		wantErr string
+	}{
+		{"bang hybrid", "/bang", map[string]string{"material": "Hybrid", "geometry_file_format": "glb"}, []string{"model", "image"}, ""},
+		{"bang none", "/bang", map[string]string{"material": "None", "geometry_file_format": "glb"}, []string{"model", "image"}, ""},
+		{"bang unknown material", "/bang", map[string]string{"material": "Plaster"}, []string{"model", "image"}, "material"},
+		{"bang strength range", "/bang", map[string]string{"material": "PBR", "strength": "13"}, []string{"model", "image"}, "strength"},
+		{"texture hybrid", "/rodin_texture_only", map[string]string{"material": "Hybrid", "texture_mode": "high", "resolution": "High"}, []string{"model", "image"}, ""},
+		{"texture unknown material", "/rodin_texture_only", map[string]string{"material": "None"}, []string{"model", "image"}, "material"},
+		{"texture unknown resolution", "/rodin_texture_only", map[string]string{"material": "PBR", "resolution": "Ultra"}, []string{"model", "image"}, "resolution"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			status, _, body := f.Do("POST", Prefix+test.route, key, form(test.fields, test.files...))
+			if status != http.StatusCreated {
+				t.Fatalf("status = %d %v", status, body)
+			}
+			reason, _ := body["error"].(string)
+			message, _ := body["message"].(string)
+			if test.wantErr == "" {
+				if reason != "" {
+					t.Fatalf("error = %q, want none", reason)
+				}
+				return
+			}
+			if reason != "INVALID_REQUEST" || !strings.Contains(message, test.wantErr) {
+				t.Fatalf("error = %q message = %q, want INVALID_REQUEST mentioning %q", reason, message, test.wantErr)
+			}
+		})
+	}
+}

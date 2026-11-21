@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -195,8 +197,19 @@ func TestMeshy71TextTo3DGeneratesTheGameLowPolyInOnePreviewAndRefine(t *testing.
 	}
 }
 
+func testImagePNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image.NewNRGBA(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
 func TestMeshy71ImageTo3DGeneratesTheGameLowPolyInOneRequest(t *testing.T) {
-	image := []byte("\x89PNG\r\n\x1a\nreference")
+	// A real 32x32 PNG: the fake checks the official pixel bounds of an
+	// inlined picture (#460 B24), so a signature-only fixture is refused.
+	image := testImagePNG(t, 32, 32)
 	for _, tc := range gameRemeshCases {
 		t.Run(tc.purpose+"/"+tc.platform, func(t *testing.T) {
 			upstream := newPostRecorder(t)

@@ -132,10 +132,11 @@ func pictureCount(offering generation.Offering, assets map[string][]generation.I
 }
 
 // checkImageLabels is the one rule ValidateInput and Start share. No marks (the
-// parameter absent, null or empty) is the request without the parameter. Marks
-// are sent only as exactly one per picture, each a mark the Schema declares and
-// the Gen-2.5 page lists: more marks than pictures is what Rodin refuses, and
-// fewer is not a request whose result is known.
+// parameter absent, null or empty) is the request without the parameter. More
+// marks than pictures is what Rodin refuses. Fewer marks than pictures is
+// completed with "?" (the official unknown mark) before the request is sent, so
+// every picture keeps a position; each supplied mark must be one the Schema
+// declares and the Gen-2.5 page lists.
 func checkImageLabels(offering generation.Offering, input map[string]any, pictures int) error {
 	parameter, declared := imageLabelsParameter(offering)
 	if !declared || generation.ParameterOmitted(parameter, input) {
@@ -145,19 +146,42 @@ func checkImageLabels(offering generation.Offering, input map[string]any, pictur
 	if err != nil {
 		return imageLabelsRefusal(offering, parameter, err)
 	}
-	switch {
-	case len(labels) == 0:
-		return nil
-	case len(labels) > pictures:
+	if len(labels) > pictures {
 		return imageLabelsRefusal(offering, parameter, fmt.Errorf("%d marks for %d pictures: more marks than pictures", len(labels), pictures))
-	case len(labels) < pictures:
-		return imageLabelsRefusal(offering, parameter, fmt.Errorf("%d marks for %d pictures: one mark per picture is required", len(labels), pictures))
 	}
 	for index, label := range labels {
 		if !slices.Contains(rodinImageLabels, label) || !labelDeclared(parameter, label) {
 			return imageLabelsRefusal(offering, parameter, fmt.Errorf("mark %d (%q) is not a declared mark", index+1, label))
 		}
 	}
+	return nil
+}
+
+// padImageLabels completes a short label list with "?" so the request carries
+// exactly one mark per picture. The official image_label list uses "?" for an
+// unknown side; the page does not say what a short list means, so Plinth makes
+// the missing positions explicit instead of sending a list that does not line
+// up with the pictures.
+func padImageLabels(offering generation.Offering, input map[string]any, pictures int) error {
+	parameter, declared := imageLabelsParameter(offering)
+	if !declared || generation.ParameterOmitted(parameter, input) {
+		return nil
+	}
+	labels, err := imageLabelValues(input[parameter.Name])
+	if err != nil {
+		return imageLabelsRefusal(offering, parameter, err)
+	}
+	if len(labels) == 0 || len(labels) >= pictures {
+		return nil
+	}
+	padded := make([]any, pictures)
+	for index := range padded {
+		padded[index] = "?"
+	}
+	for index, label := range labels {
+		padded[index] = label
+	}
+	input[parameter.Name] = padded
 	return nil
 }
 

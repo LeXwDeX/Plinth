@@ -1132,6 +1132,7 @@ func newConfiguredHarness(
 		"meshy.v2",
 		"tripo.v3",
 		"matting.v1",
+		"hyper3d.rodin.v1",
 	} {
 		if err := registry.Register(key, adapter); err != nil {
 			t.Fatal(err)

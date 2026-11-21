@@ -117,10 +117,15 @@ func TestDirectPreparationCutsTheMarksWithThePictures(t *testing.T) {
 		t.Fatalf("frozen pictures %v and marks %v", pictures, marks)
 	}
 
-	// A list that does not reach the limit stays as it is and still has to match
-	// the pictures: the Adapter refuses it before anything is frozen.
-	if _, err := prepare(true, 7, sevenMarks[:3]); !generation.IsCode(err, generation.ErrInvalidInput) {
-		t.Fatalf("seven pictures with three marks = %v, want invalid_input", err)
+	// A short list stays as it is; the Adapter completes it with the official
+	// unknown mark when it sends the request (#460 C31), so preparation does
+	// not refuse it.
+	prepared, err = prepare(true, 7, sevenMarks[:3])
+	if err != nil {
+		t.Fatalf("seven pictures with three marks were refused: %v", err)
+	}
+	if pictures, marks = frozen(prepared); !slices.Equal(pictures, ids[:5]) || !slices.Equal(marks, sevenMarks[:3]) {
+		t.Fatalf("frozen pictures %v and marks %v", pictures, marks)
 	}
 
 	// No marks: nothing is added, and the pictures are cut as before.
