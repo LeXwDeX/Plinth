@@ -59,3 +59,37 @@ func (service *Service) DeferReport(ctx context.Context, input DeferReportInput)
 	return service.runs.SetItemNextActionAt(ctx, input.OwnerID, input.ListID,
 		input.ItemID, input.NextActionAt, item.Version, input.At)
 }
+
+// RescheduleDeferredReportInput is one new check time for a working item whose
+// done report is stored and whose delivery is still converting (#459).
+type RescheduleDeferredReportInput struct {
+	OwnerID         string
+	ListID          string
+	ItemID          string
+	NextActionAt    time.Time
+	ExpectedVersion int64
+	At              time.Time
+}
+
+// RescheduleDeferredReport moves the item's next scheduling instant without
+// touching its state or its stored report. The runner's delivery tick calls it
+// when a deferred report is still waiting, so the next check is one
+// post-success observation interval ahead (capped by the Catalog) instead of
+// every tick. A missing or foreign item is ErrNotFound; a lost CAS guard is
+// ErrConflict.
+func (service *Service) RescheduleDeferredReport(
+	ctx context.Context,
+	input RescheduleDeferredReportInput,
+) (Item, error) {
+	if service.runs == nil {
+		return Item{}, ErrNotFound
+	}
+	if input.OwnerID == "" || input.ListID == "" || input.ItemID == "" {
+		return Item{}, fmt.Errorf("%w: item identity", ErrInvalid)
+	}
+	if input.ExpectedVersion < 0 && input.ExpectedVersion != VersionUnchecked {
+		return Item{}, fmt.Errorf("%w: expected version", ErrInvalid)
+	}
+	return service.runs.SetItemNextActionAt(ctx, input.OwnerID, input.ListID,
+		input.ItemID, input.NextActionAt, input.ExpectedVersion, input.At)
+}

@@ -511,7 +511,8 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 		// A working item that already reported done waits for its delivery to
 		// settle (#459): the report is stored on the item, so the loop neither
 		// opens another turn nor spends a round, and the item moves into review
-		// as soon as every post-success format is terminal.
+		// as soon as every post-success format is terminal. Only format slots
+		// hold it: a background slot that maps to no format must not.
 		finished, err := runner.finishReportedItem(ctx, run, item, now)
 		if err != nil || finished {
 			return false, err
@@ -815,8 +816,8 @@ func (runner *Runner) finishItem(
 // review once its delivery is stable (#459). It reports true when the item was
 // such a report, whether the item was finished or is still waiting: the loop
 // must not open another turn for it in either case. A waiting item's next
-// scheduling instant is the kernel's post-success deadline, so the check runs
-// once per delivery rather than every tick.
+// scheduling instant is one post-success observation interval ahead (capped by
+// the Catalog), so the check runs at that cadence rather than every tick.
 func (runner *Runner) finishReportedItem(
 	ctx context.Context,
 	run assetlist.Run,

@@ -44,6 +44,12 @@ type AssetListSchema struct {
 	// 在场/运行路由，清单保持 #327 行为；声明但 enabled=false 时 runner 不
 	// 启动，运行控制返回不可用。
 	Execution *AssetListExecutionSchema `json:"execution,omitempty"`
+	// DeliverySettleMaxSeconds 是 #459 的交付稳定检查上限：一个报告完成、
+	// 但仍有格式在后台转换的清单项按 Offering 的成功后观察间隔
+	// （post_success.interval_seconds）安排下一次检查，并以这个秒数封顶，
+	// 避免长间隔把项一直留在 working。0（未声明）表示不封顶；只用于服务端，
+	// 不进公开投影。
+	DeliverySettleMaxSeconds int `json:"delivery_settle_max_seconds,omitempty"`
 }
 
 // AssetListExecutionSchema 是自动制作的调度与在场参数。poll_interval、

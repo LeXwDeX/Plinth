@@ -11,6 +11,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 )
 
 // The production-list completion tool (#328): inside an item's own sub-session
@@ -140,8 +141,10 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 		// formats as post-success resources after the main model landed
 		// (#457). The item must not enter review before that delivery is
 		// stable, so the report is stored on the working item and the runner
-		// moves it into review when the formats settle (#459).
-		if generation.ResourcesPending(task.Resources) {
+		// moves it into review when the formats settle (#459). Only format
+		// slots count: a background slot that maps to no format (P2's
+		// thumbnail/rendered_image) must not hold the item back.
+		if len(modeldelivery.PendingResourceFormats(policy.Delivery, task)) > 0 {
 			return service.deferReportedItem(ctx, policy, item, task, messages)
 		}
 		brief, _ := json.Marshal(command.Options.ProductionBrief)
@@ -308,10 +311,21 @@ func (service *Service) SettleReportedItem(
 		// delivery left to wait for, so the item continues as an ordinary one.
 		return input.Item, false, nil
 	}
-	if generation.ResourcesPending(task.Resources) {
-		// Still converting: the item keeps its state and its next scheduling
-		// instant (set when the report was deferred) keeps the loop away until
-		// the kernel finalizes the remaining slots.
+	if len(modeldelivery.PendingResourceFormats(policy.Delivery, task)) > 0 {
+		// Still converting: the item keeps its state, and its next check moves
+		// one observation interval ahead (capped by the Catalog) instead of
+		// waiting for the kernel's deadline.
+		if _, err := policy.Service.RescheduleDeferredReport(ctx,
+			assetlist.RescheduleDeferredReportInput{
+				OwnerID:         input.OwnerID,
+				ListID:          input.ListID,
+				ItemID:          input.Item.ID,
+				NextActionAt:    assetListNextDeliveryCheck(policy, task, input.Now),
+				ExpectedVersion: input.Item.Version,
+				At:              input.Now,
+			}); err != nil {
+			return input.Item, true, err
+		}
 		return input.Item, true, nil
 	}
 	finished, err := service.FinishReportedItem(ctx, FinishReportedItemInput{
@@ -335,9 +349,10 @@ func (service *Service) SettleReportedItem(
 
 // assetListItemDeliveryPending stores a done report whose delivery is not
 // stable yet (#459): the formats the task still owes are still converting, so
-// the item keeps its state and its next scheduling instant moves to the
-// kernel's post-success deadline. The runner's delivery tick moves the item
-// into review once every format is terminal; the report is never lost.
+// the item keeps its state and its next scheduling instant moves one
+// post-success observation interval ahead (capped by the Catalog). The
+// runner's delivery tick moves the item into review once every format is
+// terminal; the report is never lost.
 func (service *Service) deferReportedItem(
 	ctx context.Context,
 	policy *AssetListPolicy,
@@ -353,14 +368,15 @@ func (service *Service) deferReportedItem(
 		return assetListRefusal(assetListMessage(messages.ItemReportFailed,
 			"the item report could not be stored")), nil
 	}
+	now := service.clock()
 	if _, err := policy.Service.DeferReport(ctx, assetlist.DeferReportInput{
 		OwnerID:         item.OwnerID,
 		ListID:          item.ListID,
 		ItemID:          item.ID,
 		Result:          result,
-		NextActionAt:    generation.PostSuccessDeadline(task),
+		NextActionAt:    assetListNextDeliveryCheck(policy, task, now),
 		ExpectedVersion: item.Version,
-		At:              time.Now().UTC(),
+		At:              now,
 	}); err != nil {
 		return assetListRefusal(assetListMessage(messages.ItemReportFailed,
 			"the item report could not be stored")), nil
@@ -387,6 +403,22 @@ func (service *Service) deferReportedItem(
 		Summary:      summary,
 		NoSubmission: true,
 	}, nil
+}
+
+// assetListNextDeliveryCheck is when the runner re-checks a deferred done
+// report (#459): one post-success observation interval of the reported
+// Offering (the kernel's read-only export; 60s when the Offering declares
+// none), capped by the Catalog's asset_list.delivery_settle_max_seconds so a
+// long interval cannot strand the item in working. A Catalog without the cap
+// leaves the interval un-capped.
+func assetListNextDeliveryCheck(policy *AssetListPolicy, task generation.Task, now time.Time) time.Time {
+	wait := generation.PostSuccessInterval(task)
+	if declared := policy.Schema.DeliverySettleMaxSeconds; declared > 0 {
+		if maxWait := time.Duration(declared) * time.Second; wait > maxWait {
+			wait = maxWait
+		}
+	}
+	return now.Add(wait)
 }
 
 // latestAssetListTask picks the newest Task in one state. The source reads

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.458-459.1",
+    "revision": "2026-11-22.459.2",
     "terminology": {
       "user_facing": [
         {
@@ -5698,6 +5698,7 @@
         "description_max_length": 1000,
         "max_references_per_item": 4
       },
+      "delivery_settle_max_seconds": 300,
       "decompose": {
         "maximum_items_per_image": 24,
         "crop": {

@@ -975,6 +975,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		chatService.SetAssetLists(chat.AssetListPolicy{
 			Service: assetListService,
 			Schema:  *applicationSchema.AssetList,
+			// #459: the same Schema rule the coverage projection uses decides
+			// which post-success slots a deferred report waits for.
+			Delivery: applicationSchema.ModelDelivery,
 			// Item sub-sessions derive the internal steps mode only when the
 			// deployment declares application.step_policy (#330).
 			StepsEnabled: applicationSchema.StepPolicy != nil,

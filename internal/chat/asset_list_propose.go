@@ -30,6 +30,11 @@ import (
 type AssetListPolicy struct {
 	Service *assetlist.Service
 	Schema  catalog.AssetListSchema
+	// Delivery is application.model_delivery: the one Schema rule that maps a
+	// post-success resource slot to the format it delivers (#459). The
+	// completion tool uses it to wait only for format slots, never for a
+	// background slot such as a thumbnail.
+	Delivery catalog.ModelDeliverySchema
 	// StepsEnabled is application.step_policy != nil (#330). An item
 	// sub-session derives the internal steps mode only when the deployment
 	// declares the step policy; otherwise it keeps its stored mode, the

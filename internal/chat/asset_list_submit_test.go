@@ -10,6 +10,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -89,7 +90,12 @@ func (runs *submitRuns) RunSummaries(_ context.Context, _, _ string) (map[string
 func newAssetListSubmitService(t *testing.T, runs *submitRuns,
 	tasks chat.AssetListTaskSource) *chat.Service {
 	t.Helper()
-	schema := defaultAssetListSchema(t)
+	return newAssetListSubmitServiceWithSchema(t, runs, defaultAssetListSchema(t), tasks)
+}
+
+func newAssetListSubmitServiceWithSchema(t *testing.T, runs *submitRuns,
+	schema catalog.AssetListSchema, tasks chat.AssetListTaskSource) *chat.Service {
+	t.Helper()
 	listService, err := assetlist.New(assetlist.Config{
 		Repository:      newAssetListRepo(),
 		Runs:            runs,
@@ -99,9 +105,16 @@ func newAssetListSubmitService(t *testing.T, runs *submitRuns,
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := newChatService(t, newMemoryChatRepository())
+	service := newChatServiceWith(t, newMemoryChatRepository(), func(config *chat.ServiceConfig) {
+		config.Clock = func() time.Time { return submitClock }
+	})
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
 	service.SetAssetLists(chat.AssetListPolicy{
 		Service: listService, Schema: schema, Tasks: tasks,
+		Delivery: product.Application().ModelDelivery,
 	})
 	return service
 }
