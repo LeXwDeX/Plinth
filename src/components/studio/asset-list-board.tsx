@@ -6,6 +6,7 @@ import { Box, Download, Image as ImageIcon, ListChecks, X } from 'lucide-react';
 import { AssetBoardCompare } from '@/components/studio/asset-board-compare';
 import { AssetBoardDetail } from '@/components/studio/asset-board-detail';
 import { AssetBoardReturnDialog } from '@/components/studio/asset-board-return-dialog';
+import { AssetStepsExtendButton } from '@/components/studio/asset-steps-extend-dialog';
 import { Action } from '@/components/ui/button';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
@@ -20,10 +21,14 @@ import {
   boardSlotKey,
   boardSteps,
   boardTaskID,
+  canExtendSteps,
   coverAsset,
   filterBoardItems,
+  itemShowsSteps,
   model3DAsset,
   returnReasonsForKind,
+  stepLimit,
+  stepsExhausted,
   taskAssetPath,
   type AssetListBoardFilter,
 } from '@/lib/asset-lists/board';
@@ -515,6 +520,9 @@ export function AssetListBoard({
                 key={item.id}
                 item={item}
                 schema={schema}
+                client={source}
+                projectID={target.projectId}
+                listID={target.listId}
                 selected={selected.has(item.id)}
                 busy={accepting || returnBusy}
                 detailOpen={detailItem?.id === item.id}
@@ -524,6 +532,7 @@ export function AssetListBoard({
                   setReturningID(item.id);
                 }}
                 onOpen={() => setDetailID(item.id)}
+                onStepsExtended={() => void load(true)}
               />
             ))}
           </ul>
@@ -531,7 +540,15 @@ export function AssetListBoard({
       )}
 
       {detailItem ? (
-        <AssetBoardDetail item={detailItem} schema={schema} onClose={() => setDetailID(null)} />
+        <AssetBoardDetail
+          item={detailItem}
+          schema={schema}
+          client={source}
+          projectID={target.projectId}
+          listID={target.listId}
+          onStepsExtended={() => void load(true)}
+          onClose={() => setDetailID(null)}
+        />
       ) : null}
 
       {returningItem ? (
@@ -539,10 +556,14 @@ export function AssetListBoard({
           key={returningItem.id}
           item={returningItem}
           schema={schema}
+          client={source}
+          projectID={target.projectId}
+          listID={target.listId}
           reasons={returnReasonsForKind(schema, returningItem.kind)}
           busy={returnBusy}
           error={returnError}
           onSubmit={(reasonIDs, note) => void submitReturn(reasonIDs, note)}
+          onStepsExtended={() => void load(true)}
           onClose={() => {
             if (returnBusy) return;
             setReturningID(null);
@@ -557,6 +578,9 @@ export function AssetListBoard({
 interface BoardCellProps {
   item: AssetListBoardItem;
   schema: ProductSchema;
+  client: AssetListClient;
+  projectID: string;
+  listID: string;
   selected: boolean;
   /** A board decision is in flight; the cell's own actions wait. */
   busy: boolean;
@@ -565,11 +589,13 @@ interface BoardCellProps {
   onToggleSelect: () => void;
   onReturn: () => void;
   onOpen: () => void;
+  onStepsExtended: () => void;
 }
 
 /** One grid cell: cover and text open the details, the 3D button rotates the model in place. */
 function BoardCell({
-  item, schema, selected, busy, detailOpen, onToggleSelect, onReturn, onOpen,
+  item, schema, client, projectID, listID, selected, busy, detailOpen,
+  onToggleSelect, onReturn, onOpen, onStepsExtended,
 }: BoardCellProps) {
   const { previewAssetUrl } = useAssetURLRewriter();
   const text = (key: string) => schemaText(schema, key);
@@ -600,10 +626,13 @@ function BoardCell({
         })
         : text('ui.asset_list.board.checks_summary_pass');
   const stepsText = steps
-    ? steps.cap && steps.cap > 0
-      ? formatSchemaText(text('ui.asset_list.board.steps_capped'), { used: steps.used, cap: steps.cap })
+    ? stepLimit(steps) > 0
+      ? formatSchemaText(text('ui.asset_list.board.steps_capped'), { used: steps.used, cap: stepLimit(steps) })
       : formatSchemaText(text('ui.asset_list.board.steps'), { steps: steps.used })
     : text('ui.asset_list.board.steps_unknown');
+  const showSteps = itemShowsSteps(item);
+  const exhausted = stepsExhausted(item);
+  const extendable = canExtendSteps(schema, item);
   const openLabel = formatSchemaText(text('ui.asset_list.board.cell_open'), { name: item.name });
 
   return (
@@ -659,6 +688,11 @@ function BoardCell({
       >
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{item.name}</span>
+          {exhausted ? (
+            <span className="shrink-0 rounded-sm bg-destructive/10 px-1.5 py-0.5 text-[11px] text-destructive" data-testid={`asset-board-steps-exhausted-${item.id}`}>
+              {text('ui.asset_list.board.steps_exhausted')}
+            </span>
+          ) : null}
           <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" data-testid={`asset-board-state-${item.id}`}>
             {stateLabel}
           </span>
@@ -678,16 +712,29 @@ function BoardCell({
             {selfCheck?.summary ? <span className="min-w-0 truncate">{selfCheck.summary}</span> : null}
           </span>
         ) : null}
-        <span className="flex flex-wrap items-baseline gap-x-2 tabular-nums text-[11px] leading-4 text-muted-foreground">
-          {steps && !(steps.cap && steps.cap > 0) && steps.model3d > 0 ? (
-            <span>{formatSchemaText(text('ui.asset_list.board.steps_3d'), { steps: steps.model3d })}</span>
-          ) : null}
-          <span className="ml-auto" data-testid={`asset-board-steps-${item.id}`}>{stepsText}</span>
-        </span>
+        {showSteps ? (
+          <span className="flex flex-wrap items-baseline gap-x-2 tabular-nums text-[11px] leading-4 text-muted-foreground">
+            {steps && !(stepLimit(steps) > 0) && steps.model3d > 0 ? (
+              <span>{formatSchemaText(text('ui.asset_list.board.steps_3d'), { steps: steps.model3d })}</span>
+            ) : null}
+            <span className="ml-auto" data-testid={`asset-board-steps-${item.id}`}>{stepsText}</span>
+          </span>
+        ) : null}
       </button>
 
-      {(modelURL || item.state === 'review') ? (
+      {(modelURL || item.state === 'review' || extendable) ? (
         <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+          {extendable ? (
+            <AssetStepsExtendButton
+              item={item}
+              schema={schema}
+              client={client}
+              projectID={projectID}
+              listID={listID}
+              onExtended={onStepsExtended}
+              testId={`asset-board-extend-${item.id}`}
+            />
+          ) : null}
           {item.state === 'review' ? (
             <Action
               type="button"

@@ -262,6 +262,7 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 			Modes:       cloned.StepPolicy.Modes,
 			DefaultMode: cloned.StepPolicy.DefaultMode,
 			Cap:         cloned.StepPolicy.Cap,
+			ExtraSteps:  cloned.StepPolicy.ExtraSteps,
 		}
 	}
 	var publicAccessKeys *PublicAccessKeysSchema

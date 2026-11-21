@@ -95,6 +95,8 @@ export interface StepPolicyProductSchema {
   modes: Array<{ value: string; label: string }>;
   default_mode: { list: string; mcp: string };
   cap: { default: number; minimum: number; maximum: number };
+  /** #330 step 5C: "give it a few more steps". `default` prefills the dialog, `maximum` bounds one submission and `total_maximum` bounds one asset's grant. */
+  extra_steps: { default: number; maximum: number; total_maximum: number };
 }
 
 /**
@@ -231,6 +233,8 @@ export interface ProductSchema {
          project_asset_list_run?: string;
          /** #328: one list item (PUT skip). */
          project_asset_list_item?: string;
+         /** #330 step 5C: one item's asset extra 3D steps (PUT). */
+         project_asset_list_item_steps?: string;
          /** #328: the project's presence heartbeat (POST present/leave). */
          project_presence?: string;
          /** #240: assign (PUT) the session to a project. */

@@ -71,6 +71,10 @@ type Config struct {
 	// count_capabilities list is used. Both empty means every step is 2D.
 	Counted    map[generation.Capability]bool
 	StepPolicy *catalog.StepPolicySchema
+	// Steps reads and extends the 3D steps of one item's asset (#330 step 5C).
+	// nil leaves SetItemSteps refusing and every item without a live step
+	// standing on the wire.
+	Steps *StepsConfig
 	// ResolveStep snapshots one capability's runtime offering. nil marks every
 	// step available without an offering id, which is what tests and catalogs
 	// without runtime offerings use. An error marks the step unavailable with
@@ -124,6 +128,7 @@ type Service struct {
 	kinds                     map[string]catalog.AssetListKindSchema
 	routes                    map[string]catalog.AssetListRouteSchema
 	counted                   map[generation.Capability]bool
+	steps                     *StepsConfig
 	resolveStep               func(capability string) (RouteStep, error)
 	resolveStepFor            func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
 	validateBrief             func(json.RawMessage) error
@@ -220,6 +225,7 @@ func New(config Config) (*Service, error) {
 		kinds:                     kinds,
 		routes:                    routes,
 		counted:                   counted,
+		steps:                     config.Steps,
 		resolveStep:               config.ResolveStep,
 		resolveStepFor:            config.ResolveStepFor,
 		validateBrief:             config.ValidateBrief,

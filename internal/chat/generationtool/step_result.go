@@ -184,8 +184,8 @@ func stepStandingResult(summary executiongrant.StepSummary) map[string]any {
 		catalog.StepResultUsed: summary.Used,
 	}
 	if summary.Mode == approvalpolicy.StepModeCap {
-		standing[catalog.StepResultCap] = summary.Cap
-		standing[catalog.StepResultRemaining] = max(summary.Cap-summary.Used, 0)
+		standing[catalog.StepResultCap] = summary.Limit()
+		standing[catalog.StepResultRemaining] = summary.Remaining()
 	}
 	return standing
 }

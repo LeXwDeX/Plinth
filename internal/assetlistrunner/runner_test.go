@@ -151,6 +151,23 @@ func (runs *fakeRuns) SetItemBlock(
 	return *item, nil
 }
 
+func (runs *fakeRuns) SetItemStepCapTurn(
+	_ context.Context, ownerID, listID, itemID, assistantMessageID string,
+	expectedVersion int64, at time.Time,
+) (assetlist.Item, error) {
+	item := runs.item(itemID)
+	if item == nil || item.OwnerID != ownerID || item.ListID != listID {
+		return assetlist.Item{}, assetlist.ErrNotFound
+	}
+	if expectedVersion != assetlist.VersionUnchecked && item.Version != expectedVersion {
+		return assetlist.Item{}, assetlist.ErrConflict
+	}
+	item.StepCapTurnMessageID = assistantMessageID
+	item.Version++
+	item.UpdatedAt = at
+	return *item, nil
+}
+
 func (runs *fakeRuns) RecordItemTurn(
 	_ context.Context, ownerID, listID, itemID, assistantMessageID string,
 	round, workRound int, expectedVersion int64, at time.Time,
@@ -712,6 +729,49 @@ func TestAdvanceBlocksTheItemAndPausesTheRunAtTheStepCap(t *testing.T) {
 	}
 	if fixture.stepCaps.calls != 1 {
 		t.Fatalf("step-cap reads = %d; want one at the terminal turn", fixture.stepCaps.calls)
+	}
+}
+
+// #330 step 5C: a grant of more steps clears the item's cap block and resumes
+// the run; the next tick must continue from a fresh turn instead of judging
+// the already-capped turn again (which would re-block or fail it).
+func TestAdvanceContinuesAfterTheStepCapBlockWasResolved(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"))
+
+	fixture.advance(t)
+	first := fixture.item(t, "aitem_1")
+	fixture.chat.finishTurn(first.SessionID, turnError)
+	fixture.chat.failTask(first.SessionID, generation.FailureInternal, false, false)
+	fixture.stepCaps.reached = true
+	fixture.advance(t)
+	if item := fixture.item(t, "aitem_1"); item.Block != assetlist.BlockStepCap || item.StepCapTurnMessageID == "" {
+		t.Fatalf("capped item = %+v; want the block and its turn", item)
+	}
+
+	// The person grants more steps: the item's block is cleared and the run
+	// paused at the cap resumes (both writes are the service's, #330 step 5C).
+	if _, err := fixture.runs.SetItemBlock(context.Background(), testOwner, testList,
+		"aitem_1", assetlist.BlockNone, assetlist.VersionUnchecked, fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.runs.UpdateRunStatus(context.Background(), testOwner, testList,
+		assetlist.RunPaused, assetlist.RunRunning, "", fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	fixture.stepCaps.reached = false
+	fixture.advance(t)
+
+	item := fixture.item(t, "aitem_1")
+	if item.State != assetlist.StateWorking || item.Round != 2 || item.WorkRound != 2 ||
+		item.Block != assetlist.BlockNone {
+		t.Fatalf("continued item = %+v; want the next round of the same work session", item)
+	}
+	if len(fixture.scheduler.calls) != 2 {
+		t.Fatalf("schedules = %d; want the fresh turn after the grant", len(fixture.scheduler.calls))
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunRunning {
+		t.Fatalf("run = %s; want running", run.Status)
 	}
 }
 

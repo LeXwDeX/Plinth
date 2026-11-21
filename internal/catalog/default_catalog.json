@@ -2168,6 +2168,7 @@
           "project_presence": "/api/v1/projects/{projectID}/presence",
           "project_asset_list_run": "/api/v1/projects/{projectID}/asset-lists/{listID}/run",
           "project_asset_list_item": "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}",
+          "project_asset_list_item_steps": "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}/steps",
           "chat_session_project": "/api/v1/chat/sessions/{sessionID}/project",
           "client_errors": "/api/v1/client-errors",
           "chat_session_approval": "/api/v1/chat/sessions/{sessionID}/approval",
@@ -2977,6 +2978,17 @@
       "ui.asset_list.board.steps_3d": "其中 3D {steps} 步",
       "ui.asset_list.board.steps_capped": "已用 {used} / {cap} 步",
       "ui.asset_list.board.steps_unknown": "尚无步数记录",
+      "ui.asset_list.board.steps_exhausted": "步数用完",
+      "ui.asset_list.steps.extend": "再给几步",
+      "ui.asset_list.steps.extend_title": "给「{name}」追加 3D 步数",
+      "ui.asset_list.steps.extend_description": "本项已用 {used} / {limit} 步。追加的步数只给这一项，打回重做时也不会清零。",
+      "ui.asset_list.steps.extend_amount": "追加步数",
+      "ui.asset_list.steps.extend_hint": "每次 1 到 {maximum} 步，一个资产最多追加 {total_maximum} 步。",
+      "ui.asset_list.steps.extend_confirm": "追加",
+      "ui.asset_list.steps.extend_cancel": "取消",
+      "ui.asset_list.steps.extend_success": "已追加到 {extra} 步，本项上限现在是 {limit} 步。",
+      "ui.asset_list.steps.extend_failed": "追加步数失败，请刷新后重试。",
+      "ui.asset_list.steps.extend_conflict": "追加步数已被别处修改，请刷新后重试。",
       "ui.asset_list.board.round": "第 {round} 版",
       "ui.asset_list.board.preview_3d": "3D 预览",
       "ui.asset_list.board.preview_close": "收起预览",
@@ -5856,6 +5868,7 @@
       ],
       "default_mode": {"list": "agent", "mcp": "agent"},
       "cap": {"default": 20, "minimum": 1, "maximum": 200},
+      "extra_steps": {"default": 5, "maximum": 50, "total_maximum": 200},
       "counted_capabilities": [
         "text-to-3d",
         "image-to-3d",
@@ -5895,7 +5908,10 @@
         "guidance": "判断指引：结果已经达标就停，交付当前结果；未达标时先看有没有补救路线、补救要几步、余额够不够；补救无望或不值得时停下，如实告诉用户哪里没达标、为什么停，不要为了凑结果反复重做。界面按步数显示进度，不按积分。"
       },
       "messages": {
-        "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。"
+        "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。",
+        "extra_steps_limit": "每个资产最多追加 {maximum} 步，这次要求 {extra} 步；不能再多了。",
+        "extra_steps_single_limit": "一次最多追加 {maximum} 步。",
+        "extra_steps_unavailable": "这个资产还没有开始制作，现在不能追加步数。"
       },
       "result": {
         "schema": {
@@ -5912,7 +5928,9 @@
       },
       "audit": {
         "update_action": "set_step_policy",
-        "resource_type": "account_step_policy"
+        "resource_type": "account_step_policy",
+        "extra_steps_action": "add_step_extra",
+        "extra_steps_resource_type": "asset_list_item_steps"
       }
     },
     "access_keys": {
@@ -15742,6 +15760,10 @@
         "label": "设置 3D 步数模式"
       },
       {
+        "value": "add_step_extra",
+        "label": "追加 3D 步数"
+      },
+      {
         "value": "create_access_key",
         "label": "创建访问 Key"
       },
@@ -17065,6 +17087,17 @@
             "ui.asset_list.board.steps_3d": "{steps} of them 3D",
             "ui.asset_list.board.steps_capped": "{used} / {cap} steps used",
             "ui.asset_list.board.steps_unknown": "No steps recorded",
+            "ui.asset_list.board.steps_exhausted": "Steps used up",
+            "ui.asset_list.steps.extend": "Give it more steps",
+            "ui.asset_list.steps.extend_title": "Give \"{name}\" more 3D steps",
+            "ui.asset_list.steps.extend_description": "This item used {used} of {limit} steps. The extra steps belong to this item and survive a return for rework.",
+            "ui.asset_list.steps.extend_amount": "Extra steps",
+            "ui.asset_list.steps.extend_hint": "1 to {maximum} per submission, up to {total_maximum} for one asset.",
+            "ui.asset_list.steps.extend_confirm": "Add",
+            "ui.asset_list.steps.extend_cancel": "Cancel",
+            "ui.asset_list.steps.extend_success": "Extra steps are now {extra}; the item's limit is {limit}.",
+            "ui.asset_list.steps.extend_failed": "Adding steps failed. Refresh and try again.",
+            "ui.asset_list.steps.extend_conflict": "The extra steps changed elsewhere. Refresh and try again.",
             "ui.asset_list.board.round": "Version {round}",
             "ui.asset_list.board.preview_3d": "3D preview",
             "ui.asset_list.board.preview_close": "Close preview",
@@ -20562,6 +20595,7 @@
             "audit_actions[value=promote_project_asset].label": "Promote project asset",
             "audit_actions[value=set_production_brief].label": "Set production brief",
             "audit_actions[value=set_step_policy].label": "Set 3D step mode",
+ "audit_actions[value=add_step_extra].label": "Add 3D steps",
             "audit_actions[value=create_access_key].label": "Create access key",
             "audit_actions[value=revoke_access_key].label": "Revoke access key",
             "access_keys.scopes[value=read].label": "Read (query and download)",
@@ -20732,6 +20766,9 @@
             "step_policy.modes[value=unlimited].label": "Unlimited steps",
             "step_policy.modes[value=cap].label": "Limit steps",
             "step_policy.messages.cap_reached": "This asset has used all of its 3D steps ({used} used, cap {cap}); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in their account settings to continue.",
+            "step_policy.messages.extra_steps_limit": "One asset may be granted at most {maximum} extra steps; this request asks for {extra}. That is the most it can take.",
+            "step_policy.messages.extra_steps_single_limit": "At most {maximum} steps may be added in one submission.",
+            "step_policy.messages.extra_steps_unavailable": "This asset has not started yet, so it cannot be given more steps.",
 "step_policy.prompt.context_template": "\n\n[3D steps] This session's approval mode is \"3D steps\" (assigned by the server; the person cannot switch it). {mode_rule}\n{usage}\n{balances}\n{costs}\n{guidance}",
             "step_policy.prompt.mode_rules[id=agent].rule": "Current mode \"{mode}\": you manage the steps yourself; the platform sets no hard cap. The three 3D providers' credit balances are the whole pool; decide whether to continue by whether the result meets the bar.",
             "step_policy.prompt.mode_rules[id=unlimited].rule": "Current mode \"{mode}\": 3D steps are not limited; the platform never refuses a new step because of the step count.",

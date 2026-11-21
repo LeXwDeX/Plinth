@@ -4,6 +4,7 @@ import { Box, Image as ImageIcon } from 'lucide-react';
 
 import { Action } from '@/components/ui/button';
 import { SideDrawer } from '@/components/ui/side-drawer';
+import { AssetStepsExtendButton } from '@/components/studio/asset-steps-extend-dialog';
 import { ModelViewer3D } from '@/components/viewer/model-viewer-3d';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
@@ -12,15 +13,19 @@ import {
   boardSlotKey,
   boardSteps,
   boardTaskID,
+  canExtendSteps,
   checkActualText,
   checkStatusKey,
   coverAsset,
   inputAssetPath,
+  itemShowsSteps,
   model3DAsset,
   regionText,
+  stepLimit,
+  stepsExhausted,
   taskAssetPath,
 } from '@/lib/asset-lists/board';
-import type { AssetListBoardItem } from '@/lib/asset-lists/client';
+import type { AssetListBoardItem, AssetListClient } from '@/lib/asset-lists/client';
 import { formatDateTime } from '@/lib/i18n/format';
 import { activeLocale } from '@/lib/i18n/locale';
 import { formatFileSize } from '@/lib/size-text';
@@ -30,6 +35,11 @@ import { useInlineModelPreviewStore } from '@/store/inline-model-preview-store';
 export interface AssetBoardDetailProps {
   item: AssetListBoardItem;
   schema: ProductSchema;
+  /** The board's client and target, for the "give it a few more steps" write. */
+  client?: AssetListClient;
+  projectID?: string;
+  listID?: string;
+  onStepsExtended?: () => void;
   onClose: () => void;
 }
 
@@ -39,8 +49,11 @@ export interface AssetBoardDetailProps {
  * criterion with its actual value and threshold, the stored artifacts with
  * their downloads, the crop provenance (#331) and the latest recorded
  * decision. The snapshot's facts are shown as recorded; nothing here decides.
+ * A capped item also offers "give it a few more steps" (#330 step 5C).
  */
-export function AssetBoardDetail({ item, schema, onClose }: AssetBoardDetailProps) {
+export function AssetBoardDetail({
+  item, schema, client, projectID, listID, onStepsExtended, onClose,
+}: AssetBoardDetailProps) {
   const { previewAssetUrl, proxyAssetUrl } = useAssetURLRewriter();
   const text = (key: string) => schemaText(schema, key);
   const slot = boardSlotKey(item.id);
@@ -125,20 +138,38 @@ export function AssetBoardDetail({ item, schema, onClose }: AssetBoardDetailProp
 
         <section className="flex flex-wrap items-baseline gap-x-3 gap-y-1" data-testid="asset-board-detail-facts">
           <span className="rounded-sm bg-muted px-1.5 py-0.5" data-testid="asset-board-detail-state">{stateLabel}</span>
+          {stepsExhausted(item) ? (
+            <span className="rounded-sm bg-destructive/10 px-1.5 py-0.5 text-destructive" data-testid="asset-board-detail-steps-exhausted">
+              {text('ui.asset_list.board.steps_exhausted')}
+            </span>
+          ) : null}
           <span className="text-muted-foreground">
             {formatSchemaText(text('ui.asset_list.board.round'), { round: item.round })}
           </span>
-          <span className="ml-auto tabular-nums text-muted-foreground" data-testid="asset-board-detail-steps">
-            {steps
-              ? steps.cap && steps.cap > 0
-                ? formatSchemaText(text('ui.asset_list.board.steps_capped'), { used: steps.used, cap: steps.cap })
-                : formatSchemaText(text('ui.asset_list.board.steps'), { steps: steps.used })
-              : text('ui.asset_list.board.steps_unknown')}
-          </span>
-          {steps && !(steps.cap && steps.cap > 0) && steps.model3d > 0 ? (
+          {itemShowsSteps(item) ? (
+            <span className="ml-auto tabular-nums text-muted-foreground" data-testid="asset-board-detail-steps">
+              {steps
+                ? stepLimit(steps) > 0
+                  ? formatSchemaText(text('ui.asset_list.board.steps_capped'), { used: steps.used, cap: stepLimit(steps) })
+                  : formatSchemaText(text('ui.asset_list.board.steps'), { steps: steps.used })
+                : text('ui.asset_list.board.steps_unknown')}
+            </span>
+          ) : null}
+          {itemShowsSteps(item) && steps && !(stepLimit(steps) > 0) && steps.model3d > 0 ? (
             <span className="w-full text-right tabular-nums text-muted-foreground">
               {formatSchemaText(text('ui.asset_list.board.steps_3d'), { steps: steps.model3d })}
             </span>
+          ) : null}
+          {client && projectID && listID && canExtendSteps(schema, item) ? (
+            <AssetStepsExtendButton
+              item={item}
+              schema={schema}
+              client={client}
+              projectID={projectID}
+              listID={listID}
+              onExtended={() => onStepsExtended?.()}
+              testId="asset-board-detail-extend"
+            />
           ) : null}
         </section>
 

@@ -12,8 +12,10 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/access"
 	"github.com/LeXwDeX/Plinth/internal/administration"
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/listcrop"
 	"github.com/LeXwDeX/Plinth/internal/project"
@@ -64,16 +66,34 @@ type assetListItemWire struct {
 	PlannedModel3DStepCount int                   `json:"planned_model3d_step_count"`
 	State                   string                `json:"state"`
 	StateReason             string                `json:"state_reason,omitempty"`
-	Version                 int64                 `json:"version"`
-	SessionID               string                `json:"session_id,omitempty"`
-	ProjectAssetID          string                `json:"project_asset_id,omitempty"`
-	Round                   int                   `json:"round"`
-	CreatedAt               time.Time             `json:"created_at"`
-	UpdatedAt               time.Time             `json:"updated_at"`
+	// Block is the item's second axis (#328): awaiting_approval or step_cap.
+	// It never changes the state.
+	Block   string `json:"block,omitempty"`
+	Version int64  `json:"version"`
+	// Steps is the live 3D step standing of the item's asset (#330 step 5C):
+	// the used steps, and in the cap mode the owner's cap plus the person's
+	// grant. It is absent before the item has a sub-session or when the read
+	// failed.
+	Steps          *assetListItemStepsWire `json:"steps,omitempty"`
+	SessionID      string                  `json:"session_id,omitempty"`
+	ProjectAssetID string                  `json:"project_asset_id,omitempty"`
+	Round          int                     `json:"round"`
+	CreatedAt      time.Time               `json:"created_at"`
+	UpdatedAt      time.Time               `json:"updated_at"`
 	// Crop is the provenance of the item's crop reference (#331): the source
 	// picture and the normalized region. It is omitted when the item has no
 	// crop reference and only the list detail carries it, never the summary.
 	Crop *assetListCropWire `json:"crop,omitempty"`
+}
+
+// assetListItemStepsWire is the live step standing of one item's asset: the
+// mode and used steps, plus the cap and the person's grant only in the cap
+// mode. The item's limit is cap + extra.
+type assetListItemStepsWire struct {
+	Mode  string `json:"mode"`
+	Used  int    `json:"used"`
+	Cap   int    `json:"cap,omitempty"`
+	Extra int    `json:"extra,omitempty"`
 }
 
 // assetListCropWire is one item's crop provenance (#331). The merge-duplicates
@@ -202,6 +222,15 @@ type assetListItemReviewBody struct {
 	ExpectedVersion *int64   `json:"expected_version"`
 }
 
+// assetListItemStepsBody is the "give it a few more steps" body (#330 step
+// 5C). extra_steps is the asset's whole grant, not an increment, so a retried
+// request cannot add twice; expected_version is the item version the browser
+// read. Both are pointers so a missing member is invalid instead of zero.
+type assetListItemStepsBody struct {
+	ExtraSteps      *int   `json:"extra_steps"`
+	ExpectedVersion *int64 `json:"expected_version"`
+}
+
 // assetListItemReviewWire is one item's batch outcome.
 type assetListItemReviewWire struct {
 	ItemID         string `json:"item_id"`
@@ -281,6 +310,31 @@ func (s *Server) assetListArchiveSchema() *catalog.AssetListArchiveSchema {
 	return s.application.AssetList.Review.Archive
 }
 
+// stepPolicyMessage fills one application.step_policy.messages entry (#330),
+// with the Schema's copy and the service's numbers. A Catalog without the
+// section falls back to the generic conflict text: the route is not registered
+// then, so this is only a defensive answer.
+func (s *Server) stepPolicyMessage(
+	pick func(messages catalog.StepPolicyMessagesSchema) string,
+	values map[string]string,
+) string {
+	text := ""
+	if policy := s.application.StepPolicy; policy != nil {
+		text = strings.TrimSpace(pick(policy.Messages))
+	}
+	if text == "" {
+		return s.message("error.conflict")
+	}
+	if len(values) == 0 {
+		return text
+	}
+	pairs := make([]string, 0, len(values)*2)
+	for name, value := range values {
+		pairs = append(pairs, "{"+name+"}", value)
+	}
+	return strings.NewReplacer(pairs...).Replace(text)
+}
+
 // assetListOwner refuses a request without a real browser session. A
 // Bearer identity, a development credential and a key never decide or edit a
 // list, even when they name the owner in JSON.
@@ -318,10 +372,34 @@ func assetListItemFields(item assetlist.Item) assetListItemWire {
 		References: append([]project.Reference{}, item.References...),
 		RouteID:    item.RouteID, Route: append([]assetlist.RouteStep{}, item.Route...),
 		PlannedStepCount: item.PlannedStepCount, PlannedModel3DStepCount: item.PlannedModel3DStepCount,
-		State: item.State, StateReason: item.StateReason, Version: item.Version,
+		State: item.State, StateReason: item.StateReason, Block: item.Block, Version: item.Version,
 		SessionID: item.SessionID, ProjectAssetID: item.ProjectAssetID, Round: item.Round,
 		CreatedAt: item.CreatedAt.UTC(), UpdatedAt: item.UpdatedAt.UTC(),
 	}
+}
+
+// assetListItemLiveSteps reads one item's live 3D step standing (#330 step
+// 5C). It is a display read: an item without a sub-session, a deployment
+// without the step service and any read failure leave the object out (the
+// browser falls back to the review snapshot or "unknown"), never a guessed
+// zero. A failure is logged with the request id the response carries.
+func (s *Server) assetListItemLiveSteps(ctx context.Context, owner string, item assetlist.Item) *assetListItemStepsWire {
+	if s.executionGrants == nil || s.application.StepPolicy == nil || item.SessionID == "" {
+		return nil
+	}
+	summary, err := s.executionGrants.StepStatus(ctx, owner, item.SessionID)
+	if err != nil {
+		if !errors.Is(err, executiongrant.ErrInvalid) && s.logger != nil {
+			s.logger.WarnContext(ctx, "asset list item step standing read failed",
+				"owner_id", owner, "list_id", item.ListID, "item_id", item.ID, "error", err)
+		}
+		return nil
+	}
+	wire := &assetListItemStepsWire{Mode: summary.Mode, Used: summary.Used}
+	if summary.Mode == approvalpolicy.StepModeCap {
+		wire.Cap, wire.Extra = summary.Cap, summary.Extra
+	}
+	return wire
 }
 
 // assetListCropReference picks the crop asset one item references and the
@@ -410,7 +488,7 @@ func assetListRepresentativeAsset(result json.RawMessage) string {
 // assetListBoardFields renders the acceptance board. crops is the owner-scoped
 // provenance of every referenced crop asset, keyed by crop asset id; nil (no
 // store or no crop references) leaves every item without the crop fields.
-func assetListBoardFields(board assetlist.Board,
+func (s *Server) assetListBoardFields(ctx context.Context, owner string, board assetlist.Board,
 	crops map[generation.AssetID]listcrop.Crop,
 ) assetListBoardWire {
 	items := make([]assetListBoardItemWire, 0, len(board.Items))
@@ -423,8 +501,10 @@ func assetListBoardFields(board assetlist.Board,
 		if len(review) == 0 {
 			review = json.RawMessage("{}")
 		}
+		item := assetListItemFields(entry.Item)
+		item.Steps = s.assetListItemLiveSteps(ctx, owner, entry.Item)
 		wire := assetListBoardItemWire{
-			assetListItemWire:     assetListItemFields(entry.Item),
+			assetListItemWire:     item,
 			Result:                result,
 			Review:                review,
 			RepresentativeAssetID: assetListRepresentativeAsset(result),
@@ -461,11 +541,14 @@ func assetListBoardFields(board assetlist.Board,
 // provenance of every referenced crop asset, keyed by crop asset id; nil (no
 // store or no crop references) leaves every item without the optional crop
 // object.
-func assetListResultWire(value assetlist.List, crops map[generation.AssetID]listcrop.Crop) assetListWire {
+func (s *Server) assetListResultWire(ctx context.Context, owner string, value assetlist.List,
+	crops map[generation.AssetID]listcrop.Crop,
+) assetListWire {
 	items := make([]assetListItemWire, 0, len(value.Items))
 	for _, item := range value.Items {
 		wire := assetListItemFields(item)
 		wire.Crop = assetListCropField(item, crops)
+		wire.Steps = s.assetListItemLiveSteps(ctx, owner, item)
 		items = append(items, wire)
 	}
 	brief := value.Brief
@@ -523,6 +606,8 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 	var activeWorking *assetlist.ErrActiveWorking
 	var reworkLimit *assetlist.ReworkLimitError
 	var assetLimit *assetlist.ReviewAssetLimitError
+	var extraLimit *assetlist.StepExtraLimitError
+	var extraSingle *assetlist.StepExtraSingleLimitError
 	switch {
 	case errors.As(err, &activeConflict):
 		detail := s.message("error.conflict")
@@ -576,6 +661,31 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 			"maximum": strconv.Itoa(assetLimit.Maximum),
 		})
 		writeProblem(writer, http.StatusConflict, "asset_list_asset_limit", detail, err)
+	case errors.As(err, &extraLimit):
+		// #330 step 5C: the whole grant would exceed the Schema's bound. The
+		// step policy owns the copy; a Catalog without it falls back to the
+		// generic conflict text.
+		detail := s.stepPolicyMessage(func(messages catalog.StepPolicyMessagesSchema) string {
+			return messages.ExtraStepsLimit
+		}, map[string]string{
+			"maximum": strconv.Itoa(extraLimit.Maximum),
+			"extra":   strconv.Itoa(extraLimit.Requested),
+		})
+		writeProblem(writer, http.StatusConflict, "asset_list_step_extra_limit", detail, err)
+	case errors.As(err, &extraSingle):
+		// #330 step 5C: one write added more than the per-write bound; nothing
+		// was written.
+		detail := s.stepPolicyMessage(func(messages catalog.StepPolicyMessagesSchema) string {
+			return messages.ExtraStepsSingleLimit
+		}, map[string]string{"maximum": strconv.Itoa(extraSingle.Maximum)})
+		writeProblem(writer, http.StatusConflict, "asset_list_step_extra_single_limit", detail, err)
+	case errors.Is(err, assetlist.ErrStepUnavailable):
+		// #330 step 5C: the item has no sub-session yet, so there is no asset
+		// to extend. This is a state conflict, not a missing list.
+		detail := s.stepPolicyMessage(func(messages catalog.StepPolicyMessagesSchema) string {
+			return messages.ExtraStepsUnavailable
+		}, nil)
+		writeProblem(writer, http.StatusConflict, "asset_list_step_unavailable", detail, err)
 	case errors.Is(err, assetlist.ErrConflict):
 		writeProblem(writer, http.StatusConflict, "conflict", s.message("error.conflict"), err)
 	case errors.Is(err, assetlist.ErrArchiveEmpty):
@@ -768,7 +878,7 @@ func (s *Server) getProjectAssetList(writer http.ResponseWriter, request *http.R
 		return
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
-	writeJSON(writer, http.StatusOK, assetListResultWire(value, crops))
+	writeJSON(writer, http.StatusOK, s.assetListResultWire(request.Context(), owner, value, crops))
 }
 
 // getProjectAssetListBoard is the read-only acceptance board (#329a). It
@@ -791,7 +901,7 @@ func (s *Server) getProjectAssetListBoard(writer http.ResponseWriter, request *h
 		return
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
-	writeJSON(writer, http.StatusOK, assetListBoardFields(board, crops))
+	writeJSON(writer, http.StatusOK, s.assetListBoardFields(request.Context(), owner, board, crops))
 }
 
 // putProjectAssetListItemReview is the person's board decision (#329b): one
@@ -834,7 +944,7 @@ func (s *Server) putProjectAssetListItemReview(writer http.ResponseWriter, reque
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
 	writeJSON(writer, http.StatusOK, assetListReviewDecisionWire{
-		List: assetListResultWire(outcome.List, nil), Items: items,
+		List: s.assetListResultWire(request.Context(), owner, outcome.List, nil), Items: items,
 	})
 }
 
@@ -938,7 +1048,7 @@ func (s *Server) putProjectAssetList(writer http.ResponseWriter, request *http.R
 		s.writeAssetListError(writer, err, value.Title)
 		return
 	}
-	writeJSON(writer, http.StatusOK, assetListResultWire(value, crops))
+	writeJSON(writer, http.StatusOK, s.assetListResultWire(request.Context(), owner, value, crops))
 }
 
 func (s *Server) decideProjectAssetList(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
@@ -970,7 +1080,7 @@ func (s *Server) decideProjectAssetList(writer http.ResponseWriter, request *htt
 		s.writeAssetListError(writer, err, value.Title)
 		return
 	}
-	writeJSON(writer, http.StatusOK, assetListResultWire(value, crops))
+	writeJSON(writer, http.StatusOK, s.assetListResultWire(request.Context(), owner, value, crops))
 }
 
 // controlProjectAssetListRun applies one person action to the list's run
@@ -1029,6 +1139,55 @@ func (s *Server) updateProjectAssetListItem(writer http.ResponseWriter, request 
 		return
 	}
 	writeJSON(writer, http.StatusOK, assetListItemFields(item))
+}
+
+// putProjectAssetListItemSteps is the person's "give it a few more steps"
+// (#330 step 5C): it raises one item's asset grant in the cap mode and clears
+// the item's step-cap block, so a run paused at the cap continues. The write
+// needs a real browser session, like every list route: a Bearer identity or a
+// development credential cannot raise a cap. The change is audited with its
+// before and after.
+func (s *Server) putProjectAssetListItemSteps(writer http.ResponseWriter, request *http.Request, principal access.Principal) {
+	owner, ok := s.assetListOwner(writer, request, principal)
+	if !ok {
+		return
+	}
+	var body assetListItemStepsBody
+	if err := s.decodeJSON(writer, request, &body); err != nil {
+		return
+	}
+	if body.ExtraSteps == nil || body.ExpectedVersion == nil || *body.ExtraSteps < 0 || *body.ExpectedVersion < 0 {
+		s.writeAssetListError(writer, fmt.Errorf("%w: extra steps", assetlist.ErrInvalid), "")
+		return
+	}
+	itemID := request.PathValue("itemID")
+	item, change, err := s.assetLists.SetItemSteps(request.Context(), owner,
+		request.PathValue("projectID"), request.PathValue("listID"), itemID,
+		*body.ExtraSteps, *body.ExpectedVersion)
+	if err != nil {
+		s.writeAssetListError(writer, err, "")
+		return
+	}
+	if audit := s.application.StepPolicy; audit != nil && change.Previous.Extra != change.Current.Extra {
+		s.recordProductAudit(request, administration.AuditEvent{
+			Action:       audit.Audit.ExtraStepsAction,
+			ActorID:      principal.ID(),
+			ActorName:    principal.Claims.Name,
+			ResourceType: audit.Audit.ExtraStepsResourceType,
+			ResourceID:   itemID,
+			Detail: map[string]any{
+				"from": map[string]any{"extra_steps": change.Previous.Extra},
+				"to":   map[string]any{"extra_steps": change.Current.Extra},
+			},
+		})
+	}
+	wire := assetListItemFields(item)
+	wire.Steps = &assetListItemStepsWire{
+		Mode: change.Current.Mode, Used: change.Current.Used,
+		Cap: change.Current.Cap, Extra: change.Current.Extra,
+	}
+	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
+	writeJSON(writer, http.StatusOK, wire)
 }
 
 func (s *Server) listChatSessionAssetLists(writer http.ResponseWriter, request *http.Request, principal access.Principal) {

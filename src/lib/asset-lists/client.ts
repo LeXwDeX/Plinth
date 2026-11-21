@@ -100,12 +100,27 @@ export interface AssetListItem {
   planned_model3d_step_count: number;
   state: string;
   state_reason?: string;
+  /** #328: the item's second axis (awaiting_approval, step_cap); absent otherwise. */
+  block?: string;
   version: number;
   session_id?: string;
   project_asset_id?: string;
   round: number;
+  /** #330 step 5C: the live 3D step standing of the item's asset; absent before the item has a sub-session. */
+  steps?: AssetListItemSteps;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * #330 step 5C: the live step standing of one item's asset. `cap` and `extra`
+ * appear only in the cap mode; the item's limit is `cap + extra`.
+ */
+export interface AssetListItemSteps {
+  mode: string;
+  used: number;
+  cap?: number;
+  extra?: number;
 }
 
 /** The list with its shared brief and items. */
@@ -166,6 +181,8 @@ export interface AssetListBoardSteps {
   used: number;
   model3d: number;
   cap?: number;
+  /** #330 step 5C: the person's extra-step grant for this asset (cap mode only). */
+  extra?: number;
   mode?: string;
 }
 
@@ -402,6 +419,18 @@ export interface AssetListClient {
     expectedVersion: number,
     reason?: string,
   ): Promise<AssetListItem>;
+  /**
+   * #330 step 5C: set one item asset's whole extra-step grant. The value is an
+   * absolute grant (not an increment), so a retried request cannot add twice;
+   * `expectedVersion` is the item version the browser read.
+   */
+  addItemSteps(
+    projectID: string,
+    listID: string,
+    itemID: string,
+    extraSteps: number,
+    expectedVersion: number,
+  ): Promise<AssetListItem>;
   /** #328: this browser tab is (or is no longer) watching the project. */
   presence(projectID: string, tabID: string, state: AssetListPresenceState): Promise<void>;
   /**
@@ -486,6 +515,8 @@ export function createAssetListClient(
     route(required(routes.project_asset_list_run), { projectID, listID });
   const itemRoute = (projectID: string, listID: string, itemID: string) =>
     route(required(routes.project_asset_list_item), { projectID, listID, itemID });
+  const itemStepsRoute = (projectID: string, listID: string, itemID: string) =>
+    route(required(routes.project_asset_list_item_steps), { projectID, listID, itemID });
   const sessionListsRoute = (sessionID: string) =>
     route(required(routes.chat_session_asset_lists), { sessionID });
   const presenceRoute = (projectID: string) =>
@@ -592,6 +623,16 @@ export function createAssetListClient(
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+      });
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return itemOf(payload);
+    },
+    async addItemSteps(projectID, listID, itemID, extraSteps, expectedVersion) {
+      const response = await fetcher(itemStepsRoute(projectID, listID, itemID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ extra_steps: extraSteps, expected_version: expectedVersion }),
       });
       const payload = await payloadOf(response);
       if (!response.ok) failure(response, payload);
