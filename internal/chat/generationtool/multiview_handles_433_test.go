@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 // #433: the multiview tool takes several views of one object whether the person
@@ -29,6 +31,22 @@ func threeViewPictures() []string {
 func referenceAssets(run multiviewRun) []any {
 	assets, _ := run.input["reference_assets"].([]any)
 	return assets
+}
+
+// wantReferenceOrder checks the frozen pictures are the given ones, in that
+// order: an order-only Offering reads a picture's position as its view, so a
+// reordered list would make it read another angle as the front.
+func wantReferenceOrder(t *testing.T, run multiviewRun, urls []string) {
+	t.Helper()
+	assets := referenceAssets(run)
+	if len(assets) != len(urls) {
+		t.Fatalf("reference_assets = %v, want %d pictures", assets, len(urls))
+	}
+	for index, url := range urls {
+		if assets[index] != "asset-for-"+url {
+			t.Fatalf("reference_assets = %v, want %v in that order", assets, urls)
+		}
+	}
 }
 
 // A session lock on Meshy 7.1 and a multiview call that gives four handles: the
@@ -177,5 +195,123 @@ func TestMultiviewHandlesRefuseANonContiguousPrefixForAnOrderOnlyModel(t *testin
 	}
 	if !strings.Contains(run.result.AgentContent, run.chat.ThreeView.Messages.ViewsInvalid) {
 		t.Fatalf("refusal = %q, want the view check's words", run.result.AgentContent)
+	}
+}
+
+// The frozen picture list is the order the views were bound in: a picture the
+// person marked "input" does not move ahead of them (#433). An order-only model
+// reads positions, so a moved picture would make it take the back view as the
+// front.
+func TestMultiviewHandlesKeepTheirOrderWhenAPictureIsMarkedInput(t *testing.T) {
+	run := runMultiviewIn(t, multiviewScenario{
+		locked:   "meshy-7.1",
+		also:     []string{meshyImageTo3D, meshyMultiviewImageTo3D},
+		pictures: fourViewPictures(),
+		purposes: map[string]string{"@img3": "input"},
+	}, nil, `{"reference_handles":["@img1","@img2","@img3","@img4"]}`, nil)
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("handles with an input-marked picture: %+v %v", run.result, run.err)
+	}
+	if run.gateway.submitted.OfferingID != meshyMultiviewImageTo3D {
+		t.Fatalf("offering = %q, want the multiview shape", run.gateway.submitted.OfferingID)
+	}
+	wantReferenceOrder(t, run, fourViewPictures())
+	if _, written := run.input["reference_views"]; written {
+		t.Fatalf("an order-only Offering must get no view labels: %v", run.input["reference_views"])
+	}
+}
+
+// The same order holds on an artboard-source turn: the call's own pictures keep
+// their positions, so the snapshot's own order cannot relabel them (#433). A
+// Catalog that declares the purpose argument on the multiview tool gets the same
+// rule: the person's "input" mark does not require a picture to lead, because
+// every position is a view.
+func TestMultiviewHandlesKeepTheirOrderOnAnArtboardTurn(t *testing.T) {
+	pictures := fourViewPictures()
+	// The person's selection holds the same four pictures in another order.
+	selection := []string{"back-url", "right-url", "front-url", "left-url"}
+	for _, test := range []struct {
+		name           string
+		pictures       []string
+		selection      []string
+		arguments      string
+		purposeArg     bool
+		wantOfferingID generation.OfferingID
+	}{
+		{
+			name: "the call names the views", pictures: pictures, selection: selection,
+			arguments:      `{"reference_handles":["@img1","@img2","@img3","@img4"]}`,
+			wantOfferingID: meshyMultiviewImageTo3D,
+		},
+		{
+			name: "the selection is the call's pictures in view order", selection: pictures,
+			arguments:      `{}`,
+			wantOfferingID: meshyMultiviewImageTo3D,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			run := runMultiviewIn(t, multiviewScenario{
+				locked:    "meshy-7.1",
+				also:      []string{meshyImageTo3D, meshyMultiviewImageTo3D},
+				pictures:  test.pictures,
+				selection: test.selection,
+				canvas:    true,
+			}, nil, test.arguments, nil)
+			if run.err != nil || run.result.NoSubmission {
+				t.Fatalf("artboard turn: %+v %v", run.result, run.err)
+			}
+			if run.gateway.submitted.OfferingID != test.wantOfferingID {
+				t.Fatalf("offering = %q, want %q", run.gateway.submitted.OfferingID, test.wantOfferingID)
+			}
+			wantReferenceOrder(t, run, pictures)
+		})
+	}
+}
+
+// A Catalog that declares reference_purposes on the multiview tool still runs
+// the step with an input-marked picture at its view's position: the request's
+// order is the views, not a base picture (#433).
+func TestMultiviewHandlesDoNotRequireAnInputPictureToLead(t *testing.T) {
+	run := runMultiviewIn(t, multiviewScenario{
+		locked:          "meshy-7.1",
+		also:            []string{meshyImageTo3D, meshyMultiviewImageTo3D},
+		pictures:        fourViewPictures(),
+		purposes:        map[string]string{"@img3": "input"},
+		canvas:          true,
+		purposeArgument: true,
+	}, nil, `{"reference_handles":["@img1","@img2","@img3","@img4"]}`, nil)
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("an input-marked back view must run in place: %+v %v", run.result, run.err)
+	}
+	if run.gateway.submitted.OfferingID != meshyMultiviewImageTo3D {
+		t.Fatalf("offering = %q, want the multiview shape", run.gateway.submitted.OfferingID)
+	}
+	wantReferenceOrder(t, run, fourViewPictures())
+}
+
+// A labelled Offering keeps the call's labels and pictures aligned on an
+// artboard turn and with an input-marked picture: the frozen input is read as
+// the views it names.
+func TestMultiviewHandlesKeepTheirLabelsOnArtboardAndInputTurns(t *testing.T) {
+	run := runMultiviewIn(t, multiviewScenario{
+		pictures:  fourViewPictures(),
+		purposes:  map[string]string{"@img3": "input"},
+		selection: []string{"back-url", "right-url", "front-url", "left-url"},
+		canvas:    true,
+	}, nil,
+		`{"reference_handles":["@img1","@img2","@img3","@img4"],"reference_views":["front","left","back","right"]}`, nil)
+	if run.err != nil || run.result.NoSubmission {
+		t.Fatalf("labelled handles on an artboard turn: %+v %v", run.result, run.err)
+	}
+	if run.gateway.submitted.OfferingID != multiviewOffering {
+		t.Fatalf("offering = %q, want the labelled multiview Offering", run.gateway.submitted.OfferingID)
+	}
+	wantReferenceOrder(t, run, fourViewPictures())
+	if got := run.input["reference_views"]; !reflect.DeepEqual(got, []any{"front", "left", "back", "right"}) {
+		t.Fatalf("reference_views = %v, want the call's labels in its picture order", got)
+	}
+	note, _ := run.content["reference_note"].(string)
+	if !strings.Contains(note, "正面 / 左侧 / 背面 / 右侧") {
+		t.Fatalf("reference_note = %q, want the labels of the pictures that ran", note)
 	}
 }

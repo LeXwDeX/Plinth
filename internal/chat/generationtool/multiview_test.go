@@ -53,6 +53,15 @@ type multiviewScenario struct {
 	// pictures are the session's image URLs, in the order @img1, @img2, …: they
 	// belong to the user's last message, so a handle naming one resolves.
 	pictures []string
+	// purposes are the attachment purposes the person marked, by handle (#250).
+	purposes map[string]string
+	// selection is the workspace selection in its own order, and canvas makes
+	// the turn an artboard-source turn (#266).
+	selection []string
+	canvas    bool
+	// purposeArgument declares the shipped tool's reference_purposes argument,
+	// which the default Catalog leaves out (#433).
+	purposeArgument bool
 }
 
 const (
@@ -89,6 +98,9 @@ func runMultiviewIn(t *testing.T, scenario multiviewScenario, views *fakeThreeVi
 	// The direct submission path of this harness has no prepared authorization;
 	// the frozen input is what these tests read.
 	offering.NativePricing = nil
+	if scenario.purposeArgument {
+		tool.ReferencePurposesArgument = "reference_purposes"
+	}
 	offerings := []generation.Offering{offering}
 	for _, id := range scenario.also {
 		other, found := product.Get(generation.OfferingID(id))
@@ -135,10 +147,17 @@ func runMultiviewIn(t *testing.T, scenario multiviewScenario, views *fakeThreeVi
 		last.ImageURLs = append([]string(nil), scenario.pictures...)
 		last.Attachments = attachments
 	}
+	options := chat.TurnOptions{Multiview: request, ExplicitModel3D: scenario.locked, AttachmentPurposes: scenario.purposes}
+	for _, url := range scenario.selection {
+		options.Selection = append(options.Selection, chat.Attachment{Kind: chat.AttachmentKindImage, URL: url})
+	}
+	if scenario.canvas {
+		options.InputSource = application.Chat.Context.CanvasInputSource
+	}
 	result, err := executor.Execute(context.Background(), chat.ToolCommand{
 		OwnerID: "owner-a", SessionID: "session-a", Tool: tool, History: history,
 		Call:    agents.ToolCall{ID: "call-views", Name: tool.Name, Arguments: []byte(arguments)},
-		Options: chat.TurnOptions{Multiview: request, ExplicitModel3D: scenario.locked},
+		Options: options,
 	}, func(chat.ToolObservation) error { return nil })
 	run := multiviewRun{result: result, err: err, resolver: resolver, gateway: gateway, chat: application.Chat}
 	if result.AgentContent != "" {

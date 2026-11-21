@@ -45,7 +45,7 @@ type multiviewPictures struct {
 func (executor *Executor) multiviewSelection(ctx context.Context, command chat.ToolCommand,
 	arguments map[string]json.RawMessage) (*multiviewPictures, string, error) {
 	multiview := executor.chat.ThreeView.Multiview
-	if multiview.Tool == "" || command.Tool.Name != multiview.Tool {
+	if !executor.isMultiviewTool(command) {
 		return nil, "", nil
 	}
 	messages := executor.chat.ThreeView.Messages
@@ -82,6 +82,13 @@ func (executor *Executor) multiviewSelection(ctx context.Context, command chat.T
 	return pictures, "", nil
 }
 
+// isMultiviewTool reports whether the tool is the one the three-view schema
+// names for a step that takes several views of one object.
+func (executor *Executor) isMultiviewTool(command chat.ToolCommand) bool {
+	tool := executor.chat.ThreeView.Multiview.Tool
+	return tool != "" && command.Tool.Name == tool
+}
+
 // callMultiviewViews binds the views of a multiview step whose pictures the
 // call itself supplies (#433): the handles, historical indices or selected
 // pictures the ordinary reference path resolves. The tool describes two ways to
@@ -95,7 +102,7 @@ func (executor *Executor) multiviewSelection(ctx context.Context, command chat.T
 func (executor *Executor) callMultiviewViews(command chat.ToolCommand, arguments map[string]json.RawMessage,
 	pictures int) (*multiviewPictures, string) {
 	multiview := executor.chat.ThreeView.Multiview
-	if multiview.Tool == "" || command.Tool.Name != multiview.Tool || pictures == 0 {
+	if !executor.isMultiviewTool(command) || pictures == 0 {
 		return nil, ""
 	}
 	messages := executor.chat.ThreeView.Messages
