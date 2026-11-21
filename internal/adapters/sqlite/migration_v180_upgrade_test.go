@@ -16,8 +16,10 @@ package sqlite
 //   - 升级前快照的每一列、每一行在升级后原样保留，只多出新增列；
 //   - foreign_key_check 与 integrity_check 通过；
 //   - 用户、会话与消息（含 tool_calls）、回合与检查点（done/error/waiting_task/
-//     running）、制作计划、SkillRun 与步骤、生成任务/Attempt/资产、执行授权与
-//     Agent 配置版本都能经仓库层读回。
+//     running）、3D 处理计划（processing_plans）、对话里的制作预算计划
+//     （production_budgets/budget_reservations，plan_json 钉住模型名）、
+//     SkillRun 与步骤、生成任务/Attempt/资产、执行授权与 Agent 配置版本都能
+//     经仓库层读回。
 
 import (
 	"context"
@@ -32,6 +34,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -210,7 +213,9 @@ func seedV180Data(t *testing.T, db *sql.DB) {
 		 ('owner-b', 'bob', '$2a$10$synthetic-bob', 'Bob', 'Bob Li', 'bob@example.test',
 		  '["creator"]', 0, 1, '2024-04-02T08:00:00Z', '2024-04-03T08:00:00Z',
 		  '2024-04-03T08:00:00Z', NULL, 'openid-bob', 0)`,
-		// Chat sessions: a working session with 2D context, and one owner-b session.
+		// Chat sessions: a working budget-mode session, the sessions of the
+		// pending/closed/denied and exhausted production plans, and one
+		// owner-b session.
 		`INSERT INTO go_chat_sessions
 		 (id, owner_id, owner_name, title, created_at, updated_at, approval_mode, notes, picked,
 		  agent_scope, title_source, reasoning_effort, context_prompt_tokens, context_completion_tokens,
@@ -220,12 +225,19 @@ func seedV180Data(t *testing.T, db *sql.DB) {
 		  project_id, style_lock_source)
 		 VALUES
 		 ('sess-a', 'owner-a', 'Alice', '合成概念车', '2024-05-02T10:00:00Z', '2024-05-02T10:30:00Z',
-		  'manual', '合成备注', '', 'auto', 'user', 'high', 1280, 320, 'chat-model-a',
+		  'budget', '合成备注', '', 'auto', 'user', 'high', 1280, 320, 'chat-model-a',
 		  '2024-05-02T10:20:00Z', 'chat-model-a', '{"subject":"一辆合成概念车","style":"简洁"}',
 		  'model-3d-a', '', '', '', 0, 0, '', '[]', 96, '', '[]', '', 'project'),
 		 ('sess-b', 'owner-b', 'Bob', 'Bob 的会话', '2024-05-03T10:00:00Z', '2024-05-03T10:05:00Z',
 		  'auto', '', '', '2d', 'auto', '', NULL, NULL, '', '', '', '', '', '', '', '', 0, 0, '',
 		  '[]', NULL, '', '[]', '', 'project')`,
+		`INSERT INTO go_chat_sessions
+		 (id, owner_id, owner_name, title, created_at, updated_at, approval_mode, agent_scope, title_source)
+		 VALUES
+		 ('sess-budget', 'owner-a', 'Alice', '预算计划会话', '2024-05-04T10:00:00Z',
+		  '2024-05-04T10:30:00Z', 'budget', 'auto', 'user'),
+		 ('sess-budget-exhausted', 'owner-a', 'Alice', '预算用尽会话', '2024-05-05T10:00:00Z',
+		  '2024-05-05T11:00:00Z', 'budget', '3d', 'user')`,
 		// Messages: one user message and one assistant message per turn state.
 		`INSERT INTO go_chat_messages
 		 (id, session_id, role, content, image_urls, tool_calls, attachments, multiview, created_at)
@@ -299,7 +311,13 @@ func seedV180Data(t *testing.T, db *sql.DB) {
 		  'FAILED', 10, '{"class":"transport","retryable":true,"detail":"合成上游超时"}', 'att-4', 1,
 		  NULL, 4, NULL, NULL, NULL,
 		  '2024-05-02T10:18:00.000000000Z', '2024-05-02T10:19:00.000000000Z',
-		  '2024-05-02T10:19:00.000000000Z', NULL, 'sess-a', NULL, 0)`,
+		  '2024-05-02T10:19:00.000000000Z', NULL, 'sess-a', NULL, 0),
+		 ('task-exhausted', 'owner-a', 'image-to-3d',
+		  '{"id":"` + v180OfferingID + `","revision":"` + v180OfferingRev + `","provider_id":"provider-a","capability":"image-to-3d","parameters":[]}',
+		  '{"prompt":"合成概念车（预算用尽）"}', 'hash-task-exhausted', 'idem-task-exhausted',
+		  'SUCCEEDED', 100, NULL, NULL, 0, NULL, 2, NULL, NULL, NULL,
+		  '2024-05-05T10:05:00.000000000Z', '2024-05-05T10:40:00.000000000Z',
+		  '2024-05-05T10:40:00.000000000Z', NULL, 'sess-budget-exhausted', NULL, 0)`,
 		`INSERT INTO generation_attempts
 		 (id, task_id, ordinal, offering_json, state, submission_key, upstream_provider_id,
 		  upstream_job_id, failure_json, opaque_json, started_at, updated_at, finished_at)
@@ -367,12 +385,63 @@ func seedV180Data(t *testing.T, db *sql.DB) {
 		  '2024-05-02T10:20:00Z', '', 0, '', 0),
 		 ('eg-bound', 'owner-a', 'sess-a', 'format-gltf', 'rev-gltf',
 		  'prep-1', 'hash-prep-1', 'idem-eg-bound', 'op-eg-bound', 'front-1', 'bound', 'task-conv',
-		  'human_browser', 1, 'owner-a', '2024-05-02T10:22:00Z', '2024-05-02T10:21:00Z',
-		  '2024-05-02T10:22:00Z', '', 0, '', 0),
+		  'agent_human_decision', 1, 'policy:auto', '2024-05-02T10:22:00Z',
+		  '2024-05-02T10:21:00Z', '2024-05-02T10:22:00Z', '', 2, '` + v180Digest + `', 1),
 		 ('eg-denied', 'owner-a', 'sess-a', '` + v180OfferingID + `', '` + v180OfferingRev + `',
 		  'prep-2', 'hash-prep-2', 'idem-eg-denied', 'op-eg-denied', 'side-1', 'denied', NULL,
 		  'agent_human_decision', 3, 'owner-a', '2024-05-02T10:11:00Z', '2024-05-02T10:09:00Z',
-		  '2024-05-02T10:11:00Z', 'msg-a2', 0, '', 0)`,
+		  '2024-05-02T10:11:00Z', 'msg-a2', 0, '', 0),
+		 ('eg-budget-released', 'owner-a', 'sess-budget', '` + v180OfferingID + `',
+		  '` + v180OfferingRev + `', 'prep-2', 'hash-prep-2', 'idem-eg-budget-released',
+		  'op-eg-budget-released', '', 'bound', 'task-failed', 'agent_human_decision', 1,
+		  'policy:auto', '2024-05-02T10:18:00Z', '2024-05-02T10:18:00Z',
+		  '2024-05-02T10:19:00Z', '', 1, '` + v180Digest + `', 1),
+		 ('eg-budget-exhausted', 'owner-a', 'sess-budget-exhausted', '` + v180OfferingID + `',
+		  '` + v180OfferingRev + `', 'prep-2', 'hash-prep-2', 'idem-eg-budget-exhausted',
+		  'op-eg-budget-exhausted', '', 'bound', 'task-exhausted', 'agent_human_decision', 1,
+		  'owner-a', '2024-05-05T10:10:00Z', '2024-05-05T10:05:00Z',
+		  '2024-05-05T10:10:00Z', '', 0, '', 1)`,
+		// Production budgets of every state (one active/exhausted per session,
+		// as the partial unique index requires) and their unit reservations.
+		// plan_json keeps the v1.8.0 shape: a step may pin the model name in
+		// offering_id or pin a real Offering ID, quotes are per unit, and a
+		// closed plan still carries the pre-unit integer estimated_credits.
+		`INSERT INTO production_budgets
+		 (id, owner_id, session_id, plan_json, limits_json, state, created_at, decided_at,
+		  decided_by, message_id, call_id, notice_sent_at)
+		 VALUES
+		 ('budget-pending', 'owner-a', 'sess-budget',
+		  '{"title":"合成概念车制作计划（待批准）","steps":[{"capability":"text-to-3d","offering_id":"model-3d-a","purpose":"主体模型","estimate":{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"20"},"check":"self_check"},{"capability":"format-conversion","offering_id":"local/generated-glb/to-gltf","purpose":"导出 glTF","estimate":{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"3"}}],"correction_capabilities":["retexture","remesh"],"acceptance":[{"id":"look","statement":"造型符合描述","check":"visual_quality"}],"checkpoints":[{"after_capability":"text-to-3d","checks":[{"check":"watertight","required":true}]}],"contingencies":[{"id":"fix-uv","trigger":["self_check"],"step":{"capability":"remesh","offering_id":"model-3d-a","estimate":{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"6"}}}]}',
+		  '[{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"29"}]',
+		  'pending', '2024-05-04T10:05:00Z', NULL, '', 'msg-a2', 'call-2', ''),
+		 ('budget-closed', 'owner-a', 'sess-budget',
+		  '{"title":"旧版制作计划","steps":[{"capability":"text-to-3d","offering_id":"model-3d-a","purpose":"主体模型","estimated_credits":12}],"correction_capabilities":["remesh"]}',
+		  '[{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"30"}]',
+		  'closed', '2024-05-04T10:00:00Z', '2024-05-04T10:20:00Z', 'system', 'msg-a2', 'call-2', ''),
+		 ('budget-denied', 'owner-a', 'sess-budget',
+		  '{"title":"被拒的制作计划","steps":[{"capability":"text-to-3d","offering_id":"model-3d-a","purpose":"主体模型","estimate":{"unit":"meshy.credit","unit_label":"Meshy credits","amount":"4"}}]}',
+		  '[{"unit":"meshy.credit","unit_label":"Meshy credits","amount":"9"}]',
+		  'denied', '2024-05-04T10:02:00Z', '2024-05-04T10:10:00Z', 'owner-a', 'msg-a2', 'call-2', ''),
+		 ('budget-active', 'owner-a', 'sess-a',
+		  '{"title":"合成概念车制作计划","steps":[{"capability":"text-to-3d","offering_id":"model-3d-a","purpose":"主体模型","estimate":{"unit":"meshy.credit","unit_label":"Meshy credits","amount":"5.5"}},{"capability":"format-conversion","offering_id":"local/generated-glb/to-gltf","purpose":"导出 glTF","estimate":{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"3"}}],"correction_capabilities":["remesh"],"contingencies":[{"id":"fix-holes","trigger":["self_check"],"step":{"capability":"remesh","offering_id":"tripo/geometry/decimate-quad","estimate":{"unit":"meshy.credit","unit_label":"Meshy credits","amount":"1.25"}}}]}',
+		  '[{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"10"},{"unit":"meshy.credit","unit_label":"Meshy credits","amount":"8"}]',
+		  'active', '2024-05-02T10:06:00Z', '2024-05-02T10:07:00Z', 'owner-a', 'msg-a2', 'call-2', ''),
+		 ('budget-exhausted', 'owner-a', 'sess-budget-exhausted',
+		  '{"title":"用尽的制作计划","steps":[{"capability":"text-to-3d","offering_id":"model-3d-a","estimate":{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"20"}}]}',
+		  '[{"unit":"legacy.credits","unit_label":"legacy.credits","amount":"20"}]',
+		  'exhausted', '2024-05-05T10:02:00Z', '2024-05-05T10:03:00Z', 'owner-a', 'msg-a2',
+		  'call-2', '2024-05-05T11:00:00Z')`,
+		`INSERT INTO budget_reservations
+		 (grant_request_id, budget_id, task_id, unit, amount_micros, state, created_at, settled_at)
+		 VALUES
+		 ('eg-approved', 'budget-active', '', 'meshy.credit', 1500000, 'reserved',
+		  '2024-05-02T10:10:00Z', NULL),
+		 ('eg-bound', 'budget-active', 'task-conv', 'legacy.credits', 3000000, 'charged',
+		  '2024-05-02T10:21:00Z', '2024-05-02T10:23:00Z'),
+		 ('eg-budget-released', 'budget-closed', 'task-failed', 'legacy.credits', 4000000,
+		  'released', '2024-05-02T10:18:00Z', '2024-05-02T10:19:00Z'),
+		 ('eg-budget-exhausted', 'budget-exhausted', 'task-exhausted', 'legacy.credits', 20000000,
+		  'charged', '2024-05-05T10:10:00Z', '2024-05-05T10:40:00Z')`,
 		// SkillRun with a finished (output_ready) step and a planned one; its
 		// step references the delivered conversion task and asset.
 		`INSERT INTO skill_runs
@@ -424,6 +493,8 @@ var v180SnapshotTables = []string{
 	"generation_assets",
 	"generation_input_assets",
 	"generation_prepared_inputs",
+	"production_budgets",
+	"budget_reservations",
 	"execution_grants",
 	"agent_configuration_versions",
 }
@@ -654,12 +725,20 @@ func assertV180Reads(t *testing.T, r *Repository) {
 		if err != nil {
 			t.Fatalf("ListSessions: %v", err)
 		}
-		if len(sessions) != 1 {
-			t.Fatalf("owner-a 会话 = %d; want 1", len(sessions))
+		if len(sessions) != 3 {
+			t.Fatalf("owner-a 会话 = %d; want 3（工作会话与两个预算计划会话）", len(sessions))
 		}
 		session := sessions[0]
-		if session.ID != v180SessionID || session.Title != "合成概念车" ||
-			session.ApprovalMode != "manual" || session.AgentScope != "auto" ||
+		for _, candidate := range sessions {
+			if candidate.ID == v180SessionID {
+				session = candidate
+			}
+		}
+		if session.ID != v180SessionID {
+			t.Fatalf("sess-a 不在会话列表: %+v", sessions)
+		}
+		if session.Title != "合成概念车" ||
+			session.ApprovalMode != "budget" || session.AgentScope != "auto" ||
 			session.TitleSource != "user" ||
 			session.ExplicitModel3D != v180OfferingID || session.Messages != 5 {
 			t.Fatalf("会话 = %+v", session)
@@ -751,7 +830,7 @@ func assertV180Reads(t *testing.T, r *Repository) {
 		}
 	})
 
-	t.Run("制作计划", func(t *testing.T) {
+	t.Run("3D 处理计划", func(t *testing.T) {
 		plan, err := r.GetProcessingPlan(ctx, generation.OwnerID(v180OwnerID), "plan-1")
 		if err != nil {
 			t.Fatalf("GetProcessingPlan: %v", err)
@@ -771,6 +850,123 @@ func assertV180Reads(t *testing.T, r *Repository) {
 		}
 		if plan.Steps[1].State != "QUEUED" || plan.Steps[1].Retry != 1 || !plan.Steps[1].Resumable {
 			t.Fatalf("plan step[1] = %+v", plan.Steps[1])
+		}
+	})
+
+	t.Run("制作预算计划", func(t *testing.T) {
+		const micros = int64(1000000)
+		pending, err := r.GetProductionBudget(ctx, v180OwnerID, "budget-pending")
+		if err != nil {
+			t.Fatalf("GetProductionBudget(budget-pending): %v", err)
+		}
+		if pending.State != budget.StatePending || pending.SessionID != "sess-budget" ||
+			pending.DecidedAt != nil || pending.DecidedBy != "" ||
+			pending.MessageID != "msg-a2" || pending.CallID != "call-2" {
+			t.Fatalf("budget-pending = %+v", pending)
+		}
+		if len(pending.Limits) != 1 || pending.Limits[0].Unit != budget.LegacyUnit ||
+			pending.Limits[0].UnitLabel != budget.LegacyUnit ||
+			pending.Limits[0].Micros != 29*micros {
+			t.Fatalf("budget-pending limits = %+v", pending.Limits)
+		}
+		listed, err := r.PendingProductionBudgets(ctx, v180OwnerID, "sess-budget")
+		if err != nil {
+			t.Fatalf("PendingProductionBudgets: %v", err)
+		}
+		if len(listed) != 1 || listed[0].ID != "budget-pending" {
+			t.Fatalf("sess-budget 待批准计划 = %+v; want 只有 budget-pending", listed)
+		}
+		plan := pending.Plan
+		if plan.Title != "合成概念车制作计划（待批准）" || len(plan.Steps) != 2 ||
+			len(plan.Contingencies) != 1 || len(plan.Checkpoints) != 1 || len(plan.Acceptance) != 1 {
+			t.Fatalf("budget-pending plan = %+v", plan)
+		}
+		// #434: a v1.8.0 plan pins the model name in offering_id, so decoding
+		// keeps that string; whether it still matches an Offering is that
+		// Issue's decision, not this storage check's.
+		if plan.Steps[0].OfferingID != v180OfferingID || plan.Steps[0].Capability != string(generation.TextTo3D) ||
+			plan.Steps[0].Estimate.Unit != budget.LegacyUnit ||
+			plan.Steps[0].Estimate.Micros != 20*micros || plan.Steps[0].Check != "self_check" {
+			t.Fatalf("budget-pending step[0] = %+v", plan.Steps[0])
+		}
+		// The second step pins a real Offering ID; v1.8.0 already used the
+		// provider/model/capability form for these.
+		if plan.Steps[1].OfferingID != "local/generated-glb/to-gltf" ||
+			plan.Steps[1].Estimate.Micros != 3*micros {
+			t.Fatalf("budget-pending step[1] = %+v", plan.Steps[1])
+		}
+		if !reflect.DeepEqual(plan.CorrectionCapabilities, []string{"retexture", "remesh"}) {
+			t.Fatalf("budget-pending correction capabilities = %v", plan.CorrectionCapabilities)
+		}
+		if plan.Contingencies[0].ID != "fix-uv" ||
+			plan.Contingencies[0].Step.OfferingID != v180OfferingID ||
+			plan.Contingencies[0].Step.Estimate.Micros != 6*micros {
+			t.Fatalf("budget-pending contingency = %+v", plan.Contingencies[0])
+		}
+
+		closed, err := r.GetProductionBudget(ctx, v180OwnerID, "budget-closed")
+		if err != nil {
+			t.Fatalf("GetProductionBudget(budget-closed): %v", err)
+		}
+		if closed.State != budget.StateClosed || closed.DecidedBy != budget.SystemActor ||
+			closed.DecidedAt == nil {
+			t.Fatalf("budget-closed = %+v", closed)
+		}
+		// The pre-unit integer quote of an old plan is still read as legacy
+		// credits, unchanged (#120).
+		if got := closed.Plan.Steps[0].Estimate; got.Unit != budget.LegacyUnit || got.Micros != 12*micros {
+			t.Fatalf("budget-closed step estimate = %+v; want 12 legacy credits", got)
+		}
+
+		denied, err := r.GetProductionBudget(ctx, v180OwnerID, "budget-denied")
+		if err != nil {
+			t.Fatalf("GetProductionBudget(budget-denied): %v", err)
+		}
+		if denied.State != budget.StateDenied || denied.DecidedBy != v180OwnerID || denied.DecidedAt == nil {
+			t.Fatalf("budget-denied = %+v", denied)
+		}
+		if got := denied.Plan.Steps[0].Estimate; got.Unit != "meshy.credit" ||
+			got.UnitLabel != "Meshy credits" || got.Micros != 4*micros {
+			t.Fatalf("budget-denied step estimate = %+v", got)
+		}
+
+		// The active plan's summary totals its reservations per unit and never
+		// adds different units together.
+		summary, found, err := r.ProductionBudgetSummary(ctx, v180OwnerID, v180SessionID)
+		if err != nil || !found {
+			t.Fatalf("ProductionBudgetSummary(sess-a): found=%v err=%v", found, err)
+		}
+		if summary.ID != "budget-active" || summary.State != budget.StateActive ||
+			len(summary.Units) != 2 || summary.DecidedAt == nil {
+			t.Fatalf("budget-active summary = %+v", summary)
+		}
+		legacy, meshy := summary.Units[0], summary.Units[1]
+		if legacy.Unit != budget.LegacyUnit || legacy.UnitLabel != budget.LegacyUnit ||
+			legacy.Limit != 10*micros || legacy.Spent != 3*micros ||
+			legacy.Reserved != 0 || legacy.Remaining != 7*micros {
+			t.Fatalf("budget-active legacy unit = %+v", legacy)
+		}
+		if meshy.Unit != "meshy.credit" || meshy.UnitLabel != "Meshy credits" ||
+			meshy.Limit != 8*micros || meshy.Spent != 0 ||
+			meshy.Reserved != 1500000 || meshy.Remaining != 6500000 {
+			t.Fatalf("budget-active meshy unit = %+v", meshy)
+		}
+		if summary.Plan.Steps[0].OfferingID != v180OfferingID ||
+			summary.Plan.Steps[0].Estimate.Unit != "meshy.credit" ||
+			summary.Plan.Steps[0].Estimate.Micros != 5500000 ||
+			summary.Plan.Contingencies[0].Step.OfferingID != "tripo/geometry/decimate-quad" {
+			t.Fatalf("budget-active summary plan = %+v", summary.Plan)
+		}
+
+		exhausted, found, err := r.ProductionBudgetSummary(ctx, v180OwnerID, "sess-budget-exhausted")
+		if err != nil || !found {
+			t.Fatalf("ProductionBudgetSummary(sess-budget-exhausted): found=%v err=%v", found, err)
+		}
+		if exhausted.State != budget.StateExhausted || len(exhausted.Units) != 1 ||
+			exhausted.Units[0].Unit != budget.LegacyUnit ||
+			exhausted.Units[0].Limit != 20*micros || exhausted.Units[0].Spent != 20*micros ||
+			exhausted.Units[0].Reserved != 0 || exhausted.Units[0].Remaining != 0 {
+			t.Fatalf("budget-exhausted summary = %+v", exhausted)
 		}
 	})
 
@@ -892,7 +1088,7 @@ func assertV180Reads(t *testing.T, r *Repository) {
 			"eg-pending":  {executiongrant.Pending, "human_browser", "", 1},
 			"eg-approved": {executiongrant.Approved, "agent_human_decision", "", 3},
 			"eg-claimed":  {executiongrant.Claimed, "human_browser", "", 2},
-			"eg-bound":    {executiongrant.Bound, "human_browser", "task-conv", 1},
+			"eg-bound":    {executiongrant.Bound, "agent_human_decision", "task-conv", 1},
 			"eg-denied":   {executiongrant.Denied, "agent_human_decision", "", 3},
 		} {
 			grant, err := r.GetExecutionGrant(ctx, v180OwnerID, requestID)
