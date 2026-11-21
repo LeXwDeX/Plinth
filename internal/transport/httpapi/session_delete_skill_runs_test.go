@@ -8,10 +8,13 @@ import (
 	"testing"
 )
 
-// seedSessionDeletionFixtures gives owner local-user four sessions with a
-// SkillRun each: two whose run has work in flight (a Task still running) and
-// two whose run is at rest (its Task succeeded). One of each is owned by a
-// canvas project, so both deletion routes are exercised.
+// seedSessionDeletionFixtures gives owner local-user seven sessions with a
+// SkillRun each. Work in flight: two whose Task is still running, and one whose
+// paid submission was accepted but whose step never learned the Task (the grant
+// is bound to a Task still running). At rest: two whose Task succeeded, one
+// whose grant is approved with no Task (a stopped turn), and one whose bound
+// grant already points at a succeeded Task. One in-flight and one resting
+// session are owned by a canvas project, so both deletion routes are exercised.
 func seedSessionDeletionFixtures(t *testing.T, path string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)
@@ -38,6 +41,66 @@ func seedSessionDeletionFixtures(t *testing.T, path string) {
 				plan_step_id, prepared_input_id, prepared_input_hash, grant_request_id, task_id, review)
 				VALUES ('run-`+s+`',0,'front','{}','task_bound','operation-`+s+`','step-key-`+s+`','plan-`+s+`',
 				'prepared-`+s+`','prepared-hash','grant-`+s+`','task-`+s+`','unreviewed')`,
+		)
+	}
+	// A paid Task whose submission response was lost: the grant is bound and
+	// names a Task that is still running, while the step is grant_pending
+	// without a Task. Deleting this session would cut off a paid submission
+	// the SkillRun still has to follow (#430).
+	statements = append(statements,
+		`INSERT INTO go_chat_sessions(id,owner_id,owner_name,title,created_at,updated_at)
+			VALUES ('recovering','local-user','Owner','recovering','`+stamp+`','`+stamp+`')`,
+		`INSERT INTO generation_tasks (id, owner_id, capability, offering_json, input_json, request_hash,
+			idempotency_key, state, version, created_at, updated_at, session_id)
+			VALUES ('task-recovering','local-user','image-to-image','{}','{}','hash-recovering','key-recovering','RUNNING',1,'`+stamp+`','`+stamp+`','recovering')`,
+		`INSERT INTO skill_runs (id, owner_id, session_id, recipe_id, recipe_revision, recipe_hash,
+			selected_offering_id, source_asset_id, idempotency_key, request_hash, created_at, updated_at)
+			VALUES ('run-recovering','local-user','recovering','recipe','rev','hash','offering','asset','run-key-recovering','request','`+stamp+`','`+stamp+`')`,
+		`INSERT INTO execution_grants (request_id, owner_id, session_id, offering_id, offering_revision,
+			prepared_input_id, prepared_input_hash, idempotency_key, operation_id, status, task_id, source,
+			request_version, created_at, updated_at)
+			VALUES ('grant-recovering','local-user','recovering','offering','rev','prepared-recovering',
+			'prepared-hash','grant-key-recovering','operation-grant-recovering','bound','task-recovering',
+			'human_browser',1,'`+stamp+`','`+stamp+`')`,
+		`INSERT INTO skill_run_steps (run_id, ordinal, step_key, spec_json, phase, operation_id, idempotency_key,
+			plan_step_id, prepared_input_id, prepared_input_hash, grant_request_id, task_id, review)
+			VALUES ('run-recovering',0,'front','{}','grant_pending','operation-recovering','step-key-recovering',
+			'plan-recovering','prepared-recovering','prepared-hash','grant-recovering',NULL,'unreviewed')`,
+	)
+	// At rest despite a grant: approved has no Task and no transition of its
+	// own (the stopped turn is the person's decision to drop it), and a bound
+	// grant whose Task already succeeded has no generation work left. Both
+	// sessions must be deletable (#430).
+	for _, fixture := range []struct{ session, grantStatus, taskState string }{
+		{"approved-stop", "approved", ""},
+		{"recovered", "bound", "SUCCEEDED"},
+	} {
+		s := fixture.session
+		statements = append(statements,
+			`INSERT INTO go_chat_sessions(id,owner_id,owner_name,title,created_at,updated_at)
+				VALUES ('`+s+`','local-user','Owner','`+s+`','`+stamp+`','`+stamp+`')`,
+			`INSERT INTO skill_runs (id, owner_id, session_id, recipe_id, recipe_revision, recipe_hash,
+				selected_offering_id, source_asset_id, idempotency_key, request_hash, created_at, updated_at)
+				VALUES ('run-`+s+`','local-user','`+s+`','recipe','rev','hash','offering','asset','run-key-`+s+`','request','`+stamp+`','`+stamp+`')`,
+		)
+		var taskID string
+		if fixture.taskState != "" {
+			taskID = "task-" + s
+			statements = append(statements, `INSERT INTO generation_tasks (id, owner_id, capability, offering_json,
+				input_json, request_hash, idempotency_key, state, version, created_at, updated_at, session_id)
+				VALUES ('`+taskID+`','local-user','image-to-image','{}','{}','hash-`+s+`','key-`+s+`','`+fixture.taskState+`',1,'`+stamp+`','`+stamp+`','`+s+`')`)
+		}
+		statements = append(statements,
+			`INSERT INTO execution_grants (request_id, owner_id, session_id, offering_id, offering_revision,
+				prepared_input_id, prepared_input_hash, idempotency_key, operation_id, status, task_id, source,
+				request_version, created_at, updated_at)
+				VALUES ('grant-`+s+`','local-user','`+s+`','offering','rev','prepared-`+s+`','prepared-hash',
+				'grant-key-`+s+`','operation-grant-`+s+`','`+fixture.grantStatus+`',
+				NULLIF('`+taskID+`',''),'human_browser',1,'`+stamp+`','`+stamp+`')`,
+			`INSERT INTO skill_run_steps (run_id, ordinal, step_key, spec_json, phase, operation_id, idempotency_key,
+				plan_step_id, prepared_input_id, prepared_input_hash, grant_request_id, task_id, review)
+				VALUES ('run-`+s+`',0,'front','{}','grant_pending','operation-`+s+`','step-key-`+s+`','plan-`+s+`',
+				'prepared-`+s+`','prepared-hash','grant-`+s+`',NULL,'unreviewed')`,
 		)
 	}
 	for _, fixture := range []struct{ project, session string }{
@@ -92,6 +155,7 @@ func TestDeletingASessionWithSkillRunWorkInFlightAnswers409WithTheSchemaText(t *
 	for _, route := range []struct{ name, target string }{
 		{"chat session", "/api/chat/sessions/busy"},
 		{"canvas project", "/api/canvas/projects/project-busy"},
+		{"chat session with a lost paid binding", "/api/chat/sessions/recovering"},
 	} {
 		t.Run(route.name, func(t *testing.T) {
 			for _, locale := range []struct{ accept, want string }{{"", zh}, {"zh-CN", zh}, {"en-US", en}} {
@@ -105,8 +169,9 @@ func TestDeletingASessionWithSkillRunWorkInFlightAnswers409WithTheSchemaText(t *
 			}
 		})
 	}
-	// The refusals changed nothing: both sessions are still there.
-	for _, target := range []string{"/api/chat/sessions/busy", "/api/chat/sessions/canvas-busy"} {
+	// The refusals changed nothing: the sessions are still there, including the
+	// one whose paid result the SkillRun still has to record.
+	for _, target := range []string{"/api/chat/sessions/busy", "/api/chat/sessions/canvas-busy", "/api/chat/sessions/recovering"} {
 		request := httptest.NewRequest(http.MethodGet, target, nil)
 		request.Header.Set("X-User-ID", "local-user")
 		response := httptest.NewRecorder()
@@ -122,7 +187,15 @@ func TestDeletingASessionWithSkillRunWorkInFlightAnswers409WithTheSchemaText(t *
 	if response := deleteAs(handler, "/api/canvas/projects/project-resting", ""); response.Code != http.StatusOK {
 		t.Fatalf("deleting a canvas project whose session's SkillRun is at rest = %d body = %s", response.Code, response.Body)
 	}
-	for _, target := range []string{"/api/chat/sessions/resting", "/api/chat/sessions/canvas-resting"} {
+	// An approved grant with no Task and a bound grant whose Task already
+	// ended are at rest: the sessions are deletable (#430).
+	for _, target := range []string{"/api/chat/sessions/approved-stop", "/api/chat/sessions/recovered"} {
+		if response := deleteAs(handler, target, ""); response.Code != http.StatusNoContent {
+			t.Fatalf("deleting the resting session %s = %d body = %s", target, response.Code, response.Body)
+		}
+	}
+	for _, target := range []string{"/api/chat/sessions/resting", "/api/chat/sessions/canvas-resting",
+		"/api/chat/sessions/approved-stop", "/api/chat/sessions/recovered"} {
 		request := httptest.NewRequest(http.MethodGet, target, nil)
 		request.Header.Set("X-User-ID", "local-user")
 		response := httptest.NewRecorder()
