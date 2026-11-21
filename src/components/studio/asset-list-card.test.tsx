@@ -135,6 +135,7 @@ function clientWith(
     decide: decide as unknown as AssetListClient['decide'],
     controlRun: (controls.controlRun ?? vi.fn(async () => run())) as unknown as AssetListClient['controlRun'],
     skipItem: (controls.skipItem ?? vi.fn(async () => item({ state: 'skipped' }))) as unknown as AssetListClient['skipItem'],
+    addItemSteps: vi.fn(async () => item()) as unknown as AssetListClient['addItemSteps'],
     listSessionLists: vi.fn(async () => []),
     presence: vi.fn(async () => {}),
     edit: (controls.edit ?? vi.fn(async () => detail())) as unknown as AssetListClient['edit'],

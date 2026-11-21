@@ -351,6 +351,88 @@ describe('AssetListBoard (#329)', () => {
     fireEvent.click(cell);
     expect(screen.getByTestId('asset-board-detail')).toBeTruthy();
   });
+
+  // #330 step 5C: a capped item reads "used / limit" with the person's grant,
+  // is marked as used up, and offers "give it a few more steps"; the dialog
+  // sends the whole grant (current extra + the amount) and the board re-reads.
+  it('marks a capped item, offers more steps and reads the grant back', async () => {
+    const capped = boardItem({
+      id: 'item-capped',
+      name: '上限角色',
+      state: 'working',
+      block: 'step_cap',
+      session_id: 'ses_capped',
+      version: 4,
+      steps: { mode: 'cap', used: 5, cap: 5, extra: 0 },
+    });
+    const extended = { ...capped, block: undefined, version: 5, steps: { mode: 'cap' as const, used: 5, cap: 5, extra: 5 } };
+    const addItemSteps = vi.fn(async () => extended);
+    const getBoard = vi.fn(async () => board([capped]));
+    renderBoard(board([capped]), { getBoard, client: { addItemSteps } });
+
+    await waitFor(() => expect(screen.getByTestId('asset-board-steps-item-capped')).toBeTruthy());
+    expect(screen.getByTestId('asset-board-steps-item-capped').textContent)
+      .toBe(messages['ui.asset_list.board.steps_capped'].replace('{used}', '5').replace('{cap}', '5'));
+    expect(screen.getByTestId('asset-board-steps-exhausted-item-capped').textContent)
+      .toBe(text('ui.asset_list.board.steps_exhausted'));
+    // A 2D item is never marked or offered steps.
+    expect(screen.queryByTestId('asset-board-steps-exhausted-item-2d')).toBeNull();
+    expect(screen.queryByTestId('asset-board-extend-item-2d')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('asset-board-extend-item-capped'));
+    const dialog = await waitFor(() => screen.getByTestId('asset-steps-extend-dialog'));
+    expect(within(dialog).getByTestId('asset-steps-extend-amount')).toHaveProperty('value', '5');
+    expect(within(dialog).getByText(text('ui.asset_list.steps.extend_hint')
+      .replace('{maximum}', '50').replace('{total_maximum}', '200'))).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId('asset-steps-extend-confirm'));
+
+    await waitFor(() => expect(addItemSteps).toHaveBeenCalledWith('proj', 'listid', 'item-capped', 5, 4));
+    await waitFor(() => expect(getBoard).toHaveBeenCalledTimes(2));
+  });
+
+  // #330 step 5C: a return for rework goes through the same capped asset, so
+  // the return dialog carries the "give it a few more steps" control directly.
+  it('offers more steps in the return dialog of a capped review item', async () => {
+    const cappedReview = boardItem({
+      id: 'item-review-capped',
+      name: '待打回角色',
+      state: 'review',
+      session_id: 'ses_review_capped',
+      version: 2,
+      steps: { mode: 'cap', used: 3, cap: 3, extra: 0 },
+      latest_review: null,
+    });
+    const addItemSteps = vi.fn(async () => ({ ...cappedReview, version: 3 }));
+    renderBoard(board([cappedReview]), {
+      getBoard: vi.fn(async () => board([cappedReview])),
+      client: { addItemSteps },
+    });
+    await waitFor(() => expect(screen.getByTestId('asset-board-return-item-review-capped')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('asset-board-return-item-review-capped'));
+    const dialog = await waitFor(() => screen.getByTestId('asset-board-return-dialog'));
+    expect(within(dialog).getByTestId('asset-board-return-extend')).toBeTruthy();
+    expect(within(dialog).getByTestId('asset-board-return-extend-button').textContent)
+      .toBe(text('ui.asset_list.steps.extend'));
+  });
+
+  // A list item with no 3D step in its plan is never shown a step line, so a
+  // 2D-only list does not imply the step cap exists.
+  it('shows no step line for a pure 2D item', async () => {
+    const icon = boardItem({
+      id: 'item-icon',
+      name: '图标',
+      kind: 'image',
+      state: 'review',
+      planned_step_count: 1,
+      planned_model3d_step_count: 0,
+      review: {},
+    });
+    renderBoard(board([icon]));
+    await waitFor(() => expect(screen.getByTestId('asset-board-cell-item-icon')).toBeTruthy());
+    expect(screen.queryByTestId('asset-board-steps-item-icon')).toBeNull();
+    expect(screen.queryByTestId('asset-board-steps-exhausted-item-icon')).toBeNull();
+    expect(screen.queryByTestId('asset-board-extend-item-icon')).toBeNull();
+  });
 });
 
 function withRun(value: AssetListBoardData, status: string): AssetListBoardData {

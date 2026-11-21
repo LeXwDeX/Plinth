@@ -275,7 +275,17 @@ func (b *Builder) Build(ctx context.Context, locale string, subject Subject) Blo
 		} else {
 			asset.UsedSteps = &used
 			if mode == approvalpolicy.StepModeCap {
-				left := max(capValue-used, 0)
+				// The asset may have been granted extra steps by the person
+				// (#330 step 5C); an unreadable grant is treated as none, and
+				// the number stays a fact about the stored setting.
+				extra := 0
+				if granted, err := b.config.Usage.AssetExtraSteps(ctx, subject.OwnerID, subject.AssetID); err != nil {
+					b.config.Logger.Warn("MCP 状态块：资产追加步数读取失败，按 0 处理",
+						"owner_id", subject.OwnerID, "asset_id", subject.AssetID, "error", err)
+				} else {
+					extra = granted
+				}
+				left := max(capValue+extra-used, 0)
 				asset.StepsLeft = &left
 			}
 		}

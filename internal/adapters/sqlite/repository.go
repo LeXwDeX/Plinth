@@ -469,6 +469,9 @@ var assetListItemReviewWritesMigration string
 //go:embed migrations/0105_access_key_usage.sql
 var accessKeyUsageMigration string
 
+//go:embed migrations/0106_step_extra_grants.sql
+var stepExtraGrantsMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -565,7 +568,8 @@ func migrations() []migration {
 		migration{version: 102, name: "asset_list_item_reviews", sql: assetListItemReviewsMigration},
 		migration{version: 103, name: "input_asset_crops", sql: inputAssetCropsMigration},
 		migration{version: 104, name: "asset_list_item_review_writes", sql: assetListItemReviewWritesMigration},
-		migration{version: 105, name: "access_key_usage", sql: accessKeyUsageMigration})
+		migration{version: 105, name: "access_key_usage", sql: accessKeyUsageMigration},
+		migration{version: 106, name: "step_extra_grants", sql: stepExtraGrantsMigration})
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -584,8 +588,9 @@ func migrations() []migration {
 // runs, item execution columns and tab presence of a list (#328), 102 the
 // acceptance decisions of a list item (#329), 103 the provenance of the
 // crops cut out of a source picture (#331), 104 the review writes of a list
-// item (#329) and 105 the personal access key
-// usage count and the overall switch (#332).
+// item (#329), 105 the personal access key
+// usage count and the overall switch (#332) and 106 the extra 3D steps one
+// asset may be granted (#330 step 5C).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))

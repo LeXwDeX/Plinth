@@ -2,6 +2,7 @@ package assetlist
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -58,8 +59,43 @@ func (service *Service) ControlRun(
 	if err != nil {
 		return Run{}, err
 	}
-	return service.runs.TransitionRun(ctx, ownerID, listID, current.Status, to,
-		pauseReason, expectedAt, service.clock())
+	at := service.clock()
+	updated, err := service.runs.TransitionRun(ctx, ownerID, listID, current.Status, to,
+		pauseReason, expectedAt, at)
+	if err != nil {
+		return Run{}, err
+	}
+	// Resuming is the person saying the cap no longer applies: clear the
+	// step-cap blocks so the runner can advance those items. The cap itself is
+	// not re-checked here (the person may have raised it in the top bar); a
+	// still-exhausted item is refused again on its next step and re-blocked.
+	if action == RunActionResume && to == RunRunning {
+		if err := service.clearStepCapBlocks(ctx, ownerID, listID, at); err != nil {
+			return Run{}, err
+		}
+	}
+	return updated, nil
+}
+
+// clearStepCapBlocks removes the step-cap block of a list's items. The item
+// version is not checked: the person's resume is not a per-item edit, and a
+// concurrently finished item is simply not blocked any more.
+func (service *Service) clearStepCapBlocks(ctx context.Context, ownerID, listID string, at time.Time) error {
+	items, err := service.runs.ItemsByList(ctx, ownerID, listID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Block != BlockStepCap {
+			continue
+		}
+		if _, err := service.runs.SetItemBlock(ctx, ownerID, listID, item.ID,
+			BlockNone, VersionUnchecked, at); err != nil &&
+			!errors.Is(err, ErrConflict) && !errors.Is(err, ErrItemState) && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
+	return nil
 }
 
 // controlRunTarget is the person's side of the run state machine. A target

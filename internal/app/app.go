@@ -935,6 +935,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
 			Counted:            counted,
+			Steps:              assetListStepsConfig(executionGrants, applicationSchema.StepPolicy),
 			ProjectAssets:      projectService,
 			ProjectAssetLimits: assetlist.ProjectAssetLimits{
 				MaximumAssets: applicationSchema.Project.Limits.MaximumAssetsPerProject,
@@ -2731,9 +2732,11 @@ func stepsPolicyFromSchema(declared catalog.StepPolicySchema) approvalpolicy.Ste
 		counted = append(counted, string(capability))
 	}
 	return approvalpolicy.StepsPolicy{
-		Counted:     counted,
-		DefaultList: approvalpolicy.StepSetting{Mode: declared.DefaultMode.List, Cap: declared.Cap.Default},
-		DefaultMCP:  approvalpolicy.StepSetting{Mode: declared.DefaultMode.MCP, Cap: declared.Cap.Default},
+		Counted:           counted,
+		DefaultList:       approvalpolicy.StepSetting{Mode: declared.DefaultMode.List, Cap: declared.Cap.Default},
+		DefaultMCP:        approvalpolicy.StepSetting{Mode: declared.DefaultMode.MCP, Cap: declared.Cap.Default},
+		ExtraMaximum:      declared.ExtraSteps.Maximum,
+		ExtraTotalMaximum: declared.ExtraSteps.TotalMaximum,
 	}
 }
 
@@ -2753,6 +2756,56 @@ func accountSettingsFromSchema(store accountsettings.Store, declared *catalog.St
 		CapMinimum: declared.Cap.Minimum,
 		CapMaximum: declared.Cap.Maximum,
 	})
+}
+
+// assetListStepsConfig adapts the grant service's per-asset extra-step write
+// to the list service (#330 step 5C). The list layer stays independent of the
+// grant package: the errors are mapped here, and the bounds come from the same
+// Schema section.
+func assetListStepsConfig(grants *executiongrant.Service, declared *catalog.StepPolicySchema) *assetlist.StepsConfig {
+	if grants == nil || declared == nil {
+		return nil
+	}
+	return &assetlist.StepsConfig{
+		Maximum:      declared.ExtraSteps.Maximum,
+		TotalMaximum: declared.ExtraSteps.TotalMaximum,
+		Set: func(ctx context.Context, ownerID, sessionID string, target int) (assetlist.StepChange, error) {
+			change, err := grants.SetExtraSteps(ctx, ownerID, sessionID, target)
+			if err != nil {
+				switch {
+				case errors.Is(err, executiongrant.ErrExtraStepsLimit):
+					return assetlist.StepChange{}, &assetlist.StepExtraLimitError{
+						Maximum: declared.ExtraSteps.TotalMaximum, Requested: target,
+					}
+				case errors.Is(err, executiongrant.ErrExtraStepsSingleLimit):
+					return assetlist.StepChange{}, &assetlist.StepExtraSingleLimitError{
+						Maximum: declared.ExtraSteps.Maximum,
+					}
+				case errors.Is(err, executiongrant.ErrExtraStepsUnavailable):
+					return assetlist.StepChange{}, assetlist.ErrStepUnavailable
+				case errors.Is(err, executiongrant.ErrConflict):
+					return assetlist.StepChange{}, assetlist.ErrConflict
+				case errors.Is(err, executiongrant.ErrInvalid):
+					return assetlist.StepChange{}, assetlist.ErrInvalid
+				}
+				return assetlist.StepChange{}, err
+			}
+			return assetlist.StepChange{
+				Previous: assetListStepState(change.Previous),
+				Current:  assetListStepState(change.Current),
+			}, nil
+		},
+	}
+}
+
+// assetListStepState keeps the wire shape one place: the cap and the extra
+// grant travel together, and only in the cap mode.
+func assetListStepState(summary executiongrant.StepSummary) assetlist.StepState {
+	state := assetlist.StepState{Mode: summary.Mode, Used: summary.Used}
+	if summary.Mode == approvalpolicy.StepModeCap {
+		state.Cap, state.Extra = summary.Cap, summary.Extra
+	}
+	return state
 }
 
 // threeViewServiceOrNil keeps a deployment without the three-view recipe from

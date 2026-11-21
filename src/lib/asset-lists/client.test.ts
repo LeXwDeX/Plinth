@@ -450,3 +450,16 @@ describe('asset list client', () => {
     });
   });
 });
+describe('asset list client extra steps (#330)', () => {
+  it('sets one item asset\'s whole extra-step grant on its own route', async () => {
+    const updated = { ...detail.items[0], version: 5, block: undefined, steps: { mode: 'cap', used: 3, cap: 3, extra: 2 } };
+    const fetcher = vi.fn(async () => jsonResponse(updated)) as unknown as typeof fetch;
+    const client = createAssetListClient(schema, { fetcher });
+    await expect(client.addItemSteps('prj/1', 'al 1', 'it/1', 5, 4)).resolves.toEqual(updated);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/projects/prj%2F1/asset-lists/al%201/items/it%2F1/steps', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extra_steps: 5, expected_version: 4 }),
+    });
+  });
+});

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -271,8 +272,13 @@ func (service *Service) stepSummary(
 		return summary
 	}
 	summary.Model3D = standing.Used
-	summary.Cap = standing.Cap
 	summary.Mode = standing.Mode
+	if standing.Mode == approvalpolicy.StepModeCap {
+		// Only the cap mode has a limit; the agent and unlimited modes keep a
+		// remembered cap number in the setting, which is not applied.
+		summary.Cap = standing.Cap
+		summary.Extra = standing.Extra
+	}
 	return summary
 }
 

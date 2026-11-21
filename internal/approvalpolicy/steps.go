@@ -52,6 +52,11 @@ type StepsPolicy struct {
 	// one, per entry.
 	DefaultList StepSetting
 	DefaultMCP  StepSetting
+	// ExtraMaximum is the most one "give it a few more steps" write may add on
+	// top of an asset's current grant; ExtraTotalMaximum bounds the grant one
+	// asset keeps (#330 step 5C). Both are application.step_policy.extra_steps.
+	ExtraMaximum      int
+	ExtraTotalMaximum int
 }
 
 // Counts reports whether a Task of the capability is a 3D step.

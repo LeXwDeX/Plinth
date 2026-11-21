@@ -116,7 +116,7 @@ func (orchestrator *Orchestrator) stepModeRule(
 	}
 	return strings.NewReplacer(
 		"{mode}", label,
-		"{cap}", strconv.Itoa(summary.Cap),
+		"{cap}", strconv.Itoa(summary.Limit()),
 	).Replace(orchestrator.text(ctx, rule))
 }
 
@@ -133,8 +133,8 @@ func (orchestrator *Orchestrator) stepUsageLine(
 	}
 	return strings.NewReplacer(
 		"{used}", used,
-		"{cap}", strconv.Itoa(summary.Cap),
-		"{remaining}", strconv.Itoa(max(summary.Cap-summary.Used, 0)),
+		"{cap}", strconv.Itoa(summary.Limit()),
+		"{remaining}", strconv.Itoa(summary.Remaining()),
 	).Replace(orchestrator.text(ctx, prompt.UsageLine))
 }
 

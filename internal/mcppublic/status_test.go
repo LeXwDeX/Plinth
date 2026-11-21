@@ -38,6 +38,8 @@ type fakeUsage struct {
 	asset    map[string]int
 	totalErr error
 	assetErr error
+	extra    map[string]int
+	extraErr error
 	titles   map[string]string
 	titleErr error
 }
@@ -46,6 +48,12 @@ func (f *fakeUsage) AssetStepsUsed(_ context.Context, _, session string, _ []str
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.asset[session], f.assetErr
+}
+
+func (f *fakeUsage) AssetExtraSteps(_ context.Context, _, session string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.extra[session], f.extraErr
 }
 
 func (f *fakeUsage) AssetTitle(_ context.Context, _, session string) (string, bool, error) {

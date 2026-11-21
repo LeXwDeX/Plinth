@@ -820,6 +820,12 @@ func (s *Server) routes() {
 		if route := routes.ProjectAssetListItem; route != "" {
 			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.updateProjectAssetListItem))
 		}
+		// "Give it a few more steps" (#330 step 5C): the route exists only when
+		// the Catalog declares the step policy and its list-item steps route.
+		if route := routes.ProjectAssetListItemSteps; route != "" &&
+			s.application.StepPolicy != nil && s.executionGrants != nil {
+			s.mux.HandleFunc("PUT "+route, s.withPrincipal(s.putProjectAssetListItemSteps))
+		}
 		if route := routes.ChatSessionAssetLists; route != "" {
 			s.mux.HandleFunc("GET "+route, s.withPrincipal(s.listChatSessionAssetLists))
 		}

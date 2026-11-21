@@ -264,6 +264,10 @@ type RunStore interface {
 	// guard, VersionUnchecked skips it. It never cancels a bound Task.
 	SkipItem(ctx context.Context, ownerID, listID, itemID, reason string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (Item, error)
+	// SetItemStepCapTurn records the turn the runner blocked at the 3D step
+	// cap (#330 step 5C). The item's next advance past that turn opens a fresh
+	// turn instead of re-evaluating the capped one. It bumps the item version.
+	SetItemStepCapTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemSession(ctx context.Context, ownerID, listID, itemID, sessionID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemNextActionAt(ctx context.Context, ownerID, listID, itemID string, nextActionAt time.Time, expectedVersion int64, at time.Time) (Item, error)
 	// RecordItemTurn stores the assistant message of a turn the server opened
