@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-21.407-380-433-330-445-410-432.1",
+    "revision": "2026-11-21.407-380-433-330-445-410-432-456.1",
     "terminology": {
       "user_facing": [
         {
@@ -10640,7 +10640,6 @@
                 "face_limit": 20000,
                 "smart_low_poly": true,
                 "texture_quality": "standard",
-                "output_formats": ["GLTF", "FBX"],
                 "export_texture_format": "PNG",
                 "export_texture_size": "2k",
                 "export_pivot_bottom_center": true
@@ -10682,7 +10681,7 @@
                 "pose_mode": "a-pose"
               }
             },
-            "reason": "角色用于实时渲染，需要受控面数与 UV，布线最好利于表情和关节变形。文生、图生先用细节更好的 Tripo P2；2026-11-12 实测 P2 开启四边面输出（quad=true）只交付 FBX、没有可预览的 GLB，所以角色默认不开 Tripo 的四边面，保持三角面输出，面数上限按平台预算取值。Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后；Rodin 四边面等其余模型的真实拓扑质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（自动重拓扑、四边面）并烘出 2K 贴图，一步得到带贴图的低模；2026-11-12 实测目标面数 10000 的四边面交付了 22540 个三角面（约 2.25 倍），所以目标面数取三角面预算的 0.4 倍（手机、网页、XR 取 8000，约 1.8 万个三角面；PC、主机取 40000，约 9 万个）。Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图与四边面拓扑质量尚无更多真实样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
+            "reason": "角色用于实时渲染，需要受控面数与 UV，布线最好利于表情和关节变形。文生、图生先用细节更好的 Tripo P2；2026-11-12 实测 P2 开启四边面输出（quad=true）只交付 FBX、没有可预览的 GLB，所以角色默认不开 Tripo 的四边面，保持三角面输出，面数上限按平台预算取值。Meshy T2.5 智能拓扑只出三角面，排在其后；Rodin Gen-2.5 用 mesh_mode 出四边面并开 T/A 姿态与法线烘焙、2K 贴图，作为第三选择。多视图先用细节与纹理更高的 Tripo v3.1 多视图，其次 P2 多视图。顺序按产出质量定，成本只在质量相同时排先后；Rodin 四边面等其余模型的真实拓扑质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（自动重拓扑、四边面）并烘出 2K 贴图，一步得到带贴图的低模；2026-11-12 实测目标面数 10000 的四边面交付了 22540 个三角面（约 2.25 倍），所以目标面数取三角面预算的 0.4 倍（手机、网页、XR 取 8000，约 1.8 万个三角面；PC、主机取 40000，约 9 万个）。Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图与四边面拓扑质量尚无更多真实样本核对。Tripo 多视图默认导出全部六种格式，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（六种转换都按进阶价计）。",
             "platforms": [
               {
                 "ids": ["mobile", "web", "xr"],
@@ -10791,7 +10790,6 @@
                 "face_limit": 20000,
                 "smart_low_poly": true,
                 "texture_quality": "standard",
-                "output_formats": ["GLTF", "FBX"],
                 "export_texture_format": "PNG",
                 "export_texture_size": "2k",
                 "export_pivot_bottom_center": true
@@ -10827,7 +10825,7 @@
                 "texture_resolution": "2k"
               }
             },
-            "reason": "道具与场景件不需要变形，目录里的 Offering 自述把 Meshy T2.5 与 Tripo P2 都写成适合游戏与实时资产的低模、干净拓扑，没有可依据的质量差异；质量相同时才按成本排先后，所以报价较低的 T2.5 在前、P2 在后；Rodin Gen-2.5 可出四边面并烘焙法线贴图（2K 贴图），排第三。面数预算更低，P2 不设面数覆盖，按其自适应低模。两者的真实输出质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（三角面、约 8000 面）并烘出 2K 贴图，一步得到带贴图的低模；但 Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图质量尚无真实样本核对。Tripo 多视图只导出游戏引擎要用的 GLB 与 FBX，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（转换按进阶价计）。",
+            "reason": "道具与场景件不需要变形，目录里的 Offering 自述把 Meshy T2.5 与 Tripo P2 都写成适合游戏与实时资产的低模、干净拓扑，没有可依据的质量差异；质量相同时才按成本排先后，所以报价较低的 T2.5 在前、P2 在后；Rodin Gen-2.5 可出四边面并烘焙法线贴图（2K 贴图），排第三。面数预算更低，P2 不设面数覆盖，按其自适应低模。两者的真实输出质量尚未用真实上游样本核对。Meshy 7.1 排在最后：它生成时直接重拓扑（三角面、约 8000 面）并烘出 2K 贴图，一步得到带贴图的低模；但 Meshy 官方建议低模游戏资产改用智能拓扑（T2.5），重拓扑后的贴图质量尚无真实样本核对。Tripo 多视图默认导出全部六种格式，贴图用无损 PNG 并缩小到 2K，原点移到底部中心（六种转换都按进阶价计）。",
             "platforms": [
               {
                 "ids": ["mobile", "web", "xr"],
@@ -10952,17 +10950,11 @@
             },
             "overrides_not_needed": [
               "meshy/meshy-7.1/text-to-3d",
-              "meshy/meshy-7.1/image-to-3d"
+              "meshy/meshy-7.1/image-to-3d",
+              "tripo/tripo-v3.1-full/text-to-3d",
+              "tripo/tripo-v3.1-full/image-to-3d"
             ],
-            "parameter_overrides": {
-              "tripo/tripo-v3.1-full/text-to-3d": {
-                "output_formats": ["GLTF", "STL", "3MF"]
-              },
-              "tripo/tripo-v3.1-full/image-to-3d": {
-                "output_formats": ["GLTF", "STL", "3MF"]
-              }
-            },
-            "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。Tripo 只导出 GLB、STL 与 3MF 三种格式，其余格式打印用不到，转换保持基础价。",
+            "reason": "打印需要完整细节与水密网格；优先 Meshy 7.1 的高细节输出，其次 Tripo v3.1。Tripo 默认导出全部六种格式（GLB、USDZ、FBX、OBJ、STL、3MF），转换保持基础价；打印实际用到的切片格式是 STL 与 3MF，其余格式一并交付。",
             "pipeline": [
               {
                 "capability": "analyze-printability"
@@ -20955,16 +20947,16 @@
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
             "chat.model3d_usage.profiles[id=game_character].label": "Game / real-time · character",
             "chat.model3d_usage.profiles[id=game_character].description": "A character for a game or real-time app; the triangle count is controlled and UVs are kept for rigging, animation and engine import.",
-            "chat.model3d_usage.profiles[id=game_character].reason": "A character is rendered in real time, so it needs a controlled triangle count and UVs, and ideally topology that suits expressions and joint deformation. For text and single-image input Tripo P2 comes first for its detail. Observed on 2026-11-12, P2 with quad output on (quad=true) delivers an FBX only and no previewable GLB, so characters do not turn Tripo's quad output on by default: the output stays triangles and the face limit follows the platform budget. Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality, and the real topology quality of Rodin's quads and the other models has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (automatic remesh, quads) and bakes 2K textures, so one step gives a textured low-poly model. Observed on 2026-11-12, a quad target of 10000 delivered 22540 triangles (about 2.25 triangles per target face), so the target is 0.4 times the triangle budget (8000 for mobile, web and XR, about 18,000 triangles; 40000 for PC and console, about 90,000). Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures and the quad topology after remesh have no further real upstream samples to check against. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
+            "chat.model3d_usage.profiles[id=game_character].reason": "A character is rendered in real time, so it needs a controlled triangle count and UVs, and ideally topology that suits expressions and joint deformation. For text and single-image input Tripo P2 comes first for its detail. Observed on 2026-11-12, P2 with quad output on (quad=true) delivers an FBX only and no previewable GLB, so characters do not turn Tripo's quad output on by default: the output stays triangles and the face limit follows the platform budget. Meshy T2.5 Smart Topology outputs triangles only, so it comes after; Rodin Gen-2.5 is the third choice, with quads through mesh_mode, a T or A pose, a baked normal map and 2K textures. For multiview, the higher-fidelity Tripo v3.1 multiview comes first, then P2 multiview. The order follows output quality; cost only orders models of equal quality, and the real topology quality of Rodin's quads and the other models has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (automatic remesh, quads) and bakes 2K textures, so one step gives a textured low-poly model. Observed on 2026-11-12, a quad target of 10000 delivered 22540 triangles (about 2.25 triangles per target face), so the target is 0.4 times the triangle budget (8000 for mobile, web and XR, about 18,000 triangles; 40000 for PC and console, about 90,000). Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures and the quad topology after remesh have no further real upstream samples to check against. Tripo multiview exports all six formats by default, with lossless PNG textures reduced to 2K and the origin at the bottom center (all six conversions are priced as advanced ones).",
             "chat.model3d_usage.profiles[id=game_prop].label": "Game / real-time · prop and scene piece",
             "chat.model3d_usage.profiles[id=game_prop].description": "A prop or scene piece for a game or real-time app; a lower triangle count, with UVs kept.",
-            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces do not deform. The catalog's own notes describe both Meshy T2.5 and Tripo P2 as low-poly, clean-topology models for games and real-time assets, so there is no documented quality difference to rank by; cost only orders models of equal quality, so the lower-quoted T2.5 comes first and P2 follows; Rodin Gen-2.5 comes third for quad faces with a baked normal map and 2K textures. The triangle budget is lower; P2 sets no face limit so it can choose its own adaptive low-poly count. The real output quality of both has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (triangles, about 8,000 faces) and bakes 2K textures, so one step gives a textured low-poly model; but Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures after remesh have not been checked against real upstream samples. Tripo multiview exports only the GLB and FBX a game engine needs, with lossless PNG textures reduced to 2K and the origin at the bottom center (the conversions are priced as advanced ones).",
+            "chat.model3d_usage.profiles[id=game_prop].reason": "Props and scene pieces do not deform. The catalog's own notes describe both Meshy T2.5 and Tripo P2 as low-poly, clean-topology models for games and real-time assets, so there is no documented quality difference to rank by; cost only orders models of equal quality, so the lower-quoted T2.5 comes first and P2 follows; Rodin Gen-2.5 comes third for quad faces with a baked normal map and 2K textures. The triangle budget is lower; P2 sets no face limit so it can choose its own adaptive low-poly count. The real output quality of both has not been checked against real upstream samples. Meshy 7.1 comes last: it remeshes while generating (triangles, about 8,000 faces) and bakes 2K textures, so one step gives a textured low-poly model; but Meshy's own guidance for low-poly game assets is Smart Topology (T2.5), and the textures after remesh have not been checked against real upstream samples. Tripo multiview exports all six formats by default, with lossless PNG textures reduced to 2K and the origin at the bottom center (all six conversions are priced as advanced ones).",
             "chat.model3d_usage.profiles[id=web_ar].label": "Web / AR display",
             "chat.model3d_usage.profiles[id=web_ar].description": "A model shown live on the web or in AR; the triangle count is controlled and UVs are kept.",
             "chat.model3d_usage.profiles[id=web_ar].reason": "Web and AR need fewer triangles and smaller textures; Meshy 7.1's low triangle count and 2K textures come first, with P2 as an alternative.",
             "chat.model3d_usage.profiles[id=print].label": "3D printing",
             "chat.model3d_usage.profiles[id=print].description": "A solid model for 3D printing; full detail is kept and a watertight mesh is required so it can be sliced.",
-            "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1. Tripo exports only GLB, STL and 3MF; printing has no use for the other formats, and the conversions stay at the basic price.",
+            "chat.model3d_usage.profiles[id=print].reason": "Printing needs full detail and a watertight mesh; prefer Meshy 7.1's high-detail output, then Tripo v3.1. Tripo exports all six formats by default (GLB, USDZ, FBX, OBJ, STL, 3MF) and the conversions stay at the basic price; printing slices from STL and 3MF, and the other formats come with them.",
             "chat.model3d_usage.brief.fields[name=purpose].label": "Purpose",
             "chat.model3d_usage.brief.fields[name=image_use].label": "2D purpose",
             "chat.model3d_usage.brief.fields[name=image_transparent].label": "Transparent background",

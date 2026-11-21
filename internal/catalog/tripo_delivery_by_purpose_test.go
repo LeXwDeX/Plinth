@@ -235,10 +235,11 @@ func TestConversionsArePricedBasicUnlessAnAdvancedExportOptionIsSet(t *testing.T
 }
 
 // Each purpose names its delivered format set and export options in the Schema.
-// The game purposes ask for the GLB and FBX only, with lossless PNG textures at
-// 2K and the origin at the bottom centre (the advanced export); print keeps STL
-// and 3MF next to the GLB on the basic conversion (its STL and 3MF carry no
-// texture); display and web/AR stay exactly what they were.
+// Since #456 every purpose delivers all six formats, as the product's "convert
+// everything by default" rule asks: the game purposes keep the advanced export
+// (lossless PNG textures at 2K, the origin at the bottom centre) on all six
+// conversions, print keeps the basic conversion on all six (its STL and 3MF
+// carry no texture), and display and web/AR stay exactly what they were.
 func TestEveryPurposeDeclaresItsFormatSet(t *testing.T) {
 	c := loadDefaultCatalog(t)
 	type want struct {
@@ -251,9 +252,9 @@ func TestEveryPurposeDeclaresItsFormatSet(t *testing.T) {
 	expected := map[string]want{
 		"render":         {allFormats, "JPEG", "4k", false, "30"},
 		"web_ar":         {allFormats, "JPEG", "4k", false, "30"},
-		"game_character": {[]string{"GLTF", "FBX"}, "PNG", "2k", true, "20"},
-		"game_prop":      {[]string{"GLTF", "FBX"}, "PNG", "2k", true, "20"},
-		"print":          {[]string{"GLTF", "STL", "3MF"}, "JPEG", "4k", false, "15"},
+		"game_character": {allFormats, "PNG", "2k", true, "60"},
+		"game_prop":      {allFormats, "PNG", "2k", true, "60"},
+		"print":          {allFormats, "JPEG", "4k", false, "30"},
 	}
 	exports := map[string]exportOffering{}
 	for _, tc := range exportOfferings {

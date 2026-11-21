@@ -3676,6 +3676,18 @@ def scenario_offering_knowledge(work, stack_binary, processes, catalog):
         record("#249 purpose override coverage", covered,
                f"required={usage.get('override_coverage_required')} multiview={override}")
 
+        # #456: every purpose delivers all six formats. The game purposes keep the
+        # advanced export on all six, and print leaves the format set to the
+        # Offering default (all six on the basic conversion), so neither narrows it.
+        advanced = (override.get("export_texture_format") == "PNG" and override.get("export_texture_size") == "2k"
+                    and override.get("export_pivot_bottom_center") is True)
+        print_profile = next(profile for profile in usage["profiles"] if profile["id"] == "print")
+        print_tripo = print_profile.get("parameter_overrides", {}).get("tripo/tripo-v3.1-full/text-to-3d")
+        record("#456 the purposes deliver all six formats",
+               advanced and "output_formats" not in override and print_tripo is None
+               and "tripo/tripo-v3.1-full/text-to-3d" in (print_profile.get("overrides_not_needed") or []),
+               f"advanced={advanced} game_formats={override.get('output_formats')} print_override={print_tripo}")
+
         session = new_session(api)
         api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "auto"})
         model = next((item["model_id"] for item in offerings.values()

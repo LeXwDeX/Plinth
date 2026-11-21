@@ -365,7 +365,7 @@ PC 创建界面只填写名称和提示词，选择界面不提供类别筛选�
 | Meshy Retexture | glb、fbx、obj、usdz、stl、3mf（按 Schema 现有声明）；`thumbnail_url` | 全部六种；stl、3mf 为后台可选；缩略图（`background`、可选，#324；依据 #187 实测上游返回 `thumbnail_url`，官方文档页当时无法打开） |
 | Meshy Rigging | `rigged_character_fbx_url`、`rigged_character_glb_url`、`basic_animations` | `result` 整棵树展开，全部保存 |
 | Meshy Animation | `animation_glb_url`、`animation_fbx_url`；带 `post_process` 时另有 usdz/骨架/改帧率 FBX | glb、fbx 全部保存；`post_process` 一次只能选一种操作，未请求 |
-| Tripo v3.1 文生/图生 3D | 基础 GLB（`pbr_model`/`base_model`/`model`）；`rendered_image`、`generated_image`；转换可得 GLTF、USDZ、FBX、OBJ、STL、3MF | GLB（由 GLTF 转换交付）加按用途选择的转换格式，默认六种，游戏用途只要 GLB 与 FBX，打印用途 GLB、STL、3MF（#278，见下文）；`rendered_image` 与 `generated_image` 都作为缩略图保存（后者为未声明的额外资产） |
+| Tripo v3.1 文生/图生 3D | 基础 GLB（`pbr_model`/`base_model`/`model`）；`rendered_image`、`generated_image`；转换可得 GLTF、USDZ、FBX、OBJ、STL、3MF | GLB（由 GLTF 转换交付）加六种转换格式：#456 起所有用途都默认全出（游戏用途六种都走进阶导出，其余用途基础导出），#278 曾按用途收窄（游戏 GLB/FBX、打印 GLB/STL/3MF）；`rendered_image` 与 `generated_image` 都作为缩略图保存（后者为未声明的额外资产） |
 | 图片（GPT、Gemini、即梦、Meshy Nano Banana、去背景） | 每次请求返回一张图片，格式由请求参数或上游决定 | GPT 固定无损 PNG；其他按上游原样保存 |
 
 Meshy Animation 的 `action_id` 选项（#265）按官方 [Animation Library](https://docs.meshy.ai/en/api/animation-library)（由 [Animation API](https://docs.meshy.ai/en/api/animation) 链接）重建：值是官方 `action_id`，标签是中文说明加括号内的官方名称，后者也是上游交付的剪辑名（例如 4 为 `Attack`，交付 `Armature|Attack|baselayer`）；分组为官方 category。官方库共 656 个动作，编号 0–696 不连续，退役编号不列出且会被 Catalog 拒绝。旧表的 37 个标签（如 1 Sitting、4 Waving）与官方编号不符，已全部替换；Agent 的 `list_offerings` 只收到紧凑的 `options_compact`（`4:Attack` 形式，见 `docs/architecture.md`「3D 处理工具」）；Offering revision 与 wire 映射不变，旧任务冻结的编号仍按官方含义执行。官方库会增删动作，`GET /openapi/v1/animations/library` 未接入运行时同步，变更时须重新核对文档并更新 Schema 与 `meshy_animation_actions_test.go`。改版后尚未在测试栈做付费复验。
