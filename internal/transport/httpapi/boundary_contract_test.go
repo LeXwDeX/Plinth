@@ -115,7 +115,9 @@ func TestProviderAssetDeliveryRequiresValidSignature(t *testing.T) {
 		delivered.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("signed delivery headers = %#v", delivered.Header())
 	}
-	if !bytes.Equal(delivered.Body.Bytes(), []byte("\x89PNG\r\n\x1a\nreference")) {
+	// #460 B16: the uploaded reference is a real PNG (Meshy checks its pixels),
+	// so the signed delivery is compared against the same bytes.
+	if !bytes.Equal(delivered.Body.Bytes(), testReferencePNG(t, 32, 32)) {
 		t.Fatalf("signed delivery body = %q", delivered.Body.Bytes())
 	}
 

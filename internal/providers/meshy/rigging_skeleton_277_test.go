@@ -3,7 +3,6 @@ package meshy_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -87,18 +86,18 @@ func TestMeshyRiggingRefusesWhatTheSchemaDoesNotDeclare(t *testing.T) {
 	for name, input := range map[string]string{
 		"an unknown template":        `{"source_task":"task-local","skeleton_template":"godot_humanoid"}`,
 		"fingers that are no switch": `{"source_task":"task-local","include_fingers":"yes"}`,
-		"fingers with a texture":     `{"source_task":"task-local","include_fingers":true,"texture_image_url":"https://example.test/skin.png"}`,
+		// #460 B17: the upstream deprecated texture_image_url, so the platform
+		// no longer declares or exposes it at all.
+		"a texture reference image": `{"source_task":"task-local","include_fingers":false,"texture_image_url":"https://example.test/skin.png"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, normalized, err := product.Normalize(generation.Rigging, meshyRigging, json.RawMessage(input)); err == nil {
 				t.Fatalf("accepted %s: %s", input, normalized)
-			} else if name == "fingers with a texture" && !strings.Contains(err.Error(), "手指骨骼") {
-				t.Fatalf("the refusal does not say why: %v", err)
 			}
 		})
 	}
-	// Without fingers a texture image stays allowed.
-	if _, _, err := product.Normalize(generation.Rigging, meshyRigging, json.RawMessage(`{"source_task":"task-local","include_fingers":false,"texture_image_url":"https://example.test/skin.png"}`)); err != nil {
+	// Fingers without a texture reference are fine.
+	if _, _, err := product.Normalize(generation.Rigging, meshyRigging, json.RawMessage(`{"source_task":"task-local","include_fingers":true}`)); err != nil {
 		t.Fatal(err)
 	}
 }

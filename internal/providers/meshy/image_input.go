@@ -26,7 +26,12 @@ func validateImageInputParameter(p schema.Parameter) error {
 		return nil
 	}
 	c := p.ImageInput
-	if p.Type != "asset" || p.MaxBytes <= 0 || len(p.MediaTypes) == 0 || c.MinWidth <= 0 || c.MinHeight <= 0 || c.MaxPixels <= 0 || c.MaxPixels/c.MinWidth < c.MinHeight {
+	// A single asset carries the bound, and so does a reference-image array:
+	// Meshy's image-to-3d and multi-image Offerings take 1–4 pictures, each of
+	// which has to satisfy the same official pixel bounds (#460 B16).
+	if (p.Type != "asset" && !(p.Type == "asset-array" && p.Semantic == "reference-image")) ||
+		p.MaxBytes <= 0 || len(p.MediaTypes) == 0 || c.MinWidth <= 0 || c.MinHeight <= 0 ||
+		c.MaxPixels <= 0 || c.MaxPixels/c.MinWidth < c.MinHeight {
 		return fmt.Errorf("invalid frozen image_input contract")
 	}
 	for _, mime := range p.MediaTypes {
@@ -68,17 +73,57 @@ func (a *Adapter) readImageInput(ctx context.Context, request generation.InputVa
 		return nil, "", imageInputFailure(generation.ErrInvalidInput, nil)
 	}
 	var input map[string]json.RawMessage
-	var id string
-	if json.Unmarshal(request.Input, &input) != nil || json.Unmarshal(input[p.Name], &id) != nil || strings.TrimSpace(id) == "" {
+	if json.Unmarshal(request.Input, &input) != nil {
 		return nil, "", imageInputFailure(generation.ErrInvalidInput, nil)
+	}
+	var ids []string
+	if p.Type == "asset" {
+		var id string
+		if json.Unmarshal(input[p.Name], &id) != nil || strings.TrimSpace(id) == "" {
+			return nil, "", imageInputFailure(generation.ErrInvalidInput, nil)
+		}
+		ids = []string{id}
+	} else {
+		var list []string
+		if json.Unmarshal(input[p.Name], &list) != nil || len(list) == 0 {
+			return nil, "", imageInputFailure(generation.ErrInvalidInput, nil)
+		}
+		for _, id := range list {
+			if strings.TrimSpace(id) == "" {
+				return nil, "", imageInputFailure(generation.ErrInvalidInput, nil)
+			}
+		}
+		ids = list
 	}
 	assets := request.InputAssets[p.Name]
-	if len(assets) != 1 {
+	if len(assets) != len(ids) {
 		return nil, "", imageInputFailure(generation.ErrInvalidInput, nil)
 	}
-	asset := assets[0]
+	// Every picture of the list is checked; the wire keeps the whole list.
+	var lastRaw []byte
+	var lastMime string
+	for index, id := range ids {
+		raw, mime, err := a.readOneImageInput(ctx, request, p, assets[index], generation.AssetID(id))
+		if err != nil {
+			return nil, "", err
+		}
+		lastRaw, lastMime = raw, mime
+	}
+	_ = ids
+	return lastRaw, lastMime, nil
+}
+
+// readOneImageInput checks one picture of an image_input parameter against the
+// frozen bounds and returns its bytes and media type.
+func (a *Adapter) readOneImageInput(
+	ctx context.Context,
+	request generation.InputValidationRequest,
+	p schema.Parameter,
+	asset generation.InputAsset,
+	id generation.AssetID,
+) ([]byte, string, error) {
 	digest, err := hex.DecodeString(asset.SHA256)
-	if err != nil || len(digest) != sha256.Size || asset.ID != generation.AssetID(id) || asset.OwnerID != request.OwnerID || asset.StorageKey == "" || asset.Size <= 0 {
+	if err != nil || len(digest) != sha256.Size || asset.ID != id || asset.OwnerID != request.OwnerID || asset.StorageKey == "" || asset.Size <= 0 {
 		return nil, "", inputRefusal(request.Offering, schema.InputRefusalMismatch, schema.InputRefusalValues{}, generation.ErrInvalidInput, imageInputDiagnostic)
 	}
 	if asset.Size > p.MaxBytes {

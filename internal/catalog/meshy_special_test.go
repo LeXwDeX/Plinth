@@ -44,7 +44,14 @@ func TestMeshySpecialQualifiedAvailabilityWithExactDelivery(t *testing.T) {
 			if !ok {
 				t.Fatalf("missing candidate %s", tc.id)
 			}
-			if o.Enabled != (tc.capability != "repair-printability") || o.IdempotentSubmission || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || !o.CreditsMetered || o.EstimatedCredits != tc.credits {
+			// #460 B14: these steps create a new task with backoff when the
+			// upstream reports timeout, service_unavailable or server_error.
+			retryable := o.Retry.Retryable
+			if o.Enabled != (tc.capability != "repair-printability") || o.IdempotentSubmission ||
+				o.Retry.MaxAttempts != 2 || !slices.Contains(retryable, schema.FailureTimedOut) ||
+				!slices.Contains(retryable, schema.FailureUpstreamUnavailable) ||
+				!slices.Contains(retryable, schema.FailureRateLimited) ||
+				!o.CreditsMetered || o.EstimatedCredits != tc.credits {
 				t.Fatalf("unsafe qualification contract: %+v", o)
 			}
 			if tc.capability == "repair-printability" {

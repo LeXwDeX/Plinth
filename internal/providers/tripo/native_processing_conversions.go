@@ -440,6 +440,12 @@ func nativeConversionRunning(request generation.ObserveRequest, s *nativeConvers
 		if item.Status == conversionItemSubmitted {
 			steps++
 		}
+		// A format waiting to be resubmitted, or one whose outcome is unknown,
+		// is one more stage: the reported progress must advance with the state,
+		// or the coordinator would discard the round as stale.
+		if item.Status == conversionItemRetryPending || item.Status == conversionItemUnknown {
+			steps++
+		}
 		if item.Status == conversionItemDone {
 			steps += 2
 		}
@@ -566,7 +572,10 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 		// another paid export is started.
 		return nativeConversionFailure(request, run, base, "Tripo 必需格式转换失败"), nil
 	}
-	if changed && !allFormatsDone(names, s.Conversions) {
+	if changed {
+		// A child reached an outcome this round: report it and dispatch
+		// nothing, so a stage belongs to exactly one child. The refresh and the
+		// claims follow in the next round.
 		return nativeConversionRunning(request, run, base, len(c.Formats)), nil
 	}
 	if allFormatsDone(names, s.Conversions) {

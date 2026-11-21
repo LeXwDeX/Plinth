@@ -498,7 +498,10 @@ func (h *acmeHarness) runUntilTerminal(
 	taskID generation.TaskID,
 ) generation.Task {
 	t.Helper()
-	for range 40 {
+	// 80 rounds: a private child that keeps failing is resubmitted five times
+	// with the documented 1, 2, 4… second backoff (#460 A1) before the step
+	// ends, which needs more rounds than a single pass.
+	for range 80 {
 		h.reconcile(t)
 		task, err := h.module.Get(context.Background(), owner, taskID)
 		if err != nil {

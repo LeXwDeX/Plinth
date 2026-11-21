@@ -74,11 +74,63 @@ Product Schema 声明 `asset-recovery` 与 `local/existing-assets/recover`，使
 
 ## 上游结果重新取回声明（#295）
 
-Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe", retention_hours}`，表示该连接已受理的上游作业在 Task 因入库失败而终态后，仍可经 Adapter 的 `Observe` 只读取回结果。Catalog 只允许有上游作业的协议声明它（`meshy`、`tripo`、`hyper3d.rodin`、`matting`），拒绝 `image-sync`、本地与对话协议、未知 mode 与越界保留期；声明时 `runtime.generation_messages` 必须带 `refetch_source_unavailable` 与 `refetch_result_unavailable`。`generation_messages.upstream_job_conflict`（可选，缺省时用 `submission_unknown`）是上游返回已被其他任务记录的 Job ID 时的失败文案（#298）。当前 Schema：Meshy `retention_hours: 72`（官方《Asset Retention》：API 结果最多保留 3 天），Tripo、Hyper3D、Matting 不写保留期（官方未写明，以上游回答为准）；三个同步图片连接不声明（结果是一次性的内联字节）。
+Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe", retention_hours}`，表示该连接已受理的上游作业在 Task 因入库失败而终态后，仍可经 Adapter 的 `Observe` 只读取回结果。Catalog 只允许有上游作业的协议声明它（`meshy`、`tripo`、`hyper3d.rodin`、`matting`），拒绝 `image-sync`、本地与对话协议、未知 mode 与越界保留期；声明时 `runtime.generation_messages` 必须带 `refetch_source_unavailable` 与 `refetch_result_unavailable`。`generation_messages.upstream_job_conflict`（可选，缺省时用 `submission_unknown`）是上游返回已被其他任务记录的 Job ID 时的失败文案（#298）。当前 Schema：Meshy `retention_hours: 72`（官方《Asset Retention》：API 结果最多保留 3 天），Tripo `retention_hours: 168`（#460 A8：官方 asset retention 页写明 2026-12-01 起最多保留 7 天，读取 2026-11-22；补齐与重新取回不依赖 7 天之后的 `task_id`），Hyper3D、Matting 不写保留期（官方未写明，以上游回答为准）；三个同步图片连接不声明（结果是一次性的内联字节）。
 
 这不新增 Adapter 方法或 Provider 私有分支：内核用来源冻结 Offering、输入、Job 与 Opaque 调既有 `Observe`（拒绝型派发检查点），再用既有 `OpenAsset` 下载；Adapter 看到的仍是来源 Task/Attempt 身份。重新取回 Task 的冻结 Offering 去掉计费与成功后观察声明，只用于展示与输出契约。逐 Provider 能否重取、依据与不确定性见 `docs/architecture.md`「上游结果重新取回（#295）」。
 
 公开面：Core 路由 `task_refetch`（`GET` 资格、`POST` 发起，参数只有 `taskID`），文案 `ui.task.refetch.*`（中英文）；Agent 控制工具 `recover_task_result`（`task.refetch`、`SESSION_WRITE`）与 `chat.agent.refetch_started_content`、`refetch_unavailable_content`（六个原因必须齐全：`not_applicable`、`not_supported`、`expired`、`provider_unavailable`、`repeated_failure`、`delivered`；`repeated_failure` 必须含 `{cause}`，由公开失败类别文案 `failure.<class>` 填入；`delivered`（#330 第二轮：已有成功的重新取回，资格为 `eligible:false`）必须含 `{task_id}`，填入那次取回的 Task）。重新取回沿用来源冻结的交付声明，不改用当前 Catalog；快照声明有误导致取回以同样的不可重试完整性失败结束时，来源以 `repeated_failure` 关闭，判定规则见 `docs/architecture.md`。
+
+## Tripo / Meshy 的重试、轮询、并发与保留期（#460）
+
+本节按 #460 的 A/B 两部分记录实现状态。官方原文与链接（读取日期 2026-11-22）：Tripo `developers.tripo3d.ai/en/docs/{billing,rate-limits,error-handling,task-lifecycle,task-query,models-convert,files}` 与 `/en/blog/asset-retention-policy`；Meshy `docs.meshy.ai/en/api/{convert,errors,rate-limits,task-lifecycle,asset-retention}`。**本节的“已实现”只声明本机 fake 回归通过，未做 dev-test 部署与真实上游验收。**
+
+### Tripo（A1–A8）
+
+- **A1 转换子作业 `failed` / `cancelled`**：官方 Billing：“Failed and cancelled tasks are not charged.”，所以只对该格式重新提交 `models/convert`，每格式最多 5 次，按 1、2、4… 秒退避（上限 32 秒）。三条路径统一：`precompletion.go`（成功前）、`native_processing_conversions.go`（原生处理导出）、`conversion.go`（成功后观察）。私有状态新增 `retry_pending` / `unknown` 与每次提交的 `attempts`（remote id、credits_consumed、结局）；每次重提都是一次新的私有派发许可。预算用尽后，成功前两条路径整单失败（#462 再改交付形态），成功后路径只终结该格式自己的槽位。已实现，测试 `TestFailedConvertChildIsResubmittedForItsOwnFormat`、`TestCancelledConvertChildIsResubmitted`、`TestFullFormatChildFailureRetriesThenFailsPublicTask`、`TestNativeExport429*` 之外的 `TestAFailedGLBExport…`（更新）。
+- **A2 429 预算按格式**：官方 Rate Limits 说 429（1007 请求速率 / 2000 并发池）要遵守 `Retry-After`，指数退避从 1 s 起、上限 32 s、最多 5 次。预算从“整次运行共用”改为每格式各 5 次，`Retry-After` 优先；`recordConversionRefusal` 与 `refusedNativeConversion` 都按格式计。已实现，测试 `TestRateLimitBudgetIsPerFormat`、`TestRateLimitRefusalWaitsForRetryAfter`、`TestNativeExport429*`。
+- **A3 `unknown` 按时长有界**：官方 Task Query：“Do not treat … `unknown` as success or failure. Continue polling with a timeout; if it expires, contact support with the `task_id`.” Schema 扩展 `status_mapping.upstream_status.<word>.max_duration_seconds`（连接声明，Catalog 校验只允许 accepted/running 相位），Tripo 连接声明 `unknown` 为 300 秒。主作业到期记为 ambiguous（`submission_unknown`、`retryable=false`，内核不重发）；转换子作业到期时，成功前路径整单 ambiguous 失败，成功后路径把该格式记为 `unknown`（不重发、不断言失败，槽位由 deadline 收尾）。已实现，测试 `TestUnknownStatusIsBoundedByDuration`。
+- **A4 轮询间隔**：官方 Task Query：“Query once every 1-2 seconds.” 全部 Tripo Offering 的 `poll_interval_seconds` 由 5 改为 2。已实现，测试 `TestTripoSchemaDeclaresTheOfficialRetryFacts`。
+- **A5 并发**：官方 Rate Limits 写明默认并发池为 texture、format-convert、refine 共享 5 个。Offering 的 `provider_options.format_conversion.concurrency_limit` 声明为 5；一次观察只允许一个私有派发许可（内核 `dispatchCheckpointer` 只保留最后一个 ack，`checkpoint.go`），所以采用“每轮派发一个、不等前一个完成”，同时在途子作业不超过声明上限；超出时按 2000 与 `Retry-After` 处理。已实现，测试 `TestConversionConcurrencyIsBoundedByFive`（6 格式时在途 ≤5，第 6 个在有名额后派发）。**边界**：该上限约束单个 Task 的在途子作业；账号级共享池由上游以 2000 回答。
+- **A6 创建请求 5xx / 响应丢失**：官方 Error Handling：“A task-creation request may have succeeded even if its response was lost; avoid resubmitting until its outcome is known.” 保持结果不明不重发。未改，现有测试继续覆盖（`TestPreCompletionUnconfirmedConvertStaysUnknown` 等）。
+- **A7 免费上传**：官方 Files：上传不创建任务。`uploadReader` 不再以 `submitting=true` 发送，`POST /files` 失败是可重试的传输错误（`transport` / `upstream_unavailable`），下一次尝试重发整个 multipart。已实现，测试 `TestFailedUploadIsARetryableTransportError`。
+- **A8 资产保留期**：官方 asset retention 页写明 2026-12-01 起最多保留 7 天。Tripo 连接声明 `result_refetch.retention_hours: 168`；补齐与重新取回不依赖 7 天之后的 `task_id`。已实现（Schema + 本文件与架构总览），测试 `TestTripoSchemaDeclaresTheOfficialRetryFacts`。
+
+### Meshy（B9–B19，本批次部分实现）
+
+- **B9 / B14 `timeout`/`service_unavailable`/`server_error` 自动重排**：官方 Errors：“Create the task again”。`meshy/{meshy-7,meshy-7.1,meshy-t2.5}/{text-to-3d,image-to-3d}`、`meshy-7.1-multiview`、`meshy/processing/convert` 的 `retry.retryable` 补 `timed_out`；`service_unavailable`/`server_error` 已映射 `upstream_unavailable`。已实现（`internal/catalog/result_refetch_schema_test.go` 与 Catalog 回归）。
+- **B10（H1）preview 不再发送 refine 专用字段**：`meshy/{meshy-7,meshy-7.1}/text-to-3d` 的 `enable_pbr`、`texture_prompt`、`texture_image_url` 补 `omit_when: mode != refine`（照 T2.5）。已实现（Catalog + 线上样本 `internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json` 的请求体随官方 wire 更新，响应体保持捕获原样）。
+- **B11（H2）refine 不发送 `ai_model`**：`projectInput` 不再注入被 Offering 投影省略的模型字段（`ai_model` 在这两个 Offering 声明为 `omit_when: mode == refine`），由上游沿用 preview 的模型。已实现。
+- **B12（M1）Rigging 上限 380000**：官方 Rigging 写明 “at most 380,000 triangles”；Catalog `source_model_limit.max_triangles`、fake `MaxRigFaces` 与文档同步为 380000。已实现（fake 的 `core.go` 未改，`MaxRigFaces` 见下）。
+- **B13（M2）Meshy 403**：连接 `error_mapping.http_status_ranges` 增加 403 → `upstream_denied`（不可重试、非 authentication）。已实现。
+- **B15（L6）四边面 + 8K**：官方没有这条约束，保留为**平台保守约束**并改述文案（不删除守卫，因为没有真实失败样本可以证明可以放开）。已实现（Schema + 本地化）。
+- **B16（L7）图片像素上下限**：`meshy/{meshy-7.1,meshy-t2.5}/image-to-3d` 与 `meshy-7.1-multiview/image-to-3d` 的 `reference_assets` 声明 `image_input`（每边 ≥32 px、总像素 ≤178,956,970）；Catalog 允许 Meshy 在参考图数组上声明 `image_input`，Adapter 逐个检查列表中的每张图。已实现。
+- **B17（L8）Rigging `texture_image_url`**：官方 2026-10-23 起弃用（“Omit it.”）。Offering 删除该参数、发现投影删除对应字段、`provider_deprecations` 登记。已实现。
+- **B18（L9）`pose_mode` 空值不发送**：声明 `omit_when: pose_mode == ""`。已实现。
+- **B19（L10）print/analyze 两个尺寸**：Schema 已有 `minimum:0, maximum:1`（至多一项），与“至多一个”的官方口径一致，未改。
+- **B20（L12）请求超时**：`request_timeout_seconds: 1800` 是连接级、覆盖全部请求（含产物下载）；官方 60 s/120 s 的建议只针对创建请求，本仓库无法只对创建请求设超时，**保持现状**，见下节“未做”。
+- **B21（L13）非终态轮询遵守 `Retry-After`**：未实现（见下节）。
+- **B22（L14）`status_mapping` 多余状态词**：未实现（见下节）。
+- **B23（L15）keychain build 的 `obj`**：`output_format` 增加 `obj`。已实现。
+- **B24（L16）fake 校验**：未实现（见下节）。
+
+### 官方未说明（只记录，不定规则）
+
+Tripo：幂等键；被 429 拒绝的请求是否计费；退款时点；`unknown` 的专门等待上限；并发池满时是排队还是拒绝。
+Rodin：Texture 价格是 2 还是 2.5；各 `material` 实际交付的文件；非 glb 的文件名；四边面换算只有一个样本；`preview_render=false` 时仍返回 `preview.webp`；multipart 中数组的编码方式。
+
+### 本批次未做（交接）
+
+- **B20（L12）请求超时**：连接级 `request_timeout_seconds` 同时覆盖创建与产物下载，仓库里无法只对创建请求设 60 s/120 s；**保持现状**，等能按请求类型设超时的方案。
+- **B21（L13）非终态轮询遵守 `Retry-After`**：未实现；需要在内核/httpjson 通用层让轮询失败的重排使用 `Retry-After`（有则用、否则 5 s）。
+- **B22（L14）`status_mapping` 收敛**：未实现；需先确认真实样本与历史数据是否依赖官方 5 个状态之外的词。
+- **B24（L16）fake 校验**：未实现；需要在 Meshy fake 补 preview 专属字段、图片像素与 `pose_mode:""` 的校验。
+- **C25–C32（Rodin / Hyper3D）**：未开始。
+- **门禁**：本批次只跑了 `gofmt`、`go vet` 与 `go test ./...`（含受影响包的回归）；`-race`、前端门禁、wire coverage、fake 栈与公开快照检查未跑。
+
+### 本批次的证据边界
+
+- Meshy 的 `internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json` 是捕获样本：响应体保持原样，两个创建请求的请求体按官方 2026-11-22 的 wire 更新（preview 去掉 `enable_pbr`/`pose_mode`，refine 去掉 `ai_model`），交换元数据保持 wirefixture 的原字段集。
+- Rigging 上限 380000 之后，`internal/testutil/fakeupstream/meshy/openapi-v1` 的对齐报告与端点说明里仍保留 2026-10-29 捕获时“320000 面以上被接受后 FAILED”的历史记录，它们记录的是当时的观测，不改为 380000。
 
 ## Tripo Rig Check 边界
 

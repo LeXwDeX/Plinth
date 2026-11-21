@@ -76,7 +76,7 @@ func TestMultiviewRealPreparedInputFreezesOrderBytesAndGrantAcrossRestart(t *tes
 	ids := []generation.AssetID{}
 	original := [][]byte{}
 	for i := 0; i < 4; i++ {
-		im := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+		im := image.NewNRGBA(image.Rect(0, 0, 32, 32))
 		im.SetNRGBA(0, 0, color.NRGBA{R: uint8(40 + i), G: 50, B: 90, A: 255})
 		var data bytes.Buffer
 		if err = png.Encode(&data, im); err != nil {
@@ -259,7 +259,7 @@ func TestMultiviewAgentDefaultQuoteUsesManualOrAutomaticGrant(t *testing.T) {
 				t.Fatal(err)
 			}
 			var imageBytes bytes.Buffer
-			if err := png.Encode(&imageBytes, image.NewNRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+			if err := png.Encode(&imageBytes, image.NewNRGBA(image.Rect(0, 0, 32, 32))); err != nil {
 				t.Fatal(err)
 			}
 			asset, err := inputs.UploadAsset(ctx, "owner", generation.InputAssetUpload{Body: bytes.NewReader(imageBytes.Bytes()), MediaType: "image/png", AssetType: "image", MaxBytes: 20 << 20})

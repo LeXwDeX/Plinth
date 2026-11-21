@@ -205,9 +205,6 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 		}
 		state.Conversions[format] = updated
 	}
-	if allFormatsDone(selections, state.Conversions) {
-		return a.preCompletionClaims(ctx, request, options, base, state, selections)
-	}
 	// A required format spent its retry budget: fail before another paid
 	// export is started.
 	for _, format := range selections {
@@ -215,10 +212,14 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 			return preCompletionFailure(base, state, "Tripo 必需格式转换失败"), nil
 		}
 	}
-	if changed && !allFormatsDone(selections, state.Conversions) {
+	if changed {
 		// A child reached an outcome this round: report it and dispatch
-		// nothing, so one round belongs to one action.
+		// nothing, so one round belongs to one action. The claims go in the
+		// next round, when nothing new was learned.
 		return preCompletionRunning(base, state), nil
+	}
+	if allFormatsDone(selections, state.Conversions) {
+		return a.preCompletionClaims(ctx, request, options, base, state, selections)
 	}
 	if backoff {
 		// A format just entered its retry backoff: let the wait pass first

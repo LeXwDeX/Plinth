@@ -18,6 +18,11 @@ import (
 // finishing, the refine being submitted, the refine finishing), then the
 // download of each claimed file. A request the sample does not contain fails
 // the replay.
+//
+// #460: the two create requests were adjusted to the official 2026-11-22 wire
+// (preview omits enable_pbr and pose_mode; refine omits ai_model, per "Leave it
+// out to texture with the model that matches the preview"). The response bodies
+// are the captured ones, untouched.
 func TestMeshyLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *testing.T) {
 	exchanges, policy := loadLiveCandidate(t)
 	replay, err := wirefixture.NewReplayWithMedia(exchanges, policy, wirefixture.SyntheticMediaResolver{})

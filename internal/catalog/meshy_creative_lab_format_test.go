@@ -67,13 +67,20 @@ func TestCreativeLabReliefBuildsDefaultToPreviewableGLBAndKeepSelectableZIP(t *t
 			for _, option := range format.Options {
 				values = append(values, option.Value)
 			}
-			if format.Type != "select" || format.Fixed || string(format.Default) != `"glb"` || !slices.Equal(values, []string{"glb", "zip"}) {
+			want := []string{"glb", "zip"}
+			if product == "keychain" {
+				want = []string{"glb", "zip", "obj"}
+			}
+			if format.Type != "select" || format.Fixed || string(format.Default) != `"glb"` || !slices.Equal(values, want) {
 				t.Fatalf("format contract = type %s fixed %v default %s options %v", format.Type, format.Fixed, format.Default, values)
 			}
 			if format.Presentation == nil || format.Presentation.Surface != "provider" {
 				t.Fatal("format must be a provider choice, not a readonly fixed value")
 			}
-			for _, input := range []string{`{"source_task":"task","output_format":"obj"}`, `{"source_task":"task","output_format":"stl"}`} {
+			for _, input := range []string{`{"source_task":"task","output_format":"stl"}`, `{"source_task":"task","output_format":"usdz"}`} {
+				if product != "keychain" {
+					input = `{"source_task":"task","output_format":"obj"}`
+				}
 				if _, err := normalizeInput(o, json.RawMessage(input)); err == nil {
 					t.Fatalf("accepted undeclared format %s", input)
 				}

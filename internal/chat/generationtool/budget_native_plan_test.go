@@ -77,7 +77,7 @@ func TestMeshyMultiviewPlanEstimateCoversItsFrozenQuoteAndRunsInBudget(t *testin
 	}
 	urls := make([]string, 0, 2)
 	for index := range 2 {
-		picture := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+		picture := image.NewNRGBA(image.Rect(0, 0, 32, 32))
 		picture.SetNRGBA(0, 0, color.NRGBA{R: uint8(30 * (index + 1)), G: 60, B: 90, A: 255})
 		var encoded bytes.Buffer
 		if err := png.Encode(&encoded, picture); err != nil {

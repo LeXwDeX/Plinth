@@ -22,6 +22,16 @@ func TestMeshyMultiviewHasAnIndependentFrozenContract(t *testing.T) {
 	if err := meshy.ValidateOffering(o); err != nil {
 		t.Fatal(err)
 	}
+	// #460 B16: the multi-image reference list carries the official pixel bounds.
+	assets, found := o.Parameters[0], false
+	for _, p := range o.Parameters {
+		if p.Name == "reference_assets" {
+			assets, found = p, true
+		}
+	}
+	if !found || assets.ImageInput == nil || assets.ImageInput.MinWidth != 32 || assets.ImageInput.MaxPixels != 178956970 {
+		t.Fatalf("reference_assets = %+v", assets.ImageInput)
+	}
 	old, _ := c.Get("meshy/meshy-7.1/image-to-3d")
 	if old.ModelID == o.ModelID || old.ReferenceSelectionPolicy != "" {
 		t.Fatal("legacy single-view identity changed")
