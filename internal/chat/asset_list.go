@@ -18,11 +18,14 @@ import (
 // duplicating either.
 
 // ResolveAssetListStep resolves one route step for a list owned by the
-// session. It reuses stepOffering's order: the person's explicit 3D model,
-// the workspace's image model for image-domain steps, the Agent's pinned
-// model (none here) and the capability's default available Offering. An
-// unavailable capability is reported as available=false with the reason; it
-// never blocks the proposal.
+// session. It asks the same question a turn would — which model would this
+// step run — and answers it with stepOffering, i.e. chat.ResolveModel: the
+// person's explicit model for the capability's domain, the purpose's
+// recommendation, the workspace value and the capability's default available
+// Offering, in that order (#380 step 1). The list's own route names no model,
+// so the Agent's argument and the plan's pin take no part. An unavailable
+// capability is reported as available=false with the reason; it never blocks
+// the proposal.
 func (service *Service) ResolveAssetListStep(
 	ctx context.Context,
 	ownerID string,
@@ -39,19 +42,27 @@ func (service *Service) ResolveAssetListStep(
 	if err != nil {
 		return step, err
 	}
+	explicitImage, err := service.SessionExplicitModelImage(ctx, ownerID, sessionID)
+	if err != nil {
+		return step, err
+	}
 	// The workspace image model is the one the person last sent with in the
 	// image domain (#318); it is what create_three_view would select.
 	models, _, err := service.SessionModels(ctx, ownerID, sessionID)
 	if err != nil {
 		return step, err
 	}
+	// The step asks what a turn of this session would run, so a retired lock
+	// moves to its successor first, exactly as startTurn freezes it (#380 S1:
+	// a lock left on a retired model would otherwise read as unavailable).
 	command := ToolCommand{
 		OwnerID:   ownerID,
 		SessionID: sessionID,
 		Options: TurnOptions{
-			ExplicitModel3D: explicitModel,
-			CreativeDomain:  string(generation.DomainModel3D),
-			DomainModels:    map[string]string{"image": models["image"]},
+			ExplicitModel3D:    service.currentModel(explicitModel),
+			ExplicitModelImage: service.currentModel(explicitImage),
+			CreativeDomain:     string(generation.DomainModel3D),
+			DomainModels:       map[string]string{"image": models["image"]},
 		},
 	}
 	policy := service.productionPlans
@@ -59,11 +70,7 @@ func (service *Service) ResolveAssetListStep(
 		step.Reason = "no available offering for capability " + string(capability)
 		return step, nil
 	}
-	offering, _, refusal := policy.stepOffering(
-		string(capability), "",
-		strings.TrimSpace(command.Options.ExplicitModel3D),
-		strings.TrimSpace(command.Options.ModelFor("image")),
-	)
+	offering, _, refusal := policy.stepOffering(command, string(capability), "")
 	if refusal != "" {
 		step.Reason = refusal
 		return step, nil

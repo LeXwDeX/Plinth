@@ -237,8 +237,7 @@ func (policy *ProductionPlanPolicy) buildContingencies(command ToolCommand,
 			return nil, "contingency " + id + " capability " + capability +
 				" is neither a declared correction capability nor a declared fix of its trigger"
 		}
-		offering, _, refusal := policy.stepOffering(capability, strings.TrimSpace(raw.Step.Model),
-			strings.TrimSpace(command.Options.ExplicitModel3D), strings.TrimSpace(command.Options.ModelFor("image")))
+		offering, _, refusal := policy.stepOffering(command, capability, strings.TrimSpace(raw.Step.Model))
 		if refusal != "" {
 			return nil, refusal
 		}

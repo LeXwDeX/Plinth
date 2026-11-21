@@ -153,7 +153,9 @@ func (executor *Executor) ToolDescriptionNote(tool catalog.ChatToolSchema, optio
 			if strings.TrimSpace(options.ExplicitModelFor(toolDomain(command))) == "" {
 				return ""
 			}
-			choice, err := executor.chooseOffering(command, tool.Capability, nil, modelInput{})
+			// The note is written before any turn runs, so no plan pin is
+			// known; the person's lock is the first layer anyway (#380).
+			choice, err := executor.chooseOffering(command, tool.Capability, nil, modelInput{}, "")
 			if err != nil || choice.Refusal != "" || choice.Offering.ID == "" {
 				return ""
 			}
