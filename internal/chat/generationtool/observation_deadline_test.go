@@ -106,3 +106,33 @@ func TestFirstAcceptedObservationErrorHasDeadline(t *testing.T) {
 		t.Fatalf("accepted callback failure lost identity/deadline: %+v %v", result, err)
 	}
 }
+
+// #460 review 4: a Task that is still running when the wait deadline passes is
+// reported as still in progress, not as a generation failure. This exercises
+// the deadline branch in wait (not the read-error path in awaitTask).
+func TestRunningTaskAtDeadlineReportsPending(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	tool := application.Chat.Tools[0]
+	now := time.Date(2026, 11, 22, 8, 0, 0, 0, time.UTC)
+	original := generation.Task{ID: "original-task", OwnerID: "owner-a", SessionID: "session-a",
+		State: generation.TaskRunning, Offering: generation.Offering{Timeout: time.Hour}}
+	gateway := &failingObservationGateway{fakeGateway: &fakeGateway{tasks: []generation.Task{original, original, original, original}}}
+	executor, err := generationtool.New(generationtool.Config{Gateway: gateway, References: &fakeReferences{},
+		Chat: application.Chat, TaskStates: application.TaskStates, Clock: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", BoundTaskID: "original-task",
+		Tool: tool, Call: agents.ToolCall{ID: "call-a", Name: tool.Name}, TaskWaitDeadline: now.Add(-time.Minute)}
+	result, err := executor.Execute(context.Background(), command, func(chat.ToolObservation) error { return nil })
+	if err != nil || result.AwaitTask || result.TaskID != "original-task" || result.AgentContent == "" {
+		t.Fatalf("running task at deadline = %+v err=%v", result, err)
+	}
+	if !strings.Contains(result.AgentContent, `"pending":true`) {
+		t.Fatalf("running task at deadline did not report pending: %+v", result)
+	}
+}
