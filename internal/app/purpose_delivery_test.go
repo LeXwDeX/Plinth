@@ -146,10 +146,12 @@ func TestPurposeFormatSetsDecideTheRequiredAndDeliveredSlots(t *testing.T) {
 		// What display, web/AR and every task that asks for nothing special get:
 		// the plain conversion and the price this Offering always had.
 		{"display keeps all six on the basic conversion", ``, allFormats, nil, "90", "30", "jpeg"},
-		{"game asks for the GLB and FBX with the advanced export",
+		// #456: asking for the GLB and FBX only is still possible (the Agent may
+		// give a reason and narrow the set), and so is the advanced export.
+		{"a narrowed GLB and FBX set with the advanced export",
 			`,"output_formats":["GLTF","FBX"],"export_texture_format":"PNG","export_texture_size":"2k","export_pivot_bottom_center":true`,
 			[]string{"GLTF", "FBX"}, map[string]any{"texture_format": "PNG", "texture_size": float64(2048), "pivot_to_center_bottom": true}, "80", "20", "png"},
-		{"print keeps STL and 3MF next to the GLB on the basic conversion", `,"output_formats":["GLTF","STL","3MF"]`,
+		{"a narrowed GLB, STL and 3MF set on the basic conversion", `,"output_formats":["GLTF","STL","3MF"]`,
 			[]string{"GLTF", "STL", "3MF"}, nil, "75", "15", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

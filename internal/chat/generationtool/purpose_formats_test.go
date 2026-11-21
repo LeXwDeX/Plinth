@@ -1,8 +1,6 @@
 package generationtool_test
 
 import (
-	"slices"
-	"strings"
 	"testing"
 )
 
@@ -25,7 +23,10 @@ func frozenStrings(t *testing.T, value any) []string {
 	return result
 }
 
-func TestPrintPurposeFreezesTheGLBStlAnd3MFSetOnTheBasicExport(t *testing.T) {
+// #456: print delivers all six formats on the basic export. The purpose no
+// longer narrows the format set, so the frozen input is the Offering default
+// six and nothing about it is attributed to the purpose.
+func TestPrintPurposeFreezesAllSixFormatsOnTheBasicExport(t *testing.T) {
 	h := newProcessingHarness(t, "auto", meshyCatalogTasks)
 	h.gateway.normalize = true // the real Catalog normalization injects the defaults
 	result := h.runLocked3D("call-print-formats", purposeBrief(t, map[string]any{"purpose": "print"}), nil)
@@ -33,22 +34,20 @@ func TestPrintPurposeFreezesTheGLBStlAnd3MFSetOnTheBasicExport(t *testing.T) {
 		t.Fatalf("step was not frozen: %+v", result)
 	}
 	input, frozen := h.frozenInput(0), h.gateway.frozen[0]
-	if formats := frozenStrings(t, input["output_formats"]); !slices.Equal(formats, []string{"GLTF", "STL", "3MF"}) {
-		t.Fatalf("output_formats = %v, want the print set", formats)
-	}
-	if frozen.ParameterSources["output_formats"] != "profile:print" || frozen.ParameterReasons["output_formats"] == "" ||
-		!strings.Contains(frozen.ParameterReasons["output_formats"], "STL") {
-		t.Fatalf("the format set carries %q / %q, want the print purpose and its reason", frozen.ParameterSources["output_formats"], frozen.ParameterReasons["output_formats"])
+	if formats := frozenStrings(t, input["output_formats"]); len(formats) != 6 {
+		t.Fatalf("output_formats = %v, want all six formats", formats)
 	}
 	// Print names no export option: its STL and 3MF carry no texture, so the
-	// conversions stay on the upstream defaults (the basic price) and nothing
-	// about them is attributed to the purpose.
+	// conversions stay on the upstream defaults (the basic price).
 	for name, want := range map[string]any{
 		"export_texture_format": "JPEG", "export_texture_size": "4k", "export_pivot_bottom_center": false, "export_fbx_preset": "blender",
 	} {
 		if input[name] != want || frozen.ParameterSources[name] != "" {
 			t.Errorf("%s = %v from %q, want the default %v", name, input[name], frozen.ParameterSources[name], want)
 		}
+	}
+	if frozen.ParameterSources["output_formats"] != "" {
+		t.Errorf("output_formats is attributed to %q, want the Offering default the purpose leaves alone", frozen.ParameterSources["output_formats"])
 	}
 	if _, reported := h.content(result)[budgetNoteKey]; reported {
 		t.Fatalf("values within the budget were reported: %s", result.AgentContent)
