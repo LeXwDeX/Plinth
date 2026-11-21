@@ -8,7 +8,7 @@
   "offering": "meshy/meshy-7.1/text-to-3d",
   "api_version": "v2",
   "provenance": "captured",
-  "transformation": "Draft from the opt-in upstream recorder: prompts are [redacted], model and asset URLs are the recorded public CDN shape (https://assets.meshy.ai/id-3/tasks/id-2/output/…), ids are id-1/id-2/id-3, timestamps are the recorded ones and media bytes are deterministic recipes, not the original bytes. The capture ran on 2026-11-22 local time (UTC+8); the UTC window is recorded in captured_window_utc.",
+  "transformation": "Draft from the opt-in upstream recorder: prompts are [redacted], model and asset URLs keep the recorded official CDN shape with placeholder ids, ids are id-1/id-2/id-3, timestamps are the recorded ones and media bytes are deterministic recipes, not the original bytes. The capture ran on 2026-11-22 local time (UTC+8); the UTC window is recorded in captured_window_utc.",
   "exchanges": 88,
   "candidate_sha256": "b3da8fa83435e9fbdfca303560c972ffa1c80e7c0812f8a3a6c2b24b287313d2",
   "media": [
