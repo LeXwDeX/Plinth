@@ -570,12 +570,13 @@ func (executor *Executor) modelChoiceFailure(command chat.ToolCommand, code, mes
 }
 
 // modelInputFor is the input-shape test of a call being selected, before its
-// input is built.
-func modelInputFor(command chat.ToolCommand, referenceURLs []string, pictures *multiviewPictures) modelInput {
+// input is built. A group's pictures may hold a view the Offering does not
+// name; the call's own pictures must all be taken (#433).
+func modelInputFor(referenceURLs []string, pictures *multiviewPictures) modelInput {
 	input := modelInput{References: len(referenceURLs)}
 	if pictures != nil {
 		input.Views = pictures.Views
-		input.Group = !pictures.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
+		input.Group = pictures.group
 	}
 	return input
 }

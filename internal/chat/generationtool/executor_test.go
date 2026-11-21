@@ -738,6 +738,10 @@ type fakeGateway struct {
 	index     int
 	// unavailable names Offerings whose runtime configuration is missing.
 	unavailable map[generation.OfferingID]bool
+	// submittedTask answers Get with the Task a submission created: its frozen
+	// Offering and input, as internal/generation does. Without it the canned
+	// tasks serve the answer.
+	submittedTask bool
 }
 
 func TestExecutorRejectsMissingExplicitReferenceBeforePaidSubmit(t *testing.T) {
@@ -794,6 +798,18 @@ func (gateway *fakeGateway) Submit(
 	command generation.SubmitCommand,
 ) (generation.Accepted, error) {
 	gateway.submitted = command
+	if gateway.submittedTask {
+		task := generation.Task{
+			ID: "configured-task", State: generation.TaskSucceeded, Input: command.Input,
+			Assets: []generation.Asset{{ID: "model-thumb", Role: "thumbnail"}},
+		}
+		for _, offering := range gateway.offerings {
+			if offering.ID == command.OfferingID {
+				task.Offering = offering
+			}
+		}
+		gateway.tasks, gateway.index = []generation.Task{task}, 0
+	}
 	return generation.Accepted{TaskID: "configured-task"}, gateway.submitErr
 }
 
