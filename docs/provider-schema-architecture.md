@@ -90,7 +90,7 @@ Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe",
 - **A2 429 预算按格式**：官方 Rate Limits 说 429（1007 请求速率 / 2000 并发池）要遵守 `Retry-After`，指数退避从 1 s 起、上限 32 s、最多 5 次。预算从“整次运行共用”改为每格式各 5 次，`Retry-After` 优先；`recordConversionRefusal` 与 `refusedNativeConversion` 都按格式计。已实现，测试 `TestRateLimitBudgetIsPerFormat`、`TestRateLimitRefusalWaitsForRetryAfter`、`TestNativeExport429*`。
 - **A3 `unknown` 按时长有界**：官方 Task Query：“Do not treat … `unknown` as success or failure. Continue polling with a timeout; if it expires, contact support with the `task_id`.” Schema 扩展 `status_mapping.upstream_status.<word>.max_duration_seconds`（连接声明，Catalog 校验只允许 accepted/running 相位），Tripo 连接声明 `unknown` 为 300 秒。主作业到期记为 ambiguous（`submission_unknown`、`retryable=false`，内核不重发）；转换子作业到期时，成功前路径整单 ambiguous 失败，成功后路径把该格式记为 `unknown`（不重发、不断言失败，槽位由 deadline 收尾）。已实现，测试 `TestUnknownStatusIsBoundedByDuration`。
 - **A4 轮询间隔**：官方 Task Query：“Query once every 1-2 seconds.” 全部 Tripo Offering 的 `poll_interval_seconds` 由 5 改为 2。已实现，测试 `TestTripoSchemaDeclaresTheOfficialRetryFacts`。
-- **A5 并发**：官方 Rate Limits 写明默认并发池为 texture、format-convert、refine 共享 5 个。Offering 的 `provider_options.format_conversion.concurrency_limit` 声明为 5；一次观察只允许一个私有派发许可（内核 `dispatchCheckpointer` 只保留最后一个 ack，`checkpoint.go`），所以采用“每轮派发一个、不等前一个完成”，同时在途子作业不超过声明上限；超出时按 2000 与 `Retry-After` 处理。已实现，测试 `TestConversionConcurrencyIsBoundedByFive`（6 格式时在途 ≤5，第 6 个在有名额后派发）。**边界**：该上限约束单个 Task 的在途子作业；账号级共享池由上游以 2000 回答。
+- **A5 并发**：官方 Rate Limits 写明默认并发池为 texture、format-convert、refine 共享 5 个。Offering 的 `provider_options.format_conversion.concurrency_limit` 声明为 5；一次观察只允许一个私有派发许可（内核 `dispatchCheckpointer` 只保留最后一个 ack，`checkpoint.go`），所以采用“每轮派发一个、不等前一个完成”，同时在途子作业不超过声明上限；超出时按 2000 与 `Retry-After` 处理。已实现，测试 `TestConversionConcurrencyIsBoundedByFive`（6 格式时在途 ≤5，第 6 个在有名额后派发）。**边界**：该上限约束单个 Task 的在途子作业；账号级共享池由 #468 的上游并发池模块在 Provider 层排队（Tripo 注册 `model-processing` 后，Adapter 的有效每 Task 子作业并发降为 1，由全局 limit 约束跨 Task 的总和），上游 2000 只作兜底。
 - **A6 创建请求 5xx / 响应丢失**：官方 Error Handling：“A task-creation request may have succeeded even if its response was lost; avoid resubmitting until its outcome is known.” 保持结果不明不重发。未改，现有测试继续覆盖（`TestPreCompletionUnconfirmedConvertStaysUnknown` 等）。
 - **A7 免费上传**：官方 Files：上传不创建任务。`uploadReader` 不再以 `submitting=true` 发送，`POST /files` 失败是可重试的传输错误（`transport` / `upstream_unavailable`），下一次尝试重发整个 multipart。已实现，测试 `TestFailedUploadIsARetryableTransportError`。
 - **A8 资产保留期**：官方 asset retention 页写明 2026-12-01 起最多保留 7 天。Tripo 连接声明 `result_refetch.retention_hours: 168`；补齐与重新取回不依赖 7 天之后的 `task_id`。已实现（Schema + 本文件与架构总览），测试 `TestTripoSchemaDeclaresTheOfficialRetryFacts`。
@@ -112,6 +112,14 @@ Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe",
 - **B22（L14）`status_mapping` 多余状态词**：未实现（见下节）。
 - **B23（L15）keychain build 的 `obj`**：`output_format` 增加 `obj`。已实现。
 - **B24（L16）fake 校验**：未实现（见下节）。
+
+## 上游并发池（#468）
+
+Provider 连接可以声明 `concurrency: {pools: {<name>: {limit_env, default}}}`。声明即启用：Adapter 在付费派发前向 `internal/providers/upstreampool` 申请名额，名额满时本次不派发并返回带 `obs.Queue` 的运行观察（排队），不消耗 429/重试预算；未声明的连接或路径不排队。limit 由 `limit_env` 环境变量覆盖 `default`（各部署共享同一上游账号时按栈配额），代码不写死。持有键是 `(attempt_id, pool_id)`，同一 attempt 幂等，父作业经 `Handoff` 把名额交给子作业；`Release(Ticket)` 凭授权序号释放，迟到释放不误放。闲置 TTL 与绝对上限回收泄漏，等待者按 FIFO 放行。
+
+Tripo 注册 `model-processing`（convert、texture、refine 共用），只拦截三条私有转换路径：成功前（`precompletion.go`）、成功后（`conversion.go` 的 `observePostSuccessConversion`）、原生导出（`native_processing_conversions.go`）。固定顺序是先 `Acquire`、再改条目状态、再取 `privateDispatchPermit`、再发 HTTP；code 2000 视为池满，释放名额、按 `Retry-After` 回池排队且不消耗 `RateLimitRetries`，code 1007 与其他 429 保持原预算。公开作业（texture/refine 主作业、上传转换）只计数、不拦截（Start 后 `Readopt`、Observe `Touch`、终态释放）。Agent 等待截止时间覆盖 `timeout × max_attempts + max_backoff × max_attempts + upstream_queue_timeout`，到期仍未终态时返回「仍在进行/排队」（`chat.presentation.messages.generation_pending`）而不是生成失败。
+
+fake Tripo 支持 `AccountConcurrencyLimit`（超出返回 429 code 2000 + `Retry-After`，模拟 texture/refine 主作业与 convert 共用）。实现与测试：`internal/providers/upstreampool`、`internal/providers/tripo/upstream_pool_468_test.go`、`internal/providers/tripo/pool.go`、`internal/app/provider_connections.go`、`internal/chat/generationtool/executor.go`。跨栈共用账号的配额由部署环境变量设置，不在仓库写死。
 
 ### 官方未说明（只记录，不定规则）
 

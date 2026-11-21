@@ -569,6 +569,20 @@ Rig 在精确源码 `95e65d67252a64136da8cb6820fae7f2d56e84af` 的独立 App 中
 - **Meshy**：生成与 Convert 的 `retry.retryable` 补 `timed_out`；7.x 文生的 preview 不再发送 `enable_pbr`/`texture_prompt`/`texture_image_url`，refine 不再发送 `ai_model`（由 Schema 的 `omit_when` 决定，Adapter 的 `projectInput` 尊重声明）；Rigging 输入上限 380000；连接 `error_mapping` 增加 403 → `upstream_denied`；Rigging 弃用的 `texture_image_url` 从 Offering 与发现投影移除并在 `provider_deprecations` 登记；图生/多图的 `reference_assets` 声明 `image_input`（每边 ≥32 px、总像素 ≤178,956,970），Adapter 逐个检查；`pose_mode` 为空不发送；keychain build 的 `output_format` 增加 `obj`。
 - **边界**：`internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json` 的响应体保持捕获原样，两个创建请求的请求体按官方 2026-11-22 的 wire 更新（响应体与交换元数据保持原样）；`internal/testutil/fakeupstream/meshy` 的 Rigging 上限改为 380000，对齐报告里 2026-10-29 的历史观测（320000 面以上被接受后 FAILED）保持不变。
 
+### 上游并发池（#468；源码与本机 fake 测试已完成，未部署验收）
+
+上游账号的并发名额是全平台共享的：Tripo 的 format-convert、texture、refine 共用官方默认的 5 个名额，平台所有用户共用一个账号。`internal/providers/upstreampool` 是 Provider 层的进程级内存池，按 `(connection, pool_id)` 注册启用，不进入 `internal/generation` 内核，也不改公开 Task 状态机。
+
+- **注册与启用**：`internal/app` 装配时创建一个 `upstreampool.Manager`，按连接声明 `provider_connections[].concurrency.pools` 注册池；limit 来自 `limit_env` 环境变量（未设置时取 `default`，生产默认 5，共享账号的各栈用各自的环境变量配额，如 dev-test 3、formal-test 2），代码不写死。Tripo 注册 `model-processing`。未注册的 Provider 或路径一律不排队，`Acquire` 返回惰性票据，行为与改动前一致。
+- **持有键与幂等**：持有键是 `(attempt_id, pool_id)`。同一 attempt 的重复 `Acquire` 幂等，子作业与父作业共享一个名额；主作业上游完成后 Adapter 调用 `Handoff(attempt)` 把名额交给同一 attempt 的子作业，全部子作业终态或 Task 终态时 `Release`。票据带授权序号，`Release(Ticket)` 只释放自己那一次授权，迟到的释放不会误放别人的名额。
+- **固定顺序（C1）**：三条私有转换路径（`precompletion.go` 成功前、`conversion.go` 的 `observePostSuccessConversion` 成功后、`native_processing_conversions.go` 原生导出）都按「先 `Acquire` → 再改条目状态 → 再取 `privateDispatchPermit` → 再发 HTTP」执行。名额满时本次不派发：不改条目状态、不取许可、不写 `dispatching`，返回 running 观察并带 `obs.Queue`（复用上游排队时钟，N1）与较短的固定 `PollAfter`。
+- **只拦截三条私有路径；公开作业只计数（C3）**：`texture`/`retexture` 主作业与公开格式转换在 Start 成功后 `Readopt` 登记、Observe 时 `Touch`、终态时释放，但不阻塞；内核对公开作业没有「未派发、稍后再试」的出口。
+- **429/2000（C4）**：有池闸门的路径把 code 2000（并发池满）视为回到池里排队：释放当前名额、按 `Retry-After` 等待、不消耗 `RateLimitRetries`；code 1007 与其他 429 保持原有每格式预算。
+- **恢复与回收（C5）**：进程重启后计数归零，Adapter 在第一次 Observe 时对仍提交的子作业 `Readopt`（允许超过 limit，一个轮询周期由上游 429 兜底收敛）。每次 Adapter 调用 `Touch` 刷新 lastSeen；闲置 TTL 取 `max(10min, 3×最大轮询间隔)`，绝对上限取 `job_timeout + upstream_queue_timeout`，按 lastSeen 回收，绝不回收仍在轮询的持有者。
+- **公平性**：等待者按首次 `Acquire` 的序号 FIFO；有 k 个空位就放行序号最小的 k 个仍存活的等待者，已超等待者 TTL 的跳过。
+- **Agent 等待截止时间（#460 review 4）**：`internal/chat/generationtool/executor.go` 的 `taskWaitDeadline` 覆盖 `timeout × max_attempts + max_backoff × max_attempts + upstream_queue_timeout`；到期时任务仍未终态则返回「任务仍在进行或排队」（`chat.presentation.messages.generation_pending`，带 task_id）而不是 `generationFailure`，Agent 可以如实告知用户继续等待，回合正常收尾。
+- **fake 与验证**：fake Tripo 支持 `AccountConcurrencyLimit`（超出返回 429 code 2000 + `Retry-After`，模拟 texture/refine 主作业与 convert 共用）。回归见 `internal/providers/upstreampool/pool_test.go`、`internal/providers/tripo/upstream_pool_468_test.go`、`internal/providers/tripo/native_processing_rate_limit_test.go` 的 `TestNativeExportFullPoolQueuesWithoutBudget`、`internal/testutil/fakeupstream/tripo/v3/fake_test.go` 的账号池测试，以及 `internal/app/provider_connections_test.go` 的环境变量覆盖测试。跨栈共用账号的配额由部署环境变量设置，仓库不写死。
+
 ### Tripo P2 低模的官方价与启用（#192）
 
 **源码与本机/fake 测试已完成；未部署，未做真实 P2 付费验收。** 依据 2026-11-08 读取的官方 P Series 价格（[pricing](https://developers.tripo3d.ai/en/pricing)）和 2026-11-04 的 P 页面，三条 P2 Offering（`tripo/tripo-p2/image-to-3d`、`tripo/tripo-p2-multiview/image-to-3d`、`tripo/tripo-p2/text-to-3d`）在 revision `2026-11-08.192.1` 启用，application revision 为 `2026-11-08.192-p2-pricing.1`。
