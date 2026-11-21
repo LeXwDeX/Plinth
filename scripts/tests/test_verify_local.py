@@ -286,7 +286,7 @@ class CLIIntegrationTests(VerificationTests):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         calls = self.log.read_text().splitlines()
         self.assertEqual(len(calls), len(v.GATES) + 1)
-        self.assertEqual(calls[5], 'test -race -count=1 -timeout=30m ./...')
+        self.assertEqual(calls[6], 'test -race -count=1 -timeout=30m ./...')
         self.assertIn(f'full: {len(v.GATES) + 1} gates passed (', result.stdout)
         self.assertNotIn('CI only', result.stdout)
     def test_gate_failure_propagates(self):
