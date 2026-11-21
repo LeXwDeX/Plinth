@@ -52,7 +52,7 @@ func seedSessionWithDependents(t *testing.T, r *Repository, ownerID, sessionID s
 			t.Fatalf("seed %s: %v", sessionID, err)
 		}
 	}
-	seedSkillRun(t, r, ownerID, sessionID, "run-"+sessionID, skillRunStepSeed{skillrun.TaskBound, generation.TaskSucceeded, ""})
+	seedSkillRun(t, r, ownerID, sessionID, "run-"+sessionID, skillRunStepSeed{phase: skillrun.TaskBound, taskState: generation.TaskSucceeded})
 }
 
 func seedOwningCanvasProject(t *testing.T, r *Repository, ownerID, projectID, sessionID string) {

@@ -151,7 +151,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			DocURL: docsRoot + "balance", CheckedAt: captured},
 		{Method: "GET", Path: "/assets/{task_id}/{name}", Evidence: fakeupstream.EvidenceConstructed,
 			DocURL: docsRoot + "remesh", CheckedAt: captured,
-			Note: "the official CDN host is not part of the API; this route serves the fixed files a task's URLs name. Content types of glb, png, fbx, stl and 3mf are as observed; obj, mtl and usdz were not requested in the run and follow the Meshy adapter's notes"},
+			Note: "the official CDN host is not part of the API; this route serves the fixed files a task's URLs name. The content types of glb, png, fbx, stl, 3mf, obj, mtl and usdz are as the 2026-11-20 window observed them (obj is model/obj, usdz application/octet-stream)"},
 	}
 	for _, kind := range kinds {
 		page := docsRoot + kind.Path[1:]
@@ -170,26 +170,26 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		case "/rigging", "/animations", "/print/analyze", "/print/multi-color":
 			checkedAt = docsChecked
 		}
-		note := ""
+		var parts []string
 		switch kind.Path {
 		case "/rigging":
-			note = "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs); the request values skeleton_template (nine templates), include_fingers (not with texture_image_url) and height_meters (not negative) are checked as the page read on 2026-11-12 documents them, which has not been requested from the real API (riggingRequestError); include_fingers on a source task made with quad topology answers the real HTTP 400 {message} observed 2026-11-12 (#294, riggingSourceError)"
+			parts = append(parts, "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs); the request values skeleton_template (nine templates), include_fingers (not with texture_image_url) and height_meters (not negative) are checked as the page read on 2026-11-12 documents them, which has not been requested from the real API (riggingRequestError); include_fingers on a source task made with quad topology answers the real HTTP 400 {message} observed 2026-11-12 (#294, riggingSourceError)")
 		case "/print/analyze":
-			note = "the report's printability._version key cannot be held by the sample sanitizer; the fake adds it back"
+			parts = append(parts, "the report's printability._version key cannot be held by a sample (a policy key must start with a letter or a digit), so the draft drops it and the fake adds it back")
 		case "/image-to-3d", "/multi-image-to-3d", "/retexture":
-			note = "the samples were captured with the cheapest texture options; texture_urls and the PBR maps a default Catalog request asks for are constructed from the documented texture fields (docs checked " + docsChecked + ")"
+			parts = append(parts, "the 2026-10-29 samples were captured with the cheapest texture options, so texture_urls and the PBR maps were constructed from the documented texture fields (docs checked "+docsChecked+"); the 2026-11-20 window re-captured image-to-3d and retexture with the Catalog defaults (textures and PBR on) and their PBR maps are real")
 		}
-		if note != "" {
-			note += "; "
-		}
-		note += "the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked " + docsChecked + ")"
+		parts = append(parts,
+			"the 2026-11-20 window re-captured the processing chain: the poll repeats geometry_resolution and texture_resolution as sent (ultra_mode and hd_texture set from them), a successful rig answers result.basic_animations with six clips and the OBJ of a textured model comes with an MTL",
+			"the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked "+docsChecked+")")
+		note := strings.Join(parts, "; ")
 		out = append(out,
 			fakeupstream.Endpoint{Method: "POST", Path: kind.Path, Evidence: fakeupstream.EvidenceReal,
 				Sample: "POST " + samplePrefix + kind.Path, DocURL: page, CheckedAt: checkedAt,
 				Note: note},
 			fakeupstream.Endpoint{Method: "GET", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
 				Sample: "GET " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
-				Note: "IN_PROGRESS and SUCCEEDED polls are real; PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"},
+				Note: "IN_PROGRESS and SUCCEEDED polls are real (the 2026-11-20 capture is the newest and the engine templates from it); PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"},
 			fakeupstream.Endpoint{Method: "DELETE", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
 				Sample: "DELETE " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
 				Note: "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"},
@@ -218,12 +218,13 @@ func newHandler(env *fakeupstream.Env) (http.Handler, error) {
 }
 
 // ContentTypes are the content types the official asset CDN served in the
-// alignment run, by file extension.
+// alignment run, by file extension. The 2026-11-20 window requested every
+// format the Catalog needs and confirmed glb, png, fbx, stl, 3mf, obj, mtl and
+// usdz as below.
 var ContentTypes = map[string]string{
 	".glb": "model/gltf-binary", ".png": "image/png", ".fbx": "application/octet-stream",
 	".stl": "model/stl", ".3mf": "model/3mf",
-	// Not requested in the run; the Meshy adapter documents the CDN labelling.
-	".obj": "application/x-tgif", ".mtl": "text/plain", ".usdz": "model/vnd.usdz+zip",
+	".obj": "model/obj", ".mtl": "text/plain", ".usdz": "application/octet-stream",
 }
 
 func globSamples() ([]string, error) {

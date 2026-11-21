@@ -56,21 +56,12 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 	if !strings.HasPrefix(model3d.Text, "【3D 制作要领】") || !strings.Contains(model3d.Text, "自检要点") {
 		t.Fatalf("model3d text = %q", model3d.Text)
 	}
-	// The brief names the fields inspect_model really returns, not a summary
-	// that the Agent would have to map by hand. The actual JSON names come from
-	// modelinspect's topology report, so a rename there breaks this assertion.
-	topology := reflect.TypeOf(modelinspect.TopologyReport{})
-	jsonFields := make(map[string]struct{}, topology.NumField())
-	for index := 0; index < topology.NumField(); index++ {
-		name, _, _ := strings.Cut(topology.Field(index).Tag.Get("json"), ",")
-		jsonFields[name] = struct{}{}
-	}
-	for _, field := range []string{"connected_components", "debris_components", "debris_triangles"} {
-		if _, ok := jsonFields[field]; !ok {
-			t.Fatalf("modelinspect.TopologyReport no longer returns %q", field)
-		}
-		if !strings.Contains(model3d.Text, field) {
-			t.Fatalf("model3d text omits inspect field %q", field)
+	// The craft names what the self-check looks at in domain terms; the JSON
+	// field names are explained once, in the inspect_model tool description
+	// (#407).
+	for _, want := range []string{"轮廓与比例", "贴图接缝", "水密"} {
+		if !strings.Contains(model3d.Text, want) {
+			t.Fatalf("model3d text omits %q", want)
 		}
 	}
 	if strings.Contains(model3d.Text, "connected_components 和 debris") {
@@ -78,11 +69,11 @@ func TestShippedCraftPromptCoversThe3DToolbox(t *testing.T) {
 	}
 }
 
-// The facts #120 added to inspect_model reach the Agent: the winding and
-// inside-out topology fields, the bind-pose warning and the strip triangle
-// count are explained both in the tool description and in the 3D craft
-// brief. Field names come from modelinspect's report, so a rename there
-// breaks this test instead of leaving a stale explanation.
+// The facts #120 added to inspect_model reach the Agent once, in the
+// inspect_model tool description (#407): the winding and inside-out topology
+// fields, the bind-pose warning and the strip triangle count. Field names come
+// from modelinspect's report, so a rename there breaks this test instead of
+// leaving a stale explanation.
 func TestInspectFactsAreExplainedToTheAgent(t *testing.T) {
 	c, err := catalog.LoadDefault()
 	if err != nil {
@@ -113,8 +104,8 @@ func TestInspectFactsAreExplainedToTheAgent(t *testing.T) {
 		if !strings.Contains(description, want) {
 			t.Fatalf("inspect_model description omits %q", want)
 		}
-		if !strings.Contains(craft, want) {
-			t.Fatalf("model3d craft brief omits %q", want)
+		if strings.Contains(craft, want) {
+			t.Fatalf("model3d craft repeats the inspect fact %q that lives in the tool description", want)
 		}
 	}
 }
@@ -316,10 +307,20 @@ func TestShippedImage2DProductionCraftCoversThe2DToolbox(t *testing.T) {
 	if !slices.Equal(triggers, declared) {
 		t.Fatalf("image2d_production triggers = %v, 2d tools = %v", triggers, declared)
 	}
-	for _, want := range []string{"单主体", "参考图", "model_choice", "inspect_image"} {
+	for _, want := range []string{"单主体", "参考图", "model_choice"} {
 		if !strings.Contains(craft.Text, want) {
 			t.Fatalf("image2d_production omits %q", want)
 		}
+	}
+	// The delivery checks live once, in the 2D self-check craft (#407).
+	var selfCheck string
+	for _, prompt := range app.Chat.Agent.CraftPrompts {
+		if prompt.ID == "image2d" {
+			selfCheck = prompt.Text
+		}
+	}
+	if !strings.Contains(selfCheck, "inspect_image") || strings.Contains(craft.Text, "inspect_image") {
+		t.Fatal("the 2D delivery check is not stated once, in the image2d craft")
 	}
 	if domain := app.Chat.Agent.CraftPrompts[0].WhenDomain; domain != "model-3d" {
 		t.Fatalf("model3d when_domain = %q", domain)

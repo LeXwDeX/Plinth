@@ -264,7 +264,6 @@ export function ImageUpload({
               key={index}
               className="group relative h-20 w-20 overflow-hidden rounded-lg border bg-muted"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={uri}
                 alt={schemaMessage(schema, 'ui.form.image_upload.preview_alt', {

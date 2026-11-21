@@ -46,14 +46,15 @@ WEB_ASSETS_ROOT=build/go-web go run ./cmd/art-ai
 提交 PR 前在本机运行：
 
 ```bash
-python3 scripts/verify-local.py           # 八项本地门禁
+python3 scripts/verify-local.py           # 十项本地门禁
 python3 scripts/verify-local.py --race    # 再加上 race 测试（CI 必跑，较慢）
 ```
 
-八项依次是：`pnpm exec tsc --noEmit`、`pnpm test`、`pnpm build`、`go vet ./...`、
+十项依次是：`pnpm lint`（ESLint 的 `react-hooks/rules-of-hooks`）、`pnpm exec tsc --noEmit`、`pnpm test`、`pnpm build`、`go vet ./...`、
 `go test -count=1 ./...`、`CGO_ENABLED=0 go build -trimpath ./cmd/art-ai`、
 `bash scripts/check-public-tree.sh`（已跟踪文件不得含内部主机、地址或服务器路径）、
-`python3 -m unittest discover -s scripts/tests -p 'test_*.py'`（发布与门禁脚本的单测）；race 项是
+`python3 -m unittest discover -s scripts/tests -p 'test_*.py'`（发布与门禁脚本的单测），以及
+fake 上游整栈冒烟的稳定子集 `python3 scripts/smoke/smoke-fake-stack.py`（场景参数见 `dev_test.md` §2）；race 项是
 `CGO_ENABLED=1 go test -race -count=1 ./...`。门禁清单的唯一真源是 `dev_test.md` §2「自动化门禁项」，
 `src/__tests__/ci-gate-parity.test.ts` 保证本地入口、GitHub Actions 与该清单一致：增删门禁时要
 同一提交里一起改。
@@ -140,13 +141,16 @@ the service refuses to start with it when `APP_ENV=production`.
 Before opening a PR, run:
 
 ```bash
-python3 scripts/verify-local.py           # the seven local checks
+python3 scripts/verify-local.py           # the ten local checks
 python3 scripts/verify-local.py --race    # plus the optional race test (always run in CI, slower)
 ```
 
-The seven checks are `pnpm exec tsc --noEmit`, `pnpm test`, `pnpm build`, `go vet ./...`,
-`go test -count=1 ./...`, `CGO_ENABLED=0 go build -trimpath ./cmd/art-ai` and
-`bash scripts/check-public-tree.sh`; the race check is
+The ten checks are `pnpm lint` (ESLint's `react-hooks/rules-of-hooks`), `pnpm exec tsc --noEmit`,
+`pnpm test`, `pnpm build`, `go vet ./...`, `go test -count=1 ./...`,
+`CGO_ENABLED=0 go build -trimpath ./cmd/art-ai`, `bash scripts/check-public-tree.sh`,
+`python3 -m unittest discover -s scripts/tests -p 'test_*.py'` and the stable subset of the
+fake-upstream stack smoke `python3 scripts/smoke/smoke-fake-stack.py` (scenarios in
+`dev_test.md` §2); the race check is
 `CGO_ENABLED=1 go test -race -count=1 ./...`. The single source of truth for the list is
 `dev_test.md` §2; `src/__tests__/ci-gate-parity.test.ts` keeps the local script and GitHub
 Actions in line with it, so change them together in one commit when you add or remove a

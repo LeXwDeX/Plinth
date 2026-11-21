@@ -4240,6 +4240,12 @@ type ChatThreeViewMessages struct {
 	GroupNotReady string `json:"group_not_ready"`
 	ViewsChanged  string `json:"views_changed"`
 	ViewsInvalid  string `json:"views_invalid"`
+	// ViewsUnsupported refuses a multiview step whose chosen Offering takes no
+	// several views at all, such as the single-image shape of a locked model
+	// (#433): {model} is the Offering's public name. Nothing runs, so a call
+	// never degrades to a single-image step with one of the pictures. A
+	// Catalog without this copy words the refusal as ViewsInvalid.
+	ViewsUnsupported string `json:"views_unsupported,omitempty"`
 }
 
 // ChatPendingApprovalsSchema is application.chat.pending_approvals. It is

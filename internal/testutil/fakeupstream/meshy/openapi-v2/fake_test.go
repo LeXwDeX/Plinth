@@ -225,7 +225,7 @@ func TestEveryRequestedFormatUsesTheCDNContentType(t *testing.T) {
 }
 
 // The documented task_error types are reachable on the v2 object too, and its
-// object has no expires_at (finding #203).
+// object answers expires_at null (captured 2026-11-20).
 func TestTaskErrorSelectorWorksOnTheV2Shape(t *testing.T) {
 	f := newFixture(t)
 	id := create(t, f, map[string]any{"mode": "preview", "prompt": "p"}, core.TaskErrorHeader, "service_unavailable")
@@ -237,8 +237,8 @@ func TestTaskErrorSelectorWorksOnTheV2Shape(t *testing.T) {
 	if _, has := failure["code"]; has {
 		t.Errorf("service_unavailable has no documented code: %v", failure)
 	}
-	if _, has := body["expires_at"]; has {
-		t.Errorf("the v2 object has no expires_at: %v", body)
+	if expires, has := body["expires_at"]; !has || expires != nil {
+		t.Errorf("the v2 object carries expires_at null: %v", body)
 	}
 }
 
@@ -299,22 +299,71 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 	}
 	pollSample := func(typ, status string) *wirefixture.Exchange {
-		for _, exchange := range samples.Exchanges {
-			body, err := fakeupstream.JSONBody(exchange)
-			if err == nil && exchange.Request.Method == "GET" && body["type"] == typ && body["status"] == status {
-				return &exchange
+		var newest *wirefixture.Exchange
+		for index := range samples.Exchanges {
+			exchange := &samples.Exchanges[index]
+			body, err := fakeupstream.JSONBody(*exchange)
+			if err != nil || exchange.Request.Method != "GET" || body["type"] != typ || body["status"] != status {
+				continue
+			}
+			if newest == nil || exchange.Metadata.CapturedAt.After(newest.Metadata.CapturedAt) {
+				newest = exchange
 			}
 		}
-		return nil
+		return newest
 	}
 	bySample := func(method, apiPath string, status int) wirefixture.Exchange {
+		var newest wirefixture.Exchange
 		for _, exchange := range samples.Find(method+" "+samplePrefix+apiPath, "") {
-			if exchange.Response.Status == status {
-				return exchange
+			if exchange.Response.Status != status {
+				continue
+			}
+			if newest.Request.Method == "" || exchange.Metadata.CapturedAt.After(newest.Metadata.CapturedAt) {
+				newest = exchange
 			}
 		}
-		t.Fatalf("no real sample %s %s %d", method, apiPath, status)
-		return wirefixture.Exchange{}
+		if newest.Request.Method == "" {
+			t.Fatalf("no real sample %s %s %d", method, apiPath, status)
+		}
+		return newest
+	}
+	// sampleInput is the request the captured create answered: the task object
+	// repeats it under input, and the fake echoes the request it received.
+	sampleInput := func(sample wirefixture.Exchange) map[string]any {
+		body, err := fakeupstream.JSONBody(sample)
+		if err != nil {
+			t.Fatal(err)
+		}
+		input, _ := body["input"].(map[string]any)
+		if len(input) == 0 {
+			t.Fatalf("the newest create sample carries no input: %v", body)
+		}
+		return fakeupstream.Clone(input)
+	}
+	// createOf is the newest create sample of one mode; preview and refine are
+	// one route, and their inputs differ (a refine names its preview).
+	createOf := func(mode string) wirefixture.Exchange {
+		var newest wirefixture.Exchange
+		for _, exchange := range samples.Find("POST "+samplePrefix+"/text-to-3d", "") {
+			if exchange.Response.Status != http.StatusAccepted {
+				continue
+			}
+			body, err := fakeupstream.JSONBody(exchange)
+			if err != nil {
+				continue
+			}
+			input, _ := body["input"].(map[string]any)
+			if input["mode"] != mode {
+				continue
+			}
+			if newest.Request.Method == "" || exchange.Metadata.CapturedAt.After(newest.Metadata.CapturedAt) {
+				newest = exchange
+			}
+		}
+		if newest.Request.Method == "" {
+			t.Fatalf("no real create sample of mode %q", mode)
+		}
+		return newest
 	}
 
 	const missing = "01a18514-059e-73f7-a0ce-0f88a12c9300"
@@ -327,9 +376,16 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 
 	preview := ""
 	for _, typ := range []string{"text-to-3d-preview", "text-to-3d-refine"} {
-		body := map[string]any{"mode": "preview", "prompt": "p"}
+		mode := "preview"
 		if typ == "text-to-3d-refine" {
-			body = map[string]any{"mode": "refine", "preview_task_id": preview}
+			mode = "refine"
+		}
+		body := sampleInput(createOf(mode))
+		if typ == "text-to-3d-refine" {
+			if _, has := body["preview_task_id"]; !has {
+				t.Fatalf("the refine sample does not name its preview: %v", body)
+			}
+			body["preview_task_id"] = preview
 		}
 		status, _, created := f.Raw("POST", Prefix+"/text-to-3d", key, body)
 		if status != http.StatusAccepted {
@@ -337,7 +393,7 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 		var decoded map[string]any
 		_ = json.Unmarshal(created, &decoded)
-		same("create "+typ, bySample("POST", "/text-to-3d", 202), created)
+		same("create "+typ, createOf(mode), created)
 		id := decoded["result"].(string)
 		if typ == "text-to-3d-preview" {
 			preview = id
@@ -384,5 +440,43 @@ func TestEndpointTableIsCompleteAndHonest(t *testing.T) {
 		if status, _, _ := f.Do(endpoint.Method, Prefix+path, "", nil); status != http.StatusUnauthorized {
 			t.Errorf("%s answers %d without a key, want 401", endpoint.Key(), status)
 		}
+	}
+}
+
+// The 2026-11-20 capture shows the v2 create answering the whole task object
+// (status PENDING, id, preceding_tasks) with the accepted request under input,
+// and the polls repeating that input. The fake must echo the request it
+// received, not the sample's values.
+func TestCreateAndPollEchoTheRequestUnderInput(t *testing.T) {
+	f := newFixture(t)
+	request := map[string]any{
+		"mode": "preview", "prompt": "a plain cube", "ai_model": "meshy-7.1",
+		"target_formats": []string{"glb"}, "topology": "triangle", "should_remesh": true,
+	}
+	status, _, created := f.Do("POST", Prefix+"/text-to-3d", key, request)
+	if status != http.StatusAccepted {
+		t.Fatalf("create = %d %v", status, created)
+	}
+	if created["status"] != core.StatusPending || created["type"] != "text-to-3d-preview" {
+		t.Fatalf("create body = %v", created)
+	}
+	if created["id"] != created["result"] {
+		t.Fatalf("create id %v and result %v differ", created["id"], created["result"])
+	}
+	input, _ := created["input"].(map[string]any)
+	if input["prompt"] != "a plain cube" || input["ai_model"] != "meshy-7.1" {
+		t.Fatalf("create input = %v", input)
+	}
+	if _, has := created["preceding_tasks"]; !has {
+		t.Fatalf("a queued task reports preceding_tasks: %v", created)
+	}
+	id := created["result"].(string)
+	_, _, polled := f.Do("GET", Prefix+"/text-to-3d/"+id, key, nil)
+	polledInput, _ := polled["input"].(map[string]any)
+	if polledInput["prompt"] != "a plain cube" {
+		t.Fatalf("poll input = %v", polledInput)
+	}
+	if polledInput["mode"] != "preview" {
+		t.Fatalf("poll input lost the mode: %v", polledInput)
 	}
 }

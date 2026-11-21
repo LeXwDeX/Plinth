@@ -480,7 +480,8 @@ func (executor *Executor) execute(
 	}
 	var turnReferenceURLs []string
 	// A multiview step (#65) takes its pictures and views from the person's
-	// structured request or the named three-view group, never from handles.
+	// structured request or the named three-view group; a call naming neither
+	// keeps the ordinary handle path, which binds its views too (#433).
 	multiview, refusal, err := executor.multiviewSelection(ctx, command, arguments)
 	if err != nil {
 		result := executor.executionFailure(command, "")
@@ -501,7 +502,7 @@ func (executor *Executor) execute(
 		}
 		turnReferenceURLs = multiview.URLs
 	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
-		turnReferenceURLs, err = executor.selectReferences(command, arguments)
+		turnReferenceURLs, err = executor.callReferences(command, arguments)
 		if err != nil {
 			if result, refused := executor.refuseReference(command, err); refused {
 				return result, nil
@@ -510,7 +511,18 @@ func (executor *Executor) execute(
 			result.NoSubmission = true
 			return result, err
 		}
+		// #433: the multiview tool takes several views of one object whichever
+		// way it names them, so a call giving its own pictures (handles,
+		// historical indices, this turn's or the selected ones) carries their
+		// views as well, or is refused before anything is prepared.
+		multiview, refusal = executor.callMultiviewViews(command, arguments, len(turnReferenceURLs))
+		if refusal != "" {
+			return executor.refusal(command, refusalMultiviewViews, refusal), nil
+		}
 	}
+	// A multiview call that binds its own views fixes the order of its
+	// pictures: each position is a view, so none of them leads (#433).
+	boundViews := multiview != nil && multiview.fromHandles
 	// #250: the required turn inputs lead the list (the artboard snapshot and
 	// the pictures marked "input"); identity anchors follow, then the style
 	// pictures, then the turn's other ordinary references. The order is also
@@ -536,9 +548,14 @@ func (executor *Executor) execute(
 	// keeps its repeats). An anchored turn de-duplicates so the same picture is
 	// not sent twice, and the counts follow the final list so a trimmed suffix
 	// is reported by the right class.
-	groups := executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, turnReferenceURLs)
+	groups := executor.referenceGroupsOf(command, identityReferenceURLs, styleReferenceURLs, turnReferenceURLs, !boundViews)
 	referenceURLs := groups.URLs
-	if command.Tool.ReferencePurposesArgument != "" {
+	// A multiview call's own pictures keep their positions, so an "input"
+	// purpose does not move one ahead (#433): the Agent's handles and
+	// reference_views are the order contract. The shipped multiview tool
+	// declares no purpose argument at all; a Catalog that adds one still gets
+	// the same rule, because a leading picture would relabel every later view.
+	if command.Tool.ReferencePurposesArgument != "" && !boundViews {
 		for handle, purpose := range command.Options.AttachmentPurposes {
 			if purpose != "input" {
 				continue
@@ -578,7 +595,7 @@ func (executor *Executor) execute(
 		// production purpose, the workspace picker and the defaults decide, in
 		// that order.
 		choice, err := executor.chooseOffering(command, capability, arguments,
-			modelInputFor(command, referenceURLs, multiview),
+			modelInputFor(referenceURLs, multiview),
 			executor.planPinnedOffering(ctx, command, capability))
 		if err != nil {
 			result := executor.executionFailure(command, "")
@@ -611,8 +628,7 @@ func (executor *Executor) execute(
 	// unchosen model moves to a mask-capable Offering, which the result names
 	// as a switch (maskModelSwitchNote).
 	if multiview != nil {
-		group := !multiview.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
-		if refusal := executor.fitMultiviewViews(command, offering, multiview, group); refusal != "" {
+		if refusal := executor.fitMultiviewViews(command, offering, multiview, multiview.group); refusal != "" {
 			return executor.refusal(command, refusalMultiviewViews, refusal), nil
 		}
 		if declaresReferenceViews(offering) {
@@ -621,8 +637,10 @@ func (executor *Executor) execute(
 			views, _ := json.Marshal(multiview.Views)
 			arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
 		}
-		groups = executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, multiview.URLs)
-		referenceURLs = groups.URLs
+		if !multiview.fromHandles {
+			groups = executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, multiview.URLs)
+			referenceURLs = groups.URLs
+		}
 	}
 	if groups.Identity+groups.Style > 0 {
 		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {
@@ -1234,6 +1252,21 @@ func (executor *Executor) selectReferences(
 		}
 	}
 	return bound, nil
+}
+
+// callReferences resolves the pictures a call names itself. A multiview step
+// reads them as its views, so the artboard snapshot of a canvas turn does not
+// join them unless the call names it: its pictures are positions, and a
+// snapshot has no view (#433). Every other call puts the snapshot the person
+// sent first (#266).
+func (executor *Executor) callReferences(
+	command chat.ToolCommand,
+	arguments map[string]json.RawMessage,
+) ([]string, error) {
+	if executor.isMultiviewTool(command) {
+		return executor.selectReferencesBy(command, arguments, executor.chat.Context.ToolReferenceArgument)
+	}
+	return executor.selectReferences(command, arguments)
 }
 
 const (

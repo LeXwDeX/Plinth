@@ -36,7 +36,11 @@ vi.mock('swr', () => ({
 vi.mock('@/lib/agent-params', async (original) => ({ ...(await original<typeof import('@/lib/agent-params')>()), createAgentHarnessClient: () => ({ getParamsWithState: vi.fn(), putParamsWithState: async (...args: Parameters<typeof runtime.put>) => ({ params: await runtime.put(...args), parameterStates: {} }) }) }));
 import { resetPendingAgentParams, useSessionAgentParams, sessionAgentParamsKey } from '../use-session-agent-params';
 const parameters: ParamSchema[] = [{ name: 'size', label: 'Size', type: 'number', default: 1 }];
-const render = (session = 's1', offering = 'image/offering') => { runtime.cursor = 0; return useSessionAgentParams(session, parameters, offering); };
+const render = (session = 's1', offering = 'image/offering') => {
+  runtime.cursor = 0;
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- this suite drives the hook directly through a mocked React runtime, never inside a component render
+  return useSessionAgentParams(session, parameters, offering);
+};
 beforeEach(() => {
   runtime.slots = []; runtime.cursor = 0; runtime.owner = 'owner1'; runtime.loading = false; runtime.error = undefined; runtime.servers = {}; runtime.keys = [];
   runtime.put.mockReset().mockResolvedValue({ size: 4 }); runtime.mutate.mockReset(); runtime.mutateGlobal.mockClear();

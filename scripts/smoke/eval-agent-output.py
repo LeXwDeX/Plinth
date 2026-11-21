@@ -85,14 +85,14 @@ def choices_pending(live, session):
     return [card for card in live.pending_choices(session) if card.get("state") == "pending"]
 
 
-def answer_choice(live, session, card, purpose, domain, model):
+def answer_choice(live, session, card, purpose, domain, model, stats):
     options = [option for option in card.get("options") or [] if isinstance(option, dict) and option.get("id")]
     pick = next((option for option in options if purpose and option["id"] == purpose), None)
     pick = pick or next((option for option in options if option.get("recommended")), options[0] if options else None)
     if pick is None:
         return False
-    status, _ = live.send(session, "按这个用途继续。", domain, model,
-                          choiceAnswer={"choice_id": card["id"], "option_id": pick["id"]})
+    status, _ = send_message(live, session, "按这个用途继续。", domain, model, stats,
+                             choiceAnswer={"choice_id": card["id"], "option_id": pick["id"]})
     return status in (200, 201, 202)
 
 
@@ -106,9 +106,112 @@ def record_card(cards, seen, kind, card):
     return True
 
 
-def drive_turn(live, session, content, domain, model, purpose, cards, seen, args):
+# --------------------------------------------------------- sending messages
+
+# The server refuses a chat message while the session runs a turn (409, the
+# catalog's `chat.presentation.messages.turn_active`). A terminal Task does not
+# mean the turn ended: the Agent keeps writing after its last Task, so the
+# evaluation's follow-ups and card answers were refused (#444). The refused
+# message was never accepted, so waiting and sending the same body again
+# duplicates nothing; every wait and retry is counted so the report shows what
+# the waiting cost instead of hiding it in a sleep.
+IDLE_POLL_SECONDS = 5
+IDLE_WAIT_SECONDS = 300
+BUSY_RETRY_SECONDS = 15
+BUSY_RETRY_LIMIT = 12
+BUSY_MESSAGE_MARKERS = ("仍有任务正在处理", "still has a task in progress")
+
+
+def sending():
+    """The send counters of one case: waits for the turn, busy retries, rejections."""
+    return {"sends": 0, "idle_waits": 0, "idle_wait_ms": 0, "busy_retries": 0, "busy_wait_ms": 0, "rejected": 0}
+
+
+def session_busy(status, data):
+    """Whether a 409 means "the session still runs a turn" and is worth retrying.
+
+    A card answer can also be refused with 409 (`choice_answered`, "这个选择已经
+    作答或已失效"); retrying that one only burns the turn budget, so the retry
+    keys on the turn-active text in both locales (or on a 409 with no body).
+    """
+    if status != 409:
+        return False
+    text = json.dumps(data or {}, ensure_ascii=False)
+    if any(marker in text for marker in BUSY_MESSAGE_MARKERS):
+        return True
+    return text.strip() in ("", "{}")
+
+
+def turn_running(live, session, probe=IDLE_POLL_SECONDS):
+    """Whether the session still runs a turn: no final reply yet, or the stream is still open.
+
+    A pending choice or approval card is how a turn ends, so a card alone does
+    not count as running.
+    """
+    if not common.reply_is_final(live.messages(session)):
+        return True
+    return live.client.read_chat_stream(session, probe) != "done"
+
+
+def wait_turn_end(live, session, stats, timeout=IDLE_WAIT_SECONDS, poll=IDLE_POLL_SECONDS, sleep=time.sleep):
+    """Wait (bounded) until the session's turn is over; False when the wait timed out.
+
+    A timeout is not an error: the caller still sends the message and a 409 is
+    retried, so a turn that never ends cannot silently drop the follow-up.
+    """
+    if not turn_running(live, session):
+        return True
+    started = time.time()
+    stats["idle_waits"] += 1
+    while turn_running(live, session):
+        elapsed = time.time() - started
+        if elapsed >= timeout:
+            stats["idle_wait_ms"] += int(elapsed * 1000)
+            return False
+        sleep(poll)
+    stats["idle_wait_ms"] += int((time.time() - started) * 1000)
+    return True
+
+
+def send_message(live, session, content, domain, model, stats, extra=None,
+                 idle_timeout=IDLE_WAIT_SECONDS, retry_seconds=BUSY_RETRY_SECONDS,
+                 retry_limit=BUSY_RETRY_LIMIT, poll=IDLE_POLL_SECONDS, sleep=time.sleep):
+    """Send one message once the running turn ends, retrying while the session is busy.
+
+    Before the first message of a session there is no turn to wait for. A final
+    409 is returned as-is so the caller records a lost turn rather than
+    pretending the message landed.
+    """
+    extra = dict(extra or {})
+    if "choiceAnswer" not in extra:
+        # Same bookkeeping as common.Live.send: wait_tasks answers a later card
+        # with the request fields of the last message.
+        live._last_send[session] = (domain, model, dict(extra))
+    if stats["sends"]:
+        wait_turn_end(live, session, stats, timeout=idle_timeout, poll=poll, sleep=sleep)
+    body = {"content": content, "creative_domain": domain, "ai_model": model}
+    body.update(extra)
+    status, data = 0, {}
+    for attempt in range(retry_limit + 1):
+        status, data = live.client.call("POST", f"/api/chat/sessions/{session}/messages", body)
+        if not session_busy(status, data):
+            break
+        stats["busy_retries"] += 1
+        if attempt >= retry_limit:
+            break
+        sleep(retry_seconds)
+        stats["busy_wait_ms"] += int(retry_seconds * 1000)
+    stats["sends"] += 1
+    if status not in (200, 201, 202):
+        stats["rejected"] += 1
+        print(f"message rejected: HTTP {status} {common.one_line(json.dumps(data, ensure_ascii=False), 160)}",
+              flush=True)
+    return status, data
+
+
+def drive_turn(live, session, content, domain, model, purpose, cards, seen, args, stats):
     """Send one message, answer cards, and wait for the turn to carry a final reply."""
-    status, _ = live.send(session, content, domain, model)
+    status, _ = send_message(live, session, content, domain, model, stats)
     if status not in (200, 201, 202):
         return False
     end = time.time() + args.turn_timeout
@@ -116,7 +219,7 @@ def drive_turn(live, session, content, domain, model, purpose, cards, seen, args
         changed = False
         for card in choices_pending(live, session):
             if record_card(cards, seen, "choice", card):
-                answer_choice(live, session, card, purpose, domain, model)
+                answer_choice(live, session, card, purpose, domain, model, stats)
                 changed = True
         for card in live.pending_approvals(session):
             kind = "plan" if card.get("kind") == "plan" else "approval"
@@ -154,13 +257,15 @@ def run_case(live, request, schema, offerings, args):
     if request.get("modality") == "3d" and model:
         live.lock_model_3d(session, model)
     cards, seen = [], set()
+    sends = sending()
     followups = list(request.get("live_followups") or [])
     turns = 0
     content = request["prompt"]
     counts = expected_counts(request)
     for attempt in range(len(followups) + 1):
         turns += 1
-        turn_ok = drive_turn(live, session, content, domain, model, request.get("purpose"), cards, seen, args)
+        turn_ok = drive_turn(live, session, content, domain, model, request.get("purpose"), cards, seen, args,
+                             sends)
         # A turn that never finished is unlikely to start Tasks; do not wait the full task budget for it.
         tasks, _ = live.wait_tasks(session, counts, timeout=args.task_timeout if turn_ok else min(args.task_timeout, 120))
         messages = live.messages(session)
@@ -191,6 +296,7 @@ def run_case(live, request, schema, offerings, args):
                              if message.get("role") == "assistant" and (message.get("content") or "").strip()), {}),
         "image_count": images,
         "turns": turns,
+        "sends": sends,
         "elapsed_ms": int((time.time() - started) * 1000),
         "output_metrics": output_metrics,
         "output_checks": output_checks,
@@ -207,17 +313,86 @@ def download(live, url, path):
     return status == 200 and size > 0, size
 
 
+# ----------------------------------------------------------- model selection
+
+# #444: a 3D task carries several required model files, and Meshy lists the 3MF
+# first (3MF, FBX, GLB, OBJ, STL, USDZ). Media types do not tell them apart
+# (`application/x-tgif` for OBJ, `application/zip` for USDZ), so the public
+# `format` name of the task projection (#327) decides. Only binary glTF (GLB)
+# can be inspected; the JSON form is the second choice, and a mislabeled GLB
+# still gets inspected because its container decides.
+GLTF_FORMATS = ("glb", "gltf")
+KNOWN_MODEL_FORMATS = ("glb", "gltf", "fbx", "obj", "stl", "usdz", "3mf")
+FORMAT_EXTENSIONS = {"glb": ".glb", "gltf": ".gltf", "fbx": ".fbx", "obj": ".obj",
+                     "stl": ".stl", "usdz": ".usdz", "3mf": ".3mf"}
+FORMAT_LABELS = {"glb": "GLB", "gltf": "glTF", "fbx": "FBX", "obj": "OBJ",
+                 "stl": "STL", "usdz": "USDZ", "3mf": "3MF"}
+MEDIA_TYPE_FORMATS = {"model/gltf-binary": "glb", "model/gltf+json": "gltf"}
+GLB_MAGIC = b"glTF"
+
+
+def asset_format(asset):
+    """The model format of a task asset: its public `format` name, else the media type, else the URL suffix."""
+    named = str(asset.get("format") or "").strip().lower()
+    if named in KNOWN_MODEL_FORMATS:
+        return named
+    media = str(asset.get("media_type") or "").split(";")[0].strip().lower()
+    if media in MEDIA_TYPE_FORMATS:
+        return MEDIA_TYPE_FORMATS[media]
+    suffix = os.path.splitext(str(asset.get("url") or "").split("?")[0])[1].lower()
+    for name in KNOWN_MODEL_FORMATS:
+        if suffix == FORMAT_EXTENSIONS[name]:
+            return name
+    return named
+
+
+def is_model_asset(asset):
+    """Whether the asset is one of the task's model files (the old selection rule)."""
+    media = str(asset.get("media_type") or "").split(";")[0].strip().lower()
+    role = str(asset.get("role") or "").strip().lower()
+    if role in ("model", "primary") or media.startswith("model/") or "gltf" in media or "glb" in media:
+        return True
+    return str(asset.get("url") or "").lower().split("?")[0].endswith((".glb", ".gltf"))
+
+
 def model_asset(task):
-    for asset in task.get("assets") or []:
-        if not asset.get("required") or not asset.get("url"):
-            continue
-        media = str(asset.get("media_type") or "").lower()
-        role = str(asset.get("role") or "").lower()
-        if "gltf" in media or "glb" in media or media.startswith("model/") or role in ("model", "primary"):
-            return asset
-        if str(asset.get("url") or "").lower().split("?")[0].endswith((".glb", ".gltf")):
-            return asset
-    return None
+    """(asset, format) of the model file to inspect: the GLB first, then glTF (#444).
+
+    The old rule took the first required `model` asset, which is Meshy's 3MF;
+    `modelinspect` then refused that ZIP as "bad GLB magic" and every 3D case's
+    output:model check was wrong. A task with no glTF asset returns its first
+    model file with its own format, so the check can name what was delivered
+    instead of handing a non-glTF file to the GLB parser.
+    """
+    models = [(asset_format(asset), asset) for asset in task.get("assets") or []
+              if asset.get("required") and asset.get("url") and is_model_asset(asset)]
+    for wanted in GLTF_FORMATS:
+        for name, asset in models:
+            if name == wanted:
+                return asset, name
+    return (models[0][1], models[0][0]) if models else (None, "")
+
+
+def glb_container(path):
+    """Whether the downloaded file starts with the GLB container magic."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(4) == GLB_MAGIC
+    except OSError:
+        return False
+
+
+def unsupported_model_detail(asset, name):
+    """Why a delivered model file cannot be inspected, or "" when it is glTF.
+
+    #444: naming the delivered format keeps a 3MF ZIP from looking like a
+    corrupt GLB; the GLB parser only gets glTF files.
+    """
+    if name in GLTF_FORMATS:
+        return ""
+    return (f"unsupported format: {asset.get('format') or name or 'unknown'}"
+            f" ({asset.get('media_type') or 'no media type'});"
+            " the task has no GLB or glTF asset to inspect")
 
 
 def inspect_model(path):
@@ -302,21 +477,33 @@ def collect_outputs(live, request, tasks, messages, tools, directory, schema, re
     for task in tasks:
         if task.get("state") != SUCCESS or task.get("capability") not in ("text-to-3d", "image-to-3d", "multiview-to-3d"):
             continue
-        asset = model_asset(task)
+        check_id = f"output:model:{task.get('id')}"
+        asset, name = model_asset(task)
         if not asset:
-            checks.append({"id": f"output:model:{task.get('id')}", "status": quality.CHECK_FAIL, "detail": "no model asset"})
+            checks.append({"id": check_id, "status": quality.CHECK_FAIL, "detail": "no model asset"})
             continue
-        path = os.path.join(directory, f"{safe_name(task.get('id'))}-{safe_name(asset.get('role'))}.glb")
+        unsupported = unsupported_model_detail(asset, name)
+        if unsupported:
+            checks.append({"id": check_id, "status": quality.CHECK_FAIL, "detail": unsupported})
+            continue
+        label = safe_name(f"{name}-{asset.get('role') or 'model'}")
+        path = os.path.join(directory, f"{safe_name(task.get('id'))}-{label}{FORMAT_EXTENSIONS[name]}")
         ok, size = download(live, asset["url"], path)
         if not ok:
-            checks.append({"id": f"output:model:{task.get('id')}", "status": quality.CHECK_FAIL, "detail": "model download failed"})
+            checks.append({"id": check_id, "status": quality.CHECK_FAIL, "detail": "model download failed"})
+            continue
+        if name == "gltf" and not glb_container(path):
+            checks.append({"id": check_id, "status": quality.CHECK_FAIL,
+                           "detail": f"unsupported format: glTF JSON ({asset.get('media_type') or 'model/gltf+json'});"
+                                     " the inspector reads GLB binary glTF only"})
             continue
         facts, error = inspect_model(path)
         if facts is None:
-            checks.append({"id": f"output:model:{task.get('id')}", "status": quality.CHECK_FAIL, "detail": f"inspect failed: {error}"})
+            checks.append({"id": check_id, "status": quality.CHECK_FAIL, "detail": f"inspect failed: {error}"})
             continue
-        output["model"] = {"task_id": task.get("id"), "path": os.path.relpath(path, report_root), "bytes": size,
-                           "facts": facts, "inspect_summary": inspect_summary}
+        output["model"] = {"task_id": task.get("id"), "format": FORMAT_LABELS.get(name, name.upper()),
+                           "path": os.path.relpath(path, report_root),
+                           "bytes": size, "facts": facts, "inspect_summary": inspect_summary}
         output["tasks"].append({"task_id": task.get("id"), "capability": task.get("capability"),
                                 "model_id": task.get("model_id"), "bytes": size})
         checks.extend(quality.model_budget_checks(facts, budget))

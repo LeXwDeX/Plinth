@@ -375,18 +375,23 @@ func TestMalformedToolArgumentsAreStillAnsweredAfterARestart(t *testing.T) {
 		{Content: "configured reply"},
 	}}
 	tools := &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)}
-	// The process dies once the round is stored: the write of the answer fails.
+	// The process dies once the round is stored: the answer's write is still
+	// attempted (it does not follow the cancelled context) and the shutdown
+	// keeps the turn where the restart finds it.
+	ctx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
 	writes := 0
 	h.repo.setFault(func(chat.TurnCheckpoint) error {
 		writes++
 		if writes == 2 {
+			shutdown()
 			return errors.New("process died")
 		}
 		return nil
 	})
 	command := h.start()
-	if err := h.process(command, agent, tools); err == nil {
-		t.Fatal("the interrupted run reported success")
+	if err := h.processWith(ctx, command, agent, tools); err != nil {
+		t.Fatalf("the shutdown reported a failure: %v", err)
 	}
 	interrupted := h.turn(command)
 	callID := command.AssistantMessageID + "_tool_0"

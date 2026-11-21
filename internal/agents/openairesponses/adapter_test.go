@@ -61,8 +61,12 @@ func TestStreamsAToolCallWithItsArguments(t *testing.T) {
 	}
 	if len(completion.ToolCalls) != 1 || completion.ToolCalls[0].Name != "lookup_note" ||
 		completion.ToolCalls[0].ID != "call_fake_0" || string(completion.ToolCalls[0].Arguments) != `{"topic":"cube"}` ||
-		completion.Content != "" || len(deltas) != 0 {
+		completion.Content != "" {
 		t.Fatalf("completion = %#v deltas = %v", completion, deltas)
+	}
+	// The call's start is the one signal of the round (#431).
+	if len(deltas) != 1 || !deltas[0].ToolCalling || deltas[0].Thinking || deltas[0].Content != "" {
+		t.Fatalf("deltas = %v", deltas)
 	}
 	const wantTools = `"tools":[{"type":"function","name":"lookup_note","description":"d","parameters":{"type":"object"},"strict":false}],` +
 		`"stream":true,"store":false,"include":["reasoning.encrypted_content"],"reasoning":{"effort":"high"}}`

@@ -82,6 +82,20 @@
 
 `related` 覆盖本次改动涉及的浏览器与 Agent 验收（含按 `scripts/smoke/README.md` 需要的 L2 真实模型链路）。脚本无法判断「稳定」本身：报告只能在全部检查实际通过后写入，有失败、跳过或软失败就不写。
 
+### 保留数据升级演练（草案，未实施，需授权）
+
+保留数据的环境从上一个运行版本跨到候选版本时，迁移第一次作用于存量行就发生在晋级发布现场；发布的 preflight 只在空的临时目录启动候选镜像，覆盖不到这一步。仓库目前只有自动化的迁移升级测试（`internal/adapters/sqlite/migration_v180_upgrade_test.go`：用 v1.8.0 的迁移集合与合成数据建库，再用当前代码升级并读回，见 #435），它证明迁移逻辑，但不是真实数据的演练。
+
+以下草案**尚未实施**，也没有任何演练记录；执行前须取得用户当次授权，并且只用最新全量备份的副本，不接触正式实例与正在使用的数据目录：
+
+1. 取该环境最新一次发布成功的全量备份作为演练副本，解到一次性目录；
+2. 在同一主机的一次性目录里用候选镜像启动独立实例（独立 Compose 项目与回环端口，不复用正式实例的卷、网络别名或运行配置变量名），数据指向副本；
+3. 让启动过程跑完全部迁移，核对迁移台账推进到候选镜像携带的最高版本，且此前版本的账行（名称与校验和）未被改写；
+4. 健康检查通过后做只读冒烟：打开存量会话与消息、读取任务与资产、制作计划、SkillRun、执行授权与已发布的 Agent 配置；不发起生成或任何付费请求；
+5. 把 revision、迁移版本与冒烟结论记到本次晋级所用的 Issue；无论成败删除演练实例与一次性目录，不删除也不改动正式备份与正式实例。
+
+同一条“可重复的升级演练脚本”（#435 的验收项）尚未实现；实现并演练通过前，本草案只是晋级前的人工检查清单，不能当作已验收的自动门禁。
+
 ## 5. 发布流程
 
 两个环境走同一套脚本，`release-env.py` 只把环境参数交给 `scripts/release-go-testenv.sh`，服务器段为 `scripts/release-server-steps.sh`：
@@ -439,7 +453,7 @@ RECOVERY
 公开仓库 `LeXwDeX/Plinth` 起始于一个不带内部开发历史的单根快照提交（见 [`history.md`](history.md)「编号对照」）；它是唯一仓库，提交直接在其上进行，日常开发不生成快照。下面的步骤只在需要从内部存档重建公开起点时使用；快照工具只在本地生成，不推送，替换公开仓库已有内容或强推前须由用户当场确认。日常开发中，同一扫描以 `dev_test.md` §2「public tree」门禁在每次推送前运行：每个推送的提交都会立即公开。
 
 1. 选定源 revision：已合入 `main`、通过 `dev_test.md` §2 门禁和开源 1.0 验收（#260）的精确 SHA。
-2. 先检查：`scripts/check-public-tree.sh <SHA>`（日常开发中同一扫描以 `dev_test.md` §2 第 8 项门禁「public tree」在 pre-push 与 CI 里对工作树运行）。它用 `git archive` 取出该 revision 的已跟踪文件，扣除 `scripts/public-snapshot.exclude` 列出的路径后逐个扫描（文本与二进制都扫）：私有网段前缀、内部主机与域名、服务器路径、本机临时路径、内部 Compose 项目名前缀、组织名称、本机用户目录（公开 CI runner 的家目录除外）、私钥头，以及 GitLab、OpenAI 式、GitHub、Meshy、Tripo 的凭据前缀（只匹配凭据长度，测试里的短假值不算，#334）；本机存在 `deploy/local/environments.json` 时，其中每个主机、地址、根目录、布局路径、Compose 项目与镜像源主机也作为字面量加入；还可以用 `--pattern`、`--patterns-file` 或未纳入 Git 的 `deploy/local/public-snapshot-patterns.txt`（每行一个正则，`#` 开头为注释）补充不想提交的私有词。有任一命中即以非零退出并列出 `文件:行`。
+2. 先检查：`scripts/check-public-tree.sh <SHA>`（日常开发中同一扫描以 `dev_test.md` §2 第 9 项门禁「public tree」在 pre-push 与 CI 里对工作树运行）。它用 `git archive` 取出该 revision 的已跟踪文件，扣除 `scripts/public-snapshot.exclude` 列出的路径后逐个扫描（文本与二进制都扫）：私有网段前缀、内部主机与域名、服务器路径、本机临时路径、内部 Compose 项目名前缀、组织名称、本机用户目录（公开 CI runner 的家目录除外）、私钥头，以及 GitLab、OpenAI 式、GitHub、Meshy、Tripo 的凭据前缀（只匹配凭据长度，测试里的短假值不算，#334）；本机存在 `deploy/local/environments.json` 时，其中每个主机、地址、根目录、布局路径、Compose 项目与镜像源主机也作为字面量加入；还可以用 `--pattern`、`--patterns-file` 或未纳入 Git 的 `deploy/local/public-snapshot-patterns.txt`（每行一个正则，`#` 开头为注释）补充不想提交的私有词。有任一命中即以非零退出并列出 `文件:行`。
 3. 生成：`python3 scripts/make-public-snapshot.py make --rev <SHA> --version v1.0.0 --out <仓库外的新目录> [--tag]`。工具在同级临时目录导出、排除、扫描，扫描失败时不留下任何目录；通过后 `git init -b main`，以本机 `git config user.name/user.email` 为作者和提交者生成唯一提交（提交信息写版本和源 SHA），`--tag`（可选，仅供后续版本；首次发布不创建 tag/Release）时在本地打同名附注 tag。新仓库没有 remote。
 4. 在快照目录里按 README 构建（`go build ./...`、`pnpm install --frozen-lockfile` 与 `pnpm build`）并复查 `python3 scripts/make-public-snapshot.py check --tree <快照目录>`，再进入人工确认的发布步骤。
 

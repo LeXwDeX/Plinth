@@ -181,6 +181,12 @@ type ToolTaskIdentity struct {
 var ErrTurnSuspended = errors.New("chat orchestrator: turn suspended awaiting user input")
 var ErrTurnAwaitTask = errors.New("chat orchestrator: turn awaiting task")
 
+// ErrTurnCheckpointUnsaved 表示检查点没有写进存储，但原因不是另一个写入方
+// 赢得了比较交换（#429）：编码失败、存储拒绝或锁冲突都算。进程内没有
+// 任何东西会重试这次写入，所以轮次以 failed 收尾，而不是挂起等重启。
+// 真正的版本冲突仍是 ErrTurnCheckpointConflict，轮次留给那个写入方。
+var ErrTurnCheckpointUnsaved = errors.New("chat orchestrator: turn checkpoint not saved")
+
 // ErrWakeNotReleased 表示唤醒入队时原 Process 尚未返回（命令 ID 仍在
 // queued 去重集合），需要稍后重试；见 enqueueForWake。
 var ErrWakeNotReleased = errors.New("chat orchestrator: wake target not released yet")
@@ -1361,14 +1367,17 @@ func (orchestrator *Orchestrator) Process(
 	}
 	// endUnsaved ends the turn as failed when something it has to keep cannot
 	// be read or saved before it can go on (#378): the Agent configuration
-	// snapshot, or the round the model just planned. Nothing of what failed to
-	// be saved has run, so nothing paid is lost. A stop or a process shutdown
-	// keeps its own ending, and a write that lost to another writer never gets
-	// here (the callers leave that turn to its writer). Whatever else fails
-	// cannot be waited out: nothing in the live process retries it, and a
-	// suspended turn would keep the session busy and the stream open until the
-	// next restart. The person gets the failure text with the error ID, and the
-	// stream ends with the events that close it.
+	// snapshot, the round the model just planned, or - after the tools of the
+	// round ran (#429) - the checkpoint that records their receipts. Nothing
+	// of a round that never ran has run, so nothing paid is lost there; the
+	// tool phase keeps the round's calls and their Task bindings on the reply,
+	// and the Tasks themselves stay with the generation kernel. A stop or a
+	// process shutdown keeps its own ending, and a write that lost to another
+	// writer never gets here (the callers leave that turn to its writer).
+	// Whatever else fails cannot be waited out: nothing in the live process
+	// retries it, and a suspended turn would keep the session busy and the
+	// stream open until the next restart. The person gets the failure text
+	// with the error ID, and the stream ends with the events that close it.
 	endUnsaved := func(stage string, cause error) error {
 		if orchestrator.turnCanceled(turnKey) {
 			return finalizeStop()
@@ -1383,6 +1392,57 @@ func (orchestrator *Orchestrator) Process(
 			"session_id", command.SessionID,
 			"assistant_message_id", command.AssistantMessageID,
 			"stage", stage,
+			"error", cause,
+		)
+		failure := orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
+		if failure != nil {
+			// The failure text could not be stored either; the stream
+			// still ends, or its client would wait for an event that
+			// never comes.
+			_ = orchestrator.appendEvent(
+				context.WithoutCancel(ctx),
+				command.SessionID,
+				map[string]any{
+					orchestrator.schema.Stream.EventFields.Type: orchestrator.
+						schema.Stream.EventTypes.Done,
+				},
+			)
+		}
+		return failure
+	}
+	// endBackgroundFailed ends a turn whose background ending could not be
+	// stored (#137/#429). The person already chose to let the Tasks run, so
+	// nothing of the turn is cancelled and nothing is submitted again: the
+	// reply keeps the waiting calls' Task bindings, the Tasks keep running in
+	// the kernel, and the turn fails with the events that close its stream.
+	// A shutdown is not a failure: the queued turn waits for the restart.
+	endBackgroundFailed := func(cause error) error {
+		// The failure write is the best remaining chance to mark the calls:
+		// a later turn lists the Tasks from the reply and looks them up
+		// instead of paying for them again. The bindings come from the
+		// checkpoint the turn already wrote before it stopped waiting.
+		for _, entry := range turn.Checkpoint.WaitingCalls() {
+			if entry.TaskID == "" {
+				continue
+			}
+			for index := range assistant.ToolCalls {
+				call := &assistant.ToolCalls[index]
+				if call.ID != entry.CallID {
+					continue
+				}
+				if call.TaskID == "" {
+					call.TaskID = entry.TaskID
+				}
+				if call.TaskID == entry.TaskID {
+					call.Background = true
+				}
+			}
+		}
+		failed = true
+		orchestrator.logger.Error(
+			"后台继续的轮次无法收尾，轮次以失败结束",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
 			"error", cause,
 		)
 		failure := orchestrator.fail(ctx, command.OwnerID, &assistant, orchestrator.agentFailureMessage(ctx, cause))
@@ -1453,13 +1513,18 @@ func (orchestrator *Orchestrator) Process(
 	// #137: the person stopped waiting and let the Tasks run on. This comes
 	// before the stop check: the choice committed before any later stop.
 	if turn.Checkpoint.Background {
-		if err := orchestrator.finalizeBackgroundTurn(ctx, command, turn, &assistant); err != nil {
-			// Keep the durable turn for restart recovery, like a stop whose
-			// reconciliation failed; it is never finished as failed.
-			suspended = true
-			return err
-		}
+		// The choice is durable, so this turn no longer owns its Tasks: no
+		// later stop cancels them, whether the ending below can be written or
+		// not (#429).
 		backgroundFinalized = true
+		if err := orchestrator.finalizeBackgroundTurn(ctx, command, turn, &assistant); err != nil {
+			if ctx.Err() != nil {
+				// 进程停机：轮次保持排队（Background 已落库），重启后由
+				// RecoverTurns 重新收尾。
+				return err
+			}
+			return endBackgroundFailed(err)
+		}
 		return nil
 	}
 	requested, err := orchestrator.service.TurnStopRequested(
@@ -1909,6 +1974,21 @@ func (orchestrator *Orchestrator) Process(
 			}
 			suspended = true
 			return nil
+		}
+		if errors.Is(toolErr, ErrTurnCheckpointUnsaved) {
+			// #429: 工具执行阶段的检查点写入失败没有人重试，挂起会让会话一直
+			// 忙、SSE 一直开着。本轮的调用可能已经提交了付费任务：先把内存里
+			// 的绑定并回回复（消息上已持久化的绑定保持不变），再按 #378 的
+			// 同一语义以 failed 结束。任务归生成内核，不会被取消，也不会被
+			// 这次失败重新提交；failed 轮次不在 RecoverTurns 的续跑范围内。
+			orchestrator.mergeDurableToolCalls(ctx, command, &assistant)
+			for index := range assistant.ToolCalls {
+				if assistant.ToolCalls[index].TaskID == "" {
+					assistant.ToolCalls[index].TaskID =
+						taskBindings[assistant.ToolCalls[index].ID]
+				}
+			}
+			return endUnsaved("保存工具执行结果", toolErr)
 		}
 		// A submit callback persisted the task binding together with its estimated
 		// credits and approval source. Merge them before the next write so that
@@ -2895,7 +2975,15 @@ func (orchestrator *Orchestrator) executeTools(
 		version, err := orchestrator.service.SaveTurnCheckpoint(context.WithoutCancel(ctx), *turn,
 			state, turn.Checkpoint, false)
 		if err != nil {
-			return errors.Join(ErrTurnCheckpointConflict, err)
+			if errors.Is(err, ErrTurnCheckpointConflict) {
+				// 写入输给另一个写入方：轮次归它（或重启恢复）收尾，不是
+				// 我们该结束的。
+				return err
+			}
+			// #429: 编码、锁、存储等其他失败没有人会重试。挂起只会让会话
+			// 一直忙、SSE 一直开着，直到下一次重启；回合以 failed 结束，
+			// 已提交的任务留在生成内核并保留消息上的绑定。
+			return errors.Join(ErrTurnCheckpointUnsaved, err)
 		}
 		turn.CheckpointVersion, turn.State = version, state
 		return nil

@@ -540,6 +540,19 @@ func (executor *Executor) referenceGroupsFor(command chat.ToolCommand, identity,
 	return assembleReferenceGroups(identity, style, executor.turnLeadingReferences(command, turn), turn)
 }
 
+// referenceGroupsOf orders a call's final reference list like
+// referenceGroupsFor, except that lead says whether the turn's required inputs
+// may move ahead of the call's own pictures. A multiview step that binds its own
+// views passes false (#433): each position is a view, so a picture moved ahead
+// would relabel every later one, and an order-only Offering would read another
+// angle as the front.
+func (executor *Executor) referenceGroupsOf(command chat.ToolCommand, identity, style, turn []string, lead bool) referenceGroups {
+	if !lead {
+		return assembleReferenceGroups(identity, style, nil, turn)
+	}
+	return executor.referenceGroupsFor(command, identity, style, turn)
+}
+
 // turnLeadingReferences returns the turn pictures that must stay ahead of the
 // anchors: the artboard snapshot of a canvas turn and every picture whose
 // declared attachment purpose is "input". A picture the person marked input

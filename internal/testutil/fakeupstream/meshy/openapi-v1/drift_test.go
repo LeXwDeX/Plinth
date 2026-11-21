@@ -59,49 +59,71 @@ func withoutOmitted(shape fakeupstream.Shape) fakeupstream.Shape {
 
 func assertSameShape(t *testing.T, what string, want, got fakeupstream.Shape) {
 	t.Helper()
-	if diff := fakeupstream.DiffShape(want, withoutOmitted(got)); !diff.Empty() {
+	// OmittedKeys are keys some samples cannot hold and the fake adds back by
+	// hand; a newer sample may carry them itself (the runtime recorder kept
+	// printability._version), so both sides drop them.
+	if diff := fakeupstream.DiffShape(withoutOmitted(want), withoutOmitted(got)); !diff.Empty() {
 		t.Errorf("%s drifted from the real sample: %s", what, diff)
 	}
 }
 
-// find returns the first exchange of method on apiPath (a sample key path)
-// with status; poll samples are filtered by task type and status.
+// find returns the newest exchange of method on apiPath (a sample key path)
+// with status; poll samples are filtered by task type and status. The fake
+// templates from the newest committed sample of a key, so the comparison must
+// read the same one.
 func find(samples *fakeupstream.Samples, method, apiPath string, status int) *wirefixture.Exchange {
-	for _, exchange := range samples.Find(method+" "+samplePrefix+apiPath, "") {
-		if exchange.Response.Status == status {
-			return &exchange
+	var newest *wirefixture.Exchange
+	for index := range samples.Exchanges {
+		exchange := &samples.Exchanges[index]
+		if exchange.Response.Status != status {
+			continue
+		}
+		if fakeupstream.SampleKey(exchange.Request.Method, strings.TrimPrefix(exchange.Request.Path, samplePrefix)) != method+" "+apiPath {
+			continue
+		}
+		if newest == nil || exchange.Metadata.CapturedAt.After(newest.Metadata.CapturedAt) {
+			newest = exchange
 		}
 	}
-	return nil
+	return newest
 }
 
 func realPoll(samples *fakeupstream.Samples, typ, status string) *wirefixture.Exchange {
-	for _, exchange := range samples.Exchanges {
+	var newest *wirefixture.Exchange
+	for index := range samples.Exchanges {
+		exchange := &samples.Exchanges[index]
 		if exchange.Request.Method != "GET" || exchange.Response.Status != http.StatusOK ||
 			exchange.Response.Body.Encoding != wirefixture.PayloadJSON {
 			continue
 		}
-		body, err := fakeupstream.JSONBody(exchange)
-		if err == nil && body["type"] == typ && body["status"] == status {
-			return &exchange
+		body, err := fakeupstream.JSONBody(*exchange)
+		if err != nil || body["type"] != typ || body["status"] != status {
+			continue
+		}
+		if newest == nil || exchange.Metadata.CapturedAt.After(newest.Metadata.CapturedAt) {
+			newest = exchange
 		}
 	}
-	return nil
+	return newest
 }
 
-func kindRequests(source, rig string) map[string]map[string]any {
+func kindRequests(source, plain, rig string) map[string]map[string]any {
 	return map[string]map[string]any{
 		"/text-to-image":  {"prompt": "p"},
 		"/image-to-image": {"prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
-		// The captured image-to-3d and multi-image-to-3d samples were taken with
-		// the cheapest texture options; ask for the same, so the drift comparison
-		// checks the sample's structure rather than the request-driven texture
-		// shaping (see TestTextureOptionsShapeTheSuccessBody).
-		"/image-to-3d":       {"image_url": "https://example.test/a.png", "should_texture": true, "enable_pbr": false},
+		// The 2026-10-29 image-to-3d and multi-image-to-3d samples were taken with
+		// the cheapest texture options; the 2026-11-20 window asked for the
+		// Catalog defaults (textures on, PBR on), and the newest sample decides.
+		// Ask for the same, so the drift comparison checks the sample's structure
+		// rather than the request-driven texture shaping (see
+		// TestTextureOptionsShapeTheSuccessBody).
+		"/image-to-3d":       {"image_url": "https://example.test/a.png", "should_texture": true, "enable_pbr": true},
 		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}, "should_texture": false, "enable_pbr": false},
 		"/remesh":            {"input_task_id": source},
-		"/convert":           {"input_task_id": source, "target_formats": []string{"glb", "stl"}},
-		"/retexture":         {"input_task_id": source, "text_style_prompt": "p", "enable_pbr": false},
+		// The newest convert sample is a real export of an untextured model: its
+		// model_urls carries an OBJ and no MTL, so the comparison converts one.
+		"/convert":           {"input_task_id": plain, "target_formats": []string{"glb", "obj", "fbx", "stl", "usdz", "3mf"}},
+		"/retexture":         {"input_task_id": source, "text_style_prompt": "p", "enable_pbr": true},
 		"/rigging":           {"input_task_id": source},
 		"/animations":        {"rig_task_id": rig, "action_id": 0},
 		"/uv-unwrap":         {"input_task_id": source},
@@ -151,10 +173,12 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 	}
 
 	source := f.source()
+	plain := f.create("/image-to-3d", map[string]any{"image_url": "https://example.test/b.png", "should_texture": false})
+	f.finish("/image-to-3d", plain, key)
 	rig := f.create("/rigging", map[string]any{"input_task_id": source})
 	f.finish("/rigging", rig, key)
 	for _, kind := range kinds {
-		request := kindRequests(source, rig)[kind.Path]
+		request := kindRequests(source, plain, rig)[kind.Path]
 		// Task creation answers the sample's create envelope.
 		sample := find(samples, "POST", kind.Path, http.StatusAccepted)
 		if sample == nil {
