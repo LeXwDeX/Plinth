@@ -565,6 +565,73 @@ func TestRunSessionDeletionResumesTheInterruptedTurnWhenNothingWasDeleted(t *tes
 	}
 }
 
+// The final transaction can refuse a deletion the preflight allowed: a paid
+// submission accepted after the preflight advanced a SkillRun step while the
+// turn was being stopped. The session stays, and the turn the deletion
+// interrupted goes on from its checkpoint like the other "nothing deleted"
+// paths (#430).
+func TestRunSessionDeletionResumesTheTurnWhenTheFinalCheckRefuses(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	schema.Agent.WorkerCount = 1
+	schema.Agent.QueueSize = 2
+	agent := &resumingAgent{entered: make(chan struct{})}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service,
+		Schema:  schema,
+		Model:   "configured-model",
+		Agent:   agent,
+		Tools:   scriptedToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, stopRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- orchestrator.Run(runCtx) }()
+	defer func() {
+		stopRun()
+		<-runDone
+	}()
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "draw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := orchestrator.Enqueue(chat.ProcessTurn{
+		OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	<-agent.entered
+
+	deleted, err := service.RunSessionDeletion(ctx, "owner-a", session.ID, func(context.Context) (bool, error) {
+		return false, chat.ErrSessionDeletionBlocked
+	})
+	if deleted || !errors.Is(err, chat.ErrSessionDeletionBlocked) {
+		t.Fatalf("RunSessionDeletion = %v, %v, want the final check's refusal", deleted, err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(messages) == 2 && messages[1].Content == "configured response" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the interrupted turn was not resumed: messages = %#v", messages)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // What the deletion function reports reaches the caller: the canvas project
 // deletion answers "project not found" from it.
 func TestRunSessionDeletionReportsWhatTheDeletionDid(t *testing.T) {

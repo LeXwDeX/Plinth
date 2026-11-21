@@ -85,25 +85,32 @@ type Step struct {
 }
 
 // InFlight reports whether work is running on the step's behalf that deleting
-// its session would cut off (#384, #430): a grant still standing between the
-// person's decision and the paid submission, or a bound Task that has not
-// reached a terminal state. Every other step is at rest: not started, prepared,
-// denied, finished, or bound to a Task that ended. A run is in flight when any
-// of its steps is. The Generation Task stays the only authority for the Task's
-// state and the execution grant for the grant's, so the caller passes what it
-// read.
+// its session would cut off (#384, #430): a grant waiting for its decision or
+// being claimed, a grant whose bound Task has not reached a terminal state, or
+// a Task bound on the step that has not ended. Every other step is at rest. A
+// run is in flight when any of its steps is. The Generation Task stays the only
+// authority for Task state and the execution grant for the grant's, so the
+// caller passes what it read: taskState is the step's own bound Task,
+// grantTaskState the Task the step's grant binds (both empty when absent).
 //
-// A grant_pending step whose grant is approved, claimed or bound still has its
-// submission ahead of it or behind an unknown result: the approval is paid
-// work, and a bound grant may name a Task whose response was lost before the
-// step learned its ID (recovery repairs the step from the grant). Deleting the
-// run there would discard a result that may already exist upstream.
-func (step Step) InFlight(taskState generation.TaskState, grantStatus executiongrant.Status) bool {
+// A grant_pending step is at rest once its grant is approved: an approval has
+// no Task yet (only a bound grant has one) and no terminal or expiry transition
+// of its own, so counting it as in flight would make a session whose approved
+// turn was stopped and never submitted undeletable forever. The submitting side
+// is that session's own turn, which deletion interrupts and awaits. A bound
+// grant is in flight only while its Task is not terminal: once the Task ended,
+// the run holds a recoverable result or failure, yet there is no generation
+// work left to cut off, and deleting the session is the person's explicit
+// choice. A claimed grant is only visible inside the submission transaction and
+// counts as work.
+func (step Step) InFlight(taskState generation.TaskState, grantStatus executiongrant.Status, grantTaskState generation.TaskState) bool {
 	switch step.Phase {
 	case GrantPending:
 		switch grantStatus {
-		case executiongrant.Pending, executiongrant.Approved, executiongrant.Claimed, executiongrant.Bound:
+		case executiongrant.Pending, executiongrant.Claimed:
 			return true
+		case executiongrant.Bound:
+			return !grantTaskState.Terminal()
 		default:
 			return false
 		}
