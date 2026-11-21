@@ -117,6 +117,161 @@ export interface AssetListDetail extends AssetListSummary {
   items: AssetListItem[];
 }
 
+/** #329: one stored result file of the acceptance snapshot. */
+export interface AssetListBoardArtifact {
+  asset_id: string;
+  role?: string;
+  variant?: string;
+  media_type?: string;
+  size?: number;
+  sha256?: string;
+}
+
+/**
+ * #329: one acceptance criterion as the server judged it. `status` is pass,
+ * fail or unknown; unknown is a fact (no readable GLB, an unusable threshold),
+ * never a pass. `actual` is whatever the judge measured for that criterion.
+ */
+export interface AssetListBoardCheck {
+  check: string;
+  status: string;
+  actual?: unknown;
+  budget?: string;
+  detail?: string;
+}
+
+/** #329: the 3D judgment; an empty asset_id means the results held no GLB. */
+export interface AssetListBoardModel3D {
+  asset_id?: string;
+  checks: AssetListBoardCheck[];
+}
+
+/** #329: the 2D delivery judgment of the cover picture. */
+export interface AssetListBoardImage2D {
+  asset_id?: string;
+  width?: number;
+  height?: number;
+  checks: AssetListBoardCheck[];
+}
+
+/** #329: the Agent's persisted self-check conclusion, when one exists. */
+export interface AssetListBoardSelfCheck {
+  status?: string;
+  summary?: string;
+  remaining?: string[];
+}
+
+/** #329: the step summary of the item's sub-session (#330 wording: steps, not credits). */
+export interface AssetListBoardSteps {
+  used: number;
+  model3d: number;
+  cap?: number;
+  mode?: string;
+}
+
+/** #329: the snapshot taken when the item entered review. */
+export interface AssetListBoardReview {
+  captured_at?: string;
+  round?: number;
+  task_id?: string;
+  cover_asset_id?: string;
+  artifacts?: AssetListBoardArtifact[];
+  model3d?: AssetListBoardModel3D;
+  image2d?: AssetListBoardImage2D;
+  self_check?: AssetListBoardSelfCheck;
+  steps?: AssetListBoardSteps;
+}
+
+/** #329: the server-built completion snapshot stored with a reported-done item. */
+export interface AssetListBoardResult {
+  task_id?: string;
+  assets?: Array<{ id: string; name?: string; role?: string }>;
+}
+
+/** #329: one recorded acceptance decision (the latest round shown on the board). */
+export interface AssetListBoardDecision {
+  id: string;
+  round: number;
+  verdict: string;
+  reason?: string;
+  reasons?: string[];
+  note?: string;
+  reviewer_id?: string;
+  review?: Record<string, unknown>;
+  created_at: string;
+}
+
+/** #329c: where one crop of the item was cut from. */
+export interface AssetListBoardSource {
+  source_input_asset_id: string;
+  source_kind?: string;
+  source_width?: number;
+  source_height?: number;
+}
+
+/** #329c: the cut geometry: the normalized region and its source-pixel rectangle. */
+export interface AssetListBoardRegion extends CropRegion {
+  pixel_rect?: { x0: number; y0: number; x1: number; y1: number };
+}
+
+/**
+ * #329: one item of the acceptance board: the list item plus its produced
+ * artifacts, its acceptance snapshot, the latest decision and the crop
+ * provenance (#331). `result` and `review` are `{}` before the item has them;
+ * `latest_review` is null until the person decides.
+ */
+export interface AssetListBoardItem extends AssetListItem {
+  result?: AssetListBoardResult | null;
+  review?: AssetListBoardReview | null;
+  latest_review?: AssetListBoardDecision | null;
+  reference_asset_id?: string;
+  source?: AssetListBoardSource;
+  region?: AssetListBoardRegion;
+  representative_asset_id?: string;
+}
+
+/** #329: the read-only acceptance board: the list summary plus every item in position order. */
+export interface AssetListBoard {
+  list: AssetListSummary & { version: number };
+  items: AssetListBoardItem[];
+}
+
+/** #329d: the two board decisions; a return names one item, an accept may name many. */
+export type AssetListReviewDecision = 'accept' | 'return';
+
+/**
+ * #329d: one board submission. `expected_version` is the list version the
+ * board read; a stale one is a 409 and nothing is written. A return needs at
+ * least one `reason_ids` entry; an accept may carry a note but never reasons.
+ */
+export interface AssetListReviewInput {
+  decision: AssetListReviewDecision;
+  item_ids: string[];
+  reason_ids?: string[];
+  note?: string;
+  expected_version: number;
+}
+
+/** #329d: one item's outcome of a batch; `error` is the server's per-item refusal. */
+export interface AssetListItemReview {
+  item_id: string;
+  verdict?: string;
+  project_asset_id?: string;
+  error?: string;
+}
+
+/** #329d: the refreshed list plus one outcome per submitted item. */
+export interface AssetListReviewResult {
+  list: AssetListDetail;
+  items: AssetListItemReview[];
+}
+
+/** #329d: a downloaded archive and the filename the server suggested. */
+export interface AssetListArchiveDownload {
+  blob: Blob;
+  filename: string;
+}
+
 /** #331: a normalized region relative to its source picture, right and bottom edges exclusive. */
 export interface CropRegion {
   x: number;
@@ -213,6 +368,18 @@ export type AssetListPresenceState = 'present' | 'leave';
 export interface AssetListClient {
   listProjectLists(projectID: string): Promise<AssetListSummary[]>;
   getList(projectID: string, listID: string): Promise<AssetListDetail>;
+  /** #329: the read-only acceptance board of one list, every item from one aggregate read. */
+  getBoard(projectID: string, listID: string): Promise<AssetListBoard>;
+  /**
+   * #329d: accept one or many reviewed items, or return exactly one with its
+   * declared reasons. The list version gates the whole batch.
+   */
+  review(projectID: string, listID: string, input: AssetListReviewInput): Promise<AssetListReviewResult>;
+  /**
+   * #329d: the batch archive of the accepted items. `itemIDs` narrows it to a
+   * subset after the server refused a whole-list download as too large.
+   */
+  downloadArchive(projectID: string, listID: string, itemIDs?: readonly string[]): Promise<AssetListArchiveDownload>;
   decide(projectID: string, listID: string, decision: AssetListDecision, reason?: string): Promise<AssetListDetail>;
   listSessionLists(sessionID: string): Promise<AssetListSummary[]>;
   /**
@@ -263,6 +430,21 @@ function route(template: string, parameters: Record<string, string>): string {
   });
 }
 
+/** The server's `Content-Disposition` name, preferring RFC 5987 when present. */
+export function archiveFilename(header: string | null): string {
+  if (!header) return '';
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      return encoded[1];
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain ? plain[1] : '';
+}
+
 /**
  * #328: the presence URL for `navigator.sendBeacon`. Empty when the Catalog has
  * no route; the heartbeat then falls back to the client's fetch.
@@ -286,6 +468,18 @@ export function createAssetListClient(
   const projectListsRoute = () => required(routes.project_asset_lists);
   const listRoute = (projectID: string, listID: string) =>
     route(required(routes.project_asset_list), { projectID, listID });
+  const boardRoute = (projectID: string, listID: string) =>
+    route(required(routes.project_asset_list_board), { projectID, listID });
+  const reviewRoute = (projectID: string, listID: string) =>
+    route(required(routes.project_asset_list_item_review), { projectID, listID });
+  const archiveRoute = (projectID: string, listID: string, itemIDs: readonly string[]) => {
+    const base = route(required(routes.project_asset_list_archive), { projectID, listID });
+    const query = itemIDs
+      .filter((id) => id !== '')
+      .map((id) => `item_ids=${encodeURIComponent(id)}`)
+      .join('&');
+    return query ? `${base}?${query}` : base;
+  };
   const decisionRoute = (projectID: string, listID: string) =>
     route(required(routes.project_asset_list_decision), { projectID, listID });
   const runRoute = (projectID: string, listID: string) =>
@@ -319,6 +513,7 @@ export function createAssetListClient(
   };
   const summaries = (payload: unknown): AssetListSummary[] => array(object(payload).data) as AssetListSummary[];
   const detailOf = (payload: unknown): AssetListDetail => object(payload) as unknown as AssetListDetail;
+  const boardOf = (payload: unknown): AssetListBoard => object(payload) as unknown as AssetListBoard;
   const runOf = (payload: unknown): AssetListRunState => object(payload) as unknown as AssetListRunState;
   const itemOf = (payload: unknown): AssetListItem => object(payload) as unknown as AssetListItem;
 
@@ -334,6 +529,38 @@ export function createAssetListClient(
       const payload = await payloadOf(response);
       if (!response.ok) failure(response, payload);
       return detailOf(payload);
+    },
+    async getBoard(projectID, listID) {
+      const response = await fetcher(boardRoute(projectID, listID));
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return boardOf(payload);
+    },
+    async review(projectID, listID, input) {
+      const body: Record<string, unknown> = {
+        decision: input.decision,
+        item_ids: input.item_ids,
+      };
+      if (input.reason_ids && input.reason_ids.length > 0) body.reason_ids = input.reason_ids;
+      if (input.note) body.note = input.note;
+      body.expected_version = input.expected_version;
+      const response = await fetcher(reviewRoute(projectID, listID), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await payloadOf(response);
+      if (!response.ok) failure(response, payload);
+      return object(payload) as unknown as AssetListReviewResult;
+    },
+    async downloadArchive(projectID, listID, itemIDs) {
+      const response = await fetcher(archiveRoute(projectID, listID, itemIDs ?? []));
+      if (!response.ok) failure(response, await payloadOf(response));
+      const blob = await response.blob();
+      return {
+        blob,
+        filename: archiveFilename(response.headers.get('content-disposition')) || `asset-list-${listID}.zip`,
+      };
     },
     async decide(projectID, listID, decision, reason) {
       const body = reason ? { decision, reason } : { decision };

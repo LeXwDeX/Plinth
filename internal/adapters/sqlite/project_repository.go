@@ -344,6 +344,54 @@ func (r *ProjectRepository) GetAsset(ctx context.Context, ownerID, projectID, as
 }
 
 func (r *ProjectRepository) CreateAsset(ctx context.Context, projectID string, value project.Asset, maximum int) (project.Asset, error) {
+	err := r.withProjectWrite(ctx, func(conn *sql.Conn) error {
+		stored, err := insertProjectAsset(ctx, conn, projectID, value, maximum)
+		if err != nil {
+			return err
+		}
+		value = stored
+		return nil
+	})
+	if err != nil {
+		return project.Asset{}, err
+	}
+	value.ProjectID = projectID
+	return value, nil
+}
+
+// CountAssets counts the project's stored assets. A missing or foreign project
+// is ErrNotFound, like the other owner-scoped reads.
+func (r *ProjectRepository) CountAssets(ctx context.Context, ownerID, projectID string) (int, error) {
+	var exists int
+	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM projects WHERE id = ? AND owner_id = ?`,
+		projectID, ownerID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, project.ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read project for assets: %w", err)
+	}
+	var count int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_assets WHERE project_id = ?`,
+		projectID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count project assets: %w", err)
+	}
+	return count, nil
+}
+
+// insertProjectAsset stores one project asset inside an already open write
+// transaction. A caller-supplied id is a deterministic identity (#329b): an
+// existing row of the same owner and project is returned instead of inserting
+// a second one, and the per-project bound is checked before the insert. The
+// same helper backs the project route's create and the production list's
+// accept, which writes its decision and assets in one transaction.
+func insertProjectAsset(
+	ctx context.Context,
+	conn *sql.Conn,
+	projectID string,
+	value project.Asset,
+	maximum int,
+) (project.Asset, error) {
 	images, err := encodeProjectReferences(value.Images)
 	if err != nil {
 		return project.Asset{}, err
@@ -352,37 +400,50 @@ func (r *ProjectRepository) CreateAsset(ctx context.Context, projectID string, v
 	if err != nil {
 		return project.Asset{}, err
 	}
-	err = r.withProjectWrite(ctx, func(conn *sql.Conn) error {
-		var exists int
-		err := conn.QueryRowContext(ctx, `SELECT 1 FROM projects WHERE id = ? AND owner_id = ?`, projectID, value.OwnerID).Scan(&exists)
-		if errors.Is(err, sql.ErrNoRows) {
-			return project.ErrNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("read project for asset: %w", err)
-		}
-		var count int
-		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_assets WHERE project_id = ?`, projectID).Scan(&count); err != nil {
-			return fmt.Errorf("count project assets: %w", err)
-		}
-		if count >= maximum {
-			return project.ErrLimit
-		}
-		_, err = conn.ExecContext(ctx, `
-			INSERT INTO project_assets (id, project_id, owner_id, kind, name, description,
-			                            images_json, models_json, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			value.ID, projectID, value.OwnerID, value.Kind, value.Name, value.Description,
-			images, models, formatTime(value.CreatedAt), formatTime(value.UpdatedAt))
-		if err != nil {
-			return fmt.Errorf("create project asset: %w", err)
-		}
-		return nil
-	})
-	if err != nil {
-		return project.Asset{}, err
+	var exists int
+	err = conn.QueryRowContext(ctx, `SELECT 1 FROM projects WHERE id = ? AND owner_id = ?`,
+		projectID, value.OwnerID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return project.Asset{}, project.ErrNotFound
 	}
-	value.ProjectID = projectID
+	if err != nil {
+		return project.Asset{}, fmt.Errorf("read project for asset: %w", err)
+	}
+	// A row of another owner is a bug, never an idempotent replay.
+	var storedOwner, storedProject string
+	err = conn.QueryRowContext(ctx,
+		`SELECT owner_id, project_id FROM project_assets WHERE id = ?`, value.ID).
+		Scan(&storedOwner, &storedProject)
+	if err == nil {
+		if storedOwner != value.OwnerID || storedProject != projectID {
+			return project.Asset{}, project.ErrInvalid
+		}
+		return scanProjectAsset(conn.QueryRowContext(ctx, `
+			SELECT a.id, a.project_id, a.owner_id, a.kind, a.name, a.description,
+			       a.images_json, a.models_json, a.created_at, a.updated_at
+			FROM project_assets a JOIN projects p ON p.id = a.project_id
+			WHERE a.id = ? AND a.project_id = ? AND p.owner_id = ?`,
+			value.ID, projectID, value.OwnerID))
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return project.Asset{}, fmt.Errorf("read asset by id: %w", err)
+	}
+	var count int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM project_assets WHERE project_id = ?`,
+		projectID).Scan(&count); err != nil {
+		return project.Asset{}, fmt.Errorf("count project assets: %w", err)
+	}
+	if count >= maximum {
+		return project.Asset{}, project.ErrLimit
+	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO project_assets (id, project_id, owner_id, kind, name, description,
+		                            images_json, models_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, projectID, value.OwnerID, value.Kind, value.Name, value.Description,
+		images, models, formatTime(value.CreatedAt), formatTime(value.UpdatedAt)); err != nil {
+		return project.Asset{}, fmt.Errorf("create project asset: %w", err)
+	}
 	return value, nil
 }
 

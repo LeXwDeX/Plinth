@@ -7,6 +7,7 @@ import { X } from 'lucide-react';
 import { RegionErrorBoundary } from '@/components/common/region-error-boundary';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { AllOutputs } from '@/components/studio/all-outputs';
+import { AssetListBoard } from '@/components/studio/asset-list-board';
 import { CompareView } from '@/components/studio/compare-view';
 import { Stage3D } from '@/components/studio/stage-3d';
 import { StageImageView } from '@/components/studio/stage-image-view';
@@ -39,6 +40,7 @@ export function Stage() {
   const openPending = useWorkspaceStore((state) => state.openPendingResult);
   const dismissPending = useWorkspaceStore((state) => state.dismissPendingResult);
   const allOutputsOpen = useStudioStore((state) => state.allOutputsOpen);
+  const assetBoard = useStudioStore((state) => state.assetBoard);
   const compare = useStudioStore((state) => state.compare);
   const openLightbox = useStudioStore((state) => state.openLightbox);
   const setCurrentObject = useWorkspaceStore((state) => state.setCurrentObject);
@@ -103,6 +105,7 @@ export function Stage() {
         ) : null}
         {compare ? <CompareView onEnlarge={enlargeCompare} /> : null}
         {allOutputsOpen ? <AllOutputs /> : null}
+        {assetBoard ? <AssetListBoard key={`${assetBoard.projectId}:${assetBoard.listId}`} target={assetBoard} schema={schema} /> : null}
         <StageImageView />
       </div>
     </section>

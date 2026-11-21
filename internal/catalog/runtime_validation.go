@@ -303,6 +303,8 @@ func validateRuntime(schema RuntimeSchema) error {
 		"project_asset_list":              httpRuntime.Routes.ProjectAssetList,
 		"project_asset_list_decision":     httpRuntime.Routes.ProjectAssetListDecision,
 		"project_asset_list_board":        httpRuntime.Routes.ProjectAssetListBoard,
+		"project_asset_list_item_review":  httpRuntime.Routes.ProjectAssetListItemReview,
+		"project_asset_list_archive":      httpRuntime.Routes.ProjectAssetListArchive,
 		"chat_session_asset_lists":        httpRuntime.Routes.ChatSessionAssetLists,
 		"project_presence":                httpRuntime.Routes.ProjectPresence,
 		"project_asset_list_run":          httpRuntime.Routes.ProjectAssetListRun,
@@ -413,6 +415,8 @@ func validateRuntime(schema RuntimeSchema) error {
 		"project_asset_list":              {"projectID", "listID"},
 		"project_asset_list_decision":     {"projectID", "listID"},
 		"project_asset_list_board":        {"projectID", "listID"},
+		"project_asset_list_item_review":  {"projectID", "listID"},
+		"project_asset_list_archive":      {"projectID", "listID"},
 		"chat_session_asset_lists":        {"sessionID"},
 		"project_presence":                {"projectID"},
 		"project_asset_list_run":          {"projectID", "listID"},
@@ -466,6 +470,15 @@ func validateRuntime(schema RuntimeSchema) error {
 		httpRuntime.LegacyRoutes.AdminUserAssets,
 		httpRuntime.LegacyRoutes.AdminBackfillStatus,
 		httpRuntime.LegacyRoutes.MeshyProxyAsset,
+	}
+	// The administrator's access key view (#332) is optional with its Schema
+	// section; when it is declared all three routes are required.
+	if route := httpRuntime.LegacyRoutes.AdminAccessKeys; route != "" {
+		legacyRoutes = append(legacyRoutes,
+			route,
+			httpRuntime.LegacyRoutes.AdminAccessKey,
+			httpRuntime.LegacyRoutes.AdminAccessKeysSwitch,
+		)
 	}
 	// The background-continue route (#137) is optional; when declared it is
 	// a distinct route with the stop route's single session parameter.

@@ -24,7 +24,7 @@ func (r *Repository) AssetListReviewRepository() *AssetListReviewRepository {
 var _ assetlist.ReviewStore = (*AssetListReviewRepository)(nil)
 
 const assetListItemReviewColumns = `id, owner_id, list_id, item_id, round, verdict,
-	reason, reviewer_id, review_json, created_at`
+	reason, reasons_json, note, reviewer_id, review_json, created_at`
 
 func (r *AssetListReviewRepository) ItemReviews(
 	ctx context.Context,
@@ -41,10 +41,11 @@ func (r *AssetListReviewRepository) ItemReviews(
 	result := make([]assetlist.ItemReview, 0)
 	for rows.Next() {
 		var review assetlist.ItemReview
-		var raw, created string
+		var raw, reasons, created string
 		if err := rows.Scan(
 			&review.ID, &review.OwnerID, &review.ListID, &review.ItemID, &review.Round,
-			&review.Verdict, &review.Reason, &review.ReviewerID, &raw, &created,
+			&review.Verdict, &review.Reason, &reasons, &review.Note, &review.ReviewerID,
+			&raw, &created,
 		); err != nil {
 			return nil, fmt.Errorf("scan asset list item review: %w", err)
 		}
@@ -52,8 +53,19 @@ func (r *AssetListReviewRepository) ItemReviews(
 			raw = "{}"
 		}
 		review.Review = json.RawMessage(raw)
+		review.Reasons = decodeStringList(reasons)
 		review.CreatedAt, _ = parseTime(created)
 		result = append(result, review)
 	}
 	return result, rows.Err()
+}
+
+// decodeStringList reads a JSON string array column; an unreadable value is
+// no reasons rather than a read failure, like the other JSON columns.
+func decodeStringList(raw string) []string {
+	var values []string
+	if raw == "" || json.Unmarshal([]byte(raw), &values) != nil {
+		return nil
+	}
+	return values
 }

@@ -85,24 +85,8 @@ func (policy *ProductionPlanPolicy) acceptanceFor(command ToolCommand, steps []b
 // would show the literal "{minimum}–{maximum}" to the person, so it is left
 // out instead.
 func acceptanceApplies(template string, check budget.PlanCheck) bool {
-	switch check.Check {
-	case modelcheck.CheckUV, modelcheck.CheckWatertight, modelcheck.CheckSkin:
-		if !check.Required {
-			return false
-		}
-	case modelcheck.CheckTriangles, modelcheck.CheckTextureSize:
-		if check.Maximum == nil || *check.Maximum <= 0 {
-			return false
-		}
-	case modelcheck.CheckPlausibleScale:
-		if check.Minimum == nil && check.Maximum == nil {
-			return false
-		}
-	case modelcheck.CheckPivotBottomCenter, modelcheck.CheckYUp,
-		modelcheck.CheckDebris, modelcheck.CheckDegenerate:
-		if check.MaximumRatio == nil || *check.MaximumRatio <= 0 {
-			return false
-		}
+	if !reviewCheckDeclared(check) {
+		return false
 	}
 	if strings.Contains(template, "{minimum}") && check.Minimum == nil {
 		return false
@@ -111,6 +95,26 @@ func acceptanceApplies(template string, check budget.PlanCheck) bool {
 		return false
 	}
 	return true
+}
+
+// reviewCheckDeclared reports whether the purpose gave the check a usable
+// threshold. A boolean check the purpose does not require, or a bound the
+// purpose does not set, would always read unknown, so the acceptance criteria
+// and the review snapshot leave it out instead of promising a standard nobody
+// can meet.
+func reviewCheckDeclared(check budget.PlanCheck) bool {
+	switch check.Check {
+	case modelcheck.CheckUV, modelcheck.CheckWatertight, modelcheck.CheckSkin:
+		return check.Required
+	case modelcheck.CheckTriangles, modelcheck.CheckTextureSize:
+		return check.Maximum != nil && *check.Maximum > 0
+	case modelcheck.CheckPlausibleScale:
+		return check.Minimum != nil || check.Maximum != nil
+	case modelcheck.CheckPivotBottomCenter, modelcheck.CheckYUp,
+		modelcheck.CheckDebris, modelcheck.CheckDegenerate:
+		return check.MaximumRatio != nil && *check.MaximumRatio > 0
+	}
+	return false
 }
 
 // buildCheckpoints validates the Agent's checkpoint declarations and freezes
@@ -233,8 +237,7 @@ func (policy *ProductionPlanPolicy) buildContingencies(command ToolCommand,
 			return nil, "contingency " + id + " capability " + capability +
 				" is neither a declared correction capability nor a declared fix of its trigger"
 		}
-		offering, _, refusal := policy.stepOffering(capability, strings.TrimSpace(raw.Step.Model),
-			strings.TrimSpace(command.Options.ExplicitModel3D), strings.TrimSpace(command.Options.ModelFor("image")))
+		offering, _, refusal := policy.stepOffering(command, capability, strings.TrimSpace(raw.Step.Model))
 		if refusal != "" {
 			return nil, refusal
 		}

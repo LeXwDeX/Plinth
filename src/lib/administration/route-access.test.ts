@@ -13,6 +13,7 @@ const administrableKeys = [
   'user-assets',
   'agent-configuration',
   'llm',
+  'access-keys',
 ];
 
 function route(pathname: string, isAdmin: boolean) {

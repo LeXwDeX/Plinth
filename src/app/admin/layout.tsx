@@ -3,7 +3,7 @@
 import Link from '@/components/ui/browser-link';
 import { usePathname } from '@/lib/browser-navigation';
 import { buttonVariants } from '@/components/ui/button';
-import { BarChart3, Cpu, Users, FileText, Sparkles, FolderSearch } from 'lucide-react';
+import { BarChart3, Cpu, Users, FileText, Sparkles, FolderSearch, KeyRound } from 'lucide-react';
 import { useProductSchema } from '@/components/product-schema-provider';
 
 const iconMap = {
@@ -13,6 +13,7 @@ const iconMap = {
   sparkles: Sparkles,
   'folder-search': FolderSearch,
   cpu: Cpu,
+  key: KeyRound,
 };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

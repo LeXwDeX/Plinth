@@ -475,6 +475,11 @@ func TestAccessKeyIsNotAcceptedByAnyRouteOfTheMainServer(t *testing.T) {
 		{http.MethodGet, accessKeysPath, ""},
 		{http.MethodPost, accessKeysPath, `{"name":"another","scopes":["read"]}`},
 		{http.MethodDelete, accessKeysPath + "/" + created.ID, ""},
+		// The administrator's view of every key and the overall switch (#332)
+		// is no exception: a key never manages keys and never flips the switch.
+		{http.MethodGet, "/api/admin/access-keys", ""},
+		{http.MethodDelete, "/api/admin/access-keys/" + created.ID, ""},
+		{http.MethodPut, "/api/admin/access-keys/switch", `{"enabled":false}`},
 	}
 	for _, call := range calls {
 		withKey := httptest.NewRequest(call.method, call.path, strings.NewReader(call.body))

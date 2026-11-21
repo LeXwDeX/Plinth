@@ -76,7 +76,7 @@ func (registry *toolRegistry) offeringTradeoffs(prompt catalog.ChatAgentCraftPro
 	seen := map[string]bool{}
 	lines := make([]string, 0)
 	for _, capability := range prompt.OfferingCapabilities {
-		for _, offering := range registry.offerings(string(capability)) {
+		for _, offering := range registry.offeringsFor(string(capability)) {
 			if offering.Capability != capability || !offering.Enabled || offering.Knowledge == nil {
 				continue
 			}

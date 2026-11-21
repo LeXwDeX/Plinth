@@ -196,7 +196,9 @@ func TestAccessKeyStoreRevokeIsOwnerScopedAndIdempotent(t *testing.T) {
 	}
 }
 
-func TestAccessKeyStoreTouchRecordsTheLastUseOfALiveKeyOnly(t *testing.T) {
+// The count is recorded for every authenticated request, a revoke included,
+// while the last use time is only set while the key is not revoked.
+func TestAccessKeyStoreCountsEveryRequestAndRecordsLastUseOfALiveKey(t *testing.T) {
 	r := openAccessKeyRepo(t)
 	ctx := context.Background()
 	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
@@ -210,14 +212,46 @@ func TestAccessKeyStoreTouchRecordsTheLastUseOfALiveKeyOnly(t *testing.T) {
 	}
 	used := now.Add(5 * time.Minute)
 	for _, id := range []string{"live", "dead", "missing"} {
-		if err := r.TouchAccessKey(ctx, id, used); err != nil {
-			t.Fatalf("touch %s: %v", id, err)
+		if err := r.RecordAccessKeyLastUse(ctx, id, used); err != nil {
+			t.Fatalf("record last use %s: %v", id, err)
+		}
+		if err := r.IncrementAccessKeyRequests(ctx, id); err != nil {
+			t.Fatalf("count request %s: %v", id, err)
 		}
 	}
 	live, _, _ := r.AccessKey(ctx, "live")
 	dead, _, _ := r.AccessKey(ctx, "dead")
-	if !live.LastUsedAt.Equal(used) || !dead.LastUsedAt.IsZero() {
-		t.Fatalf("live last used %v, revoked last used %v", live.LastUsedAt, dead.LastUsedAt)
+	if !live.LastUsedAt.Equal(used) || live.RequestCount != 1 || !dead.LastUsedAt.IsZero() || dead.RequestCount != 1 {
+		t.Fatalf("live last used %v count %d, revoked last used %v count %d; a counted request is never dropped",
+			live.LastUsedAt, live.RequestCount, dead.LastUsedAt, dead.RequestCount)
+	}
+}
+
+// Concurrent count writes never lose a request: the column is incremented in
+// the database, not read and written back.
+func TestAccessKeyStoreCountsConcurrentRequests(t *testing.T) {
+	r := openAccessKeyRepo(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	if err := r.CreateAccessKey(ctx, keyRecord("hot", "owner-a", now, time.Hour), 10, now); err != nil {
+		t.Fatal(err)
+	}
+	var wait sync.WaitGroup
+	for index := 0; index < 16; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for use := 0; use < 5; use++ {
+				if err := r.IncrementAccessKeyRequests(ctx, "hot"); err != nil {
+					t.Errorf("count request: %v", err)
+				}
+			}
+		}()
+	}
+	wait.Wait()
+	record, found, err := r.AccessKey(ctx, "hot")
+	if err != nil || !found || record.RequestCount != 80 {
+		t.Fatalf("record = %+v found=%v err=%v; want 80 requests", record, found, err)
 	}
 }
 

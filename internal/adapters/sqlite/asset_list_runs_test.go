@@ -208,6 +208,36 @@ func TestAssetListRunRepositoryClaimItemClaimsInPositionOrder(t *testing.T) {
 	}
 }
 
+func TestAssetListRunRepositoryClaimItemResumesAReturnedItem(t *testing.T) {
+	_, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	seedRunList(t, lists, "alist_1", 2)
+	if _, err := runs.CreateRun(ctx, newAssetListRun("run_1", "owner-a", "prj_1", "alist_1", assetlist.RunRunning)); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	// The first item was returned after round one; its round already counted
+	// the rework, so claiming must not count it again.
+	if _, err := runs.db.Exec(`UPDATE asset_list_items
+		SET state = ?, round = 2, return_reason = '风格不对', return_note = '修脸'
+		WHERE id = ?`, assetlist.StateReturned, "aitem_alist_1_1"); err != nil {
+		t.Fatal(err)
+	}
+
+	item, found, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil || !found {
+		t.Fatalf("claim returned item = %+v, %v, %v", item, found, err)
+	}
+	if item.ID != "aitem_alist_1_1" || item.State != assetlist.StateWorking ||
+		item.Round != 2 || item.ReturnReason != "风格不对" || item.ReturnNote != "修脸" {
+		t.Fatalf("claimed = %+v; want the returned item working at round 2", item)
+	}
+	// Fresh work is claimed after the rework and still starts at round one.
+	fresh, found, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil || !found || fresh.ID != "aitem_alist_1_2" || fresh.Round != 1 {
+		t.Fatalf("fresh claim = %+v, %v, %v; want item 2 at round 1", fresh, found, err)
+	}
+}
+
 func TestAssetListRunRepositoryClaimItemRaceClaimsOnce(t *testing.T) {
 	_, lists, runs, _ := newAssetListRunRepositories(t)
 	ctx := context.Background()
@@ -263,21 +293,22 @@ func TestAssetListRunRepositoryRecordItemTurnGuardsWorkingStateAndVersion(t *tes
 	}
 
 	recorded, err := runs.RecordItemTurn(ctx, "owner-a", "alist_1", item.ID, "msg_1",
-		1, item.Version, assetListTestNow.Add(time.Second))
+		1, 1, item.Version, assetListTestNow.Add(time.Second))
 	if err != nil || recorded.LastTurnMessageID != "msg_1" || recorded.Round != 1 ||
-		recorded.Version != 2 || !recorded.UpdatedAt.Equal(assetListTestNow.Add(time.Second)) {
-		t.Fatalf("recorded item = %+v, %v; want msg_1 round 1 version 2", recorded, err)
+		recorded.WorkRound != 1 || recorded.Version != 2 ||
+		!recorded.UpdatedAt.Equal(assetListTestNow.Add(time.Second)) {
+		t.Fatalf("recorded item = %+v, %v; want msg_1 round 1 work round 1 version 2", recorded, err)
 	}
 
 	if _, err := runs.RecordItemTurn(ctx, "owner-a", "alist_1", item.ID, "msg_2",
-		2, 1, assetListTestNow); !errors.Is(err, assetlist.ErrConflict) {
+		2, 2, item.Version, assetListTestNow); !errors.Is(err, assetlist.ErrConflict) {
 		t.Fatalf("stale record = %v; want ErrConflict", err)
 	}
 	recorded, err = runs.RecordItemTurn(ctx, "owner-a", "alist_1", item.ID, "msg_2",
-		2, recorded.Version, assetListTestNow)
+		2, 2, recorded.Version, assetListTestNow)
 	if err != nil || recorded.LastTurnMessageID != "msg_2" || recorded.Round != 2 ||
-		recorded.Version != 3 {
-		t.Fatalf("continuation record = %+v, %v; want msg_2 round 2 version 3", recorded, err)
+		recorded.WorkRound != 2 || recorded.Version != 3 {
+		t.Fatalf("continuation record = %+v, %v; want msg_2 round 2 work round 2 version 3", recorded, err)
 	}
 
 	if _, err := runs.FinishItem(ctx, assetlist.FinishItemInput{
@@ -287,16 +318,20 @@ func TestAssetListRunRepositoryRecordItemTurnGuardsWorkingStateAndVersion(t *tes
 		t.Fatalf("finish item: %v", err)
 	}
 	if _, err := runs.RecordItemTurn(ctx, "owner-a", "alist_1", item.ID, "msg_3",
-		3, assetlist.VersionUnchecked, assetListTestNow); !errors.Is(err, assetlist.ErrItemState) {
+		3, 3, assetlist.VersionUnchecked, assetListTestNow); !errors.Is(err, assetlist.ErrItemState) {
 		t.Fatalf("record on review item = %v; want ErrItemState", err)
 	}
 	if _, err := runs.RecordItemTurn(ctx, "owner-a", "alist_1", "aitem_missing", "msg_3",
-		3, assetlist.VersionUnchecked, assetListTestNow); !errors.Is(err, assetlist.ErrNotFound) {
+		3, 3, assetlist.VersionUnchecked, assetListTestNow); !errors.Is(err, assetlist.ErrNotFound) {
 		t.Fatalf("record missing item = %v; want ErrNotFound", err)
 	}
 	if _, err := runs.RecordItemTurn(ctx, "owner-a", "alist_1", item.ID, "msg_3",
-		0, assetlist.VersionUnchecked, assetListTestNow); !errors.Is(err, assetlist.ErrInvalid) {
+		0, 1, assetlist.VersionUnchecked, assetListTestNow); !errors.Is(err, assetlist.ErrInvalid) {
 		t.Fatalf("record round 0 = %v; want ErrInvalid", err)
+	}
+	if _, err := runs.RecordItemTurn(ctx, "owner-a", "alist_1", item.ID, "msg_3",
+		1, 0, assetlist.VersionUnchecked, assetListTestNow); !errors.Is(err, assetlist.ErrInvalid) {
+		t.Fatalf("record work round 0 = %v; want ErrInvalid", err)
 	}
 }
 

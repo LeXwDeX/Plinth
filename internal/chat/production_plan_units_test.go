@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/budget"
@@ -274,19 +273,21 @@ func TestProductionPlanPinsTheWorkspaceImageModel(t *testing.T) {
 		t.Fatalf("second plan = %+v", store.plans)
 	}
 
-	// The Agent naming another 2D model while the workspace model is visible is
-	// refused instead of silently planning a step the continuation cannot run.
-	conflict := planCommand(`{"title":"三视图","steps":[{"capability":"image-to-image","model":"image-model-b","purpose":"正面"}],` +
+	// #380: the Agent naming another 2D model is planned at that model. The
+	// workspace picker's value is not the person's choice, and the plan pins
+	// the Offering it quoted, so the continuation runs exactly this step.
+	named := planCommand(`{"title":"三视图","steps":[{"capability":"image-to-image","model":"image-model-b","purpose":"正面"}],` +
 		`"budgets":[{"unit":"legacy.credits","amount":40}]}`)
-	conflict.Options = chat.TurnOptions{CreativeDomain: "model-3d",
+	named.Options = chat.TurnOptions{CreativeDomain: "model-3d",
 		DomainModels: map[string]string{"image": "image-model-a"}}
 	store = &recordingProductionPlans{}
 	service3 := &chat.Service{}
 	service3.SetProductionPlans(chat.ProductionPlanPolicy{
 		Budget: shippedBudgetSchema(t), Offerings: func() []generation.Offering { return offerings }, Store: store,
 	})
-	result, err = service3.ProposeProductionPlan(context.Background(), conflict)
-	if err != nil || result.Error == "" || !strings.Contains(result.Error, "workspace image model is image-model-a") || len(store.created) != 0 {
-		t.Fatalf("conflicting model = %+v err=%v stored=%d", result, err, len(store.created))
+	result, err = service3.ProposeProductionPlan(context.Background(), named)
+	if err != nil || result.Error != "" || len(store.created) != 1 ||
+		store.plans[0].Steps[0].OfferingID != "provider/alt-image/image-to-image" {
+		t.Fatalf("named model = %+v err=%v plans=%+v", result, err, store.plans)
 	}
 }

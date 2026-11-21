@@ -1850,6 +1850,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 	}
 	accountSettingsService := harnessAccountSettings(t, repository, applicationSchema)
 	accessKeysService := harnessAccessKeys(t, repository, applicationSchema)
+	accessKeyAdminService := harnessAccessKeyAdmin(t, repository, administrationAuditService, applicationSchema)
 	mcpParts := harnessMCP(t, repository, applicationSchema, accountSettingsService, accessKeysService, accessPolicy, providerAccountService, chatService)
 	// The external MCP listener shares the platform inspect_image core, as the
 	// application does (#332 step 7b).
@@ -1913,10 +1914,17 @@ func newHTTPHarnessWithCatalogAndProviders(
 				crops:  repository.InputAssetCropRepository(),
 			},
 			Crops:              cropService,
+			Archive:            module,
 			Schema:             *listSchema,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
 			Counted:            counted,
+			ProjectAssets:      projectService,
+			ProjectAssetLimits: assetlist.ProjectAssetLimits{
+				MaximumAssets: applicationSchema.Project.Limits.MaximumAssetsPerProject,
+				MaximumImages: applicationSchema.Project.Limits.MaximumAssetImages,
+				MaximumModels: applicationSchema.Project.Limits.MaximumAssetModels,
+			},
 			ResolveStepFor: func(_ context.Context, _, _, capability string) (assetlist.RouteStep, error) {
 				if capability == "remesh" {
 					return assetlist.RouteStep{Capability: capability, Available: false,
@@ -1950,6 +1958,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 		AccountInputAssets:                repository,
 		AccountSettings:                   accountSettingsService,
 		AccessKeys:                        accessKeysService,
+		AdministrationAccessKeys:          accessKeyAdminService,
 		ExecutionGrants:                   executionGrants,
 		AgentOperations:                   repository,
 		PendingApprovals:                  pendingApprovals,
@@ -2126,6 +2135,31 @@ func harnessAccessKeys(t *testing.T, repository *sqlite.Repository, application 
 
 // harnessAccountSettings builds the person's settings service the way the
 // application assembly does: nil for a Catalog without a step policy.
+// harnessAccessKeyAdmin builds the administrator's access key view the way
+// the application assembly does: nil without application.access_keys.
+func harnessAccessKeyAdmin(t *testing.T, repository *sqlite.Repository, audit *administration.AuditService, application catalog.ApplicationSchema) *administration.AccessKeyAdminService {
+	t.Helper()
+	if application.AccessKeys == nil {
+		return nil
+	}
+	view := application.Administration.AccessKeys
+	if view.Permission == "" {
+		return nil
+	}
+	service, err := administration.NewAccessKeyAdminService(administration.AccessKeyAdminConfig{
+		Repository: repository, Audit: audit, DefaultEnabled: application.AccessKeys.Enabled,
+		DefaultPageSize: view.Limits.DefaultPageSize, MaxPageSize: view.Limits.MaxPageSize,
+		AuditActions: administration.AccessKeyAdminAuditActions{
+			Read: view.Audit.ReadAction, Revoke: view.Audit.RevokeAction,
+			Enable: view.Audit.EnableAction, Disable: view.Audit.DisableAction, Type: view.Audit.ResourceType,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
+
 func harnessAccountSettings(t *testing.T, repository *sqlite.Repository, application catalog.ApplicationSchema) *accountsettings.Service {
 	t.Helper()
 	declared := application.StepPolicy

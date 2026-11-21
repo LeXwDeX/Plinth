@@ -247,6 +247,8 @@ func validateAdministration(
 	schema AdministrationSchema,
 	runtime RuntimeSchema,
 	authentication AuthenticationSchema,
+	auditActions map[string]struct{},
+	accessKeysDeclared bool,
 ) error {
 	if len(schema.Navigation) == 0 {
 		return errors.New("administration.navigation 不能为空")
@@ -476,24 +478,38 @@ func validateAdministration(
 	); err != nil {
 		return err
 	}
-	return validateAdministrationBackfillStatus(
+	if err := validateAdministrationBackfillStatus(
 		schema.BackfillStatus,
 		runtime,
 		authentication,
-	)
+	); err != nil {
+		return err
+	}
+	if !accessKeysDeclared {
+		return nil
+	}
+	return validateAdministrationAccessKeys(schema, runtime, authentication, auditActions)
 }
 
 // validateAdministrationReadAudits 集中校验各管理模块的读审计声明。
 func validateAdministrationReadAudits(
 	schema AdministrationSchema,
 ) error {
-	for module, audit := range map[string]AdministrationReadAuditSchema{
+	audits := map[string]AdministrationReadAuditSchema{
 		"users":       {ReadAction: schema.Users.Audit.ReadAction, ResourceType: schema.Users.Audit.ResourceType},
 		"audit_logs":  schema.AuditLogs.Audit,
 		"generations": {ReadAction: schema.Generations.Audit.ReadAction, ResourceType: schema.Generations.Audit.ResourceType},
 		"usage":       schema.Usage.Audit,
 		"user_assets": schema.UserAssets.Audit,
-	} {
+	}
+	// The access key view is optional; a historical Catalog without it must not
+	// be asked for its read action.
+	if schema.AccessKeys.Permission != "" || schema.AccessKeys.API.Fields.ID != "" {
+		audits["access_keys"] = AdministrationReadAuditSchema{
+			ReadAction: schema.AccessKeys.Audit.ReadAction, ResourceType: schema.AccessKeys.Audit.ResourceType,
+		}
+	}
+	for module, audit := range audits {
 		if strings.TrimSpace(audit.ReadAction) == "" {
 			return fmt.Errorf(
 				"administration.%s.audit.read_action 不能为空",
@@ -1431,6 +1447,155 @@ func validateAdministrationGenerations(
 				"generations.presentation.text[%q] 不能为空",
 				key,
 			)
+		}
+	}
+	return nil
+}
+
+var requiredAdministrationAccessKeyTextKeys = []string{
+	"title",
+	"empty",
+	"search_placeholder",
+	"search",
+	"all_owners",
+	"total_summary",
+	"column_owner",
+	"column_name",
+	"column_prefix",
+	"column_scopes",
+	"column_created_at",
+	"column_last_used_at",
+	"column_request_count",
+	"column_expires_at",
+	"column_revoked_at",
+	"column_status",
+	"column_actions",
+	"status_active",
+	"status_expired",
+	"status_revoked",
+	"revoke",
+	"revoke_key",
+	"revoke_confirm",
+	"revoked",
+	"switch_title",
+	"switch_description",
+	"switch_on",
+	"switch_off",
+	"switched_on",
+	"switched_off",
+	"cancel",
+	"forbidden_title",
+	"forbidden_description",
+	"pagination_previous",
+	"pagination_next",
+	"pagination_summary",
+}
+
+// validateAdministrationAccessKeys validates the administrator's access key
+// view (#332). The section is optional so historical Catalogs stay valid; a
+// partially declared view is an error, never a silently missing page.
+func validateAdministrationAccessKeys(
+	schema AdministrationSchema,
+	runtime RuntimeSchema,
+	authentication AuthenticationSchema,
+	auditActions map[string]struct{},
+) error {
+	keys := schema.AccessKeys
+	routes := runtime.HTTP.LegacyRoutes
+	if strings.TrimSpace(keys.Permission) == "" && strings.TrimSpace(keys.API.Fields.ID) == "" &&
+		strings.TrimSpace(routes.AdminAccessKeys) == "" {
+		return nil
+	}
+	for name, value := range map[string]string{
+		"data": keys.API.Fields.Data, "total": keys.API.Fields.Total,
+		"page": keys.API.Fields.Page, "page_size": keys.API.Fields.PageSize,
+		"id": keys.API.Fields.ID, "owner_id": keys.API.Fields.OwnerID,
+		"owner_username": keys.API.Fields.OwnerUsername, "owner_name": keys.API.Fields.OwnerName,
+		"name": keys.API.Fields.Name, "prefix": keys.API.Fields.Prefix, "scopes": keys.API.Fields.Scopes,
+		"created_at": keys.API.Fields.CreatedAt, "last_used_at": keys.API.Fields.LastUsedAt,
+		"request_count": keys.API.Fields.RequestCount, "expires_at": keys.API.Fields.ExpiresAt,
+		"revoked_at": keys.API.Fields.RevokedAt, "active": keys.API.Fields.Active,
+		"enabled":    keys.API.Fields.Enabled,
+		"query_page": keys.API.Query.Page, "query_page_size": keys.API.Query.PageSize,
+		"query_search": keys.API.Query.Search, "query_owner_id": keys.API.Query.OwnerID,
+		"path_key_id": keys.API.PathParameters.KeyID,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("administration.access_keys.api %s 不能为空", name)
+		}
+	}
+	if strings.ContainsAny(keys.API.PathParameters.KeyID, "{} /?#") {
+		return errors.New("administration.access_keys.api.path_parameters.key_id 非法")
+	}
+	if parameters := configuredRouteParameters(routes.AdminAccessKey); len(parameters) != 1 ||
+		parameters[0] != keys.API.PathParameters.KeyID {
+		return errors.New("runtime.http.legacy_routes.admin_access_key 必须只声明 access_keys.api.path_parameters.key_id")
+	}
+	if len(configuredRouteParameters(routes.AdminAccessKeys)) != 0 ||
+		len(configuredRouteParameters(routes.AdminAccessKeysSwitch)) != 0 {
+		return errors.New("runtime.http.legacy_routes.admin_access_keys 与 admin_access_keys_switch 不得声明路径参数")
+	}
+	if routes.AdminAccessKeys == routes.AdminAccessKey ||
+		routes.AdminAccessKeys == routes.AdminAccessKeysSwitch ||
+		routes.AdminAccessKey == routes.AdminAccessKeysSwitch {
+		return errors.New("administration access key routes 必须互不相同")
+	}
+	if keys.Limits.DefaultPageSize <= 0 || keys.Limits.MaxPageSize < keys.Limits.DefaultPageSize ||
+		keys.Limits.SearchMaxLength <= 0 {
+		return errors.New("administration.access_keys.limits 的分页与搜索上限必须为正数，且 max_page_size 不小于 default_page_size")
+	}
+	permissionFound := false
+	for _, permission := range authentication.Permissions {
+		if permission.Key == keys.Permission {
+			permissionFound = true
+			break
+		}
+	}
+	if !permissionFound {
+		return fmt.Errorf("administration.access_keys.permission 引用了未知 permission %q", keys.Permission)
+	}
+	actions := map[string]string{
+		"read_action": keys.Audit.ReadAction, "revoke_action": keys.Audit.RevokeAction,
+		"enable_action": keys.Audit.EnableAction, "disable_action": keys.Audit.DisableAction,
+		"resource_type": keys.Audit.ResourceType,
+	}
+	for name, value := range actions {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("administration.access_keys.audit.%s 不能为空", name)
+		}
+	}
+	seenActions := map[string]string{}
+	for name, action := range actions {
+		if name == "resource_type" {
+			continue
+		}
+		if previous, exists := seenActions[action]; exists {
+			return fmt.Errorf("administration.access_keys.audit.%s 与 %s 使用了同一个 audit action %q", name, previous, action)
+		}
+		seenActions[action] = name
+		if _, exists := auditActions[action]; !exists {
+			return fmt.Errorf("administration.access_keys.audit.%s 引用了未知 audit action %q", name, action)
+		}
+	}
+	for name, value := range map[string]string{
+		"invalid_request": keys.Messages.InvalidRequest, "key_not_found": keys.Messages.KeyNotFound,
+		"internal_error": keys.Messages.InternalError,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("administration.access_keys.messages.%s 不能为空", name)
+		}
+	}
+	presentation := keys.Presentation
+	if strings.TrimSpace(presentation.DateLocale) == "" || strings.TrimSpace(presentation.EmptyPlaceholder) == "" ||
+		presentation.LoadingRows <= 0 || len(presentation.DateTimeOptions) == 0 {
+		return errors.New("administration.access_keys.presentation 的日期、空值占位、加载行数与日期选项必须有效")
+	}
+	if presentation.DateTimeOptions["month"] != "2-digit" || presentation.DateTimeOptions["day"] != "2-digit" {
+		return errors.New("administration.access_keys.presentation.date_time_options 的 month 与 day 必须为 2-digit")
+	}
+	for _, key := range requiredAdministrationAccessKeyTextKeys {
+		if strings.TrimSpace(presentation.Text[key]) == "" {
+			return fmt.Errorf("administration.access_keys.presentation.text[%q] 不能为空", key)
 		}
 	}
 	return nil

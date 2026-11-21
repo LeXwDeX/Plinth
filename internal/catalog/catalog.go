@@ -245,6 +245,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := validateTaskOfferingReferences(result.byID); err != nil {
 		return nil, err
 	}
+	if err := validateOfferingModelFamilies(result.byID); err != nil {
+		return nil, err
+	}
 	if err := validateTaskSourceDiscovery(result.application.ProviderDiscovery, result.byID); err != nil {
 		return nil, err
 	}
@@ -358,6 +361,29 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := validateLocalizedOfferingTerminology(doc.Application.Terminology, doc.Application.Localization); err != nil {
 		return nil, fmt.Errorf("application.localization: %w", err)
 	}
+	// #413: the Agent tool registry reads the Offering directory on every
+	// request. Record the sorted enabled lists once, so a hot read can borrow
+	// the Catalog's immutable values instead of deep-copying them: each enabled
+	// Offering is cloned once here, not once per capability.
+	sharedLists := make(map[schemacontract.Capability][]schemacontract.Offering)
+	all := make([]schemacontract.Offering, 0, len(result.byID))
+	for _, offering := range result.byID {
+		if !offering.Enabled {
+			continue
+		}
+		value := cloneOfferingModelProfiles(offering)
+		all = append(all, value)
+		sharedLists[offering.Capability] = append(sharedLists[offering.Capability], value)
+	}
+	sortOfferings(all)
+	sharedLists[""] = all
+	for capability, offerings := range sharedLists {
+		if capability == "" {
+			continue
+		}
+		sortOfferings(offerings)
+	}
+	result.sharedLists = sharedLists
 	return result, nil
 }
 
@@ -380,6 +406,7 @@ func (raw rawOffering) toOffering() schemacontract.Offering {
 		ProviderOrder:                 valueOrZero(raw.ProviderOrder),
 		ModelID:                       raw.ModelID,
 		ModelName:                     raw.ModelName,
+		ModelFamily:                   raw.ModelFamily,
 		Description:                   raw.Description,
 		Knowledge:                     raw.Knowledge,
 		Capability:                    raw.Capability,
@@ -437,16 +464,32 @@ func (c *Catalog) List(capability schemacontract.Capability) []schemacontract.Of
 		}
 		result = append(result, cloneOfferingModelProfiles(offering))
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Priority != result[j].Priority {
-			return result[i].Priority > result[j].Priority
-		}
-		if result[i].Recommended != result[j].Recommended {
-			return result[i].Recommended
-		}
-		return result[i].ID < result[j].ID
-	})
+	sortOfferings(result)
 	return result
+}
+
+// sortOfferings puts Offerings in Catalog order: priority, then recommended,
+// then id. List and the shared lists both use it, so they stay in step.
+func sortOfferings(offerings []schemacontract.Offering) {
+	sort.Slice(offerings, func(i, j int) bool {
+		if offerings[i].Priority != offerings[j].Priority {
+			return offerings[i].Priority > offerings[j].Priority
+		}
+		if offerings[i].Recommended != offerings[j].Recommended {
+			return offerings[i].Recommended
+		}
+		return offerings[i].ID < offerings[j].ID
+	})
+}
+
+// ListShared is the read-only view of List (#413): it returns the enabled
+// Offerings of a capability in Catalog order without deep-copying them. The
+// Catalog is immutable after loading and these are its own values, so every
+// caller shares them; the caller must not modify the slice, an Offering, or
+// anything reachable from one (parameters, knowledge, provider options,
+// limits). A caller that needs values it may modify asks List instead.
+func (c *Catalog) ListShared(capability schemacontract.Capability) []schemacontract.Offering {
+	return c.sharedLists[capability]
 }
 
 func (c *Catalog) Normalize(
