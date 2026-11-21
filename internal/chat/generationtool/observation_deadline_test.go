@@ -64,8 +64,14 @@ func TestBoundTaskReadAndObservationErrorsRespectDurableDeadline(t *testing.T) {
 			}
 			now = deadline
 			result, err = executor.Execute(context.Background(), command, observe)
-			if err == nil || result.AwaitTask || result.TaskID != "original-task" || result.AgentContent == "" {
-				t.Fatalf("expired observation still waits: %+v err=%v", result, err)
+			// #460 review 4: the deadline passed while the Task was last seen
+			// running, so the turn reports it as still in progress (not a
+			// failure) and ends instead of waiting forever.
+			if err != nil || result.AwaitTask || result.TaskID != "original-task" || result.AgentContent == "" {
+				t.Fatalf("expired observation did not report pending: %+v err=%v", result, err)
+			}
+			if !strings.Contains(result.AgentContent, `"pending":true`) {
+				t.Fatalf("expired observation did not mark the result pending: %+v", result)
 			}
 			if strings.Contains(result.AgentContent, "private") || gateway.submitted.OfferingID != "" {
 				t.Fatalf("failed read exposed details or resubmitted: %+v command=%+v", result, gateway.submitted)
