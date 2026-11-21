@@ -82,6 +82,10 @@ files, keyed and signed downloads, inspect_model, remesh); the listener binds lo
 stack reaches them): #284's notice naming the pictures that were not matted, #299's out-of-memory batch as a
 partial success and as a capacity failure, and an unmarked batch (scripts/smoke/fake_faults.py,
 scripts/smoke/smoke-fake-faults.py runs the same checks on a fake-shaped dev-test);
+"auto-approval" the #406/#432 automatic default: a new session and the public Schema start in auto,
+an existing session keeps its mode, the unplanned steps after a generation (retexture, resize, convert,
+an image-to-image rework) submit without a card, the 21st paid call of one turn is refused with the Schema
+sentence, strict and budget-without-a-plan raise a card, and extra credits are granted with the step;
 "plan-checkpoint" the #251 budget plan checkpoint: a failed inherited check pauses the next step,
 the declared contingency is inserted within the approved budget, and no second approval card appears;
 "preferences" the #241 session choices: four candidates, pick/reject with reasons, the next prompt carrying them,
@@ -2132,6 +2136,226 @@ FAULTS = {
 # The API key a stack uses for a scenario, where it is not just fake-<scenario>.
 FAULT_KEYS = {"artifact-expired-stuck": "fake-artifact-expired-1000"}
 
+
+def _shipped_schema_value(path):
+    """One value of the shipped Product Schema, read from the same file the stack
+    loads (private_catalog copies it). The Agent's per-turn limit sentence is
+    server-side copy, so a scenario that asserts the refusal reads it here."""
+    with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
+        value = json.load(handle)
+    for key in path:
+        value = value[key]
+    return value
+
+
+def _auto_card(api, session):
+    """The session's one pending approval card, or None (the plan card included)."""
+    items = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+    return items[0] if items else None
+
+
+def _auto_turn(api, session, content, seconds=240, **fields):
+    """One chat turn that must finish by itself: returns (ok, why). A card left
+    behind is reported by the caller through _auto_card, not approved here."""
+    before = assistant_reply_count(api, session)
+    body = {"content": content}
+    body.update(fields)
+    status, payload = _send_chat(api, session, body)
+    if status not in (200, 201, 202):
+        return False, f"send {status} {json.dumps(payload, ensure_ascii=False)[:200]}"
+    end = time.time() + seconds
+    while time.time() < end:
+        if assistant_reply_count(api, session) > before:
+            return True, ""
+        time.sleep(0.4)
+    return False, "the turn did not finish"
+
+
+def scenario_auto_approval(work, api, offerings):
+    """#406/#432: the automatic approval default on the paid paths the fake can
+    express. The public Schema and a new session both start in auto; an existing
+    session keeps the mode it was given. Under auto the unplanned steps after a
+    generation (retexture, resize, convert, an image-to-image rework) submit with
+    no card, report the policy as the approval source and land in the session's
+    credit estimate and the account usage; the 21st paid call of one turn is
+    refused with the Schema's own limit sentence and creates no Task; the same
+    call under strict (manual) and under budget without an approved plan raises a
+    card and submits nothing; and extra credits are granted with the step.
+    What a real model would decide to append is not expressible here: that is
+    #407's live measurement."""
+    fields, _route = chat_schema_facts(api)
+    approval_field = fields.get("approval_mode", "approvalMode")
+    limit_text = _shipped_schema_value(["application", "chat", "agent", "consent_limit_content"])
+    status, schema = api.json("GET", "/api/v1/schema")
+    schema = schema.get("schema", schema) if status == 200 and isinstance(schema, dict) else {}
+    policy = (schema.get("chat") or {}).get("approval_policy") or {}
+    record("auto-approval: the public Schema defaults a new session to auto",
+           policy.get("default_mode") == "auto" and policy.get("modes") == ["auto", "budget", "manual"],
+           f"default_mode={policy.get('default_mode')!r}, modes={policy.get('modes')}")
+
+    auto = new_session(api)
+    status, body = api.json("GET", f"/api/chat/sessions/{auto}")
+    record("auto-approval: a new session reads auto", status == 200 and body.get(approval_field) == "auto",
+           f"status {status}, approval={body.get(approval_field)!r}")
+
+    # #406: the default is a session's own value; a session saved in another mode
+    # keeps it while the session created after it is auto.
+    strict = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{strict}/approval", {approval_field: "manual"})
+    if status != 200:
+        record("auto-approval: switch a session to strict", False, f"PUT {status}")
+        return
+    fresh = new_session(api)
+    modes = {}
+    for name, session in (("saved", strict), ("new", fresh), ("default", auto)):
+        status, body = api.json("GET", f"/api/chat/sessions/{session}")
+        modes[name] = body.get(approval_field) if status == 200 else None
+    record("auto-approval: a saved session keeps its mode and a new one is auto",
+           modes.get("saved") == "manual" and modes.get("new") == "auto" and modes.get("default") == "auto",
+           f"modes {modes}")
+
+    # (a) The unplanned chain: auto submits every paid step, each with the policy
+    # as its approval source and none of them with a card.
+    def step(label, marker, text, **extra):
+        task, why, source = agent_tool_turn(api, auto, text + " " + marker, **extra)
+        if not task or task.get("state") != "SUCCEEDED":
+            record(f"auto-approval: {label}", False, why or f"state {(task or {}).get('state')}")
+            return None
+        used = task.get("offering_id")
+        problems, count = check_delivery(api, task, offerings[used]) if used in offerings else ([f"unknown offering {used}"], 0)
+        card = _auto_card(api, auto)
+        record(f"auto-approval: auto submits {label} without a card",
+               source == "policy" and not problems and card is None,
+               f"{used} {task.get('state')}, {count} assets, approval {source}, pending {card.get('kind') if card else 'none'}"
+               + ("" if not problems else "; " + "; ".join(problems)))
+        return task
+
+    model = step("text-to-3d", '[[fake:tool:create_model_3d {"prompt":"a plain cube","model":"meshy-7.1"}]]',
+                 "make a cube", creative_domain="model-3d", ai_model=MESHY_TEXT_TO_3D)
+    if not model:
+        return
+    retexture = step("retexture", '[[fake:tool:retexture_model {"offering_id":"' + MESHY_RETEXTURE +
+                     '","source_task_id":"' + model["id"] + '","prompt":"plain matte grey"}]]',
+                     "retexture it", creative_domain="model-3d", ai_model=MESHY_TEXT_TO_3D)
+    if not retexture:
+        return
+    resized = step("resize", '[[fake:tool:process_model {"step":"resize","offering_id":"' + MESHY_RESIZE +
+                   '","source_task_id":"' + retexture["id"] + '","resize_longest_side":0.2}]]',
+                   "resize it", creative_domain="model-3d", ai_model=MESHY_TEXT_TO_3D)
+    if not resized:
+        return
+    step("convert", '[[fake:tool:convert_model_format {"source_task_id":"' + resized["id"] + '","format":"glb"}]]',
+         "convert it", creative_domain="model-3d", ai_model=MESHY_TEXT_TO_3D)
+
+    # (b) A 2D rework: an image-to-image step the person did not plan either.
+    picture = upload_asset(api, "auto-rework.png", make_png(), "image/png")
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{auto}/model2d",
+                         {"explicit_model_2d": IMAGE_OFFERINGS["openai"][1]})
+    rework_marker = ('[[fake:tool:refine_image {"prompt":"warm sunset light on the same cube",'
+                     '"reference_image_indices":[1]}]]')
+    rework, why, source = agent_tool_turn(api, auto, "rework the picture " + rework_marker,
+                                          creative_domain="image", ai_model=IMAGE_OFFERINGS["openai"][1],
+                                          image_urls=[f"/api/v1/assets/{picture}"] if picture else None)
+    record("auto-approval: auto submits an image-to-image rework without a card",
+           bool(rework) and rework.get("state") == "SUCCEEDED" and source == "policy"
+           and rework.get("capability") == "image-to-image" and _auto_card(api, auto) is None,
+           f"{why or (rework or {}).get('state')} {(rework or {}).get('capability')}, approval {source}")
+
+    # (c) The money the session accepted and the account usage agree with the steps.
+    status, auto_body = api.json("GET", f"/api/chat/sessions/{auto}")
+    status_usage, usage = api.json("GET", "/api/v1/account/usage")
+    estimated = auto_body.get("estimatedCredits", auto_body.get("estimated_credits")) if isinstance(auto_body, dict) else None
+    # The usage projection keeps either the legacy total or, when a step priced in
+    # its own unit, the per-unit price totals (and then drops the legacy field).
+    legacy = next((item.get("amount") for item in usage.get("price_totals") or []
+                   if item.get("unit") == "legacy.credits"), None)
+    recorded = usage.get("estimated_credits") if usage.get("estimated_credits") is not None else legacy
+    record("auto-approval: the session estimate and the account usage carry the steps",
+           isinstance(estimated, int) and estimated > 0 and status_usage == 200
+           and recorded is not None and float(recorded) >= estimated,
+           f"session estimated_credits={estimated}, usage estimated_credits={usage.get('estimated_credits')}, "
+           f"legacy.credits={legacy}, succeeded={usage.get('succeeded_tasks')}")
+
+    # (d) Extra credits: a step whose declared price includes an extra part (Tripo
+    # P2's standard texture, 100 + 10) and whose consent parameter therefore could
+    # ask for a card. Auto grants it with the step and records the quote.
+    extra = new_session(api)
+    marker = '[[fake:tool:create_model_3d {"prompt":"a wooden crate","model":"tripo-p2-text"}]]'
+    meshy_marker = '[[fake:tool:create_model_3d {"prompt":"a plain cube","model":"meshy-7.1"}]]'
+    base, why, source = agent_tool_turn(api, extra, "make a crate " + marker,
+                                        creative_domain="model-3d", ai_model=TRIPO_P2_TEXT_TO_3D)
+    detail = [item for item in _tool_results(work, "main", extra, "create_model_3d")
+              if item.get("task_id")]
+    quote = (detail[-1] if detail else {}).get("native_quote") or {}
+    task_quote = (base or {}).get("native_quote") or {}
+    record("auto-approval: auto grants extra credits without a card",
+           bool(base) and base.get("state") == "SUCCEEDED" and source == "policy"
+           and quote.get("total_amount") == "110" and quote.get("extra_amount") == "10"
+           and task_quote.get("total_amount") == "110" and _auto_card(api, extra) is None,
+           f"{why or (base or {}).get('state')}, approval {source}, quote "
+           f"base={quote.get('base_amount')} extra={quote.get('extra_amount')} total={quote.get('total_amount')}, "
+           f"task quote={task_quote.get('total_amount')}")
+
+    # (e) The same step under strict and under budget without a plan: a card, no
+    # Task, and approving the strict card runs exactly that step.
+    for label, session, mode in (("strict", strict, "manual"), ("budget", new_session(api), "budget")):
+        status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {approval_field: mode})
+        if status != 200:
+            record(f"auto-approval: {label} approval mode", False, f"PUT {status}")
+            continue
+        before = {task.get("id") for task in session_tasks(api, session)}
+        status, _ = _send_chat(api, session, {"content": "make a cube " + meshy_marker,
+                                              "creative_domain": "model-3d", "ai_model": MESHY_TEXT_TO_3D,
+                                              "domainModels": {"model-3d": MESHY_TEXT_TO_3D}})
+        card = None
+        end = time.time() + 45
+        while time.time() < end and card is None:
+            card = _auto_card(api, session)
+            if card is None:
+                time.sleep(0.4)
+        new_tasks = [task for task in session_tasks(api, session) if task.get("id") not in before]
+        record(f"auto-approval: {label} raises a card and submits nothing",
+               status in (200, 201, 202) and card is not None and not new_tasks,
+               f"send {status}, card={bool(card)}, new tasks "
+               f"{[(t.get('capability'), t.get('state')) for t in new_tasks]}")
+        if label != "strict" or not card:
+            continue
+        status, decision = api.json("PUT", f"/api/v1/tasks/grants/{card['request_id']}",
+                                    decision_body(api, "approve"))
+        task_id = decision.get("task_id")
+        if status != 200 or not task_id:
+            record("auto-approval: the strict card runs its step once approved", False,
+                   f"approve {status} {json.dumps(decision, ensure_ascii=False)[:200]}")
+            continue
+        task = wait_task(api, task_id)
+        record("auto-approval: the strict card runs its step once approved",
+               task.get("state") == "SUCCEEDED", f"task {task.get('state')}")
+
+    # (f) One turn, 21 paid calls: the Schema's 20 pass and the 21st is refused
+    # with the Schema sentence, without a Task.
+    stress = new_session(api)
+    markers = " ".join(
+        '[[fake:tool:create_model_3d {"prompt":"a plain cube %d","model":"meshy-7.1"}]]' % index
+        for index in range(1, 22))
+    ok, why = _auto_turn(api, stress, "make twenty-one cubes " + markers,
+                         creative_domain="model-3d", ai_model=MESHY_TEXT_TO_3D,
+                         domainModels={"model-3d": MESHY_TEXT_TO_3D})
+    contents = _tool_message_contents(work, "main", stress, "create_model_3d")
+    submitted = []
+    for content in contents:
+        try:
+            payload = json.loads(content)
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("task_id"):
+            submitted.append(payload["task_id"])
+    refused = [content for content in contents if content.strip() == limit_text]
+    stress_tasks = [task for task in session_tasks(api, stress) if task.get("capability") == "text-to-3d"]
+    record("auto-approval: the 21st paid call of one turn is refused with the Schema sentence",
+           ok and len(submitted) == 20 and len(refused) == 1 and len(stress_tasks) == 20
+           and _auto_card(api, stress) is None,
+           f"{why or 'turn finished'}, receipts={len(submitted)}, refusals={len(refused)}, "
+           f"tasks={len(stress_tasks)}, pending={_auto_card(api, stress) is not None}")
 
 def refetch_delivers(api, task, offerings, offering):
     """The free path after an expired URL: POST the Task's refetch, wait for the new
@@ -5510,12 +5734,11 @@ def _processing_plans(work, stack, session):
     return plans
 
 
-def _tool_results(work, stack, session, tool_name):
-    """JSON tool results the Agent received for one tool, oldest first.
-
-    They live in the persisted chat checkpoint's completed messages; the
-    public messages wire carries only the call summary. This reads the same
-    server-side copy the Agent sees, never the processing-plans table."""
+def _tool_message_contents(work, stack, session, tool_name):
+    """The raw content of every tool message the Agent received for one tool,
+    oldest first. Unlike _tool_results this keeps a plain-text receipt (a refusal
+    the Schema words as a sentence), which is what the per-turn generation limit
+    returns. Reads the same persisted server-side checkpoint the Agent sees."""
     import sqlite3
     try:
         db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
@@ -5525,7 +5748,7 @@ def _tool_results(work, stack, session, tool_name):
         db.close()
     except sqlite3.Error:
         return []
-    results, seen = [], set()
+    contents = []
     for (checkpoint_json,) in rows:
         try:
             checkpoint = json.loads(checkpoint_json or "{}")
@@ -5536,17 +5759,28 @@ def _tool_results(work, stack, session, tool_name):
         for message in checkpoint.get("completed") or []:
             if message.get("Role") != "tool" or calls.get(message.get("ToolCallID")) != tool_name:
                 continue
-            content = message.get("Content") or ""
-            if content in seen:
-                continue
-            try:
-                payload = json.loads(content)
-            except ValueError:
-                continue
-            if not isinstance(payload, dict):
-                continue
-            seen.add(content)
-            results.append(payload)
+            contents.append(message.get("Content") or "")
+    return contents
+
+
+def _tool_results(work, stack, session, tool_name):
+    """JSON tool results the Agent received for one tool, oldest first.
+
+    They live in the persisted chat checkpoint's completed messages; the
+    public messages wire carries only the call summary. This reads the same
+    server-side copy the Agent sees, never the processing-plans table."""
+    results, seen = [], set()
+    for content in _tool_message_contents(work, stack, session, tool_name):
+        if content in seen:
+            continue
+        try:
+            payload = json.loads(content)
+        except ValueError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        seen.add(content)
+        results.append(payload)
     return results
 
 
@@ -7860,7 +8094,7 @@ def scenario_asset_list_review(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -7886,7 +8120,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "visual-anchors", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -7921,6 +8155,8 @@ def main():
                 scenario_image_self_check(api, offerings, work)
             if "three-view" in selected:
                 scenario_three_view(work, api, offerings)
+            if "auto-approval" in selected:
+                scenario_auto_approval(work, api, offerings)
             if "plan-checkpoint" in selected:
                 scenario_plan_checkpoint(work, api, offerings)
             if "concept-candidates" in selected:
