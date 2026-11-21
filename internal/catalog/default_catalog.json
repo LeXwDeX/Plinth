@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-21.407-380-433.1",
+    "revision": "2026-11-21.407-380-433-330-445-410.1",
     "terminology": {
       "user_facing": [
         {
@@ -2168,6 +2168,8 @@
           "project_presence": "/api/v1/projects/{projectID}/presence",
           "project_asset_list_run": "/api/v1/projects/{projectID}/asset-lists/{listID}/run",
           "project_asset_list_item": "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}",
+          "project_asset_list_item_steps": "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}/steps",
+          "chat_session_steps": "/api/v1/chat/sessions/{sessionID}/steps",
           "chat_session_project": "/api/v1/chat/sessions/{sessionID}/project",
           "client_errors": "/api/v1/client-errors",
           "chat_session_approval": "/api/v1/chat/sessions/{sessionID}/approval",
@@ -2931,7 +2933,7 @@
       "ui.asset_list.run_running": "制作中",
       "ui.asset_list.run_paused_presence": "用户离开，已暂停",
       "ui.asset_list.run_paused_user": "已暂停",
-      "ui.asset_list.run_paused_step_cap": "达到步数上限，已暂停",
+      "ui.asset_list.run_paused_step_cap": "清单项步数用完，已暂停",
       "ui.asset_list.run_paused_failure": "执行失败，已暂停",
       "ui.asset_list.run_stopped": "已停止",
       "ui.asset_list.run_completed": "已全部完成",
@@ -2978,6 +2980,17 @@
       "ui.asset_list.board.steps_3d": "其中 3D {steps} 步",
       "ui.asset_list.board.steps_capped": "已用 {used} / {cap} 步",
       "ui.asset_list.board.steps_unknown": "尚无步数记录",
+      "ui.asset_list.board.steps_exhausted": "步数用完",
+      "ui.asset_list.steps.extend": "再给几步",
+      "ui.asset_list.steps.extend_title": "给「{name}」追加 3D 步数",
+      "ui.asset_list.steps.extend_description": "本项已用 {used} / {limit} 步。追加的步数只给这一项，打回重做时也不会清零。",
+      "ui.asset_list.steps.extend_amount": "追加步数",
+      "ui.asset_list.steps.extend_hint": "每次 1 到 {maximum} 步，一个资产最多追加 {total_maximum} 步。",
+      "ui.asset_list.steps.extend_confirm": "追加",
+      "ui.asset_list.steps.extend_cancel": "取消",
+      "ui.asset_list.steps.extend_success": "已追加到 {extra} 步，本项上限现在是 {limit} 步。",
+      "ui.asset_list.steps.extend_failed": "追加步数失败，请刷新后重试。",
+      "ui.asset_list.steps.extend_conflict": "追加步数已被别处修改，请刷新后重试。",
       "ui.asset_list.board.round": "第 {round} 版",
       "ui.asset_list.board.preview_3d": "3D 预览",
       "ui.asset_list.board.preview_close": "收起预览",
@@ -4795,6 +4808,7 @@
         "ui.step_policy.error": "保存失败：{reason}",
         "ui.step_policy.load_failed": "读取 3D 步数设置失败：{reason}",
         "ui.step_policy.loading": "正在读取…",
+        "ui.step_policy.session_steps": "本会话已用 {used} / {limit} 步",
         "ui.studio.chat.queued": "排队中",
         "ui.studio.chat.queued_note": "上一步完成后自动发送",
         "ui.studio.chat.queued_cancel": "取消排队",
@@ -5866,6 +5880,7 @@
       ],
       "default_mode": {"list": "agent", "mcp": "agent"},
       "cap": {"default": 20, "minimum": 1, "maximum": 200},
+      "extra_steps": {"default": 5, "maximum": 50, "total_maximum": 200},
       "counted_capabilities": [
         "text-to-3d",
         "image-to-3d",
@@ -5905,7 +5920,10 @@
         "guidance": "判断指引：结果已经达标就停，交付当前结果；未达标时先看有没有补救路线、补救要几步、余额够不够；补救无望或不值得时停下，如实告诉用户哪里没达标、为什么停，不要为了凑结果反复重做。界面按步数显示进度，不按积分。"
       },
       "messages": {
-        "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。"
+        "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。",
+        "extra_steps_limit": "每个资产最多追加 {maximum} 步，这次要求 {extra} 步；不能再多了。",
+        "extra_steps_single_limit": "一次最多追加 {maximum} 步。",
+        "extra_steps_unavailable": "这个资产还没有开始制作，现在不能追加步数。"
       },
       "result": {
         "schema": {
@@ -5922,7 +5940,9 @@
       },
       "audit": {
         "update_action": "set_step_policy",
-        "resource_type": "account_step_policy"
+        "resource_type": "account_step_policy",
+        "extra_steps_action": "add_step_extra",
+        "extra_steps_resource_type": "asset_list_item_steps"
       }
     },
     "access_keys": {
@@ -15759,6 +15779,10 @@
         "label": "设置 3D 步数模式"
       },
       {
+        "value": "add_step_extra",
+        "label": "追加 3D 步数"
+      },
+      {
         "value": "create_access_key",
         "label": "创建访问 Key"
       },
@@ -16526,10 +16550,12 @@
           "transport": "local",
           "connection_ref": "workspace-read",
           "protocol_version": "2026-07-28",
+          "default_enabled": false,
           "tools": [
             {
               "name": "mcp_list_offerings",
               "remote_name": "mcp_list_offerings",
+              "duplicates": "list_offerings",
               "description": "查询可用生成与处理服务。reference_image_max 是服务可接受参考图张数的只读字段；Schema 未声明正上限时字段缺席，表示未知，不能当成 1。比较未选模型的上限前先查询本列表；不要从已选模型或工具说明推断，也不要自行切换已选模型。",
               "parameters": {
                 "type": "object",
@@ -16592,6 +16618,7 @@
             {
               "name": "mcp_get_task_assets",
               "remote_name": "mcp_get_task_assets",
+              "duplicates": "get_task",
               "description": "查询自己的任务产物",
               "parameters": {
                 "type": "object",
@@ -16676,6 +16703,7 @@
         "mcp_protocol": "MCP 协议",
         "mcp_unavailable": "当前接线不可执行",
         "mcp_tools": "MCP 工具",
+        "mcp_default_off": "默认不启用（与内置工具重复）",
         "configuration_source": "配置来源",
         "image_to_image_template": "图生图模板（保留 {user_input} 与 {skill_prompt}）",
         "invalid_configuration": "配置文档无效",
@@ -17035,7 +17063,7 @@
             "ui.asset_list.run_running": "Producing",
             "ui.asset_list.run_paused_presence": "Paused: you left",
             "ui.asset_list.run_paused_user": "Paused",
-            "ui.asset_list.run_paused_step_cap": "Paused: step limit reached",
+            "ui.asset_list.run_paused_step_cap": "Paused: an item used up its steps",
             "ui.asset_list.run_paused_failure": "Paused after a failure",
             "ui.asset_list.run_stopped": "Stopped",
             "ui.asset_list.run_completed": "All done",
@@ -17082,6 +17110,17 @@
             "ui.asset_list.board.steps_3d": "{steps} of them 3D",
             "ui.asset_list.board.steps_capped": "{used} / {cap} steps used",
             "ui.asset_list.board.steps_unknown": "No steps recorded",
+            "ui.asset_list.board.steps_exhausted": "Steps used up",
+            "ui.asset_list.steps.extend": "Give it more steps",
+            "ui.asset_list.steps.extend_title": "Give \"{name}\" more 3D steps",
+            "ui.asset_list.steps.extend_description": "This item used {used} of {limit} steps. The extra steps belong to this item and survive a return for rework.",
+            "ui.asset_list.steps.extend_amount": "Extra steps",
+            "ui.asset_list.steps.extend_hint": "1 to {maximum} per submission, up to {total_maximum} for one asset.",
+            "ui.asset_list.steps.extend_confirm": "Add",
+            "ui.asset_list.steps.extend_cancel": "Cancel",
+            "ui.asset_list.steps.extend_success": "Extra steps are now {extra}; the item's limit is {limit}.",
+            "ui.asset_list.steps.extend_failed": "Adding steps failed. Refresh and try again.",
+            "ui.asset_list.steps.extend_conflict": "The extra steps changed elsewhere. Refresh and try again.",
             "ui.asset_list.board.round": "Version {round}",
             "ui.asset_list.board.preview_3d": "3D preview",
             "ui.asset_list.board.preview_close": "Close preview",
@@ -18903,6 +18942,7 @@
             "ui.step_policy.error": "Could not save: {reason}",
             "ui.step_policy.load_failed": "Could not load the 3D step settings: {reason}",
             "ui.step_policy.loading": "Loading…",
+            "ui.step_policy.session_steps": "This session used {used} of {limit} steps",
             "ui.studio.chat.queued": "Queued",
             "ui.studio.chat.queued_note": "Sends automatically when the previous step finishes",
             "ui.studio.chat.queued_cancel": "Cancel queued message",
@@ -20496,6 +20536,7 @@
             "agent_configuration.ui.mcp_protocol": "MCP protocol",
             "agent_configuration.ui.mcp_unavailable": "The current wiring cannot be executed",
             "agent_configuration.ui.mcp_tools": "MCP tools",
+            "agent_configuration.ui.mcp_default_off": "Off by default (repeats built-in tools)",
             "agent_configuration.ui.configuration_source": "Configuration source",
             "agent_configuration.ui.image_to_image_template": "Image-to-image template (keep {user_input} and {skill_prompt})",
             "agent_configuration.ui.invalid_configuration": "Invalid configuration document",
@@ -20588,6 +20629,7 @@
             "audit_actions[value=promote_project_asset].label": "Promote project asset",
             "audit_actions[value=set_production_brief].label": "Set production brief",
             "audit_actions[value=set_step_policy].label": "Set 3D step mode",
+ "audit_actions[value=add_step_extra].label": "Add 3D steps",
             "audit_actions[value=create_access_key].label": "Create access key",
             "audit_actions[value=revoke_access_key].label": "Revoke access key",
             "access_keys.scopes[value=read].label": "Read (query and download)",
@@ -20758,6 +20800,9 @@
             "step_policy.modes[value=unlimited].label": "Unlimited steps",
             "step_policy.modes[value=cap].label": "Limit steps",
             "step_policy.messages.cap_reached": "This asset has used all of its 3D steps ({used} used, cap {cap}); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in their account settings to continue.",
+            "step_policy.messages.extra_steps_limit": "One asset may be granted at most {maximum} extra steps; this request asks for {extra}. That is the most it can take.",
+            "step_policy.messages.extra_steps_single_limit": "At most {maximum} steps may be added in one submission.",
+            "step_policy.messages.extra_steps_unavailable": "This asset has not started yet, so it cannot be given more steps.",
 "step_policy.prompt.context_template": "\n\n[3D steps] This session's approval mode is \"3D steps\" (assigned by the server; the person cannot switch it). {mode_rule}\n{usage}\n{balances}\n{costs}\n{guidance}",
             "step_policy.prompt.mode_rules[id=agent].rule": "Current mode \"{mode}\": you manage the steps yourself; the platform sets no hard cap. The three 3D providers' credit balances are the whole pool; decide whether to continue by whether the result meets the bar.",
             "step_policy.prompt.mode_rules[id=unlimited].rule": "Current mode \"{mode}\": 3D steps are not limited; the platform never refuses a new step because of the step count.",

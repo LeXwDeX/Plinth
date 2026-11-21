@@ -1068,6 +1068,12 @@ func cloneAgentConfiguration(source AgentConfigurationSchema) AgentConfiguration
 	for i, preset := range source.MCPPresets {
 		result.MCPPresets[i] = preset
 		result.MCPPresets[i].ToolNames = append([]string(nil), preset.ToolNames...)
+		// The default is a pointer so an absent declaration differs from an
+		// explicit false (#445); copy the value so callers never share it.
+		if preset.DefaultEnabled != nil {
+			enabled := *preset.DefaultEnabled
+			result.MCPPresets[i].DefaultEnabled = &enabled
+		}
 		result.MCPPresets[i].Tools = make([]AgentMCPToolSchema, len(preset.Tools))
 		for j, tool := range preset.Tools {
 			tool.Parameters = append(json.RawMessage(nil), tool.Parameters...)

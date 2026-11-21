@@ -97,11 +97,74 @@ export function checkActualText(value: unknown): string {
   }
 }
 
-/** The item's step standing; null until a snapshot exists. */
+/** Whether the item plans or has taken any 3D step; a pure 2D item shows no step line. */
+export function itemShowsSteps(item: AssetListBoardItem): boolean {
+  if (item.planned_model3d_step_count > 0) return true;
+  if ((item.steps?.used ?? 0) > 0) return true;
+  return (item.review?.steps?.model3d ?? 0) > 0;
+}
+
+/** The item's step standing: the live asset reading first, then the review snapshot. */
 export function boardSteps(item: AssetListBoardItem): AssetListBoardSteps | null {
+  const live = item.steps;
+  if (live && typeof live.used === 'number') {
+    return {
+      used: live.used,
+      model3d: item.review?.steps?.model3d ?? 0,
+      cap: live.cap,
+      extra: live.extra,
+      mode: live.mode,
+    };
+  }
   const steps = item.review?.steps;
   if (!steps || typeof steps.used !== 'number') return null;
   return steps;
+}
+
+/** The item's step limit under the cap mode: the owner's cap plus the grant. */
+export function stepLimit(steps: AssetListBoardSteps | null): number {
+  if (!steps || !steps.cap) return 0;
+  return steps.cap + (steps.extra ?? 0);
+}
+
+/** Whether the item used up its steps (the runner's step_cap block, or used >= limit). */
+export function stepsExhausted(item: AssetListBoardItem): boolean {
+  if (item.block === 'step_cap') return true;
+  const steps = boardSteps(item);
+  const limit = stepLimit(steps);
+  return limit > 0 && Boolean(steps) && (steps as AssetListBoardSteps).used >= limit;
+}
+
+/**
+ * #330 step 5C: the extra-step bounds the Schema declares, or null when this
+ * deployment cannot extend an asset at all (no step policy section).
+ */
+export function stepExtraBounds(schema: ProductSchema): { default: number; maximum: number; totalMaximum: number } | null {
+  const extra = schema.step_policy?.extra_steps;
+  if (!extra) return null;
+  return { default: extra.default, maximum: extra.maximum, totalMaximum: extra.total_maximum };
+}
+
+/**
+ * #330 step 5C: the extra-step bounds an item's route may use, or null when
+ * this deployment cannot extend an item (no step policy, no list-item route).
+ */
+export function stepExtraConfig(schema: ProductSchema): { default: number; maximum: number; totalMaximum: number } | null {
+  if (!schema.runtime.http.routes.project_asset_list_item_steps) return null;
+  return stepExtraBounds(schema);
+}
+
+/**
+ * #330 step 5C: whether the board offers "give it more steps" for this item.
+ * Only a capped asset with a running sub-session can use them, and only once
+ * the item has used its limit; the button never appears for 2D-only items or
+ * the agent/unlimited modes.
+ */
+export function canExtendSteps(schema: ProductSchema, item: AssetListBoardItem): boolean {
+  if (!stepExtraConfig(schema) || !item.session_id) return false;
+  const steps = boardSteps(item);
+  if (!steps || steps.mode !== 'cap') return false;
+  return stepsExhausted(item);
 }
 
 /** The single-slot viewer key of one item; the store keeps one viewer alive at a time. */

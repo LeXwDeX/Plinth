@@ -67,9 +67,11 @@ func stepPolicy() approvalpolicy.Policy {
 	return approvalpolicy.New("manual", []string{"auto", "manual"},
 		[]string{"text-to-3d", "image-to-3d", "retexture"}, []string{"text-to-image", "image-to-3d", "text-to-3d"}).
 		WithSteps(approvalpolicy.StepsPolicy{
-			Counted:     []string{"text-to-3d", "image-to-3d", "retexture"},
-			DefaultList: approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
-			DefaultMCP:  approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
+			Counted:           []string{"text-to-3d", "image-to-3d", "retexture"},
+			DefaultList:       approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
+			DefaultMCP:        approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
+			ExtraMaximum:      50,
+			ExtraTotalMaximum: 200,
 		})
 }
 
@@ -335,5 +337,87 @@ func TestStepCapReachedIsOnlyAPolicyDenial(t *testing.T) {
 		if got := (Grant{Status: tc.status, DecidedBy: tc.by}).StepCapReached(); got != tc.want {
 			t.Errorf("%s: %v", name, got)
 		}
+	}
+}
+
+// fakeExtraStore is the steps fixture plus the per-asset extra-step write.
+type fakeExtraStore struct {
+	*fakeStepStore
+	change StepExtraChange
+	err    error
+	target int
+	calls  int
+}
+
+func (f *fakeExtraStore) SetSessionExtraSteps(_ context.Context, _, _ string, _ StepRequest, target int) (StepExtraChange, error) {
+	f.calls++
+	f.target = target
+	if f.err != nil {
+		return StepExtraChange{}, f.err
+	}
+	return f.change, nil
+}
+
+// #330 step 5C: SetExtraSteps validates the request, resolves the asset's
+// entry and hands the whole target to the data layer; the before/after stand
+// is what the caller audits.
+func TestSetExtraStepsResolvesTheEntryAndReturnsTheChange(t *testing.T) {
+	ctx := context.Background()
+	store, modes, service := stepFixture("text-to-3d")
+	extra := &fakeExtraStore{fakeStepStore: store, change: StepExtraChange{
+		Previous: StepSummary{Entry: "list", Mode: approvalpolicy.StepModeCap, Cap: 1, Used: 1},
+		Current:  StepSummary{Entry: "list", Mode: approvalpolicy.StepModeCap, Cap: 1, Extra: 2, Used: 1},
+	}}
+	service.Grants = extra
+	modes.entry = approvalpolicy.StepEntryList
+	change, err := service.SetExtraSteps(ctx, "owner-a", "session-a", 2)
+	if err != nil || extra.calls != 1 || extra.target != 2 || change.Current.Extra != 2 || change.Previous.Extra != 0 {
+		t.Fatalf("change = %+v calls=%d target=%d err=%v", change, extra.calls, extra.target, err)
+	}
+	for name, call := range map[string]func() error{
+		"negative target": func() error { _, err := service.SetExtraSteps(ctx, "owner-a", "session-a", -1); return err },
+		"target above total": func() error {
+			_, err := service.SetExtraSteps(ctx, "owner-a", "session-a", stepPolicy().Steps.ExtraTotalMaximum+1)
+			return err
+		},
+		"blank owner": func() error { _, err := service.SetExtraSteps(ctx, "", "session-a", 1); return err },
+	} {
+		if err := call(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// A plain session (no entry) and a deployment without the policy or the
+	// extra store cannot be extended.
+	modes.entry = ""
+	if _, err := service.SetExtraSteps(ctx, "owner-a", "session-a", 1); !errors.Is(err, ErrExtraStepsUnavailable) {
+		t.Fatalf("plain session: %v", err)
+	}
+	withoutPolicy := service
+	withoutPolicy.Policy = approvalpolicy.New("manual", []string{"manual"}, nil, nil)
+	if _, err := withoutPolicy.SetExtraSteps(ctx, "owner-a", "session-a", 1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("no policy: %v", err)
+	}
+	plainStore := Service{Grants: policyFixture("text-to-3d"), Prepared: store, Policy: stepPolicy(), Modes: modes}
+	modes.entry = approvalpolicy.StepEntryList
+	if _, err := plainStore.SetExtraSteps(ctx, "owner-a", "session-a", 1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("no extra store: %v", err)
+	}
+	// The data layer's refusals pass through unchanged.
+	extra.err = ErrExtraStepsLimit
+	if _, err := service.SetExtraSteps(ctx, "owner-a", "session-a", 3); !errors.Is(err, ErrExtraStepsLimit) {
+		t.Fatalf("store error: %v", err)
+	}
+}
+
+// A cap limit of cap+extra is what the Agent is told and what the tool result
+// carries: the numbers agree with the decision.
+func TestStepSummaryLimitAndRemainingIncludeTheGrant(t *testing.T) {
+	summary := StepSummary{Mode: approvalpolicy.StepModeCap, Cap: 20, Extra: 5, Used: 22}
+	if summary.Limit() != 25 || summary.Remaining() != 3 {
+		t.Fatalf("limit=%d remaining=%d", summary.Limit(), summary.Remaining())
+	}
+	over := StepSummary{Mode: approvalpolicy.StepModeCap, Cap: 2, Extra: 1, Used: 9}
+	if over.Remaining() != 0 {
+		t.Fatalf("remaining below zero: %d", over.Remaining())
 	}
 }

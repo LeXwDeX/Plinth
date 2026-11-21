@@ -41,21 +41,41 @@ type AgentConfigurationLimits struct {
 	MaxSkillPromptCharacters int `json:"max_skill_prompt_characters"`
 }
 type AgentMCPPresetSchema struct {
-	ID              string               `json:"id"`
-	Name            string               `json:"name"`
-	Description     string               `json:"description"`
-	ToolNames       []string             `json:"tool_names"`
-	Transport       string               `json:"transport"`
-	ConnectionRef   string               `json:"connection_ref"`
-	ProtocolVersion string               `json:"protocol_version"`
-	Tools           []AgentMCPToolSchema `json:"tools"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	ToolNames       []string `json:"tool_names"`
+	Transport       string   `json:"transport"`
+	ConnectionRef   string   `json:"connection_ref"`
+	ProtocolVersion string   `json:"protocol_version"`
+	// DefaultEnabled decides whether a fresh Agent configuration starts with
+	// this preset enabled (#445). Absent (nil) keeps the historical behavior of
+	// enabling every declared preset, so an external Catalog written before
+	// the field keeps its meaning; the shipped Catalog declares false for a
+	// preset whose tools repeat built-in Agent tools.
+	DefaultEnabled *bool                `json:"default_enabled,omitempty"`
+	Tools          []AgentMCPToolSchema `json:"tools"`
 }
+
+// EnabledByDefault is the preset default a new Agent configuration starts
+// from. A preset that does not declare the field stays enabled, as it was
+// before #445.
+func (p AgentMCPPresetSchema) EnabledByDefault() bool {
+	return p.DefaultEnabled == nil || *p.DefaultEnabled
+}
+
 type AgentMCPToolSchema struct {
 	Name        string                  `json:"name"`
 	RemoteName  string                  `json:"remote_name"`
 	Description string                  `json:"description"`
 	Parameters  json.RawMessage         `json:"parameters"`
 	Execution   ChatToolExecutionSchema `json:"execution"`
+	// Duplicates names the built-in Agent tool whose read this MCP tool
+	// repeats, when the same Catalog declares both (#445). It is a Schema
+	// equivalence declaration, not execution policy: a preset that carries
+	// one may not be enabled by a default configuration, so a default session
+	// never offers two tools for the same read query.
+	Duplicates string `json:"duplicates,omitempty"`
 }
 type AgentMCPPolicySchema struct {
 	TimeoutMilliseconds int   `json:"timeout_milliseconds"`
@@ -142,6 +162,12 @@ func validateAgentConfigurationConnections(application ApplicationSchema) error 
 	for _, tool := range application.Chat.AgentTools {
 		names[tool.Name] = true
 	}
+	// builtIn is what an MCP tool may declare it repeats (#445). It is the
+	// built-in declaration only; one MCP tool cannot mirror another.
+	builtIn := make(map[string]bool, len(names))
+	for name := range names {
+		builtIn[name] = true
+	}
 	for _, preset := range schema.MCPPresets {
 		for _, tool := range preset.Tools {
 			if names[tool.Name] {
@@ -152,6 +178,22 @@ func validateAgentConfigurationConnections(application ApplicationSchema) error 
 		if preset.Transport == "streamable_http" {
 			if _, found := schema.MCPConnections[preset.ConnectionRef]; !found {
 				return fmt.Errorf("MCP connection reference missing")
+			}
+		}
+	}
+	// A declared equivalence removes the tool from the default tool table:
+	// the built-in it repeats is already there. The two checks make that rule
+	// load-time, not a data preference of the shipped Catalog (#445).
+	for _, preset := range schema.MCPPresets {
+		for _, tool := range preset.Tools {
+			if tool.Duplicates == "" {
+				continue
+			}
+			if !builtIn[tool.Duplicates] {
+				return fmt.Errorf("MCP tool %q duplicates unknown built-in tool %q", tool.Name, tool.Duplicates)
+			}
+			if preset.EnabledByDefault() {
+				return fmt.Errorf("MCP preset %q repeats built-in tool %q and must not be enabled by default", preset.ID, tool.Duplicates)
 			}
 		}
 	}

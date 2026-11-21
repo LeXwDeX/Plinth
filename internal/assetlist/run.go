@@ -27,8 +27,9 @@ const (
 )
 
 // Run pause reasons. user is sticky until an explicit resume; presence clears
-// with a fresh heartbeat; step_cap needs the blocking item resolved first and
-// failure hands the decision to the person.
+// with a fresh heartbeat; step_cap holds while every remaining item waits at
+// the 3D step cap and no other item can progress (#330 §6); failure hands the
+// decision to the person.
 const (
 	PauseNone     = ""
 	PauseUser     = "user"
@@ -38,8 +39,10 @@ const (
 )
 
 // Item block values are the second axis of an item and never change its
-// state. awaiting_approval releases the parallel slot; step_cap pauses the
-// run; paused stays reserved for a later step.
+// state. awaiting_approval and step_cap release the parallel slot: the person
+// resolves them later and the scheduler keeps claiming other items. step_cap
+// is the "3D steps used up" marker of one item; it pauses the run only while
+// no other item can progress. paused stays reserved for a later step.
 const (
 	BlockNone             = ""
 	BlockAwaitingApproval = "awaiting_approval"
@@ -264,6 +267,10 @@ type RunStore interface {
 	// guard, VersionUnchecked skips it. It never cancels a bound Task.
 	SkipItem(ctx context.Context, ownerID, listID, itemID, reason string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (Item, error)
+	// SetItemStepCapTurn records the turn the runner blocked at the 3D step
+	// cap (#330 step 5C). The item's next advance past that turn opens a fresh
+	// turn instead of re-evaluating the capped one. It bumps the item version.
+	SetItemStepCapTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemSession(ctx context.Context, ownerID, listID, itemID, sessionID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemNextActionAt(ctx context.Context, ownerID, listID, itemID string, nextActionAt time.Time, expectedVersion int64, at time.Time) (Item, error)
 	// RecordItemTurn stores the assistant message of a turn the server opened

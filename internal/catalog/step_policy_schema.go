@@ -38,6 +38,12 @@ type StepPolicySchema struct {
 	DefaultMode StepPolicyEntryModes `json:"default_mode"`
 	// Cap bounds and defaults the number of 3D steps of one asset.
 	Cap StepPolicyCapSchema `json:"cap"`
+	// ExtraSteps declares how many additional steps a person may grant one
+	// asset (#330 step 5C). The grant is stored per asset (a chat session) and
+	// added to the cap only in the cap mode: SetSessionExtraSteps writes the
+	// target, Default is what the browser dialog starts with and Maximum what
+	// one write may add; TotalMaximum bounds the extra steps one asset keeps.
+	ExtraSteps StepPolicyExtraStepsSchema `json:"extra_steps"`
 	// CountedCapabilities lists the capabilities whose Tasks count as 3D steps.
 	// Server-side only.
 	CountedCapabilities []schemacontract.Capability `json:"counted_capabilities"`
@@ -77,6 +83,16 @@ type StepPolicyCapSchema struct {
 	Default int `json:"default"`
 	Minimum int `json:"minimum"`
 	Maximum int `json:"maximum"`
+}
+
+// StepPolicyExtraStepsSchema is application.step_policy.extra_steps (#330 step
+// 5C): the "give it a few more steps" grant of one asset. Default is the
+// dialog's initial amount; Maximum is the most one write may add on top of the
+// asset's current grant; TotalMaximum is the most extra steps one asset keeps.
+type StepPolicyExtraStepsSchema struct {
+	Default      int `json:"default"`
+	Maximum      int `json:"maximum"`
+	TotalMaximum int `json:"total_maximum"`
 }
 
 // StepPolicyPromptSchema is application.step_policy.prompt (#330): the
@@ -154,6 +170,15 @@ type StepPolicyMessagesSchema struct {
 	// CapReached is what the Agent reads when a 3D step is refused because the
 	// asset used all its steps. {used} and {cap} are the numbers.
 	CapReached string `json:"cap_reached"`
+	// ExtraStepsLimit refuses a grant above TotalMaximum: {maximum} is the
+	// bound and {extra} the grant the request asked for.
+	ExtraStepsLimit string `json:"extra_steps_limit"`
+	// ExtraStepsSingleLimit refuses one write that adds more than Maximum in a
+	// single call: {maximum} is the per-write bound.
+	ExtraStepsSingleLimit string `json:"extra_steps_single_limit"`
+	// ExtraStepsUnavailable refuses a grant for an item whose sub-session does
+	// not exist yet; there is no asset to extend.
+	ExtraStepsUnavailable string `json:"extra_steps_unavailable"`
 }
 
 // StepPolicyResultSchema is application.step_policy.result (#330 step 3B): the
@@ -170,18 +195,24 @@ type StepPolicyResultSchema struct {
 	Schema json.RawMessage `json:"schema"`
 }
 
-// StepPolicyAuditSchema declares the audit action recorded when a person
-// changes the setting.
+// StepPolicyAuditSchema declares the audit actions recorded when a person
+// changes the setting, and when a person grants one asset more steps.
 type StepPolicyAuditSchema struct {
 	UpdateAction string `json:"update_action"`
 	ResourceType string `json:"resource_type"`
+	// ExtraStepsAction and ExtraStepsResourceType name the audit entry of one
+	// asset's "give it a few more steps" write (#330 step 5C). ResourceID is
+	// the list item the person extended.
+	ExtraStepsAction       string `json:"extra_steps_action"`
+	ExtraStepsResourceType string `json:"extra_steps_resource_type"`
 }
 
 // PublicStepPolicySchema is the browser-visible part of application.step_policy:
-// the modes with their labels, the defaults and the cap range. The counted
-// capabilities and the server's messages stay server-side.
+// the modes with their labels, the defaults, the cap range and the extra-step
+// bounds. The counted capabilities and the server's messages stay server-side.
 type PublicStepPolicySchema struct {
-	Modes       []ValueLabel         `json:"modes"`
-	DefaultMode StepPolicyEntryModes `json:"default_mode"`
-	Cap         StepPolicyCapSchema  `json:"cap"`
+	Modes       []ValueLabel               `json:"modes"`
+	DefaultMode StepPolicyEntryModes       `json:"default_mode"`
+	Cap         StepPolicyCapSchema        `json:"cap"`
+	ExtraSteps  StepPolicyExtraStepsSchema `json:"extra_steps"`
 }

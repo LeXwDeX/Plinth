@@ -588,6 +588,19 @@ func (r *AssetListRunRepository) SetItemBlock(
 		`block = ?`, block)
 }
 
+// SetItemStepCapTurn records the turn the runner blocked at the 3D step cap
+// (#330 step 5C). The marker is consumed by the item's next advance after the
+// person grants more steps, so the same refusal is not judged again.
+func (r *AssetListRunRepository) SetItemStepCapTurn(
+	ctx context.Context,
+	ownerID, listID, itemID, assistantMessageID string,
+	expectedVersion int64,
+	at time.Time,
+) (assetlist.Item, error) {
+	return r.updateAssetListItem(ctx, ownerID, listID, itemID, expectedVersion, at,
+		`step_cap_turn_message_id = ?`, assistantMessageID)
+}
+
 func (r *AssetListRunRepository) SetItemSession(
 	ctx context.Context,
 	ownerID, listID, itemID, sessionID string,

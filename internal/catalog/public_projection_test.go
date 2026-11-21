@@ -66,12 +66,13 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"asset_list":          {"limits", "kinds", "routes", "states", "item_states", "presence", "review"},
 		"asset_list.limits":   {"max_lists_per_project", "draft_ttl_seconds", "name_max_length", "description_max_length", "max_references_per_item", "maximum_items_per_image", "minimum_crop_short_edge"},
 		"asset_list.presence": {"heartbeat_seconds"},
-		// #330: the browser sees the modes with their labels, the defaults and
-		// the cap range; the counted capabilities, the Agent-facing message and
-		// the audit declaration stay server-side.
-		"step_policy":              {"modes", "default_mode", "cap"},
+		// #330: the browser sees the modes with their labels, the defaults, the cap
+		// range and the extra-step bounds; the counted capabilities, the
+		// Agent-facing messages and the audit declaration stay server-side.
+		"step_policy":              {"modes", "default_mode", "cap", "extra_steps"},
 		"step_policy.default_mode": {"list", "mcp"},
 		"step_policy.cap":          {"default", "minimum", "maximum"},
+		"step_policy.extra_steps":  {"default", "maximum", "total_maximum"},
 		// #332: the browser builds the access key dialog from the limits,
 		// lifetimes and scope labels; the last-use interval, the server's
 		// messages and the audit declaration stay server-side.
