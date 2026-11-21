@@ -15,12 +15,15 @@ import (
 )
 
 // skillRunStepSeed describes one step of a SkillRun to seed: the phase it is in,
-// the state of the Task it is bound to ("" for none) and the status of its
-// grant ("" for none).
+// the state of the Task it is bound to ("" for none), the status of its grant
+// ("" for none) and, for a bound grant the step does not name yet (the lost
+// response or failed binding recovery state, #430), the state of the Task only
+// the grant names.
 type skillRunStepSeed struct {
-	phase     skillrun.StepPhase
-	taskState generation.TaskState
-	grant     executiongrant.Status
+	phase          skillrun.StepPhase
+	taskState      generation.TaskState
+	grant          executiongrant.Status
+	grantTaskState generation.TaskState
 }
 
 // seedSkillRun gives the session one SkillRun with the given steps. Every Task
@@ -39,27 +42,39 @@ func seedSkillRun(t *testing.T, r *Repository, ownerID, sessionID, runID string,
 		selected_offering_id, source_asset_id, idempotency_key, request_hash, created_at, updated_at)
 		VALUES (?, ?, ?, 'recipe', 'rev', 'hash', 'offering', 'asset', ?, 'request', ?, ?)`,
 		runID, ownerID, sessionID, "key-"+runID, stamp, stamp)
+	insertTask := func(id string, state generation.TaskState) {
+		t.Helper()
+		exec(`INSERT INTO generation_tasks (id, owner_id, capability, offering_json, input_json, request_hash,
+			idempotency_key, state, version, created_at, updated_at, session_id)
+			VALUES (?, ?, 'image-to-image', '{}', '{}', ?, ?, ?, 7, ?, ?, ?)`,
+			id, ownerID, "hash-"+id, "task-key-"+id, string(state), stamp, stamp, sessionID)
+	}
 	for ordinal, step := range steps {
 		key := fmt.Sprintf("%s-step-%d", runID, ordinal)
 		// The table's checks tie each phase to the identities it must carry.
-		var preparedID, preparedHash, taskID, grantID any
+		var preparedID, preparedHash, grantID any
 		if step.phase != skillrun.Planned {
 			preparedID, preparedHash = "prepared-"+key, "prepared-hash"
 		}
 		if step.phase == skillrun.GrantPending || step.phase == skillrun.TaskBound {
 			grantID = "grant-" + key
 		}
+		var taskID any
 		if step.taskState != "" {
 			taskID = "task-" + key
-			exec(`INSERT INTO generation_tasks (id, owner_id, capability, offering_json, input_json, request_hash,
-				idempotency_key, state, version, created_at, updated_at, session_id)
-				VALUES (?, ?, 'image-to-image', '{}', '{}', ?, ?, ?, 7, ?, ?, ?)`,
-				taskID, ownerID, "hash-"+key, "task-key-"+key, string(step.taskState), stamp, stamp, sessionID)
+			insertTask(taskID.(string), step.taskState)
 		}
 		if step.grant != "" {
 			var boundTask any
 			if step.grant == executiongrant.Bound {
+				// A step that has not bound its Task yet points only its grant
+				// at it: the submission was accepted but its response or the
+				// step's binding was lost.
 				boundTask = taskID
+				if boundTask == nil {
+					boundTask = "grant-task-" + key
+					insertTask(boundTask.(string), step.grantTaskState)
+				}
 			}
 			exec(`INSERT INTO execution_grants (request_id, owner_id, session_id, offering_id, offering_revision,
 				prepared_input_id, prepared_input_hash, idempotency_key, operation_id, status, task_id, source,
@@ -88,16 +103,25 @@ func countSkillRows(t *testing.T, r *Repository, sessionID string) (runs, steps 
 	return runs, steps
 }
 
-// A session with a SkillRun step that has work in flight (a human grant waiting
-// for its decision, or a Task that has not ended) is refused, and nothing is
-// lost by it. The bulk rows are deleted by transactions of their own, so the
-// refusal has to come before the first of them: a refused deletion changes
-// nothing (#384).
+// A session with a SkillRun step that has work in flight (a standing grant, or
+// a Task that has not ended) is refused, and nothing is lost by it. A paid
+// submission whose response or step binding was lost keeps its run: the grant
+// names the Task, which may already hold a result that must not disappear with
+// the session (#384, #430). The bulk rows are deleted by transactions of their
+// own, so the refusal has to come before the first of them: a refused deletion
+// changes nothing.
 func TestDeleteSessionWithASkillRunInFlightIsRefusedAndLosesNothing(t *testing.T) {
 	for name, step := range map[string]skillRunStepSeed{
-		"a Task still running":    {skillrun.TaskBound, generation.TaskRunning, ""},
-		"a Task still queued":     {skillrun.TaskBound, generation.TaskQueued, ""},
-		"a grant waiting for you": {skillrun.GrantPending, "", executiongrant.Pending},
+		"a Task still running": {phase: skillrun.TaskBound, taskState: generation.TaskRunning},
+		"a Task still queued":  {phase: skillrun.TaskBound, taskState: generation.TaskQueued},
+		"a grant waiting for you": {
+			phase: skillrun.GrantPending, grant: executiongrant.Pending},
+		"an approved paid step not submitted yet": {
+			phase: skillrun.GrantPending, grant: executiongrant.Approved},
+		"a paid Task whose step binding was lost": {
+			phase: skillrun.GrantPending, grant: executiongrant.Bound, grantTaskState: generation.TaskQueued},
+		"a paid Task already done but not recorded": {
+			phase: skillrun.GrantPending, grant: executiongrant.Bound, grantTaskState: generation.TaskSucceeded},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r, err := openTestRepository(filepath.Join(t.TempDir(), "chat.db"))
@@ -106,7 +130,7 @@ func TestDeleteSessionWithASkillRunInFlightIsRefusedAndLosesNothing(t *testing.T
 			}
 			defer r.Close()
 			seedBulkChatSession(t, r, "owner-a", "kept", 30, 100)
-			seedSkillRun(t, r, "owner-a", "kept", "run-1", skillRunStepSeed{skillrun.Planned, "", ""}, step)
+			seedSkillRun(t, r, "owner-a", "kept", "run-1", skillRunStepSeed{phase: skillrun.Planned}, step)
 			r.deleteBatchRows = 10
 			batches := 0
 			r.afterDeleteBatch = func() { batches++ }
@@ -144,16 +168,16 @@ func TestDeleteSessionTakesItsRestingSkillRunsWithIt(t *testing.T) {
 	defer r.Close()
 	seedBulkChatSession(t, r, "owner-a", "done", 30, 100)
 	seedSkillRun(t, r, "owner-a", "done", "run-done",
-		skillRunStepSeed{skillrun.TaskBound, generation.TaskSucceeded, ""},
-		skillRunStepSeed{skillrun.TaskBound, generation.TaskFailed, ""},
-		skillRunStepSeed{skillrun.TaskBound, generation.TaskCanceled, ""},
-		skillRunStepSeed{skillrun.GrantPending, "", executiongrant.Denied},
-		skillRunStepSeed{skillrun.Prepared, "", ""},
-		skillRunStepSeed{skillrun.Planned, "", ""},
+		skillRunStepSeed{phase: skillrun.TaskBound, taskState: generation.TaskSucceeded},
+		skillRunStepSeed{phase: skillrun.TaskBound, taskState: generation.TaskFailed},
+		skillRunStepSeed{phase: skillrun.TaskBound, taskState: generation.TaskCanceled},
+		skillRunStepSeed{phase: skillrun.GrantPending, grant: executiongrant.Denied},
+		skillRunStepSeed{phase: skillrun.Prepared},
+		skillRunStepSeed{phase: skillrun.Planned},
 	)
 	// Another session's SkillRun, even one in flight, is not touched.
 	seedBulkChatSession(t, r, "owner-a", "other", 3, 3)
-	seedSkillRun(t, r, "owner-a", "other", "run-other", skillRunStepSeed{skillrun.TaskBound, generation.TaskRunning, ""})
+	seedSkillRun(t, r, "owner-a", "other", "run-other", skillRunStepSeed{phase: skillrun.TaskBound, taskState: generation.TaskRunning})
 	type taskRow struct {
 		State   string
 		Version int
@@ -222,25 +246,29 @@ func TestPreflightSessionDeletionAgreesWithSkillStepInFlight(t *testing.T) {
 	}
 	defer r.Close()
 	cases := []skillRunStepSeed{
-		{skillrun.Planned, "", ""},
-		{skillrun.Prepared, "", ""},
-		{skillrun.GrantPending, "", executiongrant.Pending},
-		{skillrun.GrantPending, "", executiongrant.Denied},
-		{skillrun.GrantPending, "", executiongrant.Approved},
-		{skillrun.TaskBound, generation.TaskQueued, ""},
-		{skillrun.TaskBound, generation.TaskRunning, ""},
-		{skillrun.TaskBound, generation.TaskMaterializing, ""},
-		{skillrun.TaskBound, generation.TaskSucceeded, ""},
-		{skillrun.TaskBound, generation.TaskFailed, ""},
-		{skillrun.TaskBound, generation.TaskCanceled, ""},
-		{skillrun.TaskBound, generation.TaskRunning, executiongrant.Bound},
-		{skillrun.TaskBound, generation.TaskFailed, executiongrant.Bound},
+		{skillrun.Planned, "", "", ""},
+		{skillrun.Prepared, "", "", ""},
+		{skillrun.GrantPending, "", executiongrant.Pending, ""},
+		{skillrun.GrantPending, "", executiongrant.Denied, ""},
+		{skillrun.GrantPending, "", executiongrant.Approved, ""},
+		// A paid submission whose response or step binding was lost: the grant
+		// is bound and names the Task while the step still waits for it.
+		{skillrun.GrantPending, "", executiongrant.Bound, generation.TaskQueued},
+		{skillrun.GrantPending, "", executiongrant.Bound, generation.TaskSucceeded},
+		{skillrun.TaskBound, generation.TaskQueued, "", ""},
+		{skillrun.TaskBound, generation.TaskRunning, "", ""},
+		{skillrun.TaskBound, generation.TaskMaterializing, "", ""},
+		{skillrun.TaskBound, generation.TaskSucceeded, "", ""},
+		{skillrun.TaskBound, generation.TaskFailed, "", ""},
+		{skillrun.TaskBound, generation.TaskCanceled, "", ""},
+		{skillrun.TaskBound, generation.TaskRunning, executiongrant.Bound, ""},
+		{skillrun.TaskBound, generation.TaskFailed, executiongrant.Bound, ""},
 	}
 	for index, step := range cases {
 		session := fmt.Sprintf("session-%d", index)
 		seedBulkChatSession(t, r, "owner-a", session, 1, 1)
 		seedSkillRun(t, r, "owner-a", session, fmt.Sprintf("run-%d", index), step)
-		want := skillrun.Step{Phase: step.phase}.InFlight(step.taskState, step.grant == executiongrant.Pending)
+		want := skillrun.Step{Phase: step.phase}.InFlight(step.taskState, step.grant)
 		err := r.PreflightSessionDeletion(context.Background(), "owner-a", session)
 		switch {
 		case want && !errors.Is(err, chat.ErrSessionDeletionBlocked):
@@ -264,10 +292,10 @@ func TestDeleteProjectAndSessionFollowsTheSessionDeletionRules(t *testing.T) {
 	ctx := context.Background()
 	seedBulkChatSession(t, r, "owner-a", "busy", 30, 100)
 	seedOwningCanvasProject(t, r, "owner-a", "project-busy", "busy")
-	seedSkillRun(t, r, "owner-a", "busy", "run-busy", skillRunStepSeed{skillrun.TaskBound, generation.TaskRunning, ""})
+	seedSkillRun(t, r, "owner-a", "busy", "run-busy", skillRunStepSeed{phase: skillrun.TaskBound, taskState: generation.TaskRunning})
 	seedBulkChatSession(t, r, "owner-a", "owned", 30, 100)
 	seedOwningCanvasProject(t, r, "owner-a", "project-owned", "owned")
-	seedSkillRun(t, r, "owner-a", "owned", "run-owned", skillRunStepSeed{skillrun.TaskBound, generation.TaskSucceeded, ""})
+	seedSkillRun(t, r, "owner-a", "owned", "run-owned", skillRunStepSeed{phase: skillrun.TaskBound, taskState: generation.TaskSucceeded})
 	r.deleteBatchRows = 10
 	batches := 0
 	r.afterDeleteBatch = func() {

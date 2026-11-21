@@ -590,3 +590,138 @@ func TestRunSessionDeletionReportsWhatTheDeletionDid(t *testing.T) {
 		t.Fatalf("a deletion that removed the rows = %v, %v", deleted, err)
 	}
 }
+
+// preflightWindowRepository runs a hook inside PreflightSessionDeletion, the
+// window between the owner check and the deletion mark, and then refuses the
+// deletion as a session with a SkillRun in flight does.
+type preflightWindowRepository struct {
+	*memoryChatRepository
+	inside  func()
+	verdict error
+}
+
+func (r *preflightWindowRepository) PreflightSessionDeletion(context.Context, string, string) error {
+	if r.inside != nil {
+		r.inside()
+	}
+	return r.verdict
+}
+
+// A turn that finishes while the preflight is deciding must still finish: the
+// deletion mark is set only after the preflight passed, so a refusal does not
+// suppress the turn's finishing writes and leave it running forever (#430).
+func TestDeleteSessionRefusedInsideThePreflightWindowLeavesAFinishedTurnFinished(t *testing.T) {
+	repository := &preflightWindowRepository{
+		memoryChatRepository: newMemoryChatRepository(),
+		verdict:              chat.ErrSessionDeletionBlocked,
+	}
+	service := newChatService(t, repository)
+	agent := &lateWriteAgent{entered: make(chan struct{}), proceed: make(chan struct{})}
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service,
+		Schema:  configuredChatSchema(t),
+		Model:   "configured-model",
+		Agent:   agent,
+		Tools:   scriptedToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "draw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processDone := make(chan error, 1)
+	go func() {
+		processDone <- orchestrator.Process(ctx, chat.ProcessTurn{
+			OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: assistant.ID,
+		})
+	}()
+	<-agent.entered
+	repository.inside = func() {
+		close(agent.proceed)
+		select {
+		case err := <-processDone:
+			if err != nil {
+				t.Errorf("the turn finishing in the preflight window reported %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("the turn did not finish in the preflight window")
+		}
+	}
+	if err := service.DeleteSession(ctx, "owner-a", session.ID); !errors.Is(err, chat.ErrSessionDeletionBlocked) {
+		t.Fatalf("DeleteSession = %v, want ErrSessionDeletionBlocked", err)
+	}
+	if active, err := service.HasActiveTurn(ctx, "owner-a", session.ID); err != nil || active {
+		t.Fatalf("the surviving session is busy (active=%v err=%v): the finished turn was left running", active, err)
+	}
+	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[1].Content != "late text" {
+		t.Fatalf("messages after the refused deletion = %#v, want the finished reply", messages)
+	}
+}
+
+// A resumed turn must not wait for a restart when the queue is full: the
+// running row is returned to the queued state the waiting scanner reads, so
+// the next sweep enqueues it (#430).
+func TestResumeSessionReturnsAFullQueueTurnToTheScanner(t *testing.T) {
+	repository := newMemoryChatRepository()
+	service := newChatService(t, repository)
+	schema := configuredChatSchema(t)
+	schema.Agent.WorkerCount = 1
+	schema.Agent.QueueSize = 1
+	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
+		Service: service,
+		Schema:  schema,
+		Model:   "configured-model",
+		Agent:   &scriptedAgent{},
+		Tools:   scriptedToolExecutor{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant, err := service.StartTurn(ctx, chat.StartTurn{OwnerID: "owner-a", SessionID: session.ID, Content: "draw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.MarkTurnRunning(ctx, assistant.ID); err != nil {
+		t.Fatal(err)
+	}
+	// No worker runs in this test: the single queue slot stays occupied.
+	if err := orchestrator.Enqueue(chat.ProcessTurn{AssistantMessageID: "queue-filler"}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := service.RunSessionDeletion(ctx, "owner-a", session.ID, func(context.Context) (bool, error) {
+		return false, nil
+	})
+	if err != nil || deleted {
+		t.Fatalf("RunSessionDeletion = %v, %v, want the session to stay", deleted, err)
+	}
+	turn, err := service.GetTurn(ctx, "owner-a", session.ID, assistant.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.State != service.TurnQueuedState() {
+		t.Fatalf("the running turn left by a full queue is %q, want %q", turn.State, service.TurnQueuedState())
+	}
+	candidates, err := service.ListWakeCandidates(ctx, chat.TurnPageCursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].AssistantMessageID != assistant.ID {
+		t.Fatalf("the waiting scanner sees %#v, want the resumed turn", candidates)
+	}
+}

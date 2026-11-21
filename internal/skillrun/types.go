@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/harness"
 )
@@ -84,16 +85,28 @@ type Step struct {
 }
 
 // InFlight reports whether work is running on the step's behalf that deleting
-// its session would cut off (#384): a human grant still waiting for its
-// decision, or a bound Task that has not reached a terminal state. Every other
-// step is at rest: not started, prepared, denied, finished, or bound to a Task
-// that ended. A run is in flight when any of its steps is. The Generation Task
-// stays the only authority for the Task's state and the execution grant for the
-// grant's, so the caller passes what it read.
-func (step Step) InFlight(taskState generation.TaskState, grantPending bool) bool {
+// its session would cut off (#384, #430): a grant still standing between the
+// person's decision and the paid submission, or a bound Task that has not
+// reached a terminal state. Every other step is at rest: not started, prepared,
+// denied, finished, or bound to a Task that ended. A run is in flight when any
+// of its steps is. The Generation Task stays the only authority for the Task's
+// state and the execution grant for the grant's, so the caller passes what it
+// read.
+//
+// A grant_pending step whose grant is approved, claimed or bound still has its
+// submission ahead of it or behind an unknown result: the approval is paid
+// work, and a bound grant may name a Task whose response was lost before the
+// step learned its ID (recovery repairs the step from the grant). Deleting the
+// run there would discard a result that may already exist upstream.
+func (step Step) InFlight(taskState generation.TaskState, grantStatus executiongrant.Status) bool {
 	switch step.Phase {
 	case GrantPending:
-		return grantPending
+		switch grantStatus {
+		case executiongrant.Pending, executiongrant.Approved, executiongrant.Claimed, executiongrant.Bound:
+			return true
+		default:
+			return false
+		}
 	case TaskBound:
 		return !taskState.Terminal()
 	default:

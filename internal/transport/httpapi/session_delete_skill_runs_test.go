@@ -8,10 +8,12 @@ import (
 	"testing"
 )
 
-// seedSessionDeletionFixtures gives owner local-user four sessions with a
-// SkillRun each: two whose run has work in flight (a Task still running) and
-// two whose run is at rest (its Task succeeded). One of each is owned by a
-// canvas project, so both deletion routes are exercised.
+// seedSessionDeletionFixtures gives owner local-user five sessions with a
+// SkillRun each: two whose run has work in flight (a Task still running), one
+// whose paid submission was accepted but whose step never learned the Task
+// (the grant is bound and the recovered Task already succeeded), and two whose
+// run is at rest (its Task succeeded). One of each of the first two kinds is
+// owned by a canvas project, so both deletion routes are exercised.
 func seedSessionDeletionFixtures(t *testing.T, path string) {
 	t.Helper()
 	db, err := sql.Open("sqlite", path)
@@ -40,6 +42,30 @@ func seedSessionDeletionFixtures(t *testing.T, path string) {
 				'prepared-`+s+`','prepared-hash','grant-`+s+`','task-`+s+`','unreviewed')`,
 		)
 	}
+	// A paid Task whose submission response was lost: the grant is bound and
+	// names the Task, the step is still grant_pending without a Task, and the
+	// Task already succeeded (#430). Deleting this session used to discard the
+	// paid result the SkillRun recovers from.
+	statements = append(statements,
+		`INSERT INTO go_chat_sessions(id,owner_id,owner_name,title,created_at,updated_at)
+			VALUES ('recovering','local-user','Owner','recovering','`+stamp+`','`+stamp+`')`,
+		`INSERT INTO generation_tasks (id, owner_id, capability, offering_json, input_json, request_hash,
+			idempotency_key, state, version, created_at, updated_at, session_id)
+			VALUES ('task-recovering','local-user','image-to-image','{}','{}','hash-recovering','key-recovering','SUCCEEDED',1,'`+stamp+`','`+stamp+`','recovering')`,
+		`INSERT INTO skill_runs (id, owner_id, session_id, recipe_id, recipe_revision, recipe_hash,
+			selected_offering_id, source_asset_id, idempotency_key, request_hash, created_at, updated_at)
+			VALUES ('run-recovering','local-user','recovering','recipe','rev','hash','offering','asset','run-key-recovering','request','`+stamp+`','`+stamp+`')`,
+		`INSERT INTO execution_grants (request_id, owner_id, session_id, offering_id, offering_revision,
+			prepared_input_id, prepared_input_hash, idempotency_key, operation_id, status, task_id, source,
+			request_version, created_at, updated_at)
+			VALUES ('grant-recovering','local-user','recovering','offering','rev','prepared-recovering',
+			'prepared-hash','grant-key-recovering','operation-grant-recovering','bound','task-recovering',
+			'human_browser',1,'`+stamp+`','`+stamp+`')`,
+		`INSERT INTO skill_run_steps (run_id, ordinal, step_key, spec_json, phase, operation_id, idempotency_key,
+			plan_step_id, prepared_input_id, prepared_input_hash, grant_request_id, task_id, review)
+			VALUES ('run-recovering',0,'front','{}','grant_pending','operation-recovering','step-key-recovering',
+			'plan-recovering','prepared-recovering','prepared-hash','grant-recovering',NULL,'unreviewed')`,
+	)
 	for _, fixture := range []struct{ project, session string }{
 		{"project-busy", "canvas-busy"}, {"project-resting", "canvas-resting"},
 	} {
@@ -92,6 +118,7 @@ func TestDeletingASessionWithSkillRunWorkInFlightAnswers409WithTheSchemaText(t *
 	for _, route := range []struct{ name, target string }{
 		{"chat session", "/api/chat/sessions/busy"},
 		{"canvas project", "/api/canvas/projects/project-busy"},
+		{"chat session with a lost paid binding", "/api/chat/sessions/recovering"},
 	} {
 		t.Run(route.name, func(t *testing.T) {
 			for _, locale := range []struct{ accept, want string }{{"", zh}, {"zh-CN", zh}, {"en-US", en}} {
@@ -105,8 +132,9 @@ func TestDeletingASessionWithSkillRunWorkInFlightAnswers409WithTheSchemaText(t *
 			}
 		})
 	}
-	// The refusals changed nothing: both sessions are still there.
-	for _, target := range []string{"/api/chat/sessions/busy", "/api/chat/sessions/canvas-busy"} {
+	// The refusals changed nothing: the sessions are still there, including the
+	// one whose paid result the SkillRun still has to record.
+	for _, target := range []string{"/api/chat/sessions/busy", "/api/chat/sessions/canvas-busy", "/api/chat/sessions/recovering"} {
 		request := httptest.NewRequest(http.MethodGet, target, nil)
 		request.Header.Set("X-User-ID", "local-user")
 		response := httptest.NewRecorder()

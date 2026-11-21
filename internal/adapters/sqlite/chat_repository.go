@@ -865,10 +865,12 @@ func (r *Repository) drainSessionBulkRows(ctx context.Context, sessionID string)
 }
 
 // sessionSkillRunInFlight finds a step of the session's SkillRuns that has work
-// in flight: a human grant still waiting for its decision, or a bound Task that
-// has not reached a terminal state. It is skillrun.Step.InFlight as one query
-// (a test holds the two together), and it reads the Task and the grant, the
-// only authorities for their states, without writing either.
+// in flight: a grant still standing between the person's decision and the paid
+// submission (pending, approved, claimed, or bound while the step has not
+// recorded its Task), or a bound Task that has not reached a terminal state. It
+// is skillrun.Step.InFlight as one query (a test holds the two together), and
+// it reads the Task and the grant, the only authorities for their states,
+// without writing either.
 const sessionSkillRunInFlight = `
 	SELECT 1
 	FROM skill_runs sr
@@ -876,7 +878,7 @@ const sessionSkillRunInFlight = `
 	LEFT JOIN generation_tasks t ON t.id = ss.task_id
 	LEFT JOIN execution_grants g ON g.request_id = ss.grant_request_id
 	WHERE sr.owner_id = ? AND sr.session_id = ?
-	  AND ((ss.phase = ? AND g.status = ?)
+	  AND ((ss.phase = ? AND g.status IN (?, ?, ?, ?))
 	    OR (ss.phase = ? AND COALESCE(t.state, '') NOT IN (?, ?, ?)))
 	LIMIT 1`
 
@@ -888,7 +890,9 @@ const sessionSkillRunInFlight = `
 func (r *Repository) PreflightSessionDeletion(ctx context.Context, ownerID, sessionID string) error {
 	var found int
 	err := r.db.QueryRowContext(ctx, sessionSkillRunInFlight, ownerID, sessionID,
-		string(skillrun.GrantPending), string(executiongrant.Pending),
+		string(skillrun.GrantPending),
+		string(executiongrant.Pending), string(executiongrant.Approved),
+		string(executiongrant.Claimed), string(executiongrant.Bound),
 		string(skillrun.TaskBound),
 		string(schema.TaskSucceeded), string(schema.TaskFailed), string(schema.TaskCanceled),
 	).Scan(&found)
