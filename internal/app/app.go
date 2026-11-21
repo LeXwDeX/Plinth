@@ -835,8 +835,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// One grant service for every paid-step entry point. The session approval
 	// mode and the Schema policy decide whether a step waits for a person.
 	executionGrants := &executiongrant.Service{
-		Grants: repository, Prepared: repository, Budgets: repository,
-		Policy: approvalPolicy, Modes: chatService,
+		Grants: repository, Prepared: repository,
+		// A plan stored before #426 pinned the Agent's model name; the read
+		// view resolves it to the Offering ID of the current Catalog (#434).
+		Budgets: budgetPlanStore(repository, module.Offerings),
+		Policy:  approvalPolicy, Modes: chatService,
 		// An Agent approval stays approvable for the Schema's duration; after
 		// that it can only be requested again in a new turn.
 		PendingTTL: time.Duration(applicationSchema.Chat.PendingApprovals.TTLSeconds) * time.Second,

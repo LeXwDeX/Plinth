@@ -399,6 +399,39 @@ func MatchModel(candidates []generation.Offering, name string) (generation.Offer
 	return generation.Offering{}, false
 }
 
+// ResolvePlanPin maps a production plan's stored offering pin to the Offering
+// ID of the current Catalog (#434). A plan saved before #426 pinned the Agent's
+// model name there, while Plan.Allows and Plan.Covers compare the Offering ID a
+// grant runs, so reading the old value unchanged leaves every pinned step
+// off-plan. ModelNameMatches is the same rule the plan and the generation tools
+// select an Offering with, so a name resolves here exactly when it would select
+// that Offering in a new plan.
+//
+// Only an Offering of the pin's capability counts, and only when exactly one
+// enabled Offering carries the name: an ambiguous name is not guessed, because
+// the plan quoted one model and the other Offering's price is not what the
+// person approved. A pin that already names an Offering ID resolves to itself;
+// a name the Catalog does not declare reports false so the caller keeps the
+// stored value and the step stays off-plan.
+func ResolvePlanPin(offerings []generation.Offering, capability, pinned string) (string, bool) {
+	capability, pinned = strings.TrimSpace(capability), strings.TrimSpace(pinned)
+	if capability == "" || pinned == "" {
+		return "", false
+	}
+	offeringID := ""
+	for _, offering := range offerings {
+		if !offering.Enabled || string(offering.Capability) != capability ||
+			!ModelNameMatches(offering, pinned) {
+			continue
+		}
+		if offeringID != "" {
+			return "", false
+		}
+		offeringID = string(offering.ID)
+	}
+	return offeringID, offeringID != ""
+}
+
 // recommendedWorkspace finds the workspace picker's model among the purpose's
 // recommendations, available and fitting the input (#282): a visible pick the
 // purpose already recommends needs no confirmation.
