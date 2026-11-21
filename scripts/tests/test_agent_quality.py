@@ -4,6 +4,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
@@ -13,13 +14,14 @@ if str(SMOKE) not in sys.path:
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, SMOKE / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name.replace("-", "_"), SMOKE / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 quality = load("agent_quality")
+compare_cli = load("eval-agent-compare")
 CATALOG = json.loads((pathlib.Path(__file__).resolve().parents[2] / "internal" / "catalog" / "default_catalog.json").read_text(encoding="utf-8"))
 PURPOSES = quality.schema_purposes(CATALOG)
 
@@ -493,6 +495,7 @@ class ReportTest(unittest.TestCase):
         result = quality.compare_reports(self.report(), self.report())
         self.assertTrue(result["ok"])
 
+
     def test_compare_refuses_different_request_sets(self):
         candidate = self.report()
         candidate["request_set"] = {"version": 1, "sha256": "y"}
@@ -530,6 +533,113 @@ class ReportTest(unittest.TestCase):
         result = quality.compare_reports(baseline, candidate, new_request_set=True)
         self.assertFalse(result["ok"])
         self.assertTrue(any(item["check"] == "final_reply" for item in result["regressions"]))
+
+
+class CompareExclusionTest(unittest.TestCase):
+    """#444: the baseline's 3D output checks were wrong, so they must not gate the candidate."""
+
+    def report(self, checks):
+        return {
+            "mode": "output-live",
+            "revision": "a",
+            "request_set": {"version": 5, "sha256": "x"},
+            "cases": [{"id": "3d-case", "title": "3d-case", "metrics": {}, "checks": checks, "tasks": []}],
+            "summary": {"metrics": {"success_rate": 0.0}},
+        }
+
+    def test_an_excluded_prefix_is_listed_and_cannot_regress(self):
+        baseline = self.report([{"id": "output:model:t1", "status": "fail", "detail": "inspect failed: bad GLB magic"},
+                                {"id": "final_reply", "status": "pass", "detail": ""}])
+        candidate = self.report([{"id": "output:model:t1", "status": "fail", "detail": "unsupported format: 3MF"},
+                                 {"id": "final_reply", "status": "fail", "detail": "empty"}])
+        result = quality.compare_reports(baseline, candidate, exclude_check_prefixes=["output:model"])
+        self.assertEqual([item["check"] for item in result["excluded"]], ["output:model:t1"])
+        self.assertIn("output:model*", result["markdown"])
+        self.assertIn("不可比检查", result["markdown"])
+        # The real regression still counts.
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(item["check"] == "final_reply" for item in result["regressions"]))
+        self.assertFalse(any(item["check"] == "output:model:t1" for item in result["regressions"]))
+
+    def test_an_excluded_prefix_is_not_an_improvement(self):
+        baseline = self.report([{"id": "output:model:t1", "status": "fail", "detail": "no model asset"}])
+        candidate = self.report([{"id": "output:model:t1", "status": "pass", "detail": ""}])
+        result = quality.compare_reports(baseline, candidate, exclude_check_prefixes=["output:model"])
+        self.assertTrue(result["ok"], result["problems"])
+        self.assertEqual(result["improvements"], [])
+        self.assertEqual(len(result["excluded"]), 1)
+
+    def test_a_baseline_glb_parse_failure_is_incomparable_without_a_prefix(self):
+        baseline = self.report([{"id": "output:model:t1", "status": "fail",
+                                 "detail": "inspect failed: modelinspect: invalid model: bad GLB magic"},
+                                {"id": "output:model:t2", "status": "fail", "detail": "model download failed"}])
+        candidate = self.report([{"id": "output:model:t1", "status": "pass", "detail": ""},
+                                 {"id": "output:model:t2", "status": "pass", "detail": ""}])
+        result = quality.compare_reports(baseline, candidate)
+        self.assertTrue(result["ok"], result["problems"])
+        self.assertEqual([item["check"] for item in result["incomparable"]], ["output:model:t1"])
+        self.assertIn("bad GLB magic", result["markdown"])
+        # A baseline failure with another reason is a real improvement.
+        self.assertTrue(any(item["check"] == "output:model:t2" for item in result["improvements"]))
+
+    def test_the_compare_script_passes_the_prefix_flag_through(self):
+        baseline = self.report([{"id": "output:model:t1", "status": "fail", "detail": "inspect failed: bad GLB magic"}])
+        candidate = self.report([{"id": "output:model:t1", "status": "pass", "detail": ""}])
+        with tempfile.TemporaryDirectory() as directory:
+            base_path = pathlib.Path(directory) / "baseline.json"
+            cand_path = pathlib.Path(directory) / "candidate.json"
+            out_path = pathlib.Path(directory) / "compare.json"
+            base_path.write_text(json.dumps(baseline), encoding="utf-8")
+            cand_path.write_text(json.dumps(candidate), encoding="utf-8")
+            self.assertEqual(compare_cli.main([str(base_path), str(cand_path), "--json", str(out_path)]), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual([item["check"] for item in written["incomparable"]], ["output:model:t1"])
+            self.assertEqual(written["exclude_check_prefixes"], [])
+            # A baseline pass against a candidate fail blocks unless the prefix is named.
+            baseline["cases"][0]["checks"][0] = {"id": "output:model:t1", "status": "pass", "detail": ""}
+            candidate["cases"][0]["checks"][0] = {"id": "output:model:t1", "status": "fail",
+                                                  "detail": "unsupported format: 3MF"}
+            base_path.write_text(json.dumps(baseline), encoding="utf-8")
+            cand_path.write_text(json.dumps(candidate), encoding="utf-8")
+            self.assertEqual(compare_cli.main([str(base_path), str(cand_path)]), 1)
+            self.assertEqual(compare_cli.main([str(base_path), str(cand_path),
+                                               "--exclude-check-prefix", "output:model",
+                                               "--json", str(out_path)]), 0)
+            written = json.loads(out_path.read_text(encoding="utf-8"))
+            self.assertEqual(written["exclude_check_prefixes"], ["output:model"])
+            self.assertEqual(len(written["excluded"]), 1)
+
+
+class SendStatsTest(unittest.TestCase):
+    """#444: waiting for a turn and retrying a busy session must show in the report."""
+
+    def case_run(self):
+        return {
+            "messages": [message({"name": "create_model_3d", "taskId": "t1"})],
+            "tasks": [succeeded("text-to-3d")],
+            "cards": [],
+            "final_reply": {"content": "完成。"},
+            "sends": {"sends": 2, "idle_waits": 1, "idle_wait_ms": 12000,
+                      "busy_retries": 2, "busy_wait_ms": 30000, "rejected": 0},
+        }
+
+    def test_the_case_report_carries_the_send_waits(self):
+        run = self.case_run()
+        case = quality.evaluate_case(base_request(), run)
+        self.assertEqual(case["sends"]["busy_retries"], 2)
+        self.assertEqual(case["sends"]["idle_waits"], 1)
+        report = quality.summarize([case], "output-live", "a", False, {"version": 1, "sha256": "x"})
+        markdown = quality.report_markdown(report)
+        self.assertIn("发送等待", markdown)
+        self.assertIn("会话忙重试 2 次", markdown)
+
+    def test_a_trajectory_run_without_send_counts_keeps_the_report_short(self):
+        run = self.case_run()
+        del run["sends"]
+        case = quality.evaluate_case(base_request(), run)
+        self.assertEqual(case["sends"], {})
+        report = quality.summarize([case], "trajectory-fake", "a", False, {"version": 1, "sha256": "x"})
+        self.assertNotIn("发送等待", quality.report_markdown(report))
 
 
 if __name__ == "__main__":
