@@ -35,9 +35,12 @@ const (
 )
 
 type assetListHTTPHarness struct {
-	handler      http.Handler
-	cookie       *http.Cookie
-	repository   *sqlite.Repository
+	handler    http.Handler
+	cookie     *http.Cookie
+	repository *sqlite.Repository
+	// chat is the server's chat service, so a test can install the MCP asset
+	// reader that derives the steps mode of an external MCP session (#330).
+	chat         *chat.Service
 	databasePath string
 	seed         *assetlist.Service
 	product      catalog.ApplicationSchema
@@ -116,8 +119,9 @@ func newAssetListHTTPHarnessWith(t *testing.T, customize func(*catalog.Applicati
 		t.Fatal(err)
 	}
 	return &assetListHTTPHarness{
-		handler: handler, cookie: cookie, repository: state.repository, databasePath: state.databasePath,
-		seed: assetListSeedService(t, state.repository, nil), product: product.Application(),
+		handler: handler, cookie: cookie, repository: state.repository, chat: state.chat,
+		databasePath: state.databasePath,
+		seed:         assetListSeedService(t, state.repository, nil), product: product.Application(),
 		projectID: createdProject.ID, sessionID: createdSession.ID,
 	}
 }

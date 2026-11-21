@@ -27,6 +27,13 @@ SUCCESS = common.SUCCESS_STATE
 FAILED_STATES = common.FAILED_STATES
 CHECK_PASS, CHECK_FAIL, CHECK_SKIP = "pass", "fail", "skip"
 
+# #444: the #407 baseline took Meshy's 3MF delivery for the model and the GLB
+# inspector refused it, so its output:model verdicts say nothing about the
+# delivered model. A baseline check whose detail carries one of these markers is
+# listed as incomparable instead of a regression, because the candidate that
+# inspects the real GLB cannot be compared against a broken download.
+UNCOMPARABLE_DETAIL_MARKERS = ("bad GLB magic",)
+
 # Project steps set up the #240 fixture between tool steps; they are not tool
 # calls and never count against the tool-call budget.
 PROJECT_SETUP_ACTIONS = ("promote_first_image", "new_session")
@@ -275,7 +282,8 @@ def evaluate_case(request, run):
     """Hard checks and recorded metrics for one finished request.
 
     `run` is built by the runners: messages, tasks, cards, final_reply,
-    elapsed_ms and (live only) output_metrics.
+    elapsed_ms, (live only) output_metrics and the live send counters `sends`
+    (waits for the turn and busy-session retries, #444).
     """
     expected = request.get("expected") or {}
     tools = collect_tools(run.get("messages") or [])
@@ -452,6 +460,7 @@ def evaluate_case(request, run):
         "purpose": request.get("purpose"),
         "session_id": run.get("session_id"),
         "turns": run.get("turns"),
+        "sends": run.get("sends") or {},
         "tool_calls": tools,
         "cards": cards,
         "tasks": [
@@ -610,6 +619,11 @@ def report_markdown(report):
         lines.append(f"- 检查点：{case_metrics.get('checkpoints')}")
         lines.append(f"- 任务：{[(task.get('capability'), task.get('state')) for task in case.get('tasks') or []]}")
         lines.append(f"- 最终回复：{case_metrics.get('final_reply_chars', 0)} 字符")
+        sends = case.get("sends") or {}
+        if sends.get("idle_waits") or sends.get("busy_retries") or sends.get("rejected"):
+            lines.append(f"- 发送等待：回合结束 {sends.get('idle_waits', 0)} 次/{sends.get('idle_wait_ms', 0) / 1000:.1f}s，"
+                         f"会话忙重试 {sends.get('busy_retries', 0)} 次/{sends.get('busy_wait_ms', 0) / 1000:.1f}s，"
+                         f"被拒 {sends.get('rejected', 0)} 次")
         if case_metrics.get("output"):
             lines.append(f"- 产出指标：`{json.dumps(case_metrics['output'], ensure_ascii=False)}`")
         lines.append("")
@@ -802,14 +816,21 @@ TAIL_METRICS = {
 }
 
 
-def compare_reports(baseline, candidate, tolerance=0, new_request_set=False):
+def compare_reports(baseline, candidate, tolerance=0, new_request_set=False, exclude_check_prefixes=()):
     """Regressions, improvements and changed metric deltas between two reports.
 
     new_request_set is the explicit report mode for a changed fixed request
     set (#240): the request-set version/content difference is recorded rather
     than treated as incomparable, cases missing from the baseline count as
     additions, and the tail metrics are compared over the common cases only.
+
+    exclude_check_prefixes drops checks from the diff (#444): the caller names
+    the checks whose baseline verdict is void, for example `output:model` after
+    the baseline inspected a 3MF delivery as a GLB. Baseline checks whose
+    detail is an UNCOMPARABLE_DETAIL_MARKERS match (the same GLB parse failure)
+    are listed as incomparable automatically. Neither list affects `ok`.
     """
+    prefixes = tuple(prefix for prefix in exclude_check_prefixes or () if prefix)
     problems = []
     if not new_request_set:
         if baseline.get("request_set", {}).get("version") != candidate.get("request_set", {}).get("version"):
@@ -821,7 +842,7 @@ def compare_reports(baseline, candidate, tolerance=0, new_request_set=False):
 
     base_cases = {case.get("id"): case for case in baseline.get("cases") or []}
     cand_cases = {case.get("id"): case for case in candidate.get("cases") or []}
-    regressions, improvements, changed = [], [], []
+    regressions, improvements, changed, excluded, incomparable = [], [], [], [], []
     for case_id in sorted(set(base_cases) | set(cand_cases)):
         if case_id not in cand_cases:
             if new_request_set:
@@ -836,6 +857,15 @@ def compare_reports(baseline, candidate, tolerance=0, new_request_set=False):
         base_checks = {check.get("id"): check for check in base_cases[case_id].get("checks") or []}
         cand_checks = {check.get("id"): check for check in cand_cases[case_id].get("checks") or []}
         for check_id in sorted(set(base_checks) | set(cand_checks)):
+            if prefixes and str(check_id or "").startswith(prefixes):
+                excluded.append({"case": case_id, "check": check_id, "reason": "按前缀排除"})
+                continue
+            before_detail = str((base_checks.get(check_id) or {}).get("detail") or "")
+            marker = next((marker for marker in UNCOMPARABLE_DETAIL_MARKERS if marker in before_detail), "")
+            if marker:
+                incomparable.append({"case": case_id, "check": check_id,
+                                     "reason": f"基线判定作废（detail 含「{marker}」）"})
+                continue
             before = (base_checks.get(check_id) or {}).get("status")
             after = (cand_checks.get(check_id) or {}).get("status")
             if before == after:
@@ -879,10 +909,14 @@ def compare_reports(baseline, candidate, tolerance=0, new_request_set=False):
         "regressions": regressions,
         "improvements": improvements,
         "changed": changed,
+        "excluded": excluded,
+        "incomparable": incomparable,
+        "exclude_check_prefixes": list(prefixes),
         "metrics": deltas,
         "new_request_set": new_request_set,
         "markdown": compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
-                                     new_request_set=new_request_set),
+                                     new_request_set=new_request_set, excluded=excluded,
+                                     incomparable=incomparable, prefixes=prefixes),
     }
 
 
@@ -915,7 +949,7 @@ def case_metric_totals(cases, case_ids):
 
 
 def compare_markdown(baseline, candidate, problems, regressions, improvements, changed, deltas,
-                     new_request_set=False):
+                     new_request_set=False, excluded=(), incomparable=(), prefixes=()):
     lines = [
         "# Agent 产出质量评测对比",
         "",
@@ -925,9 +959,16 @@ def compare_markdown(baseline, candidate, problems, regressions, improvements, c
     ]
     if new_request_set:
         lines.append("- 请求集: 显式按新请求集对比（新增用例计为新增，汇总指标只比较两边共有的用例且仅作参考）")
+    if prefixes:
+        lines.append("- 排除检查: " + "、".join(f"`{prefix}*`" for prefix in prefixes) + "（不参与回退判定）")
     lines.append("")
     if problems:
         lines += ["## 不可比", ""] + [f"- {problem}" for problem in problems] + [""]
+    if excluded or incomparable:
+        lines += ["## 不可比检查（不参与回退判定）", "", "| 用例 | 检查 | 原因 |", "|---|---|---|"]
+        lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('reason')} |" for item in excluded]
+        lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('reason')} |" for item in incomparable]
+        lines.append("")
     if regressions:
         lines += ["## 回退", "", "| 用例 | 检查 | 基线 | 候选 |", "|---|---|---|---|"]
         lines += [f"| {item.get('case')} | {item.get('check')} | {item.get('before', '-')} | {item.get('after', '-')} |" for item in regressions]

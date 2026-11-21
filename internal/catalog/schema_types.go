@@ -4240,6 +4240,12 @@ type ChatThreeViewMessages struct {
 	GroupNotReady string `json:"group_not_ready"`
 	ViewsChanged  string `json:"views_changed"`
 	ViewsInvalid  string `json:"views_invalid"`
+	// ViewsUnsupported refuses a multiview step whose chosen Offering takes no
+	// several views at all, such as the single-image shape of a locked model
+	// (#433): {model} is the Offering's public name. Nothing runs, so a call
+	// never degrades to a single-image step with one of the pictures. A
+	// Catalog without this copy words the refusal as ViewsInvalid.
+	ViewsUnsupported string `json:"views_unsupported,omitempty"`
 }
 
 // ChatPendingApprovalsSchema is application.chat.pending_approvals. It is
@@ -6681,9 +6687,17 @@ type CoreHTTPRoutesSchema struct {
 	// (pause/resume/stop/start) and per-item skip. PR2 declares the path
 	// templates only; the handlers arrive with the runner. Empty (historical
 	// Catalogs) leaves them unregistered.
-	ProjectPresence            string `json:"project_presence,omitempty"`
-	ProjectAssetListRun        string `json:"project_asset_list_run,omitempty"`
-	ProjectAssetListItem       string `json:"project_asset_list_item,omitempty"`
+	ProjectPresence      string `json:"project_presence,omitempty"`
+	ProjectAssetListRun  string `json:"project_asset_list_run,omitempty"`
+	ProjectAssetListItem string `json:"project_asset_list_item,omitempty"`
+	// ProjectAssetListItemSteps grants one list item's asset a few more 3D
+	// steps (#330 step 5C). Empty (historical Catalogs, or no step policy)
+	// leaves the route unregistered. ChatSessionSteps grants one asset
+	// session's asset (an external MCP asset, #332) the same way, keyed by the
+	// session instead of the list item; both methods need a real browser
+	// session.
+	ProjectAssetListItemSteps  string `json:"project_asset_list_item_steps,omitempty"`
+	ChatSessionSteps           string `json:"chat_session_steps,omitempty"`
 	ProviderAsset              string `json:"provider_asset"`
 	Offerings                  string `json:"offerings"`
 	Assets                     string `json:"assets"`

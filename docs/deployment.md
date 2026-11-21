@@ -321,6 +321,8 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 "result_fields": {"success": "success", "steps": "steps"}
 ```
 
+**升级说明：再给几步与步数上限恢复（#330 第 5B/5C 步）。** 迁移 `0106_step_extra_grants.sql` 只追加两列、不回填数据，随启动迁移自动应用：`go_chat_sessions.extra_steps INTEGER NOT NULL DEFAULT 0`（每个资产——一个会话——累计追加的 3D 步数，清单子会话与外部 MCP 资产共用）与 `asset_list_items.step_cap_turn_message_id TEXT NOT NULL DEFAULT ''`（runner 在被步数上限挡住的那一轮记下 assistant 消息 ID，用户追加步数或继续后从新一轮接着做，而不是重判同一轮）。不修改 `updated_at`，不影响会话列表排序。回滚到旧版本时按 §7 恢复升级前的数据库备份（迁移版本守卫会拒绝打开 migration 版本高于旧二进制的库）；两列本身不需要手工删除，旧二进制显式列出列名、不会读取它们。使用自定义 `CATALOG_FILE` 时，若声明 `application.step_policy`，须补上 `step_policy.extra_steps`（`{default, maximum, total_maximum}`，要求 `1 <= default <= maximum <= total_maximum`）、三条文案 `messages.extra_steps_limit`（含 `{maximum}` 与 `{extra}`）、`messages.extra_steps_single_limit`（含 `{maximum}`）、`messages.extra_steps_unavailable`、审计声明 `audit.extra_steps_action` 与 `audit.extra_steps_resource_type`，并把该动作加入 `application.audit_actions`（带中英文标签）；开启 `asset_list.execution.enabled` 时还须声明 `runtime.http.routes.project_asset_list_item_steps`（参数恰好为 `{projectID}`、`{listID}`、`{itemID}`）。外部 MCP 资产会话的「再给几步」还需要可选路由 `runtime.http.routes.chat_session_steps`（参数恰好为 `{sessionID}`；缺省时该入口不注册，清单项入口不受影响）。缺必需项会让 Catalog 校验失败、进程拒绝启动；默认 Catalog 已全部声明。第 5B/5C/6 步的界面、路由与调度器行为尚未在 dev-test 验收，记录见 Issue #330。
+
 ## 7. 冒烟失败后的手工回滚
 
 自动回滚只覆盖发布脚本内的失败。冒烟失败且已有前一版本时（首次 bootstrap 版本没有前一版本，只能停止服务并保留现场）：
@@ -451,7 +453,7 @@ RECOVERY
 公开仓库 `LeXwDeX/Plinth` 起始于一个不带内部开发历史的单根快照提交（见 [`history.md`](history.md)「编号对照」）；它是唯一仓库，提交直接在其上进行，日常开发不生成快照。下面的步骤只在需要从内部存档重建公开起点时使用；快照工具只在本地生成，不推送，替换公开仓库已有内容或强推前须由用户当场确认。日常开发中，同一扫描以 `dev_test.md` §2「public tree」门禁在每次推送前运行：每个推送的提交都会立即公开。
 
 1. 选定源 revision：已合入 `main`、通过 `dev_test.md` §2 门禁和开源 1.0 验收（#260）的精确 SHA。
-2. 先检查：`scripts/check-public-tree.sh <SHA>`（日常开发中同一扫描以 `dev_test.md` §2 第 8 项门禁「public tree」在 pre-push 与 CI 里对工作树运行）。它用 `git archive` 取出该 revision 的已跟踪文件，扣除 `scripts/public-snapshot.exclude` 列出的路径后逐个扫描（文本与二进制都扫）：私有网段前缀、内部主机与域名、服务器路径、本机临时路径、内部 Compose 项目名前缀、组织名称、本机用户目录（公开 CI runner 的家目录除外）、私钥头，以及 GitLab、OpenAI 式、GitHub、Meshy、Tripo 的凭据前缀（只匹配凭据长度，测试里的短假值不算，#334）；本机存在 `deploy/local/environments.json` 时，其中每个主机、地址、根目录、布局路径、Compose 项目与镜像源主机也作为字面量加入；还可以用 `--pattern`、`--patterns-file` 或未纳入 Git 的 `deploy/local/public-snapshot-patterns.txt`（每行一个正则，`#` 开头为注释）补充不想提交的私有词。有任一命中即以非零退出并列出 `文件:行`。
+2. 先检查：`scripts/check-public-tree.sh <SHA>`（日常开发中同一扫描以 `dev_test.md` §2 第 9 项门禁「public tree」在 pre-push 与 CI 里对工作树运行）。它用 `git archive` 取出该 revision 的已跟踪文件，扣除 `scripts/public-snapshot.exclude` 列出的路径后逐个扫描（文本与二进制都扫）：私有网段前缀、内部主机与域名、服务器路径、本机临时路径、内部 Compose 项目名前缀、组织名称、本机用户目录（公开 CI runner 的家目录除外）、私钥头，以及 GitLab、OpenAI 式、GitHub、Meshy、Tripo 的凭据前缀（只匹配凭据长度，测试里的短假值不算，#334）；本机存在 `deploy/local/environments.json` 时，其中每个主机、地址、根目录、布局路径、Compose 项目与镜像源主机也作为字面量加入；还可以用 `--pattern`、`--patterns-file` 或未纳入 Git 的 `deploy/local/public-snapshot-patterns.txt`（每行一个正则，`#` 开头为注释）补充不想提交的私有词。有任一命中即以非零退出并列出 `文件:行`。
 3. 生成：`python3 scripts/make-public-snapshot.py make --rev <SHA> --version v1.0.0 --out <仓库外的新目录> [--tag]`。工具在同级临时目录导出、排除、扫描，扫描失败时不留下任何目录；通过后 `git init -b main`，以本机 `git config user.name/user.email` 为作者和提交者生成唯一提交（提交信息写版本和源 SHA），`--tag`（可选，仅供后续版本；首次发布不创建 tag/Release）时在本地打同名附注 tag。新仓库没有 remote。
 4. 在快照目录里按 README 构建（`go build ./...`、`pnpm install --frozen-lockfile` 与 `pnpm build`）并复查 `python3 scripts/make-public-snapshot.py check --tree <快照目录>`，再进入人工确认的发布步骤。
 

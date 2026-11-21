@@ -1224,6 +1224,8 @@ func assertV180HeadSchema(t *testing.T, r *Repository) {
 		{"access_keys", "request_count", "0"},
 		{"asset_list_items", "accepted_at", "''"},
 		{"asset_list_items", "work_round", "0"},
+		{"asset_list_items", "step_cap_turn_message_id", "''"},
+		{"go_chat_sessions", "extra_steps", "0"},
 		{"asset_list_item_reviews", "reasons_json", "'[]'"},
 	} {
 		var (
@@ -1248,7 +1250,12 @@ func assertV180HeadSchema(t *testing.T, r *Repository) {
 		`SELECT (SELECT COUNT(*) FROM go_chat_turns WHERE end_reason <> '') +
 		        (SELECT COUNT(*) FROM execution_grants
 		         WHERE access_key_id <> ''
-		           AND request_id IN ('eg-pending','eg-approved','eg-claimed','eg-bound','eg-denied'))`,
+		           AND request_id IN ('eg-pending','eg-approved','eg-claimed','eg-bound','eg-denied')) +
+		        (SELECT COUNT(*) FROM go_chat_sessions
+		         WHERE extra_steps <> 0
+		           AND id IN ('sess-a','sess-b','sess-budget','sess-budget-exhausted')) +
+		        (SELECT COUNT(*) FROM asset_list_items
+		         WHERE step_cap_turn_message_id <> '')`,
 	).Scan(&stale); err != nil || stale != 0 {
 		t.Fatalf("历史行在新增列上有非默认值: %d err=%v", stale, err)
 	}

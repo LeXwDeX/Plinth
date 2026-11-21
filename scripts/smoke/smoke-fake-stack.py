@@ -6617,10 +6617,30 @@ ASSET_LIST_RUN_FAILURE_CONTINUATION = (
 
 # The step-cap arm creates one task in round one and ends the turn without a
 # report; round two's second create is refused at the account's one-step cap.
+# The marker sits before the placeholders: a description that carries its own
+# script marker (the 2D item below) then wins, because the last marker of the
+# last user message is the one the fake runs.
 ASSET_LIST_RUN_CAP_CONTINUATION = (
-    "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
     '[[fake:script:create_model_3d {"prompt":"a production asset for {name}, round {round}",'
     '"model":"tripo/tripo-p2/text-to-3d"}|done]]'
+    "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+)
+
+# #330 §6: the second item of the cap arm reports itself. Its description
+# carries its own fake script (the runner substitutes {description} into the
+# continuation and the last marker wins), so it runs one step of its own asset
+# and reaches review while the first item waits at the cap.
+ASSET_LIST_RUN_CAP_REPORT_DESCRIPTION = (
+    "低模圆盾 [[fake:script:create_model_3d "
+    '{"prompt":"a production asset for 上限圆盾","model":"tripo/tripo-p2/text-to-3d"}'
+    '|submit_asset_list_item {"status":"done"}|done]]'
+)
+
+# #330 step 5C: a list whose items are all 2D never reaches the 3D step cap.
+ASSET_LIST_RUN_2D_CONTINUATION = (
+    "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+    '[[fake:script:refine_image {"prompt":"a flat interface icon for {name}, round {round}"}'
+    '|submit_asset_list_item {"status":"done"}|done]]'
 )
 
 
@@ -6951,9 +6971,12 @@ def _asset_list_run_arm_failure(work, stack_binary, processes):
 
 
 def _asset_list_run_arm_step_cap(work, stack_binary, processes):
-    """An account list cap of one lets round one create its task; round two's
-    create is refused, so the item stays working, the run pauses at step_cap and
-    the second item never starts or spends a step."""
+    """#330 §6: an account list cap of one per asset. The first item creates its
+    task in round one; round two's create is refused, so it is blocked at the
+    cap and releases its slot. The scheduler claims the second item, which runs
+    one step of its own asset and reports itself for review. With nothing else
+    to run the run pauses at step_cap; a grant of one more step continues the
+    blocked item from a fresh round while the reviewed item is left alone."""
     stack = "asset-list-run-cap"
     catalog = private_catalog(
         work, name="catalog-asset-list-run-cap.json",
@@ -6965,7 +6988,7 @@ def _asset_list_run_arm_step_cap(work, stack_binary, processes):
     try:
         session, project_id, why = _asset_list_setup(api, "步数上限清单")
         if why:
-            record("#328 run step cap: create the project and session", False, why)
+            record("#330 run step cap: create the project and session", False, why)
             return
         beat = lambda: _asset_list_presence(api, work, stack, project_id)
         beat()
@@ -6978,7 +7001,7 @@ def _asset_list_run_arm_step_cap(work, stack_binary, processes):
             })
         else:
             capped = {}
-        record("#328 run step cap: the account's list step setting is a cap of one",
+        record("#330 run step cap: the account's list step setting is a cap of one",
                status == 200 and (capped.get("list") or {}).get("mode") == "cap"
                and (capped.get("list") or {}).get("cap") == 1,
                f"status={status} policy={json.dumps(capped, ensure_ascii=False)[:200]}")
@@ -6988,8 +7011,30 @@ def _asset_list_run_arm_step_cap(work, stack_binary, processes):
         ])
         list_id = str((result or {}).get("list_id") or "")
         if not list_id:
-            record("#328 run step cap: the agent proposes the list", False, why)
+            record("#330 run step cap: the agent proposes the list", False, why)
             return
+        # The reporting item's script lives in its description: the proposal
+        # turn must stay a plain tool marker, so the draft is edited before
+        # confirmation.
+        status, draft = api.json("GET", f"/api/v1/projects/{project_id}/asset-lists/{list_id}")
+        draft_items = (draft or {}).get("items") or []
+        edited = None
+        if status == 200 and len(draft_items) == 2:
+            status, edited = api.json(
+                "PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}", {
+                    "title": draft.get("title") or "步数上限清单",
+                    "items": [
+                        {"kind": "prop", "name": "上限长矛", "description": "低模长矛"},
+                        {"kind": "prop", "name": "上限圆盾",
+                         "description": ASSET_LIST_RUN_CAP_REPORT_DESCRIPTION},
+                    ],
+                    "brief": {},
+                    "expected_version": draft.get("version"),
+                })
+        record("#330 run step cap: the draft names a blocking item and a reporting item",
+               status == 200 and len((edited or {}).get("items") or []) == 2
+               and ((edited or {}).get("items") or [{}, {}])[1].get("kind") == "prop",
+               f"status={status} items={[(item.get('kind'), item.get('planned_model3d_step_count')) for item in (edited or {}).get('items') or []]}")
         status, _ = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
                              {"decision": "confirm"})
         detail = _wait_asset_list_run(
@@ -7001,23 +7046,129 @@ def _asset_list_run_arm_step_cap(work, stack_binary, processes):
         second = items[1] if len(items) > 1 else {}
         first_tasks = _asset_list_item_tasks(api, first)
         second_tasks = _asset_list_item_tasks(api, second)
-        record("#328 run step cap: the second round at the cap blocks the item and pauses the run",
+        record("#330 run step cap: the capped item is blocked and the other item finishes",
                status == 200 and run.get("status") == "paused"
                and run.get("pause_reason") == "step_cap"
-               and first.get("state") == "working" and first.get("round") == 2
-               and second.get("state") == "todo" and not second.get("session_id")
+               and first.get("state") == "working" and first.get("block") == "step_cap"
+               and first.get("round") == 2
                and len(first_tasks) == 1 and first_tasks[0].get("state") == "SUCCEEDED"
-               and not second_tasks,
+               and first_tasks[0].get("capability") == "text-to-3d"
+               and second.get("state") == "review" and bool(second.get("session_id"))
+               and len(second_tasks) == 1 and second_tasks[0].get("state") == "SUCCEEDED"
+               and second_tasks[0].get("capability") == "text-to-3d"
+               and _asset_list_run_of(detail).get("item_counts", {}).get("todo") == 0,
                f"run={run.get('status')}/{run.get('pause_reason')} "
-               f"items={[(i.get('state'), i.get('round')) for i in items]} "
-               f"tasks={[[task.get('state') for task in tasks] for tasks in (first_tasks, second_tasks)]}")
+               f"items={[(i.get('state'), i.get('round'), i.get('block')) for i in items]} "
+               f"tasks={[[(task.get('state'), task.get('capability')) for task in tasks] for tasks in (first_tasks, second_tasks)]}")
         time.sleep(2)
         detail = _asset_list_detail(api, project_id, list_id)
         first_after = _asset_list_item_tasks(api, (detail.get("items") or [{}])[0])
-        record("#328 run step cap: the paused run submits no further task",
+        second_after = _asset_list_item_tasks(api, (detail.get("items") or [{}, {}])[1])
+        record("#330 run step cap: the paused run submits no further task",
                _asset_list_run_of(detail).get("pause_reason") == "step_cap"
-               and len(first_after) == 1,
-               f"pause={_asset_list_run_of(detail).get('pause_reason')} tasks={len(first_after)}")
+               and len(first_after) == 1 and len(second_after) == 1,
+               f"pause={_asset_list_run_of(detail).get('pause_reason')} "
+               f"tasks={len(first_after)}/{len(second_after)}")
+
+        # #330 step 5C: the person gives the blocked item one more step. The
+        # write is the asset's whole grant and clears the item's step-cap block;
+        # the scheduler then continues from a fresh round instead of re-judging
+        # the capped turn, and keeps the reviewed item untouched.
+        first = (detail.get("items") or [{}])[0]
+        item_id = str(first.get("id") or "")
+        steps_before = first.get("steps") or {}
+        status, extended = api.json(
+            "PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/items/{item_id}/steps",
+            {"extra_steps": 1, "expected_version": first.get("version")})
+        record("#330 extra steps: the item receives one more step and loses its cap block",
+               status == 200 and (extended or {}).get("block") in (None, "")
+               and (extended or {}).get("steps", {}).get("extra") == 1
+               and steps_before.get("used") == 1 and steps_before.get("cap") == 1,
+               f"status={status} steps={json.dumps((extended or {}).get('steps'), ensure_ascii=False)} "
+               f"block={(extended or {}).get('block')!r} before={json.dumps(steps_before, ensure_ascii=False)}")
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: [task.get("state") for task in _asset_list_item_tasks(
+                api, (value.get("items") or [{}])[0])] == ["SUCCEEDED", "SUCCEEDED"],
+            seconds=90, beat=beat)
+        first = (detail.get("items") or [{}])[0]
+        second = (detail.get("items") or [{}, {}])[1]
+        tasks = _asset_list_item_tasks(api, first)
+        second_final = _asset_list_item_tasks(api, second)
+        record("#330 extra steps: the scheduler continues the blocked item in a fresh round",
+               len(tasks) == 2 and first.get("round", 0) >= 2
+               and first.get("block") in (None, "")
+               and len(second_final) == 1 and second.get("state") == "review",
+               f"round={first.get('round')} block={first.get('block')!r} "
+               f"tasks={[(task.get('state'), task.get('capability')) for task in tasks]} "
+               f"second={second.get('state')}/{len(second_final)}")
+    finally:
+        processes.stop(child)
+
+
+def _asset_list_run_arm_2d(work, stack_binary, processes):
+    """#330 step 5C: a list whose only item is 2D is never counted or blocked,
+    even with the account's list step mode at a cap of one."""
+    stack = "asset-list-run-2d"
+    catalog = private_catalog(
+        work, name="catalog-asset-list-run-2d.json",
+        execution_enabled=True, poll_interval_milliseconds=500,
+        presence_heartbeat_seconds=5, presence_grace_seconds=30,
+        max_parallel_items=1, max_rounds_per_item=2,
+        continuation_message=ASSET_LIST_RUN_2D_CONTINUATION)
+    child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+    try:
+        session, project_id, why = _asset_list_setup(api, "纯 2D 清单")
+        if why:
+            record("#330 2D list: create the project and session", False, why)
+            return
+        beat = lambda: _asset_list_presence(api, work, stack, project_id)
+        beat()
+        status, policy = api.json("GET", "/api/v1/account/step-policy")
+        if status == 200:
+            status, capped = api.json("PUT", "/api/v1/account/step-policy", {
+                "expected_version": policy.get("version") or 0,
+                "list": {"mode": "cap", "cap": 1},
+                "mcp": {"mode": "agent", "cap": 20},
+            })
+        else:
+            capped = {}
+        record("#330 2D list: the account's list step mode is a cap of one",
+               status == 200 and (capped.get("list") or {}).get("mode") == "cap"
+               and (capped.get("list") or {}).get("cap") == 1,
+               f"status={status} policy={json.dumps(capped, ensure_ascii=False)[:200]}")
+        result, why = _asset_list_turn(api, work, stack, session, "纯 2D 清单", [
+            {"kind": "image", "name": "扁平图标", "description": "一组界面图标"},
+        ])
+        list_id = str((result or {}).get("list_id") or "")
+        if not list_id:
+            record("#330 2D list: the agent proposes the list", False, why)
+            return
+        status, _ = api.json("PUT", f"/api/v1/projects/{project_id}/asset-lists/{list_id}/decision",
+                             {"decision": "confirm"})
+        detail = _wait_asset_list_run(
+            api, project_id, list_id,
+            lambda value: _asset_list_run_of(value).get("status") == "completed",
+            seconds=120, beat=beat)
+        run = _asset_list_run_of(detail)
+        items = detail.get("items") or []
+        item = items[0] if items else {}
+        tasks = _asset_list_item_tasks(api, item)
+        steps = item.get("steps") or {}
+        record("#330 2D list: 2D tasks are never counted and the item is never blocked at the step cap",
+               status == 200 and run.get("pause_reason") != "step_cap"
+               and item.get("block") in (None, "")
+               and len(tasks) >= 1
+               and all(task.get("state") == "SUCCEEDED"
+                       and task.get("capability") in ("text-to-image", "image-to-image")
+                       for task in tasks)
+               and steps.get("used") == 0 and steps.get("extra") in (None, 0),
+               f"run={run.get('status')}/{run.get('pause_reason')} state={item.get('state')} "
+               f"reason={item.get('state_reason')!r} block={item.get('block')!r} "
+               f"tasks={[(t.get('state'), t.get('capability')) for t in tasks]} "
+               f"steps={json.dumps(steps, ensure_ascii=False)} "
+               f"(the fake image turn ends without a report, so the item may stop at its round limit; "
+               f"no step-cap pause or block is the contract)")
     finally:
         processes.stop(child)
 
@@ -7028,8 +7179,11 @@ def scenario_asset_list_run(work, stack_binary, processes):
     message, a stopped heartbeat pauses and a returning one resumes, a restart
     repeats no turn or task), the presence arm (no heartbeat before
     confirmation pauses the run before its first turn and a heartbeat finishes
-    it), the failure arm (a reported failure turns to the next item) and the
-    step-cap arm (a one-step account cap blocks round two and pauses the run).
+    it), the failure arm (a reported failure turns to the next item), the
+    step-cap arm (a one-step account cap blocks round two of the 3D item while
+    the 2D item finishes; the run pauses at the cap only then, and a grant of
+    one more step continues the blocked item) and the 2D arm (an all-2D list is
+    never blocked by the same cap).
     No arm sends a chat message after the proposal; the fake script in the
     runner's continuation drives every item turn."""
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
@@ -7050,6 +7204,7 @@ def scenario_asset_list_run(work, stack_binary, processes):
     _asset_list_run_arm_presence(work, stack_binary, processes, catalog)
     _asset_list_run_arm_failure(work, stack_binary, processes)
     _asset_list_run_arm_step_cap(work, stack_binary, processes)
+    _asset_list_run_arm_2d(work, stack_binary, processes)
 
 
 def scenario_asset_list(work, stack_binary, processes, catalog):

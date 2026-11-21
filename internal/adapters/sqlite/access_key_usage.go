@@ -27,6 +27,25 @@ func (r *Repository) AssetStepsUsed(ctx context.Context, ownerID, sessionID stri
 	return stepsUsedOnConn(ctx, conn, ownerID, sessionID, counted)
 }
 
+// AssetExtraSteps reads the steps the person granted one asset beyond the cap
+// (#330 step 5C). A session without a grant, or a foreign session, answers
+// zero: the status block then reads the plain cap.
+func (r *Repository) AssetExtraSteps(ctx context.Context, ownerID, sessionID string) (int, error) {
+	if ownerID == "" || sessionID == "" {
+		return 0, executiongrant.ErrInvalid
+	}
+	var extra int
+	err := r.db.QueryRowContext(ctx, `SELECT extra_steps FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&extra)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return extra, nil
+}
+
 // AssetTitle reads the title of one of the owner's chat sessions.
 func (r *Repository) AssetTitle(ctx context.Context, ownerID, sessionID string) (string, bool, error) {
 	if ownerID == "" || sessionID == "" {

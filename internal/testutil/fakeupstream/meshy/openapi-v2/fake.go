@@ -2,6 +2,7 @@ package meshyopenapiv2
 
 import (
 	"embed"
+	"io/fs"
 	"net/http"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
@@ -11,7 +12,15 @@ import (
 //go:embed testdata/meshy-openapi-v2*.candidate.json
 var sampleFS embed.FS
 
-var sampleFiles = []string{"testdata/meshy-openapi-v2.candidate.json"}
+// sampleFiles are the committed candidates; the glob keeps a re-capture in. The
+// engine templates from the newest sample of each key.
+var sampleFiles = func() []string {
+	names, err := fs.Glob(sampleFS, "testdata/meshy-openapi-v2*.candidate.json")
+	if err != nil || len(names) == 0 {
+		panic("meshy/openapi-v2: no committed samples")
+	}
+	return names
+}()
 
 // Prefix is where this version is mounted. The Meshy adapter appends
 // openapi/v2/<endpoint> to meshy_base_url, so a stack points meshy_base_url at
@@ -56,10 +65,10 @@ var textTo3D = core.Kind{
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/text-to-3d", Evidence: fakeupstream.EvidenceReal, Sample: "POST /openapi/v2/text-to-3d",
 		DocURL: docsRoot + "text-to-3d", CheckedAt: captured,
-		Note: "preview and refine are one route; the task type follows mode; the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked " + docsChecked + ")"},
+		Note: "preview and refine are one route; the task type follows mode; the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked " + docsChecked + "). The 2026-11-20 window shows the create answering the whole queued task object (status PENDING, the task's own id and result, expires_at/started_at/finished_at null, preceding_tasks) with the accepted request echoed under input, which the fake reproduces; the 2026-10-29 sample answered only {result}"},
 	{Method: "GET", Path: "/text-to-3d/{id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /openapi/v2/text-to-3d/{id}",
 		DocURL: docsRoot + "text-to-3d", CheckedAt: captured,
-		Note: "IN_PROGRESS and SUCCEEDED polls are real for both types; PENDING is constructed from the field docs (started_at/finished_at 0, preceding_tasks while queued); FAILED is constructed from the in-progress structure (a failed one carries the task_error object and no expires_at); CANCELED is constructed (task-canceled scenario); texture_urls follow the request's enable_pbr in a refine (constructed from docs); geometry_resolution/ultra_mode are not echoed because the Adapter does not read them (side evidence of #203)"},
+		Note: "IN_PROGRESS and SUCCEEDED polls are real for both types and the 2026-11-20 capture is the newest: its object adds input (the request as sent), expires_at null, geometry_resolution/texture_resolution as sent, ultra_mode/hd_texture and an output object with model_urls/seed/texture_urls/thumbnail_url. PENDING is constructed from the field docs and the observed poll (started_at/finished_at 0, preceding_tasks while queued; the create object has them null instead); FAILED is constructed from the in-progress structure (a failed one carries the task_error object and expires_at null); CANCELED is constructed (task-canceled scenario); texture_urls follow the request's enable_pbr in a refine, and a preview keeps the captured normal map when enable_pbr was asked for"},
 	{Method: "DELETE", Path: "/text-to-3d/{id}", Evidence: fakeupstream.EvidenceReal, Sample: "DELETE /openapi/v2/text-to-3d/{id}",
 		DocURL: docsRoot + "text-to-3d", CheckedAt: captured},
 	{Method: "GET", Path: "/assets/{task_id}/{name}", Evidence: fakeupstream.EvidenceConstructed,
@@ -88,13 +97,10 @@ func newHandler(env *fakeupstream.Env) (http.Handler, error) {
 }
 
 // ContentTypes are the content types the official asset CDN serves, by file
-// extension. glb and png were observed in the v2 alignment run; fbx, stl, 3mf,
-// obj, mtl and usdz follow the v1 alignment's observations on the same CDN
-// (assets.meshy.ai / cdn.meshy.ai) and the Meshy adapter's notes, because the
-// v2 run requested glb only while the Catalog's default offering requires all
-// six model formats.
+// extension. The 2026-11-20 window requested every format the Catalog needs
+// and confirmed glb, png, fbx, stl, 3mf, obj, mtl and usdz as below.
 var ContentTypes = map[string]string{
 	".glb": "model/gltf-binary", ".png": "image/png", ".fbx": "application/octet-stream",
-	".stl": "model/stl", ".3mf": "model/3mf", ".obj": "application/x-tgif",
-	".mtl": "text/plain", ".usdz": "model/vnd.usdz+zip",
+	".stl": "model/stl", ".3mf": "model/3mf", ".obj": "model/obj",
+	".mtl": "text/plain", ".usdz": "application/octet-stream",
 }

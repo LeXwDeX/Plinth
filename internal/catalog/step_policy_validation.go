@@ -54,6 +54,10 @@ func validateStepPolicy(
 		limits.Default < limits.Minimum || limits.Default > limits.Maximum {
 		return errors.New("step_policy.cap 必须满足 1 <= minimum <= default <= maximum")
 	}
+	extra := policy.ExtraSteps
+	if extra.Default < 1 || extra.Maximum < extra.Default || extra.TotalMaximum < extra.Maximum {
+		return errors.New("step_policy.extra_steps 必须满足 1 <= default <= maximum <= total_maximum")
+	}
 	if len(policy.CountedCapabilities) == 0 {
 		return errors.New("step_policy.counted_capabilities 不能为空")
 	}
@@ -82,11 +86,28 @@ func validateStepPolicy(
 		!strings.Contains(message, "{used}") || !strings.Contains(message, "{cap}") {
 		return errors.New("step_policy.messages.cap_reached 必须非空并包含 {used} 与 {cap}")
 	}
+	if extraLimit := policy.Messages.ExtraStepsLimit; strings.TrimSpace(extraLimit) == "" ||
+		!strings.Contains(extraLimit, "{maximum}") || !strings.Contains(extraLimit, "{extra}") {
+		return errors.New("step_policy.messages.extra_steps_limit 必须非空并包含 {maximum} 与 {extra}")
+	}
+	if strings.TrimSpace(policy.Messages.ExtraStepsUnavailable) == "" {
+		return errors.New("step_policy.messages.extra_steps_unavailable 不能为空")
+	}
+	if single := policy.Messages.ExtraStepsSingleLimit; strings.TrimSpace(single) == "" ||
+		!strings.Contains(single, "{maximum}") {
+		return errors.New("step_policy.messages.extra_steps_single_limit 必须非空并包含 {maximum}")
+	}
 	if strings.TrimSpace(policy.Audit.ResourceType) == "" {
 		return errors.New("step_policy.audit.resource_type 不能为空")
 	}
 	if _, declared := auditActions[policy.Audit.UpdateAction]; !declared {
 		return fmt.Errorf("step_policy.audit.update_action 引用了未知 audit action %q", policy.Audit.UpdateAction)
+	}
+	if strings.TrimSpace(policy.Audit.ExtraStepsResourceType) == "" {
+		return errors.New("step_policy.audit.extra_steps_resource_type 不能为空")
+	}
+	if _, declared := auditActions[policy.Audit.ExtraStepsAction]; !declared {
+		return fmt.Errorf("step_policy.audit.extra_steps_action 引用了未知 audit action %q", policy.Audit.ExtraStepsAction)
 	}
 	route := schema.Runtime.HTTP.Routes.AccountStepPolicy
 	if strings.TrimSpace(route) == "" {
@@ -94,6 +115,18 @@ func validateStepPolicy(
 	}
 	if !configuredRouteParametersMatch(route, nil) {
 		return errors.New("http step policy route account_step_policy 不能含路径参数")
+	}
+	// "Give it a few more steps" is a list-item action (#330 step 5C): a
+	// Catalog that runs lists must declare the route where the person grants
+	// them, or the browser would have no way to continue a capped item.
+	if list := schema.AssetList; list != nil && list.Execution != nil && list.Execution.Enabled {
+		stepsRoute := schema.Runtime.HTTP.Routes.ProjectAssetListItemSteps
+		if strings.TrimSpace(stepsRoute) == "" {
+			return errors.New("asset_list.execution.enabled 需要 runtime.http.routes.project_asset_list_item_steps")
+		}
+		if !configuredRouteParametersMatch(stepsRoute, []string{"projectID", "listID", "itemID"}) {
+			return errors.New("http route project_asset_list_item_steps 参数必须恰好为 [projectID listID itemID]")
+		}
 	}
 	return nil
 }

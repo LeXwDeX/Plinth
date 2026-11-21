@@ -151,6 +151,23 @@ func (runs *fakeRuns) SetItemBlock(
 	return *item, nil
 }
 
+func (runs *fakeRuns) SetItemStepCapTurn(
+	_ context.Context, ownerID, listID, itemID, assistantMessageID string,
+	expectedVersion int64, at time.Time,
+) (assetlist.Item, error) {
+	item := runs.item(itemID)
+	if item == nil || item.OwnerID != ownerID || item.ListID != listID {
+		return assetlist.Item{}, assetlist.ErrNotFound
+	}
+	if expectedVersion != assetlist.VersionUnchecked && item.Version != expectedVersion {
+		return assetlist.Item{}, assetlist.ErrConflict
+	}
+	item.StepCapTurnMessageID = assistantMessageID
+	item.Version++
+	item.UpdatedAt = at
+	return *item, nil
+}
+
 func (runs *fakeRuns) RecordItemTurn(
 	_ context.Context, ownerID, listID, itemID, assistantMessageID string,
 	round, workRound int, expectedVersion int64, at time.Time,
@@ -416,18 +433,22 @@ func (presence *fakePresence) Active(
 
 // ------------------------------------------------------------- fake step caps
 
+// fakeStepCaps answers the runner's cap question per session: `all` caps every
+// asset, and reached names individual sessions, so one item can be blocked
+// while another still works (#330 §6).
 type fakeStepCaps struct {
-	reached bool
+	all     bool
+	reached map[string]bool
 	err     error
 	calls   int
 }
 
-func (caps *fakeStepCaps) StepCapReached(_ context.Context, _, _ string) (bool, error) {
+func (caps *fakeStepCaps) StepCapReached(_ context.Context, _, sessionID string) (bool, error) {
 	caps.calls++
 	if caps.err != nil {
 		return false, caps.err
 	}
-	return caps.reached, nil
+	return caps.all || caps.reached[sessionID], nil
 }
 
 // ------------------------------------------------------------------- fixture
@@ -450,7 +471,7 @@ func newFixture(t *testing.T, maxParallel, maxRounds int) *fixture {
 		runs:      &fakeRuns{},
 		scheduler: &fakeScheduler{},
 		presence:  &fakePresence{states: map[string]bool{}},
-		stepCaps:  &fakeStepCaps{},
+		stepCaps:  &fakeStepCaps{reached: map[string]bool{}},
 	}
 	fixture.lists = &fakeLists{runs: fixture.runs}
 	fixture.chat = newFakeChat(fixture.runs, fixture.now)
@@ -679,7 +700,9 @@ func TestAdvanceContinuesRoundsUntilTheRoundLimitThenFailsTheItem(t *testing.T) 
 	}
 }
 
-func TestAdvanceBlocksTheItemAndPausesTheRunAtTheStepCap(t *testing.T) {
+// #330 §6: a capped item is blocked and releases its parallel slot; the
+// scheduler keeps going and claims the next item, and the run stays running.
+func TestAdvanceBlocksTheCappedItemAndClaimsTheNext(t *testing.T) {
 	fixture := newFixture(t, 1, 3)
 	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"), newItem("aitem_2", "武器"))
 
@@ -689,7 +712,7 @@ func TestAdvanceBlocksTheItemAndPausesTheRunAtTheStepCap(t *testing.T) {
 	// would fail the item as internal and pause the run for a failure.
 	fixture.chat.finishTurn(first.SessionID, turnError)
 	fixture.chat.failTask(first.SessionID, generation.FailureInternal, false, false)
-	fixture.stepCaps.reached = true
+	fixture.stepCaps.all = true
 
 	fixture.advance(t)
 
@@ -700,18 +723,195 @@ func TestAdvanceBlocksTheItemAndPausesTheRunAtTheStepCap(t *testing.T) {
 	if first.StateReason != "" {
 		t.Fatalf("state reason = %q; a step-cap block is not a failure", first.StateReason)
 	}
+	second := fixture.item(t, "aitem_2")
+	if second.State != assetlist.StateWorking || second.SessionID == "" || second.Round != 1 {
+		t.Fatalf("second item = %+v; want claimed and turning while the first waits at the cap", second)
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunRunning {
+		t.Fatalf("run = %s/%s; want running because another item can still work",
+			run.Status, run.PauseReason)
+	}
+	if len(fixture.scheduler.calls) != 2 {
+		t.Fatalf("schedules = %d; want the blocked item's turn plus the next item's turn",
+			len(fixture.scheduler.calls))
+	}
+	if fixture.stepCaps.calls != 1 {
+		t.Fatalf("step-cap reads = %d; want one at the terminal turn", fixture.stepCaps.calls)
+	}
+}
+
+// #330 §6: once every remaining item waits at the cap the run pauses at
+// step_cap; the block itself is never a failure.
+func TestAdvancePausesOnlyWhenEveryRemainingItemIsAtTheStepCap(t *testing.T) {
+	fixture := newFixture(t, 2, 3)
+	first := newItem("aitem_1", "角色")
+	first.State = assetlist.StateWorking
+	first.Round = 1
+	first.SessionID = "ses_1"
+	second := newItem("aitem_2", "武器")
+	second.State = assetlist.StateWorking
+	second.Round = 1
+	second.SessionID = "ses_2"
+	fixture.seedRun(assetlist.RunRunning, first, second)
+	for _, item := range []*assetlist.Item{&first, &second} {
+		fixture.chat.sessions[item.SessionID] = chat.Session{
+			ID: item.SessionID, OwnerID: testOwner, ProjectID: testProject,
+		}
+		fixture.chat.seedTerminalTurn(item.SessionID, turnDone)
+		turn, found := fixture.chat.latest(item.SessionID)
+		if !found {
+			t.Fatal("seeded turn missing")
+		}
+		fixture.runs.item(item.ID).LastTurnMessageID = turn.AssistantMessageID
+	}
+	fixture.stepCaps.reached["ses_1"] = true
+
+	fixture.advance(t)
+
+	if fixture.runs.item("aitem_1").Block != assetlist.BlockStepCap {
+		t.Fatalf("first block = %q; want step_cap", fixture.runs.item("aitem_1").Block)
+	}
+	// The second item is not capped: it opens its next round and the run keeps
+	// running even though the first item is blocked.
+	if fixture.runs.item("aitem_2").Block != assetlist.BlockNone {
+		t.Fatalf("second block = %q; want none", fixture.runs.item("aitem_2").Block)
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunRunning {
+		t.Fatalf("run = %s/%s; want running while the second item works",
+			run.Status, run.PauseReason)
+	}
+
+	// The second item reaches the cap of its own asset: nothing can progress
+	// any more, so the run pauses at the cap.
+	fixture.chat.finishTurn("ses_2", turnDone)
+	fixture.stepCaps.reached["ses_2"] = true
+	fixture.advance(t)
+
+	if fixture.runs.item("aitem_2").Block != assetlist.BlockStepCap {
+		t.Fatalf("second block = %q; want step_cap", fixture.runs.item("aitem_2").Block)
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunPaused ||
+		run.PauseReason != assetlist.PauseStepCap {
+		t.Fatalf("run = %s/%s; want paused/step_cap when every remaining item is blocked",
+			run.Status, run.PauseReason)
+	}
+}
+
+// #330 §6 with two parallel slots: blocking one item leaves the other item's
+// turn in flight and the run running.
+func TestAdvanceKeepsRunningWhileAParallelItemStillWorks(t *testing.T) {
+	fixture := newFixture(t, 2, 3)
+	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"), newItem("aitem_2", "武器"))
+
+	fixture.advance(t)
+	if fixture.runs.claims != 2 {
+		t.Fatalf("claims = %d; want both slots used", fixture.runs.claims)
+	}
+	first := fixture.item(t, "aitem_1")
+	fixture.chat.finishTurn(first.SessionID, turnError)
+	fixture.chat.failTask(first.SessionID, generation.FailureInternal, false, false)
+	fixture.stepCaps.reached[first.SessionID] = true
+
+	fixture.advance(t)
+
+	if item := fixture.item(t, "aitem_1"); item.Block != assetlist.BlockStepCap {
+		t.Fatalf("first item block = %q; want step_cap", item.Block)
+	}
+	second := fixture.item(t, "aitem_2")
+	if second.State != assetlist.StateWorking || second.Block != assetlist.BlockNone {
+		t.Fatalf("second item = %s/%q; want its turn left in flight", second.State, second.Block)
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunRunning {
+		t.Fatalf("run = %s/%s; want running while the other turn is in flight",
+			run.Status, run.PauseReason)
+	}
+
+	// Both blocked: now the run pauses.
+	fixture.chat.finishTurn(second.SessionID, turnDone)
+	fixture.stepCaps.reached[second.SessionID] = true
+	fixture.advance(t)
 	if run := fixture.runState(t); run.Status != assetlist.RunPaused ||
 		run.PauseReason != assetlist.PauseStepCap {
 		t.Fatalf("run = %s/%s; want paused/step_cap", run.Status, run.PauseReason)
 	}
-	if len(fixture.scheduler.calls) != 1 {
-		t.Fatalf("schedules = %d; want no continuation at the cap", len(fixture.scheduler.calls))
+}
+
+// #330 §6: the pause ends when the last blocked item is skipped; the resumed
+// tick settles the list as completed instead of leaving it paused forever.
+func TestAdvanceResumesAndCompletesAfterTheLastBlockedItemIsSkipped(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	blocked := newItem("aitem_1", "角色")
+	blocked.State = assetlist.StateWorking
+	blocked.Round = 1
+	blocked.Block = assetlist.BlockStepCap
+	blocked.SessionID = "ses_1"
+	fixture.seedRun(assetlist.RunPaused, blocked)
+	fixture.runs.runs[0].PauseReason = assetlist.PauseStepCap
+	fixture.chat.sessions["ses_1"] = chat.Session{ID: "ses_1", OwnerID: testOwner, ProjectID: testProject}
+	fixture.chat.seedTerminalTurn("ses_1", turnDone)
+
+	// A paused run is not advanced while the item is blocked.
+	fixture.advance(t)
+	if run := fixture.runState(t); run.Status != assetlist.RunPaused {
+		t.Fatalf("run = %s; want the step-cap pause kept while the item is blocked", run.Status)
 	}
-	if second := fixture.item(t, "aitem_2"); second.State != assetlist.StateTodo {
-		t.Fatalf("second item = %s; want todo after the pause", second.State)
+	if len(fixture.scheduler.calls) != 0 {
+		t.Fatalf("schedules = %d; want no turn for a blocked item", len(fixture.scheduler.calls))
 	}
-	if fixture.stepCaps.calls != 1 {
-		t.Fatalf("step-cap reads = %d; want one at the terminal turn", fixture.stepCaps.calls)
+
+	// The person skips the item: the skip makes it terminal, and the runner's
+	// next tick resumes and completes the run.
+	fixture.runs.item("aitem_1").State = assetlist.StateSkipped
+	fixture.advance(t)
+
+	if run := fixture.runState(t); run.Status != assetlist.RunCompleted {
+		t.Fatalf("run = %s/%s; want completed after the last item became terminal",
+			run.Status, run.PauseReason)
+	}
+}
+
+// #330 step 5C: a grant of more steps clears the item's cap block and resumes
+// the run; the next tick must continue from a fresh turn instead of judging
+// the already-capped turn again (which would re-block or fail it).
+func TestAdvanceContinuesAfterTheStepCapBlockWasResolved(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"))
+
+	fixture.advance(t)
+	first := fixture.item(t, "aitem_1")
+	fixture.chat.finishTurn(first.SessionID, turnError)
+	fixture.chat.failTask(first.SessionID, generation.FailureInternal, false, false)
+	fixture.stepCaps.all = true
+	fixture.advance(t)
+	if item := fixture.item(t, "aitem_1"); item.Block != assetlist.BlockStepCap || item.StepCapTurnMessageID == "" {
+		t.Fatalf("capped item = %+v; want the block and its turn", item)
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunPaused ||
+		run.PauseReason != assetlist.PauseStepCap {
+		t.Fatalf("run = %s/%s; want paused/step_cap with no other item to run",
+			run.Status, run.PauseReason)
+	}
+
+	// The person grants more steps: the item's block is cleared (the service's
+	// write, #330 step 5C) and the runner resumes the pause that nothing waits
+	// for any more.
+	if _, err := fixture.runs.SetItemBlock(context.Background(), testOwner, testList,
+		"aitem_1", assetlist.BlockNone, assetlist.VersionUnchecked, fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	fixture.stepCaps.all = false
+	fixture.advance(t)
+
+	item := fixture.item(t, "aitem_1")
+	if item.State != assetlist.StateWorking || item.Round != 2 || item.WorkRound != 2 ||
+		item.Block != assetlist.BlockNone {
+		t.Fatalf("continued item = %+v; want the next round of the same work session", item)
+	}
+	if len(fixture.scheduler.calls) != 2 {
+		t.Fatalf("schedules = %d; want the fresh turn after the grant", len(fixture.scheduler.calls))
+	}
+	if run := fixture.runState(t); run.Status != assetlist.RunRunning {
+		t.Fatalf("run = %s; want running", run.Status)
 	}
 }
 

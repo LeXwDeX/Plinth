@@ -139,11 +139,14 @@ type ReviewSelfCheck struct {
 }
 
 // ReviewSteps is the step summary: every terminal Task of the sub-session is
-// one step, and the 3D ones are counted separately (#330).
+// one step, and the 3D ones are counted separately (#330). Extra is the steps
+// the person granted this asset (#330 step 5C); Cap and Extra appear together
+// only in the cap mode, where their sum is the item's limit.
 type ReviewSteps struct {
 	Used    int    `json:"used"`
 	Model3D int    `json:"model3d"`
 	Cap     int    `json:"cap,omitempty"`
+	Extra   int    `json:"extra,omitempty"`
 	Mode    string `json:"mode,omitempty"`
 }
 

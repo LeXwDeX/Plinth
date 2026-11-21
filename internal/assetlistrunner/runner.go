@@ -62,6 +62,7 @@ type Runs interface {
 	ClaimItem(ctx context.Context, ownerID, listID string, at time.Time) (assetlist.Item, bool, error)
 	FinishItem(ctx context.Context, input assetlist.FinishItemInput) (assetlist.Item, error)
 	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (assetlist.Item, error)
+	SetItemStepCapTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, expectedVersion int64, at time.Time) (assetlist.Item, error)
 	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round, workRound int, expectedVersion int64, at time.Time) (assetlist.Item, error)
 }
 
@@ -240,6 +241,13 @@ func (runner *Runner) Advance(ctx context.Context) error {
 	if err := runner.resumePresencePauses(ctx, now); err != nil {
 		errs = append(errs, err)
 	}
+	// A step-cap pause ends as soon as no item is blocked at the cap any more
+	// (#330 §6): the blocked item was extended, skipped or reported. Resuming
+	// before the running scan lets the same tick settle (and possibly complete)
+	// the list instead of waiting one more interval.
+	if err := runner.resumeStepCapPauses(ctx, now); err != nil {
+		errs = append(errs, err)
+	}
 	running, err := runner.runs.RunsByStatus(ctx, assetlist.RunRunning)
 	if err != nil {
 		return errors.Join(append(errs, fmt.Errorf("read running asset list runs: %w", err))...)
@@ -253,7 +261,7 @@ func (runner *Runner) Advance(ctx context.Context) error {
 }
 
 // resumePresencePauses brings back only presence pauses: user stays sticky,
-// step_cap needs the blocking item resolved and failure waits for the person.
+// step_cap is handled by resumeStepCapPauses and failure waits for the person.
 func (runner *Runner) resumePresencePauses(ctx context.Context, now time.Time) error {
 	paused, err := runner.runs.RunsByStatus(ctx, assetlist.RunPaused)
 	if err != nil {
@@ -270,6 +278,49 @@ func (runner *Runner) resumePresencePauses(ctx context.Context, now time.Time) e
 			continue
 		}
 		if !present {
+			continue
+		}
+		if _, err := runner.runs.UpdateRunStatus(ctx, run.OwnerID, run.ListID,
+			assetlist.RunPaused, assetlist.RunRunning, "", now); err != nil &&
+			!errors.Is(err, assetlist.ErrConflict) {
+			errs = append(errs, fmt.Errorf("resume asset list run %s: %w", run.ID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// resumeStepCapPauses ends a pause the runner set when every remaining item
+// waited at the 3D step cap (#330 §6). The runner pauses only while an item is
+// blocked, so a pause whose last blocked item was extended, skipped or
+// reported has nothing left to wait for; it continues and the tick settles the
+// list. No presence means no resume: the presence gate owns that pause reason.
+func (runner *Runner) resumeStepCapPauses(ctx context.Context, now time.Time) error {
+	paused, err := runner.runs.RunsByStatus(ctx, assetlist.RunPaused)
+	if err != nil {
+		return fmt.Errorf("read paused asset list runs: %w", err)
+	}
+	var errs []error
+	for _, run := range paused {
+		if run.PauseReason != assetlist.PauseStepCap {
+			continue
+		}
+		present, err := runner.present(ctx, run, now)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read asset list presence for run %s: %w", run.ID, err))
+			continue
+		}
+		if !present {
+			continue
+		}
+		list, err := runner.lists.Get(ctx, run.OwnerID, run.ProjectID, run.ListID)
+		if errors.Is(err, assetlist.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read asset list %s: %w", run.ListID, err))
+			continue
+		}
+		if stepCapBlocked(list.Items) {
 			continue
 		}
 		if _, err := runner.runs.UpdateRunStatus(ctx, run.OwnerID, run.ListID,
@@ -315,6 +366,9 @@ func (runner *Runner) advanceRun(ctx context.Context, run assetlist.Run, now tim
 	}
 	// Re-read after the item transitions so the parallel-slot count reflects
 	// finished items and a completion report that landed during this tick.
+	// A blocked item (awaiting_approval, step_cap) releases its slot, so a
+	// cap-blocked item does not stop the scheduler from claiming another one
+	// (#330 §6).
 	current, err := runner.lists.Get(ctx, run.OwnerID, run.ProjectID, run.ListID)
 	if errors.Is(err, assetlist.ErrNotFound) {
 		return nil
@@ -324,10 +378,14 @@ func (runner *Runner) advanceRun(ctx context.Context, run assetlist.Run, now tim
 	}
 	slots := workingSlots(current.Items)
 	claimed := false
+	stale := false
 	for slots < runner.maxParallel {
 		item, ok, err := runner.runs.ClaimItem(ctx, run.OwnerID, run.ListID, now)
 		if err != nil {
 			if errors.Is(err, assetlist.ErrConflict) {
+				// Another writer moved an item between the read and the claim;
+				// the next tick judges from a fresh read.
+				stale = true
 				break
 			}
 			return err
@@ -341,20 +399,24 @@ func (runner *Runner) advanceRun(ctx context.Context, run assetlist.Run, now tim
 			return err
 		}
 	}
-	if claimed {
+	if claimed || stale {
 		return nil
 	}
-	return runner.completeIfDone(ctx, run, current.Items, now)
+	return runner.settleRun(ctx, run, current.Items, now)
 }
 
 // advanceItem moves one working item: it waits for an active turn, records a
 // finished one, classifies a failure, continues the next round or reaches the
 // round limit. Errors that mean "another writer moved the item" are not
 // failures of the tick; they end this item's work until the next read.
+//
+// The second result is true only when the runner paused the run (a failure
+// that needs the person). A step-cap block no longer pauses here: the item is
+// left blocked and the tick keeps working on the other items.
 func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item assetlist.Item, now time.Time) (bool, error) {
 	if item.Block != assetlist.BlockNone {
-		// awaiting_approval waits for the person; step_cap is handled by the
-		// gate that pauses the run.
+		// awaiting_approval waits for the person; step_cap waits for the person
+		// to extend, skip or report the item. Neither may open another turn.
 		return false, nil
 	}
 	if !item.NextActionAt.IsZero() && item.NextActionAt.After(now) {
@@ -414,20 +476,25 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 			item.WorkRound = workRound
 			item.LastTurnMessageID = turn.AssistantMessageID
 		}
+		// A turn already handled as a step-cap block (#330 step 5C): the refusal
+		// stays in that turn's grant audit, so after the person granted more
+		// steps (or resumed) the runner continues from a fresh turn instead of
+		// re-judging the same capped turn. Evaluating it again would either
+		// re-block or misreport the refusal as a failure.
+		if item.StepCapTurnMessageID != "" && item.StepCapTurnMessageID == turn.AssistantMessageID {
+			round, workRound := runner.nextRounds(item)
+			return false, runner.openTurn(ctx, run, item, sessionID, round, workRound, now)
+		}
 		// A turn refused at the owner's 3D step cap ended while the item still
-		// works: block the item and pause the run instead of continuing the
-		// round or classifying the refusal as a failure (#328 §2.5).
+		// works: block the item and keep the tick going instead of classifying
+		// the refusal as a failure (#330 §6). The blocked item releases its
+		// parallel slot; the run pauses only when nothing else can progress.
 		capped, err := runner.stepCapReached(ctx, run, sessionID)
 		if err != nil {
 			return false, err
 		}
 		if capped {
-			if err := runner.blockStepCap(ctx, run, item, now); err != nil {
-				return false, err
-			}
-			// The run is paused now; stop the tick before it advances another
-			// working item.
-			return true, nil
+			return false, runner.blockStepCap(ctx, run, item, turn.AssistantMessageID, now)
 		}
 		report, failed, err := runner.failureReport(ctx, run.OwnerID, sessionID, turn)
 		if err != nil {
@@ -749,10 +816,22 @@ func (runner *Runner) stepCapReached(ctx context.Context, run assetlist.Run, ses
 	return runner.stepCaps.StepCapReached(ctx, run.OwnerID, sessionID)
 }
 
-// blockStepCap marks the item on its second axis and pauses the run. The item
-// stays working: the person resolves the cap (or the item) and the control
-// service clears the block before the runner advances it again.
-func (runner *Runner) blockStepCap(ctx context.Context, run assetlist.Run, item assetlist.Item, now time.Time) error {
+// blockStepCap marks the item on its second axis and leaves the run running
+// (#330 §6). The item stays working: the person resolves the cap (extends,
+// skips, or lets the Agent report) and the control service clears the block
+// before the runner advances it again. The capped turn is recorded first, so
+// the person's grant continues from a fresh turn. A blocked item does not hold
+// a parallel slot; the run pauses at the cap only when settleRun finds nothing
+// else to do.
+func (runner *Runner) blockStepCap(ctx context.Context, run assetlist.Run, item assetlist.Item, assistantMessageID string, now time.Time) error {
+	if assistantMessageID != "" {
+		if _, err := runner.runs.SetItemStepCapTurn(ctx, run.OwnerID, run.ListID, item.ID,
+			assistantMessageID, assetlist.VersionUnchecked, now); err != nil &&
+			!errors.Is(err, assetlist.ErrConflict) && !errors.Is(err, assetlist.ErrItemState) &&
+			!errors.Is(err, assetlist.ErrNotFound) {
+			return err
+		}
+	}
 	_, err := runner.runs.SetItemBlock(ctx, run.OwnerID, run.ListID, item.ID,
 		assetlist.BlockStepCap, assetlist.VersionUnchecked, now)
 	if err != nil && !errors.Is(err, assetlist.ErrConflict) &&
@@ -761,31 +840,89 @@ func (runner *Runner) blockStepCap(ctx context.Context, run assetlist.Run, item 
 	}
 	runner.logger.Info("asset list item blocked at the step cap",
 		"run_id", run.ID, "item_id", item.ID)
-	return runner.pauseRun(ctx, run, assetlist.PauseStepCap, now)
+	return nil
 }
 
-// completeIfDone finishes a running list when nothing is left to make. A
-// review or returned item blocks completion: the list waits for #329 to
-// resolve it, and the run keeps its per-owner running slot.
-func (runner *Runner) completeIfDone(
+// runDrain is what a tick with no claim left can do for one list.
+type runDrain int
+
+const (
+	// drainWaiting means something outside this tick will move the list: a
+	// turn in flight, an approval card the person is deciding, a review the
+	// person has to accept, a return to redo or an item scheduled for later.
+	// The run stays running.
+	drainWaiting runDrain = iota
+	// drainComplete means every item reached a terminal state.
+	drainComplete
+	// drainStepCap means no item can advance without the person resolving a
+	// 3D step cap, and at least one item is blocked at it.
+	drainStepCap
+)
+
+// drainOf classifies a list with nothing claimable. An item blocked at the cap
+// is not "waiting": its turn does not continue by itself. Any other unfinished
+// item outranks the block, because the runner or the person can still move it
+// without touching the cap.
+func drainOf(items []assetlist.Item) runDrain {
+	blocked := false
+	pending := false
+	for _, item := range items {
+		switch item.State {
+		case assetlist.StateTodo, assetlist.StateReturned:
+			return drainWaiting
+		case assetlist.StateWorking:
+			pending = true
+			if item.Block == assetlist.BlockStepCap {
+				blocked = true
+				continue
+			}
+			return drainWaiting
+		case assetlist.StateReview:
+			pending = true
+		}
+	}
+	if !pending {
+		return drainComplete
+	}
+	if blocked {
+		return drainStepCap
+	}
+	return drainWaiting
+}
+
+// stepCapBlocked reports whether any item still waits at the 3D step cap.
+func stepCapBlocked(items []assetlist.Item) bool {
+	for _, item := range items {
+		if item.State == assetlist.StateWorking && item.Block == assetlist.BlockStepCap {
+			return true
+		}
+	}
+	return false
+}
+
+// settleRun decides the run's status after a tick that claimed nothing. A
+// list whose items are all terminal completes; a list whose remaining work
+// sits behind step-cap blocks pauses at the cap; every other unfinished state
+// keeps the run running. Review items alone keep waiting as before (#329), and
+// they do not hide a cap pause: nothing automatic would happen either way.
+func (runner *Runner) settleRun(
 	ctx context.Context,
 	run assetlist.Run,
 	items []assetlist.Item,
 	now time.Time,
 ) error {
-	for _, item := range items {
-		switch item.State {
-		case assetlist.StateTodo, assetlist.StateWorking,
-			assetlist.StateReview, assetlist.StateReturned:
+	switch drainOf(items) {
+	case drainComplete:
+		_, err := runner.runs.UpdateRunStatus(ctx, run.OwnerID, run.ListID,
+			assetlist.RunRunning, assetlist.RunCompleted, "", now)
+		if errors.Is(err, assetlist.ErrConflict) || errors.Is(err, assetlist.ErrNotFound) {
 			return nil
 		}
+		return err
+	case drainStepCap:
+		return runner.pauseRun(ctx, run, assetlist.PauseStepCap, now)
 	}
-	_, err := runner.runs.UpdateRunStatus(ctx, run.OwnerID, run.ListID,
-		assetlist.RunRunning, assetlist.RunCompleted, "", now)
-	if errors.Is(err, assetlist.ErrConflict) || errors.Is(err, assetlist.ErrNotFound) {
-		return nil
-	}
-	return err
+	return nil
 }
 
 func (runner *Runner) present(ctx context.Context, run assetlist.Run, now time.Time) (bool, error) {
@@ -830,13 +967,20 @@ func (runner *Runner) forgetDeferredTurns(items []assetlist.Item) {
 	}
 }
 
+// workingSlots counts the items that hold a parallel slot. An item waiting for
+// an approval card or blocked at the 3D step cap releases its slot (#328,
+// #330 §6): the person can resolve it later, and the scheduler is free to
+// claim another item meanwhile.
 func workingSlots(items []assetlist.Item) int {
 	slots := 0
 	for _, item := range items {
-		// An item waiting for an approval card releases its parallel slot.
-		if item.State == assetlist.StateWorking && item.Block != assetlist.BlockAwaitingApproval {
-			slots++
+		if item.State != assetlist.StateWorking {
+			continue
 		}
+		if item.Block == assetlist.BlockAwaitingApproval || item.Block == assetlist.BlockStepCap {
+			continue
+		}
+		slots++
 	}
 	return slots
 }

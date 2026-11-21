@@ -36,6 +36,17 @@ func TestDefaultStepPolicyLoadsAndProjectsSafeMembers(t *testing.T) {
 	if policy.Cap.Default != 20 || policy.Cap.Minimum != 1 || policy.Cap.Maximum != 200 {
 		t.Fatalf("cap = %+v", policy.Cap)
 	}
+	if policy.ExtraSteps.Default != 5 || policy.ExtraSteps.Maximum != 50 || policy.ExtraSteps.TotalMaximum != 200 {
+		t.Fatalf("extra_steps = %+v", policy.ExtraSteps)
+	}
+	if policy.Messages.ExtraStepsLimit == "" || policy.Messages.ExtraStepsSingleLimit == "" ||
+		policy.Messages.ExtraStepsUnavailable == "" {
+		t.Fatalf("extra-step messages = %+v", policy.Messages)
+	}
+	if policy.Audit.ExtraStepsAction == "" || policy.Audit.ExtraStepsResourceType == "" ||
+		application.Runtime.HTTP.Routes.ProjectAssetListItemSteps == "" {
+		t.Fatalf("extra-step audit/route = %+v %q", policy.Audit, application.Runtime.HTTP.Routes.ProjectAssetListItemSteps)
+	}
 	for _, twoDimensional := range []string{"text-to-image", "image-to-image", "image-to-multiview", "edit-multiview", "background-removal"} {
 		for _, counted := range policy.CountedCapabilities {
 			if string(counted) == twoDimensional {
@@ -110,6 +121,40 @@ func TestStepPolicyValidationRejectsIncompleteOrUnknownDeclarations(t *testing.T
 		"default below minimum": func(app *catalog.ApplicationSchema) {
 			app.StepPolicy.Cap.Minimum = 5
 			app.StepPolicy.Cap.Default = 4
+		},
+		"extra steps default zero": func(app *catalog.ApplicationSchema) { app.StepPolicy.ExtraSteps.Default = 0 },
+		"extra steps maximum below default": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.ExtraSteps.Maximum = app.StepPolicy.ExtraSteps.Default - 1
+		},
+		"extra steps total below maximum": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.ExtraSteps.TotalMaximum = app.StepPolicy.ExtraSteps.Maximum - 1
+		},
+		"no extra steps limit message": func(app *catalog.ApplicationSchema) { app.StepPolicy.Messages.ExtraStepsLimit = "" },
+		"extra steps limit without extra": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Messages.ExtraStepsLimit = "最多 {maximum} 步"
+		},
+		"no extra steps single limit message": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Messages.ExtraStepsSingleLimit = ""
+		},
+		"extra steps single limit without maximum": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Messages.ExtraStepsSingleLimit = "一次只能加几步"
+		},
+		"no extra steps unavailable message": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Messages.ExtraStepsUnavailable = ""
+		},
+		"missing extra steps audit resource type": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Audit.ExtraStepsResourceType = ""
+		},
+		"undeclared extra steps audit action": func(app *catalog.ApplicationSchema) {
+			app.StepPolicy.Audit.ExtraStepsAction = "add_nothing"
+		},
+		"missing list item steps route": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Enabled = true
+			app.Runtime.HTTP.Routes.ProjectAssetListItemSteps = ""
+		},
+		"list item steps route with the wrong parameters": func(app *catalog.ApplicationSchema) {
+			app.AssetList.Execution.Enabled = true
+			app.Runtime.HTTP.Routes.ProjectAssetListItemSteps = "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{item}/steps"
 		},
 		"no counted capabilities": func(app *catalog.ApplicationSchema) { app.StepPolicy.CountedCapabilities = nil },
 		"unknown capability": func(app *catalog.ApplicationSchema) {
