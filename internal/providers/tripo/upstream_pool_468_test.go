@@ -357,3 +357,44 @@ func poolTerminal(phase generation.UpstreamPhase) bool {
 		return false
 	}
 }
+
+// #468: after a restart the pool is empty, but a child that was already
+// submitted is still running upstream. The first Observe re-registers it
+// (Readopt, allowed to exceed the limit for one cycle) instead of queueing it
+// behind another attempt that took the only slot.
+func TestUpstreamPoolReadoptAfterRestart(t *testing.T) {
+	upstream := newPoolUpstream(t, 100)
+	adapter, _ := newPoolAdapter(t, upstream, 1)
+	tasks := poolRequests(t, 1)
+	ctx := generation.WithDispatchCheckpointer(context.Background(), tasks[0].permit)
+	first, err := adapter.Observe(ctx, tasks[0].request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks[0].permit.settle(t, first)
+	if first.Queue != nil || first.Dispatch == nil {
+		t.Fatalf("first round did not dispatch: %+v", first)
+	}
+	// Restart: a new pool and adapter against the same upstream. Another
+	// attempt takes the only slot before the original task is observed again.
+	restarted, pool := newPoolAdapter(t, upstream, 1)
+	other := upstreampool.Holder{Connection: "tripo.v3", Pool: tripo.TripoPoolName, Attempt: "other"}
+	if _, ok, _ := pool.Acquire(context.Background(), other, 0); !ok {
+		t.Fatal("other attempt should fit the empty pool")
+	}
+	tasks[0].request.Opaque = first.Opaque
+	next, err := restarted.Observe(ctx, tasks[0].request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks[0].permit.settle(t, next)
+	if next.Queue != nil {
+		t.Fatalf("submitted child was queued after restart: %+v", next)
+	}
+	if next.Phase != generation.UpstreamRunning {
+		t.Fatalf("submitted child after restart phase = %s: %+v", next.Phase, next)
+	}
+	if stats := pool.Stats(); stats.TotalHeld != 2 {
+		t.Fatalf("readopt did not exceed the limit for the running child: %+v", stats)
+	}
+}

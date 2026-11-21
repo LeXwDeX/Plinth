@@ -160,6 +160,12 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 	if hasDispatchingRemnant(state.Conversions) {
 		return preCompletionFailure(base, state, "Tripo 转换提交结果不明，已停止再次付费"), nil
 	}
+	// A restart begins with an empty pool: re-register the children the
+	// checkpoint still shows as submitted so the count reflects what is really
+	// running upstream (Readopt may exceed the limit for one poll cycle).
+	if len(submittedFormats(selections, state.Conversions)) > 0 {
+		a.readoptPool(request.Offering, request.AttemptID)
+	}
 	// Poll every in-flight child (bounded concurrency, stable order). A child
 	// that ended failed or cancelled is resubmitted under a new permit while its
 	// own budget lasts (Tripo bills neither); a child whose bounded unknown

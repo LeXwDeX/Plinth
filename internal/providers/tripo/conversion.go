@@ -599,6 +599,9 @@ func (a *Adapter) observePostSuccessConversion(
 	a.touchPool(request.Offering, request.AttemptID)
 	state := parsePostSuccessState(request.Opaque)
 	selections := frozenConversionSelections(request.Offering, request.Input)
+	if len(submittedFormats(selections, state.Conversions)) > 0 {
+		a.readoptPool(request.Offering, request.AttemptID)
+	}
 	base := generation.Observation{
 		Job:       &request.Job,
 		PollAfter: request.Offering.PollInterval,

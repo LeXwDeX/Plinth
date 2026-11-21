@@ -389,7 +389,9 @@ func (a *Adapter) Observe(
 	// registered them, every Observe refreshes them, and a terminal observation
 	// releases them. The private conversion paths below do their own Acquire.
 	if a.poolEnabled() && poolCountsPublicJob(request.Offering) {
-		a.touchPool(request.Offering, request.AttemptID)
+		// Readopt (not just Touch) so a restart re-registers the still-running
+		// public job; it also refreshes last-seen.
+		a.readoptPool(request.Offering, request.AttemptID)
 		defer func() {
 			if err == nil && terminalPhase(observation.Phase) {
 				a.releasePool(request.Offering, request.AttemptID)

@@ -528,6 +528,11 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 		s.ConversionRequests = map[string]json.RawMessage{}
 	}
 	names := nativeFormatNames(c)
+	// A restart begins with an empty pool: re-register the children the ledger
+	// still shows as submitted (Readopt may exceed the limit for one cycle).
+	if countSubmitted(names, s.Conversions) > 0 {
+		a.readoptPool(request.Offering, request.AttemptID)
+	}
 	// Poll every in-flight child (bounded concurrency, stable order). A child
 	// that ended failed or cancelled enters the backoff wait; the format is
 	// resubmitted only while its own budget lasts (Tripo bills neither). One
