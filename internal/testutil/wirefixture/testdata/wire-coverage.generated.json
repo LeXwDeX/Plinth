@@ -18,6 +18,7 @@
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-texture.candidate.json",
     "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/jimeng/api-v3/testdata/jimeng-api-v3-text-to-image.candidate.json",
+    "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-animation.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-convert.candidate.json",
@@ -27,6 +28,7 @@
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-analyze.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-multi-color.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-remesh.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-resize.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-retexture.candidate.json",
@@ -34,9 +36,11 @@
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
+    "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-quota-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-386-convert-3mf.candidate.json",
@@ -50,6 +54,7 @@
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-multiview.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rig-check.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json",
@@ -73,15 +78,31 @@
       "total": 84
     },
     "units": {
-      "derived": 18,
+      "derived": 20,
       "disabled-zero-egress": 11,
       "local-no-wire": 4,
-      "real": 112,
-      "total": 145
+      "real": 133,
+      "total": 168
     }
   },
   "incomplete": [],
   "units": [
+    {
+      "adapter_key": "connection:GPT",
+      "capability": "(scenario)",
+      "endpoint": "POST /v1/responses",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/openai/v1/testdata/openai-v1-quota-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
     {
       "adapter_key": "connection:LLM",
       "capability": "(scenario)",
@@ -757,6 +778,22 @@
     },
     {
       "adapter_key": "matting.v1",
+      "capability": "(scenario)",
+      "endpoint": "GET /api/v1/batches/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/matting/api-v1/testdata/matting-api-v1-batch-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "matting.v1",
       "capability": "background-removal",
       "endpoint": "GET /api/v1/batches/{id}",
       "hosts": [
@@ -995,6 +1032,326 @@
       "evidence": "real",
       "evidence_files": [
         "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-delete.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/animations/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/convert/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/image-to-3d/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/print/analyze/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/remesh/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/resize/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/retexture/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/rigging/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v1/text-to-image/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /openapi/v2/text-to-3d/{id}",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.glb",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "GET /{id}/tasks/{id}/output/texture_0.png",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v1/animations",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v1/image-to-3d",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v1/remesh",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v1/resize",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v1/retexture",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v1/rigging",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v1/text-to-image",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "(scenario)",
+      "endpoint": "POST /openapi/v2/text-to-3d",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json"
       ],
       "offerings": []
     },
@@ -2416,6 +2773,7 @@
       "capability": "(scenario)",
       "endpoint": "GET /v3/tasks/{id}",
       "hosts": [
+        "example.test",
         "openapi.tripo3d.ai"
       ],
       "protocols": [
@@ -2424,7 +2782,8 @@
       "evidence": "real",
       "evidence_files": [
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
-        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json"
       ],
       "offerings": []
     },
@@ -2465,6 +2824,7 @@
       "capability": "(scenario)",
       "endpoint": "POST /v3/files",
       "hosts": [
+        "example.test",
         "openapi.tripo3d.ai"
       ],
       "protocols": [
@@ -2473,8 +2833,25 @@
       "evidence": "derived",
       "evidence_files": [
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-image.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-model.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/generation/image-to-multiview",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json"
       ],
       "offerings": []
     },

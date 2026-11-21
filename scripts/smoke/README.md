@@ -591,6 +591,49 @@ candidate, meta, policy, evidence file and the matrix, and rejects policies that
 `internal/app/agent_flow_replay_test.go`. See `docs/architecture.md`
 "Wire 黄金样本、覆盖矩阵与全栈离线回放" for rules, limits and what is not covered.
 
+#### Recording bounds and the 2026-11-20 window (#446)
+
+The runtime recorder (`UPSTREAM_CAPTURE_DIR`, #233) buffers each JSON, SSE or
+multipart body up to a fixed **1 MiB**; it has no setting to raise it today.
+A larger body is written as the value-free `body-over-limit` marker, a body the
+sanitizer will not hold as `sanitizer-refused`, and one the client stopped
+reading as `incomplete-body`. The live window on `dev-test` on 2026-11-20 wrote
+**1171 records: 774 complete exchanges and 397 skip markers**
+(`body-over-limit`: LLM 253, openai-images 26, gemini-images 9, meshy 13, tripo
+1, matting 1; `sanitizer-refused`: LLM 89, GPT 3; `incomplete-body`: 2).
+
+Complete records covered: Meshy OpenAPI v1 `text-to-image`, `image-to-3d`,
+`remesh`, `retexture`, `resize`, `rigging`, `animations`, `convert`,
+`print/analyze` and asset downloads (glb, png, obj, mtl, fbx, stl, usdz, 3mf);
+Meshy OpenAPI v2 `text-to-3d` preview and refine (create, running, succeeded);
+Tripo `/v3/files`, `/v3/generation/image-to-multiview`, `/v3/tasks` and artifact
+downloads; matting `api/v1/batches/{id}` polls and one PNG; `LLM`
+`/v1/chat/completions` (13) and one `GPT` `/v1/responses` 429 (the gateway's
+daily model-group quota). Not covered, because the body never reached the
+recorder: every chat request over 1 MiB (the Agent prompt with tool schemas),
+the image creation requests carrying data-URI pictures (openai-images,
+gemini-images) and the Meshy `image-to-3d` creates carrying the uploaded picture.
+
+The selected samples from this window are committed as
+`*-2026-11-20.candidate.json` beside the older captures, produced by
+`fake-upstream-align draft` from the private records. Prompts, URLs and opaque
+IDs are the sanitizer's placeholders; the quota error's `group_name`, the
+matting download locator and the prompts were replaced with placeholder values
+before committing. The Meshy engine templates from the newest sample of each
+key; the Tripo, matting and OpenAI fakes keep their older templates, and a test
+holds each to the newest capture's structure.
+
+**Next recording.** To capture the bodies this window missed, raise the per-body
+bound first. The sanitizer policy's `MaxBodyBytes` is capped at **8 MiB**
+(`8388608`, `internal/wirecapture/project.go`) and is configurable for
+`TestWireCaptureServer` through its manifest; the runtime recorder's 1 MiB is
+the constant `defaultRuntimeBodyLimit`, so reaching 8 MiB there needs a code
+change (a Schema-declared setting) and is not available today. A larger bound
+also records more text: review every draft before committing, and never widen
+the bound to keep a prompt or a URL verbatim. Request bodies that are
+irreducibly large (the Agent prompt, data-URI image uploads) are still recorded
+only as markers today.
+
 ### Recovery Fixture
 
 此夹具用于缺少自然失败/暂停样本时的有界验收。普通 `cmd/art-ai` 二进制不包含故障控制器；只有 `go test -c ./internal/app` 生成的测试二进制能运行 `TestAcceptanceServer`。`dev-test` 主机上的实际故障进程使用独立 loopback 端口及私有目录，不能使用 `dev-test` 主实例的入口端口，也不能复用共享数据库、资产或 Catalog 的写路径。`dev-test` 主实例的同版正常回归仍按上文 L0/L1/L2 执行。

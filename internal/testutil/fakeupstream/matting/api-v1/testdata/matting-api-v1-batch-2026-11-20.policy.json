@@ -1,0 +1,38 @@
+{
+  "MaxBodyBytes": 0,
+  "Keys": {
+    "accepted_count": true,
+    "batch_id": true,
+    "batch_status": true,
+    "download_path": true,
+    "downloadable": true,
+    "error_message": true,
+    "invalid_reason": true,
+    "rejected_count": true,
+    "source_index": true,
+    "source_name": true,
+    "status": true,
+    "task_id": true,
+    "tasks": true,
+    "total_count": true
+  },
+  "Allowed": {
+    "/api/v1/tasks/task-sample/download": true,
+    "0": true,
+    "1": true,
+    "RUNNING": true,
+    "SUCCEEDED": true,
+    "SUCCESS": true,
+    "api": true,
+    "application/json": true,
+    "batches": true,
+    "id-299": true,
+    "id-300": true,
+    "input_1.png": true,
+    "v1": true
+  },
+  "Aliases": null,
+  "PublicHosts": null,
+  "Projection": null,
+  "QueryKeys": null
+}

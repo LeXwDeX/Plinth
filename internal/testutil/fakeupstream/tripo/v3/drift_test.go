@@ -369,3 +369,67 @@ func TestSecondAlignmentReportIsCommittedAndClean(t *testing.T) {
 func TestThirdAlignmentReportIsCommittedAndClean(t *testing.T) {
 	testkit.AssertAlignmentReport(t, "testdata/alignment-report-386.json", OfficialBase, true)
 }
+
+// The 2026-11-20 live window re-captured image-to-multiview through the
+// production path (an uploaded PNG, then the task). The fake keeps that
+// capture's structure even though it templates from the older sample of the
+// kind (#446).
+func TestTheFakeMatchesTheNewestMultiviewCapture(t *testing.T) {
+	samples := loadSamples(t)
+	f := newFixture(t, fakeupstream.Config{})
+	newest := func(method, path string, status int, statusField, statusValue string) wirefixture.Exchange {
+		var newest wirefixture.Exchange
+		for _, exchange := range samples.Find(method+" /v3"+path, "") {
+			if exchange.Response.Status != status {
+				continue
+			}
+			if statusField != "" {
+				body, err := fakeupstream.JSONBody(exchange)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, _ := fakeupstream.DigMap(body, "data")
+				if data[statusField] != statusValue {
+					continue
+				}
+			}
+			if newest.Request.Method == "" || exchange.Metadata.CapturedAt.After(newest.Metadata.CapturedAt) {
+				newest = exchange
+			}
+		}
+		if newest.Request.Method == "" {
+			t.Fatalf("no sample %s /v3%s %d %s=%s", method, path, status, statusField, statusValue)
+		}
+		return newest
+	}
+
+	upload := newest("POST", "/files", http.StatusOK, "", "")
+	status, _, uploaded := f.upload("input.png", "image/png", []byte("png"), key)
+	if status != http.StatusOK {
+		t.Fatalf("upload = %d %v", status, uploaded)
+	}
+	assertSameShape(t, "files", sampleShape(t, upload), shapeOfBody(t, uploaded))
+
+	create := newest("POST", "/generation/image-to-multiview", http.StatusOK, "status", statusQueued)
+	// The captured request named one uploaded picture as a URL (the sanitizer
+	// replaced it with a fixed example.test one).
+	status, _, created := f.do("POST", "/generation/image-to-multiview", key, map[string]any{
+		"input": "https://example.test/redacted",
+	})
+	if status != http.StatusOK {
+		t.Fatalf("create = %d %v", status, created)
+	}
+	assertSameShape(t, "image-to-multiview create", sampleShape(t, create), shapeOfBody(t, created))
+
+	id := field(t, created, "data", "task_id").(string)
+	for _, state := range []string{statusRunning, statusSuccess} {
+		for {
+			_, _, polled := f.do("GET", "/tasks/"+id, key, nil)
+			if field(t, polled, "data", "status") != state {
+				continue
+			}
+			assertSameShape(t, "image-to-multiview "+state, sampleShape(t, newest("GET", "/tasks/{id}", http.StatusOK, "status", state)), shapeOfBody(t, polled))
+			break
+		}
+	}
+}
