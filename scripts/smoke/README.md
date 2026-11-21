@@ -157,7 +157,7 @@ BASE=... ADMIN_USERNAME=... ADMIN_PASSWORD=... ART_AI_LIVE_ACK=1 \
   python3 scripts/smoke/eval-agent-output.py --live --report <目录>
 ```
 
-只发送请求集的用户话术，由真实 Agent 自行决定轨迹；脚本自动回答用途卡、按 Schema 路由批准卡片（auto 批准方式下通常没有逐步卡），记录打断、工具调用、付费调用与任务。产出收集为 `artifacts/`：3D 模型用 `scripts/smoke/inspect_model_eval.go`（复用 `internal/modelinspect`，与 Agent 的 `inspect_model` 同一套事实）计算面数、拓扑、水密、UV、部件与用途预算判定；2D 记录尺寸、格式、背景/主体覆盖；`render_model_views` 的视图保存为评分图。报告写 `agent-quality-output.json` 与 `.md`，同时生成 `scoring-packet.json` 与 `scoring-sheet.md`：量表、提示词、参考图与渲染图都在里面，由人工或评审模型评分后写入 `scores.json`，再用 `--scores scores.json` 合并。评分文件形如 `{"<用例 id>": {"reference_fidelity": {"score": 4, "reason": "…"}, "craft": {"score": 3, "reason": "…"}}}`；维度取 `rubric.json` 的 `per_request_axes`。脚本不内置评审模型、调用次数或费用，也不自动重试真实上游。
+只发送请求集的用户话术，由真实 Agent 自行决定轨迹；脚本自动回答用途卡、按 Schema 路由批准卡片（auto 批准方式下通常没有逐步卡），记录打断、工具调用、付费调用与任务。产出收集为 `artifacts/`：3D 模型用 `scripts/smoke/inspect_model_eval.go`（复用 `internal/modelinspect`，与 Agent 的 `inspect_model` 同一套事实）计算面数、拓扑、水密、UV、部件与用途预算判定；2D 记录尺寸、格式、背景/主体覆盖；`render_model_views` 的视图保存为评分图。报告写 `agent-quality-output.json` 与 `.md`，同时生成 `scoring-packet.json` 与 `scoring-sheet.md`：量表、提示词、参考图与渲染图都在里面，由人工或评审模型评分后写入 `scores.json`，再用 `--scores scores.json` 合并。评分文件形如 `{"<用例 id>": {"reference_fidelity": {"score": 4, "reason": "…"}, "craft": {"score": 3, "reason": "…"}}}`；维度取 `rubric.json` 的 `per_request_axes`。脚本不内置评审模型、调用次数或费用，也不自动重试真实上游。3D 产物按 GLB、glTF 的顺序选取（#444：Meshy 先交付 3MF，旧规则会把它当 GLB 检查）；没有 glTF 时检查结果写明交付的格式，不交给 GLB 解析器。追问与卡片回答在本会话回合结束后再发，会话忙的 409 有界重试，等待与重试次数写进各用例的 `sends`。
 
 ### 两次运行对比
 
@@ -165,7 +165,7 @@ BASE=... ADMIN_USERNAME=... ADMIN_PASSWORD=... ART_AI_LIVE_ACK=1 \
 python3 scripts/smoke/eval-agent-compare.py <基线.json> <候选.json> [--tolerance N] [--json 结果.json] [--new-request-set]
 ```
 
-逐用例比较检查状态与汇总指标：检查 pass→fail、用例缺失、工具/付费/打断次数增加是回退；自检次数增加是改善。有回退时退出码 1，可直接用作门禁；`--no-fail` 只报告。`--new-request-set` 是请求集有意变更时的显式报告模式（#240）：请求集版本/内容差异不再算不可比，新增用例记为新增，汇总指标只比较两边共有的用例；`2d-series-project` 与 `2d-3d-input-concept` 的加入用该模式对比旧基线 `baselines/agent-quality-trajectory-77fc6878.json` 与新基线，退出码仍按共有用例的结果决定。
+逐用例比较检查状态与汇总指标：检查 pass→fail、用例缺失、工具/付费/打断次数增加是回退；自检次数增加是改善。有回退时退出码 1，可直接用作门禁；`--no-fail` 只报告。`--exclude-check-prefix <前缀>`（可重复）把指定检查排除出回退判定；基线里 detail 含 `bad GLB magic` 的检查（#444 之前的误判）自动列为「不可比」，单独成表。`--new-request-set` 是请求集有意变更时的显式报告模式（#240）：请求集版本/内容差异不再算不可比，新增用例记为新增，汇总指标只比较两边共有的用例；`2d-series-project` 与 `2d-3d-input-concept` 的加入用该模式对比旧基线 `baselines/agent-quality-trajectory-77fc6878.json` 与新基线，退出码仍按共有用例的结果决定。
 
 ## Fake 上游整栈自检（#96）
 
@@ -590,6 +590,58 @@ candidate, meta, policy, evidence file and the matrix, and rejects policies that
 `ValidatePolicy` refuses. The full-stack replays are in
 `internal/app/agent_flow_replay_test.go`. See `docs/architecture.md`
 "Wire 黄金样本、覆盖矩阵与全栈离线回放" for rules, limits and what is not covered.
+
+#### Recording bounds and the 2026-11-20 window (#446)
+
+The runtime recorder (`UPSTREAM_CAPTURE_DIR`, #233) buffers each JSON, SSE or
+multipart body up to a fixed **1 MiB**; it has no setting to raise it today.
+A larger body is written as the value-free `body-over-limit` marker, a body the
+sanitizer will not hold as `sanitizer-refused`, and one the client stopped
+reading as `incomplete-body`. The live window on `dev-test` on 2026-11-20 wrote
+**1171 records: 774 complete exchanges and 397 skip markers**
+(`body-over-limit`: LLM 253, openai-images 26, gemini-images 9, meshy 13, tripo
+1, matting 1; `sanitizer-refused`: LLM 89, GPT 3; `incomplete-body`: 2).
+
+Complete records covered: Meshy OpenAPI v1 `text-to-image`, `image-to-3d`,
+`remesh`, `retexture`, `resize`, `rigging`, `animations`, `convert`,
+`print/analyze` and asset downloads (glb, png, obj, mtl, fbx, stl, usdz, 3mf);
+Meshy OpenAPI v2 `text-to-3d` preview and refine (create, running, succeeded);
+Tripo `/v3/files`, `/v3/generation/image-to-multiview`, `/v3/tasks` and artifact
+downloads; matting `api/v1/batches/{id}` polls and one PNG; `LLM`
+`/v1/chat/completions` (13) and one `GPT` `/v1/responses` 429 (the gateway's
+daily model-group quota). Not covered, because the body never reached the
+recorder: every chat request over 1 MiB (the Agent prompt with tool schemas),
+the image creation requests carrying data-URI pictures (openai-images,
+gemini-images) and the Meshy `image-to-3d` creates carrying the uploaded picture.
+
+The selected samples from this window are committed as
+`*-2026-11-20.candidate.json` beside the older captures, produced by
+`fake-upstream-align draft` from the private records. Prompts, URLs and opaque
+IDs are the sanitizer's placeholders; the quota error's `group_name`, the
+matting download locator and the prompts were replaced with placeholder values
+before committing. The Meshy engine templates from the newest sample of each
+key; the Tripo, matting and OpenAI fakes keep their older templates, and a test
+holds each to the newest capture's structure.
+
+One difference is recorded rather than copied: the 13 `LLM`
+`/v1/chat/completions` answers carry `choices[0].message.reasoning_content` and
+`usage.{prompt,completion}_tokens_details` (including
+`usage.prompt_tokens_details.text_tokens`) and no `system_fingerprint` or
+`prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`, while the fake's committed
+chat sample has the latter two and no `text_tokens`. Those are optional,
+model-specific fields; the fake keeps its own model's body because the
+adapters read none of them.
+
+**Next recording.** To capture the bodies this window missed, raise the per-body
+bound first. The sanitizer policy's `MaxBodyBytes` is capped at **8 MiB**
+(`8388608`, `internal/wirecapture/project.go`) and is configurable for
+`TestWireCaptureServer` through its manifest; the runtime recorder's 1 MiB is
+the constant `defaultRuntimeBodyLimit`, so reaching 8 MiB there needs a code
+change (a Schema-declared setting) and is not available today. A larger bound
+also records more text: review every draft before committing, and never widen
+the bound to keep a prompt or a URL verbatim. Request bodies that are
+irreducibly large (the Agent prompt, data-URI image uploads) are still recorded
+only as markers today.
 
 ### Recovery Fixture
 

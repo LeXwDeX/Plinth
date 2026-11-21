@@ -257,7 +257,7 @@ func TestShippedAssetCraftCoversAssetTypesAndStyles(t *testing.T) {
 
 // TestShippedRiggedCharacterRouteIsDeclaredAsGuidance is #286: a character that
 // needs rigging defaults to the A-pose three-view then multiview-to-3D route.
-// The route is Schema guidance (craft text and the system prompt), and the
+// The route is Schema guidance, stated once in the 3D craft text (#407); the
 // purpose still recommends multiview Offerings to serve it.
 func TestShippedRiggedCharacterRouteIsDeclaredAsGuidance(t *testing.T) {
 	app := shippedApplication(t)
@@ -267,12 +267,13 @@ func TestShippedRiggedCharacterRouteIsDeclaredAsGuidance(t *testing.T) {
 			craft = prompt.Text
 		}
 	}
-	for name, text := range map[string]string{"3D craft": craft, "system prompt": app.Chat.Agent.SystemPrompt} {
-		for _, want := range []string{"A 姿态", "create_three_view", "create_model_3d_from_views", "humanoid"} {
-			if !strings.Contains(text, want) {
-				t.Errorf("%s omits %q from the rigged-character route", name, want)
-			}
+	for _, want := range []string{"A 姿态", "create_three_view", "create_model_3d_from_views", "humanoid"} {
+		if !strings.Contains(craft, want) {
+			t.Errorf("the 3D craft omits %q from the rigged-character route", want)
 		}
+	}
+	if strings.Contains(app.Chat.Agent.SystemPrompt, "create_three_view") {
+		t.Error("the system prompt repeats the rigged-character route that lives in the 3D craft")
 	}
 	for _, profile := range app.Chat.Model3DUsage.Profiles {
 		if profile.ID == "game_character" {
