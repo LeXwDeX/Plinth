@@ -323,7 +323,6 @@ export function CanvasBoard({
   // #310: the mask's own Schema tint (a CSS token, re-read with the theme), not the lighter selection tint.
   const maskTintColor = useMemo(
     () => readCanvasToken(maskSchema.tint_color_token, palette.handle),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [maskSchema.tint_color_token, palette],
   );
   const outsideDim = canvasSchema.frontend.artboard.outside_dim;
@@ -369,12 +368,10 @@ export function CanvasBoard({
   const labelSchema = canvasSchema.frontend.artboard.label;
   const artboardLabelColor = useMemo(
     () => readCanvasToken(labelSchema.color_token, palette.erase),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [labelSchema.color_token, palette],
   );
   const artboardLabelPlate = useMemo(
     () => readCanvasToken(labelSchema.background_token, palette.canvasBackground),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [labelSchema.background_token, palette],
   );
   // #246/#282: the label inside the frame names the canvas pixels and its ratio ("工作区：2048×2048，1:1"),
@@ -418,7 +415,6 @@ export function CanvasBoard({
   // Palette changes with the theme; re-read the schema-named token when it does.
   const snapGuideColor = useMemo(
     () => readCanvasToken(snapSchema.guide_color_token, palette.primary),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [snapSchema.guide_color_token, palette],
   );
   const pinchDistance = useRef(0);
