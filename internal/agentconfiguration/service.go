@@ -62,6 +62,9 @@ type MCPPreset struct {
 	ToolNames       []string `json:"tool_names"`
 	Transport       string   `json:"transport"`
 	ProtocolVersion string   `json:"protocol_version"`
+	// DefaultEnabled is what a fresh configuration starts from (#445). The
+	// published configuration's own selection stays authoritative.
+	DefaultEnabled bool `json:"default_enabled"`
 }
 type History struct {
 	Revision  string    `json:"revision"`
@@ -135,7 +138,15 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 	for i := range s.defaults.Skills {
 		s.defaults.Skills[i].RawImageURL = s.defaults.Skills[i].ThumbnailPath
 	}
+	// A preset may declare that a new configuration starts without it (#445):
+	// the built-in tool it repeats is already in the default tool table, and
+	// offering both splits the model's choice without adding a capability.
+	// An absent declaration keeps the historical behavior; a published
+	// configuration keeps whichever presets the administrator selected.
 	for _, preset := range schema.AgentConfiguration.MCPPresets {
+		if !preset.EnabledByDefault() {
+			continue
+		}
 		s.defaults.EnabledMCPPresetIDs = append(s.defaults.EnabledMCPPresetIDs, preset.ID)
 	}
 	if err := s.Validate(s.defaults); err != nil {
@@ -217,7 +228,7 @@ func (s *Service) Management(ctx context.Context) (Management, error) {
 		for _, tool := range preset.Tools {
 			names = append(names, tool.Name)
 		}
-		result.MCPPresets = append(result.MCPPresets, MCPPreset{Available: false, ID: preset.ID, Name: preset.Name, Description: preset.Description, ToolNames: names, Transport: preset.Transport, ProtocolVersion: preset.ProtocolVersion})
+		result.MCPPresets = append(result.MCPPresets, MCPPreset{Available: false, ID: preset.ID, Name: preset.Name, Description: preset.Description, ToolNames: names, Transport: preset.Transport, ProtocolVersion: preset.ProtocolVersion, DefaultEnabled: preset.EnabledByDefault()})
 	}
 
 	for i := range result.Tools {

@@ -1380,31 +1380,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return result
 		},
 		Configuration: func(ctx context.Context, owner string) (chat.AgentConfigurationSnapshot, error) {
-			snapshot, err := agentConfigurationService.SnapshotForOwner(ctx, owner)
-			if err != nil {
-				return chat.AgentConfigurationSnapshot{}, err
-			}
-			frozen := chat.AgentConfigurationSnapshot{Revision: snapshot.Revision, SystemPrompt: snapshot.Configuration.SystemPrompt, DomainContext: snapshot.Configuration.DomainContext, Skills: snapshot.Configuration.Skills}
-			enabled := map[string]bool{}
-			for _, name := range snapshot.Configuration.EnabledToolNames {
-				enabled[name] = true
-			}
-			for _, tool := range applicationSchema.Chat.Tools {
-				if enabled[tool.Name] {
-					frozen.Tools = append(frozen.Tools, tool)
-				}
-			}
-			for _, tool := range applicationSchema.Chat.AgentTools {
-				if enabled[tool.Name] {
-					frozen.AgentTools = append(frozen.AgentTools, tool)
-				}
-			}
-			mcpTools, err := mcpService.Declarations(snapshot.Configuration.EnabledMCPPresetIDs)
-			if err != nil {
-				return chat.AgentConfigurationSnapshot{}, err
-			}
-			frozen.AgentTools = append(frozen.AgentTools, mcpTools...)
-			return frozen, nil
+			return agentTurnConfiguration(ctx, owner, agentConfigurationService, applicationSchema, mcpService)
 		},
 		Service: chatService,
 		Schema:  orchestratorSchema,

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-21.407-380-433-330.1",
+    "revision": "2026-11-21.407-380-433-330-445.1",
     "terminology": {
       "user_facing": [
         {
@@ -2169,6 +2169,7 @@
           "project_asset_list_run": "/api/v1/projects/{projectID}/asset-lists/{listID}/run",
           "project_asset_list_item": "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}",
           "project_asset_list_item_steps": "/api/v1/projects/{projectID}/asset-lists/{listID}/items/{itemID}/steps",
+          "chat_session_steps": "/api/v1/chat/sessions/{sessionID}/steps",
           "chat_session_project": "/api/v1/chat/sessions/{sessionID}/project",
           "client_errors": "/api/v1/client-errors",
           "chat_session_approval": "/api/v1/chat/sessions/{sessionID}/approval",
@@ -2931,7 +2932,7 @@
       "ui.asset_list.run_running": "制作中",
       "ui.asset_list.run_paused_presence": "用户离开，已暂停",
       "ui.asset_list.run_paused_user": "已暂停",
-      "ui.asset_list.run_paused_step_cap": "达到步数上限，已暂停",
+      "ui.asset_list.run_paused_step_cap": "清单项步数用完，已暂停",
       "ui.asset_list.run_paused_failure": "执行失败，已暂停",
       "ui.asset_list.run_stopped": "已停止",
       "ui.asset_list.run_completed": "已全部完成",
@@ -4797,6 +4798,7 @@
         "ui.step_policy.error": "保存失败：{reason}",
         "ui.step_policy.load_failed": "读取 3D 步数设置失败：{reason}",
         "ui.step_policy.loading": "正在读取…",
+        "ui.step_policy.session_steps": "本会话已用 {used} / {limit} 步",
         "ui.studio.chat.queued": "排队中",
         "ui.studio.chat.queued_note": "上一步完成后自动发送",
         "ui.studio.chat.queued_cancel": "取消排队",
@@ -16532,10 +16534,12 @@
           "transport": "local",
           "connection_ref": "workspace-read",
           "protocol_version": "2026-07-28",
+          "default_enabled": false,
           "tools": [
             {
               "name": "mcp_list_offerings",
               "remote_name": "mcp_list_offerings",
+              "duplicates": "list_offerings",
               "description": "查询可用生成与处理服务。reference_image_max 是服务可接受参考图张数的只读字段；Schema 未声明正上限时字段缺席，表示未知，不能当成 1。比较未选模型的上限前先查询本列表；不要从已选模型或工具说明推断，也不要自行切换已选模型。",
               "parameters": {
                 "type": "object",
@@ -16598,6 +16602,7 @@
             {
               "name": "mcp_get_task_assets",
               "remote_name": "mcp_get_task_assets",
+              "duplicates": "get_task",
               "description": "查询自己的任务产物",
               "parameters": {
                 "type": "object",
@@ -16682,6 +16687,7 @@
         "mcp_protocol": "MCP 协议",
         "mcp_unavailable": "当前接线不可执行",
         "mcp_tools": "MCP 工具",
+        "mcp_default_off": "默认不启用（与内置工具重复）",
         "configuration_source": "配置来源",
         "image_to_image_template": "图生图模板（保留 {user_input} 与 {skill_prompt}）",
         "invalid_configuration": "配置文档无效",
@@ -17041,7 +17047,7 @@
             "ui.asset_list.run_running": "Producing",
             "ui.asset_list.run_paused_presence": "Paused: you left",
             "ui.asset_list.run_paused_user": "Paused",
-            "ui.asset_list.run_paused_step_cap": "Paused: step limit reached",
+            "ui.asset_list.run_paused_step_cap": "Paused: an item used up its steps",
             "ui.asset_list.run_paused_failure": "Paused after a failure",
             "ui.asset_list.run_stopped": "Stopped",
             "ui.asset_list.run_completed": "All done",
@@ -18911,6 +18917,7 @@
             "ui.step_policy.error": "Could not save: {reason}",
             "ui.step_policy.load_failed": "Could not load the 3D step settings: {reason}",
             "ui.step_policy.loading": "Loading…",
+            "ui.step_policy.session_steps": "This session used {used} of {limit} steps",
             "ui.studio.chat.queued": "Queued",
             "ui.studio.chat.queued_note": "Sends automatically when the previous step finishes",
             "ui.studio.chat.queued_cancel": "Cancel queued message",
@@ -20504,6 +20511,7 @@
             "agent_configuration.ui.mcp_protocol": "MCP protocol",
             "agent_configuration.ui.mcp_unavailable": "The current wiring cannot be executed",
             "agent_configuration.ui.mcp_tools": "MCP tools",
+            "agent_configuration.ui.mcp_default_off": "Off by default (repeats built-in tools)",
             "agent_configuration.ui.configuration_source": "Configuration source",
             "agent_configuration.ui.image_to_image_template": "Image-to-image template (keep {user_input} and {skill_prompt})",
             "agent_configuration.ui.invalid_configuration": "Invalid configuration document",

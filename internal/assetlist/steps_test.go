@@ -61,6 +61,15 @@ func (store *stepRunStore) ItemsByList(_ context.Context, ownerID, listID string
 	return items, nil
 }
 
+func (store *stepRunStore) ItemBySession(_ context.Context, ownerID, sessionID string) (assetlist.Item, bool, error) {
+	for _, item := range store.items {
+		if item.OwnerID == ownerID && item.SessionID == sessionID && sessionID != "" {
+			return item, true, nil
+		}
+	}
+	return assetlist.Item{}, false, nil
+}
+
 func (store *stepRunStore) ItemByID(_ context.Context, ownerID, listID, itemID string) (assetlist.Item, error) {
 	item, found := store.items[itemID]
 	if !found || item.OwnerID != ownerID || item.ListID != listID {
@@ -226,5 +235,47 @@ func TestSetItemStepsWithoutPortsIsUnavailable(t *testing.T) {
 	}
 	if _, _, err := service.SetItemSteps(ctx, "owner-a", "prj_1", list.ID, list.Items[0].ID, 1, 0); !errors.Is(err, assetlist.ErrRunUnavailable) {
 		t.Fatalf("no ports: %v", err)
+	}
+}
+
+// #330 §6: the session-keyed grant release resolves the item by its session,
+// clears the step-cap block and resumes the paused run; a plain session is a
+// no-op.
+func TestClearStepCapForSessionReleasesTheItemsRun(t *testing.T) {
+	ctx := context.Background()
+	runs := newStepRunStore()
+	service, _, clock := newService(t, func(config *assetlist.Config) {
+		config.Runs = runs
+	})
+	list, err := service.Propose(ctx, proposal())
+	if err != nil || len(list.Items) != 1 {
+		t.Fatalf("propose = %+v %v", list, err)
+	}
+	itemID := list.Items[0].ID
+	runs.items[itemID] = assetlist.Item{
+		ID: itemID, ListID: list.ID, OwnerID: "owner-a", State: assetlist.StateWorking,
+		SessionID: "ses_item", Block: assetlist.BlockStepCap, Version: 0,
+	}
+	runs.runs[list.ID] = assetlist.Run{
+		ID: "run_1", OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+		Status: assetlist.RunPaused, PauseReason: assetlist.PauseStepCap,
+	}
+	if err := service.ClearStepCapForSession(ctx, "owner-a", "ses_item"); err != nil {
+		t.Fatal(err)
+	}
+	if stored := runs.items[itemID]; stored.Block != assetlist.BlockNone || !stored.UpdatedAt.Equal(clock.Now()) {
+		t.Fatalf("item = %+v; want the block cleared", stored)
+	}
+	if run := runs.runs[list.ID]; run.Status != assetlist.RunRunning || run.PauseReason != "" {
+		t.Fatalf("run = %+v; want running", run)
+	}
+
+	// A plain session and an item without the block change nothing.
+	before := runs.items[itemID]
+	if err := service.ClearStepCapForSession(ctx, "owner-a", "ses_other"); err != nil {
+		t.Fatal(err)
+	}
+	if stored := runs.items[itemID]; stored.Version != before.Version {
+		t.Fatalf("a plain session touched the item: %+v", stored)
 	}
 }

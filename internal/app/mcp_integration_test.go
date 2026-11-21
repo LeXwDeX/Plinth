@@ -37,6 +37,35 @@ func TestWorkspaceMCPUsesRealProtocolOwnerSessionAndConfigurationAllowlist(t *te
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(create.Body.Bytes(), &session)
+	// #445: the shipped workspace-read preset repeats built-in reads and a
+	// fresh configuration does not enable it. This test covers the platform
+	// MCP endpoint, so the administrator's explicit selection is published
+	// first; it also proves a published selection keeps the preset enabled.
+	repository, err := sqlitetest.Open(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := agentconfiguration.New(repository, product.Application(), skills, product.List(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := configuration.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Configuration.EnabledMCPPresetIDs = []string{"workspace-read"}
+	if _, err := configuration.Publish(context.Background(), current.Revision, "test-admin", "publish", current.Configuration); err != nil {
+		t.Fatal(err)
+	}
 	call := func(owner, scope, name string, arguments map[string]any) *httptest.ResponseRecorder {
 		method := "tools/list"
 		params := map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": mcphttp.ProtocolVersion, "io.modelcontextprotocol/clientInfo": map[string]string{"name": "test", "version": "1"}, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}
@@ -86,24 +115,7 @@ func TestWorkspaceMCPUsesRealProtocolOwnerSessionAndConfigurationAllowlist(t *te
 			t.Fatalf("private field in MCP discovery: %s", private)
 		}
 	}
-	repository, err := sqlitetest.Open(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	product, err := catalog.LoadDefault()
-	if err != nil {
-		t.Fatal(err)
-	}
-	skills, err := catalog.LoadDefaultSkillCatalog()
-	if err != nil {
-		t.Fatal(err)
-	}
-	configuration, err := agentconfiguration.New(repository, product.Application(), skills, product.List(""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := configuration.Snapshot(context.Background())
+	current, err = configuration.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +178,7 @@ func TestExternalMCPPresetIsUnavailableAndNeverDialed(t *testing.T) {
 	}
 	// This is a valid Catalog plus configured allowed origin and credential;
 	// absence of an endpoint is not what prevents the remote call.
-	_, err = catalog.Load(bytes.NewReader(data))
+	product, err := catalog.Load(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,6 +195,30 @@ func TestExternalMCPPresetIsUnavailableAndNeverDialed(t *testing.T) {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(created.Body.Bytes(), &session)
+	// #445: the shipped workspace-read preset is off by default. This test
+	// covers the platform MCP endpoint, so publish the administrator's
+	// explicit selection first; the external preset stays unavailable.
+	repository, err := sqlitetest.Open(filepath.Join(root, "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	skills, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentConfiguration, err := agentconfiguration.New(repository, product.Application(), skills, product.List(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := agentConfiguration.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.Configuration.EnabledMCPPresetIDs = []string{"workspace-read"}
+	if _, err := agentConfiguration.Publish(context.Background(), current.Revision, "test-admin", "publish", current.Configuration); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"", "mcp_external_read"} {
 		method := "tools/list"
 		params := map[string]any{"_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": mcphttp.ProtocolVersion, "io.modelcontextprotocol/clientInfo": map[string]string{"name": "test", "version": "1"}, "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}

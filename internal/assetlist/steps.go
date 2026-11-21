@@ -145,6 +145,34 @@ func (service *Service) SetItemSteps(
 	return updated, change, nil
 }
 
+// ClearStepCapForSession releases the list item whose sub-session is sessionID
+// after the asset's grant was raised through the session route (#330 §6). The
+// session-keyed write does not know the list item, so it calls this afterwards:
+// the item's step_cap block is cleared and a run paused at the cap resumes,
+// exactly like the list-item route. A session that is no item, or an item
+// without the block, is a no-op; a read failure is returned, never guessed.
+func (service *Service) ClearStepCapForSession(ctx context.Context, ownerID, sessionID string) error {
+	ownerID = strings.TrimSpace(ownerID)
+	sessionID = strings.TrimSpace(sessionID)
+	if service.runs == nil || ownerID == "" || sessionID == "" {
+		return nil
+	}
+	item, found, err := service.runs.ItemBySession(ctx, ownerID, sessionID)
+	if err != nil || !found {
+		return err
+	}
+	if item.Block != BlockStepCap {
+		return nil
+	}
+	at := service.clock()
+	if _, err := service.runs.SetItemBlock(ctx, ownerID, item.ListID, item.ID,
+		BlockNone, VersionUnchecked, at); err != nil &&
+		!errors.Is(err, ErrConflict) && !errors.Is(err, ErrItemState) && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	return service.resumeStepCapRun(ctx, ownerID, item.ListID, at)
+}
+
 // resumeStepCapRun resumes a run the runner paused at the cap. Only the step
 // cap pause is touched: a person's pause stays until they continue, and other
 // automatic pauses keep their own rules.

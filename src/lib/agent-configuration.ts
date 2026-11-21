@@ -21,7 +21,7 @@ export interface AgentConfiguration {
   enabled_mcp_preset_ids: string[];
 }
 export interface AgentToolSummary { name: string; description: string; domains?: string[] }
-export interface AgentMCPPreset { available: boolean; id: string; name: string; description: string; tool_names: string[]; protocol_version?: string; transport?: string; connection_ref?: string }
+export interface AgentMCPPreset { available: boolean; id: string; name: string; description: string; tool_names: string[]; protocol_version?: string; transport?: string; connection_ref?: string; default_enabled?: boolean }
 export interface AgentConfigurationSnapshot {
   revision: string;
   configuration: AgentConfiguration;

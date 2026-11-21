@@ -26,6 +26,7 @@ import { AssetListCardLoader } from '@/components/studio/asset-list-card-loader'
 import { assetListPlacement } from '@/components/studio/asset-list-placement';
 import { ChoiceCard } from '@/components/studio/choice-card';
 import { QueuedTurns } from '@/components/studio/queued-turns';
+import { SessionStepsBar } from '@/components/studio/session-steps-bar';
 import { TaskStatusCards } from '@/components/studio/task-status-cards';
 import { Composer, type ComposerBranch, type ComposerChip, type ComposerMask, type ComposerMention } from '@/components/studio/composer';
 import { SessionNotesPanel, sessionNotesText } from '@/components/workspace/session-notes-panel';
@@ -1945,6 +1946,8 @@ export function ChatColumn() {
     ...pending.items.filter((item) => item.kind === 'step').map((item) => cardFromPending(item, labelOfInput)),
   ];
   const sessionBudget = useChatStore((state) => state.sessions.find((session) => session.id === activeSessionId)?.budget ?? null);
+  // #330 §6: the session's own title names the asset in the step dialog.
+  const sessionTitle = useChatStore((state) => state.sessions.find((session) => session.id === activeSessionId)?.title ?? '');
   // #120: whether the plan is shown or still waits for a decision is the Schema role of its state.
   const budgetShown = budgetIsShown(schema, sessionBudget);
   const budgetAwaiting = budgetAwaitsDecision(schema, sessionBudget);
@@ -2205,6 +2208,10 @@ export function ChatColumn() {
               </Action>
             </HintTooltip>
           </header>
+
+          {activeSessionId ? (
+            <SessionStepsBar sessionID={activeSessionId} name={sessionTitle} />
+          ) : null}
 
           {activeSessionId ? (
             <SessionNotesPanel

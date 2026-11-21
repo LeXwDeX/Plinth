@@ -137,12 +137,21 @@ export function stepsExhausted(item: AssetListBoardItem): boolean {
 
 /**
  * #330 step 5C: the extra-step bounds the Schema declares, or null when this
- * deployment cannot extend an item (no step policy, no route).
+ * deployment cannot extend an asset at all (no step policy section).
+ */
+export function stepExtraBounds(schema: ProductSchema): { default: number; maximum: number; totalMaximum: number } | null {
+  const extra = schema.step_policy?.extra_steps;
+  if (!extra) return null;
+  return { default: extra.default, maximum: extra.maximum, totalMaximum: extra.total_maximum };
+}
+
+/**
+ * #330 step 5C: the extra-step bounds an item's route may use, or null when
+ * this deployment cannot extend an item (no step policy, no list-item route).
  */
 export function stepExtraConfig(schema: ProductSchema): { default: number; maximum: number; totalMaximum: number } | null {
-  const extra = schema.step_policy?.extra_steps;
-  if (!extra || !schema.runtime.http.routes.project_asset_list_item_steps) return null;
-  return { default: extra.default, maximum: extra.maximum, totalMaximum: extra.total_maximum };
+  if (!schema.runtime.http.routes.project_asset_list_item_steps) return null;
+  return stepExtraBounds(schema);
 }
 
 /**
