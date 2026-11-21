@@ -473,7 +473,7 @@ func (executor *Executor) replayReferenceURLs(
 		}
 		referenceURLs = multiview.URLs
 	} else if command.Tool.AcceptReferenceImages == nil || *command.Tool.AcceptReferenceImages {
-		urls, err := executor.selectReferences(command, arguments)
+		urls, err := executor.callReferences(command, arguments)
 		if err != nil {
 			return nil, nil, false
 		}
@@ -481,7 +481,8 @@ func (executor *Executor) replayReferenceURLs(
 	}
 	// #250: the reference list is rebuilt in the same priority order as the
 	// first submission, with the same server-generated purposes, so the
-	// replayed prompt can match the frozen one.
+	// replayed prompt can match the frozen one. A multiview call that named its
+	// own pictures keeps their order there too (#433).
 	identity, identityPurposes, _, anchorRefusal, err := executor.anchorReferenceURLs(command, arguments)
 	if err != nil || anchorRefusal != "" {
 		return nil, nil, false
@@ -490,7 +491,8 @@ func (executor *Executor) replayReferenceURLs(
 	if err != nil {
 		return nil, nil, false
 	}
-	groups := executor.referenceGroupsFor(command, identity, style, referenceURLs)
+	groups := executor.referenceGroupsOf(command, identity, style, referenceURLs,
+		multiview != nil || !executor.isMultiviewTool(command))
 	referenceURLs = groups.URLs
 	capability := command.Tool.FallbackCapability
 	if len(referenceURLs) > 0 {
