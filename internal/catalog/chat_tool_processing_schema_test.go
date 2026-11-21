@@ -21,6 +21,35 @@ func processingTool(t *testing.T, app *catalog.ApplicationSchema, name string) *
 	return nil
 }
 
+// #432: convert_model_format no longer declares texture_format. The argument
+// only ever reached tripo/tripo-v3.1/format-conversion, which stays disabled
+// (#278), and none of the available conversion routes (Meshy Convert, the local
+// converters, the STL upload converter) has such an option, so the published
+// tool must not offer a texture-format choice no available service can run.
+func TestConvertModelFormatDoesNotDeclareTheRetiredTextureFormat(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := c.Application()
+	tool := processingTool(t, &app, "convert_model_format")
+	var parameters struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
+		t.Fatal(err)
+	}
+	if _, declared := parameters.Properties["texture_format"]; declared {
+		t.Error("convert_model_format still declares the retired texture_format argument")
+	}
+	if parameter, mapped := tool.Processing.ParameterArguments["texture_format"]; mapped {
+		t.Errorf("convert_model_format still maps texture_format onto the offering parameter %q", parameter)
+	}
+	if strings.Contains(strings.ToLower(tool.Description), "texture") {
+		t.Errorf("convert_model_format description still names a texture option: %s", tool.Description)
+	}
+}
+
 func TestDefaultSchemaDeclaresModelProcessingTools(t *testing.T) {
 	c, err := catalog.LoadDefault()
 	if err != nil {

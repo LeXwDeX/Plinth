@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-21.407-380-433-330-445-410.1",
+    "revision": "2026-11-21.407-380-433-330-445-410-432.1",
     "terminology": {
       "user_facing": [
         {
@@ -9486,7 +9486,7 @@
           "canvas_source": "ignore",
           "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["format-conversion"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Convert a finished 3D model of this session to another file format. A service that exports every format it supports in one run (Meshy Convert) bills once for all of them. Some options (for example a texture format) add extra credits; the estimate in the result includes them. A step with extra credits waits on an approval card in manual mode; the user approves it there, so never ask them to tick a consent box.",
+          "description": "Convert a finished 3D model of this session to another file format. A service that exports every format it supports in one run (Meshy Convert) bills once for all of them.",
           "ignore_user_model": true,
           "capability": "format-conversion",
           "fallback_capability": "format-conversion",
@@ -9501,10 +9501,6 @@
               "format": {
                 "type": "string",
                 "description": "Target file format, a value declared by the format-conversion offering (see list_offerings)."
-              },
-              "texture_format": {
-                "type": "string",
-                "description": "Optional texture image format; choosing it can add extra credits."
               }
             },
             "required": [
@@ -9515,7 +9511,7 @@
           },
           "processing": {
             "source_task_argument": "source_task_id",
-            "parameter_arguments": {"format": "format", "texture_format": "texture_format"},
+            "parameter_arguments": {"format": "format"},
             "delivery_format_argument": "format",
             "source_variant_preference": ["glb", "gltf", "fbx", "obj", "stl"],
             "messages": {
