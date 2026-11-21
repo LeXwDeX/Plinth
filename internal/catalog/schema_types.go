@@ -6273,7 +6273,8 @@ type ChatMessageTexts struct {
 	// model differs from the model still selected in the workspace, so the
 	// person confirms the switch instead of the purpose silently replacing
 	// their visible choice ({workspace}, {recommended}, {profile}; #103
-	// review C1).
+	// review C1). A Catalog that declares no text runs the recommendation
+	// instead, as it always has.
 	ModelChoiceWorkspaceConflict string `json:"model_choice_workspace_conflict,omitempty"`
 	// ChoiceOptionInvalid refuses a direction card whose Agent-supplied
 	// options are too few, too many, or not bounded tokens (#239).
@@ -7564,15 +7565,18 @@ type LoginPresentation struct {
 }
 
 type rawOffering struct {
-	NativePricing                 *schemacontract.NativePricing     `json:"native_pricing,omitempty"`
-	ID                            schemacontract.OfferingID         `json:"id"`
-	Revision                      string                            `json:"revision"`
-	ProviderID                    string                            `json:"provider_id"`
-	ProviderName                  string                            `json:"provider_name"`
-	ProviderShortLabel            string                            `json:"provider_short_label"`
-	ProviderOrder                 *int                              `json:"provider_order,omitempty"`
-	ModelID                       string                            `json:"model_id"`
-	ModelName                     string                            `json:"model_name"`
+	NativePricing      *schemacontract.NativePricing `json:"native_pricing,omitempty"`
+	ID                 schemacontract.OfferingID     `json:"id"`
+	Revision           string                        `json:"revision"`
+	ProviderID         string                        `json:"provider_id"`
+	ProviderName       string                        `json:"provider_name"`
+	ProviderShortLabel string                        `json:"provider_short_label"`
+	ProviderOrder      *int                          `json:"provider_order,omitempty"`
+	ModelID            string                        `json:"model_id"`
+	ModelName          string                        `json:"model_name"`
+	// ModelFamily names the upstream model this Offering is a shape of (#380);
+	// see schema.Offering.ModelFamily.
+	ModelFamily                   string                            `json:"model_family,omitempty"`
 	Description                   string                            `json:"description,omitempty"`
 	Knowledge                     *schemacontract.OfferingKnowledge `json:"knowledge,omitempty"`
 	Capability                    schemacontract.Capability         `json:"capability"`

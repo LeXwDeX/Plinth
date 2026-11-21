@@ -186,7 +186,7 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 			command.Options.ExplicitModel3D = test.locked
 			command.Options.AIModel = test.workspace
 			command.Options.ProductionBrief = choiceTestBrief(test.purpose)
-			choice, err := executor.chooseOffering(command, generation.TextTo3D, choiceTestArguments(test.named), modelInput{})
+			choice, err := executor.chooseOffering(command, generation.TextTo3D, choiceTestArguments(test.named), modelInput{}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -241,7 +241,7 @@ func TestChooseOfferingDoesNotSilentlyReplaceTheWorkspaceModel(t *testing.T) {
 	command.Options.AIModel = choiceFullID
 	command.Options.ProductionBrief = choiceTestBrief("game_character")
 	choice, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{full, p2}}).
-		chooseOffering(command, generation.TextTo3D, nil, modelInput{})
+		chooseOffering(command, generation.TextTo3D, nil, modelInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +261,7 @@ func TestChooseOfferingRunsAWorkspaceModelThePurposeRecommends(t *testing.T) {
 	command.Options.AIModel = choiceMeshyID
 	command.Options.ProductionBrief = choiceTestBrief("game_character")
 	choice, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{p2, meshy}}).
-		chooseOffering(command, generation.TextTo3D, nil, modelInput{})
+		chooseOffering(command, generation.TextTo3D, nil, modelInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestChooseOfferingSkipsAnUnavailableProfileRecommendation(t *testing.T) {
 	}
 	command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
 	command.Options.ProductionBrief = choiceTestBrief("game_character")
-	choice, err := choiceTestExecutor(gateway).chooseOffering(command, generation.TextTo3D, nil, modelInput{})
+	choice, err := choiceTestExecutor(gateway).chooseOffering(command, generation.TextTo3D, nil, modelInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestChooseOfferingSkipsAProfileOfferingThatCannotTakeTheInput(t *testing.T)
 	executor.chat.Model3DUsage = usage
 	command := choiceTestCommand(choiceTestTool("create_model_3d_from_image", generation.ImageTo3D))
 	command.Options.ProductionBrief = choiceTestBrief("game_character")
-	choice, err := executor.chooseOffering(command, generation.ImageTo3D, nil, modelInput{References: 2})
+	choice, err := executor.chooseOffering(command, generation.ImageTo3D, nil, modelInput{References: 2}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestChooseOfferingTreatsAStructuredMultiviewModelAsThePersons(t *testing.T)
 	command.Tool.IgnoreUserModel = true
 	command.Options.Multiview = &chat.MultiviewRequest{Model: string(offering.ID)}
 	choice, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{offering}}).
-		chooseOffering(command, generation.ImageTo3D, choiceTestArguments(string(offering.ID)), modelInput{})
+		chooseOffering(command, generation.ImageTo3D, choiceTestArguments(string(offering.ID)), modelInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +338,7 @@ func TestTheExplicitModelLockAppliesToTheMultiviewTool(t *testing.T) {
 
 	command.Options.ExplicitModel3D = string(p2.ID)
 	conflict, err := executor.chooseOffering(command, generation.ImageTo3D,
-		choiceTestArguments(string(multiview.ID)), modelInput{})
+		choiceTestArguments(string(multiview.ID)), modelInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestTheExplicitModelLockAppliesToTheMultiviewTool(t *testing.T) {
 	}
 
 	command.Options.ExplicitModel3D = string(multiview.ID)
-	locked, err := executor.chooseOffering(command, generation.ImageTo3D, nil, modelInput{})
+	locked, err := executor.chooseOffering(command, generation.ImageTo3D, nil, modelInput{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestAStructuredMultiviewRequestOutranksTheSessionLock(t *testing.T) {
 			if test.requested != "" {
 				command.Options.Multiview = &chat.MultiviewRequest{Model: test.requested}
 			}
-			choice, err := executor.chooseOffering(command, generation.ImageTo3D, choiceTestArguments(test.named), modelInput{})
+			choice, err := executor.chooseOffering(command, generation.ImageTo3D, choiceTestArguments(test.named), modelInput{}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -450,7 +450,7 @@ func TestTheMultiviewFallbackOnlyRunsADeclaredModelThatTakesTheViews(t *testing.
 
 	command := choiceTestCommand(tool)
 	chosen, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{unfit, declared}}).
-		chooseOffering(command, generation.ImageTo3D, nil, modelInput{Views: views})
+		chooseOffering(command, generation.ImageTo3D, nil, modelInput{Views: views}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +459,7 @@ func TestTheMultiviewFallbackOnlyRunsADeclaredModelThatTakesTheViews(t *testing.
 	}
 
 	refused, err := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{unfit}}).
-		chooseOffering(command, generation.ImageTo3D, nil, modelInput{Views: views})
+		chooseOffering(command, generation.ImageTo3D, nil, modelInput{Views: views}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +775,7 @@ func TestChooseOfferingFollowsThe2DModelChoiceLayers(t *testing.T) {
 	// the purpose chooses and carries its reason.
 	choice, err := executor.chooseOffering(
 		imageTestCommand(imageTestBrief("illustration"), "nano-banana-pro", "", ""),
-		generation.TextToImage, nil, modelInput{})
+		generation.TextToImage, nil, modelInput{}, "")
 	if err != nil || choice.Refusal != "" || choice.Offering.ID != imageProTextID ||
 		choice.Source != "profile" || choice.Profile != "illustration" || choice.Reason == "" {
 		t.Fatalf("purpose choice = %+v %v", choice, err)
@@ -783,7 +783,7 @@ func TestChooseOfferingFollowsThe2DModelChoiceLayers(t *testing.T) {
 	// A different visible workspace pick is confirmed, not silently replaced.
 	choice, err = executor.chooseOffering(
 		imageTestCommand(imageTestBrief("illustration"), "gpt-image-2", "", ""),
-		generation.TextToImage, nil, modelInput{})
+		generation.TextToImage, nil, modelInput{}, "")
 	if err != nil || choice.Refusal == "" {
 		t.Fatalf("workspace conflict = %+v %v", choice, err)
 	}
@@ -791,20 +791,20 @@ func TestChooseOfferingFollowsThe2DModelChoiceLayers(t *testing.T) {
 	arguments := imageTestArguments("gpt-image-2")
 	choice, err = executor.chooseOffering(
 		imageTestCommand(imageTestBrief("illustration"), "", "", ""),
-		generation.TextToImage, arguments, modelInput{})
+		generation.TextToImage, arguments, modelInput{}, "")
 	if err != nil || choice.Refusal != "" || choice.Offering.ID != imageGptTextID || choice.Source != "agent" {
 		t.Fatalf("agent choice = %+v %v", choice, err)
 	}
 	// The explicit 2D pick wins over the Agent and the purpose.
 	choice, err = executor.chooseOffering(
 		imageTestCommand(imageTestBrief("illustration"), "", "nano-banana-pro", "gpt-image-2"),
-		generation.TextToImage, arguments, modelInput{})
+		generation.TextToImage, arguments, modelInput{}, "")
 	if err != nil || choice.Refusal == "" {
 		t.Fatalf("explicit conflict = %+v %v", choice, err)
 	}
 	choice, err = executor.chooseOffering(
 		imageTestCommand(imageTestBrief("illustration"), "", "nano-banana-pro", ""),
-		generation.TextToImage, nil, modelInput{})
+		generation.TextToImage, nil, modelInput{}, "")
 	if err != nil || choice.Refusal != "" || choice.Offering.ID != imageProTextID || choice.Source != "user" {
 		t.Fatalf("locked choice = %+v %v", choice, err)
 	}
@@ -833,7 +833,7 @@ func TestChooseOfferingFallsBackToTheDefault2DPurpose(t *testing.T) {
 	for name, brief := range briefs {
 		t.Run(name, func(t *testing.T) {
 			command := imageTestCommand(brief, "", "", "")
-			choice, err := executor.chooseOffering(command, generation.TextToImage, nil, modelInput{})
+			choice, err := executor.chooseOffering(command, generation.TextToImage, nil, modelInput{}, "")
 			if err != nil || choice.Refusal != "" || choice.Offering.ID != imageProTextID ||
 				choice.Source != "profile" || choice.Profile != "concept_art" || choice.Reason == "" {
 				t.Fatalf("default purpose choice = %+v %v", choice, err)
@@ -852,7 +852,7 @@ func TestChooseOfferingFallsBackToTheDefault2DPurpose(t *testing.T) {
 	// A declared image_use still wins over the default.
 	choice, err := executor.chooseOffering(
 		imageTestCommand(imageTestBrief("illustration"), "", "", ""),
-		generation.TextToImage, nil, modelInput{})
+		generation.TextToImage, nil, modelInput{}, "")
 	if err != nil || choice.Refusal != "" || choice.Profile != "illustration" || choice.Source != "profile" {
 		t.Fatalf("declared purpose choice = %+v %v", choice, err)
 	}
@@ -886,5 +886,21 @@ func TestModelChoiceOfNamesTheImageSource(t *testing.T) {
 	command.Options.ExplicitModelImage = "nano-banana-pro"
 	if choice := executor.modelChoiceOf(command, offering, input); choice == nil || choice.Source != "user" {
 		t.Fatalf("locked model choice = %+v", choice)
+	}
+}
+
+// #417 / #380: a step that ran the lock's model family in another shape is the
+// person's choice, not the default.
+func TestModelChoiceOfNamesTheLockForItsFamilysShape(t *testing.T) {
+	single := choiceTestOffering("meshy/meshy-7.1/image-to-3d", "meshy-7.1", generation.ImageTo3D)
+	single.ModelFamily = "meshy-7.1"
+	multiview := choiceTestOffering("meshy/meshy-7.1-multiview/image-to-3d", "meshy-7.1-multiview", generation.ImageTo3D)
+	multiview.ModelFamily = "meshy-7.1"
+	executor := choiceTestExecutor(&choiceTestGateway{offerings: []generation.Offering{single, multiview}})
+	command := choiceTestCommand(choiceTestTool("create_model_3d_from_views", generation.ImageTo3D))
+	command.Tool.IgnoreUserModel = true
+	command.Options.ExplicitModel3D = "meshy-7.1"
+	if choice := executor.modelChoiceOf(command, multiview, json.RawMessage(`{}`)); choice == nil || choice.Source != "user" {
+		t.Fatalf("family choice = %+v, want the person's lock", choice)
 	}
 }

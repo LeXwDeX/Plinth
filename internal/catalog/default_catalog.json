@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-20.401.3",
+    "revision": "2026-11-21.380-model-resolve.1",
     "terminology": {
       "user_facing": [
         {
@@ -26475,6 +26475,7 @@
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
       "model_id": "meshy-7.1",
+      "model_family": "meshy-7.1",
       "model_name": "Meshy 7.1",
       "knowledge": {
         "strengths": [
@@ -27694,6 +27695,7 @@
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
       "model_id": "meshy-7.1",
+      "model_family": "meshy-7.1",
       "model_name": "Meshy 7.1",
       "knowledge": {
         "strengths": [
@@ -28476,6 +28478,7 @@
       "provider_short_label": "TRIPO",
       "provider_order": 5,
       "model_id": "tripo-v3.1-full",
+      "model_family": "tripo-v3.1",
       "model_name": "Tripo H3 v3.1 (最新)",
       "knowledge": {
         "strengths": [
@@ -29342,6 +29345,7 @@
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1",
+      "model_family": "tripo-v3.1",
       "model_name": "Tripo H3 v3.1 (最新)",
       "knowledge": {
         "strengths": [
@@ -30004,6 +30008,7 @@
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1-full",
+      "model_family": "tripo-v3.1",
       "model_name": "Tripo H3 v3.1 (最新)",
       "knowledge": {
         "strengths": [
@@ -30948,6 +30953,7 @@
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1-multiview",
+      "model_family": "tripo-v3.1",
       "model_name": "Tripo H3 v3.1 多视图",
       "knowledge": {
         "strengths": [
@@ -31898,6 +31904,7 @@
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
       "model_id": "tripo-v3.1",
+      "model_family": "tripo-v3.1",
       "model_name": "Tripo H3 v3.1 (最新)",
       "knowledge": {
         "strengths": [
@@ -32640,6 +32647,7 @@
       "provider_short_label": "TRIPO",
       "provider_order": 5,
       "model_id": "tripo-p2",
+      "model_family": "tripo-p2",
       "model_name": "Tripo P2 低模 (P2-20260801)",
       "knowledge": {
         "strengths": [
@@ -33122,6 +33130,7 @@
       "provider_short_label": "TRIPO",
       "provider_order": 5,
       "model_id": "tripo-p2-multiview",
+      "model_family": "tripo-p2",
       "model_name": "Tripo P2 多视图低模 (P2-20260801)",
       "knowledge": {
         "strengths": [
@@ -33625,6 +33634,7 @@
       "provider_short_label": "TRIPO",
       "provider_order": 5,
       "model_id": "tripo-p2-text",
+      "model_family": "tripo-p2",
       "model_name": "Tripo P2 文生低模 (P2-20260801)",
       "knowledge": {
         "strengths": [
@@ -46288,6 +46298,7 @@
       "provider_name": "Meshy AI",
       "provider_short_label": "MESHY",
       "model_id": "meshy-7.1-multiview",
+      "model_family": "meshy-7.1",
       "model_name": "Meshy 7.1 多视图",
       "knowledge": {
         "strengths": [

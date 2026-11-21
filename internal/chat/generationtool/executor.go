@@ -573,10 +573,13 @@ func (executor *Executor) execute(
 		}
 		offering, capability = selected, selected.Capability
 	} else if command.Tool.ModelArgument != "" {
-		// #103: the person's explicit pick, the Agent's model argument, the
-		// session's production purpose and the defaults decide, in that order.
+		// #380: the person's explicit pick, this turn's structured request, the
+		// Agent's model argument, the approved plan's pin, the session's
+		// production purpose, the workspace picker and the defaults decide, in
+		// that order.
 		choice, err := executor.chooseOffering(command, capability, arguments,
-			modelInputFor(command, referenceURLs, multiview))
+			modelInputFor(command, referenceURLs, multiview),
+			executor.planPinnedOffering(ctx, command, capability))
 		if err != nil {
 			result := executor.executionFailure(command, "")
 			result.NoSubmission = true
@@ -603,14 +606,10 @@ func (executor *Executor) execute(
 		}
 	}
 	// #244: a frozen selection mask must be bound to a mask parameter, never
-	// quietly dropped into a whole-image redraw. A model the person or the
-	// Agent named is refused; only an unchosen model may move to a mask-capable
-	// Offering, and the result names that switch.
-	offering, maskRefusal := executor.ensureMaskOffering(command, capability,
-		modelInputFor(command, referenceURLs, multiview), offering)
-	if maskRefusal != "" {
-		return executor.refusal(command, refusalMask, maskRefusal), nil
-	}
+	// quietly dropped into a whole-image redraw. chat.ResolveModel refuses a
+	// model the person or the Agent named that cannot bind it, and only an
+	// unchosen model moves to a mask-capable Offering, which the result names
+	// as a switch (maskModelSwitchNote).
 	if multiview != nil {
 		group := !multiview.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
 		if refusal := executor.fitMultiviewViews(command, offering, multiview, group); refusal != "" {
@@ -1110,32 +1109,64 @@ func (executor *Executor) selectOffering(
 		}
 		return selected, nil
 	}
-	if model == "" && !tool.IgnoreUserModel {
-		// No user choice for this domain (a Schema-allowed fallback, or a tool
-		// that needs none): the default, else recommended, else first
-		// available Offering.
-		if offering, found := preferredOffering(offerings, executor.gateway.OfferingAvailable); found {
-			return offering, nil
-		}
+	// chat.ResolveModel owns the workspace picker and default layers (#380): a
+	// tool that ignores the user model never reads the picker, so it takes the
+	// default, and a picker value that names no available Offering falls to the
+	// default instead of failing the turn.
+	workspace := strings.TrimSpace(model)
+	if tool.IgnoreUserModel {
+		workspace = ""
 	}
+	available := make([]generation.Offering, 0, len(offerings))
 	for _, offering := range offerings {
-		if !offering.Enabled ||
-			!executor.gateway.OfferingAvailable(offering.ID) {
-			continue
-		}
-		// IgnoreUserModel 声明工具与用户所选模型无关（如抠图）；
-		// 用户模型属于其他 capability 时不能把工具过滤成无 Offering。
-		if tool.IgnoreUserModel ||
-			model == "" ||
-			model == offering.ModelID ||
-			model == string(offering.ID) {
-			return offering, nil
+		if offering.Enabled && executor.gateway.OfferingAvailable(offering.ID) {
+			available = append(available, offering)
 		}
 	}
-	return generation.Offering{}, fmt.Errorf(
-		"generation tool: no available offering for %q",
-		model,
-	)
+	resolution := chat.ResolveModel(chat.ModelRequest{
+		Candidates: available,
+		Workspace:  workspace,
+	})
+	if resolution.Conflict != nil {
+		return generation.Offering{}, fmt.Errorf("generation tool: no available offering for %q", capability)
+	}
+	// A tool that follows the user model still refuses a picker value no
+	// Offering of the capability carries, as it always has: the value names a
+	// model this step cannot run.
+	if workspace != "" && !modelMatches(resolution.Offering, workspace) {
+		return generation.Offering{}, fmt.Errorf("generation tool: no available offering for %q", workspace)
+	}
+	return resolution.Offering, nil
+}
+
+// planPinnedOffering is the Offering the approved plan pins for a capability
+// when this turn runs that plan (#380 step 1). It is empty for an ordinary
+// turn, a turn that runs no plan and a plan that pins nothing for the
+// capability: only a plan continuation follows a plan, so a later ordinary
+// turn of the same session is not bound by it.
+func (executor *Executor) planPinnedOffering(ctx context.Context, command chat.ToolCommand, capability generation.Capability) string {
+	budgetID := strings.TrimSpace(command.Options.PlanContinuation)
+	if budgetID == "" || executor.grants == nil || executor.grants.Budgets == nil || command.OwnerID == "" {
+		return ""
+	}
+	production, err := executor.grants.Budgets.GetProductionBudget(ctx, command.OwnerID, budgetID)
+	if err != nil || production.SessionID != command.SessionID {
+		return ""
+	}
+	if production.State != budget.StateActive && production.State != budget.StateExhausted {
+		return ""
+	}
+	for _, step := range production.Plan.Steps {
+		if step.Capability == string(capability) && step.OfferingID != "" {
+			return step.OfferingID
+		}
+	}
+	for _, contingency := range production.Plan.Contingencies {
+		if contingency.Step.Capability == string(capability) && contingency.Step.OfferingID != "" {
+			return contingency.Step.OfferingID
+		}
+	}
+	return ""
 }
 
 // toolDomain is the workspace domain a tool belongs to. A tool that spans
@@ -1183,35 +1214,6 @@ func (executor *Executor) fallbackModelAllowed(command chat.ToolCommand) bool {
 // usedFallbackModel reports whether a step ran on the Schema's fallback model.
 func (executor *Executor) usedFallbackModel(command chat.ToolCommand) bool {
 	return command.Tool.CrossDomainModelFallback && executor.userModel(command) == "" && executor.fallbackModelAllowed(command)
-}
-
-// preferredOffering picks the Offering to use when the user chose none: an
-// available default first, then a recommended one, then the first available,
-// in catalog order.
-func preferredOffering(offerings []generation.Offering, available func(generation.OfferingID) bool) (generation.Offering, bool) {
-	var recommended, first *generation.Offering
-	for index := range offerings {
-		offering := &offerings[index]
-		if !offering.Enabled || !available(offering.ID) {
-			continue
-		}
-		if offering.Default {
-			return *offering, true
-		}
-		if recommended == nil && offering.Recommended {
-			recommended = offering
-		}
-		if first == nil {
-			first = offering
-		}
-	}
-	switch {
-	case recommended != nil:
-		return *recommended, true
-	case first != nil:
-		return *first, true
-	}
-	return generation.Offering{}, false
 }
 
 func (executor *Executor) selectReferences(
