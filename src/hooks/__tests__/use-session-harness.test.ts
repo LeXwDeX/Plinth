@@ -60,6 +60,7 @@ function view(selection: HarnessSelection): HarnessView {
 }
 const render = (session = 's1', owner = 'u1') => {
   runtime.cursor = 0;
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- this suite drives the hook directly through a mocked React runtime, never inside a component render
   const result = useSessionHarness(session, owner);
   const effects = runtime.effects.splice(0);
   runtime.effectSetups.push(...effects);

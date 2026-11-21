@@ -11,6 +11,7 @@
   ],
   "license": "Apache-2.0",
   "scripts": {
+    "lint": "eslint src web",
     "build": "vite build --config vite.go-web.config.mjs && node scripts/check-build-external-links.mjs",
     "build:go-web": "vite build --config vite.go-web.config.mjs && node scripts/check-build-external-links.mjs",
     "test": "vitest run",
@@ -47,10 +48,13 @@
     "@types/react-dom": "^19.3.0",
     "@types/three": "0.180.0",
     "@vitest/coverage-v8": "^4.1.12",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^26.1.0",
     "msw": "^2.12.14",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "typescript-eslint": "^8.73.0",
     "vite": "^8.1.6",
     "vitest": "^4.1.12",
     "yaml": "^2.9.1"
