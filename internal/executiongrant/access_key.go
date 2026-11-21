@@ -168,6 +168,9 @@ type AccessKeyUsageStore interface {
 	// AssetStepsUsed counts the 3D steps of one asset of the owner, in every
 	// mode.
 	AssetStepsUsed(ctx context.Context, ownerID, sessionID string, counted []string) (int, error)
+	// AssetExtraSteps reads the steps the person granted one asset beyond the
+	// cap (#330 step 5C). A session without a grant answers zero.
+	AssetExtraSteps(ctx context.Context, ownerID, sessionID string) (int, error)
 	// AssetTitle is the name of the owner's asset (chat session) in the
 	// owner's session list; found is false when the owner has no such session.
 	AssetTitle(ctx context.Context, ownerID, sessionID string) (title string, found bool, err error)

@@ -62,6 +62,7 @@ type Runs interface {
 	ClaimItem(ctx context.Context, ownerID, listID string, at time.Time) (assetlist.Item, bool, error)
 	FinishItem(ctx context.Context, input assetlist.FinishItemInput) (assetlist.Item, error)
 	SetItemBlock(ctx context.Context, ownerID, listID, itemID, block string, expectedVersion int64, at time.Time) (assetlist.Item, error)
+	SetItemStepCapTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, expectedVersion int64, at time.Time) (assetlist.Item, error)
 	RecordItemTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, round, workRound int, expectedVersion int64, at time.Time) (assetlist.Item, error)
 }
 
@@ -414,6 +415,15 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 			item.WorkRound = workRound
 			item.LastTurnMessageID = turn.AssistantMessageID
 		}
+		// A turn already handled as a step-cap block (#330 step 5C): the refusal
+		// stays in that turn's grant audit, so after the person granted more
+		// steps (or resumed) the runner continues from a fresh turn instead of
+		// re-judging the same capped turn. Evaluating it again would either
+		// re-block or misreport the refusal as a failure.
+		if item.StepCapTurnMessageID != "" && item.StepCapTurnMessageID == turn.AssistantMessageID {
+			round, workRound := runner.nextRounds(item)
+			return false, runner.openTurn(ctx, run, item, sessionID, round, workRound, now)
+		}
 		// A turn refused at the owner's 3D step cap ended while the item still
 		// works: block the item and pause the run instead of continuing the
 		// round or classifying the refusal as a failure (#328 §2.5).
@@ -422,7 +432,7 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 			return false, err
 		}
 		if capped {
-			if err := runner.blockStepCap(ctx, run, item, now); err != nil {
+			if err := runner.blockStepCap(ctx, run, item, turn.AssistantMessageID, now); err != nil {
 				return false, err
 			}
 			// The run is paused now; stop the tick before it advances another
@@ -751,8 +761,17 @@ func (runner *Runner) stepCapReached(ctx context.Context, run assetlist.Run, ses
 
 // blockStepCap marks the item on its second axis and pauses the run. The item
 // stays working: the person resolves the cap (or the item) and the control
-// service clears the block before the runner advances it again.
-func (runner *Runner) blockStepCap(ctx context.Context, run assetlist.Run, item assetlist.Item, now time.Time) error {
+// service clears the block before the runner advances it again. The capped
+// turn is recorded first, so the person's grant continues from a fresh turn.
+func (runner *Runner) blockStepCap(ctx context.Context, run assetlist.Run, item assetlist.Item, assistantMessageID string, now time.Time) error {
+	if assistantMessageID != "" {
+		if _, err := runner.runs.SetItemStepCapTurn(ctx, run.OwnerID, run.ListID, item.ID,
+			assistantMessageID, assetlist.VersionUnchecked, now); err != nil &&
+			!errors.Is(err, assetlist.ErrConflict) && !errors.Is(err, assetlist.ErrItemState) &&
+			!errors.Is(err, assetlist.ErrNotFound) {
+			return err
+		}
+	}
 	_, err := runner.runs.SetItemBlock(ctx, run.OwnerID, run.ListID, item.ID,
 		assetlist.BlockStepCap, assetlist.VersionUnchecked, now)
 	if err != nil && !errors.Is(err, assetlist.ErrConflict) &&

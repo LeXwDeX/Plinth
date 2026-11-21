@@ -28,9 +28,11 @@ func newStepFixture(t *testing.T) *stepFixture {
 	return &stepFixture{
 		r: openGrantTestRepo(t),
 		steps: approvalpolicy.StepsPolicy{
-			Counted:     []string{"text-to-3d", "image-to-3d", "retexture", "rigging", "model-split"},
-			DefaultList: approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
-			DefaultMCP:  approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
+			Counted:           []string{"text-to-3d", "image-to-3d", "retexture", "rigging", "model-split"},
+			DefaultList:       approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
+			DefaultMCP:        approvalpolicy.StepSetting{Mode: approvalpolicy.StepModeAgent, Cap: 20},
+			ExtraMaximum:      50,
+			ExtraTotalMaximum: 200,
 		},
 	}
 }
@@ -553,5 +555,106 @@ func TestStepUsageReadsWithoutDeciding(t *testing.T) {
 	if _, err := f.r.StepUsage(context.Background(), "owner-a", "session-a",
 		executiongrant.StepRequest{Entry: "web", Steps: f.steps}); !errors.Is(err, executiongrant.ErrInvalid) {
 		t.Fatalf("unknown entry: %v", err)
+	}
+}
+
+// #330 step 5C: the person's grant is stored on the asset (its session), read
+// by the same summary every mode sees, and it lifts the cap without touching
+// the owner's setting.
+func TestExtraStepsLiftTheCapAndAreReadByTheSummary(t *testing.T) {
+	f := newStepFixture(t)
+	f.setSettings(t, "owner-a", capSetting(1), capSetting(1))
+	f.task(t, "used", "owner-a", "session-a", "text-to-3d", "SUCCEEDED", "", "COMPLETED")
+	f.mustRefuse(t, f.grant(t, "owner-a", "session-a", "text-to-3d", ""), approvalpolicy.StepEntryList)
+
+	change, err := f.r.SetSessionExtraSteps(context.Background(), "owner-a", "session-a",
+		executiongrant.StepRequest{Entry: approvalpolicy.StepEntryList, Steps: f.steps}, 2)
+	if err != nil || change.Previous.Extra != 0 || change.Current.Extra != 2 ||
+		change.Previous.Cap != 1 || change.Current.Cap != 1 || change.Current.Used != 1 {
+		t.Fatalf("change = %+v err=%v", change, err)
+	}
+	if summary := f.used(t, "owner-a", "session-a", approvalpolicy.StepEntryList); summary.Extra != 2 || summary.Limit() != 3 || summary.Remaining() != 2 {
+		t.Fatalf("summary = %+v limit=%d remaining=%d", summary, summary.Limit(), summary.Remaining())
+	}
+	// The owner's setting is untouched: the grant is the asset's, not a cap
+	// change.
+	stored, found, err := f.r.AccountSettings(context.Background(), "owner-a")
+	if err != nil || !found || stored.List.Cap != 1 {
+		t.Fatalf("setting = %+v found=%v err=%v", stored, found, err)
+	}
+	// Two steps fit now; the third is refused at the grant's limit.
+	f.mustApprove(t, f.grant(t, "owner-a", "session-a", "text-to-3d", ""), approvalpolicy.StepEntryList)
+	f.mustApprove(t, f.grant(t, "owner-a", "session-a", "text-to-3d", ""), approvalpolicy.StepEntryList)
+	f.mustRefuse(t, f.grant(t, "owner-a", "session-a", "text-to-3d", ""), approvalpolicy.StepEntryList)
+
+	// The other entry of the same asset reads its own cap and shares the grant.
+	mcp := f.used(t, "owner-a", "session-a", approvalpolicy.StepEntryMCP)
+	if mcp.Cap != 1 || mcp.Extra != 2 || mcp.Used != 3 {
+		t.Fatalf("mcp summary = %+v", mcp)
+	}
+}
+
+func TestExtraStepsRefuseADecreaseForeignAssetsAndTheBounds(t *testing.T) {
+	ctx := context.Background()
+	f := newStepFixture(t)
+	f.setSettings(t, "owner-a", capSetting(1), capSetting(1))
+	f.session(t, "owner-a", "session-a")
+	request := executiongrant.StepRequest{Entry: approvalpolicy.StepEntryList, Steps: f.steps}
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a", request, 3); err != nil {
+		t.Fatal(err)
+	}
+	// A raise is allowed; a decrease is a stale context, not a write.
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a", request, 5); err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a", request, 4); !errors.Is(err, executiongrant.ErrConflict) {
+		t.Fatalf("decrease: %v", err)
+	}
+	// One write may add at most the per-write bound; the whole grant stays
+	// within the total bound.
+	f.steps.ExtraMaximum, f.steps.ExtraTotalMaximum = 2, 10
+	request = executiongrant.StepRequest{Entry: approvalpolicy.StepEntryList, Steps: f.steps}
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a", request, 8); !errors.Is(err, executiongrant.ErrExtraStepsSingleLimit) {
+		t.Fatalf("single bound: %v", err)
+	}
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a", request, 20); !errors.Is(err, executiongrant.ErrExtraStepsSingleLimit) {
+		t.Fatalf("single bound before total: %v", err)
+	}
+	f.steps.ExtraMaximum = 20
+	request = executiongrant.StepRequest{Entry: approvalpolicy.StepEntryList, Steps: f.steps}
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a", request, 11); !errors.Is(err, executiongrant.ErrExtraStepsLimit) {
+		t.Fatalf("total bound: %v", err)
+	}
+	// A foreign session and an unknown entry never take the write.
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-b", "session-a", request, 6); !errors.Is(err, executiongrant.ErrExtraStepsUnavailable) {
+		t.Fatalf("foreign asset: %v", err)
+	}
+	f.steps.ExtraMaximum, f.steps.ExtraTotalMaximum = 50, 200
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a", request, 6); err != nil {
+		t.Fatalf("owner write after a foreign refusal: %v", err)
+	}
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-a",
+		executiongrant.StepRequest{Entry: "web", Steps: f.steps}, 7); !errors.Is(err, executiongrant.ErrInvalid) {
+		t.Fatalf("unknown entry: %v", err)
+	}
+	if _, err := f.r.SetSessionExtraSteps(ctx, "owner-a", "session-missing", request, 7); !errors.Is(err, executiongrant.ErrExtraStepsUnavailable) {
+		t.Fatalf("missing session: %v", err)
+	}
+}
+
+// The grant never makes a 2D step wait: the uncounted path does not read the
+// asset's standing at all.
+func TestExtraStepsDoNotAffectTwoDimensionalSteps(t *testing.T) {
+	f := newStepFixture(t)
+	f.setSettings(t, "owner-a", capSetting(1), capSetting(1))
+	f.task(t, "used", "owner-a", "session-a", "text-to-3d", "SUCCEEDED", "", "COMPLETED")
+	if _, err := f.r.SetSessionExtraSteps(context.Background(), "owner-a", "session-a",
+		executiongrant.StepRequest{Entry: approvalpolicy.StepEntryList, Steps: f.steps}, 1); err != nil {
+		t.Fatal(err)
+	}
+	decided, decision, err := f.decide(f.grant(t, "owner-a", "session-a", "text-to-image", ""), approvalpolicy.StepEntryList)
+	if err != nil || !decision.Approved || decided.Status != executiongrant.Approved ||
+		decision.Summary != (executiongrant.StepSummary{}) {
+		t.Fatalf("2D with a grant = %+v %+v err=%v", decided, decision, err)
 	}
 }

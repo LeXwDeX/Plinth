@@ -99,7 +99,8 @@ func (r *Repository) ApproveExecutionGrantWithSteps(ctx context.Context, owner, 
 			if err != nil {
 				return executiongrant.Grant{}, executiongrant.StepDecision{}, err
 			}
-			approve = decision.Summary.Mode != approvalpolicy.StepModeCap || decision.Summary.Used < decision.Summary.Cap
+			approve = decision.Summary.Mode != approvalpolicy.StepModeCap ||
+				decision.Summary.Used < decision.Summary.Limit()
 		}
 	}
 	decision.Approved = approve
@@ -240,11 +241,91 @@ func stepSummaryOnConn(ctx context.Context, conn *sql.Conn, owner, sessionID str
 		}
 	}
 	summary := executiongrant.StepSummary{Entry: request.Entry, Mode: setting.Mode, Cap: setting.Cap}
+	summary.Extra, err = sessionExtraStepsOnConn(ctx, conn, owner, sessionID)
+	if err != nil {
+		return executiongrant.StepSummary{}, err
+	}
 	summary.Used, err = stepsUsedOnConn(ctx, conn, owner, sessionID, request.Steps.Counted)
 	if err != nil {
 		return executiongrant.StepSummary{}, err
 	}
 	return summary, nil
+}
+
+// sessionExtraStepsOnConn reads the extra steps the person granted one asset
+// (#330 step 5C). A session without a row (a deleted asset, a session a step
+// read names but that does not exist) has no grant: the answer is zero, like
+// its used steps.
+func sessionExtraStepsOnConn(ctx context.Context, conn *sql.Conn, owner, sessionID string) (int, error) {
+	var extra int
+	err := conn.QueryRowContext(ctx, `SELECT extra_steps FROM go_chat_sessions
+ WHERE id = ? AND owner_id = ?`, sessionID, owner).Scan(&extra)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read chat session extra steps: %w", err)
+	}
+	return extra, nil
+}
+
+// SetSessionExtraSteps stores one asset's whole extra-step grant (#330 step
+// 5C). The current grant, the setting, the used steps and the write commit in
+// one BEGIN IMMEDIATE transaction, so two tabs cannot both raise it from the
+// same reading and a concurrent step decision sees the new limit or the old
+// one, never a torn value. A target below the stored grant is a context
+// conflict; one write may raise it by at most ExtraMaximum and the asset keeps
+// at most ExtraTotalMaximum. A session that is not the owner's is
+// ErrExtraStepsUnavailable.
+func (r *Repository) SetSessionExtraSteps(ctx context.Context, owner, sessionID string, request executiongrant.StepRequest, target int) (executiongrant.StepExtraChange, error) {
+	if owner == "" || sessionID == "" || target < 0 || !approvalpolicy.ValidStepEntry(request.Entry) {
+		return executiongrant.StepExtraChange{}, executiongrant.ErrInvalid
+	}
+	conn, err := r.grantWriteConn(ctx)
+	if err != nil {
+		return executiongrant.StepExtraChange{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackGrantConn(conn)
+		}
+	}()
+	var stored int
+	err = conn.QueryRowContext(ctx, `SELECT extra_steps FROM go_chat_sessions
+ WHERE id = ? AND owner_id = ?`, sessionID, owner).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return executiongrant.StepExtraChange{}, executiongrant.ErrExtraStepsUnavailable
+	}
+	if err != nil {
+		return executiongrant.StepExtraChange{}, fmt.Errorf("read chat session extra steps: %w", err)
+	}
+	if target < stored {
+		return executiongrant.StepExtraChange{}, executiongrant.ErrConflict
+	}
+	if request.Steps.ExtraMaximum > 0 && target-stored > request.Steps.ExtraMaximum {
+		return executiongrant.StepExtraChange{}, executiongrant.ErrExtraStepsSingleLimit
+	}
+	if request.Steps.ExtraTotalMaximum > 0 && target > request.Steps.ExtraTotalMaximum {
+		return executiongrant.StepExtraChange{}, executiongrant.ErrExtraStepsLimit
+	}
+	previous, err := stepSummaryOnConn(ctx, conn, owner, sessionID, request)
+	if err != nil {
+		return executiongrant.StepExtraChange{}, err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE go_chat_sessions SET extra_steps = ?
+ WHERE id = ? AND owner_id = ?`, target, sessionID, owner); err != nil {
+		return executiongrant.StepExtraChange{}, fmt.Errorf("store chat session extra steps: %w", err)
+	}
+	current, err := stepSummaryOnConn(ctx, conn, owner, sessionID, request)
+	if err != nil {
+		return executiongrant.StepExtraChange{}, err
+	}
+	if err := commitGrantConn(ctx, conn); err != nil {
+		return executiongrant.StepExtraChange{}, err
+	}
+	committed = true
+	return executiongrant.StepExtraChange{Previous: previous, Current: current}, nil
 }
 
 // stepsUsedOnConn counts the 3D steps of one asset (one chat session of the

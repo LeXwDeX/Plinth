@@ -832,6 +832,10 @@ func (r *hookedGrantRepository) StepUsage(ctx context.Context, owner, sessionID 
 	return r.Repository.(executiongrant.StepGrantStore).StepUsage(ctx, owner, sessionID, request)
 }
 
+func (r *hookedGrantRepository) SetSessionExtraSteps(ctx context.Context, owner, sessionID string, request executiongrant.StepRequest, target int) (executiongrant.StepExtraChange, error) {
+	return r.Repository.(executiongrant.StepExtraStore).SetSessionExtraSteps(ctx, owner, sessionID, request, target)
+}
+
 func (r *hookedGrantRepository) GrantByKey(ctx context.Context, owner, key string) (executiongrant.Grant, bool, error) {
 	return r.Repository.(interface {
 		GrantByKey(context.Context, string, string) (executiongrant.Grant, bool, error)
@@ -1919,6 +1923,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: listSchema.Limits.MaxListsPerProject,
 			Counted:            counted,
+			Steps:              harnessAssetListSteps(executionGrants, applicationSchema.StepPolicy),
 			ProjectAssets:      projectService,
 			ProjectAssetLimits: assetlist.ProjectAssetLimits{
 				MaximumAssets: applicationSchema.Project.Limits.MaximumAssetsPerProject,
@@ -1937,6 +1942,13 @@ func newHTTPHarnessWithCatalogAndProviders(
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Mirror the application assembly: item sub-sessions derive the
+		// internal steps mode and its entry from this policy (#330).
+		chatService.SetAssetLists(chat.AssetListPolicy{
+			Service:      assetListService,
+			Schema:       *listSchema,
+			StepsEnabled: applicationSchema.StepPolicy != nil,
+		})
 		if listSchema.Execution != nil {
 			assetListPresence = repository.AssetListPresenceRepository()
 		}
@@ -2160,6 +2172,49 @@ func harnessAccessKeyAdmin(t *testing.T, repository *sqlite.Repository, audit *a
 	return service
 }
 
+// harnessAssetListSteps mirrors the application's extra-step port (#330 step
+// 5C): the list layer gets the grant service's whole-target write and the same
+// Schema bounds, with the grant package's errors mapped to the list's.
+func harnessAssetListSteps(grants *executiongrant.Service, declared *catalog.StepPolicySchema) *assetlist.StepsConfig {
+	if grants == nil || declared == nil {
+		return nil
+	}
+	return &assetlist.StepsConfig{
+		Maximum:      declared.ExtraSteps.Maximum,
+		TotalMaximum: declared.ExtraSteps.TotalMaximum,
+		Set: func(ctx context.Context, ownerID, sessionID string, target int) (assetlist.StepChange, error) {
+			change, err := grants.SetExtraSteps(ctx, ownerID, sessionID, target)
+			if err != nil {
+				switch {
+				case errors.Is(err, executiongrant.ErrExtraStepsLimit):
+					return assetlist.StepChange{}, &assetlist.StepExtraLimitError{
+						Maximum: declared.ExtraSteps.TotalMaximum, Requested: target,
+					}
+				case errors.Is(err, executiongrant.ErrExtraStepsSingleLimit):
+					return assetlist.StepChange{}, &assetlist.StepExtraSingleLimitError{
+						Maximum: declared.ExtraSteps.Maximum,
+					}
+				case errors.Is(err, executiongrant.ErrExtraStepsUnavailable):
+					return assetlist.StepChange{}, assetlist.ErrStepUnavailable
+				case errors.Is(err, executiongrant.ErrConflict):
+					return assetlist.StepChange{}, assetlist.ErrConflict
+				case errors.Is(err, executiongrant.ErrInvalid):
+					return assetlist.StepChange{}, assetlist.ErrInvalid
+				}
+				return assetlist.StepChange{}, err
+			}
+			state := func(summary executiongrant.StepSummary) assetlist.StepState {
+				result := assetlist.StepState{Mode: summary.Mode, Used: summary.Used}
+				if summary.Mode == approvalpolicy.StepModeCap {
+					result.Cap, result.Extra = summary.Cap, summary.Extra
+				}
+				return result
+			}
+			return assetlist.StepChange{Previous: state(change.Previous), Current: state(change.Current)}, nil
+		},
+	}
+}
+
 func harnessAccountSettings(t *testing.T, repository *sqlite.Repository, application catalog.ApplicationSchema) *accountsettings.Service {
 	t.Helper()
 	declared := application.StepPolicy
@@ -2204,9 +2259,11 @@ func harnessApprovalPolicy(application catalog.ApplicationSchema) approvalpolicy
 			counted = append(counted, string(capability))
 		}
 		policy = policy.WithSteps(approvalpolicy.StepsPolicy{
-			Counted:     counted,
-			DefaultList: approvalpolicy.StepSetting{Mode: application.StepPolicy.DefaultMode.List, Cap: application.StepPolicy.Cap.Default},
-			DefaultMCP:  approvalpolicy.StepSetting{Mode: application.StepPolicy.DefaultMode.MCP, Cap: application.StepPolicy.Cap.Default},
+			Counted:           counted,
+			DefaultList:       approvalpolicy.StepSetting{Mode: application.StepPolicy.DefaultMode.List, Cap: application.StepPolicy.Cap.Default},
+			DefaultMCP:        approvalpolicy.StepSetting{Mode: application.StepPolicy.DefaultMode.MCP, Cap: application.StepPolicy.Cap.Default},
+			ExtraMaximum:      application.StepPolicy.ExtraSteps.Maximum,
+			ExtraTotalMaximum: application.StepPolicy.ExtraSteps.TotalMaximum,
 		})
 	}
 	return policy

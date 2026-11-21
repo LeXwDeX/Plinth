@@ -165,12 +165,18 @@ type Item struct {
 	// ReturnReason and ReturnNote are the return context of the latest rework
 	// (#329b): the same sub-session's next turn quotes them, and the per-round
 	// history stays in the review rows.
-	ReturnReason string          `json:"return_reason,omitempty"`
-	ReturnNote   string          `json:"return_note,omitempty"`
-	Result       json.RawMessage `json:"result"`
-	Review       json.RawMessage `json:"review"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	ReturnReason string `json:"return_reason,omitempty"`
+	ReturnNote   string `json:"return_note,omitempty"`
+	// StepCapTurnMessageID records the turn the runner stopped at the 3D step
+	// cap (#330 step 5C). That turn's refusal stays in the grant audit, so
+	// without the marker a grant of more steps would re-evaluate the same turn
+	// and block or fail it again. The runner consumes it once and continues
+	// from a fresh turn; the wire never carries it.
+	StepCapTurnMessageID string          `json:"-"`
+	Result               json.RawMessage `json:"result"`
+	Review               json.RawMessage `json:"review"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
 }
 
 // RouteStep is one planned capability of an item, with the runtime offering

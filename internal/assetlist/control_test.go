@@ -141,6 +141,40 @@ func (store *controlRunStore) RunSummaries(
 	return result, nil
 }
 
+func (store *controlRunStore) ItemsByList(
+	_ context.Context,
+	ownerID, listID string,
+) ([]assetlist.Item, error) {
+	result := make([]assetlist.Item, 0, len(store.items))
+	for _, item := range store.items {
+		if item.OwnerID == ownerID && item.ListID == listID {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+func (store *controlRunStore) SetItemBlock(
+	_ context.Context,
+	ownerID, listID, itemID, block string,
+	expectedVersion int64,
+	at time.Time,
+) (assetlist.Item, error) {
+	key := controlItemKey(ownerID, listID, itemID)
+	item, found := store.items[key]
+	if !found {
+		return assetlist.Item{}, assetlist.ErrNotFound
+	}
+	if expectedVersion != assetlist.VersionUnchecked && item.Version != expectedVersion {
+		return assetlist.Item{}, assetlist.ErrConflict
+	}
+	item.Block = block
+	item.Version++
+	item.UpdatedAt = at
+	store.items[key] = item
+	return item, nil
+}
+
 func newControlService(t *testing.T, store *controlRunStore) (*assetlist.Service, *testClock) {
 	t.Helper()
 	service, _, clock := newService(t, func(config *assetlist.Config) {
@@ -504,5 +538,38 @@ func TestItemCountsAddCountsEveryDocumentedState(t *testing.T) {
 	want := assetlist.ItemCounts{Todo: 2, Working: 2, Review: 2, Accepted: 2, Returned: 2, Failed: 2, Skipped: 2}
 	if counts != want {
 		t.Fatalf("counts = %+v; want %+v", counts, want)
+	}
+}
+
+// #330 step 5C: resuming a run paused at the step cap clears the step-cap
+// blocks the runner set, so the items can advance; other blocks are another
+// owner's state and stay.
+func TestControlRunResumeClearsStepCapBlocks(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	created := time.Date(2026, 11, 18, 11, 0, 0, 0, time.UTC)
+	store := newControlRunStore()
+	store.runs[controlRunKey("owner-a", "alist_1")] = storedControlRun(
+		"owner-a", "alist_1", assetlist.RunPaused, assetlist.PauseStepCap, created)
+	store.items[controlItemKey("owner-a", "alist_1", "aitem_1")] = assetlist.Item{
+		ID: "aitem_1", ListID: "alist_1", OwnerID: "owner-a", State: assetlist.StateWorking,
+		Block: assetlist.BlockStepCap, Version: 2,
+	}
+	store.items[controlItemKey("owner-a", "alist_1", "aitem_2")] = assetlist.Item{
+		ID: "aitem_2", ListID: "alist_1", OwnerID: "owner-a", State: assetlist.StateWorking,
+		Block: assetlist.BlockAwaitingApproval, Version: 1,
+	}
+	service, _ := newControlService(t, store)
+
+	resumed, err := service.ControlRun(ctx, "owner-a", "prj_1", "alist_1",
+		assetlist.RunActionResume, runVersion(store.runs[controlRunKey("owner-a", "alist_1")]), "")
+	if err != nil || resumed.Status != assetlist.RunRunning {
+		t.Fatalf("resume = %+v, %v", resumed, err)
+	}
+	if item := store.items[controlItemKey("owner-a", "alist_1", "aitem_1")]; item.Block != assetlist.BlockNone || item.Version != 3 {
+		t.Fatalf("step-cap item = %+v; want the block cleared and the version bumped", item)
+	}
+	if item := store.items[controlItemKey("owner-a", "alist_1", "aitem_2")]; item.Block != assetlist.BlockAwaitingApproval {
+		t.Fatalf("awaiting-approval item = %+v; another block must stay", item)
 	}
 }
