@@ -26,6 +26,10 @@ type submitRuns struct {
 	runErr    error
 	finish    assetlist.FinishItemInput
 	finishErr error
+	// deferred and nextActionAt record the deferral write of a done report
+	// whose delivery is not stable yet (#459).
+	deferred     assetlist.DeferReportInput
+	nextActionAt time.Time
 }
 
 func (runs *submitRuns) ItemBySession(_ context.Context, ownerID, sessionID string) (assetlist.Item, bool, error) {
@@ -58,6 +62,22 @@ func (runs *submitRuns) FinishItem(_ context.Context, input assetlist.FinishItem
 	item.State = input.State
 	item.StateReason = input.StateReason
 	item.Result = input.Result
+	return item, nil
+}
+
+// SetItemResult and SetItemNextActionAt record the deferred report of a done
+// call whose delivery is not stable yet (#459).
+func (runs *submitRuns) SetItemResult(_ context.Context, _, _, _ string, result json.RawMessage, _ int64, at time.Time) (assetlist.Item, error) {
+	runs.deferred = assetlist.DeferReportInput{Result: result, At: at}
+	item := runs.item
+	item.Result = result
+	return item, nil
+}
+
+func (runs *submitRuns) SetItemNextActionAt(_ context.Context, _, _, _ string, nextActionAt time.Time, _ int64, _ time.Time) (assetlist.Item, error) {
+	runs.nextActionAt = nextActionAt
+	item := runs.item
+	item.NextActionAt = nextActionAt
 	return item, nil
 }
 

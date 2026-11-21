@@ -526,23 +526,51 @@ func validateConvertedObjOfferings(
 	return nil
 }
 
+// matches reports whether role and variant are selected, without the media
+// type. A resource slot that has not delivered has no saved bytes and
+// therefore no media type (#459); every other use compares all three.
+func (match ModelAssetMatch) matchesVariant(role, variant string) bool {
+	if !slices.Contains(match.Roles, role) {
+		return false
+	}
+	if len(match.Variants) == 0 && len(match.VariantPrefixes) == 0 {
+		return true
+	}
+	matched := slices.ContainsFunc(match.Variants, func(candidate string) bool { return strings.EqualFold(candidate, variant) })
+	return matched || slices.ContainsFunc(match.VariantPrefixes, func(prefix string) bool {
+		return prefix != "" && len(variant) >= len(prefix) && strings.EqualFold(variant[:len(prefix)], prefix)
+	})
+}
+
 // Matches reports whether a saved file of role, variant and media type is one
 // this match selects (roles, then variants or variant prefixes, then media
 // types; each list empty means any). Comparisons ignore case.
 func (match ModelAssetMatch) Matches(role, variant, mediaType string) bool {
-	if !slices.Contains(match.Roles, role) {
+	if !match.matchesVariant(role, variant) {
 		return false
 	}
-	if len(match.Variants) > 0 || len(match.VariantPrefixes) > 0 {
-		matched := slices.ContainsFunc(match.Variants, func(candidate string) bool { return strings.EqualFold(candidate, variant) })
-		matched = matched || slices.ContainsFunc(match.VariantPrefixes, func(prefix string) bool {
-			return prefix != "" && len(variant) >= len(prefix) && strings.EqualFold(variant[:len(prefix)], prefix)
-		})
-		if !matched {
-			return false
+	return len(match.MediaTypes) == 0 || slices.ContainsFunc(match.MediaTypes, func(candidate string) bool { return strings.EqualFold(candidate, mediaType) })
+}
+
+// PendingFormat names the target format a post-success resource slot is going
+// to deliver (#459): the first format, in the Schema's presentation order,
+// whose matches select the slot's role and variant.
+//
+// A pending slot has no saved bytes, so the matches' media types cannot be
+// compared and are left out: which format a pending slot fills is decided by
+// the role and variant the Offering froze, and a Provider that names one slot
+// for two containers (Tripo's converted.gltf is a self-contained GLB, #293)
+// fills the format that lists that slot. An aggregate slot (variant_prefix)
+// maps to no format, because it stands for several formats at once.
+func (schema ModelDeliverySchema) PendingFormat(role, variant string) (string, bool) {
+	for _, format := range schema.Formats {
+		for _, match := range format.Matches {
+			if match.matchesVariant(role, variant) {
+				return format.ID, true
+			}
 		}
 	}
-	return len(match.MediaTypes) == 0 || slices.ContainsFunc(match.MediaTypes, func(candidate string) bool { return strings.EqualFold(candidate, mediaType) })
+	return "", false
 }
 
 // FormatOf is the public format ID of a saved file (#326): the first format

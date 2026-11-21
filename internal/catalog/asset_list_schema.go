@@ -208,7 +208,11 @@ type AssetListMessagesSchema struct {
 	ItemNotInSession     string `json:"item_not_in_session"`
 	ItemNotWorking       string `json:"item_not_working"`
 	ItemNoSuccessfulTask string `json:"item_no_successful_task"`
-	ItemReportFailed     string `json:"item_report_failed"`
+	// ItemDeliveryPending is the completion tool's answer when the reported
+	// Task still owes formats as post-success resources (#459): the item keeps
+	// its state until the delivery is stable, and the report is stored.
+	ItemDeliveryPending string `json:"item_delivery_pending,omitempty"`
+	ItemReportFailed    string `json:"item_report_failed"`
 }
 
 // AssetListReviewSchema 是 application.asset_list.review（#329b）：验收看板的

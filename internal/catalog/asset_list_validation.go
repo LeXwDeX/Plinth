@@ -182,6 +182,7 @@ func validateAssetList(
 		"item_not_working":               list.Messages.ItemNotWorking,
 		"item_no_successful_task":        list.Messages.ItemNoSuccessfulTask,
 		"item_report_failed":             list.Messages.ItemReportFailed,
+		"item_delivery_pending":          list.Messages.ItemDeliveryPending,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("asset_list.messages.%s 不能为空", field)

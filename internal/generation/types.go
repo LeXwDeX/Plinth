@@ -1194,17 +1194,32 @@ type ConversionIntent struct {
 }
 
 // DeliveryConversionRule recognizes a Task whose frozen Offering and input run
-// a Schema-declared format conversion, and names its source and formats.
+// a Schema-declared format conversion, and names its source and formats. It
+// also names the formats a stored Task still owes as post-success resources
+// (#459), which the Product Schema maps from the resource slots to formats.
 type DeliveryConversionRule interface {
 	IsConversion(OfferingID, json.RawMessage) bool
 	ConversionIntent(Offering, json.RawMessage) (ConversionIntent, bool)
+	PendingFormats(Task) []string
 }
 
-// ConversionConflictChecker reads the declared conversion of an active Task
-// of the same owner and session. It is called inside the Task creation
-// transaction. An error aborts creation: a read failure must never admit a
-// second paid conversion.
-type ConversionConflictChecker func(Task) (ConversionIntent, bool, error)
+// ConversionGuardReport is what the Product Schema's conversion rule tells the
+// repository about one stored Task: the declared conversion it runs (Declared
+// and Intent) and the formats it still owes as post-success resources
+// (PendingFormats, #459). The repository needs both to refuse a second paid run
+// for work the platform is already doing.
+type ConversionGuardReport struct {
+	Intent         ConversionIntent
+	Declared       bool
+	PendingFormats []string
+}
+
+// ConversionConflictChecker reads one stored Task's report for the guarded
+// conversion admission. It is called inside the Task creation transaction for
+// every active Task of the same owner and session, and for the succeeded
+// source Task whose resources may still be pending. An error aborts creation:
+// a read failure must never admit a second paid conversion.
+type ConversionConflictChecker func(Task) (ConversionGuardReport, error)
 
 // ConversionGuardedRepository creates a Task after checking, in the same
 // write transaction, that no active Task of the same owner and session runs a

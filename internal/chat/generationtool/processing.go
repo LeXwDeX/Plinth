@@ -16,6 +16,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -534,6 +535,13 @@ func (executor *Executor) deliveryRoute(
 	if !validates || requested == "" {
 		return selectedOffering{}, false, false, nil
 	}
+	// The source task may still be converting this very format as a
+	// post-success resource (#457): the platform is already doing it, so no
+	// route is offered and nothing is submitted. The refusal names the Schema's
+	// own copy for that case.
+	if format, converting := pendingDeliveryFormat(executor.modelDelivery, source, requested); converting {
+		return selectedOffering{}, false, false, deliveryConverting{format: format}
+	}
 	listed := map[generation.OfferingID]generation.Offering{}
 	for _, offering := range executor.gateway.Offerings(capability) {
 		listed[offering.ID] = offering
@@ -576,6 +584,27 @@ func (executor *Executor) deliveryRoute(
 		return selectedOffering{offering: offering, binding: binding}, allFormats, true, nil
 	}
 	return selectedOffering{}, false, false, nil
+}
+
+// deliveryConverting marks a requested format the source task is already
+// converting as a post-success resource (#457): nothing is submitted, and the
+// call answers with the Schema's own sentence for that case instead of a
+// service that cannot take the model.
+type deliveryConverting struct{ format string }
+
+func (e deliveryConverting) Error() string { return "format already converting: " + e.format }
+
+// pendingDeliveryFormat names the format of the source task's pending
+// post-success resources the caller asked for (#459). The mapping is the
+// Schema's format matches (model_delivery.formats[].matches); the comparison
+// ignores case, as the format argument does elsewhere.
+func pendingDeliveryFormat(delivery catalog.ModelDeliverySchema, source generation.Task, requested string) (string, bool) {
+	for _, format := range modeldelivery.PendingResourceFormats(delivery, source) {
+		if strings.EqualFold(format, requested) {
+			return format, true
+		}
+	}
+	return "", false
 }
 
 // wholeRunProvides reports that an Offering chosen outside the delivery
@@ -732,6 +761,13 @@ func (executor *Executor) executeProcessing(
 	mentions := executor.serviceMentions(ctx, command, capability)
 	chosen, allFormats, found, err := executor.deliveryConversion(ctx, owner, capability, source, asset, processing, arguments, mentions.named)
 	if err != nil {
+		var converting deliveryConverting
+		if errors.As(err, &converting) {
+			// The platform is converting this format already (#459): no second
+			// paid run, and the Agent is told so in the Schema's own words.
+			return executor.reject(command, executor.fillText(command, processing.Messages.FormatConverting,
+				"{format}", converting.format))
+		}
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	if !found && choice != nil {

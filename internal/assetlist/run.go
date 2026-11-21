@@ -273,6 +273,11 @@ type RunStore interface {
 	SetItemStepCapTurn(ctx context.Context, ownerID, listID, itemID, assistantMessageID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemSession(ctx context.Context, ownerID, listID, itemID, sessionID string, expectedVersion int64, at time.Time) (Item, error)
 	SetItemNextActionAt(ctx context.Context, ownerID, listID, itemID string, nextActionAt time.Time, expectedVersion int64, at time.Time) (Item, error)
+	// SetItemResult stores a done report on a working item without deciding it
+	// (#459): the report is kept while the item's delivery is not stable yet,
+	// and the runner moves the item into review once it is. A missing or
+	// foreign item is ErrNotFound; a lost CAS guard is ErrConflict.
+	SetItemResult(ctx context.Context, ownerID, listID, itemID string, result json.RawMessage, expectedVersion int64, at time.Time) (Item, error)
 	// RecordItemTurn stores the assistant message of a turn the server opened
 	// for a working item and sets round (the item's whole life) and workRound
 	// (the current work session). The three change together so a restart can

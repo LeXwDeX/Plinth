@@ -207,6 +207,11 @@ func postSuccessDeadline(task Task) time.Time {
 	return base.Add(time.Duration(deadlineSeconds) * time.Second)
 }
 
+// PostSuccessDeadline 是内核收尾成功后资源槽位的时刻（§6.4）：FinishedAt +
+// 声明的 deadline_seconds。只读的调用方（制作清单在交付未稳定时推迟报告，
+// #459）用它安排下一次检查；槽位只会在此时或更晚由 finalizer 落终态。
+func PostSuccessDeadline(task Task) time.Time { return postSuccessDeadline(task) }
+
 // postSuccessInterval 取观察间隔（声明缺省/非法时 60s 兜底；加载期校验
 // 已拒绝非法声明，兜底只服务历史快照防御）。
 func postSuccessInterval(task Task) time.Duration {

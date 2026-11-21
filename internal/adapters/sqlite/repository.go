@@ -1001,20 +1001,64 @@ func (r *Repository) admitConversion(
 		return err
 	}
 	for _, value := range active {
-		intent, declared, err := check(value)
+		report, err := check(value)
 		if err != nil {
 			return err
 		}
-		if !declared {
+		if !report.Declared {
 			continue
 		}
-		source, err := conversionSourceIdentity(ctx, conn, task.OwnerID, intent)
+		source, err := conversionSourceIdentity(ctx, conn, task.OwnerID, report.Intent)
 		if err != nil {
 			return err
 		}
-		if source.equal(newSource) && formatsOverlap(task.Conversion.Formats, intent.Formats) {
+		if source.equal(newSource) && formatsOverlap(task.Conversion.Formats, report.Intent.Formats) {
 			return generation.RepositoryConversionConflict
 		}
+	}
+	// The same source may still owe the format as a post-success resource of a
+	// finished Task (#457): that Task is not active, but its delivery is not
+	// stable yet, so a second paid run would duplicate work already in flight.
+	return r.admitPendingDelivery(ctx, conn, task, newSource, check)
+}
+
+// admitPendingDelivery refuses a new conversion whose target format the source
+// Task still owes as a post-success resource (#459). The read is one row by id,
+// inside this transaction; the resource slots only ever move from pending to a
+// terminal state, so a slot that settles right after the read can only refuse a
+// run that is no longer needed, never admit a second one. An uploaded source
+// has no owning Task and therefore nothing pending.
+func (r *Repository) admitPendingDelivery(
+	ctx context.Context,
+	conn *sql.Conn,
+	task generation.Task,
+	source conversionSource,
+	check generation.ConversionConflictChecker,
+) error {
+	if source.task == "" {
+		return nil
+	}
+	row := conn.QueryRowContext(ctx, taskSelect+` WHERE generation_tasks.id = ?
+		AND generation_tasks.owner_id = ?
+		AND generation_tasks.state = ?
+		AND generation_tasks.resource_state_json IS NOT NULL`,
+		source.task, task.OwnerID, generation.TaskSucceeded)
+	stored, err := scanTask(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	report, err := check(stored)
+	if err != nil {
+		return err
+	}
+	if len(report.PendingFormats) == 0 {
+		return nil
+	}
+	if formatsOverlap(task.Conversion.Formats, report.PendingFormats) {
+		return generation.RepositoryConversionConflict
 	}
 	return nil
 }

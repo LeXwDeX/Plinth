@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
@@ -135,19 +136,16 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 			return assetListRefusal(assetListMessage(messages.ItemNoSuccessfulTask,
 				"the session has no successful task")), nil
 		}
-		result, err := json.Marshal(assetListItemResultSnapshot{
-			TaskID: string(task.ID),
-			Assets: assetListItemResultAssets(task.Assets),
-		})
-		if err != nil {
-			return assetListRefusal(reportFailed), nil
+		// A success can still owe formats: the platform converts the other
+		// formats as post-success resources after the main model landed
+		// (#457). The item must not enter review before that delivery is
+		// stable, so the report is stored on the working item and the runner
+		// moves it into review when the formats settle (#459).
+		if generation.ResourcesPending(task.Resources) {
+			return service.deferReportedItem(ctx, policy, item, task, messages)
 		}
-		// The review snapshot is generated in the same step that moves the
-		// item to waiting for the person (#329b). Its ports resolve the
-		// purpose thresholds and inspect the GLB/picture; a failure leaves the
-		// report stored with an empty snapshot, never a stuck item.
 		brief, _ := json.Marshal(command.Options.ProductionBrief)
-		review, snapshotErr := policy.Service.ReviewSnapshot(ctx, assetlist.ReviewSnapshotInput{
+		finished, err := service.FinishReportedItem(ctx, FinishReportedItemInput{
 			OwnerID:   command.OwnerID,
 			SessionID: command.SessionID,
 			ProjectID: strings.TrimSpace(command.Options.ProjectID),
@@ -159,18 +157,6 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 			Task:      task,
 			Tasks:     tasks,
 			At:        service.clock(),
-		})
-		if snapshotErr != nil || len(review) == 0 {
-			review = nil
-		}
-		finished, err := policy.Service.FinishItem(ctx, assetlist.FinishItemInput{
-			OwnerID: command.OwnerID,
-			ListID:  item.ListID,
-			ItemID:  item.ID,
-			State:   assetlist.StateReview,
-			Result:  result,
-			Review:  review,
-			At:      service.clock(),
 		})
 		if err != nil {
 			return assetListRefusal(reportFailed), nil
@@ -201,6 +187,206 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 		return assetListItemReported(finished, status, taskID, messages), nil
 	}
 	return assetListRefusal(reportFailed), nil
+}
+
+// FinishReportedItemInput is one done report of a working item, ready to be
+// stored: the Task the report names and the sub-session's Tasks for the step
+// summary, the item's frozen production brief and the state it was reported in.
+type FinishReportedItemInput struct {
+	OwnerID string
+	// SessionID is the sub-session the report belongs to: the turn's session
+	// for the completion tool, the item's bound session for the runner. It
+	// scopes the self-check record and the purpose thresholds the snapshot
+	// resolves, so it is never derived from a stored Task.
+	SessionID string
+	ProjectID string
+	ListID    string
+	ItemID    string
+	Kind      string
+	Brief     json.RawMessage
+	Round     int
+	Task      generation.Task
+	Tasks     []generation.Task
+	At        time.Time
+}
+
+// FinishReportedItem stores a done report and moves the item into review
+// (#329b). The result snapshot is server-built and the review snapshot is
+// generated in the same step that moves the item to waiting for the person; its
+// ports resolve the purpose thresholds and inspect the GLB/picture, and a
+// failure leaves the report stored with an empty snapshot, never a stuck item.
+//
+// Both the completion tool and the runner's delivery tick call it (#459), so a
+// report deferred for an unstable delivery is finished exactly like one that
+// arrived after the formats settled.
+func (service *Service) FinishReportedItem(
+	ctx context.Context,
+	input FinishReportedItemInput,
+) (assetlist.Item, error) {
+	policy := service.assetLists
+	if policy == nil || policy.Service == nil || policy.Tasks == nil {
+		return assetlist.Item{}, assetlist.ErrNotFound
+	}
+	result, err := json.Marshal(assetListItemResultSnapshot{
+		TaskID: string(input.Task.ID),
+		Assets: assetListItemResultAssets(input.Task.Assets),
+	})
+	if err != nil {
+		return assetlist.Item{}, err
+	}
+	review, snapshotErr := policy.Service.ReviewSnapshot(ctx, assetlist.ReviewSnapshotInput{
+		OwnerID:   input.OwnerID,
+		SessionID: input.SessionID,
+		ProjectID: strings.TrimSpace(input.ProjectID),
+		ListID:    input.ListID,
+		ItemID:    input.ItemID,
+		Kind:      input.Kind,
+		Brief:     input.Brief,
+		Round:     input.Round,
+		Task:      input.Task,
+		Tasks:     input.Tasks,
+		At:        input.At,
+	})
+	if snapshotErr != nil || len(review) == 0 {
+		review = nil
+	}
+	return policy.Service.FinishItem(ctx, assetlist.FinishItemInput{
+		OwnerID: input.OwnerID,
+		ListID:  input.ListID,
+		ItemID:  input.ItemID,
+		State:   assetlist.StateReview,
+		Result:  result,
+		Review:  review,
+		At:      input.At,
+	})
+}
+
+// SettleReportedItemInput is one working item whose done report may be waiting
+// for its delivery to settle (#459). The report itself is the item's stored
+// result_json; Tasks is the sub-session's Task source.
+type SettleReportedItemInput struct {
+	OwnerID   string
+	ProjectID string
+	ListID    string
+	Item      assetlist.Item
+	Brief     json.RawMessage
+	Tasks     []generation.Task
+	Now       time.Time
+}
+
+// SettleReportedItem finishes a working item whose done report is stored, once
+// the delivery that report names is stable (#459). It reports false when the
+// item has no stored report (an ordinary working item, which the loop
+// continues), and true when it finished the item or left it waiting: the loop
+// must not open another turn for it either way.
+//
+// This is the one place that advances a deferred report, so the automatic
+// completion reconciler of #461 can settle an item the same way once it has
+// finished the formats it was completing.
+func (service *Service) SettleReportedItem(
+	ctx context.Context,
+	input SettleReportedItemInput,
+) (assetlist.Item, bool, error) {
+	policy := service.assetLists
+	if policy == nil || policy.Service == nil || policy.Tasks == nil {
+		return input.Item, false, nil
+	}
+	taskID := assetListItemResultTaskID(input.Item.Result)
+	if taskID == "" {
+		return input.Item, false, nil
+	}
+	var task generation.Task
+	found := false
+	for _, candidate := range input.Tasks {
+		if string(candidate.ID) == taskID {
+			task, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		// The reported Task is gone (deleted with its session): there is no
+		// delivery left to wait for, so the item continues as an ordinary one.
+		return input.Item, false, nil
+	}
+	if generation.ResourcesPending(task.Resources) {
+		// Still converting: the item keeps its state and its next scheduling
+		// instant (set when the report was deferred) keeps the loop away until
+		// the kernel finalizes the remaining slots.
+		return input.Item, true, nil
+	}
+	finished, err := service.FinishReportedItem(ctx, FinishReportedItemInput{
+		OwnerID:   input.OwnerID,
+		SessionID: input.Item.SessionID,
+		ProjectID: input.ProjectID,
+		ListID:    input.ListID,
+		ItemID:    input.Item.ID,
+		Kind:      input.Item.Kind,
+		Brief:     input.Brief,
+		Round:     input.Item.Round,
+		Task:      task,
+		Tasks:     input.Tasks,
+		At:        input.Now,
+	})
+	if err != nil {
+		return input.Item, true, err
+	}
+	return finished, true, nil
+}
+
+// assetListItemDeliveryPending stores a done report whose delivery is not
+// stable yet (#459): the formats the task still owes are still converting, so
+// the item keeps its state and its next scheduling instant moves to the
+// kernel's post-success deadline. The runner's delivery tick moves the item
+// into review once every format is terminal; the report is never lost.
+func (service *Service) deferReportedItem(
+	ctx context.Context,
+	policy *AssetListPolicy,
+	item assetlist.Item,
+	task generation.Task,
+	messages catalog.AssetListMessagesSchema,
+) (ToolResult, error) {
+	result, err := json.Marshal(assetListItemResultSnapshot{
+		TaskID: string(task.ID),
+		Assets: assetListItemResultAssets(task.Assets),
+	})
+	if err != nil {
+		return assetListRefusal(assetListMessage(messages.ItemReportFailed,
+			"the item report could not be stored")), nil
+	}
+	if _, err := policy.Service.DeferReport(ctx, assetlist.DeferReportInput{
+		OwnerID:         item.OwnerID,
+		ListID:          item.ListID,
+		ItemID:          item.ID,
+		Result:          result,
+		NextActionAt:    generation.PostSuccessDeadline(task),
+		ExpectedVersion: item.Version,
+		At:              time.Now().UTC(),
+	}); err != nil {
+		return assetListRefusal(assetListMessage(messages.ItemReportFailed,
+			"the item report could not be stored")), nil
+	}
+	message := strings.NewReplacer("{name}", item.Name).Replace(
+		assetListMessage(messages.ItemDeliveryPending,
+			"the item's formats are still converting, so it does not enter review yet"))
+	content, err := json.Marshal(assetListItemReportContent{
+		ItemID:  item.ID,
+		State:   item.State,
+		Status:  assetListItemStatusDone,
+		TaskID:  string(task.ID),
+		Message: message,
+	})
+	if err != nil {
+		return ToolResult{Error: message, NoSubmission: true}, nil
+	}
+	summary, _ := json.Marshal(map[string]string{
+		"asset_list_item_id": item.ID,
+		"status":             assetListItemStatusDone,
+	})
+	return ToolResult{
+		AgentContent: string(content),
+		Summary:      summary,
+		NoSubmission: true,
+	}, nil
 }
 
 // latestAssetListTask picks the newest Task in one state. The source reads

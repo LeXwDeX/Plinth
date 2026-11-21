@@ -83,6 +83,11 @@ type Chat interface {
 	// TurnEndedInError reports whether the turn recorded the Schema's error
 	// reason.
 	TurnEndedInError(turn chat.Turn) bool
+	// SettleReportedItem moves a working item whose done report is stored into
+	// review once its delivery is stable (#459). It reports false when the item
+	// has no such report, and true when it finished the item or left it waiting
+	// for its delivery.
+	SettleReportedItem(ctx context.Context, input chat.SettleReportedItemInput) (assetlist.Item, bool, error)
 }
 
 // Scheduler hands a started turn to the chat orchestrator. A full queue or a
@@ -503,6 +508,14 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 		if failed {
 			return runner.failItem(ctx, run, item, report, now)
 		}
+		// A working item that already reported done waits for its delivery to
+		// settle (#459): the report is stored on the item, so the loop neither
+		// opens another turn nor spends a round, and the item moves into review
+		// as soon as every post-success format is terminal.
+		finished, err := runner.finishReportedItem(ctx, run, item, now)
+		if err != nil || finished {
+			return false, err
+		}
 		// max_rounds_per_item bounds the turns of one work session. Reading
 		// the item's whole-life round here would fail a returned item after a
 		// single turn when its first make used the allowance (#329b).
@@ -796,6 +809,52 @@ func (runner *Runner) finishItem(
 		return nil
 	}
 	return err
+}
+
+// finishReportedItem moves a working item whose done report is stored into
+// review once its delivery is stable (#459). It reports true when the item was
+// such a report, whether the item was finished or is still waiting: the loop
+// must not open another turn for it in either case. A waiting item's next
+// scheduling instant is the kernel's post-success deadline, so the check runs
+// once per delivery rather than every tick.
+func (runner *Runner) finishReportedItem(
+	ctx context.Context,
+	run assetlist.Run,
+	item assetlist.Item,
+	now time.Time,
+) (bool, error) {
+	if runner.chat == nil {
+		return false, nil
+	}
+	if runner.tasks == nil {
+		return false, nil
+	}
+	tasks, err := runner.tasks(ctx, run.OwnerID, item.SessionID)
+	if err != nil {
+		// Without the session's Tasks the report cannot be judged: leave the
+		// item to the ordinary turn path instead of guessing.
+		return false, err
+	}
+	list, err := runner.lists.Get(ctx, run.OwnerID, run.ProjectID, run.ListID)
+	if errors.Is(err, assetlist.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, handled, err := runner.chat.SettleReportedItem(ctx, chat.SettleReportedItemInput{
+		OwnerID:   run.OwnerID,
+		ProjectID: run.ProjectID,
+		ListID:    run.ListID,
+		Item:      item,
+		Brief:     list.Brief,
+		Tasks:     tasks,
+		Now:       now,
+	})
+	if err != nil {
+		return false, err
+	}
+	return handled, nil
 }
 
 func (runner *Runner) pauseRun(ctx context.Context, run assetlist.Run, reason string, now time.Time) error {

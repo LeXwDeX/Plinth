@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-21.407-380-433-330-445.1",
+    "revision": "2026-11-22.458-459.1",
     "terminology": {
       "user_facing": [
         {
@@ -5842,6 +5842,7 @@
         "item_not_in_session": "这个工具只在制作清单项的会话里可用。",
         "item_not_working": "清单项当前不在制作中，无法报告结果。",
         "item_no_successful_task": "本会话没有成功的任务，不能报告完成；请先让生成任务成功。",
+        "item_delivery_pending": "清单项「{name}」的模型还在后台转换格式，交付尚未稳定，暂时不进入待验收；格式全部落地后会自动转入待验收，无需重新制作。",
         "item_report_failed": "清单项结果提交失败：清单可能已停止或完成，或服务暂时不可用，请稍后重试。"
       },
       "ui": {
@@ -9516,6 +9517,7 @@
               "no_offering": "No available offering can run {step} right now.",
               "invalid_input": "The request was rejected before submission: {detail}",
               "unavailable": "Model processing is not available in this deployment.",
+              "format_converting": "The platform is already converting this model to {format} in the background; nothing was submitted. Do not run it again: the file arrives on its own when that conversion finishes, so tell the person it is on its way.",
               "source_confirmation": "Nothing was submitted. The person has {selected} selected{reason}, but this call would run {step} on another model, {source}, which costs credits. Do not switch models on your own: in one or two sentences tell the person why the selected model cannot be used (when it cannot) and ask whether to use {source} instead{options}. Offer only these options; never offer a service on a model it cannot take. Call again with {source} only after the person agrees in their reply.",
               "selected_source_incompatible": ", and no available service accepts it for this step",
               "selected_service_refused": "; {reasons}",
@@ -20700,6 +20702,7 @@
             "asset_list.messages.item_not_in_session": "This tool is only available inside a production-list item's own session.",
             "asset_list.messages.item_not_working": "The list item is not in progress, so no result can be reported.",
             "asset_list.messages.item_no_successful_task": "This session has no successful task, so it cannot report done; let the generation task succeed first.",
+            "asset_list.messages.item_delivery_pending": "The formats of item \"{name}\" are still converting in the background, so its delivery is not stable and it does not enter review yet; it moves to review on its own once every format has landed, with nothing to remake.",
             "asset_list.messages.item_report_failed": "The item report could not be stored: the list may be stopped or completed, or the service is temporarily unavailable; try again later.",
             "asset_list.ui.card_title": "Work list",
             "asset_list.ui.panel_title": "Work list",

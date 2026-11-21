@@ -591,6 +591,37 @@ func (r *AssetListRunRepository) SetItemBlock(
 // SetItemStepCapTurn records the turn the runner blocked at the 3D step cap
 // (#330 step 5C). The marker is consumed by the item's next advance after the
 // person grants more steps, so the same refusal is not judged again.
+// SetItemResult stores a done report on a working item without deciding it
+// (#459). The report is kept while the item's delivery is not stable yet; the
+// item keeps its state, its session and its return context, and the runner
+// moves it into review once every post-success format is terminal. An empty
+// report becomes {} (the stored "no result" shape); a missing or foreign item
+// is ErrNotFound; a lost CAS guard is ErrConflict.
+func (r *AssetListRunRepository) SetItemResult(
+	ctx context.Context,
+	ownerID, listID, itemID string,
+	result json.RawMessage,
+	expectedVersion int64,
+	at time.Time,
+) (assetlist.Item, error) {
+	if ownerID == "" || listID == "" || itemID == "" {
+		return assetlist.Item{}, fmt.Errorf("%w: item identity", assetlist.ErrInvalid)
+	}
+	if expectedVersion < 0 && expectedVersion != assetlist.VersionUnchecked {
+		return assetlist.Item{}, fmt.Errorf("%w: expected version", assetlist.ErrInvalid)
+	}
+	stored := bytes.TrimSpace(result)
+	if len(stored) == 0 {
+		stored = json.RawMessage("{}")
+	}
+	item, err := r.updateAssetListItem(ctx, ownerID, listID, itemID, expectedVersion, at,
+		`result_json = ?`, string(stored))
+	if err != nil {
+		return assetlist.Item{}, err
+	}
+	return item, nil
+}
+
 func (r *AssetListRunRepository) SetItemStepCapTurn(
 	ctx context.Context,
 	ownerID, listID, itemID, assistantMessageID string,

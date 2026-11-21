@@ -12,11 +12,26 @@ import (
 // Offering or Provider itself; the App injects this rule from
 // application.model_delivery.conversions.
 type SchemaConversionRule struct {
+	delivery    catalog.ModelDeliverySchema
 	conversions []catalog.ModelConversionSchema
 }
 
 func NewSchemaConversionRule(delivery catalog.ModelDeliverySchema) *SchemaConversionRule {
-	return &SchemaConversionRule{conversions: append([]catalog.ModelConversionSchema(nil), delivery.Conversions...)}
+	return &SchemaConversionRule{
+		delivery:    delivery,
+		conversions: append([]catalog.ModelConversionSchema(nil), delivery.Conversions...),
+	}
+}
+
+// PendingFormats names the formats a stored Task still owes as post-success
+// resources (#459): the task's frozen resource slots mapped through the
+// Schema's format matches. The kernel reads it in the guarded conversion
+// admission, so the one mapping serves the coverage projection and the guard.
+func (r *SchemaConversionRule) PendingFormats(task generation.Task) []string {
+	if r == nil {
+		return nil
+	}
+	return PendingResourceFormats(r.delivery, task)
 }
 
 func (r *SchemaConversionRule) IsConversion(offering generation.OfferingID, input json.RawMessage) bool {
