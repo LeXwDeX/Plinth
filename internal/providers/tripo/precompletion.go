@@ -224,6 +224,15 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 			return preCompletionFailure(base, state, "Tripo 必需格式转换失败"), nil
 		}
 	}
+	if backoff {
+		// A format just entered its retry backoff: let the wait pass first
+		// (official 1, 2, 4… seconds). This comes before the changed return
+		// because entering the backoff also records an attempt: the two always
+		// fire together and neither may dispatch, so only the wait differs.
+		observation := preCompletionRunning(base, state)
+		observation.PollAfter = conversionRetryWait(state.Conversions)
+		return observation, nil
+	}
 	if changed {
 		// A child reached an outcome this round: report it and dispatch
 		// nothing, so one round belongs to one action. The claims go in the
@@ -232,13 +241,6 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 	}
 	if allFormatsDone(selections, state.Conversions) {
 		return a.preCompletionClaims(ctx, request, options, base, state, selections)
-	}
-	if backoff {
-		// A format just entered its retry backoff: let the wait pass first
-		// (official 1, 2, 4… seconds).
-		observation := preCompletionRunning(base, state)
-		observation.PollAfter = conversionRetryWait(state.Conversions)
-		return observation, nil
 	}
 	// Dispatch one more format while the in-flight children are below the
 	// declared concurrency: a pending retry first, then a format never started.

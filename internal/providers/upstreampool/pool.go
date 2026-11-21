@@ -132,6 +132,15 @@ type entry struct {
 	token   uint64
 }
 
+// retiredEntry remembers when a reclaimed entry first held a slot. A public job
+// is re-adopted on every Observe (Adapter.Observe), so without this the
+// re-registration after a reclaim would reset created and the hard maximum
+// lifetime could never expire for a holder that keeps polling.
+type retiredEntry struct {
+	created time.Time
+	seen    time.Time
+}
+
 type pool struct {
 	limit       int
 	maxLifetime time.Duration
@@ -139,6 +148,7 @@ type pool struct {
 	waitHint    time.Duration
 	queuePoll   time.Duration
 	entries     map[string]*entry
+	retired     map[string]retiredEntry
 	nextSeq     uint64
 	nextToken   uint64
 }
@@ -188,6 +198,7 @@ func (m *Manager) Register(connection, name string, config PoolConfig) {
 		waitHint:    config.WaitHint,
 		queuePoll:   config.QueuePoll,
 		entries:     map[string]*entry{},
+		retired:     map[string]retiredEntry{},
 	}
 }
 
@@ -236,10 +247,16 @@ func (m *Manager) Acquire(ctx context.Context, holder Holder, weight int) (Ticke
 		created := m.grantLocked(p, holder.Attempt, now)
 		return m.ticket(p, created), true, 0
 	}
+	created := now
+	if retired, ok := p.retired[holder.Attempt]; ok {
+		created = retired.created
+	}
+	// A new queue entry starts its own life; an older tombstone is stale.
+	delete(p.retired, holder.Attempt)
 	p.entries[holder.Attempt] = &entry{
 		attempt: holder.Attempt,
 		seq:     p.nextSeq,
-		created: now,
+		created: created,
 		seen:    now,
 	}
 	p.nextSeq++
@@ -319,6 +336,7 @@ func (m *Manager) Readopt(holders ...Holder) {
 			existing.seen = now
 			continue
 		}
+		// grantLocked keeps the original created time of a reclaimed holder.
 		m.grantLocked(p, holder.Attempt, now)
 	}
 }
@@ -423,12 +441,25 @@ func (m *Manager) ticket(p *pool, e *entry) Ticket {
 }
 
 func (m *Manager) grantLocked(p *pool, attempt string, now time.Time) *entry {
+	// A reclaimed holder keeps its original created time: a public job is
+	// re-adopted on every Observe (and a dispatching one re-acquires), so
+	// resetting created here would let a leaked slot live past the hard maximum
+	// lifetime forever. A fresh attempt has no tombstone and starts at now.
+	created := now
+	if retired, ok := p.retired[attempt]; ok {
+		created = retired.created
+	}
+	delete(p.retired, attempt)
+	return m.grantLockedAt(p, attempt, created, now)
+}
+
+func (m *Manager) grantLockedAt(p *pool, attempt string, created, now time.Time) *entry {
 	p.nextToken++
 	e := &entry{
 		attempt: attempt,
 		seq:     p.nextSeq,
 		held:    true,
-		created: now,
+		created: created,
 		seen:    now,
 		token:   p.nextToken,
 	}
@@ -463,15 +494,24 @@ func (m *Manager) admitLocked(p *pool, now time.Time) {
 
 // reclaimLocked drops entries whose idle TTL or hard maximum lifetime ran out.
 // A holder that touched recently is kept; the hard cap is a backstop for a path
-// that never reports a terminal state.
+// that never reports a terminal state. The dropped entry's created time is
+// remembered so a later Readopt cannot reset the hard cap's clock.
 func (m *Manager) reclaimLocked(p *pool, now time.Time) {
 	for attempt, e := range p.entries {
 		if p.maxLifetime > 0 && now.Sub(e.created) > p.maxLifetime {
+			p.retired[attempt] = retiredEntry{created: e.created, seen: now}
 			delete(p.entries, attempt)
 			continue
 		}
 		if now.Sub(e.seen) > m.poolIdleTTL(p) {
+			p.retired[attempt] = retiredEntry{created: e.created, seen: now}
 			delete(p.entries, attempt)
+		}
+	}
+	// A tombstone is only useful while its attempt may still be re-adopted.
+	for attempt, retired := range p.retired {
+		if now.Sub(retired.seen) > m.poolIdleTTL(p) {
+			delete(p.retired, attempt)
 		}
 	}
 }

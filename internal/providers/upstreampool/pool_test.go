@@ -169,6 +169,59 @@ func TestMaxLifetimeReclaimsEvenWhenTouched(t *testing.T) {
 	}
 }
 
+// #468: a public job is re-adopted on every Observe. A reclaimed entry must
+// keep its original created time, so the hard maximum lifetime still reclaims
+// a holder that keeps polling instead of being renewed forever.
+func TestReadoptKeepsOriginalCreatedForHardLifetime(t *testing.T) {
+	clock := &fakeClock{at: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC)}
+	m := New(Options{Now: clock.now, IdleTTL: 10 * time.Hour})
+	m.Register("tripo.v3", "model-processing", PoolConfig{Limit: 2, MaxLifetime: time.Hour})
+	ctx := context.Background()
+	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+		t.Fatal("acquire a")
+	}
+	// Past the hard cap another holder's Acquire reclaims a and takes the slot.
+	clock.advance(61 * time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+		t.Fatal("acquire b after the hard cap")
+	}
+	// The public job is re-adopted on its next Observe, as Adapter.Observe
+	// does every round.
+	m.Readopt(holder("a"))
+	// One minute later a third holder polls: the hard cap must still reclaim
+	// a, so c fits. If Readopt had reset created, a would be a minute old and
+	// c would queue behind the two live entries.
+	clock.advance(time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+		t.Fatalf("hard maximum lifetime was reset by Readopt: %+v", m.Stats())
+	}
+}
+
+// #468: a dispatching public job re-acquires its slot; a reclaimed attempt
+// that asks again must keep its original created time as well, or the hard
+// maximum lifetime is renewed on every round.
+func TestReacquireKeepsOriginalCreatedForHardLifetime(t *testing.T) {
+	clock := &fakeClock{at: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC)}
+	m := New(Options{Now: clock.now, IdleTTL: 10 * time.Hour})
+	m.Register("tripo.v3", "model-processing", PoolConfig{Limit: 2, MaxLifetime: time.Hour})
+	ctx := context.Background()
+	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+		t.Fatal("acquire a")
+	}
+	clock.advance(61 * time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+		t.Fatal("acquire b after the hard cap")
+	}
+	// The same attempt asks for its slot again.
+	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+		t.Fatal("re-acquire a")
+	}
+	clock.advance(time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+		t.Fatalf("hard maximum lifetime was reset by Acquire: %+v", m.Stats())
+	}
+}
+
 func TestWaitingHolderTTLIsSkipped(t *testing.T) {
 	m, clock := newTestManager(1, time.Hour)
 	ctx := context.Background()

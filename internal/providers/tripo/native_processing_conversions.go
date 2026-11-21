@@ -538,7 +538,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 	// resubmitted only while its own budget lasts (Tripo bills neither). One
 	// round that learned an outcome reports it and dispatches nothing, so a
 	// stage always belongs to exactly one child.
-	changed := false
+	changed, backoff := false, false
 	for _, f := range c.Formats {
 		item, ok := s.Conversions[f.Format]
 		if !ok || item.Status != conversionItemSubmitted {
@@ -571,16 +571,28 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 			locator = firstHTTPOutput(child.Output, "model_url")
 		}
 		previous := item.Status
-		updated, _ := applyConversionChild(item, phase, locator, child.CreditsConsumed)
+		updated, wait := applyConversionChild(item, phase, locator, child.CreditsConsumed)
 		s.Conversions[f.Format] = updated
 		if updated.Status != previous || len(updated.Attempts) != len(item.Attempts) {
 			changed = true
+		}
+		if wait > 0 {
+			backoff = true
 		}
 	}
 	if failed := failedFormat(names, s.Conversions); failed != "" {
 		// A required format spent its retry budget: the step fails now, before
 		// another paid export is started.
 		return nativeConversionFailure(request, run, base, "Tripo 必需格式转换失败"), nil
+	}
+	if backoff {
+		// A child just entered its retry backoff: let the wait pass first
+		// (official 1, 2, 4… seconds). This comes before the changed return
+		// because entering the backoff also records an attempt: the two always
+		// fire together and neither may dispatch, so only the wait differs.
+		obs := nativeConversionRunning(request, run, base, len(c.Formats))
+		obs.PollAfter = conversionRetryWait(s.Conversions)
+		return obs, nil
 	}
 	if changed {
 		// A child reached an outcome this round: report it and dispatch
