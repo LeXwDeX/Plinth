@@ -53,7 +53,26 @@ func (executor *Executor) taskInSession(ctx context.Context, owner, session stri
 // sessionModelTasks returns the owner's succeeded tasks of this session that
 // delivered a saved model file, newest first, at most limit of them. A branch
 // additionally lists the models its ancestors produced.
+//
+// A format conversion delivers files of the model it converted, so it is
+// never a new model of the session: the listing and the self-check queue
+// leave it out, and the converted files show on the source model's
+// export_formats (#458). The source resolution paths that follow a converted
+// file back to its Task read sessionSourceTasks instead.
 func (executor *Executor) sessionModelTasks(ctx context.Context, owner, session string, limit int) ([]generation.Task, error) {
+	return executor.sessionTasks(ctx, owner, session, limit, false)
+}
+
+// sessionSourceTasks is sessionModelTasks for resolving an explicit source
+// asset: a conversion's output is a legitimate source for a later step, so
+// conversions stay among the candidates (#458).
+func (executor *Executor) sessionSourceTasks(ctx context.Context, owner, session string, limit int) ([]generation.Task, error) {
+	return executor.sessionTasks(ctx, owner, session, limit, true)
+}
+
+func (executor *Executor) sessionTasks(
+	ctx context.Context, owner, session string, limit int, includeConversions bool,
+) ([]generation.Task, error) {
 	lister, ok := executor.gateway.(taskLister)
 	if !ok || owner == "" || session == "" {
 		return nil, errors.New("generation tool: task listing unavailable")
@@ -72,6 +91,9 @@ func (executor *Executor) sessionModelTasks(ctx context.Context, owner, session 
 		for _, task := range result.Tasks {
 			if !executor.taskInSession(ctx, owner, session, task) ||
 				task.State != generation.TaskSucceeded || !hasSavedModel(task) {
+				continue
+			}
+			if !includeConversions && executor.isConversion != nil && executor.isConversion(task.Offering.ID, task.Input) {
 				continue
 			}
 			found = append(found, task)
@@ -143,6 +165,19 @@ type ModelVersions func(ctx context.Context, owner generation.OwnerID, session s
 
 // SetModelVersions wires the page's version numbers into the tool results.
 func (executor *Executor) SetModelVersions(read ModelVersions) { executor.modelVersions = read }
+
+// ConversionRule reports whether a Task's frozen Offering and input run a
+// declared format conversion. A conversion delivers files of the model it
+// converted, so it is never a new model of the session (#458). The App
+// injects the same rule the version chain folds conversions with; nil leaves
+// conversions in the listing.
+type ConversionRule func(offering generation.OfferingID, input json.RawMessage) bool
+
+// SetConversionRule wires the format-conversion recognizer into the session
+// model listing and the self-check queue.
+func (executor *Executor) SetConversionRule(isConversion ConversionRule) {
+	executor.isConversion = isConversion
+}
 
 // versionLabels names the session's models by the label the page shows
 // (chat.context.model_version_template); nil when that is not known.
@@ -1080,8 +1115,9 @@ func (executor *Executor) executeMultiSourceProcessing(
 		ids = append(ids, id)
 	}
 	// A merge may draw from several finished tasks, so scan the same bounded
-	// window list_session_models uses, not only its display limit.
-	tasks, err := executor.sessionModelTasks(ctx, command.OwnerID, command.SessionID, sessionTaskMaxPages*sessionTaskPageSize)
+	// window list_session_models uses, not only its display limit. A converted
+	// file is a legitimate merge source, so conversions stay in the candidates.
+	tasks, err := executor.sessionSourceTasks(ctx, command.OwnerID, command.SessionID, sessionTaskMaxPages*sessionTaskPageSize)
 	if err != nil {
 		return chat.ToolResult{NoSubmission: true}, err
 	}
@@ -1304,7 +1340,9 @@ func (executor *Executor) resolveModelSource(
 	}
 	var task generation.Task
 	if taskID == "" {
-		tasks, err := executor.sessionModelTasks(ctx, command.OwnerID, command.SessionID,
+		// An explicit asset reference may name a converted file, so conversions
+		// stay among the candidates here (#458).
+		tasks, err := executor.sessionSourceTasks(ctx, command.OwnerID, command.SessionID,
 			executor.chat.Agent.MaxListedModels)
 		if err != nil {
 			return generation.Task{}, "", nil, err
