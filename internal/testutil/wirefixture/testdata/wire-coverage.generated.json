@@ -6,6 +6,7 @@
     "internal/app/testdata/agent-flow/agent-flow.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-image-to-3d.candidate.json",
     "internal/providers/hyper3d/testdata/rodin-text-to-3d.candidate.json",
+    "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
     "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
     "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json",
@@ -37,6 +38,7 @@
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-image-to-image.candidate.json",
     "internal/testutil/fakeupstream/openai/images-v1/testdata/openai-images-v1-text-to-image.candidate.json",
@@ -78,11 +80,11 @@
       "total": 84
     },
     "units": {
-      "derived": 20,
+      "derived": 32,
       "disabled-zero-egress": 11,
       "local-no-wire": 4,
       "real": 133,
-      "total": 168
+      "total": 180
     }
   },
   "incomplete": [],
@@ -2092,7 +2094,9 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
         "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json",
         "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json"
       ],
       "offerings": [
@@ -2327,6 +2331,342 @@
     {
       "adapter_key": "meshy.v2",
       "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.3mf",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.fbx",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.glb",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.mtl",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.obj",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.stl",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/model.usdz",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/preview.png",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/texture_0.png",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/texture_0_metallic.png",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/texture_0_normal.png",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
+      "endpoint": "GET /{id}/tasks/{id}/output/texture_0_roughness.png",
+      "hosts": [
+        "assets.meshy.ai"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json"
+      ],
+      "offerings": [
+        {
+          "id": "meshy/meshy-7.1/text-to-3d",
+          "model_id": "meshy-7.1",
+          "enabled": true
+        },
+        {
+          "id": "meshy/meshy-t2.5/text-to-3d",
+          "model_id": "meshy-t2.5",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "adapter_key": "meshy.v2",
+      "capability": "text-to-3d",
       "endpoint": "POST /openapi/v2/text-to-3d",
       "hosts": [
         "api.meshy.ai"
@@ -2336,7 +2676,9 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/providers/meshy/testdata/meshy-text-to-3d-2026-11-22.candidate.json",
         "internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json",
         "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json"
       ],
       "offerings": [
@@ -4113,6 +4455,18 @@
         "meshy.v2|text-to-3d|GET /{asset}.png",
         "meshy.v2|text-to-3d|GET /{asset}.stl",
         "meshy.v2|text-to-3d|GET /{asset}.usdz",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.3mf",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.fbx",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.glb",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.mtl",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.obj",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.stl",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.usdz",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/preview.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0_metallic.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0_normal.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0_roughness.png",
         "meshy.v2|text-to-3d|POST /openapi/v2/text-to-3d"
       ]
     },
@@ -4165,6 +4519,18 @@
         "meshy.v2|text-to-3d|GET /{asset}.png",
         "meshy.v2|text-to-3d|GET /{asset}.stl",
         "meshy.v2|text-to-3d|GET /{asset}.usdz",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.3mf",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.fbx",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.glb",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.mtl",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.obj",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.stl",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/model.usdz",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/preview.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0_metallic.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0_normal.png",
+        "meshy.v2|text-to-3d|GET /{id}/tasks/{id}/output/texture_0_roughness.png",
         "meshy.v2|text-to-3d|POST /openapi/v2/text-to-3d"
       ]
     },
