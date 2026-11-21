@@ -80,6 +80,15 @@ type PoolConfig struct {
 	// MaxLifetime is the hard upper bound on one entry's age, independent of
 	// last-seen. Zero means no hard cap (the idle TTL still applies).
 	MaxLifetime time.Duration
+	// IdleTTL overrides the Manager's default idle TTL for this pool. Zero
+	// keeps the Manager default.
+	IdleTTL time.Duration
+	// WaitHint overrides the Manager's default wait hint for this pool. Zero
+	// keeps the Manager default.
+	WaitHint time.Duration
+	// QueuePoll is how long a queued Adapter should wait before polling again.
+	// Zero means the Adapter's own fallback.
+	QueuePoll time.Duration
 }
 
 // Options tunes the Manager's clock and default bounds.
@@ -92,14 +101,18 @@ type Options struct {
 	// WaitHint is the wait Acquire suggests when the pool is full. Default
 	// 2 seconds; an Adapter may use its own shorter poll.
 	WaitHint time.Duration
+	// QueuePoll is the default wait a queued Adapter uses before polling again
+	// when its pool does not declare one. Default 2 seconds.
+	QueuePoll time.Duration
 }
 
 // Manager is the process-wide registry of upstream pools. It is safe for
 // concurrent use.
 type Manager struct {
-	now      func() time.Time
-	idleTTL  time.Duration
-	waitHint time.Duration
+	now       func() time.Time
+	idleTTL   time.Duration
+	waitHint  time.Duration
+	queuePoll time.Duration
 
 	mu    sync.Mutex
 	pools map[poolKey]*pool
@@ -122,6 +135,9 @@ type entry struct {
 type pool struct {
 	limit       int
 	maxLifetime time.Duration
+	idleTTL     time.Duration
+	waitHint    time.Duration
+	queuePoll   time.Duration
 	entries     map[string]*entry
 	nextSeq     uint64
 	nextToken   uint64
@@ -139,11 +155,15 @@ func New(options Options) *Manager {
 	if options.WaitHint <= 0 {
 		options.WaitHint = 2 * time.Second
 	}
+	if options.QueuePoll <= 0 {
+		options.QueuePoll = 2 * time.Second
+	}
 	return &Manager{
-		now:      options.Now,
-		idleTTL:  options.IdleTTL,
-		waitHint: options.WaitHint,
-		pools:    map[poolKey]*pool{},
+		now:       options.Now,
+		idleTTL:   options.IdleTTL,
+		waitHint:  options.WaitHint,
+		queuePoll: options.QueuePoll,
+		pools:     map[poolKey]*pool{},
 	}
 }
 
@@ -156,11 +176,17 @@ func (m *Manager) Register(connection, name string, config PoolConfig) {
 	if existing, ok := m.pools[key]; ok {
 		existing.limit = config.Limit
 		existing.maxLifetime = config.MaxLifetime
+		existing.idleTTL = config.IdleTTL
+		existing.waitHint = config.WaitHint
+		existing.queuePoll = config.QueuePoll
 		return
 	}
 	m.pools[key] = &pool{
 		limit:       config.Limit,
 		maxLifetime: config.MaxLifetime,
+		idleTTL:     config.IdleTTL,
+		waitHint:    config.WaitHint,
+		queuePoll:   config.QueuePoll,
 		entries:     map[string]*entry{},
 	}
 }
@@ -203,7 +229,7 @@ func (m *Manager) Acquire(ctx context.Context, holder Holder, weight int) (Ticke
 			return m.ticket(p, existing), true, 0
 		}
 		existing.seen = now
-		return Ticket{}, false, m.waitHint
+		return Ticket{}, false, m.poolWaitHint(p)
 	}
 	m.admitLocked(p, now)
 	if p.heldCountLocked() < p.limit {
@@ -217,7 +243,7 @@ func (m *Manager) Acquire(ctx context.Context, holder Holder, weight int) (Ticke
 		seen:    now,
 	}
 	p.nextSeq++
-	return Ticket{}, false, m.waitHint
+	return Ticket{}, false, m.poolWaitHint(p)
 }
 
 // Release frees the slot the ticket proves. A ticket that no longer matches the
@@ -347,6 +373,51 @@ func (m *Manager) Stats() Stats {
 	return stats
 }
 
+// QueuePoll is the configured wait a queued Adapter uses before polling again
+// for this pool, or the Manager default.
+func (m *Manager) QueuePoll(connection, name string) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p, ok := m.pools[poolKey{connection: connection, pool: name}]; ok && p.queuePoll > 0 {
+		return p.queuePoll
+	}
+	return m.queuePoll
+}
+
+// IdleTTL is the configured idle TTL for this pool, or the Manager default.
+func (m *Manager) IdleTTL(connection, name string) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p, ok := m.pools[poolKey{connection: connection, pool: name}]; ok {
+		return m.poolIdleTTL(p)
+	}
+	return m.idleTTL
+}
+
+// WaitHint is the configured wait hint for this pool, or the Manager default.
+func (m *Manager) WaitHint(connection, name string) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p, ok := m.pools[poolKey{connection: connection, pool: name}]; ok {
+		return m.poolWaitHint(p)
+	}
+	return m.waitHint
+}
+
+func (m *Manager) poolWaitHint(p *pool) time.Duration {
+	if p != nil && p.waitHint > 0 {
+		return p.waitHint
+	}
+	return m.waitHint
+}
+
+func (m *Manager) poolIdleTTL(p *pool) time.Duration {
+	if p != nil && p.idleTTL > 0 {
+		return p.idleTTL
+	}
+	return m.idleTTL
+}
+
 func (m *Manager) ticket(p *pool, e *entry) Ticket {
 	return Ticket{manager: m, pool: p, attempt: e.attempt, seq: e.seq, token: e.token}
 }
@@ -399,7 +470,7 @@ func (m *Manager) reclaimLocked(p *pool, now time.Time) {
 			delete(p.entries, attempt)
 			continue
 		}
-		if now.Sub(e.seen) > m.idleTTL {
+		if now.Sub(e.seen) > m.poolIdleTTL(p) {
 			delete(p.entries, attempt)
 		}
 	}

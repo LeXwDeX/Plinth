@@ -216,8 +216,32 @@ func registerUpstreamPools(
 		pool.Register(connection.AdapterKey, name, upstreampool.PoolConfig{
 			Limit:       limit,
 			MaxLifetime: maxLifetime,
+			IdleTTL:     poolSecondsSetting(declaration.IdleTTLSeconds),
+			WaitHint:    poolSecondsSetting(declaration.WaitHintSeconds),
+			QueuePoll:   poolSecondsSetting(declaration.QueuePollSeconds),
 		})
 	}
+}
+
+// poolSecondsSetting resolves one optional pool policy value: the declared
+// default, overridden by its environment variable when set. Zero (absent or an
+// invalid override) leaves the Manager's or Adapter's own fallback in place.
+func poolSecondsSetting(setting *catalog.ProviderPoolSettingSchema) time.Duration {
+	if setting == nil {
+		return 0
+	}
+	value := setting.Default
+	if setting.Env != "" {
+		if raw := strings.TrimSpace(os.Getenv(setting.Env)); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				value = parsed
+			}
+		}
+	}
+	if value <= 0 {
+		return 0
+	}
+	return time.Duration(value) * time.Second
 }
 
 // buildProviderAdapterWithTransport 每个受支持协议恰有一个构造分支；新增

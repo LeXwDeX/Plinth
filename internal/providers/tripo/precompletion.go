@@ -262,7 +262,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 			// carries the upstream queue clock.
 			slot, acquired, wait := a.acquirePool(ctx, request.Offering, request.AttemptID)
 			if !acquired {
-				return poolQueueObservation(preCompletionRunning(base, state), wait), nil
+				return a.poolQueueObservation(preCompletionRunning(base, state), request.Offering, wait), nil
 			}
 			attempts := previous.RetryAttempts
 			if previous.Status == conversionItemRetryPending || previous.Status == conversionItemRateLimited {
@@ -302,7 +302,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 						permit.Result = generation.DispatchResultNotDispatched
 						restoreConversionItem(state.Conversions, format, previous, existed)
 						slot.Release()
-						observation := poolQueueObservation(preCompletionRunning(base, state), retryAfter)
+						observation := a.poolQueueObservation(preCompletionRunning(base, state), request.Offering, retryAfter)
 						observation.Dispatch = permit
 						return observation, nil
 					}

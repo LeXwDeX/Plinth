@@ -729,7 +729,7 @@ func (a *Adapter) observePostSuccessConversion(
 				queued.Progress = 50
 				queued.DedupeKey = privateDedupeKey("convert", format, "pool-queued", strconv.Itoa(len(state.Conversions)))
 				queued.Opaque = encodePostSuccessState(state)
-				return poolQueueObservation(queued, wait), nil
+				return a.poolQueueObservation(queued, request.Offering, wait), nil
 			}
 			// The retry budget is spent when the resubmission is accepted, not
 			// when it is planned: a 429 refusal never reached the upstream.
@@ -780,7 +780,7 @@ func (a *Adapter) observePostSuccessConversion(
 						queued.DedupeKey = privateDedupeKey("convert", format, "pool-refused", strconv.Itoa(len(state.Conversions)))
 						queued.Opaque = encodePostSuccessState(state)
 						queued.Dispatch = permit
-						return poolQueueObservation(queued, retryAfter), nil
+						return a.poolQueueObservation(queued, request.Offering, retryAfter), nil
 					}
 				}
 				// 明确的 HTTP 429 是上游拒绝（未受理）：以 not_dispatched 结算

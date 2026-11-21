@@ -616,7 +616,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 			// queue clock.
 			slot, acquired, wait := a.acquirePool(ctx, request.Offering, request.AttemptID)
 			if !acquired {
-				return poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), wait), nil
+				return a.poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), request.Offering, wait), nil
 			}
 			if s.ProgressUnits == 0 {
 				s.ProgressUnits = nativeConversionProgressUnits(len(c.Formats))
@@ -665,7 +665,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 							s.ProgressUnits = 0
 						}
 						slot.Release()
-						obs := poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), retryAfter)
+						obs := a.poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), request.Offering, retryAfter)
 						obs.Dispatch = permit
 						return obs, nil
 					}

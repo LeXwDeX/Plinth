@@ -925,31 +925,43 @@ func TestUpstreamPoolLimitEnvironmentOverride(t *testing.T) {
 			tripo = connection
 		}
 	}
-	if tripo.Concurrency == nil || tripo.Concurrency.Pools["model-processing"].Default != 5 {
-		t.Fatalf("tripo connection does not declare the model-processing pool: %+v", tripo.Concurrency)
+	declaration := tripo.Concurrency.Pools["model-processing"]
+	if declaration.Default != 5 || declaration.QueuePollSeconds == nil ||
+		declaration.IdleTTLSeconds == nil || declaration.WaitHintSeconds == nil {
+		t.Fatalf("tripo connection does not declare the model-processing policy: %+v", tripo.Concurrency)
 	}
 	offerings := offeringsForAdapter(product.List(""), tripo.AdapterKey)
-	limit := func() int {
+	build := func() *upstreampool.Manager {
 		pool := upstreampool.New(upstreampool.Options{})
 		registerUpstreamPools(pool, tripo, offerings)
-		for _, stat := range pool.Stats().Pools {
-			if stat.Pool == tripo.Concurrency.Pools["model-processing"].LimitEnv ||
-				stat.Connection == tripo.AdapterKey {
-				return stat.Limit
-			}
+		return pool
+	}
+	const connection, pool = "tripo.v3", "model-processing"
+	assert := func(manager *upstreampool.Manager, limit, queuePoll, idleTTL, waitHint int) {
+		t.Helper()
+		stats := manager.Stats()
+		if len(stats.Pools) != 1 || stats.Pools[0].Connection != connection || stats.Pools[0].Pool != pool {
+			t.Fatalf("pool not registered: %+v", stats)
 		}
-		t.Fatalf("pool not registered: %+v", pool.Stats())
-		return 0
+		if stats.Pools[0].Limit != limit ||
+			manager.QueuePoll(connection, pool) != time.Duration(queuePoll)*time.Second ||
+			manager.IdleTTL(connection, pool) != time.Duration(idleTTL)*time.Second ||
+			manager.WaitHint(connection, pool) != time.Duration(waitHint)*time.Second {
+			t.Fatalf("policy = limit %d queue %v idle %v hint %v, want %d/%ds/%ds/%ds",
+				stats.Pools[0].Limit, manager.QueuePoll(connection, pool), manager.IdleTTL(connection, pool),
+				manager.WaitHint(connection, pool), limit, queuePoll, idleTTL, waitHint)
+		}
 	}
-	if got := limit(); got != 5 {
-		t.Fatalf("default limit = %d, want 5", got)
-	}
+	assert(build(), 5, 2, 600, 2)
 	t.Setenv("TRIPO_CONVERSION_CONCURRENCY", "3")
-	if got := limit(); got != 3 {
-		t.Fatalf("environment limit = %d, want 3", got)
-	}
+	t.Setenv("TRIPO_POOL_QUEUE_POLL_SECONDS", "7")
+	t.Setenv("TRIPO_POOL_IDLE_TTL_SECONDS", "1200")
+	t.Setenv("TRIPO_POOL_WAIT_HINT_SECONDS", "4")
+	assert(build(), 3, 7, 1200, 4)
+	// Invalid overrides fall back to the declared defaults.
 	t.Setenv("TRIPO_CONVERSION_CONCURRENCY", "not-a-number")
-	if got := limit(); got != 5 {
-		t.Fatalf("invalid environment limit = %d, want the default 5", got)
-	}
+	t.Setenv("TRIPO_POOL_QUEUE_POLL_SECONDS", "not-a-number")
+	t.Setenv("TRIPO_POOL_IDLE_TTL_SECONDS", "0")
+	t.Setenv("TRIPO_POOL_WAIT_HINT_SECONDS", "-1")
+	assert(build(), 5, 2, 600, 2)
 }

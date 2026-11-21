@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.460-468.1",
+    "revision": "2026-11-22.460-468.2",
     "terminology": {
       "user_facing": [
         {
@@ -1196,7 +1196,7 @@
           "auth_prefix": "Bearer ",
           "request_timeout_seconds": 1800,
           "result_refetch": {"mode": "observe", "retention_hours": 168},
-          "concurrency": {"pools": {"model-processing": {"limit_env": "TRIPO_CONVERSION_CONCURRENCY", "default": 5}}},
+          "concurrency": {"pools": {"model-processing": {"limit_env": "TRIPO_CONVERSION_CONCURRENCY", "default": 5, "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2}, "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600}, "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}}}},
           "capabilities": [
             "text-to-3d",
             "image-to-3d",

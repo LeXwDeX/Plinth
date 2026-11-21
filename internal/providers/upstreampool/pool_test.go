@@ -222,3 +222,39 @@ func TestConcurrentAcquireRelease(t *testing.T) {
 		t.Fatalf("held = %d, want at most the limit 5", stats.TotalHeld)
 	}
 }
+
+// #468: policy values come from the pool declaration when set, else the
+// Manager's defaults. Unset keeps the previous behavior (10 min / 2 s / 2 s).
+func TestPoolPolicyDefaultsAndOverrides(t *testing.T) {
+	defaults := New(Options{})
+	defaults.Register("c", "p", PoolConfig{Limit: 1})
+	if defaults.QueuePoll("c", "p") != 2*time.Second ||
+		defaults.IdleTTL("c", "p") != 10*time.Minute ||
+		defaults.WaitHint("c", "p") != 2*time.Second {
+		t.Fatalf("defaults = queue %v idle %v hint %v",
+			defaults.QueuePoll("c", "p"), defaults.IdleTTL("c", "p"), defaults.WaitHint("c", "p"))
+	}
+	configured := New(Options{})
+	configured.Register("c", "p", PoolConfig{
+		Limit:     1,
+		QueuePoll: 7 * time.Second,
+		IdleTTL:   20 * time.Minute,
+		WaitHint:  4 * time.Second,
+	})
+	if configured.QueuePoll("c", "p") != 7*time.Second ||
+		configured.IdleTTL("c", "p") != 20*time.Minute ||
+		configured.WaitHint("c", "p") != 4*time.Second {
+		t.Fatalf("overrides = queue %v idle %v hint %v",
+			configured.QueuePoll("c", "p"), configured.IdleTTL("c", "p"), configured.WaitHint("c", "p"))
+	}
+	// A full pool returns the configured hint.
+	ctx := context.Background()
+	local := Holder{Connection: "c", Pool: "p", Attempt: "a"}
+	if _, ok, _ := configured.Acquire(ctx, local, 0); !ok {
+		t.Fatal("first acquire should fit")
+	}
+	local.Attempt = "b"
+	if _, ok, hint := configured.Acquire(ctx, local, 0); ok || hint != 4*time.Second {
+		t.Fatalf("full pool hint = %v ok=%v, want 4s", hint, ok)
+	}
+}
