@@ -480,7 +480,8 @@ func (executor *Executor) execute(
 	}
 	var turnReferenceURLs []string
 	// A multiview step (#65) takes its pictures and views from the person's
-	// structured request or the named three-view group, never from handles.
+	// structured request or the named three-view group; a call naming neither
+	// keeps the ordinary handle path, which binds its views too (#433).
 	multiview, refusal, err := executor.multiviewSelection(ctx, command, arguments)
 	if err != nil {
 		result := executor.executionFailure(command, "")
@@ -509,6 +510,14 @@ func (executor *Executor) execute(
 			result := executor.executionFailure(command, "")
 			result.NoSubmission = true
 			return result, err
+		}
+		// #433: the multiview tool takes several views of one object whichever
+		// way it names them, so a call giving its own pictures (handles,
+		// historical indices, this turn's or the selected ones) carries their
+		// views as well, or is refused before anything is prepared.
+		multiview, refusal = executor.callMultiviewViews(command, arguments, len(turnReferenceURLs))
+		if refusal != "" {
+			return executor.refusal(command, refusalMultiviewViews, refusal), nil
 		}
 	}
 	// #250: the required turn inputs lead the list (the artboard snapshot and
@@ -578,7 +587,7 @@ func (executor *Executor) execute(
 		// production purpose, the workspace picker and the defaults decide, in
 		// that order.
 		choice, err := executor.chooseOffering(command, capability, arguments,
-			modelInputFor(command, referenceURLs, multiview),
+			modelInputFor(referenceURLs, multiview),
 			executor.planPinnedOffering(ctx, command, capability))
 		if err != nil {
 			result := executor.executionFailure(command, "")
@@ -611,8 +620,7 @@ func (executor *Executor) execute(
 	// unchosen model moves to a mask-capable Offering, which the result names
 	// as a switch (maskModelSwitchNote).
 	if multiview != nil {
-		group := !multiview.fromRequest || (command.Options.Multiview != nil && command.Options.Multiview.Group != "")
-		if refusal := executor.fitMultiviewViews(command, offering, multiview, group); refusal != "" {
+		if refusal := executor.fitMultiviewViews(command, offering, multiview, multiview.group); refusal != "" {
 			return executor.refusal(command, refusalMultiviewViews, refusal), nil
 		}
 		if declaresReferenceViews(offering) {
@@ -621,8 +629,10 @@ func (executor *Executor) execute(
 			views, _ := json.Marshal(multiview.Views)
 			arguments[executor.chat.ThreeView.Multiview.ViewsArgument] = views
 		}
-		groups = executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, multiview.URLs)
-		referenceURLs = groups.URLs
+		if !multiview.fromHandles {
+			groups = executor.referenceGroupsFor(command, identityReferenceURLs, styleReferenceURLs, multiview.URLs)
+			referenceURLs = groups.URLs
+		}
 	}
 	if groups.Identity+groups.Style > 0 {
 		if _, supported := semanticParameter(offering, generation.SemanticReferenceImage); !supported {

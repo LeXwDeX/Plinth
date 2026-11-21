@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-21.380-model-resolve.1",
+    "revision": "2026-11-21.433-multiview-handles.1",
     "terminology": {
       "user_facing": [
         {
@@ -11473,6 +11473,7 @@
           "group_not_ready": "这组三视图还不能用于多视图生成 3D，没有提交任务：需要正面图和至少一个其他视角都已完成。请告诉用户先在三视图卡片上生成剩余视图，或改用「只用正面转 3D」。",
           "views_changed": "用户点按钮之后这组三视图有视图被替换或重新生成了，没有提交任务。请告诉用户在三视图卡片上重新点「用三视图生成 3D」。",
           "views_invalid": "图片的视角标注无效，没有提交任务：每张图只能标一个所选模型支持的视角，不能重复，且必须有正面。请让用户重新标注视角。",
+          "views_unsupported": "所选模型 {model} 不能用多个视角生成 3D，这次没有提交任务，也没有退化成单图 3D。请换一个支持多视图的模型后再调用，或改用 create_model_3d_from_image 提交单图。",
           "agent_completed": "三视图运行 {run} 的必需视角已完成并通过一致性检查：{views}。用 create_model_3d_from_views 的 three_view_group={run} 提交多视图 3D；不要再告诉用户这些视角不会自动完成。{checklist}",
           "agent_paused": "三视图运行 {run} 在 {view} 暂停：{reason}。后续视角没有自动提交，请告诉用户在三视图卡片上继续或重试。",
           "consistency_retry": "{view} 与正面图不一致（{reasons}），已自动重做第 {attempt}/{maximum} 次；其他视角不受影响。",
