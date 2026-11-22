@@ -37,6 +37,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/processing"
 )
 
 const (
@@ -1275,4 +1276,284 @@ func assertV180HeadSchema(t *testing.T, r *Repository) {
 	).Scan(&indexSQL); err != nil || !strings.Contains(indexSQL, budget.StateCompleted) {
 		t.Fatalf("idx_production_budgets_current 不含 %q: %s", budget.StateCompleted, indexSQL)
 	}
+}
+
+// migrationsThrough is the prefix of migrations() up to and including version.
+// It builds a database at an intermediate migration version, which is how a
+// row written by an older binary comes to exist.
+func migrationsThrough(version int) []migration {
+	var prefix []migration
+	for _, migration := range migrations() {
+		if migration.version > version {
+			break
+		}
+		prefix = append(prefix, migration)
+	}
+	return prefix
+}
+
+// seedV180AssetList writes a project, one list and two items in the shape 0107
+// leaves behind: the list tables exist (0100–0106), delivery_deferred does not
+// (0108). The insert lists columns by name, exactly as the binary of that era
+// does, so every later column has to come from its default.
+func seedV180AssetList(t *testing.T, db *sql.DB) {
+	t.Helper()
+	execV180Statements(t, db, []string{
+		`INSERT INTO projects (id, owner_id, name, created_at, updated_at)
+		 VALUES ('prj-v180', 'owner-a', '合成项目', '2024-05-02T10:00:00Z', '2024-05-02T10:00:00Z')`,
+		`INSERT INTO asset_lists
+		 (id, request_key, owner_id, project_id, title, status, created_at, updated_at, expires_at)
+		 VALUES ('list-1', 'req-list-1', 'owner-a', 'prj-v180', '合成清单', 'draft',
+		  '2024-05-02T10:00:00Z', '2024-05-02T10:00:00Z', '2024-05-09T10:00:00Z')`,
+		`INSERT INTO asset_list_items
+		 (id, owner_id, list_id, position, kind, name, route_id, state, created_at, updated_at)
+		 VALUES
+		 ('item-1', 'owner-a', 'list-1', 0, 'character', '合成角色', 'text-to-3d', 'todo',
+		  '2024-05-02T10:01:00Z', '2024-05-02T10:01:00Z'),
+		 ('item-2', 'owner-a', 'list-1', 1, 'character', '合成道具', 'text-to-3d', 'working',
+		  '2024-05-02T10:02:00Z', '2024-05-02T10:02:00Z')`,
+	})
+}
+
+// seedV180AutoCompletion writes the automatic-completion record a 0111 binary
+// would leave behind: first_run_at does not exist yet, so 0112 has to backfill
+// it from updated_at rather than leave it empty.
+func seedV180AutoCompletion(t *testing.T, db *sql.DB) {
+	t.Helper()
+	execV180Statements(t, db, []string{
+		`INSERT INTO model_delivery_auto_completions
+		 (task_id, owner_id, state, attempts, next_run_at, updated_at)
+		 VALUES ('task-done', 'owner-a', 'pending', 1, '2024-05-06T10:00:00Z', '2024-05-05T10:00:00Z')`,
+	})
+}
+
+// TestUpgradeFromV180AppliesLaterMigrationsToStoredRows covers the migrations
+// that only mean something once rows exist (the rest of #435's list):
+//   - 0108 adds asset_list_items.delivery_deferred, which an existing item must
+//     read as 0;
+//   - 0109 creates the automatic-completion records and their scan watermark,
+//     and 0112 backfills first_run_at from updated_at;
+//   - 0110 rebuilds execution_grants so source accepts delivery, on top of 0097's
+//     access_key;
+//   - 0111 rebuilds processing_plans so origin accepts delivery.
+//
+// The rows are written at the migration version of their era (asset list items
+// before 0108, the completion record before 0112) so the migrations run against
+// data shaped the way an older binary writes it, not against post-migration
+// defaults.
+func TestUpgradeFromV180AppliesLaterMigrationsToStoredRows(t *testing.T) {
+	historical := v180Migrations(t)
+	path := filepath.Join(t.TempDir(), "v180-later.db")
+	ctx := context.Background()
+
+	v180 := openV180Database(t, path, historical)
+	t.Cleanup(func() { _ = v180.Close() })
+	seedV180Data(t, v180.db)
+	// 0100–0107 build the list tables; 0108 onwards has not run yet.
+	if err := v180.runMigrations(ctx, migrationsThrough(107)); err != nil {
+		t.Fatalf("迁移到 0107: %v", err)
+	}
+	seedV180AssetList(t, v180.db)
+	// 0110 and 0111 rebuild the two tables this fixture already filled.
+	if err := v180.runMigrations(ctx, migrationsThrough(111)); err != nil {
+		t.Fatalf("迁移到 0111: %v", err)
+	}
+	seedV180AutoCompletion(t, v180.db)
+	before := map[string]v180TableSnapshot{
+		"asset_lists":      snapshotV180Table(t, v180.db, "asset_lists"),
+		"asset_list_items": snapshotV180Table(t, v180.db, "asset_list_items"),
+		"execution_grants": snapshotV180Table(t, v180.db, "execution_grants"),
+		"processing_plans": snapshotV180Table(t, v180.db, "processing_plans"),
+	}
+	assertV180DatabaseIntegrity(t, v180.db, "0111 存量库")
+	if err := v180.Close(); err != nil {
+		t.Fatalf("关闭 0111 数据库: %v", err)
+	}
+
+	// The current binary opens the same file: 0112 and, if a later migration is
+	// added, everything after it runs against the rows seeded above.
+	upgraded, err := openTestRepository(path)
+	if err != nil {
+		t.Fatalf("用当前代码升级 v1.8.0 数据库: %v", err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	if head := readV180LedgerHead(t, upgraded.db); head != MigrationHead() {
+		t.Fatalf("升级后 migration 版本 = %d; want %d", head, MigrationHead())
+	}
+	for table, original := range before {
+		kept := snapshotV180Table(t, upgraded.db, table)
+		for column, want := range original {
+			if got := kept[column]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s.%s 的数据在升级后变化:\n0111 %v\n升级后 %v", table, column, want, got)
+			}
+		}
+	}
+	assertV180DatabaseIntegrity(t, upgraded.db, "升级后")
+
+	t.Run("0108 旧清单项默认未延迟交付", func(t *testing.T) {
+		var notNull int
+		var dflt sql.NullString
+		if err := upgraded.db.QueryRow(
+			`SELECT "notnull", dflt_value FROM pragma_table_info(?) WHERE name = 'delivery_deferred'`,
+			"asset_list_items",
+		).Scan(&notNull, &dflt); err != nil {
+			t.Fatalf("asset_list_items.delivery_deferred 缺失: %v", err)
+		}
+		if notNull != 1 || !dflt.Valid || dflt.String != "0" {
+			t.Fatalf("delivery_deferred = notnull %d default %v; want notnull 1 default 0", notNull, dflt)
+		}
+		var total, deferred int
+		if err := upgraded.db.QueryRow(
+			`SELECT COUNT(*), COALESCE(SUM(delivery_deferred <> 0), 0) FROM asset_list_items`,
+		).Scan(&total, &deferred); err != nil {
+			t.Fatalf("统计旧清单项: %v", err)
+		}
+		if total != 2 || deferred != 0 {
+			t.Fatalf("旧清单项 = %d 行，其中 %d 行 delivery_deferred 非 0", total, deferred)
+		}
+		// An insert that leaves the column out — the shape the older binary
+		// uses — still works and reads as not deferred. It goes on a second
+		// list so the read-back of the seeded list stays at two items.
+		if _, err := upgraded.db.Exec(`INSERT INTO asset_lists
+		 (id, request_key, owner_id, project_id, title, status, created_at, updated_at, expires_at)
+		 VALUES ('list-probe', 'req-list-probe', 'owner-a', 'prj-v180', '探针清单', 'draft',
+		 '` + v180Stamp + `', '` + v180Stamp + `', '2024-05-09T10:00:00Z')`); err != nil {
+			t.Fatalf("写入探针清单: %v", err)
+		}
+		if _, err := upgraded.db.Exec(`INSERT INTO asset_list_items
+		 (id, owner_id, list_id, position, kind, name, route_id, state, created_at, updated_at)
+		 VALUES ('item-probe', 'owner-a', 'list-probe', 0, 'character', '探针', 'text-to-3d', 'todo',
+		 '` + v180Stamp + `', '` + v180Stamp + `')`); err != nil {
+			t.Fatalf("不写 delivery_deferred 的插入被拒绝: %v", err)
+		}
+		var deferredProbe int
+		if err := upgraded.db.QueryRow(
+			`SELECT delivery_deferred FROM asset_list_items WHERE id = 'item-probe'`,
+		).Scan(&deferredProbe); err != nil || deferredProbe != 0 {
+			t.Fatalf("新行 delivery_deferred = %d err=%v; want 0", deferredProbe, err)
+		}
+	})
+
+	t.Run("0109 与 0112 自动补齐记录", func(t *testing.T) {
+		for _, table := range []string{
+			"model_delivery_auto_completions", "model_delivery_auto_completion_watermark",
+		} {
+			var count int
+			if err := upgraded.db.QueryRow(
+				`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table,
+			).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("新增表 %s 缺失: count=%d err=%v", table, count, err)
+			}
+		}
+		// 0112: the record predates the column, so it takes updated_at as the
+		// start of its deadline instead of an empty stamp.
+		var firstRunAt, updatedAt string
+		if err := upgraded.db.QueryRow(
+			`SELECT first_run_at, updated_at FROM model_delivery_auto_completions WHERE task_id = 'task-done'`,
+		).Scan(&firstRunAt, &updatedAt); err != nil {
+			t.Fatalf("读取自动补齐记录: %v", err)
+		}
+		if updatedAt != "2024-05-05T10:00:00Z" || firstRunAt != updatedAt {
+			t.Fatalf("first_run_at = %q updated_at = %q; want first_run_at 回填为 updated_at", firstRunAt, updatedAt)
+		}
+		// The watermark is a single row, and its CHECK says so.
+		if _, err := upgraded.db.Exec(
+			`INSERT INTO model_delivery_auto_completion_watermark (id, updated_at) VALUES (1, ?)`, v180Stamp,
+		); err != nil {
+			t.Fatalf("写入水位线: %v", err)
+		}
+		if _, err := upgraded.db.Exec(
+			`INSERT INTO model_delivery_auto_completion_watermark (id, updated_at) VALUES (2, ?)`, v180Stamp,
+		); err == nil {
+			t.Fatal("水位线接受了第二行")
+		}
+	})
+
+	t.Run("0110 交付来源的执行授权", func(t *testing.T) {
+		insert := func(id, source, accessKeyID string) error {
+			_, err := upgraded.db.Exec(`INSERT INTO execution_grants
+			 (request_id, owner_id, session_id, offering_id, offering_revision, prepared_input_id,
+			  prepared_input_hash, idempotency_key, operation_id, status, source, request_version,
+			  created_at, updated_at, access_key_id)
+			 VALUES (?, 'owner-a', 'sess-a', 'o', 'rev', 'prep-1', 'hash-prep-1', ?,
+			 ?, 'pending', ?, 1, '`+v180Stamp+`', '`+v180Stamp+`', ?)`,
+				id, "idem-"+id, "op-"+id, source, accessKeyID)
+			return err
+		}
+		for name, probe := range map[string]struct {
+			source, accessKeyID string
+			fail                bool
+		}{
+			"平台交付授权":       {executiongrant.Delivery, "", false},
+			"浏览器授权":        {executiongrant.HumanBrowser, "", false},
+			"Agent 决定授权":   {executiongrant.AgentPending, "", false},
+			"个人 Key 授权":    {executiongrant.AccessKey, "key-1", false},
+			"交付授权带 Key":    {executiongrant.Delivery, "key-1", true},
+			"Key 授权没有 Key": {executiongrant.AccessKey, "", true},
+			"未知来源":         {"robot", "", true},
+		} {
+			if err := insert("probe-"+name, probe.source, probe.accessKeyID); (err != nil) != probe.fail {
+				t.Errorf("%s: err = %v; want failure=%v", name, err, probe.fail)
+			}
+		}
+		grant, err := upgraded.GetExecutionGrant(ctx, v180OwnerID, "probe-平台交付授权")
+		if err != nil {
+			t.Fatalf("GetExecutionGrant(交付授权): %v", err)
+		}
+		if grant.Source != executiongrant.Delivery || grant.AccessKeyID != "" ||
+			grant.Status != executiongrant.Pending || grant.RequestVersion != 1 {
+			t.Fatalf("交付授权 = %+v", grant)
+		}
+	})
+
+	t.Run("0111 交付来源的处理计划", func(t *testing.T) {
+		insert := func(id, origin string) error {
+			_, err := upgraded.db.Exec(`INSERT INTO processing_plans
+			 (id, owner_id, session_id, source_task_id, source_asset_id, state, approved_credits,
+			  request_hash, steps_json, created_at, updated_at, version, origin)
+			 VALUES (?, 'owner-a', 'sess-a', 'task-done', 'asset-model-1', 'RUNNING', 0,
+			 ?, '[]', '`+v180Stamp+`', '`+v180Stamp+`', 1, ?)`,
+				id, "hash-"+id, origin)
+			return err
+		}
+		for origin, fail := range map[string]bool{
+			processing.OriginDelivery: false,
+			processing.OriginAgent:    false,
+			processing.OriginBrowser:  false,
+			"robot":                   true,
+		} {
+			if err := insert("plan-origin-"+origin, origin); (err != nil) != fail {
+				t.Errorf("origin %q: err = %v; want failure=%v", origin, err, fail)
+			}
+		}
+		plan, err := upgraded.GetProcessingPlan(ctx, generation.OwnerID(v180OwnerID), "plan-origin-delivery")
+		if err != nil {
+			t.Fatalf("GetProcessingPlan(交付计划): %v", err)
+		}
+		if plan.Origin != processing.OriginDelivery || plan.ID != "plan-origin-delivery" ||
+			plan.State != "RUNNING" || plan.Version != 1 {
+			t.Fatalf("交付计划 = %+v", plan)
+		}
+	})
+
+	t.Run("清单与项经仓库层读回", func(t *testing.T) {
+		list, err := upgraded.AssetListRepository().GetList(ctx, v180OwnerID, "prj-v180", "list-1")
+		if err != nil {
+			t.Fatalf("GetList(list-1): %v", err)
+		}
+		if list.ID != "list-1" || list.ProjectID != "prj-v180" || list.Status != "draft" ||
+			list.Title != "合成清单" || list.RequestKey != "req-list-1" {
+			t.Fatalf("清单 = %+v", list)
+		}
+		if len(list.Items) != 2 {
+			t.Fatalf("清单项 = %d; want 2", len(list.Items))
+		}
+		first, second := list.Items[0], list.Items[1]
+		if first.ID != "item-1" || first.Name != "合成角色" || first.State != "todo" {
+			t.Fatalf("item-1 = %+v", first)
+		}
+		if second.ID != "item-2" || second.State != "working" || second.Name != "合成道具" {
+			t.Fatalf("item-2 = %+v", second)
+		}
+	})
 }

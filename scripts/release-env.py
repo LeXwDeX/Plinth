@@ -9,6 +9,7 @@ secrets. deploy/environments.example.json is its template.
   release-env.py list
   release-env.py show <env>
   release-env.py release <env> [--revision SHA] [--acceptance-note ID] [--live-upstream]
+  release-env.py release <env> [--revision SHA] [--acceptance-note ID] [--live-chat]
   release-env.py smoke <env> -- <command...>      # BASE, ADMIN_*, AGENT_TEST_*, EXPECT_SHA, RELEASE_ENV,
                                                   # ART_AI_UPSTREAM_SHAPE set
   release-env.py compose-env <env>                # GO_* layout for manual compose and
@@ -32,6 +33,12 @@ Compose project and every Provider and chat connection points at it, so no real
 upstream is called and no real key is used. A live dev-test release needs both
 --live-upstream and ART_AI_LIVE_ACK=1 (each live release also needs the user's
 consent in the conversation, AGENTS.md). Other environments are always live.
+
+Mixed shape (#416): --live-chat releases the ephemeral stack with the chat
+connections of the runtime environment (a real model deciding on Plinth's tool
+table) and every generation Provider still on the fake upstream. It needs
+ART_AI_LIVE_ACK=1 for the same reason a live release does: the chat calls cost
+tokens. The two switches are exclusive.
 """
 import argparse
 from datetime import datetime, timezone
@@ -320,18 +327,27 @@ def promotion_revision(document, name, revision, note_id):
     return revision
 
 
-def upstream_shape(environment, live_upstream=False, environ=None):
-    """The upstream shape of a release: fake for the ephemeral stack unless both live switches are set."""
+def upstream_shape(environment, live_upstream=False, environ=None, live_chat=False):
+    """The upstream shape of a release: fake for the ephemeral stack unless both live switches are set.
+
+    --live-chat (#416) is the half-open mixed shape: the chat connections call the
+    real gateway of the runtime environment while every generation Provider still
+    points at the fake upstream, so a real model decides and generation stays free.
+    It needs the same explicit acknowledgement as a fully live release.
+    """
     environ = os.environ if environ is None else environ
     if environment.get("data") != "ephemeral":
-        if live_upstream:
-            raise EnvironmentError_("--live-upstream only applies to the ephemeral dev-test stack; this environment is always live")
+        if live_upstream or live_chat:
+            raise EnvironmentError_("--live-upstream and --live-chat only apply to the ephemeral dev-test stack; this environment is always live")
         return "live"
-    if not live_upstream:
+    if live_upstream and live_chat:
+        raise EnvironmentError_("--live-upstream and --live-chat cannot be combined: --live-upstream releases every connection live, --live-chat only the chat ones")
+    if not live_upstream and not live_chat:
         return "fake"
     if environ.get(LIVE_ACK) != "1":
-        raise EnvironmentError_(f"a live dev-test release calls real, paid upstreams; set {LIVE_ACK}=1 together with --live-upstream")
-    return "live"
+        raise EnvironmentError_(f"a dev-test release with real chat or real upstreams calls paid services; set {LIVE_ACK}=1 together with "
+                                f"{'--live-upstream' if live_upstream else '--live-chat'}")
+    return "live" if live_upstream else "mixed"
 
 
 def release_variables(environment, revision, shape="live"):
@@ -354,8 +370,8 @@ def release_variables(environment, revision, shape="live"):
         words.append(f"RELEASE_BACKUP_KEEP={backup['keep']}")
     if environment.get("data") == "ephemeral":
         words.append("RELEASE_DATA_MODE=ephemeral")
-        if shape == "fake":
-            words.append("RELEASE_UPSTREAM_SHAPE=fake")
+        if shape in ("fake", "mixed"):
+            words.append(f"RELEASE_UPSTREAM_SHAPE={shape}")
     words += [f"{key}={environment['layout'][key]}" for key in LAYOUT_KEYS if key in environment.get("layout", {})]
     if environment.get("extra_compose_file"):
         words.append(f"RELEASE_EXTRA_COMPOSE_FILE={environment['extra_compose_file']}")
@@ -382,7 +398,8 @@ def release(document, name, args):
         revision = promotion_revision(document, name, args.revision, args.acceptance_note)
     elif args.revision or args.acceptance_note:
         raise EnvironmentError_(f"{name} always releases the pushed origin/main; --revision is for promotions")
-    shape = upstream_shape(environment, getattr(args, "live_upstream", False) is True)
+    shape = upstream_shape(environment, live_upstream=getattr(args, "live_upstream", False) is True,
+                           live_chat=getattr(args, "live_chat", False) is True)
     print(f"[release-env] {name}: {environment['base_url']}" + (f" revision={revision}" if revision else " origin/main")
           + f" upstream={shape}")
     environment_variables = {**os.environ, **release_variables(environment, revision, shape)}
@@ -448,8 +465,8 @@ def ensure_agent_account(document, name):
 def running_upstream_shape(environment):
     """The shape the environment was last released in, from its production/compose.env.
 
-    Only the ephemeral stack can run fake; anything unreadable counts as live, so a
-    script that needs the double live switch refuses instead of guessing fake.
+    Only the ephemeral stack can run fake or mixed; anything unreadable counts as
+    live, so a script that needs the double live switch refuses instead of guessing.
     """
     if environment.get("data") != "ephemeral":
         return "live"
@@ -457,7 +474,8 @@ def running_upstream_shape(environment):
         values = host_env(environment, "compose.env", ("RELEASE_UPSTREAM_SHAPE",))
     except (EnvironmentError_, ValueError):
         return "live"
-    return "fake" if values.get("RELEASE_UPSTREAM_SHAPE") == "fake" else "live"
+    shape = values.get("RELEASE_UPSTREAM_SHAPE")
+    return shape if shape in ("fake", "mixed") else "live"
 
 
 def smoke_variables(document, name):
@@ -598,6 +616,8 @@ def main(argv=None):
     entry.add_argument("--acceptance-note", type=int)
     entry.add_argument("--live-upstream", action="store_true",
                        help=f"release the ephemeral dev-test stack against real upstreams (needs {LIVE_ACK}=1)")
+    entry.add_argument("--live-chat", action="store_true",
+                       help=f"release the ephemeral dev-test stack with a real chat gateway and fake generation (#416, needs {LIVE_ACK}=1)")
     smoke_parser = sub.add_parser("smoke")
     smoke_parser.add_argument("environment")
     smoke_parser.add_argument("command", nargs=argparse.REMAINDER)

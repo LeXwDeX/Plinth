@@ -1803,7 +1803,14 @@ export interface ChatProductSchema {
       corrections_limit?: string;
       checks?: string;
       conclusion?: string;
+      /** #332: 会话来源成员（普通会话或外部 MCP 调用创建的会话）；分组见 session_groups。 */
+      source?: string;
     };
+    /**
+     * #332: 会话列表按会话来源分组：按声明顺序渲染每组，source 是会话来源成员的取值，
+     * label 是组名在 content.messages 里的 key。没有声明时会话列表保持平铺。
+     */
+    session_groups?: { source: string; label: string }[];
     /** 一个附件对象的成员名（消息响应与 attachments/selection 请求共用）。 */
     attachment: {
       handle: string;

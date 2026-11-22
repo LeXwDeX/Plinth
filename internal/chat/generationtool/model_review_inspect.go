@@ -9,6 +9,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/modelinspect"
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // ModelInspectRequest names one saved model for InspectReviewedModel.
@@ -65,6 +66,16 @@ const (
 	ModelInspectUnknownPurpose = "unknown_purpose"
 	ModelInspectUnavailable    = "unavailable"
 )
+
+// countedStepCapabilities are the capabilities the step policy counts as 3D
+// steps, which say what a remedy costs (#332). An Executor assembled without
+// the step policy (a read-only core in a test) counts none.
+func (executor *Executor) countedStepCapabilities() []schemacontract.Capability {
+	if executor.stepPolicy == nil {
+		return nil
+	}
+	return executor.stepPolicy.CountedCapabilities
+}
 
 // InspectReviewedModel is the read-only core of inspect_model behind the
 // outward MCP server (#332): it loads the owner's Task, parses the saved file
@@ -179,6 +190,7 @@ func (executor *Executor) InspectReviewedModel(
 		},
 		executor.modelReviewFixAvailability(),
 		request.AllowedFixes,
+		executor.countedStepCapabilities(),
 	)
 	return ModelInspectResult{
 		TaskID:         task.ID,

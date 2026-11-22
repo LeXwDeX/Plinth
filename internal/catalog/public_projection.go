@@ -107,6 +107,9 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	}
 	publicChat.API.Fields = cloned.Chat.API.Fields
 	publicChat.API.ResponseFields = cloned.Chat.API.ResponseFields
+	// #332: the session list groups by where a session came from; the groups,
+	// their names and their order are the Schema's, so the browser reads them.
+	publicChat.API.SessionGroups = cloned.Chat.API.SessionGroups
 	publicChat.API.Attachment = cloned.Chat.API.Attachment
 	publicChat.API.Preference = cloned.Chat.API.Preference
 	publicChat.API.StyleLock = cloned.Chat.API.StyleLock

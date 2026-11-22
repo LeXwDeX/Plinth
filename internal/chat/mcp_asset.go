@@ -5,6 +5,18 @@ import (
 	"time"
 )
 
+// The two values of a session's source (#332): the wire member the Schema
+// names (chat.api.response_fields.source) says which sessions came from where,
+// and the browser groups the session list by it. An ordinary session is the
+// chat source; one an outside caller reached through the external MCP service
+// (MCPAsset) is the mcp source. The vocabulary is the code's: the Schema
+// declares the grouping (which sources get a group, its name and order), and
+// validation keeps the two from drifting apart.
+const (
+	SessionSourceChat = "chat"
+	SessionSourceMCP  = "mcp"
+)
+
 // MCPAsset is one asset of the external MCP service (#332): the chat session an
 // outside caller reaches by a name. The mapping is also the marker that says a
 // session came from MCP, so a person can tell those sessions apart in the

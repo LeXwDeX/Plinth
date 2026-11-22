@@ -12,6 +12,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/modelcheck"
 	"github.com/LeXwDeX/Plinth/internal/modelinspect"
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // The purpose check of inspect_model (#103): the production brief selects a
@@ -55,11 +56,29 @@ type ModelReviewUsageCheckItem struct {
 	Actual  any            `json:"actual"`
 	Budget  map[string]any `json:"budget"`
 	FixHint string         `json:"fix_hint,omitempty"`
+	// Remedies is the structured form of FixHint (#332): what to fix, in the
+	// Schema's own words, and what it costs in 3D steps. Present on the same
+	// fails as FixHint, when the declared fix names a capability that can be
+	// run; FixHint stays, so a client that only reads the sentence still works.
+	Remedies []ModelReviewRemedy `json:"remedies,omitempty"`
 	// Note says what the item was judged on when that is not the inspected file:
 	// the deliverable the purpose sized, with the file's own texture edge beside it
 	// (#292); or, for a file the purpose sized itself, the original file its Task
 	// keeps beside it (#305).
 	Note string `json:"note,omitempty"`
+}
+
+// ModelReviewRemedy is one executable fix of a failed purpose check (#332):
+// what has to be fixed (Code, the check's own id), the Schema's sentence for
+// it (Message), the capabilities that do it in declaration order, and how many
+// 3D steps they cost (Steps). A remedy that names no counted capability costs
+// 0 steps: it is fixed by a local tool or by regenerating, both of which the
+// step policy does not count.
+type ModelReviewRemedy struct {
+	Code         string   `json:"code"`
+	Message      string   `json:"message"`
+	Steps        int      `json:"steps"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // modelReviewUsageCheckItem keeps the internal name of the review tools.
@@ -105,7 +124,7 @@ func newModelReviewUsageCheck(
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
 ) *modelReviewUsageCheck {
-	return newModelReviewUsageCheckFor(report, nil, usage, production, brief, purpose, text, available, nil)
+	return newModelReviewUsageCheckFor(report, nil, usage, production, brief, purpose, text, available, nil, nil)
 }
 
 // newModelReviewUsageCheckFor is newModelReviewUsageCheck for a Task that has a
@@ -113,7 +132,9 @@ func newModelReviewUsageCheck(
 // deliverable and reports the inspected file's own texture edge beside it. A nil
 // sized judges the inspected file, as before. allowedFixes bounds the fix hints
 // to capabilities the caller can execute itself; nil keeps every runtime
-// availability check, as the platform path does.
+// availability check, as the platform path does. counted is the step policy's
+// counted capabilities, which say how many 3D steps a remedy costs (#332); nil
+// leaves every remedy on 0 steps.
 func newModelReviewUsageCheckFor(
 	report modelinspect.Report,
 	sized *sizedDeliverable,
@@ -124,6 +145,7 @@ func newModelReviewUsageCheckFor(
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
 	allowedFixes []generation.Capability,
+	counted []schemacontract.Capability,
 ) *modelReviewUsageCheck {
 	profile, source, platform, found := modelReviewUsageProfileFor(usage, brief, purpose)
 	if !found {
@@ -156,7 +178,11 @@ func newModelReviewUsageCheckFor(
 		if !exists {
 			continue
 		}
-		checks[index].FixHint = modelReviewUsageFixHint(fix, profile, production, text, available)
+		// One judgement of the fix serves both the sentence and the structured
+		// remedy: each call asks the availability of every option, and two calls
+		// could disagree if the answer changed between them (#332).
+		hint, option, executable := modelReviewUsageFix(fix, profile, production, text, available)
+		checks[index].FixHint = hint
 		// A sized deliverable that is over the bound is fixed by sizing it again,
 		// not by the general fix for the inspected file (#292). When the inspected
 		// file is itself the sized one (the GLB of a rig, #305) its measured edge is
@@ -170,6 +196,11 @@ func newModelReviewUsageCheckFor(
 			checks[index].FixHint = text(production.ExportTextureFixText, "{formats}", sized.formats(),
 				"{export}", strconv.Itoa(over), "{maximum}", strconv.Itoa(*budget.MaxTextureSize))
 		}
+		// #332: the same fix as a structured remedy, so an outside Agent can
+		// decide on it instead of parsing the sentence. The message is the hint
+		// just rendered, so the two never disagree.
+		checks[index].Remedies = modelReviewUsageRemedies(checks[index].Check, checks[index].FixHint,
+			option, executable, counted)
 	}
 	result := &modelReviewUsageCheck{
 		Purpose:       profile.ID,
@@ -568,17 +599,35 @@ func modelReviewUsageFixHint(
 	text modelReviewUsageText,
 	available modelReviewFixAvailability,
 ) string {
+	hint, _, _ := modelReviewUsageFix(fix, profile, production, text, available)
+	return hint
+}
+
+// modelReviewUsageFix renders the fix of a failed check and names the option it
+// chose. The returned option is the first one every capability of which is
+// available, so the hint and the remedy built from it can never disagree; it is
+// nil when the fix has no option to run (no options declared, none available, or
+// a template that names no capability). The hint is "" when the fix would have
+// to name a purpose bound the purpose does not declare.
+func modelReviewUsageFix(
+	fix catalog.ChatModelInspectFixSchema,
+	profile catalog.ChatModel3DUsageProfile,
+	production catalog.ChatModelInspectProductionSchema,
+	text modelReviewUsageText,
+	available modelReviewFixAvailability,
+) (string, []catalog.ChatModelInspectFixCapabilitySchema, bool) {
 	bounds, bounded := modelReviewFixBounds(fix.Check, profile)
 	boundedText := func(template string) bool {
 		return strings.Contains(template, "{minimum}") || strings.Contains(template, "{maximum}")
 	}
 	if !bounded && (boundedText(fix.Template) || boundedText(fix.UnavailableTemplate)) {
-		return ""
+		return "", nil, false
 	}
 	replacements := make([]string, 0, 6)
 	if strings.Contains(fix.Template, "{capabilities}") {
 		resolver := strings.NewReplacer(bounds...)
 		options := make([]string, 0, len(fix.Options))
+		var chosen []catalog.ChatModelInspectFixCapabilitySchema
 		for _, option := range fix.Options {
 			capabilities := make([]string, 0, len(option.Capabilities))
 			supported := true
@@ -601,18 +650,55 @@ func modelReviewUsageFixHint(
 			}
 			if supported && len(capabilities) > 0 {
 				options = append(options, strings.Join(capabilities, production.CapabilityJoiner))
+				if chosen == nil {
+					chosen = option.Capabilities
+				}
 			}
 		}
 		if len(options) == 0 {
 			if strings.TrimSpace(fix.UnavailableTemplate) != "" {
-				return text(fix.UnavailableTemplate, bounds...)
+				return text(fix.UnavailableTemplate, bounds...), nil, false
 			}
-			return text(production.NoCapabilityText)
+			return text(production.NoCapabilityText), nil, false
 		}
 		replacements = append(replacements, "{capabilities}", strings.Join(options, production.OptionSeparator))
+		replacements = append(replacements, bounds...)
+		return text(fix.Template, replacements...), chosen, true
 	}
 	replacements = append(replacements, bounds...)
-	return text(fix.Template, replacements...)
+	return text(fix.Template, replacements...), nil, false
+}
+
+// modelReviewUsageRemedies is the structured form of one failed check's fix
+// (#332): the Schema's sentence with the id an Agent can branch on, the
+// capabilities that do it and the 3D steps they cost. message is the hint
+// already rendered for the item, so the sentence a client reads from fix_hint
+// and the one it reads here are the same. It is empty when the fix names no
+// option that can run, because the sentence then says what to do without a tool
+// (regenerate, fix it in a DCC) and there is nothing to run. The capabilities
+// counted by the step policy are the ones a step costs; a fix made of local
+// tools only is a 0-step remedy, which is a fact the caller needs, not a
+// missing one.
+func modelReviewUsageRemedies(
+	check, message string,
+	option []catalog.ChatModelInspectFixCapabilitySchema,
+	executable bool,
+	counted []schemacontract.Capability,
+) []ModelReviewRemedy {
+	if !executable || message == "" || len(option) == 0 {
+		return nil
+	}
+	capabilities := make([]string, 0, len(option))
+	steps := 0
+	for _, candidate := range option {
+		capabilities = append(capabilities, candidate.Capability)
+		if slices.Contains(counted, generation.Capability(candidate.Capability)) {
+			steps++
+		}
+	}
+	return []ModelReviewRemedy{{
+		Code: check, Message: message, Steps: steps, Capabilities: capabilities,
+	}}
 }
 
 // modelReviewFixBounds are the purpose bounds a fix may name as placeholders:

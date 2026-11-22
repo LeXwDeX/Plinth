@@ -334,7 +334,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	applicationSchema := taskCatalog.Application()
-	if err := validateFakeUpstreamWiring(shape, config, applicationSchema); err != nil {
+	if err := validateUpstreamWiring(shape, config, applicationSchema); err != nil {
 		return nil, err
 	}
 	if shape.fake() {
@@ -343,6 +343,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		}
 		logger.Warn("上游形态为 fake：全部 Provider 与对话模型连接指向 fake 上游，不发起真实上游请求",
 			"upstream_shape", upstreamShapeFake, "fake_upstream_origin", shape.origin.String())
+	}
+	if shape.mixed {
+		logger.Warn("上游形态为混合：对话模型连接指向真实网关（消耗真实对话 token），生成 Provider 仍指向 fake 上游，不发起真实生成请求",
+			"upstream_shape", upstreamShapeMixed, "fake_upstream_origin", shape.origin.String())
 	}
 	// Opt-in recording of upstream calls (#233): off unless the operator set a
 	// directory. Capture wraps every connection's transport, outside any
@@ -1257,6 +1261,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ProposePlan:          chatService.ProposeProductionPlan,
 		ProposeAssetList:     chatService.ProposeAssetList,
 		SubmitAssetListItem:  chatService.SubmitAssetListItem,
+		ReadAssetList:        chatService.ReadAssetList,
 		WriteVisualAnchor:    chatService.WriteVisualAnchor,
 		Project:              applicationSchema.Project,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
@@ -1523,9 +1528,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Scheduler: chatAgent,
 			Presence:  repository.AssetListPresenceRepository(),
 			StepCaps:  repository,
-			Schema:    *applicationSchema.AssetList,
-			Clock:     time.Now,
-			Logger:    logger,
+			// #329f: the list-end summary words each item's actual consumption
+			// with the same per-asset step standing the board reads, and takes
+			// its copy from the Catalog.
+			Steps: func(ctx context.Context, ownerID, sessionID string) (int, error) {
+				summary, err := executionGrants.StepStatus(ctx, ownerID, sessionID)
+				return summary.Used, err
+			},
+			Texts:  texts,
+			Schema: *applicationSchema.AssetList,
+			Clock:  time.Now,
+			Logger: logger,
 		})
 	}
 	fallbackIdentity, err := buildIdentity(config, accessPolicy)

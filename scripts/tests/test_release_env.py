@@ -499,6 +499,22 @@ class UpstreamShapeTest(unittest.TestCase):
         words = release_env.release_variables(environment, None, shape)["RELEASE_SERVER_ENV"]
         self.assertNotIn("RELEASE_UPSTREAM_SHAPE", words)
 
+    def test_live_chat_is_the_half_open_mixed_shape(self):
+        # #416: real chat connections, fake generation. It needs the same
+        # acknowledgement as a fully live release and cannot be combined with it.
+        environment = ephemeral_document()["environments"]["dev-test"]
+        for environ in ({}, {"ART_AI_LIVE_ACK": "0"}):
+            with self.subTest(environ=environ), self.assertRaisesRegex(release_env.EnvironmentError_, "ART_AI_LIVE_ACK=1"):
+                release_env.upstream_shape(environment, live_chat=True, environ=environ)
+        self.assertEqual(release_env.upstream_shape(environment, live_chat=True, environ={"ART_AI_LIVE_ACK": "1"}), "mixed")
+        words = release_env.release_variables(environment, None, "mixed")["RELEASE_SERVER_ENV"].split()
+        self.assertIn("RELEASE_UPSTREAM_SHAPE=mixed", words)
+        self.assertIn("RELEASE_DATA_MODE=ephemeral", words)
+        with self.assertRaisesRegex(release_env.EnvironmentError_, "cannot be combined"):
+            release_env.upstream_shape(environment, live_upstream=True, live_chat=True, environ={"ART_AI_LIVE_ACK": "1"})
+        # The acknowledgement alone keeps the fake default.
+        self.assertEqual(release_env.upstream_shape(environment, environ={"ART_AI_LIVE_ACK": "1"}), "fake")
+
     def test_persistent_environments_are_always_live(self):
         document = load(BASE)
         for name, environment in document["environments"].items():
@@ -522,8 +538,8 @@ class UpstreamShapeTest(unittest.TestCase):
     def test_smoke_reports_the_running_shape(self):
         document = ephemeral_document()
         environment = document["environments"]["dev-test"]
-        for values, want in (({"RELEASE_UPSTREAM_SHAPE": "fake"}, "fake"), ({"RELEASE_UPSTREAM_SHAPE": "live"}, "live"),
-                             ({}, "live")):
+        for values, want in (({"RELEASE_UPSTREAM_SHAPE": "fake"}, "fake"), ({"RELEASE_UPSTREAM_SHAPE": "mixed"}, "mixed"),
+                             ({"RELEASE_UPSTREAM_SHAPE": "live"}, "live"), ({}, "live")):
             with self.subTest(values=values), mock.patch.object(release_env, "host_env", return_value=values):
                 self.assertEqual(release_env.running_upstream_shape(environment), want)
         with mock.patch.object(release_env, "host_env", side_effect=release_env.EnvironmentError_("ssh failed")):
