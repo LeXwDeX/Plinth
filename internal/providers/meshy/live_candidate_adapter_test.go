@@ -18,8 +18,14 @@ import (
 // finishing, the refine being submitted, the refine finishing), then the
 // download of each claimed file. A request the sample does not contain fails
 // the replay.
+//
+// #460: this test drives the current wire, captured on 2026-11-22
+// (meshy-text-to-3d-2026-11-22): the preview omits enable_pbr and pose_mode,
+// and the refine omits ai_model, per "Leave it out to texture with the model
+// that matches the preview". The response bodies are the captured ones,
+// untouched.
 func TestMeshyLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *testing.T) {
-	exchanges, policy := loadLiveCandidate(t)
+	exchanges, policy := loadLiveCandidate(t, "meshy-text-to-3d-2026-11-22")
 	replay, err := wirefixture.NewReplayWithMedia(exchanges, policy, wirefixture.SyntheticMediaResolver{})
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +41,8 @@ func TestMeshyLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *te
 	if !ok {
 		t.Fatal("missing Meshy Offering")
 	}
-	input := normalizedInput(t, offering, `{"prompt":"A simple plain blue cube, clean flat surfaces, solid uniform blue color, no text, no logos, no patterns, minimal geometric object."}`)
+	// The capture redacted the prompt, so the replay matches the redacted value.
+	input := normalizedInput(t, offering, `{"prompt":"[redacted]"}`)
 
 	started, err := port.Start(context.Background(), generation.StartRequest{
 		TaskID: "task", AttemptID: "attempt", SubmissionKey: "once", Offering: offering, Input: input,
@@ -55,8 +62,9 @@ func TestMeshyLiveCandidateDrivesTheAdapterThroughStartObserveAndOpenAsset(t *te
 			t.Fatalf("observe %d: %v", polls, err)
 		}
 	}
-	if polls != 53 || len(observation.Artifacts) != 12 {
-		t.Fatalf("observations = %d (want the recorded 35 preview + 18 refine polls), claims = %d (want 12)", polls, len(observation.Artifacts))
+	// The 2026-11-22 capture recorded 60 preview polls and 14 refine polls.
+	if polls != 74 || len(observation.Artifacts) != 12 {
+		t.Fatalf("observations = %d (want the recorded 60 preview + 14 refine polls), claims = %d (want 12)", polls, len(observation.Artifacts))
 	}
 
 	// The kernel downloads the required files before the background ones. The

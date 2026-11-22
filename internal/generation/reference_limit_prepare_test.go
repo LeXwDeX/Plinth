@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 
@@ -29,9 +32,12 @@ func TestDirectPreparationKeepsTheFirstPicturesAndSaysSo(t *testing.T) {
 	if _, err := h.repository.CreateSession(ctx, chat.Session{ID: "session-a", OwnerID: "owner-a", OwnerName: "Owner", Title: "limit", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	// #460 B16: the Meshy image-to-3d reference list carries the official
+	// pixel bounds (each side >= 32 px), so the pictures are real 32x32 PNGs.
+	picture := testPicturePNG(t, 32, 32)
 	var ids []string
-	for _, body := range []string{"image-a", "image-b"} {
-		asset, err := h.inputs.Upload(ctx, "owner-a", bytes.NewReader([]byte(body)), "image/png", 1<<20)
+	for range 2 {
+		asset, err := h.inputs.Upload(ctx, "owner-a", bytes.NewReader(picture), "image/png", 1<<20)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,4 +84,21 @@ func TestDirectPreparationKeepsTheFirstPicturesAndSaysSo(t *testing.T) {
 	if err != nil || single.ReferenceNote != "" {
 		t.Fatalf("one picture: note %q, %v", single.ReferenceNote, err)
 	}
+}
+
+// testPicturePNG is a real PNG of the given size, used where a Provider checks
+// the decoded pixels of a reference picture.
+func testPicturePNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	image := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			image.Set(x, y, color.RGBA{R: 0x20, G: 0x40, B: 0x60, A: 0xff})
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }

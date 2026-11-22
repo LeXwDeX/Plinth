@@ -69,7 +69,7 @@ func remeshInput(topology string, polycount int) string {
 }
 
 // The Remesh defaults (quad, 300000 faces) deliver about 600000 triangles, over
-// Rigging's 320000: the whole plan is refused before any step is paid, with the
+// Rigging's 380000: the whole plan is refused before any step is paid, with the
 // limit and the compatible parameters in the Schema's words.
 func TestRemeshDefaultsFollowedByRiggingAreRefusedBeforeAnythingIsPaid(t *testing.T) {
 	f := newChainFixture(t, textTo3DSource, "{}")
@@ -81,7 +81,7 @@ func TestRemeshDefaultsFollowedByRiggingAreRefusedBeforeAnythingIsPaid(t *testin
 	if refusal == nil || refusal.Code != generation.ErrInvalidInput {
 		t.Fatalf("refusal is not a Schema reason: %v", err)
 	}
-	for _, want := range []string{"600000", "320000", "Meshy Remesh", "Meshy Rigging", "quad ≤ 160000 / triangle ≤ 320000", "没有创建", "没有扣积分"} {
+	for _, want := range []string{"600000", "380000", "Meshy Remesh", "Meshy Rigging", "quad ≤ 190000 / triangle ≤ 380000", "没有创建", "没有扣积分"} {
 		if !strings.Contains(refusal.Detail, want) {
 			t.Fatalf("detail %q lacks %q", refusal.Detail, want)
 		}
@@ -95,7 +95,7 @@ func TestRemeshDefaultsFollowedByRiggingAreRefusedBeforeAnythingIsPaid(t *testin
 	}
 	english := refusal.LocalizedDetail(func(text string) string { return texts.Text("en", text) })
 	if strings.ContainsAny(english, "一二三四五六七八九十的") || !strings.Contains(english, "would deliver about 600000 triangle faces") ||
-		!strings.Contains(english, "320000") || !strings.Contains(english, "quad ≤ 160000 / triangle ≤ 320000") {
+		!strings.Contains(english, "380000") || !strings.Contains(english, "quad ≤ 190000 / triangle ≤ 380000") {
 		t.Fatalf("english refusal = %q", english)
 	}
 }
@@ -109,8 +109,8 @@ func TestRemeshThenRiggingBoundaryValues(t *testing.T) {
 		polycount int
 		allowed   bool
 	}{
-		{"quad at 160000 is exactly the limit", "quad", 160000, true},
-		{"quad one face over", "quad", 160001, false},
+		{"quad at 190000 is exactly the limit", "quad", 190000, true},
+		{"quad one face over", "quad", 190001, false},
 		// Remesh itself takes at most 300000 faces, so triangle topology always fits.
 		{"triangle at the parameter maximum", "triangle", 300000, true},
 		{"quad below", "quad", 100, true},
@@ -185,7 +185,7 @@ func TestChainEstimateSurvivesNeutralStepsAndStaysUnknownWhenUnreadable(t *testi
 	neutral := generation.Offering{ID: "neutral", Revision: "v1", ProviderID: "p", Capability: "retexture", Domain: generation.DomainProcessing, Enabled: true,
 		Parameters: []generation.Parameter{{Name: "source_task", Type: "task", TaskCapabilities: []generation.Capability{"remesh"}}}}
 	limited := generation.Offering{ID: "limited", ModelName: "Rigging model", Revision: "v1", ProviderID: "p", Capability: "rigging", Domain: generation.DomainProcessing, Enabled: true,
-		SourceModelLimit: &generation.SourceModelLimit{MaxTriangles: 320000, CountBasis: "triangles"},
+		SourceModelLimit: &generation.SourceModelLimit{MaxTriangles: 380000, CountBasis: "triangles"},
 		Parameters:       []generation.Parameter{{Name: "source_task", Type: "task", TaskCapabilities: []generation.Capability{"retexture"}}}}
 	create := func(t *testing.T, remeshInput, limitedMessage string) error {
 		t.Helper()
@@ -209,19 +209,19 @@ func TestChainEstimateSurvivesNeutralStepsAndStaysUnknownWhenUnreadable(t *testi
 	message := "{source_service}->{service}: {estimate}/{limit} {choices}"
 	err := create(t, `{}`, message)
 	refusal := generation.UserFacingError(err)
-	if refusal == nil || refusal.Detail != "Remesh model->Rigging model: 600000/320000 quad ≤ 160000 / triangle ≤ 320000" {
+	if refusal == nil || refusal.Detail != "Remesh model->Rigging model: 600000/380000 quad ≤ 190000 / triangle ≤ 380000" {
 		t.Fatalf("estimate lost across a neutral step: %v", err)
 	}
-	// The boundary values: 160000 quad faces and 320000 triangle faces both
-	// deliver exactly 320000 triangles; one face more does not fit.
+	// The boundary values: 190000 quad faces and 380000 triangle faces both
+	// deliver exactly 380000 triangles; one face more does not fit.
 	for _, test := range []struct {
 		input   string
 		allowed bool
 	}{
-		{`{"topology":"quad","target_polycount":160000}`, true},
-		{`{"topology":"quad","target_polycount":160001}`, false},
-		{`{"topology":"triangle","target_polycount":320000}`, true},
-		{`{"topology":"triangle","target_polycount":320001}`, false},
+		{`{"topology":"quad","target_polycount":190000}`, true},
+		{`{"topology":"quad","target_polycount":190001}`, false},
+		{`{"topology":"triangle","target_polycount":380000}`, true},
+		{`{"topology":"triangle","target_polycount":380001}`, false},
 	} {
 		if err := create(t, test.input, message); test.allowed != (err == nil) {
 			t.Fatalf("%s: allowed=%v err=%v", test.input, test.allowed, err)
@@ -253,10 +253,10 @@ func TestFinishedRodinTaskStartsTheChainWithItsQuadFactor(t *testing.T) {
 		triangles int64
 		allowed   bool
 	}{
-		{"quad just inside the limit", `{"mesh_mode":"Quad","quality_override":145454}`, 319999, true}, // 319998.8
-		{"quad one face over", `{"mesh_mode":"Quad","quality_override":145455}`, 320001, false},
-		{"triangles at the limit", `{"mesh_mode":"Raw","quality_override":320000}`, 320000, true},
-		{"triangles one face over", `{"mesh_mode":"Raw","quality_override":320001}`, 320001, false},
+		{"quad just inside the limit", `{"mesh_mode":"Quad","quality_override":172727}`, 380000, true}, // 379999.4 rounds up
+		{"quad one face over", `{"mesh_mode":"Quad","quality_override":172728}`, 380002, false},
+		{"triangles at the limit", `{"mesh_mode":"Raw","quality_override":380000}`, 380000, true},
+		{"triangles one face over", `{"mesh_mode":"Raw","quality_override":380001}`, 380001, false},
 		{"the display request", `{}`, 2000000, false},
 		{"the Quad ceiling", `{"mesh_mode":"Quad","quality_override":200000}`, 440000, false},
 	} {
@@ -279,7 +279,7 @@ func TestFinishedRodinTaskStartsTheChainWithItsQuadFactor(t *testing.T) {
 			if !errors.Is(err, ErrInvalid) || refusal == nil {
 				t.Fatalf("a plan over the limit was not refused with a reason: %v", err)
 			}
-			for _, want := range []string{fmt.Sprint(test.triangles), "320000", "Rodin Gen-2.5", "Meshy Rigging", "Quad ≤ 145454 / Raw ≤ 320000"} {
+			for _, want := range []string{fmt.Sprint(test.triangles), "380000", "Rodin Gen-2.5", "Meshy Rigging", "Quad ≤ 172727 / Raw ≤ 380000"} {
 				if !strings.Contains(refusal.Detail, want) {
 					t.Fatalf("detail %q lacks %q", refusal.Detail, want)
 				}

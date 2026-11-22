@@ -57,8 +57,9 @@ const (
 )
 
 // MaxRigFaces is the input face limit the official Rigging documentation names
-// (https://docs.meshy.ai/en/api/rigging-and-animation, 2026-10-29).
-const MaxRigFaces = 320000
+// ("at most 380,000 triangles";
+// https://docs.meshy.ai/en/api/rigging-and-animation, checked 2026-11-22).
+const MaxRigFaces = 380000
 
 // MaxUVUnwrapFaces is the input face limit the official UV Unwrap documentation
 // names; a larger mesh answers 400 at create (https://docs.meshy.ai/en/api/uv-unwrap,

@@ -107,6 +107,12 @@ type Config struct {
 	ArtifactOrigin string
 	// Now is the clock; tests inject one. Default time.Now.
 	Now func() time.Time
+	// AccountConcurrencyLimit, when positive, makes a provider version that
+	// declares it answer task creation with 429 code 2000 and Retry-After once
+	// that many tasks are in flight across all of its job kinds (#468). It
+	// models an account-wide upstream pool shared by generation and conversion
+	// jobs; 0 disables the limit.
+	AccountConcurrencyLimit int
 }
 
 func (c Config) withDefaults() Config {

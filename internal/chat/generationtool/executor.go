@@ -1870,9 +1870,18 @@ func (executor *Executor) taskWaitDeadline(command chat.ToolCommand, offering ge
 		// Give that read a bounded recovery window using the Schema timeout.
 		timeout = time.Duration(executor.chat.Agent.RequestTimeoutSeconds) * time.Second
 	} else {
-		// Upstream queue time does not count toward the job timeout (#136),
-		// so the Task may run that much longer.
-		timeout += offering.UpstreamQueueTimeout
+		// The deadline must cover every run the Offering may make, not one:
+		// max_attempts runs of the job timeout, each with its backoff, plus the
+		// upstream queue wait that does not count toward the job timeout
+		// (#136, #460 review 4). A Task still running when this passes is
+		// reported as in progress, not as a failure.
+		attempts := offering.Retry.MaxAttempts
+		if attempts < 1 {
+			attempts = 1
+		}
+		timeout = timeout*time.Duration(attempts) +
+			offering.Retry.MaxBackoff*time.Duration(attempts) +
+			offering.UpstreamQueueTimeout
 	}
 	return executor.clock().Add(timeout)
 }
@@ -1880,7 +1889,11 @@ func (executor *Executor) taskWaitDeadline(command chat.ToolCommand, offering ge
 func (executor *Executor) awaitTask(command chat.ToolCommand, taskID generation.TaskID,
 	deadline time.Time, err error) (chat.ToolResult, error) {
 	if !executor.clock().Before(deadline) {
-		return executor.generationFailure(command, string(taskID)), err
+		// The wait ran out while the Task's state was last seen running: report
+		// it as still in progress rather than a failure (#460 review 4). The
+		// pending result is what the model sees; the read error is deliberately
+		// not surfaced as a tool failure, so the turn can end cleanly.
+		return executor.taskPending(command, string(taskID)), nil
 	}
 	return chat.ToolResult{TaskID: string(taskID), AwaitTask: true, WaitUntil: deadline}, err
 }
@@ -1975,11 +1988,10 @@ func (executor *Executor) wait(
 			), errors.New(detail)
 		}
 		if !executor.clock().Before(deadline) {
-			detail := executor.localized(command, executor.chat.Presentation.Messages.GenerationFailed)
-			return executor.generationFailure(
-				command,
-				string(taskID),
-			), errors.New(detail)
+			// The Task is still running or queued upstream: say so instead of
+			// reporting a generation failure, and let the Agent tell the person
+			// to keep waiting (#460 review 4).
+			return executor.taskPending(command, string(taskID)), nil
 		}
 		return chat.ToolResult{TaskID: string(taskID), AwaitTask: true, WaitUntil: deadline}, nil
 	}
@@ -2219,6 +2231,31 @@ func (executor *Executor) failureMessage(
 	failure *generation.Failure,
 ) string {
 	return LocalizedFailureMessage(executor.chat, metered, failure, executor.localizeText(command))
+}
+
+// taskPending is the tool result for a Task that is still running or queued
+// when the turn's wait deadline passed. It is not a failure: it carries the
+// Task ID and the Schema's pending text so the Agent can tell the person to
+// keep waiting, and the turn can end cleanly (#468, #460 review 4).
+func (executor *Executor) taskPending(
+	command chat.ToolCommand,
+	taskID string,
+) chat.ToolResult {
+	message := executor.localized(command, executor.chat.Presentation.Messages.GenerationPending)
+	if message == "" {
+		message = executor.localized(command, executor.chat.Presentation.Messages.GenerationError)
+	}
+	message = strings.ReplaceAll(message, "{task_id}", taskID)
+	payload := map[string]any{
+		command.Tool.ResultFields.TaskID: taskID,
+		"pending":                        true,
+		"message":                        message,
+	}
+	content, _ := json.Marshal(payload)
+	return chat.ToolResult{
+		TaskID:       taskID,
+		AgentContent: string(content),
+	}
 }
 
 func (executor *Executor) generationFailure(

@@ -74,7 +74,7 @@ func splatAgentHarness(t *testing.T, mode string) (*generationtool.Executor, cha
 		t.Fatal(err)
 	}
 	var raw bytes.Buffer
-	if err := png.Encode(&raw, image.NewNRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+	if err := png.Encode(&raw, image.NewNRGBA(image.Rect(0, 0, 32, 32))); err != nil {
 		t.Fatal(err)
 	}
 	asset, err := inputs.UploadAsset(context.Background(), "owner-a", generation.InputAssetUpload{Body: &raw, MediaType: "image/png", AssetType: "image", MaxBytes: 1024})

@@ -40,7 +40,7 @@ func TestSourceModelLimitIsDeclaredOnceAndFillsRequirementCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	rigging, _ := product.Get("meshy/processing/rigging")
-	if rigging.SourceModelLimit == nil || rigging.SourceModelLimit.MaxTriangles != 320000 {
+	if rigging.SourceModelLimit == nil || rigging.SourceModelLimit.MaxTriangles != 380000 {
 		t.Fatalf("rigging limit = %+v", rigging.SourceModelLimit)
 	}
 	requirements := func(c *catalog.Catalog) string {
@@ -52,14 +52,14 @@ func TestSourceModelLimitIsDeclaredOnceAndFillsRequirementCopy(t *testing.T) {
 		}
 		return ""
 	}
-	if text := requirements(product); !strings.Contains(text, "最多 320000 个三角面") || strings.Contains(text, "{limit}") {
+	if text := requirements(product); !strings.Contains(text, "最多 380000 个三角面") || strings.Contains(text, "{limit}") {
 		t.Fatalf("requirements = %q", text)
 	}
 	texts, err := catalog.NewTextLocalizer(product.Application())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if english := texts.Text("en", requirements(product)); !strings.Contains(english, "at most 320000 triangle faces") || strings.Contains(english, "{limit}") {
+	if english := texts.Text("en", requirements(product)); !strings.Contains(english, "at most 380000 triangle faces") || strings.Contains(english, "{limit}") {
 		t.Fatalf("english requirements = %q", english)
 	}
 	// Changing the one declaration changes the copy and its translation, and the
@@ -83,7 +83,7 @@ func TestSourceModelLimitIsDeclaredOnceAndFillsRequirementCopy(t *testing.T) {
 	// Requirement copy never spells the number itself.
 	raw := readDefaultCatalogDocument(t)
 	encoded, _ := json.Marshal(catalogOffering(t, raw, "meshy/processing/rigging"))
-	if strings.Contains(string(encoded), "320000 个") {
+	if strings.Contains(string(encoded), "380000 个") {
 		t.Fatalf("rigging offering still spells the ceiling in copy")
 	}
 }
@@ -181,7 +181,7 @@ func TestCatalogAcceptsDecimalTriangleFactors(t *testing.T) {
 	}
 	rigging, _ := product.Get("meshy/processing/rigging")
 	budgets := schema.FormatTopologyBudgets(remesh.OutputTriangles.CompatibleFaceBudgets(*rigging.SourceModelLimit))
-	if budgets != "quad ≤ 142222 / triangle ≤ 320000" { // 320000 / 2.25 = 142222.2
+	if budgets != "quad ≤ 168888 / triangle ≤ 380000" { // 380000 / 2.25 = 168888.8
 		t.Fatalf("compatible budgets = %q", budgets)
 	}
 }

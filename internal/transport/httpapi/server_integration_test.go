@@ -9,6 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"math"
 	"mime/multipart"
@@ -2066,7 +2069,9 @@ func uploadInputAsset(t *testing.T, baseURL, owner string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = part.Write([]byte("\x89PNG\r\n\x1a\nreference"))
+	// #460 B16: Meshy's image-to-3d checks the decoded pixels of its reference
+	// pictures (each side >= 32 px), so the fixture is a real PNG.
+	_, _ = part.Write(testReferencePNG(t, 32, 32))
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -2333,4 +2338,21 @@ func (port assetListReferenceAssets) ResolveInputAsset(ctx context.Context,
 		reference.IsCrop = true
 	}
 	return reference, true, nil
+}
+
+// testReferencePNG is a real PNG of the given size, used where a Provider
+// decodes the pixels of an uploaded reference picture.
+func testReferencePNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	picture := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			picture.Set(x, y, color.RGBA{R: 0x20, G: 0x40, B: 0x60, A: 0xff})
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, picture); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }

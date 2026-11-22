@@ -11,9 +11,12 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
 )
 
-func loadLiveCandidate(t *testing.T) ([]wirefixture.Exchange, wirefixture.Policy) {
+// loadLiveCandidate loads one committed capture by its file base name
+// ("meshy-text-to-3d" is the 2026-10-26 capture, "meshy-text-to-3d-2026-11-22"
+// the 2026-11-22 one).
+func loadLiveCandidate(t *testing.T, base string) ([]wirefixture.Exchange, wirefixture.Policy) {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/meshy-text-to-3d.candidate.json")
+	raw, err := os.ReadFile("testdata/" + base + ".candidate.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +24,7 @@ func loadLiveCandidate(t *testing.T) ([]wirefixture.Exchange, wirefixture.Policy
 	if err := json.Unmarshal(raw, &exchanges); err != nil {
 		t.Fatal(err)
 	}
-	policyRaw, err := os.ReadFile("testdata/meshy-text-to-3d.policy.json")
+	policyRaw, err := os.ReadFile("testdata/" + base + ".policy.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,8 +35,11 @@ func loadLiveCandidate(t *testing.T) ([]wirefixture.Exchange, wirefixture.Policy
 	return exchanges, policy
 }
 
+// The 2026-10-26 capture stays as historical evidence of the wire this
+// platform used before #460; its create requests still carry enable_pbr /
+// pose_mode on the preview and ai_model on the refine.
 func TestMeshyLiveCandidateReplaysWholeWire(t *testing.T) {
-	exchanges, policy := loadLiveCandidate(t)
+	exchanges, policy := loadLiveCandidate(t, "meshy-text-to-3d")
 	if len(exchanges) != 67 {
 		t.Fatalf("live candidate exchanges = %d, want the reviewed 67", len(exchanges))
 	}

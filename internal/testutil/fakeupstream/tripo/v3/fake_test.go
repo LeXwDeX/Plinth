@@ -198,6 +198,11 @@ func textBody() map[string]any {
 	return map[string]any{"model": "v3.1-20260211", "prompt": "a robot"}
 }
 
+// convertBody is a models/convert request of the fixed format the fake exports.
+func convertBody() map[string]any {
+	return map[string]any{"input": "https://example.test/model.glb", "format": "GLTF"}
+}
+
 // deliveryErr runs Plinth's delivery check over fetched bytes.
 func deliveryErr(t *testing.T, data []byte, role, variant, mediaType string) error {
 	t.Helper()
@@ -911,5 +916,177 @@ func TestMultiviewToModelValidatesInputsAndFinishes(t *testing.T) {
 	_, body := f.finish(id, key)
 	if got := field(t, body, "data", "type"); got != "multiview_to_model" {
 		t.Fatalf("type = %v", got)
+	}
+}
+
+// #460: a convert child can be made to end failed, cancelled or unknown, and a
+// failed or cancelled task reports no credits (Billing: "Failed and cancelled
+// tasks are not charged.", read 2026-11-22). The other kinds ignore the word.
+func TestConvertTaskOutcomeScenarios(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, tc := range map[string]struct {
+		key     string
+		headers []string
+		want    string
+	}{
+		"failed by header":    {key, []string{"X-Fake-Scenario", "convert-task-failed"}, statusFailed},
+		"cancelled by header": {key, []string{"X-Fake-Scenario", "convert-task-canceled"}, statusCancelled},
+		"unknown by header":   {key, []string{"X-Fake-Scenario", "convert-task-unknown"}, statusUnknown},
+		"failed by key":       {"fake-convert-task-failed", nil, statusFailed},
+		"cancelled by key":    {"fake-convert-task-canceled", nil, statusCancelled},
+	} {
+		t.Run(name, func(t *testing.T) {
+			id := f.create("/models/convert", convertBody(), tc.key, tc.headers...)
+			var data map[string]any
+			for i := 0; i < 4; i++ {
+				_, _, body := f.do("GET", "/tasks/"+id, tc.key, nil)
+				data, _ = fakeupstream.DigMap(body, "data")
+			}
+			if data["status"] != tc.want {
+				t.Fatalf("terminal poll = %v, want %s", data["status"], tc.want)
+			}
+			if tc.want == statusFailed || tc.want == statusCancelled {
+				if credits, _ := data["credits_consumed"].(float64); credits != 0 {
+					t.Fatalf("a %s conversion reports %v credits, want 0", tc.want, credits)
+				}
+			}
+			if tc.want == statusFailed {
+				if _, has := data["error_code"]; !has {
+					t.Fatalf("a failed task carries no error_code: %v", data)
+				}
+			}
+		})
+	}
+	// A generation task is not a conversion: the convert word leaves it alone.
+	id := f.create("/generation/text-to-model", textBody(), key, "X-Fake-Scenario", "convert-task-failed")
+	_, _, body := f.do("GET", "/tasks/"+id, key, nil)
+	if got := field(t, body, "data", "status"); got == statusFailed {
+		t.Fatalf("a generation task answered the convert scenario: %v", body)
+	}
+}
+
+// #460: the two 429 answers can be injected without a Retry-After header, so
+// the client's own backoff is exercised. The header form is per request; the key
+// form resolves to the shared scenario word.
+func TestRateLimitWithoutRetryAfter(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	for name, tc := range map[string]struct {
+		key     string
+		headers []string
+		code    float64
+	}{
+		"request rate":     {key, []string{"X-Fake-Scenario", "rate-limit-no-retry-after"}, 1007},
+		"concurrency pool": {key, []string{"X-Fake-Scenario", "concurrency-limit-no-retry-after"}, 2000},
+		"concurrency key":  {"fake-concurrency-limit", nil, 2000},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, header, body := f.do("POST", "/models/convert", tc.key, convertBody(), tc.headers...)
+			if status != http.StatusTooManyRequests {
+				t.Fatalf("status %d body %v", status, body)
+			}
+			if code := field(t, body, "code").(float64); code != tc.code {
+				t.Fatalf("code = %v, want %v", code, tc.code)
+			}
+			if name == "concurrency key" {
+				if header.Get("Retry-After") == "" {
+					t.Fatalf("the key form must keep the documented Retry-After: %v", header)
+				}
+				return
+			}
+			if header.Get("Retry-After") != "" {
+				t.Fatalf("Retry-After = %q, want none", header.Get("Retry-After"))
+			}
+		})
+	}
+}
+
+// #460: a free upload creates no task, so a failed upload is a plain transport
+// failure (500), never a task-creation refusal.
+func TestUploadFailureScenario(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "model.glb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("glb-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest("POST", f.base()+"/files", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+key)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("X-Fake-Scenario", "upload-failed")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", response.StatusCode)
+	}
+	// Without the word the same upload succeeds.
+	fresh := &bytes.Buffer{}
+	second := multipart.NewWriter(fresh)
+	part2, err := second.CreateFormFile("file", "model.glb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part2.Write([]byte("glb-bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := http.NewRequest("POST", f.base()+"/files", fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain.Header.Set("Authorization", "Bearer "+key)
+	plain.Header.Set("Content-Type", second.FormDataContentType())
+	response2, err := http.DefaultClient.Do(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response2.Body.Close()
+	if response2.StatusCode != http.StatusOK {
+		t.Fatalf("plain upload status = %d, want 200", response2.StatusCode)
+	}
+}
+
+// #468: the account concurrency pool is shared by generation and conversion
+// jobs. When it is full, task creation answers 429 code 2000 with Retry-After;
+// a job that reaches a terminal poll frees its slot.
+func TestAccountConcurrencyPoolRefusesCreationWhenFull(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: 1})
+	first := f.create("/generation/text-to-model", textBody(), key)
+	status, header, body := f.do(http.MethodPost, "/generation/text-to-model", key, textBody())
+	if status != http.StatusTooManyRequests || header.Get("Retry-After") == "" ||
+		field(t, body, "code").(float64) != 2000 {
+		t.Fatalf("full pool = %d %v %v", status, header, body)
+	}
+	f.finish(first, key)
+	second := f.create("/generation/text-to-model", textBody(), key)
+	if second == "" {
+		t.Fatal("creation still refused after the first job finished")
+	}
+}
+
+func TestAccountConcurrencyPoolIsSharedWithConversions(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: 1})
+	parent := f.create("/generation/text-to-model", textBody(), key)
+	if status, _, body := f.do(http.MethodPost, "/models/convert", key, map[string]any{"input": parent, "format": "GLTF"}); status != http.StatusTooManyRequests ||
+		field(t, body, "code").(float64) != 2000 {
+		t.Fatalf("convert under a full pool = %d %v", status, body)
+	}
+	f.finish(parent, key)
+	if status, _, body := f.do(http.MethodPost, "/models/convert", key, map[string]any{"input": parent, "format": "GLTF"}); status != http.StatusOK {
+		t.Fatalf("convert after the pool freed = %d %v", status, body)
 	}
 }

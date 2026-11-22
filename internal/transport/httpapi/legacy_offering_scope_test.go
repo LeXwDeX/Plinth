@@ -20,7 +20,7 @@ func TestLegacyInputApplicabilityRejectsSuppliedUnsupportedFields(t *testing.T) 
 		id     generation.OfferingID
 		fields []string
 	}{
-		{"tripo/processing/rigging", []string{"model_url", "height_meters", "texture_image_url"}},
+		{"tripo/processing/rigging", []string{"model_url", "height_meters"}},
 		{"tripo/processing/texture", []string{"model_url", "target_formats", "enable_pbr", "resolution"}},
 		{"tripo/processing/animation", []string{"action_id"}},
 	} {

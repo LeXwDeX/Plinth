@@ -143,10 +143,13 @@ func validateOffering(
 	actionParameters := 0
 	for _, parameter := range offering.Parameters {
 		// The input asset service checks image_input for every protocol (#276);
-		// Meshy additionally checks the exact frozen bytes, which needs a single
-		// asset.
-		if parameter.ImageInput != nil && protocols[offering.AdapterKey] == "meshy" && parameter.Type != "asset" {
-			return fmt.Errorf("Offering %q 的 Meshy image_input 只支持单个资产参数", offering.ID)
+		// Meshy additionally checks the exact frozen bytes, so it needs a single
+		// asset — or a reference-image array, where it checks every picture of
+		// the list (#460 B16: image-to-3d and multi-image take 1–4 pictures).
+		if parameter.ImageInput != nil && protocols[offering.AdapterKey] == "meshy" &&
+			parameter.Type != "asset" &&
+			!(parameter.Type == "asset-array" && parameter.Semantic == "reference-image") {
+			return fmt.Errorf("Offering %q 的 Meshy image_input 只支持单个资产或参考图数组参数", offering.ID)
 		}
 		// Every image-to-image Offering projects its sources through imagewire, the one place that flattens.
 		if parameter.AlphaFlatten != nil && offering.Capability != schemacontract.ImageToImage {

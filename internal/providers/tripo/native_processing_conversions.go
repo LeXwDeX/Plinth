@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,24 +21,17 @@ import (
 // table is maintained in the adapter. Each child supplies one required slot.
 const maximumNativeConversionFormats = 8
 
-// An explicit HTTP 429 refuses a create request without accepting it (Tripo
-// Rate Limits page, read 2026-10-22: code 1007 for the request rate, code 2000
-// with Retry-After for a full concurrency pool; back off from 1 s, doubling,
-// at most 32 s, up to 5 retries). The same private child is sent again under a
-// new permit. Every refusal is one private progress stage, so a run's retry
-// budget is also bounded by the 18-point export band.
-const (
-	conversionItemRateLimited         = "rate_limited"
-	maximumConversionRateLimitRetries = 5
-	maximumConversionRateLimitBackoff = 32 * time.Second
-	maximumConversionRateLimitWait    = 5 * time.Minute
-	nativeConversionProgressBand      = 18
-)
+// nativeConversionProgressBand is how many progress points the private export
+// steps of a run share. The retry budgets are per format and unbounded by this
+// band, so the reported progress is clamped rather than made to fit.
+const nativeConversionProgressBand = 18
 
 // nativeConversionProgressUnits is the number of private stages of a run: a
-// submission and a success per format plus the refusal budget.
+// submission and a success per format, plus one refusal per format. It fixes
+// the pacing of the reported progress; a run that spends more retries than that
+// simply stops advancing.
 func nativeConversionProgressUnits(count int) int {
-	return 2*count + min(maximumConversionRateLimitRetries, nativeConversionProgressBand-2*count)
+	return 2*count + min(maximumConversionRateLimitRetries*count, nativeConversionProgressBand-2*count)
 }
 
 // explicitRateLimit reports an unambiguous HTTP 429 refusal and its Retry-After.
@@ -57,7 +51,7 @@ func conversionRateLimitWait(retryAfter time.Duration, retry int) time.Duration 
 	if retryAfter > 0 {
 		return min(retryAfter, maximumConversionRateLimitWait)
 	}
-	return min(time.Second<<(retry-1), maximumConversionRateLimitBackoff)
+	return conversionRetryBackoff(retry)
 }
 
 type nativeConversionOptions struct {
@@ -105,6 +99,37 @@ type nativeConversionSource struct {
 	Alias  string `json:"alias"`
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
+}
+
+// nativeFormatNames are the export formats a native conversion declaration
+// produces, in declaration order (the frozen order every private step follows).
+func nativeFormatNames(c *nativeConversionOptions) []string {
+	names := make([]string, 0, len(c.Formats))
+	for _, f := range c.Formats {
+		names = append(names, f.Format)
+	}
+	return names
+}
+
+// failedFormat returns the first format whose retries are exhausted, or "".
+func failedFormat(names []string, conversions map[string]conversionItem) string {
+	for _, format := range names {
+		if item, ok := conversions[format]; ok && item.Status == conversionItemFailed {
+			return format
+		}
+	}
+	return ""
+}
+
+// countSubmitted counts the formats whose child is in flight.
+func countSubmitted(names []string, conversions map[string]conversionItem) int {
+	count := 0
+	for _, format := range names {
+		if item, ok := conversions[format]; ok && item.Status == conversionItemSubmitted {
+			count++
+		}
+	}
+	return count
 }
 
 func nativeConversionControl(o generation.Offering, options providerOptions, name string) bool {
@@ -262,8 +287,7 @@ func nativeConversionCheckpoint(s nativeConversionLedger, o generation.Offering,
 	if c == nil || s.ConversionSource == nil || s.ConversionSource.Alias != c.SourceAlias || !uploadedHashValid(s.ConversionSource.SHA256) || s.ConversionSource.Size <= 0 || s.ConversionSource.Size > c.MaxSourceBytes || len(s.ConversionRequests) != len(s.Conversions) {
 		return nativeProcessingProtocolError()
 	}
-	remaining, inflight := false, false
-	refusals := 0
+	remaining := false
 	remotes := map[string]bool{}
 	for _, id := range reserved {
 		if id != "" {
@@ -276,35 +300,40 @@ func nativeConversionCheckpoint(s nativeConversionLedger, o generation.Offering,
 			remaining = true
 			continue
 		}
-		if remaining || inflight || !validNativeCredit(item.CreditsConsumed) || item.RateLimitRetries < 0 {
-			return nativeProcessingProtocolError()
-		}
-		refusals += item.RateLimitRetries
-		if refusals > 0 && (s.ProgressUnits == 0 || refusals > s.ProgressUnits-2*len(c.Formats)) {
+		// Formats are recorded in the frozen order: once one is missing, no
+		// later format may be present. Several formats may be in flight at once
+		// (bounded concurrency), so an unfinished earlier format does not
+		// invalidate a later one.
+		if remaining || !validNativeCredit(item.CreditsConsumed) ||
+			item.RateLimitRetries < 0 || item.RateLimitRetries > maximumConversionRateLimitRetries ||
+			item.RetryAttempts < 0 || item.RetryAttempts > maximumConversionChildRetries {
 			return nativeProcessingProtocolError()
 		}
 		switch item.Status {
 		case conversionItemDispatching:
-			if item.RemoteID != "" {
+			if item.RemoteID != "" || item.Locator != "" {
 				return nativeProcessingProtocolError()
 			}
-			inflight = true
 		case conversionItemSubmitted:
-			if !uploadedTokenValid(item.RemoteID) {
+			if !uploadedTokenValid(item.RemoteID) || item.Locator != "" {
 				return nativeProcessingProtocolError()
 			}
-			inflight = true
 		case conversionItemDone:
 			if !uploadedTokenValid(item.RemoteID) || item.Locator == "" {
 				return nativeProcessingProtocolError()
 			}
 		case conversionItemRateLimited:
-			if item.RemoteID != "" || item.RateLimitRetries < 1 || item.Locator != "" {
+			if item.RemoteID != "" || item.Locator != "" || item.RateLimitRetries < 1 {
 				return nativeProcessingProtocolError()
 			}
-			inflight = true
-		case conversionItemFailed:
-			inflight = true
+		case conversionItemRetryPending:
+			if item.RemoteID != "" || item.Locator != "" {
+				return nativeProcessingProtocolError()
+			}
+		case conversionItemFailed, conversionItemUnknown:
+			if item.RemoteID != "" || item.Locator != "" {
+				return nativeProcessingProtocolError()
+			}
 		default:
 			return nativeProcessingProtocolError()
 		}
@@ -411,12 +440,20 @@ func nativeConversionRunning(request generation.ObserveRequest, s *nativeConvers
 		if item.Status == conversionItemSubmitted {
 			steps++
 		}
+		// A format waiting to be resubmitted, or one whose outcome is unknown,
+		// is one more stage: the reported progress must advance with the state,
+		// or the coordinator would discard the round as stale.
+		if item.Status == conversionItemRetryPending || item.Status == conversionItemUnknown {
+			steps++
+		}
 		if item.Status == conversionItemDone {
 			steps += 2
 		}
 	}
 	obs.Phase = generation.UpstreamRunning
-	obs.Progress = 80 + nativeConversionProgressBand*steps/units
+	// A run that spends more retries than the band allows stops advancing at
+	// the top of the export band rather than reporting past it.
+	obs.Progress = min(80+nativeConversionProgressBand*steps/units, 80+nativeConversionProgressBand)
 	obs.Artifacts = nil
 	return nativeConversionObservation(request, s, obs)
 }
@@ -434,12 +471,11 @@ func nativeConversionFailure(request generation.ObserveRequest, s *nativeConvers
 func refusedNativeConversion(request generation.ObserveRequest, run *nativeConversionRun, base generation.Observation, count int, format string, retries int, retryAfter time.Duration, permit *generation.DispatchReceipt, cause *generation.Failure) generation.Observation {
 	s := run.ledger
 	permit.Result = generation.DispatchResultNotDispatched
-	used := 0
-	for _, item := range s.Conversions {
-		used += item.RateLimitRetries
-	}
-	if used >= s.ProgressUnits-2*count {
-		s.Conversions[format] = conversionItem{Status: conversionItemFailed, RateLimitRetries: retries}
+	if retries >= maximumConversionRateLimitRetries {
+		item := s.Conversions[format]
+		item.Status = conversionItemFailed
+		item.RemoteID = ""
+		s.Conversions[format] = item
 		obs := nativeConversionFailure(request, run, base, "Tripo 必需格式转换持续被限流，有限重试已用尽")
 		refusal := *cause
 		refusal.Class, refusal.Retryable, refusal.Ambiguous, refusal.RetryAfter = generation.FailureRateLimited, false, false, 0
@@ -456,9 +492,15 @@ func refusedNativeConversion(request generation.ObserveRequest, run *nativeConve
 	return obs
 }
 
-func (a *Adapter) observeNativeConversions(ctx context.Context, request generation.ObserveRequest, options providerOptions, run *nativeConversionRun, base generation.Observation) (generation.Observation, error) {
+func (a *Adapter) observeNativeConversions(ctx context.Context, request generation.ObserveRequest, options providerOptions, run *nativeConversionRun, base generation.Observation) (observation generation.Observation, err error) {
 	c := options.NativeConversion
 	s := run.ledger
+	a.touchPool(request.Offering, request.AttemptID)
+	defer func() {
+		if err == nil && terminalPhase(observation.Phase) {
+			a.releasePool(request.Offering, request.AttemptID)
+		}
+	}()
 	if base.Phase != generation.UpstreamCompleted {
 		if len(s.Conversions) > 0 && (base.Phase == generation.UpstreamAccepted || base.Phase == generation.UpstreamRunning) {
 			return generation.Observation{}, nativeProcessingProtocolError()
@@ -484,107 +526,229 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 	if s.Conversions == nil {
 		s.Conversions = map[string]conversionItem{}
 		s.ConversionRequests = map[string]json.RawMessage{}
-		s.ProgressUnits = nativeConversionProgressUnits(len(c.Formats))
 	}
-	if format, item, ok := inflightConversion(s.Conversions); ok {
-		child, err := a.observeNativeTask(ctx, options, item.RemoteID, string(request.AttemptID)+":convert:"+format)
+	names := nativeFormatNames(c)
+	// A restart begins with an empty pool: re-register the children the ledger
+	// still shows as submitted (Readopt may exceed the limit for one cycle).
+	if countSubmitted(names, s.Conversions) > 0 {
+		a.readoptPool(request.Offering, request.AttemptID)
+	}
+	// Poll every in-flight child (bounded concurrency, stable order). A child
+	// that ended failed or cancelled enters the backoff wait; the format is
+	// resubmitted only while its own budget lasts (Tripo bills neither). One
+	// round that learned an outcome reports it and dispatches nothing, so a
+	// stage always belongs to exactly one child.
+	changed, backoff := false, false
+	for _, f := range c.Formats {
+		item, ok := s.Conversions[f.Format]
+		if !ok || item.Status != conversionItemSubmitted {
+			continue
+		}
+		child, err := a.observeNativeTask(ctx, options, item.RemoteID, string(request.AttemptID)+":convert:"+f.Format)
 		if err != nil {
 			return generation.Observation{}, err
 		}
-		if len(child.CreditsConsumed) > 0 {
-			item.CreditsConsumed = bytes.Clone(child.CreditsConsumed)
+		status := conversionStatusWord(child.Status)
+		rule, known := declaredStatusRule(a.statusMapping, status)
+		if !known {
+			return generation.Observation{}, nativeProcessingProtocolError()
+		}
+		if a.unknownStatusExpired(item.RemoteID, status, rule) {
+			item.Attempts = append(item.Attempts, conversionAttempt{
+				RemoteID:        item.RemoteID,
+				CreditsConsumed: bytes.Clone(child.CreditsConsumed),
+				Outcome:         conversionAttemptUnknown,
+			})
+			item.Status = conversionItemUnknown
+			item.Locator = ""
+			item.RemoteID = ""
+			s.Conversions[f.Format] = item
+			return nativeConversionFailure(request, run, base, "Tripo 必需格式转换结果不明"), nil
 		}
 		phase, _ := conversionChildPhase(a.statusMapping, child.Status)
-		switch phase {
-		case generation.UpstreamCompleted:
-			item.Locator = firstHTTPOutput(child.Output, "model_url")
-			if item.Locator == "" {
-				return generation.Observation{}, nativeProcessingProtocolError()
-			}
-			item.Status = conversionItemDone
-		case generation.UpstreamFailed, generation.UpstreamCanceled:
-			item.Status = conversionItemFailed
-			s.Conversions[format] = item
-			return nativeConversionFailure(request, run, base, "Tripo 必需格式转换失败"), nil
+		locator := ""
+		if phase == generation.UpstreamCompleted {
+			locator = firstHTTPOutput(child.Output, "model_url")
 		}
-		s.Conversions[format] = item
+		previous := item.Status
+		updated, wait := applyConversionChild(item, phase, locator, child.CreditsConsumed)
+		s.Conversions[f.Format] = updated
+		if updated.Status != previous || len(updated.Attempts) != len(item.Attempts) {
+			changed = true
+		}
+		if wait > 0 {
+			backoff = true
+		}
+	}
+	if failed := failedFormat(names, s.Conversions); failed != "" {
+		// A required format spent its retry budget: the step fails now, before
+		// another paid export is started.
+		return nativeConversionFailure(request, run, base, "Tripo 必需格式转换失败"), nil
+	}
+	if backoff {
+		// A child just entered its retry backoff: let the wait pass first
+		// (official 1, 2, 4… seconds). This comes before the changed return
+		// because entering the backoff also records an attempt: the two always
+		// fire together and neither may dispatch, so only the wait differs.
+		obs := nativeConversionRunning(request, run, base, len(c.Formats))
+		obs.PollAfter = conversionRetryWait(s.Conversions)
+		return obs, nil
+	}
+	if changed {
+		// A child reached an outcome this round: report it and dispatch
+		// nothing, so a stage belongs to exactly one child. The refresh and the
+		// claims follow in the next round.
 		return nativeConversionRunning(request, run, base, len(c.Formats)), nil
 	}
-	for _, f := range c.Formats {
-		retries := 0
-		if item, ok := s.Conversions[f.Format]; ok {
-			if item.Status == conversionItemDone {
-				continue
+	if allFormatsDone(names, s.Conversions) {
+		// Every required format is converted: refresh below.
+	} else if inflight := countSubmitted(names, s.Conversions); inflight < a.conversionConcurrency(options) {
+		if format, ok := nextConversionDispatch(names, s.Conversions); ok {
+			if _, ok := generation.DispatchCheckpointerFromContext(ctx); !ok {
+				return generation.Observation{}, failure(generation.FailureRejected, false, "Tripo 私有转换缺少持久执行派发许可")
 			}
-			if item.Status != conversionItemRateLimited {
-				return nativeConversionFailure(request, run, base, "Tripo 必需转换结果无法确认"), nil
+			if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
+				return generation.Observation{}, err
 			}
-			retries = item.RateLimitRetries
-		}
-		if _, ok := generation.DispatchCheckpointerFromContext(ctx); !ok {
-			return generation.Observation{}, failure(generation.FailureRejected, false, "Tripo 私有转换缺少持久执行派发许可")
-		}
-		if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
-			return generation.Observation{}, err
-		}
-		binding, err := a.bindNativeConversionSource(ctx, request.Offering, source, c)
-		if err != nil {
-			return generation.Observation{}, err
-		}
-		if s.ConversionSource != nil && *s.ConversionSource != binding {
-			return generation.Observation{}, failure(generation.FailureIntegrity, false, "Tripo 处理产物字节与冻结转换来源不一致")
-		}
-		s.ConversionSource = &binding
-		body, err := nativeConversionBody(request.Offering, c, request.Input, source.Locator, f.Format)
-		if err != nil {
-			return generation.Observation{}, err
-		}
-		s.ConversionRequests[f.Format], _ = json.Marshal(body)
-		s.Conversions[f.Format] = conversionItem{Status: conversionItemDispatching, RateLimitRetries: retries}
-		permit, err := generation.PrivateDispatchPermit(ctx, generation.DispatchIntent{Bytes: run.encode()})
-		if err != nil {
-			return generation.Observation{}, err
-		}
-		var raw json.RawMessage
-		key := run.submissionKey + ":convert:" + f.Format
-		if err := a.client.DoJSON(ctx, http.MethodPost, options.ConvertEndpoint, body, key, &raw, true); err != nil {
-			if retryAfter, refused := explicitRateLimit(err); refused && permit != nil && s.ProgressUnits != 0 {
+			binding, err := a.bindNativeConversionSource(ctx, request.Offering, source, c)
+			if err != nil {
+				return generation.Observation{}, err
+			}
+			if s.ConversionSource != nil && *s.ConversionSource != binding {
+				return generation.Observation{}, failure(generation.FailureIntegrity, false, "Tripo 处理产物字节与冻结转换来源不一致")
+			}
+			body, err := nativeConversionBody(request.Offering, c, request.Input, source.Locator, format)
+			if err != nil {
+				return generation.Observation{}, err
+			}
+			previousRequest, hadRequest := s.ConversionRequests[format]
+			// Fixed order (C1): take the upstream slot, then change the entry
+			// state, then take the dispatch permit, then send. A full pool
+			// changes nothing and returns a running observation with the upstream
+			// queue clock.
+			slot, acquired, wait := a.acquirePool(ctx, request.Offering, request.AttemptID)
+			if !acquired {
+				return a.poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), request.Offering, wait), nil
+			}
+			if s.ProgressUnits == 0 {
+				s.ProgressUnits = nativeConversionProgressUnits(len(c.Formats))
+			}
+			s.ConversionSource = &binding
+			s.ConversionRequests[format], _ = json.Marshal(body)
+			previous, existed := s.Conversions[format]
+			attempts := previous.RetryAttempts
+			if previous.Status == conversionItemRetryPending || previous.Status == conversionItemRateLimited {
+				attempts++
+			}
+			s.Conversions[format] = conversionItem{
+				Status:           conversionItemDispatching,
+				RateLimitRetries: previous.RateLimitRetries,
+				RetryAttempts:    attempts,
+				Attempts:         previous.Attempts,
+			}
+			key := run.submissionKey + ":convert:" + format
+			if attempts > 0 {
+				key += ":retry:" + strconv.Itoa(attempts)
+			}
+			permit, err := generation.PrivateDispatchPermit(ctx, generation.DispatchIntent{Bytes: run.encode()})
+			if err != nil {
+				slot.Release()
+				return generation.Observation{}, err
+			}
+			var raw json.RawMessage
+			if err := a.client.DoJSON(ctx, http.MethodPost, options.ConvertEndpoint, body, key, &raw, true); err != nil {
+				// The account pool is full (code 2000) and this path is gated by
+				// the pool: restore the entry, release the slot and queue again
+				// without spending the retry budget (C4). Without a pool the
+				// historical per-format budget below applies.
+				if a.poolEnabled() {
+					if retryAfter, full := poolFullRetryAfter(err); full && permit != nil {
+						permit.Result = generation.DispatchResultNotDispatched
+						restoreConversionItem(s.Conversions, format, previous, existed)
+						if hadRequest {
+							s.ConversionRequests[format] = previousRequest
+						} else {
+							delete(s.ConversionRequests, format)
+						}
+						if len(s.Conversions) == 0 {
+							// Nothing was ever dispatched: keep the ledger empty so the
+							// next round starts from a clean checkpoint.
+							s.ConversionSource = nil
+							s.ProgressUnits = 0
+						}
+						slot.Release()
+						obs := a.poolQueueObservation(nativeConversionRunning(request, run, base, len(c.Formats)), request.Offering, retryAfter)
+						obs.Dispatch = permit
+						return obs, nil
+					}
+				}
+				if retryAfter, refused := explicitRateLimit(err); refused && permit != nil && s.ProgressUnits != 0 {
+					var provider *generation.ProviderError
+					errors.As(err, &provider)
+					return refusedNativeConversion(request, run, base, len(c.Formats), format, previous.RateLimitRetries, retryAfter, permit, provider.Failure), nil
+				}
+				return generation.Observation{}, err
+			}
+			data, err := a.rigCheckData(raw)
+			if err != nil {
 				var provider *generation.ProviderError
-				errors.As(err, &provider)
-				return refusedNativeConversion(request, run, base, len(c.Formats), f.Format, retries, retryAfter, permit, provider.Failure), nil
+				if errors.As(err, &provider) && provider.Failure != nil && provider.Failure.Class != generation.FailureProtocol {
+					s.Conversions[format] = conversionItem{
+						Status:           conversionItemFailed,
+						RateLimitRetries: previous.RateLimitRetries,
+						RetryAttempts:    previous.RetryAttempts,
+						Attempts:         previous.Attempts,
+					}
+					obs := nativeConversionFailure(request, run, base, "Tripo 必需格式转换请求被拒绝")
+					// Keep upstream diagnostics private while exposing only bounded product text.
+					rejection := *provider.Failure
+					rejection.SafeDetail = obs.Failure.SafeDetail
+					obs.Failure = &rejection
+					obs.Dispatch = permit
+					return obs, nil
+				}
+				return generation.Observation{}, submissionUnknown("Tripo 私有转换创建响应无法确认，已停止重发")
 			}
-			return generation.Observation{}, err
-		}
-		data, err := a.rigCheckData(raw)
-		if err != nil {
-			var provider *generation.ProviderError
-			if errors.As(err, &provider) && provider.Failure != nil && provider.Failure.Class != generation.FailureProtocol {
-				s.Conversions[f.Format] = conversionItem{Status: conversionItemFailed}
-				obs := nativeConversionFailure(request, run, base, "Tripo 必需格式转换请求被拒绝")
-				// Keep upstream diagnostics private while exposing only bounded product text.
-				rejection := *provider.Failure
-				rejection.SafeDetail = obs.Failure.SafeDetail
-				obs.Failure = &rejection
-				obs.Dispatch = permit
-				return obs, nil
+			var remote string
+			if json.Unmarshal(data["task_id"], &remote) != nil || !uploadedTokenValid(remote) || remote == run.baseRemoteID {
+				return generation.Observation{}, submissionUnknown("Tripo 私有转换创建响应缺少 task_id，已停止重发")
 			}
-			return generation.Observation{}, submissionUnknown("Tripo 私有转换创建响应无法确认，已停止重发")
-		}
-		var remote string
-		if json.Unmarshal(data["task_id"], &remote) != nil || !uploadedTokenValid(remote) || remote == run.baseRemoteID {
-			return generation.Observation{}, submissionUnknown("Tripo 私有转换创建响应缺少 task_id，已停止重发")
-		}
-		for _, item := range s.Conversions {
-			if item.RemoteID == remote {
-				return generation.Observation{}, submissionUnknown("Tripo 私有转换返回重复任务标识，已停止重发")
+			for _, item := range s.Conversions {
+				if item.RemoteID == remote {
+					return generation.Observation{}, submissionUnknown("Tripo 私有转换返回重复任务标识，已停止重发")
+				}
 			}
+			if run.sourceRemoteID != "" && remote == run.sourceRemoteID {
+				return generation.Observation{}, submissionUnknown("Tripo 私有转换返回来源任务标识，已停止重发")
+			}
+			s.Conversions[format] = conversionItem{
+				Status:           conversionItemSubmitted,
+				RemoteID:         remote,
+				RateLimitRetries: previous.RateLimitRetries,
+				RetryAttempts:    attempts,
+				Attempts:         previous.Attempts,
+			}
+			// The slot now belongs to this attempt's children (C2).
+			a.handoffPool(request.Offering, request.AttemptID)
+			obs := nativeConversionRunning(request, run, base, len(c.Formats))
+			obs.Dispatch = permit
+			return obs, nil
 		}
-		if run.sourceRemoteID != "" && remote == run.sourceRemoteID {
-			return generation.Observation{}, submissionUnknown("Tripo 私有转换返回来源任务标识，已停止重发")
+	}
+	if !allFormatsDone(names, s.Conversions) {
+		// Nothing is in flight, no retry is waiting and no format is left to
+		// start: a required format ended failed (its budget spent) or its
+		// outcome is unknown. The step fails; it never delivers a partial set.
+		if !hasPendingRetry(names, s.Conversions) &&
+			countSubmitted(names, s.Conversions) == 0 &&
+			len(unstartedFormats(names, s.Conversions)) == 0 {
+			return nativeConversionFailure(request, run, base, "Tripo 必需格式转换失败"), nil
 		}
-		s.Conversions[f.Format] = conversionItem{Status: conversionItemSubmitted, RemoteID: remote, RateLimitRetries: retries}
+		// Still waiting: children in flight or a retry in its backoff.
 		obs := nativeConversionRunning(request, run, base, len(c.Formats))
-		obs.Dispatch = permit
+		if wait := conversionRetryWait(s.Conversions); wait > 0 {
+			obs.PollAfter = wait
+		}
 		return obs, nil
 	}
 	// Refresh URLs through GET only, then recheck the original source bytes. The

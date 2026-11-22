@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 )
 
 // rateLimitPermit records every private dispatch intent. Like the kernel, it
@@ -322,14 +323,26 @@ func TestNativeExportRateLimitCheckpointFailsClosed(t *testing.T) {
 	if err := nativeConversionCheckpoint(valid, r.Offering, r.Input, options); err != nil {
 		t.Fatalf("valid rate-limited ledger rejected: %v", err)
 	}
-	budget := units - 2*len(formats)
+	// #460 A2/A5: every format has its own refusal budget, formats may be in
+	// flight at once, and the new private states are checkpointed.
+	for name, l := range map[string]nativeConversionLedger{
+		"retry pending":          ledger(map[string]conversionItem{"FBX": {Status: conversionItemRetryPending, RetryAttempts: 2, RetryWaitSeconds: 4}}, units),
+		"unknown child":          ledger(map[string]conversionItem{"FBX": {Status: conversionItemUnknown}}, units),
+		"per-format budget":      ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 4}, "OBJ": {Status: conversionItemRateLimited, RateLimitRetries: 4}}, units),
+		"two children in flight": ledger(map[string]conversionItem{"FBX": {Status: conversionItemSubmitted, RemoteID: "child_fbx"}, "OBJ": {Status: conversionItemSubmitted, RemoteID: "child_obj"}}, units),
+	} {
+		if err := nativeConversionCheckpoint(l, r.Offering, r.Input, options); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
+	}
+	budget := maximumConversionRateLimitRetries
 	cases := map[string]nativeConversionLedger{
 		"remote id on a refused child": ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RemoteID: "child", RateLimitRetries: 1}}, units),
+		"remote id on a retry pending": ledger(map[string]conversionItem{"FBX": {Status: conversionItemRetryPending, RemoteID: "child"}}, units),
 		"refusal without a count":      ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited}}, units),
 		"count over the budget":        ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: budget + 1}}, units),
-		"total over the budget":        ledger(map[string]conversionItem{"FBX": {Status: conversionItemDone, RemoteID: "child_fbx", Locator: "https://assets.example/fbx", RateLimitRetries: budget}, "OBJ": {Status: conversionItemRateLimited, RateLimitRetries: 1}}, units),
-		"refusal before another child": ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 1}, "OBJ": {Status: conversionItemSubmitted, RemoteID: "child_obj"}}, units),
-		"legacy ledger with refusal":   ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 1}}, 0),
+		"retries over the budget":      ledger(map[string]conversionItem{"FBX": {Status: conversionItemRetryPending, RetryAttempts: maximumConversionChildRetries + 1}}, units),
+		"unknown child with a locator": ledger(map[string]conversionItem{"FBX": {Status: conversionItemUnknown, Locator: "https://assets.example/fbx"}}, units),
 		"forged progress units":        ledger(map[string]conversionItem{"FBX": {Status: conversionItemRateLimited, RateLimitRetries: 1}}, units+1),
 	}
 	for name, l := range cases {
@@ -337,15 +350,19 @@ func TestNativeExportRateLimitCheckpointFailsClosed(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
+	_ = formats
 }
 
-// Every stage, including each refused child, strictly raises the progress
-// within the private export band for the largest frozen format set.
-func TestNativeExportStagesWithRefusalsStrictlyIncrease(t *testing.T) {
+// Every stage, including each refused child, raises the progress within the
+// private export band and never past it. #460 A2 gives each format its own
+// refusal budget, so a run can spend more stages than the band has points: the
+// reported progress then stops at the top of the band instead of regressing or
+// overflowing.
+func TestNativeExportStagesWithRefusalsNeverRegress(t *testing.T) {
 	for count := 1; count <= maximumNativeConversionFormats; count++ {
 		units := nativeConversionProgressUnits(count)
-		budget := units - 2*count
-		if budget < 1 || budget > maximumConversionRateLimitRetries || units > 18 {
+		budget := maximumConversionRateLimitRetries
+		if units > 18 || units < 2*count {
 			t.Fatalf("count %d: units %d budget %d", count, units, budget)
 		}
 		state := nativeProcessingState{nativeConversionLedger: nativeConversionLedger{Conversions: map[string]conversionItem{}, ProgressUnits: units}}
@@ -353,7 +370,7 @@ func TestNativeExportStagesWithRefusalsStrictlyIncrease(t *testing.T) {
 		last := 80
 		step := func() {
 			obs := nativeConversionRunning(generation.ObserveRequest{}, run, generation.Observation{}, count)
-			if obs.Progress <= last || obs.Progress > 98 {
+			if obs.Progress < last || obs.Progress > 98 {
 				t.Fatalf("count %d: stage %d→%d", count, last, obs.Progress)
 			}
 			last = obs.Progress
@@ -372,5 +389,62 @@ func TestNativeExportStagesWithRefusalsStrictlyIncrease(t *testing.T) {
 				step()
 			}
 		}
+	}
+}
+
+// #468: a full account pool (code 2000) on a native export is not a
+// per-format rate limit. The adapter releases the slot, keeps the export
+// ledger, waits for Retry-After and queues again without spending a retry.
+func TestNativeExportFullPoolQueuesWithoutBudget(t *testing.T) {
+	backend := &rateLimitServer{answer: func(n int, w http.ResponseWriter) bool {
+		if n == 1 {
+			rateLimited(w, "7")
+			return true
+		}
+		return false
+	}}
+	server := backend.start(t)
+	pool := upstreampool.New(upstreampool.Options{})
+	pool.Register("tripo.v3", TripoPoolName, upstreampool.PoolConfig{Limit: 5})
+	adapter := rateLimitAdapter(t, server)
+	adapter.pool = pool
+	adapter.poolID = TripoPoolName
+	r := nativeDeliveryFixture(generation.Rigging)
+	p := &rateLimitPermit{}
+	ctx := generation.WithDispatchCheckpointer(context.Background(), p)
+	accepted, err := adapter.Start(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.settle(t, accepted)
+	q := rigObserve(r, accepted)
+
+	refused, err := adapter.Observe(ctx, q)
+	if err != nil {
+		t.Fatalf("full pool became an error: %v", err)
+	}
+	if refused.Phase != generation.UpstreamRunning || refused.Failure != nil || refused.Queue == nil {
+		t.Fatalf("full pool did not return a queued running observation: %+v", refused)
+	}
+	if refused.Dispatch == nil || refused.Dispatch.Result != generation.DispatchResultNotDispatched {
+		t.Fatalf("full pool did not settle the permit as not dispatched: %+v", refused.Dispatch)
+	}
+	state := conversionState(t, refused.Opaque)
+	item := state.Conversions["FBX"]
+	if item.Status == "rate_limited" || item.RateLimitRetries != 0 {
+		t.Fatalf("full pool spent a per-format retry: %+v", item)
+	}
+	p.settle(t, refused)
+
+	q.Opaque = refused.Opaque
+	submitted, err := adapter.Observe(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.Dispatch == nil || submitted.Dispatch.Result != generation.DispatchResultDispatched || len(backend.converts) != 2 {
+		t.Fatalf("the export did not resume after the pool freed: %+v converts=%v", submitted, backend.converts)
+	}
+	if got := conversionState(t, submitted.Opaque).Conversions["FBX"]; got.Status != conversionItemSubmitted || got.RateLimitRetries != 0 {
+		t.Fatalf("resumed child state %+v", got)
 	}
 }

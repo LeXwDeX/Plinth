@@ -39,7 +39,7 @@ func buildProviderAdapter(
 	assets generation.AssetStore,
 	recoveryStores ...generation.RecoveryStore,
 ) (generation.ProviderPort, error) {
-	return buildProviderAdapterWithTransport(offerings, connection, baseURL, apiKey, timeout, scratchDir, inputs, assets, nil, recoveryStores...)
+	return buildProviderAdapterWithTransport(offerings, connection, baseURL, apiKey, timeout, scratchDir, inputs, assets, nil, nil, recoveryStores...)
 }
 
 func buildChatAgent(
@@ -227,6 +227,7 @@ func TestRemoteProviderAdaptersUseConnectionTransport(t *testing.T) {
 				nil,
 				nil,
 				decorate,
+				nil,
 			); err != nil {
 				t.Fatal(err)
 			}

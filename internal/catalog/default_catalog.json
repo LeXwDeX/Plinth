@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.459-407-380-433-330-445-410-432-456.1",
+    "revision": "2026-11-22.460-468-459.1",
     "terminology": {
       "user_facing": [
         {
@@ -1086,6 +1086,11 @@
                 "min": 402,
                 "max": 402,
                 "class": "insufficient_balance"
+              },
+              {
+                "min": 403,
+                "max": 403,
+                "class": "upstream_denied"
               }
             ],
             "error_fields": {
@@ -1190,7 +1195,8 @@
           "auth_header": "Authorization",
           "auth_prefix": "Bearer ",
           "request_timeout_seconds": 1800,
-          "result_refetch": {"mode": "observe"},
+          "result_refetch": {"mode": "observe", "retention_hours": 168},
+          "concurrency": {"pools": {"model-processing": {"limit_env": "TRIPO_CONVERSION_CONCURRENCY", "default": 5, "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2}, "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600}, "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}}}},
           "capabilities": [
             "text-to-3d",
             "image-to-3d",
@@ -1330,8 +1336,7 @@
               },
               "unknown": {
                 "phase": "running",
-                "class": "upstream_unavailable",
-                "max_consecutive": 20
+                "max_duration_seconds": 300
               }
             }
           }
@@ -10235,6 +10240,7 @@
           "interrupted": "⚠️ 该生成任务已中断。请重新描述需求。",
           "interrupted_prompt": "⚠️ 该生成任务已中断 (prompt: {prompt})。请重新描述需求。",
           "generation_failed": "生成失败",
+          "generation_pending": "任务仍在进行或排队中，请稍后继续查看；任务 ID：{task_id}",
           "generation_failed_by_class": {
             "upstream_queue_timeout": "这一步在服务商的队列里等待太久（超过上游排队等待上限），平台已停止等待，任务记为失败。服务商可能仍会执行并扣除积分，所以系统没有自动重新提交。请如实告诉用户：上游排队过久，可能已经扣费，结果未知。先用 get_task 查看这个任务的最新状态，不要自行重新提交；是否重新生成由用户决定，重新生成会再次计费。",
             "insufficient_balance": "该模型服务商的账户余额不足、已欠费，或没有可用的 API 订阅（未开通，或套餐不含 API 权限），这一步没有执行。请联系管理员处理",
@@ -13175,6 +13181,9 @@
           "recommended": true,
           "parameter_projections": {
             "text-to-3d": {
+              "omit": [
+                "ai_model"
+              ],
               "order": [
                 "mode",
                 "geometry_resolution",
@@ -15158,13 +15167,6 @@
             },
             {
               "name": "height_meters",
-              "forwarding": "always",
-              "offering_ids": [
-                "meshy/processing/rigging"
-              ]
-            },
-            {
-              "name": "texture_image_url",
               "forwarding": "always",
               "offering_ids": [
                 "meshy/processing/rigging"
@@ -21030,6 +21032,7 @@
             "chat.presentation.messages.interrupted": "⚠️ This generation task was interrupted. Please describe your request again.",
             "chat.presentation.messages.interrupted_prompt": "⚠️ This generation task was interrupted (prompt: {prompt}). Please describe your request again.",
             "chat.presentation.messages.generation_failed": "Generation failed",
+            "chat.presentation.messages.generation_pending": "This task is still running or queued; check back later. Task ID: {task_id}",
             "chat.presentation.messages.generation_failed_ambiguous": "The provider accepted this step, or may have, but the platform could not confirm the result (for example the job timed out or the submission outcome is unknown); the provider may already have run it and charged credits, so it was not resubmitted automatically. Tell the user plainly that the result is unknown and that credits may already have been charged. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.upstream_queue_timeout": "This step waited too long in the provider's queue (past the upstream queue wait limit), so the platform stopped waiting and marked the task failed. The provider may still run it and charge credits, so it was not resubmitted automatically. Tell the user plainly that it waited too long in the provider's queue, that credits may already have been charged and that the result is unknown. Check the task's latest state with get_task first and do not resubmit on your own; whether to generate again is the user's decision, and generating again charges again.",
             "chat.presentation.messages.generation_failed_by_class.insufficient_balance": "This model provider's account balance is insufficient or overdue, or the account has no usable API subscription (not activated, or a plan without API access), so this step was not run. Please contact an administrator",
@@ -21394,7 +21397,10 @@
             "Matting 适配器仅支持背景去除": "The Matting adapter only supports background removal.",
             "Meshy 7.1 多视图": "Meshy 7.1 multi-view",
             "Meshy Repair Printability（候选，待实测）": "Meshy Repair Printability (candidate, pending validation)",
-            "Meshy 官方约束：8K 纹理不支持四边面，请改用三角面或降低纹理分辨率": "Meshy limitation: 8K textures don't support quad faces; use triangles or lower the texture resolution",
+            "平台保守约束：8K 纹理配四边面在本平台未验证，请改用三角面或降低纹理分辨率": "Platform constraint: 8K textures with quad faces are unverified here; use triangles or lower the texture resolution",
+        "OBJ 网格（只能下载）": "OBJ mesh (download only)",
+        "生成模型": "Generation models",
+        "精细化阶段的纹理模型；官方 refine 参数表没有该字段，留空即由上游沿用预览阶段的模型。": "The texture model of the refine step; the official refine parameter table has no such field, so leaving it empty keeps the model the preview used.",
             "Nano Banana 2 (新版)": "Nano Banana 2 (New)",
             "Nano Banana Pro (高质量)": "Nano Banana Pro (High quality)",
             "Not Your Mom 舞 (Not_Your_Mom)": "Not Your Mom dance",
@@ -22448,7 +22454,6 @@
             "四足行走": "Quadruped walk",
             "奔跑": "Run",
             "射击": "Shoot",
-            "带手指骨骼的绑骨不能同时指定纹理参考图。": "Rigging with finger bones cannot also take a texture reference image.",
             "Meshy 绑骨不支持给四边面拓扑的来源模型加手指骨骼；这一步没有提交，也没有扣积分。请关闭「包含手指骨骼」后重试，或改用三角面拓扑重新生成来源模型。": "Meshy rigging cannot add finger bones to a source model with quad topology. This step was not submitted and no credits were spent. Turn off “Include finger bones” and try again, or regenerate the source model with triangle topology.",
             "待机": "Idle",
             "扑跃": "Dive",
@@ -22463,7 +22468,7 @@
             "给 Tripo 生成的模型绑骨，支持双足人形，也支持四足、六足、八足、鸟类、蛇形、水生等生物。先做绑骨检查，骨架类型按报告的建议选择；检查归不进任何一类的生物才选「其他」。双足骨架还可以选骨架命名（Tripo、Mixamo、ActorCore、Unity、Unreal Engine、VRM）：要放进游戏引擎的角色按目标引擎选，制作简报写明了目标引擎、你又没指定时默认跟随目标引擎；其他类型固定用 Tripo 命名。只有 Tripo 命名的骨架可以继续用 Tripo 动画生成预设动作。": "Rigs a model generated by Tripo. Supports biped humanoids as well as quadruped, hexapod, octopod, avian, serpentine and aquatic creatures. Run a rig check first and choose the skeleton type the report recommends; choose Other only for a creature the check cannot place in any type. A biped skeleton can also choose its naming (Tripo, Mixamo, ActorCore, Unity, Unreal Engine, VRM): for a character headed into a game engine choose by the target engine, and when the production brief names a target engine and you have not chosen, it follows the target engine. Every other type always uses Tripo naming. Only a skeleton with Tripo naming can go on to Tripo animation for preset motions.",
             "给 Tripo 生成的模型绑骨，适合四足、六足、八足、鸟类、蛇形、水生等非人形生物，骨架类型按绑骨检查报告的建议选择。绑出的骨架不能继续做 Tripo 动画，也不能选引擎骨架命名：要人形骨架、引擎骨架命名或后续动画，请用 Tripo Rigging v3.0。": "Rigs a model generated by Tripo; suited to non-humanoid creatures (quadruped, hexapod, octopod, avian, serpentine, aquatic), with the skeleton type chosen as the rig check report recommends. A skeleton rigged here cannot go on to Tripo animation and cannot choose an engine skeleton naming: for a biped skeleton, an engine skeleton naming or animation afterward, use Tripo Rigging v3.0.",
             "给 Tripo Rigging v3.0 绑好骨的模型套用预设动作，交付带动画的 GLB。双足骨架可选待机、行走、奔跑、扑跃、攀爬、跳跃、挥砍、射击、受击、跌倒、转身；四足、六足、八足、蛇形、水生骨架各有一个行走或前行动作；鸟类和「其他」骨架暂无预设动作。动作必须与骨架类型相符，不相符的组合在提交前就被拒绝；骨架命名不是 Tripo（如 Unity、Unreal Engine）的骨架不能用本服务做动画。": "Applies a preset motion to a model rigged by Tripo Rigging v3.0 and delivers a GLB with the animation. A biped skeleton can take idle, walk, run, dive, climb, jump, slash, shoot, hurt, fall and turn; quadruped, hexapod, octopod, serpentine and aquatic skeletons each have one walk or march motion; avian and Other skeletons have no preset motion yet. The motion must fit the skeleton type, and a mismatched pair is refused before submission; a skeleton whose naming is not Tripo (Unity, Unreal Engine and so on) cannot be animated by this service.",
-            "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持（提交前就会拒绝）；手部无法加指骨时任务会失败，可关闭此项重试。": "Adds finger bones to the hands at no extra credits, and the files are in meters. It cannot be combined with a texture reference image, and a source model with quad topology is not supported (refused before submission); if the hands cannot be given finger bones the task fails, so turn this off and retry.",
+            "给手部加上手指骨骼，不额外扣积分，文件单位为米。四边面拓扑的来源模型不支持（提交前就会拒绝）；手部无法加指骨时任务会失败，可关闭此项重试。": "Adds finger bones to the hands at no extra credits, and the files are in meters. It cannot be combined with a texture reference image, and a source model with quad topology is not supported (refused before submission); if the hands cannot be given finger bones the task fails, so turn this off and retry.",
             "蛇形": "Serpentine",
             "蛇形前行": "Serpentine march",
             "跌倒": "Fall",
@@ -22494,7 +22499,7 @@
             "默认启用 PBR 材质，并启用纹理。": "PBR materials are enabled by default, along with textures.",
             "默认建议三角面：Meshy 的 8K 纹理不支持四边面。": "Triangle faces are recommended by default: Meshy's 8K texture does not support quad faces.",
             "默认建议为三角面。选四边面时，目标面数按四边面计，最多 200000；导出的 GLB 只含三角面，每个四边面约折合 2.2 个三角面（来自一个样本：2026-11-13 的一次真实运行，10000 个四边面实得约 21,800 个三角面）。用途的三角面预算按这个比例换算。": "Triangles are the recommended default. With quad faces the target face count is in quads, up to 200000; the exported GLB holds only triangles, and each quad comes to about 2.2 triangles (from one sample: a real run on 2026-11-13 turned 10000 quads into about 21,800 triangles). A purpose's triangle budget is counted with this ratio.",
-            "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。": "The default is triangles: Meshy 8K textures don't support quad faces.",
+            "默认建议为三角面：8K 纹理配四边面在本平台未验证（平台保守约束，官方未说明）。": "The default is triangles: Meshy 8K textures don't support quad faces.",
             "默认建议为上限 2000000；选四边面时最多 200000。未指定面数时，默认值按当前拓扑收敛到范围内；会话用途规定了面数预算时，Agent 发起的生成按预算取值。": "The recommended default is the 2,000,000 ceiling; quad faces allow at most 200,000. When no count is given, the default is brought into the range of the current topology; when the session purpose sets a face budget, steps started by the Agent take a value within it.",
             "默认建议为上限 300000；需要控制面数时用独立的重拓扑。": "The default is the 300000 upper limit; use a separate remesh when you need to control the face count.",
             "只在开启自动重拓扑时生效。默认不重拓扑以保最高质量，面数由几何分辨率和模型本身决定（4K 实测约 25 万到 790 万面，单个格式可达数百 MB）；需要控制面数或交付体积时开启自动重拓扑，或用独立的重拓扑。": "Applies only when auto remesh is on. By default no remesh runs, for the highest quality, so the face count follows the geometry resolution and the model itself (at 4K, measured at about 250 thousand to 7.9 million faces, with single formats up to several hundred MB). To control the face count or delivery size, turn on auto remesh or use a separate remesh.",
@@ -22735,6 +22740,13 @@
           {
             "name": "symmetry_mode",
             "reason": "已弃用，不影响输出，官方要求不再发送"
+          },
+          {
+            "name": "texture_image_url",
+            "endpoints": [
+              "rigging"
+            ],
+            "reason": "2026-10-23 起官方弃用（原文 “Omit it.”），平台不再暴露该参数"
           },
           {
             "name": "hd_texture",
@@ -26271,9 +26283,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -26303,6 +26316,29 @@
             "surface": "provider",
             "control": "select"
           }
+        },
+        {
+          "name": "ai_model",
+          "label": "生成模型",
+          "type": "select",
+          "description": "精细化阶段的纹理模型；官方 refine 参数表没有该字段，留空即由上游沿用预览阶段的模型。",
+          "options": [
+            {
+              "value": "meshy-7",
+              "label": "Meshy meshy-7"
+            }
+          ],
+          "presentation": {
+            "surface": "hidden",
+            "control": "select"
+          },
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "ultra_mode",
@@ -26368,7 +26404,14 @@
           "presentation": {
             "surface": "provider",
             "control": "select"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "pose_mode",
+              "operator": "equals",
+              "value": ""
+            }
+          ]
         },
         {
           "name": "topology",
@@ -26418,7 +26461,14 @@
           "presentation": {
             "surface": "provider",
             "control": "boolean"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "not-equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "texture_prompt",
@@ -26428,7 +26478,14 @@
           "presentation": {
             "surface": "provider",
             "control": "text"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "not-equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "auto_size",
@@ -26449,7 +26506,14 @@
         {
           "name": "texture_image_url",
           "label": "纹理参考图",
-          "type": "text"
+          "type": "text",
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "not-equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "target_formats",
@@ -26594,9 +26658,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "input_rules": [
@@ -26613,7 +26678,7 @@
               "value": "8k"
             }
           ],
-          "message": "Meshy 官方约束：8K 纹理不支持四边面，请改用三角面或降低纹理分辨率",
+          "message": "平台保守约束：8K 纹理配四边面在本平台未验证，请改用三角面或降低纹理分辨率",
           "parameters": []
         }
       ],
@@ -26646,6 +26711,29 @@
             "control": "select"
           },
           "fixed": true
+        },
+        {
+          "name": "ai_model",
+          "label": "生成模型",
+          "type": "select",
+          "description": "精细化阶段的纹理模型；官方 refine 参数表没有该字段，留空即由上游沿用预览阶段的模型。",
+          "options": [
+            {
+              "value": "meshy-7.1",
+              "label": "Meshy meshy-7.1"
+            }
+          ],
+          "presentation": {
+            "surface": "hidden",
+            "control": "select"
+          },
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "geometry_resolution",
@@ -26703,14 +26791,21 @@
           "presentation": {
             "surface": "provider",
             "control": "select"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "pose_mode",
+              "operator": "equals",
+              "value": ""
+            }
+          ]
         },
         {
           "name": "topology",
           "label": "拓扑类型",
           "type": "select",
           "default": "triangle",
-          "description": "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。",
+          "description": "默认建议为三角面：8K 纹理配四边面在本平台未验证（平台保守约束，官方未说明）。",
           "options": [
             {
               "value": "quad",
@@ -26776,7 +26871,14 @@
             "control": "boolean"
           },
           "adjustment_policy": "advised",
-          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。"
+          "adjustment_reason": "默认值优先保证生成质量和完整交付，不建议更改。Agent 可按需求说明理由并调整合法取值；必需格式、参数组合和交付要求仍须满足。",
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "not-equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "texture_resolution",
@@ -26821,7 +26923,14 @@
           "presentation": {
             "surface": "provider",
             "control": "text"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "not-equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "auto_size",
@@ -26849,7 +26958,14 @@
         {
           "name": "texture_image_url",
           "label": "纹理参考图",
-          "type": "text"
+          "type": "text",
+          "omit_when": [
+            {
+              "parameter": "mode",
+              "operator": "not-equals",
+              "value": "refine"
+            }
+          ]
         },
         {
           "name": "target_formats",
@@ -27062,9 +27178,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -27196,6 +27313,13 @@
               "parameter": "mode",
               "operator": "not-equals",
               "value": "preview"
+            }
+          ],
+          "omit_when": [
+            {
+              "parameter": "pose_mode",
+              "operator": "equals",
+              "value": ""
             }
           ]
         },
@@ -27507,9 +27631,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -27624,7 +27749,14 @@
           "presentation": {
             "surface": "provider",
             "control": "select"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "pose_mode",
+              "operator": "equals",
+              "value": ""
+            }
+          ]
         },
         {
           "name": "target_formats",
@@ -27815,9 +27947,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "input_rules": [
@@ -27834,7 +27967,7 @@
               "value": "8k"
             }
           ],
-          "message": "Meshy 官方约束：8K 纹理不支持四边面，请改用三角面或降低纹理分辨率",
+          "message": "平台保守约束：8K 纹理配四边面在本平台未验证，请改用三角面或降低纹理分辨率",
           "parameters": []
         }
       ],
@@ -27859,7 +27992,12 @@
             "jpeg",
             "png",
             "webp"
-          ]
+          ],
+          "image_input": {
+            "min_width": 32,
+            "min_height": 32,
+            "max_pixels": 178956970
+          }
         },
         {
           "name": "geometry_resolution",
@@ -27893,7 +28031,7 @@
           "label": "拓扑类型",
           "type": "select",
           "default": "triangle",
-          "description": "默认建议为三角面：Meshy 的 8K 纹理不支持四边面。",
+          "description": "默认建议为三角面：8K 纹理配四边面在本平台未验证（平台保守约束，官方未说明）。",
           "options": [
             {
               "value": "quad",
@@ -27950,7 +28088,14 @@
           "presentation": {
             "surface": "provider",
             "control": "select"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "pose_mode",
+              "operator": "equals",
+              "value": ""
+            }
+          ]
         },
         {
           "name": "target_formats",
@@ -28249,9 +28394,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -28275,7 +28421,12 @@
             "jpeg",
             "png",
             "webp"
-          ]
+          ],
+          "image_input": {
+            "min_width": 32,
+            "min_height": 32,
+            "max_pixels": 178956970
+          }
         },
         {
           "name": "model_type",
@@ -28591,7 +28742,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -29322,6 +29473,7 @@
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "bindings": [
             {
@@ -29457,7 +29609,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -30012,6 +30164,7 @@
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "response_aliases": [
           {
             "key": "model_url",
@@ -30122,7 +30275,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -30929,6 +31082,7 @@
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "bindings": [
             {
@@ -31067,7 +31221,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -31878,6 +32032,7 @@
         "endpoint": "generation/multiview-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "bindings": [
             {
@@ -32018,7 +32173,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -32649,6 +32804,7 @@
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "upload_endpoint": "files",
         "response_aliases": [
           {
@@ -32761,7 +32917,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -33244,7 +33400,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -33747,7 +33903,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -34406,9 +34562,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -34988,11 +35145,6 @@
           "minimum": 1e-06
         },
         {
-          "name": "texture_image_url",
-          "label": "纹理参考图",
-          "type": "text"
-        },
-        {
           "name": "skeleton_template",
           "label": "骨架模板",
           "type": "select",
@@ -35057,7 +35209,7 @@
             "surface": "provider",
             "control": "boolean"
           },
-          "description": "给手部加上手指骨骼，不额外扣积分，文件单位为米。不能与纹理参考图同时使用，四边面拓扑的来源模型也不支持（提交前就会拒绝）；手部无法加指骨时任务会失败，可关闭此项重试。",
+          "description": "给手部加上手指骨骼，不额外扣积分，文件单位为米。四边面拓扑的来源模型不支持（提交前就会拒绝）；手部无法加指骨时任务会失败，可关闭此项重试。",
           "omit_when": [
             {
               "parameter": "include_fingers",
@@ -35075,20 +35227,6 @@
           ],
           "minimum": 1,
           "maximum": 1
-        },
-        {
-          "parameters": [],
-          "forbidden_when": [
-            {
-              "parameter": "include_fingers",
-              "operator": "truthy"
-            },
-            {
-              "parameter": "texture_image_url",
-              "operator": "present"
-            }
-          ],
-          "message": "带手指骨骼的绑骨不能同时指定纹理参考图。"
         }
       ],
       "outputs": [
@@ -35126,7 +35264,7 @@
         "cdn.meshy.ai"
       ],
       "source_model_limit": {
-        "max_triangles": 320000,
+        "max_triangles": 380000,
         "count_basis": "triangles"
       },
       "provider_options": {
@@ -38824,7 +38962,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 2,
         "initial_backoff_seconds": 30,
@@ -40197,7 +40335,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 1,
@@ -40318,10 +40456,14 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 30,
-        "retryable": []
+        "max_backoff_seconds": 300,
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable",
+          "timed_out"
+        ]
       },
       "parameters": [
         {
@@ -40468,10 +40610,14 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 30,
-        "retryable": []
+        "max_backoff_seconds": 300,
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable",
+          "timed_out"
+        ]
       },
       "parameters": [
         {
@@ -40648,10 +40794,14 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 30,
-        "retryable": []
+        "max_backoff_seconds": 300,
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable",
+          "timed_out"
+        ]
       },
       "parameters": [
         {
@@ -40832,10 +40982,14 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 30,
-        "retryable": []
+        "max_backoff_seconds": 300,
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable",
+          "timed_out"
+        ]
       },
       "parameters": [
         {
@@ -41033,10 +41187,14 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 30,
-        "retryable": []
+        "max_backoff_seconds": 300,
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable",
+          "timed_out"
+        ]
       },
       "parameters": [
         {
@@ -41233,10 +41391,14 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 30,
-        "retryable": []
+        "max_backoff_seconds": 300,
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable",
+          "timed_out"
+        ]
       },
       "parameters": [
         {
@@ -41417,7 +41579,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -41485,7 +41647,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -41790,6 +41952,7 @@
         ],
         "model": "v3.5-20260815",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -41877,7 +42040,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -42219,7 +42382,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -42598,7 +42761,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -43772,6 +43935,10 @@
             {
               "value": "zip",
               "label": "完整文件包 ZIP（只能下载）"
+            },
+            {
+              "value": "obj",
+              "label": "OBJ 网格（只能下载）"
             }
           ],
           "description": "每次构建只返回所选的一种格式。GLB 可在 3D 舞台预览；ZIP 是上游生成的完整文件包，只能下载，不能在线预览。"
@@ -46417,9 +46584,10 @@
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
         "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+  "rate_limited",
+  "upstream_unavailable",
+  "timed_out"
+]
       },
       "materialize_attempts": 8,
       "input_rules": [
@@ -46436,7 +46604,7 @@
               "value": "8k"
             }
           ],
-          "message": "Meshy 官方约束：8K 纹理不支持四边面，请改用三角面或降低纹理分辨率",
+          "message": "平台保守约束：8K 纹理配四边面在本平台未验证，请改用三角面或降低纹理分辨率",
           "parameters": []
         }
       ],
@@ -46462,7 +46630,12 @@
             "webp"
           ],
           "wire_name": "image_urls",
-          "description": "按选择顺序发送 1–4 张同一对象的不同视角原图；请将正面图放在第一张。不替换为三视图组正面、不丢弃视角；其余视角仍保留选择顺序。"
+          "description": "按选择顺序发送 1–4 张同一对象的不同视角原图；请将正面图放在第一张。不替换为三视图组正面、不丢弃视角；其余视角仍保留选择顺序。",
+          "image_input": {
+            "min_width": 32,
+            "min_height": 32,
+            "max_pixels": 178956970
+          }
         },
         {
           "name": "texture_assets",
@@ -46553,7 +46726,14 @@
           "presentation": {
             "surface": "provider",
             "control": "select"
-          }
+          },
+          "omit_when": [
+            {
+              "parameter": "pose_mode",
+              "operator": "equals",
+              "value": ""
+            }
+          ]
         },
         {
           "name": "target_formats",
@@ -46933,7 +47113,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -47224,6 +47404,7 @@
         ],
         "model": "v3.0",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -47323,7 +47504,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -47586,6 +47767,7 @@
         ],
         "model": "v3.0",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -47672,7 +47854,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -47922,6 +48104,7 @@
         ],
         "model": "v2.0-20260430",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -48008,7 +48191,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -48239,6 +48422,7 @@
         ],
         "model": "v1.0-20250506",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -48325,7 +48509,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -48556,6 +48740,7 @@
         ],
         "model": "v1.0-20250506",
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "model",
           "max_source_bytes": 150000000,
@@ -48675,7 +48860,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "parameters": [
@@ -48707,6 +48892,7 @@
           {"key": "mask_url", "claim_id": "smartsegment-mask", "role": "mask", "variant": "png", "fields": ["mask_url"]}
         ],
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "seg_model_url",
           "max_source_bytes": 150000000,
@@ -48745,7 +48931,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 3600,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "parameters": [
@@ -48778,6 +48964,7 @@
           {"key": "mask_url", "claim_id": "smartsegment-mask", "role": "mask", "variant": "png", "fields": ["mask_url"]}
         ],
         "convert_endpoint": "models/convert",
+        "format_conversion": {"concurrency_limit": 5},
         "native_conversion": {
           "source_alias": "seg_model_url",
           "max_source_bytes": 150000000,
@@ -48816,7 +49003,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {
         "max_attempts": 1,
         "initial_backoff_seconds": 30,
@@ -48899,7 +49086,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "credits_metered": true,
@@ -48934,7 +49121,7 @@
       "cancellation_supported": false,
       "idempotent_submission": false,
       "timeout_seconds": 1800,
-      "poll_interval_seconds": 5,
+      "poll_interval_seconds": 2,
       "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
       "materialize_attempts": 8,
       "credits_metered": true,

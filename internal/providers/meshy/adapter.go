@@ -736,7 +736,18 @@ func (a *Adapter) projectInput(
 	options.ModelParameter = strings.TrimSpace(options.ModelParameter)
 	if options.ModelParameter != "" {
 		_, exists := body[options.ModelParameter]
-		if options.Endpoint == multiImageEndpoint || !exists {
+		// The Offering's own declaration decides whether the model field is
+		// sent at all: a parameter the projection omits (Meshy's refine step,
+		// whose official parameter table has no ai_model — "Leave it out to
+		// texture with the model that matches the preview") is not injected
+		// here either, so the Provider keeps no branch of its own.
+		omitted := false
+		for _, parameter := range request.Offering.Parameters {
+			if parameter.Name == options.ModelParameter {
+				omitted = generation.ParameterOmitted(parameter, body)
+			}
+		}
+		if options.Endpoint == multiImageEndpoint || (!exists && !omitted) {
 			modelValue := strings.TrimSpace(options.ModelParameterValue)
 			if modelValue == "" {
 				modelValue = request.Offering.ModelID

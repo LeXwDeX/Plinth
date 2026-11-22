@@ -507,7 +507,7 @@ func TestAgentOfferingProjectionTellsTheRemeshRiggingConstraint(t *testing.T) {
 	if remesh == nil || rigging == nil || animation == nil {
 		t.Fatal("processing offerings missing from the projection")
 	}
-	if rigging.MaxSourceTriangles != 320000 || animation.MaxSourceTriangles != 0 {
+	if rigging.MaxSourceTriangles != 380000 || animation.MaxSourceTriangles != 0 {
 		t.Fatalf("max source triangles: rigging %d, animation %d", rigging.MaxSourceTriangles, animation.MaxSourceTriangles)
 	}
 	// #93: UV unwrap takes at most 40,000 triangles, so Remesh also tells that chain.
@@ -515,8 +515,8 @@ func TestAgentOfferingProjectionTellsTheRemeshRiggingConstraint(t *testing.T) {
 		t.Fatalf("remesh chain limits = %#v", remesh.ChainLimits)
 	}
 	limit := remesh.ChainLimits[0]
-	if limit.NextCapability != "rigging" || limit.MaxTriangles != 320000 || limit.CountParameter != "target_polycount" ||
-		limit.Topology != "topology" || limit.Compatible != "quad ≤ 160000 / triangle ≤ 320000" {
+	if limit.NextCapability != "rigging" || limit.MaxTriangles != 380000 || limit.CountParameter != "target_polycount" ||
+		limit.Topology != "topology" || limit.Compatible != "quad ≤ 190000 / triangle ≤ 380000" {
 		t.Fatalf("chain limit = %#v", limit)
 	}
 	if uv := remesh.ChainLimits[1]; uv.NextCapability != "uv-unwrap" || uv.MaxTriangles != 40000 || uv.Compatible != "quad ≤ 20000 / triangle ≤ 40000" {

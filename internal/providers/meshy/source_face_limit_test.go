@@ -54,8 +54,10 @@ func TestRiggingSourceFaceLimit(t *testing.T) {
 			allow bool
 		}{
 			{"below limit", 100, 19602, true},
-			{"exactly at limit", 401, 320000, true},
-			{"one step over limit", 402, 321602, false},
+			// Large(grid) has 2*(grid-1)^2 triangles: 436 -> 378450 is inside the
+			// declared 380000, 437 -> 380192 is one step over it.
+			{"just below the limit", 436, 378450, true},
+			{"one step over the limit", 437, 380192, false},
 			{"remesh quad default (about 600k)", 548, 598418, false},
 		} {
 			t.Run(source+"/"+test.name, func(t *testing.T) {
@@ -72,7 +74,7 @@ func TestRiggingSourceFaceLimit(t *testing.T) {
 				if refusal == nil || !refusal.UserFacing || refusal.Code != generation.ErrInvalidInput {
 					t.Fatalf("over limit error = %v", err)
 				}
-				for _, want := range []string{formatInt(test.faces), "320000", "没有提交"} {
+				for _, want := range []string{formatInt(test.faces), "380000", "没有提交"} {
 					if !strings.Contains(refusal.Detail, want) {
 						t.Fatalf("detail %q lacks %q", refusal.Detail, want)
 					}
@@ -83,7 +85,7 @@ func TestRiggingSourceFaceLimit(t *testing.T) {
 }
 
 func TestRiggingSourceFaceLimitEnglishAndSchemaCopy(t *testing.T) {
-	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 402})
+	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 437})
 	request, product := riggingFaceRequest(t, raw, "task")
 	texts, err := catalog.NewTextLocalizer(product.Application())
 	if err != nil {
@@ -94,7 +96,7 @@ func TestRiggingSourceFaceLimitEnglishAndSchemaCopy(t *testing.T) {
 		t.Fatal("expected refusal")
 	}
 	english := refusal.LocalizedDetail(func(text string) string { return texts.Text("en", text) })
-	if han.MatchString(english) || !strings.Contains(english, "321602") || !strings.Contains(english, "320000") {
+	if han.MatchString(english) || !strings.Contains(english, "380192") || !strings.Contains(english, "380000") {
 		t.Fatalf("english refusal = %q", english)
 	}
 	if refusal.Cause == nil {
@@ -151,7 +153,7 @@ func TestRiggingSourceFaceLimitFollowsTheSchemaDeclaration(t *testing.T) {
 	raw := modelinputtest.Large(modelinputtest.LargeOptions{Grid: 100}) // 19602 triangles
 	request, _ := riggingFaceRequest(t, raw, "asset")
 	adapter := &Adapter{inputAssets: &profiledInputs{bodies: [][]byte{raw}}}
-	if request.Offering.SourceModelLimit == nil || request.Offering.SourceModelLimit.MaxTriangles != 320000 {
+	if request.Offering.SourceModelLimit == nil || request.Offering.SourceModelLimit.MaxTriangles != 380000 {
 		t.Fatalf("declaration = %+v", request.Offering.SourceModelLimit)
 	}
 	if err := adapter.ValidateInput(context.Background(), request); err != nil {
@@ -230,7 +232,7 @@ func TestRiggingSourceFaceLimitStillRefusesAnOversizedNativeTaskSource(t *testin
 	task, _ := riggingFaceRequest(t, raw, "task")
 	lowerInline(&task)
 	refusal := generation.UserFacingError((&Adapter{inputAssets: &profiledInputs{bodies: [][]byte{raw}}}).ValidateInput(context.Background(), task))
-	if refusal == nil || !strings.Contains(refusal.Detail, "320000") {
+	if refusal == nil || !strings.Contains(refusal.Detail, "380000") {
 		t.Fatalf("native Task source above the inline size passed: %v", refusal)
 	}
 	upload, _ := riggingFaceRequest(t, raw, "asset")

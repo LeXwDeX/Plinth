@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/tripo"
@@ -170,14 +171,16 @@ func TestFakeInjectedTaskFailureIsReadFromTheTaskObject(t *testing.T) {
 	}
 }
 
-// Tripo's "unknown" status is not terminal (the official Python SDK's
-// wait_for_task stops only on success, failed, cancelled, banned and expired),
-// so the adapter keeps polling, but at most max_consecutive times in a row.
-func TestUnknownStatusIsBoundedPolling(t *testing.T) {
+// Tripo's "unknown" status is not terminal (the official task-query page says
+// it is neither success nor failure and to continue polling with a timeout), so
+// the adapter keeps polling, but only for as long as the connection's declared
+// duration bound allows. When it passes, the task ends as an ambiguous failure:
+// the upstream result is unknown, so nothing is resent and no retry is offered.
+func TestUnknownStatusIsBoundedByDuration(t *testing.T) {
 	_, statusMapping := declaredTripoMappings(t)
 	rule, ok := statusMapping.UpstreamStatus["unknown"]
-	if !ok || rule.MaxConsecutive <= 0 || rule.Class == "" {
-		t.Fatalf("unknown is not declared with a bound: %+v", rule)
+	if !ok || rule.MaxDurationSeconds <= 0 {
+		t.Fatalf("unknown is not declared with a duration bound: %+v", rule)
 	}
 	status := "unknown"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -185,7 +188,8 @@ func TestUnknownStatusIsBoundedPolling(t *testing.T) {
 			"task_id": "uuid-1", "status": status, "progress": 0, "output": map[string]any{}}})
 	}))
 	defer upstream.Close()
-	adapter := newAdapter(t, upstream)
+	now := time.Now()
+	adapter := newAdapterWithClock(t, upstream, func() time.Time { return now })
 	observe := func(remote string) generation.Observation {
 		observation, err := adapter.Observe(t.Context(), generation.ObserveRequest{
 			AttemptID: "att-1", Offering: tripoOffering(generation.TextTo3D),
@@ -196,14 +200,17 @@ func TestUnknownStatusIsBoundedPolling(t *testing.T) {
 		}
 		return observation
 	}
-	lastRunningKey := ""
-	for poll := 1; poll <= rule.MaxConsecutive; poll++ {
-		observation := observe("uuid-1")
-		if observation.Phase != generation.UpstreamRunning || observation.Failure != nil {
-			t.Fatalf("poll %d = %+v, want running", poll, observation)
+	// Inside the bound the task stays running, however many polls it takes
+	// (the old poll-count bound failed after a hundred).
+	for i := 0; i < 300; i++ {
+		now = now.Add(time.Second)
+		if observation := observe("uuid-1"); observation.Phase != generation.UpstreamRunning {
+			t.Fatalf("poll %d inside the bound = %+v", i, observation)
 		}
-		lastRunningKey = observation.DedupeKey
 	}
+	lastRunningKey := observe("uuid-1").DedupeKey
+	// The window opened at the first unknown poll: 300 further seconds pass it.
+	now = now.Add(time.Duration(rule.MaxDurationSeconds) * time.Second)
 	observation := observe("uuid-1")
 	// The coordinator discards an observation whose DedupeKey equals the last
 	// recorded one before applying its phase, so the terminal transition must
@@ -212,23 +219,20 @@ func TestUnknownStatusIsBoundedPolling(t *testing.T) {
 		t.Fatalf("limit-exceeded key %q must differ from the running key %q", observation.DedupeKey, lastRunningKey)
 	}
 	if observation.Phase != generation.UpstreamFailed || observation.Failure == nil ||
-		string(observation.Failure.Class) != rule.Class || observation.Failure.Retryable {
-		t.Fatalf("poll past the bound = %+v", observation)
+		observation.Failure.Class != generation.FailureSubmissionUnknown ||
+		!observation.Failure.Ambiguous || observation.Failure.Retryable {
+		t.Fatalf("poll past the duration bound = %+v", observation)
 	}
-	// Another task has its own allowance, and a known status resets the count.
+	// Another task has its own window, and a known status closes it.
 	if observation := observe("uuid-2"); observation.Phase != generation.UpstreamRunning {
 		t.Fatalf("other task = %+v", observation)
 	}
 	status = "running"
 	observe("uuid-2")
 	status = "unknown"
-	for poll := 1; poll <= rule.MaxConsecutive; poll++ {
-		if observation := observe("uuid-2"); observation.Phase != generation.UpstreamRunning {
-			t.Fatalf("after reset, poll %d = %+v", poll, observation)
-		}
-	}
-	if observation := observe("uuid-2"); observation.Phase != generation.UpstreamFailed {
-		t.Fatalf("after reset, past the bound = %+v", observation)
+	now = now.Add(time.Duration(rule.MaxDurationSeconds) * time.Second)
+	if observation := observe("uuid-2"); observation.Phase != generation.UpstreamRunning {
+		t.Fatalf("a known status must close the unknown window: %+v", observation)
 	}
 	// unknown that turns into success within the bound still completes.
 	status = "unknown"
