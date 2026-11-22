@@ -399,6 +399,40 @@ func MatchModel(candidates []generation.Offering, name string) (generation.Offer
 	return generation.Offering{}, false
 }
 
+// ApplicableModelLock is the person's lock as it applies to one capability:
+// the lock when the capability is the one it names, or when it names no
+// Offering the Catalog declares at all (a model dropped without a successor:
+// the step refuses it instead of silently running another one); empty when it
+// names an Offering of another capability, which is not this step's decision.
+//
+// The rule is the one the production plan always applied (a lock on a 3D model
+// is not a lock on the remesh step of the same workspace), and it is what makes
+// the plan's quote and the executor's choice agree (#380 step 2): before it,
+// only the plan filtered the lock, so the plan quoted a step the executor then
+// refused. Offering state is deliberately not checked: a lock that names a
+// disabled Offering of the capability stays a lock, and the step refuses it as
+// unavailable.
+func ApplicableModelLock(offerings []generation.Offering, lock, capability string) string {
+	lock = strings.TrimSpace(lock)
+	if lock == "" || capability == "" {
+		return ""
+	}
+	names := false
+	for _, offering := range offerings {
+		if !ModelNameMatches(offering, lock) {
+			continue
+		}
+		if string(offering.Capability) == capability {
+			return lock
+		}
+		names = true
+	}
+	if names {
+		return ""
+	}
+	return lock
+}
+
 // ResolvePlanPin maps a production plan's stored offering pin to the Offering
 // ID of the current Catalog (#434). A plan saved before #426 pinned the Agent's
 // model name there, while Plan.Allows and Plan.Covers compare the Offering ID a
