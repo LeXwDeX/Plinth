@@ -240,7 +240,7 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 		}
 		if err != nil || prepared.ID == "" || prepared.InputHash == "" || prepared.SessionID != session ||
 			prepared.OfferingID != step.OfferingID || prepared.OfferingRevision != step.OfferingRevision ||
-			!skillrun.MatchesPreparedInput(step, generation.AssetID(asset), prepared.NormalizedInput) {
+			!skillrun.MatchesPreparedInput(step, generation.AssetID(asset), "", prepared.NormalizedInput) {
 			t.Fatalf("resolver/run/prepared contract for %s: %+v error=%v", step.Key, prepared, err)
 		}
 		return prepared

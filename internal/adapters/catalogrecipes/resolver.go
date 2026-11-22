@@ -77,7 +77,8 @@ func (r *Resolver) ResolveRecipe(_ context.Context, id string, selected generati
 				OfferingID: offering.ID, OfferingRevision: offering.Revision,
 				PromptTemplate: promptTemplate, PromptParameter: prompt,
 				SourceParameter: source, StaticInput: declared.StaticInput,
-				OutputRole: declared.OutputRole, SourceStepKey: declared.SourceStepKey, Optional: declared.Optional,
+				OutputRole: declared.OutputRole, SourceStepKey: declared.SourceStepKey,
+				IncludeSourceAsset: declared.IncludeSourceAsset, Optional: declared.Optional,
 			})
 		}
 		if err := skillrun.ValidateRecipe(recipe); err != nil {

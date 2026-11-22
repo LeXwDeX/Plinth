@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imageinspect"
@@ -19,23 +20,32 @@ import (
 // The shape is the source subject's box plus the Schema's margin on every side,
 // kept inside the bounds of the subject type (a humanoid asked for an A-pose
 // is wider than the arms-down source, a quadruped's side view is wider than
-// its front view). Every output-size parameter the Offering lets a person
-// choose then gets the legal value closest to that shape, by the rule of the
-// canvas and of a single reference picture. The result is nil, and the
-// Offering's defaults apply, when the Schema does not enable the rule, the
-// source cannot be read, or the Offering has no output size to follow.
+// its front view). A purpose that follows the source picture as a whole takes
+// that picture's own width over height and no subject-type bound: a design
+// sheet keeps the source's shape (#409). Every output-size parameter the
+// Offering lets a person choose then gets the legal value closest to that
+// shape, by the rule of the canvas and of a single reference picture. The
+// result is nil, and the Offering's defaults apply, when the Schema does not
+// enable the rule, the source cannot be read, or the Offering has no output
+// size to follow.
+//
+// purpose is the declared use of the run (empty means the shared rule); an
+// unknown one keeps the shared rule.
 func (s *Service) FrameInput(ctx context.Context, owner generation.OwnerID, offering generation.Offering,
-	subjectType string, source generation.AssetID,
+	subjectType, purpose string, source generation.AssetID,
 ) map[string]json.RawMessage {
-	frame := s.schema.Frame
+	frame := s.frameForPurpose(purpose)
 	if !frame.Enabled || s.assets == nil || source == "" {
 		return nil
 	}
-	ratio, ok := s.sourceShape(ctx, owner, source)
+	ratio, ok := s.sourceShape(ctx, owner, source, frame)
 	if !ok {
 		return nil
 	}
-	sizes := generationtool.FrameOutputSizes(offering, s.boundFrameRatio(ratio, subjectType))
+	if !frame.SourceRatio {
+		ratio = s.boundFrameRatio(ratio, subjectType)
+	}
+	sizes := generationtool.FrameOutputSizes(offering, ratio)
 	if len(sizes) == 0 {
 		return nil
 	}
@@ -50,10 +60,13 @@ func (s *Service) FrameInput(ctx context.Context, owner generation.OwnerID, offe
 	return input
 }
 
-// sourceShape is the width over height of the frame the source subject asks
+// sourceShape is the width over height of the frame the source picture asks
 // for: the subject's box with the Schema's margin, or the whole picture when
-// no subject stands out from its background.
-func (s *Service) sourceShape(ctx context.Context, owner generation.OwnerID, source generation.AssetID) (float64, bool) {
+// the purpose keeps the source's shape or no subject stands out from its
+// background.
+func (s *Service) sourceShape(ctx context.Context, owner generation.OwnerID, source generation.AssetID,
+	frame catalog.ChatThreeViewFrameSchema,
+) (float64, bool) {
 	_, body, err := s.assets.OpenOwned(ctx, owner, source)
 	if err != nil || body == nil {
 		return 0, false
@@ -74,7 +87,9 @@ func (s *Service) sourceShape(ctx context.Context, owner generation.OwnerID, sou
 		return 0, false
 	}
 	bounds := picture.Bounds()
-	frame := s.schema.Frame
+	if frame.SourceRatio {
+		return float64(bounds.Dx()) / float64(bounds.Dy()), true
+	}
 	subject := imageinspect.SubjectSegments(picture, frame.SubjectThreshold)
 	if !subject.HasSubject || subject.Ratio < frame.MinSubjectRatio {
 		return float64(bounds.Dx()) / float64(bounds.Dy()), true

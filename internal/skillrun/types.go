@@ -60,6 +60,12 @@ type StepSpec struct {
 	// SourceStepKey is empty when the original source asset is used. A step
 	// may consume only an earlier, locally materialized step output.
 	SourceStepKey string `json:"source_step_key,omitempty"`
+	// IncludeSourceAsset makes the run's original source picture the step's
+	// second reference, after the SourceStepKey view (#409). A design sheet's
+	// side views are drawn from the approved front view and the original
+	// picture together; false keeps the one-source input. It requires a
+	// SourceStepKey, so the single-source behavior is unchanged.
+	IncludeSourceAsset bool `json:"include_source_asset,omitempty"`
 	// Optional marks a step the run is complete without; it still starts
 	// only when a person asks for it (#65). The first step is never optional.
 	Optional bool `json:"optional,omitempty"`
@@ -246,15 +252,19 @@ type PendingGrant struct {
 // caller still uses Generation.PrepareInput and ExecutionGrant; no paid work is
 // issued by this package.
 type Execution struct {
-	Harness        harness.Binding `json:"harness,omitempty"`
-	RunID          string
-	OwnerID        generation.OwnerID
-	SessionID      string
-	Step           Step
-	SourceAssetID  generation.AssetID
-	OperationID    string
-	IdempotencyKey string
-	PlanStepID     string
+	Harness       harness.Binding `json:"harness,omitempty"`
+	RunID         string
+	OwnerID       generation.OwnerID
+	SessionID     string
+	Step          Step
+	SourceAssetID generation.AssetID
+	// SecondSourceAssetID is the step's second reference when its recipe
+	// declares IncludeSourceAsset: the run's original picture, appended after
+	// SourceAssetID (#409). Empty keeps the one-source input.
+	SecondSourceAssetID generation.AssetID
+	OperationID         string
+	IdempotencyKey      string
+	PlanStepID          string
 }
 
 type RecipeResolver interface {

@@ -74,6 +74,97 @@ func threeViewEmittedChecks(consistency ChatThreeViewConsistencySchema) []string
 	return names
 }
 
+// validateThreeViewPurposes checks the declared uses of the multi-view tool
+// (#409): every use names a declared recipe no other use names, every recipe
+// has the shape the default one has, and an override is held to the same rules
+// with the shared wording it falls back to.
+func validateThreeViewPurposes(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSchema) error {
+	if len(schema.Purposes) == 0 {
+		if strings.TrimSpace(schema.DefaultPurpose) != "" {
+			return errors.New("three_view.default_purpose 只在声明 purposes 时有意义")
+		}
+		return nil
+	}
+	seenID := map[string]bool{}
+	seenRecipe := map[string]bool{}
+	for _, purpose := range schema.Purposes {
+		id := strings.TrimSpace(purpose.ID)
+		if id == "" || seenID[id] || strings.TrimSpace(purpose.Label) == "" {
+			return fmt.Errorf("three_view.purposes 的 id 与 label 必须唯一且非空，现为 %q", purpose.ID)
+		}
+		seenID[id] = true
+		var recipe *ChatSkillRecipeSchema
+		for i := range recipes {
+			if recipes[i].ID == purpose.RecipeID {
+				recipe = &recipes[i]
+			}
+		}
+		if strings.TrimSpace(purpose.RecipeID) == "" || seenRecipe[purpose.RecipeID] ||
+			recipe == nil || len(recipe.Steps) < 2 {
+			return fmt.Errorf("three_view.purposes[%s].recipe_id %q 必须是未被占用的、至少两步的已声明 skill recipe",
+				id, purpose.RecipeID)
+		}
+		seenRecipe[purpose.RecipeID] = true
+		if recipe.Steps[0].Optional || recipe.Steps[0].Key != schema.ModelSourceStepKey {
+			return fmt.Errorf("three_view.purposes[%s] 的第一个视图必须是 3D 来源视图，且不能是可选视图", id)
+		}
+		for index, step := range recipe.Steps {
+			if index > 0 && step.SourceStepKey != schema.ModelSourceStepKey {
+				return fmt.Errorf("three_view.purposes[%s] 的后续视图 %q 必须以 %q 为 source_step_key",
+					id, step.Key, schema.ModelSourceStepKey)
+			}
+		}
+		if err := validateThreeViewPurposeFrame(id, purpose.Frame); err != nil {
+			return err
+		}
+		if purpose.Consistency == nil {
+			continue
+		}
+		override := schema
+		override.Consistency = *purpose.Consistency
+		if len(override.Consistency.Reasons) == 0 {
+			override.Consistency.Reasons = schema.Consistency.Reasons
+		}
+		if override.Consistency.ReasonSeparator == "" {
+			override.Consistency.ReasonSeparator = schema.Consistency.ReasonSeparator
+		}
+		if err := validateThreeViewConsistency(override, *recipe); err != nil {
+			return fmt.Errorf("three_view.purposes[%s].consistency 无效：%w", id, err)
+		}
+	}
+	if !seenID[strings.TrimSpace(schema.DefaultPurpose)] {
+		return fmt.Errorf("three_view.default_purpose %q 必须是已声明的 purpose", schema.DefaultPurpose)
+	}
+	if !strings.Contains(schema.Messages.PurposeInvalid, "{purpose}") ||
+		!strings.Contains(schema.Messages.PurposeInvalid, "{choices}") {
+		return errors.New("three_view.messages.purpose_invalid 必须包含 {purpose} 与 {choices}")
+	}
+	return nil
+}
+
+// validateThreeViewPurposeFrame checks a use's frame override: it takes the
+// source picture's own shape, with no subject measurement to declare, or the
+// shared subject measurement with its bounds.
+func validateThreeViewPurposeFrame(purpose string, frame *ChatThreeViewFrameSchema) error {
+	if frame == nil {
+		return nil
+	}
+	if !frame.Enabled {
+		return fmt.Errorf("three_view.purposes[%s].frame 必须启用", purpose)
+	}
+	if frame.SourceRatio {
+		if frame.SubjectThreshold != 0 || frame.MinSubjectRatio != 0 || frame.MarginRatio != 0 {
+			return fmt.Errorf("three_view.purposes[%s].frame 按源图比例时不能声明主体测量字段", purpose)
+		}
+		return nil
+	}
+	if frame.SubjectThreshold <= 0 || frame.MinSubjectRatio <= 0 || frame.MinSubjectRatio >= 1 ||
+		frame.MarginRatio < 0 || frame.MarginRatio > 0.5 {
+		return fmt.Errorf("three_view.purposes[%s].frame 的主体测量字段无效", purpose)
+	}
+	return nil
+}
+
 // validateThreeViewConsistency checks the automatic check's bounds (#243) and
 // the appearance comparison, the front-view acceptance and the words of every
 // reason (#283).

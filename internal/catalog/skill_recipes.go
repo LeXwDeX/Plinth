@@ -21,7 +21,8 @@ func validateSkillRecipes(recipes []ChatSkillRecipeSchema) error {
 			if strings.TrimSpace(step.Key) == "" || prior[step.Key] ||
 				strings.TrimSpace(step.Label) == "" || step.Capability != schema.ImageToImage ||
 				strings.TrimSpace(step.PromptTemplate) == "" || strings.TrimSpace(step.OutputRole) == "" ||
-				(step.SourceStepKey != "" && !prior[step.SourceStepKey]) {
+				(step.SourceStepKey != "" && !prior[step.SourceStepKey]) ||
+				(step.IncludeSourceAsset && step.SourceStepKey == "") {
 				return fmt.Errorf("invalid step %q in skill recipe %q", step.Key, recipe.ID)
 			}
 			for key, value := range step.StaticInput {

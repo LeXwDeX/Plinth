@@ -2012,6 +2012,9 @@ func validateThreeView(schema ChatThreeViewSchema, recipes []ChatSkillRecipeSche
 	if err := validateThreeViewSubjectTypes(schema, *recipe, agentTools); err != nil {
 		return err
 	}
+	if err := validateThreeViewPurposes(schema, recipes); err != nil {
+		return err
+	}
 	if err := validateThreeViewConsistency(schema, *recipe); err != nil {
 		return err
 	}

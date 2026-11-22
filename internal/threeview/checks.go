@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/imageinspect"
 	"github.com/LeXwDeX/Plinth/internal/skillrun"
@@ -35,12 +36,13 @@ type viewCheck struct {
 func (s *Service) viewChecks(ctx context.Context, owner generation.OwnerID, run skillrun.Run,
 	step skillrun.Step,
 ) ([]viewCheck, error) {
-	candidate, err := s.measure(ctx, owner, step, step.OutputAssetID)
+	consistency := s.consistencyForRecipe(run.RecipeID)
+	candidate, err := s.measure(ctx, owner, step, step.OutputAssetID, consistency)
 	if err != nil {
 		return nil, err
 	}
 	if step.Spec.SourceStepKey == "" {
-		return s.frontChecks(candidate.report), nil
+		return s.frontChecks(candidate.report, consistency), nil
 	}
 	sourceIndex := stepIndexByKey(run, step.Spec.SourceStepKey)
 	if sourceIndex < 0 {
@@ -51,17 +53,19 @@ func (s *Service) viewChecks(ctx context.Context, owner generation.OwnerID, run 
 	if !ready {
 		return nil, skillrun.ErrConflict
 	}
-	reference, err := s.measure(ctx, owner, source, sourceAsset)
+	reference, err := s.measure(ctx, owner, source, sourceAsset, consistency)
 	if err != nil {
 		return nil, err
 	}
-	consistency := s.schema.Consistency
 	checks := wrapChecks(imageinspect.Compare(reference.report, candidate.report, imageinspect.Consistency{
 		MaxSubjectRatioDelta: consistency.MaxSubjectRatioDelta,
 		MaxBackgroundSpread:  consistency.MaxBackgroundSpread,
 		MaxBBoxHeightDelta:   consistency.MaxBBoxHeightDelta,
 	}), "")
-	if !s.comparesAppearance() {
+	// A later view is the same subject again, so it must be complete inside the
+	// frame, as the front view is (#409).
+	checks = append(checks, viewCheck{Check: imageinspect.EdgeCheck(candidate.report)})
+	if !s.comparesAppearance(consistency) {
 		return checks, nil
 	}
 	checks = append(checks, wrapChecks(imageinspect.CompareAppearance(reference.appearance, candidate.appearance,
@@ -69,7 +73,7 @@ func (s *Service) viewChecks(ctx context.Context, owner generation.OwnerID, run 
 			MaxPaletteDistance: consistency.Appearance.Palette.MaxDistance,
 			MaxPartCountDelta:  consistency.Appearance.Parts.MaxCountDelta,
 		}), "")...)
-	mirror, err := s.mirrorChecks(ctx, owner, run, step, source, reference, candidate)
+	mirror, err := s.mirrorChecks(ctx, owner, run, step, source, reference, candidate, consistency)
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +81,7 @@ func (s *Service) viewChecks(ctx context.Context, owner generation.OwnerID, run 
 }
 
 // frontChecks are the checks of a view that has no earlier view to follow.
-func (s *Service) frontChecks(report imageinspect.Report) []viewCheck {
-	consistency := s.schema.Consistency
+func (s *Service) frontChecks(report imageinspect.Report, consistency catalog.ChatThreeViewConsistencySchema) []viewCheck {
 	checks := report.Review(imageinspect.Checklist{
 		RequirePlainBackground: consistency.MaxBackgroundSpread > 0,
 		MaxBackgroundSpread:    consistency.MaxBackgroundSpread,
@@ -97,10 +100,10 @@ func (s *Service) frontChecks(report imageinspect.Report) []viewCheck {
 // the person); an optional view that was never made, or one still waiting, is
 // skipped. The front view the candidate was measured against is not read twice.
 func (s *Service) mirrorChecks(ctx context.Context, owner generation.OwnerID, run skillrun.Run, step, source skillrun.Step,
-	reference, candidate measuredView,
+	reference, candidate measuredView, consistency catalog.ChatThreeViewConsistencySchema,
 ) ([]viewCheck, error) {
 	var checks []viewCheck
-	for _, pair := range s.schema.Consistency.Appearance.Mirror.Pairs {
+	for _, pair := range consistency.Appearance.Mirror.Pairs {
 		if len(pair.Views) != 2 {
 			continue
 		}
@@ -125,7 +128,7 @@ func (s *Service) mirrorChecks(ctx context.Context, owner generation.OwnerID, ru
 		view := reference
 		if partner.Spec.Key != source.Spec.Key {
 			var err error
-			if view, err = s.measure(ctx, owner, partner, asset); err != nil {
+			if view, err = s.measure(ctx, owner, partner, asset, consistency); err != nil {
 				return nil, err
 			}
 		}
@@ -160,16 +163,17 @@ func wrapChecks(checks []imageinspect.Check, partner string) []viewCheck {
 	return wrapped
 }
 
-// comparesAppearance reports whether the Schema compares what the views look
-// like at all; without it no picture is decoded beyond its geometry report.
-func (s *Service) comparesAppearance() bool {
-	appearance := s.schema.Consistency.Appearance
+// comparesAppearance reports whether the declared consistency bounds compare
+// what the views look like at all; without them no picture is decoded beyond
+// its geometry report.
+func (s *Service) comparesAppearance(consistency catalog.ChatThreeViewConsistencySchema) bool {
+	appearance := consistency.Appearance
 	return appearance.SubjectThreshold > 0 &&
 		(appearance.Palette.MaxDistance > 0 || appearance.Parts.MaxCountDelta > 0 || len(appearance.Mirror.Pairs) > 0)
 }
 
-func (s *Service) appearanceOptions() imageinspect.AppearanceOptions {
-	appearance := s.schema.Consistency.Appearance
+func (s *Service) appearanceOptions(consistency catalog.ChatThreeViewConsistencySchema) imageinspect.AppearanceOptions {
+	appearance := consistency.Appearance
 	return imageinspect.AppearanceOptions{
 		SubjectThreshold:     appearance.SubjectThreshold,
 		PaletteColours:       appearance.Palette.Colours,
@@ -183,7 +187,7 @@ func (s *Service) appearanceOptions() imageinspect.AppearanceOptions {
 // measure reads one view's picture: a generated Task output, or the input
 // asset the person put in its place.
 func (s *Service) measure(ctx context.Context, owner generation.OwnerID, step skillrun.Step,
-	assetID generation.AssetID,
+	assetID generation.AssetID, consistency catalog.ChatThreeViewConsistencySchema,
 ) (measuredView, error) {
 	data, err := s.assetData(ctx, owner, step, assetID)
 	if err != nil {
@@ -195,12 +199,12 @@ func (s *Service) measure(ctx context.Context, owner generation.OwnerID, step sk
 		return measuredView{}, err
 	}
 	view := measuredView{report: report}
-	if s.comparesAppearance() {
+	if s.comparesAppearance(consistency) {
 		picture, err := imageinspect.Decode(data, limits)
 		if err != nil {
 			return measuredView{}, err
 		}
-		view.appearance = imageinspect.MeasureAppearance(picture, s.appearanceOptions())
+		view.appearance = imageinspect.MeasureAppearance(picture, s.appearanceOptions(consistency))
 	}
 	return view, nil
 }
@@ -239,8 +243,8 @@ func (s *Service) assetData(ctx context.Context, owner generation.OwnerID, step 
 
 // reasonText words one failed check with the Schema's reason for it. A check
 // the Schema has no words for is reported by its name and measurement.
-func (s *Service) reasonText(check viewCheck) string {
-	template := s.schema.Consistency.Reasons[check.Name]
+func (s *Service) reasonText(check viewCheck, consistency catalog.ChatThreeViewConsistencySchema) string {
+	template := consistency.Reasons[check.Name]
 	if template == "" {
 		return check.Name + " (" + check.Actual + ")"
 	}

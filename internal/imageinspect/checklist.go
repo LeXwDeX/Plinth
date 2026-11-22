@@ -72,9 +72,7 @@ func (r Report) Review(checklist Checklist) []Check {
 			Fix:      "crop_subject"})
 	}
 	if checklist.RequireEdgeClear {
-		checks = append(checks, Check{Name: "edge", Status: status(!r.TouchesEdge),
-			Actual:   fmt.Sprintf("touches edge=%t", r.TouchesEdge),
-			Expected: "the subject stays inside the frame", Fix: "crop_subject"})
+		checks = append(checks, EdgeCheck(r))
 	}
 	if checklist.MaxComponents > 0 {
 		checks = append(checks, Check{Name: "components", Status: status(r.ComponentCount <= checklist.MaxComponents),
@@ -85,6 +83,14 @@ func (r Report) Review(checklist Checklist) []Check {
 		checks = append(checks, MainComponentCheck(r, checklist.MinMainComponentRatio))
 	}
 	return checks
+}
+
+// EdgeCheck is the "not cropped" verdict of one report for a caller that
+// already runs its own checks and needs the edge item alone.
+func EdgeCheck(report Report) Check {
+	return Check{Name: "edge", Status: status(!report.TouchesEdge),
+		Actual:   fmt.Sprintf("touches edge=%t", report.TouchesEdge),
+		Expected: "the subject stays inside the frame", Fix: "crop_subject"}
 }
 
 func status(ok bool) string {

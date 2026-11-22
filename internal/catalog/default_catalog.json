@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.424-425-462-478.1",
+    "revision": "2026-11-22.409.1",
     "terminology": {
       "user_facing": [
         {
@@ -6878,7 +6878,7 @@
               "create_multiview_images",
               "create_model_3d_from_views"
             ],
-            "text": "【三视图制作要领】\n逐张三视图（create_three_view）用于要给 3D 做输入的同一主体：正面以用户选的图为身份锚，左侧、背面（和可选右侧）都以已通过的正面为源，按正交投影、中性均匀光、统一姿态/比例/画幅生成；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束。每一张都是独立任务，因此可以只重做或替换有问题的那一张，完成后用 inspect_image 比较主体占比、背景和轮廓高度；画幅按源图主体的高宽比选择（竖版角色不会落进 1:1），服务端的一致性检查还会比对主色分布、配件等独立部件数量和左右镜像。这些数字看不出款式和语义，所以三视图完成后要对照正面图逐张复核服装、配色、配件和左右（回执里附有清单），发现问题如实告诉用户并建议重试或替换那一张。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型的能力与价格以 list_offerings 为准，不要假设不同模型价格相同。"
+            "text": "【三视图制作要领】\n逐张三视图、四视图和多视角设定图都只用 create_three_view：一个视角一张独立图片，绝不出横排合图或九宫格，也不要把四个视角画进同一张图。先出正面并自检，再用「原图 + 已通过的正面图」依次出左、背和可选的右侧；每一张都是独立任务，因此可以只重做或替换有问题的那一张。\n按目的选 purpose：\n- model_input（缺省）用于要给 3D 做输入的同一主体：正交投影、中性均匀光、统一姿态/比例/画幅；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图的姿态、画风和画幅比例，不强制 A/T 姿态；四张图的主体描述与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n两种用途里，每一张都是独立任务，完成后用 inspect_image 比较主体占比、背景和轮廓高度；model_input 的画幅按源图主体的高宽比选择（竖版角色不会落进 1:1），design_sheet 的画幅直接取源图整张比例。服务端的一致性检查还会比对轮廓高度、配件等独立部件数量和左右镜像（design_sheet 停用主体占比差、主色和部件数），这些数字看不出款式和语义，所以完成后要对照正面图逐张复核服装、配色、配件和左右（回执里附有清单），发现问题如实告诉用户并建议重试或替换那一张。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型的能力与价格以 list_offerings 为准，不要假设不同模型价格相同。"
           },
           {
             "id": "image2d",
@@ -8384,7 +8384,7 @@
         {
           "name": "create_three_view",
           "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model selected by the human. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, so clothing, proportions and colors stay consistent. Pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, using the nearest size the model supports, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
+          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model the session's model choice picks. Pick purpose: model_input (the default) renders an orthographic set for 3D, where the subject_type class decides the pose and the frame; design_sheet renders a design sheet that keeps the source's own pose, art style and aspect ratio. Each view is one picture of its own: never a row or a grid of several views, and never one horizontal composite. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, with the original picture as a second reference for a design sheet, so clothing, proportions and colors stay consistent. For model_input, pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. For design_sheet the source's pose is kept as it is. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, or the source picture's own shape for a design sheet, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8401,7 +8401,12 @@
               "subject_type": {
                 "type": "string",
                 "enum": ["generic", "humanoid", "quadruped", "hard_surface"],
-                "description": "Optional subject class for the constraint template. humanoid uses a neutral A-pose or T-pose; quadruped stands on all four legs; hard_surface keeps rigid panels and symmetry. Omit for the session default."
+                "description": "Optional subject class for the constraint template of the model_input purpose. humanoid uses a neutral A-pose or T-pose; quadruped stands on all four legs; hard_surface keeps rigid panels and symmetry. Omit for the session default."
+              },
+              "purpose": {
+                "type": "string",
+                "enum": ["model_input", "design_sheet"],
+                "description": "Optional use of this run: model_input (the default) for an orthographic set that feeds 3D, or design_sheet for a design sheet that keeps the source's pose, art style and aspect ratio. Omit for the session default."
               }
             },
             "additionalProperties": false
@@ -10199,6 +10204,47 @@
                 "optional": true
               }
             ]
+          },
+          {
+            "id": "image-design-sheet",
+            "revision": "2026-11-22.409.1",
+            "steps": [
+              {
+                "key": "front",
+                "label": "正面",
+                "capability": "image-to-image",
+                "prompt_template": "Use the original reference image as the identity anchor. Design sheet, front view: produce one single picture, never a row or a grid of several views. Subject: keep the same subject as the reference, with its category, shape, geometry, proportions, colors, materials, surface markings, clothing and accessories; keep the subject's own pose exactly as in the reference, and do not straighten it into an A-pose or a T-pose. Style: keep the same art style, line work, shading, rendering and finish as the reference. This view: the subject faces the camera; the camera sees its front and not its left side, right side or back. Output: exactly one subject, complete and uncropped with even margins, at the same scale and framing as the reference, on a plain uniform background, with neutral even lighting and no strong directional shadows. Do not add captions, view labels, text, decoration or extra objects, and do not add any other view beside this one.",
+                "output_role": "image"
+              },
+              {
+                "key": "left",
+                "label": "左侧",
+                "capability": "image-to-image",
+                "source_step_key": "front",
+                "include_source_asset": true,
+                "prompt_template": "Use the approved front view and the original reference image together as identity anchors. Design sheet, left view: produce one single picture, never a row or a grid of several views. Subject: keep the same subject as the front view, with its category, shape, geometry, proportions, colors, materials, surface markings, clothing and accessories; keep the subject's own pose exactly as in the reference, and do not straighten it into an A-pose or a T-pose. Style: keep the same art style, line work, shading, rendering and finish as the reference. This view: the subject's own left side faces the camera, as if seen from the subject's left, so in picture terms the subject faces toward the left edge of the frame; the camera does not see its front, right side or back. Keep the subject the same size in frame and the same silhouette height as the front view. Output: exactly one subject, complete and uncropped with even margins, on a plain uniform background, with neutral even lighting and no strong directional shadows. Do not add captions, view labels, text, decoration or extra objects, and do not add any other view beside this one.",
+                "output_role": "image"
+              },
+              {
+                "key": "back",
+                "label": "背面",
+                "capability": "image-to-image",
+                "source_step_key": "front",
+                "include_source_asset": true,
+                "prompt_template": "Use the approved front view and the original reference image together as identity anchors. Design sheet, back view: produce one single picture, never a row or a grid of several views. Subject: keep the same subject as the front view, with its category, shape, geometry, proportions, colors, materials, surface markings, clothing and accessories; keep the subject's own pose exactly as in the reference, and do not straighten it into an A-pose or a T-pose. Style: keep the same art style, line work, shading, rendering and finish as the reference. This view: the subject is seen from directly behind, so in picture terms it faces away from the viewer; the camera does not see its front, left side or right side. Keep the subject the same size in frame and the same silhouette height as the front view. Output: exactly one subject, complete and uncropped with even margins, on a plain uniform background, with neutral even lighting and no strong directional shadows. Do not add captions, view labels, text, decoration or extra objects, and do not add any other view beside this one.",
+                "output_role": "image"
+              },
+              {
+                "key": "right",
+                "label": "右侧",
+                "capability": "image-to-image",
+                "source_step_key": "front",
+                "include_source_asset": true,
+                "prompt_template": "Use the approved front view and the original reference image together as identity anchors. Design sheet, right view: produce one single picture, never a row or a grid of several views. Subject: keep the same subject as the front view, with its category, shape, geometry, proportions, colors, materials, surface markings, clothing and accessories; keep the subject's own pose exactly as in the reference, and do not straighten it into an A-pose or a T-pose. Style: keep the same art style, line work, shading, rendering and finish as the reference. This view: the subject's own right side faces the camera, as if seen from the subject's right, so in picture terms the subject faces toward the right edge of the frame; the camera does not see its front, left side or back. Keep the subject the same size in frame and the same silhouette height as the front view. Output: exactly one subject, complete and uncropped with even margins, on a plain uniform background, with neutral even lighting and no strong directional shadows. Do not add captions, view labels, text, decoration or extra objects, and do not add any other view beside this one.",
+                "output_role": "image",
+                "optional": true
+              }
+            ]
           }
         ]
       },
@@ -11372,6 +11418,62 @@
       },
       "three_view": {
         "recipe_id": "image-three-view",
+        "purpose_argument": "purpose",
+        "default_purpose": "model_input",
+        "purposes": [
+          {
+            "id": "model_input",
+            "label": "给 3D 做输入",
+            "recipe_id": "image-three-view"
+          },
+          {
+            "id": "design_sheet",
+            "label": "设定图（保持原姿态与画风）",
+            "recipe_id": "image-design-sheet",
+            "frame": {
+              "enabled": true,
+              "source_ratio": true
+            },
+            "consistency": {
+              "max_subject_ratio_delta": 0,
+              "max_background_spread": 32,
+              "max_bbox_height_delta": 0.12,
+              "max_attempts_per_view": 2,
+              "front": {
+                "max_components": 6,
+                "min_main_component_ratio": 0.6
+              },
+              "appearance": {
+                "subject_threshold": 32,
+                "palette": {
+                  "max_distance": 0,
+                  "colours": 6,
+                  "min_share": 0.03,
+                  "merge_distance": 48
+                },
+                "parts": {
+                  "max_count_delta": 0,
+                  "min_share": 0.01
+                },
+                "mirror": {
+                  "normalized_side": 64,
+                  "pairs": [
+                    {
+                      "views": ["left", "right"],
+                      "min_overlap": 0.6,
+                      "max_orientation_margin": 0.1
+                    },
+                    {
+                      "views": ["front", "back"],
+                      "min_overlap": 0.5,
+                      "max_orientation_margin": 0.1
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
         "model_source_step_key": "front",
         "label": "三视图",
         "maximum_listed": 10,
@@ -11520,7 +11622,8 @@
           "agent_paused": "三视图运行 {run} 在 {view} 暂停：{reason}。后续视角没有自动提交，请告诉用户在三视图卡片上继续或重试。",
           "consistency_retry": "{view} 与正面图不一致（{reasons}），已自动重做第 {attempt}/{maximum} 次；其他视角不受影响。",
           "consistency_failed": "{view} 与正面图仍不一致（{reasons}），已停止自动重做。请让用户在三视图卡片上重试这一张，或替换它。",
-          "subject_invalid": "主体类型 {subject} 不受支持；可选：{choices}。"
+          "subject_invalid": "主体类型 {subject} 不受支持；可选：{choices}。",
+          "purpose_invalid": "用途 {purpose} 不受支持；可选：{choices}。"
         },
         "multiview": {
           "tool": "create_model_3d_from_views",
@@ -21201,6 +21304,10 @@
             "chat.skills.recipes[id=image-three-view].steps[key=left].label": "Left",
             "chat.skills.recipes[id=image-three-view].steps[key=right].label": "Right",
             "chat.skills.recipes[id=image-three-view].steps[key=back].label": "Back",
+            "chat.skills.recipes[id=image-design-sheet].steps[key=front].label": "Front",
+            "chat.skills.recipes[id=image-design-sheet].steps[key=left].label": "Left",
+            "chat.skills.recipes[id=image-design-sheet].steps[key=right].label": "Right",
+            "chat.skills.recipes[id=image-design-sheet].steps[key=back].label": "Back",
             "chat.harness.groups[id=common].label": "Common features",
             "chat.harness.groups[id=common].empty_message": "No common features available.",
             "chat.harness.groups[id=model].label": "Specific to the current model",

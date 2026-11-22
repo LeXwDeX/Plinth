@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -113,7 +114,7 @@ func (r *Runtime) ResolveAgentStepAt(ctx context.Context, owner generation.Owner
 	if prepared.ID != step.PreparedInputID || prepared.OwnerID != owner || prepared.SessionID != session ||
 		prepared.InputHash != step.PreparedInputHash || prepared.Capability != step.Spec.Capability ||
 		prepared.OfferingID != step.Spec.OfferingID || prepared.OfferingRevision != step.Spec.OfferingRevision ||
-		!MatchesPreparedInput(step.Spec, execution.SourceAssetID, prepared.NormalizedInput) ||
+		!MatchesPreparedInput(step.Spec, execution.SourceAssetID, execution.SecondSourceAssetID, prepared.NormalizedInput) ||
 		(grant.Status == executiongrant.Bound && grant.TaskID == "") ||
 		(step.TaskID != "" && (grant.Status != executiongrant.Bound || grant.TaskID != string(step.TaskID))) {
 		return Run{}, Execution{}, executiongrant.Grant{}, ErrConflict
@@ -176,7 +177,7 @@ func (r *Runtime) PrepareStep(ctx context.Context, owner generation.OwnerID, run
 	if execution.Step.Phase != Planned {
 		return Run{}, generation.PreparedInput{}, ErrConflict
 	}
-	input, err := stepInput(execution.Step.Spec, execution.SourceAssetID)
+	input, err := stepInput(execution.Step.Spec, execution.SourceAssetID, execution.SecondSourceAssetID)
 	if err != nil {
 		return Run{}, generation.PreparedInput{}, err
 	}
@@ -201,9 +202,13 @@ func (r *Runtime) PrepareStep(ctx context.Context, owner generation.OwnerID, run
 	return run, prepared, nil
 }
 
-func stepInput(spec StepSpec, source generation.AssetID) (json.RawMessage, error) {
+// stepInput freezes one step's provider input: the recipe prompt, the source
+// asset and, for a recipe that declares IncludeSourceAsset, the run's original
+// picture as the second reference (#409). A second asset equal to the first is
+// refused, so a recipe cannot silently send the same picture twice.
+func stepInput(spec StepSpec, source, second generation.AssetID) (json.RawMessage, error) {
 	if spec.PromptParameter == "" || spec.SourceParameter == "" ||
-		spec.PromptParameter == spec.SourceParameter || source == "" {
+		spec.PromptParameter == spec.SourceParameter || source == "" || second == source {
 		return nil, ErrInvalid
 	}
 	input := make(map[string]json.RawMessage, len(spec.StaticInput)+2)
@@ -214,9 +219,14 @@ func stepInput(spec StepSpec, source generation.AssetID) (json.RawMessage, error
 		input[key] = append(json.RawMessage(nil), value...)
 	}
 	prompt, _ := json.Marshal(spec.PromptTemplate)
-	assets, _ := json.Marshal([]generation.AssetID{source})
+	assets := make([]generation.AssetID, 0, 2)
+	assets = append(assets, source)
+	if second != "" {
+		assets = append(assets, second)
+	}
+	encodedAssets, _ := json.Marshal(assets)
 	input[spec.PromptParameter] = prompt
-	input[spec.SourceParameter] = assets
+	input[spec.SourceParameter] = encodedAssets
 	encoded, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -226,8 +236,8 @@ func stepInput(spec StepSpec, source generation.AssetID) (json.RawMessage, error
 
 // MatchesPreparedInput checks the recipe-owned fields after Catalog
 // normalization. Offering defaults may add fields, but no caller can replace
-// the prompt or source asset while retaining the Skill checkpoint.
-func MatchesPreparedInput(spec StepSpec, source generation.AssetID, normalized json.RawMessage) bool {
+// the prompt or the source assets while retaining the Skill checkpoint.
+func MatchesPreparedInput(spec StepSpec, source, second generation.AssetID, normalized json.RawMessage) bool {
 	if spec.PromptParameter == "" || spec.SourceParameter == "" {
 		return false
 	}
@@ -241,8 +251,15 @@ func MatchesPreparedInput(spec StepSpec, source generation.AssetID, normalized j
 		return false
 	}
 	var assets []generation.AssetID
-	if err := json.Unmarshal(input[spec.SourceParameter], &assets); err != nil ||
-		len(assets) != 1 || assets[0] != source {
+	if err := json.Unmarshal(input[spec.SourceParameter], &assets); err != nil {
+		return false
+	}
+	expected := make([]generation.AssetID, 0, 2)
+	expected = append(expected, source)
+	if second != "" {
+		expected = append(expected, second)
+	}
+	if !slices.Equal(assets, expected) {
 		return false
 	}
 	for key, value := range spec.StaticInput {
