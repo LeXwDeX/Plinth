@@ -83,6 +83,11 @@ type Chat interface {
 	// TurnEndedInError reports whether the turn recorded the Schema's error
 	// reason.
 	TurnEndedInError(turn chat.Turn) bool
+	// SettleReportedItem moves a working item whose done report is stored into
+	// review once its delivery is stable (#459). It reports false when the item
+	// has no such report, and true when it finished the item or left it waiting
+	// for its delivery.
+	SettleReportedItem(ctx context.Context, input chat.SettleReportedItemInput) (assetlist.Item, bool, error)
 }
 
 // Scheduler hands a started turn to the chat orchestrator. A full queue or a
@@ -503,6 +508,15 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 		if failed {
 			return runner.failItem(ctx, run, item, report, now)
 		}
+		// A working item that already reported done waits for its delivery to
+		// settle (#459): the report is stored on the item, so the loop neither
+		// opens another turn nor spends a round, and the item moves into review
+		// as soon as every post-success format is terminal. Only format slots
+		// hold it: a background slot that maps to no format must not.
+		finished, err := runner.finishReportedItem(ctx, run, item, now)
+		if err != nil || finished {
+			return false, err
+		}
 		// max_rounds_per_item bounds the turns of one work session. Reading
 		// the item's whole-life round here would fail a returned item after a
 		// single turn when its first make used the allowance (#329b).
@@ -798,6 +812,52 @@ func (runner *Runner) finishItem(
 	return err
 }
 
+// finishReportedItem moves a working item whose done report is stored into
+// review once its delivery is stable (#459). It reports true when the item was
+// such a report, whether the item was finished or is still waiting: the loop
+// must not open another turn for it in either case. A waiting item's next
+// scheduling instant is one post-success observation interval ahead (capped by
+// the Catalog), so the check runs at that cadence rather than every tick.
+func (runner *Runner) finishReportedItem(
+	ctx context.Context,
+	run assetlist.Run,
+	item assetlist.Item,
+	now time.Time,
+) (bool, error) {
+	if runner.chat == nil {
+		return false, nil
+	}
+	if runner.tasks == nil {
+		return false, nil
+	}
+	tasks, err := runner.tasks(ctx, run.OwnerID, item.SessionID)
+	if err != nil {
+		// Without the session's Tasks the report cannot be judged: leave the
+		// item to the ordinary turn path instead of guessing.
+		return false, err
+	}
+	list, err := runner.lists.Get(ctx, run.OwnerID, run.ProjectID, run.ListID)
+	if errors.Is(err, assetlist.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, handled, err := runner.chat.SettleReportedItem(ctx, chat.SettleReportedItemInput{
+		OwnerID:   run.OwnerID,
+		ProjectID: run.ProjectID,
+		ListID:    run.ListID,
+		Item:      item,
+		Brief:     list.Brief,
+		Tasks:     tasks,
+		Now:       now,
+	})
+	if err != nil {
+		return false, err
+	}
+	return handled, nil
+}
+
 func (runner *Runner) pauseRun(ctx context.Context, run assetlist.Run, reason string, now time.Time) error {
 	_, err := runner.runs.UpdateRunStatus(ctx, run.OwnerID, run.ListID,
 		assetlist.RunRunning, assetlist.RunPaused, reason, now)
@@ -970,7 +1030,11 @@ func (runner *Runner) forgetDeferredTurns(items []assetlist.Item) {
 // workingSlots counts the items that hold a parallel slot. An item waiting for
 // an approval card or blocked at the 3D step cap releases its slot (#328,
 // #330 §6): the person can resolve it later, and the scheduler is free to
-// claim another item meanwhile.
+// claim another item meanwhile. An item whose done report is stored while its
+// delivery is still converting releases it too (#459): the delivery tick
+// advances that item on its own schedule (its next check is one observation
+// interval ahead), so without this a max_parallel_items = 1 list would claim
+// nothing until the delivery settled.
 func workingSlots(items []assetlist.Item) int {
 	slots := 0
 	for _, item := range items {
@@ -978,6 +1042,9 @@ func workingSlots(items []assetlist.Item) int {
 			continue
 		}
 		if item.Block == assetlist.BlockAwaitingApproval || item.Block == assetlist.BlockStepCap {
+			continue
+		}
+		if item.DeliveryDeferred {
 			continue
 		}
 		slots++

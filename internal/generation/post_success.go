@@ -145,7 +145,7 @@ func (m *Module) reschedulePostSuccess(
 ) error {
 	task := lease.Task
 	now := m.clock.Now()
-	task.NextActionAt = now.Add(postSuccessInterval(task))
+	task.NextActionAt = now.Add(PostSuccessInterval(task))
 	task.UpdatedAt = now
 	task.Version++
 	m.logger.Warn(
@@ -494,7 +494,7 @@ func pollAfterOrInterval(task Task, obs Observation) time.Duration {
 	if obs.PollAfter > 0 {
 		return obs.PollAfter
 	}
-	return postSuccessInterval(task)
+	return PostSuccessInterval(task)
 }
 
 // cloneResourceStates 深拷贝资源态（避免修改租约内聚合的共享 map）。

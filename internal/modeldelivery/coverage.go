@@ -212,6 +212,13 @@ type view struct {
 	// inFlight maps a format to a declared conversion the Agent started
 	// directly and that has not finished. No second run may be started for it.
 	inFlight map[string]generation.Task
+	// pending maps a format to the post-success resource slot the task still
+	// owes (#459): the platform is converting it, so it is neither missing nor
+	// obtainable. failed marks a format whose slot ended without a file
+	// (failed/incomplete/abandoned/denied): it is missing, and it reads as a
+	// failed conversion rather than one that never ran.
+	pending map[string]generation.ResourceState
+	failed  map[string]bool
 	// err is a read that failed while collecting the view. A projection that
 	// could not see an active conversion must fail before offering or starting
 	// a paid run, never present the formats as unconverted.
@@ -237,8 +244,10 @@ func renewedKey(base, failedPlanID string) string {
 
 func (s *Service) resolve(ctx context.Context, task generation.Task) view {
 	v := view{task: task, assets: sortedAssets(task), obtained: map[string]obtained{}, plans: map[string]processing.Plan{}, active: map[string]processing.Plan{}, refetch: map[string]generation.RefetchEligibility{},
-		keys: map[string]string{}, previous: map[string]processing.Plan{}, inFlight: map[string]generation.Task{}}
+		keys: map[string]string{}, previous: map[string]processing.Plan{}, inFlight: map[string]generation.Task{},
+		pending: map[string]generation.ResourceState{}, failed: map[string]bool{}}
 	v.own, v.rest = s.classify(v.assets)
+	s.recordResourceFormats(&v, task)
 	known := map[string]bool{}
 	for _, candidate := range s.candidates(task) {
 		key := candidate.key
@@ -286,6 +295,74 @@ func (s *Service) resolve(ctx context.Context, task generation.Task) view {
 	}
 	v.err = s.directConversions(ctx, &v)
 	return v
+}
+
+// recordResourceFormats projects the task's post-success resource slots onto
+// the formats they deliver (#459). A pending slot is a format the platform is
+// already converting, so the Formats tab must not offer or start a second paid
+// run for it. A slot that ended without a file (failed, incomplete, abandoned
+// or denied) leaves the format missing, but marks it as a conversion that ran
+// and failed rather than one that never ran.
+//
+// A READY slot needs no entry: the kernel only writes READY on local asset
+// evidence, and the file is then classified as an asset above.
+//
+// A slot that has not delivered maps to every format its role and variant
+// select, not to one of them: the saved bytes are what tells two containers of
+// the same slot apart (converted.gltf is both the GLB and the glTF export), so
+// until they land no single format can be named (#459).
+func (s *Service) recordResourceFormats(v *view, task generation.Task) {
+	for key, state := range task.Resources {
+		role, scope, _, err := generation.ParseResourceStateKey(key)
+		if err != nil {
+			continue
+		}
+		formats := s.schema.PendingFormats(role, scope)
+		if len(formats) == 0 {
+			continue
+		}
+		switch state.State {
+		case generation.ResourcePending:
+			for _, format := range formats {
+				if _, taken := v.pending[format]; !taken {
+					v.pending[format] = state
+				}
+			}
+		case generation.ResourceFailed, generation.ResourceIncomplete,
+			generation.ResourceDenied, generation.ResourceAbandoned:
+			for _, format := range formats {
+				v.failed[format] = true
+			}
+		}
+	}
+}
+
+// PendingResourceFormats names the formats a stored Task still owes as
+// post-success resources (#459), sorted. It is the one Schema rule of this
+// package for that question, not a second copy: the mapping is
+// application.model_delivery.formats[].matches, read by the coverage
+// projection, the guarded Task admission and the Agent's conversion route. A
+// slot names every format it may fill until its bytes say otherwise.
+func PendingResourceFormats(delivery catalog.ModelDeliverySchema, task generation.Task) []string {
+	pending := map[string]bool{}
+	for key, state := range task.Resources {
+		if state.State != generation.ResourcePending {
+			continue
+		}
+		role, scope, _, err := generation.ParseResourceStateKey(key)
+		if err != nil {
+			continue
+		}
+		for _, format := range delivery.PendingFormats(role, scope) {
+			pending[format] = true
+		}
+	}
+	result := make([]string, 0, len(pending))
+	for format := range pending {
+		result = append(result, format)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // record records what one completion plan of the task contributes: the
@@ -757,7 +834,8 @@ func (s *Service) analyze(ctx context.Context, task generation.Task) analysis {
 	for _, format := range s.schema.Formats {
 		_, own := v.own[format.ID]
 		_, got := v.obtained[format.ID]
-		if !own && !got {
+		_, converting := v.pending[format.ID]
+		if !own && !got && !converting {
 			missing = append(missing, format.ID)
 		}
 	}
@@ -839,6 +917,14 @@ func (s *Service) analyze(ctx context.Context, task generation.Task) analysis {
 				row.Status, row.Reason, row.Conversion = StatusConverting, reasonConverting, s.conversionOfTask(converting)
 				break
 			}
+			if _, pending := v.pending[format.ID]; pending {
+				// The task itself is still converting this format as a
+				// post-success resource (#457): the platform is doing it, so the
+				// row reads as converting and no second run is offered. Its
+				// deadline is the kernel's, not a plan's.
+				row.Status, row.Reason = StatusConverting, reasonConverting
+				break
+			}
 			index, planned := stepOf[format.ID]
 			if !planned {
 				row.Status, row.Reason = StatusUnavailable, reasons[format.ID]
@@ -862,10 +948,11 @@ func (s *Service) analyze(ctx context.Context, task generation.Task) analysis {
 				row.Status, row.Reason = StatusConverting, reasonConverting
 			}
 			if row.Status == StatusObtainable {
-				// A failed run, or one given up for a new run, is not a format
-				// that was never converted (#330).
+				// A failed run, one given up for a new run, or a post-success
+				// slot that ended without a file (#459) is not a format that was
+				// never converted (#330).
 				_, renewed := v.previous[step.candidate.key]
-				if exists || renewed {
+				if exists || renewed || v.failed[format.ID] {
 					row.Reason = reasonConversionFailed
 				} else {
 					row.Reason = reasonNotConverted

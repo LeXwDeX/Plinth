@@ -5965,6 +5965,12 @@ type ChatToolProcessingMessages struct {
 	// available Offering takes the saved file instead (#325). {step} is
 	// substituted. Empty falls back to SourceIncompatible.
 	SourceExpired string `json:"source_expired,omitempty"`
+	// FormatConverting refuses a target format the source Task is still
+	// converting as a post-success resource of its own (#457/#459): the
+	// platform is already producing it, so nothing is submitted and the call
+	// says so. {format} is the Schema format id. Empty leaves the call on the
+	// ordinary route order, where the guarded admission refuses it.
+	FormatConverting string `json:"format_converting,omitempty"`
 }
 
 // ChatToolServiceMessages are the LLM-facing texts a processing tool returns

@@ -314,12 +314,25 @@ func (m *Module) declaredConversion(offering Offering, input json.RawMessage) (C
 	return m.conversions.ConversionIntent(offering, input)
 }
 
-func (m *Module) declaredConversionOfTask(task Task) (ConversionIntent, bool, error) {
+func (m *Module) declaredConversionOfTask(task Task) (ConversionGuardReport, error) {
 	if task.Conversion != nil {
-		return *task.Conversion, true, nil
+		return ConversionGuardReport{Intent: *task.Conversion, Declared: true, PendingFormats: m.pendingFormats(task)}, nil
 	}
 	intent, ok := m.declaredConversion(task.Offering, task.Input)
-	return intent, ok, nil
+	if !ok {
+		return ConversionGuardReport{PendingFormats: m.pendingFormats(task)}, nil
+	}
+	return ConversionGuardReport{Intent: intent, Declared: true, PendingFormats: m.pendingFormats(task)}, nil
+}
+
+// pendingFormats names the formats a stored Task still owes as post-success
+// resources (#459). The Product Schema maps the frozen resource slots to
+// formats; a Task without resource states has none.
+func (m *Module) pendingFormats(task Task) []string {
+	if m.conversions == nil || len(task.Resources) == 0 {
+		return nil
+	}
+	return m.conversions.PendingFormats(task)
 }
 
 // DefaultOfferingID 返回该能力的默认供给项：优先显式声明 Default 的

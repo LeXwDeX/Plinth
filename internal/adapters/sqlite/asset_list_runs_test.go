@@ -208,6 +208,43 @@ func TestAssetListRunRepositoryClaimItemClaimsInPositionOrder(t *testing.T) {
 	}
 }
 
+// #459: storing a done report on a working item marks it as waiting for its
+// delivery, and the item clears the marker when it leaves the working state.
+// The runner reads the marker to release the item's parallel slot.
+func TestAssetListItemDeliveryDeferredMarkerFollowsTheItem459(t *testing.T) {
+	_, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	seedRunList(t, lists, "alist_1", 1)
+	if _, err := runs.CreateRun(ctx, newAssetListRun("run_1", "owner-a", "prj_1", "alist_1", assetlist.RunRunning)); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	claimed, found, err := runs.ClaimItem(ctx, "owner-a", "alist_1", assetListTestNow)
+	if err != nil || !found {
+		t.Fatalf("claim = %+v, %v, %v", claimed, found, err)
+	}
+	if claimed.DeliveryDeferred {
+		t.Fatalf("a fresh claim = %+v; want no deferred marker", claimed)
+	}
+
+	deferred, err := runs.SetItemResult(ctx, "owner-a", "alist_1", claimed.ID,
+		json.RawMessage(`{"task_id":"task_1"}`), assetlist.VersionUnchecked, assetListTestNow)
+	if err != nil || !deferred.DeliveryDeferred {
+		t.Fatalf("stored report = %+v, %v; want the deferred marker", deferred, err)
+	}
+	items, err := runs.ItemsByList(ctx, "owner-a", "alist_1")
+	if err != nil || len(items) != 1 || !items[0].DeliveryDeferred {
+		t.Fatalf("listed items = %+v, %v; want the marker read back", items, err)
+	}
+
+	finished, err := runs.FinishItem(ctx, assetlist.FinishItemInput{
+		OwnerID: "owner-a", ListID: "alist_1", ItemID: claimed.ID,
+		State: assetlist.StateReview, At: assetListTestNow,
+	})
+	if err != nil || finished.DeliveryDeferred || finished.State != assetlist.StateReview {
+		t.Fatalf("finished item = %+v, %v; want review without the marker", finished, err)
+	}
+}
+
 func TestAssetListRunRepositoryClaimItemResumesAReturnedItem(t *testing.T) {
 	_, lists, runs, _ := newAssetListRunRepositories(t)
 	ctx := context.Background()

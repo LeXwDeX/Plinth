@@ -38,9 +38,9 @@ func conversionAdmissionTask(id, owner, session, source string, formats ...strin
 }
 
 func conversionChecker(intents map[generation.TaskID]generation.ConversionIntent) generation.ConversionConflictChecker {
-	return func(active generation.Task) (generation.ConversionIntent, bool, error) {
+	return func(active generation.Task) (generation.ConversionGuardReport, error) {
 		intent, declared := intents[active.ID]
-		return intent, declared, nil
+		return generation.ConversionGuardReport{Intent: intent, Declared: declared}, nil
 	}
 }
 
@@ -294,8 +294,8 @@ func TestConversionAdmissionFailsClosedOnUnreadableSource330(t *testing.T) {
 	task = approveCreateFixture(t, repository, task)
 	checkerErr := errors.New("active conversions unreadable")
 	if _, _, err := repository.CreateConversionGuarded(context.Background(), task, event, 0,
-		func(generation.Task) (generation.ConversionIntent, bool, error) {
-			return generation.ConversionIntent{}, false, checkerErr
+		func(generation.Task) (generation.ConversionGuardReport, error) {
+			return generation.ConversionGuardReport{}, checkerErr
 		}); !errors.Is(err, checkerErr) {
 		t.Fatalf("checker failure = %v", err)
 	}

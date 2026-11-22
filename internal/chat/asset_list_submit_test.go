@@ -10,6 +10,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
@@ -26,6 +27,10 @@ type submitRuns struct {
 	runErr    error
 	finish    assetlist.FinishItemInput
 	finishErr error
+	// deferred and nextActionAt record the deferral write of a done report
+	// whose delivery is not stable yet (#459).
+	deferred     assetlist.DeferReportInput
+	nextActionAt time.Time
 }
 
 func (runs *submitRuns) ItemBySession(_ context.Context, ownerID, sessionID string) (assetlist.Item, bool, error) {
@@ -61,6 +66,22 @@ func (runs *submitRuns) FinishItem(_ context.Context, input assetlist.FinishItem
 	return item, nil
 }
 
+// SetItemResult and SetItemNextActionAt record the deferred report of a done
+// call whose delivery is not stable yet (#459).
+func (runs *submitRuns) SetItemResult(_ context.Context, _, _, _ string, result json.RawMessage, _ int64, at time.Time) (assetlist.Item, error) {
+	runs.deferred = assetlist.DeferReportInput{Result: result, At: at}
+	item := runs.item
+	item.Result = result
+	return item, nil
+}
+
+func (runs *submitRuns) SetItemNextActionAt(_ context.Context, _, _, _ string, nextActionAt time.Time, _ int64, _ time.Time) (assetlist.Item, error) {
+	runs.nextActionAt = nextActionAt
+	item := runs.item
+	item.NextActionAt = nextActionAt
+	return item, nil
+}
+
 // RunSummaries keeps list reads undecorated in this fixture.
 func (runs *submitRuns) RunSummaries(_ context.Context, _, _ string) (map[string]assetlist.RunSummary, error) {
 	return nil, nil
@@ -69,7 +90,12 @@ func (runs *submitRuns) RunSummaries(_ context.Context, _, _ string) (map[string
 func newAssetListSubmitService(t *testing.T, runs *submitRuns,
 	tasks chat.AssetListTaskSource) *chat.Service {
 	t.Helper()
-	schema := defaultAssetListSchema(t)
+	return newAssetListSubmitServiceWithSchema(t, runs, defaultAssetListSchema(t), tasks)
+}
+
+func newAssetListSubmitServiceWithSchema(t *testing.T, runs *submitRuns,
+	schema catalog.AssetListSchema, tasks chat.AssetListTaskSource) *chat.Service {
+	t.Helper()
 	listService, err := assetlist.New(assetlist.Config{
 		Repository:      newAssetListRepo(),
 		Runs:            runs,
@@ -79,9 +105,16 @@ func newAssetListSubmitService(t *testing.T, runs *submitRuns,
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := newChatService(t, newMemoryChatRepository())
+	service := newChatServiceWith(t, newMemoryChatRepository(), func(config *chat.ServiceConfig) {
+		config.Clock = func() time.Time { return submitClock }
+	})
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
 	service.SetAssetLists(chat.AssetListPolicy{
 		Service: listService, Schema: schema, Tasks: tasks,
+		Delivery: product.Application().ModelDelivery,
 	})
 	return service
 }

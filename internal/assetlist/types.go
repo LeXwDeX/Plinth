@@ -172,11 +172,18 @@ type Item struct {
 	// without the marker a grant of more steps would re-evaluate the same turn
 	// and block or fail it again. The runner consumes it once and continues
 	// from a fresh turn; the wire never carries it.
-	StepCapTurnMessageID string          `json:"-"`
-	Result               json.RawMessage `json:"result"`
-	Review               json.RawMessage `json:"review"`
-	CreatedAt            time.Time       `json:"created_at"`
-	UpdatedAt            time.Time       `json:"updated_at"`
+	StepCapTurnMessageID string `json:"-"`
+	// DeliveryDeferred marks a working item whose done report is stored while
+	// its post-success delivery is still converting (#459). Such an item holds
+	// no parallel slot: the runner's delivery tick advances it on its own
+	// schedule, so it must not keep another item from being claimed. It is set
+	// with the report (DeferReport) and cleared when the item leaves the
+	// working state; the wire never carries it.
+	DeliveryDeferred bool            `json:"-"`
+	Result           json.RawMessage `json:"result"`
+	Review           json.RawMessage `json:"review"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 // RouteStep is one planned capability of an item, with the runtime offering

@@ -188,6 +188,50 @@ func TestConversionAdmissionSerializesSimultaneousDirectSubmissions330(t *testin
 	}
 }
 
+// setTaskResources writes the post-success resource slots of a stored Task, the
+// way the kernel's coordinator does when a Provider asserts a slot or the
+// deadline finalizes it.
+func setTaskResources(t *testing.T, h *harness, id generation.TaskID, resources string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", h.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE generation_tasks SET resource_state_json = ? WHERE id = ?`, resources, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// #459: a succeeded source Task can still owe a format as a post-success
+// resource (#457's mixed post_success shape). The guarded admission must refuse
+// a second paid run for that format even though the source Task is not active,
+// because the platform is already converting it. The Schema rule names the
+// format; this exercises the whole path the Agent and the Processing Plan use.
+func TestConversionAdmissionBlocksFormatTheSourceStillOwes459(t *testing.T) {
+	h, _, _ := newCompletionHarness(t)
+	ctx := context.Background()
+	source := runToTerminal(t, h, "owner-a", submitConversionSource(t, h, "admission pending resource"), 30)
+	setTaskResources(t, h, source.ID,
+		`{"converted_model|converted.fbx|":{"state":"pending"},"converted_model|converted.gltf|":{"state":"ready"}}`)
+
+	_, err := h.module.SubmitPrepared(ctx, directConversionSubmission(t, h, source.ID, "direct-during-pending"))
+	if !errors.Is(err, generation.ErrConversionInProgress) {
+		t.Fatalf("direct conversion while the source still owes the format = %v", err)
+	}
+	// A plan step of the same source is refused the same way.
+	plan := planConversionSubmission(t, h, source.ID, "plan-459", "0:0", "processing:plan-459:0:0")
+	if _, err := h.module.SubmitPrepared(ctx, plan); !errors.Is(err, generation.ErrConversionInProgress) {
+		t.Fatalf("plan step while the source still owes the format = %v", err)
+	}
+	// Once the slot is terminal the conversion is admitted again.
+	setTaskResources(t, h, source.ID,
+		`{"converted_model|converted.fbx|":{"state":"ready"},"converted_model|converted.gltf|":{"state":"ready"}}`)
+	if _, err := h.module.SubmitPrepared(ctx, plan); err != nil {
+		t.Fatalf("plan step after the slot settled: %v", err)
+	}
+}
+
 func TestConversionAdmissionAllowsAnotherSource330(t *testing.T) {
 	h, _, _ := newCompletionHarness(t)
 	ctx := context.Background()
