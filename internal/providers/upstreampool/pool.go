@@ -211,12 +211,16 @@ func (m *Manager) Enabled(holder Holder) bool {
 	return ok && p.limit > 0
 }
 
-// Acquire atomically checks the holder's pool and takes a slot when one is
+// Acquire atomically checks the holder's pool and takes one slot when one is
 // free. It never blocks: when the pool is full it returns an inert ticket,
 // false and a wait hint, and the holder must try again later. Repeated calls
 // for the same attempt are idempotent and return the same live ticket.
-func (m *Manager) Acquire(ctx context.Context, holder Holder, weight int) (Ticket, bool, time.Duration) {
-	_ = weight // MVP grants one slot per holder; weight is accepted for callers.
+//
+// A holder always takes exactly one slot: the pool counts holders, not a
+// declared size, and no caller has a weighted claim. An earlier signature also
+// took a weight and discarded it, which suggested a caller could book a larger
+// share than the limit accounts for; it is gone until the pool can honour it.
+func (m *Manager) Acquire(ctx context.Context, holder Holder) (Ticket, bool, time.Duration) {
 	if err := ctx.Err(); err != nil {
 		return Ticket{}, false, m.waitHint
 	}

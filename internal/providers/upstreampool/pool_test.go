@@ -38,14 +38,14 @@ func holder(attempt string) Holder {
 func TestAcquireFillsToLimitThenQueues(t *testing.T) {
 	m, _ := newTestManager(2, time.Hour)
 	ctx := context.Background()
-	first, ok, _ := m.Acquire(ctx, holder("a"), 0)
+	first, ok, _ := m.Acquire(ctx, holder("a"))
 	if !ok || !first.Active() {
 		t.Fatalf("first acquire = %v %v", ok, first.Active())
 	}
-	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("b")); !ok {
 		t.Fatal("second acquire should fit")
 	}
-	ticket, ok, hint := m.Acquire(ctx, holder("c"), 0)
+	ticket, ok, hint := m.Acquire(ctx, holder("c"))
 	if ok || ticket.Active() || hint <= 0 {
 		t.Fatalf("third acquire = %v %v %v, want queued with a wait hint", ok, ticket.Active(), hint)
 	}
@@ -58,11 +58,11 @@ func TestAcquireFillsToLimitThenQueues(t *testing.T) {
 func TestAcquireIsIdempotentPerAttempt(t *testing.T) {
 	m, _ := newTestManager(1, time.Hour)
 	ctx := context.Background()
-	first, ok, _ := m.Acquire(ctx, holder("a"), 0)
+	first, ok, _ := m.Acquire(ctx, holder("a"))
 	if !ok {
 		t.Fatal("first acquire should fit")
 	}
-	second, ok, _ := m.Acquire(ctx, holder("a"), 0)
+	second, ok, _ := m.Acquire(ctx, holder("a"))
 	if !ok || second.token != first.token {
 		t.Fatalf("repeat acquire = %v token %d, want the same ticket", ok, second.token)
 	}
@@ -74,19 +74,19 @@ func TestAcquireIsIdempotentPerAttempt(t *testing.T) {
 func TestLateReleaseDoesNotFreeAnotherHoldersSlot(t *testing.T) {
 	m, _ := newTestManager(1, time.Hour)
 	ctx := context.Background()
-	a, _, _ := m.Acquire(ctx, holder("a"), 0)
+	a, _, _ := m.Acquire(ctx, holder("a"))
 	m.Release(a)
-	b, ok, _ := m.Acquire(ctx, holder("b"), 0)
+	b, ok, _ := m.Acquire(ctx, holder("b"))
 	if !ok {
 		t.Fatal("b should fit after a released")
 	}
 	// A's late release must not free B's slot.
 	m.Release(a)
-	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); ok {
+	if _, ok, _ := m.Acquire(ctx, holder("c")); ok {
 		t.Fatal("late release freed a slot B owns")
 	}
 	m.Release(b)
-	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("c")); !ok {
 		t.Fatal("releasing B should free the slot")
 	}
 }
@@ -94,11 +94,11 @@ func TestLateReleaseDoesNotFreeAnotherHoldersSlot(t *testing.T) {
 func TestReleaseAdmitsFIFO(t *testing.T) {
 	m, _ := newTestManager(1, time.Hour)
 	ctx := context.Background()
-	a, _, _ := m.Acquire(ctx, holder("a"), 0)
-	if _, ok, _ := m.Acquire(ctx, holder("first"), 0); ok {
+	a, _, _ := m.Acquire(ctx, holder("a"))
+	if _, ok, _ := m.Acquire(ctx, holder("first")); ok {
 		t.Fatal("first waiter should queue")
 	}
-	if _, ok, _ := m.Acquire(ctx, holder("second"), 0); ok {
+	if _, ok, _ := m.Acquire(ctx, holder("second")); ok {
 		t.Fatal("second waiter should queue")
 	}
 	m.Release(a)
@@ -108,12 +108,12 @@ func TestReleaseAdmitsFIFO(t *testing.T) {
 		t.Fatalf("after release stats = %+v, want 1 held 1 waiting", stats)
 	}
 	// The earliest waiter gets the slot when it calls Acquire.
-	ticket, ok, _ := m.Acquire(ctx, holder("first"), 0)
+	ticket, ok, _ := m.Acquire(ctx, holder("first"))
 	if !ok || !ticket.Active() {
 		t.Fatalf("first waiter = %v, want admitted", ok)
 	}
 	// The later waiter is still queued.
-	if _, ok, _ := m.Acquire(ctx, holder("second"), 0); ok {
+	if _, ok, _ := m.Acquire(ctx, holder("second")); ok {
 		t.Fatal("later waiter jumped the queue")
 	}
 }
@@ -126,7 +126,7 @@ func TestReadoptRestoresWithoutLimit(t *testing.T) {
 		t.Fatalf("readopt = %+v, want 3 held beyond the limit", stats)
 	}
 	// A fresh holder still queues while the readopted entries hold the pool.
-	if _, ok, _ := m.Acquire(context.Background(), holder("d"), 0); ok {
+	if _, ok, _ := m.Acquire(context.Background(), holder("d")); ok {
 		t.Fatal("readopted entries should occupy the pool")
 	}
 }
@@ -134,7 +134,7 @@ func TestReadoptRestoresWithoutLimit(t *testing.T) {
 func TestTouchKeepsPollingHolderAlive(t *testing.T) {
 	m, clock := newTestManager(1, time.Minute)
 	ctx := context.Background()
-	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("a")); !ok {
 		t.Fatal("acquire")
 	}
 	// Half the idle TTL passes, then the holder polls.
@@ -143,12 +143,12 @@ func TestTouchKeepsPollingHolderAlive(t *testing.T) {
 	clock.advance(40 * time.Second)
 	// The holder is still live: a fresh acquire for another attempt queues
 	// rather than reclaiming a.
-	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); ok {
+	if _, ok, _ := m.Acquire(ctx, holder("b")); ok {
 		t.Fatal("holder a was reclaimed while polling")
 	}
 	// Without a touch, the idle TTL reclaims it.
 	clock.advance(2 * time.Minute)
-	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("c")); !ok {
 		t.Fatal("idle holder was not reclaimed")
 	}
 }
@@ -158,13 +158,13 @@ func TestMaxLifetimeReclaimsEvenWhenTouched(t *testing.T) {
 	m := New(Options{Now: clock.now, IdleTTL: time.Hour})
 	m.Register("tripo.v3", "model-processing", PoolConfig{Limit: 1, MaxLifetime: 2 * time.Hour})
 	ctx := context.Background()
-	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("a")); !ok {
 		t.Fatal("acquire")
 	}
 	clock.advance(90 * time.Minute)
 	m.Touch(holder("a"))
 	clock.advance(40 * time.Minute) // past the hard cap, within the idle TTL
-	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("b")); !ok {
 		t.Fatal("hard maximum lifetime did not reclaim the holder")
 	}
 }
@@ -177,12 +177,12 @@ func TestReadoptKeepsOriginalCreatedForHardLifetime(t *testing.T) {
 	m := New(Options{Now: clock.now, IdleTTL: 10 * time.Hour})
 	m.Register("tripo.v3", "model-processing", PoolConfig{Limit: 2, MaxLifetime: time.Hour})
 	ctx := context.Background()
-	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("a")); !ok {
 		t.Fatal("acquire a")
 	}
 	// Past the hard cap another holder's Acquire reclaims a and takes the slot.
 	clock.advance(61 * time.Minute)
-	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("b")); !ok {
 		t.Fatal("acquire b after the hard cap")
 	}
 	// The public job is re-adopted on its next Observe, as Adapter.Observe
@@ -192,7 +192,7 @@ func TestReadoptKeepsOriginalCreatedForHardLifetime(t *testing.T) {
 	// a, so c fits. If Readopt had reset created, a would be a minute old and
 	// c would queue behind the two live entries.
 	clock.advance(time.Minute)
-	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("c")); !ok {
 		t.Fatalf("hard maximum lifetime was reset by Readopt: %+v", m.Stats())
 	}
 }
@@ -205,19 +205,19 @@ func TestReacquireKeepsOriginalCreatedForHardLifetime(t *testing.T) {
 	m := New(Options{Now: clock.now, IdleTTL: 10 * time.Hour})
 	m.Register("tripo.v3", "model-processing", PoolConfig{Limit: 2, MaxLifetime: time.Hour})
 	ctx := context.Background()
-	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("a")); !ok {
 		t.Fatal("acquire a")
 	}
 	clock.advance(61 * time.Minute)
-	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("b")); !ok {
 		t.Fatal("acquire b after the hard cap")
 	}
 	// The same attempt asks for its slot again.
-	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("a")); !ok {
 		t.Fatal("re-acquire a")
 	}
 	clock.advance(time.Minute)
-	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("c")); !ok {
 		t.Fatalf("hard maximum lifetime was reset by Acquire: %+v", m.Stats())
 	}
 }
@@ -225,26 +225,26 @@ func TestReacquireKeepsOriginalCreatedForHardLifetime(t *testing.T) {
 func TestWaitingHolderTTLIsSkipped(t *testing.T) {
 	m, clock := newTestManager(1, time.Hour)
 	ctx := context.Background()
-	a, _, _ := m.Acquire(ctx, holder("a"), 0)
-	if _, ok, _ := m.Acquire(ctx, holder("old"), 0); ok {
+	a, _, _ := m.Acquire(ctx, holder("a"))
+	if _, ok, _ := m.Acquire(ctx, holder("old")); ok {
 		t.Fatal("old waiter should queue")
 	}
 	clock.advance(30 * time.Minute)
 	m.Touch(holder("a"))
 	clock.advance(45 * time.Minute) // old waiter past its idle TTL, a still live
-	if _, ok, _ := m.Acquire(ctx, holder("new"), 0); ok {
+	if _, ok, _ := m.Acquire(ctx, holder("new")); ok {
 		t.Fatal("new waiter should queue behind a")
 	}
 	m.Release(a)
 	// "old" was reclaimed; "new" is the only waiter and is admitted.
-	if _, ok, _ := m.Acquire(ctx, holder("new"), 0); !ok {
+	if _, ok, _ := m.Acquire(ctx, holder("new")); !ok {
 		t.Fatal("live waiter was skipped")
 	}
 }
 
 func TestUnregisteredPoolNeverQueues(t *testing.T) {
 	m := New(Options{})
-	ticket, ok, hint := m.Acquire(context.Background(), Holder{Connection: "other", Pool: "x", Attempt: "a"}, 0)
+	ticket, ok, hint := m.Acquire(context.Background(), Holder{Connection: "other", Pool: "x", Attempt: "a"})
 	if !ok || !ticket.Active() || hint != 0 {
 		t.Fatalf("unregistered acquire = %v %v %v", ok, ticket.Active(), hint)
 	}
@@ -261,7 +261,7 @@ func TestConcurrentAcquireRelease(t *testing.T) {
 			defer wg.Done()
 			attempt := string(rune('a' + i%26))
 			for j := 0; j < 200; j++ {
-				ticket, ok, _ := m.Acquire(ctx, holder(attempt), 0)
+				ticket, ok, _ := m.Acquire(ctx, holder(attempt))
 				if ok {
 					m.Touch(holder(attempt))
 					m.Release(ticket)
@@ -303,11 +303,11 @@ func TestPoolPolicyDefaultsAndOverrides(t *testing.T) {
 	// A full pool returns the configured hint.
 	ctx := context.Background()
 	local := Holder{Connection: "c", Pool: "p", Attempt: "a"}
-	if _, ok, _ := configured.Acquire(ctx, local, 0); !ok {
+	if _, ok, _ := configured.Acquire(ctx, local); !ok {
 		t.Fatal("first acquire should fit")
 	}
 	local.Attempt = "b"
-	if _, ok, hint := configured.Acquire(ctx, local, 0); ok || hint != 4*time.Second {
+	if _, ok, hint := configured.Acquire(ctx, local); ok || hint != 4*time.Second {
 		t.Fatalf("full pool hint = %v ok=%v, want 4s", hint, ok)
 	}
 }

@@ -448,3 +448,125 @@ func TestNativeExportFullPoolQueuesWithoutBudget(t *testing.T) {
 		t.Fatalf("resumed child state %+v", got)
 	}
 }
+
+// #473: a 429 on a native export child that is being resent must not rebuild
+// the format's ledger entry. Attempts and retry_attempts are the evidence of
+// what was already sent, and the next dispatch derives its submission key from
+// them: rebuilding the entry reset both, so the resent child reused the spent
+// key "...:convert:<format>:retry:1".
+func TestNativeExport429KeepsTheChildAttemptEvidence473(t *testing.T) {
+	converts := 0
+	var requestIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		if q.Method == http.MethodPost {
+			if !strings.HasSuffix(q.URL.Path, "models/convert") {
+				io.WriteString(w, `{"code":0,"data":{"task_id":"task_processed"}}`)
+				return
+			}
+			converts++
+			requestIDs = append(requestIDs, q.Header.Get("X-Request-ID"))
+			switch converts {
+			case 2:
+				rateLimited(w, "")
+				return
+			case 1:
+				io.WriteString(w, `{"code":0,"data":{"task_id":"child_1"}}`)
+			default:
+				io.WriteString(w, fmt.Sprintf(`{"code":0,"data":{"task_id":"child_%d"}}`, converts))
+			}
+			return
+		}
+		id := strings.TrimPrefix(q.URL.Path, "/v3/tasks/")
+		data := map[string]any{"task_id": id, "status": "success", "progress": 100}
+		switch id {
+		case "task_processed":
+			data["output"] = map[string]any{"model_url": "https://assets.example/processed.glb"}
+		case "child_1":
+			// The first child ends failed: the same format is resent under a new
+			// permit, and its second create is refused with an explicit 429.
+			data = map[string]any{"task_id": id, "status": "failed", "progress": 0, "credits_consumed": 0}
+		default:
+			data["output"] = map[string]any{"model_url": "https://assets.example/" + id + ".glb"}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": data})
+	}))
+	defer server.Close()
+	statusMapping := &generation.StatusMapping{UpstreamStatus: map[string]generation.StatusRule{
+		"success": {Phase: "completed"},
+		"running": {Phase: "running"},
+		"failed":  {Phase: "failed"},
+	}}
+	factory := func() *Adapter {
+		a, err := New(Config{
+			BaseURL:       server.URL + "/v3",
+			APIKey:        "test",
+			HTTPClient:    server.Client(),
+			StatusMapping: statusMapping,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a.nativeSourceClient = nativeDeliveryTestSourceClient(nativeTestGLB, nil)
+		return a
+	}
+	r := nativeDeliveryFixture(generation.Rigging)
+	permit := &rateLimitPermit{}
+	ctx := generation.WithDispatchCheckpointer(context.Background(), permit)
+	accepted, err := factory().Start(ctx, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	permit.settle(t, accepted)
+	request := rigObserve(r, accepted)
+	// Round 1 dispatches the FBX child; round 2 collects its failed outcome.
+	for round := 0; round < 2; round++ {
+		observation, err := factory().Observe(ctx, request)
+		if err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		permit.settle(t, observation)
+		request.Opaque = observation.Opaque
+	}
+	pending := conversionState(t, request.Opaque).Conversions["FBX"]
+	if pending.Status != conversionItemRetryPending || pending.RetryAttempts != 0 || len(pending.Attempts) != 1 {
+		t.Fatalf("the failed child left %+v, want retry_pending with one attempt", pending)
+	}
+	submissionKey := conversionState(t, request.Opaque).SubmissionKey
+	// Round 3 resends it and the upstream refuses the create with a 429.
+	refused, err := factory().Observe(ctx, request)
+	if err != nil {
+		t.Fatalf("the 429 became an error: %v", err)
+	}
+	permit.settle(t, refused)
+	if refused.Dispatch == nil || refused.Dispatch.Result != generation.DispatchResultNotDispatched {
+		t.Fatalf("the refusal was not settled as not dispatched: %+v", refused)
+	}
+	request.Opaque = refused.Opaque
+	item := conversionState(t, refused.Opaque).Conversions["FBX"]
+	if item.Status != conversionItemRateLimited || item.RateLimitRetries != 1 ||
+		item.RetryAttempts != 1 || len(item.Attempts) != 1 {
+		t.Fatalf("the refused child lost its attempt evidence: %+v", item)
+	}
+	// Round 4 counts one more attempt, so its submission key differs from the
+	// refused one instead of reusing it.
+	resent, err := factory().Observe(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	permit.settle(t, resent)
+	if resent.Dispatch == nil || resent.Dispatch.Result != generation.DispatchResultDispatched {
+		t.Fatalf("the refused child was not resent under a new permit: %+v", resent)
+	}
+	if got := conversionState(t, resent.Opaque).Conversions["FBX"]; got.RetryAttempts != 2 || got.RemoteID != "child_3" {
+		t.Fatalf("resent child = %+v, want retry_attempts 2 and the new remote id", got)
+	}
+	if len(requestIDs) != 3 {
+		t.Fatalf("convert requests = %d, want three: %v", len(requestIDs), requestIDs)
+	}
+	if requestIDs[1] == requestIDs[2] {
+		t.Fatalf("the resent child reused the spent submission key %q", requestIDs[2])
+	}
+	if want := submissionKey + ":convert:FBX:retry:2"; requestIDs[2] != want {
+		t.Fatalf("submission key = %q, want %q", requestIDs[2], want)
+	}
+}

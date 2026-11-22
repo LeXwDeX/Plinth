@@ -340,6 +340,17 @@ func validateModelDelivery(schema ApplicationSchema) error {
 			if len(match.Roles) == 0 {
 				return fmt.Errorf("format %q 的 match 缺少 roles", format.ID)
 			}
+			// 前缀匹配只属于归档里按名字归位的依赖文件
+			// （archive.obj_package.textures.variant_prefixes）：format 的 match
+			// 回答的是"这个已落盘文件是哪个格式"，而待交付槽位
+			// （ModelDeliverySchema.PendingFormats）按 role + variant 精确选中
+			// 格式，聚合（variant_prefix）槽位不映射任何格式——它一次交付该
+			// 前缀下的多个变体。format 一旦声明 variant_prefixes，一个 pending
+			// 的聚合槽位就会把它前缀下的格式全部标成 converting（挡掉本可
+			// 用的路线），因此交付声明不接受这个组合。
+			if len(match.VariantPrefixes) > 0 {
+				return fmt.Errorf("format %q 的 match 不能声明 variant_prefixes：聚合（variant_prefix）槽位不映射任何格式", format.ID)
+			}
 		}
 		for mediaType, extension := range format.MediaTypeExtensions {
 			if mediaType != strings.ToLower(mediaType) || !strings.Contains(mediaType, "/") || !strings.HasPrefix(extension, ".") || strings.ContainsAny(extension, "/\\") {
@@ -567,7 +578,8 @@ func (match ModelAssetMatch) Matches(role, variant, mediaType string) bool {
 // order: naming one would leave the others unguarded, which is exactly the
 // duplicate paid run this projection exists to prevent. An aggregate slot
 // (variant_prefix) maps to no format, because it stands for several formats at
-// once.
+// once; validateModelDelivery refuses a format whose matches declare
+// variant_prefixes so that no prefix slot can select one (#473).
 func (schema ModelDeliverySchema) PendingFormats(role, variant string) []string {
 	formats := make([]string, 0, 2)
 	for _, format := range schema.Formats {

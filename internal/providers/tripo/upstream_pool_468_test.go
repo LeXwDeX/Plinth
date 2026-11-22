@@ -384,7 +384,7 @@ func TestUpstreamPoolReadoptAfterRestart(t *testing.T) {
 	// attempt takes the only slot before the original task is observed again.
 	restarted, pool := newPoolAdapter(t, upstream, 1)
 	other := upstreampool.Holder{Connection: "tripo.v3", Pool: tripo.TripoPoolName, Attempt: "other"}
-	if _, ok, _ := pool.Acquire(context.Background(), other, 0); !ok {
+	if _, ok, _ := pool.Acquire(context.Background(), other); !ok {
 		t.Fatal("other attempt should fit the empty pool")
 	}
 	tasks[0].request.Opaque = first.Opaque
@@ -433,4 +433,64 @@ func TestUpstreamPoolQueuedPollUsesSchemaValue(t *testing.T) {
 	if second.PollAfter != 7*time.Second {
 		t.Fatalf("queued poll = %v, want the Schema value 7s", second.PollAfter)
 	}
+}
+
+// #473: a post-success private conversion holds one upstream slot for its
+// children (C2) and must give it back when the run is over. The round that
+// delivers the last settled format is terminal, so the kernel marks the slots
+// ready and post_success clears next_action_at: no postSuccessCompletion
+// follows to release the slot, which then stayed held until the idle TTL and
+// made a later task queue behind a run that no longer existed.
+func TestPostSuccessPrivateConversionReleasesItsPoolSlot473(t *testing.T) {
+	upstream := newPoolUpstream(t, 100)
+	adapter, pool := newPoolAdapter(t, upstream, 4, selectedSetOffering(t))
+	request := generation.ObserveRequest{
+		TaskID:      "post-success-pool",
+		AttemptID:   "post-success-pool-attempt",
+		Offering:    selectedSetOffering(t),
+		PostSuccess: true,
+		Job:         generation.UpstreamJob{ProviderID: "tripo", RemoteID: "parent"},
+		Input:       json.RawMessage(`{"output_formats":["GLTF","FBX"],"authorize_extra_credits":true}`),
+	}
+	permit := &conversionPermit{}
+	ctx := generation.WithDispatchCheckpointer(context.Background(), permit)
+	held := 0
+	settled := false
+	for round := 0; round < 60; round++ {
+		observation, err := adapter.Observe(ctx, request)
+		if err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		permit.settle(t, observation)
+		request.Opaque = observation.Opaque
+		if stats := pool.Stats(); stats.TotalHeld > held {
+			held = stats.TotalHeld
+		}
+		if postSuccessPoolSettled(t, observation.Opaque, "GLTF", "FBX") {
+			settled = true
+			break
+		}
+	}
+	if !settled {
+		t.Fatalf("the post-success run did not deliver every format: %s", request.Opaque)
+	}
+	if held == 0 {
+		t.Fatal("the post-success run never took an upstream slot")
+	}
+	if stats := pool.Stats(); stats.TotalHeld != 0 {
+		t.Fatalf("the finished post-success run still holds %d slot(s): %+v", stats.TotalHeld, stats)
+	}
+}
+
+// postSuccessPoolSettled reports whether every named format of a post-success
+// private run reached the done state.
+func postSuccessPoolSettled(t *testing.T, opaque json.RawMessage, formats ...string) bool {
+	t.Helper()
+	state := parsePoolState(t, opaque)
+	for _, format := range formats {
+		if item, exists := state[format]; !exists || item.Status != "done" {
+			return false
+		}
+	}
+	return true
 }

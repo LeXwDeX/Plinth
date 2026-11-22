@@ -46,7 +46,7 @@ func (a *Adapter) acquirePool(
 	if !a.poolEnabled() {
 		return upstreampool.Ticket{}, true, 0
 	}
-	return a.pool.Acquire(ctx, a.poolHolder(offering, attempt), 0)
+	return a.pool.Acquire(ctx, a.poolHolder(offering, attempt))
 }
 
 func (a *Adapter) readoptPool(offering generation.Offering, attempt generation.AttemptID) {

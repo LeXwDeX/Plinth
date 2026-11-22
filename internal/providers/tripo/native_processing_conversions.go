@@ -467,11 +467,17 @@ func nativeConversionFailure(request generation.ObserveRequest, s *nativeConvers
 // refusedNativeConversion settles an explicit 429 as not dispatched. Within the
 // run's budget the child waits as rate_limited for Retry-After or the backoff;
 // after it, the export fails as a definite, non-retryable rate limit, so no
-// new Attempt repeats the paid base operation.
-func refusedNativeConversion(request generation.ObserveRequest, run *nativeConversionRun, base generation.Observation, count int, format string, retries int, retryAfter time.Duration, permit *generation.DispatchReceipt, cause *generation.Failure) generation.Observation {
+// new Attempt repeats the paid base operation. The refusal is recorded in place
+// (recordConversionRefusal, the same call the pre-completion path makes): the
+// format's attempts, retry budget, locator and remote id are evidence of what
+// was already sent, and rebuilding the entry would reset them — the next
+// dispatch would then recompute attempts=1 and reuse a spent submission key
+// (#473).
+func refusedNativeConversion(request generation.ObserveRequest, run *nativeConversionRun, base generation.Observation, count int, format string, retryAfter time.Duration, permit *generation.DispatchReceipt, cause *generation.Failure) generation.Observation {
 	s := run.ledger
 	permit.Result = generation.DispatchResultNotDispatched
-	if retries >= maximumConversionRateLimitRetries {
+	wait, exhausted := recordConversionRefusal(s.Conversions, format, retryAfter)
+	if exhausted {
 		item := s.Conversions[format]
 		item.Status = conversionItemFailed
 		item.RemoteID = ""
@@ -484,10 +490,8 @@ func refusedNativeConversion(request generation.ObserveRequest, run *nativeConve
 		obs.Dispatch = permit
 		return obs
 	}
-	retries++
-	s.Conversions[format] = conversionItem{Status: conversionItemRateLimited, RateLimitRetries: retries}
 	obs := nativeConversionRunning(request, run, base, count)
-	obs.PollAfter = conversionRateLimitWait(retryAfter, retries)
+	obs.PollAfter = wait
 	obs.Dispatch = permit
 	return obs
 }
@@ -685,7 +689,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 				if retryAfter, refused := explicitRateLimit(err); refused && permit != nil && s.ProgressUnits != 0 {
 					var provider *generation.ProviderError
 					errors.As(err, &provider)
-					return refusedNativeConversion(request, run, base, len(c.Formats), format, previous.RateLimitRetries, retryAfter, permit, provider.Failure), nil
+					return refusedNativeConversion(request, run, base, len(c.Formats), format, retryAfter, permit, provider.Failure), nil
 				}
 				return generation.Observation{}, err
 			}

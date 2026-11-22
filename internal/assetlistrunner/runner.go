@@ -715,7 +715,7 @@ func (runner *Runner) failedTaskInTurn(
 	if runner.tasks == nil {
 		return generation.Task{}, false, nil
 	}
-	tasks, err := runner.tasks(ctx, ownerID, sessionID)
+	tasks, err := runner.tasks(ctx, ownerID, sessionID, "")
 	if err != nil {
 		return generation.Task{}, false, err
 	}
@@ -830,7 +830,11 @@ func (runner *Runner) finishReportedItem(
 	if runner.tasks == nil {
 		return false, nil
 	}
-	tasks, err := runner.tasks(ctx, run.OwnerID, item.SessionID)
+	// Read the reported Task by id: an item's sub-session can create more
+	// terminal Tasks than one page holds, and a report that cannot be found
+	// would open another (paid) turn for the item (#473).
+	tasks, err := runner.tasks(ctx, run.OwnerID, item.SessionID,
+		generation.TaskID(chat.AssetListItemResultTaskID(item.Result)))
 	if err != nil {
 		// Without the session's Tasks the report cannot be judged: leave the
 		// item to the ordinary turn path instead of guessing.

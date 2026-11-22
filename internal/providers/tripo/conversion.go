@@ -587,7 +587,7 @@ type postSuccessState struct {
 func (a *Adapter) observePostSuccessConversion(
 	ctx context.Context,
 	request generation.ObserveRequest,
-) (generation.Observation, error) {
+) (observation generation.Observation, err error) {
 	options, err := a.optionsFor(request.Offering)
 	if err != nil || strings.Count(options.ObserveEndpoint, "{task_id}") != 1 {
 		return generation.Observation{}, failure(
@@ -599,6 +599,19 @@ func (a *Adapter) observePostSuccessConversion(
 	a.touchPool(request.Offering, request.AttemptID)
 	state := parsePostSuccessState(request.Opaque)
 	selections := frozenConversionSelections(request.Offering, request.Input)
+	// The attempt holds one upstream slot for its children (C2). Release it as
+	// soon as this run is over: the round that delivers the last settled format
+	// leaves nothing to dispatch, poll or redeliver, so the kernel marks the
+	// slots ready and stops observing (post_success clears next_action_at), and
+	// the explicit release in postSuccessCompletion never runs. Holding it there
+	// keeps a finished attempt's slot until the idle TTL (#473). A run that is
+	// only pausing keeps it. ReleaseHolder is idempotent (a holder that owns no
+	// live grant is ignored), so the two releases cannot double-free.
+	defer func() {
+		if err == nil && terminalPhase(observation.Phase) && postSuccessRunSettled(selections, state.Conversions) {
+			a.releasePool(request.Offering, request.AttemptID)
+		}
+	}()
 	if len(submittedFormats(selections, state.Conversions)) > 0 {
 		a.readoptPool(request.Offering, request.AttemptID)
 	}
@@ -624,6 +637,12 @@ func (a *Adapter) observePostSuccessConversion(
 	// 1) 歧义遗留：dispatching 无回执 → 该格式与全部未发送格式
 	//    abandoned（pending 栅栏使后续 Checkpoint 永远失败，诚实反映
 	//    不可重发；已成功格式不受影响）。
+	//
+	//    这条路径的上游名额在 postSuccessCompletion 里被释放：子作业可能
+	//    仍在上游跑，所以并发可以短暂超过声明上限。这是有意的取舍——一条
+	//    已知失败的 attempt 若把名额握到 IdleTTL，会在批量清单里表现为
+	//    「没有任务在跑却排队」；多占出的并发由上游自己的 429（code 2000）
+	//    兜住（池是进程内软上限，Readopt 同样不查上限）。
 	if hasDispatchingRemnant(state.Conversions) {
 		for _, format := range unstartedFormats(selections, state.Conversions) {
 			state.Conversions[format] = conversionItem{Status: conversionItemAbandoned}
@@ -1337,6 +1356,26 @@ func hasPendingRetry(selections []string, conversions map[string]conversionItem)
 func allFormatsDone(selections []string, conversions map[string]conversionItem) bool {
 	for _, format := range selections {
 		if item, exists := conversions[format]; !exists || item.Status != conversionItemDone {
+			return false
+		}
+	}
+	return true
+}
+
+// postSuccessRunSettled 报告这一轮观察结束时整轮是否已无可做之事：每个
+// 选中格式都到达终态（成功、失败、被拒、放弃），没有待派发、在途或待重提
+// 的子作业。只有这时释放 attempt 的上游名额才是安全的——否则名额要留给
+// 仍在上游跑的子作业（C2 的 handoff）。unknown 不算已结算：它的子作业可能
+// 仍在上游，名额按既有约定留到 postSuccessCompletion 释放。
+func postSuccessRunSettled(selections []string, conversions map[string]conversionItem) bool {
+	for _, format := range selections {
+		item, exists := conversions[format]
+		if !exists {
+			return false
+		}
+		switch item.Status {
+		case conversionItemDone, conversionItemFailed, conversionItemDenied, conversionItemAbandoned:
+		default:
 			return false
 		}
 	}

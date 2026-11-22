@@ -94,6 +94,10 @@ func TestModelDeliveryRejectsInconsistentDeclarations(t *testing.T) {
 		"unknown audit action":        {func(d *ModelDeliverySchema) { d.Archive.Audit.Action = "no_such_action" }, "audit action"},
 		"obj package format":          {func(d *ModelDeliverySchema) { d.Archive.ObjPackage.FormatID = "nope" }, "obj_package"},
 		"bad fixed input":             {func(d *ModelDeliverySchema) { d.Conversions[1].Input = json.RawMessage(`[1]`) }, "JSON 对象"},
+		// #473: an aggregate (variant_prefix) slot maps to no format, so a
+		// format that matched by prefix would turn one pending slot into a
+		// converting row for every format under it.
+		"format match with a prefix": {func(d *ModelDeliverySchema) { d.Formats[0].Matches[0].VariantPrefixes = []string{"converted."} }, "variant_prefixes"},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
