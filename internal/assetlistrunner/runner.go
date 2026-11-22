@@ -78,6 +78,10 @@ type Chat interface {
 	CreateItemSession(ctx context.Context, input chat.CreateItemSessionInput) (chat.Session, error)
 	StartItemTurn(ctx context.Context, input chat.StartItemTurnInput) (chat.Message, chat.TurnOptions, error)
 	LatestTurn(ctx context.Context, ownerID, sessionID string) (chat.Turn, bool, error)
+	// PostAssistantMessage writes a platform message into an existing session
+	// without a turn: the list-end summary (#329f), which is neither a card nor
+	// a step.
+	PostAssistantMessage(ctx context.Context, ownerID string, message chat.Message) (chat.Message, bool, error)
 	// TurnStateTerminal reports whether a turn state is done or error.
 	TurnStateTerminal(state string) bool
 	// TurnEndedInError reports whether the turn recorded the Schema's error
@@ -123,9 +127,16 @@ type Config struct {
 	Scheduler Scheduler
 	Presence  Presence
 	StepCaps  StepCaps
-	Schema    catalog.AssetListSchema
-	Clock     func() time.Time
-	Logger    *slog.Logger
+	// Steps reads how many steps one item's asset actually used (#330): the
+	// list-end summary reports it per item. nil leaves the summary without a
+	// per-item number rather than guessing one.
+	Steps func(ctx context.Context, ownerID, sessionID string) (int, error)
+	// Texts gives the list-end summary the copy of the UI locale the list's
+	// session last used. Nil keeps the Schema's default-locale copy.
+	Texts  *catalog.TextLocalizer
+	Schema catalog.AssetListSchema
+	Clock  func() time.Time
+	Logger *slog.Logger
 }
 
 // failureStreak remembers the last item that failed with a continuable
@@ -154,6 +165,8 @@ type Runner struct {
 	scheduler    Scheduler
 	presence     Presence
 	stepCaps     StepCaps
+	steps        func(ctx context.Context, ownerID, sessionID string) (int, error)
+	texts        *catalog.TextLocalizer
 	interval     time.Duration
 	maxParallel  int
 	maxRounds    int
@@ -161,7 +174,10 @@ type Runner struct {
 	continuation string
 	// rework is the continuation of a returned item (#329b); rework falls
 	// back to the default when the Catalog has no review section.
-	rework   string
+	rework string
+	// schema is the declared application.asset_list: the state labels and the
+	// list-end summary copy (#329f). New keeps the Config's value whole.
+	schema   catalog.AssetListSchema
 	clock    func() time.Time
 	logger   *slog.Logger
 	streaks  map[string]failureStreak
@@ -178,12 +194,15 @@ func New(config Config) *Runner {
 		scheduler:    config.Scheduler,
 		presence:     config.Presence,
 		stepCaps:     config.StepCaps,
+		steps:        config.Steps,
+		texts:        config.Texts,
 		interval:     defaultPollInterval,
 		maxParallel:  defaultMaxParallel,
 		maxRounds:    defaultMaxRounds,
 		grace:        defaultGrace,
 		continuation: defaultContinuation,
 		rework:       defaultRework,
+		schema:       config.Schema,
 		clock:        config.Clock,
 		logger:       config.Logger,
 		streaks:      map[string]failureStreak{},
@@ -969,6 +988,10 @@ func stepCapBlocked(items []assetlist.Item) bool {
 // sits behind step-cap blocks pauses at the cap; every other unfinished state
 // keeps the run running. Review items alone keep waiting as before (#329), and
 // they do not hide a cap pause: nothing automatic would happen either way.
+//
+// A completing list gets its summary first (#329f): the message is idempotent
+// by its id, so a status write that fails is retried on the next tick without
+// posting twice.
 func (runner *Runner) settleRun(
 	ctx context.Context,
 	run assetlist.Run,
@@ -977,6 +1000,9 @@ func (runner *Runner) settleRun(
 ) error {
 	switch drainOf(items) {
 	case drainComplete:
+		if err := runner.postRunSummary(ctx, run); err != nil {
+			return err
+		}
 		_, err := runner.runs.UpdateRunStatus(ctx, run.OwnerID, run.ListID,
 			assetlist.RunRunning, assetlist.RunCompleted, "", now)
 		if errors.Is(err, assetlist.ErrConflict) || errors.Is(err, assetlist.ErrNotFound) {
@@ -987,6 +1013,180 @@ func (runner *Runner) settleRun(
 		return runner.pauseRun(ctx, run, assetlist.PauseStepCap, now)
 	}
 	return nil
+}
+
+// runSummaryMessageID is the summary's message id. The run is unique, so the
+// id makes a repeated tick post the same message once.
+func runSummaryMessageID(runID string) string { return "asset_list_summary_" + runID }
+
+// postRunSummary writes the list-end summary into the list's session (#329f).
+// It is a platform message, not an Agent turn: no card, no step and no model
+// call. A list without a session (or one whose session is gone) gets no
+// summary, which must not stop the run from completing.
+func (runner *Runner) postRunSummary(ctx context.Context, run assetlist.Run) error {
+	list, err := runner.lists.Get(ctx, run.OwnerID, run.ProjectID, run.ListID)
+	if errors.Is(err, assetlist.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sessionID := strings.TrimSpace(list.SourceSessionID)
+	if sessionID == "" {
+		return nil
+	}
+	content := runner.runSummaryText(ctx, run.OwnerID,
+		runner.sessionLocale(ctx, run.OwnerID, sessionID), list)
+	if content == "" {
+		return nil
+	}
+	_, _, err = runner.chat.PostAssistantMessage(ctx, run.OwnerID, chat.Message{
+		ID:        runSummaryMessageID(run.ID),
+		SessionID: sessionID,
+		Content:   content,
+	})
+	if errors.Is(err, chat.ErrSessionNotFound) {
+		// The session is gone; there is nobody to read the summary. Completing
+		// the run must not depend on it.
+		runner.logger.Info("asset list summary not posted: session is gone",
+			"run_id", run.ID, "session_id", sessionID)
+		return nil
+	}
+	return err
+}
+
+// runSummaryText renders the summary from the Catalog: the head line with the
+// counts and the total steps, then one line per item in position order. The
+// copy comes from the Schema in the session's locale, so the loop never holds a
+// second version of the product text. An empty declared head line means there
+// is nothing to post.
+func (runner *Runner) runSummaryText(
+	ctx context.Context,
+	ownerID, locale string,
+	list assetlist.List,
+) string {
+	messages := runner.schema.Messages
+	head := runner.text(locale, messages.RunSummary)
+	if strings.TrimSpace(head) == "" {
+		return ""
+	}
+	counts := map[string]int{}
+	returned := 0
+	steps := 0
+	lines := make([]string, 0, len(list.Items)+1)
+	for _, item := range list.Items {
+		counts[item.State]++
+		// A returned item is accepted or failed by now: what the person sees
+		// as "sent back" is the items that were returned at least once, not a
+		// state the list can still be in when it ends.
+		if item.ReturnCount > 0 {
+			returned++
+		}
+		used := runner.itemSteps(ctx, ownerID, item)
+		steps += used
+		lines = append(lines, runner.summaryItemLine(locale, item, used))
+	}
+	head = strings.NewReplacer(
+		"{title}", list.Title,
+		"{accepted}", strconv.Itoa(counts[assetlist.StateAccepted]),
+		"{returned}", strconv.Itoa(returned),
+		"{failed}", strconv.Itoa(counts[assetlist.StateFailed]),
+		"{skipped}", strconv.Itoa(counts[assetlist.StateSkipped]),
+		"{steps}", strconv.Itoa(steps),
+	).Replace(head)
+	return head + "\n" + strings.Join(lines, "\n")
+}
+
+// summaryItemLine is one item's line: its name, its state's label and what the
+// item's asset used. A failed item names the declared reason of its stored
+// state_reason instead of only the state.
+func (runner *Runner) summaryItemLine(locale string, item assetlist.Item, used int) string {
+	messages := runner.schema.Messages
+	if item.State == assetlist.StateFailed {
+		line := runner.text(locale, messages.RunSummaryItemFailed)
+		return strings.NewReplacer(
+			"{name}", item.Name,
+			"{steps}", strconv.Itoa(used),
+			"{reason}", runner.summaryReason(locale, item.StateReason),
+		).Replace(line)
+	}
+	line := runner.text(locale, messages.RunSummaryItem)
+	return strings.NewReplacer(
+		"{name}", item.Name,
+		"{state}", runner.summaryStateLabel(item.State),
+		"{steps}", strconv.Itoa(used),
+	).Replace(line)
+}
+
+// summaryReason words a stored state_reason: one of the five upstream failure
+// categories (#251) or the runner's own round limit. A reason with no declared
+// copy falls back to the state's own label, never to a hardcoded sentence.
+func (runner *Runner) summaryReason(locale, stateReason string) string {
+	messages := runner.schema.Messages
+	declared := map[string]string{
+		string(generation.CategoryInputInvalid):     messages.RunSummaryReasonInputInvalid,
+		string(generation.CategoryParameterInvalid): messages.RunSummaryReasonParameterInvalid,
+		string(generation.CategoryUpstreamCapacity): messages.RunSummaryReasonUpstreamCapacity,
+		string(generation.CategoryUpstreamRefused):  messages.RunSummaryReasonUpstreamRefused,
+		string(generation.CategoryInternal):         messages.RunSummaryReasonInternal,
+		roundLimitReason:                            messages.RunSummaryReasonRoundLimit,
+	}
+	if reason := declared[stateReason]; reason != "" {
+		return runner.text(locale, reason)
+	}
+	// An empty reason (a failure recorded before categories existed) still
+	// reads as a failure: name the state instead of printing an empty bracket.
+	if strings.TrimSpace(stateReason) == "" {
+		return runner.summaryStateLabel(assetlist.StateFailed)
+	}
+	return stateReason
+}
+
+// summaryStateLabel is the Schema's label of one item state. An unknown state
+// falls back to the stored id, which is what the state vocabulary calls it.
+func (runner *Runner) summaryStateLabel(state string) string {
+	for _, declared := range runner.schema.ItemStates {
+		if declared.ID == state {
+			return declared.Label
+		}
+	}
+	return state
+}
+
+// itemSteps is what one item's asset actually used (#330). An item without a
+// sub-session, a deployment without the step store and a failed read leave it
+// at zero: the summary counts what it can prove.
+func (runner *Runner) itemSteps(ctx context.Context, ownerID string, item assetlist.Item) int {
+	if runner.steps == nil || item.SessionID == "" {
+		return 0
+	}
+	used, err := runner.steps(ctx, ownerID, item.SessionID)
+	if err != nil {
+		runner.logger.Warn("asset list item step standing not readable for the summary",
+			"item_id", item.ID, "error", err)
+		return 0
+	}
+	return used
+}
+
+// text is one Schema string in the session's locale. Nil localizer or an
+// undeclared text keep the default-locale copy.
+func (runner *Runner) text(locale, text string) string {
+	if runner.texts == nil {
+		return text
+	}
+	return runner.texts.Text(locale, text)
+}
+
+// sessionLocale is the UI locale the list's session last used: its newest turn
+// froze it. A session without a turn keeps the default locale, like every other
+// background write.
+func (runner *Runner) sessionLocale(ctx context.Context, ownerID, sessionID string) string {
+	turn, found, err := runner.chat.LatestTurn(ctx, ownerID, sessionID)
+	if err != nil || !found {
+		return ""
+	}
+	return turn.Options.Locale
 }
 
 func (runner *Runner) present(ctx context.Context, run assetlist.Run, now time.Time) (bool, error) {

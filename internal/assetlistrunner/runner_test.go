@@ -216,6 +216,9 @@ func (runs *fakeRuns) item(itemID string) *assetlist.Item {
 
 type fakeLists struct {
 	runs *fakeRuns
+	// sourceSessionID is the session the list was proposed in (#329f), where
+	// the list-end summary is posted. Empty leaves the summary nowhere to go.
+	sourceSessionID string
 }
 
 func (lists *fakeLists) Get(_ context.Context, ownerID, projectID, listID string) (assetlist.List, error) {
@@ -223,7 +226,10 @@ func (lists *fakeLists) Get(_ context.Context, ownerID, projectID, listID string
 	if run == nil || run.ProjectID != projectID {
 		return assetlist.List{}, assetlist.ErrNotFound
 	}
-	list := assetlist.List{ID: listID, OwnerID: ownerID, ProjectID: projectID, Title: "List"}
+	list := assetlist.List{
+		ID: listID, OwnerID: ownerID, ProjectID: projectID, Title: "List",
+		SourceSessionID: lists.sourceSessionID,
+	}
 	for _, item := range lists.runs.items {
 		if item.ListID == listID {
 			list.Items = append(list.Items, item)
@@ -240,6 +246,7 @@ type fakeChat struct {
 	sessions      map[string]chat.Session
 	turns         map[string][]chat.Turn
 	tasks         map[string][]generation.Task
+	messages      map[string]chat.Message
 	continuations []string
 	nextID        int
 }
@@ -250,6 +257,7 @@ func newFakeChat(runs *fakeRuns, now time.Time) *fakeChat {
 		sessions: map[string]chat.Session{},
 		turns:    map[string][]chat.Turn{},
 		tasks:    map[string][]generation.Task{},
+		messages: map[string]chat.Message{},
 	}
 }
 
@@ -364,6 +372,25 @@ func (chatService *fakeChat) SettleReportedItem(
 		return finished, true, err
 	}
 	return input.Item, false, nil
+}
+
+// PostAssistantMessage records a platform message the way the chat service
+// does: the caller chose the id, so posting it twice stores it once.
+func (chatService *fakeChat) PostAssistantMessage(
+	_ context.Context, ownerID string, message chat.Message,
+) (chat.Message, bool, error) {
+	if ownerID == "" || message.ID == "" || message.SessionID == "" {
+		return chat.Message{}, false, chat.ErrMessageNotFound
+	}
+	if session, found := chatService.sessions[message.SessionID]; !found || session.OwnerID != ownerID {
+		return chat.Message{}, false, chat.ErrSessionNotFound
+	}
+	if _, found := chatService.messages[message.ID]; found {
+		return message, false, nil
+	}
+	message.Role = "assistant"
+	chatService.messages[message.ID] = message
+	return message, true, nil
 }
 
 func (chatService *fakeChat) latest(sessionID string) (chat.Turn, bool) {
@@ -491,7 +518,20 @@ type fixture struct {
 	scheduler *fakeScheduler
 	presence  *fakePresence
 	stepCaps  *fakeStepCaps
-	runner    *assetlistrunner.Runner
+	// config is the runner's assembly; a test that declares more Schema or an
+	// extra port rebuilds from it with buildRunner.
+	config assetlistrunner.Config
+	runner *assetlistrunner.Runner
+}
+
+// buildRunner replaces the fixture's runner with one built from the same ports,
+// after mutate adjusts the assembly (more Schema copy, a step port).
+func (f *fixture) buildRunner(mutate func(*assetlistrunner.Config)) {
+	config := f.config
+	if mutate != nil {
+		mutate(&config)
+	}
+	f.runner = assetlistrunner.New(config)
 }
 
 func newFixture(t *testing.T, maxParallel, maxRounds int) *fixture {
@@ -505,7 +545,7 @@ func newFixture(t *testing.T, maxParallel, maxRounds int) *fixture {
 	}
 	fixture.lists = &fakeLists{runs: fixture.runs}
 	fixture.chat = newFakeChat(fixture.runs, fixture.now)
-	fixture.runner = assetlistrunner.New(assetlistrunner.Config{
+	config := assetlistrunner.Config{
 		Runs:      fixture.runs,
 		Lists:     fixture.lists,
 		Chat:      fixture.chat,
@@ -527,7 +567,9 @@ func newFixture(t *testing.T, maxParallel, maxRounds int) *fixture {
 		}},
 		Clock:  func() time.Time { return fixture.now },
 		Logger: slog.New(slog.DiscardHandler),
-	})
+	}
+	fixture.config = config
+	fixture.runner = assetlistrunner.New(config)
 	return fixture
 }
 
@@ -1397,6 +1439,71 @@ func TestAdvanceCompletesWhenNothingIsLeftToMake(t *testing.T) {
 
 	if run := fixture.runState(t); run.Status != assetlist.RunCompleted {
 		t.Fatalf("run = %s; want completed", run.Status)
+	}
+}
+
+// #329f: a list whose items all reached a terminal state gets one summary
+// message in the session the list was proposed in. It is a platform message, not
+// a turn: it opens no card and spends no step.
+func TestCompletedRunPostsTheListSummaryIntoTheListSession(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	fixture.lists.sourceSessionID = "ses_list"
+	fixture.chat.sessions["ses_list"] = chat.Session{
+		ID: "ses_list", OwnerID: testOwner, ProjectID: testProject,
+	}
+	used := map[string]int{"ses_1": 3, "ses_2": 2}
+	fixture.buildRunner(func(config *assetlistrunner.Config) {
+		config.Schema.Messages.RunSummary = "清单「{title}」已结束：通过 {accepted} 项，打回 {returned} 项，" +
+			"失败 {failed} 项，跳过 {skipped} 项；共 {steps} 步。"
+		config.Schema.Messages.RunSummaryItem = "· {name}：{state}，{steps} 步"
+		config.Schema.Messages.RunSummaryItemFailed = "· {name}：失败，{steps} 步（{reason}）"
+		config.Schema.Messages.RunSummaryReasonInternal = "平台内部错误"
+		config.Schema.ItemStates = []catalog.AssetListStateSchema{
+			{ID: assetlist.StateAccepted, Label: "已验收"},
+			{ID: assetlist.StateFailed, Label: "失败"},
+		}
+		config.Steps = func(_ context.Context, _, sessionID string) (int, error) {
+			return used[sessionID], nil
+		}
+	})
+	accepted := newItem("aitem_1", "角色")
+	accepted.State = assetlist.StateAccepted
+	accepted.SessionID = "ses_1"
+	// The item was sent back once before it was accepted: the summary counts
+	// the person's returns, not a state no item can end in.
+	accepted.ReturnCount = 1
+	failed := newItem("aitem_2", "道具")
+	failed.State = assetlist.StateFailed
+	failed.StateReason = string(generation.CategoryInternal)
+	failed.SessionID = "ses_2"
+	fixture.seedRun(assetlist.RunRunning, accepted, failed)
+
+	fixture.advance(t)
+
+	if run := fixture.runState(t); run.Status != assetlist.RunCompleted {
+		t.Fatalf("run = %s; want completed", run.Status)
+	}
+	if len(fixture.chat.messages) != 1 {
+		t.Fatalf("messages = %d; want one list summary", len(fixture.chat.messages))
+	}
+	for _, message := range fixture.chat.messages {
+		if message.SessionID != "ses_list" || message.Role != "assistant" {
+			t.Fatalf("summary = %s/%s; want an assistant message of the list's session",
+				message.SessionID, message.Role)
+		}
+		for _, want := range []string{
+			"清单「List」已结束：通过 1 项，打回 1 项，失败 1 项，跳过 0 项；共 5 步。",
+			"· 角色：已验收，3 步",
+			"· 道具：失败，2 步（平台内部错误）",
+		} {
+			if !strings.Contains(message.Content, want) {
+				t.Fatalf("summary = %q; want it to contain %q", message.Content, want)
+			}
+		}
+	}
+	if len(fixture.chat.continuations) != 0 {
+		t.Fatalf("continuations = %d; want the summary to open no turn",
+			len(fixture.chat.continuations))
 	}
 }
 

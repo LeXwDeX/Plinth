@@ -5858,6 +5858,15 @@
         "step_cap_blocked": "清单项「{name}」的 3D 步数已用完，这一步没有执行。",
         "needs_approval": "清单项「{name}」在等你审批这一步。",
         "run_waiting": "制作清单「{title}」在等待前一份清单完成。",
+        "run_summary": "制作清单「{title}」已结束：通过 {accepted} 项，打回 {returned} 项，失败 {failed} 项，跳过 {skipped} 项；实际消耗 {steps} 步。",
+        "run_summary_item": "· {name}：{state}，{steps} 步",
+        "run_summary_item_failed": "· {name}：失败，{steps} 步（{reason}）",
+        "run_summary_reason_input_invalid": "输入或素材不满足服务要求",
+        "run_summary_reason_parameter_invalid": "参数超出服务允许的范围",
+        "run_summary_reason_upstream_capacity": "上游繁忙、限流或超时",
+        "run_summary_reason_upstream_refused": "上游拒绝执行，或额度与配额不足",
+        "run_summary_reason_internal": "平台内部错误",
+        "run_summary_reason_round_limit": "用完了本次制作的轮数",
         "item_reported_done": "清单项「{name}」已报告完成，进入待验收。",
         "item_reported_failed": "清单项「{name}」已报告失败。",
         "item_not_in_session": "这个工具只在制作清单项的会话里可用。",
@@ -8568,6 +8577,18 @@
               "reason": {"type": "string"}
             },
             "required": ["status"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "name": "get_asset_list",
+          "execution": {"implementation_key":"assetlist.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "list_id": {"type": "string", "description": "Optional list id; omit it to read the current list of this session's project."}
+            },
             "additionalProperties": false
           }
         }
@@ -20942,6 +20963,15 @@
             "asset_list.messages.step_cap_blocked": "Item \"{name}\" used up its 3D steps, so this step did not run.",
             "asset_list.messages.needs_approval": "Item \"{name}\" is waiting for your approval of this step.",
             "asset_list.messages.run_waiting": "The list \"{title}\" is waiting for the previous list to finish.",
+            "asset_list.messages.run_summary": "The list \"{title}\" is finished: {accepted} accepted, {returned} returned, {failed} failed, {skipped} skipped; {steps} steps used in total.",
+            "asset_list.messages.run_summary_item": "· {name}: {state}, {steps} steps",
+            "asset_list.messages.run_summary_item_failed": "· {name}: failed, {steps} steps ({reason})",
+            "asset_list.messages.run_summary_reason_input_invalid": "the input or the material does not meet the service's requirements",
+            "asset_list.messages.run_summary_reason_parameter_invalid": "the parameters are outside what the service accepts",
+            "asset_list.messages.run_summary_reason_upstream_capacity": "the provider was busy, throttled or timed out",
+            "asset_list.messages.run_summary_reason_upstream_refused": "the provider refused the job, or the quota is exhausted",
+            "asset_list.messages.run_summary_reason_internal": "an internal error of the platform",
+            "asset_list.messages.run_summary_reason_round_limit": "the item used all its rounds of this run",
             "asset_list.messages.item_reported_done": "Item \"{name}\" was reported done and is awaiting review.",
             "asset_list.messages.item_reported_failed": "Item \"{name}\" was reported failed.",
             "asset_list.messages.item_not_in_session": "This tool is only available inside a production-list item's own session.",
@@ -21526,6 +21556,7 @@
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=refine_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",
+            "chat.agent_tools[name=get_asset_list].description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
             "chat.tools[name=create_creative_lab_design].model_required_message": "Select a Creative Lab template first.",
             "chat.tools[name=build_creative_lab_item].model_required_message": "Select a Creative Lab design preview first.",
             "chat.three_view.label": "Three views",

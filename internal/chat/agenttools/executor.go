@@ -85,6 +85,9 @@ const (
 	// ToolSubmitAssetListItem reports the outcome of the production-list item
 	// whose sub-session runs this turn (#328).
 	ToolSubmitAssetListItem = "submit_asset_list_item"
+	// ToolGetAssetList reads the current state of a production list: every
+	// item's state, artifacts and self-check conclusion (#329f).
+	ToolGetAssetList = "get_asset_list"
 	// ToolSetVisualAnchor writes a session visual anchor after the person
 	// confirmed it on a choice card (#250).
 	ToolSetVisualAnchor = "set_visual_anchor"
@@ -188,6 +191,10 @@ type Config struct {
 	// failed (#328). Only an item's own sub-session is accepted; the service
 	// verifies the frozen AssetListItemID and the task outcome.
 	SubmitAssetListItem func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// ReadAssetList reads the current state of a production list (#329f): every
+	// item's state, artifacts and self-check conclusion. Nil leaves the tool
+	// unavailable.
+	ReadAssetList func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// WriteVisualAnchor applies one explicitly confirmed visual-anchor write
 	// (#250). The service owns the owner/session checks and the bounds; this
 	// tool cannot touch the user's style lock.
@@ -285,6 +292,7 @@ type Executor struct {
 	proposePlan            func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	proposeAssetList       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	submitAssetListItem    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	readAssetList          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	project                *catalog.ProjectSchema
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
@@ -436,6 +444,7 @@ func New(config Config) (*Executor, error) {
 		proposePlan:            config.ProposePlan,
 		proposeAssetList:       config.ProposeAssetList,
 		submitAssetListItem:    config.SubmitAssetListItem,
+		readAssetList:          config.ReadAssetList,
 		writeVisualAnchor:      config.WriteVisualAnchor,
 		project:                config.Project,
 		consent:                config.Consent,
@@ -514,6 +523,11 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "asset list item reports unavailable", NoSubmission: true}, nil
 		}
 		return e.submitAssetListItem(ctx, command)
+	case ToolGetAssetList:
+		if e.readAssetList == nil {
+			return chat.ToolResult{Error: "asset lists unavailable", NoSubmission: true}, nil
+		}
+		return e.readAssetList(ctx, command)
 	case ToolFindHistoryImages:
 		return e.findHistoryImages(command), nil
 	case ToolInspectImage:
