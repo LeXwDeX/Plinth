@@ -50,6 +50,15 @@ const StreamErrorMarker = "[[fake:stream-error]]"
 // are replaced with {} when they are not valid JSON. Every other request is
 // answered with the fixed text; a request whose last message is a tool result
 // always is.
+//
+// The arguments are the call's arguments, verbatim: the fake fills in nothing and
+// drops nothing. That is what makes a real model's imperfect shape reachable
+// (#416): a marker that leaves out an optional parameter (the `model` of a
+// generation tool, which the platform chooses and no tool schema declares) is
+// answered with a call that has no such key, and a value the model typed loosely
+// keeps the JSON type it was written with. A scenario that wants the shape a real
+// model sent writes it in the marker; nothing here repairs it into a "perfect"
+// call.
 const ToolMarkerPrefix = "[[fake:tool:"
 
 // ScriptMarkerPrefix starts a scripted multi-round answer:

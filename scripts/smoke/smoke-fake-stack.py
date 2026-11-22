@@ -130,6 +130,7 @@ external MCP listener defaults to 19413 (FAKE_STACK_MCP_PORT).
 import argparse
 import base64
 import datetime
+import decimal
 import hashlib
 import http.cookiejar
 import json
@@ -175,6 +176,7 @@ MCP_OWNER_PASSWORD = "fake-stack-" + secrets.token_urlsafe(18)
 TEXT_TO_3D = "tripo/tripo-v3.1-full/text-to-3d"
 MESHY_TEXT_TO_3D = "meshy/meshy-7.1/text-to-3d"
 MESHY_IMAGE_TO_3D = "meshy/meshy-7.1/image-to-3d"
+MESHY_MULTIVIEW_TO_3D = "meshy/meshy-7.1-multiview/image-to-3d"
 MESHY_REMESH = "meshy/processing/remesh"
 MESHY_RESIZE = "meshy/processing/resize"
 MESHY_RETEXTURE = "meshy/processing/retexture"
@@ -1994,6 +1996,217 @@ def scenario_three_view(work, api, offerings):
     record("three-view strict: the frozen left input contains the front output",
            bool(front_asset) and bool(assets) and assets[0] == front_asset,
            f"front {front_asset or 'none'} left source {assets[:1]}")
+
+
+FOUR_VIEW_IMAGE = IMAGE_OFFERINGS["openai"][1]
+FOUR_VIEW_KEYS = ("front", "left", "back", "right")
+
+
+def _native_amount(value):
+    """A non-negative native amount ("12.5", 10) as a Decimal, or None."""
+    if isinstance(value, bool):
+        return None
+    try:
+        amount = decimal.Decimal(str(value))
+    except (decimal.InvalidOperation, ValueError, TypeError):
+        return None
+    return amount if amount.is_finite() and amount >= 0 else None
+
+
+def _four_view_group(api, session, keys, seconds=180):
+    """Waits until every named view of the session's group is terminal."""
+    end = time.time() + seconds
+    group = None
+    while time.time() < end:
+        group = _three_view_group(api, session)
+        slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+        if slots and all(slots.get(key, {}).get("status") in
+                         ("succeeded", "failed", "rejected", "denied", "canceled") for key in keys):
+            return group
+        time.sleep(0.3)
+    return group
+
+
+def _tool_call_arguments(work, stack, session, tool_name):
+    """The arguments of every assistant tool call of one tool, oldest first.
+
+    The public messages wire carries only the call summary, so the fake LLM's own
+    argument shape (#416: a call that omits `model`) is read from the persisted
+    checkpoint the Agent saw."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute(
+            "SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at ASC",
+            (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    calls = []
+    for (checkpoint_json,) in rows:
+        try:
+            checkpoint = json.loads(checkpoint_json or "{}")
+        except ValueError:
+            continue
+        for call in (checkpoint.get("assistant") or {}).get("ToolCalls") or []:
+            if call.get("Name") != tool_name:
+                continue
+            raw = call.get("Arguments")
+            # The checkpoint stores the arguments as the Go byte slice the
+            # orchestrator keeps: base64 of the JSON text.
+            if isinstance(raw, str):
+                try:
+                    raw = base64.b64decode(raw, validate=True)
+                except (ValueError, TypeError):
+                    pass
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", "replace")
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw or "{}")
+                except ValueError:
+                    raw = {}
+            calls.append(raw if isinstance(raw, dict) else {})
+    return calls
+
+
+def scenario_four_view(work, api, offerings):
+    """#416: the art report of #417 on the fake stack, where the chain must pass
+    (#380 fixed the three causes): four views -> Meshy 7.1 multiview 3D under an
+    approved budget plan. The 3D workspace is locked to the single-image Meshy
+    7.1, the plan's fifth step is its multiview shape, and the four views run
+    from the three-view recipe with the optional right view the person starts.
+    The scenario asserts what the person saw: the plan card's multiview estimate
+    equals the quote the Task froze, the plan's own turn ends by itself, and no
+    per-step approval card appears outside the plan. The variant calls
+    create_model_3d_from_views without `model`, as a real model does: the lock's
+    family shape must run, not the lock's single-picture shape and not a
+    plan-external Tripo."""
+    picture = upload_asset(api, "four-view-reference.png",
+                           make_picture(96, 192, (255, 255, 255), [((32, 24, 64, 168), (52, 58, 70))]), "image/png")
+    if not picture:
+        record("four-view: upload the reference picture", False, "upload refused")
+        return
+    picture_url = f"/api/v1/assets/{picture}"
+    session = new_session(api)
+    status, _ = api.json("PUT", f"/api/v1/chat/sessions/{session}/approval", {"approvalMode": "budget"})
+    if status != 200:
+        record("four-view: budget approval mode", False, f"PUT {status}")
+        return
+    # The artist's own pick: the 3D workspace stays on the single-image model.
+    status, locked = api.json("PUT", f"/api/v1/chat/sessions/{session}/model3d",
+                              {"explicit_model_3d": "meshy-7.1"})
+    record("four-view: the 3D workspace is locked to meshy-7.1", status == 200,
+           f"PUT {status} {json.dumps(locked, ensure_ascii=False)[:160]}")
+    plan = {
+        "title": "四视图到多视图 3D",
+        "steps": [
+            {"capability": "image-to-image", "purpose": "四视图正面"},
+            {"capability": "image-to-image", "purpose": "四视图左侧"},
+            {"capability": "image-to-image", "purpose": "四视图背面"},
+            {"capability": "image-to-image", "purpose": "四视图右侧"},
+            {"capability": "image-to-3d", "model": "meshy-7.1-multiview", "purpose": "多视图生成 3D"},
+        ],
+        "budgets": [{"unit": "legacy.credits", "amount": 100}, {"unit": "meshy.credit", "amount": 40}],
+    }
+    marker = "[[fake:tool:propose_production_plan " + json.dumps(plan, ensure_ascii=False, separators=(",", ":")) + "]]"
+    status, _ = _send_chat(api, session, {"content": "按计划做四视图 " + marker, "creative_domain": "image",
+                                          "ai_model": FOUR_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("four-view: propose the plan", False, f"send {status}")
+        return
+    card, budget_id = None, ""
+    end = time.time() + 40
+    while time.time() < end and not card:
+        pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+        card = next((item for item in pending if item.get("kind") == "plan"), None)
+        if card:
+            budget_id = card.get("request_id") or ""
+            break
+        time.sleep(0.4)
+    if not card:
+        record("four-view: budget card appears", False, "no plan card")
+        return
+    steps = (card.get("plan") or {}).get("steps") or []
+    fifth = steps[4] if len(steps) > 4 else {}
+    estimate = fifth.get("estimate") or {}
+    planned = _native_amount(estimate.get("amount"))
+    record("four-view: the plan card quotes the multiview step at its full default price",
+           len(steps) == 5 and fifth.get("capability") == "image-to-3d"
+           and fifth.get("offering_id") == MESHY_MULTIVIEW_TO_3D
+           and estimate.get("unit") == "meshy.credit" and planned is not None and planned == 40,
+           f"steps={[(step.get('capability'), step.get('offering_id'), (step.get('estimate') or {}).get('amount')) for step in steps]}")
+    status, approved = api.json("PUT", f"/api/v1/chat/sessions/{session}/budgets/{budget_id}",
+                                decision_body(api, "approve"))
+    if status != 200 or approved.get("state") != "active":
+        record("four-view: approve the plan", False, f"PUT {status} {approved}")
+        return
+    record("four-view: plan approved and active", True,
+           f"budget {budget_id} state {approved.get('state')}")
+
+    views = '[[fake:tool:create_three_view {"reference_image_indices":[1],"subject_type":"humanoid"}]]'
+    status, _ = _send_chat(api, session, {"content": "生成四视图 " + views, "creative_domain": "image",
+                                          "ai_model": FOUR_VIEW_IMAGE, "image_urls": [picture_url]})
+    if status not in (200, 201, 202):
+        record("four-view: start the views", False, f"send {status}")
+        return
+    # The recipe's right view is optional, so the server never starts it: the
+    # person starts it, exactly as the three-view card's button does.
+    group = _four_view_group(api, session, ("front",), 180)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    right = slots.get("right") or {}
+    run_id = (group or {}).get("run_id") or ""
+    status, started = api.json("POST", f"/api/v1/chat/sessions/{session}/three-views/{run_id}/views/right",
+                               {"action": "start", "attempt": right.get("attempt", 0)})
+    record("four-view: the person starts the optional right view",
+           status == 200 and run_id != "" and (started.get("group") is not None),
+           f"POST {status} startable={right.get('startable')} status={right.get('status')}")
+    group = _four_view_group(api, session, FOUR_VIEW_KEYS, 240)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    record("four-view: front, left, back and right all succeed and the group is complete",
+           bool(group) and group.get("complete") is True
+           and all(slots.get(key, {}).get("status") == "succeeded" for key in FOUR_VIEW_KEYS),
+           f"complete={group.get('complete') if group else None} slots={ {k: v.get('status') for k, v in slots.items()} }")
+
+    # The plan's fifth step, called the way a real model does: no `model`.
+    before = {task.get("id") for task in session_tasks(api, session)}
+    submit = '[[fake:tool:create_model_3d_from_views {"three_view_group":"' + run_id + '"}]]'
+    status, _ = _send_chat(api, session, {"content": "用这四视图生成 3D " + submit,
+                                          "creative_domain": "model-3d", "ai_model": MESHY_IMAGE_TO_3D,
+                                          "domainModels": {"model-3d": MESHY_IMAGE_TO_3D}})
+    if status not in (200, 201, 202):
+        record("four-view: submit the multiview 3D step", False, f"send {status}")
+        return
+    task = None
+    end = time.time() + 90
+    while time.time() < end and not task:
+        task = next((candidate for candidate in session_tasks(api, session)
+                     if candidate.get("id") not in before and candidate.get("capability") == "image-to-3d"), None)
+        time.sleep(0.3)
+    if task:
+        task = wait_task(api, task.get("id"))
+    quote = (task or {}).get("native_quote") or {}
+    actual = _native_amount(quote.get("total_amount"))
+    record("four-view: the plan's fifth step runs Meshy 7.1 multiview",
+           bool(task) and task.get("state") == "SUCCEEDED" and task.get("offering_id") == MESHY_MULTIVIEW_TO_3D,
+           f"task {(task or {}).get('id')} state {(task or {}).get('state')} "
+           f"offering {(task or {}).get('offering_id')}")
+    record("four-view: the executed quote is the plan card's estimate",
+           quote.get("unit") == "meshy.credit" and actual is not None and planned is not None and actual == planned,
+           f"planned {estimate.get('amount')} {estimate.get('unit')}, actual {quote.get('total_amount')} {quote.get('unit')}")
+    calls = _tool_call_arguments(work, "main", session, "create_model_3d_from_views")
+    record("four-view: the call ran the lock's multiview shape without a model",
+           bool(calls) and all("model" not in call for call in calls)
+           and task is not None and task.get("offering_id") == MESHY_MULTIVIEW_TO_3D,
+           f"arguments={json.dumps(calls, ensure_ascii=False)[:200]}")
+
+    # The turn the plan's fifth step ran in ends by itself, and nothing outside
+    # the plan ever waited for a person.
+    done = _quality_turn_done(api, session, timeout=60)
+    pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1].get("items") or []
+    record("four-view: the turn ends by itself with no per-step approval card",
+           done and len(pending) == 0,
+           f"turn done={done} pending={[(item.get('kind'), item.get('capability')) for item in pending]}")
 
 
 def running_replies(api, session):
@@ -8254,7 +8467,7 @@ def scenario_auto_completion(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -8280,7 +8493,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -8315,6 +8528,8 @@ def main():
                 scenario_image_self_check(api, offerings, work)
             if "three-view" in selected:
                 scenario_three_view(work, api, offerings)
+            if "four-view" in selected:
+                scenario_four_view(work, api, offerings)
             if "auto-approval" in selected:
                 scenario_auto_approval(work, api, offerings)
             if "plan-checkpoint" in selected:

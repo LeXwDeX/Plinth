@@ -36,6 +36,7 @@ class TargetShapeTest(unittest.TestCase):
 
     def test_shape_comes_from_the_variable_or_the_host_compose_env(self):
         self.assertEqual(shape.target_shape({"ART_AI_UPSTREAM_SHAPE": "fake"}), "fake")
+        self.assertEqual(shape.target_shape({"ART_AI_UPSTREAM_SHAPE": "mixed"}), "mixed")
         with tempfile.TemporaryDirectory() as root:
             os.makedirs(os.path.join(root, "production"))
             path = os.path.join(root, "production", "compose.env")
@@ -45,12 +46,16 @@ class TargetShapeTest(unittest.TestCase):
             # The explicit variable wins over the host file.
             self.assertEqual(shape.target_shape({"ART_AI_SERVER_ROOT": root, "ART_AI_UPSTREAM_SHAPE": "live"}), "live")
             with open(path, "w") as handle:
+                handle.write("RELEASE_DATA_MODE=ephemeral\nRELEASE_UPSTREAM_SHAPE=mixed\n")
+            self.assertEqual(shape.target_shape({"ART_AI_SERVER_ROOT": root}), "mixed")
+            with open(path, "w") as handle:
                 handle.write("RELEASE_DATA_MODE=ephemeral\n")
             self.assertEqual(shape.target_shape({"ART_AI_SERVER_ROOT": root}), "live")
 
 
 class GateTest(unittest.TestCase):
     FAKE = {"ART_AI_UPSTREAM_SHAPE": "fake"}
+    MIXED = {"ART_AI_UPSTREAM_SHAPE": "mixed"}
     LIVE = {"ART_AI_UPSTREAM_SHAPE": "live"}
 
     def test_fake_default_runs_on_a_fake_target_without_switches(self):
@@ -71,6 +76,22 @@ class GateTest(unittest.TestCase):
     def test_live_only_refuses_a_fake_target_even_with_both_switches(self):
         _, refusal = shape.resolve("live-only", True, {**self.FAKE, "ART_AI_LIVE_ACK": "1"})
         self.assertIn("--live-upstream", refusal)
+
+    def test_a_mixed_target_counts_as_live_for_every_gate(self):
+        # #416: generation is fake but the chat connections are a real gateway,
+        # so a script spends real chat tokens and needs the two live switches.
+        for kind in ("fake-default", "live-only"):
+            for live_flag, environ in ((False, self.MIXED), (True, self.MIXED),
+                                       (False, {**self.MIXED, "ART_AI_LIVE_ACK": "1"})):
+                with self.subTest(kind=kind, live_flag=live_flag, environ=environ):
+                    shape_name, refusal = shape.resolve(kind, live_flag, environ)
+                    self.assertEqual(shape_name, "mixed")
+                    self.assertIsNotNone(refusal)
+            # With both switches fake-default runs (as it does on a live target,
+            # whose chat costs the same real tokens); live-only still refuses.
+            self.assertIsNone(shape.resolve("fake-default", True, {**self.MIXED, "ART_AI_LIVE_ACK": "1"})[1])
+            _, refusal = shape.resolve("live-only", True, {**self.MIXED, "ART_AI_LIVE_ACK": "1"})
+            self.assertIsNotNone(refusal)
 
     def test_cli_exit_codes(self):
         def run(argv, environ):

@@ -1,0 +1,71 @@
+# dev-test 混合上游叠加文件（#416）：与 docker-compose.go-production.yml、
+# docker-compose.go-ephemeral.yml 并用（release-server-steps.sh 在
+# RELEASE_UPSTREAM_SHAPE=mixed 时追加，只允许与 RELEASE_DATA_MODE=ephemeral 同用）。
+#
+# 与 docker-compose.go-fake-upstream.yml 的差别只有一处：本文件不把对话模型连接
+# （LLM_BASE_URL / LLM_API_KEY / LLM_CONNECTIONS）指向 fake，它们沿用运行环境文件
+# （GO_RUNTIME_ENV_FILE）里的真实网关与真实密钥。于是真实模型在 Plinth 的工具表上
+# 做决策（只花对话 token），全部生成仍由 fake 上游出图出模型，零生成费用。
+#
+# UPSTREAM_SHAPE=mixed 时服务启动前校验（internal/app/upstream_shape.go）：
+# - 生成侧：每个生成 Provider 的地址都指向 FAKE_UPSTREAM_ORIGIN、密钥都是 fake 密钥，
+#   否则拒绝启动（与 fake 形态同一条 fail-closed 规则）；
+# - 对话侧：运行配置声明的每个对话连接（chat.agent 与 LLM_CONNECTIONS）都必须是真实
+#   网关——地址、密钥与模型都要有值，地址不能是 FAKE_UPSTREAM_ORIGIN，密钥不能是
+#   fake 密钥——否则拒绝启动，避免“以为在跟真实模型对话、其实打到 fake”或把 fake
+#   密钥发给真实网关。
+# formal-test 与自部署入口从不使用本文件。
+services:
+  fake-upstream:
+    image: art-ai-go-fake-upstream:${GO_IMAGE_TAG:?GO_IMAGE_TAG is required}
+    # 镜像由 release-server-steps.sh 在本机构建，从不拉取。
+    pull_policy: never
+    command:
+      - "-addr"
+      - "0.0.0.0:19000"
+      - "-allow-non-loopback"
+      - "-artifact-origin"
+      - "https://fake-assets.example.test"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:19000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+  art-ai-go:
+    depends_on:
+      - fake-upstream
+    environment:
+      UPSTREAM_SHAPE: mixed
+      FAKE_UPSTREAM_ORIGIN: http://fake-upstream:19000
+      TRIPO_BASE_URL: http://fake-upstream:19000/tripo/v3
+      TRIPO_API_KEY: fake-test-key
+      TRIPO_API_BASE_URL: ""
+      MESHY_BASE_URL: http://fake-upstream:19000/meshy
+      MESHY_API_KEY: fake-test-key
+      MESHY_API_BASE_URL: ""
+      MESHY_WEBHOOK_KEY: ""
+      HYPER3D_BASE_URL: http://fake-upstream:19000/hyper3d/api/v2
+      HYPER3D_API_KEY: fake-test-key
+      OPENAI_BASE_URL: http://fake-upstream:19000/openai/images/v1
+      OPENAI_API_KEY: fake-test-key
+      GEMINI_BASE_URL: http://fake-upstream:19000/gemini/images/v1
+      GEMINI_API_KEY: fake-test-key
+      JIMENG_BASE_URL: http://fake-upstream:19000/jimeng
+      JIMENG_API_KEY: fake-test-key
+      MATTING_BASE_URL: http://fake-upstream:19000/matting
+      MATTING_API_KEY: fake-test-key
+      MATTING_API_URL: ""
+      MATTING_API_TOKEN: ""
+      # 对话连接（LLM_*）故意不在这里覆盖：它们来自运行环境文件的真实网关。
