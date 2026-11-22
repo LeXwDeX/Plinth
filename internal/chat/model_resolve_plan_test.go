@@ -26,6 +26,10 @@ func resolvePlanService(t *testing.T, store chat.ProductionPlanStore, offerings 
 		},
 		Store: store,
 		Usage: usage,
+		// The shipped Catalog declares the confirmation text, and the plan reads
+		// that same declaration since #380 step 2: a fixture that leaves it out is
+		// a deployment that never asks the person which model to keep.
+		ConfirmsWorkspace: true,
 	})
 	return service
 }

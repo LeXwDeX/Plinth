@@ -158,6 +158,12 @@ type TurnOptions struct {
 	// (#328). Only the service sets it; a request never does. The Agent reads
 	// the frozen copy, so an item edit cannot change a running turn.
 	AssetListReferences []project.Reference `json:"AssetListReferences,omitempty"`
+	// TurnPlan is the turn's model decision, computed by the service from the
+	// frozen session state and the Catalog's availability when the turn starts
+	// and read by the generation tools and the production plan instead of
+	// resolving the same layers again (#380 step 2). Nil for a turn stored
+	// before it and for a service with no Catalog wired.
+	TurnPlan *TurnPlan `json:"TurnPlan,omitempty"`
 }
 
 // SelectionMaskRef is the client's claim about the selection mask of a canvas

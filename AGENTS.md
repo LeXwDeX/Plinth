@@ -40,6 +40,16 @@ Plinth 是开源的多模型创作平台：Go 后端（`cmd/`、`internal/`）�
 - 本项目各阶段的落地步骤见「实施流程」，`dev-test` 与 `formal-test` 的环境规则见「环境与运维」。
 - 流水线细节以 `.github/` 下 workflow 配置为准。
 
+### 发布后冒烟判定与晋级校验
+
+`release-env.py release dev-test` 在 fake 形态发布成功后自动依次跑 L0（`smoke-l0-browser-boot.sh`）、L1（`smoke-l1-free.sh`）与 L1 Agent（`smoke-l1-agent-mode.sh`），并写一份机器可读报告（字段见 `docs/deployment.md` §4）；这三层不再需要人工复跑，也不接受手写结论。判定口径：
+
+- **PASS**：脚本退出码 0，其 `PASS=<n> FAIL=<n>[ SKIP=<n>]` 汇总行给出 `failed=0`、`skipped=0`，输出里没有 `SOFT-FAIL` 行，且 `passed>0`。只有这时报告里该层的 `status` 才是 `pass`。
+- **skip 与 soft-fail 不算通过**：脚本的 `SKIP:`、`SOFT-FAIL:`（例如 L1 的「没有可用文生 3D 模型」「未取到待批准同意」）都让该层成为 `fail`；退出码非 0（含 `PAID-TASK-ALERT`）同样。缺汇总行也是 `fail`：脚本没跑完不能当成通过。任何一层 skip 或 soft-fail 都不得记成 PASS，也不得只跑其中一两层就晋级。
+- **失败处置**：这三层不在发布脚本的自动回滚范围内（发布本身已成功）。先在关联 Issue 记录证据与失败层，按部署协议恢复上一个已验证版本，再修复并重跑受影响检查与发布验收；回滚失败或环境阻塞如实报告，不降级验收、不跳过失败项。
+- **真实形态不自动跑**：`formal-test` 与带 `--live-upstream` 的 `dev-test` 发布不自动跑这三层，因为 L1 会调用真实对话模型，须按「上游接口与 Fake」每次取得当次同意；按 `docs/deployment.md` §6 手动执行并留证。
+- **晋级 `formal-test` 的四项检查**：`L0`、`L1`、`L1_agent`、`related` 各须 `status` 为 `pass`、`failed=0`、`passed>0`、`skipped=0`、`soft_failed=0`，并附本仓 Issue comment 的完整 URL。前三项由 `release-env.py` 读源环境发布根下的机器报告核对（报告存在即核对，缺失时回退到只核对 Issue comment）；`related` 只由 Issue comment 给出，脚本无法判断「本次相关」的范围。
+
 ## 开发流程
 
 ### 问题核查
@@ -70,10 +80,10 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 2. **本机门禁与自建 CI**：按 `dev_test.md` §2 运行本机门禁，再跑自建 CI 复现同一套门禁（见「验收要求」）。
 3. **Git 交付**：提交、推送、创建 PR 并在门禁通过后正常合并到 `main`（见「Git 与协作」）。
 4. **发布到 `dev-test`**：用 `scripts/release-env.py release dev-test` 发布已推送的 `origin/main`，发布后核对镜像 revision 与目标完整 SHA 一致。CI 只执行自动化门禁，不承担发布。
-5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；涉及上游的验收使用 fake 场景。L2、L5 等真实模型或付费验收不再每次发布必跑，只在用户当次同意后执行（见「上游接口与 Fake」），结果回灌 fake。
+5. **部署后回归**：执行每次发布必跑的 L0 浏览器启动检查、L1 免费冒烟，以及本次功能涉及的页面、API 和直接影响链回归；涉及上游的验收使用 fake 场景。L2、L5 等真实模型或付费验收不再每次发布必跑，只在用户当次同意后执行（见「上游接口与 Fake」），结果回灌 fake。`dev-test` 的 fake 形态发布由 `release-env.py` 自动跑 L0、L1、L1 Agent 并写机器报告，判定口径见「发布后冒烟判定与晋级校验」；真实形态仍按 `docs/deployment.md` §6 手动执行。
 6. **失败处置**：发布脚本构建或 preflight 失败时中止，旧实例不动；容器更新或健康检查失败由脚本回滚并留报告。L0/L1 及后续回归失败不在脚本自动回滚范围内，必须记录证据、按部署协议恢复已验证版本，再修复并重跑受影响检查和发布验收；回滚失败或环境阻塞须明确报告，不能降级验收或跳过失败项。发布和测试协议以 `docs/deployment.md`、`dev_ops.md`「Agent 全自动发布协议」与 `scripts/smoke/README.md` 为准。
 7. **最终 GitHub Runner 验证**：本轮所有问题在自建 CI 与 `dev-test` 上解决后，对准备晋级的精确 `main` revision 跑一次 GitHub Runner 的完整 TDD/CI（全部测试与门禁，不按 diff 缩减），全部通过才可晋级。
-8. **晋级到 `formal-test` 做人工 Review**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过、最终 GitHub Runner 验证通过以后，才发布到正式测试环境，交由人工 Review。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；验收报告以本仓库原生 Issue comment 记录，`release-env.py` 读取并核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
+8. **晋级到 `formal-test` 做人工 Review**（需要时）：开发测试环境（包括 Agent 测试）全部稳定通过、最终 GitHub Runner 验证通过以后，才发布到正式测试环境，交由人工 Review。`formal-test` 只接收已在 `dev-test` 发布成功、并且 L0、L1、L1 Agent 及本次相关浏览器/Agent 验收全部 PASS（无 skip、无 soft-fail）的精确 `main` revision；前三项由 `release-env.py` 读 `dev-test` 发布根下的机器报告核对，验收报告以本仓库原生 Issue comment 记录，脚本同时核对该报告与 `dev-test` 成功发布清单，缺任一项即拒绝。晋级回执记在 #2 的 comment。
 9. **Tag 与 GitHub Release**：人工 Review 确认 `formal-test` 版本无问题后，才对该精确 revision 打 tag 并发布 GitHub Release；Review 未通过时修复后从第 1 步重走。
 
 纯文档或 AGENTS 规则修改且不影响运行产物时，只做第 1–3 步并校验文档，不必重建运行镜像或发布。
@@ -92,7 +102,7 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 
 - **环境**：内部环境只有 `dev-test`（开发测试环境）和 `formal-test`（正式测试环境，测试版本中的稳定版）。`legacy-formal` 已下线，不是可部署环境（存档 #74）。部署入口、各环境的部署事实与差异以 [`docs/deployment.md`](docs/deployment.md) 为准。
 - **按环境名部署**：用户在仓库根目录说要部署到哪个环境（例如「部署到正式测试环境」）时，按 `docs/deployment.md` 执行：从未纳入 Git 的 `deploy/local/environments.json`（模板 `deploy/environments.example.json`）按环境名解析目标，用 `scripts/release-env.py release <环境>` 发布，核对 revision，冒烟并汇报。
-- **Agent 专用账号**：`dev-test` 与 `formal-test` 都保留一个 Agent 专用账号，用于浏览器与 API 验收，按真实用户流程测试；不使用用户本人账号。账号名与口令由维护者指定，只存于各环境发布根下不追踪的 `production/agent-test.env`（`AGENT_TEST_USERNAME`/`AGENT_TEST_PASSWORD`，权限 `0600`），本机另有一份在不追踪的 `deploy/local/` 中并附说明；不写入 Git、日志或记忆。`release-env.py release <env>` 发布成功后自动运行 `scripts/smoke/ensure-agent-account.sh`（#215）：`dev-test` 每次都是全新数据，由管理员账号（运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导）经管理接口重新创建；`formal-test` 保留数据，已存在时只校验可登录。主机上缺少该文件时只提示不失败；建号失败时发布已完成，命令返回非零并说明。`release-env.py smoke <env>` 也会自动注入这两个变量。Agent 在 `dev-test` 用它自行登录，不再请用户登录、提供口令或确认；浏览器登录与验收经本地环境文件对应条目的 `base_url` 访问。
+- **Agent 专用账号**：`dev-test` 与 `formal-test` 都保留一个 Agent 专用账号，用于浏览器与 API 验收，按真实用户流程测试；不使用用户本人账号。账号名与口令由维护者指定，只存于各环境发布根下不追踪的 `production/agent-test.env`（`AGENT_TEST_USERNAME`/`AGENT_TEST_PASSWORD`，权限 `0600`），本机另有一份在不追踪的 `deploy/local/` 中并附说明；不写入 Git、日志或记忆。`release-env.py release <env>` 发布成功后自动运行 `scripts/smoke/ensure-agent-account.sh`（#215）：`dev-test` 每次都是全新数据，由管理员账号（运行环境 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 引导）经管理接口重新创建；`formal-test` 保留数据，已存在时只校验可登录。主机上缺少该文件时只提示不失败；建号失败时发布已完成，命令返回非零并说明。随后 `dev-test` 的 fake 形态发布自动跑 L0/L1/L1 Agent 并写机器报告（#411，见「发布后冒烟判定与晋级校验」）。`release-env.py smoke <env>` 也会自动注入这两个变量。Agent 在 `dev-test` 用它自行登录，不再请用户登录、提供口令或确认；浏览器登录与验收经本地环境文件对应条目的 `base_url` 访问。
 - **dev-test 常设授权**：`dev-test` 的发布、重启、回滚及有界镜像清理，Agent 可直接执行，无需逐次请示；真实模型验收与测试期付费同意见「付费验收」。范围限 Plinth 的 `dev-test` 栈。
 - **运维边界**：普通发布仅调用 `scripts/cutover-go-production.sh` 的 preflight，不调用 takeover、不重跑 ETL、不使用旧 `deploy.sh` 或 `--remove-orphans`。各环境的发布、回滚、镜像清理和数据目录互相隔离；各栈互不操作。发布脚本不触碰环境文件 `dev-test` 条目 `host_ci.dir` 指定的自建 CI 目录。
 - **数据与备份**：`dev-test` 每次发布都是全新数据（环境文件 `"data": "ephemeral"`，只有 `dev-test` 可设，与 `promote_from`、`backup` 互斥），不做发布备份，日志仍写主机 `logs/`（#28）。`formal-test` 保留数据，环境文件必须写 `"backup": {"scope": "full", "keep": 2}`：每次发布全量备份，只在成功路径清理，保留最新 2 份；发布备份不含镜像和日志（#66）。`dev-test` 仍写 `backup` 时可用 database 范围，它不是完整回滚；保留 database-only 快照可能被使用时，禁止离线 CAS/task 破坏性维护（见 `docs/storage-maintenance.md`），不得为回滚删除 CAS 字节。备份范围、保留数量、`.release.lock` 与清理边界按 `dev_ops.md`「发布备份范围与保留」执行（#364）。

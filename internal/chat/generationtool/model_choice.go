@@ -257,8 +257,11 @@ func (executor *Executor) chooseOffering(
 	// restored from another session or a previous visit, so it must not keep
 	// the purpose from choosing. The lock applies to every tool of its domain,
 	// the multiview tool included: ignore_user_model only keeps the workspace
-	// picker out of its fallback.
-	lock, lockSource := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command))), chat.ModelSourceLock
+	// picker out of its fallback. When the turn carries a plan, the lock is the
+	// one the plan froze for the capability: a lock that names another
+	// capability's model is not this step's decision (#380 step 2), and the
+	// production plan reads the same value.
+	lock, lockSource := executor.planModelLock(command, capability), chat.ModelSourceLock
 	// The person's structured multiview request names the model of its own
 	// turn: they chose it on the multiview panel or the three-view card, so it
 	// is their explicit pick for this step and replaces the session lock here,
@@ -437,6 +440,18 @@ func (executor *Executor) modelConflictChoice(
 		Refusal: executor.modelUnavailableText(command, conflict.Candidates, conflict.Named),
 		Code:    refusalModelUnavailable,
 	}
+}
+
+// planModelLock is the person's lock as the turn's frozen plan applies it to
+// the capability (#380 step 2): the session's explicit model for the tool's
+// workspace domain, or empty when the plan says the capability is not the one
+// the lock names. A turn stored without a plan (or a service with no Catalog)
+// keeps the session's lock unchanged.
+func (executor *Executor) planModelLock(command chat.ToolCommand, capability generation.Capability) string {
+	if entry, ok := command.Options.TurnPlan.Domain(toolDomain(command), string(capability)); ok {
+		return entry.Lock
+	}
+	return strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
 }
 
 // requestedMultiviewModel is the model the person's structured multiview
@@ -651,7 +666,7 @@ func (executor *Executor) modelChoiceOf(command chat.ToolCommand, offering gener
 // ran, either itself or the same model family's shape (#417): a lock on Meshy
 // 7.1 chose the multiview shape a multiview step ran.
 func (executor *Executor) lockChoseOffering(command chat.ToolCommand, offering generation.Offering) bool {
-	locked := strings.TrimSpace(command.Options.ExplicitModelFor(toolDomain(command)))
+	locked := executor.planModelLock(command, offering.Capability)
 	if locked == "" {
 		return false
 	}

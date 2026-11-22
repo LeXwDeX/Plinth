@@ -14,6 +14,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 var (
@@ -64,6 +65,10 @@ var (
 	// or decide, and delete again. Nothing was stopped or deleted (#384); the
 	// HTTP boundary answers 409 with the Schema text.
 	ErrSessionDeletionBlocked = errors.New("chat: session has work in flight that keeps it from being deleted")
+	// ErrSelectionMaskNoModel rejects a turn whose frozen selection mask no
+	// enabled, runtime-available image Offering can bind; the turn does not
+	// start instead of failing at the tool (#244, #380 step 2).
+	ErrSelectionMaskNoModel = errors.New("chat: selection mask without a mask-capable model")
 )
 
 // ProjectSource is the narrow port the chat service uses to attribute a
@@ -315,6 +320,11 @@ type ServiceConfig struct {
 	// successor and the turn records the switch; the session's explicit 3D
 	// and 2D locks are moved the same way, unrecorded (#380).
 	RetiredModels []catalog.RetiredModelSuccessor
+	// TurnPlanConfirmsWorkspace says the Schema declares the text that asks the
+	// person before a purpose recommendation replaces the model they see (#380
+	// step 2). The turn plan is computed with the same rule the generation
+	// tools apply.
+	TurnPlanConfirmsWorkspace bool
 	// Model3DUsage is application.chat.model3d_usage (#103): the purposes a
 	// production brief may name, their parameter overrides and the brief's
 	// field declarations. Zero disables the brief API and the purpose card.
@@ -410,6 +420,12 @@ type Service struct {
 	// multiviewModelValid is the check a structured multiview request's model
 	// passes when a turn starts (#373); nil accepts any model.
 	multiviewModelValid func(string) bool
+	// turnPlanOfferings, turnPlanAvailable and turnPlanConfirmsWorkspace are
+	// the Catalog inputs of the turn plan (#380 step 2); nil
+	// turnPlanOfferings leaves every turn without a plan.
+	turnPlanOfferings         func() []generation.Offering
+	turnPlanAvailable         func(generation.OfferingID) bool
+	turnPlanConfirmsWorkspace bool
 	// usageProfileKind and imageUsageProfileKind are the declared cards the
 	// brief write settles; their IDs and argument names come from the Schema,
 	// not from code (#103, #239).
@@ -579,6 +595,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		styleLockSources:           styleLockSourceSet(config.StyleLockSources),
 		canvasInputSource:          config.CanvasInputSource,
 		retiredModels:              retiredModelIndex(config.RetiredModels),
+		turnPlanConfirmsWorkspace:  config.TurnPlanConfirmsWorkspace,
 		model3DUsage:               config.Model3DUsage,
 		image2DUsage:               config.Image2DUsage,
 		explicitModel3DValid:       config.ExplicitModel3DValid,
@@ -1189,6 +1206,19 @@ func (service *Service) SetMultiviewModelValid(valid func(model string) bool) {
 	service.multiviewModelValid = valid
 }
 
+// SetTurnPlanCatalog installs the Catalog view the turn plan is computed from
+// (#380 step 2): the Offerings a turn may resolve its capabilities against and
+// which of them can run now. Availability is runtime state, so it is wired once
+// the generation module exists; without it every turn runs without a plan and
+// the tools keep reading the frozen session options.
+func (service *Service) SetTurnPlanCatalog(
+	offerings func() []generation.Offering,
+	available func(generation.OfferingID) bool,
+) {
+	service.turnPlanOfferings = offerings
+	service.turnPlanAvailable = available
+}
+
 func (service *Service) StartTurn(
 	ctx context.Context,
 	command StartTurn,
@@ -1421,6 +1451,20 @@ func (service *Service) startTurn(
 	command.Options.Harness, err = service.freezeHarnessSnapshot(ctx, command.OwnerID, command.SessionID, command.Options.Selection)
 	if err != nil {
 		return Message{}, err
+	}
+	// The turn's model decision, from the session state frozen above and the
+	// Catalog's availability now (#380 step 2). The plan is frozen with the
+	// turn, so a later restart or a Catalog change does not change what the
+	// turn runs; a plan that cannot serve what the turn itself asks for refuses
+	// the turn here instead of failing minutes later at the tool.
+	service.freezeTurnPlan(&command.Options)
+	if plan := command.Options.TurnPlan; plan != nil && command.Options.SelectionMask != nil &&
+		!plan.MaskCapable(string(generation.DomainImage)) {
+		// The person circled a region to redraw and no available image model
+		// can bind a mask: the mask can never be honoured, so the turn does not
+		// start (#244, #380 step 2). A turn without a plan (no Catalog wired)
+		// keeps the tool's own refusal.
+		return Message{}, ErrSelectionMaskNoModel
 	}
 	answeredChoice := ""
 	if command.ChoiceAnswer != nil {

@@ -512,6 +512,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// A turn's pick of a retired generation model runs on its successor
 		// (#329 follow-up).
 		RetiredModels: taskCatalog.RetiredModelSuccessors(),
+		// The turn plan's confirmation rule (#380 step 2): the Schema's text
+		// decides whether a purpose recommendation asks before replacing the
+		// model the person sees, the same declaration the generation tools read.
+		TurnPlanConfirmsWorkspace: applicationSchema.Chat.Presentation.Messages.ModelChoiceWorkspaceConflict != "",
 		// The production purposes and the brief fields (#103).
 		Model3DUsage: applicationSchema.Chat.Model3DUsage,
 		// The 2D production purposes and their requirements (#239).
@@ -808,6 +812,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return generationtool.MultiviewModelAvailable(module.Offerings(""), capabilities, module.OfferingAvailable, model)
 		})
 	}
+	// The turn plan's Catalog view (#380 step 2): the Offerings a turn resolves
+	// its capabilities against, and which of them can run now. Wired here
+	// because availability is runtime state.
+	chatService.SetTurnPlanCatalog(func() []generation.Offering {
+		return module.Offerings("")
+	}, module.OfferingAvailable)
 	canvasImageService, err := canvas.NewImageService(
 		canvas.ImageServiceConfig{
 			References:        referenceResolver,
@@ -874,6 +884,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// the purpose budget and the production review settings.
 		Usage:      applicationSchema.Chat.Model3DUsage,
 		Production: applicationSchema.Chat.ModelReview.Inspect.Production,
+		// #380 step 2: the plan quotes a step with the same confirmation rule
+		// the generation tools apply, so an approved plan covers the step that
+		// runs.
+		ConfirmsWorkspace: applicationSchema.Chat.Presentation.Messages.ModelChoiceWorkspaceConflict != "",
 	})
 	// #331: the read-only crop_image_regions tool cuts normalized regions out
 	// of one owned picture at original resolution and stores every crop as a

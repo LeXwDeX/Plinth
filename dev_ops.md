@@ -16,21 +16,23 @@
 2. **失败协议**：候选启动或健康检查失败时，脚本先按本次备份范围恢复数据，再启动发布前实际运行的镜像（`database` 范围只恢复 `production/data`，候选写入的 `storage-go`/`web-data` 字节保留，不是完整回滚）。镜像标签从原容器读取。失败报告留服务器 `production/reports/release-failures/`，其中写明 `backup_scope` 与 `backup_targets`；Agent 在关联 GitHub Issue 中记录问题、证据、修复与重试结论，再回本地修复并重试。构建/preflight 失败直接中止，旧实例未动。
 3. **部署凭据全在本地**（SSH 目标与发布根只在本地 `deploy/local/environments.json`），不进任何远端系统。
 4. **各栈单实例**：`dev-test` 与 `formal-test` 分别只运行一个 `art-ai-go` 服务。
-5. **测试栈冒烟该做的全做**：L0/L1 每次测试发布后必跑；L2 真实模型链路（含一次小额生成）在涉及 Agent/生成/同意链路的测试发布后跑。`formal-test` 只运行免费 L0/L1/L1 Agent。
+5. **测试栈冒烟该做的全做**：L0/L1 每次测试发布后必跑；L2 真实模型链路（含一次小额生成）在涉及 Agent/生成/同意链路的测试发布后跑。`formal-test` 只运行免费 L0/L1/L1 Agent。`dev-test` 的 fake 形态发布由 `release-env.py` 自动跑 L0、L1、L1 Agent（建号之后，按此顺序），逐层读脚本自己的 `PASS=/FAIL=/SKIP=` 汇总行并写机器报告到 `<root>/production/reports/smoke-<revision>.json`（每层日志在同名目录下，`0600`），判定口径与失败处置见 `AGENTS.md`「发布后冒烟判定与晋级校验」；任一层不是 `pass` 或报告写不出去时发布命令返回非零，但发布不回滚。真实形态不自动跑，也不写报告：L1 会调用真实对话模型，须按 `docs/deployment.md` §6 取得当次同意后手动执行。
 6. **LLM 噪声在脚本代码中兜底/重试**（consent 未出现自动重发一次消息再等），不靠人工判定。
 7. **冒烟不清理测试数据**；`dev-test` 每次发布本身从全新数据开始（`data: ephemeral`，见 `docs/deployment.md`）。
 
 操作入口（脚本为唯一真源，本节不复制步骤细节）：
 
 ```
-python3 scripts/release-env.py release dev-test  # 本地发布入口：按环境文件传参（同步→构建→preflight→备份→Compose 更新→健康→失败自动回滚）
+python3 scripts/release-env.py release dev-test  # 本地发布入口：按环境文件传参（同步→构建→preflight→备份→Compose 更新→健康→失败自动回滚→建号→L0/L1/L1 Agent 与机器报告）
 scripts/release-go-testenv.sh        # 发布驱动（RELEASE_HOST、RELEASE_ROOT 必填，无缺省主机/根）
 scripts/release-server-steps.sh      # 服务器段（由发布入口 scp 执行；<tag> <sha> <remote_root> 均必填）
-scripts/smoke/smoke-l1-free.sh       # L1 免费冒烟（每次发布后必跑）
-scripts/smoke/smoke-l1-agent-mode.sh # L1 批准方式/3D 交付验收（本功能集每次发布后必跑，零费用）
+scripts/smoke/smoke-l1-free.sh       # L1 免费冒烟（每次发布后必跑；dev-test fake 形态由发布入口自动跑）
+scripts/smoke/smoke-l1-agent-mode.sh # L1 批准方式/3D 交付验收（本功能集每次发布后必跑，零费用；同上）
 scripts/smoke/smoke-l2-livemodel.sh  # L2 真实模型链路（按需）
 scripts/smoke/README.md              # 分层口径
 ```
+
+晋级校验（`promote_from`，#411）：`release formal-test --acceptance-note <ID>` 除 Issue comment 外，还读 `dev-test` 发布根下该 revision 的机器冒烟报告（`<root>/production/reports/smoke-<revision>.json`），三层必须都是 `pass`；报告缺失时按 `docs/deployment.md` §4 回退到只核对 comment，命令会打印提示。机器报告只由发布入口写，不手工编辑。
 
 镜像目标与自部署边界（#251/#259）：`Dockerfile.go-runtime` 的默认目标 `runtime` 是开源自部署镜像，不含历史迁移命令；内部环境（`dev-test`、`formal-test`）使用的 `art-ai-go-production` 镜像由 `release-server-steps.sh` 以 `--target runtime-with-migration-tools` 构建（含 `art-ai-etl`、`art-ai-recover-assets` 与 `/app/legacy-*`），`docker-compose.go-production.yml` / `docker-compose.go-candidate.yml` 的 `build.target` 相同，镜像内容与发布前一致。根目录 `docker-compose.yml` 只供自部署，内部环境不使用它，也不得用它操作 `dev-test` / `formal-test` 的 Compose 项目。内部 Compose 与发布脚本仍在原路径。
 
