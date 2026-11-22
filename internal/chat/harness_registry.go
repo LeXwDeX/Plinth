@@ -29,6 +29,10 @@ func (o *Orchestrator) harnessRegistry(ctx context.Context, base *toolRegistry) 
 	for i, tool := range registry.ordered {
 		if tool.name == snapshot.ToolName {
 			tool.parameters = append(json.RawMessage(nil), snapshot.ToolParameters...)
+			// 参数表换成了这次选择真正接受的参数，描述也必须跟着换：原描述教的是
+			// 自由模式下的一整套参数（如多视图的 front/left/back/right 与
+			// three_view_group），留着会让模型按这次已经去掉的参数调用。
+			tool.description = harnessOperationDescription(o.schema.Harness, snapshot.Selection.OperationID, tool.description)
 		}
 		if tool.name == o.schema.Harness.PrerequisiteTool {
 			tool.description = o.schema.Harness.ProposalMessage
@@ -38,6 +42,17 @@ func (o *Orchestrator) harnessRegistry(ctx context.Context, base *toolRegistry) 
 		registry.byName[tool.name] = tool
 	}
 	return &registry
+}
+
+// harnessOperationDescription 是 Harness 固定功能下工具自己的说明：功能声明里的
+// 一句描述。找不到这个功能时保留原描述，宁可少说也不编造。
+func harnessOperationDescription(schema catalog.ChatHarnessSchema, operationID, fallback string) string {
+	for _, operation := range schema.Operations {
+		if operation.ID == operationID {
+			return operation.Description
+		}
+	}
+	return fallback
 }
 
 func (registry *toolRegistry) harnessPermits(tool registeredTool) bool {
