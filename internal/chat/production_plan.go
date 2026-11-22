@@ -116,6 +116,12 @@ type ProductionPlanPolicy struct {
 	// candidates one step may declare and where they may come from. A zero
 	// value refuses candidates.
 	Candidates catalog.ChatCandidatesSchema
+	// ConfirmsWorkspace says the Schema declares the text that asks the person
+	// before a purpose recommendation replaces the model they see (see
+	// ModelRequest.ConfirmsWorkspace). It is the same declaration the
+	// generation tools read, so a plan quote and the call that runs it agree
+	// (#380 step 2).
+	ConfirmsWorkspace bool
 }
 
 // SetProductionPlanPurposeBudget installs the purpose budget check of planned
@@ -551,7 +557,7 @@ func (policy *ProductionPlanPolicy) stepOffering(command ToolCommand, capability
 		domain = string(generation.DomainModel3D)
 	}
 	profile, recommended := policy.purposeRecommendation(command, capability, domain)
-	lock := policy.planLock(command, capability, domain)
+	lock, workspace, confirmsWorkspace := policy.planModelDecision(command, capability, domain)
 	resolution := ResolveModel(ModelRequest{
 		Candidates:  candidates,
 		Lock:        lock,
@@ -559,17 +565,32 @@ func (policy *ProductionPlanPolicy) stepOffering(command ToolCommand, capability
 		Recommended: recommended,
 		Profile:     profile.ID,
 		Reason:      profile.Reason,
-		Workspace:   strings.TrimSpace(command.Options.ModelFor(domain)),
+		Workspace:   workspace,
 		// The plan asks in its own words, so a recommendation that differs
 		// from the workspace picker's value is a confirmation here too: a plan
 		// quoted at the recommendation would be the silent switch the tool
-		// refuses.
-		ConfirmsWorkspace: true,
+		// refuses. The plan and the tools read the same declaration, so a
+		// Catalog that declares the confirmation text behaves the same in both
+		// (#380 step 2).
+		ConfirmsWorkspace: confirmsWorkspace,
 	})
 	if resolution.Conflict != nil {
 		return generation.Offering{}, false, planModelRefusal(capability, domain, lock, pinned, resolution.Conflict)
 	}
 	return resolution.Offering, resolution.Source != ModelSourceDefault, ""
+}
+
+// planModelDecision is the person's lock and the workspace picker's value the
+// plan resolves a capability with: the ones the turn's frozen plan computed
+// when the turn started, so the plan quotes what the executor will run
+// (#380 step 2). A turn without a plan (a hand-built Service, or a Catalog
+// wired without one) keeps the policy's own rule.
+func (policy *ProductionPlanPolicy) planModelDecision(command ToolCommand, capability, domain string) (string, string, bool) {
+	if entry, ok := command.Options.TurnPlan.Domain(domain, capability); ok {
+		return entry.Lock, entry.Workspace, policy.ConfirmsWorkspace
+	}
+	return policy.planLock(command, capability, domain), strings.TrimSpace(command.Options.ModelFor(domain)),
+		policy.ConfirmsWorkspace
 }
 
 // availableOfferings are the capability's enabled, runtime-available Offerings,
@@ -606,26 +627,17 @@ func (policy *ProductionPlanPolicy) purposeRecommendation(command ToolCommand, c
 	return profile, RecommendedOfferings(profile, ModelShapeOfCapability(generation.Capability(capability)))
 }
 
-// planLock is the person's lock when it names a model of the capability. A
-// lock of another domain or capability is not this step's lock: a plan lists
-// remesh, splat and motion steps the lock was never about, and refusing them
-// would make every such plan unproposable. A locked model the capability
-// declares but cannot run now stays a lock, so the step is refused instead of
-// quoted at another model.
+// planLock is the person's lock as it applies to a capability (see
+// ApplicableModelLock). A lock of another capability is not this step's lock: a
+// plan lists remesh, splat and motion steps the lock was never about, and
+// refusing them would make every such plan unproposable. The lock's own rule is
+// shared with the executor, so a step the plan quotes is a step the executor
+// runs (#380 step 2).
 func (policy *ProductionPlanPolicy) planLock(command ToolCommand, capability, domain string) string {
 	if domain != string(generation.DomainModel3D) && domain != string(generation.DomainImage) {
 		return ""
 	}
-	lock := strings.TrimSpace(command.Options.ExplicitModelFor(domain))
-	if lock == "" {
-		return ""
-	}
-	for _, offering := range policy.Offerings() {
-		if string(offering.Capability) == capability && ModelNameMatches(offering, lock) {
-			return lock
-		}
-	}
-	return ""
+	return ApplicableModelLock(policy.Offerings(), command.Options.ExplicitModelFor(domain), capability)
 }
 
 // planUnavailableRefusal is the Agent's refusal when the capability has no
