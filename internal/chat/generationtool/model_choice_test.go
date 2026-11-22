@@ -827,6 +827,85 @@ func imageTestArguments(model string) map[string]json.RawMessage {
 	return map[string]json.RawMessage{"model": encoded}
 }
 
+// #409: create_three_view has no model argument of its own, so the model the
+// person sees in the workspace picker is their only statement and a refusal
+// there could not ask them which model to keep. A 2D purpose the Schema
+// inferred from a brief that names none advises only (#381): it must not veto
+// that visible pick. A purpose the brief names keeps #103 C1's confirmation,
+// and so does every generation tool of the image workspace.
+func TestChooseThreeViewModelKeepsTheWorkspaceModelOfAnInferredPurpose(t *testing.T) {
+	const (
+		proImage = "meshy/nano-banana-pro/image-to-image"
+		gptImage = "openai/gpt-image-2/image-to-image"
+	)
+	usage := imageTestUsage()
+	// Both declared 2D purposes recommend the Pro model for an image-to-image
+	// step; GPT Image 2 is only what the picker shows.
+	for index := range usage.Profiles {
+		usage.Profiles[index].RecommendedOfferings = map[string][]string{shapeImageToImage: {proImage}}
+	}
+	gateway := &choiceTestGateway{offerings: []generation.Offering{
+		imageTestOffering(proImage, string(generation.ImageToImage)),
+		imageTestOffering(gptImage, string(generation.ImageToImage)),
+	}}
+	executor := imageTestExecutor(gateway)
+	executor.chat.Image2DUsage = usage
+	// The Catalog's create_three_view declares no model argument.
+	threeViewCommand := func(brief chat.ProductionBrief, workspace, locked string) chat.ToolCommand {
+		command := imageTestCommand(brief, workspace, locked, "")
+		command.Tool.Name, command.Tool.ModelArgument = "create_three_view", ""
+		return command
+	}
+	// The brief names no 2D purpose, so the Schema's default (concept_art)
+	// answers for it and the visible model runs.
+	choice, source := executor.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, gptImage, ""))
+	if choice.ID != gptImage || source != "user" {
+		t.Fatalf("inferred purpose choice = %s (%s), want the workspace model %s", choice.ID, source, gptImage)
+	}
+	// A brief that names only other fields leaves the purpose inferred.
+	choice, _ = executor.ChooseThreeViewModel(threeViewCommand(
+		chat.ProductionBrief{"style": json.RawMessage(`"写实"`)}, gptImage, ""))
+	if choice.ID != gptImage {
+		t.Fatalf("brief without an image_use choice = %s, want the workspace model %s", choice.ID, gptImage)
+	}
+	// The person's own session lock outranks the picker.
+	choice, _ = executor.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, gptImage, proImage))
+	if choice.ID != proImage {
+		t.Fatalf("locked choice = %s, want the locked model %s", choice.ID, proImage)
+	}
+	// With no workspace value the purpose still chooses, as refine_image's does.
+	choice, _ = executor.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, "", ""))
+	if choice.ID != proImage {
+		t.Fatalf("purpose choice = %s, want the recommended model %s", choice.ID, proImage)
+	}
+	// A purpose the brief names keeps #103 C1's rule: the call is refused
+	// instead of replacing the visible model silently.
+	for _, brief := range []chat.ProductionBrief{
+		imageTestBrief("illustration"), imageTestBrief("concept_art"),
+	} {
+		choice, _ = executor.ChooseThreeViewModel(threeViewCommand(brief, gptImage, ""))
+		if choice.ID != "" {
+			t.Fatalf("named purpose choice = %s, want a refusal", choice.ID)
+		}
+	}
+	// A workspace model with no available Offering is still refused.
+	unavailable := imageTestExecutor(&choiceTestGateway{
+		offerings:   gateway.offerings,
+		unavailable: map[generation.OfferingID]bool{generation.OfferingID(gptImage): true},
+	})
+	unavailable.chat.Image2DUsage = usage
+	choice, _ = unavailable.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, gptImage, ""))
+	if choice.ID != "" {
+		t.Fatalf("unavailable workspace model = %s, want a refusal", choice.ID)
+	}
+	// So is a lock that names a model the call cannot run: the relaxed rule is
+	// only the purpose's advice giving way, never the person's own lock.
+	choice, _ = unavailable.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, proImage, gptImage))
+	if choice.ID != "" {
+		t.Fatalf("unavailable locked model = %s, want a refusal", choice.ID)
+	}
+}
+
 // #239 review: the image_use description and the system prompt promise that an
 // omitted or empty image_use lets the default 2D purpose apply. The default
 // purpose must therefore choose the model and freeze its overrides even when

@@ -221,6 +221,46 @@ func TestModel3DProfileFallsBackToTheDefaultPurpose(t *testing.T) {
 	}
 }
 
+// #409: the 2D default is the table's documented rule for a brief that names no
+// image purpose, and it keeps the generation tools' model choice. A tool that
+// has no model argument of its own cannot ask the person which model to keep, so
+// it reads this to let the workspace picker's visible model win over the
+// inferred purpose instead. A purpose the brief names is the person's own.
+func TestImage2DDefaultIsInferred(t *testing.T) {
+	resolver := purposeParamsResolver()
+	briefs := map[string]chat.ProductionBrief{
+		"no brief":                              nil,
+		"an empty brief":                        {},
+		"a brief without an image_use":          purposeParamsBrief(t, map[string]any{"style": "写实"}),
+		"a purpose the Schema does not declare": purposeParamsBrief(t, map[string]any{"image_use": "retired"}),
+	}
+	for name, brief := range briefs {
+		t.Run(name, func(t *testing.T) {
+			if !resolver.Image2DDefaultIsInferred(brief) {
+				t.Fatalf("brief %s: want the default 2D purpose reported as inferred", name)
+			}
+			profile, found := resolver.Image2DProfile(brief, false)
+			if !found || profile.ID != "concept_art" || profile.Default {
+				t.Fatalf("profile = %+v (%v), want the default purpose unmarked", profile, found)
+			}
+		})
+	}
+	// A purpose the brief names, the default purpose included, is the person's.
+	for _, imageUse := range []string{"concept_art", "illustration"} {
+		brief := purposeParamsBrief(t, map[string]any{"image_use": imageUse})
+		if resolver.Image2DDefaultIsInferred(brief) {
+			t.Fatalf("image_use %q: want the named purpose kept as the person's own", imageUse)
+		}
+	}
+	// A Schema with no default purpose infers nothing.
+	bare := chat.PurposeParameters{Model3D: purposeParamsUsage(), Image2D: catalog.ChatImage2DUsageSchema{
+		Profiles: purposeParamsImageUsage().Profiles,
+	}}
+	if bare.Image2DDefaultIsInferred(chat.ProductionBrief{}) {
+		t.Fatal("a Schema with no default_profile: want nothing inferred")
+	}
+}
+
 // The request's own values stay its own; the purpose fills what it left unset,
 // and only the advised values carry its reason and source. A fixed parameter is
 // never filled.

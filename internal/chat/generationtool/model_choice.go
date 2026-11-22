@@ -327,13 +327,51 @@ func (executor *Executor) chooseOffering(
 // recommendation and the Offering default, in chat.ResolveModel's order, the
 // same layers refine_image uses. The result is empty when no Offering can take
 // the call; the caller words that refusal. It is a shell over chooseOffering so
-// the Skill tool stops carrying a second, weaker selection rule.
+// the Skill tool stops carrying a second, weaker selection rule, with the one
+// exception below: this tool has no model argument of its own, and a plan quotes
+// an image step at the workspace picker's value (#243's rule), so an inferred
+// purpose must not refuse the model the plan already quoted.
 func (executor *Executor) ChooseThreeViewModel(command chat.ToolCommand) (generation.Offering, string) {
 	choice, _ := executor.chooseOffering(command, generation.ImageToImage, nil, modelInput{}, "")
-	if choice.Offering.ID == "" {
-		return generation.Offering{}, ""
+	if choice.Offering.ID != "" {
+		return choice.Offering, choice.Source
 	}
-	return choice.Offering, choice.Source
+	// A purpose the Schema inferred for a brief that names none advises only
+	// (#381), and this tool cannot ask the person which model to keep the way
+	// #103 C1's confirmation does: it has no model argument of its own, so the
+	// workspace picker is the person's only statement. Keep that visible pick
+	// rather than refusing a call whose model is right there. Only that refusal
+	// is relaxed: a lock, or a model the call cannot take, is still refused, and
+	// a purpose the brief names keeps the confirmation.
+	if choice.Code == refusalModelWorkspaceConflict {
+		if offering, ok := executor.inferredPurposeWorkspaceModel(command, generation.ImageToImage); ok {
+			return offering, "user"
+		}
+	}
+	return generation.Offering{}, ""
+}
+
+// inferredPurposeWorkspaceModel is the Offering the workspace picker shows for
+// this call's capability, when the call's purpose is only the Schema's inferred
+// 2D default (chat.PurposeParameters.Image2DDefaultIsInferred). It applies the
+// same availability and input tests the four layers give the workspace value.
+func (executor *Executor) inferredPurposeWorkspaceModel(command chat.ToolCommand,
+	capability generation.Capability) (generation.Offering, bool) {
+	if command.Tool.IgnoreUserModel ||
+		toolDomain(command) != string(generation.DomainImage) ||
+		!executor.purposeParameters().Image2DDefaultIsInferred(command.Options.ProductionBrief) {
+		return generation.Offering{}, false
+	}
+	workspace := strings.TrimSpace(executor.userModel(command))
+	if workspace == "" {
+		return generation.Offering{}, false
+	}
+	fits := executor.modelFits(command, modelInput{})
+	offering, matched := matchOffering(executor.availableOfferings(capability), workspace)
+	if !matched || !fits(offering) {
+		return generation.Offering{}, false
+	}
+	return offering, true
 }
 
 // purposeRecommendation is the production purpose of the call's workspace

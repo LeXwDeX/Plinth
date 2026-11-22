@@ -34,7 +34,10 @@ type PurposeProfile struct {
 	// which to keep. A purpose the brief names is the person's own and keeps the
 	// confirmation of #103 C1. The 2D default is the table's documented rule
 	// ("omit or leave empty to let the default 2D purpose apply") and is not
-	// marked here, so its long-standing model choice is unchanged.
+	// marked here, so its long-standing model choice is unchanged;
+	// Image2DDefaultIsInferred tells the few callers that must let the workspace
+	// picker's visible model win over that inferred purpose apart from a purpose
+	// the brief names.
 	Default bool
 }
 
@@ -145,6 +148,37 @@ func (resolver PurposeParameters) Image2DProfile(brief ProductionBrief, explicit
 		}
 	}
 	return PurposeProfile{}, false
+}
+
+// Image2DDefaultIsInferred reports whether the 2D purpose the brief follows is
+// the Schema's default_profile standing in for a brief that names none: #381's
+// inferred-purpose rule, image side. The 2D default is the table's documented
+// rule for an omitted or empty image_use, so it keeps the generation tools'
+// long-standing model choice (PurposeProfile.Default) and their #103 C1
+// confirmation. A caller that cannot ask the person which model to keep, because
+// its tool has no model argument of its own, reads this to let the workspace
+// picker's visible model win over the inferred purpose instead (#409's
+// three-view tool). A purpose the brief names and the Schema declares is the
+// person's own and answers false, the default purpose included; a name the
+// Schema no longer declares answers true, as Image2DProfile ignores it the same
+// way a session without one.
+func (resolver PurposeParameters) Image2DDefaultIsInferred(brief ProductionBrief) bool {
+	usage := resolver.Image2D
+	if len(usage.Profiles) == 0 || usage.DefaultProfile == "" {
+		return false
+	}
+	id := brief.Text(resolver.Model3D.Brief.FieldNameOfType("image_profile"))
+	for _, profile := range usage.Profiles {
+		if profile.ID == id {
+			return false
+		}
+	}
+	for _, profile := range usage.Profiles {
+		if profile.ID == usage.DefaultProfile {
+			return true
+		}
+	}
+	return false
 }
 
 // image2DPurposeProfile narrows a declared 2D purpose to the fields the layers
