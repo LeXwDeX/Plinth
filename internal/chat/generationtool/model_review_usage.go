@@ -178,7 +178,11 @@ func newModelReviewUsageCheckFor(
 		if !exists {
 			continue
 		}
-		checks[index].FixHint = modelReviewUsageFixHint(fix, profile, production, text, available)
+		// One judgement of the fix serves both the sentence and the structured
+		// remedy: each call asks the availability of every option, and two calls
+		// could disagree if the answer changed between them (#332).
+		hint, option, executable := modelReviewUsageFix(fix, profile, production, text, available)
+		checks[index].FixHint = hint
 		// A sized deliverable that is over the bound is fixed by sizing it again,
 		// not by the general fix for the inspected file (#292). When the inspected
 		// file is itself the sized one (the GLB of a rig, #305) its measured edge is
@@ -196,7 +200,7 @@ func newModelReviewUsageCheckFor(
 		// decide on it instead of parsing the sentence. The message is the hint
 		// just rendered, so the two never disagree.
 		checks[index].Remedies = modelReviewUsageRemedies(checks[index].Check, checks[index].FixHint,
-			fix, profile, production, text, available, counted)
+			option, executable, counted)
 	}
 	result := &modelReviewUsageCheck{
 		Purpose:       profile.ID,
@@ -677,14 +681,10 @@ func modelReviewUsageFix(
 // missing one.
 func modelReviewUsageRemedies(
 	check, message string,
-	fix catalog.ChatModelInspectFixSchema,
-	profile catalog.ChatModel3DUsageProfile,
-	production catalog.ChatModelInspectProductionSchema,
-	text modelReviewUsageText,
-	available modelReviewFixAvailability,
+	option []catalog.ChatModelInspectFixCapabilitySchema,
+	executable bool,
 	counted []schemacontract.Capability,
 ) []ModelReviewRemedy {
-	_, option, executable := modelReviewUsageFix(fix, profile, production, text, available)
 	if !executable || message == "" || len(option) == 0 {
 		return nil
 	}
