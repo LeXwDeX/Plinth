@@ -34,6 +34,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // 格式转换的源任务判据：唯一性按声明（semantic=source-task 的 task
@@ -598,7 +599,10 @@ func (a *Adapter) observePostSuccessConversion(
 	}
 	a.touchPool(request.Offering, request.AttemptID)
 	state := parsePostSuccessState(request.Opaque)
-	selections := frozenConversionSelections(request.Offering, request.Input)
+	// 工作清单由冻结声明解析（#462）：混合形态里只有被请求的精确槽位
+	// 进入这里，主模型转换（GLTF）在成功前已经完成，不会重复付费。
+	plan, declared := resolveConversionPlan(request.Offering, request.Input)
+	selections := plan.selections
 	// The attempt holds one upstream slot for its children (C2). Release it as
 	// soon as this run is over: the round that delivers the last settled format
 	// leaves nothing to dispatch, poll or redeliver, so the kernel marks the
@@ -621,11 +625,10 @@ func (a *Adapter) observePostSuccessConversion(
 	}
 	if len(selections) == 0 {
 		// 未选择任何格式：零转换工作、零付费调用（历史快照/未选形态）。
-		return a.postSuccessCompletion(base, request, state, selections), nil
+		return a.postSuccessCompletion(base, request, state, plan), nil
 	}
 	// 承载选中项的公开输出声明缺失 → 无法标识资源身份：fail-closed，
 	// 在任何付费派发之前拒绝（不发明 role/variant）。
-	requirement, declared := conversionRequirement(request.Offering)
 	if !declared {
 		return generation.Observation{}, failure(
 			generation.FailureProtocol,
@@ -653,7 +656,7 @@ func (a *Adapter) observePostSuccessConversion(
 				state.Conversions[format] = item
 			}
 		}
-		return a.postSuccessCompletion(base, request, state, selections), nil
+		return a.postSuccessCompletion(base, request, state, plan), nil
 	}
 
 	// 2) 轮询全部在途子作业（有界并发下通常有多个，顺序稳定）。完成的
@@ -698,7 +701,7 @@ func (a *Adapter) observePostSuccessConversion(
 			// 本地资产证据判定（P1）。其余在途子作业下一轮继续。
 			updated.DeliveryAttempts++
 			state.Conversions[format] = updated
-			return a.deliveryObservation(base, request, state, format, updated.Locator, updated.DeliveryAttempts), nil
+			return a.deliveryObservation(base, request, state, plan, format, updated.Locator, updated.DeliveryAttempts), nil
 		}
 		state.Conversions[format] = updated
 	}
@@ -724,13 +727,13 @@ func (a *Adapter) observePostSuccessConversion(
 				for _, remaining := range unstartedFormats(selections, state.Conversions) {
 					state.Conversions[remaining] = conversionItem{Status: conversionItemDenied}
 				}
-				return a.postSuccessCompletion(base, request, state, selections), nil
+				return a.postSuccessCompletion(base, request, state, plan), nil
 			}
 			if options.ConvertEndpoint == "" {
 				for _, remaining := range unstartedFormats(selections, state.Conversions) {
 					state.Conversions[remaining] = conversionItem{Status: conversionItemFailed}
 				}
-				return a.postSuccessCompletion(base, request, state, selections), nil
+				return a.postSuccessCompletion(base, request, state, plan), nil
 			}
 			previous, existed := state.Conversions[format]
 			extras, err := conversionExtras(request.Offering, options, request.Input, format)
@@ -809,7 +812,7 @@ func (a *Adapter) observePostSuccessConversion(
 					permit.Result = generation.DispatchResultNotDispatched
 					wait, exhausted := recordConversionRefusal(state.Conversions, format, retryAfter)
 					if exhausted {
-						observation := a.postSuccessCompletion(base, request, state, selections)
+						observation := a.postSuccessCompletion(base, request, state, plan)
 						observation.Dispatch = permit
 						return observation, nil
 					}
@@ -851,7 +854,7 @@ func (a *Adapter) observePostSuccessConversion(
 	//    时选 DeliveryAttempts 最少者（平局取字典序，P1 公平性轮换，进度随
 	//    私有状态跨重启持久化）；已重发过则先刷新可能过期的签名定位符
 	//    （observe_endpoint 的 GET 查询，非付费，绝不重发 convert）。
-	if format, item, found := undeliveredConversion(state.Conversions, request.ResourceSlots, requirement); found {
+	if format, item, found := undeliveredConversion(state.Conversions, request.ResourceSlots, plan); found {
 		locator := item.Locator
 		if item.DeliveryAttempts > 0 {
 			value, err := a.observeTask(
@@ -871,12 +874,12 @@ func (a *Adapter) observePostSuccessConversion(
 			item.Status = conversionItemFailed
 			item.Locator = ""
 			state.Conversions[format] = item
-			return a.postSuccessCompletion(base, request, state, selections), nil
+			return a.postSuccessCompletion(base, request, state, plan), nil
 		}
 		item.Locator = locator
 		item.DeliveryAttempts++
 		state.Conversions[format] = item
-		return a.deliveryObservation(base, request, state, format, locator, item.DeliveryAttempts), nil
+		return a.deliveryObservation(base, request, state, plan, format, locator, item.DeliveryAttempts), nil
 	}
 
 	// 5) 无在途、无未开始、无待兑现：完成断言。仍有待重提格式时不
@@ -889,7 +892,7 @@ func (a *Adapter) observePostSuccessConversion(
 		base.Opaque = encodePostSuccessState(state)
 		return base, nil
 	}
-	return a.postSuccessCompletion(base, request, state, selections), nil
+	return a.postSuccessCompletion(base, request, state, plan), nil
 }
 
 // deliveryObservation 构造"交付一个已完成转换产物"的观察：只携带产物
@@ -899,11 +902,12 @@ func (a *Adapter) deliveryObservation(
 	base generation.Observation,
 	request generation.ObserveRequest,
 	state postSuccessState,
+	plan conversionPlan,
 	format string,
 	locator string,
 	attempt int,
 ) generation.Observation {
-	requirement, _ := conversionRequirement(request.Offering)
+	requirement := plan.Requirement(format)
 	item := state.Conversions[format]
 	base.Phase = generation.UpstreamCompleted
 	base.Progress = 100
@@ -929,7 +933,7 @@ func (a *Adapter) postSuccessCompletion(
 	base generation.Observation,
 	request generation.ObserveRequest,
 	state postSuccessState,
-	selections []string,
+	plan conversionPlan,
 ) generation.Observation {
 	// The post-success run is over: free the attempt's upstream slot.
 	a.releasePool(request.Offering, request.AttemptID)
@@ -937,7 +941,7 @@ func (a *Adapter) postSuccessCompletion(
 	base.Progress = 100
 	base.DedupeKey = "post-success:" + string(request.AttemptID) + ":" + strconv.Itoa(len(state.Conversions))
 	base.Opaque = encodePostSuccessState(state)
-	base.ResourceUpdates = append(base.ResourceUpdates, conversionAssertions(request, state, selections)...)
+	base.ResourceUpdates = append(base.ResourceUpdates, conversionAssertions(request, state, plan)...)
 	return base
 }
 
@@ -946,22 +950,46 @@ func (a *Adapter) postSuccessCompletion(
 func conversionAssertions(
 	request generation.ObserveRequest,
 	state postSuccessState,
-	selections []string,
+	plan conversionPlan,
 ) []generation.ResourceUpdate {
 	if len(state.Conversions) == 0 {
 		return nil
 	}
-	requirement, declared := conversionRequirement(request.Offering)
-	if !declared {
-		return nil
+	requirement := plan.Requirement(plan.firstFormat())
+	if requirement.Variant != "" {
+		// 混合形态（#462）：每个被请求的格式都有自己的精确槽位，逐个
+		// 断言终态失败项；成功项不断言（READY 只来自本地资产证据）。
+		updates := make([]generation.ResourceUpdate, 0, len(state.Conversions))
+		for _, format := range plan.selections {
+			item, tracked := state.Conversions[format]
+			if !tracked {
+				continue
+			}
+			stateCode, reason, terminalFailure := conversionFailureAssertion(item.Status)
+			if !terminalFailure {
+				continue
+			}
+			target := plan.Requirement(format)
+			if !slotStillPending(request.ResourceSlots, target.Role, conversionVariant(target, format)) {
+				continue
+			}
+			updates = append(updates, generation.ResourceUpdate{
+				Role:    target.Role,
+				Variant: conversionVariant(target, format),
+				State:   stateCode,
+				Reason:  reason,
+			})
+		}
+		return updates
 	}
 	if requirement.VariantFrom == "" {
 		// 聚合形状（历史快照兼容）：全部选中格式终态才断言。
-		if update := aggregateCompletionUpdate(state.Conversions, selections, requirement); update != nil {
+		if update := aggregateCompletionUpdate(state.Conversions, plan.selections, requirement); update != nil {
 			return []generation.ResourceUpdate{*update}
 		}
 		return nil
 	}
+	// 逐项形状（variant_from）：每个终态失败项断言自己的槽位。
 	// 逐项形状：每个终态失败项断言自己的槽位（内核只应用仍 pending 的
 	// 槽位，重复断言幂等）；done 项不断言——READY 只来自本地资产证据。
 	updates := make([]generation.ResourceUpdate, 0, len(state.Conversions))
@@ -1117,10 +1145,111 @@ func conversionRequirement(
 // 实现（generation.SelectionVariant，无第二真源）；历史快照（声明前形状）
 // 保持既有的小写派生，确保在途任务的资产身份逐字节不变。
 func conversionVariant(requirement generation.AssetRequirement, format string) string {
+	if requirement.Variant != "" {
+		return requirement.Variant
+	}
 	if requirement.VariantFrom != "" {
 		return generation.SelectionVariant(requirement, format)
 	}
 	return requirement.VariantPrefix + strings.ToLower(format)
+}
+
+// requestedConversionSlots 是冻结快照里"只在请求选了它时才存在"的精确
+// on-demand 槽位（#462）。内核在冻结时已经移除未命中的槽位，所以这里只读取
+// 声明，不再按输入重算。
+func requestedConversionSlots(offering generation.Offering) []generation.AssetRequirement {
+	slots := make([]generation.AssetRequirement, 0, len(offering.Outputs))
+	for _, requirement := range offering.Outputs {
+		if requirement.Delivery == generation.AssetDeliveryOnDemand &&
+			requirement.RequestedWhen != nil && requirement.Variant != "" {
+			slots = append(slots, requirement)
+		}
+	}
+	return slots
+}
+
+// requestedConversionFormat 判定某个选中格式是否由这样的槽位承载。
+func requestedConversionFormat(offering generation.Offering, values map[string]any, format string) bool {
+	for _, requirement := range requestedConversionSlots(offering) {
+		value, ok := schema.RequestedSlotValue(*requirement.RequestedWhen)
+		if !ok || value != format {
+			continue
+		}
+		if values == nil || schema.ConditionMatches(*requirement.RequestedWhen, values) {
+			return true
+		}
+	}
+	return false
+}
+
+// conversionTarget 是一个成功后转换目标：冻结快照里的公开槽位声明，以及它
+// 承载的选中格式（新形状里两者一一对应）。
+type conversionTarget struct {
+	Format      string
+	Requirement generation.AssetRequirement
+}
+
+// conversionPlan 是本次成功后观察的工作清单（声明驱动，无 Provider 格式枚举）。
+type conversionPlan struct {
+	targets    []conversionTarget
+	selections []string
+}
+
+// Requirement 返回某个格式的槽位声明；未声明的格式返回零值。
+func (p conversionPlan) Requirement(format string) generation.AssetRequirement {
+	for _, target := range p.targets {
+		if target.Format == format {
+			return target.Requirement
+		}
+	}
+	return generation.AssetRequirement{}
+}
+
+// firstFormat 返回工作清单里的首个格式（"" = 空清单），用于读取历史
+// 聚合形状的单一声明。
+func (p conversionPlan) firstFormat() string {
+	if len(p.targets) == 0 {
+		return ""
+	}
+	return p.targets[0].Format
+}
+
+// resolveConversionPlan 解析成功后观察要推进的格式与各自的公开槽位声明：
+//   - 新形状（#462）：每个带 requested_when 的精确 on-demand 槽位一个目标，
+//     冻结快照里没有的槽位（未选中的格式）不产生目标；
+//   - 历史快照：一个聚合/逐项声明 + 冻结选中的格式集，全部共享该声明。
+//
+// declared 为 false 表示 Offering 没有承载附加导出格式的 on-demand 声明，
+// 调用方在任何付费派发之前 fail-closed。
+func resolveConversionPlan(offering generation.Offering, input json.RawMessage) (plan conversionPlan, declared bool) {
+	slots := requestedConversionSlots(offering)
+	if len(slots) > 0 {
+		var values map[string]any
+		if len(input) > 0 && json.Unmarshal(input, &values) != nil {
+			values = nil
+		}
+		for _, requirement := range slots {
+			value, ok := schema.RequestedSlotValue(*requirement.RequestedWhen)
+			if !ok {
+				continue
+			}
+			if values != nil && !schema.ConditionMatches(*requirement.RequestedWhen, values) {
+				continue
+			}
+			plan.targets = append(plan.targets, conversionTarget{Format: value, Requirement: requirement})
+			plan.selections = append(plan.selections, value)
+		}
+		return plan, true
+	}
+	requirement, found := conversionRequirement(offering)
+	if !found {
+		return conversionPlan{}, false
+	}
+	plan.selections = frozenConversionSelections(offering, input)
+	for _, format := range plan.selections {
+		plan.targets = append(plan.targets, conversionTarget{Format: format, Requirement: requirement})
+	}
+	return plan, true
 }
 
 // undeliveredConversion 返回"上游已完成但内核槽位仍未兑现"且
@@ -1139,10 +1268,15 @@ func conversionVariant(requirement generation.AssetRequirement, format string) s
 func undeliveredConversion(
 	conversions map[string]conversionItem,
 	slots []generation.ResourceSlotState,
-	requirement generation.AssetRequirement,
+	plan conversionPlan,
 ) (string, conversionItem, bool) {
-	if requirement.VariantFrom == "" || len(slots) == 0 {
-		// 聚合形状没有逐项身份可对照（历史快照）：保持既有行为，不重发。
+	if len(slots) == 0 {
+		return "", conversionItem{}, false
+	}
+	// 聚合形状没有逐项身份可对照（历史快照）：保持既有行为，不重发。
+	aggregate := len(plan.targets) > 0 && plan.targets[0].Requirement.Variant == "" &&
+		plan.targets[0].Requirement.VariantFrom == ""
+	if aggregate {
 		return "", conversionItem{}, false
 	}
 	bestFormat := ""
@@ -1151,6 +1285,10 @@ func undeliveredConversion(
 	for _, format := range sortedFormats(conversions) {
 		item := conversions[format]
 		if item.Status != conversionItemDone {
+			continue
+		}
+		requirement := plan.Requirement(format)
+		if requirement.Role == "" {
 			continue
 		}
 		if !slotStillPending(slots, requirement.Role, conversionVariant(requirement, format)) {

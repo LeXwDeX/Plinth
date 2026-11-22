@@ -1086,6 +1086,24 @@ func validateOfferingOutputs(offering schemacontract.Offering) error {
 				return fmt.Errorf("%s的 required_when 必须引用 text 参数（present）或 select 参数的声明选项（equals），并限定精确 required 槽位", at)
 			}
 		}
+		// requested_when 声明"只在选了该项时才存在的槽位"（#462）：与
+		// required_when 同样的可判定条件，但限定精确的非阻断槽位。内核在
+		// 冻结时移除未命中的槽位，故这里必须保证条件只由冻结输入决定，
+		// 且变体精确（逐项身份，不做前缀/逐项展开）。
+		if output.RequestedWhen != nil {
+			condition := *output.RequestedWhen
+			parameter, exists := offeringParameter(offering.Parameters, condition.Parameter)
+			value, isText := schemacontract.RequestedSlotValue(condition)
+			declared := false
+			for _, option := range parameter.Options {
+				if option.Value == value {
+					declared = true
+				}
+			}
+			if output.Delivery != schemacontract.AssetDeliveryOnDemand || output.Variant == "" || output.VariantPrefix != "" || output.VariantFrom != "" || output.Minimum == nil || *output.Minimum != 1 || !exists || parameter.Type != "string-array" || condition.Operator != "contains" || !isText || !declared {
+				return fmt.Errorf("%s的 requested_when 必须引用 string-array 参数的声明选项（contains），并限定精确 on-demand 槽位", at)
+			}
+		}
 		// A sized output names the parameter that sets the edge of its textures
 		// (#292): a texture-size select of the Offering, on one exact variant.
 		if output.TextureSizeParameter != "" {

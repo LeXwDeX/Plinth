@@ -394,3 +394,14 @@ describe('the action and the wording of an obtainable row (#323)', () => {
     }
   });
 });
+
+it('shows the task\'s own format progress while it converts them in the background', () => {
+  // #462: the task succeeds with its primary model and keeps converting the
+  // requested formats; the panel says how many of them have landed. The words
+  // are the Schema's, not a second copy in the component.
+  const html = view({ formats: rows, post_success_progress: { done: 2, total: 5 } });
+  expect(html).toContain('data-testid="model-formats-progress"');
+  expect(html).toContain('格式 2/5');
+  // Nothing is shown for a task that converts no format of its own.
+  expect(view({ formats: rows })).not.toContain('data-testid="model-formats-progress"');
+});

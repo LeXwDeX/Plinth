@@ -59,8 +59,18 @@ type AssetRequirement struct {
 	// normalized input. An unmatched slot has minimum zero; supplied bytes must
 	// still pass the declared delivery checks.
 	RequiredWhen *ParameterCondition `json:"required_when,omitempty"`
-	MediaTypes   []string            `json:"media_types,omitempty"`
-	MaxBytes     int64               `json:"max_bytes,omitempty"`
+	// RequestedWhen makes an exact non-blocking slot exist only for an input
+	// that asks for it (#462). Unlike RequiredWhen the slot is not merely
+	// relaxed: an unmatched slot is removed from the frozen Offering at submit,
+	// so it never enters the success gate, the resource-state projection or the
+	// post-success work list, and no slot is created for a format the request
+	// did not select. The condition value names the selected value (a
+	// multi-select "contains"), and the Provider reads that value as the format
+	// it converts; the kernel still holds no format table. Supplied bytes must
+	// pass the declared delivery checks like any other slot.
+	RequestedWhen *ParameterCondition `json:"requested_when,omitempty"`
+	MediaTypes    []string            `json:"media_types,omitempty"`
+	MaxBytes      int64               `json:"max_bytes,omitempty"`
 	// Fidelity is a structural delivery gate; animation also requires a skeleton.
 	Fidelity string `json:"fidelity,omitempty"`
 	// VariantFrom 指向驱动逐项展开的多选参数名（string-array + options）。
@@ -102,6 +112,18 @@ func DeliveryProfileFormat(profile string) (variant, mediaType string, known boo
 	default:
 		return "", "", false
 	}
+}
+
+// RequestedSlotValue decodes the value a requested_when condition selects: the
+// multi-select entry whose presence creates the slot (#462). It is the one rule
+// the Provider's post-success work list and the Catalog's load-time validation
+// both read, so a slot and the work it authorizes cannot drift apart.
+func RequestedSlotValue(condition ParameterCondition) (string, bool) {
+	var value string
+	if json.Unmarshal(condition.Value, &value) != nil || value == "" {
+		return "", false
+	}
+	return value, true
 }
 
 // InputRule 描述跨参数的存在性约束。参数本身负责类型和值域校验，

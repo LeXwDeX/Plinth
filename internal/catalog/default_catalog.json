@@ -3552,6 +3552,7 @@
         "ui.workspace.model_formats.status.obtainable": "可转换",
         "ui.workspace.model_formats.status.unavailable": "不可用",
         "ui.workspace.model_formats.status.converting": "转换中",
+        "ui.workspace.model_formats.progress": "格式 {done}/{total}",
         "ui.workspace.model_formats.reason": "查看原因",
         "ui.workspace.model_formats.download": "下载",
         "ui.workspace.model_formats.download_all": "下载全部（ZIP）",
@@ -17692,6 +17693,7 @@
             "ui.workspace.model_formats.status.obtainable": "Convertible",
             "ui.workspace.model_formats.status.unavailable": "Unavailable",
             "ui.workspace.model_formats.status.converting": "Converting",
+            "ui.workspace.model_formats.progress": "Formats {done}/{total}",
             "ui.workspace.model_formats.reason": "View reason",
             "ui.workspace.model_formats.download": "Download",
             "ui.workspace.model_formats.download_all": "Download all (ZIP)",
@@ -28685,7 +28687,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/text-to-3d",
-      "revision": "2026-11-12.278.1",
+      "revision": "2026-11-22.462.2",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -29282,9 +29284,9 @@
         {
           "role": "converted_model",
           "variant": "converted.usdz",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "USDZ"
@@ -29294,9 +29296,9 @@
         {
           "role": "converted_model",
           "variant": "converted.fbx",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "FBX"
@@ -29306,9 +29308,9 @@
         {
           "role": "converted_model",
           "variant": "converted.obj",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "OBJ"
@@ -29318,9 +29320,9 @@
         {
           "role": "converted_model",
           "variant": "converted.stl",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "STL"
@@ -29330,9 +29332,9 @@
         {
           "role": "converted_model",
           "variant": "converted.3mf",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "3MF"
@@ -29346,6 +29348,11 @@
           "minimum": 0
         }
       ],
+      "post_success": {
+        "observe": true,
+        "interval_seconds": 5,
+        "deadline_seconds": 7200
+      },
       "native_pricing": {
         "version": 1,
         "unit": "tripo.credit",
@@ -30218,7 +30225,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/image-to-3d",
-      "revision": "2026-11-12.278.1",
+      "revision": "2026-11-22.462.2",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -30891,9 +30898,9 @@
         {
           "role": "converted_model",
           "variant": "converted.usdz",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "USDZ"
@@ -30903,9 +30910,9 @@
         {
           "role": "converted_model",
           "variant": "converted.fbx",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "FBX"
@@ -30915,9 +30922,9 @@
         {
           "role": "converted_model",
           "variant": "converted.obj",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "OBJ"
@@ -30927,9 +30934,9 @@
         {
           "role": "converted_model",
           "variant": "converted.stl",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "STL"
@@ -30939,9 +30946,9 @@
         {
           "role": "converted_model",
           "variant": "converted.3mf",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "3MF"
@@ -30955,6 +30962,11 @@
           "minimum": 0
         }
       ],
+      "post_success": {
+        "observe": true,
+        "interval_seconds": 5,
+        "deadline_seconds": 7200
+      },
       "native_pricing": {
         "version": 1,
         "unit": "tripo.credit",
@@ -31164,7 +31176,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-multiview/image-to-3d",
-      "revision": "2026-11-12.278.1",
+      "revision": "2026-11-22.462.2",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -31841,9 +31853,9 @@
         {
           "role": "converted_model",
           "variant": "converted.usdz",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "USDZ"
@@ -31853,9 +31865,9 @@
         {
           "role": "converted_model",
           "variant": "converted.fbx",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "FBX"
@@ -31865,9 +31877,9 @@
         {
           "role": "converted_model",
           "variant": "converted.obj",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "OBJ"
@@ -31877,9 +31889,9 @@
         {
           "role": "converted_model",
           "variant": "converted.stl",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "STL"
@@ -31889,9 +31901,9 @@
         {
           "role": "converted_model",
           "variant": "converted.3mf",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "3MF"
@@ -31905,6 +31917,11 @@
           "minimum": 0
         }
       ],
+      "post_success": {
+        "observe": true,
+        "interval_seconds": 5,
+        "deadline_seconds": 7200
+      },
       "native_pricing": {
         "version": 1,
         "unit": "tripo.credit",

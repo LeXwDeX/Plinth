@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,10 +19,26 @@ import (
 // New fixed-format Offerings hold the public task in RUNNING until every
 // authorized private conversion has a downloadable result. Historical
 // Offerings retain their post-success conversion lifecycle.
+//
+// A mixed Offering (#462) declares post_success and also holds the public task
+// until its blocking conversion (the GLTF export that produces the
+// self-contained primary model) has landed. Only that blocking slot is worked
+// on before success; the requested non-blocking formats are converted by
+// observePostSuccessConversion after the task is already SUCCEEDED and usable.
 func preCompletionFormats(offering generation.Offering) bool {
-	if offering.PostSuccess != nil || offering.PriceSelectionParameter() == "" {
+	if offering.PriceSelectionParameter() == "" {
 		return false
 	}
+	// A mixed Offering (#462) declares post_success and still blocks on its own
+	// conversion: without the primary model the task cannot succeed. An Offering
+	// whose only converted slots are on-demand (the historical post-success
+	// shapes) has no blocking conversion and never runs this path.
+	return hasBlockingConversion(offering)
+}
+
+// hasBlockingConversion reports whether the Offering declares a converted-model
+// slot the task must deliver before it may succeed.
+func hasBlockingConversion(offering generation.Offering) bool {
 	for _, output := range offering.Outputs {
 		if output.Role == "converted_model" && output.Delivery == generation.AssetDeliveryRequired &&
 			output.Variant != "" && output.Minimum != nil && *output.Minimum == 1 {
@@ -66,9 +83,15 @@ func requiredConvertedOutputs(offering generation.Offering, values map[string]an
 	return required
 }
 
-// validatePreCompletionInput reads the frozen format selection and checks that
-// it is exactly the set of conversions the Offering's required slots need: no
-// format whose slot is not required, none missing, none repeated or unknown.
+// validatePreCompletionInput reads the frozen format selection and returns the
+// conversions that must finish before the task may succeed: the formats of the
+// Offering's required converted-model slots. It refuses a selection that names
+// a format the Offering does not declare, repeats one, or leaves a required
+// conversion unselected.
+//
+// In a mixed Offering (#462) the selection is wider than that set: the extra
+// entries are the requested non-blocking formats, converted after success, so
+// they are accepted here and never dispatched before the blocking set is done.
 func validatePreCompletionInput(offering generation.Offering, input json.RawMessage) ([]string, error) {
 	var values map[string]any
 	if json.Unmarshal(input, &values) != nil || offering.PriceSelectionParameter() == "" {
@@ -87,26 +110,35 @@ func validatePreCompletionInput(offering generation.Offering, input json.RawMess
 		formats = append(formats, format)
 	}
 	required := requiredConvertedOutputs(offering, values)
-	if required == 0 || len(formats) != required {
+	if required == 0 {
 		return nil, failure(generation.FailureInvalidInput, false, "Tripo 必须请求全部声明的转换格式")
 	}
+	blocking := make([]string, 0, len(formats))
 	seen := make(map[string]bool, len(formats))
 	for _, format := range formats {
 		if seen[format] || !conversionSelectionDeclared(offering, format) {
 			return nil, failure(generation.FailureInvalidInput, false, "Tripo 转换格式重复或不受支持")
 		}
 		seen[format] = true
-		if _, found := preCompletionOutput(offering, format); !found {
-			return nil, failure(generation.FailureProtocol, false, "Tripo 转换输出契约不完整")
+		if _, found := preCompletionOutput(offering, format); found {
+			blocking = append(blocking, format)
+			continue
 		}
+		if requestedConversionFormat(offering, values, format) {
+			continue
+		}
+		return nil, failure(generation.FailureProtocol, false, "Tripo 转换输出契约不完整")
+	}
+	if len(blocking) != required {
+		return nil, failure(generation.FailureInvalidInput, false, "Tripo 必须请求全部声明的转换格式")
 	}
 	// The model role is fulfilled by this conversion's self-contained GLB (see
 	// observePreCompletionFormats); a selection without it would end with no
 	// model claim after the paid generation, so it is refused before any spend.
-	if !seen[primaryModelConversion] {
+	if !slices.Contains(blocking, primaryModelConversion) {
 		return nil, failure(generation.FailureInvalidInput, false, "Tripo 必须请求 "+primaryModelConversion+" 转换以交付自包含 GLB 主模型")
 	}
-	return formats, nil
+	return blocking, nil
 }
 
 // primaryModelConversion is the export whose binary glTF replaces the source
@@ -381,6 +413,15 @@ func (a *Adapter) preCompletionClaims(
 	// Tripo's source GLB can contain upstream URLs in its metadata. The GLTF
 	// conversion is a self-contained binary glTF, so use that conversion for
 	// the primary model claim as well as its declared converted-model claim.
+	//
+	// D10 (fall back to the original GLB as the primary model when the GLTF
+	// conversion keeps failing) is deliberately NOT enabled here: its precondition
+	// is a desensitized sample proving the original GLB passes the isolation
+	// check, and without that evidence a GLTF failure still fails the whole task
+	// rather than delivering a model whose bytes were never checked (#457 D10).
+	// D11 (converting the other formats from a successful P2 task) is not enabled
+	// either: the official documentation does not yet confirm that convert accepts
+	// a P2 task (#457 D11).
 	var primaryModel generation.ArtifactClaim
 	retained := make([]generation.ArtifactClaim, 0, len(base.Artifacts))
 	for _, claim := range base.Artifacts {

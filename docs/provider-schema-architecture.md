@@ -330,6 +330,10 @@ Meshy 多图 Offering 的六个必需模型槽位是 `model_urls.<format>` 标�
 
 这些输出不声明 `delivery_profile`，原因有三：profile 要求精确 variant 和唯一 MIME，表达不了 `converted.stl` 和按需展开的槽位；Meshy CDN 对 3MF 返回 `application/octet-stream`，旧 Offering 的 claim 类型靠宿主机 MIME 表推断，收窄 `media_types` 会让真实交付失败；结构身份本来就属于交付检查的通用规则，不是产品配置。所以 Catalog 不为此声明 profile。已声明 `3mf-package-v1` 的输出仍走原来更严格的 OPC 检查。
 
+**Tripo 全格式的按需槽位（#462，Offering revision `2026-11-22.462.2`）。** 三个 Tripo 全格式 Offering 的新 revision 把主模型链路（`model` + `converted.gltf`，`required`）与其余五种格式（`converted.{usdz,fbx,obj,stl,3mf}`，`on-demand`、`minimum: 1`）分开，并声明 `post_success {observe: true, interval_seconds: 5, deadline_seconds: 7200}`。五个按需槽位各带一个 `requested_when`：参数是 `output_formats`，算子是 `contains`，值是它自己的格式名（`USDZ`、`FBX`、`OBJ`、`STL`、`3MF`）。内核在冻结时只留下条件命中的槽位，所以「已请求的格式集合」在 Task 快照里就是这五个槽位本身，不需要 Provider 再问一次输入。加载期校验（`validateOfferingOutputs`）要求 `requested_when` 只能引用 `string-array` 参数的声明选项、只能是精确变体槽位，且 `minimum` 显式为 1——条件只由冻结输入决定。
+
+这五个槽位**没有声明 `delivery_profile`**：现有的 `binary-fbx-v1` / `3mf-package-v1` 绑定的是精确变体 `fbx` / `3mf`（`DeliveryProfileFormat` 是一对一映射，存储层按同一个变体校验），而 Tripo 的槽位叫 `converted.fbx` / `converted.3mf`；把它们改成 `fbx` / `3mf` 会动到格式清单的匹配规则与历史资产身份。同时，启用一个有字节解析器的严格 profile 需要先有脱敏样本证明真实导出能通过（与 D10 同一条纪律），目前没有这个证据。因此这五个槽位保持原有的交付检查（精确变体 + `max_bytes` + 通用结构检查，STL/3MF 的结构检查见上一段），不放松、也不在没有证据时收紧。`model` 与 `converted.gltf` 的必需身份不变：GLTF 转换返回的自包含 GLB 是主模型，它落地即成功，其余格式由成功后观察继续转换。
+
 `result_reports` 只声明分析/修复的归一报告投影，原始协议解析留在 Adapter。报告通过既有 Inline Claim 持久化及资产鉴权交付，不将 JSON URL 当报告，也不引入通用任意 JSON 资产例外。Task 仍需所有必需槽位 READY 才能成功。这六个声明都限制一次 Attempt、非幂等提交；发送结果不明不自动重发。Schema 估算和平台累计估算不能写成上游实扣。
 
 ### Tripo Image-to-Splat 候选合同
