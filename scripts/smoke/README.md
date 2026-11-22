@@ -10,6 +10,7 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 ```
 
 - 凭据只在本地，远端命令通过本地 `deploy/local/environments.json` 中该环境的 `ssh` 执行。测试栈发布由 `python3 scripts/release-env.py release dev-test` 驱动 `scripts/release-go-testenv.sh`（`RELEASE_HOST`、`RELEASE_ROOT` 必填，无缺省主机/根）执行；`formal-test` 晋级命令与来源验收 note 格式见 `docs/deployment.md`。
+- `dev-test` 的 fake 形态发布成功后，发布入口自动依次跑本页 L0、L1、L1 Agent 三层，读各脚本自己的 `PASS=/FAIL=/SKIP=` 汇总行与 `SOFT-FAIL` 行，写机器报告 `<root>/production/reports/smoke-<revision>.json` 与每层日志（#411）。任一层不是 `pass`（含 skip、soft-fail、缺汇总行）或报告写不出去时发布命令返回非零，但发布不回滚；判定口径与失败处置见 `AGENTS.md`「发布后冒烟判定与晋级校验」。真实形态不自动跑，按上文表格手动执行并留证。
 - `smoke-l0-browser-boot.sh`、`smoke-l1-free.sh`、`smoke-l1-agent-mode.sh` 对非默认 `BASE` 都要求显式完整 `ADMIN_USERNAME` 与 `ADMIN_PASSWORD`，避免误读测试运行环境凭据。
 - 候选启动或健康检查（healthz/readyz）失败时，按本次备份范围恢复数据并启动发布前实际运行的镜像。标签从原容器读取。失败报告写在服务器 `production/reports/release-failures/<tag>-<stage>.txt`，并带 `backup_scope`/`backup_targets`。
 - 默认备份 `data`、`storage-go`、`web-data`，且不自动清理历史备份。仅 `dev-test` 可在环境文件写 `"backup": {"scope": "database", "keep": 2}`：停机只备份 `production/data`，回滚只替换该目录；候选写入的 `storage-go`/`web-data` 字节保留，可能成为孤儿，因此不是完整回滚。手工回滚先读 `backups/release-<T>/scope`（单行 `database` 或 `full`；旧快照无 scope 且三个归档齐全时按 `full`）。离线故障注入回归：`bash scripts/smoke/test-release-rollback.sh`（含 database scope）以及实际 helper 的单行 scope 夹具（`test-release-stack.sh`）。

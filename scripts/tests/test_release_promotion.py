@@ -88,5 +88,62 @@ class PromotionRuleTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), "release command failed: false")
 
 
+def smoke_report(**changes):
+    report = {"schema": promotion.SMOKE_SCHEMA, "version": promotion.SMOKE_VERSION, "environment": "dev-test",
+              "revision": SHA, "upstream_shape": "fake", "started_at": "2026-11-22T00:00:00Z",
+              "finished_at": "2026-11-22T00:05:00Z",
+              "checks": {name: {"status": "pass", "passed": 3, "failed": 0, "skipped": 0, "soft_failed": 0,
+                                "script": "smoke.sh", "log": f"/srv/dev-test/production/reports/smoke-{SHA}/{name}.log"}
+                         for name in ("L0", "L1", "L1_agent")}}
+    report.update(changes)
+    return report
+
+
+class MachineSmokeReportTests(unittest.TestCase):
+    """#411: release-env.py writes the report; a promotion must find three passing layers in it."""
+
+    def test_a_report_with_three_passing_layers_is_accepted(self):
+        text = json.dumps(smoke_report())
+        self.assertEqual(sorted(promotion.smoke_checks_from_report(text, SHA)),
+                         ["L0", "L1", "L1_agent"])
+
+    def test_the_report_path_is_pinned_to_the_revision_under_the_release_root(self):
+        self.assertEqual(promotion.smoke_report_path(SHA), f"production/reports/smoke-{SHA}.json")
+
+    def test_a_layer_that_failed_skipped_or_soft_failed_is_refused(self):
+        for name, field, value in (("L0", "failed", 1), ("L1", "status", "soft-fail"), ("L1_agent", "passed", 0),
+                                   ("L1_agent", "skipped", 1), ("L1_agent", "soft_failed", 2), ("L0", "passed", True)):
+            with self.subTest(name=name, field=field, value=value):
+                report = smoke_report()
+                report["checks"][name][field] = value
+                with self.assertRaises(promotion.ReleaseError):
+                    promotion.smoke_checks_from_report(json.dumps(report), SHA)
+
+    def test_a_missing_layer_is_refused(self):
+        for name in ("L0", "L1", "L1_agent"):
+            with self.subTest(name=name):
+                report = smoke_report()
+                del report["checks"][name]
+                with self.assertRaises(promotion.ReleaseError):
+                    promotion.smoke_checks_from_report(json.dumps(report), SHA)
+
+    def test_another_revision_unknown_schema_or_broken_json_is_refused(self):
+        cases = [json.dumps(smoke_report(revision="b" * 40)), json.dumps(smoke_report(schema="plinth.other")),
+                 json.dumps(smoke_report(version=2)), "{}", "not json", json.dumps({"schema": "list"})]
+        for text in cases:
+            with self.subTest(text=text[:40]), self.assertRaises(promotion.ReleaseError):
+                promotion.smoke_checks_from_report(text, SHA)
+
+    def test_the_note_checks_use_the_same_passing_rule(self):
+        # The note and the machine report must agree on what "pass" means.
+        for field, value in (("failed", 1), ("passed", 0), ("skipped", 1), ("soft_failed", 1), ("status", "fail")):
+            with self.subTest(field=field, value=value):
+                report = acceptance()
+                report["checks"]["L0"][field] = value
+                self.assertFalse(promotion.check_passed(report["checks"]["L0"]))
+                with self.assertRaises(promotion.ReleaseError):
+                    promotion.acceptance_from_note(note(report), SHA, FORGE)
+
+
 if __name__ == "__main__":
     unittest.main()

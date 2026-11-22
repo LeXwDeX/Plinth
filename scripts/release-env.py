@@ -20,6 +20,12 @@ passing acceptance report (L0, L1, L1_agent, related) in a native Issue note.
 The release itself is scripts/release-go-testenv.sh with the environment's
 parameters; nothing about the server flow is duplicated here.
 
+After a successful release in the fake upstream shape, the three scripted smoke
+layers (L0, L1, L1 Agent) run automatically and leave a machine-written report
+under the release root (production/reports/, untracked): one JSON with a check per
+layer and one log per layer. An environment with "promote_from" also checks that
+report in the source environment instead of trusting a hand-written claim (#411).
+
 Upstream shape (#219): the disposable "data": "ephemeral" environment (dev-test)
 releases in the fake shape by default: a fake upstream service runs in the same
 Compose project and every Provider and chat connection points at it, so no real
@@ -28,11 +34,13 @@ upstream is called and no real key is used. A live dev-test release needs both
 consent in the conversation, AGENTS.md). Other environments are always live.
 """
 import argparse
+from datetime import datetime, timezone
 import importlib.util
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 
@@ -68,6 +76,10 @@ def load_helper(filename, name):
     return module
 
 
+def promotion_rules():
+    return load_helper("release-promotion.py", "release_promotion_rules")
+
+
 def run(*args, input=None, timeout=120):
     try:
         result = subprocess.run([str(a) for a in args], input=input, capture_output=True,
@@ -77,6 +89,30 @@ def run(*args, input=None, timeout=120):
     if result.returncode:
         raise EnvironmentError_(f"{Path(str(args[0])).name} failed (exit {result.returncode})")
     return result.stdout.decode("utf-8")
+
+
+def host_file_state(environment, path):
+    """True when the host has this file, False when it does not; an unreachable host raises."""
+    try:
+        result = subprocess.run(["ssh", environment["ssh"], f"test -f {shlex.quote(path)}"],
+                                capture_output=True, timeout=120, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise EnvironmentError_("ssh was unavailable or timed out") from None
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise EnvironmentError_("ssh failed")
+
+
+def write_host_file(environment, path, content, directory_mode=None):
+    """Write one report file under the release root (untracked, 0600)."""
+    directory = shlex.quote(str(Path(path).parent))
+    command = f"mkdir -p {directory}"
+    if directory_mode:
+        command += f" && chmod {directory_mode} {directory}"
+    command += f" && cat > {shlex.quote(path)} && chmod 600 {shlex.quote(path)}"
+    run("ssh", environment["ssh"], command, input=content.encode("utf-8"))
 
 
 def load_environments(path):
@@ -242,7 +278,7 @@ def promotion_revision(document, name, revision, note_id):
     environment = document["environments"][name]
     source_name = environment["promote_from"]
     source = document["environments"][source_name]
-    promotion = load_helper("release-promotion.py", "release_promotion_rules")
+    promotion = promotion_rules()
     running = running_revision(source)
     revision = revision or running
     try:
@@ -267,6 +303,18 @@ def promotion_revision(document, name, revision, note_id):
         promotion.validate_manifest(manifest, revision, report["image_tag"])
     except promotion.ReleaseError as error:
         raise EnvironmentError_(f"{source_name} acceptance refused: {error}") from None
+    # #411: the source environment's own smoke report is checked as well, so a note cannot claim
+    # a layer the release script did not see pass. Older releases have no report: the note stays
+    # the only evidence for them.
+    report_path = f"{source['root']}/{promotion.smoke_report_path(revision)}"
+    if host_file_state(source, report_path):
+        try:
+            promotion.smoke_checks_from_report(run("ssh", source["ssh"], f"cat {report_path}"), revision)
+        except (EnvironmentError_, promotion.ReleaseError) as error:
+            raise EnvironmentError_(f"{source_name} smoke report refused: {error}") from None
+    else:
+        print(f"[release-env] note: {source_name} has no machine smoke report for {revision}; "
+              f"L0/L1/L1_agent rest on the acceptance note alone")
     if revision != running:
         print(f"[release-env] note: {source_name} now runs {running}; promoting accepted {revision}")
     return revision
@@ -341,7 +389,10 @@ def release(document, name, args):
     code = subprocess.run(["bash", str(SCRIPTS / "release-go-testenv.sh")], env=environment_variables).returncode
     if code:
         return code
-    return ensure_agent_account(document, name)
+    code = ensure_agent_account(document, name)
+    if code:
+        return code
+    return post_release_smoke(document, name, shape)
 
 
 # Reads the asked KEY=value lines of one env file on the host as JSON; a missing file yields {}.
@@ -409,15 +460,128 @@ def running_upstream_shape(environment):
     return "fake" if values.get("RELEASE_UPSTREAM_SHAPE") == "fake" else "live"
 
 
+def smoke_variables(document, name):
+    """BASE, credentials, EXPECT_SHA and the shape for a smoke run against this environment."""
+    environment = document["environments"][name]
+    return {**os.environ, **admin_credentials(environment), **agent_credentials(environment),
+            "BASE": environment["base_url"],
+            "EXPECT_SHA": running_revision(environment), "RELEASE_CONTAINER": container(environment),
+            "RELEASE_ENV": name, "ART_AI_UPSTREAM_SHAPE": running_upstream_shape(environment)}
+
+
 def smoke(document, name, command):
     environment = document["environments"][name]
     if not command:
         raise EnvironmentError_("smoke needs a command after --")
-    variables = {**os.environ, **admin_credentials(environment), **agent_credentials(environment),
-                 "BASE": environment["base_url"],
-                 "EXPECT_SHA": running_revision(environment), "RELEASE_CONTAINER": container(environment),
-                 "RELEASE_ENV": name, "ART_AI_UPSTREAM_SHAPE": running_upstream_shape(environment)}
-    return subprocess.run(command, env=variables).returncode
+    return subprocess.run(command, env=smoke_variables(document, name)).returncode
+
+
+# #411: the layers a release runs by itself, each script printing its own PASS/FAIL/SKIP counters.
+SMOKE_LAYERS = (
+    ("L0", "smoke-l0-browser-boot.sh"),
+    ("L1", "smoke-l1-free.sh"),
+    ("L1_agent", "smoke-l1-agent-mode.sh"),
+)
+# The last "PASS=<n> FAIL=<n>[ SKIP=<n>]" line a script prints is its summary.
+SMOKE_SUMMARY = re.compile(r"PASS=(\d+) FAIL=(\d+)(?:\s+SKIP=(\d+))?")
+SMOKE_SOFT_FAIL = re.compile(r"^SOFT-FAIL", re.M)
+SMOKE_TIMEOUT = 1800
+
+
+def utc_now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def smoke_layer(script, layer, variables):
+    """Run one smoke layer, keep its output and read its own counters.
+
+    A layer passes only when it exits 0 and its summary shows no failure, no skip, no soft-fail
+    and at least one pass. No summary at all counts as a failure: the script never got far
+    enough to report, and a missing report must not look like a pass.
+    """
+    started = utc_now()
+    try:
+        result = subprocess.run(["bash", str(SCRIPTS / "smoke" / script)], env=variables,
+                                capture_output=True, timeout=SMOKE_TIMEOUT)
+        output = (result.stdout + result.stderr).decode("utf-8", "replace")
+        code = result.returncode
+    except subprocess.TimeoutExpired as error:
+        output = ((error.stdout or b"") + (error.stderr or b"")).decode("utf-8", "replace")
+        output += f"\nFAIL: {layer} timed out after {SMOKE_TIMEOUT} seconds"
+        code = 1
+    except OSError:
+        output, code = f"FAIL: {script} could not be started", 1
+    summary = None
+    for match in SMOKE_SUMMARY.finditer(output):
+        summary = match
+    passed = failed = skipped = 0
+    if summary:
+        passed, failed, skipped = int(summary.group(1)), int(summary.group(2)), int(summary.group(3) or 0)
+    soft_failed = len(SMOKE_SOFT_FAIL.findall(output))
+    check = {"status": "pass" if code == 0 and passed > 0 and not failed and not skipped and not soft_failed
+             else "fail",
+             "passed": passed, "failed": failed, "skipped": skipped, "soft_failed": soft_failed,
+             "script": script, "started_at": started, "finished_at": utc_now()}
+    return check, output
+
+
+def smoke_report(document, name, revision):
+    """Run L0, L1 and L1 Agent and write the machine report under the release root.
+
+    One JSON holds a check per layer (its counters, its status and its log path) plus the
+    revision and the run times; one log per layer sits next to it. The report is untracked
+    evidence: it is written from the scripts' own counters, not from a claim about them.
+    """
+    environment = document["environments"][name]
+    rules = promotion_rules()
+    relative = rules.smoke_report_path(revision)
+    report_file = Path(relative)
+    directory = str(report_file.parent / report_file.stem)
+    variables = smoke_variables(document, name)
+    checks = {}
+    for layer, script in SMOKE_LAYERS:
+        check, output = smoke_layer(script, layer, variables)
+        check["log"] = f"{environment['root']}/{directory}/{layer}.log"
+        checks[layer] = check
+        write_host_file(environment, check["log"], output, directory_mode="700")
+        print(f"[release-env] {name}: smoke {layer} {check['status']} "
+              f"(passed={check['passed']} failed={check['failed']} skipped={check['skipped']} "
+              f"soft_failed={check['soft_failed']})")
+    report = {"schema": rules.SMOKE_SCHEMA, "version": rules.SMOKE_VERSION, "environment": name,
+              "revision": revision, "upstream_shape": variables["ART_AI_UPSTREAM_SHAPE"],
+              "started_at": utc_now(), "finished_at": utc_now(), "checks": checks}
+    write_host_file(environment, f"{environment['root']}/{relative}",
+                    json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    return report, f"{environment['root']}/{relative}"
+
+
+def post_release_smoke(document, name, shape):
+    """After a successful release, run the release smoke layers and leave the report.
+
+    Only the fake shape runs them by itself: on a live stack L1 reaches a real chat model, which
+    needs the user's consent for every run (AGENTS.md "上游接口与 Fake"), so those releases keep
+    the manual protocol of docs/deployment.md §6. The release itself stays deployed either way.
+    """
+    environment = document["environments"][name]
+    if shape != "fake":
+        print(f"[release-env] {name}: {shape} upstream shape; L0/L1/L1 Agent are not run "
+              f"automatically, follow docs/deployment.md §6")
+        return 0
+    rules = promotion_rules()
+    try:
+        revision = running_revision(environment)
+        report, path = smoke_report(document, name, revision)
+    except (EnvironmentError_, rules.ReleaseError) as error:
+        print(f"[release-env] {name}: the release is deployed, but the post-release smoke "
+              f"produced no report: {error}", file=sys.stderr)
+        return 1
+    print(f"[release-env] {name}: post-release smoke report {path}")
+    failed = [layer for layer, check in report["checks"].items() if check["status"] != "pass"]
+    if failed:
+        print(f"[release-env] {name}: the release is deployed, but the post-release smoke failed: "
+              f"{', '.join(failed)}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def main(argv=None):

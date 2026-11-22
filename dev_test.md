@@ -226,7 +226,7 @@ Hook 安装默认只预览：`python3 scripts/install-local-verification-hook.py
 SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-hooks.py`（#242），规则与上述门禁安装器一致：默认预览，`--apply` 原子替换并保留其他字节与模式，未知/损坏块拒绝改写，`--uninstall` 只移除本区块；另有只读 `--status`、`--mode warn|enforce` 与 `--init-worktrees`。回归为 `python3 -m unittest scripts/tests/test_install_specgit_required_hooks.py`。上线顺序与对已有工作树的影响见 `docs/specgit-project-integration.md`「所有分支与工作树强制初始化」。
 
 ## 3. 部署与回归流程
-0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 专用账号由 `release-env.py release dev-test` 在发布成功后自动运行 `scripts/smoke/ensure-agent-account.sh` 经管理接口重新创建（#215，见 AGENTS.md「环境与运维」），数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
+0. `dev-test` 默认每次发布都是全新数据（环境文件 `"data": "ephemeral"`，#28）：发布不做备份，冒烟与相关验收都从空库开始，只存在运行环境引导的管理员测试账号；Agent 专用账号由 `release-env.py release dev-test` 在发布成功后自动运行 `scripts/smoke/ensure-agent-account.sh` 经管理接口重新创建（#215，见 AGENTS.md「环境与运维」），随后同一命令自动跑 L0、L1、L1 Agent 并写机器报告（#411，见 AGENTS.md「发布后冒烟判定与晋级校验」）；数据由测试流程按真实用户流程自己创建；`formal-test` 不适用。
 1. 本地代码修改完成；
 2. 在待合并 head 上运行本机 `python3 scripts/verify-local.py --race` 全量（清单见 §2，前端三项 + Go 门禁四条），完成独立审核；
 3. 将已验收提交合并并推送到 `main`，以 `main` 的精确提交 SHA 生成不可变
@@ -241,7 +241,10 @@ SpecGit 初始化区块使用独立安装器 `scripts/install-specgit-required-h
 5. 更新前记录旧镜像标签并创建一致性备份；新容器未能健康启动时恢复旧
    镜像标签。正式生产的首次迁移另按
    `docs/production-migration-runbook.md` 执行，失败时必须恢复旧 Next；
-6. 部署后执行与本次改动相关的无扣费端到端验收；`dev-test` 测试栈的少量真实
+6. 部署后执行与本次改动相关的无扣费端到端验收；`dev-test` 的 fake 形态发布由
+   `release-env.py` 在发布成功后自动跑 L0、L1、L1 Agent 并写机器报告（#411，判定口径见
+   AGENTS.md「发布后冒烟判定与晋级校验」），真实形态与 `formal-test` 仍按
+   `docs/deployment.md` §6 手动执行；`dev-test` 测试栈的少量真实
    Provider 生成验收已有 `AGENTS.md` 常设授权，按模型和资产链留证，
    测试操作者代点同意仅是测试期操作授权；产品的批准规则见 `docs/product.md`；
    `formal-test` 不做付费生成；写 Key、付费生成、导入数据及 nginx/域名变更须用户明确决定；
