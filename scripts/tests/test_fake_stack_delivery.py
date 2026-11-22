@@ -5,8 +5,11 @@ A SUCCEEDED edit-multiview Task whose requested view is missing has to fail the 
 a view that was not requested may be absent. Offline: no stack, no network.
 """
 import importlib.util
+import inspect
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
@@ -48,6 +51,50 @@ class ConditionalSlots(unittest.TestCase):
         offering = {"outputs": [{"role": "model", "variant": "glb", "delivery": "required", "minimum": 1}]}
         problems, _ = fs.check_delivery(NoAssetsApi(), task_with([]), offering, {})
         self.assertEqual(problems, ["missing required slot ('model', 'glb')"])
+
+
+class AutoCompletionCatalog(unittest.TestCase):
+    """#461: a private Catalog states the feature it runs under, so a scenario's
+    Tasks, steps and ZIP bytes cannot drift because the platform started
+    completing formats on its own."""
+
+    def catalogs(self):
+        with tempfile.TemporaryDirectory() as work:
+            off = fs.private_catalog(work, name="off.json")
+            on = fs.private_catalog(work, name="on.json", auto_completion=True,
+                                    auto_completion_scan_milliseconds=500,
+                                    auto_completion_poll_milliseconds=500)
+            with open(off, encoding="utf-8") as handle:
+                off = json.load(handle)
+            with open(on, encoding="utf-8") as handle:
+                on = json.load(handle)
+        return off, on
+
+    def test_the_default_private_catalog_declares_no_automatic_route(self):
+        off, _ = self.catalogs()
+        auto = off["application"]["model_delivery"]["auto_completion"]
+        self.assertEqual(auto["source_capabilities"], [])
+        self.assertEqual(auto["route_order"], [])
+        self.assertEqual([conversion for conversion in off["application"]["model_delivery"]["conversions"]
+                          if conversion.get("auto")], [])
+        # The conversions stay: only the platform's own round is gone.
+        self.assertTrue([conversion for conversion in off["application"]["model_delivery"]["conversions"]
+                         if conversion["offering_id"] == "local/generated-glb/to-gltf"])
+
+    def test_the_scenario_catalog_keeps_the_shipped_block(self):
+        _, on = self.catalogs()
+        auto = on["application"]["model_delivery"]["auto_completion"]
+        self.assertEqual(auto["source_capabilities"], ["text-to-3d", "image-to-3d"])
+        self.assertEqual(auto["route_order"], ["local/generated-glb/to-gltf", "meshy/processing/convert"])
+        self.assertEqual(auto["scan_interval_milliseconds"], 500)
+        self.assertEqual(auto["poll_interval_milliseconds"], 500)
+
+    def test_the_scenario_is_selectable_and_part_of_the_full_run(self):
+        source = inspect.getsource(fs.main)
+        # The default set and the call itself; the --only help names it in its list.
+        self.assertGreaterEqual(source.count('"auto-completion"'), 2)
+        self.assertIn("asset-list-review,auto-completion,faults", source, "the --only help names it")
+        self.assertIn("scenario_auto_completion(work, stack_binary, processes)", source)
 
 
 class ZeroRealUpstream(unittest.TestCase):
