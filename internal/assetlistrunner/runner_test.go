@@ -329,7 +329,7 @@ func (chatService *fakeChat) TurnEndedInError(turn chat.Turn) bool {
 }
 
 func (chatService *fakeChat) Tasks(
-	_ context.Context, ownerID, sessionID string,
+	_ context.Context, ownerID, sessionID string, _ generation.TaskID,
 ) ([]generation.Task, error) {
 	if session, found := chatService.sessions[sessionID]; found && session.OwnerID != ownerID {
 		return nil, nil

@@ -149,6 +149,31 @@ func (c candidate) provides(format string) bool {
 	return false
 }
 
+// providedFormats is everything one run of this candidate produces: the single
+// format of a per-format run, or the whole Provides list of a run that delivers
+// them together.
+func (c candidate) providedFormats() []string {
+	if c.format != "" {
+		return []string{c.format}
+	}
+	return c.conversion.Provides
+}
+
+// overlapsPending reports whether this run also produces a format the task
+// still owes as a post-success resource slot (#459). The admission decides on
+// the whole run (admitPendingDelivery compares the run's format set with those
+// slots), so such a run is refused whatever single format a row asks for: the
+// coverage must not offer it as obtainable for one format while the run it
+// would start is rejected (#473).
+func (c candidate) overlapsPending(pending map[string]generation.ResourceState) bool {
+	for _, provided := range c.providedFormats() {
+		if _, owed := pending[provided]; owed {
+			return true
+		}
+	}
+	return false
+}
+
 // planKey is deterministic in (task, Offering revision, format) so a repeated
 // request finds the plan it already created instead of paying twice.
 func planKey(task generation.Task, offering generation.Offering, format string) string {
@@ -694,6 +719,17 @@ func (s *Service) planSteps(ctx context.Context, task generation.Task, v view, m
 			// Existing plans under it are still found through candidates().
 			// A retired route only recognizes plans made under it (#330).
 			if !candidate.provides(format) || !candidate.offering.Enabled || candidate.conversion.Retired {
+				continue
+			}
+			// A run that also produces a format the task still owes cannot be
+			// admitted (#459): the plan built for it is refused as a duplicate
+			// of the delivery already in flight, whatever one missing format
+			// this row is about. It is no route now, and the format reads as
+			// converting — the same source as the admission side (#473).
+			if candidate.overlapsPending(v.pending) {
+				if firstFailure == "" {
+					firstFailure = reasonConverting
+				}
 				continue
 			}
 			check, exists := checked[candidate.key]

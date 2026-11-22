@@ -965,21 +965,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		}
 		// The completion tool reports only the Tasks of the item's own
 		// sub-session; branch ancestors are another session's work. The runner
-		// reads the same source.
-		assetListTasks = func(ctx context.Context, ownerID, sessionID string) ([]generation.Task, error) {
-			page, err := module.List(ctx, generation.OwnTasks(generation.OwnerID(ownerID)),
-				generation.ListQuery{
-					SessionID: sessionID,
-					States: []generation.TaskState{
-						generation.TaskSucceeded, generation.TaskFailed,
-					},
-					Limit: 100,
-				})
-			if err != nil {
-				return nil, err
-			}
-			return page.Tasks, nil
-		}
+		// reads the same source, which reads the reported Task by id first
+		// (#473).
+		assetListTasks = assetListTaskSource(module)
 		// The proposal tool validates and stores through the service; its copy
 		// comes from the same Schema section (never hardcoded).
 		chatService.SetAssetLists(chat.AssetListPolicy{

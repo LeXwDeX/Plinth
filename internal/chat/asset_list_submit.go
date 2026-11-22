@@ -21,10 +21,13 @@ import (
 // or an asset, and a refusal never leaks an internal error text.
 
 // AssetListTaskSource reads the terminal Tasks created in one sub-session,
-// newest first, scoped to the owner. Branch ancestors are deliberately not
-// included: an item's outcome is the work of its own session. The application
-// supplies it from generation.Module.List with the same owner scope.
-type AssetListTaskSource func(ctx context.Context, ownerID, sessionID string) ([]generation.Task, error)
+// newest first, scoped to the owner. When taskID is not empty it reads that one
+// Task by id instead, so a stored report whose Task is older than the newest
+// page is still found (an item's sub-session can create more than a hundred
+// terminal Tasks); a Task that is gone yields no Tasks. Branch ancestors are
+// deliberately not included: an item's outcome is the work of its own session.
+// The application supplies it from generation.Module.
+type AssetListTaskSource func(ctx context.Context, ownerID, sessionID string, taskID generation.TaskID) ([]generation.Task, error)
 
 // Completion statuses the tool accepts. A status other than these is refused
 // before any list state is read.
@@ -109,7 +112,7 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 	if item.State != assetlist.StateWorking {
 		if (status == assetListItemStatusDone && item.State == assetlist.StateReview) ||
 			(status == assetListItemStatusFailed && item.State == assetlist.StateFailed) {
-			return assetListItemReported(item, status, assetListItemResultTaskID(item.Result),
+			return assetListItemReported(item, status, AssetListItemResultTaskID(item.Result),
 				messages), nil
 		}
 		return assetListRefusal(assetListMessage(messages.ItemNotWorking,
@@ -126,7 +129,7 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 	if err == nil && (run.Status == assetlist.RunStopped || run.Status == assetlist.RunCompleted) {
 		return assetListRefusal(reportFailed), nil
 	}
-	tasks, err := policy.Tasks(ctx, command.OwnerID, command.SessionID)
+	tasks, err := policy.Tasks(ctx, command.OwnerID, command.SessionID, "")
 	if err != nil {
 		return assetListRefusal(reportFailed), nil
 	}
@@ -294,7 +297,7 @@ func (service *Service) SettleReportedItem(
 	if policy == nil || policy.Service == nil || policy.Tasks == nil {
 		return input.Item, false, nil
 	}
-	taskID := assetListItemResultTaskID(input.Item.Result)
+	taskID := AssetListItemResultTaskID(input.Item.Result)
 	if taskID == "" {
 		return input.Item, false, nil
 	}
@@ -457,9 +460,11 @@ func assetListItemResultAssets(assets []generation.Asset) []assetListItemResultA
 	return result
 }
 
-// assetListItemResultTaskID reads back the snapshot's Task id for an
+// AssetListItemResultTaskID reads back the snapshot's Task id for an
 // idempotent reply. A failed item stores no snapshot, so the id stays empty.
-func assetListItemResultTaskID(raw json.RawMessage) string {
+// The asset-list runner uses it to read that one Task by id when it settles a
+// deferred report (#473).
+func AssetListItemResultTaskID(raw json.RawMessage) string {
 	var snapshot struct {
 		TaskID string `json:"task_id"`
 	}

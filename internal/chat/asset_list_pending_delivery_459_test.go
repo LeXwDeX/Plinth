@@ -63,7 +63,7 @@ func TestSubmitAssetListItemDoneDefersAnUnstableDelivery459(t *testing.T) {
 	})
 	task.FinishedAt = &finished
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{task}, nil
 		})
 	result, err := service.SubmitAssetListItem(context.Background(),
@@ -109,7 +109,7 @@ func TestSubmitAssetListItemDoneCapsTheDeferredCheck459(t *testing.T) {
 	// at 30s, so the item is checked again well before the interval.
 	schema.DeliverySettleMaxSeconds = 30
 	service := newAssetListSubmitServiceWithSchema(t, runs, schema,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{task}, nil
 		})
 	if _, err := service.SubmitAssetListItem(context.Background(),
@@ -131,7 +131,7 @@ func TestSubmitAssetListItemDoneFinishesWhenOnlyABackgroundSlotIsPending459(t *t
 		"thumbnail|rendered_image|":      {State: generation.ResourcePending},
 	})
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{task}, nil
 		})
 	result, err := service.SubmitAssetListItem(context.Background(),
@@ -157,7 +157,7 @@ func TestSettleReportedItemWaitsThenFinishes459(t *testing.T) {
 	// is written, and the next check moves one observation interval ahead.
 	pending := pendingFormatTask(createdAt, generation.ResourcePending)
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{pending}, nil
 		})
 	now := time.Date(2026, 11, 18, 11, 0, 0, 0, time.UTC)
@@ -206,7 +206,7 @@ func TestSettleReportedItemFinishesWhenOnlyABackgroundSlotIsPending459(t *testin
 		"thumbnail|rendered_image|":      {State: generation.ResourcePending},
 	})
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{task}, nil
 		})
 	item, handled, err := service.SettleReportedItem(context.Background(),
@@ -226,7 +226,7 @@ func TestSettleReportedItemFinishesWhenOnlyABackgroundSlotIsPending459(t *testin
 func TestSettleReportedItemIgnoresAWorkingItemWithoutAReport459(t *testing.T) {
 	runs := workingSubmitRuns()
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return nil, nil
 		})
 	_, handled, err := service.SettleReportedItem(context.Background(), settleInput(runs, nil, time.Now()))

@@ -158,6 +158,10 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 	}
 	state := parsePreCompletionState(request.Opaque)
 	if hasDispatchingRemnant(state.Conversions) {
+		// 结果不明（发送无回执）时停止再次付费并终结 attempt：上游可能仍在
+		// 跑这个子作业，但名额按「有意取舍」还回去（本函数的 defer），否则
+		// 这条已知失败的路径会把名额握到 IdleTTL。多占出的并发由上游自己的
+		// 429（code 2000）兜住——池是进程内软上限，不是硬配额。
 		return preCompletionFailure(base, state, "Tripo 转换提交结果不明，已停止再次付费"), nil
 	}
 	// A restart begins with an empty pool: re-register the children the

@@ -163,7 +163,7 @@ func TestSubmitAssetListItemDoneStoresTheTaskSnapshot(t *testing.T) {
 	}
 	var sourceSession string
 	service := newAssetListSubmitService(t, runs,
-		func(_ context.Context, ownerID, sessionID string) ([]generation.Task, error) {
+		func(_ context.Context, ownerID, sessionID string, _ generation.TaskID) ([]generation.Task, error) {
 			if ownerID != "owner-a" {
 				t.Fatalf("task source owner = %q", ownerID)
 			}
@@ -212,7 +212,7 @@ func TestSubmitAssetListItemDoneStoresTheTaskSnapshot(t *testing.T) {
 func TestSubmitAssetListItemDoneRequiresASuccessfulTask(t *testing.T) {
 	runs := workingSubmitRuns()
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{{ID: "task-1", State: generation.TaskFailed}}, nil
 		})
 	result, err := service.SubmitAssetListItem(context.Background(),
@@ -231,7 +231,7 @@ func TestSubmitAssetListItemDoneRequiresASuccessfulTask(t *testing.T) {
 func TestSubmitAssetListItemFailedUsesTheFailureClassification(t *testing.T) {
 	runs := workingSubmitRuns()
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{{
 				ID: "task-1", State: generation.TaskFailed,
 				CreatedAt: time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC),
@@ -266,7 +266,7 @@ func TestSubmitAssetListItemFailedUsesTheFailureClassification(t *testing.T) {
 func TestSubmitAssetListItemFailedUsesTheReasonWithoutATask(t *testing.T) {
 	runs := workingSubmitRuns()
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return nil, nil
 		})
 	result, err := service.SubmitAssetListItem(context.Background(),
@@ -284,7 +284,7 @@ func TestSubmitAssetListItemFailedUsesTheReasonWithoutATask(t *testing.T) {
 func TestSubmitAssetListItemRefusesAnOrdinarySession(t *testing.T) {
 	runs := workingSubmitRuns()
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			t.Fatal("an ordinary session must not read tasks")
 			return nil, nil
 		})
@@ -312,7 +312,7 @@ func TestSubmitAssetListItemRepeatIsIdempotent(t *testing.T) {
 	runs.item.State = assetlist.StateReview
 	runs.item.Result = json.RawMessage(`{"task_id":"task-2","assets":[]}`)
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return nil, nil
 		})
 	result, err := service.SubmitAssetListItem(context.Background(),
@@ -344,7 +344,7 @@ func TestSubmitAssetListItemRefusesATerminalRun(t *testing.T) {
 		runs := workingSubmitRuns()
 		runs.run.Status = status
 		service := newAssetListSubmitService(t, runs,
-			func(context.Context, string, string) ([]generation.Task, error) {
+			func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 				return nil, nil
 			})
 		result, err := service.SubmitAssetListItem(context.Background(),
@@ -363,7 +363,7 @@ func TestSubmitAssetListItemAllowsAPausedRun(t *testing.T) {
 	runs := workingSubmitRuns()
 	runs.run.Status = assetlist.RunPaused
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return []generation.Task{succeededTask("task-1",
 				time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC))}, nil
 		})
@@ -384,7 +384,7 @@ func TestSubmitAssetListItemRefusesInvalidArguments(t *testing.T) {
 	} {
 		runs := workingSubmitRuns()
 		service := newAssetListSubmitService(t, runs,
-			func(context.Context, string, string) ([]generation.Task, error) {
+			func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 				return nil, nil
 			})
 		result, err := service.SubmitAssetListItem(context.Background(),
@@ -403,7 +403,7 @@ func TestSubmitAssetListItemDoesNotLeakInternalErrors(t *testing.T) {
 	runs := workingSubmitRuns()
 	runs.itemErr = errors.New("database is locked")
 	service := newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return nil, nil
 		})
 	result, err := service.SubmitAssetListItem(context.Background(),
@@ -416,7 +416,7 @@ func TestSubmitAssetListItemDoesNotLeakInternalErrors(t *testing.T) {
 
 	runs = workingSubmitRuns()
 	service = newAssetListSubmitService(t, runs,
-		func(context.Context, string, string) ([]generation.Task, error) {
+		func(context.Context, string, string, generation.TaskID) ([]generation.Task, error) {
 			return nil, errors.New("query failed")
 		})
 	result, err = service.SubmitAssetListItem(context.Background(),

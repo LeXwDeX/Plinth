@@ -194,3 +194,41 @@ func TestPendingGltFSlotReadsAsBothContainers459(t *testing.T) {
 		t.Fatalf("a plan was started for gltf while the task still owes it: %#v", complete.Steps)
 	}
 }
+
+// #473: the coverage judges one missing format, the admission judges the whole
+// run (admitPendingDelivery compares the run's format set with the source's
+// pending slots). A run that also produces a format the source still owes is
+// refused as a duplicate, so the format row must not read as obtainable and
+// Complete must not build a plan that is going to be rejected.
+func TestCoverageSkipsWholeRunRoutesThatOverlapAPendingFormat473(t *testing.T) {
+	f := newConversionFixture(t)
+	// The per-format Tripo route is not in this Catalog: the only route left
+	// for the remaining formats is the whole-run Meshy convert, which provides
+	// them together with the still-pending converted.fbx.
+	f.absent[tripoConvert] = true
+	f.pendingResourceTask("tripo-pending", "owner")
+	coverage, err := f.service.Coverage(context.Background(), generation.OwnTasks("owner"), "tripo-pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"3mf", "usdz"} {
+		row := formatByID(t, coverage, id)
+		if row.Status == StatusObtainable {
+			t.Fatalf("%s reads as obtainable while the only run that produces it also converts the pending fbx: %#v", id, row)
+		}
+		if row.Reason != reasonConverting {
+			t.Fatalf("%s reason = %q, want %q", id, row.Reason, reasonConverting)
+		}
+	}
+	completed, err := f.service.Complete(context.Background(), generation.OwnerID("owner"), "tripo-pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range completed.Steps {
+		for _, format := range step.Formats {
+			if format == "3mf" || format == "usdz" {
+				t.Fatalf("a plan was started for %s while the source still owes fbx: %#v", format, completed.Steps)
+			}
+		}
+	}
+}
