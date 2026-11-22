@@ -8,6 +8,12 @@ switches are set: the --live argument AND ART_AI_LIVE_ACK=1. Either alone, or
 neither, refuses (exit 2). Each live run also needs the user's consent in the
 conversation first (AGENTS.md "上游接口与 Fake").
 
+The mixed shape (#416, release-env.py --live-chat) is reported as "mixed": its
+generation Providers are fake but its chat connections are a real gateway, so a
+script run against it spends real chat tokens. Both gates therefore treat it as
+not fake: fake-default wants the two live switches, live-only refuses it because
+the generation side is not real. Neither gate lets a script assume it.
+
 The target's shape comes from ART_AI_UPSTREAM_SHAPE (release-env.py smoke sets
 it from the environment's production/compose.env), else from
 $ART_AI_SERVER_ROOT/production/compose.env on the host. An unknown shape counts
@@ -17,7 +23,7 @@ as live, so a script never assumes the fake and calls a real upstream.
   upstream_shape.py live-only [--live]      # L2-L5: real upstream only, both switches, refuses a fake target
   upstream_shape.py shape                   # print the target shape only (no gate)
 
-Prints the shape (fake or live) on success.
+Prints the shape (fake, mixed or live) on success.
 """
 import os
 import sys
@@ -25,7 +31,7 @@ import sys
 ACK_VARIABLE = "ART_AI_LIVE_ACK"
 LIVE_FLAG = "--live"
 SHAPE_VARIABLE = "ART_AI_UPSTREAM_SHAPE"
-SHAPES = ("fake", "live")
+SHAPES = ("fake", "mixed", "live")
 
 
 def target_shape(environ):
@@ -64,9 +70,10 @@ def resolve(kind, live_flag, environ):
             return shape, None
         return shape, live_switch_error(live_flag, environ)
     if kind == "live-only":
-        if shape == "fake":
-            return shape, ("refusing to run: the target runs the fake upstream and this script needs real upstreams; "
-                           "release dev-test with --live-upstream and ART_AI_LIVE_ACK=1 first (user consent required)")
+        if shape != "live":
+            return shape, ("refusing to run: the target does not call real, paid upstreams "
+                           f"(shape {shape}); release dev-test with --live-upstream and {ACK_VARIABLE}=1 first "
+                           "(user consent required)")
         return shape, live_switch_error(live_flag, environ)
     raise ValueError(f"unknown gate {kind}")
 

@@ -117,7 +117,7 @@ func TestFakeUpstreamOverlayReplacesEveryUpstreamVariable(t *testing.T) {
 	if err != nil || !shape.fake() {
 		t.Fatalf("overlay shape = %v, %v", shape.fake(), err)
 	}
-	if err := validateFakeUpstreamWiring(shape, config, schema); err != nil {
+	if err := validateUpstreamWiring(shape, config, schema); err != nil {
 		t.Fatalf("overlay wiring refused: %v", err)
 	}
 }
@@ -189,14 +189,110 @@ func TestFakeUpstreamWiringFailsClosed(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if err := validateFakeUpstreamWiring(shape, config, schema); err == nil {
+		if err := validateUpstreamWiring(shape, config, schema); err == nil {
 			t.Errorf("%s: wiring accepted", name)
 		}
 	}
 	// The live shape checks nothing: formal-test keeps its own wiring.
 	config := shapeConfig(t, schema, map[string]string{"PROVIDER_MODE": "live", "AGENT_MODE": "live", "TRIPO_API_KEY": "real"})
-	if err := validateFakeUpstreamWiring(upstreamShape{}, config, schema); err != nil {
+	if err := validateUpstreamWiring(upstreamShape{}, config, schema); err != nil {
 		t.Fatalf("live shape refused: %v", err)
+	}
+}
+
+// #416: the mixed shape serves generation from the fake upstream and the chat
+// connections from a real gateway. Its rule is the mirror image of the fake
+// shape's chat rule: every connection the run config declares must be a real
+// gateway, and every Provider must still be fake.
+func TestMixedUpstreamShapeWiring(t *testing.T) {
+	schema := defaultSchema(t)
+	overlay := fakeOverlayEnvironment(t)
+	// A runtime.env as dev-test has it (real addresses and keys), with the
+	// generation side overlaid by the fake and the chat side left real.
+	environment := liveRuntimeEnvironment(schema)
+	for key, value := range overlay {
+		if strings.HasPrefix(key, "LLM_") {
+			continue
+		}
+		environment[key] = value
+	}
+	environment["UPSTREAM_SHAPE"] = "mixed"
+	config := shapeConfig(t, schema, environment)
+	shape, err := resolveUpstreamShape(config)
+	if err != nil || !shape.fake() || !shape.mixed {
+		t.Fatalf("mixed shape = %+v err=%v", shape, err)
+	}
+	if err := validateUpstreamWiring(shape, config, schema); err != nil {
+		t.Fatalf("mixed wiring refused: %v", err)
+	}
+	for name, change := range map[string]map[string]string{
+		"chat on the fake origin":   {"LLM_BASE_URL": "http://fake-upstream:19000/openai/v1"},
+		"chat on the fake key":      {"LLM_API_KEY": "fake-test-key"},
+		"chat without a key":        {"LLM_API_KEY": ""},
+		"chat without an address":   {"LLM_BASE_URL": ""},
+		"tripo on its real address": {"TRIPO_BASE_URL": "https://openapi.tripo3d.ai/v3"},
+		"real meshy key":            {"MESHY_API_KEY": "msy-real"},
+	} {
+		values := map[string]string{}
+		for key, value := range environment {
+			values[key] = value
+		}
+		for key, value := range change {
+			values[key] = value
+		}
+		refused := shapeConfig(t, schema, values)
+		if err := validateUpstreamWiring(shape, refused, schema); err == nil {
+			t.Errorf("%s: mixed wiring accepted", name)
+		}
+	}
+	// An extra chat connection is declared by LLM_CONNECTIONS, so it is part of
+	// the mixed shape's chat side and follows the same rule.
+	for name, extra := range map[string]map[string]string{
+		"extra on the fake origin": {"LLM_CONNECTIONS": "EXTRA", "EXTRA_BASE_URL": "http://fake-upstream:19000/openai/v1",
+			"EXTRA_API_KEY": "sk-real-extra", "EXTRA_MODEL": "extra-model"},
+		"extra on a real gateway": {"LLM_CONNECTIONS": "EXTRA", "EXTRA_BASE_URL": "https://real-extra.example/v1",
+			"EXTRA_API_KEY": "sk-real-extra", "EXTRA_MODEL": "extra-model"},
+		"extra with a fake key": {"LLM_CONNECTIONS": "EXTRA", "EXTRA_BASE_URL": "https://real-extra.example/v1",
+			"EXTRA_API_KEY": "fake-test-key", "EXTRA_MODEL": "extra-model"},
+	} {
+		values := map[string]string{}
+		for key, value := range environment {
+			values[key] = value
+		}
+		for key, value := range extra {
+			values[key] = value
+		}
+		config := shapeConfig(t, schema, values)
+		err := validateUpstreamWiring(shape, config, schema)
+		if name == "extra on a real gateway" {
+			if err != nil {
+				t.Errorf("%s: mixed wiring refused: %v", name, err)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("%s: mixed wiring accepted", name)
+		}
+	}
+	// The fake shape refuses a real extra chat connection: its chat side must
+	// be the fake origin too.
+	values := map[string]string{}
+	for key, value := range environment {
+		values[key] = value
+	}
+	values["LLM_CONNECTIONS"] = "EXTRA"
+	values["EXTRA_BASE_URL"] = "https://real-extra.example/v1"
+	values["EXTRA_API_KEY"] = "sk-real-extra"
+	values["EXTRA_MODEL"] = "extra-model"
+	fake := shapeConfig(t, schema, values)
+	if err := validateUpstreamWiring(upstreamShape{origin: shape.origin}, fake, schema); err == nil {
+		t.Error("the fake shape accepted a real extra chat connection")
+	}
+	// A mixed release without a fake origin stays refused: the generation side
+	// would reach a real Provider.
+	if _, err := resolveUpstreamShape(shapeConfig(t, schema, map[string]string{
+		"PROVIDER_MODE": "live", "AGENT_MODE": "live", "UPSTREAM_SHAPE": "mixed"})); err == nil {
+		t.Error("mixed without FAKE_UPSTREAM_ORIGIN accepted")
 	}
 }
 

@@ -35,10 +35,11 @@
 #                            docker-compose.go-ephemeral.yml，数据/资产/缓存用匿名卷，每次发布
 #                            --renew-anon-volumes 得到全新数据；不做发布备份（与 RELEASE_BACKUP_* 互斥），
 #                            失败时旧镜像同样以全新数据拉起，成功后清理旧匿名卷
-#   RELEASE_UPSTREAM_SHAPE   空（缺省，真实上游）或 fake（仅与 RELEASE_DATA_MODE=ephemeral 同用，#219）：
-#                            另以 Dockerfile.fake-upstream 构建 art-ai-go-fake-upstream:<tag>，叠加
-#                            docker-compose.go-fake-upstream.yml，先启动并等待 fake-upstream 健康，再更新
-#                            art-ai-go；全部 Provider 与对话模型连接指向 fake，运行设置换成 fake 密钥。
+#   RELEASE_UPSTREAM_SHAPE   空（缺省，真实上游）、fake 或 mixed（后两者仅与 RELEASE_DATA_MODE=ephemeral 同用，
+#                            #219/#416）：以 Dockerfile.fake-upstream 构建 art-ai-go-fake-upstream:<tag>，叠加
+#                            对应的 fake 上游叠加文件，先启动并等待 fake-upstream 健康，再更新 art-ai-go。
+#                            fake 把全部 Provider 与对话模型连接指向 fake 并换成 fake 密钥；mixed 只把生成
+#                            Provider 指向 fake（叠加文件不动对话连接），对话连接沿用运行环境文件的真实网关。
 #                            成功后只保留本次 fake 镜像。空值发布到 ephemeral 栈时，成功后移除本项目
 #                            遗留的 fake-upstream 容器与镜像（非强制 docker rmi）
 #   RELEASE_ALLOW_BOOTSTRAP  =1 时允许空栈首次启动（无旧容器、无数据库）
@@ -125,18 +126,18 @@ case "$DATA_MODE" in
     exit 1
     ;;
 esac
-# #219: upstream shape. fake only rides on the disposable ephemeral stack.
+# #219/#416: upstream shape. fake and mixed only ride on the disposable ephemeral stack.
 UPSTREAM_SHAPE=${RELEASE_UPSTREAM_SHAPE:-}
 case "$UPSTREAM_SHAPE" in
   "") ;;
-  fake)
+  fake | mixed)
     if [ "$DATA_MODE" != ephemeral ]; then
-      echo "[server] RELEASE_UPSTREAM_SHAPE=fake requires RELEASE_DATA_MODE=ephemeral; nothing was changed" >&2
+      echo "[server] RELEASE_UPSTREAM_SHAPE=$UPSTREAM_SHAPE requires RELEASE_DATA_MODE=ephemeral; nothing was changed" >&2
       exit 1
     fi
     ;;
   *)
-    echo "[server] RELEASE_UPSTREAM_SHAPE must be empty or fake; nothing was changed" >&2
+    echo "[server] RELEASE_UPSTREAM_SHAPE must be empty, fake or mixed; nothing was changed" >&2
     exit 1
     ;;
 esac
@@ -303,8 +304,14 @@ if [ "$DATA_MODE" = ephemeral ]; then
   fi
   # After the main file, before the host-local override.
   COMPOSE_FILES=(-f "$COMPOSE_FILE" -f "$EPHEMERAL_COMPOSE_FILE")
-  if [ "$UPSTREAM_SHAPE" = fake ]; then
-    FAKE_COMPOSE_FILE="$APP/docker-compose.go-fake-upstream.yml"
+  if [ -n "$UPSTREAM_SHAPE" ]; then
+    # #416: the mixed shape overlays only the generation Providers, so the chat
+    # connections keep the runtime environment's real gateway.
+    if [ "$UPSTREAM_SHAPE" = mixed ]; then
+      FAKE_COMPOSE_FILE="$APP/docker-compose.go-mixed-upstream.yml"
+    else
+      FAKE_COMPOSE_FILE="$APP/docker-compose.go-fake-upstream.yml"
+    fi
     if [ -L "$FAKE_COMPOSE_FILE" ] || [ ! -f "$FAKE_COMPOSE_FILE" ] ||
       [ -L "$APP/Dockerfile.fake-upstream" ] || [ ! -f "$APP/Dockerfile.fake-upstream" ]; then
       echo "[server] the fake upstream overlay or Dockerfile.fake-upstream is missing; nothing was changed" >&2
@@ -456,12 +463,12 @@ retain_release_backups() {
   fi
 }
 
-# #219: the fake upstream service of the fake shape. It starts before the
-# application, so a refused or unhealthy fake stops the release before the
-# running instance is replaced.
+# #219/#416: the fake upstream service of the fake and mixed shapes. It starts
+# before the application, so a refused or unhealthy fake stops the release before
+# the running instance is replaced.
 start_fake_upstream() {
   local attempt status
-  [ "$UPSTREAM_SHAPE" = fake ] || return 0
+  [ -n "$UPSTREAM_SHAPE" ] || return 0
   echo "[server] fake upstream $TAG"
   if ! compose "$TAG" up -d --no-deps "$FAKE_SERVICE" 2>&1 | tail -1; then
     echo "[server] fake upstream did not start; the application was not replaced" >&2
@@ -476,13 +483,13 @@ start_fake_upstream() {
   return 1
 }
 
-# After success only: the fake shape keeps this release's fake image; a live
-# release of the ephemeral stack removes this project's leftover fake service.
-# Non-forced docker rmi only; failures warn and the release stays successful.
+# After success only: the fake and mixed shapes keep this release's fake image; a
+# live release of the ephemeral stack removes this project's leftover fake
+# service. Non-forced docker rmi only; failures warn and the release stays successful.
 retain_fake_upstream() {
   local image
   [ "$DATA_MODE" = ephemeral ] || return 0
-  if [ "$UPSTREAM_SHAPE" != fake ]; then
+  if [ -z "$UPSTREAM_SHAPE" ]; then
     for image in $(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
       --filter "label=com.docker.compose.service=$FAKE_SERVICE" 2>/dev/null || true); do
       docker rm -f "$image" >/dev/null 2>&1 ||
@@ -490,7 +497,7 @@ retain_fake_upstream() {
     done
   fi
   for image in $(docker images --format '{{.Repository}}:{{.Tag}}' "$FAKE_IMAGE_REPOSITORY" 2>/dev/null || true); do
-    [ "$UPSTREAM_SHAPE" = fake ] && [ "$image" = "$FAKE_IMAGE_REPOSITORY:$TAG" ] && continue
+    [ -n "$UPSTREAM_SHAPE" ] && [ "$image" = "$FAKE_IMAGE_REPOSITORY:$TAG" ] && continue
     docker rmi "$image" >/dev/null 2>&1 || echo "[server] WARNING: fake upstream image $image was not removed" >&2
   done
 }
@@ -523,7 +530,7 @@ docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
   --build-arg GO_IMAGE_TAG="$TAG" --build-arg GO_SOURCE_COMMIT="$SHA" \
   -f "$APP/Dockerfile.go-runtime" -t "art-ai-go-production:$TAG" \
   "$APP" 2>&1 | tail -1
-if [ "$UPSTREAM_SHAPE" = fake ]; then
+if [ -n "$UPSTREAM_SHAPE" ]; then
   echo "[server] build fake upstream $TAG"
   docker build ${BUILD_OPTIONS[@]+"${BUILD_OPTIONS[@]}"} \
     --build-arg GO_IMAGE_TAG="$TAG" --build-arg GO_SOURCE_COMMIT="$SHA" \

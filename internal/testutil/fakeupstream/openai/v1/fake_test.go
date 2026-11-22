@@ -213,6 +213,44 @@ func TestToolCallsFollowTheMarkerAndToolResultsEndTheTurn(t *testing.T) {
 	}
 }
 
+// #416: the arguments a marker writes are the arguments of the call, so a real
+// model's imperfect shape reaches the platform unchanged: an optional parameter
+// the model left out stays out (the fake never fills a default in), and a value
+// the model typed loosely keeps its type. The shape a scenario asks for is the
+// shape the Agent sees; only a marker that is not valid JSON falls back to {}.
+func TestToolMarkerEmitsTheRealModelArgumentShape(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	// The multiview tool of the four-view scenario: `model` is not a declared
+	// parameter, it is chosen by the platform's model resolution, so a model
+	// that leaves it out (as the report of #417 shows) calls without it.
+	tools := []map[string]any{{"type": "function", "function": map[string]any{
+		"name": "create_model_3d_from_views",
+		"parameters": map[string]any{"type": "object", "properties": map[string]any{
+			"three_view_group": map[string]any{"type": "string"},
+			"reference_views":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		}, "required": []string{"three_view_group"}},
+	}}}
+	for name, arguments := range map[string]string{
+		"missing optional parameter": `{"three_view_group":"skill_7f9f"}`,
+		"loosely typed parameter":    `{"three_view_group":"skill_7f9f","reference_views":"front"}`,
+		"empty object":               `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := f.chat(map[string]any{
+				"model": "m", "messages": user("make a model " + ToolMarkerFor("create_model_3d_from_views", arguments)),
+				"tools":   tools,
+			})
+			call := dig(t, body, "choices", 0, "message", "tool_calls", 0)
+			if status != 200 || dig(t, call, "function", "arguments") != arguments {
+				t.Fatalf("the call changed the marker's arguments: %d %v", status, call)
+			}
+			if dig(t, call, "function", "name") != "create_model_3d_from_views" {
+				t.Fatalf("wrong tool: %v", call)
+			}
+		})
+	}
+}
+
 // #250: the fake-only system-contains marker answers whether the system prompt
 // carries the requested text, in both plain and streamed replies.
 func TestSystemContainsMarkerAnswersFromTheSystemPrompt(t *testing.T) {

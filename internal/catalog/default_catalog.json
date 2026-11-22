@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.382-383.1",
+    "revision": "2026-11-22.416.1",
     "terminology": {
       "user_facing": [
         {
@@ -299,7 +299,8 @@
             "default": "live",
             "allowed_values": [
               "live",
-              "fake"
+              "fake",
+              "mixed"
             ]
           },
           "fake_upstream_origin": {

@@ -334,7 +334,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		return nil, err
 	}
 	applicationSchema := taskCatalog.Application()
-	if err := validateFakeUpstreamWiring(shape, config, applicationSchema); err != nil {
+	if err := validateUpstreamWiring(shape, config, applicationSchema); err != nil {
 		return nil, err
 	}
 	if shape.fake() {
@@ -343,6 +343,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		}
 		logger.Warn("上游形态为 fake：全部 Provider 与对话模型连接指向 fake 上游，不发起真实上游请求",
 			"upstream_shape", upstreamShapeFake, "fake_upstream_origin", shape.origin.String())
+	}
+	if shape.mixed {
+		logger.Warn("上游形态为混合：对话模型连接指向真实网关（消耗真实对话 token），生成 Provider 仍指向 fake 上游，不发起真实生成请求",
+			"upstream_shape", upstreamShapeMixed, "fake_upstream_origin", shape.origin.String())
 	}
 	// Opt-in recording of upstream calls (#233): off unless the operator set a
 	// directory. Capture wraps every connection's transport, outside any

@@ -22,11 +22,19 @@ import (
 // settings and fails closed: it refuses to start unless every Provider and chat
 // connection points at the fake origin and every configured key is a fake key,
 // so a half-configured stack never reaches a real Provider with a real key.
+//
+// #416 adds the mixed shape: the chat connections call a real gateway (a real
+// model deciding on Plinth's tool table costs only chat tokens) while every
+// generation Provider still points at the fake origin with a fake key. The same
+// fail-closed rule holds on the generation side, and the chat side is refused
+// when it is not a real gateway, so a stack cannot half-run a conversation it
+// believes is real.
 const (
 	upstreamShapeSetting      = "upstream_shape"
 	fakeUpstreamOriginSetting = "fake_upstream_origin"
 	upstreamShapeLive         = "live"
 	upstreamShapeFake         = "fake"
+	upstreamShapeMixed        = "mixed"
 	// fakeUpstreamKeyPrefix is the fake upstream's key namespace
 	// (internal/testutil/fakeupstream.KeyPrefix): every key it accepts
 	// starts with it, and no real Provider key does.
@@ -52,13 +60,26 @@ var fakeAssetProviders = []string{"tripo", "meshy", "hyper3d", "jimeng"}
 // upstreamShape is the resolved shape. origin is nil in the live shape.
 type upstreamShape struct {
 	origin *url.URL
+	// mixed reports the mixed shape (#416): the generation Providers are fake,
+	// the chat connections are real gateways. origin is set in both fake-origin
+	// shapes, because both serve artifacts from the fake upstream.
+	mixed bool
 }
 
 func (s upstreamShape) fake() bool { return s.origin != nil }
 
+// name is the setting value of the shape, for the refusal texts that must not
+// change with it.
+func (s upstreamShape) name() string {
+	if s.mixed {
+		return upstreamShapeMixed
+	}
+	return upstreamShapeFake
+}
+
 // resolveUpstreamShape reads the two settings. The live shape refuses a fake
-// origin (no partial relaxation); the fake shape needs an http origin on a
-// private name: a single-label Compose service name, or a loopback or private
+// origin (no partial relaxation); the fake-origin shapes need an http origin on
+// a private name: a single-label Compose service name, or a loopback or private
 // address literal. A public host can never become the fake upstream.
 func resolveUpstreamShape(config Config) (upstreamShape, error) {
 	shape := strings.TrimSpace(config.RuntimeSettings[upstreamShapeSetting])
@@ -66,10 +87,10 @@ func resolveUpstreamShape(config Config) (upstreamShape, error) {
 	switch shape {
 	case "", upstreamShapeLive:
 		if raw != "" {
-			return upstreamShape{}, errors.New("FAKE_UPSTREAM_ORIGIN 只能与 UPSTREAM_SHAPE=fake 一起使用")
+			return upstreamShape{}, errors.New("FAKE_UPSTREAM_ORIGIN 只能与 UPSTREAM_SHAPE=fake 或 mixed 一起使用")
 		}
 		return upstreamShape{}, nil
-	case upstreamShapeFake:
+	case upstreamShapeFake, upstreamShapeMixed:
 	default:
 		return upstreamShape{}, fmt.Errorf("运行设置 %s 的值无效: %q", upstreamShapeSetting, shape)
 	}
@@ -85,7 +106,7 @@ func resolveUpstreamShape(config Config) (upstreamShape, error) {
 		return upstreamShape{}, errors.New("FAKE_UPSTREAM_ORIGIN 必须是单标签服务名或回环/私有地址")
 	}
 	origin.Path = ""
-	return upstreamShape{origin: origin}, nil
+	return upstreamShape{origin: origin, mixed: shape == upstreamShapeMixed}, nil
 }
 
 func privateUpstreamHost(host string) bool {
@@ -107,19 +128,26 @@ func privateUpstreamHost(host string) bool {
 	return true
 }
 
-// validateFakeUpstreamWiring is the fail-closed check of the fake shape: each
-// declared Provider/chat connection's base URL is empty (connection off) or on
-// the fake origin, each key is empty or a fake key, and LLM_CONNECTIONS adds
-// no other chat connection.
-func validateFakeUpstreamWiring(shape upstreamShape, config Config, schema catalog.ApplicationSchema) error {
+// validateUpstreamWiring is the fail-closed check of the fake-origin shapes: each
+// declared generation Provider connection's base URL is empty (connection off) or
+// on the fake origin and each key is empty or a fake key. The chat side follows
+// in validateChatWiring: the fake shape reads it from the fake origin too, the
+// mixed shape (#416) requires every chat connection of the run config to be a
+// real gateway.
+func validateUpstreamWiring(shape upstreamShape, config Config, schema catalog.ApplicationSchema) error {
 	if !shape.fake() {
 		return nil
 	}
 	// Errors name the connection by its id, never by its setting names: the
 	// setting values are secrets and the names need not reach a log line.
 	type pair struct{ connection, baseURL, apiKey string }
-	pairs := []pair{{schema.Chat.Agent.ConnectionID, schema.Chat.Agent.BaseURLSetting, schema.Chat.Agent.APIKeySetting}}
+	var pairs []pair
 	for _, connection := range schema.Runtime.ProviderConnections {
+		// The chat agent's connection is declared here as well; the chat side
+		// follows the shape's own rule in validateChatWiring.
+		if connection.ID == schema.Chat.Agent.ConnectionID {
+			continue
+		}
 		pairs = append(pairs, pair{connection.ID, connection.BaseURLSetting, connection.APIKeySetting})
 	}
 	for _, account := range schema.Runtime.ProviderAccounts {
@@ -127,14 +155,49 @@ func validateFakeUpstreamWiring(shape upstreamShape, config Config, schema catal
 	}
 	for _, p := range pairs {
 		if !fakeWiringBaseURLAllowed(shape, config.RuntimeSettings, p.baseURL) {
-			return fmt.Errorf("UPSTREAM_SHAPE=fake: 连接 %s 的上游地址未指向 FAKE_UPSTREAM_ORIGIN", p.connection)
+			return fmt.Errorf("UPSTREAM_SHAPE=%s: 连接 %s 的上游地址未指向 FAKE_UPSTREAM_ORIGIN", shape.name(), p.connection)
 		}
 		if !fakeWiringKeyAllowed(config.RuntimeSettings, p.apiKey) {
-			return fmt.Errorf("UPSTREAM_SHAPE=fake: 连接 %s 的密钥必须为空或 fake 上游密钥", p.connection)
+			return fmt.Errorf("UPSTREAM_SHAPE=%s: 连接 %s 的密钥必须为空或 fake 上游密钥", shape.name(), p.connection)
 		}
 	}
-	if len(config.ExtraChatConnections) > 0 {
-		return errors.New("UPSTREAM_SHAPE=fake: LLM_CONNECTIONS 必须为空")
+	return validateChatWiring(shape, config, schema)
+}
+
+// validateChatWiring is the chat side of the fake-origin shapes. The fake shape
+// reads its chat connections from the fake origin too, so no other connection may
+// be declared and every key must be a fake one. The mixed shape (#416) is the
+// opposite: every connection the run config declares (the chat.agent settings plus
+// LLM_CONNECTIONS, the only two sources chatConnections reads) must be a real
+// gateway, so a mixed stack never serves a conversation from the fake and never
+// sends a fake key to a real gateway.
+func validateChatWiring(shape upstreamShape, config Config, schema catalog.ApplicationSchema) error {
+	connections := chatConnections(config, schema)
+	if !shape.mixed {
+		if len(config.ExtraChatConnections) > 0 {
+			return errors.New("UPSTREAM_SHAPE=fake: LLM_CONNECTIONS 必须为空")
+		}
+		for _, connection := range connections {
+			if !fakeWiringURLAllowed(shape, strings.TrimSpace(connection.BaseURL)) {
+				return fmt.Errorf("UPSTREAM_SHAPE=fake: 对话连接 %s 的上游地址未指向 FAKE_UPSTREAM_ORIGIN", connection.ID)
+			}
+			if !fakeWiringKeyAllowedValue(connection.APIKey) {
+				return fmt.Errorf("UPSTREAM_SHAPE=fake: 对话连接 %s 的密钥必须为空或 fake 上游密钥", connection.ID)
+			}
+		}
+		return nil
+	}
+	for _, connection := range connections {
+		base := strings.TrimSpace(connection.BaseURL)
+		if base == "" || strings.TrimSpace(connection.APIKey) == "" || strings.TrimSpace(connection.Model) == "" {
+			return fmt.Errorf("UPSTREAM_SHAPE=mixed: 对话连接 %s 必须是运行配置里声明的真实连接（地址、密钥与模型都要有值）", connection.ID)
+		}
+		if sameUpstreamOrigin(shape, base) {
+			return fmt.Errorf("UPSTREAM_SHAPE=mixed: 对话连接 %s 指向 FAKE_UPSTREAM_ORIGIN，混合形态需要真实对话", connection.ID)
+		}
+		if strings.HasPrefix(connection.APIKey, fakeUpstreamKeyPrefix) {
+			return fmt.Errorf("UPSTREAM_SHAPE=mixed: 对话连接 %s 的密钥是 fake 上游密钥，混合形态需要真实对话", connection.ID)
+		}
 	}
 	return nil
 }
@@ -226,14 +289,28 @@ func fakeShapeHTTPTransport(fake *url.URL) func(string, http.RoundTripper) http.
 }
 
 // fakeWiringBaseURLAllowed reports whether the named base URL setting is empty
+// fakeWiringBaseURLAllowed reports whether the named base URL setting is empty
 // (connection off) or on the fake origin.
 func fakeWiringBaseURLAllowed(shape upstreamShape, settings map[string]string, setting string) bool {
 	if setting == "" {
 		return true
 	}
-	value := strings.TrimSpace(settings[setting])
+	return fakeWiringURLAllowed(shape, strings.TrimSpace(settings[setting]))
+}
+
+// fakeWiringURLAllowed reports whether a connection address is empty (connection
+// off) or on the fake origin.
+func fakeWiringURLAllowed(shape upstreamShape, value string) bool {
 	if value == "" {
 		return true
+	}
+	return sameUpstreamOrigin(shape, value)
+}
+
+// sameUpstreamOrigin reports whether a connection address is the fake origin.
+func sameUpstreamOrigin(shape upstreamShape, value string) bool {
+	if shape.origin == nil || value == "" {
+		return false
 	}
 	parsed, err := url.Parse(value)
 	return err == nil && strings.EqualFold(parsed.Scheme, shape.origin.Scheme) && strings.EqualFold(parsed.Host, shape.origin.Host)
@@ -244,6 +321,10 @@ func fakeWiringKeyAllowed(settings map[string]string, setting string) bool {
 	if setting == "" {
 		return true
 	}
-	value := strings.TrimSpace(settings[setting])
+	return fakeWiringKeyAllowedValue(strings.TrimSpace(settings[setting]))
+}
+
+// fakeWiringKeyAllowedValue reports whether a connection key is empty or a fake key.
+func fakeWiringKeyAllowedValue(value string) bool {
 	return value == "" || strings.HasPrefix(value, fakeUpstreamKeyPrefix)
 }
