@@ -27,10 +27,11 @@ func (r *Repository) CreateProcessingPlan(ctx context.Context, plan processing.P
 }
 
 // processingOrigin keeps historical plans, whose JSON has no origin, on the
-// browser path that needs a human decision per step.
+// browser path that needs a human decision per step; the platform's own plans
+// keep their origin (#461, migration 0111).
 func processingOrigin(origin string) string {
-	if origin == processing.OriginAgent {
-		return processing.OriginAgent
+	if origin == processing.OriginAgent || origin == processing.OriginDelivery {
+		return origin
 	}
 	return processing.OriginBrowser
 }
@@ -43,7 +44,7 @@ func scanProcessingPlan(rows interface{ Scan(...any) error }) (processing.Plan, 
 	if err != nil {
 		return processing.Plan{}, err
 	}
-	if plan.Origin != processing.OriginAgent {
+	if plan.Origin != processing.OriginAgent && plan.Origin != processing.OriginDelivery {
 		plan.Origin = processing.OriginBrowser
 	}
 	if !plan.Harness.Valid() {

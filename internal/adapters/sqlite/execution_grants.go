@@ -184,7 +184,13 @@ func (r *Repository) PreparePendingWithBudget(ctx context.Context, identity exec
 }
 
 func (r *Repository) preparePending(ctx context.Context, identity executiongrant.Identity, source, triggerTurnID string, budgetEligible bool, accessKeyID string) (executiongrant.Grant, error) {
-	if !identity.Valid() || (source != executiongrant.HumanBrowser && source != executiongrant.AgentPending && source != executiongrant.AccessKey) {
+	if !identity.Valid() || (source != executiongrant.HumanBrowser && source != executiongrant.AgentPending &&
+		source != executiongrant.AccessKey && source != executiongrant.Delivery) {
+		return executiongrant.Grant{}, executiongrant.ErrInvalid
+	}
+	// A delivery grant is the platform asking for its own step (#461): it has no
+	// human's trigger turn and never spends the session's plan.
+	if source == executiongrant.Delivery && budgetEligible {
 		return executiongrant.Grant{}, executiongrant.ErrInvalid
 	}
 	if (source == executiongrant.AgentPending && triggerTurnID == "") ||
@@ -376,11 +382,17 @@ func (r *Repository) DecideExecutionGrant(ctx context.Context, owner, requestID,
 // ApproveExecutionGrantByPolicy is the only non-human approval path. The caller
 // (executiongrant.Service) has already checked session mode and capability; the
 // data layer still refuses anything but a pending grant of the same owner and a
-// "policy:" actor, and records the approval in the immutable audit table.
+// "policy:" actor, and records the approval in the immutable audit table. The
+// platform's own grant is approved only by its own actor (#461): a delivery
+// grant is never approved as a browser's, and a browser's never as delivery.
 func (r *Repository) ApproveExecutionGrantByPolicy(ctx context.Context, owner, requestID, decidedBy string) (executiongrant.Grant, error) {
 	if owner == "" || requestID == "" || !strings.HasPrefix(decidedBy, executiongrant.PolicyActorPrefix) ||
 		len(decidedBy) == len(executiongrant.PolicyActorPrefix) {
 		return executiongrant.Grant{}, executiongrant.ErrInvalid
+	}
+	sources := "'human_browser','agent_human_decision'"
+	if decidedBy == executiongrant.DeliveryActor {
+		sources = "'delivery'"
 	}
 	conn, err := r.grantWriteConn(ctx)
 	if err != nil {
@@ -395,7 +407,7 @@ func (r *Repository) ApproveExecutionGrantByPolicy(ctx context.Context, owner, r
 	}()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := conn.ExecContext(ctx, `UPDATE execution_grants SET status='approved', decided_by=?, decided_at=?, updated_at=?
- WHERE request_id=? AND owner_id=? AND source IN ('human_browser','agent_human_decision') AND status='pending'`,
+ WHERE request_id=? AND owner_id=? AND source IN (`+sources+`) AND status='pending'`,
 		decidedBy, now, now, requestID, owner)
 	if err != nil {
 		return executiongrant.Grant{}, err
@@ -424,9 +436,16 @@ func (r *Repository) ApproveExecutionGrantByPolicy(ctx context.Context, owner, r
 	if err != nil {
 		return executiongrant.Grant{}, err
 	}
+	// The audit names who acted. A policy approval of a person's step names the
+	// mode that decided; the platform's own step names the platform itself, so
+	// the trail never reads as a browser action or as a person (#461).
+	actor := decidedBy
+	if decidedBy == executiongrant.DeliveryActor {
+		actor = executiongrant.DeliveryActorID
+	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO execution_grant_audit
 		(request_id,owner_id,request_version,event,actor_id,identity_json,occurred_at) VALUES (?,?,?,?,?,?,?)`,
-		requestID, owner, g.RequestVersion, executiongrant.Approved, decidedBy, string(identityJSON), now); err != nil {
+		requestID, owner, g.RequestVersion, executiongrant.Approved, actor, string(identityJSON), now); err != nil {
 		return executiongrant.Grant{}, err
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
