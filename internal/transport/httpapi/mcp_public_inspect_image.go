@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/imagereview"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -49,6 +50,24 @@ type mcpVisualItemView struct {
 	Label       string `json:"label"`
 	Instruction string `json:"instruction"`
 	FixHint     string `json:"fix_hint"`
+	// Remedies is the structured form of FixHint (#332), the same shape the
+	// model inspection reports: the item's id as the code to branch on, the
+	// sentence, and what it costs. Judging such an item is done by eye and the
+	// fix is a redraw, which the step policy does not count, so a remedy here
+	// names no capability and costs 0 steps. FixHint stays for clients that
+	// only read the sentence.
+	Remedies []mcpRemedy `json:"remedies,omitempty"`
+}
+
+// mcpRemedy is one executable fix of a failed item (#332): the id an Agent can
+// branch on (Code), the Schema's own sentence for it (Message), the
+// capabilities that do it in declaration order, and how many 3D steps they cost
+// (Steps). It is the outward MCP shape of the model inspection's remedies.
+type mcpRemedy struct {
+	Code         string   `json:"code"`
+	Message      string   `json:"message"`
+	Steps        int      `json:"steps"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // mcpInspectedPicture is the resolved source of one inspection before the
@@ -382,7 +401,19 @@ func (s *Server) mcpImageVisualItems() []mcpVisualItemView {
 	for _, item := range items {
 		views = append(views, mcpVisualItemView{
 			ID: item.ID, Label: item.Label, Instruction: item.Instruction, FixHint: item.FixHint,
+			Remedies: mcpVisualItemRemedies(item),
 		})
 	}
 	return views
+}
+
+// mcpVisualItemRemedies is the structured form of a visual item's fix hint
+// (#332): what to fix (the item's own id), the Schema's sentence, and what it
+// costs. A look at the picture is judged by eye and fixed by redrawing, which
+// no counted capability performs, so the remedy names none and costs 0 steps.
+func mcpVisualItemRemedies(item catalog.ChatImageVisualItem) []mcpRemedy {
+	if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.FixHint) == "" {
+		return nil
+	}
+	return []mcpRemedy{{Code: item.ID, Message: item.FixHint}}
 }

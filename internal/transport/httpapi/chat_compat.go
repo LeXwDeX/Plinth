@@ -121,8 +121,9 @@ func (s *Server) legacyListChatSessions(
 		result := make([]map[string]any, 0, len(page.Sessions))
 		summaries := s.chatSessionBudgetSummaries(request.Context(), principal.ID(), page.Sessions)
 		progress := s.chatPlanStepProgress(request.Context(), principal.ID(), summaries)
+		sources := s.chatSessionSources(request.Context(), principal.ID(), page.Sessions)
 		for _, session := range page.Sessions {
-			result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries, progress))
+			result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries, progress, sources))
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"sessions": result, "next_cursor": page.NextCursor, "total": page.Total})
 		return
@@ -138,8 +139,9 @@ func (s *Server) legacyListChatSessions(
 	result := make([]map[string]any, 0, len(sessions))
 	summaries := s.chatSessionBudgetSummaries(request.Context(), principal.ID(), sessions)
 	progress := s.chatPlanStepProgress(request.Context(), principal.ID(), summaries)
+	sources := s.chatSessionSources(request.Context(), principal.ID(), sessions)
 	for _, session := range sessions {
-		result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries, progress))
+		result = append(result, s.chatSessionWireWithBudgets(request.Context(), writer, session, true, summaries, progress, sources))
 	}
 	writeJSON(writer, http.StatusOK, result)
 }
@@ -818,7 +820,45 @@ func (s *Server) chatSessionWire(
 	session chat.Session,
 	includeCount bool,
 ) map[string]any {
-	return s.chatSessionWireWithBudgets(ctx, writer, session, includeCount, nil, nil)
+	return s.chatSessionWireWithBudgets(ctx, writer, session, includeCount, nil, nil, nil)
+}
+
+// chatSessionSources reads, per session, where it came from (#332): the
+// Schema's mcp source for a session an outside caller reached through the
+// external MCP service, the chat one for every other. The sessions are read in
+// one batch, so a page of the list costs one lookup and not one per row. A
+// failed read is logged and leaves every session on the chat source: the list
+// itself is still served, and a group heading is not worth failing it for.
+func (s *Server) chatSessionSources(
+	ctx context.Context,
+	ownerID string,
+	sessions []chat.Session,
+) map[string]string {
+	sources := make(map[string]string, len(sessions))
+	for _, session := range sessions {
+		sources[session.ID] = chat.SessionSourceChat
+	}
+	if s.mcpAssets == nil || len(sessions) == 0 {
+		return sources
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+	marked, err := s.mcpAssets.Marked(ctx, ownerID, sessionIDs)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "读取会话的 MCP 来源失败，按普通会话处理",
+				"owner_id", ownerID, "session_count", len(sessionIDs), "error", err)
+		}
+		return sources
+	}
+	for sessionID, isMCP := range marked {
+		if isMCP {
+			sources[sessionID] = chat.SessionSourceMCP
+		}
+	}
+	return sources
 }
 
 // chatPlanStepProgress projects the plan steps of the given sessions (#410).
@@ -849,7 +889,9 @@ func (s *Server) chatPlanStepProgress(
 // prefetch: a non-nil map means the caller read every listed session's current
 // plan in one round trip, so a missing key is a session without a plan. A nil
 // map keeps the single-session read, whose failure is logged instead of
-// silently dropping the budget member (#103 review C6).
+// silently dropping the budget member (#103 review C6). sources is the same
+// kind of prefetch for where a session came from (#332); nil reads that one
+// session.
 func (s *Server) chatSessionWireWithBudgets(
 	ctx context.Context,
 	writer http.ResponseWriter,
@@ -857,8 +899,12 @@ func (s *Server) chatSessionWireWithBudgets(
 	includeCount bool,
 	summaries map[string]budget.Summary,
 	progress map[string][]budget.StepStatus,
+	sources map[string]string,
 ) map[string]any {
 	fields := s.application.Chat.API.ResponseFields
+	if fields.Source != "" && sources == nil {
+		sources = s.chatSessionSources(ctx, session.OwnerID, []chat.Session{session})
+	}
 	title := session.Title
 	if session.TitleSource == chat.TitleSourcePending {
 		// Until the automatic title arrives the session shows the Schema
@@ -873,6 +919,11 @@ func (s *Server) chatSessionWireWithBudgets(
 		fields.ApprovalMode:     s.chat.NormalizeApprovalMode(session.ApprovalMode),
 		fields.AgentScope:       s.chat.NormalizeAgentScope(session.AgentScope),
 		fields.EstimatedCredits: session.EstimatedCredits,
+	}
+	if fields.Source != "" {
+		// #332: where the session came from, so the person can tell an outside
+		// caller's session (the external MCP service) from an ordinary one.
+		result[fields.Source] = sources[session.ID]
 	}
 	if session.ParentSessionID != "" {
 		if fields.ParentSessionID != "" {

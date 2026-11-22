@@ -1573,9 +1573,12 @@ type PublicChatAPISchema struct {
 	Fields         ChatAPIFields           `json:"fields"`
 	ResponseFields ChatAPIResponseFields   `json:"response_fields"`
 	Attachment     ChatAttachmentAPIFields `json:"attachment"`
-	Preference     ChatPreferenceAPIFields `json:"preference,omitempty"`
-	StyleLock      ChatStyleLockAPIFields  `json:"style_lock"`
-	PromptEnhance  struct {
+	// SessionGroups is how the browser groups the session list by where a
+	// session came from (#332); see ChatAPISchema.SessionGroups.
+	SessionGroups []ChatSessionGroupSchema `json:"session_groups,omitempty"`
+	Preference    ChatPreferenceAPIFields  `json:"preference,omitempty"`
+	StyleLock     ChatStyleLockAPIFields   `json:"style_lock"`
+	PromptEnhance struct {
 		PromptField               string `json:"prompt_field"`
 		CapabilityField           string `json:"capability_field"`
 		ModelField                string `json:"model_field"`
@@ -4594,6 +4597,20 @@ type ChatAPISchema struct {
 	SessionList ChatSessionListSchema `json:"session_list"`
 	// MessageList bounds a paged read of one conversation (server side only).
 	MessageList ChatMessageListSchema `json:"message_list"`
+	// SessionGroups is how the browser groups the session list by where a
+	// session came from (#332): the declared order is the order the groups are
+	// shown in, and each group's label is the content.messages key of its name.
+	// Empty leaves the list flat, as it was before. The browser reads it from
+	// the public projection; it never keeps its own list of sources.
+	SessionGroups []ChatSessionGroupSchema `json:"session_groups,omitempty"`
+}
+
+// ChatSessionGroupSchema is one group of the session list (#332): the sessions
+// whose source member equals Source are listed under Label, which is the
+// content.messages key of the group's name in the reader's locale.
+type ChatSessionGroupSchema struct {
+	Source string `json:"source"`
+	Label  string `json:"label"`
 }
 
 // ChatPreferencesSchema is application.chat.preferences (#241): the session's
@@ -5037,6 +5054,12 @@ type ChatAPIResponseFields struct {
 	// StyleLockSource is the session DTO member carrying the effective
 	// three-state style source (#240): project, session or off.
 	StyleLockSource string `json:"style_lock_source,omitempty"`
+	// Source is the session DTO member saying where the session came from
+	// (#332): the code's chat source for an ordinary session, its mcp source
+	// for one an outside caller reached through the external MCP service. The
+	// browser groups the session list by it (chat.api.session_groups). Empty
+	// leaves the member out and the list flat.
+	Source string `json:"source,omitempty"`
 }
 
 type ChatDefaultsSchema struct {
