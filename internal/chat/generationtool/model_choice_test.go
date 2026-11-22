@@ -161,7 +161,8 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 		{name: "the Agent's model argument", named: choiceMeshyID, wantID: choiceMeshyID, source: "agent"},
 		{name: "the purpose recommendation", purpose: "game_character", wantID: choiceP2ID,
 			source: "profile", profile: "game_character"},
-		{name: "the defaults when nothing chose", wantID: choiceFullID, source: "default"},
+		{name: "the default purpose when nothing chose", wantID: choiceFullID, source: "profile",
+			profile: "render"},
 		{name: "a conflict with the person's pick is refused", locked: choiceP2ID, named: choiceMeshyID,
 			refusal: "锁定", code: "model_choice_conflict"},
 		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用",
@@ -172,7 +173,10 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 			workspace: choiceFullID, wantID: choiceFullID, source: "profile", profile: "render"},
 		{name: "the Agent outranks the workspace picker value", named: choiceMeshyID,
 			workspace: choiceFullID, wantID: choiceMeshyID, source: "agent"},
-		{name: "without a purpose the workspace picker value still runs", workspace: choiceMeshyID,
+		// #381: the default purpose is inferred, not chosen. A workspace model
+		// it does not recommend runs without asking; only a purpose the brief
+		// names asks (#103 C1, fixed by the case above).
+		{name: "the default purpose yields to the workspace model", workspace: choiceMeshyID,
 			wantID: choiceMeshyID, source: "user"},
 	}
 	for _, test := range tests {
@@ -475,7 +479,11 @@ func TestModelChoiceOfNamesWhoChoseTheModel(t *testing.T) {
 	executor := choiceTestExecutor(gateway)
 	command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
 	input := json.RawMessage(`{}`)
-	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "default" {
+	// #381: an empty brief runs on the Schema's default purpose, so the step's
+	// model is that purpose's recommendation and the choice names it (render),
+	// not a bare Offering default.
+	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "profile" ||
+		choice.Profile != "render" {
 		t.Fatalf("default choice = %+v", choice)
 	}
 	command.Call.Arguments = json.RawMessage(`{"model":"tripo/tripo-p2/text-to-3d"}`)
@@ -505,7 +513,11 @@ func TestModelChoiceOfNamesWhoChoseTheModel(t *testing.T) {
 		t.Fatalf("workspace value outranked the purpose = %+v", choice)
 	}
 	command.Options.ProductionBrief = nil
-	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "user" {
+	// The default purpose's recommendation happens to be the workspace value,
+	// so the purpose still chose it: the inferred purpose advises, and here its
+	// advice is the model the picker shows.
+	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "profile" ||
+		choice.Profile != "render" {
 		t.Fatalf("workspace fallback choice = %+v", choice)
 	}
 	command.Options.AIModel = ""
@@ -813,6 +825,85 @@ func TestChooseOfferingFollowsThe2DModelChoiceLayers(t *testing.T) {
 func imageTestArguments(model string) map[string]json.RawMessage {
 	encoded, _ := json.Marshal(model)
 	return map[string]json.RawMessage{"model": encoded}
+}
+
+// #409: create_three_view has no model argument of its own, so the model the
+// person sees in the workspace picker is their only statement and a refusal
+// there could not ask them which model to keep. A 2D purpose the Schema
+// inferred from a brief that names none advises only (#381): it must not veto
+// that visible pick. A purpose the brief names keeps #103 C1's confirmation,
+// and so does every generation tool of the image workspace.
+func TestChooseThreeViewModelKeepsTheWorkspaceModelOfAnInferredPurpose(t *testing.T) {
+	const (
+		proImage = "meshy/nano-banana-pro/image-to-image"
+		gptImage = "openai/gpt-image-2/image-to-image"
+	)
+	usage := imageTestUsage()
+	// Both declared 2D purposes recommend the Pro model for an image-to-image
+	// step; GPT Image 2 is only what the picker shows.
+	for index := range usage.Profiles {
+		usage.Profiles[index].RecommendedOfferings = map[string][]string{shapeImageToImage: {proImage}}
+	}
+	gateway := &choiceTestGateway{offerings: []generation.Offering{
+		imageTestOffering(proImage, string(generation.ImageToImage)),
+		imageTestOffering(gptImage, string(generation.ImageToImage)),
+	}}
+	executor := imageTestExecutor(gateway)
+	executor.chat.Image2DUsage = usage
+	// The Catalog's create_three_view declares no model argument.
+	threeViewCommand := func(brief chat.ProductionBrief, workspace, locked string) chat.ToolCommand {
+		command := imageTestCommand(brief, workspace, locked, "")
+		command.Tool.Name, command.Tool.ModelArgument = "create_three_view", ""
+		return command
+	}
+	// The brief names no 2D purpose, so the Schema's default (concept_art)
+	// answers for it and the visible model runs.
+	choice, source := executor.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, gptImage, ""))
+	if choice.ID != gptImage || source != "user" {
+		t.Fatalf("inferred purpose choice = %s (%s), want the workspace model %s", choice.ID, source, gptImage)
+	}
+	// A brief that names only other fields leaves the purpose inferred.
+	choice, _ = executor.ChooseThreeViewModel(threeViewCommand(
+		chat.ProductionBrief{"style": json.RawMessage(`"写实"`)}, gptImage, ""))
+	if choice.ID != gptImage {
+		t.Fatalf("brief without an image_use choice = %s, want the workspace model %s", choice.ID, gptImage)
+	}
+	// The person's own session lock outranks the picker.
+	choice, _ = executor.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, gptImage, proImage))
+	if choice.ID != proImage {
+		t.Fatalf("locked choice = %s, want the locked model %s", choice.ID, proImage)
+	}
+	// With no workspace value the purpose still chooses, as refine_image's does.
+	choice, _ = executor.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, "", ""))
+	if choice.ID != proImage {
+		t.Fatalf("purpose choice = %s, want the recommended model %s", choice.ID, proImage)
+	}
+	// A purpose the brief names keeps #103 C1's rule: the call is refused
+	// instead of replacing the visible model silently.
+	for _, brief := range []chat.ProductionBrief{
+		imageTestBrief("illustration"), imageTestBrief("concept_art"),
+	} {
+		choice, _ = executor.ChooseThreeViewModel(threeViewCommand(brief, gptImage, ""))
+		if choice.ID != "" {
+			t.Fatalf("named purpose choice = %s, want a refusal", choice.ID)
+		}
+	}
+	// A workspace model with no available Offering is still refused.
+	unavailable := imageTestExecutor(&choiceTestGateway{
+		offerings:   gateway.offerings,
+		unavailable: map[generation.OfferingID]bool{generation.OfferingID(gptImage): true},
+	})
+	unavailable.chat.Image2DUsage = usage
+	choice, _ = unavailable.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, gptImage, ""))
+	if choice.ID != "" {
+		t.Fatalf("unavailable workspace model = %s, want a refusal", choice.ID)
+	}
+	// So is a lock that names a model the call cannot run: the relaxed rule is
+	// only the purpose's advice giving way, never the person's own lock.
+	choice, _ = unavailable.ChooseThreeViewModel(threeViewCommand(chat.ProductionBrief{}, proImage, gptImage))
+	if choice.ID != "" {
+		t.Fatalf("unavailable locked model = %s, want a refusal", choice.ID)
+	}
 }
 
 // #239 review: the image_use description and the system prompt promise that an

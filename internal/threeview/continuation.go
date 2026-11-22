@@ -59,7 +59,7 @@ func (s *Service) CanContinue(ctx context.Context, owner, session, runID string)
 	if err != nil {
 		return false, translate(err)
 	}
-	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || run.RecipeID != s.schema.RecipeID {
+	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || !s.recipeKnown(run.RecipeID) {
 		return false, ErrNotFound
 	}
 	steps := s.requiredSteps(run)
@@ -92,7 +92,7 @@ func (s *Service) Continue(ctx context.Context, owner, session, runID, taskID, t
 	if err != nil {
 		return ContinuationResult{}, translate(err)
 	}
-	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || run.RecipeID != s.schema.RecipeID {
+	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || !s.recipeKnown(run.RecipeID) {
 		return ContinuationResult{}, ErrNotFound
 	}
 	// The Task the orchestrator replays may be an older view of the series
@@ -204,7 +204,8 @@ func (s *Service) continueRejected(ctx context.Context, run skillrun.Run, step s
 	result ContinuationResult, turnID string,
 ) (ContinuationResult, error) {
 	owner := run.OwnerID
-	maximum := s.schema.Consistency.MaxAttemptsPerView
+	consistency := s.consistencyForRecipe(run.RecipeID)
+	maximum := consistency.MaxAttemptsPerView
 	if maximum < 1 {
 		maximum = 1
 	}
@@ -476,12 +477,13 @@ func (s *Service) rejectionReasons(ctx context.Context, owner generation.OwnerID
 		return "", err
 	}
 	parts := make([]string, 0, len(checks))
+	consistency := s.consistencyForRecipe(run.RecipeID)
 	for _, check := range checks {
 		if check.Status == imageinspect.StatusFail {
-			parts = append(parts, s.reasonText(check))
+			parts = append(parts, s.reasonText(check, consistency))
 		}
 	}
-	separator := s.schema.Consistency.ReasonSeparator
+	separator := consistency.ReasonSeparator
 	if separator == "" {
 		separator = "; "
 	}

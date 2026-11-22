@@ -180,6 +180,13 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 			document.Application.Chat.Skills.Recipes[index] = legacy
 		}
 	}
+	// The legacy Catalog predates three_view.purposes (#409): it declared the
+	// one recipe and no use, so its views render from the original picture and
+	// carry no source chain. Declaring a use today requires that chain, so the
+	// pre-purpose document drops the uses instead of declaring a recipe the
+	// current validation cannot load.
+	document.Application.Chat.ThreeView.Purposes = nil
+	document.Application.Chat.ThreeView.DefaultPurpose = ""
 	if english, ok := document.Application.Localization.Bundles["en"]; ok {
 		prefix := "chat.skills.recipes[id=image-three-view].steps[key="
 		delete(english.Fields, prefix+"left].label")
@@ -240,7 +247,7 @@ func TestThreeViewRecipePublicationPreservesOldRunAndPreparedInputs(t *testing.T
 		}
 		if err != nil || prepared.ID == "" || prepared.InputHash == "" || prepared.SessionID != session ||
 			prepared.OfferingID != step.OfferingID || prepared.OfferingRevision != step.OfferingRevision ||
-			!skillrun.MatchesPreparedInput(step, generation.AssetID(asset), prepared.NormalizedInput) {
+			!skillrun.MatchesPreparedInput(step, generation.AssetID(asset), "", prepared.NormalizedInput) {
 			t.Fatalf("resolver/run/prepared contract for %s: %+v error=%v", step.Key, prepared, err)
 		}
 		return prepared

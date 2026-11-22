@@ -175,6 +175,19 @@ func TestThreeViewDeclarationsAreValidated(t *testing.T) {
 		{"view route needs the run and view parameters", func(a *catalog.ApplicationSchema) {
 			a.Runtime.HTTP.Routes.ChatSessionThreeViewItem = "/api/v1/chat/sessions/{sessionID}/three-views/view"
 		}},
+		{"a purpose must name a declared recipe", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.Purposes[1].RecipeID = "no-such-recipe"
+		}},
+		{"the default purpose must be declared", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.DefaultPurpose = "no_such_use"
+		}},
+		{"a purpose needs its refusal copy", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.Messages.PurposeInvalid = ""
+		}},
+		{"a purpose frame follows the source or measures a subject", func(a *catalog.ApplicationSchema) {
+			a.Chat.ThreeView.Purposes[1].Frame.SourceRatio = true
+			a.Chat.ThreeView.Purposes[1].Frame.MarginRatio = 0.1
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -199,6 +212,57 @@ func TestDefaultThreeViewUsesTheFrontViewForModels(t *testing.T) {
 	three := c.Application().Chat.ThreeView
 	if three.RecipeID != "image-three-view" || three.ModelSourceStepKey != "front" || three.ModelSourceNote == "" {
 		t.Fatalf("three_view = %+v", three)
+	}
+}
+
+// #409: the default Schema declares the design-sheet use beside the model
+// input: its own recipe, the source picture's frame, and a consistency check
+// that drops the subject-size, palette and part deltas but keeps the height
+// and the mirror.
+func TestDefaultThreeViewDeclaresTheDesignSheetUse(t *testing.T) {
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	three := c.Application().Chat.ThreeView
+	if three.PurposeArgument == "" || three.DefaultPurpose != "model_input" || len(three.Purposes) != 2 {
+		t.Fatalf("three_view purposes = %+v", three)
+	}
+	purposes := map[string]catalog.ChatThreeViewPurpose{}
+	for _, purpose := range three.Purposes {
+		purposes[purpose.ID] = purpose
+	}
+	design, ok := purposes["design_sheet"]
+	if !ok || design.RecipeID != "image-design-sheet" {
+		t.Fatalf("design sheet = %+v", design)
+	}
+	if design.Frame == nil || !design.Frame.SourceRatio || design.Consistency == nil {
+		t.Fatalf("design sheet overrides = %+v", design)
+	}
+	check := design.Consistency
+	if check.MaxSubjectRatioDelta != 0 || check.Appearance.Palette.MaxDistance != 0 ||
+		check.Appearance.Parts.MaxCountDelta != 0 {
+		t.Fatalf("the design sheet still compares subject share, palette or parts: %+v", check)
+	}
+	if check.MaxBBoxHeightDelta <= 0 || len(check.Appearance.Mirror.Pairs) == 0 {
+		t.Fatalf("the design sheet must keep the silhouette height and the sides: %+v", check)
+	}
+	var recipe *catalog.ChatSkillRecipeSchema
+	for i := range c.Application().Chat.Skills.Recipes {
+		if c.Application().Chat.Skills.Recipes[i].ID == design.RecipeID {
+			recipe = &c.Application().Chat.Skills.Recipes[i]
+		}
+	}
+	if recipe == nil || len(recipe.Steps) != 4 {
+		t.Fatalf("design sheet recipe = %+v", recipe)
+	}
+	for _, step := range recipe.Steps[1:] {
+		if !step.IncludeSourceAsset {
+			t.Fatalf("a later design-sheet view must take the original picture beside the front view: %+v", step)
+		}
+	}
+	if recipe.Steps[3].Optional != true {
+		t.Fatalf("the right view stays optional: %+v", recipe.Steps[3])
 	}
 }
 

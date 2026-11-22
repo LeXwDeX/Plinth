@@ -27,6 +27,18 @@ type PurposeProfile struct {
 	Reason               string
 	RecommendedOfferings map[string][]string
 	ParameterOverrides   map[string]map[string]json.RawMessage
+	// Default reports that the brief stated no 3D purpose and the Schema's
+	// default_profile supplied this one (#381). The platform inferred it, so the
+	// model-choice layer treats it as advice only: it never replaces a model the
+	// person can see in the workspace picker, and never asks them to confirm
+	// which to keep. A purpose the brief names is the person's own and keeps the
+	// confirmation of #103 C1. The 2D default is the table's documented rule
+	// ("omit or leave empty to let the default 2D purpose apply") and is not
+	// marked here, so its long-standing model choice is unchanged;
+	// Image2DDefaultIsInferred tells the few callers that must let the workspace
+	// picker's visible model win over that inferred purpose apart from a purpose
+	// the brief names.
+	Default bool
 }
 
 // AdvisedAdjustment is the reason and the source ("profile:<id>") the frozen
@@ -72,23 +84,41 @@ type PurposeQuery struct {
 }
 
 // Model3DProfile returns the 3D purpose the brief selects. A brief without one
-// has none: nothing is recommended or overridden by a purpose. The profile is
-// already the variant for the brief's target platform when the purpose declares
-// one (#275), so its budget and parameter overrides are what every later layer
-// reads; a brief without a platform gets the purpose as declared.
+// falls back to the Schema's default_profile, as the 2D table does (#381): a
+// clear 3D instruction with no stated purpose runs on the default purpose
+// instead of none. The profile is already the variant for the brief's target
+// platform when the purpose declares one (#275), so its budget and parameter
+// overrides are what every later layer reads; a brief without a platform gets
+// the purpose as declared. PurposeProfile.Default tells the fallback apart from
+// a purpose the brief named; this raw profile cannot.
 func (resolver PurposeParameters) Model3DProfile(brief ProductionBrief) (catalog.ChatModel3DUsageProfile, bool) {
+	profile, found, _ := resolver.model3DProfile(brief)
+	return profile, found
+}
+
+// model3DProfile is Model3DProfile with the third result telling whether the
+// brief named the purpose itself. False means the Schema's default_profile
+// answered for a brief that states none (#381): the model-choice layer must not
+// let that inferred purpose override the workspace picker's visible model.
+func (resolver PurposeParameters) model3DProfile(brief ProductionBrief) (catalog.ChatModel3DUsageProfile, bool, bool) {
 	usage := resolver.Model3D
-	if len(usage.Profiles) == 0 || brief.Empty() {
-		return catalog.ChatModel3DUsageProfile{}, false
+	if len(usage.Profiles) == 0 {
+		return catalog.ChatModel3DUsageProfile{}, false, false
 	}
 	id := brief.Text(usage.Brief.FieldNameOfType("profile"))
 	for _, profile := range usage.Profiles {
 		if profile.ID == id {
 			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
-			return profile, true
+			return profile, true, true
 		}
 	}
-	return catalog.ChatModel3DUsageProfile{}, false
+	for _, profile := range usage.Profiles {
+		if profile.ID == usage.DefaultProfile {
+			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
+			return profile, true, false
+		}
+	}
+	return catalog.ChatModel3DUsageProfile{}, false, false
 }
 
 // Image2DProfile returns the 2D purpose the brief follows (#239). The brief's
@@ -120,6 +150,37 @@ func (resolver PurposeParameters) Image2DProfile(brief ProductionBrief, explicit
 	return PurposeProfile{}, false
 }
 
+// Image2DDefaultIsInferred reports whether the 2D purpose the brief follows is
+// the Schema's default_profile standing in for a brief that names none: #381's
+// inferred-purpose rule, image side. The 2D default is the table's documented
+// rule for an omitted or empty image_use, so it keeps the generation tools'
+// long-standing model choice (PurposeProfile.Default) and their #103 C1
+// confirmation. A caller that cannot ask the person which model to keep, because
+// its tool has no model argument of its own, reads this to let the workspace
+// picker's visible model win over the inferred purpose instead (#409's
+// three-view tool). A purpose the brief names and the Schema declares is the
+// person's own and answers false, the default purpose included; a name the
+// Schema no longer declares answers true, as Image2DProfile ignores it the same
+// way a session without one.
+func (resolver PurposeParameters) Image2DDefaultIsInferred(brief ProductionBrief) bool {
+	usage := resolver.Image2D
+	if len(usage.Profiles) == 0 || usage.DefaultProfile == "" {
+		return false
+	}
+	id := brief.Text(resolver.Model3D.Brief.FieldNameOfType("image_profile"))
+	for _, profile := range usage.Profiles {
+		if profile.ID == id {
+			return false
+		}
+	}
+	for _, profile := range usage.Profiles {
+		if profile.ID == usage.DefaultProfile {
+			return true
+		}
+	}
+	return false
+}
+
 // image2DPurposeProfile narrows a declared 2D purpose to the fields the layers
 // read.
 func image2DPurposeProfile(profile catalog.ChatImage2DUsageProfile) PurposeProfile {
@@ -136,7 +197,7 @@ func (resolver PurposeParameters) Profile(domain string, brief ProductionBrief, 
 	if domain == string(generation.DomainImage) {
 		return resolver.Image2DProfile(brief, explicitOnly)
 	}
-	profile, found := resolver.Model3DProfile(brief)
+	profile, found, explicit := resolver.model3DProfile(brief)
 	if !found {
 		return PurposeProfile{}, false
 	}
@@ -144,6 +205,7 @@ func (resolver PurposeParameters) Profile(domain string, brief ProductionBrief, 
 		ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
 		RecommendedOfferings: profile.RecommendedOfferings,
 		ParameterOverrides:   profile.ParameterOverrides,
+		Default:              !explicit,
 	}, true
 }
 

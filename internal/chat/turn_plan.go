@@ -197,7 +197,10 @@ func (service *Service) freezeTurnPlan(options *TurnOptions) {
 			Recommended: recommended,
 			Profile:     profile.ID,
 			Reason:      profile.Reason,
-			Workspace:   entry.Workspace,
+			// The plan quotes what the executor will run, so it reads the same
+			// fallback: an inferred purpose never quotes over the picker's value.
+			PurposeIsDefault: profile.Default,
+			Workspace:        entry.Workspace,
 			// The plan words its refusals for the person, like the tools do:
 			// the same Schema text decides both.
 			ConfirmsWorkspace: service.turnPlanConfirmsWorkspace,

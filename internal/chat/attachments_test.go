@@ -2,11 +2,14 @@ package chat_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
@@ -232,6 +235,95 @@ func TestStartTurnVerifiesClaimsAndGivesHandles(t *testing.T) {
 	}
 	if len(turn.Options.Selection) != 1 || turn.Options.Selection[0].Handle != "@model1" || turn.Options.Selection[0].TaskID != "task-3d" {
 		t.Fatalf("turn selection = %+v (the foreign selected image must be dropped)", turn.Options.Selection)
+	}
+}
+
+// #381: the page sends a card answer with no attachment of its own. The turn
+// then continues on the pictures and the multiview group the answered card was
+// opened on, verified again like any claim.
+func TestCardAnswerContinuesOnTheCardsPicturesAndMultiview(t *testing.T) {
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	policy, _ := handlePolicyForTest(t)
+	verifier := &recordingVerifier{held: map[string]map[string]bool{}}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Handles = policy
+		config.Attachments = verifier
+	})
+	service.SetChoices(repository, 20)
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier.held["owner-a/"+session.ID] = map[string]bool{"task-1": true, "asset-1": true, "task-2": true, "asset-2": true}
+	request := &chat.MultiviewRequest{Model: "tripo/tripo-v3.1-multiview/image-to-3d", Views: []chat.MultiviewView{
+		{View: "front", TaskID: "task-1", AssetID: "asset-1"},
+		{View: "left", TaskID: "task-2", AssetID: "asset-2"},
+	}}
+	first, err := service.StartTurn(ctx, chat.StartTurn{
+		OwnerID: "owner-a", SessionID: session.ID, Content: "用这两张图生成 3D",
+		ImageURLs:   []string{"/api/v1/tasks/task-1/assets/asset-1", "/api/v1/tasks/task-2/assets/asset-2"},
+		Attachments: []chat.AttachmentRef{{ImageSlot: 1, TaskID: "task-1", AssetID: "asset-1"}, {ImageSlot: 2, TaskID: "task-2", AssetID: "asset-2"}},
+		Options:     chat.TurnOptions{Multiview: request},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := repository.CreateChoice(ctx, chat.Choice{
+		OwnerID: "owner-a", SessionID: session.ID, AssistantMessageID: first.ID,
+		CallID: "call-card", ToolName: "ask_choice", Capability: "usage_profile", StepIndex: -1, Kind: "usage_profile",
+		Options: []chat.ChoiceOption{{ID: "render", Arguments: json.RawMessage(`{"purpose":"render"}`)}},
+		State:   chat.ChoicePending,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The answered turn has ended: the Agent asked the card and finished the
+	// turn, so the answer arrives as a new turn of the session. A turn still
+	// queued or running refuses the next one (chat: turn already active).
+	if err := service.FinishTurn(ctx, first.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.FinishStream(ctx, session.ID, first.ID, false); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := service.StartTurn(ctx, chat.StartTurn{
+		OwnerID: "owner-a", SessionID: session.ID, Content: "用默认",
+		ChoiceAnswer: &chat.ChoiceAnswer{ChoiceID: card.ID, OptionID: "render"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("messages = %d, want user, assistant, user, assistant", len(messages))
+	}
+	user := messages[2]
+	if !reflect.DeepEqual(user.ImageURLs, []string{
+		"/api/v1/tasks/task-1/assets/asset-1", "/api/v1/tasks/task-2/assets/asset-2",
+	}) {
+		t.Fatalf("carried images = %v", user.ImageURLs)
+	}
+	if len(user.Attachments) != 2 || user.Attachments[0].TaskID != "task-1" || user.Attachments[1].TaskID != "task-2" {
+		t.Fatalf("carried claims = %+v", user.Attachments)
+	}
+	if user.Multiview == nil || user.Multiview.Model != request.Model || len(user.Multiview.Views) != 2 {
+		t.Fatalf("carried multiview = %+v", user.Multiview)
+	}
+	turn, err := service.GetTurn(ctx, "owner-a", session.ID, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Options.Multiview == nil || turn.Options.Multiview.Model != request.Model {
+		t.Fatalf("turn multiview = %+v", turn.Options.Multiview)
 	}
 }
 

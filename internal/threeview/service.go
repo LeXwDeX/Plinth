@@ -198,6 +198,67 @@ func New(config Config) (*Service, error) {
 		assets: config.Assets, review: config.Review}, nil
 }
 
+// purposeByID is the declared use with this id, if the Schema has one.
+func (s *Service) purposeByID(id string) (catalog.ChatThreeViewPurpose, bool) {
+	for _, purpose := range s.schema.Purposes {
+		if purpose.ID == id {
+			return purpose, true
+		}
+	}
+	return catalog.ChatThreeViewPurpose{}, false
+}
+
+// purposeByRecipe is the declared use whose recipe a run used (#409). A run
+// made before purposes existed, or one whose recipe no purpose names, keeps the
+// shared rules.
+func (s *Service) purposeByRecipe(recipeID string) (catalog.ChatThreeViewPurpose, bool) {
+	for _, purpose := range s.schema.Purposes {
+		if purpose.RecipeID == recipeID {
+			return purpose, true
+		}
+	}
+	return catalog.ChatThreeViewPurpose{}, false
+}
+
+// recipeKnown reports whether a run's recipe is one of the uses this Schema
+// declares: its own default recipe or a purpose's. A run made before purposes
+// existed keeps the default recipe (#409).
+func (s *Service) recipeKnown(recipeID string) bool {
+	if recipeID == s.schema.RecipeID {
+		return true
+	}
+	_, ok := s.purposeByRecipe(recipeID)
+	return ok
+}
+
+// frameForPurpose is the frame rule of one declared use; an absent or unknown
+// use keeps the shared frame.
+func (s *Service) frameForPurpose(purpose string) catalog.ChatThreeViewFrameSchema {
+	if declared, ok := s.purposeByID(purpose); ok && declared.Frame != nil {
+		return *declared.Frame
+	}
+	return s.schema.Frame
+}
+
+// consistencyForRecipe is the automatic check of one run: the declared use's
+// own bounds when it has them, else the shared ones (#409). A purpose that
+// replaces the bounds but declares no words keeps the shared wording.
+func (s *Service) consistencyForRecipe(recipeID string) catalog.ChatThreeViewConsistencySchema {
+	consistency := s.schema.Consistency
+	declared, ok := s.purposeByRecipe(recipeID)
+	if !ok || declared.Consistency == nil {
+		return consistency
+	}
+	check := *declared.Consistency
+	if len(check.Reasons) == 0 {
+		check.Reasons = consistency.Reasons
+	}
+	if check.ReasonSeparator == "" {
+		check.ReasonSeparator = consistency.ReasonSeparator
+	}
+	return check
+}
+
 // List projects the groups of one of the owner's sessions, newest first.
 func (s *Service) List(ctx context.Context, owner, session string) ([]Group, error) {
 	if err := s.owns(ctx, owner, session); err != nil {
@@ -257,7 +318,7 @@ func (s *Service) collect(ctx context.Context, owner, session string, limit int)
 	}
 	groups := make([]Group, 0, len(runs))
 	for _, run := range runs {
-		if run.RecipeID != s.schema.RecipeID || run.OwnerID != generation.OwnerID(owner) || run.SessionID != session {
+		if !s.recipeKnown(run.RecipeID) || run.OwnerID != generation.OwnerID(owner) || run.SessionID != session {
 			continue
 		}
 		if limit > 0 && len(groups) == limit {
@@ -469,7 +530,7 @@ func (s *Service) Advance(ctx context.Context, principal executiongrant.Principa
 	if err != nil {
 		return Group{}, translate(err)
 	}
-	if run.SessionID != session || run.RecipeID != s.schema.RecipeID || !hasStep(run, viewKey) {
+	if run.SessionID != session || !s.recipeKnown(run.RecipeID) || !hasStep(run, viewKey) {
 		return Group{}, ErrNotFound
 	}
 	guard := s.guard(principal.OwnerID, runID, viewKey)
@@ -524,7 +585,7 @@ func (s *Service) Replace(ctx context.Context, principal executiongrant.Principa
 	if err != nil {
 		return Group{}, translate(err)
 	}
-	if run.SessionID != session || run.RecipeID != s.schema.RecipeID || !hasStep(run, viewKey) {
+	if run.SessionID != session || !s.recipeKnown(run.RecipeID) || !hasStep(run, viewKey) {
 		return Group{}, ErrNotFound
 	}
 	guard := s.guard(principal.OwnerID, runID, viewKey)
@@ -559,7 +620,7 @@ func (s *Service) Views(ctx context.Context, owner, session, runID string) ([]Vi
 	if err != nil {
 		return nil, translate(err)
 	}
-	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || run.RecipeID != s.schema.RecipeID {
+	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || !s.recipeKnown(run.RecipeID) {
 		return nil, ErrNotFound
 	}
 	// Views are handed to a multiview step only after the finished ones are
@@ -697,7 +758,7 @@ func (s *Service) SourceOf(ctx context.Context, owner, session, taskID string) (
 	if err != nil {
 		return ModelSource{}, false, err
 	}
-	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || run.RecipeID != s.schema.RecipeID {
+	if run.OwnerID != generation.OwnerID(owner) || run.SessionID != session || !s.recipeKnown(run.RecipeID) {
 		return ModelSource{}, false, nil
 	}
 	group, err := s.project(ctx, run)

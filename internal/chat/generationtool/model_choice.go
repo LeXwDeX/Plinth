@@ -75,8 +75,8 @@ type modelInput struct {
 }
 
 // briefPurpose returns the 3D purpose profile the session's production brief
-// selects. A session without a brief has none: nothing is recommended or
-// overridden by a purpose. The profile is already the variant for the brief's
+// selects. A brief without one falls back to the Schema's default_profile, as
+// the 2D table does (#381). The profile is already the variant for the brief's
 // target platform when the purpose declares one (#275), so its budget and
 // parameter overrides are what every later layer reads; a session without a
 // platform gets the purpose as declared.
@@ -89,7 +89,7 @@ func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatMo
 // Schema's default_profile applies, as the image_use description and the
 // system prompt promise ("omit or leave empty to let the default 2D purpose
 // apply"). A purpose a stale brief names but the Schema no longer declares is
-// ignored the same way a session without one, matching the 3D usage check.
+// ignored the same way a session without one, as on the 3D side.
 func (executor *Executor) imageBriefPurpose(command chat.ToolCommand) (purposeProfile, bool) {
 	return executor.purposeParameters().Image2DProfile(command.Options.ProductionBrief, false)
 }
@@ -293,9 +293,14 @@ func (executor *Executor) chooseOffering(
 		Recommended: recommended,
 		Profile:     profile.ID,
 		Reason:      profile.Reason,
-		Workspace:   workspace,
+		// The recommendation the Schema inferred from a brief with no purpose
+		// never overrides the workspace picker's visible model (#381).
+		PurposeIsDefault: profile.Default,
+		Workspace:        workspace,
 		// A Catalog that declares the confirmation text asks the person before
-		// a purpose recommendation replaces the model they see (#103 C1).
+		// a purpose recommendation replaces the model they see (#103 C1). A
+		// purpose the Schema inferred for a brief that states none steps aside
+		// for the workspace model instead (#381).
 		ConfirmsWorkspace: executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict != "",
 		Fits:              executor.modelFits(command, input),
 		Views:             executor.modelViews(command, input),
@@ -315,6 +320,58 @@ func (executor *Executor) chooseOffering(
 		choice.Source = "user"
 	}
 	return choice, nil
+}
+
+// ChooseThreeViewModel is the model choice of the three-view tool (#409): the
+// person's session lock, the workspace pick, the production purpose's
+// recommendation and the Offering default, in chat.ResolveModel's order, the
+// same layers refine_image uses. The result is empty when no Offering can take
+// the call; the caller words that refusal. It is a shell over chooseOffering so
+// the Skill tool stops carrying a second, weaker selection rule, with the one
+// exception below: this tool has no model argument of its own, and a plan quotes
+// an image step at the workspace picker's value (#243's rule), so an inferred
+// purpose must not refuse the model the plan already quoted.
+func (executor *Executor) ChooseThreeViewModel(command chat.ToolCommand) (generation.Offering, string) {
+	choice, _ := executor.chooseOffering(command, generation.ImageToImage, nil, modelInput{}, "")
+	if choice.Offering.ID != "" {
+		return choice.Offering, choice.Source
+	}
+	// A purpose the Schema inferred for a brief that names none advises only
+	// (#381), and this tool cannot ask the person which model to keep the way
+	// #103 C1's confirmation does: it has no model argument of its own, so the
+	// workspace picker is the person's only statement. Keep that visible pick
+	// rather than refusing a call whose model is right there. Only that refusal
+	// is relaxed: a lock, or a model the call cannot take, is still refused, and
+	// a purpose the brief names keeps the confirmation.
+	if choice.Code == refusalModelWorkspaceConflict {
+		if offering, ok := executor.inferredPurposeWorkspaceModel(command, generation.ImageToImage); ok {
+			return offering, "user"
+		}
+	}
+	return generation.Offering{}, ""
+}
+
+// inferredPurposeWorkspaceModel is the Offering the workspace picker shows for
+// this call's capability, when the call's purpose is only the Schema's inferred
+// 2D default (chat.PurposeParameters.Image2DDefaultIsInferred). It applies the
+// same availability and input tests the four layers give the workspace value.
+func (executor *Executor) inferredPurposeWorkspaceModel(command chat.ToolCommand,
+	capability generation.Capability) (generation.Offering, bool) {
+	if command.Tool.IgnoreUserModel ||
+		toolDomain(command) != string(generation.DomainImage) ||
+		!executor.purposeParameters().Image2DDefaultIsInferred(command.Options.ProductionBrief) {
+		return generation.Offering{}, false
+	}
+	workspace := strings.TrimSpace(executor.userModel(command))
+	if workspace == "" {
+		return generation.Offering{}, false
+	}
+	fits := executor.modelFits(command, modelInput{})
+	offering, matched := matchOffering(executor.availableOfferings(capability), workspace)
+	if !matched || !fits(offering) {
+		return generation.Offering{}, false
+	}
+	return offering, true
 }
 
 // purposeRecommendation is the production purpose of the call's workspace

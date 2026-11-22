@@ -242,8 +242,14 @@ func (s *Service) ResolveExecution(ctx context.Context, owner generation.OwnerID
 			}
 		}
 		op, key, planStep := StepIdentityAt(run.ID, stepKey, step.Attempt)
+		// A recipe that asks for the original picture beside the source view
+		// gets it as the second reference (#409); every other step keeps one.
+		second := generation.AssetID("")
+		if step.Spec.IncludeSourceAsset {
+			second = run.SourceAssetID
+		}
 		return Execution{Harness: run.Harness, RunID: run.ID, OwnerID: owner, SessionID: run.SessionID,
-			Step: step, SourceAssetID: source, OperationID: op,
+			Step: step, SourceAssetID: source, SecondSourceAssetID: second, OperationID: op,
 			IdempotencyKey: key, PlanStepID: planStep}, nil
 	}
 	return Execution{}, ErrMissing
@@ -271,7 +277,8 @@ func ValidateRecipe(recipe Recipe) error {
 				return ErrInvalid
 			}
 		}
-		if (step.SourceStepKey != "" && !seen[step.SourceStepKey]) || (step.Optional && len(seen) == 0) {
+		if (step.SourceStepKey != "" && !seen[step.SourceStepKey]) || (step.Optional && len(seen) == 0) ||
+			(step.IncludeSourceAsset && step.SourceStepKey == "") {
 			return ErrInvalid
 		}
 		seen[step.Key] = true

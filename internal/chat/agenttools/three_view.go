@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/chat/references"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
@@ -67,16 +68,25 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 	if errors.Is(err, skillrun.ErrMissing) {
 		// Mutable model/reference/recipe selection applies only to a new run.
 		// Existing runs keep their original recipe and frozen source.
-		if e.skillReferences == nil || e.skillOfferings == nil {
+		if e.skillReferences == nil {
 			return chat.ToolResult{Error: "three-view skill unavailable", NoSubmission: true}, nil
 		}
 		var args struct {
 			ReferenceImageIndices []int    `json:"reference_image_indices"`
 			ReferenceHandles      []string `json:"reference_handles"`
 			SubjectType           string   `json:"subject_type"`
+			Purpose               string   `json:"purpose"`
 		}
 		if err := json.Unmarshal(command.Call.Arguments, &args); err != nil {
 			return chat.ToolResult{Error: "invalid three-view arguments", NoSubmission: true}, nil
+		}
+		// The use decides the recipe: a design sheet keeps the source's shape
+		// and pose, a model input renders the orthographic set for 3D (#409).
+		// An absent value takes the declared default, so an old run and a new
+		// call without the argument keep the historical recipe.
+		purpose, known := e.threeViewPurpose(args.Purpose)
+		if !known {
+			return chat.ToolResult{AgentContent: e.threeViewPurposeRefusal(args.Purpose), NoSubmission: true}, nil
 		}
 		subjectType, subjectRefusal := e.threeViewSubjectType(args.SubjectType)
 		if subjectRefusal != "" {
@@ -87,18 +97,7 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if len(command.Tool.Execution.Domains) == 1 {
 			toolDomain = command.Tool.Execution.Domains[0]
 		}
-		model := command.Options.ModelFor(toolDomain)
-		if model == "" {
-			return chat.ToolResult{AgentContent: "请先选择支持图生图的生成模型。", NoSubmission: true}, nil
-		}
-		var selected generation.Offering
-		for _, offering := range e.skillOfferings.Offerings(generation.ImageToImage) {
-			if offering.Enabled && e.skillOfferings.OfferingAvailable(offering.ID) &&
-				(model == offering.ModelID || model == string(offering.ID)) {
-				selected = offering
-				break
-			}
-		}
+		selected := e.threeViewModel(command, toolDomain)
 		if selected.ID == "" {
 			return chat.ToolResult{AgentContent: "所选模型没有可用的三视图图生图 Offering。", NoSubmission: true}, nil
 		}
@@ -115,22 +114,24 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if err != nil || len(assets) != 1 || assets[0] == "" {
 			return chat.ToolResult{AgentContent: "所选图片不可用，请重新选择。", NoSubmission: true}, nil
 		}
-		revision := e.skillRecipes[threeViewRecipeID]
+		revision := e.skillRecipes[purpose.RecipeID]
 		if revision == "" {
 			return chat.ToolResult{NoSubmission: true}, skillrun.ErrInvalid
 		}
 		// The frame of every view follows the source subject's shape instead
-		// of the Offering's default square (#283). It is frozen with the run;
+		// of the Offering's default square (#283), or the source picture's own
+		// shape for a use that declares it (#409). It is frozen with the run;
 		// nothing here can fail the run, a source that cannot be measured keeps
 		// the default frame.
 		var frame map[string]json.RawMessage
 		if e.threeViewService != nil {
-			frame = e.threeViewService.FrameInput(ctx, generation.OwnerID(command.OwnerID), selected, subjectType, assets[0])
+			frame = e.threeViewService.FrameInput(ctx, generation.OwnerID(command.OwnerID), selected,
+				subjectType, purpose.ID, assets[0])
 		}
 		run, err = e.skillRuntime.Create(ctx, skillrun.CreateCommand{
 			Harness: threeViewHarnessBinding(command),
 			OwnerID: generation.OwnerID(command.OwnerID), SessionID: command.SessionID,
-			RecipeID: threeViewRecipeID, ExpectedRevision: revision,
+			RecipeID: purpose.RecipeID, ExpectedRevision: revision,
 			SelectedOfferingID: selected.ID, SourceAssetID: assets[0],
 			IdempotencyKey: threeViewRunKey(command), SubjectType: subjectType,
 			StaticInput: frame,
@@ -231,6 +232,86 @@ func threeViewRunKey(command chat.ToolCommand) string {
 	return "chat-skill:" + command.SessionID + ":" + command.Call.ID
 }
 
+// threeViewPurpose resolves the requested use to its declared recipe. An
+// absent value takes the Schema's default; a Schema without declared uses has
+// the one historical recipe. An unknown use is refused, so a new recipe never
+// changes what an old call or an old run means (#409).
+func (e *Executor) threeViewPurpose(requested string) (catalog.ChatThreeViewPurpose, bool) {
+	if len(e.threeView.Purposes) == 0 {
+		// A Schema that declares no use, or an Executor wired without the
+		// three-view Schema at all, still has the historical recipe: it is the
+		// one the tool always ran before uses existed (#409).
+		recipe := e.threeView.RecipeID
+		if recipe == "" {
+			recipe = threeViewRecipeID
+		}
+		return catalog.ChatThreeViewPurpose{ID: e.threeView.DefaultPurpose, RecipeID: recipe}, true
+	}
+	wanted := strings.TrimSpace(requested)
+	if wanted == "" {
+		wanted = e.threeView.DefaultPurpose
+	}
+	for _, purpose := range e.threeView.Purposes {
+		if purpose.ID == wanted {
+			return purpose, true
+		}
+	}
+	return catalog.ChatThreeViewPurpose{}, false
+}
+
+func (e *Executor) threeViewPurposeRefusal(requested string) string {
+	choices := make([]string, 0, len(e.threeView.Purposes))
+	for _, purpose := range e.threeView.Purposes {
+		choices = append(choices, purpose.ID)
+	}
+	return strings.NewReplacer("{purpose}", strings.TrimSpace(requested),
+		"{choices}", strings.Join(choices, ", ")).Replace(e.threeView.Messages.PurposeInvalid)
+}
+
+// threeViewRecipeKnown reports whether a run's recipe is one of the uses this
+// Schema declares, or the historical recipe a run predating purposes used
+// (#409). Everything else is a different call's run.
+func (e *Executor) threeViewRecipeKnown(recipeID string) bool {
+	if recipeID == "" {
+		return false
+	}
+	if recipeID == threeViewRecipeID || recipeID == e.threeView.RecipeID {
+		return true
+	}
+	for _, purpose := range e.threeView.Purposes {
+		if purpose.RecipeID == recipeID {
+			return true
+		}
+	}
+	return false
+}
+
+// threeViewModel is the model of a new group: the shared four-layer choice the
+// generation tool makes for refine_image (#409), and the person's explicit pick
+// for this tool's domain when no generation executor is wired.
+func (e *Executor) threeViewModel(command chat.ToolCommand, toolDomain string) generation.Offering {
+	if chooser, ok := e.generate.(interface {
+		ChooseThreeViewModel(chat.ToolCommand) (generation.Offering, string)
+	}); ok {
+		selected, _ := chooser.ChooseThreeViewModel(command)
+		return selected
+	}
+	if e.skillOfferings == nil {
+		return generation.Offering{}
+	}
+	model := command.Options.ModelFor(toolDomain)
+	if model == "" {
+		return generation.Offering{}
+	}
+	for _, offering := range e.skillOfferings.Offerings(generation.ImageToImage) {
+		if offering.Enabled && e.skillOfferings.OfferingAvailable(offering.ID) &&
+			(model == offering.ModelID || model == string(offering.ID)) {
+			return offering
+		}
+	}
+	return generation.Offering{}
+}
+
 func threeViewHarnessBinding(command chat.ToolCommand) harness.Binding {
 	if command.Options.Harness != nil {
 		return command.Options.Harness.Selection.Binding
@@ -276,7 +357,7 @@ func (e *Executor) readThreeView(ctx context.Context, command chat.ToolCommand) 
 	if err != nil {
 		return run, execution, grant, err
 	}
-	if run.RecipeID != threeViewRecipeID || execution.Step.Spec.Capability != generation.ImageToImage ||
+	if !e.threeViewRecipeKnown(run.RecipeID) || execution.Step.Spec.Capability != generation.ImageToImage ||
 		(command.FrozenIdempotencyKey != "" && execution.Step.Spec.Key == run.Steps[0].Spec.Key &&
 			command.FrozenIdempotencyKey != execution.IdempotencyKey) ||
 		(command.BoundTaskID != "" && command.BoundTaskID != grant.TaskID) {

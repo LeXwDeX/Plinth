@@ -176,6 +176,91 @@ func purposeParamsApply(t *testing.T, brief chat.ProductionBrief, offering gener
 	return applied
 }
 
+// #381: a 3D brief without a purpose falls back to the Schema's default
+// purpose, as the 2D table already does, so a clear 3D instruction runs on it.
+func TestModel3DProfileFallsBackToTheDefaultPurpose(t *testing.T) {
+	resolver := purposeParamsResolver()
+	briefs := map[string]chat.ProductionBrief{
+		"no brief":                              nil,
+		"an empty brief":                        {},
+		"a brief without a purpose":             purposeParamsBrief(t, map[string]any{"style": "写实"}),
+		"a purpose the Schema does not declare": purposeParamsBrief(t, map[string]any{"purpose": "retired"}),
+	}
+	for name, brief := range briefs {
+		t.Run(name, func(t *testing.T) {
+			profile, found := resolver.Model3DProfile(brief)
+			if !found || profile.ID != "render" || profile.Reason != "展示用途优先完整细节。" {
+				t.Fatalf("profile = %+v (%v), want the default render purpose", profile, found)
+			}
+			// #381: the fallback is the platform's inference, not the person's
+			// choice, so the layers that ask the person to confirm a model can
+			// tell it apart from a purpose the brief names.
+			purpose, found := resolver.Profile(string(generation.DomainModel3D), brief, false)
+			if !found || purpose.ID != "render" || !purpose.Default {
+				t.Fatalf("3D profile = %+v (%v), want the default purpose marked as inferred", purpose, found)
+			}
+			// The default purpose names no override and its budget fits the
+			// Offering default, so a step without a purpose is unchanged.
+			_, values := resolver.Values(chat.PurposeQuery{
+				Brief: brief, Domain: string(generation.DomainModel3D), Offering: purposeParamsModel(),
+			})
+			if len(values) != 0 {
+				t.Fatalf("values = %v, want none from the default purpose", values)
+			}
+		})
+	}
+	// A declared purpose still wins over the default, and is the person's own.
+	profile, found := resolver.Model3DProfile(purposeParamsBrief(t, map[string]any{"purpose": "game_character"}))
+	if !found || profile.ID != "game_character" {
+		t.Fatalf("declared purpose = %+v (%v)", profile, found)
+	}
+	purpose, found := resolver.Profile(string(generation.DomainModel3D),
+		purposeParamsBrief(t, map[string]any{"purpose": "game_character"}), false)
+	if !found || purpose.ID != "game_character" || purpose.Default {
+		t.Fatalf("declared 3D profile = %+v (%v), want the named purpose", purpose, found)
+	}
+}
+
+// #409: the 2D default is the table's documented rule for a brief that names no
+// image purpose, and it keeps the generation tools' model choice. A tool that
+// has no model argument of its own cannot ask the person which model to keep, so
+// it reads this to let the workspace picker's visible model win over the
+// inferred purpose instead. A purpose the brief names is the person's own.
+func TestImage2DDefaultIsInferred(t *testing.T) {
+	resolver := purposeParamsResolver()
+	briefs := map[string]chat.ProductionBrief{
+		"no brief":                              nil,
+		"an empty brief":                        {},
+		"a brief without an image_use":          purposeParamsBrief(t, map[string]any{"style": "写实"}),
+		"a purpose the Schema does not declare": purposeParamsBrief(t, map[string]any{"image_use": "retired"}),
+	}
+	for name, brief := range briefs {
+		t.Run(name, func(t *testing.T) {
+			if !resolver.Image2DDefaultIsInferred(brief) {
+				t.Fatalf("brief %s: want the default 2D purpose reported as inferred", name)
+			}
+			profile, found := resolver.Image2DProfile(brief, false)
+			if !found || profile.ID != "concept_art" || profile.Default {
+				t.Fatalf("profile = %+v (%v), want the default purpose unmarked", profile, found)
+			}
+		})
+	}
+	// A purpose the brief names, the default purpose included, is the person's.
+	for _, imageUse := range []string{"concept_art", "illustration"} {
+		brief := purposeParamsBrief(t, map[string]any{"image_use": imageUse})
+		if resolver.Image2DDefaultIsInferred(brief) {
+			t.Fatalf("image_use %q: want the named purpose kept as the person's own", imageUse)
+		}
+	}
+	// A Schema with no default purpose infers nothing.
+	bare := chat.PurposeParameters{Model3D: purposeParamsUsage(), Image2D: catalog.ChatImage2DUsageSchema{
+		Profiles: purposeParamsImageUsage().Profiles,
+	}}
+	if bare.Image2DDefaultIsInferred(chat.ProductionBrief{}) {
+		t.Fatal("a Schema with no default_profile: want nothing inferred")
+	}
+}
+
 // The request's own values stay its own; the purpose fills what it left unset,
 // and only the advised values carry its reason and source. A fixed parameter is
 // never filled.

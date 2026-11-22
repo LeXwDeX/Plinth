@@ -565,7 +565,10 @@ func (policy *ProductionPlanPolicy) stepOffering(command ToolCommand, capability
 		Recommended: recommended,
 		Profile:     profile.ID,
 		Reason:      profile.Reason,
-		Workspace:   workspace,
+		// A plan quotes what the executor will run, so it reads the same
+		// fallback: an inferred purpose never quotes over the picker's value.
+		PurposeIsDefault: profile.Default,
+		Workspace:        workspace,
 		// The plan asks in its own words, so a recommendation that differs
 		// from the workspace picker's value is a confirmation here too: a plan
 		// quoted at the recommendation would be the silent switch the tool

@@ -140,6 +140,35 @@ func TestResolveModelFollowsTheLayers(t *testing.T) {
 			conflict: chat.ModelConflictWorkspace, conflictN: resolveSingleID,
 		},
 		{
+			// #381: a recommendation the Schema inferred from a brief that names
+			// no purpose is not the person's. The workspace picker's visible
+			// model runs instead, with no confirmation card.
+			name: "a default purpose yields to another visible pick",
+			request: chat.ModelRequest{
+				Recommended: []string{resolveTripoID}, Profile: "render", Workspace: resolveSingleID,
+				ConfirmsWorkspace: true, PurposeIsDefault: true,
+			},
+			wantID: resolveSingleID, source: chat.ModelSourceWorkspace,
+		},
+		{
+			// The default purpose still recommends when the picker names nothing.
+			name: "a default purpose recommends when the picker is empty",
+			request: chat.ModelRequest{
+				Recommended: []string{resolveTripoID}, Profile: "render", PurposeIsDefault: true,
+			},
+			wantID: resolveTripoID, source: chat.ModelSourcePurpose,
+		},
+		{
+			// The default purpose also yields to a visible pick that is itself a
+			// recommendation, which is that pick either way (#282).
+			name: "a default purpose yields to a visible pick it recommends",
+			request: chat.ModelRequest{
+				Recommended: []string{resolveMultiviewID, resolveSingleID}, Profile: "render",
+				Workspace: resolveSingleID, ConfirmsWorkspace: true, PurposeIsDefault: true,
+			},
+			wantID: resolveSingleID, source: chat.ModelSourcePurpose,
+		},
+		{
 			// The visible pick is itself one of the purpose's recommendations
 			// (#282): nothing is replaced, so it runs without asking.
 			name: "a visible pick the purpose recommends runs",
