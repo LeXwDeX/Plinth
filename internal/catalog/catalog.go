@@ -501,6 +501,17 @@ func sortOfferings(offerings []schemacontract.Offering) {
 // caller shares them; the caller must not modify the slice, an Offering, or
 // anything reachable from one (parameters, knowledge, provider options,
 // limits). A caller that needs values it may modify asks List instead.
+//
+// #424: the contract is a comment and a test, not a wrapper type, and only
+// read-only holders may keep these values: generation.Module.OfferingsShared,
+// which hands its own callers a fresh slice of the shared values, and the
+// availability closures internal/app binds to the Agent tool registry (they
+// read Enabled and ModelID). A named slice type would not hold the line: its
+// elements are still addressable, so shared[0].ModelName = … would compile
+// against it too. What a caller may rely on is the slice header: it is the
+// Catalog's own, so appending to it or reordering it in place writes shared
+// state, while a caller appending past its length only ever writes past the
+// Catalog's length-bounded list (TestListSharedSurvivesACallerThatAppends).
 func (c *Catalog) ListShared(capability schemacontract.Capability) []schemacontract.Offering {
 	return c.sharedLists[capability]
 }

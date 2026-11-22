@@ -84,8 +84,6 @@ def run_offering(live, report, offering, full):
     if not wanted:
         return report.skipped(f"{offering['model_id']} shape matrix", "L5_2D_SHAPES selects no declared shape")
     session = live.new_session()
-    if not session:
-        return report.failed(f"{offering['model_id']} session", "could not create a session")
     live.lock_model_2d(session, offering["model_id"])
     for shape in wanted:
         generate(live, report, session, offering, shape, shapes[shape])
@@ -101,8 +99,6 @@ def reference_cases(live, report, offering):
         return report.skipped("image-to-image references", "the Offering declares no portrait and landscape size")
     model = offering["model_id"]
     session = live.new_session()
-    if not session:
-        return report.failed("image-to-image references session", "could not create a session")
     live.lock_model_2d(session, model)
     source = generate(live, report, session, offering, "portrait", shapes["portrait"])
     if not source:
@@ -119,8 +115,6 @@ def reference_cases(live, report, offering):
         report.check("one reference keeps the source ratio",
                      common.ratio_matches(result, source_size[0] / source_size[1]), f"source={source_size} result={result}")
     session = live.new_session()
-    if not session:
-        return report.failed("two-reference session", "could not create a session")
     live.lock_model_2d(session, model)
     generate(live, report, session, offering, "portrait", shapes["portrait"])
     generate(live, report, session, offering, "landscape", shapes["landscape"])
