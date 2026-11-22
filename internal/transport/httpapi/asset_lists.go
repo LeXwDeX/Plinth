@@ -260,9 +260,12 @@ func (s *Server) assetListMessages() catalog.AssetListMessagesSchema {
 	return s.application.AssetList.Messages
 }
 
-// assetListReviewMessage fills one review copy from the Catalog, with the
-// conflict text as the fallback a Catalog without the review section gets.
+// assetListReviewMessage fills one review copy from the Catalog in the
+// request's language, with the conflict text as the fallback a Catalog without
+// the review section gets. The locale reads the template, before its holders
+// are filled in.
 func (s *Server) assetListReviewMessage(
+	writer http.ResponseWriter,
 	pick func(catalog.AssetListReviewMessagesSchema) string,
 	replacements map[string]string,
 ) string {
@@ -273,6 +276,7 @@ func (s *Server) assetListReviewMessage(
 	if text == "" {
 		return s.message("error.conflict")
 	}
+	text = traceFromWriter(writer).localeText(text)
 	pairs := make([]string, 0, len(replacements)*2)
 	for key, value := range replacements {
 		pairs = append(pairs, "{"+key+"}", value)
@@ -643,7 +647,7 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 	case errors.As(err, &reworkLimit):
 		// #329b: the item used its declared returns; the Schema copy names the
 		// item and the returns used, the person can still accept or skip.
-		detail := s.assetListReviewMessage(func(messages catalog.AssetListReviewMessagesSchema) string {
+		detail := s.assetListReviewMessage(writer, func(messages catalog.AssetListReviewMessagesSchema) string {
 			return messages.ReturnLimit
 		}, map[string]string{
 			"name":  reworkLimit.Name,
@@ -654,7 +658,7 @@ func (s *Server) writeAssetListError(writer http.ResponseWriter, err error, titl
 		// #329b: the project asset bound no longer held when the decision
 		// transaction checked it; nothing was written. The Schema copy names
 		// the item and the bound; a refetch answers the items per item.
-		detail := s.assetListReviewMessage(func(messages catalog.AssetListReviewMessagesSchema) string {
+		detail := s.assetListReviewMessage(writer, func(messages catalog.AssetListReviewMessagesSchema) string {
 			return messages.AssetLimit
 		}, map[string]string{
 			"name":    assetLimit.Name,
@@ -937,9 +941,16 @@ func (s *Server) putProjectAssetListItemReview(writer http.ResponseWriter, reque
 	}
 	items := make([]assetListItemReviewWire, 0, len(outcome.Results))
 	for _, result := range outcome.Results {
+		// A refused item always carries a reason: a deployment without the
+		// review section keeps the platform's generic copy instead of an
+		// empty line the browser would read as "nothing happened".
+		errorText := result.Error
+		if errorText == "" && result.Verdict == "" {
+			errorText = s.message("error.conflict")
+		}
 		items = append(items, assetListItemReviewWire{
 			ItemID: result.ItemID, Verdict: result.Verdict,
-			ProjectAssetID: result.ProjectAssetID, Error: result.Error,
+			ProjectAssetID: result.ProjectAssetID, Error: errorText,
 		})
 	}
 	writer.Header().Set("Cache-Control", s.application.Runtime.HTTP.PrivateCacheControl)
@@ -990,10 +1001,17 @@ func (s *Server) downloadProjectAssetListArchive(writer http.ResponseWriter, req
 	// Send the status and headers as soon as Prepare has finished instead of
 	// letting them sit in the server's buffer until the first file chunk.
 	_ = http.NewResponseController(writer).Flush()
-	if _, err := archive.WriteTo(writer); err != nil && s.logger != nil {
-		s.logger.WarnContext(request.Context(), "资产清单压缩包写出中断",
-			"list_id", request.PathValue("listID"),
-			"entries", strconv.Itoa(archive.Entries), "error", err)
+	if _, err := archive.WriteTo(writer); err != nil {
+		// The status and headers are already sent, so the status cannot change
+		// any more: abort the connection instead of logging and letting the
+		// browser save a truncated ZIP as if it were complete. The client sees a
+		// failed download and can retry the same deterministic pack.
+		if s.logger != nil {
+			s.logger.WarnContext(request.Context(), "资产清单压缩包写出中断",
+				"list_id", request.PathValue("listID"),
+				"entries", strconv.Itoa(archive.Entries), "error", err)
+		}
+		panic(http.ErrAbortHandler)
 	}
 }
 

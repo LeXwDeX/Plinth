@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -288,4 +289,68 @@ func archiveNameExists(names []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// failingArchiveWriter is a response writer that stops accepting bytes after
+// the status and headers: the pack then dies mid-stream, exactly where a read
+// error on a stored file would leave it.
+type failingArchiveWriter struct {
+	header http.Header
+	remain int
+}
+
+func (writer *failingArchiveWriter) Header() http.Header { return writer.header }
+
+func (writer *failingArchiveWriter) Write(data []byte) (int, error) {
+	if writer.remain <= 0 {
+		return 0, errors.New("archive write failed")
+	}
+	if len(data) > writer.remain {
+		written := writer.remain
+		writer.remain = 0
+		return written, errors.New("archive write failed")
+	}
+	writer.remain -= len(data)
+	return len(data), nil
+}
+
+func (writer *failingArchiveWriter) WriteHeader(int) {}
+func (writer *failingArchiveWriter) Flush()          {}
+
+// #425: a pack that fails after the status and headers were sent cannot answer
+// a 5xx any more. The response is aborted instead of logged, so the browser
+// sees a failed download rather than saving a truncated ZIP as a complete one.
+func TestProjectAssetListArchiveAbortsWhenThePackFailsMidStream(t *testing.T) {
+	t.Parallel()
+	var assetID, sha string
+	var size int64
+	setups := []func(*testing.T, string){func(t *testing.T, databasePath string) {
+		id, data := seedArchiveTask(t, databasePath)
+		assetID = id
+		size = int64(len(data))
+		sha = sha256Hex(data)
+	}}
+	harness := newAssetListArchiveHarness(t, nil, setups...)
+	list := harness.propose(t, "owner-a", harness.projectID, harness.sessionID, "Board",
+		[]assetlist.ItemInput{{Kind: "character", Name: "Hero"}})
+	confirm := grantTestRequest(t, harness.handler, harness.cookie, http.MethodPut,
+		assetListRoute(assetListDecisionRoute, harness.projectID, list.ID), `{"decision":"confirm"}`, "")
+	if confirm.Code != http.StatusOK {
+		t.Fatalf("confirm = %d %s", confirm.Code, confirm.Body.String())
+	}
+	acceptArchiveItem(t, harness.databasePath, list.Items[0].ID, assetID, size, sha)
+
+	request := httptest.NewRequest(http.MethodGet,
+		assetListRoute(assetListArchiveRoute, harness.projectID, list.ID), nil)
+	request.AddCookie(harness.cookie)
+	writer := &failingArchiveWriter{header: http.Header{}}
+	defer func() {
+		recovered := recover()
+		abort, isAbort := recovered.(error)
+		if !isAbort || !errors.Is(abort, http.ErrAbortHandler) {
+			t.Fatalf("archive write failure = %v; want the response aborted", recovered)
+		}
+	}()
+	harness.handler.ServeHTTP(writer, request)
+	t.Fatal("archive handler returned; want the response aborted")
 }

@@ -29,6 +29,7 @@ func archiveTestSchema() catalog.AssetListSchema {
 		MaxEntries:            64,
 		MaxBytes:              1 << 20,
 		StoredMediaTypes:      []string{"model/gltf-binary", "image/png"},
+		Readme:                archiveTestReadme(),
 		Messages: catalog.AssetListArchiveMessagesSchema{
 			Empty:    "没有可打包的项",
 			TooLarge: "超过 {maximum_entries} 个文件 / {maximum_bytes} 字节",
@@ -41,6 +42,26 @@ func archiveTestSchema() catalog.AssetListSchema {
 		},
 	}
 	return schema
+}
+
+// archiveTestReadme is the README copy the test schema declares: the same
+// lines the product Catalog uses, short enough to assert on.
+func archiveTestReadme() catalog.AssetListArchiveReadmeSchema {
+	return catalog.AssetListArchiveReadmeSchema{
+		TitleLine: "资产清单：{title}", ListLine: "清单 ID：{list_id}",
+		GeneratedLine: "生成时间：{generated_at}",
+		Note:          "只包含已通过验收的清单项。",
+		SummaryLine:   "共 {items} 项、{files} 个文件。",
+		ItemLine:      "{position}. {name}", ItemKindLine: "{position}. {name}（{kind}，第 {round} 版）",
+		DirectoryLine: "目录：{directory}", TaskLine: "来源任务：{task_id}",
+		FormatsLine: "格式：{formats}", FormatSeparator: "、",
+		TrianglesLine: "面数：{triangles}", TextureLine: "贴图最大边：{texture}",
+		ChecksLine: "验收：{checks}", CheckLine: "{check}={status}",
+		CheckBudgetLine: "{check}={status}（{budget}）", CheckSeparator: "；",
+		FilesHeading: "文件：", FileLine: "- {path}（{role}，{format}，{size} 字节，sha256 {sha256}）",
+		MissingHeading: "缺失（存储中已不存在，未打包）：", MissingLine: "- {asset_id}（{role}，{media_type}）",
+		UnknownRole: "未知角色",
+	}
 }
 
 // fakeArchiveAssets is the owner-scoped reader over in-memory stored files. A

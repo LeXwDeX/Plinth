@@ -264,3 +264,61 @@ func TestSnapshotCopiesSelfCheckAndUnreadableModel(t *testing.T) {
 		t.Fatalf("self check = %+v", snapshot.SelfCheck)
 	}
 }
+
+// #425: a snapshot's frozen threshold is worded from the Schema in the UI
+// locale of the turn that entered review, so the board shows it in the
+// reader's language.
+func TestSnapshotBudgetsFollowTheRequestLanguage(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	texts, err := catalog.NewTextLocalizer(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks := func(context.Context, string, string, json.RawMessage) []budget.PlanCheck {
+		return []budget.PlanCheck{{
+			Check: "triangles", Maximum: bound(30000),
+		}, {
+			Check: "uv", Required: true,
+		}}
+	}
+	for _, test := range []struct {
+		locale string
+		want   []string
+	}{
+		{"", []string{"最多 30000", "必填"}},
+		{"en", []string{"max 30000", "required"}},
+	} {
+		test := test
+		t.Run(test.locale, func(t *testing.T) {
+			service := assetreview.New(assetreview.Config{
+				Checks: checks,
+				Review: application.AssetList.Review,
+				Texts:  texts,
+			})
+			ctx := context.Background()
+			if test.locale != "" {
+				ctx = catalog.WithLocale(ctx, test.locale)
+			}
+			raw, err := service.Snapshot(ctx, snapshotInput(
+				generation.Asset{ID: "asset_img", Role: "image", MediaType: "image/png",
+					StorageKey: "k/image.png"},
+			))
+			if err != nil {
+				t.Fatalf("snapshot: %v", err)
+			}
+			snapshot := decode(t, raw)
+			if snapshot.Model3D == nil || len(snapshot.Model3D.Checks) != 2 {
+				t.Fatalf("model judgment = %+v", snapshot.Model3D)
+			}
+			for index, want := range test.want {
+				if got := snapshot.Model3D.Checks[index].Budget; got != want {
+					t.Fatalf("%s budget[%d] = %q; want %q", test.locale, index, got, want)
+				}
+			}
+		})
+	}
+}
