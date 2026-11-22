@@ -408,6 +408,11 @@ func (a *Adapter) startNativeProcessing(ctx context.Context, request generation.
 		return generation.Observation{}, submissionUnknown("Tripo 原生处理创建响应缺少 task_id")
 	}
 	state.Phase = "submitted"
+	// A public native job (texture) is a pool job: count it without blocking
+	// (C3). Its terminal observation releases the slot.
+	if poolCountsPublicJob(request.Offering) {
+		a.readoptPool(request.Offering, request.AttemptID)
+	}
 	return generation.Observation{Phase: generation.UpstreamAccepted, Job: &generation.UpstreamJob{ProviderID: request.Offering.ProviderID, RemoteID: state.RemoteID}, Opaque: state.encode(), Dispatch: permit, PollAfter: request.Offering.PollInterval, DedupeKey: privateDedupeKey(state.RemoteID, "accepted")}, nil
 }
 func nativeProcessingCheckpoint(offering generation.Offering, input, opaque json.RawMessage, taskID generation.TaskID, attemptID generation.AttemptID) (nativeProcessingState, providerOptions, error) {

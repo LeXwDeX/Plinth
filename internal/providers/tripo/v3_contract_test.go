@@ -421,6 +421,29 @@ func newAdapterWithImage(t *testing.T, upstream *httptest.Server, img []byte, of
 	return adapter
 }
 
+// newAdapterWithClock is newAdapterWithImage with an injected wall clock, so a
+// duration bound (a status word a connection bounds by time) is a test step
+// rather than five minutes of waiting.
+func newAdapterWithClock(t *testing.T, upstream *httptest.Server, clock func() time.Time, offerings ...generation.Offering) *tripo.Adapter {
+	t.Helper()
+	errorMapping, statusMapping := declaredTripoMappings(t)
+	cfg := tripo.Config{
+		BaseURL:         upstream.URL,
+		APIKey:          "tripo-key",
+		HTTPClient:      upstream.Client(),
+		AllowHTTPAssets: true,
+		OfferingRoutes:  offerings,
+		ErrorMapping:    errorMapping,
+		StatusMapping:   statusMapping,
+		Clock:           clock,
+	}
+	adapter, err := tripo.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adapter
+}
+
 func newObserveServer(t *testing.T, status string, progress int, output map[string]any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

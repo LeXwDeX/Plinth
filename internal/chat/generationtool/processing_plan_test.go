@@ -447,8 +447,8 @@ func TestAgentPlanObservationIsReadOnlyOwnerAndSessionScoped(t *testing.T) {
 func TestAgentPlanRefusesRemeshDefaultsOverTheRiggingLimit(t *testing.T) {
 	const defaults = `{"source_task_id":"model-1","steps":[{"capability":"remesh","parameters":{}},{"capability":"rigging","parameters":{}}]}`
 	for locale, want := range map[string][]string{
-		"zh": {"600000", "320000", "quad ≤ 160000 / triangle ≤ 320000", "整个计划没有创建"},
-		"en": {"about 600000 triangle faces", "320000", "quad ≤ 160000 / triangle ≤ 320000", "The plan was not created"},
+		"zh": {"600000", "380000", "quad ≤ 190000 / triangle ≤ 380000", "整个计划没有创建"},
+		"en": {"about 600000 triangle faces", "380000", "quad ≤ 190000 / triangle ≤ 380000", "The plan was not created"},
 	} {
 		t.Run(locale, func(t *testing.T) {
 			h := newAgentPlanHarness(t, "auto", false)

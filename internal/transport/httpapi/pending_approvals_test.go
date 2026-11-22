@@ -204,7 +204,7 @@ func (w pendingApprovalWorld) inTurnApprovalWithOperation(t *testing.T, callID, 
 func TestActiveConsentProjectsFrozenReferenceSource(t *testing.T) {
 	w := pendingApprovalBrowsers(t, nil)
 	var pngBytes bytes.Buffer
-	if err := png.Encode(&pngBytes, image.NewNRGBA(image.Rect(0, 0, 8, 8))); err != nil {
+	if err := png.Encode(&pngBytes, image.NewNRGBA(image.Rect(0, 0, 32, 32))); err != nil {
 		t.Fatal(err)
 	}
 	asset, err := w.inputs.UploadAsset(context.Background(), "owner-a", generation.InputAssetUpload{
@@ -324,7 +324,7 @@ func TestTextureReferenceStaysFrozenImageInBothApprovalPaths(t *testing.T) {
 	w := pendingApprovalBrowsers(t, nil)
 	ctx := context.Background()
 	var picture bytes.Buffer
-	if err := png.Encode(&picture, image.NewNRGBA(image.Rect(0, 0, 8, 8))); err != nil {
+	if err := png.Encode(&picture, image.NewNRGBA(image.Rect(0, 0, 32, 32))); err != nil {
 		t.Fatal(err)
 	}
 	input, err := w.inputs.UploadAsset(ctx, "owner-a", generation.InputAssetUpload{Body: bytes.NewReader(picture.Bytes()), OriginalFilename: "texture.png", MediaType: "image/png", AssetType: "image", MaxBytes: 1024})

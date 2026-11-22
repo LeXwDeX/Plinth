@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "scenario": "meshy-text-to-3d-live-2026-11-22",
+  "captured_at_utc": "2026-11-22",
+  "captured_window_utc": "2026-11-21T18:21:14Z/2026-11-21T18:28:03Z",
+  "source_revision": "unknown",
+  "source_state": "clean worktree at fix/460-official-retry 9c98618767c52c8a5f6c403b1b8b9497141b6548; the binary carried no injected SHA, so the capture metadata reads app_revision=unstamped and source_revision stays unknown",
+  "offering": "meshy/meshy-7.1/text-to-3d",
+  "api_version": "v2",
+  "provenance": "captured",
+  "transformation": "Draft from the opt-in upstream recorder: prompts are [redacted], model and asset URLs keep the recorded official CDN shape with placeholder ids, ids are id-1/id-2/id-3, timestamps are the recorded ones and media bytes are deterministic recipes, not the original bytes. The capture ran on 2026-11-22 local time (UTC+8); the UTC window is recorded in captured_window_utc.",
+  "exchanges": 88,
+  "candidate_sha256": "b3da8fa83435e9fbdfca303560c972ffa1c80e7c0812f8a3a6c2b24b287313d2",
+  "media": [
+    {
+      "sequence": 77,
+      "media_type": "model/3mf",
+      "recipe": "3mf-empty"
+    },
+    {
+      "sequence": 78,
+      "media_type": "application/octet-stream",
+      "recipe": "octet-empty"
+    },
+    {
+      "sequence": 79,
+      "media_type": "model/gltf-binary",
+      "recipe": "glb-triangle"
+    },
+    {
+      "sequence": 80,
+      "media_type": "text/plain",
+      "recipe": "text-plain"
+    },
+    {
+      "sequence": 81,
+      "media_type": "model/obj",
+      "recipe": "obj-triangle"
+    },
+    {
+      "sequence": 82,
+      "media_type": "model/stl",
+      "recipe": "stl-triangle"
+    },
+    {
+      "sequence": 83,
+      "media_type": "application/octet-stream",
+      "recipe": "octet-empty"
+    },
+    {
+      "sequence": 84,
+      "media_type": "image/png",
+      "recipe": "png-1x1"
+    },
+    {
+      "sequence": 85,
+      "media_type": "image/png",
+      "recipe": "png-1x1"
+    },
+    {
+      "sequence": 86,
+      "media_type": "image/png",
+      "recipe": "png-1x1"
+    },
+    {
+      "sequence": 87,
+      "media_type": "image/png",
+      "recipe": "png-1x1"
+    },
+    {
+      "sequence": 88,
+      "media_type": "image/png",
+      "recipe": "png-1x1"
+    }
+  ],
+  "evidence_note": "Private media evidence was retained outside the repository; this public manifest lists only lengths and SHA-256 digests.",
+  "schema_revision": "2026-11-22.456-460.1",
+  "catalog_sha256": "24dc624e1d35efe8ac07a34f9f5cf824c83aee27f541e0a2ffd6dd627f7612cb"
+}

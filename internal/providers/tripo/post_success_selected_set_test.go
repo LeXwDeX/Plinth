@@ -52,10 +52,13 @@ func newSelectedSetUpstream(t *testing.T) *selectedSetUpstream {
 					"data":    map[string]string{"task_id": "child-" + strings.ToLower(format)},
 				})
 			case strings.HasSuffix(r.URL.Path, "/tasks/child-gltf"):
+				// The GLTF child fails on every attempt (#460 A1: a failed task is
+				// not charged, so the same format is resent with backoff).
 				writeJSON(w, map[string]any{
 					"code": 0,
 					"data": map[string]any{
 						"task_id": "child-gltf", "status": "failed", "progress": 100,
+						"credits_consumed": 0,
 					},
 				})
 			case strings.HasSuffix(r.URL.Path, "/tasks/child-fbx"):
@@ -132,9 +135,8 @@ func observeSelectedSet(
 }
 
 // TestRetrospectiveFirstFailedFormatMustNotFinishUnstartedFormats：GLTF 子
-// 作业失败时 FBX 仍未开始——实际 Tripo 适配器不得终结整个 converted 槽位
-// （旧行为：completionUpdate 只看状态表已有条目，anyFailed → 整槽 failed，
-// 静默取消 FBX 这一独立已授权格式）。允许且只允许暴露 GLTF 自身的失败。
+// 作业失败时 FBX 仍未开始——实际 Tripo 适配器不得终结整个 converted 槽位，
+// 也不得把未开始的 FBX 记为失败（#460 A1 起该格式先进入退避重提）。
 func TestRetrospectiveFirstFailedFormatMustNotFinishUnstartedFormats(t *testing.T) {
 	upstream := newSelectedSetUpstream(t)
 	adapter := newAdapterWithImage(t, upstream.server, nil, selectedSetOffering(t))
@@ -143,26 +145,11 @@ func TestRetrospectiveFirstFailedFormatMustNotFinishUnstartedFormats(t *testing.
 		adapter,
 		`{"conversions":{"GLTF":{"status":"submitted","remote_id":"child-gltf"}}}`,
 	)
-	for _, update := range obs.ResourceUpdates {
-		if update.VariantPrefix != "" {
-			t.Fatalf(
-				"FBX never started, but actual Tripo adapter terminated whole slot: state=%s opaque=%s",
-				update.State,
-				obs.Opaque,
-			)
-		}
-		if update.Variant == "converted.fbx" {
-			t.Fatalf("unstarted FBX was terminated: %#v", update)
-		}
-		if update.Variant != "converted.gltf" || update.State != generation.ResourceFailed {
-			t.Fatalf("unexpected assertion %#v（只允许暴露失败项自身）", update)
-		}
+	if len(obs.ResourceUpdates) != 0 {
+		t.Fatalf("updates = %#v; want none while GLTF may still be resent", obs.ResourceUpdates)
 	}
-	if len(obs.ResourceUpdates) != 1 {
-		t.Fatalf("updates = %#v; want exactly the failed GLTF item", obs.ResourceUpdates)
-	}
-	if obs.Phase != generation.UpstreamCompleted {
-		t.Fatalf("phase = %s; 父任务终态语义不得回退", obs.Phase)
+	if obs.Phase != generation.UpstreamRunning {
+		t.Fatalf("phase = %s; a pending retry keeps the post-success run going", obs.Phase)
 	}
 	var state struct {
 		Conversions map[string]struct {
@@ -172,14 +159,46 @@ func TestRetrospectiveFirstFailedFormatMustNotFinishUnstartedFormats(t *testing.
 	if err := json.Unmarshal(obs.Opaque, &state); err != nil {
 		t.Fatal(err)
 	}
+	if got := state.Conversions["GLTF"].Status; got != "retry_pending" {
+		t.Fatalf("GLTF = %q, want retry_pending（失败子作业按官方不计费、按退避重提）", got)
+	}
 	if _, started := state.Conversions["FBX"]; started {
 		t.Fatalf("FBX 在本轮之前不得被派发（每轮至多一次动作）：%s", obs.Opaque)
+	}
+	// 重提预算用尽后（每次子作业都失败）才断言 GLTF 自身失败；FBX 由后续
+	// 轮次派发，不由本轮的失败连带取消。
+	for round := 0; round < 20 && len(obs.ResourceUpdates) == 0; round++ {
+		next, err := adapter.Observe(context.Background(), generation.ObserveRequest{
+			TaskID: "retrospective-parent", AttemptID: "retrospective-attempt",
+			Offering: selectedSetOffering(t), PostSuccess: true,
+			Job:    generation.UpstreamJob{ProviderID: "tripo", RemoteID: "parent"},
+			Input:  json.RawMessage(`{"output_formats":["GLTF","FBX"],"authorize_extra_credits":true}`),
+			Opaque: obs.Opaque,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		obs = next
+	}
+	if len(obs.ResourceUpdates) != 1 || obs.ResourceUpdates[0].Variant != "converted.gltf" ||
+		obs.ResourceUpdates[0].State != generation.ResourceFailed {
+		t.Fatalf("updates = %#v; want exactly the exhausted GLTF item", obs.ResourceUpdates)
+	}
+	if err := json.Unmarshal(obs.Opaque, &state); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Conversions["GLTF"].Status) == 0 {
+		t.Fatalf("GLTF state missing: %s", obs.Opaque)
+	}
+	// 六个 GLTF 尝试全部来自同一个格式，别的格式没有被连带重提。
+	if _, bodies := upstream.converts(); len(bodies) != 6 {
+		t.Fatalf("convert calls = %d, want six GLTF attempts: %v", len(bodies), bodies)
 	}
 }
 
 // TestRetrospectiveRemainingAuthorizedFormatContinuesAfterFailure：GLTF 失败
-// 后的下一轮必须继续派发仍被授权的 FBX（独立格式互不取消），FBX 完成时
-// 只交付自身产物，且不断言任何整槽终态。
+// 后的下一轮先按官方重提 GLTF（失败不计费）；预算用尽后才派发仍被授权的
+// FBX（独立格式互不取消），FBX 完成时只交付自身产物，不断言任何整槽终态。
 func TestRetrospectiveRemainingAuthorizedFormatContinuesAfterFailure(t *testing.T) {
 	upstream := newSelectedSetUpstream(t)
 	offering := selectedSetOffering(t)
@@ -204,18 +223,42 @@ func TestRetrospectiveRemainingAuthorizedFormatContinuesAfterFailure(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	hits, bodies := upstream.converts()
-	if hits != 1 {
-		t.Fatalf("convert calls = %d; want 1（剩余已授权格式必须继续）：%v", hits, bodies)
+	// 先重提 GLTF（失败不计费），预算用尽后才派发 FBX。
+	current := second
+	for round := 0; round < 20; round++ {
+		next, err := adapter.Observe(context.Background(), generation.ObserveRequest{
+			TaskID: "retrospective-parent", AttemptID: "retrospective-attempt",
+			Offering: offering, PostSuccess: true,
+			Job:    generation.UpstreamJob{ProviderID: "tripo", RemoteID: "parent"},
+			Input:  json.RawMessage(`{"output_formats":["GLTF","FBX"],"authorize_extra_credits":true}`),
+			Opaque: current.Opaque,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		current = next
+		if _, bodies := upstream.converts(); len(bodies) >= 6 {
+			break
+		}
 	}
-	if format, _ := bodies[0]["format"].(string); format != "FBX" {
-		t.Fatalf("convert format = %v; want FBX", bodies[0]["format"])
+	// 原始提交在冻结状态里，不重新计数：五 次重提（预算）之后才是 FBX。
+	hits, bodies := upstream.converts()
+	if hits != 6 {
+		t.Fatalf("convert calls = %d; want 6（五次 GLTF 重提加一次 FBX）：%v", hits, bodies)
+	}
+	for _, body := range bodies[:5] {
+		if format, _ := body["format"].(string); format != "GLTF" {
+			t.Fatalf("first five convert formats = %v; want the GLTF resubmissions", bodies)
+		}
+	}
+	if format, _ := bodies[5]["format"].(string); format != "FBX" {
+		t.Fatalf("last convert format = %v; want FBX", bodies[5]["format"])
 	}
 	if second.Phase != generation.UpstreamRunning {
 		t.Fatalf("派发轮次必须保持父任务终态语义（RUNNING，不回退）：%s", second.Phase)
 	}
-	if !strings.Contains(string(second.Opaque), `"FBX":{"status":"submitted"`) {
-		t.Fatalf("FBX 派发事实未写入私有状态：%s", second.Opaque)
+	if !strings.Contains(string(second.Opaque), `"GLTF":{"status":"submitted"`) {
+		t.Fatalf("GLTF 重提事实未写入私有状态：%s", second.Opaque)
 	}
 	for _, update := range second.ResourceUpdates {
 		t.Fatalf("派发轮次不得断言资源终态：%#v", update)

@@ -23,6 +23,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/httpjson"
 	"github.com/LeXwDeX/Plinth/internal/providers/uploadname"
+	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -47,6 +48,16 @@ type Config struct {
 	// the storage volume's tmp directory, because the container's /tmp is a
 	// 64 MB tmpfs and a model may be 150 MB (#321 A).
 	ScratchDir string
+	// Clock is the wall clock the duration bounds read (a status word a
+	// connection bounds by time, #460). Empty means time.Now; tests inject one
+	// so a five-minute bound is a test step rather than five minutes of waiting.
+	Clock func() time.Time
+	// Pool is the optional process-wide upstream concurrency pool (#468). Nil
+	// disables queueing and keeps the previous behavior.
+	Pool *upstreampool.Manager
+	// PoolID names the pool this Adapter acquires slots from; empty disables
+	// queueing even when Pool is set.
+	PoolID string
 }
 
 type Adapter struct {
@@ -58,21 +69,30 @@ type Adapter struct {
 	statusMapping      *generation.StatusMapping
 	nativeSourceClient *http.Client
 	scratchDir         string
+	clock              func() time.Time
+	pool               *upstreampool.Manager
+	poolID             string
 	// unknownPolls counts consecutive polls per remote task that returned a
 	// status word with a declared max_consecutive bound (see observation).
-	// It is process-local on purpose: the bound only has to be finite, and a
-	// restart merely grants a fresh allowance.
+	// unknownSince is when the current run of a status word with a declared
+	// max_duration_seconds bound began (see unknownStatusExpired). Both are
+	// process-local on purpose: each bound only has to be finite, and a restart
+	// merely grants a fresh allowance.
 	unknownMu    sync.Mutex
 	unknownPolls map[string]int
+	unknownSince map[string]time.Time
 }
 
 type providerOptions struct {
-	Protocol         string                     `json:"protocol,omitempty"`
-	Model            string                     `json:"model"`
-	Endpoint         string                     `json:"endpoint"`
-	ObserveEndpoint  string                     `json:"observe_endpoint"`
-	UploadEndpoint   string                     `json:"upload_endpoint"`
-	ConvertEndpoint  string                     `json:"convert_endpoint"`
+	Protocol        string `json:"protocol,omitempty"`
+	Model           string `json:"model"`
+	Endpoint        string `json:"endpoint"`
+	ObserveEndpoint string `json:"observe_endpoint"`
+	UploadEndpoint  string `json:"upload_endpoint"`
+	ConvertEndpoint string `json:"convert_endpoint"`
+	// FormatConversion declares how an Offering's private format conversions
+	// run: how many children may be in flight at once.
+	FormatConversion *formatConversionOptions   `json:"format_conversion,omitempty"`
 	ResponseAliases  []generation.ResponseAlias `json:"response_aliases,omitempty"`
 	NativeConversion *nativeConversionOptions   `json:"native_conversion,omitempty"`
 	SourceRig        *nativeSourceRig           `json:"source_rig,omitempty"`
@@ -119,7 +139,18 @@ func New(config Config) (*Adapter, error) {
 		statusMapping:      config.StatusMapping,
 		nativeSourceClient: nativeSourceClient,
 		scratchDir:         strings.TrimSpace(config.ScratchDir),
+		clock:              config.Clock,
+		pool:               config.Pool,
+		poolID:             strings.TrimSpace(config.PoolID),
 	}, nil
+}
+
+// now is the Adapter's wall clock.
+func (a *Adapter) now() time.Time {
+	if a.clock != nil {
+		return a.clock()
+	}
+	return time.Now()
 }
 
 // Old task snapshots predate explicit routes. Only missing keys may use the
@@ -353,7 +384,20 @@ func privateDispatchPermit(
 func (a *Adapter) Observe(
 	ctx context.Context,
 	request generation.ObserveRequest,
-) (generation.Observation, error) {
+) (observation generation.Observation, err error) {
+	// Public jobs in the shared pool are counted, never blocked (C3): Start
+	// registered them, every Observe refreshes them, and a terminal observation
+	// releases them. The private conversion paths below do their own Acquire.
+	if a.poolEnabled() && poolCountsPublicJob(request.Offering) {
+		// Readopt (not just Touch) so a restart re-registers the still-running
+		// public job; it also refreshes last-seen.
+		a.readoptPool(request.Offering, request.AttemptID)
+		defer func() {
+			if err == nil && terminalPhase(observation.Phase) {
+				a.releasePool(request.Offering, request.AttemptID)
+			}
+		}()
+	}
 	if smartSegmentProtocol(request.Offering) {
 		return a.observeSmartSegment(ctx, request)
 	}
@@ -503,6 +547,11 @@ func (a *Adapter) uploadReader(ctx context.Context, request generation.StartRequ
 	var response envelope[struct {
 		FileToken string `json:"file_token"`
 	}]
+	// A free upload creates no upstream task: it is not a paid submission, so a
+	// lost or failed upload is a retryable transport error rather than an
+	// ambiguous outcome (Tripo's files page: an upload holds no credits). The
+	// caller resends the whole multipart body and gets a fresh token; the token
+	// of a lost response is simply never used.
 	if err := a.client.Do(
 		ctx,
 		http.MethodPost,
@@ -511,7 +560,7 @@ func (a *Adapter) uploadReader(ctx context.Context, request generation.StartRequ
 		contentType,
 		request.SubmissionKey+":upload",
 		&response,
-		true,
+		false,
 	); err != nil {
 		return "", err
 	}
@@ -665,18 +714,22 @@ func (a *Adapter) observation(
 			"Tripo 返回未知任务状态",
 		)
 	}
-	// A status word with a declared max_consecutive (Tripo's "unknown") keeps
-	// the task in its declared phase, but only for that many polls in a row;
-	// the next poll ends the attempt with the declared failure class.
-	if a.exceedsConsecutiveBound(request.Job.RemoteID, rule) {
+	// A status word with a declared bound (Tripo's "unknown": the task-query
+	// page says it is not a success or failure and to keep polling with a
+	// timeout) keeps the task in its declared phase, but only for that long.
+	// The poll after the bound ends the attempt as an ambiguous failure: the
+	// upstream may still be working, so the job is never sent again and the
+	// failure is not offered as a retryable one.
+	if a.unknownStatusExpired(request.Job.RemoteID, status, rule) {
 		observation.Phase = generation.UpstreamFailed
 		// The coordinator drops an observation whose key equals the last
 		// recorded one, so the terminal transition needs a key of its own.
 		observation.DedupeKey = privateDedupeKey(request.Job.RemoteID, status, "poll-limit-exceeded")
 		observation.Failure = &generation.Failure{
-			Class:      generation.FailureClass(rule.Class),
-			Retryable:  rule.Retryable,
-			SafeDetail: "Tripo 任务状态为 " + status + "，超过轮询上限",
+			Class:      generation.FailureSubmissionUnknown,
+			Retryable:  false,
+			Ambiguous:  true,
+			SafeDetail: "Tripo 任务状态为 " + status + "，超过轮询时限，结果不明",
 		}
 		return observation, nil
 	}
@@ -743,25 +796,70 @@ func (a *Adapter) observation(
 	return observation, nil
 }
 
-// exceedsConsecutiveBound counts consecutive polls of a status word whose rule
-// declares max_consecutive and reports whether the bound is now exceeded.
-// Any other status word resets the count for that remote task.
-func (a *Adapter) exceedsConsecutiveBound(remoteID string, rule generation.StatusRule) bool {
-	a.unknownMu.Lock()
-	defer a.unknownMu.Unlock()
-	if rule.MaxConsecutive <= 0 {
-		delete(a.unknownPolls, remoteID)
+// unknownStatusExpired reports whether a status word the connection bounds has
+// now been reported for too long, and records this poll. The bound may be a
+// number of consecutive polls (max_consecutive) or an amount of wall-clock
+// time (max_duration_seconds, #460); whichever passes first ends the run. Any
+// other status word, or a word with no declared bound, closes both windows.
+func (a *Adapter) unknownStatusExpired(remoteID, status string, rule generation.StatusRule) bool {
+	if rule.MaxConsecutive <= 0 && rule.MaxDurationSeconds <= 0 {
+		a.clearUnknownStatus(remoteID)
 		return false
 	}
-	if a.unknownPolls == nil {
-		a.unknownPolls = map[string]int{}
+	if rule.MaxConsecutive > 0 {
+		a.unknownMu.Lock()
+		if a.unknownPolls == nil {
+			a.unknownPolls = map[string]int{}
+		}
+		a.unknownPolls[remoteID]++
+		exceeded := a.unknownPolls[remoteID] > rule.MaxConsecutive
+		if exceeded {
+			delete(a.unknownPolls, remoteID)
+		}
+		a.unknownMu.Unlock()
+		if exceeded {
+			a.clearUnknownStatus(remoteID)
+			return true
+		}
 	}
-	a.unknownPolls[remoteID]++
-	if a.unknownPolls[remoteID] > rule.MaxConsecutive {
-		delete(a.unknownPolls, remoteID)
-		return true
+	return a.unknownDurationExpired(remoteID, rule)
+}
+
+// unknownDurationExpired reports whether the wall-clock window of a status word
+// declared with max_duration_seconds has passed (Tripo's "unknown": the
+// task-query page says to continue polling with a timeout). The window opens
+// with the first poll of the run and closes with any other status word; a
+// restart grants a fresh allowance, like the poll count does.
+func (a *Adapter) unknownDurationExpired(remoteID string, rule generation.StatusRule) bool {
+	if rule.MaxDurationSeconds <= 0 {
+		return false
 	}
-	return false
+	limit := time.Duration(rule.MaxDurationSeconds) * time.Second
+	now := a.now()
+	a.unknownMu.Lock()
+	defer a.unknownMu.Unlock()
+	since, seen := a.unknownSince[remoteID]
+	if !seen {
+		if a.unknownSince == nil {
+			a.unknownSince = map[string]time.Time{}
+		}
+		a.unknownSince[remoteID] = now
+		return false
+	}
+	if now.Sub(since) < limit {
+		return false
+	}
+	delete(a.unknownSince, remoteID)
+	return true
+}
+
+// clearUnknownStatus closes the poll-count and duration windows of one remote
+// task.
+func (a *Adapter) clearUnknownStatus(remoteID string) {
+	a.unknownMu.Lock()
+	defer a.unknownMu.Unlock()
+	delete(a.unknownPolls, remoteID)
+	delete(a.unknownSince, remoteID)
 }
 
 // taskErrorCode returns a failed task's error_code as a plain decimal string

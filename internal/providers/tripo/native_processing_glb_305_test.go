@@ -160,8 +160,15 @@ func TestAFailedGLBExportFailsTheStepAndNeverDeliversTheNativeGLBAsTheModel(t *t
 	if len(observed.Artifacts) != 0 {
 		t.Fatalf("a failed export left claims behind: %+v", observed.Artifacts)
 	}
-	if exports := stack.recorder.posts("models/convert"); len(exports) != 1 || !strings.Contains(exports[0], `"format":"GLTF"`) {
-		t.Fatalf("exports = %v, want the GLB export alone", exports)
+	// #460 A1: the failed GLB export was resubmitted five times (a failed task is
+	// not charged) before the step failed; no other format was started.
+	if exports := stack.recorder.posts("models/convert"); len(exports) != 6 {
+		t.Fatalf("exports = %v, want six GLB attempts", exports)
+	}
+	for _, export := range stack.recorder.posts("models/convert") {
+		if !strings.Contains(export, `"format":"GLTF"`) {
+			t.Fatalf("exports = %v, want the GLB export alone", export)
+		}
 	}
 }
 

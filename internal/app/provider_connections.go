@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/providers/mock"
 	"github.com/LeXwDeX/Plinth/internal/providers/schemaimages"
 	"github.com/LeXwDeX/Plinth/internal/providers/tripo"
+	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 )
 
 // registerProviders 是 Provider 注册的唯一入口。本地协议在 live/mock 均使用真实
@@ -49,6 +52,9 @@ func registerProvidersWithTransport(
 		logger = slog.Default()
 	}
 	application := taskCatalog.Application()
+	// One process-wide upstream concurrency pool serves every registered
+	// Provider pool (#468). It is in-memory only; a restart begins from zero.
+	pool := upstreampool.New(upstreampool.Options{})
 	localKeys := map[string]bool{}
 	for _, connection := range application.Runtime.ProviderConnections {
 		if _, known := catalog.ProviderProtocolEnum[connection.Protocol]; !known {
@@ -77,7 +83,7 @@ func registerProvidersWithTransport(
 			logger.Warn("平台处理缺少输入或资产存储，路由不可用", "connection", connection.ID)
 			continue
 		}
-		adapter, err := buildProviderAdapterWithTransport(offerings, connection, "", "", 0, "", inputs, assets, httpTransport, recoveryStores...)
+		adapter, err := buildProviderAdapterWithTransport(offerings, connection, "", "", 0, "", inputs, assets, httpTransport, pool, recoveryStores...)
 		if err != nil {
 			return err
 		}
@@ -134,6 +140,7 @@ func registerProvidersWithTransport(
 		}
 		timeout := time.Duration(connection.RequestTimeoutSeconds) * time.Second
 		offerings := offeringsForAdapter(allOfferings, connection.AdapterKey)
+		registerUpstreamPools(pool, connection, offerings)
 		capabilities := connectionCapabilities(
 			offerings,
 			connection,
@@ -154,6 +161,7 @@ func registerProvidersWithTransport(
 			inputs,
 			assets,
 			httpTransport,
+			pool,
 		)
 		if err != nil {
 			return err
@@ -172,6 +180,70 @@ func registerProvidersWithTransport(
 	return nil
 }
 
+// registerUpstreamPools registers the connection's declared upstream pools
+// (#468). The limit comes from the declaration's environment variable when set,
+// else its default; the hard maximum lifetime is the largest job timeout plus
+// queue wait among the connection's Offerings, so a leaked slot cannot outlive
+// the longest job that could hold it. A connection without a declaration
+// registers nothing and is never queued.
+func registerUpstreamPools(
+	pool *upstreampool.Manager,
+	connection catalog.ProviderConnectionSchema,
+	offerings []generation.Offering,
+) {
+	if pool == nil || connection.Concurrency == nil || len(connection.Concurrency.Pools) == 0 {
+		return
+	}
+	maxLifetime := time.Duration(0)
+	for _, offering := range offerings {
+		timeout := offering.Timeout
+		if offering.JobTimeout > timeout {
+			timeout = offering.JobTimeout
+		}
+		if lifetime := timeout + offering.UpstreamQueueTimeout; lifetime > maxLifetime {
+			maxLifetime = lifetime
+		}
+	}
+	for name, declaration := range connection.Concurrency.Pools {
+		limit := declaration.Default
+		if declaration.LimitEnv != "" {
+			if raw := strings.TrimSpace(os.Getenv(declaration.LimitEnv)); raw != "" {
+				if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+					limit = parsed
+				}
+			}
+		}
+		pool.Register(connection.AdapterKey, name, upstreampool.PoolConfig{
+			Limit:       limit,
+			MaxLifetime: maxLifetime,
+			IdleTTL:     poolSecondsSetting(declaration.IdleTTLSeconds),
+			WaitHint:    poolSecondsSetting(declaration.WaitHintSeconds),
+			QueuePoll:   poolSecondsSetting(declaration.QueuePollSeconds),
+		})
+	}
+}
+
+// poolSecondsSetting resolves one optional pool policy value: the declared
+// default, overridden by its environment variable when set. Zero (absent or an
+// invalid override) leaves the Manager's or Adapter's own fallback in place.
+func poolSecondsSetting(setting *catalog.ProviderPoolSettingSchema) time.Duration {
+	if setting == nil {
+		return 0
+	}
+	value := setting.Default
+	if setting.Env != "" {
+		if raw := strings.TrimSpace(os.Getenv(setting.Env)); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				value = parsed
+			}
+		}
+	}
+	if value <= 0 {
+		return 0
+	}
+	return time.Duration(value) * time.Second
+}
+
 // buildProviderAdapterWithTransport 每个受支持协议恰有一个构造分支；新增
 // 同协议身份零代码改动，未知协议启动期报错。
 func buildProviderAdapterWithTransport(
@@ -184,6 +256,7 @@ func buildProviderAdapterWithTransport(
 	inputs generation.InputAssetResolver,
 	assets generation.AssetStore,
 	httpTransport func(connectionID string, base http.RoundTripper) http.RoundTripper,
+	pool *upstreampool.Manager,
 	recoveryStores ...generation.RecoveryStore,
 ) (generation.ProviderPort, error) {
 	switch connection.Protocol {
@@ -276,6 +349,8 @@ func buildProviderAdapterWithTransport(
 			InputAssets:           inputs,
 			ScratchDir:            scratchDir,
 			OfferingRoutes:        offerings,
+			Pool:                  pool,
+			PoolID:                tripo.TripoPoolName,
 		})
 	case "hyper3d.rodin":
 		for _, offering := range offerings {

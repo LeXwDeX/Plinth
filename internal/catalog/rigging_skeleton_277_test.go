@@ -235,9 +235,8 @@ func TestMeshyRiggingDeclaresSkeletonTemplateAndFingers(t *testing.T) {
 	if schema.ParameterOmitted(template, frozen) || schema.ParameterOmitted(fingers, frozen) {
 		t.Fatalf("a chosen template and fingers must reach the wire: %v", frozen)
 	}
-	// Finger bones cannot go with a texture image (the Rigging page's 400).
+	// Finger bones with a non-biped template, and a non-boolean include_fingers.
 	for _, input := range []string{
-		`{"source_task":"source","include_fingers":true,"texture_image_url":"https://example.test/skin.png"}`,
 		`{"source_task":"source","skeleton_template":"godot_humanoid"}`,
 		`{"source_task":"source","include_fingers":"yes"}`,
 	} {
@@ -247,7 +246,8 @@ func TestMeshyRiggingDeclaresSkeletonTemplateAndFingers(t *testing.T) {
 	}
 	for _, input := range []string{
 		`{"source_task":"source","skeleton_template":"unity_humanoid","include_fingers":true,"height_meters":1.8}`,
-		`{"source_task":"source","include_fingers":false,"texture_image_url":"https://example.test/skin.png"}`,
+		// #460 B17: the deprecated texture_image_url is gone; fingers alone are valid.
+		`{"source_task":"source","include_fingers":true}`,
 	} {
 		if _, _, err := c.Normalize(schema.Rigging, "meshy/processing/rigging", json.RawMessage(input)); err != nil {
 			t.Fatalf("refused %s: %v", input, err)

@@ -571,8 +571,10 @@ func TestRealTripoFirstFormatFailureKeepsRemainingAuthorizedFormats(t *testing.T
 	final := h.drivePostSuccess(t, id, 30)
 
 	converts, downloads := upstream.snapshot()
-	if len(converts) != 3 {
-		t.Fatalf("convert calls = %v; want 3（首个失败后其余已授权格式必须继续）", converts)
+	// #460 A1: the failed GLTF child is resubmitted five times (a failed task
+	// is not charged) before the format ends failed; the other formats still run.
+	if len(converts) != 8 {
+		t.Fatalf("convert calls = %v; want 8（六次 GLTF 加 FBX、OBJ）", converts)
 	}
 	if final.State != generation.TaskSucceeded || final.Progress != 100 {
 		t.Fatalf("parent regressed: %s progress=%d", final.State, final.Progress)
@@ -606,8 +608,10 @@ func TestRealTripoMiddleFormatFailureExposesMixedOutcomes(t *testing.T) {
 	final := h.drivePostSuccess(t, id, 30)
 
 	converts, _ := upstream.snapshot()
-	if len(converts) != 3 {
-		t.Fatalf("convert calls = %v; want 3", converts)
+	// #460 A1: FBX fails six times before its slot ends failed; GLTF and OBJ
+	// are converted once each.
+	if len(converts) != 8 {
+		t.Fatalf("convert calls = %v; want 8（一次 GLTF、六次 FBX、一次 OBJ）", converts)
 	}
 	want := map[string]generation.ResourceStateCode{
 		"converted.gltf": generation.ResourceReady,

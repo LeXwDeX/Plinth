@@ -74,6 +74,7 @@ func Load(reader io.Reader) (*Catalog, error) {
 	for _, capability := range doc.Application.Capabilities {
 		applicationCapabilities[capability.ID] = capability.Domain
 	}
+	maxPollSeconds := map[string]int{}
 	for index, raw := range doc.Offerings {
 		if raw.DisplayOrder == nil {
 			return nil, fmt.Errorf("offerings[%d]: 缺少 display_order", index)
@@ -82,6 +83,12 @@ func Load(reader io.Reader) (*Catalog, error) {
 			return nil, fmt.Errorf("offerings[%d]: 缺少 capability_order", index)
 		}
 		offering := raw.toOffering()
+		if offering.PollInterval > 0 {
+			seconds := int((offering.PollInterval + time.Second - 1) / time.Second)
+			if seconds > maxPollSeconds[offering.AdapterKey] {
+				maxPollSeconds[offering.AdapterKey] = seconds
+			}
+		}
 		queueTimeout, err := upstreamQueueTimeout(raw.UpstreamQueueTimeoutSeconds,
 			doc.Application.Runtime.ProviderConnections, offering.AdapterKey)
 		if err != nil {
@@ -357,6 +364,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 	// broken offering reports its own error rather than a stale translation.
 	if err := validateDocumentOfferingLocalization(doc); err != nil {
 		return nil, fmt.Errorf("application.localization: %w", err)
+	}
+	if err := validateUpstreamPoolPollIntervals(doc.Application.Runtime.ProviderConnections, maxPollSeconds); err != nil {
+		return nil, err
 	}
 	if err := validateLocalizedOfferingTerminology(doc.Application.Terminology, doc.Application.Localization); err != nil {
 		return nil, fmt.Errorf("application.localization: %w", err)

@@ -128,8 +128,13 @@ func TestMeshyCreditLimitWordingOnlyAppliesUnderItsDeclaredStatus(t *testing.T) 
 	if err := ClassifyWithMapping(mapping)(response, []byte(body)); err != nil {
 		t.Fatalf("429 with the wording was classified by the declared matcher: %v", err)
 	}
+	// #460 B13: the Meshy connection declares 403 as upstream_denied, so the
+	// same words do not outrank the status's own classification.
 	response = &http.Response{StatusCode: http.StatusForbidden, Header: make(http.Header)}
-	if err := ClassifyWithMapping(mapping)(response, []byte(body)); err != nil {
-		t.Fatalf("403 with the wording was classified by the declared matcher: %v", err)
+	err := ClassifyWithMapping(mapping)(response, []byte(body))
+	var provider *generation.ProviderError
+	if err == nil || !errors.As(err, &provider) || provider.Failure == nil ||
+		provider.Failure.Class != generation.FailureUpstreamDenied {
+		t.Fatalf("403 with the wording = %v, want upstream_denied", err)
 	}
 }

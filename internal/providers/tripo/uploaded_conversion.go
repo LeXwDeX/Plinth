@@ -495,6 +495,9 @@ func (a *Adapter) ResumePreparation(ctx context.Context, request generation.Prep
 	}
 	state.Phase = "submitted"
 	state.RemoteID = response.Data.TaskID
+	// A public uploaded conversion is a pool job: count it without blocking
+	// (C3). Its terminal observation releases the slot.
+	a.readoptPool(request.Offering, request.AttemptID)
 	return generation.Observation{Phase: generation.UpstreamAccepted, Job: &generation.UpstreamJob{ProviderID: request.Offering.ProviderID, RemoteID: state.RemoteID}, Opaque: state.encode(), Dispatch: permit, PollAfter: request.Offering.PollInterval, DedupeKey: privateDedupeKey(state.RemoteID, "accepted")}, nil
 }
 func (a *Adapter) observeUploadedConversion(ctx context.Context, request generation.ObserveRequest) (generation.Observation, error) {

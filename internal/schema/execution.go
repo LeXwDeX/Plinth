@@ -68,7 +68,20 @@ type StatusRule struct {
 	// MaxConsecutive bounds how many polls in a row may return this status
 	// word (accepted/running phases only). The poll after the bound ends the
 	// attempt as a failure of Class. Zero means no bound.
+	//
+	// A Provider that documents its bound in time rather than in polls declares
+	// MaxDurationSeconds instead: the two bounds answer different questions and
+	// a poll count says nothing about how long the upstream has been asked to
+	// keep the job open. A Provider that declares both is bounded by whichever
+	// passes first.
 	MaxConsecutive int `json:"max_consecutive,omitempty"`
+	// MaxDurationSeconds bounds how long, in wall-clock time, this status word
+	// may be reported in a row (accepted/running phases only). The window opens
+	// with the first poll that reports the word and closes as soon as another
+	// status word is reported. When it passes, the attempt ends as an ambiguous
+	// failure: the upstream result is unknown, so the job is never sent again
+	// and the failure is not presented as a retryable one. Zero means no bound.
+	MaxDurationSeconds int `json:"max_duration_seconds,omitempty"`
 	// Queued marks a status word (accepted phase only) that means the
 	// upstream accepted the job but holds it in its own queue (#131).
 	Queued bool `json:"queued,omitempty"`
