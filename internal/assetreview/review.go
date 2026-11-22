@@ -100,6 +100,14 @@ func New(config Config) *Service {
 }
 
 // Snapshot builds the review_json document of one item entering review.
+//
+// The snapshot records the files the source Task has now, so a caller must not
+// build it while that Task's delivery is still unstable: a 3D success can owe
+// formats as post-success resources (#457), and the formats that arrive later
+// (or that an automatic completion finishes, #461) would be missing from the
+// snapshot and from the artifacts it lists. The completion tool defers such a
+// report instead of entering review (#459); this builder takes the Task as it
+// is and never decides when it is called.
 func (service *Service) Snapshot(
 	ctx context.Context,
 	input assetlist.ReviewSnapshotInput,

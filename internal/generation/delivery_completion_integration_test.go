@@ -37,6 +37,13 @@ func (r *switchableConversionRule) ConversionIntent(offering generation.Offering
 	return r.base.ConversionIntent(offering, input)
 }
 
+func (r *switchableConversionRule) PendingFormats(task generation.Task) []string {
+	if !r.active {
+		return nil
+	}
+	return r.base.PendingFormats(task)
+}
+
 // tamperStore lets the auto path stay disabled while a targeted later
 // preparation sees bytes that no longer match the registered digest.
 type tamperStore struct {

@@ -1312,7 +1312,7 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 		task.Resources = initialResourceStates(task, costSelectionItems)
 		persistResources = task.Resources != nil
 		if len(pendingResourceKeys(task.Resources)) > 0 {
-			task.NextActionAt = now.Add(postSuccessInterval(task))
+			task.NextActionAt = now.Add(PostSuccessInterval(task))
 		}
 	}
 	events = append(events, Event{

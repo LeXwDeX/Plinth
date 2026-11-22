@@ -45,6 +45,14 @@ func validateAssetList(
 	if limits.MaxReferencesPerItem < 1 || limits.MaxReferencesPerItem > 8 {
 		return errors.New("asset_list.limits.max_references_per_item 必须在 1 到 8 之间")
 	}
+	// #459: 0 means "not declared" so historical Catalogs keep loading; a
+	// declared cap must be a usable scheduling bound.
+	if list.DeliverySettleMaxSeconds < 0 || list.DeliverySettleMaxSeconds > 3600 {
+		return errors.New("asset_list.delivery_settle_max_seconds 必须在 0 到 3600 之间")
+	}
+	if list.DeliverySettleMaxSeconds > 0 && list.DeliverySettleMaxSeconds < 30 {
+		return errors.New("asset_list.delivery_settle_max_seconds 不能小于 30 秒")
+	}
 
 	declaredKinds := make(map[string]AssetListKindSchema, len(list.Kinds))
 	if len(list.Kinds) == 0 {
@@ -182,6 +190,7 @@ func validateAssetList(
 		"item_not_working":               list.Messages.ItemNotWorking,
 		"item_no_successful_task":        list.Messages.ItemNoSuccessfulTask,
 		"item_report_failed":             list.Messages.ItemReportFailed,
+		"item_delivery_pending":          list.Messages.ItemDeliveryPending,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("asset_list.messages.%s 不能为空", field)

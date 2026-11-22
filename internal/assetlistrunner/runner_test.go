@@ -2,6 +2,7 @@ package assetlistrunner_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -334,6 +335,35 @@ func (chatService *fakeChat) Tasks(
 		return nil, nil
 	}
 	return append([]generation.Task(nil), chatService.tasks[sessionID]...), nil
+}
+
+// SettleReportedItem moves a working item whose stored result names a succeeded
+// Task into review, the way the chat service does once the delivery is stable
+// (#459). Items without a stored report are left to the ordinary turn path.
+func (chatService *fakeChat) SettleReportedItem(
+	_ context.Context, input chat.SettleReportedItemInput,
+) (assetlist.Item, bool, error) {
+	var snapshot struct {
+		TaskID string `json:"task_id"`
+	}
+	if len(input.Item.Result) == 0 || json.Unmarshal(input.Item.Result, &snapshot) != nil || snapshot.TaskID == "" {
+		return input.Item, false, nil
+	}
+	for _, task := range input.Tasks {
+		if string(task.ID) != snapshot.TaskID {
+			continue
+		}
+		if generation.ResourcesPending(task.Resources) {
+			// Still converting: the item keeps its state.
+			return input.Item, true, nil
+		}
+		finished, err := chatService.runs.FinishItem(context.Background(), assetlist.FinishItemInput{
+			OwnerID: input.OwnerID, ListID: input.ListID, ItemID: input.Item.ID,
+			State: assetlist.StateReview, Result: input.Item.Result, At: input.Now,
+		})
+		return finished, true, err
+	}
+	return input.Item, false, nil
 }
 
 func (chatService *fakeChat) latest(sessionID string) (chat.Turn, bool) {
@@ -970,6 +1000,40 @@ func TestAdvanceDoesNotCountAnAwaitingApprovalItemAsASlot(t *testing.T) {
 	}
 }
 
+func TestAdvanceDoesNotCountADeferredReportItemAsASlot(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	// #459: item A reported done while one of its formats is still converting.
+	// The report is stored on the item and its next check is an observation
+	// interval away, so it keeps working without holding the one parallel slot:
+	// otherwise item B never opens a turn (default max_parallel_items = 1).
+	deferred := newItem("aitem_1", "角色")
+	deferred.State = assetlist.StateWorking
+	deferred.Round = 1
+	deferred.SessionID = "ses_1"
+	deferred.DeliveryDeferred = true
+	deferred.NextActionAt = fixture.now.Add(5 * time.Minute)
+	fixture.chat.sessions["ses_1"] = chat.Session{
+		ID: "ses_1", OwnerID: testOwner, ProjectID: testProject,
+	}
+	fixture.chat.seedTerminalTurn("ses_1", turnDone)
+	fixture.seedRun(assetlist.RunRunning, deferred, newItem("aitem_2", "武器"))
+
+	fixture.advance(t)
+
+	if second := fixture.item(t, "aitem_2"); second.State != assetlist.StateWorking {
+		t.Fatalf("second item = %s; want working because the deferred item releases the slot", second.State)
+	}
+	if calls := len(fixture.scheduler.calls); calls != 1 {
+		t.Fatalf("schedules = %d; want only the claimed item's turn", calls)
+	}
+	// The deferred item keeps its state and its report: only its delivery
+	// decides when it enters review.
+	if first := fixture.item(t, "aitem_1"); first.State != assetlist.StateWorking ||
+		!first.DeliveryDeferred || first.Block != assetlist.BlockNone {
+		t.Fatalf("deferred item = %+v; want working, deferred, unblocked", first)
+	}
+}
+
 func TestAdvancePausesOnMissingPresenceAndResumesOnlyPresence(t *testing.T) {
 	fixture := newFixture(t, 1, 3)
 	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"))
@@ -1383,5 +1447,57 @@ func TestAdvanceKeepsTheRoundWhenTheTurnIsActive(t *testing.T) {
 	if len(fixture.chat.continuations) != 1 {
 		t.Fatalf("continuations = %d; want no turn opened ahead of the active one",
 			len(fixture.chat.continuations))
+	}
+}
+
+// #459: a working item whose done report is stored waits for its delivery to
+// settle instead of burning a turn. The loop keeps the item's state, and the
+// stored report moves it into review as soon as every format is terminal.
+func TestAdvanceLeavesADoneReportWaitingForItsDelivery459(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	item := newItem("aitem_1", "角色")
+	item.State = assetlist.StateWorking
+	item.Round = 1
+	item.SessionID = "ses_1"
+	item.Result = json.RawMessage(`{"task_id":"task-1","assets":[]}`)
+	fixture.seedRun(assetlist.RunRunning, item)
+	fixture.chat.sessions["ses_1"] = chat.Session{
+		ID: "ses_1", OwnerID: testOwner, ProjectID: testProject,
+	}
+	fixture.chat.seedTerminalTurn("ses_1", turnDone)
+	turn, _ := fixture.chat.latest("ses_1")
+	fixture.runs.item(item.ID).LastTurnMessageID = turn.AssistantMessageID
+	fixture.chat.tasks["ses_1"] = []generation.Task{{
+		ID: "task-1", State: generation.TaskSucceeded, CreatedAt: turn.CreatedAt,
+		Resources: map[string]generation.ResourceState{
+			"converted_model|converted.fbx|": {State: generation.ResourcePending},
+		},
+	}}
+
+	fixture.advance(t)
+
+	waited := fixture.item(t, "aitem_1")
+	if waited.State != assetlist.StateWorking || waited.Round != 1 {
+		t.Fatalf("item = %s round %d; want it kept in progress, not advanced",
+			waited.State, waited.Round)
+	}
+	if len(fixture.runs.finishes) != 0 {
+		t.Fatalf("the item was finished while its delivery runs: %+v", fixture.runs.finishes)
+	}
+	if len(fixture.chat.continuations) != 0 {
+		t.Fatalf("another turn was opened for the waiting item: %d", len(fixture.chat.continuations))
+	}
+
+	// Once the slot is terminal the same tick moves the item into review.
+	fixture.chat.tasks["ses_1"][0].Resources["converted_model|converted.fbx|"] =
+		generation.ResourceState{State: generation.ResourceReady}
+	fixture.advance(t)
+
+	reviewed := fixture.item(t, "aitem_1")
+	if reviewed.State != assetlist.StateReview {
+		t.Fatalf("item = %s; want review after the formats settled", reviewed.State)
+	}
+	if len(fixture.runs.finishes) != 1 || fixture.runs.finishes[0].State != assetlist.StateReview {
+		t.Fatalf("finishes = %+v", fixture.runs.finishes)
 	}
 }

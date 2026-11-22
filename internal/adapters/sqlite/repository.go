@@ -475,6 +475,9 @@ var stepExtraGrantsMigration string
 //go:embed migrations/0107_production_budget_completed.sql
 var productionBudgetCompletedMigration string
 
+//go:embed migrations/0108_asset_list_item_delivery_deferred.sql
+var assetListItemDeliveryDeferredMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -574,7 +577,10 @@ func migrations() []migration {
 		migration{version: 105, name: "access_key_usage", sql: accessKeyUsageMigration},
 		migration{version: 106, name: "step_extra_grants", sql: stepExtraGrantsMigration},
 		migration{version: 107, name: "production_budget_completed", sql: productionBudgetCompletedMigration,
-			foreignKeysOff: true})
+			foreignKeysOff: true},
+		migration{version: 108, name: "asset_list_item_delivery_deferred",
+			sql: assetListItemDeliveryDeferredMigration},
+	)
 }
 
 // MigrationVersions is the version of every migration this binary embeds, in
@@ -597,7 +603,8 @@ func migrations() []migration {
 // usage count and the overall switch (#332), 106 the extra 3D steps one
 // asset may be granted (#330 step 5C) and 107 the `completed` state a
 // production plan reaches when every required step succeeded, which rebuilds
-// production_budgets to widen its state CHECK (#410).
+// production_budgets to widen its state CHECK (#410), 108 the marker of a list
+// item whose report is stored while its delivery is still converting (#459).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))
@@ -1008,18 +1015,134 @@ func (r *Repository) admitConversion(
 		return err
 	}
 	for _, value := range active {
-		intent, declared, err := check(value)
+		report, err := check(value)
 		if err != nil {
 			return err
 		}
-		if !declared {
+		if !report.Declared {
 			continue
 		}
-		source, err := conversionSourceIdentity(ctx, conn, task.OwnerID, intent)
+		source, err := conversionSourceIdentity(ctx, conn, task.OwnerID, report.Intent)
 		if err != nil {
 			return err
 		}
-		if source.equal(newSource) && formatsOverlap(task.Conversion.Formats, intent.Formats) {
+		if source.equal(newSource) && formatsOverlap(task.Conversion.Formats, report.Intent.Formats) {
+			return generation.RepositoryConversionConflict
+		}
+	}
+	// The same source may still owe the format as a post-success resource of a
+	// finished Task (#457): that Task is not active, but its delivery is not
+	// stable yet, so a second paid run would duplicate work already in flight.
+	return r.admitPendingDelivery(ctx, conn, task, newSource, check)
+}
+
+// admitPendingDelivery refuses a new conversion whose target format the source
+// Task still owes as a post-success resource (#459). The read is one row by id,
+// inside this transaction; the resource slots only ever move from pending to a
+// terminal state, so a slot that settles right after the read can only refuse a
+// run that is no longer needed, never admit a second one. An uploaded source
+// has no owning Task and therefore nothing pending.
+//
+// The pending format alone does not see the other sessions: admitConversion's
+// active-Task scan is scoped to the caller's session, so a concurrent submit in
+// another session would still be admitted. Once the source is a stored Task
+// with resource states, that case ends in admitRacingDelivery, which reads the
+// owner's active conversion Tasks across sessions before the insert.
+func (r *Repository) admitPendingDelivery(
+	ctx context.Context,
+	conn *sql.Conn,
+	task generation.Task,
+	source conversionSource,
+	check generation.ConversionConflictChecker,
+) error {
+	if source.task == "" {
+		return nil
+	}
+	row := conn.QueryRowContext(ctx, taskSelect+` WHERE generation_tasks.id = ?
+		AND generation_tasks.owner_id = ?
+		AND generation_tasks.state = ?
+		AND generation_tasks.resource_state_json IS NOT NULL`,
+		source.task, task.OwnerID, generation.TaskSucceeded)
+	stored, err := scanTask(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	report, err := check(stored)
+	if err != nil {
+		return err
+	}
+	if len(report.PendingFormats) > 0 && formatsOverlap(task.Conversion.Formats, report.PendingFormats) {
+		return generation.RepositoryConversionConflict
+	}
+	// The source still owes nothing, or nothing this run targets, so this is a
+	// new paid conversion rather than a duplicate of the source's own delivery.
+	// It can still race the same conversion in another session (#459).
+	return r.admitRacingDelivery(ctx, conn, task, source, check)
+}
+
+// admitRacingDelivery refuses a new conversion that races an active conversion
+// Task of the same owner in another session: one that already runs the same
+// exact model source into one of the formats this one targets (#459). It runs
+// inside the same immediate transaction as the insert, so the first submitter's
+// Task is visible to the second one and exactly one of the two is admitted;
+// without it the per-session scan of #330 lets both pay for one delivery.
+//
+// Only the owner's other sessions are read here: admitConversion already judged
+// the caller's own session. A source that is not a stored succeeded Task never
+// reaches this scan, so independent sessions stay independent there (#330). The
+// source identity is the same one admitConversion uses, so a source Task and
+// the same saved model file are one source.
+func (r *Repository) admitRacingDelivery(
+	ctx context.Context,
+	conn *sql.Conn,
+	task generation.Task,
+	source conversionSource,
+	check generation.ConversionConflictChecker,
+) error {
+	rows, err := conn.QueryContext(ctx, taskSelect+` WHERE generation_tasks.owner_id = ?
+		AND generation_tasks.state IN (?, ?, ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM generation_task_tombstones tombstone
+			WHERE tombstone.task_id = generation_tasks.id
+		)`, task.OwnerID, generation.TaskQueued, generation.TaskRunning, generation.TaskMaterializing)
+	if err != nil {
+		return err
+	}
+	active := make([]generation.Task, 0, 4)
+	for rows.Next() {
+		value, scanErr := scanTask(rows)
+		if scanErr != nil {
+			rows.Close()
+			return scanErr
+		}
+		active = append(active, value)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, value := range active {
+		if value.SessionID == task.SessionID {
+			continue
+		}
+		report, err := check(value)
+		if err != nil {
+			return err
+		}
+		if !report.Declared {
+			continue
+		}
+		racing, err := conversionSourceIdentity(ctx, conn, task.OwnerID, report.Intent)
+		if err != nil {
+			return err
+		}
+		if racing.equal(source) && formatsOverlap(task.Conversion.Formats, report.Intent.Formats) {
 			return generation.RepositoryConversionConflict
 		}
 	}

@@ -1,0 +1,12 @@
+-- 0108: 清单项「已申报完成、但交付还没稳定」的显式记号（#459）。
+--
+-- 成功申报时平台可能还在把其它格式作为后成功资源转换（#457）。这种项不进入
+-- 待验收：报告先存进 result_json，项保持 working，next_action_at 推后一个观察
+-- 间隔，调度器到点再判断交付是否稳定。问题是它仍是 working 且无 block，于是照样
+-- 占一个并行槽位：默认 max_parallel_items = 1 时，这一项会让整份清单停摆最长
+-- delivery_settle_max_seconds（默认 300s），后面的项一直不开轮次。
+--
+-- 所以记一个显式列，而不是让调度器去猜 result_json 是否非空：只有 DeferReport
+-- 这一条路径写它，项离开 working（进入 review/failed/skipped）时清零。旧行默认 0，
+-- 旧行为不变；旧二进制不读这一列（查询与插入都显式列出列名），回滚无需 down 迁移。
+ALTER TABLE asset_list_items ADD COLUMN delivery_deferred INTEGER NOT NULL DEFAULT 0;
