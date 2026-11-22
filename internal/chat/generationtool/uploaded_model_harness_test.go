@@ -134,7 +134,7 @@ func newUploadedHarness(t *testing.T) *uploadedHarness {
 	if err = registry.Register(offering.AdapterKey, h.provider); err != nil {
 		t.Fatal(err)
 	}
-	module, err := generation.New(generation.Dependencies{Repository: h.repo, Catalog: h.product, Providers: registry, Assets: h.blobs, Inputs: h.sources})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: h.repo, Catalog: h.product, Providers: registry, Assets: h.blobs, Inputs: h.sources})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +282,7 @@ func TestUploadedModelHarnessRealKernelAdmissionAndBoundReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	module, err := generation.New(generation.Dependencies{Repository: restartedRepo, Catalog: h.product, Providers: h.registry, Assets: h.blobs, Inputs: h.sources})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: restartedRepo, Catalog: h.product, Providers: h.registry, Assets: h.blobs, Inputs: h.sources})
 	if err != nil {
 		t.Fatal(err)
 	}

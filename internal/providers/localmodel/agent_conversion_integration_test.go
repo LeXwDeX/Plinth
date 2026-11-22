@@ -111,7 +111,7 @@ func runAgentConversion(t *testing.T, raw []byte) (generation.Task, *local.Store
 	if err := registry.Register("legacy", historicalModelPort{body: raw}); err != nil {
 		t.Fatal(err)
 	}
-	module, err := generation.New(generation.Dependencies{Repository: repo, Catalog: fixture, Providers: registry, Assets: blobs, Inputs: models})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: fixture, Providers: registry, Assets: blobs, Inputs: models})
 	if err != nil {
 		t.Fatal(err)
 	}

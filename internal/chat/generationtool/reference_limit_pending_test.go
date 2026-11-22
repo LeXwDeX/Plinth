@@ -83,7 +83,7 @@ func runImageTo3DWithPicturesAndNote(t *testing.T, mode, model string, pictures 
 	if err := registry.Register("meshy.v2", mock.New()); err != nil {
 		t.Fatal(err)
 	}
-	m, err := generation.New(generation.Dependencies{Repository: repo, Catalog: c, Providers: registry, Inputs: inputs, Assets: blobs})
+	m, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: c, Providers: registry, Inputs: inputs, Assets: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func toolDescriptionNoteFixture(t *testing.T) (catalog.ChatToolSchema, *generati
 	if err != nil {
 		t.Fatal(err)
 	}
-	kernel, err := generation.New(generation.Dependencies{Repository: repo, Catalog: c, Providers: registry, Inputs: inputs, Assets: blobs})
+	kernel, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: c, Providers: registry, Inputs: inputs, Assets: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

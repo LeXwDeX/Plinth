@@ -72,7 +72,8 @@ func TestKernelFreezesFittedInput(t *testing.T) {
 	}
 	fitter := &replacingFitter{from: large.ID, to: fitted.ID}
 	module, err := generation.New(generation.Dependencies{Repository: h.repository, Catalog: catalogue,
-		Providers: registry, Assets: h.assets, Inputs: h.inputs, InputFitter: fitter,
+		Conversions: generation.NoConversions,
+		Providers:   registry, Assets: h.assets, Inputs: h.inputs, InputFitter: fitter,
 		Clock: h.clock, SchemaVersion: "catalog-test-v1"})
 	if err != nil {
 		t.Fatal(err)

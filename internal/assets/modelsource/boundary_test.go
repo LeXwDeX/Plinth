@@ -341,7 +341,7 @@ func TestHistoricalNativeUploadAcceptedTaskKeepsFrozenDispatchContract(t *testin
 					if err = registry.Register(frozen.AdapterKey, provider); err != nil {
 						t.Fatal(err)
 					}
-					module, err := generation.New(generation.Dependencies{Repository: repo, Catalog: product, Providers: registry, Assets: blobs, Inputs: inputs})
+					module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: product, Providers: registry, Assets: blobs, Inputs: inputs})
 					if err != nil {
 						t.Fatal(err)
 					}

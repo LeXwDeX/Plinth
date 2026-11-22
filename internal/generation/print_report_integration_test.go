@@ -176,7 +176,7 @@ func runPrintReport(t *testing.T, kind string, failOnce bool) {
 		if failOnce {
 			store = &reportFailOnceStore{AssetStore: store}
 		}
-		module, err = generation.New(generation.Dependencies{Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "report-test"})
+		module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "report-test"})
 		if err != nil {
 			t.Fatal(err)
 		}

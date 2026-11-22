@@ -125,7 +125,7 @@ func (h *recoveryHarness) open(t *testing.T) {
 	if err = registry.Register(h.offering.AdapterKey, recoveryCountPort{adapter, &h.starts}); err != nil {
 		t.Fatal(err)
 	}
-	h.module, err = generation.New(generation.Dependencies{Repository: h.repo, Catalog: rigReportCatalog{[]generation.Offering{h.offering}}, Providers: registry, Assets: h.store, Clock: h.clock, SchemaVersion: "recovery-test"})
+	h.module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: h.repo, Catalog: rigReportCatalog{[]generation.Offering{h.offering}}, Providers: registry, Assets: h.store, Clock: h.clock, SchemaVersion: "recovery-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

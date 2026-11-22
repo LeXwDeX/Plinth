@@ -178,7 +178,7 @@ func TestDependencyAdmissionGuardSurvivesReopenAndRetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h.module, err = generation.New(generation.Dependencies{Repository: reopened, Catalog: c, Providers: registry, Assets: h.assets, Inputs: inputs, Clock: h.clock})
+			h.module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: reopened, Catalog: c, Providers: registry, Assets: h.assets, Inputs: inputs, Clock: h.clock})
 			if err != nil {
 				t.Fatal(err)
 			}

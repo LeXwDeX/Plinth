@@ -1203,6 +1203,22 @@ type DeliveryConversionRule interface {
 	PendingFormats(Task) []string
 }
 
+// NoConversions is the DeliveryConversionRule of a Product Schema that declares
+// no format conversions. Assembly passes it explicitly instead of leaving the
+// dependency empty, so a forgotten rule fails at construction rather than
+// silently disabling the duplicate paid-conversion guard (#467).
+var NoConversions DeliveryConversionRule = noConversionsRule{}
+
+type noConversionsRule struct{}
+
+func (noConversionsRule) IsConversion(OfferingID, json.RawMessage) bool { return false }
+
+func (noConversionsRule) ConversionIntent(Offering, json.RawMessage) (ConversionIntent, bool) {
+	return ConversionIntent{}, false
+}
+
+func (noConversionsRule) PendingFormats(Task) []string { return nil }
+
 // ConversionGuardReport is what the Product Schema's conversion rule tells the
 // repository about one stored Task: the declared conversion it runs (Declared
 // and Intent) and the formats it still owes as post-success resources

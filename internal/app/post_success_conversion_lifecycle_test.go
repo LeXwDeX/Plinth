@@ -382,11 +382,12 @@ func newLifecycleHarness(
 	clock := &fakeAcmeClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
 	repository.SetClock(clock.Now)
 	module, err := generation.New(generation.Dependencies{
-		Repository: wired,
-		Catalog:    taskCatalog,
-		Providers:  registry,
-		Assets:     assetStore,
-		Clock:      clock,
+		Conversions: generation.NoConversions,
+		Repository:  wired,
+		Catalog:     taskCatalog,
+		Providers:   registry,
+		Assets:      assetStore,
+		Clock:       clock,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -425,11 +426,12 @@ func (h *lifecycleHarness) rebuild(
 		t.Fatal(err)
 	}
 	module, err := generation.New(generation.Dependencies{
-		Repository: repository,
-		Catalog:    h.catalog(t),
-		Providers:  registry,
-		Assets:     assetStore,
-		Clock:      h.clock,
+		Conversions: generation.NoConversions,
+		Repository:  repository,
+		Catalog:     h.catalog(t),
+		Providers:   registry,
+		Assets:      assetStore,
+		Clock:       h.clock,
 	})
 	if err != nil {
 		t.Fatal(err)

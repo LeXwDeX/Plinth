@@ -162,7 +162,7 @@ func TestAgentViewLabelsReachTheHyper3DWireInPictureOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	module, err := generation.New(generation.Dependencies{Repository: repo, Catalog: product, Providers: registry, Inputs: inputs, Assets: blobs})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: product, Providers: registry, Inputs: inputs, Assets: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}

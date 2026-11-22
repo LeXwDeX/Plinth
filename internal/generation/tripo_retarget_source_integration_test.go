@@ -136,7 +136,7 @@ func TestTripoRetargetAdmitsOnlyOwnedRigV3SourceBeforePayment(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	module, err := generation.New(generation.Dependencies{Repository: repository, Catalog: rigReportCatalog{[]generation.Offering{source, rigV3, rigV25, animation}}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "retarget-source-fixture"})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: rigReportCatalog{[]generation.Offering{source, rigV3, rigV25, animation}}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "retarget-source-fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}

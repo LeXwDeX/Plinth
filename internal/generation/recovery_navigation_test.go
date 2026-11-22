@@ -79,7 +79,7 @@ func navigationModule(t *testing.T, h *recoveryHarness, available bool) (*naviga
 			t.Fatal(err)
 		}
 	}
-	h.module, err = generation.New(generation.Dependencies{Repository: repo, Catalog: rigReportCatalog{[]generation.Offering{h.offering}}, Providers: registry, Assets: assets, Clock: h.clock, SchemaVersion: "recovery-navigation-test"})
+	h.module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: rigReportCatalog{[]generation.Offering{h.offering}}, Providers: registry, Assets: assets, Clock: h.clock, SchemaVersion: "recovery-navigation-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

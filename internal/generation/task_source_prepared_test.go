@@ -61,7 +61,7 @@ func TestAssetsTaskPreparedInputFreezesSelectedBytesAndRevalidatesBeforeAdmissio
 			store := &taskAssetReadStore{body: "saved model"}
 			registry := &assetDependencyDestinationRegistry{}
 			offering := Offering{ID: "local/reverse", Revision: "1", ProviderID: "local", Capability: FormatConversion, Parameters: []Parameter{assetTaskParameter(t)}}
-			m, err := New(Dependencies{Repository: repo, Catalog: assetDependencyCatalog{offering: offering}, Providers: registry, Assets: store, SchemaVersion: "test"})
+			m, err := New(Dependencies{Conversions: NoConversions, Repository: repo, Catalog: assetDependencyCatalog{offering: offering}, Providers: registry, Assets: store, SchemaVersion: "test"})
 			if err != nil {
 				t.Fatal(err)
 			}

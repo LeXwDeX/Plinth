@@ -61,7 +61,8 @@ func TestDirectPreparationCutsTheMarksWithThePictures(t *testing.T) {
 		}
 	}
 	module, err := generation.New(generation.Dependencies{Repository: h.repository, Catalog: base, Providers: registry,
-		Assets: failingAssetStore{}, Inputs: h.inputs, SchemaVersion: "catalog-test-v1"})
+		Conversions: generation.NoConversions,
+		Assets:      failingAssetStore{}, Inputs: h.inputs, SchemaVersion: "catalog-test-v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
