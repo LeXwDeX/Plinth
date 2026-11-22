@@ -111,30 +111,38 @@ class AgentAccountTest(unittest.TestCase):
         with mock.patch.object(release_env.subprocess, "run", return_value=self.Done(release_code)), \
                 mock.patch.object(release_env, "agent_credentials", return_value=agent), \
                 mock.patch.object(release_env, "smoke", fake_smoke), \
+                mock.patch.object(release_env, "post_release_smoke", return_value=0) as post_release, \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            args = mock.Mock(revision=None, acceptance_note=None)
+            args = mock.Mock(revision=None, acceptance_note=None, live_upstream=False)
             code = release_env.release(document, name, args)
-        return code, calls, output.getvalue()
+        return code, calls, output.getvalue(), post_release
 
     def test_a_successful_release_ensures_the_agent_account(self):
-        code, calls, _ = self.release(0, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"})
+        code, calls, _, _ = self.release(0, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"})
         self.assertEqual(code, 0)
         self.assertEqual(calls, [("alone", ["bash", str(release_env.AGENT_ACCOUNT_SCRIPT)])])
 
     def test_a_failed_release_does_not_touch_the_account(self):
-        code, calls, _ = self.release(3, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"})
+        code, calls, _, post_release = self.release(3, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"})
         self.assertEqual((code, calls), (3, []))
+        post_release.assert_not_called()
 
     def test_without_the_account_file_the_release_only_says_so(self):
-        code, calls, output = self.release(0, {})
+        code, calls, output, _ = self.release(0, {})
         self.assertEqual((code, calls), (0, []))
         self.assertIn("agent-test.env", output)
 
     def test_an_account_failure_is_reported_after_the_release_is_deployed(self):
-        code, calls, output = self.release(0, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"}, smoke_code=1)
+        code, calls, output, _ = self.release(0, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"}, smoke_code=1)
         self.assertEqual(code, 1)
         self.assertEqual(len(calls), 1)
         self.assertIn("deployed", output)
+
+    def test_the_post_release_smoke_runs_after_the_account_step(self):
+        # #411: the release ends with the scripted smoke layers, not with the account step.
+        code, calls, _, post_release = self.release(0, {"AGENT_TEST_USERNAME": "a", "AGENT_TEST_PASSWORD": "b"})
+        self.assertEqual((code, post_release.call_count), (0, 1))
+        self.assertEqual(post_release.call_args[0][2], "live")  # the persistent "alone" stack
 
     def test_smoke_injects_the_agent_account(self):
         seen = {}
@@ -540,6 +548,188 @@ class UpstreamShapeTest(unittest.TestCase):
                 mock.patch.object(release_env.subprocess, "run", fake_run):
             self.assertEqual(release_env.smoke(document, "dev-test", ["true"]), 0)
         self.assertEqual(seen["ART_AI_UPSTREAM_SHAPE"], "fake")
+
+
+class PostReleaseSmokeTest(unittest.TestCase):
+    """#411: a successful fake-shape release runs L0/L1/L1 Agent and leaves a JSON report."""
+
+    SHA = "a" * 40
+
+    class Done:
+        def __init__(self, stdout=b"", code=0):
+            self.stdout, self.stderr, self.returncode = stdout, b"", code
+
+    def passing(self, name="L1"):
+        return {"status": "pass", "passed": 3, "failed": 0, "skipped": 0, "soft_failed": 0,
+                "script": f"{name}.sh", "started_at": "2026-11-22T00:00:00Z", "finished_at": "2026-11-22T00:01:00Z"}
+
+    def test_a_layer_reads_its_own_counters(self):
+        output = b"INFO: upstream shape fake\nPASS: healthz\n=== SMOKE-L1 PASS=3 FAIL=0 ===\n"
+        with mock.patch.object(release_env.subprocess, "run", return_value=self.Done(output)):
+            check, kept = release_env.smoke_layer("smoke-l1-free.sh", "L1", {})
+        self.assertEqual((check["status"], check["passed"], check["failed"], check["skipped"], check["soft_failed"]),
+                         ("pass", 3, 0, 0, 0))
+        self.assertEqual(kept.count("PASS: healthz"), 1)
+        self.assertEqual(check["script"], "smoke-l1-free.sh")
+        self.assertNotIn("ADMIN_PASSWORD", kept)
+
+    def test_a_skipped_soft_failed_or_silent_layer_is_not_a_pass(self):
+        cases = [(b"=== SMOKE-L1 PASS=3 FAIL=1 ===\n", 1, "fail"),
+                 (b"=== SMOKE-L1-AGENT-MODE PASS=3 FAIL=0 SKIP=1 ===\n", 0, "fail"),
+                 (b"SOFT-FAIL: approval card not reached\n=== SMOKE-L1 PASS=3 FAIL=0 ===\n", 0, "fail"),
+                 (b"no summary at all\n", 0, "fail"),
+                 (b"", 0, "fail"),
+                 (b"=== SMOKE-L1 PASS=3 FAIL=0 SKIP=0 ===\n", 0, "pass")]
+        for output, code, want in cases:
+            with self.subTest(output=output, code=code):
+                with mock.patch.object(release_env.subprocess, "run", return_value=self.Done(output, code)):
+                    check, _ = release_env.smoke_layer("smoke-l1-free.sh", "L1", {})
+                self.assertEqual(check["status"], want)
+        # The soft-fail line is counted, so the report says why the layer is not a pass.
+        with mock.patch.object(release_env.subprocess, "run", return_value=self.Done(cases[2][0])):
+            check, _ = release_env.smoke_layer("smoke-l1-free.sh", "L1", {})
+        self.assertEqual((check["status"], check["passed"], check["soft_failed"]), ("fail", 3, 1))
+
+    def test_a_timeout_is_a_failed_layer_not_an_error(self):
+        with mock.patch.object(release_env.subprocess, "run",
+                               side_effect=release_env.subprocess.TimeoutExpired("bash", 1, output=b"PASS: a")):
+            check, output = release_env.smoke_layer("smoke-l1-free.sh", "L1", {})
+        self.assertEqual(check["status"], "fail")
+        self.assertIn("timed out", output)
+
+    def test_the_report_holds_one_check_per_layer_and_writes_one_log_each(self):
+        document = ephemeral_document()
+        written = {}
+
+        def fake_write(env, path, content, directory_mode=None):
+            written[path] = (content, directory_mode)
+
+        with mock.patch.object(release_env, "smoke_variables", return_value={"ART_AI_UPSTREAM_SHAPE": "fake",
+                                                                            "ADMIN_PASSWORD": "p"}), \
+                mock.patch.object(release_env, "smoke_layer",
+                                  side_effect=lambda script, layer, variables: (self.passing(layer), "PASS=3 FAIL=0\n")), \
+                mock.patch.object(release_env, "write_host_file", fake_write), \
+                contextlib.redirect_stdout(io.StringIO()):
+            report, path = release_env.smoke_report(document, "dev-test", self.SHA)
+        directory = f"/srv/dev-test/production/reports/smoke-{self.SHA}"
+        self.assertEqual(path, f"{directory}.json")
+        self.assertEqual(report["schema"], "plinth.smoke-report")
+        self.assertEqual((report["version"], report["revision"], report["environment"], report["upstream_shape"]),
+                         (1, self.SHA, "dev-test", "fake"))
+        self.assertEqual(sorted(report["checks"]), ["L0", "L1", "L1_agent"])
+        for layer in ("L0", "L1", "L1_agent"):
+            self.assertEqual(report["checks"][layer]["log"], f"{directory}/{layer}.log")
+            self.assertIn("PASS=3 FAIL=0", written[f"{directory}/{layer}.log"][0])
+        self.assertEqual(written[f"{directory}/L0.log"][1], "700")
+        stored = json.loads(written[f"{directory}.json"][0])
+        self.assertEqual(stored["checks"]["L1_agent"]["status"], "pass")
+        self.assertNotIn("ADMIN_PASSWORD", written[f"{directory}.json"][0])
+
+    def test_a_failed_layer_fails_the_release_after_it_is_deployed(self):
+        document = load(BASE)
+        report = {"checks": {"L0": self.passing("L0"), "L1": {**self.passing("L1"), "status": "fail"}, "L1_agent": self.passing("L1_agent")}}
+        output = io.StringIO()
+        with mock.patch.object(release_env, "running_revision", return_value=self.SHA), \
+                mock.patch.object(release_env, "smoke_report", return_value=(report, "/srv/dev-test/report.json")), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            code = release_env.post_release_smoke(document, "dev-test", "fake")
+        text = output.getvalue()
+        self.assertEqual(code, 1)
+        self.assertIn("deployed", text)
+        self.assertIn("L1", text)
+
+    def test_a_passing_report_leaves_the_release_at_zero(self):
+        document = load(BASE)
+        report = {"checks": {name: self.passing(name) for name in ("L0", "L1", "L1_agent")}}
+        with mock.patch.object(release_env, "running_revision", return_value=self.SHA), \
+                mock.patch.object(release_env, "smoke_report", return_value=(report, "/srv/dev-test/report.json")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(release_env.post_release_smoke(document, "dev-test", "fake"), 0)
+
+    def test_a_live_release_keeps_the_manual_protocol(self):
+        # L1 reaches a real chat model on a live stack, which needs the user's consent per run.
+        document = load(BASE)
+        with mock.patch.object(release_env, "smoke_report") as smoke_report, \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(release_env.post_release_smoke(document, "dev-test", "live"), 0)
+        smoke_report.assert_not_called()
+
+    def test_a_release_without_a_report_says_so_and_fails(self):
+        document = load(BASE)
+        output = io.StringIO()
+        with mock.patch.object(release_env, "running_revision", return_value=self.SHA), \
+                mock.patch.object(release_env, "smoke_report",
+                                  side_effect=release_env.EnvironmentError_("ssh failed")), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            self.assertEqual(release_env.post_release_smoke(document, "dev-test", "fake"), 1)
+        self.assertIn("deployed", output.getvalue())
+
+    def test_a_promotion_reads_the_source_smoke_report_when_it_exists(self):
+        report = {"schema": "plinth.smoke-report", "version": 1, "revision": self.SHA,
+                  "checks": {name: {"status": "pass", "passed": 3, "failed": 0, "skipped": 0, "soft_failed": 0}
+                             for name in ("L0", "L1", "L1_agent")}}
+        _, commands, _ = self.run_promotion(report)
+        rules = release_env.promotion_rules()
+        self.assertIn(f"cat /srv/dev-test/{rules.smoke_report_path(self.SHA)}", commands)
+
+    def test_a_promotion_refuses_a_source_report_that_is_not_passing(self):
+        for report in ({"schema": "plinth.smoke-report", "version": 1, "revision": self.SHA,
+                        "checks": {name: {"status": "fail", "passed": 1, "failed": 2}
+                                   for name in ("L0", "L1", "L1_agent")}},
+                       {"schema": "plinth.smoke-report", "version": 1, "revision": "b" * 40,
+                        "checks": {name: {"status": "pass", "passed": 1, "failed": 0}
+                                   for name in ("L0", "L1", "L1_agent")}},
+                       {"schema": "plinth.smoke-report", "version": 1, "revision": self.SHA,
+                        "checks": {name: {"status": "pass", "passed": 1, "failed": 0, "skipped": 1}
+                                   for name in ("L0", "L1", "L1_agent")}}):
+            with self.subTest(report=report["checks"]["L0"]):
+                with self.assertRaisesRegex(release_env.EnvironmentError_, "smoke report refused"):
+                    self.run_promotion(report)
+
+    def test_a_promotion_without_a_source_report_falls_back_to_the_note(self):
+        _, commands, output = self.run_promotion(None, present=False)
+        self.assertFalse([command for command in commands if "smoke-" in command])
+        self.assertIn("no machine smoke report", output)
+
+    # A promoted environment: dev-test is the source, formal-test takes its accepted revisions.
+    PROMOTED = {"ssh": "root@host-four", "root": "/srv/formal", "base_url": "http://host-four:8080",
+                "compose_project": "formal_test", "single_stack": {"image_keep": 1}, "protected_paths": [],
+                "promote_from": "dev-test"}
+    TAG = "aaaaaaa-20261019T010000Z"
+    EVIDENCE = "https://forge.example.invalid/owner/project/issues/63#c1"
+
+    def run_promotion(self, smoke_report, present=True):
+        """Drive promotion_revision with the source side stubbed; return (revision, commands, output)."""
+        document = copy.deepcopy(BASE)
+        document["acceptance"] = {"forge_repo": "owner/project", "issue": 63,
+                                  "forge_url": "https://forge.example.invalid/owner/project"}
+        document["environments"]["formal-test"] = dict(self.PROMOTED)
+        document = load(document)
+        rules = release_env.promotion_rules()
+        note = {"formal_promotion": 1, "revision": self.SHA, "image_tag": self.TAG,
+                "checks": {name: {"status": "pass", "failed": 0, "passed": 1, "evidence": self.EVIDENCE}
+                           for name in ("L0", "L1", "L1_agent", "related")}}
+        commands = []
+
+        def fake_run(*args, input=None, timeout=120):
+            command = args[-1]
+            commands.append(command)
+            if command.endswith("manifest.txt"):
+                return f"{self.TAG} {self.SHA} 2026-11-19T01:00:00Z\n"
+            if "smoke-" in command:
+                return json.dumps(smoke_report) if smoke_report is not None else ""
+            return ""
+
+        output = io.StringIO()
+        with mock.patch.object(release_env, "promotion_rules", return_value=rules), \
+                mock.patch.object(rules, "read_acceptance_comment",
+                                  return_value={"body": "```json\n" + json.dumps(note) + "\n```"}), \
+                mock.patch.object(release_env, "running_revision", return_value=self.SHA), \
+                mock.patch.object(release_env, "host_file_state", return_value=present), \
+                mock.patch.object(release_env, "run", fake_run), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            revision = release_env.promotion_revision(document, "formal-test", self.SHA, 5)
+        return revision, commands, output.getvalue()
 
 
 if __name__ == "__main__":

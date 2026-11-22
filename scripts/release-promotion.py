@@ -9,6 +9,12 @@ The acceptance comment must contain exactly one JSON fenced report with "formal_
 the full revision, the source image tag and four passing checks (L0, L1, L1_agent, related), each
 with evidence under the project URL. Skipped or soft-failed checks never count.
 
+Since #411 the same passing rule also applies to the machine-written smoke report that
+release-env.py leaves under the source environment's release root (smoke_report_path): the three
+scripted layers (L0, L1, L1_agent) must pass there too, so a hand-written claim cannot replace a
+layer that was never run. The related layer stays in the note: no script decides what "related"
+means for a change.
+
 The legacy-formal stack that used to be promoted by release-formal.py was retired on 2026-10-30
 (#74); only these shared checks remain.
 """
@@ -17,8 +23,29 @@ import re
 import subprocess
 
 
+SMOKE_SCHEMA = "plinth.smoke-report"
+SMOKE_VERSION = 1
+# The layers release-env.py runs after a successful release; "related" is not among them.
+SMOKE_CHECKS = ("L0", "L1", "L1_agent")
+CHECK_NAMES = ("L0", "L1", "L1_agent", "related")
+
+
 class ReleaseError(Exception):
     """Only fixed, credential-free diagnostics belong in this exception."""
+
+
+def smoke_report_path(revision):
+    """The machine smoke report of one revision, relative to the environment's release root."""
+    validate_revision(revision)
+    return f"production/reports/smoke-{revision}.json"
+
+
+def check_passed(check):
+    """One passing check: pass status, no failure, no skip, no soft-fail, at least one pass."""
+    return (isinstance(check, dict) and check.get("status") == "pass"
+            and type(check.get("failed")) is int and check["failed"] == 0
+            and type(check.get("passed")) is int and check["passed"] >= 1
+            and check.get("skipped", 0) == 0 and check.get("soft_failed", 0) == 0)
 
 
 def validate_revision(revision):
@@ -73,17 +100,44 @@ def acceptance_from_note(body, revision, forge):
     validate_tag(report.get("image_tag"))
     checks = report.get("checks", {})
     if not isinstance(checks, dict): raise ReleaseError("acceptance checks must be an object")
-    for name in ("L0", "L1", "L1_agent", "related"):
+    for name in CHECK_NAMES:
         check = checks.get(name, {})
         if not isinstance(check, dict): raise ReleaseError("acceptance check must be an object")
-        if (check.get("status") != "pass" or type(check.get("failed")) is not int
-                or check["failed"] != 0 or type(check.get("passed")) is not int or check["passed"] < 1
-                or check.get("skipped", 0) != 0 or check.get("soft_failed", 0) != 0):
+        if not check_passed(check):
             raise ReleaseError("test acceptance is missing, failed, skipped, or soft-failed")
         evidence = check.get("evidence", "")
         if not isinstance(evidence, str) or not evidence.startswith(forge + "/"):
             raise ReleaseError("native project evidence is required for every acceptance check")
     return report
+
+
+def smoke_checks_from_report(text, revision):
+    """Read the machine-written post-release smoke report (L0, L1, L1 Agent).
+
+    release-env.py writes it after a successful release, from the scripts' own counters. Every
+    scripted layer must be a passing one: a layer that failed, skipped, soft-failed or left no
+    PASS/FAIL summary makes the report — and therefore the promotion — fail.
+    """
+    validate_revision(revision)
+    try:
+        report = json.loads(text)
+    except ValueError:
+        raise ReleaseError("the machine smoke report is invalid") from None
+    if (not isinstance(report, dict) or report.get("schema") != SMOKE_SCHEMA
+            or type(report.get("version")) is not int or report["version"] != SMOKE_VERSION):
+        raise ReleaseError("the machine smoke report has an unknown schema")
+    if report.get("revision") != revision:
+        raise ReleaseError("the machine smoke report is for another revision")
+    checks = report.get("checks")
+    if not isinstance(checks, dict):
+        raise ReleaseError("the machine smoke report has no checks")
+    for name in SMOKE_CHECKS:
+        check = checks.get(name)
+        if not isinstance(check, dict):
+            raise ReleaseError(f"the machine smoke report has no {name} check")
+        if not check_passed(check):
+            raise ReleaseError(f"the machine smoke report does not record a passing {name} check")
+    return checks
 
 
 def validate_manifest(text, revision, tag):

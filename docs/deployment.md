@@ -8,8 +8,8 @@
 
 | 环境名 | 用途 | 接收的 revision | 数据 | 发布后验收 | 付费生成 |
 |---|---|---|---|---|---|
-| `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 每次发布全新数据（`"data": "ephemeral"`，#28）：不含历史迁移数据，只有运行环境引导的管理员测试账号；缺省为 fake 上游形态（#219，见下文「fake 上游形态」） | L0、L1、L1 Agent 必跑（fake 形态，零费用）；L2 等真实模型验收只在用户当次同意后以真实形态发布再跑 | 真实形态与付费验收须当次同意（见 `AGENTS.md`） |
-| `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent | 不做；测试期付费同意授权不适用 |
+| `dev-test` | 开发测试环境 | 每次已推送的 `origin/main` | 每次发布全新数据（`"data": "ephemeral"`，#28）：不含历史迁移数据，只有运行环境引导的管理员测试账号；缺省为 fake 上游形态（#219，见下文「fake 上游形态」） | 发布脚本自动跑 L0、L1、L1 Agent 并写机器报告（fake 形态，零费用，见 §4）；L2 等真实模型验收只在用户当次同意后以真实形态发布再跑 | 真实形态与付费验收须当次同意（见 `AGENTS.md`） |
+| `formal-test` | 正式测试环境（测试版本中的稳定版）：单版本、不留残余 | 只接收按 §4 晋级规则通过的精确 revision | 本栈独立，不跨主机复制 | L0、L1、L1 Agent（真实形态不自动跑，按 §6 手动执行并留证） | 不做；测试期付费同意授权不适用 |
 
 只有上表两个环境可部署（#270）。`legacy-formal` 已下线，环境名不再可用（存档 #74）；环境沿革见 [`history.md`](history.md)。
 
@@ -46,13 +46,13 @@
 
 1. `python3 scripts/release-env.py release dev-test`（同步 → 构建 → preflight → 备份 → Compose 更新 → 健康 → 失败自动回滚；`data: ephemeral` 时无备份，见下文「全新数据发布」；缺省为 fake 上游形态，真实形态加 `--live-upstream` 并设 `ART_AI_LIVE_ACK=1`，见下文「fake 上游形态」）。
 2. 核对容器 OCI revision 等于 `origin/main` 完整 SHA（`release-env.py smoke` 设置的 `EXPECT_SHA` 即读自容器标签，L1 Agent 冒烟同时比对 `/api/version`）。
-3. 冒烟（§6），以及本次改动相关的页面、API 与 Agent/生成链路验收。
-4. 全部 PASS 后，在 `acceptance.issue` 写入一条 §4 格式的验收报告 note；记下 note ID。
+3. fake 形态下发布脚本接着自动建 Agent 专用账号并跑 §6 的 L0、L1、L1 Agent，报告落在发布根（§4）。真实形态不自动跑：按 §6 手动执行这三层（L1 会调用真实对话模型，须先取得当次同意），再跑本次改动相关的页面、API 与 Agent/生成链路验收。
+4. 全部 PASS 后，在 `acceptance.issue` 写入一条 §4 格式的验收报告 note；记下 note ID。机器报告不用复制到 Issue，晋级时脚本直接读源环境发布根下的那一份。
 
 **部署到正式测试环境（`formal-test`）**
 
 1. 确认目标 revision 在 `dev-test` 已按上面第 1–4 步稳定通过，并取得验收报告 note ID。不满足就停止并告诉用户缺什么，不降级验收。
-2. `python3 scripts/release-env.py release formal-test --acceptance-note <noteID>`；不给 `--revision` 时取 `dev-test` 当前运行的 revision，也可给一个更早的已验收完整 SHA。
+2. `python3 scripts/release-env.py release formal-test --acceptance-note <noteID>`；不给 `--revision` 时取 `dev-test` 当前运行的 revision，也可给一个更早的已验收完整 SHA。脚本除 Issue comment 外还核对 `dev-test` 发布根下该 revision 的机器报告（§4），报告缺失时按 §4 的回退规则只核对 comment。
 3. 冒烟（§6），核对 revision。
 4. 在 #270 记录部署 SHA、冒烟结果与异常；不写回本文。
 
@@ -64,7 +64,8 @@
 
 - revision 是 40 位小写完整 SHA，且是 `origin/main` 的祖先；
 - 源环境的成功发布清单（`<root>/releases/manifest.txt`）中有该 revision 与报告中的同一镜像标签；
-- `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（校验函数在 `scripts/release-promotion.py`，`release-env.py` 加载，`scripts/tests/test_release_promotion.py` 覆盖）：
+- 源环境发布根下该 revision 的**机器冒烟报告**存在时，其 L0、L1、L1 Agent 三层都是 `status` 为 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`；报告缺失时按下面的回退规则只核对 Issue comment；
+- `acceptance.issue` 下指定的 comment 中恰有一个如下 JSON fenced block，四项检查都是 `pass`、`failed: 0`、`passed > 0`、`skipped: 0`、`soft_failed: 0`，每项证据为本仓库内的完整 URL（校验函数在 `scripts/release-promotion.py`，`release-env.py` 加载，`scripts/tests/test_release_promotion.py`、`scripts/tests/test_release_env.py` 覆盖）：
 
 ```json
 {
@@ -81,6 +82,37 @@
 ```
 
 `related` 覆盖本次改动涉及的浏览器与 Agent 验收（含按 `scripts/smoke/README.md` 需要的 L2 真实模型链路）。脚本无法判断「稳定」本身：报告只能在全部检查实际通过后写入，有失败、跳过或软失败就不写。
+
+### 机器冒烟报告（`release-env.py` 自动产出，#411）
+
+`dev-test` 的 fake 形态发布成功后，`release-env.py` 依次跑 `smoke-l0-browser-boot.sh`、`smoke-l1-free.sh`、`smoke-l1-agent-mode.sh`，把脚本自己的汇总行（`PASS=<n> FAIL=<n>[ SKIP=<n>]` 与 `SOFT-FAIL` 行）读成一份 JSON，落在发布根下不追踪的位置：
+
+- 报告：`<root>/production/reports/smoke-<revision>.json`
+- 每层日志：`<root>/production/reports/smoke-<revision>/<层名>.log`（`0600`，目录 `0700`）
+
+```json
+{
+  "schema": "plinth.smoke-report",
+  "version": 1,
+  "environment": "dev-test",
+  "revision": "<完整40位小写SHA>",
+  "upstream_shape": "fake",
+  "started_at": "2026-11-22T01:02:03Z",
+  "finished_at": "2026-11-22T01:07:04Z",
+  "checks": {
+    "L0": {"status": "pass", "passed": 4, "failed": 0, "skipped": 0, "soft_failed": 0,
+           "script": "smoke-l0-browser-boot.sh", "started_at": "…", "finished_at": "…",
+           "log": "<root>/production/reports/smoke-<revision>/L0.log"},
+    "L1": {"status": "pass", "passed": 9, "failed": 0, "skipped": 0, "soft_failed": 0, "…": "…"},
+    "L1_agent": {"status": "pass", "passed": 40, "failed": 0, "skipped": 0, "soft_failed": 0, "…": "…"}
+  }
+}
+```
+
+- 判定：脚本退出码 0、汇总行 `failed=0`、`skipped=0`、输出无 `SOFT-FAIL` 行且 `passed>0` 才是 `status: "pass"`；`SKIP:`、`SOFT-FAIL:`、`PAID-TASK-ALERT`、非零退出码和缺汇总行都记 `fail`。判定规则与 `scripts/release-promotion.py` 的 `check_passed` 同一份，Issue comment 与机器报告因此口径一致。
+- 落盘与失败：三层都会跑完再写报告；报告写不出去或某层不是 `pass` 时发布命令返回非零，但**发布本身不回滚**（这三层不在自动回滚范围）。按 `AGENTS.md`「发布后冒烟判定与晋级校验」记录证据、恢复已验证版本后再修。
+- 回退：源环境没有该 revision 的报告时（例如 #411 之前发布的版本），晋级只核对 Issue comment，命令会打印一行提示；报告存在即核对，不存在的报告不会当成通过。
+- 真实形态（`formal-test` 与带 `--live-upstream` 的 `dev-test`）不自动跑，也不写报告：L1 会调用真实对话模型，须每次取得当次同意，按 §6 手动执行。
 
 ### 保留数据升级演练（草案，未实施，需授权）
 
@@ -264,6 +296,8 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l0-bro
 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-free.sh
 python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-agent-mode.sh
 ```
+
+`dev-test` 的 fake 形态发布由 `release-env.py release dev-test` 自动跑上面三条（顺序：L0 → L1 → L1 Agent），逐层留日志并写机器报告，位置与字段见 §4；发布命令在报告写不成或任一层不是 `pass` 时返回非零，但发布不回滚。真实形态（`formal-test` 与 `--live-upstream` 的 `dev-test`）仍按上面三条手动执行：L1 在真实形态会调用真实对话模型，须先取得当次同意（`AGENTS.md`「上游接口与 Fake」），L0 不涉及上游、随时可跑。手动执行时可用 `python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/<脚本>` 逐层跑，脚本自己的汇总行就是报告读的那一份；机器报告只由发布入口写，手动跑不覆盖它。
 
 **多个对话模型（#322）**：默认对话模型连接仍是运行环境文件里的 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。要给用户开放更多对话模型，在同一文件加 `LLM_CONNECTIONS=<ID>,<ID>`，并为每个 `<ID>` 显式写 `<ID>_BASE_URL`、`<ID>_API_KEY`、`<ID>_MODEL`（可选 `<ID>_CONTEXT_WINDOW_TOKENS`）；统一网关下每个地址都写同一个网关 URL，不设跨连接的别名或回落。完整规则见 [Provider 配置](provider-configuration.md#多个对话模型连接--multiple-chat-model-connections)。改完只重建本栈的 `art-ai-go` 服务，然后在管理后台「LLM 设置」点「测试连接」核对连通性与读图，再设置默认模型和开放的档位；设置按版本保存在数据库，跨发布保留。
 
