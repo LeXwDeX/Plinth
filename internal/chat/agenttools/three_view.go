@@ -238,7 +238,14 @@ func threeViewRunKey(command chat.ToolCommand) string {
 // changes what an old call or an old run means (#409).
 func (e *Executor) threeViewPurpose(requested string) (catalog.ChatThreeViewPurpose, bool) {
 	if len(e.threeView.Purposes) == 0 {
-		return catalog.ChatThreeViewPurpose{ID: e.threeView.DefaultPurpose, RecipeID: e.threeView.RecipeID}, true
+		// A Schema that declares no use, or an Executor wired without the
+		// three-view Schema at all, still has the historical recipe: it is the
+		// one the tool always ran before uses existed (#409).
+		recipe := e.threeView.RecipeID
+		if recipe == "" {
+			recipe = threeViewRecipeID
+		}
+		return catalog.ChatThreeViewPurpose{ID: e.threeView.DefaultPurpose, RecipeID: recipe}, true
 	}
 	wanted := strings.TrimSpace(requested)
 	if wanted == "" {

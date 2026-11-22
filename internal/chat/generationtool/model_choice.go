@@ -293,9 +293,14 @@ func (executor *Executor) chooseOffering(
 		Recommended: recommended,
 		Profile:     profile.ID,
 		Reason:      profile.Reason,
-		Workspace:   workspace,
+		// The recommendation the Schema inferred from a brief with no purpose
+		// never overrides the workspace picker's visible model (#381).
+		PurposeIsDefault: profile.Default,
+		Workspace:        workspace,
 		// A Catalog that declares the confirmation text asks the person before
-		// a purpose recommendation replaces the model they see (#103 C1).
+		// a purpose recommendation replaces the model they see (#103 C1). A
+		// purpose the Schema inferred for a brief that states none steps aside
+		// for the workspace model instead (#381).
 		ConfirmsWorkspace: executor.chat.Presentation.Messages.ModelChoiceWorkspaceConflict != "",
 		Fits:              executor.modelFits(command, input),
 		Views:             executor.modelViews(command, input),

@@ -161,6 +161,15 @@ type ModelRequest struct {
 	// Without it a Catalog that declares no such text keeps the older rule,
 	// where the recommendation runs.
 	ConfirmsWorkspace bool
+	// PurposeIsDefault says the recommendation came from the Schema's
+	// default_profile because the brief stated no purpose (#381), not from a
+	// purpose the person chose. An inferred purpose advises only: when the
+	// workspace picker shows a model of its own, that visible model runs
+	// instead and no confirmation is asked, because the person never expressed
+	// an intent to confirm. A purpose the brief names keeps ConfirmsWorkspace's
+	// rule above (#103 C1). The purpose's parameter values and budget still
+	// apply either way.
+	PurposeIsDefault bool
 	// Fits reports whether an Offering can take the request's whole input: its
 	// reference pictures, its views and the frozen selection mask. The purpose
 	// recommendations are filtered by it, because a recommendation that cannot
@@ -288,19 +297,25 @@ func ResolveModel(request ModelRequest) ModelResolution {
 		// chosen, even when it is not an explicit lock. A recommendation that
 		// differs must not replace that visible pick silently (#103 review C1):
 		// the person confirms which to keep. A visible pick that is itself one
-		// of the purpose's recommendations runs instead (#282).
-		if workspace := strings.TrimSpace(request.Workspace); request.ConfirmsWorkspace && workspace != "" &&
-			!ModelNameMatches(chosen, workspace) {
-			if visible, found := recommendedWorkspace(candidates, request.Recommended, workspace, fits); found {
-				return ModelResolution{
-					Offering: visible, Source: ModelSourcePurpose,
-					Profile: request.Profile, Reason: request.Reason,
-				}
+		// of the purpose's recommendations runs instead (#282). A recommendation
+		// the Schema inferred from a brief that states no purpose is not the
+		// person's: it steps aside for the visible model without asking (#381).
+		if workspace := strings.TrimSpace(request.Workspace); workspace != "" && !ModelNameMatches(chosen, workspace) {
+			if request.PurposeIsDefault {
+				continue
 			}
-			return ModelResolution{Conflict: &ModelConflict{
-				Kind: ModelConflictWorkspace, Layer: ModelSourcePurpose,
-				Named: workspace, Offering: chosen, Profile: request.Profile, Candidates: candidates,
-			}}
+			if request.ConfirmsWorkspace {
+				if visible, found := recommendedWorkspace(candidates, request.Recommended, workspace, fits); found {
+					return ModelResolution{
+						Offering: visible, Source: ModelSourcePurpose,
+						Profile: request.Profile, Reason: request.Reason,
+					}
+				}
+				return ModelResolution{Conflict: &ModelConflict{
+					Kind: ModelConflictWorkspace, Layer: ModelSourcePurpose,
+					Named: workspace, Offering: chosen, Profile: request.Profile, Candidates: candidates,
+				}}
+			}
 		}
 		return ModelResolution{
 			Offering: chosen, Source: ModelSourcePurpose,

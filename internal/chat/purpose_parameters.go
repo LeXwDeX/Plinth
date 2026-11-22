@@ -27,6 +27,15 @@ type PurposeProfile struct {
 	Reason               string
 	RecommendedOfferings map[string][]string
 	ParameterOverrides   map[string]map[string]json.RawMessage
+	// Default reports that the brief stated no 3D purpose and the Schema's
+	// default_profile supplied this one (#381). The platform inferred it, so the
+	// model-choice layer treats it as advice only: it never replaces a model the
+	// person can see in the workspace picker, and never asks them to confirm
+	// which to keep. A purpose the brief names is the person's own and keeps the
+	// confirmation of #103 C1. The 2D default is the table's documented rule
+	// ("omit or leave empty to let the default 2D purpose apply") and is not
+	// marked here, so its long-standing model choice is unchanged.
+	Default bool
 }
 
 // AdvisedAdjustment is the reason and the source ("profile:<id>") the frozen
@@ -77,26 +86,36 @@ type PurposeQuery struct {
 // instead of none. The profile is already the variant for the brief's target
 // platform when the purpose declares one (#275), so its budget and parameter
 // overrides are what every later layer reads; a brief without a platform gets
-// the purpose as declared.
+// the purpose as declared. PurposeProfile.Default tells the fallback apart from
+// a purpose the brief named; this raw profile cannot.
 func (resolver PurposeParameters) Model3DProfile(brief ProductionBrief) (catalog.ChatModel3DUsageProfile, bool) {
+	profile, found, _ := resolver.model3DProfile(brief)
+	return profile, found
+}
+
+// model3DProfile is Model3DProfile with the third result telling whether the
+// brief named the purpose itself. False means the Schema's default_profile
+// answered for a brief that states none (#381): the model-choice layer must not
+// let that inferred purpose override the workspace picker's visible model.
+func (resolver PurposeParameters) model3DProfile(brief ProductionBrief) (catalog.ChatModel3DUsageProfile, bool, bool) {
 	usage := resolver.Model3D
 	if len(usage.Profiles) == 0 {
-		return catalog.ChatModel3DUsageProfile{}, false
+		return catalog.ChatModel3DUsageProfile{}, false, false
 	}
 	id := brief.Text(usage.Brief.FieldNameOfType("profile"))
 	for _, profile := range usage.Profiles {
 		if profile.ID == id {
 			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
-			return profile, true
+			return profile, true, true
 		}
 	}
 	for _, profile := range usage.Profiles {
 		if profile.ID == usage.DefaultProfile {
 			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
-			return profile, true
+			return profile, true, false
 		}
 	}
-	return catalog.ChatModel3DUsageProfile{}, false
+	return catalog.ChatModel3DUsageProfile{}, false, false
 }
 
 // Image2DProfile returns the 2D purpose the brief follows (#239). The brief's
@@ -144,7 +163,7 @@ func (resolver PurposeParameters) Profile(domain string, brief ProductionBrief, 
 	if domain == string(generation.DomainImage) {
 		return resolver.Image2DProfile(brief, explicitOnly)
 	}
-	profile, found := resolver.Model3DProfile(brief)
+	profile, found, explicit := resolver.model3DProfile(brief)
 	if !found {
 		return PurposeProfile{}, false
 	}
@@ -152,6 +171,7 @@ func (resolver PurposeParameters) Profile(domain string, brief ProductionBrief, 
 		ID: profile.ID, Label: profile.Label, Reason: profile.Reason,
 		RecommendedOfferings: profile.RecommendedOfferings,
 		ParameterOverrides:   profile.ParameterOverrides,
+		Default:              !explicit,
 	}, true
 }
 

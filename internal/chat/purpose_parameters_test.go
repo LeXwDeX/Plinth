@@ -192,6 +192,13 @@ func TestModel3DProfileFallsBackToTheDefaultPurpose(t *testing.T) {
 			if !found || profile.ID != "render" || profile.Reason != "展示用途优先完整细节。" {
 				t.Fatalf("profile = %+v (%v), want the default render purpose", profile, found)
 			}
+			// #381: the fallback is the platform's inference, not the person's
+			// choice, so the layers that ask the person to confirm a model can
+			// tell it apart from a purpose the brief names.
+			purpose, found := resolver.Profile(string(generation.DomainModel3D), brief, false)
+			if !found || purpose.ID != "render" || !purpose.Default {
+				t.Fatalf("3D profile = %+v (%v), want the default purpose marked as inferred", purpose, found)
+			}
 			// The default purpose names no override and its budget fits the
 			// Offering default, so a step without a purpose is unchanged.
 			_, values := resolver.Values(chat.PurposeQuery{
@@ -202,10 +209,15 @@ func TestModel3DProfileFallsBackToTheDefaultPurpose(t *testing.T) {
 			}
 		})
 	}
-	// A declared purpose still wins over the default.
+	// A declared purpose still wins over the default, and is the person's own.
 	profile, found := resolver.Model3DProfile(purposeParamsBrief(t, map[string]any{"purpose": "game_character"}))
 	if !found || profile.ID != "game_character" {
 		t.Fatalf("declared purpose = %+v (%v)", profile, found)
+	}
+	purpose, found := resolver.Profile(string(generation.DomainModel3D),
+		purposeParamsBrief(t, map[string]any{"purpose": "game_character"}), false)
+	if !found || purpose.ID != "game_character" || purpose.Default {
+		t.Fatalf("declared 3D profile = %+v (%v), want the named purpose", purpose, found)
 	}
 }
 

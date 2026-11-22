@@ -173,8 +173,11 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 			workspace: choiceFullID, wantID: choiceFullID, source: "profile", profile: "render"},
 		{name: "the Agent outranks the workspace picker value", named: choiceMeshyID,
 			workspace: choiceFullID, wantID: choiceMeshyID, source: "agent"},
-		{name: "the default purpose conflicts with the workspace model", workspace: choiceMeshyID,
-			refusal: "确认", code: "model_choice_workspace_conflict"},
+		// #381: the default purpose is inferred, not chosen. A workspace model
+		// it does not recommend runs without asking; only a purpose the brief
+		// names asks (#103 C1, fixed by the case above).
+		{name: "the default purpose yields to the workspace model", workspace: choiceMeshyID,
+			wantID: choiceMeshyID, source: "user"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -476,7 +479,11 @@ func TestModelChoiceOfNamesWhoChoseTheModel(t *testing.T) {
 	executor := choiceTestExecutor(gateway)
 	command := choiceTestCommand(choiceTestTool("create_model_3d", generation.TextTo3D))
 	input := json.RawMessage(`{}`)
-	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "default" {
+	// #381: an empty brief runs on the Schema's default purpose, so the step's
+	// model is that purpose's recommendation and the choice names it (render),
+	// not a bare Offering default.
+	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "profile" ||
+		choice.Profile != "render" {
 		t.Fatalf("default choice = %+v", choice)
 	}
 	command.Call.Arguments = json.RawMessage(`{"model":"tripo/tripo-p2/text-to-3d"}`)
@@ -506,7 +513,11 @@ func TestModelChoiceOfNamesWhoChoseTheModel(t *testing.T) {
 		t.Fatalf("workspace value outranked the purpose = %+v", choice)
 	}
 	command.Options.ProductionBrief = nil
-	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "user" {
+	// The default purpose's recommendation happens to be the workspace value,
+	// so the purpose still chose it: the inferred purpose advises, and here its
+	// advice is the model the picker shows.
+	if choice := executor.modelChoiceOf(command, full, input); choice == nil || choice.Source != "profile" ||
+		choice.Profile != "render" {
 		t.Fatalf("workspace fallback choice = %+v", choice)
 	}
 	command.Options.AIModel = ""

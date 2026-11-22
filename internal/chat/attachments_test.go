@@ -282,6 +282,15 @@ func TestCardAnswerContinuesOnTheCardsPicturesAndMultiview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The answered turn has ended: the Agent asked the card and finished the
+	// turn, so the answer arrives as a new turn of the session. A turn still
+	// queued or running refuses the next one (chat: turn already active).
+	if err := service.FinishTurn(ctx, first.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.FinishStream(ctx, session.ID, first.ID, false); err != nil {
+		t.Fatal(err)
+	}
 
 	second, err := service.StartTurn(ctx, chat.StartTurn{
 		OwnerID: "owner-a", SessionID: session.ID, Content: "用默认",
