@@ -29,6 +29,11 @@ type ModelDeliverySchema struct {
 	// through a format conversion (it would drop what makes them special,
 	// e.g. a skeleton), so the missing formats are reported as unavailable.
 	BlockedCapabilities []schemacontract.Capability `json:"blocked_capabilities"`
+	// AutoCompletion declares how the platform fills missing formats after a
+	// generation succeeded, without a person or an Agent asking (#461). The
+	// route order and the bounds are this block; whether one route runs for
+	// free or may spend is its conversion's Auto.
+	AutoCompletion ModelDeliveryAutoCompletionSchema `json:"auto_completion,omitempty"`
 	// Reasons maps a reason code to the user-facing text shown when a format
 	// is unavailable and written to the ZIP's README.
 	Reasons ModelDeliveryReasons `json:"reasons"`
@@ -42,8 +47,55 @@ type ModelDeliverySchema struct {
 // Disabled reports a Product Schema without model delivery declarations.
 func (delivery ModelDeliverySchema) Disabled() bool {
 	return len(delivery.Capabilities) == 0 && len(delivery.Formats) == 0 &&
-		len(delivery.Conversions) == 0 && delivery.Archive.FilenameTemplate == ""
+		len(delivery.Conversions) == 0 && delivery.Archive.FilenameTemplate == "" &&
+		len(delivery.AutoCompletion.RouteOrder) == 0
 }
+
+// Auto-completion of missing formats after a generation succeeded (#461).
+// Nothing here is a product rule in Go: which task kinds start a run, in which
+// order the routes are tried, how much a task may spend and how often the
+// durable record is scanned are all declared by the Product Schema.
+type ModelDeliveryAutoCompletionSchema struct {
+	// SourceCapabilities are the task capabilities whose success makes the
+	// task a candidate for automatic completion. A task of any other kind is
+	// left alone.
+	SourceCapabilities []schemacontract.Capability `json:"source_capabilities"`
+	// RouteOrder names the conversions tried first, in order, by Offering ID.
+	// It must list every conversion that declares Auto, so a paid route can
+	// never run without the Schema saying where it sits.
+	RouteOrder []string `json:"route_order"`
+	// ScanIntervalMilliseconds is how long the reconciler waits between two
+	// scans of the same record.
+	ScanIntervalMilliseconds int `json:"scan_interval_milliseconds"`
+	// MaxInflightPlans bounds the platform's own conversion plans that may be
+	// running at once: a local conversion is one process wide, and a queue of
+	// them must not occupy the coordinator's workers.
+	MaxInflightPlans int `json:"max_inflight_plans"`
+	// MaxCreditsPerTask bounds what one task's automatic runs may cost in
+	// total; MaxPaidRunsPerTask bounds how many of them may be paid runs.
+	MaxCreditsPerTask    int `json:"max_credits_per_task"`
+	MaxPaidRunsPerTask   int `json:"max_paid_runs_per_task"`
+	DeadlineHours        int `json:"deadline_hours"`
+	// PollIntervalMilliseconds is the ticker interval the App uses for the
+	// durable record; zero leaves the coordinator's poll interval in place.
+	PollIntervalMilliseconds int `json:"poll_interval_milliseconds,omitempty"`
+}
+
+// Enabled reports whether the Schema declares an automatic completion route.
+func (auto ModelDeliveryAutoCompletionSchema) Enabled() bool {
+	return len(auto.RouteOrder) > 0 && len(auto.SourceCapabilities) > 0
+}
+
+// Auto of a conversion route: whether the platform may run it after a
+// generation succeeded, and with whose money.
+const (
+	// ConversionAutoFree runs the route without spending anything. Such a
+	// route must be free of charge; the Catalog loader refuses it otherwise.
+	ConversionAutoFree = "free"
+	// ConversionAutoPaid may spend up to the route's MaxCredits per run, bound
+	// by the auto-completion block's per-task ceiling.
+	ConversionAutoPaid = "paid"
+)
 
 // ModelAssetMatch selects saved task assets by role, variant and media type.
 // An empty Variants entry matches an asset without a variant.
@@ -88,6 +140,16 @@ type ModelConversionSchema struct {
 	FormatValues    map[string]string `json:"format_values,omitempty"`
 	// SourceFormats orders the saved formats tried first as the source file.
 	SourceFormats []string `json:"source_formats"`
+	// Auto declares whether the platform runs this route on its own after a
+	// generation succeeded: ConversionAutoFree or ConversionAutoPaid. Empty
+	// leaves the route to a person (or an Agent) asking for it. A route that
+	// declares Auto must appear in auto_completion.route_order.
+	Auto string `json:"auto,omitempty"`
+	// MaxCredits is the upper bound of one automatic run of a paid route: the
+	// Catalog loader requires it, and requires the Offering's own highest
+	// estimate to fit under it, so the reconciliation can stop before it
+	// spends rather than after.
+	MaxCredits int `json:"max_credits,omitempty"`
 	// Retired keeps a route that is no longer used (#330: Remesh with
 	// convert_format_only, replaced by Meshy Convert) only so completion
 	// plans made under it are still recognized by their fixed input: their
@@ -119,6 +181,11 @@ type ModelDeliveryReasons struct {
 	// format names the source's original provider task and that task has
 	// passed its retention (#325), while no route takes the saved file.
 	SourceExpired string `json:"source_expired"`
+	// SourceTooLarge is shown when the saved file is larger than the source
+	// limit the only remaining route declares (Meshy Convert inlines at most
+	// 70 MiB, #457): the route is reported as unavailable instead of started
+	// and failing on every retry.
+	SourceTooLarge string `json:"source_too_large"`
 }
 
 type ModelArchiveSchema struct {
@@ -258,6 +325,8 @@ func cloneModelDelivery(source ModelDeliverySchema) ModelDeliverySchema {
 			result.Conversions[index].FormatValues[format] = value
 		}
 	}
+	result.AutoCompletion.SourceCapabilities = append([]schemacontract.Capability(nil), source.AutoCompletion.SourceCapabilities...)
+	result.AutoCompletion.RouteOrder = append([]string(nil), source.AutoCompletion.RouteOrder...)
 	archive := &result.Archive
 	archive.MediaTypeExtensions = make(map[string]string, len(source.Archive.MediaTypeExtensions))
 	for mediaType, extension := range source.Archive.MediaTypeExtensions {
@@ -384,11 +453,28 @@ func validateModelDelivery(schema ApplicationSchema) error {
 				return fmt.Errorf("conversions[%d].input 必须是 JSON 对象", index)
 			}
 		}
+		switch conversion.Auto {
+		case "", ConversionAutoFree, ConversionAutoPaid:
+		default:
+			return fmt.Errorf("conversions[%d].auto 只能是 %q 或 %q", index, ConversionAutoFree, ConversionAutoPaid)
+		}
+		if conversion.Auto == ConversionAutoPaid && conversion.MaxCredits <= 0 {
+			return fmt.Errorf("conversions[%d] 声明 auto=%q 时必须声明 max_credits", index, ConversionAutoPaid)
+		}
+		if conversion.Auto != ConversionAutoPaid && conversion.MaxCredits != 0 {
+			return fmt.Errorf("conversions[%d].max_credits 只对 auto=%q 的路线有意义", index, ConversionAutoPaid)
+		}
 		// A retired route is recognized by its fixed input and the formats
 		// it provides; a per-format route has no single fingerprint.
 		if conversion.Retired && (len(conversion.Provides) == 0 || len(conversion.FormatValues) > 0 || len(conversion.Input) == 0) {
 			return fmt.Errorf("conversions[%d] 已退役的转换须以固定 input 与 provides 识别旧计划，不能按格式逐次转换", index)
 		}
+		if conversion.Retired && conversion.Auto != "" {
+			return fmt.Errorf("conversions[%d] 已退役的转换不能作为自动补齐路线", index)
+		}
+	}
+	if err := validateAutoCompletionShape(delivery); err != nil {
+		return err
 	}
 	reasons := delivery.Reasons
 	for name, text := range map[string]string{
@@ -398,6 +484,7 @@ func validateModelDelivery(schema ApplicationSchema) error {
 		"not_converted": reasons.NotConverted, "converting": reasons.Converting,
 		"conversion_incomplete": reasons.ConversionIncomplete,
 		"conversion_failed":     reasons.ConversionFailed, "source_expired": reasons.SourceExpired,
+		"source_too_large": reasons.SourceTooLarge,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("reasons.%s 不能为空", name)
@@ -466,6 +553,108 @@ func validateModelDelivery(schema ApplicationSchema) error {
 	}
 	if _, exists := auditActions[audit.Action]; !exists {
 		return fmt.Errorf("archive.audit.action 引用了未知 audit action %q", audit.Action)
+	}
+	return nil
+}
+
+// validateAutoCompletionShape checks the automatic completion block against
+// the declarations it names, before the Offerings are loaded: the capabilities
+// must be delivery capabilities, the route order must name every automatic
+// conversion exactly once, and an enabled block must carry usable bounds.
+func validateAutoCompletionShape(delivery ModelDeliverySchema) error {
+	auto := delivery.AutoCompletion
+	if len(auto.RouteOrder) == 0 && len(auto.SourceCapabilities) == 0 {
+		return nil
+	}
+	declared := map[schemacontract.Capability]struct{}{}
+	for _, capability := range delivery.Capabilities {
+		declared[capability] = struct{}{}
+	}
+	if len(auto.SourceCapabilities) == 0 {
+		return fmt.Errorf("auto_completion.source_capabilities 不能为空")
+	}
+	for _, capability := range auto.SourceCapabilities {
+		if _, exists := declared[capability]; !exists {
+			return fmt.Errorf("auto_completion.source_capabilities 引用了未声明的 capability %q", capability)
+		}
+	}
+	if len(auto.RouteOrder) == 0 {
+		return fmt.Errorf("auto_completion.route_order 不能为空")
+	}
+	automatic := map[string]struct{}{}
+	for _, conversion := range delivery.Conversions {
+		if conversion.Auto != "" {
+			automatic[conversion.OfferingID] = struct{}{}
+		}
+	}
+	listed := map[string]struct{}{}
+	for _, id := range auto.RouteOrder {
+		if _, exists := listed[id]; exists {
+			return fmt.Errorf("auto_completion.route_order 重复声明了 %q", id)
+		}
+		listed[id] = struct{}{}
+		if _, exists := automatic[id]; !exists {
+			return fmt.Errorf("auto_completion.route_order 的 %q 没有声明 auto", id)
+		}
+	}
+	for id := range automatic {
+		if _, exists := listed[id]; !exists {
+			return fmt.Errorf("自动补齐路线 %q 没有出现在 auto_completion.route_order 里", id)
+		}
+	}
+	if auto.ScanIntervalMilliseconds <= 0 || auto.MaxInflightPlans <= 0 || auto.DeadlineHours <= 0 {
+		return fmt.Errorf("auto_completion 的扫描间隔、并发上限与截止时间必须为正数")
+	}
+	if auto.MaxCreditsPerTask <= 0 || auto.MaxPaidRunsPerTask <= 0 {
+		return fmt.Errorf("auto_completion 的单任务积分上限与付费次数上限必须为正数")
+	}
+	return nil
+}
+
+// validateModelDeliveryAutoCompletion checks every automatic route against the
+// loaded Offerings and against the session approval policy: a free route must
+// cost nothing, a paid one must carry a bound its Offering fits under, neither
+// may be a capability a person must approve by hand, and both must take a
+// saved model file as the source (the platform converts the files it has, not
+// the Provider's original task).
+func validateModelDeliveryAutoCompletion(
+	schema ApplicationSchema,
+	offerings map[schemacontract.OfferingID]schemacontract.Offering,
+) error {
+	delivery := schema.ModelDelivery
+	if !delivery.AutoCompletion.Enabled() {
+		return nil
+	}
+	manual := map[schemacontract.Capability]struct{}{}
+	for _, capability := range schema.Chat.ApprovalPolicy.ManualApprovalCapabilities {
+		manual[capability] = struct{}{}
+	}
+	for index, conversion := range delivery.Conversions {
+		if conversion.Auto == "" {
+			continue
+		}
+		offering, exists := offerings[schemacontract.OfferingID(conversion.OfferingID)]
+		if !exists {
+			continue // reported by validateModelDeliveryOfferings
+		}
+		if _, blocked := manual[offering.Capability]; blocked {
+			return fmt.Errorf("conversions[%d] 的 Offering %q 属于人工批准清单，不能作为自动补齐路线", index, conversion.OfferingID)
+		}
+		if !offering.AcceptsSavedModelSource() {
+			return fmt.Errorf("conversions[%d] 的 Offering %q 不接受已保存的文件作为来源", index, conversion.OfferingID)
+		}
+		switch conversion.Auto {
+		case ConversionAutoFree:
+			if offering.HighestEstimatedCredits() != 0 {
+				return fmt.Errorf("conversions[%d] 声明 auto=%q，但 Offering %q 的估价不是 0", index, ConversionAutoFree, conversion.OfferingID)
+			}
+		case ConversionAutoPaid:
+			if bound := offering.HighestEstimatedCredits(); bound <= 0 || bound > conversion.MaxCredits {
+				return fmt.Errorf(
+					"conversions[%d] 的 max_credits=%d 没有覆盖 Offering %q 的估价上界 %d",
+					index, conversion.MaxCredits, conversion.OfferingID, bound)
+			}
+		}
 	}
 	return nil
 }

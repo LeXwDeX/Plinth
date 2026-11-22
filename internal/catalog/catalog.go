@@ -357,6 +357,9 @@ func Load(reader io.Reader) (*Catalog, error) {
 	if err := validateModelDeliveryOfferings(result.application.ModelDelivery, result.byID); err != nil {
 		return nil, fmt.Errorf("application.model_delivery: %w", err)
 	}
+	if err := validateModelDeliveryAutoCompletion(result.application, result.byID); err != nil {
+		return nil, fmt.Errorf("application.model_delivery: %w", err)
+	}
 	if err := validateConvertedObjOfferings(result.application.ModelDelivery, result.byID); err != nil {
 		return nil, fmt.Errorf("application.model_delivery: %w", err)
 	}

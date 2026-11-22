@@ -16144,7 +16144,8 @@
           ],
           "source_formats": [
             "glb"
-          ]
+          ],
+          "auto": "free"
         },
         {
           "offering_id": "local/static-glb/to-gltf",
@@ -16179,7 +16180,9 @@
             "fbx",
             "obj",
             "stl"
-          ]
+          ],
+          "auto": "paid",
+          "max_credits": 30
         },
         {
           "offering_id": "meshy/processing/remesh",
@@ -16208,6 +16211,22 @@
         "rigging",
         "animation"
       ],
+      "auto_completion": {
+        "source_capabilities": [
+          "text-to-3d",
+          "image-to-3d"
+        ],
+        "route_order": [
+          "local/generated-glb/to-gltf",
+          "meshy/processing/convert"
+        ],
+        "scan_interval_milliseconds": 300000,
+        "max_inflight_plans": 1,
+        "max_credits_per_task": 30,
+        "max_paid_runs_per_task": 1,
+        "deadline_hours": 2,
+        "poll_interval_milliseconds": 5000
+      },
       "reasons": {
         "no_route": "当前服务商不输出该格式，也没有可用的转换途径。",
         "source_blocked": "绑骨或动画结果转换格式会丢失骨骼与动作，因此不提供格式转换。",
@@ -16218,7 +16237,8 @@
       "converting": "正在转换，完成后重新打包即可包含。",
       "conversion_incomplete": "转换已结束，但没有得到该格式的文件。",
       "conversion_failed": "上次转换没有完成；可在平台该模型的「格式」页重新获取。",
-      "source_expired": "来源模型在服务商处的原任务已超过保留期，可用的转换服务又不接受本地模型文件，因此无法转换。"
+      "source_expired": "来源模型在服务商处的原任务已超过保留期，可用的转换服务又不接受本地模型文件，因此无法转换。",
+      "source_too_large": "已保存的模型文件超过转换服务接受的上限（Meshy Convert 内联上限 70 MiB），因此无法转换。"
       },
       "archive": {
         "filename_template": "model-{task_id}.zip",
@@ -21295,6 +21315,7 @@
             "model_delivery.reasons.conversion_incomplete": "Conversion finished, but no file in this format was produced.",
             "model_delivery.reasons.conversion_failed": "The last conversion did not finish; get it again from this model's Formats tab on the platform.",
             "model_delivery.reasons.source_expired": "The source model's original task at the provider has passed its retention period, and the available conversion services do not accept a local model file, so it cannot be converted.",
+            "model_delivery.reasons.source_too_large": "The saved model file is larger than the conversion service accepts (Meshy Convert inlines at most 70 MiB), so it cannot be converted.",
             "model_delivery.archive.readme.title": "3D model package",
             "model_delivery.archive.readme.task_line": "Task: {task_id}",
             "model_delivery.archive.readme.included_heading": "Included formats:",

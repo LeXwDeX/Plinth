@@ -71,10 +71,19 @@ same HTTP API the browser uses:
     accepted items with a manifest and a README whose bytes match every
     snapshot digest; only accepted items are ever packed, and a foreign owner
     reads and decides nothing (the "asset-list-review" group).
+  * the automatic completion (#461): a Meshy text-to-3D run succeeds owing the
+    glTF it never exported, the platform's own round fills that row without a
+    补齐格式 request, a chat message or an approval card, the task ZIP then
+    carries the glTF, the run is the platform's (a grant decided by policy
+    alone, not eligible for the session budget, the 3D step settings
+    untouched), and the free local route fills it so the paid Meshy Convert
+    route never starts (the "auto-completion" group; every other private
+    Catalog declares no automatic completion, so their Tasks, steps and ZIP
+    bytes are the pre-#461 ones).
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, faults;
+agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, auto-completion, faults;
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
@@ -172,6 +181,8 @@ MESHY_RETEXTURE = "meshy/processing/retexture"
 MESHY_CONVERT = "meshy/processing/convert"
 MESHY_RIGGING = "meshy/processing/rigging"
 MESHY_ANIMATION = "meshy/processing/animation"
+# The free automatic route of #461: the platform's own GLB -> glTF package.
+LOCAL_GENERATED_GLB_TO_GLTF = "local/generated-glb/to-gltf"
 # The fake's image-to-3D answer (#332): six model formats (glb, obj, fbx, stl,
 # usdz, 3mf), the textured OBJ's MTL, four PBR maps (base_color, metallic,
 # normal, roughness) and one thumbnail.
@@ -382,7 +393,7 @@ def build(work):
     return fake, stack
 
 
-def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None, rework_message=None, plan_continuation_message=None):
+def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, self_check=False, name="catalog.json", manual_image_edits=False, preferences=True, preference_compaction=False, draft_ttl_seconds=None, execution_enabled=None, poll_interval_milliseconds=None, presence_heartbeat_seconds=None, presence_grace_seconds=None, max_parallel_items=None, max_rounds_per_item=None, continuation_message=None, rework_message=None, plan_continuation_message=None, auto_completion=False, auto_completion_scan_milliseconds=None, auto_completion_poll_milliseconds=None):
     """The default Catalog with four changes for Tripo, Meshy and Hyper3D: the fake
     artifact host is an allowed asset host, they poll once a second, and a failing
     materialization is retried once. The matting service polls once a second too,
@@ -399,11 +410,36 @@ def private_catalog(work, jimeng_urls=False, disabled=(), prompt_limits=None, se
     and the per-item round limit short enough to observe, and replaces the
     continuation text with the fake script marker that drives each item.
     rework_message replaces the returned item's rework copy (#329b) the same
-    way, so the second round is driven by the fake too. The default Catalog
-    file and its base URLs stay untouched."""
+    way, so the second round is driven by the fake too. auto_completion is off
+    by default: the private Catalog declares no automatic completion, so a
+    scenario's Tasks, steps and ZIP bytes are exactly the pre-#461 ones and the
+    reconciler never starts a plan. The "auto-completion" scenario passes it on
+    and shortens the scan interval so the platform's own round is observable;
+    the *_milliseconds options only apply with it. The default Catalog file and
+    its base URLs stay untouched."""
     with open(os.path.join(REPO, "internal/catalog/default_catalog.json"), encoding="utf-8") as handle:
         catalog = json.load(handle)
     catalog["application"]["chat"]["agent"]["background_wait"]["after_seconds"] = 1
+    delivery = catalog["application"]["model_delivery"]
+    if auto_completion:
+        # The shipped block, with the two intervals a smoke run needs: the
+        # reconciler's own round and the App's ticker.
+        if auto_completion_scan_milliseconds is not None:
+            delivery["auto_completion"]["scan_interval_milliseconds"] = auto_completion_scan_milliseconds
+        if auto_completion_poll_milliseconds is not None:
+            delivery["auto_completion"]["poll_interval_milliseconds"] = auto_completion_poll_milliseconds
+    else:
+        # The Catalog refuses an automatic route whose block lost its lists
+        # (auto_completion.source_capabilities 不能为空, route_order 不能为空),
+        # so "no automatic completion" is declared the only way the loader has
+        # for it: both lists empty and no conversion declaring auto. The
+        # conversions themselves stay, so the manual 补齐格式 action is
+        # untouched and only the platform's own round is gone.
+        delivery["auto_completion"]["source_capabilities"] = []
+        delivery["auto_completion"]["route_order"] = []
+        for conversion in delivery["conversions"]:
+            conversion.pop("auto", None)
+            conversion.pop("max_credits", None)
     # #241: a preferences-off Catalog disables the feature server-side (no
     # injection, no writes), which is the "before" arm of the #238 comparison.
     # The preferences scenario keeps only one recent round so a manual
@@ -5725,24 +5761,26 @@ def scenario_visual_anchors(api, offerings, work):
 
 def _processing_plans(work, stack, session):
     """Reads the session's processing plans from the stack's SQLite file, as
-    the panel's own list route would (state, failure and frozen steps)."""
+    the panel's own list route would (state, failure, frozen steps, and who
+    started the plan)."""
     import sqlite3
     try:
         db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
         rows = db.execute(
-            "SELECT id, state, failure, steps_json, version FROM processing_plans "
-            "WHERE session_id=? ORDER BY created_at DESC", (session,)).fetchall()
+            "SELECT id, state, failure, steps_json, version, origin, source_task_id, approved_credits "
+            "FROM processing_plans WHERE session_id=? ORDER BY created_at DESC", (session,)).fetchall()
         db.close()
     except sqlite3.Error:
         return []
     plans = []
-    for plan_id, state, failure, steps_json, version in rows:
+    for plan_id, state, failure, steps_json, version, origin, source_task_id, credits in rows:
         try:
             steps = json.loads(steps_json)
         except ValueError:
             steps = []
         plans.append({"id": plan_id, "state": state, "failure": failure or "",
-                      "steps": steps, "version": version})
+                      "steps": steps, "version": version, "origin": origin or "",
+                      "source_task_id": source_task_id or "", "approved_credits": credits})
     return plans
 
 
@@ -8104,9 +8142,134 @@ def scenario_asset_list_review(work, stack_binary, processes):
         processes.stop(child)
 
 
+def _model_format_rows(api, task_id):
+    """The task's format coverage rows by format id (#323), read-only."""
+    status, body = api.json("GET", f"/api/v1/tasks/{task_id}/formats")
+    if status != 200:
+        return {}
+    return {row.get("id"): row for row in body.get("formats") or []}
+
+
+def _session_grants(work, stack, session):
+    """The session's execution grants and the audit actor that approved each one
+    (SQLite, read-only): what a run asked for, who decided it, and whether the
+    session's plan may pay for it."""
+    import sqlite3
+    try:
+        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
+        rows = db.execute(
+            "SELECT g.offering_id, g.source, g.status, g.budget_eligible, g.decided_by, "
+            "       (SELECT a.actor_id FROM execution_grant_audit a WHERE a.request_id = g.request_id "
+            "        AND a.event = 'approved' ORDER BY a.id DESC LIMIT 1) "
+            "FROM execution_grants g WHERE g.session_id = ? ORDER BY g.created_at", (session,)).fetchall()
+        db.close()
+    except sqlite3.Error:
+        return []
+    return [{"offering_id": offering, "source": source, "status": status,
+             "budget_eligible": budget, "decided_by": decided_by, "actor_id": actor}
+            for offering, source, status, budget, decided_by, actor in rows]
+
+
+def scenario_auto_completion(work, stack_binary, processes):
+    """#461: after a generation succeeds the platform fills the formats it still
+    owes, with nobody asking. A Meshy text-to-3D run delivers the six formats
+    that Offering exports and no glTF, so the one missing row is glTF and the
+    free route (local/generated-glb/to-gltf) is the first route the Schema
+    declares. The scenario submits the generation and then never asks for
+    补齐格式 and sends no chat message; it proves the row changes from missing
+    to available with a file from a completion plan, the task ZIP carries the
+    glTF, no approval card appears, the run is the platform's own (a grant
+    decided by policy alone and not eligible for the session budget, so the
+    3D step settings are untouched), and the paid Meshy Convert route never
+    starts because the free one already covered the missing format.
+    One private stack: the shipped auto-completion block, with its own scan
+    interval and the App's ticker shortened enough to watch."""
+    stack = "auto-completion"
+    catalog = private_catalog(
+        work, name="catalog-auto-completion.json", auto_completion=True,
+        auto_completion_scan_milliseconds=500, auto_completion_poll_milliseconds=500)
+    child, api = start_stack(processes, stack_binary, work, stack, catalog, GOOD_KEY)
+    try:
+        session = new_session(api)
+        offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
+        policy_before = api.json("GET", "/api/v1/account/step-policy")[1]
+        task_id, why = submit(api, MESHY_TEXT_TO_3D, "text-to-3d",
+                              payload_for(offerings[MESHY_TEXT_TO_3D], {"prompt": "a plain toy castle"}),
+                              session)
+        if not task_id:
+            record("#461 auto-completion: the generation is submitted", False, why)
+            return
+        task = wait_task(api, task_id)
+        models = [asset for asset in (task or {}).get("assets") or [] if asset.get("role") == "model"]
+        owes_glb = [asset for asset in models
+                    if asset.get("variant") == "gltf" or asset.get("media_type") == "model/gltf+json"]
+        record("#461 auto-completion: the generation succeeds and still owes glTF",
+               task.get("state") == "SUCCEEDED" and not owes_glb,
+               f"state={task.get('state')} formats={sorted(asset.get('variant') or '' for asset in models)}")
+
+        # Nothing of ours fills it: no row action, no chat turn. Watch the card
+        # list while the platform works, so a card cannot come and go unseen.
+        row, cards = {}, 0
+        end = time.time() + 90
+        while time.time() < end:
+            pending = api.json("GET", f"/api/v1/chat/sessions/{session}/pending-approvals")[1] or {}
+            cards = max(cards, len(pending.get("items") or []))
+            row = _model_format_rows(api, task_id).get("gltf") or {}
+            if row.get("status") == "available":
+                break
+            time.sleep(0.5)
+        record("#461 auto-completion: the missing glTF row is filled without a request",
+               row.get("status") == "available" and bool(row.get("task_id")) and row.get("task_id") != task_id,
+               f"row={json.dumps(row, ensure_ascii=False)[:220]} max_pending={cards}")
+        status, raw, _headers = api.call("GET", f"/api/v1/tasks/{task_id}/archive")
+        entries, zip_why = _zip_entries(raw) if status == 200 else (None, "")
+        record("#461 auto-completion: the task archive carries the glTF",
+               status == 200 and any("gltf" in name for name in (entries or {})),
+               f"status={status} zip={zip_why} entries={sorted(entries or {})}")
+
+        plans = [plan for plan in _processing_plans(work, stack, session)
+                 if plan.get("source_task_id") == task_id]
+        steps = [step for plan in plans for step in plan.get("steps") or []]
+        record("#461 auto-completion: the platform starts one conversion plan of its own",
+               len(plans) == 1 and len(steps) == 1 and plans[0].get("origin") == "delivery"
+               and steps[0].get("offering_id") == LOCAL_GENERATED_GLB_TO_GLTF,
+               f"plans={[(plan.get('state'), plan.get('origin')) for plan in plans]} "
+               f"steps={[(step.get('offering_id'), step.get('state')) for step in steps]}")
+        tasks = session_tasks(api, session)
+        conversion = [task for task in tasks if task.get("capability") == "format-conversion"]
+        paid = [task for task in tasks if task.get("offering_id") == MESHY_CONVERT]
+        record("#461 auto-completion: the free route fills it and the paid one never runs",
+               len(conversion) == 1 and conversion[0].get("offering_id") == LOCAL_GENERATED_GLB_TO_GLTF
+               and conversion[0].get("state") == "SUCCEEDED" and not paid,
+               f"conversion={[(task.get('offering_id'), task.get('state')) for task in conversion]} "
+               f"paid={len(paid)}")
+
+        grants = [grant for grant in _session_grants(work, stack, session)
+                  if grant.get("offering_id") == LOCAL_GENERATED_GLB_TO_GLTF]
+        record("#461 auto-completion: the run is the platform's own and costs no session budget",
+               len(grants) == 1 and grants[0].get("source") == "delivery"
+               and grants[0].get("budget_eligible") == 0
+               and grants[0].get("decided_by") == "policy:delivery"
+               and grants[0].get("actor_id") == "model-delivery",
+               f"grants={json.dumps(grants, ensure_ascii=False)}")
+        messages = api.json("GET", f"/api/chat/sessions/{session}/messages")[1]
+        messages = messages if isinstance(messages, list) else (messages or {}).get("messages") or []
+        policy_after = api.json("GET", "/api/v1/account/step-policy")[1]
+        record("#461 auto-completion: no card, no message and no 3D step spent",
+               cards == 0 and not messages
+               and policy_after.get("version") == policy_before.get("version")
+               and policy_after.get("list") == policy_before.get("list")
+               and policy_after.get("mcp") == policy_before.get("mcp"),
+               f"max_pending={cards} messages={len(messages)} "
+               f"steps={json.dumps(policy_after.get('list'), ensure_ascii=False)}"
+               f"/{json.dumps(policy_after.get('mcp'), ensure_ascii=False)}")
+    finally:
+        processes.stop(child)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -8116,7 +8279,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -8253,6 +8416,10 @@ def main():
             # #329: its own stack with execution on, because the board needs
             # items that actually reached review.
             scenario_asset_list_review(work, stack_binary, processes)
+        if "auto-completion" in selected:
+            # #461: its own stack, because the automatic completion needs the
+            # shipped block turned on and the intervals shortened.
+            scenario_auto_completion(work, stack_binary, processes)
         check_no_real_upstream(work)
     finally:
         processes.stop_all()

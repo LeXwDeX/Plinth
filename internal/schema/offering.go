@@ -435,6 +435,62 @@ func (o Offering) QuotedCredits() int {
 	return o.EstimateTotalCredits(encoded)
 }
 
+// AcceptsSavedModelSource reports whether the Offering declares a saved-file
+// (asset) source parameter. A route that only names the original upstream task
+// cannot convert the files the platform already stored.
+func (o Offering) AcceptsSavedModelSource() bool {
+	for _, parameter := range o.Parameters {
+		if role, ok := SourceParameterRole(parameter); ok && role == SemanticSourceAsset {
+			return true
+		}
+	}
+	return false
+}
+
+// HighestEstimatedCredits is the most one run of the Offering can cost in
+// credits over every input its contract accepts: the base estimate at the
+// largest unit count it declares, plus its optional billed extras at their
+// highest. Unlike MaximumEstimatedCredits it is the absolute bound, so a free
+// Offering is 0 and an Offering without optional extras is its base price.
+// The automatic delivery completion bounds what it may spend by it before it
+// starts a paid run.
+func (o Offering) HighestEstimatedCredits() int {
+	base := o.EstimatedCredits
+	if base <= 0 {
+		base = 0
+	} else if o.EstimatedCreditsUnitParameter != "" {
+		// The largest declared unit count, capped the way estimateBaseCredits
+		// caps a request, so the bound never falls below a real estimate.
+		units := 1
+		for _, parameter := range o.Parameters {
+			if parameter.Name != o.EstimatedCreditsUnitParameter {
+				continue
+			}
+			if parameter.MaxItems > 1 {
+				units = parameter.MaxItems
+			} else if len(parameter.Options) > 1 {
+				units = len(parameter.Options)
+			}
+		}
+		if units > 1000 {
+			units = 1000
+		}
+		base *= units
+	}
+	if o.Cost != nil && o.Cost.ExtraCredits > 0 {
+		multiplier := 1
+		if o.Cost.SelectionParameter != "" {
+			for _, parameter := range o.Parameters {
+				if parameter.Name == o.Cost.SelectionParameter && len(parameter.Options) > 0 {
+					multiplier = len(parameter.Options)
+				}
+			}
+		}
+		base += o.Cost.ExtraCredits * multiplier
+	}
+	return base
+}
+
 func (o Offering) estimateBaseCredits(input json.RawMessage) int {
 	if o.EstimatedCreditsUnitParameter == "" || o.EstimatedCredits <= 0 {
 		return o.EstimatedCredits

@@ -478,6 +478,15 @@ var productionBudgetCompletedMigration string
 //go:embed migrations/0108_asset_list_item_delivery_deferred.sql
 var assetListItemDeliveryDeferredMigration string
 
+//go:embed migrations/0109_model_delivery_auto_completions.sql
+var modelDeliveryAutoCompletionsMigration string
+
+//go:embed migrations/0110_execution_grant_delivery.sql
+var executionGrantDeliveryMigration string
+
+//go:embed migrations/0111_processing_plan_delivery.sql
+var processingPlanDeliveryMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -580,6 +589,12 @@ func migrations() []migration {
 			foreignKeysOff: true},
 		migration{version: 108, name: "asset_list_item_delivery_deferred",
 			sql: assetListItemDeliveryDeferredMigration},
+		migration{version: 109, name: "model_delivery_auto_completions",
+			sql: modelDeliveryAutoCompletionsMigration},
+		migration{version: 110, name: "execution_grant_delivery",
+			sql: executionGrantDeliveryMigration},
+		migration{version: 111, name: "processing_plan_delivery",
+			sql: processingPlanDeliveryMigration},
 	)
 }
 
@@ -604,7 +619,11 @@ func migrations() []migration {
 // asset may be granted (#330 step 5C) and 107 the `completed` state a
 // production plan reaches when every required step succeeded, which rebuilds
 // production_budgets to widen its state CHECK (#410), 108 the marker of a list
-// item whose report is stored while its delivery is still converting (#459).
+// item whose report is stored while its delivery is still converting (#459),
+// 109 the durable record of the automatic delivery completion and its scan
+// watermark (#461), 110 the platform as the source of a grant the automatic
+// completion asks for (#461) and 111 the marker of a processing plan the
+// platform started itself (#461).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))
