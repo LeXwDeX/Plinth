@@ -310,10 +310,29 @@ func (service *Service) AskChoice(
 	}
 	var specs []optionSpec
 	var proposalOptions []ChoiceOption
+	defaultOptionID := ""
+	var defaultArguments json.RawMessage
 	switch kind.OptionSource {
 	case "usage_profiles":
 		for _, profile := range service.model3DUsage.Profiles {
 			specs = append(specs, optionSpec{id: profile.ID, label: profile.Label, description: profile.Description})
+		}
+		// The declared default purpose is the card's default (#381): the
+		// person can accept it instead of picking, and the answer runs the
+		// target tool with that purpose. A Catalog whose default names no
+		// declared purpose simply has no default.
+		if kind.Argument != "" {
+			for _, profile := range service.model3DUsage.Profiles {
+				if profile.ID != service.model3DUsage.DefaultProfile {
+					continue
+				}
+				encoded, err := json.Marshal(map[string]string{kind.Argument: profile.ID})
+				if err != nil {
+					return ToolResult{Error: "choice card unavailable", NoSubmission: true}, nil
+				}
+				defaultOptionID, defaultArguments = profile.ID, encoded
+				break
+			}
 		}
 	case "image_usage_profiles":
 		for _, profile := range service.image2DUsage.Profiles {
@@ -532,6 +551,9 @@ func (service *Service) AskChoice(
 		Capability:         kind.ID,
 		StepIndex:          -1,
 		Options:            options,
+		DefaultOptionID:    defaultOptionID,
+		AllowDefault:       defaultOptionID != "",
+		DefaultArguments:   defaultArguments,
 		State:              ChoicePending,
 		CreatedAt:          service.clock(),
 	})

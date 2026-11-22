@@ -176,6 +176,39 @@ func purposeParamsApply(t *testing.T, brief chat.ProductionBrief, offering gener
 	return applied
 }
 
+// #381: a 3D brief without a purpose falls back to the Schema's default
+// purpose, as the 2D table already does, so a clear 3D instruction runs on it.
+func TestModel3DProfileFallsBackToTheDefaultPurpose(t *testing.T) {
+	resolver := purposeParamsResolver()
+	briefs := map[string]chat.ProductionBrief{
+		"no brief":                              nil,
+		"an empty brief":                        {},
+		"a brief without a purpose":             purposeParamsBrief(t, map[string]any{"style": "写实"}),
+		"a purpose the Schema does not declare": purposeParamsBrief(t, map[string]any{"purpose": "retired"}),
+	}
+	for name, brief := range briefs {
+		t.Run(name, func(t *testing.T) {
+			profile, found := resolver.Model3DProfile(brief)
+			if !found || profile.ID != "render" || profile.Reason != "展示用途优先完整细节。" {
+				t.Fatalf("profile = %+v (%v), want the default render purpose", profile, found)
+			}
+			// The default purpose names no override and its budget fits the
+			// Offering default, so a step without a purpose is unchanged.
+			_, values := resolver.Values(chat.PurposeQuery{
+				Brief: brief, Domain: string(generation.DomainModel3D), Offering: purposeParamsModel(),
+			})
+			if len(values) != 0 {
+				t.Fatalf("values = %v, want none from the default purpose", values)
+			}
+		})
+	}
+	// A declared purpose still wins over the default.
+	profile, found := resolver.Model3DProfile(purposeParamsBrief(t, map[string]any{"purpose": "game_character"}))
+	if !found || profile.ID != "game_character" {
+		t.Fatalf("declared purpose = %+v (%v)", profile, found)
+	}
+}
+
 // The request's own values stay its own; the purpose fills what it left unset,
 // and only the advised values carry its reason and source. A fixed parameter is
 // never filled.

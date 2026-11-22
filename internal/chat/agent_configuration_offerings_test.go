@@ -180,3 +180,24 @@ func TestPublishedConfigurationRegistryKeepsEveryRuntimeSource(t *testing.T) {
 		}
 	}
 }
+
+// #381: the empty-brief rule and the choice-card wording are Catalog-hosted
+// sections, not frozen declarations. A turn on a published Agent configuration
+// therefore reads the live text, so a rule change reaches already published
+// configurations.
+func TestPublishedConfigurationReadsTheLiveBriefAndChoiceWording(t *testing.T) {
+	orchestrator, frozenContext, _ := publishedConfigurationFixture(t)
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := product.Application().Chat
+	request := orchestrator.agentRequest(frozenContext, nil,
+		TurnOptions{AgentScope: "auto", CreativeDomain: "model-3d"}, "owner", "")
+	if !strings.Contains(request.Messages[0].Content, live.Model3DUsage.Brief.EmptyText) {
+		t.Error("a published-configuration turn does not carry the live empty-brief rule")
+	}
+	if !reflect.DeepEqual(orchestrator.schema.Choice.Kinds, live.Choice.Kinds) {
+		t.Error("the choice card wording of a published configuration differs from the live Catalog")
+	}
+}

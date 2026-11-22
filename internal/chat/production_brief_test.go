@@ -119,6 +119,88 @@ func directionChoiceKind() catalog.ChatChoiceKindSchema {
 	}
 }
 
+// #381: the declared default purpose is the usage card's default, so a person
+// who lets the default stand answers the card with that purpose instead of
+// picking one.
+func TestUsageProfileCardOffersTheDefaultPurpose(t *testing.T) {
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	now := time.Now().UTC()
+	if _, err := repository.CreateSession(ctx, chat.Session{
+		ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Model3DUsage = testModel3DUsage()
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{usageProfileKind()}
+	})
+	service.SetChoices(repository, 20)
+
+	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"}}
+	result, err := service.AskChoice(ctx, command, usageProfileKind(), chat.AskChoiceArguments{Kind: "usage_profile"})
+	if err != nil || result.Error != "" {
+		t.Fatalf("usage card = %+v err=%v", result, err)
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 {
+		t.Fatalf("stored cards = %+v %v", choices, err)
+	}
+	card := choices[0]
+	if !card.AllowDefault || card.DefaultOptionID != "render" || string(card.DefaultArguments) != `{"purpose":"render"}` {
+		t.Fatalf("card default = %+v %s", card, card.DefaultArguments)
+	}
+	option, err := card.Resolve(chat.ChoiceAnswer{UseDefault: true})
+	if err != nil || option.ID != "render" {
+		t.Fatalf("default answer = %+v err=%v", option, err)
+	}
+	continuation, ok := card.PendingContinuation()
+	if !ok || !strings.Contains(continuation, `"default":{"id":"render"`) {
+		t.Fatalf("pending continuation = %q (%v)", continuation, ok)
+	}
+}
+
+// A Catalog whose default_profile names no declared purpose opens the same card
+// without a default, so the person still picks one.
+func TestUsageProfileCardWithoutADeclaredDefaultHasNoDefault(t *testing.T) {
+	ctx := context.Background()
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	now := time.Now().UTC()
+	if _, err := repository.CreateSession(ctx, chat.Session{
+		ID: "session-a", OwnerID: "owner-a", OwnerName: "A", Title: "a", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	usage := testModel3DUsage()
+	usage.DefaultProfile = "retired"
+	service := newChatServiceWith(t, repository, func(config *chat.ServiceConfig) {
+		config.Model3DUsage = usage
+		config.ChoiceKinds = []catalog.ChatChoiceKindSchema{usageProfileKind()}
+	})
+	service.SetChoices(repository, 20)
+	command := chat.ToolCommand{OwnerID: "owner-a", SessionID: "session-a", AssistantMessageID: "turn-1",
+		Call: agents.ToolCall{ID: "call-1", Name: "ask_choice"}}
+	if _, err := service.AskChoice(ctx, command, usageProfileKind(), chat.AskChoiceArguments{Kind: "usage_profile"}); err != nil {
+		t.Fatal(err)
+	}
+	choices, err := service.ListChoices(ctx, "owner-a", "session-a")
+	if err != nil || len(choices) != 1 {
+		t.Fatalf("stored cards = %+v %v", choices, err)
+	}
+	if card := choices[0]; card.AllowDefault || card.DefaultOptionID != "" {
+		t.Fatalf("card default = %+v", card)
+	}
+}
+
 func TestAskChoiceBuildsAUsageProfileCardAndTheBriefSettlesIt(t *testing.T) {
 	ctx := context.Background()
 	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "chat.db"))

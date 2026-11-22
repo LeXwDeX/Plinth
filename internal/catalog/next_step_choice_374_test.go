@@ -169,8 +169,18 @@ func TestShippedAgentPromptAsksForDirectionCardsAndFewerQuestions(t *testing.T) 
 			t.Errorf("ask_choice description lacks %q", want)
 		}
 	}
-	if !strings.Contains(app.Chat.Model3DUsage.Brief.EmptyText, "问清用途") {
-		t.Error("the empty-brief text no longer asks for the purpose")
+	// #381: the empty-brief text infers the purpose or uses the default one,
+	// and asks only for what cannot be inferred. The usage card no longer
+	// predicts the follow-up questions.
+	for _, want := range []string{"默认用途", "无法推断"} {
+		if !strings.Contains(app.Chat.Model3DUsage.Brief.EmptyText, want) {
+			t.Errorf("the empty-brief text lacks %q", want)
+		}
+	}
+	for _, kind := range app.Chat.Choice.Kinds {
+		if kind.OptionSource == "usage_profiles" && strings.Contains(kind.Message, "还会再确认") {
+			t.Errorf("the usage card still predicts the follow-up questions: %s", kind.Message)
+		}
 	}
 }
 
