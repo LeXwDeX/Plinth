@@ -4024,8 +4024,19 @@ type ChatAgentScopeMode struct {
 // browser reads the group's label and notes from the group projection.
 type ChatThreeViewSchema struct {
 	// RecipeID is the skill recipe whose runs form three-view groups. Every
-	// step of the recipe is one view (slot) of the group.
+	// step of the recipe is one view (slot) of the group. It is the recipe of
+	// the default purpose and the one a historical run used.
 	RecipeID string `json:"recipe_id"`
+	// PurposeArgument names the create_three_view argument whose value picks one
+	// of Purposes; an absent or empty value means DefaultPurpose (#409).
+	PurposeArgument string `json:"purpose_argument,omitempty"`
+	// DefaultPurpose is the use a call that names none takes.
+	DefaultPurpose string `json:"default_purpose,omitempty"`
+	// Purposes are the uses the tool declares: a design sheet keeps the source's
+	// shape and pose, a model input renders an orthographic set for 3D. Each
+	// names its recipe and may replace the shared frame and consistency rules;
+	// absent leaves the historical single-recipe behavior.
+	Purposes []ChatThreeViewPurpose `json:"purposes,omitempty"`
 	// ModelSourceStepKey is the view used as the picture for a 3D model made
 	// from the group; the other views take no part in it.
 	ModelSourceStepKey string `json:"model_source_step_key"`
@@ -4064,6 +4075,21 @@ type ChatThreeViewSchema struct {
 	Frame ChatThreeViewFrameSchema `json:"frame,omitzero"`
 	// Review is the Agent's visual checklist for the finished views (#283).
 	Review ChatThreeViewReviewSchema `json:"review,omitzero"`
+}
+
+// ChatThreeViewPurpose is one declared use of the multi-view tool (#409): the
+// recipe its runs use and, when the use needs its own rules, the frame and the
+// consistency check that replace the shared ones. A nil override keeps the
+// shared rule.
+type ChatThreeViewPurpose struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	RecipeID string `json:"recipe_id"`
+	// Frame follows the source picture as a whole, with no subject measurement
+	// and no subject-type bounds, when it is declared.
+	Frame *ChatThreeViewFrameSchema `json:"frame,omitempty"`
+	// Consistency replaces the shared consistency bounds for this use.
+	Consistency *ChatThreeViewConsistencySchema `json:"consistency,omitempty"`
 }
 
 // ChatThreeViewSubjectType is one subject class of the three-view recipe. The
@@ -4188,6 +4214,10 @@ type ChatThreeViewFrameSchema struct {
 	SubjectThreshold float64 `json:"subject_threshold"`
 	MinSubjectRatio  float64 `json:"min_subject_ratio"`
 	MarginRatio      float64 `json:"margin_ratio"`
+	// SourceRatio takes the source picture's own width over height as the frame
+	// instead of measuring a subject with a margin, and skips the subject
+	// type's bounds (#409). A design sheet keeps its source's shape.
+	SourceRatio bool `json:"source_ratio,omitempty"`
 }
 
 // ChatThreeViewReviewSchema is the Agent's visual checklist for the finished
@@ -4281,6 +4311,8 @@ type ChatThreeViewMessages struct {
 	ConsistencyFailed string `json:"consistency_failed,omitempty"`
 	// SubjectInvalid refuses an unknown subject_type: {subject}, {choices}.
 	SubjectInvalid string `json:"subject_invalid,omitempty"`
+	// PurposeInvalid refuses an unknown purpose: {purpose}, {choices}.
+	PurposeInvalid string `json:"purpose_invalid,omitempty"`
 	// GroupNotFound, GroupNotReady, ViewsChanged and ViewsInvalid refuse a
 	// multiview step (#65) before anything is prepared.
 	GroupNotFound string `json:"group_not_found"`
@@ -6200,6 +6232,10 @@ type ChatSkillRecipeStepSchema struct {
 	OutputRole     string                     `json:"output_role"`
 	SourceStepKey  string                     `json:"source_step_key,omitempty"`
 	StaticInput    map[string]json.RawMessage `json:"static_input,omitempty"`
+	// IncludeSourceAsset sends the run's original picture as this step's second
+	// reference, after the SourceStepKey view (#409). It needs a SourceStepKey;
+	// a step without one already takes the original picture.
+	IncludeSourceAsset bool `json:"include_source_asset,omitempty"`
 	// Optional: the run is complete without this step (#65).
 	Optional bool `json:"optional,omitempty"`
 }

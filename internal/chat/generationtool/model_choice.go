@@ -317,6 +317,20 @@ func (executor *Executor) chooseOffering(
 	return choice, nil
 }
 
+// ChooseThreeViewModel is the model choice of the three-view tool (#409): the
+// person's session lock, the workspace pick, the production purpose's
+// recommendation and the Offering default, in chat.ResolveModel's order, the
+// same layers refine_image uses. The result is empty when no Offering can take
+// the call; the caller words that refusal. It is a shell over chooseOffering so
+// the Skill tool stops carrying a second, weaker selection rule.
+func (executor *Executor) ChooseThreeViewModel(command chat.ToolCommand) (generation.Offering, string) {
+	choice, _ := executor.chooseOffering(command, generation.ImageToImage, nil, modelInput{}, "")
+	if choice.Offering.ID == "" {
+		return generation.Offering{}, ""
+	}
+	return choice.Offering, choice.Source
+}
+
 // purposeRecommendation is the production purpose of the call's workspace
 // domain and the models it recommends for the call's input shape (#103).
 func (executor *Executor) purposeRecommendation(command chat.ToolCommand, capability generation.Capability) (purposeProfile, []string) {

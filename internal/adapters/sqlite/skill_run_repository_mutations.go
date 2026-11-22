@@ -94,6 +94,18 @@ func expectedSkillSource(run skillrun.Run, step skillrun.Step) (generation.Asset
 	return prior.OutputAssetID, nil
 }
 
+// expectedSkillSecondSource is the step's second reference: the run's original
+// picture for a recipe that declares IncludeSourceAsset (#409), empty otherwise.
+func expectedSkillSecondSource(run skillrun.Run, step skillrun.Step) (generation.AssetID, error) {
+	if !step.Spec.IncludeSourceAsset {
+		return "", nil
+	}
+	if step.Spec.SourceStepKey == "" {
+		return "", skillrun.ErrConflict
+	}
+	return run.SourceAssetID, nil
+}
+
 func (r *Repository) AttachSkillPrepared(ctx context.Context, cmd skillrun.PreparedCommand) (skillrun.Run, error) {
 	if !skillStepIdentityValid(cmd.StepCommand) || cmd.PreparedInputID == "" || cmd.PreparedInputHash == "" {
 		return skillrun.Run{}, skillrun.ErrInvalid
@@ -120,6 +132,10 @@ func (r *Repository) AttachSkillPrepared(ctx context.Context, cmd skillrun.Prepa
 		if err != nil {
 			return err
 		}
+		second, err := expectedSkillSecondSource(run, step)
+		if err != nil {
+			return err
+		}
 		var payload, storedHash string
 		err = conn.QueryRowContext(ctx, `SELECT payload_json,input_hash FROM generation_prepared_inputs
 			WHERE id=? AND owner_id=? AND session_id=?`, cmd.PreparedInputID, run.OwnerID, run.SessionID).
@@ -138,11 +154,12 @@ func (r *Repository) AttachSkillPrepared(ctx context.Context, cmd skillrun.Prepa
 			prepared.ID != cmd.PreparedInputID || prepared.OwnerID != run.OwnerID ||
 			prepared.SessionID != run.SessionID || prepared.Capability != step.Spec.Capability ||
 			prepared.OfferingID != step.Spec.OfferingID ||
-			prepared.OfferingRevision != step.Spec.OfferingRevision || !preparedUsesAsset(prepared, source) {
+			prepared.OfferingRevision != step.Spec.OfferingRevision || !preparedUsesAsset(prepared, source) ||
+			(second != "" && !preparedUsesAsset(prepared, second)) {
 			return skillrun.ErrConflict
 		}
 		if step.Spec.PromptParameter != "" || step.Spec.SourceParameter != "" {
-			if !skillrun.MatchesPreparedInput(step.Spec, source, prepared.NormalizedInput) {
+			if !skillrun.MatchesPreparedInput(step.Spec, source, second, prepared.NormalizedInput) {
 				return skillrun.ErrConflict
 			}
 		}

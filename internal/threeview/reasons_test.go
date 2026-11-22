@@ -70,11 +70,11 @@ func TestAReasonWithoutWordsFallsBackToTheCheckAndItsMeasurement(t *testing.T) {
 	service := &Service{schema: catalog.ChatThreeViewSchema{Consistency: catalog.ChatThreeViewConsistencySchema{
 		Reasons: map[string]string{"mirror_orientation": "faces the {partner}'s way ({actual}; {expected})"}}}}
 	worded := viewCheck{Check: imageinspect.Check{Name: "mirror_orientation", Actual: "1.00 / 0.41", Expected: "0.10"}, Partner: "Left"}
-	if got := service.reasonText(worded); got != "faces the Left's way (1.00 / 0.41; 0.10)" {
+	if got := service.reasonText(worded, service.schema.Consistency); got != "faces the Left's way (1.00 / 0.41; 0.10)" {
 		t.Fatalf("worded reason = %q", got)
 	}
 	bare := viewCheck{Check: imageinspect.Check{Name: "palette_distance", Actual: "0.189"}}
-	if got := service.reasonText(bare); got != "palette_distance (0.189)" {
+	if got := service.reasonText(bare, service.schema.Consistency); got != "palette_distance (0.189)" {
 		t.Fatalf("unworded reason = %q", got)
 	}
 }
