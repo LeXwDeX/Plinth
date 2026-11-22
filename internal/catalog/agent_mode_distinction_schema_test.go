@@ -43,7 +43,8 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 		}
 		seen++
 		require("tool "+tool.Name, tool.Description,
-			"approval mode", "capabilities are approved by policy in both modes, except that a step with fixed extra credits",
+			"approval mode (auto, budget or manual",
+			"capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits",
 			"unrelated to the Agent scope", "Never tell the person to switch the Agent scope or the approval mode")
 	}
 	if seen != 2 {
