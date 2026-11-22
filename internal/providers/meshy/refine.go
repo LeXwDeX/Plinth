@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/providers/httpjson"
 )
 
 // Meshy Text to 3D needs two upstream tasks for a textured model: a preview
@@ -144,7 +145,7 @@ func (a *Adapter) observeWithRefine(
 		return a.observePreviewStage(ctx, request, endpoint, version)
 	}
 	var response taskResponse
-	if err := a.client.DoJSON(
+	metadata, err := a.client.DoJSONResponse(
 		ctx,
 		http.MethodGet,
 		fmt.Sprintf("openapi/%s/%s/%s", version, endpoint, url.PathEscape(state.RefineTaskID)),
@@ -152,7 +153,8 @@ func (a *Adapter) observeWithRefine(
 		string(request.AttemptID)+":refine",
 		&response,
 		false,
-	); err != nil {
+	)
+	if err != nil {
 		return generation.Observation{}, err
 	}
 	refineRequest := request
@@ -161,6 +163,7 @@ func (a *Adapter) observeWithRefine(
 	if err != nil {
 		return generation.Observation{}, err
 	}
+	observation.PollAfter = httpjson.PollAfter(metadata.Header, observation.PollAfter)
 	// The public attempt keeps the preview job identity; the refine stays private.
 	observation.Job = &request.Job
 	observation.Opaque = request.Opaque
@@ -180,7 +183,7 @@ func (a *Adapter) observePreviewStage(
 	version string,
 ) (generation.Observation, error) {
 	var response taskResponse
-	if err := a.client.DoJSON(
+	metadata, err := a.client.DoJSONResponse(
 		ctx,
 		http.MethodGet,
 		fmt.Sprintf("openapi/%s/%s/%s", version, endpoint, url.PathEscape(request.Job.RemoteID)),
@@ -188,13 +191,15 @@ func (a *Adapter) observePreviewStage(
 		string(request.AttemptID),
 		&response,
 		false,
-	); err != nil {
+	)
+	if err != nil {
 		return generation.Observation{}, err
 	}
 	observation, err := a.observation(request, response)
 	if err != nil {
 		return generation.Observation{}, err
 	}
+	observation.PollAfter = httpjson.PollAfter(metadata.Header, observation.PollAfter)
 	observation.Opaque = request.Opaque
 	switch observation.Phase {
 	case generation.UpstreamAccepted, generation.UpstreamRunning:

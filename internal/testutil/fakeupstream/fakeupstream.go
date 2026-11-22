@@ -89,6 +89,10 @@ type Config struct {
 	// RetryAfter is the Retry-After value of the "rate-limit" scenario.
 	// Default 1 second.
 	RetryAfter time.Duration
+	// PollRetryAfter is the Retry-After header a non-terminal status poll
+	// carries. Default 5 seconds (Meshy documents it; Hyper3D asks clients to
+	// honor it too).
+	PollRetryAfter time.Duration
 	// FailTimes limits how many matching requests a request-phase scenario
 	// fails before the fake answers normally again. 0 means always. The
 	// X-Fake-Fail-Times request header overrides it per request.
@@ -127,6 +131,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RetryAfter <= 0 {
 		c.RetryAfter = time.Second
+	}
+	if c.PollRetryAfter <= 0 {
+		c.PollRetryAfter = 5 * time.Second
 	}
 	if c.ConvertURLDelay == 0 {
 		c.ConvertURLDelay = 10 * time.Millisecond

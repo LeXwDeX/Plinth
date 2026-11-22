@@ -179,20 +179,18 @@ func TestRodinWithoutImageLabelsTheRequestIsUnchanged(t *testing.T) {
 
 // Every list the Adapter cannot send as one mark per picture is refused before
 // the request: more marks than pictures (what Rodin refuses with
-// IMAGE_LABEL_LENGTH_TOO_LONG), fewer marks (whose result was not observed, so it
-// is never sent), a mark that is not on the page's list, and values that are not
-// a list of text. The requester reads the Schema's copy with the parameter's
-// public label; neither the parameter nor the wire field is named. Nothing
-// reaches the upstream, and ValidateInput says the same before the step is
-// prepared.
+// IMAGE_LABEL_LENGTH_TOO_LONG), a mark that is not on the page's list, and values
+// that are not a list of text. A short list is completed with "?" instead
+// (TestRodinShortImageLabelsAreCompletedWithUnknownMark). The requester reads
+// the Schema's copy with the parameter's public label; neither the parameter nor
+// the wire field is named. Nothing reaches the upstream, and ValidateInput says
+// the same before the step is prepared.
 func TestRodinImageLabelsAreRefusedLocallyBeforeAnyRequest(t *testing.T) {
 	for name, test := range map[string]struct {
 		pictures int
 		marks    any
 	}{
 		"more marks than pictures":  {2, []string{"F", "L", "B"}},
-		"fewer marks than pictures": {3, []string{"F", "L"}},
-		"one mark for two pictures": {2, []string{"F"}},
 		"a mark that is not listed": {3, []string{"F", "X", "B"}},
 		"a mark in lowercase":       {1, []string{"f"}},
 		"an empty mark":             {1, []string{""}},
@@ -218,6 +216,43 @@ func TestRodinImageLabelsAreRefusedLocallyBeforeAnyRequest(t *testing.T) {
 				OwnerID: "owner", Offering: f.imageOffering(), Input: input, InputAssets: pictureAssets(test.pictures),
 			})
 			assertLabelRefusal(t, validated)
+		})
+	}
+}
+
+// A short list is completed with the official unknown mark so every picture
+// keeps its position (#460 C31). ValidateInput accepts it; Start sends one mark
+// per picture.
+func TestRodinShortImageLabelsAreCompletedWithUnknownMark(t *testing.T) {
+	for name, test := range map[string]struct {
+		pictures int
+		marks    []string
+	}{
+		"two marks for three pictures": {3, []string{"F", "L"}},
+		"one mark for two pictures":    {2, []string{"F"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newRodinFake(t)
+			input := labelInput(t, test.pictures, test.marks)
+			validated := f.port().ValidateInput(context.Background(), generation.InputValidationRequest{
+				OwnerID: "owner", Offering: f.imageOffering(), Input: input, InputAssets: pictureAssets(test.pictures),
+			})
+			if validated != nil {
+				t.Fatalf("ValidateInput refused a short list: %v", validated)
+			}
+			started, err := f.startPictures(input, test.pictures, false)
+			if err != nil || started.Job == nil {
+				t.Fatalf("the fake refused a short list: %+v %v", started, err)
+			}
+			want := slices.Concat(rodinTemplateWire,
+				prefixed("image_label=", append(slices.Clone(test.marks), make([]string, test.pictures-len(test.marks))...)),
+				repeated("images=<file>", test.pictures), []string{"prompt=a small robot"})
+			for index := len(test.marks); index < test.pictures; index++ {
+				want[len(rodinTemplateWire)+index] = "image_label=?"
+			}
+			if got := partStrings(f.only()); !slices.Equal(got, want) {
+				t.Fatalf("request = %v\nwant %v", got, want)
+			}
 		})
 	}
 }

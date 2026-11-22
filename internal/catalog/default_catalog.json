@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.460-468-459.1",
+    "revision": "2026-11-22.462.1",
     "terminology": {
       "user_facing": [
         {
@@ -1145,42 +1145,16 @@
                 "phase": "accepted",
                 "queued": true
               },
-              "queued": {
-                "phase": "accepted",
-                "queued": true
-              },
-              "waiting": {
-                "phase": "accepted",
-                "queued": true
-              },
               "in_progress": {
-                "phase": "running"
-              },
-              "running": {
-                "phase": "running"
-              },
-              "processing": {
                 "phase": "running"
               },
               "succeeded": {
                 "phase": "completed"
               },
-              "success": {
-                "phase": "completed"
-              },
-              "completed": {
-                "phase": "completed"
-              },
               "failed": {
                 "phase": "failed"
               },
-              "failure": {
-                "phase": "failed"
-              },
               "canceled": {
-                "phase": "canceled"
-              },
-              "cancelled": {
                 "phase": "canceled"
               }
             }
@@ -1350,7 +1324,8 @@
           "auth_header": "Authorization",
           "auth_prefix": "Bearer ",
           "request_timeout_seconds": 120,
-          "result_refetch": {"mode": "observe"},
+          "result_refetch": {"mode": "observe", "retention_hours": 168},
+          "retry_submit_server_error": true,
           "capabilities": [
             "text-to-3d",
             "image-to-3d",
@@ -1369,7 +1344,7 @@
               "INVALID_REQUEST": { "class": "invalid_input" },
               "API_NO_ACTIVE_SUBSCRIPTION": { "class": "insufficient_balance" },
               "API_SUBSCRIPTION_PLAN_TOO_LOW": { "class": "insufficient_balance" },
-              "API_PARALLELISM_LIMIT_REACHED": { "class": "rate_limited" },
+              "API_PARALLELISM_LIMIT_REACHED": { "class": "rate_limited", "retryable": true },
               "API_INSUFFICIENT_FUNDS": { "class": "insufficient_balance" },
               "API_OBJECT_NOT_FOUND_ON_IMAGE": { "class": "invalid_input" },
               "IMAGE_CONTENT_VIOLATION": { "class": "rejected" },
@@ -21428,7 +21403,7 @@
             "底部": "Bottom",
             "不确定": "Unsure",
             "参考图方位标记": "Reference image angle marks",
-            "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。该设置不在设置面板里显示。": "Marks, in order, which side each reference picture shows (front, front left, front right, back, back left, back right, left, right, top, bottom, or unsure when it cannot be told), so Rodin matches the pictures to different angles of one object. When filled in, every reference picture needs one mark and marks may repeat; when empty nothing is sent. This setting is not shown in the settings panel.",
+            "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。标记少于图片数时，缺少的位置按官方补“？”（不确定）。该设置不在设置面板里显示。": "Marks, in order, which side each reference picture shows (front, front left, front right, back, back left, back right, left, right, top, bottom, or unsure when it cannot be told), so Rodin matches the pictures to different angles of one object. When filled in, every reference picture needs one mark and marks may repeat; when empty nothing is sent. This setting is not shown in the settings panel.",
             "按选择顺序依次对应正面、左侧、背面、右侧视角（可用“视角”参数改写对应关系）；正面图必须有，至少 2 张、最多 4 张，均为同一物体。": "Images map to Front, Left, Back, Right in the order selected (override with the Reference image views parameter). A front image is required; send 2 to 4 images of the same object.",
             "Tripo Smart Segmentation · 图片": "Tripo Smart Segmentation · Image",
             "Tripo Smart Segmentation · 模型": "Tripo Smart Segmentation · Model",
@@ -39222,10 +39197,13 @@
       "job_timeout_seconds": 3600,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
-        "retryable": []
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable"
+        ]
       },
       "materialize_attempts": 8,
       "outputs": [
@@ -39314,8 +39292,8 @@
         "sources": [
           {
             "title": "Hyper3D Rodin API",
-            "url": "https://docs.hyper3d.ai/en/api-specification/rodin-agentic",
-            "checked_at": "2026-11-10"
+            "url": "https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5",
+            "checked_at": "2026-11-22"
           }
         ]
       },
@@ -39494,10 +39472,13 @@
       "job_timeout_seconds": 3600,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
-        "retryable": []
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable"
+        ]
       },
       "materialize_attempts": 8,
       "outputs": [
@@ -39587,8 +39568,8 @@
         "sources": [
           {
             "title": "Hyper3D Rodin API",
-            "url": "https://docs.hyper3d.ai/en/api-specification/rodin-agentic",
-            "checked_at": "2026-11-10"
+            "url": "https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5",
+            "checked_at": "2026-11-22"
           }
         ]
       },
@@ -39648,7 +39629,7 @@
             }
           ],
           "semantic": "reference-image-labels",
-          "description": "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。该设置不在设置面板里显示。",
+          "description": "按顺序标出每张参考图拍的是哪个方位（正面、左前、右前、背面、左后、右后、左侧、右侧、顶部、底部，看不出时用“不确定”），Rodin 据此把这些图对应到同一物体的不同角度。填写时每张参考图都要有一个标记，标记可以重复；不填则不发送。标记少于图片数时，缺少的位置按官方补“？”（不确定）。该设置不在设置面板里显示。",
           "presentation": {
             "surface": "hidden",
             "control": "multi-select"
@@ -43254,10 +43235,13 @@
       "job_timeout_seconds": 3600,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
-        "retryable": []
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable"
+        ]
       },
       "materialize_attempts": 8,
       "outputs": [
@@ -43345,10 +43329,13 @@
       "job_timeout_seconds": 3600,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
-        "retryable": []
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable"
+        ]
       },
       "materialize_attempts": 8,
       "outputs": [
@@ -43464,10 +43451,13 @@
       "job_timeout_seconds": 3600,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 30,
         "max_backoff_seconds": 300,
-        "retryable": []
+        "retryable": [
+          "rate_limited",
+          "upstream_unavailable"
+        ]
       },
       "materialize_attempts": 8,
       "outputs": [

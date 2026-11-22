@@ -40,6 +40,28 @@ type Client struct {
 	maxResponseBytes int64
 	classifyError    HTTPErrorClassifier
 	spoolDir         string
+	// submitTimeout bounds a task-creation request (submitting=true) without
+	// shortening the client timeout that also covers polls and downloads.
+	// Zero leaves the caller's context as the only bound.
+	submitTimeout time.Duration
+	// largeSubmitTimeout applies to a creation request whose body exceeds
+	// largeSubmitBytes.
+	largeSubmitTimeout time.Duration
+	largeSubmitBytes   int64
+	// retrySubmitServerError is the connection-level declaration that a 5xx
+	// answer to a creation request may be retried (#460 C25).
+	retrySubmitServerError bool
+}
+
+// largeSubmitBytes is the body size above which a creation request uses
+// largeSubmitTimeout (Meshy: a model_url file over 100 MB).
+const largeSubmitBytes int64 = 100 << 20
+
+// Response is the metadata of a completed HTTP exchange. Adapters use it to
+// read the upstream's Retry-After on a non-terminal poll.
+type Response struct {
+	StatusCode int
+	Header     http.Header
 }
 
 // ScratchFilePrefix names every private scratch file a Provider Adapter
@@ -64,6 +86,20 @@ type Config struct {
 	// 生产装配传入存储卷的 tmp 目录：容器的 /tmp 是 64 MB 的 tmpfs，
 	// 装不下上百 MB 的模型上传（#321 A）。
 	SpoolDir string
+	// SubmitTimeout 限定创建请求（submitting=true）的单次时长，不影响
+	// 轮询与产物下载使用的 HTTPClient 超时。零值表示只由调用方 context 约束。
+	// 官方建议（Meshy，2026-11-22）：创建请求 60 秒，请求体超过 100 MB 时 120 秒。
+	SubmitTimeout time.Duration
+	// LargeSubmitTimeout 是请求体超过 LargeSubmitBytes 时创建请求的时长；
+	// 零值时退回 SubmitTimeout。
+	LargeSubmitTimeout time.Duration
+	// LargeSubmitBytes 是创建请求使用 LargeSubmitTimeout 的请求体大小阈值；
+	// 零值取 100 MiB（Meshy 官方：model_url 文件超过 100 MB）。
+	LargeSubmitBytes int64
+	// RetrySubmitServerError 是连接级声明：创建请求收到 5xx 时可以重试
+	// （#460 C25）。上游可能已经受理创建，因此重试有重复扣费风险；
+	// 只有声明允许的连接才这样做，未声明的连接保持「结果不明不重发」。
+	RetrySubmitServerError bool
 }
 
 // HTTPErrorClassifier 对 HTTP 非 2xx 响应做 provider 专有分类。
@@ -123,19 +159,26 @@ func NewWithConfig(config Config) (*Client, error) {
 	if config.MaxResponseBytes <= 0 {
 		config.MaxResponseBytes = defaultMaxResponseBytes
 	}
+	if config.LargeSubmitBytes <= 0 {
+		config.LargeSubmitBytes = largeSubmitBytes
+	}
 	classifyError := config.ClassifyError
 	if classifyError == nil && config.ErrorMapping != nil {
 		classifyError = ClassifyWithMapping(config.ErrorMapping)
 	}
 	return &Client{
-		AuthHeader:       config.AuthHeader,
-		AuthPrefix:       config.AuthPrefix,
-		BaseURL:          parsed,
-		APIKey:           config.APIKey,
-		HTTPClient:       config.HTTPClient,
-		maxResponseBytes: config.MaxResponseBytes,
-		classifyError:    classifyError,
-		spoolDir:         strings.TrimSpace(config.SpoolDir),
+		AuthHeader:             config.AuthHeader,
+		AuthPrefix:             config.AuthPrefix,
+		BaseURL:                parsed,
+		APIKey:                 config.APIKey,
+		HTTPClient:             config.HTTPClient,
+		maxResponseBytes:       config.MaxResponseBytes,
+		classifyError:          classifyError,
+		spoolDir:               strings.TrimSpace(config.SpoolDir),
+		submitTimeout:          config.SubmitTimeout,
+		largeSubmitTimeout:     config.LargeSubmitTimeout,
+		largeSubmitBytes:       config.LargeSubmitBytes,
+		retrySubmitServerError: config.RetrySubmitServerError,
 	}, nil
 }
 
@@ -148,15 +191,32 @@ func (c *Client) DoJSON(
 	target any,
 	submitting bool,
 ) error {
+	_, err := c.DoJSONResponse(ctx, method, path, body, requestID, target, submitting)
+	return err
+}
+
+// DoJSONResponse is DoJSON plus the metadata of a completed exchange. A
+// non-terminal poll uses the header to honour the upstream's Retry-After.
+func (c *Client) DoJSONResponse(
+	ctx context.Context,
+	method string,
+	path string,
+	body any,
+	requestID string,
+	target any,
+	submitting bool,
+) (Response, error) {
 	var encoded io.Reader
+	knownSize := int64(-1)
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return providerError(generation.FailureInternal, false, false, "编码 Provider 请求失败", err)
+			return Response{}, providerError(generation.FailureInternal, false, false, "编码 Provider 请求失败", err)
 		}
 		encoded = bytes.NewReader(data)
+		knownSize = int64(len(data))
 	}
-	return c.Do(
+	return c.do(
 		ctx,
 		method,
 		path,
@@ -165,6 +225,7 @@ func (c *Client) DoJSON(
 		requestID,
 		target,
 		submitting,
+		knownSize,
 	)
 }
 
@@ -178,6 +239,21 @@ func (c *Client) Do(
 	target any,
 	submitting bool,
 ) error {
+	_, err := c.do(ctx, method, path, body, contentType, requestID, target, submitting, -1)
+	return err
+}
+
+func (c *Client) do(
+	ctx context.Context,
+	method string,
+	path string,
+	body io.Reader,
+	contentType string,
+	requestID string,
+	target any,
+	submitting bool,
+	knownSize int64,
+) (Response, error) {
 	// Finish multipart construction before opening a connection. Local asset errors
 	// then prove that no upstream task was created, without buffering images in RAM.
 	spooledBytes := int64(-1)
@@ -204,15 +280,15 @@ func (c *Client) Do(
 			}
 			file, err := os.CreateTemp(c.spoolDir, ScratchFilePrefix+"upload-*")
 			if err != nil {
-				return providerError(generation.FailureTransport, true, false, "准备上传文件失败", err)
+				return Response{}, providerError(generation.FailureTransport, true, false, "准备上传文件失败", err)
 			}
 			defer os.Remove(file.Name())
 			defer file.Close()
 			if _, err := io.Copy(file, requestBodyReader{ctx: ctx, Reader: body}); err != nil {
-				return providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
+				return Response{}, providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
 			}
 			if _, err := file.Seek(0, io.SeekStart); err != nil {
-				return providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
+				return Response{}, providerError(generation.FailureTransport, true, false, "读取本地上传文件失败，尚未向上游提交", err)
 			}
 			if info, statErr := file.Stat(); statErr == nil {
 				spooledBytes = info.Size()
@@ -222,11 +298,27 @@ func (c *Client) Do(
 	}
 	endpoint, err := c.resolve(path)
 	if err != nil {
-		return providerError(generation.FailureProtocol, false, false, "Provider endpoint 无效", err)
+		return Response{}, providerError(generation.FailureProtocol, false, false, "Provider endpoint 无效", err)
+	}
+	// A creation request has the provider's own shorter guidance (Meshy:
+	// 60 s, or 120 s when the body carries a file over 100 MB). Apply it to
+	// this request only; the client timeout still bounds polls and downloads.
+	if submitting && c.submitTimeout > 0 {
+		timeout := c.submitTimeout
+		size := knownSize
+		if size < 0 {
+			size = spooledBytes
+		}
+		if size > c.largeSubmitBytes && c.largeSubmitTimeout > 0 {
+			timeout = c.largeSubmitTimeout
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
 	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
 	if err != nil {
-		return providerError(generation.FailureInternal, false, false, "创建 Provider 请求失败", err)
+		return Response{}, providerError(generation.FailureInternal, false, false, "创建 Provider 请求失败", err)
 	}
 	if submitting {
 		// 非幂等提交关闭传输层自动重放（§4.3）：清除 GetBody 使
@@ -261,7 +353,7 @@ func (c *Client) Do(
 	response, err := c.HTTPClient.Do(request)
 	if err != nil {
 		ambiguous := submitting && !(tlsFailed.Load() && !gotConnection.Load()) && !definitelyNotSent(err)
-		return providerError(
+		return Response{}, providerError(
 			generation.FailureTransport,
 			!ambiguous,
 			ambiguous,
@@ -272,7 +364,7 @@ func (c *Client) Do(
 	defer response.Body.Close()
 	payload, readErr := io.ReadAll(io.LimitReader(response.Body, c.maxResponseBytes+1))
 	if readErr != nil {
-		return providerError(
+		return Response{}, providerError(
 			generation.FailureTransport,
 			true,
 			submitting,
@@ -281,7 +373,7 @@ func (c *Client) Do(
 		)
 	}
 	if int64(len(payload)) > c.maxResponseBytes {
-		return providerError(
+		return Response{}, providerError(
 			generation.FailureProtocol,
 			false,
 			submitting,
@@ -294,7 +386,23 @@ func (c *Client) Do(
 		// Apply this before provider-specific wording so classifiers cannot turn an
 		// uncertain acceptance into an automatic second submission.
 		if submitting && (response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500) {
-			return &generation.ProviderError{Failure: withUpstreamEvidence(
+			// A connection that declares it may retry a 5xx creation: the
+			// upstream might have accepted the work before failing, so the
+			// retry risks a second charge. The connection owns that trade-off
+			// (#460 C25); the default stays "unknown, never resend".
+			if c.retrySubmitServerError && response.StatusCode >= 500 {
+				return Response{}, &generation.ProviderError{Failure: withUpstreamEvidence(
+					&generation.Failure{
+						Class:      generation.FailureUpstreamUnavailable,
+						Retryable:  true,
+						SafeDetail: "上游返回错误，按连接声明重试提交",
+						RetryAfter: retryAfter(response.Header.Get("Retry-After")),
+					},
+					response.StatusCode,
+					payload,
+				)}
+			}
+			return Response{}, &generation.ProviderError{Failure: withUpstreamEvidence(
 				&generation.Failure{
 					Class:      generation.FailureSubmissionUnknown,
 					Retryable:  false,
@@ -307,16 +415,16 @@ func (c *Client) Do(
 		}
 		if c.classifyError != nil {
 			if err := c.classifyError(response, payload); err != nil {
-				return err
+				return Response{}, err
 			}
 		}
-		return classifyHTTP(response, payload)
+		return Response{}, classifyHTTP(response, payload)
 	}
 	if target == nil || response.StatusCode == http.StatusNoContent {
-		return nil
+		return Response{}, nil
 	}
 	if err := json.Unmarshal(payload, target); err != nil {
-		return &generation.ProviderError{Failure: withUpstreamEvidence(
+		return Response{}, &generation.ProviderError{Failure: withUpstreamEvidence(
 			&generation.Failure{
 				Class:      generation.FailureProtocol,
 				Retryable:  false,
@@ -327,7 +435,7 @@ func (c *Client) Do(
 			payload,
 		), Cause: err}
 	}
-	return nil
+	return Response{StatusCode: response.StatusCode, Header: response.Header.Clone()}, nil
 }
 
 func (c *Client) resolve(path string) (*url.URL, error) {
@@ -473,6 +581,21 @@ func retryAfter(value string) time.Duration {
 		}
 	}
 	return 0
+}
+
+// PollAfter is the non-terminal poll delay an upstream asks for: the
+// Retry-After header when it carries one, else fallback. It is the shared rule
+// (Meshy documents it as the Retry-After header, or 5 seconds when absent), so
+// a Provider does not invent its own parsing; zero and malformed values leave
+// fallback unchanged.
+func PollAfter(header http.Header, fallback time.Duration) time.Duration {
+	if header == nil {
+		return fallback
+	}
+	if delay := retryAfter(header.Get("Retry-After")); delay > 0 {
+		return delay
+	}
+	return fallback
 }
 
 func providerError(

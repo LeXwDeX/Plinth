@@ -1,9 +1,14 @@
 package core
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // The remesh options of a 3D generation request (should_remesh, topology,
@@ -43,9 +48,94 @@ const (
 	targetFloor               = 100
 )
 
+// The official image bounds of Image to 3D and Multi Image to 3D
+// (docs.meshy.ai/en/api/image-to-3d and .../multi-image-to-3d, read
+// 2026-11-22): each side at least 32 px and at most 178,956,970 pixels in
+// total. A picture outside them is refused before the task is created.
+const (
+	minImageSide   = 32
+	maxImagePixels = 178956970
+)
+
+// ImageRequestError returns what is wrong with the data URI images of an
+// image-to-3d or multi-image-to-3d request, or "". Only data URIs are checked:
+// the platform inlines the pictures, and a remote URL is the upstream's to
+// fetch. The refusal text is constructed (no real rejection was captured).
+func ImageRequestError(request map[string]any) string {
+	values := make([]any, 0, 1)
+	if value, ok := request["image_url"].(string); ok {
+		values = append(values, value)
+	}
+	if list, ok := request["image_urls"].([]any); ok {
+		values = append(values, list...)
+	}
+	for _, value := range values {
+		uri, _ := value.(string)
+		if message := imageDataURIError(uri); message != "" {
+			return message
+		}
+	}
+	return ""
+}
+
+func imageDataURIError(uri string) string {
+	const prefix = "data:"
+	if !strings.HasPrefix(uri, prefix) {
+		return ""
+	}
+	comma := strings.IndexByte(uri, ',')
+	if comma < 0 || !strings.Contains(uri[:comma], ";base64") {
+		return "image_url must be a base64 data URI"
+	}
+	raw, err := base64.StdEncoding.DecodeString(uri[comma+1:])
+	if err != nil {
+		return "image_url must be a base64 data URI"
+	}
+	config, _, err := image.DecodeConfig(strings.NewReader(string(raw)))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return "image_url must be a PNG or JPEG image"
+	}
+	if config.Width < minImageSide || config.Height < minImageSide {
+		return "each image side must be at least 32 pixels"
+	}
+	if int64(config.Width)*int64(config.Height) > maxImagePixels {
+		return "an image must not exceed 178956970 pixels"
+	}
+	return ""
+}
+
+// TextTo3DRequestError is the Text to 3D create validation. The official
+// preview parameter table has no enable_pbr, texture_prompt or
+// texture_image_url; sending them on a preview is refused. pose_mode is
+// optional and "leave it out for no pose", so an explicit empty string is
+// refused rather than sent.
+func TextTo3DRequestError(request map[string]any) string {
+	if message := GenerationRequestError(request); message != "" {
+		return message
+	}
+	if value, present := request["pose_mode"]; present {
+		if text, ok := value.(string); !ok || strings.TrimSpace(text) == "" {
+			return "pose_mode must be a-pose or t-pose; leave it out for no pose"
+		}
+	}
+	if mode, _ := request["mode"].(string); mode != "refine" {
+		for _, field := range []string{"enable_pbr", "texture_prompt", "texture_image_url"} {
+			if has(request, field) {
+				return field + " is only valid for a refine task"
+			}
+		}
+	}
+	return ""
+}
+
 // GenerationRequestError returns what is wrong with the remesh options of a 3D
 // generation request body, or "". The body was decoded with UseNumber.
 func GenerationRequestError(request map[string]any) string {
+	if value, present := request["pose_mode"]; present {
+		if text, ok := value.(string); !ok || strings.TrimSpace(text) == "" {
+			return "pose_mode must be a-pose or t-pose; leave it out for no pose"
+		}
+	}
 	aiModel, _ := request["ai_model"].(string)
 	modelType, _ := request["model_type"].(string)
 	_, smartModel := smartTopologyCeilings[aiModel]

@@ -41,6 +41,10 @@ type Config struct {
 	// Empty means os.TempDir(); production passes the storage volume's tmp
 	// directory because the container's /tmp is a small tmpfs (#321 A).
 	ScratchDir string
+	// RetrySubmitServerError is the connection-level declaration that a 5xx
+	// answer to a create may be retried (#460 C25). The upstream may have
+	// accepted the create before failing, so the retry can charge twice.
+	RetrySubmitServerError bool
 }
 
 type Adapter struct {
@@ -211,14 +215,15 @@ func New(config Config) (*Adapter, error) {
 		}
 	}
 	client, err := httpjson.NewWithConfig(httpjson.Config{
-		BaseURL:        config.BaseURL,
-		APIKey:         config.APIKey,
-		AuthHeader:     config.AuthHeader,
-		AuthPrefix:     config.AuthPrefix,
-		RequestTimeout: config.RequestTimeout,
-		HTTPClient:     config.HTTPClient,
-		ErrorMapping:   config.ErrorMapping,
-		SpoolDir:       config.ScratchDir,
+		BaseURL:                config.BaseURL,
+		APIKey:                 config.APIKey,
+		AuthHeader:             config.AuthHeader,
+		AuthPrefix:             config.AuthPrefix,
+		RequestTimeout:         config.RequestTimeout,
+		HTTPClient:             config.HTTPClient,
+		ErrorMapping:           config.ErrorMapping,
+		SpoolDir:               config.ScratchDir,
+		RetrySubmitServerError: config.RetrySubmitServerError,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hyper3d: %w", err)
@@ -387,6 +392,14 @@ func (a *Adapter) Start(ctx context.Context, request generation.StartRequest) (g
 		if err := checkImageLabels(request.Offering, input, pictures); err != nil {
 			return generation.Observation{}, err
 		}
+		// A short list is completed with "?" so the wire keeps one mark per
+		// picture (#460 C31); the edited input is what EncodeMultipart reads.
+		if err := padImageLabels(request.Offering, input, pictures); err != nil {
+			return generation.Observation{}, err
+		}
+		if encoded, err := json.Marshal(input); err == nil {
+			request.Input = encoded
+		}
 	}
 	// Preflight the complete multipart body before writing a paid-dispatch intent.
 	// A local asset read/size failure then cannot strand an intent for a request
@@ -458,8 +471,9 @@ func (a *Adapter) Observe(ctx context.Context, request generation.ObserveRequest
 		return generation.Observation{}, fail(generation.FailureProtocol, false, "上游轮询路由无效")
 	}
 	var status statusResponse
-	if err := a.client.DoJSON(ctx, http.MethodPost, options.ObserveEndpoint,
-		map[string]string{"subscription_key": state.SubscriptionKey}, string(request.AttemptID), &status, false); err != nil {
+	metadata, err := a.client.DoJSONResponse(ctx, http.MethodPost, options.ObserveEndpoint,
+		map[string]string{"subscription_key": state.SubscriptionKey}, string(request.AttemptID), &status, false)
+	if err != nil {
 		return generation.Observation{}, err
 	}
 	if err := a.businessError(status.rodinError); err != nil {
@@ -517,7 +531,7 @@ func (a *Adapter) Observe(ctx context.Context, request generation.ObserveRequest
 		}
 		observation := generation.Observation{
 			Phase: phase, Job: &request.Job, Opaque: encoded,
-			PollAfter: pollDelay(request.Offering.PollInterval, state.PollCount),
+			PollAfter: httpjson.PollAfter(metadata.Header, pollDelay(request.Offering.PollInterval, state.PollCount)),
 			DedupeKey: fmt.Sprintf("%s:%s:%d", state.TaskUUID, phase, state.PollCount),
 		}
 		if phase == generation.UpstreamAccepted && allQueued {
@@ -559,7 +573,7 @@ func (a *Adapter) Observe(ctx context.Context, request generation.ObserveRequest
 	if !modelFound {
 		return generation.Observation{
 			Phase: generation.UpstreamRunning, Job: &request.Job, Opaque: encoded,
-			PollAfter: pollDelay(request.Offering.PollInterval, state.PollCount),
+			PollAfter: httpjson.PollAfter(metadata.Header, pollDelay(request.Offering.PollInterval, state.PollCount)),
 			DedupeKey: fmt.Sprintf("%s:files-pending:%d", state.TaskUUID, state.PollCount),
 		}, nil
 	}

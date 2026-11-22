@@ -567,7 +567,20 @@ Rig 在精确源码 `95e65d67252a64136da8cb6820fae7f2d56e84af` 的独立 App 中
 - **免费上传**：`uploadReader` 不再以 `submitting=true` 发送 `/files`，失败是可重试传输错误。
 - **保留期**：Tripo 连接声明 `result_refetch.retention_hours: 168`（官方 2026-12-01 起最多 7 天）。
 - **Meshy**：生成与 Convert 的 `retry.retryable` 补 `timed_out`；7.x 文生的 preview 不再发送 `enable_pbr`/`texture_prompt`/`texture_image_url`，refine 不再发送 `ai_model`（由 Schema 的 `omit_when` 决定，Adapter 的 `projectInput` 尊重声明）；Rigging 输入上限 380000；连接 `error_mapping` 增加 403 → `upstream_denied`；Rigging 弃用的 `texture_image_url` 从 Offering 与发现投影移除并在 `provider_deprecations` 登记；图生/多图的 `reference_assets` 声明 `image_input`（每边 ≥32 px、总像素 ≤178,956,970），Adapter 逐个检查；`pose_mode` 为空不发送；keychain build 的 `output_format` 增加 `obj`。
+- **Meshy B20–B22、B24**：连接级 `request_timeout_seconds: 1800` 仍覆盖全部请求（含下载）；Meshy 连接额外给创建请求加 60 s（请求体超过 100 MB 时 120 s）的 context 期限，`httpjson.Client` 只对 `submitting=true` 的请求应用，轮询与下载不受影响。`httpjson.PollAfter` 统一解析非终态轮询的 `Retry-After`（有则用，否则回退），Meshy 回退到 Offering 的 5 s。Meshy 连接 `status_mapping` 收敛为官方 5 个状态词（`pending`、`in_progress`、`succeeded`、`failed`、`canceled`）：已提交样本只出现前四个，`canceled` 是构造的 Creative Lab 终态，没有多余状态词的历史依赖。Meshy fake 补了 preview 专属字段、内联图片像素上下限与 `pose_mode:""` 的校验。
 - **边界**：`internal/providers/meshy/testdata/meshy-text-to-3d.candidate.json` 的响应体保持捕获原样，两个创建请求的请求体按官方 2026-11-22 的 wire 更新（响应体与交换元数据保持原样）；`internal/testutil/fakeupstream/meshy` 的 Rigging 上限改为 380000，对齐报告里 2026-10-29 的历史观测（320000 面以上被接受后 FAILED）保持不变。
+
+### Rodin / Hyper3D 的重试与参数（#460 C25–C32；源码、fake 与本机测试已完成，未部署验收）
+
+- **C25 429/5xx 重试**：5 个 Hyper3D Offering 的 `retry` 改为 `max_attempts: 2`、`retryable: [rate_limited, upstream_unavailable]`。提交阶段 5xx 由连接级 `retry_submit_server_error` 声明（Hyper3D 声明 `true`，Tripo/Meshy 不声明），`httpjson` 在 `submitting && >=500` 处读取并返回可重试的 `upstream_unavailable`。风险：上游可能已在 5xx 前受理创建，重试可能重复扣费；这是连接显式接受的取舍，官方没有给出幂等键或 5xx 后查询的替代。
+- **C26 并发上限**：Hyper3D `upstream_code_map.API_PARALLELISM_LIMIT_REACHED` 补 `retryable: true`，由内核退避（或 #468 的上游池排队）处理。
+- **C27 图生 prompt**：`hyper3d/rodin-gen-2.5/image-to-3d` 的 `prompt.max_length` 保持官方 `1024`（原本已是），本批次补 Catalog 回归锁定。
+- **C28 sources / 新增参数**：两个 Gen-2.5 Offering 的 `knowledge.sources` 改指 `rodin-gen2-5` 页，`checked_at: 2026-11-22`；官方 2026-08 新增、本平台不发送的参数（`is_symmetric`、`soft`、`detail_level`、`addons`、`uhd_texture`、`preview_render`、`use_original_alpha`、`geometry_instruct_mode`、`bbox_condition`）记录在 `docs/provider-schema-architecture.md`。
+- **C29 保留期**：官方 Data Retention Policy（2026-08-03 生效）写明 7 天；Hyper3D 连接 `result_refetch.retention_hours: 168`，`result_refetch` 的语义与之一致。
+- **C30 material**：Bang 与 Texture 的 `material` 允许集补 `Hybrid`（Bang 仍保留 `None`）。
+- **C31 image_label**：`image_label` 少于图片数时，Adapter 在发送前补 `?`（官方未知方位），`ValidateInput` 不再拒绝短列表。
+- **C32 fake 值域**：Hyper3D fake 的 Bang/Texture 表单补 `material`（含 `Hybrid`/`None`）、`resolution`、`geometry_file_format`、`strength`、`quality_override`、`mesh_mode`、`seed`、`escore`、`reference_scale`、`texture_mode` 的值域校验。
+- **F8**：`timeout_seconds: 3600` 官方没有给出耗时，不改。
 
 ### 上游并发池（#468；源码与本机 fake 测试已完成，未部署验收）
 

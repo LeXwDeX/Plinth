@@ -1,6 +1,10 @@
 package meshyopenapiv1
 
 import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	"image/png"
 	"net/http"
 	"sort"
 	"strings"
@@ -26,6 +30,15 @@ func newFixture(t *testing.T, config fakeupstream.Config) *fixture {
 }
 
 func (f *fixture) v1(path string) string { return Prefix + path }
+
+func dataURI(t *testing.T, width, height int) string {
+	t.Helper()
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image.NewGray(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buffer.Bytes())
+}
 
 // create submits a task and returns its id.
 func (f *fixture) create(path string, body map[string]any, headers ...string) string {
@@ -711,5 +724,29 @@ func TestTheOBJMaterialLibraryFollowsTheSourceTexture(t *testing.T) {
 	converted, _ := convertBody["model_urls"].(map[string]any)
 	if _, has := converted["mtl"]; has {
 		t.Fatalf("a convert of an untextured model carries an MTL: %v", converted)
+	}
+}
+
+// #460 B24: the fake checks the official pixel bounds of an inlined picture.
+func TestImageTo3DRejectsPicturesOutsideOfficialPixelBounds(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	cases := []struct {
+		name          string
+		width, height int
+		want          int
+	}{
+		{"below the minimum side", 31, 32, http.StatusBadRequest},
+		{"above the pixel budget", 13400, 13400, http.StatusBadRequest},
+		{"at the minimum", 32, 32, http.StatusAccepted},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			status, _, body := f.Do("POST", f.v1("/image-to-3d"), key, map[string]any{
+				"image_url": dataURI(t, test.width, test.height),
+			})
+			if status != test.want {
+				t.Fatalf("status = %d %v, want %d", status, body, test.want)
+			}
+		})
 	}
 }
