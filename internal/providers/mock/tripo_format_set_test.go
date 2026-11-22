@@ -1,6 +1,7 @@
 package mock
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -8,13 +9,14 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
-	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-// #278: a Tripo task whose purpose chose the GLB and FBX only is delivered by the
-// mock the way the upstream delivers it. The kernel pins the unselected
-// converted-model slots to minimum 0 at submission; the mock reads the pinned
-// Offering and leaves them out.
+// #278, revised by #462: a Tripo task whose purpose chose the GLB and FBX only
+// succeeds on the GLB alone — the other five formats are on-demand slots, which
+// never block success — and delivers the selected ones in the post-success
+// round, the way the upstream converts them after the main model is ready. The
+// kernel removes the slots the request never asked for before the Task is
+// frozen, so the mock only ever sees the selected ones.
 func TestMockDeliversOnlyTheSelectedTripoFormats(t *testing.T) {
 	loaded, err := catalog.LoadDefault()
 	if err != nil {
@@ -35,35 +37,80 @@ func TestMockDeliversOnlyTheSelectedTripoFormats(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var values map[string]any
-			if err := json.Unmarshal(frozen, &values); err != nil {
+			// The kernel resolves the conditional outputs once, at freeze time.
+			pinned, err := generation.ResolveConditionalOutputs(offering, frozen)
+			if err != nil {
 				t.Fatal(err)
 			}
-			pinned := offering
-			pinned.Outputs = append([]generation.AssetRequirement(nil), offering.Outputs...)
-			for index, output := range pinned.Outputs {
-				if output.RequiredWhen != nil && !schema.ConditionMatches(*output.RequiredWhen, values) {
-					zero := 0
-					pinned.Outputs[index].Minimum = &zero
-				}
+			adapter := New()
+			files := complete(t, adapter, pinned, "formats-"+name, json.RawMessage(frozen))
+			delivered := convertedVariants(files)
+			if want := []string{"converted.gltf"}; !slices.Equal(delivered, want) {
+				t.Fatalf("success round delivered %v, want only the blocking slot(s) %v", delivered, want)
 			}
-			var delivered []string
-			for _, file := range complete(t, New(), pinned, "formats-"+name, values) {
-				if file.claim.Role == "converted_model" {
-					delivered = append(delivered, file.claim.Variant)
-				}
+			// The five on-demand slots the request selected are still pending, so
+			// the post-success round converts them.
+			pending := pendingSlotsForTest(pinned, formats)
+			if len(pending) != len(formats)-1 {
+				t.Fatalf("pending on-demand slots = %d, want %d", len(pending), len(formats)-1)
 			}
-			want := make([]string, 0, len(formats))
+			job := generation.UpstreamJob{ProviderID: pinned.ProviderID, RemoteID: adapter.jobs[adapter.submissions["formats-"+name]].remoteID}
+			result, err := adapter.Observe(context.Background(), generation.ObserveRequest{
+				TaskID: generation.TaskID("task-formats-" + name), Offering: pinned, Job: job,
+				PostSuccess: true, Input: json.RawMessage(frozen), ResourceSlots: pending,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			post := convertedVariants(convertFiles(result.Artifacts))
+			want := make([]string, 0, len(formats)-1)
 			for _, format := range formats {
+				if format == "GLTF" {
+					continue
+				}
 				want = append(want, "converted."+strings.ToLower(format))
 			}
-			slices.Sort(delivered)
+			slices.Sort(post)
 			slices.Sort(want)
-			if !slices.Equal(delivered, want) {
-				t.Fatalf("delivered converted models = %v, want %v", delivered, want)
+			if !slices.Equal(post, want) {
+				t.Fatalf("post-success delivered %v, want %v", post, want)
 			}
 		})
 	}
+}
+
+func convertedVariants(files []deliveredFile) []string {
+	variants := make([]string, 0, len(files))
+	for _, file := range files {
+		if file.claim.Role == "converted_model" {
+			variants = append(variants, file.claim.Variant)
+		}
+	}
+	slices.Sort(variants)
+	return variants
+}
+
+func convertFiles(claims []generation.ArtifactClaim) []deliveredFile {
+	files := make([]deliveredFile, 0, len(claims))
+	for _, claim := range claims {
+		if claim.Role == "converted_model" {
+			files = append(files, deliveredFile{claim: claim})
+		}
+	}
+	return files
+}
+
+func pendingSlotsForTest(offering generation.Offering, formats []string) []generation.ResourceSlotState {
+	slots := make([]generation.ResourceSlotState, 0, len(formats))
+	for _, output := range offering.Outputs {
+		if output.Role != "converted_model" || output.Delivery != generation.AssetDeliveryOnDemand {
+			continue
+		}
+		slots = append(slots, generation.ResourceSlotState{
+			Role: output.Role, Variant: output.Variant, State: generation.ResourcePending,
+		})
+	}
+	return slots
 }
 
 func mustJSON(t *testing.T, value any) string {
