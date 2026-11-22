@@ -46,9 +46,10 @@ func TestApplicableModelLockFollowsTheCapabilitiesAnOfferingBelongsTo380(t *test
 	}
 }
 
-// A lock that names a model the Catalog no longer declares stays a lock: the
-// step must refuse it as unavailable instead of silently swapping in another
-// model (#380).
+// A lock that names a model the Catalog no longer declares stays a lock, whatever
+// capability is being resolved: the step must refuse it as unavailable instead of
+// silently swapping in another model (#380). Only a lock that names a *known*
+// model of another capability is filtered out.
 func TestApplicableModelLockKeepsAModelTheCatalogDropped380(t *testing.T) {
 	offering := generation.Offering{
 		ID:         "tripo/tripo-v3.1/text-to-3d",
@@ -60,9 +61,12 @@ func TestApplicableModelLockKeepsAModelTheCatalogDropped380(t *testing.T) {
 	if got := ApplicableModelLock([]generation.Offering{offering}, "v2.0", string(generation.TextTo3D)); got != "v2.0" {
 		t.Fatalf("a dropped model stopped being a lock: %q", got)
 	}
-	// The same name bound to another capability is not this capability's lock.
-	if got := ApplicableModelLock([]generation.Offering{offering}, "v2.0", string(generation.Rigging)); got != "" {
-		t.Fatalf("another capability's lock leaked into rigging: %q", got)
+	if got := ApplicableModelLock([]generation.Offering{offering}, "v2.0", string(generation.Rigging)); got != "v2.0" {
+		t.Fatalf("a dropped model stopped being a lock for another capability: %q", got)
+	}
+	// The same *known* name bound to another capability is not this capability's lock.
+	if got := ApplicableModelLock([]generation.Offering{offering}, "v3.1", string(generation.Rigging)); got != "" {
+		t.Fatalf("another capability's known lock leaked into rigging: %q", got)
 	}
 }
 
