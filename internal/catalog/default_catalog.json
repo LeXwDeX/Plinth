@@ -1,11 +1,7 @@
 {
   "version": 1,
   "application": {
-<<<<<<< HEAD
     "revision": "2026-11-22.461.1",
-=======
-    "revision": "2026-11-22.460-468.2",
->>>>>>> origin/main
     "terminology": {
       "user_facing": [
         {
