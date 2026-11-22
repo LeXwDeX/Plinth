@@ -30,9 +30,18 @@ scripts/smoke/smoke-l1-free.sh       # L1 免费冒烟（每次发布后必跑�
 scripts/smoke/smoke-l1-agent-mode.sh # L1 批准方式/3D 交付验收（本功能集每次发布后必跑，零费用；同上）
 scripts/smoke/smoke-l2-livemodel.sh  # L2 真实模型链路（按需）
 scripts/smoke/README.md              # 分层口径
+scripts/upgrade-drill.py             # 晋级前保留数据升级演练（候选镜像 + 存量数据库副本，只读冒烟）
 ```
 
 晋级校验（`promote_from`，#411）：`release formal-test --acceptance-note <ID>` 除 Issue comment 外，还读 `dev-test` 发布根下该 revision 的机器冒烟报告（`<root>/production/reports/smoke-<revision>.json`），三层必须都是 `pass`；报告缺失时按 `docs/deployment.md` §4 回退到只核对 comment，命令会打印提示。机器报告只由发布入口写，不手工编辑。
+
+保留数据升级演练（#435）：`formal-test` 保留数据，迁移第一次作用于存量行就发生在晋级发布现场，发布 preflight 只在空目录启动候选镜像、覆盖不到。晋级前用候选镜像对一份存量数据库副本跑演练：
+
+```
+python3 scripts/upgrade-drill.py --image <候选镜像> --database <存量数据库副本> --report <报告>
+```
+
+脚本只读来源文件，默认拒绝真实路径（来源带 `-wal`/`-shm` 边车或位于环境文件某个 `root` 下）；确实要读正式备份副本时同时给 `--allow-real-path` 与 `ART_AI_LIVE_ACK=1`，只给一个仍然拒绝。报告至少记 `结论` 与 `迁移版本 前 → 后`；演练失败先修迁移，不晋级。真实数据的演练需要用户当次授权，规则见 `docs/deployment.md`「保留数据升级演练」。
 
 镜像目标与自部署边界（#251/#259）：`Dockerfile.go-runtime` 的默认目标 `runtime` 是开源自部署镜像，不含历史迁移命令；内部环境（`dev-test`、`formal-test`）使用的 `art-ai-go-production` 镜像由 `release-server-steps.sh` 以 `--target runtime-with-migration-tools` 构建（含 `art-ai-etl`、`art-ai-recover-assets` 与 `/app/legacy-*`），`docker-compose.go-production.yml` / `docker-compose.go-candidate.yml` 的 `build.target` 相同，镜像内容与发布前一致。根目录 `docker-compose.yml` 只供自部署，内部环境不使用它，也不得用它操作 `dev-test` / `formal-test` 的 Compose 项目。内部 Compose 与发布脚本仍在原路径。
 
