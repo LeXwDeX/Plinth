@@ -17,6 +17,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -78,6 +79,11 @@ type Service struct {
 	plans   Plans
 	logger  *slog.Logger
 	texts   *catalog.TextLocalizer
+	// autoCompletions is the durable record of the automatic completion, or nil
+	// when the platform runs none (#461).
+	autoCompletions AutoCompletionStore
+	// now is the clock the automatic completion reads; tests freeze it.
+	now func() time.Time
 }
 
 // Localize makes the archive README and the reasons follow the UI locale of
@@ -118,7 +124,16 @@ func New(schema catalog.ModelDeliverySchema, gateway Gateway, plans Plans, logge
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{schema: schema, gateway: gateway, plans: plans, logger: logger}, nil
+	return &Service{schema: schema, gateway: gateway, plans: plans, logger: logger, now: time.Now}, nil
+}
+
+// WithClock freezes the clock the automatic completion reads. Tests use it to
+// let a record's round come due without waiting.
+func (s *Service) WithClock(now func() time.Time) *Service {
+	if now != nil {
+		s.now = now
+	}
+	return s
 }
 
 const (
@@ -298,6 +313,8 @@ func (s *Service) reasonText(code string) string {
 		return reasons.ConversionFailed
 	case reasonSourceExpired:
 		return reasons.SourceExpired
+	case reasonSourceTooLarge:
+		return reasons.SourceTooLarge
 	}
 	return ""
 }
@@ -315,6 +332,7 @@ const (
 	reasonConversionIncomplete = "conversion_incomplete"
 	reasonConversionFailed     = "conversion_failed"
 	reasonSourceExpired        = "source_expired"
+	reasonSourceTooLarge       = "source_too_large"
 )
 
 func wrap(operation string, err error) error {

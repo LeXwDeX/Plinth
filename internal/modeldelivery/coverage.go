@@ -739,7 +739,11 @@ func (s *Service) planSteps(ctx context.Context, task generation.Task, v view, m
 			}
 			step, code := check.step, check.code
 			if code != "" {
-				if firstFailure == "" {
+				// A route that refuses the file for its size names the source
+				// ("超过转换服务接受的上限"), while source_incompatible is the
+				// generic answer of every route that did not match. The concrete
+				// one is what the person needs to read.
+				if firstFailure == "" || firstFailure == reasonSourceIncompatible && code == reasonSourceTooLarge {
 					firstFailure = code
 				}
 				continue
@@ -785,6 +789,13 @@ func (s *Service) buildStep(ctx context.Context, task generation.Task, v view, c
 	if err != nil {
 		if errors.Is(err, generation.ErrSourceExpired) {
 			return plannedStep{}, reasonSourceExpired
+		}
+		// The Offering's own source bound is the route's limit, not a constant
+		// of ours (Meshy Convert inlines at most 70 MiB, #457). A file over it
+		// is a route that cannot take this source, and the row says so with a
+		// reason instead of the generic "no route applies".
+		if limit := sourceAssetMaxBytes(offering); limit > 0 && source.Size > limit {
+			return plannedStep{}, reasonSourceTooLarge
 		}
 		return plannedStep{}, reasonSourceIncompatible
 	}

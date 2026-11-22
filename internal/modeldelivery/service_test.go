@@ -76,8 +76,26 @@ func (s *memoryStore) ListProcessingPlansBySource(_ context.Context, owner gener
 	sort.Slice(plans, func(i, j int) bool { return plans[i].ID < plans[j].ID })
 	return plans, nil
 }
-func (s *memoryStore) ListActiveProcessingPlans(context.Context, string, int) ([]processing.Plan, error) {
-	return nil, nil
+// ListActiveProcessingPlans mimics the SQLite repository: the PENDING/RUNNING
+// plans by ascending id, at most limit of them.
+func (s *memoryStore) ListActiveProcessingPlans(_ context.Context, after string, limit int) ([]processing.Plan, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var plans []processing.Plan
+	for _, plan := range s.plans {
+		if plan.State != processing.Pending && plan.State != processing.Running {
+			continue
+		}
+		if after != "" && plan.ID <= after {
+			continue
+		}
+		plans = append(plans, plan)
+	}
+	sort.Slice(plans, func(i, j int) bool { return plans[i].ID < plans[j].ID })
+	if limit > 0 && len(plans) > limit {
+		plans = plans[:limit]
+	}
+	return plans, nil
 }
 func (s *memoryStore) SaveProcessingPlan(_ context.Context, plan processing.Plan) error {
 	s.mu.Lock()
@@ -634,7 +652,7 @@ func TestTripoSourceAboveMeshyInlineLimitOffersNoMeshyRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if usdz := formatByID(t, coverage, "usdz"); usdz.Conversion != nil || usdz.Reason != reasonSourceIncompatible {
+	if usdz := formatByID(t, coverage, "usdz"); usdz.Conversion != nil || usdz.Reason != reasonSourceTooLarge {
 		t.Fatalf("usdz = %#v", usdz)
 	}
 	if len(coverage.Steps) != 0 {
@@ -1448,13 +1466,14 @@ func TestDisabledConversionDoesNotMaskTheReasonOfTheRealRoute(t *testing.T) {
 	huge := f.meshyText("huge-meshy", "owner")
 	huge.Assets[0].Size = 129 << 20
 	f.tasks[huge.ID] = huge
-	if gltf := gltfOf("huge-meshy"); gltf.Status != StatusUnavailable || gltf.Reason != reasonSourceIncompatible || gltf.Conversion != nil {
+	if gltf := gltfOf("huge-meshy"); gltf.Status != StatusUnavailable || gltf.Reason != reasonSourceTooLarge || gltf.Conversion != nil {
 		t.Fatalf("oversized source gltf = %#v", gltf)
 	}
-	// Without the Task-output route the upload-profile route refuses both.
+	// Without the Task-output route the upload-profile route refuses both: its
+	// own bound is 10 MiB, so the file is over the route's limit.
 	f.absent[generatedGltf] = true
 	for _, id := range []generation.TaskID{"big-meshy", "big-tripo"} {
-		if gltf := gltfOf(id); gltf.Status != StatusUnavailable || gltf.Reason != reasonSourceIncompatible || gltf.Conversion != nil {
+		if gltf := gltfOf(id); gltf.Status != StatusUnavailable || gltf.Reason != reasonSourceTooLarge || gltf.Conversion != nil {
 			t.Fatalf("upload profile route: %s gltf = %#v", id, gltf)
 		}
 	}

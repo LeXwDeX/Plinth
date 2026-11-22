@@ -21,6 +21,22 @@ const AgentPending = "agent_human_decision"
 // place. See access_key.go.
 const AccessKey = "access_key"
 
+// Delivery is the source of a grant the platform asks for while keeping its own
+// delivery promise (#457): a format a generation still owes is converted
+// without anyone asking. No person decides it and no approval card exists for
+// it, in any approval mode: the automatic completion's own ceiling is the only
+// limit, and the 3D step count and the session budget stay untouched. See
+// ApproveByPolicyDecision.
+const Delivery = "delivery"
+
+// DeliveryActorID is the Principal.ActorID of a delivery grant: the audit must
+// read as the platform keeping its promise, never as a person's action.
+const DeliveryActorID = "model-delivery"
+
+// DeliveryActor is Grant.DecidedBy of the approval of a delivery grant. A
+// person never has this actor ID.
+const DeliveryActor = PolicyActorPrefix + "delivery"
+
 // PolicyActorPrefix prefixes Grant.DecidedBy for an approval made by the
 // session approval policy instead of a person. A human actor ID never has it.
 const PolicyActorPrefix = "policy:"
@@ -153,7 +169,7 @@ func (s Service) Expired(g Grant) bool {
 
 func (s Service) Prepare(ctx context.Context, cmd PrepareCommand) (Grant, error) {
 	if !cmd.Harness.Valid() || s.Grants == nil || s.Prepared == nil || cmd.OwnerID == "" || cmd.ActorID == "" ||
-		(cmd.Source != HumanBrowser && cmd.Source != AgentPending && cmd.Source != AccessKey) ||
+		(cmd.Source != HumanBrowser && cmd.Source != AgentPending && cmd.Source != AccessKey && cmd.Source != Delivery) ||
 		cmd.SessionID == "" || cmd.PreparedInputID == "" {
 		return Grant{}, ErrInvalid
 	}
@@ -164,6 +180,11 @@ func (s Service) Prepare(ctx context.Context, cmd PrepareCommand) (Grant, error)
 	// The key that asked belongs to an access-key grant and to nothing else;
 	// no production plan ever approves such a grant.
 	if (cmd.Source == AccessKey) != (cmd.AccessKeyID != "") || (cmd.Source == AccessKey && cmd.BudgetEligible) {
+		return Grant{}, ErrInvalid
+	}
+	// A delivery grant is never budget eligible: its money is the automatic
+	// completion's own per-task ceiling, not the session's plan (#457 D7).
+	if cmd.Source == Delivery && (cmd.ActorID != DeliveryActorID || cmd.BudgetEligible) {
 		return Grant{}, ErrInvalid
 	}
 	snapshot, err := s.Prepared.GetExecutionPreparedSnapshot(ctx, cmd.OwnerID, cmd.PreparedInputID)
@@ -248,8 +269,16 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 	if err != nil {
 		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, err
 	}
-	if grant.OwnerID != ownerID || (grant.Source != HumanBrowser && grant.Source != AgentPending) {
+	if grant.OwnerID != ownerID ||
+		(grant.Source != HumanBrowser && grant.Source != AgentPending && grant.Source != Delivery) {
 		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
+	}
+	// A delivery grant is the platform keeping its own promise (#457 D2): every
+	// approval mode decides it here. It is never left to a person (no card), it
+	// never counts a 3D step (#330), and it never touches the session budget
+	// (D7) — its only limit is the automatic completion's own ceiling.
+	if grant.Source == Delivery {
+		return s.approveDeliveryPolicy(ctx, grant)
 	}
 	if grant.Status != Pending {
 		if (grant.DecidedBy == actor || grant.ApprovedByBudget()) &&
@@ -383,6 +412,34 @@ func (s Service) ApplyPolicyDecision(ctx context.Context, grant Grant) (PolicyRe
 		return result, nil
 	}
 	return PolicyResult{Grant: grant, Outcome: PolicyOutcomeNone, Reason: result.Reason, Budget: result.Budget}, err
+}
+
+// approveDeliveryPolicy approves a delivery grant with no human decision, in
+// every approval mode. It rechecks the frozen identity the same way the mode
+// policies do, so a grant whose prepared input no longer matches is a conflict
+// rather than an approval, and it records the delivery actor so the audit says
+// who let the platform spend.
+func (s Service) approveDeliveryPolicy(ctx context.Context, grant Grant) (PolicyResult, error) {
+	if grant.Status != Pending {
+		if grant.Status == Approved && grant.DecidedBy == DeliveryActor {
+			return PolicyResult{Grant: grant, Outcome: PolicyOutcomeApproved}, nil
+		}
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrState
+	}
+	snapshot, err := s.Prepared.GetExecutionPreparedSnapshot(ctx, grant.OwnerID, grant.PreparedInputID)
+	if err != nil {
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, err
+	}
+	if snapshot.ID != grant.PreparedInputID || snapshot.OwnerID != grant.OwnerID ||
+		snapshot.SessionID != grant.SessionID || snapshot.OfferingID != grant.OfferingID ||
+		snapshot.OfferingRevision != grant.OfferingRevision || snapshot.InputHash != grant.PreparedInputHash {
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, ErrConflict
+	}
+	approved, err := s.Grants.ApproveExecutionGrantByPolicy(ctx, grant.OwnerID, grant.RequestID, DeliveryActor)
+	if err != nil {
+		return PolicyResult{Grant: Grant{}, Outcome: PolicyOutcomeNone}, err
+	}
+	return PolicyResult{Grant: approved, Outcome: PolicyOutcomeApproved}, nil
 }
 
 // budgetReason names the budget reason only when a budget-mode step without an

@@ -185,3 +185,24 @@ func (s *Service) conversionOfTask(task generation.Task) *Conversion {
 		NativeQuote:      task.NativeQuote,
 	}
 }
+
+// sourceAssetMaxBytes is the largest saved file the Offering's source-asset
+// parameters accept: the smallest bound they declare, so a route is judged by
+// the parameter the source would actually travel through. Zero means the
+// Offering declares no bound (the kernel's own ceiling applies).
+func sourceAssetMaxBytes(offering generation.Offering) int64 {
+	limit := int64(0)
+	for _, parameter := range offering.Parameters {
+		role, isSource := schema.SourceParameterRole(parameter)
+		if !isSource || role != schema.SemanticSourceAsset {
+			continue
+		}
+		if parameter.MaxBytes <= 0 {
+			continue
+		}
+		if limit == 0 || parameter.MaxBytes < limit {
+			limit = parameter.MaxBytes
+		}
+	}
+	return limit
+}

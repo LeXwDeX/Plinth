@@ -144,9 +144,16 @@ type Step struct {
 // Origins of a processing plan. An Agent-created plan's steps are eligible for
 // the session production budget; a browser-created plan keeps per-step human
 // approval (#103).
+//
+// A delivery plan is the platform keeping its own promise (#457): it fills the
+// formats a generation still owes. It is never budget-eligible (its money is
+// the automatic completion's own ceiling, not the session's), its grant is
+// asked for as the non-human model-delivery principal and is decided by policy
+// alone, and it produces no card, no message and no 3D step.
 const (
-	OriginAgent   = "agent"
-	OriginBrowser = "browser"
+	OriginAgent    = "agent"
+	OriginBrowser  = "browser"
+	OriginDelivery = "delivery"
 )
 
 type Plan struct {
@@ -283,6 +290,19 @@ func (s *Service) WithSourcePreference(prefer []string) *Service {
 // grant is created pending and only session policy may approve it here.
 const planActor = "processing-plan"
 
+// deliveryActor asks for a delivery plan's step grant (#461). The audit must
+// read as the platform keeping its delivery promise, never as a person's
+// browser action.
+const deliveryActor = executiongrant.DeliveryActorID
+
+// stepActor names the principal a plan asks for its step grant as.
+func stepActor(plan Plan) (actor, source string) {
+	if plan.Origin == OriginDelivery {
+		return deliveryActor, executiongrant.Delivery
+	}
+	return planActor, executiongrant.HumanBrowser
+}
+
 // MaxPlanSteps 是持久计划的步骤上限；Chat 工具 Schema 的 maxItems 不得超过它。
 const MaxPlanSteps = 10
 
@@ -294,9 +314,12 @@ func (s *Service) approveStepByPolicy(ctx context.Context, plan *Plan, step *Ste
 	if s.grants == nil || s.grants.Grants == nil || s.grants.Prepared == nil {
 		return ""
 	}
+	actor, source := stepActor(*plan)
 	grant, err := s.grants.Prepare(ctx, executiongrant.PrepareCommand{
-		Harness:           plan.Harness,
-		Principal:         executiongrant.Principal{OwnerID: string(plan.OwnerID), ActorID: planActor, Source: executiongrant.HumanBrowser},
+		Harness: plan.Harness,
+		Principal: executiongrant.Principal{
+			OwnerID: string(plan.OwnerID), ActorID: actor, Source: source,
+		},
 		SessionID:         plan.SessionID,
 		OfferingID:        string(step.OfferingID),
 		OfferingRevision:  step.Revision,
@@ -471,7 +494,7 @@ func (s *Service) Create(ctx context.Context, command CreateCommand) (Plan, erro
 	}
 	now := time.Now().UTC()
 	origin := command.Origin
-	if origin != OriginAgent {
+	if origin != OriginAgent && origin != OriginDelivery {
 		origin = OriginBrowser
 	}
 	plan := Plan{Harness: command.Harness, ID: planID, OwnerID: command.OwnerID, SessionID: command.SessionID, SourceTaskID: command.SourceTaskID, SourceAssetID: command.SourceAssetID, State: Pending, Steps: steps, Version: 1, RequestHash: hex.EncodeToString(requestHash[:]), CreatedAt: now, UpdatedAt: now, Origin: origin}
@@ -1001,6 +1024,30 @@ func (s *Service) advanceAll(ctx context.Context) error {
 		}
 		if len(plans) < activePlanPageSize {
 			return nil
+		}
+		after = plans[len(plans)-1].ID
+	}
+}
+
+// CountActiveByOrigin counts the plans of one origin that have not reached a
+// final state. The platform's automatic delivery completion bounds its own
+// queued work by it: a local conversion is a single process, and a queue of
+// them must not occupy the coordinator's workers.
+func (s *Service) CountActiveByOrigin(ctx context.Context, origin string) (int, error) {
+	count := 0
+	after := ""
+	for {
+		plans, err := s.store.ListActiveProcessingPlans(ctx, after, activePlanPageSize)
+		if err != nil {
+			return 0, err
+		}
+		for _, plan := range plans {
+			if plan.Origin == origin {
+				count++
+			}
+		}
+		if len(plans) < activePlanPageSize {
+			return count, nil
 		}
 		after = plans[len(plans)-1].ID
 	}

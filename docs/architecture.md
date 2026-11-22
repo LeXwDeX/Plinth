@@ -275,6 +275,7 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/agentconfiguration` | 有界共享 Agent 配置及版本管理；`SnapshotForOwner` 始终把 Schema 系统 Skill 放在最前（不属于任何已发布版本，已发布或个人 Skill 不得绑定工具或复用其 ID，修订号附加系统 Skill 摘要）；另按 owner 管理文本 Skill（#152：`UpdatePersonalSkill` 按 owner+ID 整体替换，名称/提示词校验与创建共享），并在新轮次创建 owner 快照；编辑只影响尚未首次冻结的轮次，不编辑执行代码、运行凭据或付费授权 |
 | `internal/mcp` | Schema 固定只读工具、参数与 owner/session 范围的业务准入；协议传输和数据读取由端口注入 |
 | `internal/modeldelivery` | 3D 交付投影：按 Schema `model_delivery` 计算每个 3D 任务的格式覆盖（可下载/可补齐含积分/不可用含原因）、把“补齐格式”规划成 Processing Plan 步骤、并把已隔离的本地资产流式打成 ZIP；不持有任务状态，不调用供应商，不做本地转换 |
+| `internal/modeldelivery`（自动补齐） | 生成成功后由平台自己补齐缺失格式（#461）：`application.model_delivery.auto_completion` 声明源能力、路线顺序、扫描间隔、并发与单任务上限，`conversions[].auto: free\|paid` 声明每条路线是否可自动付费。对账器由 `internal/app` 的 ticker 驱动，持久表 `model_delivery_auto_completions` 一行一个任务（策略修订、状态、尝试次数、计划、已花积分、付费次数、原因、下次执行），水位线单表只写当前时间、永不回扫历史任务；计划复用 `modeldelivery.Service.Complete` 的路径，`Origin=delivery`、`model-delivery` ACTOR，不出卡片、不发消息、不计 #330 步数、不占会话预算。生成内核不派生补齐任务 |
 | `internal/skillrun` / `processing` | 配方/处理计划、步骤、审核、暂停/恢复/重试；#251 的检查点评估（`checkpoint.go`）、受控修订（`revise.go`）与失败分类（`failure.go`），每个公开步骤仍使用 Generation |
 | `internal/pendingapproval` | 轮次结束后仍可批准的 Agent 请求：步骤卡与制作计划卡的列表投影、批准/拒绝、一次提交、结果消息、后台巡检；预算结算/过期通知由 `internal/executiongrant` 提供，不拥有批准策略 |
 | `internal/generation` | PrepareInput/SubmitPrepared、Task/Attempt、租约、幂等、依赖、观察、物化和唯一公开终态 |

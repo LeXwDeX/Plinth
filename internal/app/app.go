@@ -94,6 +94,10 @@ type Application struct {
 	pendingApprovals *pendingapproval.Service
 	scene            *scene.Service
 	manifests        *rendermanifest.Service
+	// modelDelivery is the format delivery service, and with it the automatic
+	// completion reconciler (#461). Nil when the Product Schema declares no
+	// model_delivery block.
+	modelDelivery *modeldelivery.Service
 	// accessKeyAuthenticator resolves personal access keys for a separate
 	// listener (#332); the main server's identity does not accept them.
 	accessKeyAuthenticator *accesskeys.Authenticator
@@ -1976,6 +1980,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return nil, err
 		}
 		modelDeliveryService.Localize(texts)
+		// The platform keeps its own delivery promise (#457): after a
+		// generation succeeded, the formats it still owes are completed on our
+		// own, and the durable record survives a restart. The kernel derives no
+		// completion task; the reconciler only builds Processing Plans.
+		modelDeliveryService.WithAutoCompletions(repository).WithClock(time.Now)
 		// The administration download leaves out a repeated file as the one-click ZIP
 		// does and names it in the same words (#300).
 		administrationGenerationDownloadService.WithRepeatText(modelDeliveryService.RepeatText)
@@ -2245,6 +2254,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		scene:                  sceneService,
 		pendingApprovals:       pendingApprovalService,
 		manifests:              manifestService,
+		modelDelivery:          modelDeliveryService,
 		accessKeyAuthenticator: accessKeyAuthenticator,
 		mcpServer:              mcpServer,
 		server: &http.Server{
@@ -2264,6 +2274,16 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			) * time.Second,
 		},
 	}, nil
+}
+
+// deliveryAutoCompleteInterval is how often the automatic format completion
+// looks at its durable record. The Product Schema declares it; the coordinator's
+// poll interval is the fallback of a Schema that declares none.
+func deliveryAutoCompleteInterval(application catalog.ApplicationSchema) time.Duration {
+	if milliseconds := application.ModelDelivery.AutoCompletion.PollIntervalMilliseconds; milliseconds > 0 {
+		return time.Duration(milliseconds) * time.Millisecond
+	}
+	return time.Duration(application.Runtime.Coordinator.PollIntervalMilliseconds) * time.Millisecond
 }
 
 func legacyThumbnailSourceFields(
@@ -2497,6 +2517,29 @@ func (a *Application) Run(ctx context.Context) error {
 		results <- componentResult{name: "pending-approvals", err: a.pendingApprovals.Run(runCtx, func(err error) {
 			a.logger.Error("待批准请求巡检失败", "error", err)
 		})}
+	}()
+	go func() {
+		if a.modelDelivery == nil {
+			results <- componentResult{name: "delivery-auto-complete", err: runCtx.Err()}
+			return
+		}
+		interval := deliveryAutoCompleteInterval(a.schema)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			processed, reconcileErr := a.modelDelivery.ReconcileAutoCompletions(runCtx, 100)
+			if reconcileErr != nil && runCtx.Err() == nil {
+				a.logger.Error("格式自动补齐对账失败", "error", reconcileErr)
+			} else if processed > 0 {
+				a.logger.Info("格式自动补齐对账完成", "count", processed)
+			}
+			select {
+			case <-runCtx.Done():
+				results <- componentResult{name: "delivery-auto-complete", err: runCtx.Err()}
+				return
+			case <-ticker.C:
+			}
+		}
 	}()
 	go func() {
 		interval := time.Duration(a.schema.Runtime.Coordinator.PollIntervalMilliseconds) * time.Millisecond
