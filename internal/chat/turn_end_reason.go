@@ -108,7 +108,7 @@ func (service *Service) FinishTurnWithReason(
 	if reason == TurnEndError {
 		state = service.turnError
 	}
-	return service.repository.UpdateTurnState(
+	return service.repository.FinishTurn(
 		ctx,
 		assistantMessageID,
 		state,

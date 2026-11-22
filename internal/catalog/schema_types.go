@@ -5156,6 +5156,14 @@ type ChatThinkingModelProfile struct {
 	EffortField   string   `json:"effort_field,omitempty"`
 	EffortLevels  []string `json:"effort_levels,omitempty"`
 	DefaultEffort string   `json:"default_effort,omitempty"`
+	// TurnEfforts are the levels of the requests that are not a conversation
+	// turn, by kind: title (the first turn's title), summary (a context
+	// compaction) and prompt_enhance (#382). A conversation turn keeps the
+	// level the session chose; these requests run beside it and need far less
+	// thinking, so the model family declares a cheaper level for each. A kind
+	// the map leaves out, or a level the profile does not offer, falls back to
+	// DefaultEffort, as a session's choice does.
+	TurnEfforts map[string]string `json:"turn_efforts,omitempty"`
 	// ContextWindowTokens is the model family's context window in tokens, as
 	// the vendor documents it; 0 means not declared, and the composer then
 	// shows only the tokens used (#322).

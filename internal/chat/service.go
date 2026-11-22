@@ -233,6 +233,18 @@ type Repository interface {
 		endReason string,
 		at time.Time,
 	) error
+	// FinishTurn ends the turn and drops the request its checkpoint still
+	// holds: a terminal turn is never resumed (#382).
+	FinishTurn(
+		ctx context.Context,
+		assistantMessageID string,
+		state string,
+		endReason string,
+		at time.Time,
+	) error
+	// ListSessionTurnIDs lists the assistant message ids of the session's
+	// turns in the given states, without their options or checkpoint.
+	ListSessionTurnIDs(context.Context, string, string, []string) ([]string, error)
 	RequestTurnStop(context.Context, string, string, []string, time.Time) (Turn, bool, error)
 	TurnStopRequested(context.Context, string, string, string) (bool, error)
 }
@@ -1085,7 +1097,10 @@ func (service *Service) applyTurnState(
 	sessionID string,
 	messages []Message,
 ) ([]Message, error) {
-	turns, err := service.repository.ListSessionTurns(
+	// Only the turn ids are needed here: the message is marked active by
+	// membership, so the session's options and checkpoints are never decoded
+	// for a message list (#382).
+	turnIDs, err := service.repository.ListSessionTurnIDs(
 		ctx,
 		ownerID,
 		sessionID,
@@ -1094,9 +1109,9 @@ func (service *Service) applyTurnState(
 	if err != nil {
 		return nil, err
 	}
-	activeTurns := make(map[string]struct{}, len(turns))
-	for _, turn := range turns {
-		activeTurns[turn.AssistantMessageID] = struct{}{}
+	activeTurns := make(map[string]struct{}, len(turnIDs))
+	for _, turnID := range turnIDs {
+		activeTurns[turnID] = struct{}{}
 	}
 	now := service.clock()
 	for index := range messages {

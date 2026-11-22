@@ -156,7 +156,7 @@ func newExecutor(t *testing.T, gen chat.ToolExecutor) (*Executor, *agentparams.S
 	executor, err := New(Config{
 		Params:     store,
 		Generate:   gen,
-		Projection: func() json.RawMessage { return json.RawMessage(`{"offerings":[]}`) },
+		Projection: func(capability, model string) json.RawMessage { return json.RawMessage(`{"offerings":[]}`) },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -188,6 +188,43 @@ func TestListOfferingsReturnsProjection(t *testing.T) {
 	}
 	if result.AgentContent != `{"offerings":[]}` {
 		t.Fatalf("projection = %s", result.AgentContent)
+	}
+}
+
+// #382: the model asks for the one capability or the one model it is choosing
+// between, and the request reaches the projection as arguments.
+func TestListOfferingsPassesCapabilityAndModelToTheProjection(t *testing.T) {
+	var asked []string
+	executor, err := New(Config{
+		Params:   agentparams.NewStore(),
+		Generate: &fakeGenerate{},
+		Projection: func(capability, model string) json.RawMessage {
+			asked = append(asked, capability+"|"+model)
+			return json.RawMessage(`{"capabilities":[]}`)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ arguments, want string }{
+		{`{"capability":"text-to-3d"}`, "text-to-3d|"},
+		{`{"model":"z-image/turbo"}`, "|z-image/turbo"},
+		{`{"capability":"image-to-image","model":"m"}`, "image-to-image|m"},
+	}
+	for _, testCase := range cases {
+		if _, err := executor.Execute(context.Background(), chat.ToolCommand{
+			Call: agents.ToolCall{Name: ToolListOfferings, Arguments: json.RawMessage(testCase.arguments)},
+		}, nil); err != nil {
+			t.Fatalf("Execute list_offerings %s: %v", testCase.arguments, err)
+		}
+	}
+	if len(asked) != len(cases) {
+		t.Fatalf("projection calls = %v", asked)
+	}
+	for index, want := range cases {
+		if asked[index] != want.want {
+			t.Fatalf("call %d = %q, want %q", index, asked[index], want.want)
+		}
 	}
 }
 

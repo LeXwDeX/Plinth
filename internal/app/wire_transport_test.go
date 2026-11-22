@@ -46,7 +46,7 @@ func buildChatAgent(
 	config Config,
 	schema catalog.ApplicationSchema,
 ) (agents.Adapter, error) {
-	return buildChatAgentWithTransport(config, schema, nil)
+	return buildChatAgentWithTransport(config, schema, nil, nil)
 }
 
 type wireRecordingTransport struct {
@@ -291,6 +291,7 @@ func TestChatAgentConnectionsUseConnectionTransport(t *testing.T) {
 			bases = append(bases, base)
 			return wireRecordingTransport{base: base}
 		},
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)

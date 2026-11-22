@@ -1282,13 +1282,19 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			applicationSchema.Chat.Agent.ConsentWaitTimeoutSeconds,
 		) * time.Second,
 		TaskObservationTimeout: time.Duration(applicationSchema.Chat.Agent.RequestTimeoutSeconds) * time.Second,
-		Projection: func() json.RawMessage {
+		Projection: func(capability, model string) json.RawMessage {
 			return buildAgentOfferingsProjection(
 				applicationSchema.Capabilities,
 				taskCatalog,
 				func(id generation.OfferingID) bool {
 					return module.OfferingAvailable(id)
 				},
+				capability,
+				model,
+				// Ids only while the model asks for no capability and no model:
+				// the detail of every Offering is what made this call cost
+				// 45-98 KB per round (#382).
+				capability != "" || model != "",
 			)
 		},
 	}
@@ -1320,6 +1326,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		config,
 		applicationSchema,
 		overrides.httpTransport,
+		logger,
 	)
 	if err != nil {
 		return nil, err
