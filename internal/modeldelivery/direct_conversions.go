@@ -13,8 +13,11 @@ import (
 // outside a Processing Plan) started directly for this session (#330): a
 // succeeded Task with a READY file of the source Task fills that format, and
 // a queued, running or materializing one holds its formats against a second
-// run. Only a conversion whose frozen source is this exact Task counts; the
-// source Task's own files stay ahead of every conversion.
+// run. A failed one that may still have been charged (an ambiguous failure, or
+// none at all) holds its formats the same way, because the money may be gone
+// and the file may still arrive upstream (#478). Only a conversion whose
+// frozen source is this exact Task counts; the source Task's own files stay
+// ahead of every conversion.
 func (s *Service) directConversions(ctx context.Context, v *view) error {
 	lister, ok := s.gateway.(SessionTaskLister)
 	if !ok || v.task.SessionID == "" {
@@ -30,7 +33,7 @@ func (s *Service) directConversions(ctx context.Context, v *view) error {
 		page, err := lister.List(ctx, scope, generation.ListQuery{
 			SessionID:      v.task.SessionID,
 			OfferingIDs:    offerings,
-			ExcludedStates: []generation.TaskState{generation.TaskFailed, generation.TaskCanceled},
+			ExcludedStates: []generation.TaskState{generation.TaskCanceled},
 			Cursor:         cursor,
 			Limit:          100,
 		})
@@ -67,6 +70,20 @@ func (s *Service) directConversions(ctx context.Context, v *view) error {
 				for _, format := range s.convertedFormats(task) {
 					if _, taken := v.inFlight[format]; !taken {
 						v.inFlight[format] = task
+					}
+				}
+			case generation.TaskFailed:
+				// A run that failed ambiguously (or without saying why) may
+				// already have been paid for and may still deliver its format
+				// upstream: no second run may be started for it (#478). A run
+				// whose failure is definite proves it never charged, and its
+				// formats stay missing and convertible.
+				if task.Failure != nil && !task.Failure.Ambiguous {
+					break
+				}
+				for _, format := range s.convertedFormats(task) {
+					if _, taken := v.unknown[format]; !taken {
+						v.unknown[format] = task
 					}
 				}
 			}

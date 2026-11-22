@@ -487,6 +487,9 @@ var executionGrantDeliveryMigration string
 //go:embed migrations/0111_processing_plan_delivery.sql
 var processingPlanDeliveryMigration string
 
+//go:embed migrations/0112_auto_completion_first_run.sql
+var autoCompletionFirstRunMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -595,6 +598,8 @@ func migrations() []migration {
 			sql: executionGrantDeliveryMigration},
 		migration{version: 111, name: "processing_plan_delivery",
 			sql: processingPlanDeliveryMigration},
+		migration{version: 112, name: "auto_completion_first_run",
+			sql: autoCompletionFirstRunMigration},
 	)
 }
 
@@ -623,7 +628,9 @@ func migrations() []migration {
 // 109 the durable record of the automatic delivery completion and its scan
 // watermark (#461), 110 the platform as the source of a grant the automatic
 // completion asks for (#461) and 111 the marker of a processing plan the
-// platform started itself (#461).
+// platform started itself (#461) and 112 the first time an automatic
+// completion record was looked at, which is what its deadline runs from
+// (#478).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))

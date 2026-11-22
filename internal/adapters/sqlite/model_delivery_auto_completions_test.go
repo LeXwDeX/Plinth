@@ -91,7 +91,7 @@ func TestAutoCompletionRecordRoundTripsAndIsDue(t *testing.T) {
 		TaskID: "task-1", OwnerID: "owner", PolicyRevision: "2026-10-22.330.1",
 		State: modeldelivery.AutoStateConverting, Attempts: 2, PlanID: "plan-1",
 		PaidRuns: 1, PaidCredits: 1, Reason: "plan_started",
-		NextRunAt: past, UpdatedAt: past,
+		FirstRunAt: past.Add(-time.Hour), NextRunAt: past, UpdatedAt: past,
 	}
 	if err := r.SaveAutoCompletionRecord(ctx, record); err != nil {
 		t.Fatal(err)
@@ -102,7 +102,7 @@ func TestAutoCompletionRecordRoundTripsAndIsDue(t *testing.T) {
 	}
 	if got.State != record.State || got.PaidRuns != 1 || got.PaidCredits != 1 ||
 		got.PolicyRevision != record.PolicyRevision || got.PlanID != "plan-1" ||
-		!got.NextRunAt.Equal(past) {
+		!got.FirstRunAt.Equal(record.FirstRunAt) || !got.NextRunAt.Equal(past) {
 		t.Fatalf("record = %+v", got)
 	}
 
