@@ -59,8 +59,12 @@ type Config struct {
 	ObjPackage *catalog.ModelObjPackageSchema
 	// Crops cuts the optional per-item edit crop instruction (#331). nil
 	// refuses crop instructions; the proposal path never accepts them.
-	Crops           Cropper
-	Schema          catalog.AssetListSchema
+	Crops  Cropper
+	Schema catalog.AssetListSchema
+	// Texts gives the copy of the request's UI locale for the list's Schema
+	// text (the per-item review answers, the batch archive's README). Nil
+	// keeps the Schema's default-locale copy.
+	Texts           *catalog.TextLocalizer
 	ProjectMaxItems int
 	// MaxListsPerProject is asset_list.limits.max_lists_per_project: the
 	// draft+confirmed lists one project keeps. Terminal lists (rejected,
@@ -132,8 +136,11 @@ type Service struct {
 	resolveStep               func(capability string) (RouteStep, error)
 	resolveStepFor            func(ctx context.Context, ownerID, sessionID, capability string) (RouteStep, error)
 	validateBrief             func(json.RawMessage) error
-	clock                     func() time.Time
-	newID                     func(prefix string) (string, error)
+	// texts localizes the list's Schema copy for the request's UI locale
+	// (#425); nil keeps the default-locale copy.
+	texts *catalog.TextLocalizer
+	clock func() time.Time
+	newID func(prefix string) (string, error)
 }
 
 // New builds the service. A Catalog that declares application.asset_list is
@@ -229,6 +236,7 @@ func New(config Config) (*Service, error) {
 		resolveStep:               config.ResolveStep,
 		resolveStepFor:            config.ResolveStepFor,
 		validateBrief:             config.ValidateBrief,
+		texts:                     config.Texts,
 		clock:                     clock,
 		newID:                     newID,
 	}, nil

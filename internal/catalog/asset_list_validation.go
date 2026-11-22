@@ -416,9 +416,26 @@ func validateAssetListReview(review *AssetListReviewSchema, kinds map[string]Ass
 		"rework_message": review.Messages.ReworkMessage,
 		"return_limit":   review.Messages.ReturnLimit,
 		"asset_limit":    review.Messages.AssetLimit,
+		// 逐项通过结果的两条：整批里有一项不该被通过时，该项自己的说明。
+		"item_not_found":           review.Messages.ItemNotFound,
+		"item_not_awaiting_review": review.Messages.ItemNotAwaitingReview,
+		// 快照里的阈值措辞：一条阈值可能由最小/最大/比例/必填组合而成。
+		"budget_minimum":       review.Messages.BudgetMinimum,
+		"budget_maximum":       review.Messages.BudgetMaximum,
+		"budget_ratio_maximum": review.Messages.BudgetRatioMaximum,
+		"budget_required":      review.Messages.BudgetRequired,
 	} {
 		if strings.TrimSpace(text) == "" {
 			return fmt.Errorf("asset_list.review.messages.%s 不能为空", field)
+		}
+	}
+	for field, text := range map[string]string{
+		"budget_minimum":       review.Messages.BudgetMinimum,
+		"budget_maximum":       review.Messages.BudgetMaximum,
+		"budget_ratio_maximum": review.Messages.BudgetRatioMaximum,
+	} {
+		if !placeholderSet(text)["value"] {
+			return fmt.Errorf("asset_list.review.messages.%s 缺少占位符 {value}", field)
 		}
 	}
 	for _, name := range []string{"name", "description", "round", "reasons", "note"} {
@@ -477,6 +494,9 @@ func validateAssetListArchive(archive *AssetListArchiveSchema, auditActions []Va
 		!placeholderSet(archive.Messages.TooLarge)["maximum_bytes"] {
 		return errors.New("asset_list.review.archive.messages.too_large 需要 {maximum_entries} 与 {maximum_bytes}")
 	}
+	if err := validateAssetListArchiveReadme(archive.Readme); err != nil {
+		return err
+	}
 	audit := archive.Audit
 	if strings.TrimSpace(audit.Action) == "" || strings.TrimSpace(audit.ResourceType) == "" ||
 		audit.DetailFields.ListID == "" || audit.DetailFields.Items == "" ||
@@ -489,6 +509,67 @@ func validateAssetListArchive(archive *AssetListArchiveSchema, auditActions []Va
 	}
 	if _, exists := declaredActions[audit.Action]; !exists {
 		return fmt.Errorf("asset_list.review.archive.audit.action 引用了未知 audit action %q", audit.Action)
+	}
+	return nil
+}
+
+// assetListArchiveReadmeHolders names the holders each README line must carry;
+// a line without an entry needs none.
+var assetListArchiveReadmeHolders = map[string][]string{
+	"title_line":        {"title"},
+	"list_line":         {"list_id"},
+	"generated_line":    {"generated_at"},
+	"summary_line":      {"items", "files"},
+	"item_line":         {"position", "name"},
+	"item_kind_line":    {"position", "name", "kind", "round"},
+	"directory_line":    {"directory"},
+	"task_line":         {"task_id"},
+	"formats_line":      {"formats"},
+	"triangles_line":    {"triangles"},
+	"texture_line":      {"texture"},
+	"checks_line":       {"checks"},
+	"check_line":        {"check", "status"},
+	"check_budget_line": {"check", "status", "budget"},
+	"file_line":         {"path", "size", "sha256"},
+	"missing_line":      {"asset_id", "media_type"},
+}
+
+// validateAssetListArchiveReadme 校验整批 ZIP 的 README 文案：每行都要有，
+// 带占位符的行要真的带齐。README 只由 Schema 拼装，缺一行就少一句人话。
+func validateAssetListArchiveReadme(readme AssetListArchiveReadmeSchema) error {
+	for field, text := range map[string]string{
+		"title_line":        readme.TitleLine,
+		"list_line":         readme.ListLine,
+		"generated_line":    readme.GeneratedLine,
+		"note":              readme.Note,
+		"summary_line":      readme.SummaryLine,
+		"item_line":         readme.ItemLine,
+		"item_kind_line":    readme.ItemKindLine,
+		"directory_line":    readme.DirectoryLine,
+		"task_line":         readme.TaskLine,
+		"formats_line":      readme.FormatsLine,
+		"format_separator":  readme.FormatSeparator,
+		"triangles_line":    readme.TrianglesLine,
+		"texture_line":      readme.TextureLine,
+		"checks_line":       readme.ChecksLine,
+		"check_line":        readme.CheckLine,
+		"check_budget_line": readme.CheckBudgetLine,
+		"check_separator":   readme.CheckSeparator,
+		"files_heading":     readme.FilesHeading,
+		"file_line":         readme.FileLine,
+		"missing_heading":   readme.MissingHeading,
+		"missing_line":      readme.MissingLine,
+		"unknown_role":      readme.UnknownRole,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("asset_list.review.archive.readme.%s 不能为空", field)
+		}
+		present := placeholderSet(text)
+		for _, name := range assetListArchiveReadmeHolders[field] {
+			if !present[name] {
+				return fmt.Errorf("asset_list.review.archive.readme.%s 缺少占位符 {%s}", field, name)
+			}
+		}
 	}
 	return nil
 }

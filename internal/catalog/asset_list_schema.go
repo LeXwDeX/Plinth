@@ -254,8 +254,50 @@ type AssetListArchiveSchema struct {
 	MaxBytes   int64 `json:"max_bytes"`
 	// StoredMediaTypes are already compressed and are stored, not deflated.
 	StoredMediaTypes []string                       `json:"stored_media_types"`
+	Readme           AssetListArchiveReadmeSchema   `json:"readme"`
 	Messages         AssetListArchiveMessagesSchema `json:"messages"`
 	Audit            AssetListArchiveAuditSchema    `json:"audit"`
+}
+
+// AssetListArchiveReadmeSchema 是整批 ZIP 根目录 README.txt 的文案：每个
+// 清单项一个块，块内是该产物的目录、来源、格式、验收与文件清单。占位符
+// {title} {list_id} {generated_at} {items} {files} {position} {name} {kind}
+// {round} {directory} {task_id} {formats} {triangles} {texture} {checks}
+// {check} {status} {budget} {path} {role} {format} {size} {sha256}
+// {asset_id} {media_type} 由服务端填充。
+type AssetListArchiveReadmeSchema struct {
+	// TitleLine、ListLine、GeneratedLine 与 Note 是包头的四行。
+	TitleLine     string `json:"title_line"`
+	ListLine      string `json:"list_line"`
+	GeneratedLine string `json:"generated_line"`
+	Note          string `json:"note"`
+	// SummaryLine 收尾包头。{items} 是项数、{files} 是文件数。
+	SummaryLine string `json:"summary_line"`
+	// ItemLine 与 ItemKindLine 是一项的标题：声明了 kind 时用后者。
+	ItemLine     string `json:"item_line"`
+	ItemKindLine string `json:"item_kind_line"`
+	// FormatsLine、TrianglesLine 与 TextureLine 是一项的归档事实；没写的
+	// 事实不输出对应行。FormatSeparator 是 FormatsLine 里多个格式之间的分隔。
+	DirectoryLine   string `json:"directory_line"`
+	TaskLine        string `json:"task_line"`
+	FormatsLine     string `json:"formats_line"`
+	FormatSeparator string `json:"format_separator"`
+	TrianglesLine   string `json:"triangles_line"`
+	TextureLine     string `json:"texture_line"`
+	// ChecksLine 与 CheckLine/CheckBudgetLine 是验收结论：一条检查一行文案，
+	// 带阈值时用带 {budget} 的那条。CheckSeparator 是两条之间的分隔。
+	ChecksLine      string `json:"checks_line"`
+	CheckLine       string `json:"check_line"`
+	CheckBudgetLine string `json:"check_budget_line"`
+	CheckSeparator  string `json:"check_separator"`
+	// FilesHeading 与 FileLine 是一项的文件清单；MissingHeading 与
+	// MissingLine 是快照记录了、但存储里已经没有的文件。
+	FilesHeading   string `json:"files_heading"`
+	FileLine       string `json:"file_line"`
+	MissingHeading string `json:"missing_heading"`
+	MissingLine    string `json:"missing_line"`
+	// UnknownRole 是缺失文件既没有 role 也没有 variant 时的角色词。
+	UnknownRole string `json:"unknown_role"`
 }
 
 // AssetListArchiveMessagesSchema 是整批 ZIP 的拒绝文案。empty 是没有任何已通过
@@ -299,6 +341,16 @@ type AssetListReviewMessagesSchema struct {
 	ReturnLimit string `json:"return_limit"`
 	// AssetLimit 是项目资产达到上限时的通过失败提示。{name}、{maximum}
 	AssetLimit string `json:"asset_limit"`
+	// ItemNotFound 是整批通过里一个 id 不属于这份清单时该单项的结果。
+	ItemNotFound string `json:"item_not_found"`
+	// ItemNotAwaitingReview 是整批通过里一项已不在待验收时该单项的结果。
+	ItemNotAwaitingReview string `json:"item_not_awaiting_review"`
+	// Budget* 是验收快照里一条冻结阈值的措辞：{value} 是阈值本身。它们
+	// 进快照，所以是被检查项的门禁文案，不随读取时的语言变化。
+	BudgetMinimum      string `json:"budget_minimum"`
+	BudgetMaximum      string `json:"budget_maximum"`
+	BudgetRatioMaximum string `json:"budget_ratio_maximum"`
+	BudgetRequired     string `json:"budget_required"`
 }
 
 // AssetListUISchema 是清单卡与项目面板的固定标题和按钮文案。

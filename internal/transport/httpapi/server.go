@@ -3864,6 +3864,14 @@ func recoverMiddleware(
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
+				// A handler that aborted its response (http.ErrAbortHandler)
+				// already gave the connection up, usually after its status and
+				// headers were sent: there is no answer left to write and no
+				// fault to report, so it is re-panicked for net/http to close
+				// the connection (the client then sees the failure).
+				if abort, isAbort := recovered.(error); isAbort && errors.Is(abort, http.ErrAbortHandler) {
+					panic(recovered)
+				}
 				logger.Error(
 					"HTTP handler panic",
 					"method", request.Method,
