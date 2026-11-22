@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,7 +22,11 @@ func fullTextFrozenInput(t *testing.T, c *catalog.Catalog) json.RawMessage {
 	return input
 }
 
-func TestFullFormatOfferingCompletesOnlyWithSixConversionClaims(t *testing.T) {
+// The mixed Offering (#462) holds the public task only for the blocking GLTF
+// conversion: the task completes with the self-contained GLB as its primary
+// model, and the five requested formats are converted after success, one claim
+// per round, until every one of them has landed.
+func TestMixedOfferingCompletesWithThePrimaryModelThenConvertsTheRest(t *testing.T) {
 	var converts []string
 	var upstream *httptest.Server
 	upstream = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,35 +67,31 @@ func TestFullFormatOfferingCompletesOnlyWithSixConversionClaims(t *testing.T) {
 		AttemptID: "attempt", Offering: offering,
 		Job: generation.UpstreamJob{ProviderID: "tripo", RemoteID: "base"}, Input: input,
 	}
+	// Before success only the blocking conversion runs.
 	for round := 0; round < 30; round++ {
 		observation, err := adapter.Observe(context.Background(), request)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if observation.Phase == generation.UpstreamCompleted {
-			if len(converts) != 6 || len(observation.Artifacts) != 7 {
+			if !slices.Equal(converts, []string{"GLTF"}) || len(observation.Artifacts) != 2 {
 				t.Fatalf("completed early: converts=%v artifacts=%#v", converts, observation.Artifacts)
 			}
-			variants := map[string]bool{}
-			primaryModels := 0
+			primary := 0
 			for _, claim := range observation.Artifacts {
-				variants[claim.Variant] = true
-				if claim.Role == "model" {
-					primaryModels++
-					if claim.Locator != upstream.URL+"/gltf.glb" {
-						t.Fatalf("primary model used unconverted source: %#v", claim)
-					}
+				if claim.Role != "model" {
+					continue
+				}
+				primary++
+				if claim.Locator != upstream.URL+"/gltf.glb" {
+					t.Fatalf("primary model used unconverted source: %#v", claim)
 				}
 			}
-			if primaryModels != 1 {
-				t.Fatalf("primary model claims = %d, want 1", primaryModels)
+			if primary != 1 {
+				t.Fatalf("primary model claims = %d, want 1", primary)
 			}
-			for _, format := range []string{"gltf", "usdz", "fbx", "obj", "stl", "3mf"} {
-				if !variants["converted."+format] {
-					t.Fatalf("missing %s: %#v", format, observation.Artifacts)
-				}
-			}
-			return
+			request.Opaque = observation.Opaque
+			break
 		}
 		if observation.Phase != generation.UpstreamRunning || len(observation.Artifacts) != 0 {
 			t.Fatalf("premature result: %#v", observation)
@@ -100,7 +101,37 @@ func TestFullFormatOfferingCompletesOnlyWithSixConversionClaims(t *testing.T) {
 		}
 		request.Opaque = observation.Opaque
 	}
-	t.Fatal("conversions did not complete")
+	// After success the requested formats are converted one per round.
+	request.PostSuccess = true
+	variants := map[string]bool{}
+	for round := 0; round < 60; round++ {
+		observation, err := adapter.Observe(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if observation.Phase == generation.UpstreamFailed {
+			t.Fatalf("post-success run failed: %#v", observation.Failure)
+		}
+		for _, claim := range observation.Artifacts {
+			if claim.Role == "converted_model" {
+				variants[claim.Variant] = true
+			}
+		}
+		request.Opaque = observation.Opaque
+		if observation.Phase == generation.UpstreamCompleted && len(observation.Artifacts) == 0 {
+			break
+		}
+	}
+	if len(converts) != 6 {
+		t.Fatalf("converts = %v, want the blocking GLTF and the five requested formats", converts)
+	}
+	// converted.gltf was claimed before success; the other five come from the
+	// post-success run.
+	for _, format := range []string{"usdz", "fbx", "obj", "stl", "3mf"} {
+		if !variants["converted."+format] {
+			t.Fatalf("missing converted.%s: %v", format, variants)
+		}
+	}
 }
 
 func TestAmbiguousFullFormatDispatchNeverResendsPaidConversion(t *testing.T) {
@@ -174,6 +205,8 @@ func TestFullFormatChildFailureRetriesThenFailsPublicTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		if observation.Phase == generation.UpstreamFailed {
+			// Only the blocking GLTF conversion runs before success: the five
+			// requested formats are never dispatched once the task is failing.
 			if converts != 6 || len(observation.Artifacts) != 0 {
 				t.Fatalf("unexpected terminal result: %#v, converts=%d", observation, converts)
 			}
@@ -221,7 +254,10 @@ func TestConfirmedPrivateConversionIsNotPaidAgainAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observation.Phase != generation.UpstreamRunning || len(dispatched) != 1 || dispatched[0] == "GLTF" {
+	if observation.Phase != generation.UpstreamCompleted || len(dispatched) != 0 {
 		t.Fatalf("confirmed conversion repeated: %#v, formats=%v", observation, dispatched)
+	}
+	if len(observation.Artifacts) != 2 {
+		t.Fatalf("the confirmed GLTF conversion was not delivered: %#v", observation.Artifacts)
 	}
 }

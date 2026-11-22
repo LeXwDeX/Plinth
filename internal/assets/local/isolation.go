@@ -46,6 +46,13 @@ const (
 	maxRasterInspect = 256 << 20
 )
 
+// glbMagic is the first four bytes of every binary glTF file, and glbMediaType
+// the type that container is served as. Both the delivery check and the label
+// an ingest stores (#424) need them, so they are declared once.
+var glbMagic = []byte("glTF")
+
+const glbMediaType = "model/gltf-binary"
+
 // Network authorities include IP addresses and local hostnames. Require a URI
 // boundary before // so an OBJ face such as 1//1 remains valid geometry.
 const networkAddressBoundary = `[^\p{L}\p{N}_./\\:+-]`
@@ -100,7 +107,7 @@ func inspectDeliveredAssetFormat(file *os.File, role, variant, mediaType string)
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
-	if normalizeMediaType(mediaType) == "model/gltf-binary" && !bytes.Equal(magic[:4], []byte("glTF")) {
+	if normalizeMediaType(mediaType) == glbMediaType && !bytes.Equal(magic[:4], glbMagic) {
 		return "glb", errors.New("GLB media type requires a binary glTF container")
 	}
 	// A slot declared as STL must hold an STL mesh. Its numeric records are

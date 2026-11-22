@@ -3801,7 +3801,7 @@ func validateModelReview(schema ChatSchema, capabilityPresentations []Capability
 	if strings.TrimSpace(source.TaskArgument) == "" || strings.TrimSpace(source.AssetArgument) == "" ||
 		strings.TrimSpace(source.SourceRequired) == "" || strings.TrimSpace(source.SourceNotFound) == "" ||
 		strings.TrimSpace(source.SourceNotReady) == "" || strings.TrimSpace(source.SourceNotModel) == "" ||
-		strings.TrimSpace(source.SourceNotGLB) == "" {
+		strings.TrimSpace(source.SourceNotGLB) == "" || strings.TrimSpace(source.SourceBytesNotGLB) == "" {
 		return errors.New("chat.model_review.source 的参数名与文案不能为空")
 	}
 	if !strings.Contains(source.SourceNotModel, "{asset}") {
@@ -3809,6 +3809,9 @@ func validateModelReview(schema ChatSchema, capabilityPresentations []Capability
 	}
 	if !strings.Contains(source.SourceNotGLB, "{asset}") || !strings.Contains(source.SourceNotGLB, "{media}") {
 		return errors.New("chat.model_review.source.source_not_glb 必须包含 {asset} 与 {media}")
+	}
+	if !strings.Contains(source.SourceBytesNotGLB, "{asset}") || !strings.Contains(source.SourceBytesNotGLB, "{media}") {
+		return errors.New("chat.model_review.source.source_bytes_not_glb 必须包含 {asset} 与 {media}")
 	}
 
 	texts := []struct {

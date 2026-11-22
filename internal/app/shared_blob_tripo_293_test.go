@@ -25,6 +25,9 @@ func TestTripoGltfConversionFulfilsTheModelAndConvertedSlotsOverOneBlob(t *testi
 	if task.State != generation.TaskSucceeded {
 		t.Fatalf("state = %s, failure = %#v", task.State, task.Failure)
 	}
+	// The task is already succeeded with the primary model; the FBX conversion
+	// lands in the background (#462).
+	task = harness.driveMixedPostSuccess(t, "owner-acme", accepted.TaskID)
 	slot := func(role, variant string) generation.Asset {
 		t.Helper()
 		for _, asset := range task.Assets {

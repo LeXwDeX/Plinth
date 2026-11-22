@@ -253,8 +253,11 @@ func TestFailedConvertChildIsResubmittedForItsOwnFormat(t *testing.T) {
 		t.Fatalf("phase = %s, want completed after the resubmission: %+v", observation.Phase, observation.Failure)
 	}
 	posts, _, _ := upstream.snapshot()
-	if len(posts) != 7 || posts[0] != "GLTF" || posts[1] != "GLTF" {
-		t.Fatalf("convert posts = %v, want the failed GLTF resent once beside the five other formats", posts)
+	// The GLTF export is the blocking conversion of a mixed Offering (#462):
+	// before success it is the only format sent, and the failed child is resent
+	// once. The five requested formats are converted after success.
+	if len(posts) != 2 || posts[0] != "GLTF" || posts[1] != "GLTF" {
+		t.Fatalf("convert posts = %v, want the failed GLTF resent once", posts)
 	}
 	var state struct {
 		Conversions map[string]struct {
@@ -293,7 +296,7 @@ func TestCancelledConvertChildIsResubmitted(t *testing.T) {
 		t.Fatalf("phase = %s, want completed: %+v", observation.Phase, observation.Failure)
 	}
 	posts, _, _ := upstream.snapshot()
-	if len(posts) != 7 || posts[0] != "GLTF" || posts[1] != "GLTF" {
+	if len(posts) != 2 || posts[0] != "GLTF" || posts[1] != "GLTF" {
 		t.Fatalf("convert posts = %v, want the cancelled GLTF resent once", posts)
 	}
 	var state struct {
@@ -312,20 +315,22 @@ func TestCancelledConvertChildIsResubmitted(t *testing.T) {
 	}
 }
 
-// A2: the 429 budget belongs to each format. Three refusals of GLTF and five of
-// USDZ used to exhaust one shared budget of five and fail the run; each format
-// now gets its own five.
+// A2: the 429 budget belongs to each format. Three refusals of USDZ and five of
+// FBX used to exhaust one shared budget of five and fail the run; each format
+// now gets its own five. The formats of a mixed Offering (#462) that are
+// requested rather than blocking are converted after success, so this runs the
+// post-success phase.
 func TestRateLimitBudgetIsPerFormat(t *testing.T) {
 	upstream := newExportFixture(t)
 	upstream.set(func(f *exportFixture) {
-		f.refusals["GLTF"] = 3
-		f.refusals["USDZ"] = 5
+		f.refusals["USDZ"] = 3
+		f.refusals["FBX"] = 5
 		f.retryAfter = "1"
 	})
 	adapter := newAdapter(t, upstream.server)
 	permit := &conversionPermit{}
 	request := fullFormatRequest(t)
-	observation := driveExport(t, adapter, request, permit, 200)
+	observation := drivePostSuccess(t, adapter, request, permit, 400)
 	if observation.Phase != generation.UpstreamCompleted {
 		t.Fatalf("phase = %s, want completed: %+v", observation.Phase, observation.Failure)
 	}
@@ -334,13 +339,17 @@ func TestRateLimitBudgetIsPerFormat(t *testing.T) {
 	for _, format := range posts {
 		counts[format]++
 	}
-	if counts["GLTF"] != 4 || counts["USDZ"] != 6 {
-		t.Fatalf("counts = %v, want GLTF 4 (1+3 refusals) and USDZ 6 (1+5 refusals)", counts)
+	if counts["USDZ"] != 4 || counts["FBX"] != 6 {
+		t.Fatalf("counts = %v, want USDZ 4 (1+3 refusals) and FBX 6 (1+5 refusals)", counts)
 	}
 }
 
 // A5: at most five private children are in flight at once (the official default
-// pool), and the sixth format is dispatched only after a slot frees.
+// pool), and the last format is dispatched only after a slot frees. A mixed
+// Offering (#462) has five requested formats after success, so the fan-out is
+// exercised by holding every child running: each of them starts while the
+// previous ones are still in flight, and none of them starts with more than five
+// in flight.
 func TestConversionConcurrencyIsBoundedByFive(t *testing.T) {
 	upstream := newExportFixture(t)
 	upstream.set(func(f *exportFixture) { f.runningPolls = 100 })
@@ -348,7 +357,8 @@ func TestConversionConcurrencyIsBoundedByFive(t *testing.T) {
 	permit := &conversionPermit{}
 	request := fullFormatRequest(t)
 	ctx := generation.WithDispatchCheckpointer(context.Background(), permit)
-	// Every child stays running: only five formats may be started.
+	request.PostSuccess = true
+	// Every child stays running: the five requested formats may all be started.
 	for round := 0; round < 12; round++ {
 		observation, err := adapter.Observe(ctx, request)
 		if err != nil {
@@ -357,30 +367,24 @@ func TestConversionConcurrencyIsBoundedByFive(t *testing.T) {
 		permit.settle(t, observation)
 		request.Opaque = observation.Opaque
 	}
-	posts, inflight, completed := upstream.snapshot()
+	posts, inflight, _ := upstream.snapshot()
 	if len(posts) != 5 {
-		t.Fatalf("posts = %v, want five formats while every child is running", posts)
+		t.Fatalf("posts = %v, want the five requested formats while every child is running", posts)
 	}
 	for index, count := range inflight {
 		if count > 5 {
 			t.Fatalf("post %d (%s) started with %d children in flight, want at most 5", index, posts[index], count)
 		}
 	}
-	// Let the first wave finish: the sixth format is dispatched only now.
+	// Let the wave finish: every format is delivered and the run settles.
 	upstream.set(func(f *exportFixture) { f.runningPolls = 0 })
 	observation := driveExport(t, adapter, request, permit, 40)
 	if observation.Phase != generation.UpstreamCompleted {
 		t.Fatalf("phase = %s, want completed: %+v", observation.Phase, observation.Failure)
 	}
-	posts, inflight, completed = upstream.snapshot()
-	if len(posts) != 6 {
-		t.Fatalf("posts = %v, want six formats once a slot freed", posts)
-	}
-	if completed[5] == 0 {
-		t.Fatalf("the sixth format was dispatched before any child delivered: %v", completed)
-	}
-	if inflight[5] > 5 {
-		t.Fatalf("sixth post started with %d children in flight", inflight[5])
+	posts, _, _ = upstream.snapshot()
+	if len(posts) != 5 {
+		t.Fatalf("posts = %v, want no sixth format", posts)
 	}
 }
 

@@ -1204,6 +1204,11 @@ func (m *Module) Offerings(capability Capability) []Offering {
 // (parameters, knowledge, provider options, limits). The slice itself is
 // fresh, so a caller may reorder it. Use Offerings when the values may be
 // edited; a Catalog without the shared view falls back to it.
+//
+// #424: this and the availability closures internal/app binds to the Agent tool
+// registry are the only production holders of the shared values; both only
+// read them, and that read-only contract stays a comment and a test (see
+// catalog.ListShared for why a wrapper type would not enforce it).
 func (m *Module) OfferingsShared(capability Capability) []Offering {
 	shared, ok := m.catalog.(sharedOfferingCatalog)
 	if !ok {

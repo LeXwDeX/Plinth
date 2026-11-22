@@ -192,7 +192,13 @@ type ProjectAssets interface {
 
 // ProjectAssetLimits are the project asset reference bounds
 // (application.project.limits): an item result may hold more files than one
-// asset accepts, so the accept keeps the first declared ones.
+// asset accepts, so the accept keeps the first declared ones. Each bound is
+// independent, and a zero value means "not bounded here":
+//   - MaximumImages / MaximumModels: every declared reference of that kind is
+//     kept, in result order.
+//   - MaximumAssets: no per-batch bound is counted before the write
+//     transaction, which still enforces the project's own asset bound
+//     (application.project.limits.maximum_assets_per_project).
 type ProjectAssetLimits struct {
 	MaximumAssets int
 	MaximumImages int
@@ -204,8 +210,12 @@ type ProjectAssetLimits struct {
 type ReviewConfig struct {
 	Snapshots     ReviewSnapshots
 	ProjectAssets ProjectAssets
-	// Limits bounds the project asset registration; zero values mean no
-	// references are taken and the project's own 200 bound is unchanged.
+	// Limits bounds the project asset registration. A zero Limits means every
+	// bound is cleared: no reference bound and no per-batch asset bound, while
+	// the project's own asset bound still applies in the write transaction.
+	// SetReview reads it the same way: an all-zero Limits is "not set" and
+	// keeps whatever limits the service was built with, so limits cannot be
+	// cleared through SetReview once the service is running.
 	Limits ProjectAssetLimits
 }
 
@@ -341,6 +351,15 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 	var assetRows []project.Asset
 	assetUsed := 0
 	maximumAssets := service.projectAssetLimits.MaximumAssets
+	// assetLimitText is the per-item copy of a project at its asset bound: the
+	// item's own name and the bound are filled in per item.
+	assetLimitText := func(item Item) string {
+		return service.reviewText(ctx, func(messages catalog.AssetListReviewMessagesSchema) string {
+			return messages.AssetLimit
+		}, map[string]string{
+			"name": item.Name, "maximum": strconv.Itoa(maximumAssets),
+		})
+	}
 	if decision == ReviewDecisionAccept && service.projectAssets != nil {
 		used, err := service.projectAssets.CountAssets(ctx, ownerID, projectID)
 		if err != nil {
@@ -355,7 +374,10 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 				return ReviewOutcome{}, ErrNotFound
 			}
 			outcome.Results = append(outcome.Results, ReviewItemResult{
-				ItemID: itemID, Error: "item not found",
+				ItemID: itemID,
+				Error: service.reviewText(ctx, func(messages catalog.AssetListReviewMessagesSchema) string {
+					return messages.ItemNotFound
+				}, nil),
 			})
 			stateFailure = true
 			continue
@@ -365,7 +387,10 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 				return ReviewOutcome{}, ErrItemState
 			}
 			outcome.Results = append(outcome.Results, ReviewItemResult{
-				ItemID: itemID, Error: "item is not awaiting review",
+				ItemID: itemID,
+				Error: service.reviewText(ctx, func(messages catalog.AssetListReviewMessagesSchema) string {
+					return messages.ItemNotAwaitingReview
+				}, nil),
 			})
 			stateFailure = true
 			continue
@@ -388,14 +413,14 @@ func (service *Service) Review(ctx context.Context, input ReviewInput) (ReviewOu
 					return ReviewOutcome{}, err
 				}
 				outcome.Results = append(outcome.Results, ReviewItemResult{
-					ItemID: item.ID, Error: service.assetLimitText(item),
+					ItemID: item.ID, Error: assetLimitText(item),
 				})
 				continue
 			}
 			if assetID != "" {
 				if maximumAssets > 0 && assetUsed >= maximumAssets {
 					outcome.Results = append(outcome.Results, ReviewItemResult{
-						ItemID: item.ID, Error: service.assetLimitText(item),
+						ItemID: item.ID, Error: assetLimitText(item),
 					})
 					continue
 				}
@@ -560,20 +585,27 @@ func (service *Service) prepareReviewAsset(
 	return asset, id, nil
 }
 
-// assetLimitText is the Schema copy of a project at its asset bound, with the
-// item name and the bound filled in.
-func (service *Service) assetLimitText(item Item) string {
+// reviewText words one per-item review answer from the Schema in the request's
+// UI locale: pick selects the copy and holders are replaced afterwards, so the
+// locale sees the template's own placeholders. A deployment without the review
+// section answers nothing here; the transport fills its generic copy.
+func (service *Service) reviewText(
+	ctx context.Context,
+	pick func(catalog.AssetListReviewMessagesSchema) string,
+	holders map[string]string,
+) string {
 	text := ""
 	if service.review != nil {
-		text = service.review.Messages.AssetLimit
+		text = strings.TrimSpace(pick(service.review.Messages))
 	}
 	if text == "" {
-		text = "the project asset limit was reached"
+		return ""
 	}
-	return strings.NewReplacer(
-		"{name}", item.Name,
-		"{maximum}", strconv.Itoa(service.projectAssetLimits.MaximumAssets),
-	).Replace(text)
+	text = service.texts.Text(catalog.LocaleFrom(ctx), text)
+	for name, value := range holders {
+		text = strings.ReplaceAll(text, "{"+name+"}", value)
+	}
+	return text
 }
 
 // reviewProjectAssetID is the deterministic project asset identity of one

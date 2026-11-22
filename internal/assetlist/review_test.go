@@ -300,6 +300,144 @@ func TestReviewAcceptReportsTheAssetLimitPerItem(t *testing.T) {
 	}
 }
 
+// reviewLocaleFixture is reviewFixture over a two-item list whose review copy
+// is the product's own, with the product localizer installed: the per-item
+// answers of a batch must read in the language of the request.
+func reviewLocaleFixture(t *testing.T, fake *fakeProjectAssets) (*assetlist.Service, *memoryRepository, assetlist.List) {
+	t.Helper()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := product.Application()
+	texts, err := catalog.NewTextLocalizer(application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := reviewTestSchema()
+	schema.Review.Messages = application.AssetList.Review.Messages
+	service, repository, _ := newService(t, func(config *assetlist.Config) {
+		config.Schema = schema
+		config.Texts = texts
+		config.ProjectAssets = fake
+		config.ProjectAssetLimits = assetlist.ProjectAssetLimits{
+			MaximumAssets: 200, MaximumImages: 8, MaximumModels: 4,
+		}
+	})
+	ctx := context.Background()
+	draft, err := service.Propose(ctx, assetlist.ProposeInput{
+		Owner: "owner-a", ProjectID: "prj_1", SessionID: "ses_1",
+		RequestKey: "req_locale", Title: "Board",
+		Items: []assetlist.ItemInput{
+			{Kind: "character", Name: "Hero"},
+			{Kind: "image", Name: "Icon", RouteID: "text-to-image"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	list, err := service.Decide(ctx, assetlist.DecideInput{
+		Owner: "owner-a", ProjectID: "prj_1", ListID: draft.ID,
+		Decision: assetlist.DecisionConfirm,
+	})
+	if err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+	items := repository.items[list.ID]
+	for index := range items {
+		items[index].State = assetlist.StateReview
+		items[index].Round = 1
+		items[index].Review = json.RawMessage(`{"task_id":"","artifacts":[]}`)
+	}
+	repository.items[list.ID] = items
+	return service, repository, repository.withItems(repository.lists[list.ID])
+}
+
+// #425: the answers a batch gives for one item are Schema copy, so the browser
+// reads them in its own language instead of the server's.
+func TestReviewBatchAnswersInTheRequestLanguage(t *testing.T) {
+	cases := []struct {
+		name   string
+		count  int
+		second string
+		want   map[string]string
+	}{
+		{
+			name: "an id outside the list", second: "aitem_missing",
+			want: map[string]string{
+				"zh": "这个清单项不在当前清单里。",
+				"en": "This item is not part of the current list.",
+			},
+		},
+		{
+			name: "an item that is not awaiting review", second: "state",
+			want: map[string]string{
+				"zh": "这个清单项已经不在待验收状态。",
+				"en": "This item is no longer awaiting review.",
+			},
+		},
+		{
+			name: "a project at its asset bound", count: 200, second: "second",
+			want: map[string]string{
+				"zh": "项目资产已达上限 200 个，未能把清单项「Icon」登记为项目资产；请先清理项目资产再通过。",
+				"en": "The project already has its maximum of 200 assets, so list item \"Icon\" could not be registered as a project asset; clean up project assets before accepting.",
+			},
+		},
+	}
+	for _, test := range cases {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			for _, locale := range []string{"zh", "en"} {
+				locale := locale
+				t.Run(locale, func(t *testing.T) {
+					fake := newFakeProjectAssets()
+					fake.count = test.count
+					service, repository, list := reviewLocaleFixture(t, fake)
+					items := repository.items[list.ID]
+					if test.second == "state" {
+						items[1].State = assetlist.StateTodo
+						repository.items[list.ID] = items
+						list = repository.withItems(repository.lists[list.ID])
+					}
+					second := items[1].ID
+					switch test.second {
+					case "state":
+						items[1].State = assetlist.StateTodo
+						repository.items[list.ID] = items
+						list = repository.withItems(repository.lists[list.ID])
+					case "second":
+						// The second item of the list is the refused one.
+					default:
+						second = test.second
+					}
+					ctx := context.Background()
+					if locale == "en" {
+						ctx = catalog.WithLocale(ctx, "en")
+					}
+					outcome, err := service.Review(ctx, assetlist.ReviewInput{
+						OwnerID: "owner-a", ProjectID: "prj_1", ListID: list.ID,
+						Decision:        assetlist.ReviewDecisionAccept,
+						ItemIDs:         []string{items[0].ID, second},
+						ExpectedVersion: list.Version,
+					})
+					if err != nil {
+						t.Fatalf("accept: %v", err)
+					}
+					var answer string
+					for _, result := range outcome.Results {
+						if result.ItemID == second {
+							answer = result.Error
+						}
+					}
+					if answer != test.want[locale] {
+						t.Fatalf("%s answer = %q; want %q", locale, answer, test.want[locale])
+					}
+				})
+			}
+		})
+	}
+}
+
 // A bound that moved between the count and the write transaction rolls the
 // batch back and answers the request-level limit; nothing is written.
 func TestReviewAcceptReportsTheBoundMovedAtWriteTime(t *testing.T) {

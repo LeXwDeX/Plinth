@@ -56,6 +56,9 @@ export function Stage() {
     openLightbox(pictures.map((slot) => ({ key: slot.key, url: safeAssetURL(slot.url), label: slot.label, downloadUrl: safeAssetURL(slot.url), ...(slot.assetId ? { pick: { taskId: slot.taskId, assetId: slot.assetId } } : {}) })), shown);
   };
 
+  // The acceptance board's dialog is portaled into this row so it keeps covering the stage only (#425).
+  const stageRow = useRef<HTMLDivElement>(null);
+
   // What is on the stage is remembered per session in this browser, so coming back later lands on it.
   useEffect(() => {
     if (object && sessionId && object.sessionId === sessionId) saveLastObject(sessionId, object);
@@ -81,7 +84,9 @@ export function Stage() {
   return (
     <section aria-label={schemaText(schema, 'ui.studio.stage.title')} data-testid="studio-stage" className="@container relative flex min-h-0 min-w-0 flex-1 flex-col bg-canvas">
       <StageHeader object={object} />
-      <div className="relative flex min-h-0 flex-1">
+      {/* The acceptance board is a modal dialog that still has to cover only the stage, so its
+          dialog is portaled into this row (the positioned parent) instead of the body (#425). */}
+      <div ref={stageRow} className="relative flex min-h-0 flex-1">
         {object?.kind === 'model' ? (
           <RegionErrorBoundary region="viewer_3d"><Stage3D object={object} /></RegionErrorBoundary>
         ) : (
@@ -105,7 +110,7 @@ export function Stage() {
         ) : null}
         {compare ? <CompareView onEnlarge={enlargeCompare} /> : null}
         {allOutputsOpen ? <AllOutputs /> : null}
-        {assetBoard ? <AssetListBoard key={`${assetBoard.projectId}:${assetBoard.listId}`} target={assetBoard} schema={schema} /> : null}
+        {assetBoard ? <AssetListBoard key={`${assetBoard.projectId}:${assetBoard.listId}`} target={assetBoard} schema={schema} container={stageRow} /> : null}
         <StageImageView />
       </div>
     </section>

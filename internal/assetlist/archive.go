@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/modelcheck"
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery/objpackage"
@@ -409,7 +410,7 @@ func (service *Service) PrepareArchive(
 	for _, entry := range packed {
 		prepared.files = append(prepared.files, entry.files...)
 	}
-	prepared.readme = archiveReadme(manifest, len(prepared.files))
+	prepared.readme = service.archiveReadme(ctx, manifest, len(prepared.files))
 	prepared.Entries = len(prepared.files) + 2
 	prepared.ItemCount = len(packed)
 	prepared.Bytes = totalBytes + int64(len(prepared.manifest)) + int64(len(prepared.readme))
@@ -881,25 +882,58 @@ func archiveFormat(mediaType, variant string) string {
 	return strings.TrimPrefix(archiveExtension(mediaType, variant), ".")
 }
 
+// archiveUnsafeNameCharacters are the characters Windows refuses in a file or
+// directory name; they become dashes, like the path separators already did.
+const archiveUnsafeNameCharacters = `:*?"<>|`
+
+// archiveReservedDeviceNames are the Windows device names a directory may not
+// use, with any extension and in any case. COM0/LPT0 are not reserved; the
+// digits ¹ ² ³ are, but a name that spells them out is not.
+var archiveReservedDeviceNames = map[string]bool{
+	"CON": true, "PRN": true, "AUX": true, "NUL": true,
+	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true,
+	"COM6": true, "COM7": true, "COM8": true, "COM9": true,
+	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true,
+	"LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true,
+}
+
 // sanitizeArchiveName makes one item name safe as a directory segment: path
-// separators and control characters become dashes, leading/trailing spaces and
-// dots are dropped, and the value is truncated on a rune boundary. Chinese
-// text is preserved as is.
+// separators, the characters Windows refuses and control characters become
+// dashes, a Windows device name is prefixed with an underscore, leading and
+// trailing spaces and dots are dropped, and the value is truncated on a rune
+// boundary. Chinese text is preserved as is.
 func sanitizeArchiveName(raw string, maxBytes int) string {
 	text := strings.TrimSpace(raw)
 	text = strings.Map(func(character rune) rune {
-		if character == '/' || character == '\\' || unicode.IsControl(character) || unicode.Is(unicode.Cf, character) {
+		if character == '/' || character == '\\' ||
+			strings.ContainsRune(archiveUnsafeNameCharacters, character) ||
+			unicode.IsControl(character) || unicode.Is(unicode.Cf, character) {
 			return '-'
 		}
 		return character
 	}, text)
 	text = strings.Trim(text, " .-")
-	if maxBytes > 0 && len(text) > maxBytes {
-		text = text[:maxBytes]
-		for !utf8.ValidString(text) && len(text) > 0 {
-			text = text[:len(text)-1]
+	// truncate cuts on a rune boundary and drops the spaces and dots the cut
+	// may leave at the end.
+	truncate := func(value string) string {
+		if maxBytes <= 0 || len(value) <= maxBytes {
+			return value
 		}
-		text = strings.Trim(text, " .-")
+		value = value[:maxBytes]
+		for !utf8.ValidString(value) && len(value) > 0 {
+			value = value[:len(value)-1]
+		}
+		return strings.Trim(value, " .-")
+	}
+	// Windows decides a device name by the part before the first dot, ignoring
+	// a trailing space there; the underscore keeps the item recognizable.
+	reserved := func(value string) bool {
+		stem, _, _ := strings.Cut(value, ".")
+		return archiveReservedDeviceNames[strings.ToUpper(strings.Trim(stem, " ."))]
+	}
+	text = truncate(text)
+	if reserved(text) {
+		text = truncate("_" + text)
 	}
 	if text == "" {
 		return "item"
@@ -953,56 +987,86 @@ func (service *Service) archiveStored(mediaType string) bool {
 	return false
 }
 
-// archiveReadme renders the human-readable root README from the manifest.
-func archiveReadme(manifest ArchiveManifest, fileCount int) []byte {
+// archiveReadme renders the human-readable root README from the manifest, in
+// the request's UI locale: every line is the Schema's own copy, so a download
+// reads in the language of the browser that asked for it. The per-item block's
+// indentation is layout, so it is written by code and never by the copy.
+func (service *Service) archiveReadme(ctx context.Context, manifest ArchiveManifest, fileCount int) []byte {
+	readme := service.archive.Readme
+	locale := catalog.LocaleFrom(ctx)
 	builder := &strings.Builder{}
-	fmt.Fprintf(builder, "资产清单：%s\n", manifest.Title)
-	fmt.Fprintf(builder, "清单 ID：%s\n", manifest.ListID)
-	fmt.Fprintf(builder, "生成时间：%s\n", manifest.GeneratedAt.Format(time.RFC3339))
-	builder.WriteString("本压缩包只包含已通过验收的清单项；每个清单项一个目录，目录内是该项已落盘的产物文件。\n")
-	fmt.Fprintf(builder, "共 %d 项、%d 个文件。\n\n", len(manifest.Items), fileCount)
-	for _, item := range manifest.Items {
-		title := item.Name
-		if item.Kind != "" {
-			title = fmt.Sprintf("%s（%s，第 %d 版）", item.Name, item.Kind, item.Round)
+	fill := func(text string, holders ...string) string {
+		// The locale reads the template, before its holders are filled in: the
+		// localizer knows the Schema's own text, never a filled copy.
+		text = service.texts.Text(locale, text)
+		for index := 0; index+1 < len(holders); index += 2 {
+			text = strings.ReplaceAll(text, "{"+holders[index]+"}", holders[index+1])
 		}
-		fmt.Fprintf(builder, "%02d. %s\n", item.Position, title)
-		fmt.Fprintf(builder, "    目录：%s\n", item.Directory)
+		return text
+	}
+	line := func(indent, text string, holders ...string) {
+		builder.WriteString(indent)
+		builder.WriteString(fill(text, holders...))
+		builder.WriteString("\n")
+	}
+	line("", readme.TitleLine, "title", manifest.Title)
+	line("", readme.ListLine, "list_id", manifest.ListID)
+	line("", readme.GeneratedLine, "generated_at", manifest.GeneratedAt.Format(time.RFC3339))
+	line("", readme.Note)
+	line("", readme.SummaryLine,
+		"items", strconv.Itoa(len(manifest.Items)), "files", strconv.Itoa(fileCount))
+	builder.WriteString("\n")
+	for _, item := range manifest.Items {
+		position := fmt.Sprintf("%02d", item.Position)
+		if item.Kind == "" {
+			line("", readme.ItemLine, "position", position, "name", item.Name)
+		} else {
+			line("", readme.ItemKindLine, "position", position, "name", item.Name,
+				"kind", item.Kind, "round", strconv.Itoa(item.Round))
+		}
+		line("    ", readme.DirectoryLine, "directory", item.Directory)
 		if item.TaskID != "" {
-			fmt.Fprintf(builder, "    来源任务：%s\n", item.TaskID)
+			line("    ", readme.TaskLine, "task_id", item.TaskID)
 		}
 		if len(item.Formats) > 0 {
-			fmt.Fprintf(builder, "    格式：%s\n", strings.Join(item.Formats, "、"))
+			line("    ", readme.FormatsLine, "formats",
+				strings.Join(item.Formats, fill(readme.FormatSeparator)))
 		}
 		if item.Triangles != nil {
-			fmt.Fprintf(builder, "    面数：%d\n", *item.Triangles)
+			line("    ", readme.TrianglesLine, "triangles", strconv.FormatInt(*item.Triangles, 10))
 		}
 		if item.TextureMaxEdge != nil {
-			fmt.Fprintf(builder, "    贴图最大边：%d\n", *item.TextureMaxEdge)
+			line("    ", readme.TextureLine, "texture", strconv.FormatInt(*item.TextureMaxEdge, 10))
 		}
 		if len(item.Checks) > 0 {
 			checks := make([]string, 0, len(item.Checks))
 			for _, check := range item.Checks {
-				text := check.Check + "=" + check.Status
+				text := readme.CheckLine
 				if check.Budget != "" {
-					text += fmt.Sprintf("（%s）", check.Budget)
+					text = readme.CheckBudgetLine
+					checks = append(checks, fill(text, "check", check.Check,
+						"status", check.Status, "budget", check.Budget))
+					continue
 				}
-				checks = append(checks, text)
+				checks = append(checks, fill(text, "check", check.Check, "status", check.Status))
 			}
-			fmt.Fprintf(builder, "    验收：%s\n", strings.Join(checks, "；"))
+			line("    ", readme.ChecksLine, "checks",
+				strings.Join(checks, fill(readme.CheckSeparator)))
 		}
-		builder.WriteString("    文件：\n")
+		line("    ", readme.FilesHeading)
 		for _, file := range item.Files {
-			fmt.Fprintf(builder, "      - %s（%s，%s，%d 字节，sha256 %s）\n",
-				file.Path, file.Role, file.Format, file.Size, file.SHA256)
+			line("      ", readme.FileLine,
+				"path", file.Path, "role", file.Role, "format", file.Format,
+				"size", strconv.FormatInt(file.Size, 10), "sha256", file.SHA256)
 		}
 		if len(item.Missing) > 0 {
 			// A recorded result file the store no longer has is named here:
 			// the acceptance snapshot still counts it, the ZIP cannot.
-			builder.WriteString("    缺失（存储中已不存在，未打包）：\n")
+			line("    ", readme.MissingHeading)
 			for _, file := range item.Missing {
-				fmt.Fprintf(builder, "      - %s（%s，%s）\n",
-					file.AssetID, archiveMissingRole(file), file.MediaType)
+				line("      ", readme.MissingLine,
+					"asset_id", file.AssetID, "role", service.archiveMissingRole(ctx, readme, file),
+					"media_type", file.MediaType)
 			}
 		}
 		builder.WriteString("\n")
@@ -1011,13 +1075,15 @@ func archiveReadme(manifest ArchiveManifest, fileCount int) []byte {
 }
 
 // archiveMissingRole names a missing file by its role or, without one, its
-// variant.
-func archiveMissingRole(file ArchiveManifestMissing) string {
+// variant; a file with neither gets the Schema's own word for an unnamed role.
+func (service *Service) archiveMissingRole(
+	ctx context.Context, readme catalog.AssetListArchiveReadmeSchema, file ArchiveManifestMissing,
+) string {
 	if file.Role != "" {
 		return file.Role
 	}
 	if file.Variant != "" {
 		return file.Variant
 	}
-	return "file"
+	return service.texts.Text(catalog.LocaleFrom(ctx), readme.UnknownRole)
 }

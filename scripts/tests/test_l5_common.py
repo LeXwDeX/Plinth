@@ -737,14 +737,15 @@ class BudgetClient:
 class SessionModeClient:
     """Creates a session and answers the approval PUT with a fixed status."""
 
-    def __init__(self, approval_status=200):
+    def __init__(self, approval_status=200, create_status=201):
         self.approval_status = approval_status
+        self.create_status = create_status
         self.calls = []
 
     def call(self, method, path, body=None, **_):
         self.calls.append((method, path, body))
         if method == "POST" and path == "/api/chat/sessions":
-            return 201, {"id": "session-new"}
+            return self.create_status, {"id": "session-new"} if self.create_status == 201 else {}
         if method == "PUT" and path.endswith("/approval"):
             return self.approval_status, {}
         return 202, {}
@@ -763,8 +764,21 @@ class LiveSessionModes(unittest.TestCase):
         self.assertEqual(client.calls[-1], ("PUT", "/api/v1/chat/sessions/session-new/approval",
                                            {"approvalMode": "auto"}))
 
-    def test_new_session_fails_when_the_mode_switch_is_refused(self):
-        self.assertIsNone(self.new_session(SessionModeClient(approval_status=400)))
+    def test_new_session_raises_a_labelled_error_when_the_mode_switch_is_refused(self):
+        # #419: returning None here used to surface as an unrelated 404 in the first
+        # call that used the session, so the failing step is named instead.
+        with self.assertRaises(RuntimeError) as caught:
+            self.new_session(SessionModeClient(approval_status=400))
+        self.assertIn("session-new", str(caught.exception))
+        self.assertIn("approval mode auto", str(caught.exception))
+        self.assertIn("HTTP 400", str(caught.exception))
+
+    def test_new_session_raises_when_the_session_is_not_created(self):
+        client = SessionModeClient(create_status=500)
+        with self.assertRaises(RuntimeError) as caught:
+            self.new_session(client)
+        self.assertIn("HTTP 500", str(caught.exception))
+        self.assertFalse(any(method == "PUT" for method, _, _ in client.calls))
 
     def test_new_session_can_skip_the_mode_switch(self):
         client = SessionModeClient()

@@ -162,8 +162,12 @@ func TestPurposeFormatSetsDecideTheRequiredAndDeliveredSlots(t *testing.T) {
 			if task.State != generation.TaskSucceeded {
 				t.Fatalf("state = %s, failure = %#v", task.State, task.Failure)
 			}
+			// The task is already usable here: only the GLTF conversion is required,
+			// and the requested formats keep converting in the background (#462).
+			task = harness.driveMixedPostSuccess(t, "owner-acme", accepted.TaskID)
 
-			// The Task's own Offering pins which converted-model slots it requires.
+			// The Task's own Offering pins which converted-model slots it requires:
+			// the GLTF export that produces the primary model, and nothing else.
 			wantVariants := make([]string, 0, len(tc.formats))
 			for _, format := range tc.formats {
 				wantVariants = append(wantVariants, "converted."+strings.ToLower(format))
@@ -171,6 +175,9 @@ func TestPurposeFormatSetsDecideTheRequiredAndDeliveredSlots(t *testing.T) {
 			slices.Sort(wantVariants)
 			var required, delivered []string
 			for _, output := range task.Offering.Outputs {
+				if output.Role == "converted_model" && output.Delivery == generation.AssetDeliveryOnDemand {
+					continue
+				}
 				if output.Role == "converted_model" && output.Minimum != nil && *output.Minimum == 1 {
 					required = append(required, output.Variant)
 				}
@@ -182,8 +189,8 @@ func TestPurposeFormatSetsDecideTheRequiredAndDeliveredSlots(t *testing.T) {
 			}
 			slices.Sort(required)
 			slices.Sort(delivered)
-			if !slices.Equal(required, wantVariants) {
-				t.Errorf("required converted slots = %v, want %v", required, wantVariants)
+			if !slices.Equal(required, []string{"converted.gltf"}) {
+				t.Errorf("required converted slots = %v, want only converted.gltf", required)
 			}
 			if !slices.Equal(delivered, wantVariants) {
 				t.Errorf("delivered converted assets = %v, want %v", delivered, wantVariants)

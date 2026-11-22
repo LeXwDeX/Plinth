@@ -63,7 +63,7 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
   - `auto`（新会话默认）：所有付费步骤自动批准，包括严格方式要人批准的四类和带额外积分的步骤。仍要人决定的只有 #294 的再扣费保护：同一会话再次生成“已计费但没保存”的同类结果时出批准卡。自动方式没有制作计划、额度或三视图连续推进。
   - `budget`：先批准按积分单位分列的制作计划，计划内步骤自动连续执行；计划外、超出该单位剩余额度、服务端无法报价或会再次扣费的步骤仍出批准卡。没有生效计划时按严格方式。
   - `manual`（严格）：`manual_approval_capabilities` 声明的四类（当前 `text-to-3d`、`image-to-3d`、`image-to-splat`、`retexture`）需要人工批准；2D、重拓扑、绑骨、动画和格式转换由策略批准（`grant.decided_by` 为 `policy:manual`），不出现待批准同意，直接产生真实任务。格式转换包括免费的本地 GLB↔glTF 和上传 GLB→STL（当前 Schema 基础估算 5 积分）；具体费用以 Offering 和冻结授权为准，策略批准不表示免费；Agent 步骤带额外积分（如附加导出格式、有计费的转换选项）时，手工方式下也要在对话里的批准卡上人工批准。
-- 冒烟脚本不依赖新会话默认值：需要特定方式时显式 `PUT /api/v1/chat/sessions/{id}/approval`，需要核对默认值时才从公开 Schema 读 `default_mode`。当前显式切换的脚本：
+- 冒烟脚本不把「新会话默认值」当成隐含前提，但也不是每个脚本都显式切换：需要特定方式时显式 `PUT /api/v1/chat/sessions/{id}/approval`；保留默认时，要么先读公开 Schema 的 `default_mode` 核对新会话，要么由策略直接批准、不需要切换。各脚本的处理方式：
   - `smoke-l1-agent-mode.sh`：读 Schema `default_mode` 核对新会话与 `GET approval`，再依次 `PUT` `budget`、`auto`、`manual` 并各自回读。
   - `smoke-l1-free.sh`、`smoke-l2-livemodel.sh`、`smoke-l3-batch.sh`、`smoke-public-mock.sh`、`seed-fake-3d-task.py`：先 `PUT` `manual`，再等 3D 待批准卡或核对策略批准来源。
   - `smoke-l5-budget.py` 先 `PUT` `budget`；`smoke-l5-agent-hard.py` 的 `manual-approval` 用例先 `PUT` `manual`；其余 L5 脚本经 `l5_common.py` 的 `new_session()` 显式 `PUT` `auto`，切换失败即中止，不回落到服务端默认。
@@ -71,6 +71,7 @@ L5 脚本是 `.py`，不读取 `runtime.env`，只在本地通过 `release-env.p
   - `smoke-l4-3d-isolation.py` 不切换会话：授权已由策略批准时直接提交，只有 `pending` 才由测试操作员代批。
   - `wire-capture-browser.mjs`：preflight 只断言新会话等于公开 Schema 的 `default_mode` 并显示对应标签；`--live` 在发送前通过同一批准方式菜单切到 `manual`，以取得真实批准卡。
   - `smoke-fake-stack.py --only agent-quality`：轨迹运行器的 `_quality_bind_session` 显式 `PUT` `budget`，跟随制作计划；`agent_quality.py` 只做评估与报告，不创建会话。
+- 保留默认、不切换的脚本：`smoke-fake-stack.py` 的其余场景靠 `auto` 默认直接提交（`auto-approval` 场景显式断言公开 Schema 与新会话都是 `auto`，并断言已保存的会话保留自己的方式）；`smoke-l4-3d-isolation.py` 不碰会话批准方式；`wire-capture-browser.mjs` 的 preflight 也只断言新会话等于 `default_mode`。
 - 因此待批准同意只能用 3D 请求取得。L1 免费、L2、L3 在需要待批准同意时都先 `PUT /api/v1/chat/sessions/{id}/approval`（`{"approvalMode":"manual"}`）显式设为手工方式，再发 3D 请求；3D 模型取自 `/api/v1/offerings?capability=text-to-3d`（第一个可用、推荐、无额外计费上限的模型，`SMOKE_3D_MODEL` 可覆盖）。**不要再用 2D 请求去等待同意**：它会花钱，并让免费冒烟变成付费冒烟。
 - 脚本代批同意只发生在同意确实待批准时（L2 的 3D 批准、L3 兜底、L4 的 `status=pending` 授权）；已由策略批准的授权不再 `PUT` 决定（会得到 409）。
 
@@ -502,8 +503,9 @@ uses the real `/` Agent workspace, without an API prepare/submit shortcut:
 - `studio-composer textarea` receives only the fixed non-private synthetic input
   exported as `syntheticPrompt` by this script. Pre-register that **exact** string
   in the reviewed initial policy's `Allowed` map for a capture preflight. Only its
-  SHA-256 enters the report. `composer-send` is inspected, never clicked; Enter is
-  never pressed in the textarea. The draft is cleared before normal exit.
+  SHA-256 enters the report. `composer-send` is inspected and, under `--live` only,
+  clicked once; Enter is never pressed in the textarea. The draft is cleared before a
+  non-live exit.
 
 Before/after reads require zero session Tasks and zero pending approvals. The
 network guard permits reads plus four one-shot writes: empty-body mock login,
@@ -512,14 +514,22 @@ Allowances are consumed before forwarding the original request and never re-arme
 after failure or an uncertain response. Writes must be fetches from the main UI
 frame; canvas writes must come from the workspace. Cross-session/project writes,
 generation, approval, Agent sends, uploads, deletion and all other writes remain
-blocked. Off-origin requests and WebSockets are also blocked and counted as
-failures. Same-origin static/decoder/asset paths and same-origin blob assets are
-normal, not Provider leaks. Local API list queries are allowed; this does **not**
-waive the recorder's rejection of upstream query-bearing requests. No request is
-fulfilled with fake data, no store is seeded, and no execution intent is created
-or retried. The guard is not a server-side outbound sandbox: do not attach it to
-a server with existing running work. Use only the fresh isolated capture server,
-or a fresh zero-key mock server for selector verification.
+blocked in a non-live run. Off-origin requests and WebSockets are also blocked and
+counted as failures. Same-origin static/decoder/asset paths and same-origin blob
+assets are normal, not Provider leaks. Local API list queries are allowed; this does
+**not** waive the recorder's rejection of upstream query-bearing requests. No
+request is fulfilled with fake data, no store is seeded, and a non-live run creates
+or retries no execution intent. The guard is not a server-side outbound sandbox: do
+not attach it to a server with existing running work. Use only the fresh isolated
+capture server, or a fresh zero-key mock server for selector verification.
+
+`--live` changes the guard's shape instead of adding allowances: every same-origin
+non-GET request is forwarded (`requestDecision` returns `write` for all of them), so
+the approval-mode switch, the Agent send and the approval decision are not one-shot
+entries, are not counted individually and cannot be refused by the guard.
+Cross-session/project writes, uploads and deletion are not blocked either, so the
+live round is a real paid write path and belongs only on the fresh isolated capture
+server.
 
 For a **separately started, disposable zero-key mock server**, the same page path
 can be checked without a capture manifest:
@@ -542,32 +552,40 @@ status and allowed/blocked write counts. There are no trace/HAR/screenshots, raw
 messages, URL queries, response dumps, raw prompts or persisted browser state.
 Do not enable Playwright `DEBUG`/`PWDEBUG` logging (the entry rejects them).
 
-**Live remains blocked before the first send.** `--live --capture-root ...` is an
-explicit live request, not an escape hatch: after a successful page preflight it
-returns `status=blocked_capture`, `submitted=false`, exit 2. A normal successful
-preflight exits 0 with `preflight=pass` and `capture=blocked_capture`; check both
-fields. Failures exit 1 with a fixed `failure_stage` and, for rejected canvas
-initialization content, a fixed `canvas_guard_rejection` code. There is no dead paid
-click or imaginary capability endpoint in this version. The refusal follows the
-actual current capture/export contract:
+**`--live` drives one real paid round.** `--live --capture-root ...` requires the
+reviewed manifest and excludes `--mock-preflight`. After the same successful page
+preflight it switches the session to `manual` through the menu a person uses,
+re-reads the session to prove the switch, picks the Meshy model, matches the
+declared price label, fills the synthetic prompt, clicks send once, waits for the
+approval card and approves it once, then polls the session's Tasks until one is
+`SUCCEEDED` (20 minutes; `FAILED`/`CANCELED` fail immediately). It ends with the CSP
+and browser-guard counters at zero, `status=live_completed`,
+`capture=live_candidate_pending_review`, exit 0. A non-live run still exits 0 with
+`status=preflight_pass`, `submitted=false` and `capture=blocked_capture` after
+clearing the draft and re-saving the canvas; check both fields. Failures exit 1 with
+a fixed `failure_stage` and, for rejected canvas initialization content, a fixed
+`canvas_guard_rejection` code. The live round still does not verify the approval
+card's exact price, does not wait for or byte-verify the required Meshy assets, and
+exports no wire capture, so it does not complete #365:
 
-1. The capture server now has bounded private media spooling and synthetic recipe
-   substitution, but this browser entry does not yet drive a paid send or wait for
-   all required Meshy assets.
+1. The recorder has bounded private media spooling and synthetic recipe
+   substitution, but this browser entry does not export the recorded exchange as a
+   candidate corpus; the recorder's bounds are unchanged (a body over 1 MiB is
+   written as the value-free `body-over-limit` marker).
 2. Registered query keys are accepted without retaining values; unknown keys still
    invalidate capture.
 3. `Projection` covers dynamic task IDs and signed asset URLs, but the reviewed
    manifest still has to register every field and host; no raw getter or blanket
    allow exists.
-4. Real browser capture, multi-turn Agent evidence and a live corpus are still
-   separate acceptance work.
+4. The pending card's exact price, the required READY assets and their byte digests
+   are unchecked, and multi-turn Agent evidence is still separate acceptance work.
 
-The remaining entry work is to add the real Agent send → exact pending-card price
-check → one approval → Task/required READY asset wait and byte-digest verification.
-That continuation must preserve the same consumed intent after any uncertain
-response; it must never retry a paid click to repair capture. The main operator
-coordinates a new authorized live round serially. This preflight does not complete
-#365 or claim a Meshy asset capture.
+The remaining entry work is the exact pending-card price check, the required READY
+asset wait with byte-digest verification, and the capture export. That continuation
+must preserve the same consumed intent after any uncertain response; it must never
+retry a paid click to repair capture. The main operator coordinates a new authorized
+live round serially. This preflight does not complete #365 or claim a Meshy asset
+capture.
 
 #### After a capture: review, coverage matrix and privacy scan
 

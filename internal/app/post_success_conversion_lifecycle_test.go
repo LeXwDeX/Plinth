@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers"
+	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
 
 const (
@@ -179,6 +181,14 @@ func lifecycleAssetBytes(name string) []byte {
 	}
 	if strings.HasSuffix(strings.ToLower(name), ".gltf") {
 		return []byte(lifecycleGLTFBytes)
+	}
+	// STL and 3MF go through the structural delivery check of their slot, so the
+	// fixture has to be the real shape of those files (the fake's own fixtures,
+	// the 3MF one being the package Tripo's converter writes). Every other
+	// format keeps the plain fixture bytes these cases assert on.
+	if model, err := fakeupstream.ModelFile(strings.TrimPrefix(strings.ToLower(path.Ext(name)), ".")); err == nil &&
+		(strings.HasSuffix(strings.ToLower(name), ".stl") || strings.HasSuffix(strings.ToLower(name), ".3mf")) {
+		return model.Data
 	}
 	return []byte("lifecycle-bytes:" + name)
 }

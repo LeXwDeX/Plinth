@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.462.1",
+    "revision": "2026-11-22.424-425-462-478.1",
     "terminology": {
       "user_facing": [
         {
@@ -3552,6 +3552,7 @@
         "ui.workspace.model_formats.status.obtainable": "可转换",
         "ui.workspace.model_formats.status.unavailable": "不可用",
         "ui.workspace.model_formats.status.converting": "转换中",
+        "ui.workspace.model_formats.progress": "格式 {done}/{total}",
         "ui.workspace.model_formats.reason": "查看原因",
         "ui.workspace.model_formats.download": "下载",
         "ui.workspace.model_formats.download_all": "下载全部（ZIP）",
@@ -5759,7 +5760,13 @@
         "messages": {
           "rework_message": "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请先看上一版结果，只修正被指出的问题；能用加工步骤修正的不要整体重新生成，修正后重新自检并调用 report_list_item 重新申报。",
           "return_limit": "清单项「{name}」已经重做 {round} 轮，达到上限；只能通过、跳过或从头重试。",
-          "asset_limit": "项目资产已达上限 {maximum} 个，未能把清单项「{name}」登记为项目资产；请先清理项目资产再通过。"
+          "asset_limit": "项目资产已达上限 {maximum} 个，未能把清单项「{name}」登记为项目资产；请先清理项目资产再通过。",
+          "item_not_found": "这个清单项不在当前清单里。",
+          "item_not_awaiting_review": "这个清单项已经不在待验收状态。",
+          "budget_minimum": "最少 {value}",
+          "budget_maximum": "最多 {value}",
+          "budget_ratio_maximum": "比例最多 {value}",
+          "budget_required": "必填"
         },
         "archive": {
           "filename_template": "asset-list-{list_id}.zip",
@@ -5777,6 +5784,30 @@
             "image/jpeg",
             "image/webp"
           ],
+          "readme": {
+            "title_line": "资产清单：{title}",
+            "list_line": "清单 ID：{list_id}",
+            "generated_line": "生成时间：{generated_at}",
+            "note": "本压缩包只包含已通过验收的清单项；每个清单项一个目录，目录内是该项已落盘的产物文件。",
+            "summary_line": "共 {items} 项、{files} 个文件。",
+            "item_line": "{position}. {name}",
+            "item_kind_line": "{position}. {name}（{kind}，第 {round} 版）",
+            "directory_line": "目录：{directory}",
+            "task_line": "来源任务：{task_id}",
+            "formats_line": "格式：{formats}",
+            "format_separator": "、",
+            "triangles_line": "面数：{triangles}",
+            "texture_line": "贴图最大边：{texture}",
+            "checks_line": "验收：{checks}",
+            "check_line": "{check}={status}",
+            "check_budget_line": "{check}={status}（{budget}）",
+            "check_separator": "；",
+            "files_heading": "文件：",
+            "file_line": "- {path}（{role}，{format}，{size} 字节，sha256 {sha256}）",
+            "missing_heading": "缺失（存储中已不存在，未打包）：",
+            "missing_line": "      - {asset_id}（{role}，{media_type}）",
+            "unknown_role": "未知角色"
+          },
           "messages": {
             "empty": "这份清单还没有已通过且带产物的项，暂无可打包内容。",
             "too_large": "已通过项超出整批下载上限（最多 {maximum_entries} 个文件、共 {maximum_bytes} 字节）；请用 item_ids 分批下载。"
@@ -7262,7 +7293,8 @@
           "source_not_found": "No finished 3D model with that ID exists in this session. Call list_session_models and use one of its task IDs or model handles.",
           "source_not_ready": "The source task has not finished or has no saved model file. Wait for it to finish, or choose another model.",
           "source_not_model": "The asset {asset} is not a saved model file of that task. Use the asset_id of a model file listed by list_session_models, or omit source_asset_id to use the model's main file.",
-          "source_not_glb": "The saved file {asset} is {media}, not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first."
+          "source_not_glb": "The saved file {asset} is {media}, not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first.",
+          "source_bytes_not_glb": "The saved file {asset} is stored as {media}, but its bytes are not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first."
         },
         "texts": {
           "inspect_ready": "{model} inspected: {triangles} triangles.",
@@ -17692,6 +17724,7 @@
             "ui.workspace.model_formats.status.obtainable": "Convertible",
             "ui.workspace.model_formats.status.unavailable": "Unavailable",
             "ui.workspace.model_formats.status.converting": "Converting",
+            "ui.workspace.model_formats.progress": "Formats {done}/{total}",
             "ui.workspace.model_formats.reason": "View reason",
             "ui.workspace.model_formats.download": "Download",
             "ui.workspace.model_formats.download_all": "Download all (ZIP)",
@@ -20664,6 +20697,34 @@
             "asset_list.review.messages.rework_message": "List item \"{name}\" ({description}) was returned; this is rework round {round}. Reasons: {reasons}. Note: {note}. Look at the previous result first and fix only what was pointed out; when a processing step can fix it, do not regenerate everything. After fixing, self-check again and call report_list_item to report the item again.",
             "asset_list.review.messages.return_limit": "List item \"{name}\" has used its {round} rework rounds; it can only be accepted, skipped or retried from scratch.",
             "asset_list.review.messages.asset_limit": "The project already has its maximum of {maximum} assets, so list item \"{name}\" could not be registered as a project asset; clean up project assets before accepting.",
+            "asset_list.review.messages.item_not_found": "This item is not part of the current list.",
+            "asset_list.review.messages.item_not_awaiting_review": "This item is no longer awaiting review.",
+            "asset_list.review.messages.budget_minimum": "min {value}",
+            "asset_list.review.messages.budget_maximum": "max {value}",
+            "asset_list.review.messages.budget_ratio_maximum": "ratio max {value}",
+            "asset_list.review.messages.budget_required": "required",
+            "asset_list.review.archive.readme.title_line": "Asset list: {title}",
+            "asset_list.review.archive.readme.list_line": "List ID: {list_id}",
+            "asset_list.review.archive.readme.generated_line": "Packaged at: {generated_at}",
+            "asset_list.review.archive.readme.note": "This archive holds only the list items that passed review, one directory per item, with the files that item has stored.",
+            "asset_list.review.archive.readme.summary_line": "{items} items, {files} files.",
+            "asset_list.review.archive.readme.item_line": "{position}. {name}",
+            "asset_list.review.archive.readme.item_kind_line": "{position}. {name} ({kind}, round {round})",
+            "asset_list.review.archive.readme.directory_line": "Directory: {directory}",
+            "asset_list.review.archive.readme.task_line": "Source task: {task_id}",
+            "asset_list.review.archive.readme.formats_line": "Formats: {formats}",
+            "asset_list.review.archive.readme.format_separator": ", ",
+            "asset_list.review.archive.readme.triangles_line": "Triangles: {triangles}",
+            "asset_list.review.archive.readme.texture_line": "Maximum texture edge: {texture}",
+            "asset_list.review.archive.readme.checks_line": "Acceptance: {checks}",
+            "asset_list.review.archive.readme.check_line": "{check}={status}",
+            "asset_list.review.archive.readme.check_budget_line": "{check}={status} ({budget})",
+            "asset_list.review.archive.readme.check_separator": "; ",
+            "asset_list.review.archive.readme.files_heading": "Files:",
+            "asset_list.review.archive.readme.file_line": "- {path} ({role}, {format}, {size} bytes, sha256 {sha256})",
+            "asset_list.review.archive.readme.missing_heading": "Missing (recorded, but no longer in storage; not packaged):",
+            "asset_list.review.archive.readme.missing_line": "- {asset_id} ({role}, {media_type})",
+            "asset_list.review.archive.readme.unknown_role": "unknown role",
             "asset_list.review.archive.messages.empty": "This list has no accepted items with stored files, so there is nothing to package.",
             "asset_list.review.archive.messages.too_large": "The accepted items exceed the batch download limits ({maximum_entries} entries and {maximum_bytes} bytes in total); download them in batches with item_ids.",
             "asset_list.messages.confirmed": "The list \"{title}\" was confirmed: {count} items, {steps} planned 3D steps.",
@@ -28685,7 +28746,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/text-to-3d",
-      "revision": "2026-11-12.278.1",
+      "revision": "2026-11-22.462.2",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -29282,9 +29343,9 @@
         {
           "role": "converted_model",
           "variant": "converted.usdz",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "USDZ"
@@ -29294,9 +29355,9 @@
         {
           "role": "converted_model",
           "variant": "converted.fbx",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "FBX"
@@ -29306,9 +29367,9 @@
         {
           "role": "converted_model",
           "variant": "converted.obj",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "OBJ"
@@ -29318,9 +29379,9 @@
         {
           "role": "converted_model",
           "variant": "converted.stl",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "STL"
@@ -29330,9 +29391,9 @@
         {
           "role": "converted_model",
           "variant": "converted.3mf",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "3MF"
@@ -29346,6 +29407,11 @@
           "minimum": 0
         }
       ],
+      "post_success": {
+        "observe": true,
+        "interval_seconds": 5,
+        "deadline_seconds": 7200
+      },
       "native_pricing": {
         "version": 1,
         "unit": "tripo.credit",
@@ -30218,7 +30284,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-full/image-to-3d",
-      "revision": "2026-11-12.278.1",
+      "revision": "2026-11-22.462.2",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -30891,9 +30957,9 @@
         {
           "role": "converted_model",
           "variant": "converted.usdz",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "USDZ"
@@ -30903,9 +30969,9 @@
         {
           "role": "converted_model",
           "variant": "converted.fbx",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "FBX"
@@ -30915,9 +30981,9 @@
         {
           "role": "converted_model",
           "variant": "converted.obj",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "OBJ"
@@ -30927,9 +30993,9 @@
         {
           "role": "converted_model",
           "variant": "converted.stl",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "STL"
@@ -30939,9 +31005,9 @@
         {
           "role": "converted_model",
           "variant": "converted.3mf",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "3MF"
@@ -30955,6 +31021,11 @@
           "minimum": 0
         }
       ],
+      "post_success": {
+        "observe": true,
+        "interval_seconds": 5,
+        "deadline_seconds": 7200
+      },
       "native_pricing": {
         "version": 1,
         "unit": "tripo.credit",
@@ -31164,7 +31235,7 @@
     },
     {
       "id": "tripo/tripo-v3.1-multiview/image-to-3d",
-      "revision": "2026-11-12.278.1",
+      "revision": "2026-11-22.462.2",
       "provider_id": "tripo",
       "provider_name": "Tripo3D",
       "provider_short_label": "TRIPO",
@@ -31841,9 +31912,9 @@
         {
           "role": "converted_model",
           "variant": "converted.usdz",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "USDZ"
@@ -31853,9 +31924,9 @@
         {
           "role": "converted_model",
           "variant": "converted.fbx",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "FBX"
@@ -31865,9 +31936,9 @@
         {
           "role": "converted_model",
           "variant": "converted.obj",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "OBJ"
@@ -31877,9 +31948,9 @@
         {
           "role": "converted_model",
           "variant": "converted.stl",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "STL"
@@ -31889,9 +31960,9 @@
         {
           "role": "converted_model",
           "variant": "converted.3mf",
-          "delivery": "required",
+          "delivery": "on-demand",
           "minimum": 1,
-          "required_when": {
+          "requested_when": {
             "parameter": "output_formats",
             "operator": "contains",
             "value": "3MF"
@@ -31905,6 +31976,11 @@
           "minimum": 0
         }
       ],
+      "post_success": {
+        "observe": true,
+        "interval_seconds": 5,
+        "deadline_seconds": 7200
+      },
       "native_pricing": {
         "version": 1,
         "unit": "tripo.credit",

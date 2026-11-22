@@ -172,10 +172,15 @@ func TestHistoricalTasksNeverConvertRetroactively(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The Offering is a mixed one (#462): after the primary model lands, the
+	// requested formats are converted by the declared post-success lifecycle,
+	// which keeps the task SUCCEEDED and schedules the next observation. What
+	// must never happen is retroactive conversion: no new Attempt, no Start, no
+	// paid child, and the version only moves with those scheduled rounds.
 	if after.Task.State != generation.TaskSucceeded ||
-		after.Task.Version != terminalVersion ||
 		after.CurrentAttempt.ID != terminalAttempt ||
-		!after.Task.NextActionAt.IsZero() {
+		after.Task.NextActionAt.IsZero() ||
+		after.Task.Version < terminalVersion {
 		t.Fatalf(
 			"历史任务被扰动：state=%s version=%d attempt=%s next=%v",
 			after.Task.State,
@@ -183,6 +188,17 @@ func TestHistoricalTasksNeverConvertRetroactively(t *testing.T) {
 			after.CurrentAttempt.ID,
 			after.Task.NextActionAt,
 		)
+	}
+	// The pending slots are exactly the formats the frozen input asked for; the
+	// platform converts them, and it never charges for them retroactively.
+	pending := 0
+	for _, state := range after.Task.Resources {
+		if state.State == generation.ResourcePending {
+			pending++
+		}
+	}
+	if pending == 0 {
+		t.Fatalf("the requested formats are not pending after success: %v", after.Task.Resources)
 	}
 }
 

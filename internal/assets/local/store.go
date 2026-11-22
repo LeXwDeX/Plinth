@@ -2,6 +2,7 @@ package local
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -171,6 +172,14 @@ func (s *Store) putBlob(
 	if detected := normalizeMediaType(detectedType); strings.HasPrefix(mediaType, "image/") &&
 		strings.HasPrefix(detected, "image/") && detected != mediaType {
 		mediaType = detected
+	}
+	// The same rule for models: whatever the file arrived labelled as (a CDN
+	// mime table's application/x-tgif, a generic binary, an uploader's guess),
+	// the bytes are a binary glTF container, so the asset is stored as the
+	// format it is. A step that takes model/gltf-binary would otherwise refuse
+	// the saved file by its label (#424).
+	if bytes.HasPrefix(header, glbMagic) {
+		mediaType = glbMediaType
 	}
 
 	reader := io.LimitReader(buffered, maxBytes+1)

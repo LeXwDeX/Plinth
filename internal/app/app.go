@@ -893,6 +893,14 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		SourceMaxPixels: applicationSchema.Chat.ImageMask.Limits.MaxPixels,
 		SourceAssetType: applicationSchema.Runtime.InputAssets.DefaultAssetType,
 	}
+	// One localizer serves the Agent turn and its tool results. It is built
+	// before the list service so the list's own Schema copy (the per-item
+	// review answers, the batch archive's README) reads in the request's
+	// language too.
+	texts, err := catalog.NewTextLocalizer(applicationSchema)
+	if err != nil {
+		return nil, err
+	}
 	if applicationSchema.AssetList != nil && applicationSchema.AssetList.Decompose != nil {
 		decompose := applicationSchema.AssetList.Decompose
 		cropConfig.MaximumCropsPerSource = decompose.MaximumItemsPerImage * listcrop.StorageCropLimitMultiplier
@@ -949,6 +957,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Archive:            module,
 			ObjPackage:         assetListObjPackage,
 			Schema:             *applicationSchema.AssetList,
+			Texts:              texts,
 			ProjectMaxItems:    applicationSchema.Project.Limits.MaximumListItems,
 			MaxListsPerProject: applicationSchema.AssetList.Limits.MaxListsPerProject,
 			Counted:            counted,
@@ -1010,11 +1019,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		}
 		return result, nil
 	})
-	// One localizer serves the Agent turn and its tool results.
-	texts, err := catalog.NewTextLocalizer(applicationSchema)
-	if err != nil {
-		return nil, err
-	}
 	// Provider balances and the person's 3D step settings serve both the
 	// external MCP status block (#332) and the platform Agent's step segment
 	// (#330). They are built before either, so both read one balance cache and
@@ -1181,6 +1185,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				Images:          imageReview,
 				SelfChecks:      chatService,
 				SelfCheckSchema: applicationSchema.Chat.SelfCheck,
+				Review:          applicationSchema.AssetList.Review,
+				Texts:           texts,
 				Steps:           executionGrants.StepStatus,
 				Counted:         assetListCounted,
 			}),

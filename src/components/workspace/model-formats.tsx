@@ -38,6 +38,7 @@ import {
   failedSteps,
   formatRowAction,
   formatsFooter,
+  formatsProgress,
   modelArchiveRoute,
   modelFormatsCompleteBody,
   modelFormatsCompleteRoute,
@@ -419,6 +420,12 @@ export function ModelFormatsView({
     </Action>
   ) : null;
   const errorLine = error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null;
+  // The task's own post-success progress (#462): the platform is converting the
+  // remaining formats in the background, so the panel says how far it has come.
+  const progress = formatsProgress(schema, coverage);
+  const progressNote = progress ? (
+    <p className="text-xs text-muted-foreground" data-testid="model-formats-progress">{progress}</p>
+  ) : null;
   const converting = footer === 'converting' ? (
     <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="model-formats-converting">
       <Loader2 className="size-3 animate-spin" aria-hidden="true" />
@@ -496,6 +503,7 @@ export function ModelFormatsView({
       <div className="flex min-h-0 flex-1 flex-col" data-testid="model-formats" data-layout="pinned">
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
           {header}
+          {progressNote}
           {rowList}
           {converting}
           {emptyNote}
@@ -515,6 +523,7 @@ export function ModelFormatsView({
   return (
     <div className="flex flex-col gap-2" data-testid="model-formats">
       {header}
+      {progressNote}
       {rowList}
       {completeControl}
       {converting}

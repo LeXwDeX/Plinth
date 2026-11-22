@@ -70,7 +70,9 @@ func TestTripoMultiviewTaskMaterializesTheRealShapedConverted3MF(t *testing.T) {
 		t.Fatal(err)
 	}
 	accepted := submitStep(t, harness, generation.ImageTo3D, multiviewOfferingID, string(input), "multiview-3mf-386", nil)
-	task := harness.runUntilTerminal(t, "owner-acme", accepted.TaskID)
+	// The task succeeds with the GLTF export as the primary model; the other
+	// five formats, the 3MF among them, are converted after success (#462).
+	task := harness.driveMixedPostSuccess(t, "owner-acme", harness.runUntilTerminal(t, "owner-acme", accepted.TaskID).ID)
 	if task.State != generation.TaskSucceeded {
 		t.Fatalf("state = %s, failure = %#v", task.State, task.Failure)
 	}

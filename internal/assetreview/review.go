@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,9 +60,15 @@ type Config struct {
 	Images          ImageInspector
 	SelfChecks      SelfChecks
 	SelfCheckSchema catalog.ChatSelfCheckSchema
-	Steps           StepUsage
-	Counted         map[generation.Capability]bool
-	Clock           func() time.Time
+	// Review is application.asset_list.review: the wording of the frozen
+	// thresholds a snapshot records. nil words them to nothing.
+	Review *catalog.AssetListReviewSchema
+	// Texts gives the copy of the request's UI locale for the Schema text the
+	// snapshot carries. Nil keeps the Schema's default-locale copy.
+	Texts   *catalog.TextLocalizer
+	Steps   StepUsage
+	Counted map[generation.Capability]bool
+	Clock   func() time.Time
 }
 
 // Service builds review snapshots.
@@ -71,6 +78,8 @@ type Service struct {
 	images          ImageInspector
 	selfChecks      SelfChecks
 	selfCheckSchema catalog.ChatSelfCheckSchema
+	review          *catalog.AssetListReviewSchema
+	texts           *catalog.TextLocalizer
 	steps           StepUsage
 	counted         map[generation.Capability]bool
 	clock           func() time.Time
@@ -93,6 +102,8 @@ func New(config Config) *Service {
 		images:          config.Images,
 		selfChecks:      config.SelfChecks,
 		selfCheckSchema: config.SelfCheckSchema,
+		review:          config.Review,
+		texts:           config.Texts,
 		steps:           config.Steps,
 		counted:         counted,
 		clock:           clock,
@@ -131,7 +142,7 @@ func (service *Service) Snapshot(
 		snapshot.Model3D = service.judgeModel(ctx, input, modelAsset, checks)
 	} else if len(checks) > 0 {
 		snapshot.Model3D = &assetlist.ReviewModel3D{
-			Checks: unknownChecks(checks, "no_glb"),
+			Checks: service.unknownChecks(ctx, checks, "no_glb"),
 		}
 	}
 	if imageAsset != "" {
@@ -168,13 +179,13 @@ func (service *Service) judgeModel(
 ) *assetlist.ReviewModel3D {
 	judgment := &assetlist.ReviewModel3D{AssetID: assetID}
 	if service.models == nil || len(checks) == 0 {
-		judgment.Checks = unknownChecks(checks, "model_inspection_unavailable")
+		judgment.Checks = service.unknownChecks(ctx, checks, "model_inspection_unavailable")
 		return judgment
 	}
 	report, err := service.models.ModelReport(ctx, generation.OwnerID(input.OwnerID),
 		input.Task.ID, generation.AssetID(assetID))
 	if err != nil {
-		judgment.Checks = unknownChecks(checks, "unreadable")
+		judgment.Checks = service.unknownChecks(ctx, checks, "unreadable")
 		return judgment
 	}
 	results := modelcheck.Evaluate(report, checks)
@@ -182,7 +193,7 @@ func (service *Service) judgeModel(
 	for index, result := range results {
 		budget := ""
 		if index < len(checks) {
-			budget = budgetText(checks[index])
+			budget = service.budgetText(ctx, checks[index])
 		}
 		judgment.Checks = append(judgment.Checks, assetlist.ReviewCheck{
 			Check: result.Check, Status: result.Status, Actual: result.Actual,
@@ -355,31 +366,50 @@ func firstImageAsset(assets []generation.Asset) string {
 
 // unknownChecks states every declared criterion as unknown with a stable
 // reason. An empty declaration yields an empty list.
-func unknownChecks(checks []budget.PlanCheck, detail string) []assetlist.ReviewCheck {
+func (service *Service) unknownChecks(
+	ctx context.Context, checks []budget.PlanCheck, detail string,
+) []assetlist.ReviewCheck {
 	result := make([]assetlist.ReviewCheck, 0, len(checks))
 	for _, check := range checks {
 		result = append(result, assetlist.ReviewCheck{
 			Check: check.Check, Status: modelcheck.StatusUnknown,
-			Budget: budgetText(check), Detail: detail,
+			Budget: service.budgetText(ctx, check), Detail: detail,
 		})
 	}
 	return result
 }
 
-// budgetText words one frozen threshold for the board's detail view.
-func budgetText(check budget.PlanCheck) string {
-	parts := make([]string, 0, 3)
-	if check.Minimum != nil {
-		parts = append(parts, fmt.Sprintf("min %g", *check.Minimum))
+// budgetText words one frozen threshold for the board's detail view, from the
+// Schema in the request's UI locale: the snapshot is read by the person who
+// commissioned it, so the words follow that person's language. A deployment
+// without the review section words to nothing, never to a second copy.
+func (service *Service) budgetText(ctx context.Context, check budget.PlanCheck) string {
+	messages := catalog.AssetListReviewMessagesSchema{}
+	if service.review != nil {
+		messages = service.review.Messages
 	}
-	if check.Maximum != nil {
-		parts = append(parts, fmt.Sprintf("max %g", *check.Maximum))
+	locale := catalog.LocaleFrom(ctx)
+	fill := func(text string, value *float64) string {
+		if text == "" || value == nil {
+			return ""
+		}
+		// The locale reads the template, before its value is filled in: the
+		// localizer knows the Schema's own text, never a filled copy.
+		return strings.ReplaceAll(service.texts.Text(locale, text),
+			"{value}", strconv.FormatFloat(*value, 'g', -1, 64))
 	}
-	if check.MaximumRatio != nil {
-		parts = append(parts, fmt.Sprintf("ratio max %g", *check.MaximumRatio))
+	parts := make([]string, 0, 4)
+	for _, part := range []string{
+		fill(messages.BudgetMinimum, check.Minimum),
+		fill(messages.BudgetMaximum, check.Maximum),
+		fill(messages.BudgetRatioMaximum, check.MaximumRatio),
+	} {
+		if part != "" {
+			parts = append(parts, part)
+		}
 	}
-	if check.Required {
-		parts = append(parts, "required")
+	if check.Required && messages.BudgetRequired != "" {
+		parts = append(parts, service.texts.Text(locale, messages.BudgetRequired))
 	}
 	return strings.Join(parts, ", ")
 }

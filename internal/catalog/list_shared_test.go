@@ -51,6 +51,34 @@ func TestListSharedStaysReadOnly(t *testing.T) {
 	}
 }
 
+// TestListSharedSurvivesACallerThatAppends pins the half of the read-only
+// contract a caller can break without editing an Offering (#424): appending to
+// the borrowed slice must not reach the Catalog's own list, so two callers that
+// append cannot see or race each other's values. The Catalog's list is
+// length-bounded, so a write past its length stays invisible.
+func TestListSharedSurvivesACallerThatAppends(t *testing.T) {
+	product, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := product.ListShared("")
+	if len(shared) == 0 {
+		t.Fatal("the default Catalog has no enabled Offering")
+	}
+	length := len(shared)
+	if grown := append(shared, schemacontract.Offering{ID: "caller-added"}); len(grown) != length+1 {
+		t.Fatalf("appending to the shared slice returned %d values, want %d", len(grown), length+1)
+	}
+	if got := product.ListShared(""); len(got) != length {
+		t.Fatalf("a caller's append changed the Catalog's list to %d values, want %d", len(got), length)
+	}
+	for _, offering := range product.ListShared("") {
+		if offering.ID == "caller-added" {
+			t.Fatal("a caller's append reached the Catalog's list")
+		}
+	}
+}
+
 // sharedListCapabilities is every capability ListShared precomputes: the empty
 // one (all enabled Offerings) plus each capability an enabled Offering serves.
 func sharedListCapabilities(product *Catalog) []schemacontract.Capability {

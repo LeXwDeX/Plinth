@@ -680,7 +680,10 @@ func TestGenericResponseMediaTypeKeepsClaimDeclaredType(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := harness.runUntilTerminal(t, "owner-a", accepted.TaskID)
-	if task.State != generation.TaskSucceeded || len(task.Assets) != 8 {
+	// Only the required slots are filled: the primary model, the GLTF
+	// conversion (the self-contained GLB) and the thumbnail. The five requested
+	// formats of this mixed Offering (#462) are converted after success.
+	if task.State != generation.TaskSucceeded || len(task.Assets) != 3 {
 		t.Fatalf("task = %#v", task)
 	}
 	mediaTypes := map[string]string{}
@@ -1183,6 +1186,12 @@ func (a sixFormatFixtureAdapter) Observe(ctx context.Context, request generation
 	observation, err := a.next.Observe(ctx, request)
 	if err != nil {
 		return observation, err
+	}
+	if request.PostSuccess {
+		// The post-success phase converts the requested formats (#462): adding
+		// the required slots to every round would claim the primary model again
+		// beside each converted format.
+		return observation, nil
 	}
 	return completeFixtureOutputs(request.Offering, observation)
 }

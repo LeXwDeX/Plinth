@@ -125,6 +125,17 @@ type Coverage struct {
 	// fit the Schema's archive entry and byte bounds, so the one-click ZIP
 	// can be prepared instead of answering 413.
 	ArchiveAvailable bool `json:"archive_available"`
+	// PostSuccessProgress is how far the formats the task is converting itself
+	// have come (#462): Done of Total. A task with no post-success format work
+	// (nothing requested, or an Offering frozen before the mixed shape) has
+	// none, so the field is absent rather than 0/0.
+	PostSuccessProgress *FormatProgress `json:"post_success_progress,omitempty"`
+}
+
+// FormatProgress counts the task's own post-success formats.
+type FormatProgress struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
 }
 
 // candidate is one concrete way a conversion Offering can run for a task:
@@ -237,6 +248,11 @@ type view struct {
 	// inFlight maps a format to a declared conversion the Agent started
 	// directly and that has not finished. No second run may be started for it.
 	inFlight map[string]generation.Task
+	// unknown maps a format to a directly started conversion that failed with
+	// an unknown result: it may already have been paid for and may still
+	// deliver its format upstream, so no second run may be started for it
+	// either (#478).
+	unknown map[string]generation.Task
 	// pending maps a format to the post-success resource slot the task still
 	// owes (#459): the platform is converting it, so it is neither missing nor
 	// obtainable. failed marks a format whose slot ended without a file
@@ -270,6 +286,7 @@ func renewedKey(base, failedPlanID string) string {
 func (s *Service) resolve(ctx context.Context, task generation.Task) view {
 	v := view{task: task, assets: sortedAssets(task), obtained: map[string]obtained{}, plans: map[string]processing.Plan{}, active: map[string]processing.Plan{}, refetch: map[string]generation.RefetchEligibility{},
 		keys: map[string]string{}, previous: map[string]processing.Plan{}, inFlight: map[string]generation.Task{},
+		unknown: map[string]generation.Task{},
 		pending: map[string]generation.ResourceState{}, failed: map[string]bool{}}
 	v.own, v.rest = s.classify(v.assets)
 	s.recordResourceFormats(&v, task)
@@ -360,6 +377,32 @@ func (s *Service) recordResourceFormats(v *view, task generation.Task) {
 			}
 		}
 	}
+}
+
+// postSuccessProgress counts the formats the task is converting itself after
+// success: the requested on-demand slots of its frozen Offering (the kernel
+// leaves exactly those in the resource states), and how many of them already
+// landed as a file. It reads the frozen declaration, not the live Catalog, so a
+// Task keeps the formats it was accepted with.
+func postSuccessProgress(task generation.Task) *FormatProgress {
+	progress := &FormatProgress{}
+	for _, output := range task.Offering.Outputs {
+		// Only the #462 shape: an exact on-demand slot that exists because the
+		// request selected it. A historical per-item slot (variant_from) is not
+		// a task converting its own formats, so it is not counted.
+		if output.Delivery != generation.AssetDeliveryOnDemand || output.Variant == "" || output.RequestedWhen == nil {
+			continue
+		}
+		progress.Total++
+		key := output.Role + "|" + output.Variant + "|"
+		if state, declared := task.Resources[key]; declared && state.State == generation.ResourceReady {
+			progress.Done++
+		}
+	}
+	if progress.Total == 0 {
+		return nil
+	}
+	return progress
 }
 
 // PendingResourceFormats names the formats a stored Task still owes as
@@ -871,6 +914,7 @@ func (s *Service) analyze(ctx context.Context, task generation.Task) analysis {
 			return result
 		}
 		result.coverage.ArchiveAvailable = s.archiveFits(result.view)
+		result.coverage.PostSuccessProgress = postSuccessProgress(task)
 	}
 	if !s.capabilityIn(task.Capability, s.schema.Capabilities) || task.State != generation.TaskSucceeded {
 		return result

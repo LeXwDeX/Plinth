@@ -56,19 +56,20 @@ func modelReviewMediaTypeLeavesFormatOpen(media string) bool {
 	return false
 }
 
-// modelReviewNotGLBRefusal names the saved file and the media type it was
-// stored with. The label is reported for a person to understand the CDN
-// mislabelling; the decision came from the bytes.
+// modelReviewNotGLBRefusal fills one of the two not-GLB texts with the saved
+// file and the media type it was stored with. The label is reported for a
+// person to understand the CDN mislabelling; which text applies depends on
+// what decided the refusal, the label or the bytes.
 func (executor *Executor) modelReviewNotGLBRefusal(
 	command chat.ToolCommand,
-	review catalog.ChatModelReviewSchema,
+	template string,
 	source reviewedModel,
 ) chat.ToolResult {
 	media := strings.ToLower(strings.TrimSpace(source.asset.MediaType))
 	if media == "" {
 		media = "unknown"
 	}
-	return executor.modelReviewRefusal(command, executor.fillText(command, review.Source.SourceNotGLB,
+	return executor.modelReviewRefusal(command, executor.fillText(command, template,
 		"{asset}", string(source.asset.ID), "{media}", media))
 }
 
@@ -792,7 +793,7 @@ func (executor *Executor) loadReviewedModelKind(
 ) (*modelReviewEntry, *chat.ToolResult, string, error) {
 	media := strings.ToLower(strings.TrimSpace(source.asset.MediaType))
 	if !modelReviewMediaTypeLeavesFormatOpen(media) {
-		refusal := executor.modelReviewNotGLBRefusal(command, review, source)
+		refusal := executor.modelReviewNotGLBRefusal(command, review.Source.SourceNotGLB, source)
 		return nil, &refusal, ModelInspectNotGLB, nil
 	}
 	limits := modelReviewLimits(review)
@@ -915,7 +916,9 @@ func (executor *Executor) readReviewedModel(
 		return nil, &refusal, ModelInspectUnreadable
 	}
 	if read < len(header) || !bytes.Equal(header[:read], modelReviewGLBMagic) {
-		refusal := executor.modelReviewNotGLBRefusal(command, review, source)
+		// The bytes decided, so the text says so even when the label is
+		// model/gltf-binary: that label is what the bytes contradicted (#424).
+		refusal := executor.modelReviewNotGLBRefusal(command, review.Source.SourceBytesNotGLB, source)
 		return nil, &refusal, ModelInspectNotGLB
 	}
 	data := append([]byte(nil), header...)
@@ -948,7 +951,7 @@ func (executor *Executor) modelReviewParseRefusal(
 	err error,
 ) (*chat.ToolResult, string) {
 	if errors.Is(err, errModelReviewNotGLB) {
-		refusal := executor.modelReviewNotGLBRefusal(command, review, source)
+		refusal := executor.modelReviewNotGLBRefusal(command, review.Source.SourceBytesNotGLB, source)
 		return &refusal, ModelInspectNotGLB
 	}
 	var compressed *modelinspect.CompressionError
