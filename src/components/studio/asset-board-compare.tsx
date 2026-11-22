@@ -5,6 +5,7 @@ import { Image as ImageIcon } from 'lucide-react';
 
 import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
+import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
 import {
   boardCropGroups,
   boardItemIndex,
@@ -109,7 +110,10 @@ export function AssetBoardCompare({ schema, items, shown, focusedID, onFocus }: 
       <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="asset-board-compare-scroll">
         <div className="flex flex-col gap-8">
           {groups.map((group, groupIndex) => {
-            const sourceURL = previewAssetUrl(inputAssetPath(schema, group.sourceAssetID));
+            // #425: the comparison is drawn large on purpose, so it needs the original picture.
+            // `previewAssetUrl` only answers a 512px preview (asset-url-rewriter.ts), which is
+            // too coarse to judge a crop; the large compare panes use the original as well.
+            const sourceURL = safeAssetURL(inputAssetPath(schema, group.sourceAssetID));
             return (
               <section
                 key={group.sourceAssetID}

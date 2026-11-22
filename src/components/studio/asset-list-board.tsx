@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
 import { Box, Download, Image as ImageIcon, ListChecks, X } from 'lucide-react';
 
 import { AssetBoardCompare } from '@/components/studio/asset-board-compare';
@@ -8,6 +9,7 @@ import { AssetBoardDetail } from '@/components/studio/asset-board-detail';
 import { AssetBoardReturnDialog } from '@/components/studio/asset-board-return-dialog';
 import { AssetStepsExtendButton } from '@/components/studio/asset-steps-extend-dialog';
 import { Action } from '@/components/ui/button';
+import { OutsideFocusRelease } from '@/components/ui/dialog';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
 import {
   ASSET_LIST_BOARD_FILTERS,
@@ -57,6 +59,12 @@ export interface AssetListBoardProps {
   client?: AssetListClient;
   /** Test seam; polling defaults to 5s. */
   pollIntervalMs?: number;
+  /**
+   * The element the dialog is portaled into. The board still covers the stage
+   * only, while the dialog's focus trap and aria-hidden background are the
+   * page's; the body is the default when no host is given.
+   */
+  container?: RefObject<HTMLElement | null>;
 }
 
 interface BoardActionError {
@@ -75,18 +83,18 @@ function failureText(failure: unknown): string {
 
 /**
  * #329: the acceptance board covers the stage like 全部产出 does, because the
- * right drawer is too narrow for a whole list. The header carries the list's
- * title, state, count, the six filters and the board actions (#329d): accept
- * the selected items, return one item with its reasons, download the accepted
- * batch, or compare the results with the original picture. The grid shows
- * every item from one aggregate read with its cover, name, state, self-check
- * summary and steps. A 3D item can be rotated in place through the global
- * single viewer slot, so only one cell turns at a time. Every cell is a button
- * that opens the detail drawer; there is no hover-only action. While the list
- * is producing the board polls, pausedly while the tab is hidden.
+ * right drawer is too narrow for a whole list. It is a modal dialog (#425):
+ * the header, the six filters and the board actions (#329d) accept the selected
+ * items, return one item with its reasons, download the accepted batch, or
+ * compare the results with the original picture. The grid shows every item from
+ * one aggregate read with its cover, name, state, self-check summary and steps.
+ * A 3D item can be rotated in place through the global single viewer slot, so
+ * only one cell turns at a time. Every cell is a button that opens the detail
+ * drawer; there is no hover-only action. While the list is producing the board
+ * polls, pausedly while the tab is hidden.
  */
 export function AssetListBoard({
-  target, schema, client, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
+  target, schema, client, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS, container,
 }: AssetListBoardProps) {
   const source = useMemo(() => client ?? assetListClient(schema), [client, schema]);
   const close = useStudioStore((state) => state.closeAssetBoard);
@@ -112,6 +120,12 @@ export function AssetListBoard({
   // The latest read wins: a slow first answer must not replace a newer read
   // (or land after the board is gone).
   const requestSeq = useRef(0);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  // The board is opened by a button on a card, not by a DialogTrigger, so the
+  // dialog takes the focus before it hides the page and remembers where to put
+  // it back when it closes (#425, the #164 handoff).
+  const returnTarget = useRef<HTMLElement | null>(null);
+  const restoreFocus = useCallback(() => returnTarget.current ?? true, []);
 
   const load = useCallback(async (silent = false) => {
     const seq = requestSeq.current + 1;
@@ -173,14 +187,18 @@ export function AssetListBoard({
   }, [board]);
 
   // Escape leaves the detail first, then the board; a prevented key (a popup
-  // inside the drawer, or the return dialog) is left to that popup.
+  // inside the drawer, or the return dialog) is left to that popup. The board's
+  // own close on Escape comes from the dialog itself.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isEditableTarget(event.target)) return;
       if (returningID) return;
       event.preventDefault();
-      if (detailID) setDetailID(null);
-      else close();
+      if (detailID) {
+        // 抽屉先关。这次按键不能继续传到对话框的 document 监听，否则看板会一起关掉。
+        event.stopPropagation();
+        setDetailID(null);
+      } else close();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
@@ -323,255 +341,264 @@ export function AssetListBoard({
   };
 
   return (
-    <div
-      role="region"
-      aria-label={text('ui.asset_list.board.title')}
-      data-testid="asset-list-board"
-      className="absolute inset-0 z-float flex flex-col bg-canvas"
-    >
-      <header className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-        <ListChecks aria-hidden className="size-4 shrink-0 text-primary" />
-        <h2 className="min-w-0 max-w-[24rem] truncate text-sm font-semibold" data-testid="asset-board-title">{title}</h2>
-        {stateLabel ? (
-          <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" data-testid="asset-board-status">
-            {stateLabel}
-          </span>
-        ) : null}
-        <span className="shrink-0 tabular-nums text-xs text-muted-foreground" data-testid="asset-board-count">
-          {schemaCountMessage(schema, 'ui.asset_list.board.items_count', items.length, { count: items.length })}
-        </span>
-        <div role="group" aria-label={text('ui.asset_list.board.filter')} className="flex min-w-0 flex-wrap items-center gap-1">
-          {ASSET_LIST_BOARD_FILTERS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={filter === option.id}
-              onClick={() => setFilter(option.id)}
-              data-testid={`asset-board-filter-${option.id}`}
-              className={cn(
-                'flex min-h-11 items-center gap-1 rounded-md px-4 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring',
-                filter === option.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-              )}
-            >
-              {text(option.labelKey)}
-              <span className="tabular-nums">{boardFilterCount(items, option.id)}</span>
-            </button>
-          ))}
-        </div>
-        <Action
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className="ml-auto size-11 shrink-0 text-muted-foreground"
-          onClick={close}
-          aria-label={text('ui.asset_list.board.close')}
-          data-testid="asset-board-close"
+    <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) close(); }}>
+      <DialogPrimitive.Portal container={container}>
+        <DialogPrimitive.Popup
+          aria-modal="true"
+          aria-label={text('ui.asset_list.board.title')}
+          data-slot="dialog-content"
+          data-testid="asset-list-board"
+          initialFocus={closeButton}
+          finalFocus={restoreFocus}
+          className="absolute inset-0 z-float flex flex-col bg-canvas outline-none"
         >
-          <X />
-        </Action>
-      </header>
-
-      {board !== null ? (
-        <div
-          role="group"
-          aria-label={text('ui.asset_list.board.actions')}
-          className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2"
-          data-testid="asset-board-actions"
-        >
-          <Action
-            type="button"
-            size="sm"
-            className="min-h-11 px-4"
-            disabled={selectedReviewIDs.length === 0 || accepting}
-            loading={accepting}
-            onClick={() => void acceptSelected()}
-            data-testid="asset-board-accept-selected"
-          >
-            {accepting
-              ? text('ui.asset_list.board.accepting')
-              : schemaCountMessage(schema, 'ui.asset_list.board.accept_selected', selectedReviewIDs.length, {
-                count: selectedReviewIDs.length,
-              })}
-          </Action>
-          <span className="tabular-nums text-[11px] text-muted-foreground" data-testid="asset-board-selected-count">
-            {schemaCountMessage(schema, 'ui.asset_list.board.selected_count', selected.size, { count: selected.size })}
-          </span>
-          <span className="ml-auto flex flex-wrap items-center gap-2">
-            {cropItems.length > 0 ? (
-              <Action
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-h-11 px-4"
-                aria-pressed={compareView}
-                onClick={() => setView(compareView ? 'grid' : 'compare')}
-                data-testid="asset-board-compare-toggle"
-              >
-                {text(compareView ? 'ui.asset_list.board.compare_close' : 'ui.asset_list.board.compare_open')}
-              </Action>
+          <OutsideFocusRelease returnTarget={returnTarget} discardHandoff />
+          <header className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+            <ListChecks aria-hidden className="size-4 shrink-0 text-primary" />
+            <h2 className="min-w-0 max-w-[24rem] truncate text-sm font-semibold" data-testid="asset-board-title">{title}</h2>
+            {stateLabel ? (
+              <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" data-testid="asset-board-status">
+                {stateLabel}
+              </span>
             ) : null}
-            {accepted.length > 0 ? (
-              <Action
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-h-11 px-4"
-                disabled={downloading}
-                loading={downloading}
-                onClick={() => void download([])}
-                data-testid="asset-board-download"
-              >
-                {!downloading ? <Download aria-hidden /> : null}
-                {downloading ? text('ui.asset_list.board.downloading') : text('ui.asset_list.board.download_all')}
-              </Action>
-            ) : null}
-          </span>
-          {downloadError ? (
-            <div role="alert" className="flex basis-full flex-wrap items-center gap-2 text-xs text-destructive" data-testid="asset-board-download-error">
-              <span className="min-w-0 [overflow-wrap:anywhere]">{downloadError}</span>
-              {canDownloadBatch ? (
-                <Action
+            <span className="shrink-0 tabular-nums text-xs text-muted-foreground" data-testid="asset-board-count">
+              {schemaCountMessage(schema, 'ui.asset_list.board.items_count', items.length, { count: items.length })}
+            </span>
+            <div role="group" aria-label={text('ui.asset_list.board.filter')} className="flex min-w-0 flex-wrap items-center gap-1">
+              {ASSET_LIST_BOARD_FILTERS.map((option) => (
+                <button
+                  key={option.id}
                   type="button"
-                  variant="outline"
-                  size="sm"
-                  className="min-h-11 px-4"
-                  disabled={downloading}
-                  onClick={() => void download(downloadScope)}
-                  data-testid="asset-board-download-batch"
+                  aria-pressed={filter === option.id}
+                  onClick={() => setFilter(option.id)}
+                  data-testid={`asset-board-filter-${option.id}`}
+                  className={cn(
+                    'flex min-h-11 items-center gap-1 rounded-md px-4 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring',
+                    filter === option.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  )}
                 >
-                  {text('ui.asset_list.board.download_batch')}
-                </Action>
-              ) : downloadTooLarge ? (
-                <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">
-                  {text('ui.asset_list.board.download_scope_hint')}
-                </span>
+                  {text(option.labelKey)}
+                  <span className="tabular-nums">{boardFilterCount(items, option.id)}</span>
+                </button>
+              ))}
+            </div>
+            <Action
+              ref={closeButton}
+              type="button"
+              variant="ghost"
+              size="icon-lg"
+              className="ml-auto size-11 shrink-0 text-muted-foreground"
+              onClick={close}
+              aria-label={text('ui.asset_list.board.close')}
+              data-testid="asset-board-close"
+            >
+              <X />
+            </Action>
+          </header>
+
+          {board !== null ? (
+            <div
+              role="group"
+              aria-label={text('ui.asset_list.board.actions')}
+              className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2"
+              data-testid="asset-board-actions"
+            >
+              <Action
+                type="button"
+                size="sm"
+                className="min-h-11 px-4"
+                disabled={selectedReviewIDs.length === 0 || accepting}
+                loading={accepting}
+                onClick={() => void acceptSelected()}
+                data-testid="asset-board-accept-selected"
+              >
+                {accepting
+                  ? text('ui.asset_list.board.accepting')
+                  : schemaCountMessage(schema, 'ui.asset_list.board.accept_selected', selectedReviewIDs.length, {
+                    count: selectedReviewIDs.length,
+                  })}
+              </Action>
+              <span className="tabular-nums text-[11px] text-muted-foreground" data-testid="asset-board-selected-count">
+                {schemaCountMessage(schema, 'ui.asset_list.board.selected_count', selected.size, { count: selected.size })}
+              </span>
+              <span className="ml-auto flex flex-wrap items-center gap-2">
+                {cropItems.length > 0 ? (
+                  <Action
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 px-4"
+                    aria-pressed={compareView}
+                    onClick={() => setView(compareView ? 'grid' : 'compare')}
+                    data-testid="asset-board-compare-toggle"
+                  >
+                    {text(compareView ? 'ui.asset_list.board.compare_close' : 'ui.asset_list.board.compare_open')}
+                  </Action>
+                ) : null}
+                {accepted.length > 0 ? (
+                  <Action
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 px-4"
+                    disabled={downloading}
+                    loading={downloading}
+                    onClick={() => void download([])}
+                    data-testid="asset-board-download"
+                  >
+                    {!downloading ? <Download aria-hidden /> : null}
+                    {downloading ? text('ui.asset_list.board.downloading') : text('ui.asset_list.board.download_all')}
+                  </Action>
+                ) : null}
+              </span>
+              {downloadError ? (
+                <div role="alert" className="flex basis-full flex-wrap items-center gap-2 text-xs text-destructive" data-testid="asset-board-download-error">
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{downloadError}</span>
+                  {canDownloadBatch ? (
+                    <Action
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 px-4"
+                      disabled={downloading}
+                      onClick={() => void download(downloadScope)}
+                      data-testid="asset-board-download-batch"
+                    >
+                      {text('ui.asset_list.board.download_batch')}
+                    </Action>
+                  ) : downloadTooLarge ? (
+                    <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">
+                      {text('ui.asset_list.board.download_scope_hint')}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+              {actionError ? (
+                <div role="alert" className="flex basis-full flex-col gap-1 text-xs text-destructive" data-testid="asset-board-action-error">
+                  <span className="font-medium">{actionError.title}</span>
+                  {actionError.details.map((detail, index) => (
+                    <span key={`${detail}-${index}`} className="[overflow-wrap:anywhere]">{detail}</span>
+                  ))}
+                  <Action
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 self-start px-4"
+                    onClick={() => setActionError(null)}
+                    data-testid="asset-board-action-error-close"
+                  >
+                    {text('ui.common.close')}
+                  </Action>
+                </div>
+              ) : null}
+              {refreshError ? (
+                <div role="alert" className="flex basis-full flex-wrap items-center gap-2 text-xs text-destructive" data-testid="asset-board-refresh-error">
+                  <span className="min-w-0 [overflow-wrap:anywhere]">{refreshError}</span>
+                  <span className="text-muted-foreground">{text('ui.asset_list.board.refresh_failed')}</span>
+                  <Action
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 px-4"
+                    onClick={() => void load(true)}
+                    data-testid="asset-board-refresh-now"
+                  >
+                    {text('ui.asset_list.board.refresh_now')}
+                  </Action>
+                </div>
               ) : null}
             </div>
           ) : null}
-          {actionError ? (
-            <div role="alert" className="flex basis-full flex-col gap-1 text-xs text-destructive" data-testid="asset-board-action-error">
-              <span className="font-medium">{actionError.title}</span>
-              {actionError.details.map((detail, index) => (
-                <span key={`${detail}-${index}`} className="[overflow-wrap:anywhere]">{detail}</span>
-              ))}
-              <Action
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="min-h-11 self-start px-4"
-                onClick={() => setActionError(null)}
-                data-testid="asset-board-action-error-close"
-              >
-                {text('ui.common.close')}
+
+          {loading ? (
+            <p role="status" className="p-6 text-sm text-muted-foreground" data-testid="asset-board-loading">
+              {text('ui.asset_list.board.loading')}
+            </p>
+          ) : board === null ? (
+            <div role="alert" className="m-4 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 p-4 text-sm" data-testid="asset-board-error">
+              <span className="min-w-0 [overflow-wrap:anywhere]">{loadFailedText}</span>
+              <Action type="button" variant="outline" size="sm" className="min-h-11" onClick={() => void load()} data-testid="asset-board-retry">
+                {text('ui.asset_list.board.retry')}
               </Action>
             </div>
-          ) : null}
-          {refreshError ? (
-            <div role="alert" className="flex basis-full flex-wrap items-center gap-2 text-xs text-destructive" data-testid="asset-board-refresh-error">
-              <span className="min-w-0 [overflow-wrap:anywhere]">{refreshError}</span>
-              <span className="text-muted-foreground">{text('ui.asset_list.board.refresh_failed')}</span>
-              <Action
-                type="button"
-                variant="outline"
-                size="sm"
-                className="min-h-11 px-4"
-                onClick={() => void load(true)}
-                data-testid="asset-board-refresh-now"
-              >
-                {text('ui.asset_list.board.refresh_now')}
-              </Action>
+          ) : compareView ? (
+            <AssetBoardCompare
+              schema={schema}
+              items={items}
+              shown={shown}
+              focusedID={focusedID}
+              onFocus={setFocusedID}
+            />
+          ) : items.length === 0 ? (
+            <p className="p-6 text-sm text-muted-foreground" data-testid="asset-board-empty">
+              {text('ui.asset_list.board.empty')}
+            </p>
+          ) : shown.length === 0 ? (
+            <p className="p-6 text-sm text-muted-foreground" data-testid="asset-board-empty-filter">
+              {text('ui.asset_list.board.empty_filter')}
+            </p>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="asset-board-scroll">
+              <ul className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] content-start gap-4" data-testid="asset-board-grid">
+                {shown.map((item) => (
+                  <BoardCell
+                    key={item.id}
+                    item={item}
+                    schema={schema}
+                    client={source}
+                    projectID={target.projectId}
+                    listID={target.listId}
+                    selected={selected.has(item.id)}
+                    busy={accepting || returnBusy}
+                    detailOpen={detailItem?.id === item.id}
+                    onToggleSelect={() => toggleSelected(item.id)}
+                    onReturn={() => {
+                      setReturnError('');
+                      setReturningID(item.id);
+                    }}
+                    onOpen={() => setDetailID(item.id)}
+                    onStepsExtended={() => void load(true)}
+                  />
+                ))}
+              </ul>
             </div>
+          )}
+
+          {detailItem ? (
+            <AssetBoardDetail
+              item={detailItem}
+              schema={schema}
+              client={source}
+              projectID={target.projectId}
+              listID={target.listId}
+              onStepsExtended={() => void load(true)}
+              onClose={() => setDetailID(null)}
+            />
           ) : null}
-        </div>
-      ) : null}
 
-      {loading ? (
-        <p role="status" className="p-6 text-sm text-muted-foreground" data-testid="asset-board-loading">
-          {text('ui.asset_list.board.loading')}
-        </p>
-      ) : board === null ? (
-        <div role="alert" className="m-4 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 p-4 text-sm" data-testid="asset-board-error">
-          <span className="min-w-0 [overflow-wrap:anywhere]">{loadFailedText}</span>
-          <Action type="button" variant="outline" size="sm" className="min-h-11" onClick={() => void load()} data-testid="asset-board-retry">
-            {text('ui.asset_list.board.retry')}
-          </Action>
-        </div>
-      ) : compareView ? (
-        <AssetBoardCompare
-          schema={schema}
-          items={items}
-          shown={shown}
-          focusedID={focusedID}
-          onFocus={setFocusedID}
-        />
-      ) : items.length === 0 ? (
-        <p className="p-6 text-sm text-muted-foreground" data-testid="asset-board-empty">
-          {text('ui.asset_list.board.empty')}
-        </p>
-      ) : shown.length === 0 ? (
-        <p className="p-6 text-sm text-muted-foreground" data-testid="asset-board-empty-filter">
-          {text('ui.asset_list.board.empty_filter')}
-        </p>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto p-4" data-testid="asset-board-scroll">
-          <ul className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] content-start gap-4" data-testid="asset-board-grid">
-            {shown.map((item) => (
-              <BoardCell
-                key={item.id}
-                item={item}
-                schema={schema}
-                client={source}
-                projectID={target.projectId}
-                listID={target.listId}
-                selected={selected.has(item.id)}
-                busy={accepting || returnBusy}
-                detailOpen={detailItem?.id === item.id}
-                onToggleSelect={() => toggleSelected(item.id)}
-                onReturn={() => {
-                  setReturnError('');
-                  setReturningID(item.id);
-                }}
-                onOpen={() => setDetailID(item.id)}
-                onStepsExtended={() => void load(true)}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {detailItem ? (
-        <AssetBoardDetail
-          item={detailItem}
-          schema={schema}
-          client={source}
-          projectID={target.projectId}
-          listID={target.listId}
-          onStepsExtended={() => void load(true)}
-          onClose={() => setDetailID(null)}
-        />
-      ) : null}
-
-      {returningItem ? (
-        <AssetBoardReturnDialog
-          key={returningItem.id}
-          item={returningItem}
-          schema={schema}
-          client={source}
-          projectID={target.projectId}
-          listID={target.listId}
-          reasons={returnReasonsForKind(schema, returningItem.kind)}
-          busy={returnBusy}
-          error={returnError}
-          onSubmit={(reasonIDs, note) => void submitReturn(reasonIDs, note)}
-          onStepsExtended={() => void load(true)}
-          onClose={() => {
-            if (returnBusy) return;
-            setReturningID(null);
-            setReturnError('');
-          }}
-        />
-      ) : null}
-    </div>
+          {returningItem ? (
+            <AssetBoardReturnDialog
+              key={returningItem.id}
+              item={returningItem}
+              schema={schema}
+              client={source}
+              projectID={target.projectId}
+              listID={target.listId}
+              reasons={returnReasonsForKind(schema, returningItem.kind)}
+              busy={returnBusy}
+              error={returnError}
+              onSubmit={(reasonIDs, note) => void submitReturn(reasonIDs, note)}
+              onStepsExtended={() => void load(true)}
+              onClose={() => {
+                if (returnBusy) return;
+                setReturningID(null);
+                setReturnError('');
+              }}
+            />
+          ) : null}
+        </DialogPrimitive.Popup>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -664,7 +691,7 @@ function BoardCell({
           type="button"
           onClick={onOpen}
           aria-label={openLabel}
-          className="block w-full rounded-md focus-visible:outline-2 focus-visible:outline-ring"
+          className="block min-h-11 w-full rounded-md focus-visible:outline-2 focus-visible:outline-ring"
           data-testid={`asset-board-cover-${item.id}`}
         >
           <span className="flex aspect-square w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-md bg-muted">
@@ -683,7 +710,7 @@ function BoardCell({
       <button
         type="button"
         onClick={onOpen}
-        className="mt-2 flex w-full flex-col gap-1 rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
+        className="mt-2 flex min-h-11 w-full flex-col gap-1 rounded-md text-left focus-visible:outline-2 focus-visible:outline-ring"
         data-testid={`asset-board-cell-${item.id}`}
       >
         <span className="flex items-baseline gap-2">
