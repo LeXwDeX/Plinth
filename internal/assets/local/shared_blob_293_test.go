@@ -189,6 +189,10 @@ func TestSharedBlobStaysWhileAnyAssetReferencesIt(t *testing.T) {
 // boundary (docs/architecture.md, "内容寻址与共用的字节"); no product flow stores one
 // file under two types today, and the key format is shared with maintenance,
 // integrity scans and retention, so it is not changed here.
+//
+// The bytes are not a GLB: a binary glTF is stored as model/gltf-binary
+// whatever label it arrived with (#424) and has one final type, so this
+// boundary needs two types that both fit the bytes.
 func TestIdenticalBytesUnderDifferentFinalMediaTypesAreKeptApart(t *testing.T) {
 	root := t.TempDir()
 	store, err := New(root)
@@ -196,22 +200,22 @@ func TestIdenticalBytesUnderDifferentFinalMediaTypesAreKeptApart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	body := sharedSlotBytes()
+	body := []byte{0x00, 0x01, 0x02, 0x03, 0x04}
 
-	glb, err := store.Put(t.Context(), slotWrite("asset-glb", "model", "", 1, "model/gltf-binary", body))
+	typed, err := store.Put(t.Context(), slotWrite("asset-fbx", "model", "fbx", 1, "model/fbx", body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	opaque, err := store.Put(t.Context(), slotWrite("asset-opaque", "converted_model", "converted.gltf", 1, "application/octet-stream", body))
+	opaque, err := store.Put(t.Context(), slotWrite("asset-opaque", "converted_model", "converted", 1, "application/octet-stream", body))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if glb.SHA256 != opaque.SHA256 || glb.StorageKey == opaque.StorageKey {
-		t.Fatalf("same bytes under two final types: glb=%+v opaque=%+v", glb, opaque)
+	if typed.SHA256 != opaque.SHA256 || typed.StorageKey == opaque.StorageKey {
+		t.Fatalf("same bytes under two final types: typed=%+v opaque=%+v", typed, opaque)
 	}
-	if !strings.HasSuffix(glb.StorageKey, ".glb") || !strings.HasSuffix(opaque.StorageKey, ".bin") {
-		t.Fatalf("keys = %q, %q", glb.StorageKey, opaque.StorageKey)
+	if !strings.HasSuffix(typed.StorageKey, ".fbx") || !strings.HasSuffix(opaque.StorageKey, ".bin") {
+		t.Fatalf("keys = %q, %q", typed.StorageKey, opaque.StorageKey)
 	}
 	if files := blobFiles(t, root); len(files) != 2 {
 		t.Fatalf("blob files = %v, want one per final media type", files)

@@ -3159,9 +3159,14 @@ type ChatModelReviewSourceSchema struct {
 	SourceNotFound string `json:"source_not_found"`
 	SourceNotReady string `json:"source_not_ready"`
 	SourceNotModel string `json:"source_not_model"`
-	// SourceNotGLB refuses a saved file in a format the read-only tools
-	// cannot parse ({asset}, {media}).
+	// SourceNotGLB refuses a saved file whose stored label settles the format
+	// and is not GLB ({asset}, {media}).
 	SourceNotGLB string `json:"source_not_glb"`
+	// SourceBytesNotGLB refuses a saved file whose stored label does not settle
+	// the format (or claims GLB) while the saved bytes are not binary glTF
+	// ({asset}, {media}). It never repeats the label as the format, because a
+	// label such as model/gltf-binary is what the bytes contradicted (#424).
+	SourceBytesNotGLB string `json:"source_bytes_not_glb"`
 }
 
 // ChatModelReviewTextsSchema are the English texts the read-only model review

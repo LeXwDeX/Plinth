@@ -7262,7 +7262,8 @@
           "source_not_found": "No finished 3D model with that ID exists in this session. Call list_session_models and use one of its task IDs or model handles.",
           "source_not_ready": "The source task has not finished or has no saved model file. Wait for it to finish, or choose another model.",
           "source_not_model": "The asset {asset} is not a saved model file of that task. Use the asset_id of a model file listed by list_session_models, or omit source_asset_id to use the model's main file.",
-          "source_not_glb": "The saved file {asset} is {media}, not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first."
+          "source_not_glb": "The saved file {asset} is {media}, not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first.",
+          "source_bytes_not_glb": "The saved file {asset} is stored as {media}, but its bytes are not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first."
         },
         "texts": {
           "inspect_ready": "{model} inspected: {triangles} triangles.",
