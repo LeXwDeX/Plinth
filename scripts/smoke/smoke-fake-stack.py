@@ -286,6 +286,12 @@ class Api:
 
 FAKE_CONTROL = f"http://127.0.0.1:{FAKE_PORT}"
 
+# The one route whose whole POST bodies the fake archives (requestArchivePath in
+# cmd/fake-upstream/main.go). The per-request record behind ChatRequestsPath
+# keeps only a short summary of each message, which cannot carry a whole system
+# prompt, so a scenario that reads one reads it from the archive.
+CHAT_COMPLETIONS_PATH = "/openai/v1/chat/completions"
+
 
 def fake_control(method="GET", path="/fake/control/chat-requests"):
     """Read or clear the fake's own control plane (never a real upstream)."""
@@ -3934,38 +3940,46 @@ def _work_ledger_checkpoint(work, session, stack="main"):
         return {}
 
 
-def _work_ledger_recent_systems(work, session, stack="main", limit=6):
-    """The system prompts of the newest checkpoints, newest first. A turn that
-    is still running can leave a checkpoint with no request yet, so the caller
-    must not depend on the newest row alone."""
-    import sqlite3
-    try:
-        db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
-        db.row_factory = sqlite3.Row
-        rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT ?",
-                          (session, limit)).fetchall()
-        db.close()
-    except sqlite3.Error:
-        return []
-    systems = []
-    for row in rows:
-        try:
-            checkpoint = json.loads(row["checkpoint_json"])
-        except ValueError:
+def _chat_request_system_prompt(body):
+    """The system message of one recorded chat completion, or "" when the body
+    is not a request that carried a conversation to a model."""
+    messages = [message for message in body.get("messages") or [] if isinstance(message, dict)]
+    if not str(body.get("model") or ""):
+        return ""
+    if not any(str(message.get("role") or "") != "system" for message in messages):
+        return ""
+    for message in messages:
+        if str(message.get("role") or "") != "system":
             continue
-        system = _work_ledger_system_prompt(checkpoint)
-        if system:
-            systems.append(system)
-    return systems
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        return "\n".join(str(part.get("text") or "") for part in content or [] if isinstance(part, dict))
+    return ""
 
 
-def _work_ledger_wait_system(work, session, needle, seconds=20, stack="main"):
-    """Wait until one of the newest checkpoints' system prompts carries a
-    marker; the turn's checkpoint may land a moment after its reply."""
+def _chat_request_systems():
+    """The system prompt of every chat completion the fake upstream served,
+    newest first. The fake archives the body of each request it handled, so a
+    prompt read here is one the model really received. Neither other store can
+    answer: a finished turn's checkpoint drops its request (#382), and the
+    fake's per-request record keeps only a summary of each message."""
+    prompts = []
+    for body in reversed(fake_request_bodies(CHAT_COMPLETIONS_PATH)):
+        prompt = _chat_request_system_prompt(body)
+        if prompt:
+            prompts.append(prompt)
+    return prompts
+
+
+def _system_prompt_with(needle, seconds=20):
+    """Wait for a request the model received whose system prompt carries the
+    text, and return that prompt. Every recorded request is scanned newest
+    first, so a later turn landing never hides the one that answers."""
     end = time.time() + seconds
     systems = []
     while time.time() < end:
-        systems = _work_ledger_recent_systems(work, session, stack)
+        systems = _chat_request_systems()
         for system in systems:
             if needle in system:
                 return system
@@ -3973,33 +3987,40 @@ def _work_ledger_wait_system(work, session, needle, seconds=20, stack="main"):
     return systems[0] if systems else ""
 
 
+def _system_prompt_with_all(needles, seconds=60):
+    """Wait for a request the model received whose system prompt carries every
+    text; the newest such prompt answers, older ones still can while it lands."""
+    end = time.time() + seconds
+    systems = []
+    while time.time() < end:
+        systems = _chat_request_systems()
+        for system in systems:
+            if all(needle in system for needle in needles):
+                return system
+        time.sleep(0.5)
+    return systems[0] if systems else ""
+
+
+def _work_ledger_wait_system(work, session, needle, seconds=20, stack="main"):
+    """Wait until a request the model received carries a marker in its system
+    prompt. The work and stack arguments name the session the caller is reading;
+    the prompt itself comes from the fake's record of what it served, because a
+    finished turn's checkpoint keeps no request."""
+    return _system_prompt_with(needle, seconds)
+
+
 def _work_ledger_request_marker(work, session, stack, marker, seconds=120):
-    """Wait for the turn whose request ends with a user message carrying the
-    marker; returns (checkpoint, system prompt). The turn row may be written
-    before its request, and a compaction can delay it, so read recent rows."""
-    import sqlite3
+    """Wait for a request the model received whose user message carries the
+    marker; returns (checkpoint, system prompt). A compaction can delay the
+    turn, so every recorded request is read rather than only the newest."""
     end = time.time() + seconds
     while time.time() < end:
-        try:
-            db = sqlite3.connect(f"file:{work}/{stack}/app.db?mode=ro", uri=True)
-            db.row_factory = sqlite3.Row
-            rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=? ORDER BY updated_at DESC LIMIT 24",
-                              (session,)).fetchall()
-            db.close()
-        except sqlite3.Error:
-            rows = []
-        for row in rows:
-            try:
-                checkpoint = json.loads(row["checkpoint_json"])
-            except ValueError:
+        for body in reversed(fake_request_bodies(CHAT_COMPLETIONS_PATH)):
+            messages = [message for message in body.get("messages") or [] if isinstance(message, dict)]
+            if not any(str(message.get("role") or "") == "user" and marker in str(message.get("content") or "")
+                       for message in messages):
                 continue
-            request = checkpoint.get("Request") or checkpoint.get("request") or {}
-            messages = request.get("Messages") or request.get("messages") or []
-            for message in messages:
-                role = message.get("Role") or message.get("role") or ""
-                content = str(message.get("Content") or message.get("content") or "")
-                if role == "user" and marker in content:
-                    return checkpoint, _work_ledger_system_prompt(checkpoint)
+            return _work_ledger_checkpoint(work, session, stack), _chat_request_system_prompt(body)
         time.sleep(0.5)
     return {}, ""
 
@@ -4039,25 +4060,9 @@ def _self_check_results_recent(work, session, needle, limit=24):
 
 
 def _work_ledger_wait_system_all(work, session, needles, seconds=60, stack="main"):
-    """Wait until one recent system prompt carries every needle."""
-    end = time.time() + seconds
-    systems = []
-    while time.time() < end:
-        systems = _work_ledger_recent_systems(work, session, stack)
-        for system in systems:
-            if all(needle in system for needle in needles):
-                return system
-        time.sleep(0.5)
-    return systems[0] if systems else ""
-
-
-def _work_ledger_system_prompt(checkpoint):
-    request = checkpoint.get("Request") or checkpoint.get("request") or {}
-    messages = request.get("Messages") or request.get("messages") or []
-    if not messages:
-        return ""
-    first = messages[0] or {}
-    return str(first.get("Content") or first.get("content") or "")
+    """Wait until one request the model received carries every needle in its
+    system prompt; work and stack name the session, as in _work_ledger_wait_system."""
+    return _system_prompt_with_all(needles, seconds)
 
 
 def _work_ledger_completed(checkpoint):
@@ -4394,7 +4399,7 @@ def scenario_work_ledger(api, offerings, work):
     record("#248 get_production_step returns the full prompt and sources after compaction", ok,
            f"raw_chars={len(str(step.get('raw_prompt') or ''))} final_chars={len(str(step.get('final_prompt') or ''))} "
            f"parameters={len(step.get('parameters') or [])}")
-    system = _work_ledger_system_prompt(checkpoint)
+    system = _work_ledger_wait_system(work, session, str(step.get("step") or first_task_id))
     record("#248 ledger summary is in the next turn's system prompt",
            bool(step.get("step")) and step.get("step") in system and first_task_id in system
            and "<<<WORK_LEDGER>>>" in system,
@@ -5149,31 +5154,11 @@ def _visual_anchor_answer(api, session, card, option_id, content):
 
 
 def _visual_anchor_system_with(work, session, needle, seconds=20):
-    """A stored turn request whose system prompt carries the text. Turn rows
-    include ones whose checkpoint is not written yet, so scan every row instead
-    of trusting the newest."""
-    import sqlite3
-    end = time.time() + seconds
-    while time.time() < end:
-        try:
-            db = sqlite3.connect(f"file:{work}/main/app.db?mode=ro", uri=True)
-            db.row_factory = sqlite3.Row
-            rows = db.execute("SELECT checkpoint_json FROM go_chat_turns WHERE session_id=?",
-                              (session,)).fetchall()
-            db.close()
-        except sqlite3.Error:
-            rows = []
-        for row in rows:
-            if not row["checkpoint_json"]:
-                continue
-            try:
-                system = _work_ledger_system_prompt(json.loads(row["checkpoint_json"]))
-            except ValueError:
-                continue
-            if needle in system:
-                return system
-        time.sleep(0.5)
-    return ""
+    """The system prompt of a request the model received that carries the text.
+    The fake archives every chat completion it served, so this is the prompt the
+    model really got; every recorded request is scanned newest first instead of
+    trusting the newest one."""
+    return _system_prompt_with(needle, seconds)
 
 
 def _visual_anchor_frozen_input(work, task_id, stack="main"):
