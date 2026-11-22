@@ -223,8 +223,10 @@ func TestUpstreamPoolQueuesAcrossTasks(t *testing.T) {
 		}
 	}
 	posts, maxInflight := upstream.snapshot()
-	if len(posts) != 30 {
-		t.Fatalf("posts = %d, want 30 (5 tasks x 6 formats): %v", len(posts), posts)
+	// A mixed Offering (#462) sends only its blocking conversion before success,
+	// so one task queues one child: the pool is what the five tasks contend for.
+	if len(posts) != 5 {
+		t.Fatalf("posts = %d, want 5 (5 tasks x the blocking GLTF conversion): %v", len(posts), posts)
 	}
 	if maxInflight > 3 {
 		t.Fatalf("max in flight = %d, want at most the pool limit 3", maxInflight)

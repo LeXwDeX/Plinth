@@ -92,6 +92,41 @@ func variantsOf(formats ...string) []string {
 	return variants
 }
 
+// requestedConvertedVariants is the set of converted-model slots a frozen input
+// asked for: every on-demand slot whose requested_when holds (#462). The kernel
+// keeps exactly these in the Task's Offering, so they are the formats the
+// platform converts after the model is already delivered.
+func requestedConvertedVariants(t *testing.T, offering schema.Offering, frozen json.RawMessage) []string {
+	t.Helper()
+	var values map[string]any
+	if err := json.Unmarshal(frozen, &values); err != nil {
+		t.Fatal(err)
+	}
+	var variants []string
+	for _, output := range offering.Outputs {
+		if output.Role != "converted_model" || output.Delivery != schema.AssetDeliveryOnDemand {
+			continue
+		}
+		if output.RequestedWhen != nil && schema.ConditionMatches(*output.RequestedWhen, values) {
+			variants = append(variants, output.Variant)
+		}
+	}
+	slices.Sort(variants)
+	return variants
+}
+
+// without formats are removed, keeping the order of the rest.
+func without(formats []string, drop ...string) []string {
+	kept := make([]string, 0, len(formats))
+	for _, format := range formats {
+		if slices.Contains(drop, format) {
+			continue
+		}
+		kept = append(kept, format)
+	}
+	return kept
+}
+
 // conversionCharge is what a frozen input pays for its conversions.
 func conversionCharge(t *testing.T, offering schema.Offering, frozen json.RawMessage) string {
 	t.Helper()
@@ -122,8 +157,14 @@ func TestConvertedSlotsAreRequiredExactlyForTheSelectedFormats(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: %v", name, err)
 				}
-				if got, want := requiredConvertedVariants(t, offering, frozen), variantsOf(formats...); !slices.Equal(got, want) {
+				// Only the GLTF conversion is required: the self-contained GLB it
+				// returns is the primary model, so the task cannot succeed without
+				// it. Every other selected format is a requested on-demand slot.
+				if got, want := requiredConvertedVariants(t, offering, frozen), variantsOf("GLTF"); !slices.Equal(got, want) {
 					t.Errorf("%s: required converted slots = %v, want %v", name, got, want)
+				}
+				if got, want := requestedConvertedVariants(t, offering, frozen), variantsOf(without(formats, "GLTF")...); !slices.Equal(got, want) {
+					t.Errorf("%s: requested converted slots = %v, want %v", name, got, want)
 				}
 			}
 			// The default is the display set: all six, as before.
@@ -131,11 +172,14 @@ func TestConvertedSlotsAreRequiredExactlyForTheSelectedFormats(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got, want := requiredConvertedVariants(t, offering, frozen), variantsOf(allFormats...); !slices.Equal(got, want) {
+			if got, want := requiredConvertedVariants(t, offering, frozen), variantsOf("GLTF"); !slices.Equal(got, want) {
 				t.Errorf("default: required converted slots = %v, want %v", got, want)
 			}
+			if got, want := requestedConvertedVariants(t, offering, frozen), variantsOf(without(allFormats, "GLTF")...); !slices.Equal(got, want) {
+				t.Errorf("default: requested converted slots = %v, want %v", got, want)
+			}
 			// The GLB of the model role comes from the GLTF conversion, so its slot is
-			// never conditional; every other slot is conditional on its own format.
+			// never conditional; every other slot exists only for its own format.
 			for _, output := range offering.Outputs {
 				if output.Role != "converted_model" {
 					continue
@@ -145,10 +189,16 @@ func TestConvertedSlotsAreRequiredExactlyForTheSelectedFormats(t *testing.T) {
 				if format != "GLTF" {
 					want = &schema.ParameterCondition{Parameter: "output_formats", Operator: "contains", Value: json.RawMessage(`"` + format + `"`)}
 				}
-				if (output.RequiredWhen == nil) != (want == nil) ||
-					(want != nil && (output.RequiredWhen.Parameter != want.Parameter || output.RequiredWhen.Operator != want.Operator ||
-						string(output.RequiredWhen.Value) != string(want.Value))) {
-					t.Errorf("%s: required_when = %+v, want %+v", output.Variant, output.RequiredWhen, want)
+				if output.RequestedWhen == nil && want != nil {
+					t.Errorf("%s: requested_when = nil, want %+v", output.Variant, want)
+					continue
+				}
+				if want == nil || output.RequestedWhen == nil {
+					continue
+				}
+				if output.RequestedWhen.Parameter != want.Parameter || output.RequestedWhen.Operator != want.Operator ||
+					string(output.RequestedWhen.Value) != string(want.Value) {
+					t.Errorf("%s: requested_when = %+v, want %+v", output.Variant, output.RequestedWhen, want)
 				}
 			}
 		})

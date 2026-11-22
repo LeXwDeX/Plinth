@@ -118,7 +118,9 @@ func gameSetTask(t *testing.T, harness *acmeHarness, key string) generation.Task
 	if task.State != generation.TaskSucceeded {
 		t.Fatalf("state = %s, failure = %#v", task.State, task.Failure)
 	}
-	return task
+	// The GLB is delivered with the primary model; the FBX conversion lands in
+	// the background (#462).
+	return harness.driveMixedPostSuccess(t, "owner-acme", accepted.TaskID)
 }
 
 // slotsOf finds the model, converted.gltf and converted.fbx records of a game set

@@ -517,6 +517,32 @@ func (h *acmeHarness) runUntilTerminal(
 	return generation.Task{}
 }
 
+// driveMixedPostSuccess reconciles a task that already SUCCEEDED until its
+// post-success format work is over (#462): the task is usable from the moment its
+// primary model lands, and the remaining formats arrive one reconciled round at a
+// time. A task without post-success slots returns immediately.
+func (h *acmeHarness) driveMixedPostSuccess(
+	t *testing.T,
+	owner generation.OwnerID,
+	taskID generation.TaskID,
+) generation.Task {
+	t.Helper()
+	var task generation.Task
+	for range 400 {
+		h.reconcile(t)
+		var err error
+		task, err = h.module.Get(context.Background(), owner, taskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task.State.Terminal() && !generation.ResourcesPending(task.Resources) {
+			return task
+		}
+	}
+	t.Fatalf("post-success formats did not finish: %+v", task.Resources)
+	return task
+}
+
 // TestAcmeAsyncIdentityRunsZeroCodeFromDeclarations：异步 tripo 协议新身份，
 // 新状态词表驱动 创建→观测→可重试失败→重试→成功 全链路，零身份分支。
 func TestAcmeAsyncIdentityRunsZeroCodeFromDeclarations(t *testing.T) {

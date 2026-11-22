@@ -79,7 +79,15 @@ export interface ModelFormatCoverage {
   completionCredits: number;
   canComplete: boolean;
   archiveAvailable: boolean;
+  /** The task's own post-success format progress (#462); absent when it converts none. */
+  postSuccessProgress?: ModelFormatProgress;
   priceTotals?: PriceTotal[];
+}
+
+/** How many of the formats the task is converting itself have landed (#462). */
+export interface ModelFormatProgress {
+  done: number;
+  total: number;
 }
 
 const statuses: ReadonlySet<string> = new Set(['available', 'obtainable', 'converting', 'unavailable']);
@@ -141,6 +149,9 @@ export function parseModelFormatCoverage(raw: unknown): ModelFormatCoverage | nu
       retryBlocked: entry.retry_blocked === true,
     });
   }
+  const progress = isRecord(raw.post_success_progress) && count(raw.post_success_progress.total) > 0
+    ? { done: count(raw.post_success_progress.done), total: count(raw.post_success_progress.total) }
+    : undefined;
   const priceTotals = Object.hasOwn(raw, 'price_totals') ? parsePriceTotals(raw.price_totals) : undefined;
   return {
     taskId: raw.task_id,
@@ -150,6 +161,7 @@ export function parseModelFormatCoverage(raw: unknown): ModelFormatCoverage | nu
     completionCredits: priceTotals === undefined ? count(raw.completion_credits) : 0,
     canComplete: raw.can_complete === true,
     archiveAvailable: raw.archive_available === true,
+    ...(progress === undefined ? {} : { postSuccessProgress: progress }),
     ...(priceTotals === undefined ? {} : { priceTotals: priceTotals ?? [] }),
   };
 }
@@ -275,6 +287,20 @@ export function formatsFooter(coverage: ModelFormatCoverage | null, rows: readon
   if (stepsInProgress(coverage) || rows.some((row) => row.status === 'converting')) return 'converting';
   if (rows.length > 0 && rows.every((row) => row.status === 'available')) return 'all_present';
   return rows.some((row) => row.status === 'unavailable') ? 'no_route' : 'none';
+}
+
+/**
+ * The task's own post-success format progress, worded by the Schema (#462):
+ * "格式 2/5". Nothing is shown while the task converts no format of its own —
+ * the row list already says what is available.
+ */
+export function formatsProgress(
+  schema: ProductSchema,
+  coverage: ModelFormatCoverage | null,
+): string {
+  const progress = coverage?.postSuccessProgress;
+  if (!progress) return '';
+  return schemaText(schema, 'ui.workspace.model_formats.progress').replace('{done}', String(progress.done)).replace('{total}', String(progress.total));
 }
 
 /**

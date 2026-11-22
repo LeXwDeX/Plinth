@@ -151,8 +151,9 @@ func fullFormatRequest(t *testing.T) generation.ObserveRequest {
 }
 
 // Pre-completion: the first GLTF convert is refused with 429 and Retry-After;
-// the next observation resends GLTF under a new permit and the run completes
-// with every format converted once.
+// the next observation resends GLTF under a new permit and the public task
+// completes with its primary model. The requested formats are converted after
+// success, so none of them is sent here.
 func TestPreCompletion429RetriesTheSameFormatAfterRetryAfter(t *testing.T) {
 	upstream := &refusalUpstream{refuse: func(format string, n int, w http.ResponseWriter) bool {
 		return format == "GLTF" && n == 1 && refuse429(w, "9")
@@ -188,9 +189,12 @@ func TestPreCompletion429RetriesTheSameFormatAfterRetryAfter(t *testing.T) {
 	if obs.Phase != generation.UpstreamCompleted || upstream.count("GLTF") != 2 {
 		t.Fatalf("run did not complete after one refusal: phase %s, GLTF converts %d", obs.Phase, upstream.count("GLTF"))
 	}
+	// The pre-completion phase converts the blocking GLTF only (#462): the five
+	// requested formats are converted after success, and none of them is started
+	// while the public task can still fail.
 	for _, format := range []string{"USDZ", "FBX", "OBJ", "STL", "3MF"} {
-		if upstream.count(format) != 1 {
-			t.Fatalf("%s converted %d times", format, upstream.count(format))
+		if upstream.count(format) != 0 {
+			t.Fatalf("%s converted %d times before success", format, upstream.count(format))
 		}
 	}
 }

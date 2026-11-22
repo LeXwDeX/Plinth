@@ -122,29 +122,25 @@ func exportInput(t *testing.T, c *catalog.Catalog, id string, changes map[string
 	return frozen
 }
 
-// observeToCompletion drives the pre-completion observation against a finished
-// base task until every selected conversion is claimed.
+// observeToCompletion drives a mixed Offering (#462) through both phases: the
+// pre-completion observation claims the primary model (the GLTF export), then
+// the post-success observation converts the requested formats. The claims of
+// every round are merged into the returned observation so a caller sees the
+// whole delivery; the private state is the last round's.
 func observeToCompletion(t *testing.T, adapter *tripo.Adapter, offering generation.Offering, input json.RawMessage, baseTask string) generation.Observation {
 	t.Helper()
 	request := generation.ObserveRequest{
 		AttemptID: "attempt", Offering: offering, Input: input,
 		Job: generation.UpstreamJob{ProviderID: "tripo", RemoteID: baseTask},
 	}
-	for range 60 {
-		observation, err := adapter.Observe(context.Background(), request)
-		if err != nil {
-			t.Fatalf("observe: %v", err)
-		}
-		if observation.Phase == generation.UpstreamCompleted {
-			return observation
-		}
-		if observation.Phase == generation.UpstreamFailed {
-			t.Fatalf("task failed: %+v", observation.Failure)
-		}
-		request.Opaque = observation.Opaque
+	merged := observePreCompletion(t, adapter, request, 60)
+	request.Opaque = merged.Opaque
+	rounds := observePostSuccess(t, adapter, request, 200)
+	for _, observation := range rounds {
+		merged.Artifacts = append(merged.Artifacts, observation.Artifacts...)
+		merged.Opaque = observation.Opaque
 	}
-	t.Fatal("conversions did not complete")
-	return generation.Observation{}
+	return merged
 }
 
 func createBaseTask(t *testing.T, server *httptest.Server) string {

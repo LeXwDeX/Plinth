@@ -131,6 +131,11 @@ func cloneOfferingModelProfiles(source schema.Offering) schema.Offering {
 			condition.Value = append(json.RawMessage(nil), condition.Value...)
 			output.RequiredWhen = &condition
 		}
+		if output.RequestedWhen != nil {
+			condition := *output.RequestedWhen
+			condition.Value = append(json.RawMessage(nil), condition.Value...)
+			output.RequestedWhen = &condition
+		}
 		output.MediaTypes = append([]string(nil), output.MediaTypes...)
 	}
 	source.ProviderOptions = append(json.RawMessage(nil), source.ProviderOptions...)

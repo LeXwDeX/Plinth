@@ -44,7 +44,11 @@ func TestProviderPrivateChildRecordsStayOpaqueInOnePublicTask(t *testing.T) {
 	if task.State != generation.TaskSucceeded || task.Failure != nil {
 		t.Fatalf("task = %#v", task)
 	}
-	if len(task.Assets) != 7 {
+	// A mixed Offering (#462) requires only the primary model and the GLTF
+	// conversion before success; the five requested formats are converted after
+	// it. The fixture adapter only fills required slots, so the task lands with
+	// exactly those two files, and both are required.
+	if len(task.Assets) != 2 {
 		t.Fatalf("assets = %#v", task.Assets)
 	}
 	variants := map[string]bool{}
@@ -54,10 +58,8 @@ func TestProviderPrivateChildRecordsStayOpaqueInOnePublicTask(t *testing.T) {
 		}
 		variants[asset.Variant] = true
 	}
-	for _, variant := range []string{"converted.gltf", "converted.usdz", "converted.fbx", "converted.obj", "converted.stl", "converted.3mf"} {
-		if !variants[variant] {
-			t.Fatalf("missing %s in %#v", variant, task.Assets)
-		}
+	if !variants["converted.gltf"] {
+		t.Fatalf("missing the GLTF conversion in %#v", task.Assets)
 	}
 
 	page, err := harness.module.List(
