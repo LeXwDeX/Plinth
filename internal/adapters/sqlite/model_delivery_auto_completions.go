@@ -47,7 +47,9 @@ func (r *Repository) SetAutoCompletionWatermark(ctx context.Context, cursor mode
 
 // AutoCompletionCandidates lists the succeeded Tasks of the declared task kinds
 // that are newer than the watermark and have no record yet, oldest first, and
-// advances the watermark past everything it listed. A Task that is still
+// advances the watermark past everything it listed. The caller writes a record
+// for every candidate before it looks at any of them, so advancing the position
+// here cannot skip a Task whose round then fails (#478). A Task that is still
 // running is not listed; when it succeeds its updated_at is past the watermark
 // and the next scan finds it.
 func (r *Repository) AutoCompletionCandidates(
@@ -147,17 +149,18 @@ func joinPlaceholders(placeholders []string) string {
 // looked at.
 func (r *Repository) AutoCompletionRecord(ctx context.Context, taskID generation.TaskID) (modeldelivery.AutoCompletionRecord, bool, error) {
 	var (
-		record                  modeldelivery.AutoCompletionRecord
-		policyRevision, state   string
-		planID, reason          string
-		nextRunAt, updatedAt    string
+		record                modeldelivery.AutoCompletionRecord
+		policyRevision, state string
+		planID, reason        string
+		nextRunAt, updatedAt  string
+		firstRunAt            sql.NullString
 	)
 	err := r.db.QueryRowContext(ctx, `
 		SELECT task_id, owner_id, policy_revision, state, attempts, plan_id,
-		       paid_credits, paid_runs, reason, next_run_at, updated_at
+		       paid_credits, paid_runs, reason, next_run_at, updated_at, first_run_at
 		FROM model_delivery_auto_completions WHERE task_id = ?`, string(taskID)).
 		Scan(&record.TaskID, &record.OwnerID, &policyRevision, &state, &record.Attempts, &planID,
-			&record.PaidCredits, &record.PaidRuns, &reason, &nextRunAt, &updatedAt)
+			&record.PaidCredits, &record.PaidRuns, &reason, &nextRunAt, &updatedAt, &firstRunAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return modeldelivery.AutoCompletionRecord{}, false, nil
 	}
@@ -169,6 +172,11 @@ func (r *Repository) AutoCompletionRecord(ctx context.Context, taskID generation
 	}
 	if record.UpdatedAt, err = parseTime(updatedAt); err != nil {
 		return modeldelivery.AutoCompletionRecord{}, false, err
+	}
+	if firstRunAt.Valid && firstRunAt.String != "" {
+		if record.FirstRunAt, err = parseTime(firstRunAt.String); err != nil {
+			return modeldelivery.AutoCompletionRecord{}, false, err
+		}
 	}
 	record.OwnerID = generation.OwnerID(record.OwnerID)
 	record.PolicyRevision, record.State = policyRevision, state
@@ -187,17 +195,18 @@ func (r *Repository) SaveAutoCompletionRecord(ctx context.Context, record modeld
 	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO model_delivery_auto_completions
-			(task_id, owner_id, policy_revision, state, attempts, plan_id, paid_credits, paid_runs, reason, next_run_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(task_id, owner_id, policy_revision, state, attempts, plan_id, paid_credits, paid_runs, reason, next_run_at, updated_at, first_run_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id) DO UPDATE SET
 			owner_id = excluded.owner_id, policy_revision = excluded.policy_revision,
 			state = excluded.state, attempts = excluded.attempts, plan_id = excluded.plan_id,
 			paid_credits = excluded.paid_credits, paid_runs = excluded.paid_runs,
 			reason = excluded.reason, next_run_at = excluded.next_run_at,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at, first_run_at = excluded.first_run_at`,
 		string(record.TaskID), string(record.OwnerID), record.PolicyRevision, record.State,
 		record.Attempts, record.PlanID, record.PaidCredits, record.PaidRuns, record.Reason,
-		formatTaskTime(record.NextRunAt), formatTaskTime(updated))
+		formatTaskTime(record.NextRunAt), formatTaskTime(updated),
+		formatTaskTimeOrEmpty(record.FirstRunAt))
 	return err
 }
 
@@ -208,7 +217,7 @@ func (r *Repository) AutoCompletionDue(ctx context.Context, now time.Time, limit
 	}
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT task_id, owner_id, policy_revision, state, attempts, plan_id,
-		       paid_credits, paid_runs, reason, next_run_at, updated_at
+		       paid_credits, paid_runs, reason, next_run_at, updated_at, first_run_at
 		FROM model_delivery_auto_completions
 		WHERE state <> ? AND next_run_at <= ?
 		ORDER BY next_run_at, task_id
@@ -217,18 +226,19 @@ func (r *Repository) AutoCompletionDue(ctx context.Context, now time.Time, limit
 		return nil, err
 	}
 	type recordRow struct {
-		record                  modeldelivery.AutoCompletionRecord
-		policyRevision          string
-		state                   string
-		planID, reason          string
-		nextRunAt, updatedAt    string
+		record               modeldelivery.AutoCompletionRecord
+		policyRevision       string
+		state                string
+		planID, reason       string
+		nextRunAt, updatedAt string
+		firstRunAt           sql.NullString
 	}
 	var items []recordRow
 	for rows.Next() {
 		var item recordRow
 		if err = rows.Scan(&item.record.TaskID, &item.record.OwnerID, &item.policyRevision, &item.state,
 			&item.record.Attempts, &item.planID, &item.record.PaidCredits, &item.record.PaidRuns,
-			&item.reason, &item.nextRunAt, &item.updatedAt); err != nil {
+			&item.reason, &item.nextRunAt, &item.updatedAt, &item.firstRunAt); err != nil {
 			break
 		}
 		items = append(items, item)
@@ -248,6 +258,11 @@ func (r *Repository) AutoCompletionDue(ctx context.Context, now time.Time, limit
 		}
 		if record.UpdatedAt, err = parseTime(item.updatedAt); err != nil {
 			return nil, err
+		}
+		if item.firstRunAt.Valid && item.firstRunAt.String != "" {
+			if record.FirstRunAt, err = parseTime(item.firstRunAt.String); err != nil {
+				return nil, err
+			}
 		}
 		record.PolicyRevision, record.State = item.policyRevision, item.state
 		record.PlanID, record.Reason = item.planID, item.reason

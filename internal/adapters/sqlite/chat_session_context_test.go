@@ -61,6 +61,8 @@ func TestMigration0065UpgradesExistingSessionsWithoutContext(t *testing.T) {
 		`ALTER TABLE go_chat_turns DROP COLUMN end_reason`,
 		`ALTER TABLE skill_run_steps DROP COLUMN replacement_asset_id`,
 		`ALTER TABLE go_chat_messages DROP COLUMN multiview`,
+		`DROP TABLE IF EXISTS model_delivery_auto_completions`,
+		`DROP TABLE IF EXISTS model_delivery_auto_completion_watermark`,
 	} {
 		if _, err := r.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)

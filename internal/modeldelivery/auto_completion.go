@@ -87,6 +87,10 @@ type AutoCompletionRecord struct {
 	Reason      string
 	NextRunAt   time.Time
 	UpdatedAt   time.Time
+	// FirstRunAt is when this Task was first looked at. The Schema's deadline
+	// runs from it; NextRunAt moves with every round and cannot be the base
+	// (#478).
+	FirstRunAt time.Time
 }
 
 // AutoCompletionStore is the durable record and the scan position. It is the
@@ -99,9 +103,11 @@ type AutoCompletionStore interface {
 	SetAutoCompletionWatermark(context.Context, AutoCompletionCursor) error
 	// AutoCompletionCandidates lists succeeded Tasks of the given task kinds
 	// updated after the watermark that have no record yet, oldest first. It
-	// advances the watermark past everything it listed, whether or not the
-	// caller then manages to look at it. The kinds are the Schema's
-	// auto_completion.source_capabilities, never a list of our own.
+	// advances the watermark past everything it listed: the caller writes a
+	// pending record for every candidate before it looks at any of them, so a
+	// candidate whose round fails or never runs is still scanned again (#478).
+	// The kinds are the Schema's auto_completion.source_capabilities, never a
+	// list of our own.
 	AutoCompletionCandidates(context.Context, []generation.Capability, int) ([]AutoCompletionCandidate, error)
 	AutoCompletionRecord(context.Context, generation.TaskID) (AutoCompletionRecord, bool, error)
 	SaveAutoCompletionRecord(context.Context, AutoCompletionRecord) error
@@ -157,10 +163,13 @@ func (s *Service) ReconcileAutoCompletions(ctx context.Context, limit int) (int,
 	if err != nil {
 		return acted, wrap("read auto completion candidates", err)
 	}
+	// The scan position has already moved past these Tasks, so each one's
+	// record is written before any of them is looked at: a candidate whose
+	// round fails, and every candidate after it, is then still scanned by its
+	// own round instead of being skipped forever (#478).
+	now := s.now()
+	pending := make([]AutoCompletionRecord, 0, len(candidates))
 	for _, candidate := range candidates {
-		if ctx.Err() != nil {
-			return acted, ctx.Err()
-		}
 		record, exists, err := s.autoCompletions.AutoCompletionRecord(ctx, candidate.TaskID)
 		if err != nil {
 			return acted, wrap("read auto completion record", err)
@@ -170,7 +179,16 @@ func (s *Service) ReconcileAutoCompletions(ctx context.Context, limit int) (int,
 		}
 		record = AutoCompletionRecord{
 			TaskID: candidate.TaskID, OwnerID: candidate.OwnerID,
-			State: AutoStatePending, NextRunAt: s.now(),
+			State: AutoStatePending, FirstRunAt: now, NextRunAt: now,
+		}
+		if err := s.saveAutoCompletion(record, AutoStatePending, autoReasonWaiting); err != nil {
+			return acted, err
+		}
+		pending = append(pending, record)
+	}
+	for _, record := range pending {
+		if ctx.Err() != nil {
+			return acted, ctx.Err()
 		}
 		decided, err := s.reconcileAutoCompletion(ctx, record)
 		if err != nil {
@@ -226,20 +244,22 @@ func (s *Service) reconcileAutoCompletion(ctx context.Context, record AutoComple
 		// The free routes may still run; the paid ones may not.
 		paidBlocked = autoReasonPaidSpent
 	}
-	if paidBlocked == "" {
-		inflight, err := s.autoInflightPlans(ctx)
-		if err != nil {
-			return false, err
-		}
-		if inflight >= auto.MaxInflightPlans {
-			return false, s.scheduleAutoCompletion(record, AutoStatePending, autoReasonWaiting)
-		}
+	// The platform's own limit applies to every round, not only to the rounds
+	// that may pay: a record whose paid routes are spent still runs the free
+	// one, and a scan that starts nothing keeps the record due.
+	inflight, err := s.autoInflightPlans(ctx)
+	if err != nil {
+		return false, err
 	}
-	return s.startAutoCompletion(ctx, record, task, state, missing, paidBlocked)
+	if inflight >= auto.MaxInflightPlans {
+		return false, s.scheduleAutoCompletion(record, AutoStatePending, autoReasonWaiting)
+	}
+	return s.startAutoCompletion(ctx, record, task, state, missing, paidBlocked, auto.MaxInflightPlans-inflight)
 }
 
 // startAutoCompletion creates the plans the routes may fill and records what
-// happened. paidBlocked is the recorded reason the paid routes may not run.
+// happened. paidBlocked is the recorded reason the paid routes may not run;
+// budget is how many plans this round may still start.
 func (s *Service) startAutoCompletion(
 	ctx context.Context,
 	record AutoCompletionRecord,
@@ -247,11 +267,25 @@ func (s *Service) startAutoCompletion(
 	state analysis,
 	missing []string,
 	paidBlocked string,
+	budget int,
 ) (bool, error) {
-	plans, blocked := s.autoPlans(ctx, task, state, missing, paidBlocked)
+	plans, blocked := s.autoPlans(ctx, task, state, missing, record, budget, paidBlocked)
 	lastPlan := ""
 	paidCredits, paidRuns := record.PaidCredits, record.PaidRuns
 	for _, planned := range plans {
+		// The limit is counted again before every plan, not once a round: an
+		// earlier plan of this round, or a concurrent scan, may have taken the
+		// last slot since the round began (#478).
+		active, err := s.autoInflightPlans(ctx)
+		if err != nil {
+			return false, err
+		}
+		if active >= s.schema.AutoCompletion.MaxInflightPlans {
+			if lastPlan == "" {
+				return false, s.scheduleAutoCompletion(record, AutoStatePending, autoReasonWaiting)
+			}
+			break
+		}
 		plan, err := s.plans.Create(ctx, processing.CreateCommand{
 			OwnerID: record.OwnerID, IdempotencyKey: planned.step.candidate.key,
 			SessionID: task.SessionID, SourceTaskID: task.ID,
@@ -337,14 +371,20 @@ func (s *Service) autoRoutes() []autoRoute {
 }
 
 // autoPlans decides which plans this round may create, in route order, and
-// names the formats no automatic route may fill.
+// names the formats no automatic route may fill. budget is how many plans the
+// round may still start; paidBlocked is the recorded reason the paid routes may
+// not run.
 func (s *Service) autoPlans(
 	ctx context.Context,
 	task generation.Task,
 	state analysis,
 	missing []string,
+	record AutoCompletionRecord,
+	budget int,
 	paidBlocked string,
 ) ([]autoPlan, map[string]string) {
+	auto := s.schema.AutoCompletion
+	paidRuns, paidCredits := record.PaidRuns, record.PaidCredits
 	remaining := map[string]bool{}
 	for _, format := range missing {
 		remaining[format] = true
@@ -356,6 +396,28 @@ func (s *Service) autoPlans(
 			continue
 		}
 		for _, candidate := range s.routeCandidates(task, route, remaining) {
+			if len(plans) >= budget {
+				// The platform's own limit bounds what one round starts; the
+				// rest waits for a later round instead of queueing (#478).
+				return plans, blocked
+			}
+			// A direct conversion the Agent started already runs for one of
+			// these formats, or ran and left its result unknown: no automatic
+			// route may start a second paid run for it (#478).
+			held := false
+			for _, format := range candidate.providedFormats() {
+				_, running := state.view.inFlight[format]
+				_, unknown := state.view.unknown[format]
+				if !running && !unknown {
+					continue
+				}
+				held = true
+				delete(remaining, format)
+				delete(blocked, format)
+			}
+			if held {
+				continue
+			}
 			key := state.view.key(candidate.key)
 			// A run that already exists owns these formats, whatever revision
 			// it was made under: the record must not pay for them a second
@@ -371,7 +433,7 @@ func (s *Service) autoPlans(
 				s.dropCovered(remaining, blocked, candidate)
 				continue
 			}
-			if _, renewed := state.view.previous[candidate.key]; renewed {
+			if _, renewed := state.view.previous[key]; renewed {
 				// A run that failed for a reason no retry can fix, or one whose
 				// result is unknown: never re-sent automatically.
 				s.dropCovered(remaining, blocked, candidate)
@@ -400,8 +462,21 @@ func (s *Service) autoPlans(
 					s.noteBlocked(blocked, remaining, candidate, autoReasonPriceUnbounded)
 					continue
 				}
+				// The per-Task ceiling is compared for every plan of this round,
+				// not only at its start: a per-format route places one paid run
+				// per missing format, and each of them would pass a check made
+				// once before the round (#478).
+				if paidRuns+1 > auto.MaxPaidRunsPerTask ||
+					paidCredits+step.credits > auto.MaxCreditsPerTask {
+					s.noteBlocked(blocked, remaining, candidate, autoReasonPaidSpent)
+					continue
+				}
 			}
 			plans = append(plans, autoPlan{route: route, step: step})
+			if route.paid {
+				paidRuns++
+				paidCredits += step.credits
+			}
 			for _, format := range candidate.providedFormats() {
 				delete(remaining, format)
 				delete(blocked, format)
@@ -525,13 +600,15 @@ func (s *Service) autoInflightPlans(ctx context.Context) (int, error) {
 }
 
 // autoDeadlinePassed reports whether the Schema's deadline for this record's
-// first round has passed.
+// first round has passed. The base is FirstRunAt, never NextRunAt: the scan
+// interval refreshes the latter every round, which kept the deadline from ever
+// arriving (#478).
 func (s *Service) autoDeadlinePassed(record AutoCompletionRecord) bool {
 	hours := s.schema.AutoCompletion.DeadlineHours
-	if hours <= 0 || record.NextRunAt.IsZero() {
+	if hours <= 0 || record.FirstRunAt.IsZero() {
 		return false
 	}
-	return s.now().After(record.NextRunAt.Add(time.Duration(hours) * time.Hour))
+	return s.now().After(record.FirstRunAt.Add(time.Duration(hours) * time.Hour))
 }
 
 // scheduleAutoCompletion records a round that decides nothing yet.
@@ -548,6 +625,12 @@ func (s *Service) saveAutoCompletion(record AutoCompletionRecord, state, reason 
 	record.State = state
 	record.Reason = reason
 	record.UpdatedAt = s.now()
+	if record.FirstRunAt.IsZero() {
+		// The first write is when the Task was first looked at. Every later
+		// round keeps it, so the deadline is not pushed back by the scan
+		// interval (#478).
+		record.FirstRunAt = record.UpdatedAt
+	}
 	if s.autoCompletions == nil {
 		return nil
 	}

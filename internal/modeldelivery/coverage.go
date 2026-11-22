@@ -237,6 +237,11 @@ type view struct {
 	// inFlight maps a format to a declared conversion the Agent started
 	// directly and that has not finished. No second run may be started for it.
 	inFlight map[string]generation.Task
+	// unknown maps a format to a directly started conversion that failed with
+	// an unknown result: it may already have been paid for and may still
+	// deliver its format upstream, so no second run may be started for it
+	// either (#478).
+	unknown map[string]generation.Task
 	// pending maps a format to the post-success resource slot the task still
 	// owes (#459): the platform is converting it, so it is neither missing nor
 	// obtainable. failed marks a format whose slot ended without a file
@@ -270,6 +275,7 @@ func renewedKey(base, failedPlanID string) string {
 func (s *Service) resolve(ctx context.Context, task generation.Task) view {
 	v := view{task: task, assets: sortedAssets(task), obtained: map[string]obtained{}, plans: map[string]processing.Plan{}, active: map[string]processing.Plan{}, refetch: map[string]generation.RefetchEligibility{},
 		keys: map[string]string{}, previous: map[string]processing.Plan{}, inFlight: map[string]generation.Task{},
+		unknown: map[string]generation.Task{},
 		pending: map[string]generation.ResourceState{}, failed: map[string]bool{}}
 	v.own, v.rest = s.classify(v.assets)
 	s.recordResourceFormats(&v, task)
