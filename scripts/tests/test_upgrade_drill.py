@@ -196,9 +196,9 @@ class DrillRunTests(unittest.TestCase):
         self.workdir = self.root / "work"
         self.report = self.root / "report.md"
 
-    def run_drill(self, ready=True, keep=False):
+    def run_drill(self, ready=True, keep=False, report=None):
         argv = ["--image", "art-ai-go-production:drill", "--database", str(self.source),
-                "--workdir", str(self.workdir), "--report", str(self.report),
+                "--workdir", str(self.workdir), "--report", str(report or self.report),
                 "--environments", str(self.environments)]
         if keep:
             argv.append("--keep")
@@ -240,6 +240,11 @@ class DrillRunTests(unittest.TestCase):
         with mock.patch.object(self.drill, "read_state", side_effect=[before, after]):
             self.assertEqual(self.run_drill(), 1)
         self.assertIn("go_chat_sessions 行数 3 → 2", self.report.read_text(encoding="utf-8"))
+
+    def test_unwritable_report_fails_cleanly(self):
+        target = self.root / "missing" / "report.md"
+        self.assertEqual(self.run_drill(report=target), 2)
+        self.assertFalse(target.exists())
 
     def test_the_source_is_never_modified(self):
         before = hashlib.sha256(self.source.read_bytes()).hexdigest()

@@ -335,10 +335,13 @@ def drill(args):
         logs = container_logs(container)
         verdict = "PASS" if ready and not problems else "FAIL"
         report = render_report(fields, checks, problems, verdict, logs)
-        if args.report:
-            Path(args.report).expanduser().write_text(report, encoding="utf-8")
         (workdir / "report.md").write_text(report, encoding="utf-8")
         print(report)
+        if args.report:
+            try:
+                Path(args.report).expanduser().write_text(report, encoding="utf-8")
+            except OSError as error:
+                raise DrillError("报告写不出去（%s）：%s" % (args.report, error))
         return 0 if verdict == "PASS" else 1
     finally:
         run_command(["docker", "rm", "-f", workdir.name], timeout=30)
@@ -354,7 +357,8 @@ def parse_args(argv):
     parser.add_argument("--port", type=int, help="回环端口；缺省自动选一个空闲端口")
     parser.add_argument("--report", help="把报告写到这个文件（同时始终打印到标准输出）")
     parser.add_argument("--timeout", type=float, default=READY_TIMEOUT, help="等待就绪的秒数")
-    parser.add_argument("--keep", action="store_true", help="保留演练目录与容器现场")
+    parser.add_argument("--keep", action="store_true",
+                        help="保留演练目录与 report.md；容器总是清理")
     parser.add_argument("--allow-real-path", action="store_true",
                         help="允许 --database 指向真实环境路径（须同时设 %s=1）" % LIVE_ACK)
     parser.add_argument("--environments", help="环境文件；缺省用 local_environments 的查找顺序")
@@ -364,11 +368,15 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(argv)
     if not args.environments:
-        environments = Path(__file__).resolve().parent / "local_environments.py"
-        sys.path.insert(0, str(environments.parent))
+        # The environments file is untracked, so a worktree falls back to the
+        # main checkout's copy; when there is none, no release root is known.
+        scripts = Path(__file__).resolve().parent
+        sys.path.insert(0, str(scripts))
         try:
             import local_environments
             args.environments = str(local_environments.environments_file())
+        except ImportError:
+            args.environments = None
         finally:
             sys.path.pop(0)
     try:
