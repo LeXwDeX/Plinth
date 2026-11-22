@@ -1257,6 +1257,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ProposePlan:          chatService.ProposeProductionPlan,
 		ProposeAssetList:     chatService.ProposeAssetList,
 		SubmitAssetListItem:  chatService.SubmitAssetListItem,
+		ReadAssetList:        chatService.ReadAssetList,
 		WriteVisualAnchor:    chatService.WriteVisualAnchor,
 		Project:              applicationSchema.Project,
 		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
@@ -1523,9 +1524,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Scheduler: chatAgent,
 			Presence:  repository.AssetListPresenceRepository(),
 			StepCaps:  repository,
-			Schema:    *applicationSchema.AssetList,
-			Clock:     time.Now,
-			Logger:    logger,
+			// #329f: the list-end summary words each item's actual consumption
+			// with the same per-asset step standing the board reads, and takes
+			// its copy from the Catalog.
+			Steps: func(ctx context.Context, ownerID, sessionID string) (int, error) {
+				summary, err := executionGrants.StepStatus(ctx, ownerID, sessionID)
+				return summary.Used, err
+			},
+			Texts:  texts,
+			Schema: *applicationSchema.AssetList,
+			Clock:  time.Now,
+			Logger: logger,
 		})
 	}
 	fallbackIdentity, err := buildIdentity(config, accessPolicy)

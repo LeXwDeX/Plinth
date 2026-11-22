@@ -208,6 +208,22 @@ type AssetListMessagesSchema struct {
 	StepCapBlocked     string `json:"step_cap_blocked"`
 	NeedsApproval      string `json:"needs_approval"`
 	RunWaiting         string `json:"run_waiting"`
+	// #329f 清单总结：一次运行全部结束后，平台把一段总结写进清单会话（不是
+	// Agent 的一回合，不出卡片、不计步）。RunSummary 是首行，占位符
+	// {title} {accepted} {returned} {failed} {skipped} {steps}；{returned} 是
+	// 至少被打回过一次的项数（清单结束时没有项还停在 returned），{steps} 是
+	// 逐项实际消耗之和。RunSummaryItem 与 RunSummaryItemFailed 是逐项行，占位符
+	// {name} {state} {steps} 与 {reason}；失败原因取 RunSummaryReason* 里与该
+	// state_reason 同名的那一条，round_limit（#328 的轮数上限）也是一条原因。
+	RunSummary                       string `json:"run_summary"`
+	RunSummaryItem                   string `json:"run_summary_item"`
+	RunSummaryItemFailed             string `json:"run_summary_item_failed"`
+	RunSummaryReasonInputInvalid     string `json:"run_summary_reason_input_invalid"`
+	RunSummaryReasonParameterInvalid string `json:"run_summary_reason_parameter_invalid"`
+	RunSummaryReasonUpstreamCapacity string `json:"run_summary_reason_upstream_capacity"`
+	RunSummaryReasonUpstreamRefused  string `json:"run_summary_reason_upstream_refused"`
+	RunSummaryReasonInternal         string `json:"run_summary_reason_internal"`
+	RunSummaryReasonRoundLimit       string `json:"run_summary_reason_round_limit"`
 	// #328 完成工具 submit_asset_list_item 的结果与拒绝文案。
 	ItemReportedDone     string `json:"item_reported_done"`
 	ItemReportedFailed   string `json:"item_reported_failed"`

@@ -1026,6 +1026,7 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"list_project_assets":     {"project.list", "READ", []string{"image", "model-3d"}},
 		"propose_asset_list":      {"assetlist.propose", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"submit_asset_list_item":  {"assetlist.submit_item", "SESSION_WRITE", []string{"image", "model-3d"}},
+		"get_asset_list":          {"assetlist.read", "READ", []string{"image", "model-3d"}},
 	}
 	var controlDomains []string
 	var expectedEffect string
