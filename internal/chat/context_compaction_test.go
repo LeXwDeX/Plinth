@@ -203,7 +203,10 @@ func newContextFixtureWith(t *testing.T, policy chat.ModelPolicy, mutate func(*c
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := service.CreateSession(context.Background(), "owner-a", "Owner", "chat")
+	// A fresh session has no title of its own, so it stays TitleSourcePending
+	// and the first turn generates one (#382). Passing a title here would make
+	// the person the author of the title and skip the title call entirely.
+	session, err := service.CreateSession(context.Background(), "owner-a", "Owner", "")
 	if err != nil {
 		t.Fatal(err)
 	}

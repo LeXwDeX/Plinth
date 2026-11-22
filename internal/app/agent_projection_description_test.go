@@ -122,13 +122,35 @@ func TestAgentOfferingProjectionIsIdsOnlyByNameAndNarrowsToCapabilityOrModel(t *
 	if len(detail) == 0 {
 		t.Fatal("the detailed projection lists no capability")
 	}
-	// One capability, in full.
-	one := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "text-to-3d", "", true))
-	if len(one) != 1 || one[0].Capability != "text-to-3d" || len(one[0].Offerings) == 0 {
+	// One capability, in full. remesh is the capability whose offerings declare
+	// a description, so the detail view must carry each one exactly as the
+	// Schema declares it and omit it where the Schema declares none (#130).
+	// text-to-3d declares no description on any of its offerings, so it cannot
+	// stand for "the detail is complete"; #382 picked it by mistake.
+	one := parse(buildAgentOfferingsProjection(applications.Capabilities, product, nil, "remesh", "", true))
+	if len(one) != 1 || one[0].Capability != "remesh" || len(one[0].Offerings) == 0 {
 		t.Fatalf("capability filter = %+v", one)
 	}
-	if _, present := one[0].Offerings[0]["description"]; !present {
-		t.Fatalf("text-to-3d offering without its description: %v", one[0].Offerings[0])
+	for _, offering := range one[0].Offerings {
+		var id string
+		if err := json.Unmarshal(offering["offering_id"], &id); err != nil {
+			t.Fatal(err)
+		}
+		declared, ok := product.Get(generation.OfferingID(id))
+		if !ok {
+			t.Fatalf("projected offering %s is not in the catalog", id)
+		}
+		field, present := offering["description"]
+		if declared.Description == "" {
+			if present {
+				t.Fatalf("%s projects a description it does not declare: %s", id, field)
+			}
+			continue
+		}
+		var description string
+		if err := json.Unmarshal(field, &description); err != nil || description != declared.Description {
+			t.Fatalf("%s description = %s, want the Schema text %q", id, field, declared.Description)
+		}
 	}
 	// One model, across capabilities, in full and only of that model.
 	chosen := ""

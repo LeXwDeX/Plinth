@@ -43,8 +43,17 @@ func TestAdapterLogsOneLinePerCallWithNoRequestContent(t *testing.T) {
 		RequestTimeout:    time.Minute,
 		ScannerMaxBytes:   1 << 20,
 		ErrorBodyMaxBytes: 1 << 16,
-		Client:            &http.Client{Transport: transport},
-		Logger:            logger,
+		// A model profile that offers the "low" level, so the request really
+		// carries it on the wire and the log may state it. A profile-less model
+		// sends no effort and the line omits it, as the openairesponses sibling
+		// test asserts; without this the fixture would log no effort at all.
+		Thinking: &openaicompatible.ThinkingOptions{
+			EffortField:   "reasoning_effort",
+			EffortLevels:  []string{"low", "medium", "high"},
+			DefaultEffort: "medium",
+		},
+		Client: &http.Client{Transport: transport},
+		Logger: logger,
 	})
 	if err != nil {
 		t.Fatal(err)

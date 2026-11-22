@@ -273,7 +273,10 @@ func TestAgentToolStepsCapTextFollowsTheTurnLocale(t *testing.T) {
 	if err != nil || !refused.NoSubmission {
 		t.Fatalf("refused: %+v err=%v", refused, err)
 	}
-	const want = "This asset has used all of its 3D steps (1 used, cap 1); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in their account settings to continue."
+	// #383 moved the step-cap entry from the account settings to the top-bar
+	// "3D steps" control, so the English text now names that place; the rest of
+	// the refusal is unchanged.
+	const want = "This asset has used all of its 3D steps (1 used, cap 1); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in \"3D steps\" in the top bar to continue."
 	if text := agentError(t, refused); text != want {
 		t.Fatalf("english text = %q", text)
 	}
