@@ -43,7 +43,9 @@ func buildWorkspaceMCP(taskCatalog *catalog.Catalog, kernel *generation.Module, 
 				}
 				capabilities = filtered
 			}
-			return buildAgentOfferingsProjection(capabilities, taskCatalog, kernel.OfferingAvailable), nil
+			// An MCP client reads its own tool result in full: only the chat
+			// tool narrows to ids by default (#382).
+			return buildAgentOfferingsProjection(capabilities, taskCatalog, kernel.OfferingAvailable, capability, "", true), nil
 		},
 		Tasks: func(ctx context.Context, scope mcp.Scope, limit int) (json.RawMessage, error) {
 			if err := owned(ctx, scope); err != nil {

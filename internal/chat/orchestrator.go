@@ -2204,14 +2204,18 @@ func (orchestrator *Orchestrator) generateFirstTurnTitle(
 		"{maximum}", fmt.Sprint(maximum),
 		"{content}", userContent,
 	).Replace(orchestrator.text(ctx, orchestrator.schema.Agent.TitlePrompt))
-	// The title is written by the turn's own model and connection (#322).
+	// The title is written by the turn's own model and connection (#322), at
+	// the level the model family declares for a title rather than the
+	// session's: a title needs far less thinking than the turn it names
+	// (#382).
 	model := orchestrator.turnChatModel(command.Options)
 	completion, err := orchestrator.agent.Complete(
 		ctx,
 		agents.Request{
-			Model:       model.name,
-			Connection:  model.connection,
-			Temperature: orchestrator.schema.Agent.Temperature,
+			Model:           model.name,
+			Connection:      model.connection,
+			Temperature:     orchestrator.schema.Agent.Temperature,
+			ReasoningEffort: orchestrator.turnEffort(model.name, catalog.ChatTurnEffortTitle),
 			Messages: []agents.Message{
 				{Role: orchestrator.schema.Roles.System, Content: prompt},
 				{Role: orchestrator.schema.Roles.User, Content: userContent},
@@ -2611,6 +2615,9 @@ func (orchestrator *Orchestrator) agentRequest(
 		// #413: describe hands out the request's shared tool list; the request
 		// gets its own copy because the tool notes append to descriptions.
 		request.Tools = append([]agents.Tool(nil), registry.describe(scope)...)
+		// #382: the turn plan narrows that table once more, by what this turn
+		// froze as runnable; never to nothing.
+		request.Tools = registry.narrowToPlan(request.Tools, options.TurnPlan)
 		orchestrator.noteTools(registry, request.Tools, options)
 		request.ScopeWithheld = append([]string(nil), registry.withheld(scope)...)
 	}

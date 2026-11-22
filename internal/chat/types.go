@@ -243,6 +243,19 @@ type TurnCheckpoint struct {
 	Background bool `json:"background,omitempty"`
 }
 
+// WithoutRequests is what a turn keeps once it has ended (#382): the request
+// with its messages and their base64 pictures is dropped, because no path
+// resumes a turn that reached a terminal state. What stays is what a reader
+// still needs: the frozen configuration snapshot the turn ran on, the round
+// number, the assistant message, the round's completions and tool replies,
+// the malformed calls and the waiting list. The checkpoint of a turn that
+// never started carries nothing anyway.
+func (checkpoint TurnCheckpoint) WithoutRequests() TurnCheckpoint {
+	checkpoint.Request = agents.Request{}
+	checkpoint.ImageURLs = nil
+	return checkpoint
+}
+
 // WaitingCall is one call of a tool round that still lacks its receipt.
 // With a TaskID it is a paid step in flight: the turn wakes once the Task is
 // terminal or Deadline passed. Without one the generation kernel refused the

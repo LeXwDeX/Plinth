@@ -12,20 +12,20 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
-func (r *Repository) GetTurn(ctx context.Context, ownerID, sessionID, assistantID string) (chat.Turn, error) {
+// turnColumns is the column list every read of a whole turn selects, in scan
+// order. A caller that needs only the identity or the options reads those
+// columns alone instead (#382).
+const turnColumns = `owner_id, session_id, assistant_message_id, options_json,
+	state, end_reason, stop_requested, checkpoint_json, checkpoint_version, created_at, updated_at`
+
+// scanTurn decodes one row read with turnColumns.
+func scanTurn(scan func(dest ...any) error) (chat.Turn, error) {
 	var turn chat.Turn
 	var optionsJSON, checkpointJSON, createdAt, updatedAt string
 	var stopRequested int
-	err := r.db.QueryRowContext(ctx, `SELECT owner_id, session_id, assistant_message_id,
-		options_json, state, end_reason, stop_requested, checkpoint_json, checkpoint_version,
-		created_at, updated_at FROM go_chat_turns
-		WHERE owner_id = ? AND session_id = ? AND assistant_message_id = ?`,
-		ownerID, sessionID, assistantID).Scan(&turn.OwnerID, &turn.SessionID,
-		&turn.AssistantMessageID, &optionsJSON, &turn.State, &turn.EndReason, &stopRequested,
-		&checkpointJSON, &turn.CheckpointVersion, &createdAt, &updatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return chat.Turn{}, chat.ErrMessageNotFound
-	}
+	err := scan(&turn.OwnerID, &turn.SessionID, &turn.AssistantMessageID, &optionsJSON,
+		&turn.State, &turn.EndReason, &stopRequested, &checkpointJSON,
+		&turn.CheckpointVersion, &createdAt, &updatedAt)
 	if err != nil {
 		return chat.Turn{}, err
 	}
@@ -36,11 +36,21 @@ func (r *Repository) GetTurn(ctx context.Context, ownerID, sessionID, assistantI
 		return chat.Turn{}, fmt.Errorf("decode chat turn checkpoint: %w", err)
 	}
 	turn.StopRequested = stopRequested != 0
-	turn.CreatedAt, err = parseTime(createdAt)
-	if err != nil {
+	if turn.CreatedAt, err = parseTime(createdAt); err != nil {
 		return chat.Turn{}, err
 	}
 	turn.UpdatedAt, err = parseTime(updatedAt)
+	return turn, err
+}
+
+func (r *Repository) GetTurn(ctx context.Context, ownerID, sessionID, assistantID string) (chat.Turn, error) {
+	turn, err := scanTurn(r.db.QueryRowContext(ctx, `SELECT `+turnColumns+`
+		FROM go_chat_turns
+		WHERE owner_id = ? AND session_id = ? AND assistant_message_id = ?`,
+		ownerID, sessionID, assistantID).Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return chat.Turn{}, chat.ErrMessageNotFound
+	}
 	return turn, err
 }
 
@@ -62,39 +72,24 @@ func (r *Repository) ListTurnsPage(ctx context.Context, states []string, cursor 
 		args = append(args, stamp, stamp, cursor.AssistantMessageID)
 	}
 	args = append(args, limit)
-	rows, err := r.db.QueryContext(ctx, `SELECT owner_id, session_id, assistant_message_id FROM go_chat_turns
+	// One statement for the page, not an identity query plus one read per
+	// turn: a sweep of 64 waiting turns used to decode 64 checkpoints (#382).
+	rows, err := r.db.QueryContext(ctx, `SELECT `+turnColumns+` FROM go_chat_turns
 		WHERE state IN (`+strings.Join(placeholders, ",")+`)`+boundary+`
 		ORDER BY created_at, assistant_message_id LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
-	type identity struct{ owner, session, assistant string }
-	var ids []identity
+	defer rows.Close()
+	result := make([]chat.Turn, 0, limit)
 	for rows.Next() {
-		var id identity
-		if err := rows.Scan(&id.owner, &id.session, &id.assistant); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	result := make([]chat.Turn, 0, len(ids))
-	for _, id := range ids {
-		turn, err := r.GetTurn(ctx, id.owner, id.session, id.assistant)
-		if errors.Is(err, chat.ErrMessageNotFound) { // concurrent session deletion
-			continue
-		}
+		turn, err := scanTurn(rows.Scan)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, turn)
 	}
-	return result, nil
+	return result, rows.Err()
 }
 
 func (r *Repository) CompareAndSwapTurnCheckpoint(ctx context.Context, ownerID, sessionID, assistantID string,

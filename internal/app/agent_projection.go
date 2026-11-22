@@ -215,29 +215,50 @@ type agentOfferingsSource interface {
 
 // buildAgentOfferingsProjection 产出 schema→agent 的紧凑 offerings 投影，
 // 供 list_offerings 工具喂给 LLM 做能力/模型选择（domain 区分 2D/3D）。
+//
+// capability and model narrow the projection to one capability id and one
+// model_id ("" for either); model alone matches on the Offering's model_id,
+// case-insensitively. detail=false gives the ids-only view: every matching
+// capability and offering with its ids, and no description, knowledge, inputs
+// or price (#382). The chat tool asks for it when the model named neither a
+// capability nor a model, because it only needs the ids to ask for the one it
+// is choosing between; a caller that reads a chosen Offering asks for detail.
 func buildAgentOfferingsProjection(
 	capabilities []catalog.CapabilityPresentation,
 	offerings agentOfferingsSource,
 	available func(generation.OfferingID) bool,
+	capability, model string, detail bool,
 ) json.RawMessage {
+	capability = strings.TrimSpace(capability)
+	model = strings.ToLower(strings.TrimSpace(model))
 	views := make([]agentCapabilityView, 0, len(capabilities))
-	for _, capability := range capabilities {
-		view := agentCapabilityView{
-			Capability: string(capability.ID),
-			Domain:     string(capability.Domain),
+	for _, capabilityPresentation := range capabilities {
+		if capability != "" && string(capabilityPresentation.ID) != capability {
+			continue
 		}
-		for _, offering := range offerings.List(capability.ID) {
+		view := agentCapabilityView{
+			Capability: string(capabilityPresentation.ID),
+			Domain:     string(capabilityPresentation.Domain),
+		}
+		for _, offering := range offerings.List(capabilityPresentation.ID) {
 			if available != nil && !available(offering.ID) {
 				// list_offerings 只投影运行时可用项：LLM 不能选择
 				// 未注册/未启用的模型（B14）。
 				continue
 			}
-			offeringView := agentOfferingView{
-				OfferingID:  string(offering.ID),
-				ModelID:     offering.ModelID,
-				Description: offering.Description,
-				Knowledge:   agentOfferingKnowledge(offering.Knowledge),
+			if model != "" && !strings.EqualFold(offering.ModelID, model) {
+				continue
 			}
+			offeringView := agentOfferingView{
+				OfferingID: string(offering.ID),
+				ModelID:    offering.ModelID,
+			}
+			if !detail {
+				view.Offerings = append(view.Offerings, offeringView)
+				continue
+			}
+			offeringView.Description = offering.Description
+			offeringView.Knowledge = agentOfferingKnowledge(offering.Knowledge)
 			for _, parameter := range offering.Parameters {
 				if parameter.Semantic == generation.SemanticReferenceImage && parameter.Type == "asset-array" && parameter.MaxItems > 0 {
 					offeringView.ReferenceImageMax = parameter.MaxItems
@@ -250,7 +271,7 @@ func buildAgentOfferingsProjection(
 				offeringView.UpperNativeQuote, _ = offering.UpperNativeQuote()
 			}
 			offeringView.Inputs = agentInputViews(offering)
-			if capability.Domain == generation.DomainProcessing {
+			if capabilityPresentation.Domain == generation.DomainProcessing {
 				offeringView.Inputs = append(offeringView.Inputs, agentImageInputViews(offering)...)
 				if offering.NativePricing == nil {
 					// The quoted price includes the extras of fixed values (#324: Tripo's

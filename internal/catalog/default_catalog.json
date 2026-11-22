@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.381-409.1",
+    "revision": "2026-11-22.382.1",
     "terminology": {
       "user_facing": [
         {
@@ -6572,6 +6572,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "xhigh"],
               "default_effort": "xhigh",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "context_window_tokens": 1000000
             },
             {
@@ -6581,6 +6586,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high", "xhigh", "max"],
               "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "omit_temperature": true,
               "wire_api": "responses"
             },
@@ -6590,7 +6600,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high", "xhigh", "max"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6598,7 +6613,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6606,7 +6626,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6614,7 +6639,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6622,7 +6652,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6630,7 +6665,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6644,6 +6684,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "high", "max"],
               "default_effort": "low",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "context_window_tokens": 1000000,
               "reasoning_passback": true,
               "dsml_tool_calls": true
@@ -6658,6 +6703,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "xhigh"],
               "default_effort": "xhigh",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "context_window_tokens": 1000000
             },
             {
@@ -6669,7 +6719,12 @@
               },
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "xhigh"],
-              "default_effort": "xhigh"
+              "default_effort": "xhigh",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6694,6 +6749,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "high", "max"],
               "default_effort": "max",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "stream_include_usage": false,
               "reasoning_passback": true
             }
@@ -8096,10 +8156,20 @@
         {
           "name": "list_offerings",
           "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why. A processing offering may declare max_source_triangles, the most triangles its source model may have; an offering whose request sets the delivered triangle count (remesh) lists chain_limits for the later steps that limit their source: compatible gives, per topology, the largest target face count that still fits. When you plan a chain such as remesh then rigging, set the earlier step's topology and target face count within chain_limits[].compatible; the default settings may exceed it, and a plan over a later step's limit is refused before any step is paid. An offering's description, when present, says what the step keeps or changes (for example textures or model size); read it before choosing or chaining a processing step. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown.",
+          "description": "List the capabilities and offerings available now. With no argument it lists only capability, domain and each offering's offering_id and model_id; pass capability (a capability id such as text-to-3d or image-to-image) to get that capability's offerings with their description, knowledge, inputs and prices, and model to get only the offerings of one model_id. Read the detail before you choose or chain a model: a processing offering's description says what the step keeps or changes (for example textures or model size), max_source_triangles is the most triangles its source model may have, and chain_limits gives, per topology, the largest target face count a later step still accepts. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why.",
           "parameters": {
             "type": "object",
-            "properties": {}
+            "properties": {
+              "capability": {
+                "type": "string",
+                "description": "One capability id to list in full (for example text-to-3d, image-to-image, background-removal); omit it to list every capability with ids only."
+              },
+              "model": {
+                "type": "string",
+                "description": "One model_id to list; omit it to list every model."
+              }
+            },
+            "additionalProperties": false
           }
         },
         {

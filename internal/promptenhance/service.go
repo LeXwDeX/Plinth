@@ -81,8 +81,12 @@ func (service *Service) Enhance(
 	offering, hasOffering := service.offering(request.Capability, request.ModelID)
 	profile, systemPrompt := buildSystemPrompt(profile, maxLength, service.schema.Agent.OfferingKnowledge, offering, hasOffering)
 	completion, err := service.agent.Complete(ctx, agents.Request{
-		Model:       service.model,
-		Temperature: service.schema.API.PromptEnhance.Temperature,
+		Model: service.model,
+		// The enhancer rewrites one prompt beside the turn that will use it, so
+		// it runs at the level the model family declares for it, not at the
+		// session's (#382).
+		ReasoningEffort: service.effort(),
+		Temperature:     service.schema.API.PromptEnhance.Temperature,
 		Messages: []agents.Message{
 			{
 				Role:    service.schema.Roles.System,
@@ -107,6 +111,15 @@ func (service *Service) Enhance(
 	result := parseCompletion(content, profile)
 	result.Prompt = truncateRunes(result.Prompt, maxLength)
 	return result, nil
+}
+
+// effort is the thinking level the enhancer sends: the one the configured
+// model's family declares for a prompt enhancement in
+// chat.agent.thinking.turn_efforts. A model with no profile, or a family that
+// declares nothing for the kind, sends none and keeps its own default.
+func (service *Service) effort() string {
+	profile, _ := service.schema.Agent.Thinking.ProfileFor(service.model)
+	return profile.EffortForTurn(catalog.ChatTurnEffortPromptEnhance)
 }
 
 func (service *Service) profile(

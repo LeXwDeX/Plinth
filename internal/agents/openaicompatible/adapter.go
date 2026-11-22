@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -79,6 +80,10 @@ type Config struct {
 	// class. The application derives it from the chat connection's Schema
 	// error_mapping (#120); nil: no refusal is read as one.
 	ExhaustedQuota func(status int, body []byte) (class string, exhausted bool)
+	// Logger takes the one line every model call leaves: model, thinking
+	// level, duration, first byte, tokens and the upstream's request id
+	// (#382). Nil writes nothing.
+	Logger *slog.Logger
 }
 
 type Adapter struct {
@@ -94,6 +99,7 @@ type Adapter struct {
 	includeUsage      bool
 	parallelToolCalls bool
 	exhaustedQuota    func(status int, body []byte) (string, bool)
+	logs              *upstreamhttp.CallLogger
 }
 
 func New(config Config) (*Adapter, error) {
@@ -132,6 +138,7 @@ func New(config Config) (*Adapter, error) {
 		includeUsage:      config.StreamIncludeUsage,
 		parallelToolCalls: config.ParallelToolCalls,
 		exhaustedQuota:    config.ExhaustedQuota,
+		logs:              upstreamhttp.NewCallLogger(config.Logger),
 	}, nil
 }
 
@@ -155,19 +162,32 @@ func (adapter *Adapter) Stream(
 	ctx context.Context,
 	request agents.Request,
 	emit func(agents.Delta) error,
-) (agents.Completion, error) {
-	response, err := adapter.send(ctx, request, true)
+) (result agents.Completion, err error) {
+	// One line for the call, whatever path it returns by: the deferred log is
+	// the last thing that runs, and the named error carries the outcome (#382).
+	started := time.Now()
+	var (
+		first     time.Duration
+		usage     *agents.Usage
+		bodyBytes int
+		response  *http.Response
+	)
+	defer func() {
+		adapter.logCall(request, true, started, first, bodyBytes, usage, response, err)
+	}()
+	response, bodyBytes, err = adapter.send(ctx, request, true)
 	if err != nil {
 		return agents.Completion{}, err
 	}
 	defer response.Body.Close()
-	if err := adapter.requireSuccess(response, request); err != nil {
+	if err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
+	// first is when the upstream answered: the first stream frame is what a
+	// person waits through, so a slow model shows up as its own number.
 	lines := upstreamhttp.NewLines(response.Body, adapter.scannerMaxBytes)
 	options := adapter.options(request.Model)
 	var content, reasoning strings.Builder
-	var usage *agents.Usage
 	// thinking is true from the first reasoning fragment until visible
 	// content arrives, so each stretch of reasoning yields one content-free
 	// Thinking delta whatever the model's thinking profile (#285).
@@ -184,6 +204,9 @@ func (adapter *Adapter) Stream(
 	// else ends with ErrInlineImageOutput instead of an unknown error.
 	inlineImage := false
 	for lines.Scan() {
+		if first == 0 {
+			first = time.Since(started)
+		}
 		if lines.Oversized() {
 			if !oversizedImage(lines.Head()) {
 				return agents.Completion{}, fmt.Errorf("read agent stream: line exceeds %d bytes", adapter.scannerMaxBytes)
@@ -272,7 +295,7 @@ func (adapter *Adapter) Stream(
 	if inlineImage && strings.TrimSpace(content.String()) == "" && len(callOrder) == 0 {
 		return agents.Completion{}, agents.ErrInlineImageOutput
 	}
-	result := agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage}
+	result = agents.Completion{Content: content.String(), ReasoningContent: reasoning.String(), Usage: usage}
 	for _, index := range callOrder {
 		result.ToolCalls = append(result.ToolCalls, *calls[index])
 	}
@@ -282,15 +305,28 @@ func (adapter *Adapter) Stream(
 func (adapter *Adapter) Complete(
 	ctx context.Context,
 	request agents.Request,
-) (agents.Completion, error) {
-	response, err := adapter.send(ctx, request, false)
+) (result agents.Completion, err error) {
+	// One line for the call, as in Stream.
+	started := time.Now()
+	var (
+		first     time.Duration
+		bodyBytes int
+		response  *http.Response
+		usage     *agents.Usage
+	)
+	defer func() {
+		// A call that failed before the response has no first byte to report.
+		adapter.logCall(request, false, started, first, bodyBytes, usage, response, err)
+	}()
+	response, bodyBytes, err = adapter.send(ctx, request, false)
 	if err != nil {
 		return agents.Completion{}, err
 	}
 	defer response.Body.Close()
-	if err := adapter.requireSuccess(response, request); err != nil {
+	if err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
+	first = time.Since(started)
 	data, err := io.ReadAll(
 		io.LimitReader(response.Body, adapter.errorBodyMaxBytes+1),
 	)
@@ -319,9 +355,10 @@ func (adapter *Adapter) Complete(
 		)
 	}
 	message := body.Choices[0].Message
-	result := agents.Completion{Content: message.Content}
+	result = agents.Completion{Content: message.Content}
 	if body.Usage != nil {
-		result.Usage = body.Usage.agentUsage()
+		usage = body.Usage.agentUsage()
+		result.Usage = usage
 	}
 	if passback(adapter.options(request.Model)) {
 		result.ReasoningContent = message.ReasoningContent
@@ -344,11 +381,11 @@ func (adapter *Adapter) send(
 	ctx context.Context,
 	request agents.Request,
 	stream bool,
-) (*http.Response, error) {
+) (*http.Response, int, error) {
 	options := adapter.options(request.Model)
 	body, err := marshalRequest(request, stream, adapter.streamUsage(options), adapter.parallelToolCalls, options)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	httpRequest, err := http.NewRequestWithContext(
 		ctx,
@@ -357,7 +394,7 @@ func (adapter *Adapter) send(
 		bytes.NewReader(body),
 	)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	if adapter.apiKey != "" {
@@ -368,9 +405,34 @@ func (adapter *Adapter) send(
 	}
 	response, err := adapter.client.Do(httpRequest)
 	if err != nil {
-		return nil, fmt.Errorf("call agent: %w", err)
+		return nil, len(body), fmt.Errorf("call agent: %w", err)
 	}
-	return response, nil
+	return response, len(body), nil
+}
+
+// logCall writes the one line of a finished model call (#382).
+func (adapter *Adapter) logCall(
+	request agents.Request, stream bool, started time.Time, first time.Duration,
+	bodyBytes int, usage *agents.Usage, response *http.Response, err error,
+) {
+	options := adapter.options(request.Model)
+	requestID := ""
+	if response != nil {
+		requestID = upstreamhttp.RequestID(response.Header)
+	}
+	adapter.logs.Log(upstreamhttp.Call{
+		Model:        request.Model,
+		Connection:   request.Connection,
+		Effort:       options.effort(request.ReasoningEffort),
+		Purpose:      request.Purpose,
+		Stream:       stream,
+		Elapsed:      time.Since(started),
+		FirstByte:    first,
+		RequestBytes: bodyBytes,
+		Usage:        usage,
+		RequestID:    requestID,
+		Err:          err,
+	})
 }
 
 func (adapter *Adapter) requireSuccess(response *http.Response, request agents.Request) error {
