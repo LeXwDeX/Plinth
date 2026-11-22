@@ -231,6 +231,114 @@ func validateProviderConnections(schema RuntimeSchema) error {
 		if err := validateResultRefetch(connection); err != nil {
 			return err
 		}
+		if err := validateUpstreamPools(connection); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// poolEnvName is the shape of an environment variable named by a pool setting.
+var poolEnvName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// validateUpstreamPools checks a connection's declared upstream pools: the
+// limit and each optional policy value have a non-negative default, and the
+// policy values stay in their documented ranges. The idle TTL is checked
+// against the largest poll interval separately, once the Offerings are loaded.
+func validateUpstreamPools(connection ProviderConnectionSchema) error {
+	if connection.Concurrency == nil {
+		return nil
+	}
+	for name, pool := range connection.Concurrency.Pools {
+		if pool.Default < 0 {
+			return fmt.Errorf(
+				"连接 %q 的 concurrency.pools[%q].default 不能为负数",
+				connection.ID,
+				name,
+			)
+		}
+		if err := validatePoolEnv(connection.ID, name, "limit_env", pool.LimitEnv); err != nil {
+			return err
+		}
+		if err := validatePoolSeconds(connection.ID, name, "queue_poll_seconds", pool.QueuePollSeconds, 1, 300); err != nil {
+			return err
+		}
+		if err := validatePoolSeconds(connection.ID, name, "idle_ttl_seconds", pool.IdleTTLSeconds, 1, 86400); err != nil {
+			return err
+		}
+		if err := validatePoolSeconds(connection.ID, name, "wait_hint_seconds", pool.WaitHintSeconds, 1, 300); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePoolEnv(connectionID, poolName, field, value string) error {
+	if value == "" {
+		return nil
+	}
+	if !poolEnvName.MatchString(value) {
+		return fmt.Errorf(
+			"连接 %q 的 concurrency.pools[%q].%s %q 不是合法的环境变量名",
+			connectionID,
+			poolName,
+			field,
+			value,
+		)
+	}
+	return nil
+}
+
+func validatePoolSeconds(
+	connectionID, poolName, field string,
+	setting *ProviderPoolSettingSchema,
+	minimum, maximum int,
+) error {
+	if setting == nil {
+		return nil
+	}
+	if err := validatePoolEnv(connectionID, poolName, field+".env", setting.Env); err != nil {
+		return err
+	}
+	if setting.Default < minimum || setting.Default > maximum {
+		return fmt.Errorf(
+			"连接 %q 的 concurrency.pools[%q].%s.default = %d，超出 [%d, %d]",
+			connectionID,
+			poolName,
+			field,
+			setting.Default,
+			minimum,
+			maximum,
+		)
+	}
+	return nil
+}
+
+// validateUpstreamPoolPollIntervals checks each declared idle TTL against the
+// largest poll interval of the Offerings the connection serves. maxPollSeconds
+// maps an adapter key to that largest interval in whole seconds (rounded up).
+func validateUpstreamPoolPollIntervals(
+	connections []ProviderConnectionSchema,
+	maxPollSeconds map[string]int,
+) error {
+	for _, connection := range connections {
+		if connection.Concurrency == nil {
+			continue
+		}
+		for name, pool := range connection.Concurrency.Pools {
+			if pool.IdleTTLSeconds == nil {
+				continue
+			}
+			if largest := maxPollSeconds[connection.AdapterKey]; pool.IdleTTLSeconds.Default < largest {
+				return fmt.Errorf(
+					"连接 %q 的 concurrency.pools[%q].idle_ttl_seconds.default = %d 小于最大轮询间隔 %d 秒",
+					connection.ID,
+					name,
+					pool.IdleTTLSeconds.Default,
+					largest,
+				)
+			}
+		}
 	}
 	return nil
 }

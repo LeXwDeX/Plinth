@@ -127,7 +127,7 @@ Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe",
 
 ## 上游并发池（#468）
 
-Provider 连接可以声明 `concurrency: {pools: {<name>: {limit_env, default}}}`。声明即启用：Adapter 在付费派发前向 `internal/providers/upstreampool` 申请名额，名额满时本次不派发并返回带 `obs.Queue` 的运行观察（排队），不消耗 429/重试预算；未声明的连接或路径不排队。limit 由 `limit_env` 环境变量覆盖 `default`（各部署共享同一上游账号时按栈配额），代码不写死。持有键是 `(attempt_id, pool_id)`，同一 attempt 幂等，父作业经 `Handoff` 把名额交给子作业；`Release(Ticket)` 凭授权序号释放，迟到释放不误放。闲置 TTL 与绝对上限回收泄漏，等待者按 FIFO 放行。
+Provider 连接可以声明 `concurrency: {pools: {<name>: {limit_env, default, queue_poll_seconds, idle_ttl_seconds, wait_hint_seconds}}}`。声明即启用：Adapter 在付费派发前向 `internal/providers/upstreampool` 申请名额，名额满时本次不派发并返回带 `obs.Queue` 的运行观察（排队），不消耗 429/重试预算；未声明的连接或路径不排队。limit 由 `limit_env` 环境变量覆盖 `default`（各部署共享同一上游账号时按栈配额），代码不写死。`queue_poll_seconds`（1–300，默认 2）、`idle_ttl_seconds`（1–86400，默认 600，且不得小于该连接 Offerings 的最大轮询间隔）、`wait_hint_seconds`（1–300，默认 2）各带 `env` 覆盖（`TRIPO_POOL_QUEUE_POLL_SECONDS`、`TRIPO_POOL_IDLE_TTL_SECONDS`、`TRIPO_POOL_WAIT_HINT_SECONDS`）；Catalog 校验范围与 env 名，装配时读入，代码只保留缺省兜底。持有键是 `(attempt_id, pool_id)`，同一 attempt 幂等，父作业经 `Handoff` 把名额交给子作业；`Release(Ticket)` 凭授权序号释放，迟到释放不误放。闲置 TTL 与绝对上限回收泄漏，等待者按 FIFO 放行。
 
 Tripo 注册 `model-processing`（convert、texture、refine 共用），只拦截三条私有转换路径：成功前（`precompletion.go`）、成功后（`conversion.go` 的 `observePostSuccessConversion`）、原生导出（`native_processing_conversions.go`）。固定顺序是先 `Acquire`、再改条目状态、再取 `privateDispatchPermit`、再发 HTTP；code 2000 视为池满，释放名额、按 `Retry-After` 回池排队且不消耗 `RateLimitRetries`，code 1007 与其他 429 保持原预算。公开作业（texture/refine 主作业、上传转换）只计数、不拦截（Start 后 `Readopt`、Observe `Touch`、终态释放）。Agent 等待截止时间覆盖 `timeout × max_attempts + max_backoff × max_attempts + upstream_queue_timeout`，到期仍未终态时返回「仍在进行/排队」（`chat.presentation.messages.generation_pending`）而不是生成失败。
 

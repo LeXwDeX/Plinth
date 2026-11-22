@@ -13,9 +13,11 @@ import (
 // texture and refine (the official default holds five jobs across the three).
 const TripoPoolName = "model-processing"
 
-// poolQueuePoll is the short fixed poll a queued round asks for. The upstream
-// queue clock, not the job timeout, measures this wait (N1).
-const poolQueuePoll = 2 * time.Second
+// defaultPoolQueuePoll is the fallback poll a queued round asks for when the
+// connection does not declare queue_poll_seconds. The Schema value is the real
+// source; this is only the code fallback. The upstream queue clock, not the job
+// timeout, measures this wait (N1).
+const defaultPoolQueuePoll = 2 * time.Second
 
 // poolEnabled reports whether this Adapter queues through an upstream pool.
 func (a *Adapter) poolEnabled() bool {
@@ -75,12 +77,28 @@ func poolCountsPublicJob(offering generation.Offering) bool {
 		offering.Capability == generation.Retexture
 }
 
+// queuePoll is the configured poll a queued round uses for this offering's
+// pool, or the code fallback.
+func (a *Adapter) queuePoll(offering generation.Offering) time.Duration {
+	if a.poolEnabled() {
+		if poll := a.pool.QueuePoll(offering.AdapterKey, a.poolID); poll > 0 {
+			return poll
+		}
+	}
+	return defaultPoolQueuePoll
+}
+
 // poolQueueObservation marks a running observation as waiting for an upstream
 // slot: it carries the upstream queue clock and a short poll, so the wait does
 // not count toward the job timeout and reads as "queued", not as a failure.
-func poolQueueObservation(observation generation.Observation, wait time.Duration) generation.Observation {
-	if wait <= 0 || wait > poolQueuePoll {
-		wait = poolQueuePoll
+func (a *Adapter) poolQueueObservation(
+	observation generation.Observation,
+	offering generation.Offering,
+	wait time.Duration,
+) generation.Observation {
+	queuePoll := a.queuePoll(offering)
+	if wait <= 0 || wait > queuePoll {
+		wait = queuePoll
 	}
 	observation.PollAfter = wait
 	observation.Queue = &generation.UpstreamQueue{}

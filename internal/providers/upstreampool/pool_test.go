@@ -169,6 +169,59 @@ func TestMaxLifetimeReclaimsEvenWhenTouched(t *testing.T) {
 	}
 }
 
+// #468: a public job is re-adopted on every Observe. A reclaimed entry must
+// keep its original created time, so the hard maximum lifetime still reclaims
+// a holder that keeps polling instead of being renewed forever.
+func TestReadoptKeepsOriginalCreatedForHardLifetime(t *testing.T) {
+	clock := &fakeClock{at: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC)}
+	m := New(Options{Now: clock.now, IdleTTL: 10 * time.Hour})
+	m.Register("tripo.v3", "model-processing", PoolConfig{Limit: 2, MaxLifetime: time.Hour})
+	ctx := context.Background()
+	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+		t.Fatal("acquire a")
+	}
+	// Past the hard cap another holder's Acquire reclaims a and takes the slot.
+	clock.advance(61 * time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+		t.Fatal("acquire b after the hard cap")
+	}
+	// The public job is re-adopted on its next Observe, as Adapter.Observe
+	// does every round.
+	m.Readopt(holder("a"))
+	// One minute later a third holder polls: the hard cap must still reclaim
+	// a, so c fits. If Readopt had reset created, a would be a minute old and
+	// c would queue behind the two live entries.
+	clock.advance(time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+		t.Fatalf("hard maximum lifetime was reset by Readopt: %+v", m.Stats())
+	}
+}
+
+// #468: a dispatching public job re-acquires its slot; a reclaimed attempt
+// that asks again must keep its original created time as well, or the hard
+// maximum lifetime is renewed on every round.
+func TestReacquireKeepsOriginalCreatedForHardLifetime(t *testing.T) {
+	clock := &fakeClock{at: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC)}
+	m := New(Options{Now: clock.now, IdleTTL: 10 * time.Hour})
+	m.Register("tripo.v3", "model-processing", PoolConfig{Limit: 2, MaxLifetime: time.Hour})
+	ctx := context.Background()
+	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+		t.Fatal("acquire a")
+	}
+	clock.advance(61 * time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("b"), 0); !ok {
+		t.Fatal("acquire b after the hard cap")
+	}
+	// The same attempt asks for its slot again.
+	if _, ok, _ := m.Acquire(ctx, holder("a"), 0); !ok {
+		t.Fatal("re-acquire a")
+	}
+	clock.advance(time.Minute)
+	if _, ok, _ := m.Acquire(ctx, holder("c"), 0); !ok {
+		t.Fatalf("hard maximum lifetime was reset by Acquire: %+v", m.Stats())
+	}
+}
+
 func TestWaitingHolderTTLIsSkipped(t *testing.T) {
 	m, clock := newTestManager(1, time.Hour)
 	ctx := context.Background()
@@ -220,5 +273,41 @@ func TestConcurrentAcquireRelease(t *testing.T) {
 	stats := m.Stats()
 	if stats.TotalHeld > 5 {
 		t.Fatalf("held = %d, want at most the limit 5", stats.TotalHeld)
+	}
+}
+
+// #468: policy values come from the pool declaration when set, else the
+// Manager's defaults. Unset keeps the previous behavior (10 min / 2 s / 2 s).
+func TestPoolPolicyDefaultsAndOverrides(t *testing.T) {
+	defaults := New(Options{})
+	defaults.Register("c", "p", PoolConfig{Limit: 1})
+	if defaults.QueuePoll("c", "p") != 2*time.Second ||
+		defaults.IdleTTL("c", "p") != 10*time.Minute ||
+		defaults.WaitHint("c", "p") != 2*time.Second {
+		t.Fatalf("defaults = queue %v idle %v hint %v",
+			defaults.QueuePoll("c", "p"), defaults.IdleTTL("c", "p"), defaults.WaitHint("c", "p"))
+	}
+	configured := New(Options{})
+	configured.Register("c", "p", PoolConfig{
+		Limit:     1,
+		QueuePoll: 7 * time.Second,
+		IdleTTL:   20 * time.Minute,
+		WaitHint:  4 * time.Second,
+	})
+	if configured.QueuePoll("c", "p") != 7*time.Second ||
+		configured.IdleTTL("c", "p") != 20*time.Minute ||
+		configured.WaitHint("c", "p") != 4*time.Second {
+		t.Fatalf("overrides = queue %v idle %v hint %v",
+			configured.QueuePoll("c", "p"), configured.IdleTTL("c", "p"), configured.WaitHint("c", "p"))
+	}
+	// A full pool returns the configured hint.
+	ctx := context.Background()
+	local := Holder{Connection: "c", Pool: "p", Attempt: "a"}
+	if _, ok, _ := configured.Acquire(ctx, local, 0); !ok {
+		t.Fatal("first acquire should fit")
+	}
+	local.Attempt = "b"
+	if _, ok, hint := configured.Acquire(ctx, local, 0); ok || hint != 4*time.Second {
+		t.Fatalf("full pool hint = %v ok=%v, want 4s", hint, ok)
 	}
 }

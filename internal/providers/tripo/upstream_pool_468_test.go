@@ -118,9 +118,14 @@ func (f *poolUpstream) snapshot() (posts []string, maxInflight int) {
 
 func newPoolAdapter(t *testing.T, upstream *poolUpstream, limit int, offerings ...generation.Offering) (*tripo.Adapter, *upstreampool.Manager) {
 	t.Helper()
+	return newPoolAdapterWithPolicy(t, upstream, upstreampool.PoolConfig{Limit: limit}, offerings...)
+}
+
+func newPoolAdapterWithPolicy(t *testing.T, upstream *poolUpstream, config upstreampool.PoolConfig, offerings ...generation.Offering) (*tripo.Adapter, *upstreampool.Manager) {
+	t.Helper()
 	errorMapping, statusMapping := declaredTripoMappings(t)
 	pool := upstreampool.New(upstreampool.Options{WaitHint: 2 * time.Second})
-	pool.Register("tripo.v3", tripo.TripoPoolName, upstreampool.PoolConfig{Limit: limit})
+	pool.Register("tripo.v3", tripo.TripoPoolName, config)
 	adapter, err := tripo.New(tripo.Config{
 		BaseURL:         upstream.server.URL,
 		APIKey:          "tripo-key",
@@ -396,5 +401,36 @@ func TestUpstreamPoolReadoptAfterRestart(t *testing.T) {
 	}
 	if stats := pool.Stats(); stats.TotalHeld != 2 {
 		t.Fatalf("readopt did not exceed the limit for the running child: %+v", stats)
+	}
+}
+
+// #468: the queued poll comes from the Schema's queue_poll_seconds, not a
+// hard-coded constant. The wait hint (9s) exceeds the poll (7s), so the poll
+// is capped at the configured queue poll.
+func TestUpstreamPoolQueuedPollUsesSchemaValue(t *testing.T) {
+	upstream := newPoolUpstream(t, 100)
+	adapter, _ := newPoolAdapterWithPolicy(t, upstream, upstreampool.PoolConfig{
+		Limit:     1,
+		QueuePoll: 7 * time.Second,
+		WaitHint:  9 * time.Second,
+	})
+	tasks := poolRequests(t, 2)
+	ctx := generation.WithDispatchCheckpointer(context.Background(), tasks[0].permit)
+	first, err := adapter.Observe(ctx, tasks[0].request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks[0].permit.settle(t, first)
+	// The first task holds the only slot; the second must queue with the
+	// configured poll.
+	second, err := adapter.Observe(generation.WithDispatchCheckpointer(context.Background(), tasks[1].permit), tasks[1].request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Queue == nil {
+		t.Fatalf("second task did not queue: %+v", second)
+	}
+	if second.PollAfter != 7*time.Second {
+		t.Fatalf("queued poll = %v, want the Schema value 7s", second.PollAfter)
 	}
 }

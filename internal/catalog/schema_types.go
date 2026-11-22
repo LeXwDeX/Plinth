@@ -2408,13 +2408,30 @@ type ProviderConcurrencySchema struct {
 	Pools map[string]ProviderPoolSchema `json:"pools,omitempty"`
 }
 
-// ProviderPoolSchema is one upstream pool's limit declaration. LimitEnv names
-// an environment variable that overrides Default per deployment (the stacks
-// share one upstream account, so each sets its own quota, #468); Default is the
-// official default used when the variable is unset.
+// ProviderPoolSchema is one upstream pool's declaration. LimitEnv names an
+// environment variable that overrides Default per deployment (the stacks share
+// one upstream account, so each sets its own quota, #468); Default is the
+// official default used when the variable is unset. QueuePollSeconds,
+// IdleTTLSeconds and WaitHintSeconds are optional policy values, each with its
+// own default and environment override; absent means the code fallback.
 type ProviderPoolSchema struct {
 	LimitEnv string `json:"limit_env,omitempty"`
 	Default  int    `json:"default,omitempty"`
+	// QueuePollSeconds bounds how long a queued Adapter waits before polling
+	// again (1..300 seconds).
+	QueuePollSeconds *ProviderPoolSettingSchema `json:"queue_poll_seconds,omitempty"`
+	// IdleTTLSeconds is how long an untouched holder keeps its slot; it must be
+	// at least the largest poll interval of the connection's Offerings.
+	IdleTTLSeconds *ProviderPoolSettingSchema `json:"idle_ttl_seconds,omitempty"`
+	// WaitHintSeconds is the wait Acquire suggests when the pool is full.
+	WaitHintSeconds *ProviderPoolSettingSchema `json:"wait_hint_seconds,omitempty"`
+}
+
+// ProviderPoolSettingSchema is one optional pool policy value: a default and an
+// environment variable that overrides it per deployment.
+type ProviderPoolSettingSchema struct {
+	Env     string `json:"env,omitempty"`
+	Default int    `json:"default,omitempty"`
 }
 
 // LegacyMigrationRuntimeSchema 只服务一次性旧生产数据迁移。它不进入公开
