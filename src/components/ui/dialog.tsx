@@ -53,9 +53,10 @@ type DialogContentProps = DialogPrimitive.Popup.Props & {
 
 // 子组件的 layout effect 先于 Base UI 焦点管理器的 effect 执行：在页面其余区域被标成
 // aria-hidden 之前取下外面的焦点，并记住关闭时要还原的元素（内部存档 #164）。
-// 标记元素的 ref 先于本组件的 layout effect 挂上，用它找到所在的对话框。
+// 标记元素的 ref 先于本组件的 layout effect 挂上，用它找到所在的对话框（弹层内容直接挂在弹层上）。
 // 调用方自己声明 finalFocus 时不会取走登记的交接目标；弹层内容卸载（关闭）时丢弃，
 // 避免留给之后的对话框。该组件随弹层挂载与卸载，不随外层 DialogContent。
+// 不是 DialogContent 的弹层（验收看板，#425）也把它放进自己的弹层里复用同一时序。
 function OutsideFocusRelease({ returnTarget, discardHandoff }: { returnTarget: React.RefObject<HTMLElement | null>; discardHandoff: boolean }) {
   const marker = React.useRef<HTMLSpanElement | null>(null)
   React.useLayoutEffect(() => {
@@ -205,4 +206,5 @@ export {
   DialogPortal,
   DialogTitle,
   DialogTrigger,
+  OutsideFocusRelease,
 }

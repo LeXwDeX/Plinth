@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { AssetListBoard } from '@/components/studio/asset-list-board';
+import { inputAssetPath } from '@/lib/asset-lists/board';
 import { AssetListError, type AssetListBoard as AssetListBoardData, type AssetListBoardItem, type AssetListClient } from '@/lib/asset-lists/client';
 import { schemaText, type ProductSchema } from '@/lib/product-schema';
 import { useInlineModelPreviewStore } from '@/store/inline-model-preview-store';
@@ -202,6 +203,35 @@ function renderBoard(
   );
   return { getBoard };
 }
+
+/**
+ * #425: the board is a modal dialog opened by a button on a card, not by a
+ * DialogTrigger, so the dialog behaviour is exercised through the real store
+ * path (open on the button, close with the dialog's own controls).
+ */
+function BoardHarness({ value, pollIntervalMs }: { value: AssetListBoardData; pollIntervalMs?: number }) {
+  const assetBoard = useStudioStore((state) => state.assetBoard);
+  const client = useMemo(() => clientWith(vi.fn(async () => value)), [value]);
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="board-trigger"
+        onClick={() => useStudioStore.getState().openAssetBoard({
+          projectId: 'proj', listId: 'listid', title: '英雄套装',
+        })}
+      >
+        打开看板
+      </button>
+      {assetBoard ? (
+        <AssetListBoard target={assetBoard} schema={schema} client={client} pollIntervalMs={pollIntervalMs} />
+      ) : null}
+    </>
+  );
+}
+
+/** 44px in the project's spacing scale: min-h-11 / size-11 on every control. */
+const HIT_AREA = /\b(min-h-11|size-11|h-11)\b/;
 
 beforeEach(() => {
   saved.calls = [];
@@ -723,5 +753,128 @@ describe('AssetListBoard board actions (#329d)', () => {
     // The last read returned a completed run, so the interval is gone.
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(getBoard).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * #425: the board is a modal dialog. What needs real layout (the 44px hit areas
+ * themselves, the browser's own Tab movement) is measured in a browser; here we
+ * pin the dialog contract, the class contract behind the hit area, the default
+ * 5s poll and the original-picture comparison. jsdom has no layout and no
+ * sequential focus navigation, so the Tab test focuses the dialog's own focus
+ * guards the way a browser would.
+ */
+describe('AssetListBoard dialog behaviour (#425)', () => {
+  it('opens as a modal dialog: the close button takes the focus and the page behind is hidden', async () => {
+    const { container } = render(<BoardHarness value={boardFixture()} />);
+    fireEvent.click(screen.getByTestId('board-trigger'));
+
+    const board = await waitFor(() => screen.getByTestId('asset-list-board'));
+    expect(board.getAttribute('role')).toBe('dialog');
+    expect(board.getAttribute('aria-modal')).toBe('true');
+    expect(board.getAttribute('aria-label')).toBe(text('ui.asset_list.board.title'));
+    // The close button is the initial focus, so the dialog is not entered by tabbing.
+    await waitFor(() => expect(screen.getByTestId('asset-board-close')).toBe(document.activeElement));
+    // The page behind is aria-hidden while the dialog is open.
+    expect(container.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('traps Tab in the dialog and hands the focus back to the opener when it closes', async () => {
+    // jsdom does not run layout, so every element is reported as visible here;
+    // that is what makes Base UI's tabbable list behave like a browser's.
+    vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue(
+      [{ width: 8, height: 8, top: 0, left: 0, right: 8, bottom: 8, x: 0, y: 0, toJSON: () => ({}) }] as unknown as DOMRectList,
+    );
+    const { container } = render(<BoardHarness value={boardFixture()} />);
+    const trigger = screen.getByTestId('board-trigger');
+    // jsdom does not focus on click, and the dialog must remember the opener.
+    trigger.focus();
+    fireEvent.click(trigger);
+    await waitFor(() => expect(screen.getByTestId('asset-board-close')).toBe(document.activeElement));
+
+    // A browser moves the focus onto the guards that sit before and after the
+    // dialog content; each one wraps to the far end of the content.
+    const board = screen.getByTestId('asset-list-board');
+    const guards = Array.from(document.querySelectorAll<HTMLElement>('[data-base-ui-focus-guard]'));
+    expect(guards).toHaveLength(2);
+    guards[1].focus();
+    await waitFor(() => expect(screen.getByTestId('asset-board-filter-all')).toBe(document.activeElement));
+    const last = Array.from(board.querySelectorAll<HTMLButtonElement>('button')).at(-1);
+    guards[0].focus();
+    await waitFor(() => expect(last).toBe(document.activeElement));
+    // The page behind never gets the focus back.
+    expect(container.getAttribute('aria-hidden')).toBe('true');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('asset-list-board')).toBeNull());
+    // The dialog returns the focus to the button that opened it.
+    await waitFor(() => expect(trigger).toBe(document.activeElement));
+  });
+
+  it('closes the detail drawer first and keeps the dialog open on the same Escape', async () => {
+    render(<BoardHarness value={boardFixture()} />);
+    fireEvent.click(screen.getByTestId('board-trigger'));
+    await waitFor(() => expect(screen.getByTestId('asset-board-cell-item-2d')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('asset-board-cell-item-2d'));
+    expect(await screen.findByTestId('asset-board-detail')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(screen.queryByTestId('asset-board-detail')).toBeNull();
+    expect(screen.getByTestId('asset-list-board')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('asset-list-board')).toBeNull());
+  });
+
+  it('gives every control in the board a 44px hit area', async () => {
+    renderBoard(boardFixture());
+    await waitFor(() => expect(screen.getByTestId('asset-board-grid')).toBeTruthy());
+
+    const board = screen.getByTestId('asset-list-board');
+    const controls = Array.from(board.querySelectorAll<HTMLButtonElement>('button'));
+    // Header, actions and every cell: no control is a small icon-only target.
+    expect(controls.length).toBeGreaterThan(10);
+    for (const control of controls) {
+      expect(control.className).toMatch(HIT_AREA);
+    }
+    // The per-item checkbox is a 16px box inside a label that is the 44px target.
+    const checkbox = screen.getByTestId('asset-board-select-item-2d');
+    expect(checkbox.closest('label')?.className).toMatch(HIT_AREA);
+  });
+
+  it('re-reads every five seconds while the list produces, without a test seam', async () => {
+    vi.useFakeTimers();
+    const running = withRun(boardFixture(), 'running');
+    const getBoard = vi.fn(async () => running);
+    renderBoard(running, { getBoard });
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(getBoard).toHaveBeenCalledTimes(1);
+
+    // The default interval is the documented five seconds.
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
+    expect(getBoard).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(getBoard).toHaveBeenCalledTimes(2);
+  });
+
+  it('lays every crop box on the original picture, not on the preview or the result', async () => {
+    renderBoard(compareBoard());
+    await waitFor(() => expect(screen.getByTestId('asset-board-compare-toggle')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('asset-board-compare-toggle'));
+
+    // The original the items were cropped from, at its own address: no preview
+    // query, and not a result cover.
+    const source = await waitFor(() => screen.getByTestId('asset-board-compare-source-input_1'));
+    const src = source.getAttribute('src');
+    expect(src).toBe(inputAssetPath(schema, 'input_1'));
+    expect(src).not.toContain('size=preview');
+
+    // Both boxes are drawn inside that same picture, so their percentages are
+    // percentages of the original.
+    for (const id of ['crop-accepted', 'crop-review']) {
+      const box = screen.getByTestId(`asset-board-compare-box-${id}`);
+      expect(source.parentElement?.contains(box)).toBe(true);
+    }
   });
 });
