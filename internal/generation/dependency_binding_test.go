@@ -116,7 +116,7 @@ func TestPrivateBindingPrepareSubmitAndLeaseRejectMutationBeforeDispatch(t *test
 			port := &changingPrivateBinding{dependencyProjection: dependencyProjection{job: job}, binding: json.RawMessage(`{"candidate":"a"}`)}
 			offering := Offering{ID: "build", Revision: "new", ProviderID: "meshy", Capability: Rigging, Parameters: []Parameter{{Name: "source", Type: "task", SameSession: true, TaskSourceBinding: "provider", Required: true, SameProvider: true, TaskOfferings: []OfferingID{"prototype"}}}}
 			registry := &dependencySourceRegistry{port: port}
-			m, err := New(Dependencies{Repository: repo, Catalog: assetDependencyCatalog{offering: offering}, Providers: registry, Assets: &taskAssetReadStore{body: "unused"}})
+			m, err := New(Dependencies{Conversions: NoConversions, Repository: repo, Catalog: assetDependencyCatalog{offering: offering}, Providers: registry, Assets: &taskAssetReadStore{body: "unused"}})
 			if err != nil {
 				t.Fatal(err)
 			}

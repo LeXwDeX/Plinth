@@ -155,7 +155,8 @@ func TestTaskExistenceDoesNotConvertStorageFailureToAbsence(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			module, err := generation.New(generation.Dependencies{
-				Repository: test.repo, Catalog: product, Providers: providers.NewRegistry(), Assets: h.assets,
+				Conversions: generation.NoConversions,
+				Repository:  test.repo, Catalog: product, Providers: providers.NewRegistry(), Assets: h.assets,
 			})
 			if err != nil {
 				t.Fatal(err)

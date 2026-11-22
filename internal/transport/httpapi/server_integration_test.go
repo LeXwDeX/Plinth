@@ -1526,12 +1526,13 @@ func newHTTPHarnessWithCatalogAndProviders(
 		}
 	}
 	module, err := generation.New(generation.Dependencies{
-		Repository: repository,
-		Catalog:    taskCatalog,
-		Providers:  registry,
-		Assets:     store,
-		Inputs:     generationInputs,
-		Cache:      cacheService,
+		Conversions: generation.NoConversions,
+		Repository:  repository,
+		Catalog:     taskCatalog,
+		Providers:   registry,
+		Assets:      store,
+		Inputs:      generationInputs,
+		Cache:       cacheService,
 		// As the application sets it: the Schema's in-flight limit per person.
 		PerOwnerMaxInflightTasks: applicationSchema.Runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks,
 	})

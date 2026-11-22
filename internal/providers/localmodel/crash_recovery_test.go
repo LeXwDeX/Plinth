@@ -97,7 +97,7 @@ func TestLocalSubmittingCrashSafelyRecomputesWithoutAnotherAttempt(t *testing.T)
 				if err = registry.Register(forward.AdapterKey, port); err != nil {
 					t.Fatal(err)
 				}
-				module, err := generation.New(generation.Dependencies{Repository: repo, Catalog: fixture, Providers: registry, Assets: blobs, Inputs: native, Clock: clock})
+				module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: fixture, Providers: registry, Assets: blobs, Inputs: native, Clock: clock})
 				if err != nil {
 					t.Fatal(err)
 				}

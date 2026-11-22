@@ -193,7 +193,7 @@ func runRigReport(t *testing.T, kind string) {
 		if err := registry.Register(check.AdapterKey, port); err != nil {
 			t.Fatal(err)
 		}
-		module, err = generation.New(generation.Dependencies{Repository: repository, Catalog: catalog, Providers: registry, Assets: &rigReportStore{AssetStore: blobs, fail: kind == "cas-failure"}, Clock: clock, SchemaVersion: "rig-report-test"})
+		module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: catalog, Providers: registry, Assets: &rigReportStore{AssetStore: blobs, fail: kind == "cas-failure"}, Clock: clock, SchemaVersion: "rig-report-test"})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -148,7 +148,7 @@ func TestPrivateSourceBindingSurvivesSQLiteDeliveryApprovalAndRestart(t *testing
 	}
 	h.repository = reopened
 	reopened.SetClock(h.clock.Now)
-	h.module, err = generation.New(generation.Dependencies{Repository: reopened, Catalog: c, Providers: registry, Assets: h.assets, Inputs: h.inputs, Clock: h.clock})
+	h.module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: reopened, Catalog: c, Providers: registry, Assets: h.assets, Inputs: h.inputs, Clock: h.clock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestPrivateSourceBindingSurvivesSQLiteDeliveryApprovalAndRestart(t *testing
 	if _, err := h.module.GetPreparedInput(ctx, "foreign", prepared.ID); !generation.IsCode(err, generation.ErrNotFound) {
 		t.Fatal("foreign prepared visible")
 	}
-	bad, err := generation.New(generation.Dependencies{Repository: reopened, Catalog: c, Providers: registry, Assets: changedBindingReadStore{h.assets}, Inputs: h.inputs, Clock: h.clock})
+	bad, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: reopened, Catalog: c, Providers: registry, Assets: changedBindingReadStore{h.assets}, Inputs: h.inputs, Clock: h.clock})
 	if err != nil {
 		t.Fatal(err)
 	}

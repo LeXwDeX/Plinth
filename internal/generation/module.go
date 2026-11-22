@@ -48,7 +48,10 @@ type Dependencies struct {
 	// Offering's limits before they are resolved and frozen (#276).
 	InputFitter InputFitter
 	// Conversions recognizes the Product Schema's declared format
-	// conversions. Nil disables local delivery completion.
+	// conversions. It is required (New rejects nil): without it the kernel
+	// cannot tell a paid format conversion from an ordinary Task, and the
+	// duplicate-conversion guard silently fails open (#467). A Product Schema
+	// without conversions passes NoConversions.
 	Conversions DeliveryConversionRule
 	// SubmissionGate is the kernel paid-gate fallback (#328 §2.5.5). It is
 	// consulted only when a Task would be newly created; nil allows every
@@ -109,6 +112,11 @@ func New(deps Dependencies) (*Module, error) {
 		return nil, errors.New("generation: 缺少 ProviderRegistry")
 	case deps.Assets == nil:
 		return nil, errors.New("generation: 缺少 AssetStore")
+	case deps.Conversions == nil:
+		// 转换识别规则是必需依赖：缺失时内核无法判断一个 Task 是否是付费
+		// 格式转换，重复提交守卫会静默失效（#467）。声明“无转换”的
+		// Product Schema 必须显式传 NoConversions，而不是留空。
+		return nil, errors.New("generation: 缺少 Conversions")
 	}
 	if deps.Clock == nil {
 		deps.Clock = systemClock{}
@@ -289,11 +297,20 @@ func (m *Module) Submit(ctx context.Context, cmd SubmitCommand) (Accepted, error
 // without the guard cannot admit the conversion, because an unprotected first
 // check would race another submission. Ordinary Tasks keep the existing Create
 // path.
+//
+// Whether the Task is a declared conversion is decided here, from the frozen
+// Offering and input, not from the caller's Task.Conversion: a caller that
+// forgets the marker must not turn the guard off (#467). A caller-declared
+// intent still counts, so the two only ever meet on the conservative side.
 func (m *Module) createTask(ctx context.Context, task Task, event Event) (Task, bool, error) {
 	if err := m.admitSubmissionGate(ctx, task); err != nil {
 		return Task{}, false, err
 	}
-	if task.Conversion == nil {
+	_, declared := m.declaredConversion(task.Offering, task.Input)
+	if task.Conversion != nil {
+		declared = true
+	}
+	if !declared {
 		return m.repository.Create(ctx, task, event, m.perOwnerMaxInflightTasks)
 	}
 	guarded, ok := m.repository.(ConversionGuardedRepository)

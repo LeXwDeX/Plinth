@@ -222,7 +222,7 @@ func TestFrozenQuoteLabelRenamedSinceFollowsTheLocaleByComponentID(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server.generation, err = generation.New(generation.Dependencies{Repository: repository, Catalog: product, Assets: assets, Providers: providers.NewRegistry()})
+	server.generation, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: product, Assets: assets, Providers: providers.NewRegistry()})
 	if err != nil {
 		t.Fatal(err)
 	}

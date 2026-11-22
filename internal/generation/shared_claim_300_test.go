@@ -347,7 +347,7 @@ func runNarrowSlotTask(t *testing.T, adapter *declaredClaimsAdapter, narrow int6
 		t.Fatal(err)
 	}
 	store := &writeRecordingStore{AssetStore: blobs}
-	module, err := generation.New(generation.Dependencies{Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock})
 	if err != nil {
 		t.Fatal(err)
 	}

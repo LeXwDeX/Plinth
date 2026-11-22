@@ -141,7 +141,7 @@ func TestProcessingPlanMiddleSubmissionRecoveryPersists(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				gateway.Module, err = generation.New(generation.Dependencies{Repository: repo, Catalog: product, Providers: registry, Assets: assets, Inputs: inputs, Clock: clock})
+				gateway.Module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: product, Providers: registry, Assets: assets, Inputs: inputs, Clock: clock})
 				if err != nil {
 					t.Fatal(err)
 				}

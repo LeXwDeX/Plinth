@@ -22,7 +22,7 @@ func TestReviewCreativeTaskSourceSameSessionMustReject(t *testing.T) {
 	}
 	destination := Offering{ID: "build", ProviderID: "meshy", Capability: "creative-lab-build", Parameters: []Parameter{p}}
 	registry := &dependencySourceRegistry{port: &dependencyProjection{job: job}}
-	m, err := New(Dependencies{Repository: repo, Catalog: assetDependencyCatalog{offering: destination}, Providers: registry, Assets: &taskAssetReadStore{body: "unused"}})
+	m, err := New(Dependencies{Conversions: NoConversions, Repository: repo, Catalog: assetDependencyCatalog{offering: destination}, Providers: registry, Assets: &taskAssetReadStore{body: "unused"}})
 	if err != nil {
 		t.Fatal(err)
 	}

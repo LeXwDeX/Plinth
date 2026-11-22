@@ -193,7 +193,7 @@ func runNativeDeliveryCoordinator(t *testing.T, kind string) {
 		if err := registry.Register(processing.AdapterKey, port); err != nil {
 			t.Fatal(err)
 		}
-		module, err = generation.New(generation.Dependencies{Repository: repository, Catalog: nativeDeliveryCatalog{source, processing}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "native.delivery"})
+		module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: nativeDeliveryCatalog{source, processing}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "native.delivery"})
 		if err != nil {
 			t.Fatal(err)
 		}

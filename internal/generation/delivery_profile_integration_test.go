@@ -129,7 +129,7 @@ func TestDeliveryProfileMaterializationPersistsAndRejectsReturnOrRestoredMismatc
 				}
 				store = &profileReturnStore{Store: blobs, mutate: tc.returned}
 				adapter.store = store
-				module, err = generation.New(generation.Dependencies{Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock})
+				module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock})
 				if err != nil {
 					t.Fatal(err)
 				}

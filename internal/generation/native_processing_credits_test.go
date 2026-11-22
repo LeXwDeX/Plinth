@@ -99,7 +99,7 @@ func runNativeProcessingCreditPersistence(t *testing.T, expireLease bool) {
 		if err = registry.Register(processing.AdapterKey, adapter); err != nil {
 			t.Fatal(err)
 		}
-		module, err = generation.New(generation.Dependencies{Repository: repository, Catalog: catalog, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "native-credits-fixture"})
+		module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: catalog, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "native-credits-fixture"})
 		if err != nil {
 			t.Fatal(err)
 		}

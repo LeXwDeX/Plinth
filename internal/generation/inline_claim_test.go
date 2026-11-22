@@ -143,7 +143,7 @@ func TestInlineClaimStorageFootprint(t *testing.T) {
 			if err := registry.Register("openai-images.v1", adapter); err != nil {
 				t.Fatal(err)
 			}
-			module, err := generation.New(generation.Dependencies{Repository: repository, Catalog: catalogValue, Providers: registry, Assets: store})
+			module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: catalogValue, Providers: registry, Assets: store})
 			if err != nil {
 				t.Fatal(err)
 			}

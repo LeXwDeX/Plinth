@@ -177,7 +177,7 @@ func TestAgentParamsOfferingHTTPIsolationAndLegacyCompatibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	module, err := generation.New(generation.Dependencies{Repository: repository, Catalog: taskCatalog, Assets: assets, Providers: providers.NewRegistry()})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: taskCatalog, Assets: assets, Providers: providers.NewRegistry()})
 	if err != nil {
 		t.Fatal(err)
 	}

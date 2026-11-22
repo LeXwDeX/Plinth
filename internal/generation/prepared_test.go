@@ -68,7 +68,8 @@ func preparedModuleWith(t *testing.T, repository generation.Repository, catalogu
 		}
 	}
 	module, err := generation.New(generation.Dependencies{Repository: repository, Catalog: catalogue,
-		Providers: registry, Assets: failingAssetStore{}, Inputs: inputs, SchemaVersion: "catalog-test-v1"})
+		Conversions: generation.NoConversions,
+		Providers:   registry, Assets: failingAssetStore{}, Inputs: inputs, SchemaVersion: "catalog-test-v1"})
 	if err != nil {
 		t.Fatal(err)
 	}

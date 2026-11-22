@@ -33,7 +33,7 @@ func TestInlineRealStoreFailureHasSafeDiagnosticAndNeverResubmits(t *testing.T) 
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	module, err := generation.New(generation.Dependencies{Repository: h.repository, Catalog: product, Providers: registry, Assets: store, Clock: h.clock, Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: h.repository, Catalog: product, Providers: registry, Assets: store, Clock: h.clock, Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}

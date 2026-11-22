@@ -65,7 +65,7 @@ func TestTripoRetargetFollowsTheSkeletonChoiceOfItsSource(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	module, err := generation.New(generation.Dependencies{Repository: repository, Catalog: rigReportCatalog{[]generation.Offering{source, rigV3, animation}}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "retarget-selection-fixture"})
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: rigReportCatalog{[]generation.Offering{source, rigV3, animation}}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "retarget-selection-fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}

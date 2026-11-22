@@ -51,7 +51,8 @@ func TestPreparedManifestMustBeExactProviderInput(t *testing.T) {
 	proof := &manifestOutputProbe{output: generation.PreparedContextOutput{
 		AssetID: a.ID, SHA256: a.SHA256, Size: a.Size}}
 	module, err := generation.New(generation.Dependencies{Repository: h.repository, Catalog: catalogue,
-		Providers: registry, Assets: failingAssetStore{}, Inputs: h.inputs,
+		Conversions: generation.NoConversions,
+		Providers:   registry, Assets: failingAssetStore{}, Inputs: h.inputs,
 		PreparedContext: proof, SchemaVersion: "catalog-test-v1"})
 	if err != nil {
 		t.Fatal(err)

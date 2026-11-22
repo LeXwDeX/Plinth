@@ -434,11 +434,12 @@ func newAcmeHarnessWithTransport(
 		t.Fatal(err)
 	}
 	module, err := generation.New(generation.Dependencies{
-		Repository: repository,
-		Catalog:    taskCatalog,
-		Providers:  registry,
-		Assets:     assetStore,
-		Clock:      clock,
+		Conversions: generation.NoConversions,
+		Repository:  repository,
+		Catalog:     taskCatalog,
+		Providers:   registry,
+		Assets:      assetStore,
+		Clock:       clock,
 	})
 	if err != nil {
 		t.Fatal(err)

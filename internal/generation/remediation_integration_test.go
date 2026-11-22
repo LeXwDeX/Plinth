@@ -173,7 +173,7 @@ func remediationModuleWithClock(t *testing.T, h *harness, repo generation.Reposi
 		taskCatalog = cancelCatalog{Catalog: c}
 	}
 	admissionRepo := preparedAdmissionRepository{Repository: repo, base: h.repository}
-	m, err := generation.New(generation.Dependencies{Repository: admissionRepo, Catalog: taskCatalog, Providers: registry, Assets: assets, Clock: clock, Random: func() float64 { return 0.5 }})
+	m, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: admissionRepo, Catalog: taskCatalog, Providers: registry, Assets: assets, Clock: clock, Random: func() float64 { return 0.5 }})
 	if err != nil {
 		t.Fatal(err)
 	}

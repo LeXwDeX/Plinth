@@ -62,10 +62,11 @@ func TestBranchAncestorTaskIsFrozenUnderTheBranchEffectiveSession(t *testing.T) 
 				repository.allowed[test.session+"\x00source"] = true
 			}
 			module, err := New(Dependencies{
-				Repository: repository,
-				Catalog:    assetDependencyCatalog{offering: destination},
-				Providers:  registry,
-				Assets:     &taskAssetReadStore{body: "unused"},
+				Conversions: NoConversions,
+				Repository:  repository,
+				Catalog:     assetDependencyCatalog{offering: destination},
+				Providers:   registry,
+				Assets:      &taskAssetReadStore{body: "unused"},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -110,10 +111,11 @@ func TestBranchSubmitAcceptsAnAncestorSourceTask(t *testing.T) {
 				repository.allowed[test.session+"\x00source"] = true
 			}
 			module, err := New(Dependencies{
-				Repository: repository,
-				Catalog:    assetDependencyCatalog{offering: destination},
-				Providers:  registry,
-				Assets:     &taskAssetReadStore{body: "unused"},
+				Conversions: NoConversions,
+				Repository:  repository,
+				Catalog:     assetDependencyCatalog{offering: destination},
+				Providers:   registry,
+				Assets:      &taskAssetReadStore{body: "unused"},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -139,10 +141,11 @@ func TestBranchSubmitAcceptsAnAncestorSourceTask(t *testing.T) {
 func TestBranchScopeDoesNotWidenWithoutRefs(t *testing.T) {
 	destination, repository, registry, _ := branchSourceFixture(t)
 	module, err := New(Dependencies{
-		Repository: repository,
-		Catalog:    assetDependencyCatalog{offering: destination},
-		Providers:  registry,
-		Assets:     &taskAssetReadStore{body: "unused"},
+		Conversions: NoConversions,
+		Repository:  repository,
+		Catalog:     assetDependencyCatalog{offering: destination},
+		Providers:   registry,
+		Assets:      &taskAssetReadStore{body: "unused"},
 	})
 	if err != nil {
 		t.Fatal(err)

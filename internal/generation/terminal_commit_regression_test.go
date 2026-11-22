@@ -179,7 +179,7 @@ func TestSubmissionUnknownTerminalCommitSurvivesRenewalCancelAndStaleLease(t *te
 		t.Fatal(err)
 	}
 	admissionRepo := preparedAdmissionRepository{Repository: repo, base: real}
-	m, err := generation.New(generation.Dependencies{Repository: admissionRepo, Catalog: c, Providers: registry, Assets: assets, Clock: clock, Random: func() float64 { return 0.5 }})
+	m, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: admissionRepo, Catalog: c, Providers: registry, Assets: assets, Clock: clock, Random: func() float64 { return 0.5 }})
 	if err != nil {
 		t.Fatal(err)
 	}

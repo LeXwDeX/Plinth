@@ -75,7 +75,8 @@ func TestProviderValidateInputRefusalReachesTheKernel(t *testing.T) {
 		t.Fatal("direct Schema refusal is nil")
 	}
 	module, err := generation.New(generation.Dependencies{
-		Repository: h.repository, Catalog: overriddenOfferingCatalog{Catalog: product, offering: offering},
+		Conversions: generation.NoConversions,
+		Repository:  h.repository, Catalog: overriddenOfferingCatalog{Catalog: product, offering: offering},
 		Providers: registry, Assets: h.assets, Inputs: h.inputs, Clock: h.clock, SchemaVersion: "input-refusal-test",
 	})
 	if err != nil {

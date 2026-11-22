@@ -83,7 +83,7 @@ func TestMeshyScalarMediaTypeMaterializationChecksHTTPAndActualBytes(t *testing.
 			}
 			clock := &fakeClock{now: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)}
 			repository.SetClock(clock.Now)
-			module, err := generation.New(generation.Dependencies{Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "scalar-test"})
+			module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: printReportCatalog{offering}, Providers: registry, Assets: store, Clock: clock, SchemaVersion: "scalar-test"})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -166,7 +166,7 @@ func TestSplatRequiredDeliveryRestartOwnershipAndMeshRejection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			restoredModule, err := generation.New(generation.Dependencies{Repository: repository, Catalog: disabled, Providers: providers.NewRegistry(), Assets: reopened})
+			restoredModule, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: disabled, Providers: providers.NewRegistry(), Assets: reopened})
 			if err != nil {
 				t.Fatal(err)
 			}

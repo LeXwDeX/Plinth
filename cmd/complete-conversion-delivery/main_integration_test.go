@@ -440,7 +440,8 @@ func preparePlanFixtureInput(t *testing.T, f commandFixture, schemaVersion strin
 		t.Fatal(err)
 	}
 	module, err := generation.New(generation.Dependencies{
-		Repository: repository, Catalog: planFixtureCatalog{offering: offering}, Providers: registry,
+		Conversions: generation.NoConversions,
+		Repository:  repository, Catalog: planFixtureCatalog{offering: offering}, Providers: registry,
 		Assets: planFixtureStore{}, Inputs: planFixtureInputs{}, SchemaVersion: schemaVersion,
 	})
 	if err != nil {

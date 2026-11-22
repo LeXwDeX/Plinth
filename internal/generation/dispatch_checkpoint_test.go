@@ -118,13 +118,14 @@ func newCheckpointHarnessWithCatalog(
 	}
 	repository.SetClock(clock.Now)
 	module, err := generation.New(generation.Dependencies{
-		Repository: repository,
-		Catalog:    taskCatalog,
-		Providers:  registry,
-		Assets:     localStore,
-		Inputs:     inputs,
-		Clock:      clock,
-		Cache:      &recordingCache{},
+		Conversions: generation.NoConversions,
+		Repository:  repository,
+		Catalog:     taskCatalog,
+		Providers:   registry,
+		Assets:      localStore,
+		Inputs:      inputs,
+		Clock:       clock,
+		Cache:       &recordingCache{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -921,6 +922,7 @@ func TestDispatchOversizedIntentRejectedBeforeSend(t *testing.T) {
 	}
 	clock := &fakeClock{now: time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)}
 	module, err := generation.New(generation.Dependencies{
+		Conversions:                generation.NoConversions,
 		Repository:                 repository,
 		Catalog:                    taskCatalog,
 		Providers:                  registry,

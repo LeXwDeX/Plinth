@@ -209,7 +209,7 @@ func newAcceptanceTestRig(t *testing.T) *acceptanceTestRig {
 	if err := registry.Register("meshy.v2", mock.New()); err != nil {
 		t.Fatal(err)
 	}
-	r.module, err = generation.New(generation.Dependencies{Repository: r.repo, Catalog: r.product, Providers: registry, Assets: assets, Inputs: inputs, Clock: r.clock})
+	r.module, err = generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: r.repo, Catalog: r.product, Providers: registry, Assets: assets, Inputs: inputs, Clock: r.clock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestAcceptanceDefinitiveStartRetryAndScope(t *testing.T) {
 	if err := registry.Register("meshy.v2", mock.New()); err != nil {
 		t.Fatal(err)
 	}
-	controlled, err := generation.New(generation.Dependencies{Repository: r2.repo, Catalog: r2.product, Providers: acceptanceRegistry{registry, r2.control}, Assets: assets, Inputs: inputs, Clock: r2.clock})
+	controlled, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: r2.repo, Catalog: r2.product, Providers: acceptanceRegistry{registry, r2.control}, Assets: assets, Inputs: inputs, Clock: r2.clock})
 	if err != nil {
 		t.Fatal(err)
 	}

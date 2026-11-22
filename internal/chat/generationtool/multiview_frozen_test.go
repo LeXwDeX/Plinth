@@ -62,7 +62,7 @@ func TestMultiviewRealPreparedInputFreezesOrderBytesAndGrantAcrossRestart(t *tes
 		t.Fatal(err)
 	}
 	moduleFor := func(version string) *generation.Module {
-		m, e := generation.New(generation.Dependencies{Repository: repo, Catalog: c, Inputs: inputs, Assets: blobs, Providers: registry, SchemaVersion: version})
+		m, e := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: c, Inputs: inputs, Assets: blobs, Providers: registry, SchemaVersion: version})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -247,7 +247,7 @@ func TestMultiviewAgentDefaultQuoteUsesManualOrAutomaticGrant(t *testing.T) {
 			if err := registry.Register("meshy.v2", mock.New()); err != nil {
 				t.Fatal(err)
 			}
-			m, err := generation.New(generation.Dependencies{Repository: repo, Catalog: c, Providers: registry, Inputs: inputs, Assets: blobs})
+			m, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repo, Catalog: c, Providers: registry, Inputs: inputs, Assets: blobs})
 			if err != nil {
 				t.Fatal(err)
 			}

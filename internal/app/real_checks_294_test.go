@@ -136,7 +136,8 @@ func newInputAwareHarnessWithInputs(
 		t.Fatal(err)
 	}
 	module, err := generation.New(generation.Dependencies{
-		Repository: repository, Catalog: taskCatalog, Providers: providerRegistry, Assets: assetStore, Inputs: inputs, Clock: clock,
+		Conversions: generation.NoConversions,
+		Repository:  repository, Catalog: taskCatalog, Providers: providerRegistry, Assets: assetStore, Inputs: inputs, Clock: clock,
 	})
 	if err != nil {
 		t.Fatal(err)

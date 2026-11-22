@@ -1113,12 +1113,13 @@ func newConfiguredHarness(
 	repository.SetClock(clock.Now)
 	cache := &recordingCache{}
 	dependencies := generation.Dependencies{
-		Repository: repository,
-		Catalog:    taskCatalog,
-		Providers:  registry,
-		Assets:     store,
-		Clock:      clock,
-		Cache:      cache,
+		Conversions: generation.NoConversions,
+		Repository:  repository,
+		Catalog:     taskCatalog,
+		Providers:   registry,
+		Assets:      store,
+		Clock:       clock,
+		Cache:       cache,
 	}
 	if len(maxInflight) > 0 {
 		dependencies.PerOwnerMaxInflightTasks = maxInflight[0]
