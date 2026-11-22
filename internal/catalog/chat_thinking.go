@@ -39,6 +39,36 @@ func (profile ChatThinkingModelProfile) EffortFor(chosen string) string {
 	return profile.DefaultEffort
 }
 
+// The kinds of request that are not a conversation turn and so take the level
+// turn_efforts declares instead of the session's choice (#382).
+const (
+	// ChatTurnEffortTitle is the first turn's title request.
+	ChatTurnEffortTitle = "title"
+	// ChatTurnEffortSummary is a context compaction's summary request.
+	ChatTurnEffortSummary = "summary"
+	// ChatTurnEffortPromptEnhance is a prompt-enhancer request.
+	ChatTurnEffortPromptEnhance = "prompt_enhance"
+)
+
+// EffortForTurn is the level a request of a kind that is not a conversation
+// turn sends: the level turn_efforts declares for the kind when the profile
+// offers it. A kind it does not name, or one it names with a level it does not
+// offer, sends the profile default, exactly as a session's choice does. Empty
+// when the profile offers no level choice.
+func (profile ChatThinkingModelProfile) EffortForTurn(kind string) string {
+	if !profile.OffersEffort() {
+		return ""
+	}
+	if level, declared := profile.TurnEfforts[kind]; declared {
+		for _, offered := range profile.EffortLevels {
+			if offered == level {
+				return level
+			}
+		}
+	}
+	return profile.DefaultEffort
+}
+
 // Wire is the HTTP API the model family is served on: chat_completions unless
 // the profile declares wire_api responses.
 func (profile ChatThinkingModelProfile) Wire() string {

@@ -193,6 +193,52 @@ func TestEffortForFallsBackToTheProfileDefault(t *testing.T) {
 	}
 }
 
+// #382: a request that is not a conversation turn takes the level the family
+// declares for its kind; a kind it declares nothing for keeps the family
+// default, so the shipped default_catalog.json names low for all three.
+func TestEffortForTurnUsesTheDeclaredLevelPerKind(t *testing.T) {
+	profile := ChatThinkingModelProfile{
+		EffortField:   "reasoning_effort",
+		EffortLevels:  []string{"low", "high", "max"},
+		DefaultEffort: "max",
+		TurnEfforts:   map[string]string{ChatTurnEffortTitle: "low", ChatTurnEffortSummary: "low"},
+	}
+	if got := profile.EffortForTurn(ChatTurnEffortTitle); got != "low" {
+		t.Fatalf("title effort = %q, want low", got)
+	}
+	if got := profile.EffortForTurn(ChatTurnEffortPromptEnhance); got != "max" {
+		t.Fatalf("undeclared kind effort = %q, want the family default max", got)
+	}
+	// A level the family does not offer falls back, as a session's choice does.
+	profile.TurnEfforts[ChatTurnEffortSummary] = "xhigh"
+	if got := profile.EffortForTurn(ChatTurnEffortSummary); got != "max" {
+		t.Fatalf("unoffered level effort = %q, want the family default max", got)
+	}
+	if got := (ChatThinkingModelProfile{}).EffortForTurn(ChatTurnEffortTitle); got != "" {
+		t.Fatalf("a profile without levels sent %q", got)
+	}
+}
+
+// The shipped Catalog declares a level for every kind on every family that
+// offers a level, and none of those levels is missing from its own levels.
+func TestDefaultCatalogDeclaresTurnEfforts(t *testing.T) {
+	product, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := product.Application().Chat.Agent.Thinking.ModelProfiles
+	if len(profiles) == 0 {
+		t.Fatal("the default Catalog declares no thinking profile")
+	}
+	for _, profile := range profiles {
+		for _, kind := range []string{ChatTurnEffortTitle, ChatTurnEffortSummary, ChatTurnEffortPromptEnhance} {
+			if profile.EffortForTurn(kind) == "" {
+				t.Fatalf("%v declares no level for %s", profile.ModelPrefixes, kind)
+			}
+		}
+	}
+}
+
 func TestLoadValidatesThinkingLevelsAndWindows(t *testing.T) {
 	profile := func(fields string) func(map[string]any) {
 		return func(document map[string]any) {
@@ -220,6 +266,8 @@ func TestLoadValidatesThinkingLevelsAndWindows(t *testing.T) {
 		{name: "reserved field", profiles: `[{"model_prefixes":["d"],"effort_field":"temperature","effort_levels":["low"],"default_effort":"low"}]`, wantError: "temperature"},
 		{name: "stream options reserved", profiles: `[{"model_prefixes":["d"],"request_fields":{"stream_options":{"include_usage":true}}}]`, wantError: "stream_options"},
 		{name: "field also fixed", profiles: `[{"model_prefixes":["d"],"request_fields":{"reasoning_effort":"low"},"effort_field":"reasoning_effort","effort_levels":["low"],"default_effort":"low"}]`, wantError: "reasoning_effort"},
+		{name: "turn effort not offered", profiles: `[{"model_prefixes":["d"],"effort_field":"reasoning_effort","effort_levels":["low"],"default_effort":"low","turn_efforts":{"title":"xhigh"}}]`, wantError: "turn_efforts"},
+		{name: "turn effort declared", profiles: `[{"model_prefixes":["d"],"effort_field":"reasoning_effort","effort_levels":["low"],"default_effort":"low","turn_efforts":{"title":"low"}}]`},
 		{name: "negative window", profiles: `[{"model_prefixes":["d"],"context_window_tokens":-1}]`, wantError: "context_window_tokens"},
 		{name: "shadowed prefix", profiles: `[{"model_prefixes":["qwen"],"context_window_tokens":1},{"model_prefixes":["qwen3.8"],"context_window_tokens":2}]`, wantError: "qwen3.8"},
 		{name: "longer prefix first", profiles: `[{"model_prefixes":["qwen3.8"],"context_window_tokens":2},{"model_prefixes":["qwen"],"context_window_tokens":1}]`},

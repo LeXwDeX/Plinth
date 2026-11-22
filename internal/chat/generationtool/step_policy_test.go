@@ -203,7 +203,7 @@ func TestAgentToolStepsCapRefusesTheStepOverTheCapWithTheSchemaText(t *testing.T
 	if err != nil || refused.Suspend || !refused.NoSubmission || gateway.submitCount != 1 {
 		t.Fatalf("the step over the cap: %+v submits=%d err=%v", refused, gateway.submitCount, err)
 	}
-	const want = "这个资产的 3D 步数已用完（已用 1 步，上限 1 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。"
+	const want = "这个资产的 3D 步数已用完（已用 1 步，上限 1 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户可以在顶栏的「3D 步数」里调高步数上限后再继续。"
 	if text := agentError(t, refused); text != want || refused.Error != want {
 		t.Fatalf("step-cap text = %q (error %q)", text, refused.Error)
 	}
@@ -273,7 +273,10 @@ func TestAgentToolStepsCapTextFollowsTheTurnLocale(t *testing.T) {
 	if err != nil || !refused.NoSubmission {
 		t.Fatalf("refused: %+v err=%v", refused, err)
 	}
-	const want = "This asset has used all of its 3D steps (1 used, cap 1); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in their account settings to continue."
+	// #383 moved the step-cap entry from the account settings to the top-bar
+	// "3D steps" control, so the English text now names that place; the rest of
+	// the refusal is unchanged.
+	const want = "This asset has used all of its 3D steps (1 used, cap 1); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in \"3D steps\" in the top bar to continue."
 	if text := agentError(t, refused); text != want {
 		t.Fatalf("english text = %q", text)
 	}

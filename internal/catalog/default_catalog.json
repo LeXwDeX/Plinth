@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.381-409.1",
+    "revision": "2026-11-22.382-383.1",
     "terminology": {
       "user_facing": [
         {
@@ -4890,7 +4890,6 @@
         "ui.studio.agent_scope.desc_auto": "按你的要求自选 2D 或 3D，含图片转 3D",
         "ui.studio.agent_scope.note": "切换只影响之后的消息；已经提交的任务和等待批准的步骤不受影响。",
         "ui.studio.agent_scope.change_failed": "切换 Agent 模式失败，请重试",
-        "ui.studio.agent_scope.picker_disabled": "当前是「{mode}」，这个模型选择器已停用。切换到允许的模式后再选。",
         "ui.studio.reasoning.label": "思考强度",
         "ui.studio.reasoning.hint": "档位越高，思考越久、token 越多",
         "ui.studio.reasoning.col.level": "档位",
@@ -5933,7 +5932,7 @@
         "guidance": "判断指引：结果已经达标就停，交付当前结果；未达标时先看有没有补救路线、补救要几步、余额够不够；补救无望或不值得时停下，如实告诉用户哪里没达标、为什么停，不要为了凑结果反复重做。界面按步数显示进度，不按积分。"
       },
       "messages": {
-        "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。",
+        "cap_reached": "这个资产的 3D 步数已用完（已用 {used} 步，上限 {cap} 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户可以在顶栏的「3D 步数」里调高步数上限后再继续。",
         "extra_steps_limit": "每个资产最多追加 {maximum} 步，这次要求 {extra} 步；不能再多了。",
         "extra_steps_single_limit": "一次最多追加 {maximum} 步。",
         "extra_steps_unavailable": "这个资产还没有开始制作，现在不能追加步数。"
@@ -6572,6 +6571,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "xhigh"],
               "default_effort": "xhigh",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "context_window_tokens": 1000000
             },
             {
@@ -6581,6 +6585,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high", "xhigh", "max"],
               "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "omit_temperature": true,
               "wire_api": "responses"
             },
@@ -6590,7 +6599,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high", "xhigh", "max"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6598,7 +6612,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6606,7 +6625,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6614,7 +6638,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6622,7 +6651,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6630,7 +6664,12 @@
               ],
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "high"],
-              "default_effort": "high"
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6644,6 +6683,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "high", "max"],
               "default_effort": "low",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "context_window_tokens": 1000000,
               "reasoning_passback": true,
               "dsml_tool_calls": true
@@ -6658,6 +6702,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "xhigh"],
               "default_effort": "xhigh",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "context_window_tokens": 1000000
             },
             {
@@ -6669,7 +6718,12 @@
               },
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "medium", "xhigh"],
-              "default_effort": "xhigh"
+              "default_effort": "xhigh",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              }
             },
             {
               "model_prefixes": [
@@ -6694,6 +6748,11 @@
               "effort_field": "reasoning_effort",
               "effort_levels": ["low", "high", "max"],
               "default_effort": "max",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
               "stream_include_usage": false,
               "reasoning_passback": true
             }
@@ -8096,10 +8155,20 @@
         {
           "name": "list_offerings",
           "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "List available capabilities and offerings to understand supported generation paths. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why. A processing offering may declare max_source_triangles, the most triangles its source model may have; an offering whose request sets the delivered triangle count (remesh) lists chain_limits for the later steps that limit their source: compatible gives, per topology, the largest target face count that still fits. When you plan a chain such as remesh then rigging, set the earlier step's topology and target face count within chain_limits[].compatible; the default settings may exceed it, and a plan over a later step's limit is refused before any step is paid. An offering's description, when present, says what the step keeps or changes (for example textures or model size); read it before choosing or chaining a processing step. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown.",
+          "description": "List the capabilities and offerings available now. With no argument it lists only capability, domain and each offering's offering_id and model_id; pass capability (a capability id such as text-to-3d or image-to-image) to get that capability's offerings with their description, knowledge, inputs and prices, and model to get only the offerings of one model_id. Read the detail before you choose or chain a model: a processing offering's description says what the step keeps or changes (for example textures or model size), max_source_triangles is the most triangles its source model may have, and chain_limits gives, per topology, the largest target face count a later step still accepts. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why.",
           "parameters": {
             "type": "object",
-            "properties": {}
+            "properties": {
+              "capability": {
+                "type": "string",
+                "description": "One capability id to list in full (for example text-to-3d, image-to-image, background-removal); omit it to list every capability with ids only."
+              },
+              "model": {
+                "type": "string",
+                "description": "One model_id to list; omit it to list every model."
+              }
+            },
+            "additionalProperties": false
           }
         },
         {
@@ -9110,7 +9179,7 @@
             "cancellation": "task",
             "agent_scope": "3d"
           },
-          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -9405,7 +9474,7 @@
             "retexture",
             "format-conversion"
           ],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -19169,7 +19238,6 @@
             "ui.studio.agent_scope.desc_auto": "Chooses 2D or 3D based on your request, including image to 3D",
             "ui.studio.agent_scope.note": "Switching only affects later messages; tasks already submitted and steps awaiting approval are not affected.",
             "ui.studio.agent_scope.change_failed": "Couldn't switch Agent mode. Please retry.",
-            "ui.studio.agent_scope.picker_disabled": "The current mode is \"{mode}\", so this model picker is disabled. Switch to an allowed mode before choosing.",
             "ui.studio.reasoning.label": "Thinking",
             "ui.studio.reasoning.hint": "Higher levels think longer and use more tokens",
             "ui.studio.reasoning.col.level": "Level",
@@ -20954,7 +21022,7 @@
             "step_policy.modes[value=agent].label": "Managed by the Agent",
             "step_policy.modes[value=unlimited].label": "Unlimited steps",
             "step_policy.modes[value=cap].label": "Limit steps",
-            "step_policy.messages.cap_reached": "This asset has used all of its 3D steps ({used} used, cap {cap}); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in their account settings to continue.",
+            "step_policy.messages.cap_reached": "This asset has used all of its 3D steps ({used} used, cap {cap}); this step was not run. Do not submit more 3D steps. Tell the user the step cap was reached; they can raise it in \"3D steps\" in the top bar to continue.",
             "step_policy.messages.extra_steps_limit": "One asset may be granted at most {maximum} extra steps; this request asks for {extra}. That is the most it can take.",
             "step_policy.messages.extra_steps_single_limit": "At most {maximum} steps may be added in one submission.",
             "step_policy.messages.extra_steps_unavailable": "This asset has not started yet, so it cannot be given more steps.",
@@ -21453,8 +21521,8 @@
             "chat.agent.refetch_unavailable_content.repeated_failure": "fetching this result again already failed for exactly the same reason as the task itself ({cause}). A refetch reuses the settings the task was generated with and the same provider result, so another try would fail the same way; it is no longer offered. Tell the user plainly why the result cannot be recovered; a new generation would charge again and needs their explicit decision. Do not call recover_task_result again for this task",
             "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task or observe_task on it), and do not call recover_task_result again for this task",
             "chat.agent_scope.mock_refusal": "The current mode does not allow this request (it needs {tool}); this step is currently unavailable and cannot be done.",
-            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
-            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in both modes, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=refine_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",

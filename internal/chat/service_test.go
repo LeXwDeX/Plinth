@@ -1447,6 +1447,49 @@ func (r *memoryChatRepository) UpdateTurnState(
 	return nil
 }
 
+func (r *memoryChatRepository) ListSessionTurnIDs(
+	_ context.Context,
+	ownerID string,
+	sessionID string,
+	states []string,
+) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	allowed := map[string]bool{}
+	for _, state := range states {
+		allowed[state] = true
+	}
+	var result []string
+	for _, turn := range r.turns {
+		if turn.OwnerID != ownerID || turn.SessionID != sessionID || !allowed[turn.State] {
+			continue
+		}
+		result = append(result, turn.AssistantMessageID)
+	}
+	return result, nil
+}
+
+func (r *memoryChatRepository) FinishTurn(
+	_ context.Context,
+	assistantMessageID string,
+	state string,
+	endReason string,
+	updatedAt time.Time,
+) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	turn, found := r.turns[assistantMessageID]
+	if !found {
+		return chat.ErrMessageNotFound
+	}
+	turn.State = state
+	turn.EndReason = endReason
+	turn.UpdatedAt = updatedAt
+	turn.Checkpoint = turn.Checkpoint.WithoutRequests()
+	r.turns[assistantMessageID] = turn
+	return nil
+}
+
 func (r *memoryChatRepository) RequestTurnStop(
 	_ context.Context, ownerID, sessionID string, states []string, updatedAt time.Time,
 ) (chat.Turn, bool, error) {

@@ -112,10 +112,13 @@ type Config struct {
 	Offerings func() []generation.Offering
 	// Context carries the attachment handle syntax and its refusal wording;
 	// create_three_view accepts handles beside history indices.
-	Context    catalog.ChatContextSchema
-	Params     *agentparams.Store
-	Generate   chat.ToolExecutor
-	Projection func() json.RawMessage
+	Context  catalog.ChatContextSchema
+	Params   *agentparams.Store
+	Generate chat.ToolExecutor
+	// Projection is the list_offerings view (#382): capability and model narrow
+	// it ("" for both: every capability with ids only); a request without the
+	// new arguments still reads the ids-only default.
+	Projection func(capability, model string) json.RawMessage
 	// HistoryLookup bounds and words find_history_images (Product Schema
 	// chat.context); a policy without a bound leaves the tool unavailable.
 	HistoryLookup chat.HistoryLookupPolicy
@@ -259,7 +262,7 @@ type Executor struct {
 	generate              chat.ToolExecutor
 	preflight             func(command chat.ToolCommand) string
 	submissionGate        func(ctx context.Context, command chat.ToolCommand) string
-	projection            func() json.RawMessage
+	projection            func(capability, model string) json.RawMessage
 	historyLookup         chat.HistoryLookupPolicy
 	readTask              func(ctx context.Context, ownerID, taskID string) (json.RawMessage, error)
 	recoverTask           func(ctx context.Context, ownerID, sessionID, taskID string) (json.RawMessage, error)
@@ -466,7 +469,7 @@ func (e *Executor) Execute(
 	case ToolSetParams:
 		return e.setParams(command), nil
 	case ToolListOfferings:
-		return e.listOfferings(), nil
+		return e.listOfferings(command), nil
 	case ToolGetTask, ToolObserveTask:
 		return e.readTaskState(ctx, command), nil
 	case ToolRecoverTaskResult:
@@ -614,11 +617,25 @@ func (e *Executor) setParams(command chat.ToolCommand) chat.ToolResult {
 	return chat.ToolResult{AgentContent: "parameters updated"}
 }
 
-func (e *Executor) listOfferings() chat.ToolResult {
+func (e *Executor) listOfferings(command chat.ToolCommand) chat.ToolResult {
 	if e.projection == nil {
 		return chat.ToolResult{Error: "offerings projection unavailable"}
 	}
-	return chat.ToolResult{AgentContent: string(e.projection())}
+	// #382: the model asks for the one capability or the one model it is
+	// choosing between; without an argument it gets the ids-only view, so a
+	// round-trip does not carry every offering's knowledge and inputs.
+	var args struct {
+		Capability string `json:"capability"`
+		Model      string `json:"model"`
+	}
+	if len(command.Call.Arguments) > 0 {
+		if err := json.Unmarshal(command.Call.Arguments, &args); err != nil {
+			return chat.ToolResult{Error: "invalid list_offerings arguments"}
+		}
+	}
+	return chat.ToolResult{
+		AgentContent: string(e.projection(args.Capability, args.Model)),
+	}
 }
 
 // readTaskState 只读查询，不把被查询 Task 绑定到本次工具调用：TaskID

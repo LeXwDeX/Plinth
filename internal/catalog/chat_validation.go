@@ -2466,7 +2466,8 @@ func validateChatResponsesWire(agent ChatAgentSchema) error {
 // profile's own (not a reserved or fixed field), the levels are distinct
 // non-blank vendor values and the default is one of them.
 func validateThinkingEffort(index int, profile ChatThinkingModelProfile) error {
-	if profile.EffortField == "" && len(profile.EffortLevels) == 0 && profile.DefaultEffort == "" {
+	if profile.EffortField == "" && len(profile.EffortLevels) == 0 &&
+		profile.DefaultEffort == "" && len(profile.TurnEfforts) == 0 {
 		return nil
 	}
 	switch {
@@ -2494,6 +2495,17 @@ func validateThinkingEffort(index int, profile ChatThinkingModelProfile) error {
 	}
 	if !levels[profile.DefaultEffort] {
 		return fmt.Errorf("agent.thinking.model_profiles[%d] 的 default_effort %q 不在 effort_levels 里", index, profile.DefaultEffort)
+	}
+	// A kind declared without levels would silently do nothing, and one naming
+	// a level the family does not offer would silently fall back (#382).
+	for kind, level := range profile.TurnEfforts {
+		switch {
+		case kind == "":
+			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts 含空回合类型", index)
+		case !levels[level]:
+			return fmt.Errorf("agent.thinking.model_profiles[%d] 的 turn_efforts[%s] = %q 不在 effort_levels 里",
+				index, kind, level)
+		}
 	}
 	return nil
 }

@@ -108,9 +108,12 @@ func (store *memoryContextStore) ListCompactions(_ context.Context, owner, sessi
 // contextAgent answers every turn with one line and the usage the test sets;
 // it records the requests, and answers summary calls with summary (or fails).
 type contextAgent struct {
-	mu         sync.Mutex
-	streams    []agents.Request
-	summaries  []agents.Request
+	mu        sync.Mutex
+	streams   []agents.Request
+	summaries []agents.Request
+	// titles are the requests that were neither a turn nor a summary: the
+	// first turn's title (#382).
+	titles     []agents.Request
 	usage      *agents.Usage
 	summary    string
 	summaryErr error
@@ -136,6 +139,7 @@ func (agent *contextAgent) Complete(_ context.Context, request agents.Request) (
 	agent.mu.Lock()
 	defer agent.mu.Unlock()
 	if request.Purpose != agents.PurposeSummary {
+		agent.titles = append(agent.titles, request)
 		return agents.Completion{Content: "title"}, nil
 	}
 	agent.summaries = append(agent.summaries, request)
@@ -199,7 +203,10 @@ func newContextFixtureWith(t *testing.T, policy chat.ModelPolicy, mutate func(*c
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := service.CreateSession(context.Background(), "owner-a", "Owner", "chat")
+	// A fresh session has no title of its own, so it stays TitleSourcePending
+	// and the first turn generates one (#382). Passing a title here would make
+	// the person the author of the title and skip the title call entirely.
+	session, err := service.CreateSession(context.Background(), "owner-a", "Owner", "")
 	if err != nil {
 		t.Fatal(err)
 	}

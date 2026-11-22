@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
 // Context compaction (#322). See context.go for the round and the summary.
@@ -39,6 +40,18 @@ func (orchestrator *Orchestrator) turnChatModel(options TurnOptions) turnModel {
 		return turnModel{name: orchestrator.model}
 	}
 	return turnModel{connection: options.ModelConnection, name: options.Model}
+}
+
+// turnEffort is the thinking level a request of a kind that is not a
+// conversation turn sends: the level the model family's profile declares for
+// that kind in chat.agent.thinking.turn_efforts (#382). The title, the
+// compaction summary and the prompt enhancer run beside the turn, not for the
+// person's turn, so they do not take the level the session chose; a model
+// whose profile declares nothing for the kind keeps its own default, exactly
+// as an undeclared session choice does.
+func (orchestrator *Orchestrator) turnEffort(model, kind string) string {
+	profile, _ := orchestrator.schema.Agent.Thinking.ProfileFor(model)
+	return profile.EffortForTurn(kind)
 }
 
 // contextMessage reports whether a stored message enters the Agent context:
@@ -133,7 +146,7 @@ func (orchestrator *Orchestrator) CompactContext(ctx context.Context, ownerID, s
 		return ContextView{}, err
 	}
 	// The summary runs on the model the session's next turn would use.
-	model, effort, err := orchestrator.service.TurnModel(ctx, ownerID, sessionID)
+	model, _, err := orchestrator.service.TurnModel(ctx, ownerID, sessionID)
 	if err != nil {
 		return ContextView{}, err
 	}
@@ -141,7 +154,7 @@ func (orchestrator *Orchestrator) CompactContext(ctx context.Context, ownerID, s
 		model.Model = orchestrator.model
 	}
 	if _, err := orchestrator.compactHistory(ctx, ownerID, sessionID, history, state,
-		CompactionManual, turnModel{connection: model.ID, name: model.Model}, effort); err != nil {
+		CompactionManual, turnModel{connection: model.ID, name: model.Model}); err != nil {
 		return ContextView{}, err
 	}
 	return orchestrator.service.SessionContextView(ctx, ownerID, sessionID)
@@ -183,7 +196,7 @@ func (orchestrator *Orchestrator) autoCompact(ctx context.Context, command Proce
 	status := orchestrator.schema.Presentation.Status
 	orchestrator.statusEvent(ctx, command.SessionID, status.Compacting)
 	_, err = orchestrator.compactHistory(ctx, command.OwnerID, command.SessionID, history[:current], state,
-		CompactionAuto, model, command.Options.ReasoningEffort)
+		CompactionAuto, model)
 	switch {
 	case err == nil:
 		orchestrator.statusEvent(ctx, command.SessionID, status.Compacted)
@@ -233,13 +246,14 @@ func (orchestrator *Orchestrator) statusEvent(ctx context.Context, sessionID, te
 
 // compactHistory summarizes every round of history after the current summary
 // and before the newest kept ones, merges the earlier summary into it and
-// stores it as the session's summary.
+// stores it as the session's summary. The summary is written at the level the
+// model family declares for a summary, not at the session's own (#382).
 func (orchestrator *Orchestrator) compactHistory(
 	ctx context.Context,
 	ownerID, sessionID string,
 	history []Message,
 	state SessionContext,
-	trigger string, model turnModel, effort string,
+	trigger string, model turnModel,
 ) (Compaction, error) {
 	compaction := orchestrator.schema.ContextCompaction
 	start := summarizedThrough(history, state.Latest) + 1
@@ -290,7 +304,7 @@ func (orchestrator *Orchestrator) compactHistory(
 		Model:           model.name,
 		Connection:      model.connection,
 		Temperature:     orchestrator.schema.Agent.Temperature,
-		ReasoningEffort: effort,
+		ReasoningEffort: orchestrator.turnEffort(model.name, catalog.ChatTurnEffortSummary),
 		Purpose:         agents.PurposeSummary,
 		Messages: []agents.Message{
 			{Role: orchestrator.schema.Roles.System, Content: compaction.SummaryPrompt},

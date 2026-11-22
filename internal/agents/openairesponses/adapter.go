@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -100,6 +101,10 @@ type Config struct {
 	// class (the chat connection's Schema error_mapping, #120); nil: no
 	// refusal is read as one.
 	ExhaustedQuota func(status int, body []byte) (class string, exhausted bool)
+	// Logger takes the one line every model call leaves: model, thinking
+	// level, duration, first byte, tokens and the upstream's request id
+	// (#382). Nil writes nothing.
+	Logger *slog.Logger
 }
 
 type Adapter struct {
@@ -113,6 +118,7 @@ type Adapter struct {
 	optionsFor        func(model string) *Options
 	parallelToolCalls bool
 	exhaustedQuota    func(status int, body []byte) (string, bool)
+	logs              *upstreamhttp.CallLogger
 }
 
 func New(config Config) (*Adapter, error) {
@@ -140,6 +146,7 @@ func New(config Config) (*Adapter, error) {
 		optionsFor:        config.OptionsFor,
 		parallelToolCalls: config.ParallelToolCalls,
 		exhaustedQuota:    config.ExhaustedQuota,
+		logs:              upstreamhttp.NewCallLogger(config.Logger),
 	}, nil
 }
 
@@ -151,15 +158,33 @@ func (adapter *Adapter) options(model string) *Options {
 }
 
 // Complete sends the request without streaming and reads the response object.
-func (adapter *Adapter) Complete(ctx context.Context, request agents.Request) (agents.Completion, error) {
-	response, err := adapter.send(ctx, request, false)
+func (adapter *Adapter) Complete(
+	ctx context.Context,
+	request agents.Request,
+) (result agents.Completion, err error) {
+	// One line for the call, whatever path it returns by (#382).
+	started := time.Now()
+	var (
+		first     time.Duration
+		bodyBytes int
+		response  *http.Response
+		usage     *agents.Usage
+	)
+	defer func() {
+		if first == 0 {
+			first = time.Since(started)
+		}
+		adapter.logCall(request, false, started, first, bodyBytes, usage, response, err)
+	}()
+	response, bodyBytes, err = adapter.send(ctx, request, false)
 	if err != nil {
 		return agents.Completion{}, err
 	}
 	defer response.Body.Close()
-	if err := adapter.requireSuccess(response, request); err != nil {
+	if err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
+	first = time.Since(started)
 	// A response object echoes the instructions and the tools and may hold an
 	// encrypted reasoning item, so its bound is the stream line's, not a
 	// refusal's.
@@ -187,19 +212,20 @@ func (adapter *Adapter) Complete(ctx context.Context, request agents.Request) (a
 			return agents.Completion{}, err
 		}
 	}
-	result := outputs.completion(body.Status == statusIncomplete)
-	result.Usage = body.Usage.agentUsage()
+	result = outputs.completion(body.Status == statusIncomplete)
+	usage = body.Usage.agentUsage()
+	result.Usage = usage
 	return result, nil
 }
 
-func (adapter *Adapter) send(ctx context.Context, request agents.Request, stream bool) (*http.Response, error) {
+func (adapter *Adapter) send(ctx context.Context, request agents.Request, stream bool) (*http.Response, int, error) {
 	body, err := marshalRequest(request, stream, adapter.parallelToolCalls, adapter.options(request.Model))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, adapter.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	if adapter.apiKey != "" {
@@ -207,9 +233,33 @@ func (adapter *Adapter) send(ctx context.Context, request agents.Request, stream
 	}
 	response, err := adapter.client.Do(httpRequest)
 	if err != nil {
-		return nil, fmt.Errorf("call agent: %w", err)
+		return nil, len(body), fmt.Errorf("call agent: %w", err)
 	}
-	return response, nil
+	return response, len(body), nil
+}
+
+// logCall writes the one line of a finished model call (#382).
+func (adapter *Adapter) logCall(
+	request agents.Request, stream bool, started time.Time, first time.Duration,
+	bodyBytes int, usage *agents.Usage, response *http.Response, err error,
+) {
+	requestID := ""
+	if response != nil {
+		requestID = upstreamhttp.RequestID(response.Header)
+	}
+	adapter.logs.Log(upstreamhttp.Call{
+		Model:        request.Model,
+		Connection:   request.Connection,
+		Effort:       adapter.options(request.Model).effort(request.ReasoningEffort),
+		Purpose:      request.Purpose,
+		Stream:       stream,
+		Elapsed:      time.Since(started),
+		FirstByte:    first,
+		RequestBytes: bodyBytes,
+		Usage:        usage,
+		RequestID:    requestID,
+		Err:          err,
+	})
 }
 
 // requireSuccess turns a refusal into the Port's errors: the status always

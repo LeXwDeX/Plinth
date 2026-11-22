@@ -350,7 +350,7 @@ func TestStepCapRefusalTextAndObjectShareOneRead(t *testing.T) {
 	if store.reads != 1 {
 		t.Fatalf("the refusal read the standing %d times; want one read for text and object", store.reads)
 	}
-	const want = "这个资产的 3D 步数已用完（已用 1 步，上限 1 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户在账户设置里调高步数上限后才能继续。"
+	const want = "这个资产的 3D 步数已用完（已用 1 步，上限 1 步），这一步没有执行。请不要再提交新的 3D 步骤，直接告诉用户已达到步数上限；用户可以在顶栏的「3D 步数」里调高步数上限后再继续。"
 	if text := agentError(t, replay); text != want {
 		t.Fatalf("replay text = %q", text)
 	}

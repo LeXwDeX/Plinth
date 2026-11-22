@@ -566,6 +566,7 @@ func buildChatAgentWithTransport(
 	config Config,
 	schema catalog.ApplicationSchema,
 	httpTransport func(connectionID string, base http.RoundTripper) http.RoundTripper,
+	logger *slog.Logger,
 ) (agents.Adapter, error) {
 	registry := agents.NewRegistry()
 	var adapter agents.Adapter
@@ -649,6 +650,10 @@ func buildChatAgentWithTransport(
 					},
 					StreamIncludeUsage: schema.Chat.Agent.StreamIncludeUsage,
 					ParallelToolCalls:  schema.Chat.Agent.ParallelToolCalls,
+					// Every model call leaves one line: model, thinking level,
+					// duration, first byte, tokens and the upstream's request
+					// id. No prompt, no picture, no key (#382).
+					Logger: logger,
 					// Every chat connection speaks the declared connection's
 					// protocol, so its error_mapping reads their refusals.
 					ExhaustedQuota: chatExhaustedQuota(connection.ErrorMapping),
@@ -678,6 +683,7 @@ func buildChatAgentWithTransport(
 						return responsesOptions(schema.Chat.Agent, model)
 					},
 					ParallelToolCalls: schema.Chat.Agent.ParallelToolCalls,
+					Logger:            logger,
 					ExhaustedQuota:    chatExhaustedQuota(connection.ErrorMapping),
 				})
 				if err != nil {

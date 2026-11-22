@@ -1422,6 +1422,102 @@ func (r *Repository) ListSessionTurns(
 	return r.listTurnsFiltered(ctx, states, " AND owner_id = ? AND session_id = ?", ownerID, sessionID)
 }
 
+// ListSessionTurnIDs lists the assistant message ids of the session's turns in
+// the given states. A reader that only marks the session's messages (#403)
+// reads this instead of ListSessionTurns: it never decodes an options blob or
+// a checkpoint, and a session with many ended turns costs one column (#382).
+func (r *Repository) ListSessionTurnIDs(
+	ctx context.Context,
+	ownerID string,
+	sessionID string,
+	states []string,
+) ([]string, error) {
+	if len(states) == 0 || ownerID == "" || sessionID == "" {
+		return nil, nil
+	}
+	placeholders := make([]string, len(states))
+	arguments := make([]any, 0, len(states)+2)
+	for index, state := range states {
+		placeholders[index] = "?"
+		arguments = append(arguments, state)
+	}
+	arguments = append(arguments, ownerID, sessionID)
+	rows, err := r.db.QueryContext(ctx, `SELECT assistant_message_id FROM go_chat_turns
+		WHERE state IN (`+strings.Join(placeholders, ",")+`)
+		AND owner_id = ? AND session_id = ?`, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("list chat session turn ids: %w", err)
+	}
+	defer rows.Close()
+	var result []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		result = append(result, id)
+	}
+	return result, rows.Err()
+}
+
+// FinishTurn ends the turn and drops the request its checkpoint still holds
+// (#382). A turn that reached a terminal state is never resumed, so the
+// messages and their base64 pictures are dead weight in the row: the
+// configuration snapshot, the round, the completions and the waiting list stay
+// for the readers that still ask for them, and the row goes back to a few
+// kilobytes. MarkTurnRunning keeps the checkpoint: a running turn resumes from
+// it.
+func (r *Repository) FinishTurn(
+	ctx context.Context,
+	assistantMessageID string,
+	state string,
+	endReason string,
+	at time.Time,
+) error {
+	var encoded string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT checkpoint_json FROM go_chat_turns WHERE assistant_message_id = ?`,
+		assistantMessageID).Scan(&encoded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return chat.ErrMessageNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read chat turn checkpoint: %w", err)
+	}
+	checkpoint := chat.TurnCheckpoint{}
+	if strings.TrimSpace(encoded) != "" {
+		if err := json.Unmarshal([]byte(encoded), &checkpoint); err != nil {
+			// An unreadable checkpoint cannot be trimmed. The turn has ended,
+			// so it is dropped whole rather than kept as a row nobody decodes.
+			checkpoint = chat.TurnCheckpoint{}
+		}
+	}
+	cleared, err := json.Marshal(checkpoint.WithoutRequests())
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE go_chat_turns SET state = ?, end_reason = ?, updated_at = ?, checkpoint_json = ?
+		WHERE assistant_message_id = ?`,
+		state,
+		endReason,
+		formatTime(at),
+		string(cleared),
+		assistantMessageID,
+	)
+	if err != nil {
+		return fmt.Errorf("finish chat turn: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return chat.ErrMessageNotFound
+	}
+	return nil
+}
+
 // PlanTaskFacts 只列指定会话里制作计划步骤要配对的 Task 事实（#410），
 // 以及该会话是否仍有未结束的回合。一次批量查询服务整个列表，
 // 会话清单投影不必逐会话查一次。activeTurnStates 由调用方给出
@@ -1576,8 +1672,7 @@ func (r *Repository) listTurnsFiltered(
 	arguments = append(arguments, extraArgs...)
 	rows, err := r.db.QueryContext(
 		ctx,
-		`SELECT owner_id, session_id, assistant_message_id, options_json,
-		        state, end_reason, stop_requested, checkpoint_json, checkpoint_version, created_at, updated_at
+		`SELECT `+turnColumns+`
 		 FROM go_chat_turns
 		 WHERE state IN (`+strings.Join(placeholders, ",")+")"+extraWhere+`
 		 ORDER BY created_at ASC`,
@@ -1589,43 +1684,7 @@ func (r *Repository) listTurnsFiltered(
 	defer rows.Close()
 	var result []chat.Turn
 	for rows.Next() {
-		var turn chat.Turn
-		var optionsJSON string
-		var stopRequested int
-		var checkpointJSON string
-		var createdAt string
-		var updatedAt string
-		if err := rows.Scan(
-			&turn.OwnerID,
-			&turn.SessionID,
-			&turn.AssistantMessageID,
-			&optionsJSON,
-			&turn.State,
-			&turn.EndReason,
-			&stopRequested,
-			&checkpointJSON,
-			&turn.CheckpointVersion,
-			&createdAt,
-			&updatedAt,
-		); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(
-			[]byte(optionsJSON),
-			&turn.Options,
-		); err != nil {
-			return nil, fmt.Errorf("decode chat turn options: %w", err)
-		}
-		turn.StopRequested = stopRequested != 0
-		if err := json.Unmarshal([]byte(checkpointJSON), &turn.Checkpoint); err != nil {
-			return nil, fmt.Errorf("decode chat turn checkpoint: %w", err)
-		}
-		var err error
-		turn.CreatedAt, err = parseTime(createdAt)
-		if err != nil {
-			return nil, err
-		}
-		turn.UpdatedAt, err = parseTime(updatedAt)
+		turn, err := scanTurn(rows.Scan)
 		if err != nil {
 			return nil, err
 		}

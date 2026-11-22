@@ -172,6 +172,69 @@ func (registry *toolRegistry) withheld(scope string) []string {
 	return registry.offeredInScope(scope).withheld
 }
 
+// narrowToPlan is the turn-level narrowing of the offered table (#382): a
+// capability the turn's frozen plan has nothing to run takes its tools out of
+// the table, so the model is not offered a schema it could not pay for and the
+// table shrinks by more than the Agent scope alone removes. The plan's own
+// pinned tools (TurnPlan.Tools, the Harness operation of this turn) always stay.
+//
+// Only a capability with no candidate Offering at all is refused here. A
+// capability the plan merely wants the person to confirm (a workspace value
+// that differs from the purpose recommendation) keeps its tool: the call is
+// how that confirmation is asked for, so removing it would remove the question.
+//
+// A plan that refuses nothing changes nothing, and a narrowing that would empty
+// the table is dropped whole: a turn whose every tool was refused must still be
+// able to answer, and the tool executor refuses the call it would not run
+// anyway.
+func (registry *toolRegistry) narrowToPlan(tools []agents.Tool, plan *TurnPlan) []agents.Tool {
+	if plan == nil {
+		return tools
+	}
+	refused := map[generation.Capability]bool{}
+	for _, entry := range plan.Domains {
+		if entry.Conflict == nil || entry.OfferingID != "" || len(entry.Candidates) > 0 {
+			continue
+		}
+		refused[generation.Capability(entry.Capability)] = true
+	}
+	pinned := map[string]bool{}
+	for _, name := range plan.Tools {
+		pinned[name] = true
+	}
+	if len(refused) == 0 {
+		return tools
+	}
+	kept := make([]agents.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if pinned[tool.Name] {
+			kept = append(kept, tool)
+			continue
+		}
+		if registered, known := registry.byName[tool.Name]; known &&
+			toolRefusedBy(registered.execution, refused) {
+			continue
+		}
+		kept = append(kept, tool)
+	}
+	if len(kept) == 0 {
+		return tools
+	}
+	return kept
+}
+
+// toolRefusedBy reports whether one of the tool's capabilities is one the plan
+// refused. A tool with no declared capability is not a generation tool and
+// stays.
+func toolRefusedBy(execution catalog.ChatToolExecutionSchema, refused map[generation.Capability]bool) bool {
+	for _, capability := range execution.Capabilities {
+		if refused[capability] {
+			return true
+		}
+	}
+	return false
+}
+
 // offeredInScope evaluates the registry once per scope: every tool is
 // permitted once, and the same pass splits the permitted tools into the list
 // the model is offered and the names the Agent scope withholds (#413). A turn

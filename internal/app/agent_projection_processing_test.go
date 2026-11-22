@@ -19,7 +19,7 @@ func TestAgentOfferingProjectionIncludesProcessingDependenciesAndCredits(t *test
 	var projection struct {
 		Capabilities []agentCapabilityView `json:"capabilities"`
 	}
-	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil), &projection); err != nil {
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true), &projection); err != nil {
 		t.Fatal(err)
 	}
 	for _, capability := range projection.Capabilities {
@@ -76,7 +76,7 @@ func TestAgentOfferingProjectionListsActionChoicesAndExtraCredits(t *testing.T) 
 	var projection struct {
 		Capabilities []agentCapabilityView `json:"capabilities"`
 	}
-	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil), &projection); err != nil {
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true), &projection); err != nil {
 		t.Fatal(err)
 	}
 	find := func(id string) agentOfferingView {
@@ -119,7 +119,7 @@ func TestAgentOfferingProjectionOmitsDisabledFormatConversion(t *testing.T) {
 	var projection struct {
 		Capabilities []agentCapabilityView `json:"capabilities"`
 	}
-	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil), &projection); err != nil {
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true), &projection); err != nil {
 		t.Fatal(err)
 	}
 	for _, capability := range projection.Capabilities {
@@ -139,7 +139,7 @@ func TestAgentGenerationAdviceUsesTheSamePublicDefaultAndBounds(t *testing.T) {
 	var projection struct {
 		Capabilities []agentCapabilityView `json:"capabilities"`
 	}
-	if err = json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil), &projection); err != nil {
+	if err = json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true), &projection); err != nil {
 		t.Fatal(err)
 	}
 	found := false
@@ -175,7 +175,7 @@ func TestAgentProjectionCompactsLargeOptionLists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil)
+	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true)
 	var projection struct {
 		Capabilities []agentCapabilityView `json:"capabilities"`
 	}
@@ -236,7 +236,7 @@ func TestAgentOfferingProjectionPricesTheFixedExtraFormats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil)
+	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true)
 	var projection struct {
 		Capabilities []struct {
 			Offerings []map[string]json.RawMessage `json:"offerings"`
@@ -306,7 +306,7 @@ func TestAgentOfferingProjectionStatesReferenceImageCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil)
+	raw := buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true)
 	offerings := projectionWireOfferings(t, raw)
 	for id, want := range map[string]string{
 		"hyper3d/rodin-gen-2.5/image-to-3d":     "5",
@@ -363,7 +363,7 @@ func TestAgentOfferingProjectionKeepsAvailabilityFilterWithReferenceCapacity(t *
 		t.Fatal(err)
 	}
 	available := func(id generation.OfferingID) bool { return id == "meshy/meshy-7.1/image-to-3d" }
-	offerings := projectionWireOfferings(t, buildAgentOfferingsProjection(product.Application().Capabilities, product, available))
+	offerings := projectionWireOfferings(t, buildAgentOfferingsProjection(product.Application().Capabilities, product, available, "", "", true))
 	if _, present := offerings["hyper3d/rodin-gen-2.5/image-to-3d"]; present {
 		t.Fatal("unavailable Rodin reappeared in the Agent projection")
 	}
@@ -431,7 +431,7 @@ func TestAgentOfferingProjectionDoesNotInferReferenceCapacityFromOtherArrays(t *
 					}
 				}
 			}}
-			raw := buildAgentOfferingsProjection(product.Application().Capabilities, source, nil)
+			raw := buildAgentOfferingsProjection(product.Application().Capabilities, source, nil, "", "", true)
 			offering := projectionWireOfferings(t, raw)["meshy/meshy-7.1-multiview/image-to-3d"]
 			value, present := offering["reference_image_max"]
 			if present != test.present || (present && string(value) != test.want) {
@@ -461,7 +461,7 @@ func TestAgentOfferingProjectionStatesTheRequiredChatImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	offerings := projectionWireOfferings(t, buildAgentOfferingsProjection(product.Application().Capabilities, product, nil))
+	offerings := projectionWireOfferings(t, buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true))
 	var inputs []agentInputView
 	if err := json.Unmarshal(offerings["hyper3d/texture/local-model"]["inputs"], &inputs); err != nil {
 		t.Fatal(err)
@@ -488,7 +488,7 @@ func TestAgentOfferingProjectionTellsTheRemeshRiggingConstraint(t *testing.T) {
 	var projection struct {
 		Capabilities []agentCapabilityView `json:"capabilities"`
 	}
-	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil), &projection); err != nil {
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, nil, "", "", true), &projection); err != nil {
 		t.Fatal(err)
 	}
 	var remesh, rigging, animation *agentOfferingView
@@ -530,7 +530,7 @@ func TestAgentOfferingProjectionTellsTheRemeshRiggingConstraint(t *testing.T) {
 		Capabilities []agentCapabilityView `json:"capabilities"`
 	}
 	available := func(id generation.OfferingID) bool { return id != "meshy/processing/rigging" }
-	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, available), &hidden); err != nil {
+	if err := json.Unmarshal(buildAgentOfferingsProjection(product.Application().Capabilities, product, available, "", "", true), &hidden); err != nil {
 		t.Fatal(err)
 	}
 	for _, capability := range hidden.Capabilities {

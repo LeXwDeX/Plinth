@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agents/upstreamhttp"
@@ -42,13 +44,25 @@ func (adapter *Adapter) Stream(
 	ctx context.Context,
 	request agents.Request,
 	emit func(agents.Delta) error,
-) (agents.Completion, error) {
-	response, err := adapter.send(ctx, request, true)
+) (result agents.Completion, err error) {
+	// One line for the call, whatever path it returns by: the deferred log is
+	// the last thing that runs and the named error carries the outcome (#382).
+	started := time.Now()
+	var (
+		first     time.Duration
+		bodyBytes int
+		response  *http.Response
+		usage     *agents.Usage
+	)
+	defer func() {
+		adapter.logCall(request, true, started, first, bodyBytes, usage, response, err)
+	}()
+	response, bodyBytes, err = adapter.send(ctx, request, true)
 	if err != nil {
 		return agents.Completion{}, err
 	}
 	defer response.Body.Close()
-	if err := adapter.requireSuccess(response, request); err != nil {
+	if err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
 	state := &streamState{adapter: adapter, emit: emit, outputs: newOutputs()}
@@ -56,6 +70,11 @@ func (adapter *Adapter) Stream(
 	event := "" // the event: line of the frame being read
 read:
 	for lines.Scan() {
+		if first == 0 {
+			// The first frame is what a person waits through: a slow model
+			// shows up as its own number, apart from the whole call.
+			first = time.Since(started)
+		}
 		if lines.Oversized() {
 			state.skipOversized(event)
 			event = ""
@@ -98,8 +117,9 @@ read:
 	if state.failure != nil {
 		return agents.Completion{}, state.failure
 	}
-	result := state.outputs.completion(state.status == statusIncomplete)
-	result.Usage = state.usage
+	result = state.outputs.completion(state.status == statusIncomplete)
+	usage = state.usage
+	result.Usage = usage
 	// Text that was never streamed (an upstream that sends its message only in
 	// the done item) is delivered once, so the caller still sees it arrive.
 	if state.emit != nil && !state.emitted && result.Content != "" {
