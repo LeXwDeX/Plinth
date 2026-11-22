@@ -127,10 +127,19 @@ for (const name of browsers) {
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => {
       if (message.type() !== 'error') return;
-      // #153: a missing scene snapshot is the normal "no scene yet" answer; the
-      // browser still logs the 404 as a console error, so ignore only that URL.
+      // Some URLs answer 404 by contract, and the browser still logs the 404 as
+      // a console error. Ignore only those URLs, and only a 404: a 403 or a 500
+      // from the same route still fails the check.
+      //   #153: a missing scene snapshot is the normal "no scene yet" answer.
+      //   #330 §6: every session that is not a steps asset reads as 404, so the
+      //     studio's step bar (rendered for any active session) gets one on each
+      //     ordinary chat and renders nothing.
       const location = message.location();
-      if (message.text().includes('404') && /\/scenes\/[^/]+\/snapshot(?:\?|$)/.test(location?.url ?? '')) return;
+      const url = location?.url ?? '';
+      if (message.text().includes('404')) {
+        if (/\/scenes\/[^/]+\/snapshot(?:\?|$)/.test(url)) return;
+        if (/\/api\/v1\/chat\/sessions\/[^/]+\/steps(?:\?|$)/.test(url)) return;
+      }
       consoleErrors.push(message.text());
     });
 
