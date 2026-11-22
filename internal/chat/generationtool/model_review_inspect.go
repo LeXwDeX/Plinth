@@ -115,7 +115,7 @@ func (executor *Executor) InspectReviewedModel(
 	if !modelReviewMediaTypeLeavesFormatOpen(media) {
 		return ModelInspectResult{}, &ModelInspectRefusal{
 			Kind:    ModelInspectNotGLB,
-			Message: executor.modelReviewNotGLBRefusal(command, review, reviewedModel{task: task, asset: asset}).Error,
+			Message: executor.modelReviewNotGLBRefusal(command, review.Source.SourceNotGLB, reviewedModel{task: task, asset: asset}).Error,
 		}
 	}
 	limits := modelReviewLimits(review)

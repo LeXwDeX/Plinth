@@ -6,14 +6,20 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
 
 // #418: some CDNs label model files from the host's mime table. The fake Tripo
 // CDN answers a task's GLB with application/x-tgif; the output slot has no MIME
-// contract, so the kernel stores that label. The read-only inspection must
-// still judge the saved bytes and inspect the GLB, both through the platform
-// entry and through the outward MCP core that shares the same loader.
+// contract, so the response label reaches the store. The read-only inspection
+// must still judge the saved bytes and inspect the GLB, both through the
+// platform entry and through the outward MCP core that shares the same loader.
+//
+// #424: the store also keeps the format the bytes are (model/gltf-binary), so
+// the processing entry, which judges a source by its stored label, can bind the
+// file. A file stored before that correction keeps its CDN label, which is why
+// the read-only review still judges the bytes.
 func TestInspectModelReadsAMislabeledGLBByItsBytes(t *testing.T) {
 	harness, product, _, _ := fakeStackHarnessWithInputs(t, func(origin string) map[string]string {
 		return map[string]string{
@@ -37,10 +43,23 @@ func TestInspectModelReadsAMislabeledGLBByItsBytes(t *testing.T) {
 	if model.ID == "" {
 		t.Fatalf("the task delivered no model file: %+v", task.Assets)
 	}
-	// This is the condition the issue is about: the saved GLB carries the
-	// CDN's label, not model/gltf-binary.
-	if model.MediaType != "application/x-tgif" {
-		t.Fatalf("stored model media type = %q, want the fake CDN's application/x-tgif", model.MediaType)
+	// The CDN's application/x-tgif reached the store; the bytes are a GLB, so
+	// the stored label is the format the file is, not the CDN's mime-table entry.
+	if model.MediaType != "model/gltf-binary" {
+		t.Fatalf("stored model media type = %q, want model/gltf-binary", model.MediaType)
+	}
+	// The processing entry judges a source by its stored label: an Offering that
+	// takes model/gltf-binary must bind this file (#424).
+	forward, ok := product.Get("local/static-glb/to-gltf")
+	if !ok {
+		t.Fatal("the GLB conversion route is not declared")
+	}
+	binding, err := generation.BindModelSource(forward, task, model.ID, nil)
+	if err != nil {
+		t.Fatalf("bind the mislabeled GLB to %s: %v", forward.ID, err)
+	}
+	if binding.AssetID != model.ID || binding.Role != schema.SemanticSourceAsset {
+		t.Fatalf("binding = %+v, want the saved model asset", binding)
 	}
 
 	executor, err := generationtool.New(generationtool.Config{

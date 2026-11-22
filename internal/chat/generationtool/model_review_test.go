@@ -555,8 +555,10 @@ func TestModelReviewRefusesAnExplicitFileThatIsNotAReadableGLB(t *testing.T) {
 				assets.contents["task-a-glb"] = []byte("not a model")
 			},
 			want: func(review catalog.ChatModelReviewSchema) string {
+				// #424: the label says model/gltf-binary and the bytes are not a
+				// GLB, so the text must not read "is model/gltf-binary, not GLB".
 				return strings.NewReplacer("{asset}", "task-a-glb", "{media}", "model/gltf-binary").
-					Replace(review.Source.SourceNotGLB)
+					Replace(review.Source.SourceBytesNotGLB)
 			},
 		},
 	}

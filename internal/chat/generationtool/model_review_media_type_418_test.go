@@ -46,11 +46,13 @@ func TestModelReviewInspectsAGLBWithAnUninformativeStoredMediaType(t *testing.T)
 }
 
 // The stored label decides nothing once the bytes are read: a file that is
-// not binary glTF is refused under either ambiguous label with the Schema's
-// not-GLB text, and the outward kind stays model_not_glb.
+// The stored label decides nothing once the bytes are read: a file that is
+// not binary glTF is refused with the Schema's bytes-not-GLB text, including
+// when the label claims model/gltf-binary (#424), and the outward kind stays
+// model_not_glb.
 func TestModelReviewRefusesNonModelBytesWithAnUninformativeStoredMediaType(t *testing.T) {
 	notModel := []byte("v 0 0 0\nf 1 1 1\n")
-	for _, media := range []string{"application/x-tgif", "application/octet-stream"} {
+	for _, media := range []string{"application/x-tgif", "application/octet-stream", "model/gltf-binary"} {
 		t.Run("media="+media, func(t *testing.T) {
 			task := reviewTask("task-a", "owner-a", "session-a", notModel, generation.TaskSucceeded)
 			task.Assets[1].MediaType = media
@@ -63,7 +65,7 @@ func TestModelReviewRefusesNonModelBytesWithAnUninformativeStoredMediaType(t *te
 				t.Fatal(err)
 			}
 			want := strings.NewReplacer("{asset}", "task-a-glb", "{media}", media).
-				Replace(schema.ModelReview.Source.SourceNotGLB)
+				Replace(schema.ModelReview.Source.SourceBytesNotGLB)
 			if platform.Error != want || !platform.NoSubmission {
 				t.Fatalf("platform refusal = %+v, want %q", platform, want)
 			}

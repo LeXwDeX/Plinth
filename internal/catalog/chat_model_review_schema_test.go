@@ -265,6 +265,12 @@ func TestModelReviewDeclarationsAreValidated(t *testing.T) {
 		{"not-glb text lacks the media type", func(a *catalog.ApplicationSchema) {
 			a.Chat.ModelReview.Source.SourceNotGLB = "not a GLB: {asset}"
 		}, "{media}"},
+		{"bytes-not-glb text is empty", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Source.SourceBytesNotGLB = " "
+		}, "source"},
+		{"bytes-not-glb text lacks the media type", func(a *catalog.ApplicationSchema) {
+			a.Chat.ModelReview.Source.SourceBytesNotGLB = "not a GLB: {asset}"
+		}, "{media}"},
 		{"too-large text lacks the limit", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.TooLarge = "too large {bytes}" }, "too_large"},
 		{"unknown-part text lacks the part", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.UnknownPart = "no such part" }, "unknown_part"},
 		{"source-read text lacks the reason", func(a *catalog.ApplicationSchema) { a.Chat.ModelReview.Texts.SourceReadFailed = "unreadable" }, "source_read_failed"},
