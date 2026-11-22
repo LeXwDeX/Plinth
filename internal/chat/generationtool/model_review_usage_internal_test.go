@@ -595,7 +595,7 @@ func TestModelReviewUsageExplicitPurposeOverridesTheBrief(t *testing.T) {
 	allAvailable := func(catalog.ChatModelInspectFixCapabilitySchema) bool { return true }
 	brief := chat.ProductionBrief{"purpose": []byte(`"game"`)}
 	check := newModelReviewUsageCheckFor(usageBaseReport(), nil, usageBaseUsage(), production, brief, "prop",
-		usageIdentityText, allAvailable, nil)
+		usageIdentityText, allAvailable, nil, nil)
 	if check == nil {
 		t.Fatal("the argument purpose produced no usage check")
 	}
@@ -608,7 +608,7 @@ func TestModelReviewUsageExplicitPurposeOverridesTheBrief(t *testing.T) {
 	// The caller refuses an undeclared argument; the constructor itself must
 	// never fall back to the brief's purpose silently.
 	if unknown := newModelReviewUsageCheckFor(usageBaseReport(), nil, usageBaseUsage(), production, brief, "nope",
-		usageIdentityText, allAvailable, nil); unknown != nil {
+		usageIdentityText, allAvailable, nil, nil); unknown != nil {
 		t.Fatalf("an undeclared purpose produced %+v", unknown)
 	}
 }
@@ -635,7 +635,7 @@ func TestModelReviewUsageAllowedFixesKeepHintsExecutable(t *testing.T) {
 		"retexture", "remesh", "rigging", "animation", "format-conversion", "model-split",
 	}
 	check := newModelReviewUsageCheckFor(report, nil, usageBaseUsage(), production, chat.ProductionBrief{}, "",
-		usageIdentityText, allAvailable, allowed)
+		usageIdentityText, allAvailable, allowed, nil)
 	if check == nil {
 		t.Fatal("no usage check")
 	}
@@ -677,7 +677,7 @@ func TestModelReviewUsageAllowedFixesKeepHintsExecutable(t *testing.T) {
 	// nil keeps the platform path as it was: every runtime-available capability
 	// may still be named.
 	platform := newModelReviewUsageCheckFor(report, nil, usageBaseUsage(), production, chat.ProductionBrief{}, "",
-		usageIdentityText, allAvailable, nil)
+		usageIdentityText, allAvailable, nil, nil)
 	for _, want := range []struct{ check, text string }{
 		{catalog.ModelReviewUsageCheckUV, "uv-unwrap"},
 		{catalog.ModelReviewUsageCheckWatertight, "repair-printability"},

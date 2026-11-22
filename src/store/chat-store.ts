@@ -99,6 +99,8 @@ export interface ChatSession {
   projectId?: string;
   /** #240: the three-state style source stored on the session. */
   styleLockSource?: 'project' | 'session' | 'off';
+  /** #332: where the session came from ('chat' or 'mcp'); the server groups the list by it. */
+  source?: string;
 }
 
 export interface GenState {

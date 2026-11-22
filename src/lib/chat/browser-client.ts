@@ -784,10 +784,12 @@ function normalizeSession(
   const parentMessageId = fields.parent_message_id ? optionalString(source, fields.parent_message_id) : undefined;
   const parentTitle = fields.parent_title ? optionalString(source, fields.parent_title) : undefined;
   const projectId = fields.project_id ? optionalString(source, fields.project_id) : undefined;
+  const sourceOf = fields.source ? optionalString(source, fields.source) : undefined;
   const styleLockSourceValue = fields.style_lock_source ? optionalString(source, fields.style_lock_source) : undefined;
   return {
     ...(parentSessionId ? { parentSessionId, parentMessageId, parentTitle, parentDeleted: fields.parent_deleted ? source[fields.parent_deleted] === true : false } : {}),
     ...(projectId ? { projectId } : {}),
+    ...(sourceOf ? { source: sourceOf } : {}),
     ...(styleLockSourceValue === 'project' || styleLockSourceValue === 'session' || styleLockSourceValue === 'off'
       ? { styleLockSource: styleLockSourceValue }
       : {}),

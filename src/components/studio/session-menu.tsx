@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useSWRConfig } from 'swr';
 import useSWRInfinite from 'swr/infinite';
 import { Popover } from '@base-ui/react/popover';
@@ -27,7 +27,7 @@ import {
   type SessionPage,
 } from '@/lib/chat/session-pages';
 import { activeLocale } from '@/lib/i18n/locale';
-import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
+import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { relativeTime } from '@/lib/workspace/relative-time';
 import { cn } from '@/lib/utils';
 import { useChatStore, type ChatSession } from '@/store/chat-store';
@@ -151,6 +151,36 @@ function SessionCover({ session }: { session: ChatSession }) {
   );
 }
 
+/**
+ * The source the server writes for an ordinary session, used only as the fallback for a
+ * session that carries no source at all (a server that declares no source member). It is not a
+ * client-side list of groups: the groups, their names and their order are the Schema's.
+ */
+const DEFAULT_SESSION_SOURCE = 'chat';
+
+/**
+ * The session list split into the groups the Schema declares (#332): one section per
+ * chat.api.session_groups entry, in that order, each named by the ui.* message its label points at. A
+ * session whose source matches no group — a server that declares no source member — goes to the group
+ * of ordinary sessions, so it is still listed. Without a declared grouping the list stays flat, in a
+ * single section with no heading, as it was before.
+ */
+export function sessionSections(
+  schema: ProductSchema,
+  sessions: readonly ChatSession[],
+): { key: string; label: string; sessions: ChatSession[] }[] {
+  const groups = schema.chat.api.session_groups ?? [];
+  if (groups.length === 0) return [{ key: '', label: '', sessions: [...sessions] }];
+  const sections = groups.map((group) => ({ key: group.source, label: schemaText(schema, group.label), sessions: [] as ChatSession[] }));
+  const ofSource = new Map(sections.map((section) => [section.key, section]));
+  const fallback = ofSource.get(DEFAULT_SESSION_SOURCE) ?? sections[0];
+  for (const session of sessions) {
+    const section = ofSource.get(session.source ?? '') ?? fallback;
+    section.sessions.push(session);
+  }
+  return sections;
+}
+
 /** Session list: search, switch, new, delete with an in-row confirmation, and one page of sessions at a time. */
 function SessionList({ onClose }: { onClose: () => void }) {
   const { schema } = useProductSchema();
@@ -195,6 +225,8 @@ function SessionList({ onClose }: { onClose: () => void }) {
     }
   }, [sessions, activeSessionId]);
   const view = sessionPageView(data, page);
+  // The groups come from the Schema (chat.api.session_groups), never from a client-side list of sources.
+  const sections = useMemo(() => sessionSections(schema, view.sessions), [schema, view.sessions]);
   const paging = sessionPageStatus(data, page, pageSize);
   const failed = error !== undefined;
   // A missing or failed read is not an empty result: only a successful read may show the numbers.
@@ -334,96 +366,103 @@ function SessionList({ onClose }: { onClose: () => void }) {
         {schemaText(schema, 'ui.studio.session.new')}
       </Action>
       <ul ref={listRef} className="-mx-1 min-h-0 overflow-y-auto" aria-label={schemaText(schema, 'ui.studio.session.menu_label')}>
-        {view.sessions.map((session) => {
-          const active = session.id === activeSessionId;
-          const asking = confirming === session.id;
-          return (
-            <li key={session.id} className={cn('rounded-md px-2 py-1', active && 'bg-primary/15')} data-testid="studio-session-row">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => open(session)}
-                  aria-current={active || undefined}
-                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left text-xs hover:text-primary focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  <SessionCover session={session} />
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className={cn('truncate', active && 'font-medium')}>{session.title}</span>
-                    <SessionBranchSource session={session} />
-                    <HintTooltip name={new Date(session.updatedAt).toLocaleString(activeLocale(schema))} className="min-w-0">
-                      <span className="truncate text-[11px] text-muted-foreground" data-testid="studio-session-time">
-                        {relativeTime(schema.canvas, session.updatedAt)}
-                      </span>
-                    </HintTooltip>
-                  </span>
-                </button>
-                {active ? <Check aria-label={schemaText(schema, 'ui.studio.session.current')} className="size-3.5 shrink-0 text-primary" /> : null}
-                <HintTooltip name={schemaText(schema, 'ui.studio.session.delete')} className="shrink-0">
-                  <Action
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={formatSchemaText(schemaText(schema, 'ui.common.label_value'), { label: schemaText(schema, 'ui.studio.session.delete'), value: session.title })}
-                    disabled={deleting !== null}
-                    onClick={(event) => {
-                      if (deletingRef.current) return;
-                      deleteTrigger.current = event.currentTarget;
-                      setConfirming(session.id);
-                    }}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 />
-                  </Action>
-                </HintTooltip>
-              </div>
-              {asking ? (
-                <div
-                  role="alert"
-                  data-testid="studio-session-delete-confirm"
-                  onKeyDown={(event) => {
-                    const intent = deleteConfirmKeyIntent({
-                      key: event.key,
-                      isComposing: event.nativeEvent.isComposing,
-                      keyCode: event.keyCode,
-                      repeat: event.repeat,
-                    });
-                    if (intent !== 'cancel') return;
-                    // Escape belongs to the confirmation: it must not also close the popover and steal focus.
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (deleting !== session.id) cancelDelete();
-                  }}
-                  className="mt-1 flex flex-col gap-1.5 text-xs"
-                >
-                  <span className="text-warning">{formatSchemaText(schemaText(schema, 'ui.studio.session.delete_confirm'), { title: session.title })}</span>
-                  <span className="flex gap-1.5">
-                    <Action
-                      ref={confirmButton}
+        {sections.map((section) => (
+          <Fragment key={section.key}>
+            {section.label !== '' && section.sessions.length > 0 ? (
+              <li className="px-2 pb-0.5 pt-1.5 text-[11px] leading-4 text-muted-foreground" data-testid="studio-session-group">{section.label}</li>
+            ) : null}
+            {section.sessions.map((session) => {
+              const active = session.id === activeSessionId;
+              const asking = confirming === session.id;
+              return (
+                <li key={session.id} className={cn('rounded-md px-2 py-1', active && 'bg-primary/15')} data-testid="studio-session-row">
+                  <div className="flex items-center gap-1">
+                    <button
                       type="button"
-                      variant="destructive"
-                      size="xs"
-                      autoFocus
-                      loading={deleting === session.id}
-                      data-testid="studio-session-delete-confirm-action"
-                      onClick={() => void remove(session)}
-                      onKeyDown={(event) => {
-                        // Enter on this button is the button's own click; composition and key repeat must not
-                        // send a second delete.
-                        if (event.key !== 'Enter') return;
-                        if (deleteConfirmKeyIntent({ key: event.key, isComposing: event.nativeEvent.isComposing, keyCode: event.keyCode, repeat: event.repeat }) !== 'confirm') {
-                          event.preventDefault();
-                        }
-                      }}
+                      onClick={() => open(session)}
+                      aria-current={active || undefined}
+                      className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left text-xs hover:text-primary focus-visible:outline-2 focus-visible:outline-ring"
                     >
-                      {schemaText(schema, 'ui.studio.session.delete_action')}
-                    </Action>
-                    <Action type="button" variant="ghost" size="xs" disabled={deleting === session.id} onClick={cancelDelete}>{schemaText(schema, 'ui.studio.session.delete_keep')}</Action>
-                  </span>
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
+                      <SessionCover session={session} />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className={cn('truncate', active && 'font-medium')}>{session.title}</span>
+                        <SessionBranchSource session={session} />
+                        <HintTooltip name={new Date(session.updatedAt).toLocaleString(activeLocale(schema))} className="min-w-0">
+                          <span className="truncate text-[11px] text-muted-foreground" data-testid="studio-session-time">
+                            {relativeTime(schema.canvas, session.updatedAt)}
+                          </span>
+                        </HintTooltip>
+                      </span>
+                    </button>
+                    {active ? <Check aria-label={schemaText(schema, 'ui.studio.session.current')} className="size-3.5 shrink-0 text-primary" /> : null}
+                    <HintTooltip name={schemaText(schema, 'ui.studio.session.delete')} className="shrink-0">
+                      <Action
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={formatSchemaText(schemaText(schema, 'ui.common.label_value'), { label: schemaText(schema, 'ui.studio.session.delete'), value: session.title })}
+                        disabled={deleting !== null}
+                        onClick={(event) => {
+                          if (deletingRef.current) return;
+                          deleteTrigger.current = event.currentTarget;
+                          setConfirming(session.id);
+                        }}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 />
+                      </Action>
+                    </HintTooltip>
+                  </div>
+                  {asking ? (
+                    <div
+                      role="alert"
+                      data-testid="studio-session-delete-confirm"
+                      onKeyDown={(event) => {
+                        const intent = deleteConfirmKeyIntent({
+                          key: event.key,
+                          isComposing: event.nativeEvent.isComposing,
+                          keyCode: event.keyCode,
+                          repeat: event.repeat,
+                        });
+                        if (intent !== 'cancel') return;
+                        // Escape belongs to the confirmation: it must not also close the popover and steal focus.
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (deleting !== session.id) cancelDelete();
+                      }}
+                      className="mt-1 flex flex-col gap-1.5 text-xs"
+                    >
+                      <span className="text-warning">{formatSchemaText(schemaText(schema, 'ui.studio.session.delete_confirm'), { title: session.title })}</span>
+                      <span className="flex gap-1.5">
+                        <Action
+                          ref={confirmButton}
+                          type="button"
+                          variant="destructive"
+                          size="xs"
+                          autoFocus
+                          loading={deleting === session.id}
+                          data-testid="studio-session-delete-confirm-action"
+                          onClick={() => void remove(session)}
+                          onKeyDown={(event) => {
+                            // Enter on this button is the button's own click; composition and key repeat must not
+                            // send a second delete.
+                            if (event.key !== 'Enter') return;
+                            if (deleteConfirmKeyIntent({ key: event.key, isComposing: event.nativeEvent.isComposing, keyCode: event.keyCode, repeat: event.repeat }) !== 'confirm') {
+                              event.preventDefault();
+                            }
+                          }}
+                        >
+                          {schemaText(schema, 'ui.studio.session.delete_action')}
+                        </Action>
+                        <Action type="button" variant="ghost" size="xs" disabled={deleting === session.id} onClick={cancelDelete}>{schemaText(schema, 'ui.studio.session.delete_keep')}</Action>
+                      </span>
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </Fragment>
+        ))}
         {view.loaded && !isValidating && view.sessions.length === 0 && !view.hasPrevious ? (
           <li role="status" className="px-2 py-3 text-xs text-muted-foreground">{schemaText(schema, 'ui.studio.session.empty')}</li>
         ) : null}

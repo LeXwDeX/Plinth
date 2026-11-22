@@ -250,6 +250,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 			}
 		}
 	}
+	if err := validateChatSessionGroups(schema.API, content); err != nil {
+		return err
+	}
 	if err := validateApprovalPolicy(schema.ApprovalPolicy, capabilityPresentations); err != nil {
 		return err
 	}
@@ -2962,6 +2965,44 @@ func validateRefetchToolTexts(agent ChatAgentSchema) error {
 	// The delivered refetch is named, so the Agent follows that Task (#330).
 	if !strings.Contains(agent.RefetchUnavailableContent["delivered"], "{task_id}") {
 		return errors.New("agent 的 refetch_unavailable_content.delivered 必须包含 {task_id}")
+	}
+	return nil
+}
+
+// chatSessionSources are the session sources the code writes, in no implied
+// order: chat.api.session_groups decides which group each one is shown in and
+// where. A Catalog that declares a grouping must declare a group for each of
+// them, so a session can never be listed without its group.
+var chatSessionSources = []string{"chat", "mcp"}
+
+// validateChatSessionGroups checks how the browser groups the session list by
+// where a session came from (#332). A grouping lists each source the code
+// writes exactly once; its label is the content.messages key of the group's
+// name, which must be declared in the default locale. Without a grouping the
+// list stays flat, as it was before.
+func validateChatSessionGroups(api ChatAPISchema, content ContentSchema) error {
+	if len(api.SessionGroups) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(api.SessionGroups))
+	for _, group := range api.SessionGroups {
+		if !slices.Contains(chatSessionSources, group.Source) {
+			return fmt.Errorf("chat.api.session_groups 含未知会话来源 %q（只允许 %s）",
+				group.Source, strings.Join(chatSessionSources, "、"))
+		}
+		if seen[group.Source] {
+			return fmt.Errorf("chat.api.session_groups 重复声明会话来源 %q", group.Source)
+		}
+		seen[group.Source] = true
+		if strings.TrimSpace(content.Messages[group.Label]) == "" {
+			return fmt.Errorf("chat.api.session_groups 的来源 %q 引用的文案 %q 不在 content.messages 中",
+				group.Source, group.Label)
+		}
+	}
+	for _, source := range chatSessionSources {
+		if !seen[source] {
+			return fmt.Errorf("chat.api.session_groups 缺少会话来源 %q（服务端会写出它）", source)
+		}
 	}
 	return nil
 }
