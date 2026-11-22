@@ -996,17 +996,24 @@ class Live:
 
     # sessions
     def new_session(self, title=DEFAULT_SESSION_TITLE, approval="auto"):
+        """Create a session, switch its approval mode, and raise a labelled error on refusal.
+
+        #415/#419: the refused switch used to return None, and the failure surfaced
+        later as an unrelated 404 in whichever call first used the session. Every
+        sibling here (lock_model_3d, lock_model_2d, set_brief) raises through
+        require_ok so execute() records the failing step, so this one does too.
+        """
         status, data = self.client.call("POST", "/api/chat/sessions", {"title": title})
         session_id = data.get("id")
         if status not in (200, 201) or not session_id:
-            return None
+            raise RuntimeError(f"new session {title!r}: HTTP {status}")
         if approval:
             # Every script names the mode it needs instead of relying on the server default
             # (#415). A refused switch must not silently leave the new session in a mode the
             # scenario did not ask for.
             status, _ = self.client.call("PUT", f"/api/v1/chat/sessions/{session_id}/approval", {"approvalMode": approval})
             if status not in (200, 201):
-                return None
+                raise RuntimeError(f"session {session_id} approval mode {approval}: HTTP {status}")
         return session_id
 
     def send(self, session_id, content, domain, model, **extra):
