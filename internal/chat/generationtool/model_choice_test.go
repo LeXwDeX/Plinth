@@ -161,7 +161,8 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 		{name: "the Agent's model argument", named: choiceMeshyID, wantID: choiceMeshyID, source: "agent"},
 		{name: "the purpose recommendation", purpose: "game_character", wantID: choiceP2ID,
 			source: "profile", profile: "game_character"},
-		{name: "the defaults when nothing chose", wantID: choiceFullID, source: "default"},
+		{name: "the default purpose when nothing chose", wantID: choiceFullID, source: "profile",
+			profile: "render"},
 		{name: "a conflict with the person's pick is refused", locked: choiceP2ID, named: choiceMeshyID,
 			refusal: "锁定", code: "model_choice_conflict"},
 		{name: "an unavailable Agent model is refused", named: "missing/model", refusal: "不可用",
@@ -172,8 +173,8 @@ func TestChooseOfferingFollowsTheModelChoiceLayers(t *testing.T) {
 			workspace: choiceFullID, wantID: choiceFullID, source: "profile", profile: "render"},
 		{name: "the Agent outranks the workspace picker value", named: choiceMeshyID,
 			workspace: choiceFullID, wantID: choiceMeshyID, source: "agent"},
-		{name: "without a purpose the workspace picker value still runs", workspace: choiceMeshyID,
-			wantID: choiceMeshyID, source: "user"},
+		{name: "the default purpose conflicts with the workspace model", workspace: choiceMeshyID,
+			refusal: "确认", code: "model_choice_workspace_conflict"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

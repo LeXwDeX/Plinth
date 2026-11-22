@@ -72,18 +72,26 @@ type PurposeQuery struct {
 }
 
 // Model3DProfile returns the 3D purpose the brief selects. A brief without one
-// has none: nothing is recommended or overridden by a purpose. The profile is
-// already the variant for the brief's target platform when the purpose declares
-// one (#275), so its budget and parameter overrides are what every later layer
-// reads; a brief without a platform gets the purpose as declared.
+// falls back to the Schema's default_profile, as the 2D table does (#381): a
+// clear 3D instruction with no stated purpose runs on the default purpose
+// instead of none. The profile is already the variant for the brief's target
+// platform when the purpose declares one (#275), so its budget and parameter
+// overrides are what every later layer reads; a brief without a platform gets
+// the purpose as declared.
 func (resolver PurposeParameters) Model3DProfile(brief ProductionBrief) (catalog.ChatModel3DUsageProfile, bool) {
 	usage := resolver.Model3D
-	if len(usage.Profiles) == 0 || brief.Empty() {
+	if len(usage.Profiles) == 0 {
 		return catalog.ChatModel3DUsageProfile{}, false
 	}
 	id := brief.Text(usage.Brief.FieldNameOfType("profile"))
 	for _, profile := range usage.Profiles {
 		if profile.ID == id {
+			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
+			return profile, true
+		}
+	}
+	for _, profile := range usage.Profiles {
+		if profile.ID == usage.DefaultProfile {
 			profile, _ = usage.ForPlatform(profile, brief.Text(usage.PlatformField))
 			return profile, true
 		}

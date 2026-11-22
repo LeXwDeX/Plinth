@@ -27,6 +27,64 @@ type verifiedAttachments struct {
 	picked bool
 }
 
+// carryChoiceTurnAttachments gives a card answer the pictures and the
+// multiview group its card was opened on (#381). The page sends a card answer
+// with no attachment of its own, so without this the continuation would judge
+// the same design on the low-resolution copy history keeps. Only a turn that
+// claims nothing itself is filled, and only from the user message the answered
+// card belongs to; the claims then run through the usual verification.
+func (service *Service) carryChoiceTurnAttachments(ctx context.Context, command *StartTurn) {
+	answer := command.ChoiceAnswer
+	if answer == nil || service.choices == nil || service.repository == nil {
+		return
+	}
+	if len(command.ImageURLs) > 0 || len(command.Attachments) > 0 || len(command.Selection) > 0 || len(command.Mentions) > 0 ||
+		command.Options.Multiview != nil {
+		return
+	}
+	card, err := service.choices.GetChoice(ctx, command.OwnerID, command.SessionID, answer.ChoiceID)
+	if err != nil || card.AssistantMessageID == "" {
+		return
+	}
+	history, err := service.repository.ListMessages(ctx, command.OwnerID, command.SessionID)
+	if err != nil {
+		return
+	}
+	source := -1
+	for index := len(history) - 1; index >= 0; index-- {
+		if history[index].ID == card.AssistantMessageID {
+			source = index
+			break
+		}
+	}
+	if source < 0 {
+		return
+	}
+	for index := source - 1; index >= 0; index-- {
+		message := history[index]
+		if message.Role != service.userRole {
+			continue
+		}
+		command.ImageURLs = append([]string(nil), message.ImageURLs...)
+		for _, attachment := range message.Attachments {
+			ref := AttachmentRef{Kind: attachment.Kind, AssetID: attachment.AssetID,
+				TaskID: attachment.TaskID, CaptureID: attachment.CaptureID, ImageSlot: attachment.ImageSlot}
+			if attachment.Role == AttachmentRoleSelection {
+				// A selected object is not one of the message's images: it keeps
+				// its own picture URL and claims no image slot.
+				ref.ImageSlot, ref.URL = 0, attachment.URL
+				command.Selection = append(command.Selection, ref)
+				continue
+			}
+			if attachment.Kind == AttachmentKindImage && attachment.ImageSlot > 0 {
+				command.Attachments = append(command.Attachments, ref)
+			}
+		}
+		command.Options.Multiview = message.Multiview
+		return
+	}
+}
+
 // verifyTurnAttachments verifies every claim of the turn. It never fails the
 // turn: a claim that does not hold is demoted to a plain upload (message
 // images) or dropped (selection), so an unverified ID can never reach the

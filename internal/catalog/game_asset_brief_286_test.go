@@ -172,23 +172,19 @@ func TestEnglishProjectionTranslatesTheBriefSelects(t *testing.T) {
 func TestShippedBriefGuidanceAsksForEngineAndPlatformAndRigging(t *testing.T) {
 	app := shippedApplication(t)
 	brief := app.Chat.Model3DUsage.Brief
-	var usageCard string
-	for _, kind := range app.Chat.Choice.Kinds {
-		if kind.OptionSource == "usage_profiles" {
-			usageCard = kind.Message
-		}
-	}
 	var tool string
 	for _, candidate := range app.Chat.AgentTools {
 		if candidate.Execution.ImplementationKey == "session.brief" {
 			tool = candidate.Description
 		}
 	}
+	// #381: the usage card no longer pre-announces the follow-up questions, so
+	// it is not one of the places that must name the engine, platform and
+	// rigging; the rules and the empty-brief text still are.
 	for name, text := range map[string]string{
 		"system prompt":          app.Chat.Agent.SystemPrompt,
 		"empty brief text":       brief.EmptyText,
 		"brief context":          brief.ContextTemplate,
-		"usage card message":     usageCard,
 		"brief tool description": tool,
 	} {
 		if strings.TrimSpace(text) == "" {

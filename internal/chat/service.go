@@ -1367,6 +1367,9 @@ func (service *Service) startTurn(
 	if command.Options.InputSource != "" && command.Options.InputSource != service.canvasInputSource {
 		return Message{}, ErrInvalidInputSource
 	}
+	// A card answer carries no attachment of its own: continue on the pictures
+	// and the multiview group the card was opened on (#381).
+	service.carryChoiceTurnAttachments(ctx, &command)
 	if command.Options.Multiview != nil && !command.Options.Multiview.Valid() {
 		return Message{}, ErrInvalidMultiview
 	}

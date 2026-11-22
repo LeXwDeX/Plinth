@@ -75,8 +75,8 @@ type modelInput struct {
 }
 
 // briefPurpose returns the 3D purpose profile the session's production brief
-// selects. A session without a brief has none: nothing is recommended or
-// overridden by a purpose. The profile is already the variant for the brief's
+// selects. A brief without one falls back to the Schema's default_profile, as
+// the 2D table does (#381). The profile is already the variant for the brief's
 // target platform when the purpose declares one (#275), so its budget and
 // parameter overrides are what every later layer reads; a session without a
 // platform gets the purpose as declared.
@@ -89,7 +89,7 @@ func (executor *Executor) briefPurpose(command chat.ToolCommand) (catalog.ChatMo
 // Schema's default_profile applies, as the image_use description and the
 // system prompt promise ("omit or leave empty to let the default 2D purpose
 // apply"). A purpose a stale brief names but the Schema no longer declares is
-// ignored the same way a session without one, matching the 3D usage check.
+// ignored the same way a session without one, as on the 3D side.
 func (executor *Executor) imageBriefPurpose(command chat.ToolCommand) (purposeProfile, bool) {
 	return executor.purposeParameters().Image2DProfile(command.Options.ProductionBrief, false)
 }
