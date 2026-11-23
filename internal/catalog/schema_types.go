@@ -2376,19 +2376,24 @@ type ProviderConditionalCapabilitySchema struct {
 }
 
 type ProviderConnectionSchema struct {
-	ID                      string                                `json:"id"`
-	Protocol                string                                `json:"protocol"`
-	AdapterKey              string                                `json:"adapter_key"`
-	BaseURLSetting          string                                `json:"base_url_setting,omitempty"`
-	APIKeySetting           string                                `json:"api_key_setting,omitempty"`
-	AuthHeader              string                                `json:"auth_header,omitempty"`
-	AuthPrefix              string                                `json:"auth_prefix,omitempty"`
-	RequestTimeoutSeconds   int                                   `json:"request_timeout_seconds,omitempty"`
-	AllowHTTPAssets         bool                                  `json:"allow_http_assets,omitempty"`
-	Capabilities            []schemacontract.Capability           `json:"capabilities,omitempty"`
-	ConditionalCapabilities []ProviderConditionalCapabilitySchema `json:"conditional_capabilities,omitempty"`
-	ErrorMapping            *schemacontract.ErrorMapping          `json:"error_mapping,omitempty"`
-	StatusMapping           *schemacontract.StatusMapping         `json:"status_mapping,omitempty"`
+	ID                    string `json:"id"`
+	Protocol              string `json:"protocol"`
+	AdapterKey            string `json:"adapter_key"`
+	BaseURLSetting        string `json:"base_url_setting,omitempty"`
+	APIKeySetting         string `json:"api_key_setting,omitempty"`
+	AuthHeader            string `json:"auth_header,omitempty"`
+	AuthPrefix            string `json:"auth_prefix,omitempty"`
+	RequestTimeoutSeconds int    `json:"request_timeout_seconds,omitempty"`
+	// PollRequestTimeoutSeconds bounds one status poll of this connection
+	// (#487). The connection request timeout also covers artifact downloads,
+	// which must be allowed to run long; an official GET guidance (Meshy: 30 s)
+	// only fits the poll. Zero: polls keep the connection timeout.
+	PollRequestTimeoutSeconds int                                   `json:"poll_request_timeout_seconds,omitempty"`
+	AllowHTTPAssets           bool                                  `json:"allow_http_assets,omitempty"`
+	Capabilities              []schemacontract.Capability           `json:"capabilities,omitempty"`
+	ConditionalCapabilities   []ProviderConditionalCapabilitySchema `json:"conditional_capabilities,omitempty"`
+	ErrorMapping              *schemacontract.ErrorMapping          `json:"error_mapping,omitempty"`
+	StatusMapping             *schemacontract.StatusMapping         `json:"status_mapping,omitempty"`
 	// ResultRefetch declares that an accepted result of this connection can be
 	// fetched again from its upstream job after the Task failed to store it
 	// (#295). Absent: the provider's results cannot be fetched again.

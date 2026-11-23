@@ -51,6 +51,142 @@ func completeRequest(t *testing.T, adapter *Adapter, offering generation.Offerin
 	return open(t, adapter, offering, observe, observation.Artifacts)
 }
 
+// completeConvert is complete plus the post-success round the kernel runs for
+// #462 on-demand slots: a Meshy Convert task succeeds on its blocking slots
+// only, and the converted formats arrive as post-success resources. Tests that
+// inspect the delivered files of a conversion read both rounds.
+func completeConvert(t *testing.T, adapter *Adapter, offering generation.Offering, submission string, input any) []deliveredFile {
+	t.Helper()
+	payload, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := adapter.Start(context.Background(), generation.StartRequest{
+		TaskID: generation.TaskID("task-" + submission), AttemptID: generation.AttemptID("attempt-" + submission),
+		SubmissionKey: submission, Offering: offering, Input: payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observe := generation.ObserveRequest{
+		TaskID: generation.TaskID("task-" + submission), AttemptID: generation.AttemptID("attempt-" + submission),
+		Offering: offering, Job: *started.Job, Input: payload,
+	}
+	var observation generation.Observation
+	for range 4 {
+		if observation, err = adapter.Observe(context.Background(), observe); err != nil {
+			t.Fatal(err)
+		}
+		if observation.Phase == generation.UpstreamCompleted {
+			break
+		}
+	}
+	files := open(t, adapter, offering, observe, observation.Artifacts)
+	pinned, err := generation.ResolveConditionalOutputs(offering, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := make([]generation.ResourceSlotState, 0, len(pinned.Outputs))
+	for _, output := range pinned.Outputs {
+		if output.Delivery != generation.AssetDeliveryOnDemand || output.Variant == "" {
+			continue
+		}
+		pending = append(pending, generation.ResourceSlotState{Role: output.Role, Variant: output.Variant, State: generation.ResourcePending})
+	}
+	if len(pending) == 0 {
+		return files
+	}
+	post := generation.ObserveRequest{
+		TaskID: observe.TaskID, AttemptID: observe.AttemptID, Offering: pinned, Job: *started.Job,
+		Input: payload, PostSuccess: true, ResourceSlots: pending,
+	}
+	var delivered generation.Observation
+	for range 4 {
+		if delivered, err = adapter.Observe(context.Background(), post); err != nil {
+			t.Fatal(err)
+		}
+		if delivered.Phase == generation.UpstreamCompleted {
+			break
+		}
+	}
+	return append(files, open(t, adapter, pinned, post, delivered.Artifacts)...)
+}
+
+// completeConvertRequest is completeConvert with the request adjusted, for the
+// cases that submit the same conversion by task or by saved file.
+func completeConvertRequest(t *testing.T, adapter *Adapter, offering generation.Offering, submission string, input any, adjust func(*generation.StartRequest)) []deliveredFile {
+	t.Helper()
+	payload, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := generation.StartRequest{
+		TaskID: generation.TaskID("task-" + submission), AttemptID: generation.AttemptID("attempt-" + submission),
+		SubmissionKey: submission, Offering: offering, Input: payload,
+	}
+	adjust(&request)
+	started, err := adapter.Start(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observe := generation.ObserveRequest{
+		TaskID: request.TaskID, AttemptID: request.AttemptID, Offering: offering, Job: *started.Job, Input: payload,
+	}
+	var observation generation.Observation
+	for range 4 {
+		if observation, err = adapter.Observe(context.Background(), observe); err != nil {
+			t.Fatal(err)
+		}
+		if observation.Phase == generation.UpstreamCompleted {
+			break
+		}
+	}
+	files := open(t, adapter, offering, observe, observation.Artifacts)
+	pinned, err := generation.ResolveConditionalOutputs(offering, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := make([]generation.ResourceSlotState, 0, len(pinned.Outputs))
+	for _, output := range pinned.Outputs {
+		if output.Delivery != generation.AssetDeliveryOnDemand || output.Variant == "" {
+			continue
+		}
+		pending = append(pending, generation.ResourceSlotState{Role: output.Role, Variant: output.Variant, State: generation.ResourcePending})
+	}
+	if len(pending) == 0 {
+		return files
+	}
+	post := generation.ObserveRequest{
+		TaskID: observe.TaskID, AttemptID: observe.AttemptID, Offering: pinned, Job: *started.Job,
+		Input: payload, PostSuccess: true, ResourceSlots: pending,
+	}
+	var delivered generation.Observation
+	for range 4 {
+		if delivered, err = adapter.Observe(context.Background(), post); err != nil {
+			t.Fatal(err)
+		}
+		if delivered.Phase == generation.UpstreamCompleted {
+			break
+		}
+	}
+	return append(files, open(t, adapter, pinned, post, delivered.Artifacts)...)
+}
+
+// convertWithBlockingFormats is the Convert Offering with its six model files
+// blocking again, for tests that drive the success round.
+func convertWithBlockingFormats(offering generation.Offering) generation.Offering {
+	outputs := make([]generation.AssetRequirement, len(offering.Outputs))
+	copy(outputs, offering.Outputs)
+	for index := range outputs {
+		if outputs[index].Role == "model" && outputs[index].Variant != "" {
+			outputs[index].Delivery = generation.AssetDeliveryRequired
+			outputs[index].RequestedWhen = nil
+		}
+	}
+	offering.Outputs = outputs
+	return offering
+}
+
 func deliveryError(t *testing.T, role, variant, mediaType string, content []byte) error {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "asset")
@@ -80,7 +216,7 @@ func TestMeshyConvertDeliversTheSixModelFilesOnly(t *testing.T) {
 		t.Fatal("meshy convert missing")
 	}
 	input := map[string]any{"source_task": "task-source", "target_formats": []string{"glb", "fbx", "obj", "usdz", "stl", "3mf"}}
-	files := complete(t, New(), offering, "convert-330", input)
+	files := completeConvert(t, New(), offering, "convert-330", input)
 	var variants []string
 	for _, file := range files {
 		if file.claim.Role != "model" {
@@ -188,7 +324,7 @@ func TestTextureMarkersReachConversionsBySourceTaskAndSavedFile330(t *testing.T)
 				},
 			} {
 				t.Run(name, func(t *testing.T) {
-					files := completeRequest(t, adapter, convert, "convert-"+name, map[string]any{"target_formats": []string{"glb", "fbx", "obj", "usdz", "stl", "3mf"}}, request)
+					files := completeConvertRequest(t, adapter, convert, "convert-"+name, map[string]any{"target_formats": []string{"glb", "fbx", "obj", "usdz", "stl", "3mf"}}, request)
 					if tail := textureOf(t, files, "usdz"); !bytes.HasSuffix(tail, append(bytes.Clone(iend), tc.convertTail...)) {
 						t.Fatalf("converted texture tail = %q", tail[len(tail)-24:])
 					}
@@ -219,6 +355,12 @@ func TestConvertRejectedOnceIsCleanForTheRefetch330(t *testing.T) {
 	}
 	generation3D, _ := product.Get("meshy/meshy-7.1/text-to-3d")
 	convert, _ := product.Get("meshy/processing/convert")
+	// This case is about the mock's delivery-verdict mechanics (a conversion
+	// refused once, then served clean), not about #462 slots: it drives the
+	// success round, so the six model files are blocking here. The Catalog
+	// declares them as requested slots that arrive post-success, which
+	// TestMeshyConvertDeliversTheSixModelFilesOnly covers.
+	convert = convertWithBlockingFormats(convert)
 	adapter := New()
 	source := complete(t, adapter, generation3D, "source", map[string]any{"prompt": "a stool " + MarkerConvertRejectedOnce})
 	for _, file := range source {

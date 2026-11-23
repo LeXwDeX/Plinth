@@ -148,8 +148,16 @@ func TestHyper3DNativeQuotesMatchWireCandidates(t *testing.T) {
 		t.Fatal("Bang native source is not narrowly qualified")
 	}
 	local, _ := c.Get("hyper3d/bang/local-model")
-	if local.Parameters[0].UploadedModel == nil || local.Parameters[0].UploadedModel.ProfileID != "static-glb-v1" || !local.Parameters[1].Required {
+	if local.Parameters[0].UploadedModel == nil || local.Parameters[0].UploadedModel.ProfileID != "static-glb-v1" || local.Parameters[1].Required {
 		t.Fatal("local READY model/reference contract missing")
+	}
+	// #487: the official Bang page makes the reference image optional and
+	// requires it only when material is not None or an instruction is used
+	// (https://docs.hyper3d.ai/en/api-specification/bang, read 2026-11-23), so
+	// the Offering declares material and leaves the picture optional; the
+	// Adapter enforces the documented conditional.
+	if material := local.Parameters[2]; material.Name != "material" || len(material.Options) != 5 || material.Required {
+		t.Fatalf("Bang material = %#v, want the five official values", material)
 	}
 	raw, err := os.ReadFile("default_catalog.json")
 	if err != nil {
@@ -278,5 +286,43 @@ func TestHyper3DBangAndTextureEnabledAtAcceptedRevisions(t *testing.T) {
 		if err != nil || quote.TotalAmount != want.total || quote.ExtraAmount != "0" {
 			t.Fatalf("%s quote=%+v err=%v", id, quote, err)
 		}
+	}
+}
+
+// #487: the official Bang page makes the reference image optional and requires
+// it only when material is not None or an instruction is used
+// (https://docs.hyper3d.ai/en/api-specification/bang, read 2026-11-23). The
+// Offering declares the five official material values, so the "geometry only"
+// path is reachable instead of dead code.
+func TestHyper3DBangDeclaresMaterialAndAnOptionalReferencePicture(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	offering, ok := product.Get("hyper3d/bang/local-model")
+	if !ok {
+		t.Fatal("hyper3d/bang/local-model is missing")
+	}
+	var reference, material *schema.Parameter
+	for index := range offering.Parameters {
+		switch offering.Parameters[index].Name {
+		case "reference_image":
+			reference = &offering.Parameters[index]
+		case "material":
+			material = &offering.Parameters[index]
+		}
+	}
+	if reference == nil || reference.Required {
+		t.Fatalf("reference_image = %#v, want an optional picture", reference)
+	}
+	if material == nil || material.Type != "select" || material.Required ||
+		material.WireName != "material" || string(material.Default) != `"PBR"` || len(material.Options) != 5 {
+		t.Fatalf("material = %#v, want the five official values defaulting to PBR", material)
+	}
+	// The Adapter enforces the documented conditional: the picture is required
+	// when material is not None. Both inputs together stay expressible.
+	if _, _, err := product.Normalize(offering.Capability, offering.ID,
+		json.RawMessage(`{"source_asset":"asset-model","material":"None"}`)); err != nil {
+		t.Fatalf("a geometry-only Bang request was refused: %v", err)
 	}
 }

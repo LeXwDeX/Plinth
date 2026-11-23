@@ -51,6 +51,9 @@ type Client struct {
 	// retrySubmitServerError is the connection-level declaration that a 5xx
 	// answer to a creation request may be retried (#460 C25).
 	retrySubmitServerError bool
+	// pollTimeout bounds one non-creation request (a status poll) without
+	// touching the client timeout that also covers downloads (#487).
+	pollTimeout time.Duration
 }
 
 // largeSubmitBytes is the body size above which a creation request uses
@@ -100,6 +103,11 @@ type Config struct {
 	// （#460 C25）。上游可能已经受理创建，因此重试有重复扣费风险；
 	// 只有声明允许的连接才这样做，未声明的连接保持「结果不明不重发」。
 	RetrySubmitServerError bool
+	// PollTimeout 限定非创建请求（任务状态轮询）的单次时长（#487）。连接级
+	// 请求超时同时覆盖轮询与产物下载，官方对 GET 的建议是 30 秒
+	// （Meshy，2026-11-23）；声明后轮询单独用这个值，下载不受影响。
+	// 零值表示不额外限制。
+	PollTimeout time.Duration
 }
 
 // HTTPErrorClassifier 对 HTTP 非 2xx 响应做 provider 专有分类。
@@ -179,6 +187,7 @@ func NewWithConfig(config Config) (*Client, error) {
 		largeSubmitTimeout:     config.LargeSubmitTimeout,
 		largeSubmitBytes:       config.LargeSubmitBytes,
 		retrySubmitServerError: config.RetrySubmitServerError,
+		pollTimeout:            config.PollTimeout,
 	}, nil
 }
 
@@ -314,6 +323,13 @@ func (c *Client) do(
 		}
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	} else if !submitting && c.pollTimeout > 0 {
+		// A status poll needs far less than the connection timeout that also
+		// has to let a big artifact download finish (Meshy: GET 30 s, #487).
+		// Downloads never come through here, so only polls are shortened.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.pollTimeout)
 		defer cancel()
 	}
 	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)

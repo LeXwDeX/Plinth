@@ -313,13 +313,24 @@ func validSelectParameter(parameter generation.Parameter, allowed ...string) boo
 	return true
 }
 
+// noTemplateCollisions keeps a file or task parameter from shadowing a template
+// field: the wire position of an uploaded file must stay the template's own. A
+// scalar parameter may take a template field's place, which is exactly what
+// imagewire.EncodeMultipart does (the parameter's value is sent at the
+// template's position), so a declared select such as Bang's material can
+// override the template default (#487).
 func noTemplateCollisions(offering generation.Offering, options wireOptions) bool {
 	var template map[string]any
 	if json.Unmarshal(options.RequestTemplate, &template) != nil {
 		return false
 	}
 	for _, parameter := range offering.Parameters {
-		if _, exists := template[effectiveWireName(parameter)]; exists {
+		wire := effectiveWireName(parameter)
+		if _, exists := template[wire]; !exists {
+			continue
+		}
+		switch parameter.Type {
+		case "asset", "asset-array", "task":
 			return false
 		}
 	}

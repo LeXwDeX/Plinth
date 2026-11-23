@@ -182,12 +182,15 @@ func TestMeshySpecialCandidateInputBoundaries(t *testing.T) {
 		return o
 	}
 	resize := get("meshy/processing/resize")
-	for _, raw := range []string{`{"source_asset":"owned"}`, `{"source_asset":"owned","resize_height":0}`, `{"source_asset":"owned","resize_height":-1}`, `{"source_asset":"owned","resize_height":0.1,"resize_longest_side":0.2}`, `{"source_asset":"owned","auto_size":true}`, `{"source_asset":"owned","resize_height":1,"origin_at":"other"}`} {
+	// #487: auto_size is the official third sizing mode
+	// (docs.meshy.ai/en/api/resize, read 2026-11-23), so it is accepted alone
+	// and still refuses to travel with either numbered mode.
+	for _, raw := range []string{`{"source_asset":"owned"}`, `{"source_asset":"owned","resize_height":0}`, `{"source_asset":"owned","resize_height":-1}`, `{"source_asset":"owned","resize_height":0.1,"resize_longest_side":0.2}`, `{"source_asset":"owned","auto_size":true,"resize_height":1}`, `{"source_asset":"owned","auto_size":true,"resize_longest_side":1}`, `{"source_asset":"owned","resize_height":1,"origin_at":"other"}`} {
 		if _, err := normalizeInput(resize, json.RawMessage(raw)); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
 	}
-	for _, raw := range []string{`{"source_asset":"owned","resize_height":0.001}`, `{"source_asset":"owned","resize_longest_side":0.2,"origin_at":"center"}`} {
+	for _, raw := range []string{`{"source_asset":"owned","resize_height":0.001}`, `{"source_asset":"owned","resize_longest_side":0.2,"origin_at":"center"}`, `{"source_asset":"owned","auto_size":true,"origin_at":"center"}`} {
 		if _, err := normalizeInput(resize, json.RawMessage(raw)); err != nil {
 			t.Fatalf("rejected %s: %v", raw, err)
 		}

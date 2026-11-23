@@ -369,6 +369,7 @@ func buildProviderAdapterWithTransport(
 			ScratchDir:             scratchDir,
 			InputPublisher:         publisher,
 			RetrySubmitServerError: connection.RetrySubmitServerError,
+			PollTimeout:            time.Duration(connection.PollRequestTimeoutSeconds) * time.Second,
 		})
 	case "tripo":
 		for _, offering := range offerings {

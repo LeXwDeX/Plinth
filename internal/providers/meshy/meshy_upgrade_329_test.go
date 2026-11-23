@@ -1,15 +1,19 @@
 package meshy_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -17,6 +21,17 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/meshy"
 )
+
+// testPNG is a real PNG of the given size, so the picture bounds a parameter
+// declares can be checked at the wire.
+func testPNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image.NewNRGBA(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
 
 // #329 HTTP boundary: what the default Catalog's Meshy Offerings actually send,
 // checked against the 2026-10-22 documentation baseline.
@@ -213,20 +228,20 @@ func TestMeshy329MultiImageSendsTextureImageURLs(t *testing.T) {
 	}
 	store := multiImageInputStore{
 		"view-front": []byte("\x89PNG\r\n\x1a\nfront"), "view-back": []byte("\x89PNG\r\n\x1a\nback"),
-		"texture-front": []byte("RIFF\x00\x00\x00\x00WEBPtexture"),
+		"texture-front": testPNG(t, 32, 32),
 	}
 	adapter := newMeshyAdapter(t, meshy.Config{BaseURL: upstream.server.URL, APIKey: "test", HTTPClient: upstream.server.Client(), InputAssets: store})
 	if _, err := adapter.Start(context.Background(), generation.StartRequest{
 		OwnerID: "owner", Offering: offering, Input: input,
 		InputAssets: map[string][]generation.InputAsset{
 			"reference_assets": {{ID: "view-front", OwnerID: "owner", MediaType: "image/png"}, {ID: "view-back", OwnerID: "owner", MediaType: "image/png"}},
-			"texture_assets":   {{ID: "texture-front", OwnerID: "owner", MediaType: "image/webp"}},
+			"texture_assets":   {{ID: "texture-front", OwnerID: "owner", MediaType: "image/png"}},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	body := upstream.bodies("/openapi/v1/multi-image-to-3d")[0]
-	wantTexture := []any{"data:image/webp;base64," + base64.StdEncoding.EncodeToString(store["texture-front"])}
+	wantTexture := []any{"data:image/png;base64," + base64.StdEncoding.EncodeToString(store["texture-front"])}
 	if !reflect.DeepEqual(body["texture_image_urls"], wantTexture) {
 		t.Fatalf("texture_image_urls = %#v", body["texture_image_urls"])
 	}
@@ -235,6 +250,43 @@ func TestMeshy329MultiImageSendsTextureImageURLs(t *testing.T) {
 	}
 	assertAbsent(t, "multi-image", body, "texture_assets", "texture_image_url", "texture_prompt", "reference_assets")
 	assertNoDeprecatedFields(t, taskCatalog, "multi-image-to-3d", body)
+}
+
+// #487: the official Multi Image page gives every texture_image_urls picture
+// the bounds of the single texture picture (at least 32 px on each side,
+// 178,956,970 px at most), so a texture list is refused before submission.
+func TestMeshy487MultiImageRefusesTexturePicturesOutsideThePixelBounds(t *testing.T) {
+	upstream := newUpgradeUpstream(t)
+	taskCatalog, offering := upgradeOffering(t, "meshy/meshy-7.1-multiview/image-to-3d", upstream.server)
+	_, input, err := taskCatalog.Normalize(offering.Capability, offering.ID, json.RawMessage(
+		`{"reference_assets":["view-front"],"texture_assets":["texture-small"],"authorize_extra_credits":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := multiImageInputStore{
+		"view-front":    []byte("\x89PNG\r\n\x1a\nfront"),
+		"texture-small": testPNG(t, 16, 16),
+	}
+	adapter := newMeshyAdapter(t, meshy.Config{BaseURL: upstream.server.URL, APIKey: "test", HTTPClient: upstream.server.Client(), InputAssets: store})
+	_, err = adapter.Start(context.Background(), generation.StartRequest{
+		OwnerID: "owner", Offering: offering, Input: input,
+		InputAssets: map[string][]generation.InputAsset{
+			"reference_assets": {{ID: "view-front", OwnerID: "owner", MediaType: "image/png"}},
+			"texture_assets":   {{ID: "texture-small", OwnerID: "owner", MediaType: "image/png", Size: int64(len(store["texture-small"]))}},
+		},
+	})
+	if err == nil {
+		t.Fatal("a 16x16 texture picture was accepted, want the documented 400")
+	}
+	if !strings.Contains(err.Error(), "像素") {
+		t.Fatalf("refusal = %v, want the pixel bounds", err)
+	}
+	// The schema rule refuses texture pictures sent with texture generation
+	// off, whatever the pixels are.
+	if _, _, err := taskCatalog.Normalize(offering.Capability, offering.ID, json.RawMessage(
+		`{"reference_assets":["view-front"],"texture_assets":["texture-small"],"should_texture":false}`)); err == nil || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("should_texture=false with texture pictures = %v, want the documented refusal", err)
+	}
 }
 
 func TestMeshy329ProcessingWire(t *testing.T) {

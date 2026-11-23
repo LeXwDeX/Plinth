@@ -39,11 +39,21 @@ func ConditionMatches(condition ParameterCondition, values map[string]any) bool 
 		return !equal
 	case "contains":
 		// A string-array parameter (a multi-select) holds the expected string.
-		// It decides which exact output slots a frozen selection requires.
-		items, _ := value.([]any)
-		for _, item := range items {
-			if reflect.DeepEqual(item, expected) {
-				return true
+		// It decides which exact output slots a frozen selection requires. A
+		// caller that built the values itself holds []string, while a decoded
+		// JSON body holds []any: both are the same selection.
+		switch items := value.(type) {
+		case []any:
+			for _, item := range items {
+				if reflect.DeepEqual(item, expected) {
+					return true
+				}
+			}
+		case []string:
+			for _, item := range items {
+				if reflect.DeepEqual(item, expected) {
+					return true
+				}
 			}
 		}
 		return false
