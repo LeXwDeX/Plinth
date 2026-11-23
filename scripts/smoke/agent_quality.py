@@ -486,7 +486,7 @@ def case_hard_failures(case):
     return [check for check in case.get("checks") or [] if check.get("status") == CHECK_FAIL]
 
 
-def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at=None):
+def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at=None, shape="live"):
     hard = [check for case in cases for check in case_hard_failures(case)]
     total_cards = sum(case["metrics"]["interruption_count"] for case in cases)
     total_paid = sum(case["metrics"]["paid_call_count"] for case in cases)
@@ -517,6 +517,13 @@ def summarize(cases, mode, revision, dirty, request_set, rubric=None, started_at
         "revision": revision,
         "dirty": bool(dirty),
         "request_set": request_set,
+        # The shape decides which metrics are comparable with a run on another
+        # shape: only the artifacts need real generation, while the chat metrics
+        # (turns, refusals, questions, tool calls) depend on the chat side alone
+        # (#407, #416 mixed shape).
+        "upstream_shape": shape,
+        "comparable_metrics": (["chat"] if shape in ("live", "mixed") else [])
+        + (["artifacts"] if shape == "live" else []),
         "cases": cases,
         "summary": {
             "cases": len(cases),
