@@ -282,7 +282,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 	// declared concurrency: a pending retry first, then a format never started.
 	// One observation carries one permit (§4.3), so a round starts at most one
 	// child and never waits for the others.
-	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < a.conversionConcurrency(options) {
+	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < a.conversionConcurrency(request.Offering, options) {
 		if format, ok := nextConversionDispatch(selections, state.Conversions); ok {
 			if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
 				return generation.Observation{}, err
@@ -335,7 +335,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 				// entry, release the slot and queue again without spending the
 				// retry budget (C4). Without a pool the historical per-format
 				// budget below applies.
-				if a.poolEnabled() {
+				if a.poolEnabled(request.Offering) {
 					if retryAfter, full := poolFullRetryAfter(err); full && permit != nil {
 						permit.Result = generation.DispatchResultNotDispatched
 						restoreConversionItem(state.Conversions, format, previous, existed)
@@ -481,25 +481,12 @@ func (a *Adapter) preCompletionClaims(
 	return base, nil
 }
 
-// The Generation checkpoint stores the dispatch intent verbatim before the
-// paid POST. If that POST has no durable receipt, recover its dispatching
-// marker from details and stop; never infer that the format was unstarted.
+// parsePreCompletionState reads the checkpoint the same way the post-success
+// path does: the Generation checkpoint stores the dispatch intent verbatim
+// before the paid POST, and parsePostSuccessState recovers its dispatching
+// marker from details so a crash never looks like an unstarted format.
 func parsePreCompletionState(opaque json.RawMessage) postSuccessState {
-	state := parsePostSuccessState(opaque)
-	if len(state.Conversions) > 0 {
-		return state
-	}
-	var intent struct {
-		Stage   string `json:"stage"`
-		Details struct {
-			Conversions map[string]conversionItem `json:"conversions"`
-		} `json:"details"`
-	}
-	if json.Unmarshal(opaque, &intent) == nil && intent.Stage == "models/convert" &&
-		len(intent.Details.Conversions) > 0 {
-		state.Conversions = intent.Details.Conversions
-	}
-	return state
+	return parsePostSuccessState(opaque)
 }
 
 func preCompletionRunning(base generation.Observation, state postSuccessState) generation.Observation {

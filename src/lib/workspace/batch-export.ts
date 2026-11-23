@@ -11,13 +11,25 @@ export interface ExportEntry {
   url: string;
 }
 
+// 与 Catalog 的 format.media_type_extensions 对齐：USDZ 的
+// `model/vnd.usdz+zip`、OBJ/STL 与 `application/octet-stream` 都声明在
+// Catalog 里，不能落到 subtype 回退（会生成 `vndusdzzip` 之类的错误扩展名）。
 const EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
   'image/gif': 'gif',
+  'image/tiff': 'tiff',
+  'image/bmp': 'bmp',
+  'image/x-bmp': 'bmp',
+  'image/x-ms-bmp': 'bmp',
   'model/gltf-binary': 'glb',
   'model/gltf+json': 'gltf',
+  'model/obj': 'obj',
+  'model/stl': 'stl',
+  'model/vnd.usdz+zip': 'usdz',
+  'application/octet-stream': 'bin',
+  'application/zip': 'zip',
 };
 
 export function extensionOf(mediaType: string): string {

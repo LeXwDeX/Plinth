@@ -171,6 +171,26 @@ func TestAutoCompletionPaidBoundCoversTheOffering(t *testing.T) {
 	}
 }
 
+// A free route whose Offering is priced in native units still charges: the
+// legacy estimate alone reports 0 and the automatic completion would treat it
+// as free, never counting it against the per-Task paid ceiling (#478).
+func TestAutoCompletionFreeRouteMayNotBeNativePriced(t *testing.T) {
+	application, offerings := autoCompletionFixture(t)
+	const id = "local/generated-glb/to-gltf"
+	local, ok := offerings[schemacontract.OfferingID(id)]
+	if !ok {
+		t.Fatal("免费的本地转换 offering 缺失")
+	}
+	local.NativePricing = &schemacontract.NativePricing{
+		Version: 1, Unit: "local.credit", UnitLabel: "本地积分", BaseAmount: "1",
+	}
+	offerings[schemacontract.OfferingID(id)] = local
+	err := validateAutoCompletion(application, offerings)
+	if err == nil || !strings.Contains(err.Error(), "按原生计价") {
+		t.Fatalf("error = %v; want the native-pricing refusal", err)
+	}
+}
+
 // Retired routes are recognized by their fixed input so old plans still count;
 // they never run automatically.
 func TestRetiredRouteMayNotCompleteAutomatically(t *testing.T) {
