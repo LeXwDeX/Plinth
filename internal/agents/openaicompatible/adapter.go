@@ -26,6 +26,10 @@ type ThinkingOptions struct {
 	// ReasoningPassback keeps reasoning_content from responses and sends it
 	// back on assistant messages, as the vendor's tool-loop contract requires.
 	ReasoningPassback bool
+	// ReasoningKind is how this model carries its thinking (a profile's
+	// thinking_kind, #377): only items of this kind are sent back, so a model
+	// is never given another kind's reasoning.
+	ReasoningKind string
 	// EffortField receives the request's thinking level when EffortLevels
 	// offers it, else DefaultEffort (#322). Empty: no level is sent.
 	EffortField   string
@@ -39,6 +43,18 @@ type ThinkingOptions struct {
 	// (#401). Every request path goes through the adapter, so the Agent turn,
 	// the title, the summary and the connection test all follow it.
 	OmitTemperature bool
+}
+
+// reasoningKind is the kind of reasoning this Adapter can send back: the
+// profile's thinking_kind, and plaintext when one declares none — reasoning_content
+// on chat completions is the plaintext string, the only kind this wire carries
+// (#377). Another kind reads nothing, so an encrypted item is never written
+// here as if it were a plaintext one.
+func (options *ThinkingOptions) reasoningKind() string {
+	if options == nil || options.ReasoningKind == "" {
+		return agents.ReasoningPlaintext
+	}
+	return options.ReasoningKind
 }
 
 // effort is the level a request sends for a chosen one.
@@ -150,6 +166,27 @@ func (adapter *Adapter) options(model string) *ThinkingOptions {
 	return adapter.thinking
 }
 
+// optionsFor are the vendor extensions of a request's model: the Adapter's own
+// profile, with the thinking contract the request froze when it is one (#377),
+// so that a turn keeps the kind and the passback rule its model had when it
+// started, also after a restart into a changed Catalog.
+func (adapter *Adapter) optionsFor(request agents.Request) *ThinkingOptions {
+	options := adapter.options(request.Model)
+	thinking := request.Thinking
+	if thinking == nil {
+		return options
+	}
+	if options == nil {
+		options = &ThinkingOptions{}
+	} else {
+		cloned := *options
+		options = &cloned
+	}
+	options.ReasoningKind = thinking.Kind
+	options.ReasoningPassback = thinking.Passback
+	return options
+}
+
 // streamUsage is whether a streamed request of the model asks for usage.
 func (adapter *Adapter) streamUsage(options *ThinkingOptions) bool {
 	if options != nil {
@@ -186,7 +223,7 @@ func (adapter *Adapter) Stream(
 	// first is when the upstream answered: the first stream frame is what a
 	// person waits through, so a slow model shows up as its own number.
 	lines := upstreamhttp.NewLines(response.Body, adapter.scannerMaxBytes)
-	options := adapter.options(request.Model)
+	options := adapter.optionsFor(request)
 	var content, reasoning strings.Builder
 	// thinking is true from the first reasoning fragment until visible
 	// content arrives, so each stretch of reasoning yields one content-free
@@ -360,7 +397,7 @@ func (adapter *Adapter) Complete(
 		usage = body.Usage.agentUsage()
 		result.Usage = usage
 	}
-	if passback(adapter.options(request.Model)) {
+	if passback(adapter.optionsFor(request)) {
 		result.ReasoningContent = message.ReasoningContent
 	}
 	for _, call := range message.ToolCalls {
@@ -382,7 +419,7 @@ func (adapter *Adapter) send(
 	request agents.Request,
 	stream bool,
 ) (*http.Response, int, error) {
-	options := adapter.options(request.Model)
+	options := adapter.optionsFor(request)
 	body, err := marshalRequest(request, stream, adapter.streamUsage(options), adapter.parallelToolCalls, options)
 	if err != nil {
 		return nil, 0, err
@@ -415,7 +452,7 @@ func (adapter *Adapter) logCall(
 	request agents.Request, stream bool, started time.Time, first time.Duration,
 	bodyBytes int, usage *agents.Usage, response *http.Response, err error,
 ) {
-	options := adapter.options(request.Model)
+	options := adapter.optionsFor(request)
 	requestID := ""
 	if response != nil {
 		requestID = upstreamhttp.RequestID(response.Header)
@@ -555,8 +592,11 @@ func marshalRequest(
 			ToolCallID: message.ToolCallID,
 		}
 		if thinking != nil && thinking.ReasoningPassback &&
-			(message.ReasoningContent != "" || len(message.ToolCalls) > 0) {
-			reasoning := message.ReasoningContent
+			(len(message.Reasoning) > 0 || len(message.ToolCalls) > 0) {
+			// Only the reasoning of this model's own kind goes back (#377); the
+			// field itself is sent even when none is left, because the vendor
+			// requires it on an assistant message that calls tools.
+			reasoning := message.ReasoningText(thinking.reasoningKind())
 			item.ReasoningContent = &reasoning
 		}
 		if len(message.Parts) > 0 {

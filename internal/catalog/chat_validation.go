@@ -2384,13 +2384,17 @@ func validateChatThinkingProfiles(thinking *ChatThinkingSchema) error {
 		}
 		if len(profile.RequestFields) == 0 && profile.EffortField == "" && len(profile.EffortLevels) == 0 &&
 			profile.DefaultEffort == "" && profile.ContextWindowTokens == 0 &&
-			!profile.OmitTemperature && profile.ChatCompletionsTools == nil && profile.WireAPI == "" {
+			!profile.OmitTemperature && profile.ChatCompletionsTools == nil && profile.WireAPI == "" &&
+			profile.ThinkingKind == "" {
 			return fmt.Errorf(
-				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field、context_window_tokens、omit_temperature、chat_completions_tools 或 wire_api",
+				"agent.thinking.model_profiles[%d] 必须声明 request_fields、effort_field、thinking_kind、context_window_tokens、omit_temperature、chat_completions_tools 或 wire_api",
 				index,
 			)
 		}
 		if err := validateThinkingWire(index, profile); err != nil {
+			return err
+		}
+		if err := validateThinkingKind(index, profile); err != nil {
 			return err
 		}
 		for _, prefix := range profile.ModelPrefixes {
@@ -2447,6 +2451,46 @@ func validateThinkingWire(index int, profile ChatThinkingModelProfile) error {
 		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 reasoning_passback（推理项由协议自己回传）", index)
 	case profile.StreamIncludeUsage != nil:
 		return fmt.Errorf("agent.thinking.model_profiles[%d] 使用 responses 协议时不能声明 stream_include_usage（用量总在结束事件里）", index)
+	}
+	return nil
+}
+
+// chatThinkingKinds are the values a profile's thinking_kind may take; a
+// profile that declares none carries no thinking content.
+var chatThinkingKinds = []string{
+	ChatThinkingNone, ChatThinkingPlaintext, ChatThinkingEncrypted,
+}
+
+// validateThinkingKind checks a profile's thinking_kind (#377): a known value,
+// and a profile that passes reasoning back declares plaintext — an encrypted
+// item is only replayable by the protocol that produced it, so a chat
+// completions profile could not keep such a promise. The kind is also what a
+// turn freezes to mark the reasoning it is given, so a declaration that no
+// later request can check would pass another model's thinking on.
+func validateThinkingKind(index int, profile ChatThinkingModelProfile) error {
+	// The raw field is checked, not ReasoningKind(): the getter folds anything
+	// it does not know into "none", so an unknown value would pass unnoticed.
+	kind := profile.ThinkingKind
+	if kind == "" {
+		kind = ChatThinkingNone
+	}
+	if !slices.Contains(chatThinkingKinds, kind) {
+		return fmt.Errorf(
+			"agent.thinking.model_profiles[%d] 的 thinking_kind %q 无效（none、plaintext 或 encrypted）",
+			index, profile.ThinkingKind,
+		)
+	}
+	if profile.ReasoningPassback && kind != ChatThinkingPlaintext {
+		return fmt.Errorf(
+			"agent.thinking.model_profiles[%d] 声明 reasoning_passback 时 thinking_kind 必须是 %q",
+			index, ChatThinkingPlaintext,
+		)
+	}
+	if profile.Wire() == ChatWireResponses && kind != ChatThinkingEncrypted {
+		return fmt.Errorf(
+			"agent.thinking.model_profiles[%d] 使用 responses 协议时必须声明 thinking_kind %q（推理项只有该协议自己能回传）",
+			index, ChatThinkingEncrypted,
+		)
 	}
 	return nil
 }

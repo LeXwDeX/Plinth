@@ -354,7 +354,8 @@ func TestAdapterVendorThinkingProfileSendsFieldsAndPassesReasoningBack(t *testin
 		Model: "deepseek",
 		Messages: []agents.Message{
 			{Role: "user", Content: "draw"},
-			{Role: "assistant", ToolCalls: []agents.ToolCall{{ID: "call-a", Name: "list_offerings", Arguments: []byte(`{}`)}}, ReasoningContent: "plan one"},
+			{Role: "assistant", ToolCalls: []agents.ToolCall{{ID: "call-a", Name: "list_offerings", Arguments: []byte(`{}`)}},
+				Reasoning: []agents.ReasoningItem{{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan one"}}},
 			{Role: "tool", ToolCallID: "call-a", Content: "[]"},
 		},
 	}, func(delta agents.Delta) error {
@@ -414,8 +415,9 @@ func TestAdapterWithoutPassbackNeitherKeepsNorSendsReasoning(t *testing.T) {
 		t.Fatal(err)
 	}
 	completion, err := adapter.Complete(context.Background(), agents.Request{
-		Model:    "qwen-max",
-		Messages: []agents.Message{{Role: "assistant", Content: "earlier", ReasoningContent: "stale"}},
+		Model: "qwen-max",
+		Messages: []agents.Message{{Role: "assistant", Content: "earlier",
+			Reasoning: []agents.ReasoningItem{{Model: "qwen-max", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "stale"}}}},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -243,7 +243,7 @@ func userContent(message agents.Message) (content any, ok bool) {
 // assistant's text goes without the phase the upstream gave it (the probes
 // replayed no assistant message, so its effect is not known).
 func assistantItems(message agents.Message) []any {
-	carried := decodeReasoning(message.ReasoningContent)
+	carried := decodeReasoning(message.ReasoningText(ReasoningKind))
 	var items []any
 	next := 0 // the next carried reasoning item to place
 	placeReasoning := func(before int) {

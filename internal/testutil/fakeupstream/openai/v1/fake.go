@@ -418,6 +418,10 @@ type chatRequest struct {
 		Role      string            `json:"role"`
 		Content   json.RawMessage   `json:"content"`
 		ToolCalls []json.RawMessage `json:"tool_calls"`
+		// ReasoningContent is a pointer so that a message which carries none
+		// tells from one that carries the empty string the thinking mode sends
+		// for a round that produced no reasoning at all.
+		ReasoningContent *string `json:"reasoning_content"`
 	} `json:"messages"`
 	Stream        bool `json:"stream"`
 	StreamOptions struct {

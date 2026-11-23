@@ -105,7 +105,7 @@ func TestShippedAstraProfileServesEveryRequestOnTheResponsesWire(t *testing.T) {
 	}
 	served("agent turn")
 	agentTurn.Messages = append(agentTurn.Messages,
-		agents.Message{Role: application.Chat.Roles.Assistant, ToolCalls: first.ToolCalls, ReasoningContent: first.ReasoningContent},
+		agents.Message{Role: application.Chat.Roles.Assistant, ToolCalls: first.ToolCalls, Reasoning: reasoningItemsOf(first)},
 		agents.Message{Role: application.Chat.Roles.Tool, ToolCallID: first.ToolCalls[0].ID, Content: `{"note":"a cube"}`})
 	second, err := adapter.Stream(ctx, agentTurn, nil)
 	if err != nil || second.Content != openaiv1.FixedReply {
@@ -371,4 +371,17 @@ func TestSessionOnTheAstraConnectionRunsAnAgentTurnOnTheResponsesWire(t *testing
 	if callID == "" || callID != outputID {
 		t.Fatalf("function_call %q and its output %q do not pair: %.600v", callID, outputID, last["input"])
 	}
+}
+
+// reasoningItemsOf is what the orchestrator records of a reply on the Responses
+// wire: one encrypted item on the assistant message of the same tool loop
+// (#377).
+func reasoningItemsOf(completion agents.Completion) []agents.ReasoningItem {
+	if completion.ReasoningContent == "" {
+		return nil
+	}
+	return []agents.ReasoningItem{{
+		Model: "gpt-astra", Wire: "responses", Kind: agents.ReasoningEncrypted,
+		Content: completion.ReasoningContent,
+	}}
 }

@@ -98,7 +98,7 @@ func TestToolLoopSendsTheCallAndItsOutputOnTheSameCallID(t *testing.T) {
 			}
 			first.ToolCalls[0].ID = rewrite(first.ToolCalls[0].ID)
 			request.Messages = append(request.Messages,
-				agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, ReasoningContent: first.ReasoningContent},
+				agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, Reasoning: reasoningItems(first)},
 				agents.Message{Role: "tool", ToolCallID: first.ToolCalls[0].ID, Content: `{"note":"a cube"}`})
 			second, deltas, err := collect(adapter, request)
 			if err != nil {
@@ -428,7 +428,7 @@ func TestReasoningItemsAreSentBackAheadOfTheirFunctionCall(t *testing.T) {
 		t.Fatalf("round 1: %#v %v", first, err)
 	}
 	request.Messages = append(request.Messages,
-		agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, ReasoningContent: first.ReasoningContent},
+		agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, Reasoning: reasoningItems(first)},
 		agents.Message{Role: "tool", ToolCallID: first.ToolCalls[0].ID, Content: "x"})
 	second, err := adapter.Stream(ctx, request, nil)
 	if err != nil || second.Content != openaiv1.FixedReply || second.ReasoningContent != "" {
@@ -469,13 +469,14 @@ func TestReasoningItemsAreSentBackAheadOfTheirFunctionCall(t *testing.T) {
 	if _, err := adapter.Stream(ctx, request, nil); err != nil {
 		t.Fatalf("without reasoning: %v", err)
 	}
-	// Another Adapter's ReasoningContent is not this one's: it is ignored.
-	request.Messages[1] = agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, ReasoningContent: "plain chain of thought text"}
+	// Another Adapter's reasoning is not this one's: it is ignored.
+	request.Messages[1] = agents.Message{Role: "assistant", ToolCalls: first.ToolCalls,
+		Reasoning: []agents.ReasoningItem{{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plain chain of thought text"}}}
 	if _, err := adapter.Stream(ctx, request, nil); err != nil {
 		t.Fatalf("foreign reasoning: %v", err)
 	}
 	if strings.Contains(s.recorder.raw(0), "chain of thought") {
-		t.Fatal("a foreign ReasoningContent was sent")
+		t.Fatal("a foreign reasoning was sent")
 	}
 }
 

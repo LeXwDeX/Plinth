@@ -233,13 +233,13 @@ func TestSendsTheRequestsTheRealGatewayAccepted(t *testing.T) {
 	call.ID = "msg_x_r1_tool_1"
 	next := request
 	next.Messages = append(append([]agents.Message{}, request.Messages...),
-		agents.Message{Role: "assistant", ToolCalls: []agents.ToolCall{call}, ReasoningContent: first.ReasoningContent},
+		agents.Message{Role: "assistant", ToolCalls: []agents.ToolCall{call}, Reasoning: reasoningItems(first)},
 		agents.Message{Role: "tool", ToolCallID: call.ID, Content: `{"temp_c":21}`})
 	requestEqual(t, "reasoning-replay-accepted", record(nil, next), sample["reasoning-replay-accepted"].body(t))
 
 	// The same round without the reasoning item.
 	next.Messages = append([]agents.Message{}, next.Messages...)
-	next.Messages[2].ReasoningContent = ""
+	next.Messages[2].Reasoning = nil
 	requestEqual(t, "reasoning-dropped-accepted", record(nil, next), sample["reasoning-dropped-accepted"].body(t))
 
 	// A call under a rewritten call_id, effort high, an optional property.

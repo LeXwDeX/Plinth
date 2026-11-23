@@ -2,6 +2,7 @@ package chat_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
 	"reflect"
@@ -514,6 +515,21 @@ func newChatService(
 	return newChatServiceWith(t, repository, nil)
 }
 
+// configuredThinkingProfiles is the chat.agent.thinking of the test service:
+// one model family whose plaintext reasoning the vendor requires back, so a
+// turn of "configured-model" has a thinking contract to freeze (#377).
+func configuredThinkingProfiles() *catalog.ChatThinkingSchema {
+	return &catalog.ChatThinkingSchema{
+		Enabled: true,
+		ModelProfiles: []catalog.ChatThinkingModelProfile{{
+			ModelPrefixes:     []string{"configured-model"},
+			RequestFields:     map[string]json.RawMessage{"thinking": json.RawMessage(`{"type":"enabled"}`)},
+			ReasoningPassback: true,
+			ThinkingKind:      catalog.ChatThinkingPlaintext,
+		}},
+	}
+}
+
 // newChatServiceWith builds the configured test service and lets a test
 // adjust the config (handle syntax, attachment verifier) before it is used.
 func newChatServiceWith(
@@ -526,6 +542,12 @@ func newChatServiceWith(
 	sequence := 0
 	config := chat.ServiceConfig{
 		Repository: repository,
+		// The thinking profile of the deployment's model: plaintext reasoning the
+		// vendor requires back, which is what a turn freezes with itself (#377).
+		Models: chat.ModelPolicy{
+			Model:    "configured-model",
+			Thinking: configuredThinkingProfiles(),
+		},
 		ApprovalPolicy: approvalpolicy.New("manual", []string{"auto", "manual"},
 			[]string{"text-to-3d"}, []string{"text-to-3d", "text-to-image"}),
 		Clock: func() time.Time { return current },

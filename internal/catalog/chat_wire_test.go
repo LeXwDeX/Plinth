@@ -46,7 +46,7 @@ func TestLoadValidatesTheWireAPIOfAModelProfile(t *testing.T) {
 			}
 		}
 	}
-	const responses = `"wire_api":"responses"`
+	const responses = `"wire_api":"responses","thinking_kind":"encrypted"`
 	tests := []struct {
 		name      string
 		profiles  string
@@ -54,7 +54,7 @@ func TestLoadValidatesTheWireAPIOfAModelProfile(t *testing.T) {
 		wantError string
 	}{
 		{name: "responses with levels", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `,"effort_field":"reasoning_effort","effort_levels":["low","high"],"default_effort":"high","omit_temperature":true}]`, path: "/responses"},
-		{name: "the wire alone is a declaration", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `}]`, path: "/responses"},
+		{name: "the wire and its thinking kind are a declaration", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `}]`, path: "/responses"},
 		{name: "chat completions spelled out", profiles: `[{"model_prefixes":["gpt-4"],"wire_api":"chat_completions","omit_temperature":true}]`},
 		{name: "both wires on one connection", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `},{"model_prefixes":["gpt-6"],"wire_api":"chat_completions","effort_field":"reasoning_effort","effort_levels":["low"],"default_effort":"low"}]`, path: "/responses"},
 		{name: "responses with a chat completions tools flag", profiles: `[{"model_prefixes":["gpt-astra"],` + responses + `,"chat_completions_tools":false}]`, path: "/responses"},
@@ -148,7 +148,8 @@ func TestWireAPILoadsTypedAndStaysPrivate(t *testing.T) {
 		agent := document["application"].(map[string]any)["chat"].(map[string]any)["agent"].(map[string]any)
 		agent["responses_endpoint_path"] = "/v1/responses"
 		agent["thinking"] = map[string]any{"enabled": true, "model_profiles": []any{
-			map[string]any{"model_prefixes": []any{"gpt-astra"}, "wire_api": "responses", "omit_temperature": true}}}
+			map[string]any{"model_prefixes": []any{"gpt-astra"}, "wire_api": "responses",
+				"omit_temperature": true, "thinking_kind": "encrypted"}}}
 	}, &loaded)
 	if err != nil {
 		t.Fatal(err)
