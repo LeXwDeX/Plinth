@@ -75,7 +75,9 @@ func assertSameShape(t *testing.T, what string, want, got fakeupstream.Shape) {
 // follows because it is built from the sample.
 func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 	samples := loadSamples(t)
-	f := newFixture(t, fakeupstream.Config{})
+	// Drift only compares response shapes; it creates several tasks at once across
+	// categories, so the per-category concurrency pools are turned off (-1).
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
 
 	// Fixed-request endpoints.
 	for _, tc := range []struct {
@@ -196,7 +198,7 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 // failed poll of the same task type without the failure fields (see doc.go).
 func TestCancelledAndUnknownPollsDeriveFromTheRealFailedPoll(t *testing.T) {
 	samples := loadSamples(t)
-	f := newFixture(t, fakeupstream.Config{})
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
 	real := realPoll(samples, "animate_retarget", statusFailed)
 	if real == nil {
 		t.Fatal("no real failed poll sample")
@@ -230,7 +232,7 @@ func TestCancelledAndUnknownPollsDeriveFromTheRealFailedPoll(t *testing.T) {
 // and message differ (1003 instead of the sampled 1004).
 func TestMalformedBodyKeepsTheRealErrorEnvelope(t *testing.T) {
 	samples := loadSamples(t)
-	f := newFixture(t, fakeupstream.Config{})
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
 	var sample *wirefixture.Exchange
 	for _, exchange := range samples.Find("POST /v3/generation/text-to-model", "") {
 		if exchange.Response.Status == http.StatusBadRequest {
@@ -252,7 +254,7 @@ func TestMalformedBodyKeepsTheRealErrorEnvelope(t *testing.T) {
 // once on a plain picture (both captured): the fake keeps both structures.
 func TestSmartSegmentationTypesAndFailureMatchTheRealSamples(t *testing.T) {
 	samples := loadSamples(t)
-	f := newFixture(t, fakeupstream.Config{})
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
 	model := f.create("/mesh/smartsegment", map[string]any{"input": "file_x", "seg_type": "model"}, key)
 	_, done := f.finish(model, key)
 	if field(t, done, "data", "type") != "smartsegment_model" {
@@ -292,7 +294,7 @@ func realPoll(samples *fakeupstream.Samples, typ, status string) *wirefixture.Ex
 // route exists outside the table.
 func TestEndpointTableIsCompleteAndHonest(t *testing.T) {
 	samples := loadSamples(t)
-	f := newFixture(t, fakeupstream.Config{})
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
 	for _, endpoint := range endpoints {
 		switch endpoint.Evidence {
 		case fakeupstream.EvidenceReal:
@@ -376,7 +378,7 @@ func TestThirdAlignmentReportIsCommittedAndClean(t *testing.T) {
 // kind (#446).
 func TestTheFakeMatchesTheNewestMultiviewCapture(t *testing.T) {
 	samples := loadSamples(t)
-	f := newFixture(t, fakeupstream.Config{})
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
 	newest := func(method, path string, status int, statusField, statusValue string) wirefixture.Exchange {
 		var newest wirefixture.Exchange
 		for _, exchange := range samples.Find(method+" /v3"+path, "") {

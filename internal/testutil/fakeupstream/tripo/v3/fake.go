@@ -757,10 +757,12 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			t.failCode, t.failMessage = 3000, "Fake injected task failure"
 		}
 		h.mu.Lock()
-		if h.env.AccountConcurrencyLimit > 0 && h.inflightLocked() >= h.env.AccountConcurrencyLimit {
+		// The rate-limits page's pools are per task category: a category that is
+		// full answers 429 code 2000 with Retry-After (#468), and the other
+		// categories keep their own, unaffected pool (checked 2026-11-23).
+		category := concurrencyCategory(t)
+		if limit := h.concurrencyLimit(category); limit > 0 && h.inflightLocked(category) >= limit {
 			h.mu.Unlock()
-			// The account's shared pool is full: the same 429 code 2000 and
-			// Retry-After the rate-limits page documents (#468).
 			h.render(w, r, fakeupstream.ScenarioConcurrencyLimit)
 			return
 		}
@@ -828,16 +830,76 @@ func (h *handler) urlSource(raw string) *task {
 	return nil
 }
 
-// inflightLocked counts tasks that have not reached a terminal poll. The
-// caller holds h.mu.
-func (h *handler) inflightLocked() int {
+// inflightLocked counts the tasks of one category that have not reached a
+// terminal poll. The caller holds h.mu.
+func (h *handler) inflightLocked(category string) int {
 	count := 0
 	for _, t := range h.tasks {
-		if !t.done {
+		if !t.done && concurrencyCategory(t) == category {
 			count++
 		}
 	}
 	return count
+}
+
+// concurrencyLimit is the account-level ceiling of one category: the official
+// per-category default (categoryConcurrency), or AccountConcurrencyLimit when a
+// test pins every category to the same number. A negative AccountConcurrencyLimit
+// disables the pools (returns 0, so create never refuses), for tests that are not
+// about concurrency.
+func (h *handler) concurrencyLimit(category string) int {
+	if h.env.AccountConcurrencyLimit > 0 {
+		return h.env.AccountConcurrencyLimit
+	}
+	if h.env.AccountConcurrencyLimit < 0 {
+		return 0
+	}
+	return categoryConcurrency[category]
+}
+
+// Concurrency categories of the rate-limits page (checked 2026-11-23). Each is an
+// independent account-level pool, so one category filling up never blocks another.
+const (
+	categoryGenerationH     = "generation-h"
+	categoryGenerationP     = "generation-p"
+	categoryImage           = "image-generation"
+	categoryAnimation       = "animation"
+	categoryModelProcessing = "model-processing"
+	categoryMeshOperations  = "mesh-operations"
+)
+
+// categoryConcurrency is the official default pool of each category (3D
+// generation H 10 / P 5, image generation 1, animation 10, model processing 5,
+// mesh operations 10).
+var categoryConcurrency = map[string]int{
+	categoryGenerationH:     10,
+	categoryGenerationP:     5,
+	categoryImage:           1,
+	categoryAnimation:       10,
+	categoryModelProcessing: 5,
+	categoryMeshOperations:  10,
+}
+
+// concurrencyCategory is the rate-limit category a creation request falls under.
+// Generation splits H (10) and P (5) by the request's model name (isPSeries); the
+// other kinds map to the category the page lists them in.
+func concurrencyCategory(t *task) string {
+	switch t.kind.Type {
+	case "image_to_multiview", "edit_multiview":
+		return categoryImage
+	case "animate_prerigcheck", "animate_rig", "animate_retarget":
+		return categoryAnimation
+	case "texture_model", "convert_model":
+		return categoryModelProcessing
+	case "mesh_segmentation", "mesh_completion", "highpoly_to_lowpoly", "smartsegment_image":
+		return categoryMeshOperations
+	}
+	// text_to_model, image_to_model, multiview_to_model and image_to_splat are
+	// 3D generation; the page gives the H series 10 and the P series 5.
+	if t.isPSeries() {
+		return categoryGenerationP
+	}
+	return categoryGenerationH
 }
 
 func (h *handler) lookup(id string) *task {

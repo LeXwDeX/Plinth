@@ -64,8 +64,20 @@ func TestRiggingDeliversItsConvertedGLBAsTheModelAndKeepsTheNativeOneAsTheOrigin
 			}
 
 			model := claims["model:glb"]
-			if model.ID != "convert:GLTF" || model.MediaType != "model/gltf-binary" || model.Locator == run.model || len(model.Metadata) != 0 {
+			if model.ID != "convert:GLTF" || model.MediaType != "model/gltf-binary" || model.Locator == run.model {
 				t.Fatalf("model = %+v, want the GLTF conversion", model)
+			}
+			// The converted model keeps the move its child conversion reported; the
+			// source binding metadata belongs to the original GLB, not this claim.
+			var modelMetadata map[string]json.RawMessage
+			if json.Unmarshal(model.Metadata, &modelMetadata) != nil {
+				t.Fatalf("model metadata = %s", model.Metadata)
+			}
+			if _, ok := modelMetadata["normalize_scale"]; !ok {
+				t.Fatalf("model metadata = %s, want the conversion's normalize fields", model.Metadata)
+			}
+			if _, ok := modelMetadata["native_conversion_source"]; ok {
+				t.Fatalf("model metadata = %s, want the model claim, not the source binding", model.Metadata)
 			}
 			if want := state.Conversions["GLTF"].Locator; model.Locator != want || !strings.HasSuffix(strings.Split(model.Locator, "?")[0], "/model.glb") {
 				t.Fatalf("the model is at %s, the conversion delivered %s", model.Locator, want)

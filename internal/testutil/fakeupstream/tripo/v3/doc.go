@@ -38,8 +38,11 @@
 //     2004. The part is streamed, not capped, because the official model limit
 //     is 150 MB; the per-type size limits themselves are not enforced.
 //   - Request-rate limiting is 429/code 1007 with X-RateLimit-Limit,
-//     X-RateLimit-Remaining and X-RateLimit-Reset; a full concurrency pool
-//     (creation only) is the distinct 429/code 2000 with Retry-After.
+//     X-RateLimit-Remaining and X-RateLimit-Reset; a full per-category concurrency
+//     pool (creation only) is the distinct 429/code 2000 with Retry-After. The
+//     pools are independent by task category (3D generation H/P, image generation,
+//     animation, model processing, mesh operations), so one category filling up
+//     never blocks another.
 //
 // Rig and retarget requests (#277). The samples hold one request of each (rig_type
 // biped, spec tripo, preset:walk). The fake also checks the values the official

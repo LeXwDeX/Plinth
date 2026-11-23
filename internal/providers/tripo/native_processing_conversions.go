@@ -780,7 +780,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 		}
 		item.Locator = locator
 		s.Conversions[f.Format] = item
-		base.Artifacts = append(base.Artifacts, generation.ArtifactClaim{ID: "convert:" + f.Format, Role: f.Role, Variant: f.Variant, MediaType: f.MediaType, Locator: locator})
+		base.Artifacts = append(base.Artifacts, generation.ArtifactClaim{ID: "convert:" + f.Format, Role: f.Role, Variant: f.Variant, MediaType: f.MediaType, Locator: locator, Metadata: responseMetadata(child.Output, options.ResponseMetadata)})
 	}
 	for i := range base.Artifacts {
 		claim := &base.Artifacts[i]
