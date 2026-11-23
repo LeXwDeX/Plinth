@@ -97,7 +97,7 @@ func New(presets []catalog.AgentMCPPresetSchema, policy catalog.AgentMCPPolicySc
 			return nil, ErrToolDenied
 		}
 		for _, tool := range preset.Tools {
-			if tool.Name == "" || tool.RemoteName == "" || tool.Execution.ImplementationKey != "mcp/read" || !slices.Equal(tool.Execution.Effects, []string{"READ"}) || tool.Execution.Consent != "none" || tool.Execution.Scope != "session" {
+			if tool.Name == "" || tool.RemoteName == "" || tool.Execution.ImplementationKey != "mcp/read" || !slices.Equal(tool.Execution.Effects, []string{"READ"}) || tool.Execution.Scope != "session" {
 				return nil, ErrToolDenied
 			}
 			if _, found := s.byName[tool.Name]; found {

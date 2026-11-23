@@ -160,6 +160,52 @@ func TestApproveByPolicyUsesFrozenCapabilityAndIdentity(t *testing.T) {
 	}
 }
 
+// #490: a step of a capability the manual policy does not list is carded by its
+// own frozen credit estimate. The estimate is the one the approval card shows,
+// so what the policy decides is what the person is asked to agree to.
+func TestFrozenCreditsCardAStepTheCapabilityListLeavesAutomatic(t *testing.T) {
+	// 50 credits on an unlisted, otherwise automatic capability: a person decides.
+	store := policyFixture("text-to-image")
+	store.snapshot.EstimatedCredits = 50
+	service := policyService(store, &modeReader{mode: "manual"})
+	service.Policy = service.Policy.WithCreditsThreshold(20)
+	if _, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", "manual"); !errors.Is(err, ErrHumanRequired) {
+		t.Fatalf("manual 50-credit step: %v", err)
+	}
+	if store.approved != 0 || store.grant.Status != Pending {
+		t.Fatalf("grant changed: %+v", store.grant)
+	}
+	// Below the threshold the capability decides, and auto mode is untouched by
+	// the cost rule at any price.
+	for _, tt := range []struct {
+		name     string
+		credits  int
+		mode     string
+		approved bool
+	}{
+		{"manual under the threshold", 19, "manual", true},
+		{"manual at the threshold", 20, "manual", false},
+		{"auto over the threshold", 500, "auto", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := policyFixture("text-to-image")
+			store.snapshot.EstimatedCredits = tt.credits
+			service := policyService(store, &modeReader{mode: tt.mode})
+			service.Policy = service.Policy.WithCreditsThreshold(20)
+			got, err := service.ApproveByPolicy(context.Background(), "owner-a", "request-a", tt.mode)
+			if tt.approved {
+				if err != nil || got.Status != Approved || !got.ApprovedByPolicy() || store.approved != 1 {
+					t.Fatalf("%s: %+v err=%v approvals=%d", tt.name, got, err, store.approved)
+				}
+				return
+			}
+			if !errors.Is(err, ErrHumanRequired) || store.approved != 0 {
+				t.Fatalf("%s: err=%v approvals=%d", tt.name, err, store.approved)
+			}
+		})
+	}
+}
+
 // An Agent step that spends extra credits is the person's to approve in manual
 // mode even on a capability that is otherwise automatic, and automatic mode
 // approves it with the rest. The panel's own grants (a checkbox the person

@@ -646,7 +646,7 @@ ExecutionGrant 按会话批准模式签发（规则见 `docs/product.md`）。�
 
 `create_three_view` 保持 `implementation_key: skill.prepare`。
 本批将 `effects` 修正为 `PAID_TASK`，将 `cancellation` 修正为 `task`。
-`consent: human` 和必需幂等保留。工具声明不能替代用户对具体冻结输入的同意。
+必需幂等保留。工具声明不能替代用户对具体冻结输入的同意。
 
 持久 SkillRun 与精确 Grant 绑定 owner/session/turn、冻结输入、Offering 修订和步骤身份。
 已提交 Task 按原幂等身份优先核对；丢响应或重启不能触发换键重发。

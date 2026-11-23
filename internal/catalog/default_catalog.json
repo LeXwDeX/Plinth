@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-23.487.3",
+    "revision": "2026-11-23.490.1",
     "terminology": {
       "user_facing": [
         {
@@ -7788,7 +7788,7 @@
       "agent_tools": [
         {
           "name": "set_params",
-          "execution": {"implementation_key":"params.set","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"params.set","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Set legal creative parameters for the exact offering_id. User-pinned parameters take precedence. Normal settings default to automatic (no user pin). For advised parameters, provide a non-empty reason keyed by parameter in reasons when changing the recommended value. Hidden and protocol parameters cannot be changed, and a count the person owns (adjustment_policy user, such as the per-task image count) cannot be raised here: their session value applies. This does not authorize generation; the next step freezes its actual values, explanations and estimate under the session approval policy.",
           "parameters": {
             "type": "object",
@@ -7818,7 +7818,7 @@
         },
         {
           "name": "update_session_notes",
-          "execution": {"implementation_key":"session.notes","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"session.notes","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Replace this session's settings summary with a complete, concise updated version. Use it when the user and you settle creative settings that must survive a long conversation (character, style, palette, materials, things to avoid; never sizes, ratios or resolutions, which come only from the user's chosen generation parameters) or when the user asks you to remember or forget something. The text you submit replaces the previous summary entirely, so keep every setting that is still in force. Short plain lines; no URLs or IDs. Submit an empty string to clear it.",
           "parameters": {
             "type": "object",
@@ -7836,7 +7836,7 @@
         },
         {
           "name": "update_production_brief",
-          "execution": {"implementation_key":"session.brief","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"session.brief","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Replace this session's production brief with a complete, concise version. Before 2D or 3D work, record what the result is for: ask briefly when the request leaves it open, then write the brief and say what you recorded; the person can change it in the brief panel, and generation does not wait for their confirmation. A clear generation instruction with all its inputs needs no separate purpose question: infer the purpose from the conversation and pictures (or use the default purpose), write the brief and say what you recorded instead of asking again. For 3D, the purpose sets the default model, triangle budget, UV and watertight requirements. For a game or real-time asset also ask for, and record, the target engine (target_engine), the target platform (target_platform) and, for a character, whether it needs a skeleton (needs_rig) and animation (needs_animation); skip what the person already stated. For 2D, image_use sets the recommended model, aspect ratio, background and size requirements; image_transparent and image_for_3d record delivery choices. A value the person explicitly locked must be kept exactly, while unlocked choices are yours to decide and explain. The object you submit replaces the previous brief entirely, so repeat every field still in force. Omit fields to clear them; submit an empty object to clear the brief. Use ask_choice with kind usage_profile or image_usage_profile when the person should pick a purpose from a card, and kind direction for a stylistic or compositional choice.",
           "parameters": {
             "type": "object",
@@ -7901,7 +7901,7 @@
         },
         {
           "name": "ask_choice",
-          "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind concept_quantity first when a 2D request is open (only a subject, purpose or vague idea, no style, references, stated count or request to start): this opens the card that asks how many low-cost concept sketches to draw, and the reply must submit no generation at all. After the answer, draw exactly the chosen number. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind concept_direction after drawing concept sketches: each option carries a label, one sentence, the thumbnail handle of its sketch, and the exact refine_image arguments that continue that direction. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Use kind next_step when the person must choose how to continue and no other kind fits, for example when the request has more than one workable direction, or when something blocks submitting (such as pictures that are not the same design): give 2 to 4 options, each with an id, a short label and a one-sentence description; the person's pick comes back to you as text and calls no tool. Whenever you would offer the person two or more directions to choose from, open this card instead of writing a numbered or bulleted list in the message, and put every blocking question on one card: at most one card per reply. An option may carry an action that the page performs when the person picks it, before the answer is sent: switch_operation with an operation_id from switchable_operations in the function context fixes that function, and clear_operation clears the function selection so that all your tools are available again; never invent a function name. While a function is fixed, next_step is the only kind you can open. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
           "parameters": {
             "type": "object",
@@ -7995,7 +7995,7 @@
         },
         {
           "name": "propose_production_plan",
-          "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Use this tool only when the session's approval mode is budget (the approval block of the system context states the mode). A plan and its budget decide nothing in auto mode, where the server approves every paid step itself, or in strict mode, where the steps that need a person get their own approval card, so do not open a plan card there. In budget mode: propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. To let the person compare results, optionally declare candidates on one step (source provider, seed or input_image, with count or models up to the Schema maximum): the server quotes every candidate and the approved continuation submits them in parallel, keeping the losers as assets. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require. A step the person may skip (the optional extra view of a three-view recipe, say) is declared with optional=true: the plan is complete without it, an unrun optional step reads \"optional, not run\" on the card, and its estimate still counts toward the approved limit.",
           "parameters": {
             "type": "object",
@@ -8153,7 +8153,7 @@
         },
         {
           "name": "revise_processing_plan",
-          "execution": {"implementation_key":"processing.revise","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"processing.revise","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"3d"},
           "description": "Revise one processing plan of this session within the approval the person already gave. Use it after a step's server-evaluated checkpoint failed, after a Task failed for a retryable reason, or to remove a step that never started. Operations: insert (after a failed checkpoint, or after a Task failure for a contingency triggered by task_failed; only a contingency the approved production plan declared, matched by contingency_id; its estimate is already in the approved budget), replace or skip (only a step that never started and has no frozen input), retry (the same rules as a person's retry: a failure that may already have been charged or is ambiguous still asks the person), and waive_checkpoint (bounded per plan and needs a reason). Every revision needs expected_plan_version from the latest get_processing_plan; a stale version is refused. A revision outside the approved plan or budget returns approval_required: stop and ask the person; do not create a second plan on your own. Parameters are ordinary Offering parameters only, never a source or consent parameter; the server binds and re-prices the step.",
           "parameters": {
             "type": "object",
@@ -8174,7 +8174,7 @@
         },
         {
           "name": "find_history_images",
-          "execution": {"implementation_key":"history.images","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"history.images","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Look through the pictures of this chat session when the user's words refer to images (for example 'keep the pose of the white-clad gunman and use the outfit of the other one') but this turn does not attach or select all of them. Without handles it lists the newest pictures of this session, newest first, with their handle, source (upload, generated, capture, canvas), the user's words that came with them, the generation prompt of a generated picture, and whether the picture is part of this turn or the current selection. With handles it also shows you those pictures so you can check them. Only this session's pictures are reachable. One reply may surface a limited number of distinct pictures (the server counts it and the result says how many remain); listing them again or looking at a listed picture costs nothing. Read-only: it never selects or changes anything; put the pictures you settle on into reference_handles of the generation tool yourself.",
           "parameters": {
             "type": "object",
@@ -8190,7 +8190,7 @@
         },
         {
           "name": "inspect_image",
-          "execution": {"implementation_key":"image.inspect","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"image.inspect","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read-only deterministic inspection of one picture of this session. Pass an image handle such as @img3 (generated results and history lookups both report their handles) or @selected for the currently selected picture. The result reports the picture's size and aspect, whether it has a transparent channel, how transparent it is, the border/background colour spread, the subject's pixel share and box, whether the subject touches an edge, and how many separate subject components there are. A checklist (delivery, the default, or 3d_input) turns those facts into pass/fail checks with a fix hint. The delivery checklist also judges the picture against the session's 2D purpose from the production brief (or the default purpose, and says which): the purpose's minimum short edge in pixels, seamless tiling for textures (a broken seam is reported with its position), and, when a transparent background is wanted, a real alpha channel and clean edges with no light rim. A failed check carries a hint with the next step; a check that cannot be judged is unknown, not passed. The 3d_input checklist also lists visual_items that pixels cannot judge (pose, perspective, cast shadows): look at the picture (show_picture) and give your verdict on each in visual_review; the server records them beside the deterministic checks, so a failed item shows up in the self-check record. Use it to self-check a generated 2D result before delivering it, or to check an input picture before image-to-3D. It never creates a Task, charges credits or changes the session; a look at a picture that is not readable is refused with the reason.",
           "parameters": {
             "type": "object",
@@ -8252,7 +8252,7 @@
         },
         {
           "name": "create_selection_mask",
-          "execution": {"implementation_key":"image.mask","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"image.mask","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Build a selection mask for one picture of this session locally, without calling any model, creating a Task or charging credits. Use it when the person describes the area in words instead of painting it. mode=subject keeps the picture's opaque pixels (or its subject against a plain background) as the editable region; mode=region with x0,y0,x1,y1 selects a rectangle; add invert=true to swap kept and editable. The result is a PNG mask where transparent pixels are redrawn and opaque pixels are kept, stored as the owner's input asset. Pass the returned mask_url as the mask argument of refine_image (the server binds it), and show the mask to the person first; never submit a paid step before they confirm it. A picture that cannot be read or has no subject is refused with the reason.",
           "parameters": {
             "type": "object",
@@ -8278,7 +8278,7 @@
         },
         {
           "name": "crop_image_regions",
-          "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. The result gives each crop's input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
           "parameters": {
             "type": "object",
@@ -8322,7 +8322,7 @@
         },
         {
           "name": "get_production_step",
-          "execution": {"implementation_key":"ledger.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"ledger.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read one production step of this session's work ledger in full. Use it instead of rewriting a step's prompt from memory: a changed word produces a different result. Pass the step handle shown in the ledger summary (such as @step3) or the Task ID. The result returns the step's capability, offering and model, state and progress, failure class, the exact prompt the Agent asked for and the final prompt that was frozen for the upstream (including the style lock and any template rewriting), the negative prompt, every declared parameter with its effective value and where it came from (agent, default, style_lock or unknown), input pictures by handle and purpose, result handles and roles, the read-only self-check conclusions (inspect_model leftovers with fix hints, inspect_image pass/fail counts, render/compare failed views) and the adopted or rejected decision. The ledger is a projection of the session's public Tasks and persisted tool calls: it never creates a Task, charges credits or changes the session.",
           "parameters": {
             "type": "object",
@@ -8338,7 +8338,7 @@
         },
         {
           "name": "list_offerings",
-          "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "List the capabilities and offerings available now. With no argument it lists only capability, domain and each offering's offering_id and model_id; pass capability (a capability id such as text-to-3d or image-to-image) to get that capability's offerings with their description, knowledge, inputs and prices, and model to get only the offerings of one model_id. Read the detail before you choose or chain a model: a processing offering's description says what the step keeps or changes (for example textures or model size), max_source_triangles is the most triangles its source model may have, and chain_limits gives, per topology, the largest target face count a later step still accepts. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why.",
           "parameters": {
             "type": "object",
@@ -8359,11 +8359,11 @@
           "name": "get_processing_plan",
           "description": "Read the persistent processing plan of this session by plan_id. Reports each step's offering, parameters, estimated credits, state and public task_id. Read-only: never approves, resumes, retries or submits a step. Use observe_task on returned task IDs for output details.",
           "parameters": {"type":"object","properties":{"plan_id":{"type":"string"}},"required":["plan_id"],"additionalProperties":false},
-          "execution": {"implementation_key":"processing.read","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"}
+          "execution": {"implementation_key":"processing.read","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"}
         },
         {
           "name": "list_session_models",
-          "execution": {"implementation_key":"model.list","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.list","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"3d"},
           "description": "List the finished 3D models of this chat session (task ID, capability, provider, model, creation time, saved file formats, export_formats and the processing steps each can feed). model_assets lists the saved model files by format; main marks the model's main file, the one a step uses when only the task ID or handle is given, and next_steps are judged on it. export_formats is the format coverage the Formats tab shows: available (a file exists), obtainable (can be converted), converting, unavailable (cannot be exported now). Only claim a format can be exported or converted when it is available, obtainable or converting there. version is the label the version strip and the approval card show for the model (for example 3D v5): when you name a model's version, use it exactly and never number models yourself. Use the returned task_id as the source of retexture_model and process_model.",
           "parameters": {
             "type": "object",
@@ -8372,7 +8372,7 @@
         },
         {
           "name": "inspect_model",
-          "execution": {"implementation_key":"model.inspect","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.inspect","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Read-only structural inspection of a finished 3D model of this session: triangle and vertex counts, parts with their bounding boxes and triangle shares, materials and texture slots, UV sets, skins, animations, the world bounding box (including the bottom-centre offset) and topology (connected components, debris, boundary and non-manifold edges, winding, watertightness). Reading the facts: triangles counts drawn triangles only, so for a triangle-strip model it leaves out the degenerate triangles that join strips and can be lower than the index count suggests. topology.inconsistent_winding_edges above 0 means neighbouring faces point opposite ways, and topology.inside_out true means the closed surface faces inward as a whole; either makes watertight false and the model unfit for printing until it is repaired (the watertight item of usage_check names the fix). The warning skin_bind_pose means the skeleton could not be evaluated, so the skinned mesh was measured in its bind pose: the bounding box, sizes and pivot refer to that pose, and you should say so when you report them. Use it to answer questions about a model's geometry, to judge whether it is fit for printing or processing, or to choose part IDs for render_model_views. It also returns usage_check: when the Schema declares production purposes, every purpose budget and production-readiness property (triangle range, UV, watertightness, skin, texture size, bottom-centre pivot, Y-up, plausible scale, debris and degenerate triangles) is judged pass, fail or unknown against the purpose selected by the session's production brief, with the actual value, the budget value and, for a failure, a fix_hint naming the currently enabled tools that can fix it. Use these facts instead of inventing requirements. Pass a task ID or model handle in model (such as @model2, or @selected); omit it to inspect the selected model. source_asset_id optionally names one saved model file of that task; omit it to use the model's main file. It never creates a task, charges credits or changes the session. A model above the configured size or triangle limit is refused with the limit and the reason; report that clearly instead of guessing the model's contents.",
           "parameters": {
             "type": "object",
@@ -8391,7 +8391,7 @@
         },
         {
           "name": "render_model_views",
-          "execution": {"implementation_key":"model.render","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.render","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Render one or more still views of a finished 3D model of this session as PNG pictures and attach them to your reply. Use it when the person asks what a model looks like from some direction, wants a visual check, or when you need to show a result. model takes a task ID or model handle (such as @model2 or @selected); omit it for the selected model. views lists any of front, back, left, right, top, three_quarter (the Schema's default views apply when omitted). mode is textured, clay, normals or wireframe (default textured). parts highlights part IDs returned by inspect_model, and isolate draws only those parts. size is the output edge in pixels; the server caps it at the Schema maximum. The pictures are attached with @img handles reported in the result's views; say which view each handle shows, and never guess handle numbers. It never creates a task or charges credits. Wireframe above the configured triangle limit is refused; use clay instead. Each view uses the configured per-view and per-reply limits, and the result reports how many renders remain in this reply.",
           "parameters": {
             "type": "object",
@@ -8435,7 +8435,7 @@
         },
         {
           "name": "compare_models",
-          "execution": {"implementation_key":"model.compare","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.compare","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Render two finished 3D models of this session side by side, left then right, one picture per requested view, and attach the pictures to your reply. Use it to compare shape, silhouette or texture between two versions or candidates. models takes exactly two task IDs or model handles (such as @model2 and @model3, or @selected for one of them when it is the selected model). views and mode work like render_model_views. Each model is framed by its own bounding box, so the comparison shows proportions rather than absolute scale; the result also lists each model's triangle count and bounding box. The pictures are attached with @img handles reported in the result's views; left is models[0] and right is models[1]. It never creates a task or charges credits, and it counts toward the per-reply render limit like render_model_views.",
           "parameters": {
             "type": "object",
@@ -8471,7 +8471,7 @@
         },
         {
           "name": "compare_model_reference",
-          "execution": {"implementation_key":"model.compare_reference","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.compare_reference","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Compare a finished 3D model of this session with its reference picture, one side-by-side picture per view: the reference on the left, the model render on the right. Use it before delivering an image-to-3D or multiview result to check whether the result still looks like the reference. model takes a task ID or model handle (such as @model2, or @selected); omit it for the selected model. With no image or pairs, the reference pictures frozen in the task's input are used automatically, paired with their recorded views. image names one reference picture handle or asset id and view names its assumed view; pairs names several {image, view} pairs (at most the Schema limit). mode and size work like render_model_views but use the reference comparison's own defaults. The result attaches the comparison pictures with @img handles and reports deterministic metrics: normalized silhouette intersection-over-union, bounding-box aspect delta and subject mean-colour distance. Those metrics are a reference, not a verdict: the renderer uses approximate PBR, reads GLB only, frames each subject by its own bounding box and assumes the reference's view. It never creates a task or charges credits, and it counts toward the per-reply render limit.",
           "parameters": {
             "type": "object",
@@ -8523,7 +8523,7 @@
         },
         {
           "name": "record_self_check",
-          "execution": {"implementation_key":"self_check.record","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"self_check.record","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Write the conclusion of one finished 3D model's self-check into its persisted record. The server has already appended a check for every real inspect_model, render_model_views, compare_models and compare_model_reference call of this session; use only those calls as evidence, never claim a check you did not make. status is a delivery state declared by the Product Schema: passed means no remaining issue, has_issues means the result is delivered with remaining issues listed in remaining. A passed conclusion requires at least one real inspect check and one render, compare or reference check, and no failed purpose check in the latest inspect_model unless waiver gives the reason the person accepted it. not_inspectable is only for a model the latest inspect_model refused. The saved conclusion names the purpose it was judged against. summary, findings, fixes and remaining are the Agent's words, bounded by the Schema; an over-long text is refused, never silently cut. The record persists across turns and context compaction and appears in the conversation as a folded card. This tool never creates a Task, charges credits or changes the Task's terminal state; an unchecked result stays downloadable but must never be reported as checked.",
           "parameters": {
             "type": "object",
@@ -8567,7 +8567,7 @@
         },
         {
           "name": "get_task",
-          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Read the current state, progress and assets of a generation task by task_id. While the provider still holds the accepted task in its own queue, the result has upstream_queue (ahead: the provider's count of tasks before it, when reported; note: what to tell the waiting user).",
           "parameters": {
             "type": "object",
@@ -8583,7 +8583,7 @@
         },
         {
           "name": "observe_task",
-          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Observe live progress of a running generation task by task_id. The result has upstream_queue while the provider still holds the task in its own queue; follow its note to tell the waiting user.",
           "parameters": {
             "type": "object",
@@ -8599,7 +8599,7 @@
         },
         {
           "name": "recover_task_result",
-          "execution": {"implementation_key":"task.refetch","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"task.refetch","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Fetch again, at no charge, the result of a failed task of this session whose upstream generation had already finished and been charged but whose result could not be stored (get_task shows result_recovery.available true). It only reads the already accepted upstream job again: it never submits a new generation and never charges. It returns the recovery task_id to follow with observe_task, or why the result cannot be fetched again. Calling it again returns the same recovery task instead of starting another one.",
           "parameters": {
             "type": "object",
@@ -8617,7 +8617,7 @@
         },
         {
           "name": "request_consent",
-          "execution": {"implementation_key":"consent.request","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"consent.request","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Optionally explain the intended paid action and expected credits. This tool records intent only; it cannot authorize execution. Call the generation tool with the final prompt and references to freeze the exact input, then wait for the user's decision on that operation.",
           "parameters": {
             "type": "object",
@@ -8636,7 +8636,7 @@
         },
         {
           "name": "create_three_view",
-          "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model the session's model choice picks. Pick purpose: model_input (the default) renders an orthographic set for 3D, where the subject_type class decides the pose and the frame; design_sheet renders a design sheet that keeps the source's own pose, art style and aspect ratio. Each view is one picture of its own: never a row or a grid of several views, and never one horizontal composite. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, with the original picture as a second reference for a design sheet, so clothing, proportions and colors stay consistent. For model_input, pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. For design_sheet the source's pose is kept as it is. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, or the source picture's own shape for a design sheet, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
           "parameters": {
             "type": "object",
@@ -8667,7 +8667,7 @@
         },
         {
           "name": "set_visual_anchor",
-          "execution": {"implementation_key":"anchor.write","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"anchor.write","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Create, update or delete one of this session's visual anchors, or decline a proposed one. An identity anchor is a character or object's standard look: its reference pictures become automatic references when a later generation call names the anchor in its anchors argument. A style anchor is a reference-backed look. The user must confirm a new anchor on a choice card first: call ask_choice with kind visual_anchor and put this tool's exact arguments in proposal. A user-set style lock is never changed by this tool. The result names the anchors; it never returns asset ids or URLs.",
           "parameters": {
             "type": "object",
@@ -8704,7 +8704,7 @@
         },
         {
           "name": "list_project_assets",
-          "execution": {"implementation_key":"project.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"project.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "List the assets of the project this session belongs to: each asset's read-only handle, kind, name, description and picture references, plus any saved 3D model references. Use the handles (for example @project1) in reference_handles of a generation tool to reuse a finished character or prop; the server attaches the project's style references automatically. Saved 3D model references are listed for reference only: this version cannot use a project model as the source of a paid processing step. A session outside any project has nothing to list.",
           "parameters": {
             "type": "object",
@@ -8714,7 +8714,7 @@
         },
         {
           "name": "propose_asset_list",
-          "execution": {"implementation_key":"assetlist.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"assetlist.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Propose a production list of assets for the current project. The user must confirm the list before any work starts. Returns the list id, item count, planned steps and availability warnings.",
           "parameters": {
             "type": "object",
@@ -8743,7 +8743,7 @@
         },
         {
           "name": "submit_asset_list_item",
-          "execution": {"implementation_key":"assetlist.submit_item","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"assetlist.submit_item","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Report the outcome of the current production-list item: done when its task succeeded, failed with a reason otherwise. Only valid inside a list item's own session.",
           "parameters": {
             "type": "object",
@@ -8757,7 +8757,7 @@
         },
         {
           "name": "get_asset_list",
-          "execution": {"implementation_key":"assetlist.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"assetlist.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
           "parameters": {
             "type": "object",
@@ -8774,7 +8774,7 @@
           "canvas_source": "bind",
           "selection_mask": "bind",
           "reference_size": "single",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count.",
           "cross_domain_model_fallback": true,
           "model_argument": "model",
@@ -8880,7 +8880,7 @@
           "name": "remove_background",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["background-removal"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["background-removal"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Remove the background of the referenced images using the background-removal offering. Use it whenever the background itself should go: an image edit changes the picture and does not reliably produce real transparency. Use reference_handles (such as @img3, or @selected) or reference_image_indices for existing images; without either, the images selected on the workspace are used. A result with notices means some pictures were not processed even though the task succeeded: tell the user which ones, as the notice message says, and do not call the batch complete.",
           "ignore_user_model": true,
           "default_to_selection": true,
@@ -8937,7 +8937,7 @@
           "name": "create_model_3d",
           "canvas_source": "refuse",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["text-to-3d"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from an English text description.",
           "model_argument": "model",
           "model_choices": {"from": "available_offerings", "require_parameters": ["prompt"]},
@@ -9022,7 +9022,7 @@
           "name": "create_model_3d_from_image",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d","text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d","text-to-3d"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from reference image(s). Without references the images selected on the workspace are used. How many pictures a model uses depends on the model picked for 3D (stated below when known): never say that pictures beyond that number are used, or that they are used as views of one object. When a result has reference_note, including while the step waits on its approval card, it states the facts about the pictures: which pictures are used, how many were given, and that using several pictures needs a model that takes several pictures. Your reply must state each of these facts; put them in your own words if you like. Several views of the same object (a front view plus left, back or right views) belong to create_model_3d_from_views instead. For a model that takes angle marks for its pictures, say in view_labels which side of the object each picture shows when you can see it; the server ignores view_labels for any other model.",
           "default_to_selection": true,
           "model_argument": "model",
@@ -9149,7 +9149,7 @@
           "name": "create_model_3d_from_views",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. The available models are derived from the Catalog's enabled multiview Offerings: those that label each picture's view (reference_views) and order-only models such as Meshy 7.1 multiview, whose pictures are read as front, left, back, right by position. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. An order-only model accepts only a contiguous front, left, back, right prefix, so never give it front plus back without left. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. Use list_offerings for actual quotes; do not assume one multiview model costs the same as another.",
           "ignore_user_model": true,
           "model_argument": "model",
@@ -9233,7 +9233,7 @@
           "name": "retexture_model",
           "canvas_source": "ignore",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Re-texture a finished 3D model of this session from an English text prompt, one reference image or both, as the selected service's inputs in list_offerings allow. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "retexture",
@@ -9370,7 +9370,6 @@
               "model-split",
               "model-merge"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -9669,7 +9668,7 @@
             "model-split",
             "retexture",
             "format-conversion"
-          ],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          ],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
@@ -9769,7 +9768,7 @@
           "name": "convert_model_format",
           "canvas_source": "ignore",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["format-conversion"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["format-conversion"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Convert a finished 3D model of this session to another file format. A service that exports every format it supports in one run (Meshy Convert) bills once for all of them.",
           "ignore_user_model": true,
           "capability": "format-conversion",
@@ -9854,7 +9853,6 @@
             "capabilities": [
               "text-to-motion"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -9946,7 +9944,6 @@
             "capabilities": [
               "image-to-splat"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -10025,7 +10022,7 @@
           "name": "create_multiview_images",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-multiview"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-multiview"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Create one Tripo four-view image Task from exactly one owned reference image. Keep the four returned views together in front, left, back, right order; do not substitute the older three-view recipe. The estimated native price is 10 Tripo credits.",
           "ignore_user_model": true,
           "require_unique_offering": true,
@@ -10047,7 +10044,7 @@
           "name": "edit_multiview_images",
           "canvas_source": "ignore",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["edit-multiview"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["edit-multiview"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Edit selected views of a successful Tripo four-view image Task from this same session. Give its public source Task ID and at least one view prompt. Only prompted views are generated, at 5 Tripo credits each; unedited views remain assets of the original Task.",
           "accept_reference_images": false,
           "ignore_user_model": true,
@@ -10080,7 +10077,6 @@
               "creative-lab-prototype",
               "creative-lab-build"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -10204,7 +10200,6 @@
             "capabilities": [
               "creative-lab-build"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -10259,7 +10254,7 @@
           "name": "create_concept_sketch",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Draw one low-cost 2D concept sketch for an open request. Call it several times in the same reply (the Product Schema declares how many) to offer visibly different directions, each with its own English prompt that names the style, medium and key visual differences. Without references it draws from text; with reference_handles it keeps the referenced subject. After drawing, open an ask_choice card of the concept_direction kind whose options carry each sketch's handle and the exact refine_image arguments that continue it. The Product Schema may override cheap parameters per Offering; a model that declares none of them is used as is.",
           "require_user_model": true,
           "cross_domain_model_fallback": true,
@@ -10681,6 +10676,7 @@
         "default_mode": "auto",
         "modes": ["auto", "budget", "manual"],
         "manual_approval_capabilities": ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"],
+        "manual_credits_threshold": 20,
         "budget": {
           "max_credits": 20000,
           "max_steps": 12,
@@ -10756,7 +10752,7 @@
             {
               "id": "manual",
               "label": "严格（逐步批准）",
-              "description": "严格（逐步批准）方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡，等用户在卡片上批准后才执行。2D 步骤、重拓扑、绑骨、动画按策略自动批准，不出卡。任何步骤只要会额外消耗积分（例如额外导出格式、Tripo 的附加费用），即使它本来自动批准，也要在批准卡上由用户批准。"
+              "description": "严格（逐步批准）方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡，等用户在卡片上批准后才执行。单步预计积分达到服务端阈值的步骤同样先出批准卡，不论能力类别，所以重拓扑、绑骨、分割、补面这类加工步骤通常也要批准；具体阈值由服务端 Schema 声明，不要猜数字。2D 步骤、动画、格式转换这类单步积分较低的步骤按策略自动批准，不出卡。任何步骤只要会额外消耗积分（例如额外导出格式、Tripo 的附加费用），即使它本来自动批准，也要在批准卡上由用户批准。"
             }
           ]
         }
@@ -16970,7 +16966,6 @@
                   "model-3d"
                 ],
                 "capabilities": [],
-                "consent": "none",
                 "idempotency": "none",
                 "cancellation": "context",
                 "agent_scope": "utility"
@@ -17002,7 +16997,6 @@
                   "model-3d"
                 ],
                 "capabilities": [],
-                "consent": "none",
                 "idempotency": "none",
                 "cancellation": "context",
                 "agent_scope": "utility"
@@ -17033,7 +17027,6 @@
                   "model-3d"
                 ],
                 "capabilities": [],
-                "consent": "none",
                 "idempotency": "none",
                 "cancellation": "context",
                 "agent_scope": "utility"

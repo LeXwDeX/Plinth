@@ -49,7 +49,7 @@ func TestDefaultCatalogDeclaresImageCropContracts(t *testing.T) {
 	}
 	if tool.Execution.ImplementationKey != "image.crop" ||
 		len(tool.Execution.Effects) != 1 || tool.Execution.Effects[0] != "READ" ||
-		tool.Execution.Consent != "none" || tool.Execution.AgentScope != "utility" ||
+		tool.Execution.AgentScope != "utility" ||
 		len(tool.Execution.Domains) != 1 || tool.Execution.Domains[0] != "image" {
 		t.Fatalf("crop tool execution = %+v", tool.Execution)
 	}

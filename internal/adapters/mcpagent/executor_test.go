@@ -22,7 +22,7 @@ func (p *readPeer) CallTool(context.Context, string, json.RawMessage) (json.RawM
 	return json.RawMessage(`{"resultType":"complete","content":[{"type":"text","text":"facts"}]}`), nil
 }
 func TestExecutorRequiresFrozenRegistrationAndKeepsReadSideEffectFree(t *testing.T) {
-	execution := catalog.ChatToolExecutionSchema{ImplementationKey: "mcp/read", Effects: []string{"READ"}, Scope: "session", Consent: "none"}
+	execution := catalog.ChatToolExecutionSchema{ImplementationKey: "mcp/read", Effects: []string{"READ"}, Scope: "session"}
 	preset := catalog.AgentMCPPresetSchema{ID: "read-preset", Tools: []catalog.AgentMCPToolSchema{{Name: "mcp_read", RemoteName: "remote_read", Parameters: json.RawMessage(`{"type":"object","additionalProperties":false}`), Execution: execution}}}
 	peer := &readPeer{}
 	service, err := mcp.New([]catalog.AgentMCPPresetSchema{preset}, catalog.AgentMCPPolicySchema{TimeoutMilliseconds: 100, MaxResponseBytes: 4096, MaxTools: 5}, func(_ context.Context, _ catalog.AgentMCPPresetSchema, scope mcp.Scope) (mcp.Peer, error) {

@@ -2789,7 +2789,8 @@ func approvalPolicyFromSchema(application catalog.ApplicationSchema) approvalpol
 	for _, capability := range application.Capabilities {
 		known = append(known, string(capability.ID))
 	}
-	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
+	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known).
+		WithCreditsThreshold(declared.ManualCreditsThreshold)
 	if application.StepPolicy != nil {
 		// The internal steps mode exists only when the Catalog declares the 3D
 		// step policy (#330). It is not an offered mode: nothing assigns it to a

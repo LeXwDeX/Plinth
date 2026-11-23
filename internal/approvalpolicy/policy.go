@@ -29,6 +29,11 @@ type Policy struct {
 	Modes                      []string
 	ManualApprovalCapabilities []string
 	KnownCapabilities          []string
+	// ManualCreditsThreshold is the per-step credit estimate from which manual
+	// mode asks a person whatever the capability is (0 disables the rule: the
+	// capability list alone then decides, which is how a policy built without
+	// WithCreditsThreshold behaves).
+	ManualCreditsThreshold int
 	// Steps is set by WithSteps when application.step_policy is declared. It
 	// enables the internal steps mode (ModeSteps), which is deliberately not in
 	// Modes: only the server derives it for a session (#330).
@@ -73,6 +78,9 @@ func (p Policy) Allows(mode string) bool {
 //     owner's setting, and a step over the cap is refused, not sent to a
 //     person (#330).
 //   - any other mode is treated as manual.
+//
+// This is the capability rule alone. RequiresHumanForCredits adds the cost rule
+// of manual mode and is what the runtime decides a real step with.
 func RequiresHuman(policy Policy, mode, capability string) bool {
 	if normalized := policy.NormalizeMode(mode); normalized == ModeAuto || normalized == ModeSteps {
 		return false
@@ -81,6 +89,54 @@ func RequiresHuman(policy Policy, mode, capability string) bool {
 		return true
 	}
 	return slices.Contains(policy.ManualApprovalCapabilities, capability)
+}
+
+// RequiresHumanForCredits reports whether a human must decide a step that costs
+// the given credits: the capability rule of RequiresHuman, and in manual mode
+// also every step whose own estimate reaches the policy's
+// ManualCreditsThreshold (#490).
+//
+// The cost rule is deliberately not part of RequiresHuman: the capability list
+// stays the answer to "which capabilities does this deployment card", and the
+// threshold adds "and which steps are expensive enough to card anyway". A step
+// is judged by what it costs, not by which capability it happens to be, so a
+// 50-credit processing step no longer slips through because its capability is
+// not listed while a cheap 3D step stays on the list it was put on.
+//
+//   - auto and steps: never, whatever the step costs. Auto already approved
+//     every paid step, and money is not the constraint of the 3D step mode.
+//   - manual (or any mode treated as manual, budget included): the capability
+//     rule, then the threshold. credits is the step's total estimate (base plus
+//     extra), the number the approval card shows; a non-positive estimate never
+//     reaches a positive threshold.
+//
+// RequiresHumanForExtraCredits stays the rule for the extra part alone: a step
+// with extra credits is the person's to approve even when neither this rule nor
+// the capability list asks for it.
+func RequiresHumanForCredits(policy Policy, mode, capability string, credits int) bool {
+	if RequiresHuman(policy, mode, capability) {
+		return true
+	}
+	if credits <= 0 || policy.ManualCreditsThreshold <= 0 {
+		return false
+	}
+	normalized := policy.NormalizeMode(mode)
+	if normalized == ModeAuto || normalized == ModeSteps {
+		return false
+	}
+	return credits >= policy.ManualCreditsThreshold
+}
+
+// WithCreditsThreshold returns the policy with the manual cost rule of
+// application.chat.approval_policy. It is an additive option: New keeps its
+// signature, and a policy without it (or with 0) decides manual mode on the
+// capability list alone.
+func (p Policy) WithCreditsThreshold(credits int) Policy {
+	if credits < 0 {
+		credits = 0
+	}
+	p.ManualCreditsThreshold = credits
+	return p
 }
 
 // RequiresHumanForExtraCredits reports whether a human must decide a step

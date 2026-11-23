@@ -30,7 +30,7 @@ func TestAgentConfigurationPresetPolicyAndPrivateProjection(t *testing.T) {
 			s.AgentConfiguration.MCPPresets[0].Tools[0].Execution.Effects = []string{"PAID_TASK"}
 		},
 		func(s *catalog.ApplicationSchema) {
-			s.AgentConfiguration.MCPPresets[0].Tools[0].Execution.Consent = "human"
+			s.AgentConfiguration.MCPPresets[0].Tools[0].Execution.Scope = "owner"
 		},
 		func(s *catalog.ApplicationSchema) { s.AgentConfiguration.Limits.MaxPromptCharacters = 0 },
 		func(s *catalog.ApplicationSchema) { s.AgentConfiguration.Routes.MCP = "https://external.test/mcp" },

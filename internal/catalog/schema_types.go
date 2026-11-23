@@ -4415,6 +4415,16 @@ type ChatApprovalPolicySchema struct {
 	DefaultMode                string                      `json:"default_mode"`
 	Modes                      []string                    `json:"modes"`
 	ManualApprovalCapabilities []schemacontract.Capability `json:"manual_approval_capabilities"`
+	// ManualCreditsThreshold is the per-step credit estimate from which manual
+	// mode asks a person, whatever the capability is (#490). The capability list
+	// answers "which kinds of step this deployment cards"; this answers "and
+	// which steps are too expensive to run without one", so a costly processing
+	// step cannot slip through on a capability that is not listed. It is the
+	// same estimate the approval card shows (base plus extra). 0 disables the
+	// rule and leaves the capability list as the only manual rule; a Catalog
+	// that does not declare the field (every one written before #490) reads as 0.
+	// Server-only: the browser cannot price a step before it is frozen.
+	ManualCreditsThreshold int `json:"manual_credits_threshold"`
 	// Budget is the production-plan budget of budget mode. Server-only.
 	Budget ChatApprovalBudgetSchema `json:"budget"`
 	// Prompt is what the Agent is told about the session's approval mode
@@ -6144,13 +6154,20 @@ type ChatToolServiceMessages struct {
 
 // ChatToolExecutionSchema declares the runtime implementation and safety
 // contract for a tool. It remains server-side and is omitted from public DTOs.
+//
+// There is deliberately no `consent` field. A tool declared consent: human
+// until #490, but no runtime read it: whether a step waits for a person is
+// decided by approvalpolicy from the session's approval mode, the step's
+// capability and what the frozen step costs. The paid-ness of a tool is already
+// stated by effects: ["PAID_TASK"], which the validator pins to
+// idempotency: required and cancellation: task; a second, never-read word for
+// the same fact only looked like a guarantee.
 type ChatToolExecutionSchema struct {
 	ImplementationKey string                      `json:"implementation_key"`
 	Effects           []string                    `json:"effects"`
 	Scope             string                      `json:"scope"`
 	Domains           []string                    `json:"domains"`
 	Capabilities      []schemacontract.Capability `json:"capabilities"`
-	Consent           string                      `json:"consent"`
 	Idempotency       string                      `json:"idempotency"`
 	Cancellation      string                      `json:"cancellation"`
 	// AgentScope is the tool's class for the session Agent scope: "2d", "3d",

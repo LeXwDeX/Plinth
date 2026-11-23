@@ -150,7 +150,6 @@ func TestChatToolExecutionValidationRejectsUnsafeOrUnregisteredMetadata(t *testi
 		name   string
 		mutate func(*catalog.ApplicationSchema)
 	}{
-		{"paid task cannot drop consent", func(a *catalog.ApplicationSchema) { a.Chat.Tools[0].Execution.Consent = "none" }},
 		{"paid task cannot downgrade effect", func(a *catalog.ApplicationSchema) { a.Chat.Tools[0].Execution.Effects = []string{"READ"} }},
 		{"generation implementation is fixed", func(a *catalog.ApplicationSchema) { a.Chat.Tools[0].Execution.ImplementationKey = "arbitrary.execute" }},
 		{"generation capability closure", func(a *catalog.ApplicationSchema) { a.Chat.Tools[0].Execution.Capabilities = nil }},

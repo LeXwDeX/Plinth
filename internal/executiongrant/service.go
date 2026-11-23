@@ -326,7 +326,11 @@ func (s Service) ApproveByPolicyDecision(ctx context.Context, ownerID, requestID
 		noPlan = true
 		planSummary = result.Budget
 	}
-	if approvalpolicy.RequiresHuman(s.Policy, mode, snapshot.Capability) {
+	// A step costs what it costs, not what capability it happens to be: in
+	// manual mode the policy's per-step credit threshold cards the expensive
+	// processing steps that the capability list does not name (#490). The
+	// estimate is the frozen one the approval card shows.
+	if approvalpolicy.RequiresHumanForCredits(s.Policy, mode, snapshot.Capability, snapshot.EstimatedCredits) {
 		return PolicyResult{Grant: grant, Outcome: PolicyOutcomeHuman, Reason: budgetReason(noPlan), Budget: planSummary}, ErrHumanRequired
 	}
 	// An Agent step that spends extra credits is the person's to approve in

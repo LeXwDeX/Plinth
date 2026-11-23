@@ -1055,12 +1055,6 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 	if execution.Scope != "session" {
 		return fmt.Errorf("tool %q scope 必须为 session", name)
 	}
-	if execution.Consent != "human" && execution.Consent != "none" {
-		return fmt.Errorf("tool %q consent 必须为 human 或 none", name)
-	}
-	if expectedEffect == "PAID_TASK" && execution.Consent != "human" {
-		return fmt.Errorf("paid tool %q 必须要求 human consent", name)
-	}
 	if execution.Idempotency != "required" && execution.Idempotency != "none" {
 		return fmt.Errorf("tool %q idempotency 必须为 required 或 none", name)
 	}
@@ -1167,6 +1161,13 @@ func validateApprovalPolicy(policy ChatApprovalPolicySchema, capabilities []Capa
 			return fmt.Errorf("approval_policy.manual_approval_capabilities 重复声明 %q", capability)
 		}
 		seen[capability] = true
+	}
+	// A negative threshold would silently widen automatic approval (no step
+	// could ever reach it) instead of narrowing it. 0 is a declared value: it
+	// turns the cost rule off, which is what a Catalog written before #490 gets
+	// by leaving the field out.
+	if policy.ManualCreditsThreshold < 0 {
+		return fmt.Errorf("approval_policy.manual_credits_threshold 不能为负数: %d", policy.ManualCreditsThreshold)
 	}
 	if err := validateApprovalPrompt(policy.Prompt, offered); err != nil {
 		return err
