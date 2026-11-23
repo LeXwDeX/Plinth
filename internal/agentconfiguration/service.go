@@ -113,10 +113,11 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 		}
 	}
 	s.defaults = Configuration{SystemPrompt: schema.Chat.Agent.SystemPrompt, DomainContext: schema.Chat.Agent.DomainContext, Skills: skills.Skills, EnabledToolNames: []string{}, EnabledMCPPresetIDs: []string{}}
-	// The production-list tools only finish their work when the Catalog turns
-	// application.asset_list.execution on: without a run no item reaches
-	// working, so a default table that offers them invites calls that can
-	// never complete (#494). They stay declared and publishable, like a tool
+	// The completion tool submit_asset_list_item only finishes its work when the
+	// Catalog turns application.asset_list.execution on: without a run no item
+	// reaches working, so a default table that offers it invites calls that can
+	// never complete (#494). Propose and read do not need a run and stay in the
+	// default table. The tool stays declared and publishable, like a tool
 	// without an enabled Offering.
 	assetListExecution := schema.AssetListExecutionEnabled()
 	// A tool whose capabilities have no enabled Offering is declared in the
@@ -125,7 +126,7 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 	// back without any other change.
 	declare := func(name, description string, execution catalog.ChatToolExecutionSchema) {
 		if !catalog.AnyCapabilityActive(execution.Capabilities, s.active) ||
-			(catalog.IsAssetListTool(name) && !assetListExecution) {
+			(catalog.RequiresAssetListExecution(name) && !assetListExecution) {
 			s.hiddenTools[name] = true
 			return
 		}

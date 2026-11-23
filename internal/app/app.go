@@ -1382,8 +1382,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	)
 	// #494: the base registry is the fallback for a turn that froze no Agent
 	// configuration; it takes the same injection view as the frozen one, so the
-	// production-list tools are absent whenever asset_list.execution is off.
-	orchestratorSchema.AgentTools = withoutAssetListTools(
+	// production-list completion tool is absent whenever asset_list.execution is
+	// off (propose and read stay in).
+	orchestratorSchema.AgentTools = withoutAssetListExecutionTools(
 		orchestratorSchema.AgentTools, applicationSchema.AssetListExecutionEnabled())
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Project: applicationSchema.Project,

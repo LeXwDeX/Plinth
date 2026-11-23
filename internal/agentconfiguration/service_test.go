@@ -520,8 +520,9 @@ func TestSystemSkillsAreNotPublishableOrPersonal(t *testing.T) {
 
 // #494: the production-list tools stay declared in the Catalog while
 // application.asset_list.execution is off, but a default configuration must not
-// offer them: without a run no item reaches working. Switching the section on
-// brings all three back with no other change.
+// offer the completion tool: without a run no item reaches working. Proposing
+// and reading a list need no run and stay offered. Switching the section on
+// brings the completion tool back with no other change.
 func TestProductionListToolsStayOutOfADefaultConfigurationWithoutExecution(t *testing.T) {
 	ctx := context.Background()
 	product, err := catalog.LoadDefault()
@@ -557,10 +558,14 @@ func TestProductionListToolsStayOutOfADefaultConfigurationWithoutExecution(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range declared {
-		if slices.Contains(toolNames(management.Tools), name) ||
-			slices.Contains(management.Configuration.EnabledToolNames, name) {
-			t.Fatalf("%s is offered although asset_list.execution is off", name)
+	if slices.Contains(toolNames(management.Tools), "submit_asset_list_item") ||
+		slices.Contains(management.Configuration.EnabledToolNames, "submit_asset_list_item") {
+		t.Fatal("submit_asset_list_item is offered although asset_list.execution is off")
+	}
+	for _, name := range []string{"propose_asset_list", "get_asset_list"} {
+		if !slices.Contains(toolNames(management.Tools), name) ||
+			!slices.Contains(management.Configuration.EnabledToolNames, name) {
+			t.Fatalf("%s is missing from a default configuration while asset_list.execution is off", name)
 		}
 	}
 	on := product.Application()

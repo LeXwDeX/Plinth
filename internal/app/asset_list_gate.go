@@ -101,15 +101,16 @@ func assetListGateMessage(declared, fallback string) string {
 	return strings.NewReplacer("{name}", "", "{title}", "", "{detail}", "").Replace(message)
 }
 
-// withoutAssetListTools is the Agent's injection view of the tool declarations
-// when the Catalog keeps application.asset_list.execution off (#494). The three
-// tools stay declared in the Catalog and the capability stays wired; only the
-// table a turn offers loses them, because without a run no item reaches working
-// and the calls could never finish. Dropping them here — rather than at
-// execution — also answers a configuration frozen while they were still
-// offered: the turn registry no longer resolves the name, so the Orchestrator
-// returns the Schema's tool-unavailable copy instead of an unknown-tool error.
-func withoutAssetListTools(
+// withoutAssetListExecutionTools is the Agent's injection view of the tool
+// declarations when the Catalog keeps application.asset_list.execution off
+// (#494). The tools stay declared in the Catalog and the capability stays
+// wired; only the table a turn offers loses the one tool that cannot finish:
+// submit_asset_list_item needs an item a run pushed to working. Propose and
+// read need no run and stay in the table. Dropping it here — rather than at
+// execution — also answers a configuration frozen while it was still offered:
+// the turn registry no longer resolves the name, so the Orchestrator returns
+// the Schema's tool-unavailable copy instead of an unknown-tool error.
+func withoutAssetListExecutionTools(
 	tools []catalog.ChatAgentToolSchema,
 	executionEnabled bool,
 ) []catalog.ChatAgentToolSchema {
@@ -118,7 +119,7 @@ func withoutAssetListTools(
 	}
 	kept := make([]catalog.ChatAgentToolSchema, 0, len(tools))
 	for _, tool := range tools {
-		if catalog.IsAssetListTool(tool.Name) {
+		if catalog.RequiresAssetListExecution(tool.Name) {
 			continue
 		}
 		kept = append(kept, tool)
@@ -128,8 +129,8 @@ func withoutAssetListTools(
 
 // assetListUnavailableCopy is the Schema's "this tool is not available in this
 // turn" copy, with {tool} still in it, for an executor whose Catalog keeps the
-// production-list tools out of the table. Empty when the execution section is
-// on, which leaves the executor's own unwired-tool fallback in place.
+// completion tool out of the table. Empty when the execution section is on,
+// which leaves the executor's own unwired-tool fallback in place.
 func assetListUnavailableCopy(application catalog.ApplicationSchema) string {
 	if application.AssetListExecutionEnabled() {
 		return ""

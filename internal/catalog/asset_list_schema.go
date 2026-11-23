@@ -10,16 +10,13 @@ func (s ApplicationSchema) AssetListExecutionEnabled() bool {
 	return s.AssetList != nil && s.AssetList.Execution != nil && s.AssetList.Execution.Enabled
 }
 
-// IsAssetListTool 报告 name 是否是推动清单自动闭环的 Agent 工具：#327 的
-// propose_asset_list、#328 的 submit_asset_list_item 与 #329f 的 get_asset_list。
-// Catalog 仍在 chat.agent_tools 里声明它们（能力不删），但闭环关闭时它们做不成
-// 事，所以注入层把这三个名字留在默认工具表之外（#494）。
-func IsAssetListTool(name string) bool {
-	switch name {
-	case "propose_asset_list", "submit_asset_list_item", "get_asset_list":
-		return true
-	}
-	return false
+// RequiresAssetListExecution 报告 name 是否是只有自动制作闭环开着才走得通的
+// Agent 工具：目前只有 #328 的 submit_asset_list_item。它要求清单项已经由某个
+// run 推到 working，闭环关闭时必然回 item_not_in_session / item_not_working，
+// 所以注入层在默认工具表之外只留下它（#494）。#327 的 propose_asset_list 与
+// #329f 的 get_asset_list 不依赖 run，默认照常注入。
+func RequiresAssetListExecution(name string) bool {
+	return name == "submit_asset_list_item"
 }
 
 // AssetListSchema 是 application.asset_list（#327）：项目下的一份制作清单。

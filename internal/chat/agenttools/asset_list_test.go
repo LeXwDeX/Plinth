@@ -82,9 +82,10 @@ func TestSubmitAssetListItemDispatchesToTheService(t *testing.T) {
 	}
 }
 
-// #494: a turn frozen while the production-list tools were still offered can
-// name one after the Catalog stopped injecting them. The executor answers the
-// Schema's tool-unavailable copy, names the called tool and runs nothing.
+// #494: a turn frozen while submit_asset_list_item was still offered can name
+// it after the Catalog stopped injecting it. The executor answers the Schema's
+// tool-unavailable copy, names the called tool and runs nothing. Propose and
+// read need no run, so the same Catalog keeps them dispatched.
 func TestAssetListToolsRefuseWithSchemaCopyWithoutExecution(t *testing.T) {
 	called := ""
 	executor, err := New(Config{
@@ -106,17 +107,25 @@ func TestAssetListToolsRefuseWithSchemaCopyWithoutExecution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{ToolProposeAssetList, ToolSubmitAssetListItem, ToolGetAssetList} {
+	result, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
+		Call: agents.ToolCall{ID: "call-submit", Name: ToolSubmitAssetListItem, Arguments: json.RawMessage(`{}`)},
+	}, nil)
+	if err != nil || !result.NoSubmission ||
+		result.Error != "工具 "+ToolSubmitAssetListItem+" 本回合不可用，没有执行。" {
+		t.Fatalf("%s = %+v, %v", ToolSubmitAssetListItem, result, err)
+	}
+	if called != "" {
+		t.Fatalf("the refused completion tool still ran %s", called)
+	}
+	for _, name := range []string{ToolProposeAssetList, ToolGetAssetList} {
+		called = ""
 		result, err := executor.Execute(context.Background(), chat.ToolCommand{
 			OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
 			Call: agents.ToolCall{ID: "call-" + name, Name: name, Arguments: json.RawMessage(`{}`)},
 		}, nil)
-		if err != nil || !result.NoSubmission ||
-			result.Error != "工具 "+name+" 本回合不可用，没有执行。" {
-			t.Fatalf("%s = %+v, %v", name, result, err)
+		if err != nil || result.Error != "" || called != name {
+			t.Fatalf("%s = %+v called=%q err=%v", name, result, called, err)
 		}
-	}
-	if called != "" {
-		t.Fatalf("a refused asset list tool still ran %s", called)
 	}
 }

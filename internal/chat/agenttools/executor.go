@@ -202,10 +202,11 @@ type Config struct {
 	ReadAssetList func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	// AssetListUnavailable is the Schema's "tool {tool} is not available in
 	// this turn" copy, set when the Catalog keeps application.asset_list.execution
-	// off (#494). The three production-list tools answer it instead of running:
+	// off (#494). Only submit_asset_list_item answers it instead of running:
 	// without a run no item reaches working, so the call could not finish. It
-	// also covers a turn frozen while the tools were still offered. {tool} is
-	// filled with the called name; empty leaves the tools dispatched as before.
+	// also covers a turn frozen while the tool was still offered. Propose and
+	// read need no run and dispatch as before. {tool} is filled with the called
+	// name; empty leaves the tool dispatched as before.
 	AssetListUnavailable string
 	// WriteVisualAnchor applies one explicitly confirmed visual-anchor write
 	// (#250). The service owns the owner/session checks and the bounds; this
@@ -512,12 +513,13 @@ func (e *Executor) Execute(
 		}
 		return e.proposePlan(ctx, command)
 	case ToolProposeAssetList, ToolSubmitAssetListItem, ToolGetAssetList:
-		// #494: the Catalog keeps the three tools declared but out of the
-		// table while asset_list.execution is off. A turn frozen while they
-		// were still offered can still name one; answer with the Schema's
-		// "not available in this turn" copy, which names the way out, instead
-		// of starting a list nothing can advance.
-		if e.assetListUnavailable != "" {
+		// #494: the Catalog keeps submit_asset_list_item declared but out of
+		// the table while asset_list.execution is off. A turn frozen while it
+		// was still offered can still name it; answer with the Schema's "not
+		// available in this turn" copy, which names the way out, instead of
+		// starting a completion nothing can advance. Propose and read need no
+		// run, so they fall through to their dispatchers.
+		if e.assetListUnavailable != "" && command.Call.Name == ToolSubmitAssetListItem {
 			return chat.ToolResult{
 				Error:        strings.ReplaceAll(e.assetListUnavailable, "{tool}", command.Call.Name),
 				NoSubmission: true,

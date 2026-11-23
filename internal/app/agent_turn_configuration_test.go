@@ -88,7 +88,9 @@ func TestAgentTurnConfigurationDoesNotRepeatBuiltInReadsByDefault(t *testing.T) 
 
 // #494: the production-list tools are declared in the shipped Catalog but the
 // execution section that could advance a list is off, so the default tool table
-// must not offer them; turning execution on puts them back with no other change.
+// must not offer the completion tool; proposing and reading a list need no run
+// and stay. Turning execution on puts the completion tool back with no other
+// change.
 func TestAgentTurnConfigurationOffersAssetListToolsOnlyWithExecution(t *testing.T) {
 	product, err := catalog.LoadDefault()
 	if err != nil {
@@ -132,12 +134,21 @@ func TestAgentTurnConfigurationOffersAssetListToolsOnlyWithExecution(t *testing.
 		}
 		return result
 	}
-	declared := []string{"propose_asset_list", "get_asset_list", "submit_asset_list_item"}
-	for _, name := range declared {
-		if names(t, off)[name] {
-			t.Fatalf("the default tool table still offers %s while asset_list.execution is off", name)
+	// Only the completion tool needs a run: it is the one the default table
+	// must not offer while asset_list.execution is off.
+	if names(t, off)["submit_asset_list_item"] {
+		t.Fatal("the default tool table still offers submit_asset_list_item while asset_list.execution is off")
+	}
+	// Proposing and reading a list need no run, so the default table keeps them.
+	for _, name := range []string{"propose_asset_list", "get_asset_list"} {
+		if !names(t, off)[name] {
+			t.Fatalf("the default tool table lost %s while asset_list.execution is off", name)
 		}
-		if !names(t, on)[name] {
+	}
+	// Turning execution on brings the completion tool back with no other change.
+	enabled := names(t, on)
+	for _, name := range []string{"propose_asset_list", "get_asset_list", "submit_asset_list_item"} {
+		if !enabled[name] {
 			t.Fatalf("the tool table lost %s although asset_list.execution is on", name)
 		}
 	}
