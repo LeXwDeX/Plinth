@@ -271,6 +271,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateConvergence(schema); err != nil {
 		return err
 	}
+	if err := validateImageCount(schema.ImageCount); err != nil {
+		return err
+	}
 	if err := validateHarness(schema, capabilityPresentations); err != nil {
 		return err
 	}
@@ -3047,6 +3050,20 @@ func validateChatSessionGroups(api ChatAPISchema, content ContentSchema) error {
 		if !seen[source] {
 			return fmt.Errorf("chat.api.session_groups 缺少会话来源 %q（服务端会写出它）", source)
 		}
+	}
+	return nil
+}
+
+// validateImageCount checks the person's own 2D image count block (#486). The
+// block is optional: a Catalog that declares no template injects nothing. A
+// declared template must carry the count placeholder, because a block that
+// cannot state the number is the guessing this block exists to prevent.
+func validateImageCount(config ChatImageCountSchema) error {
+	if strings.TrimSpace(config.ContextTemplate) == "" {
+		return nil
+	}
+	if !strings.Contains(config.ContextTemplate, "{count}") {
+		return errors.New("chat.image_count.context_template 缺少 {count}")
 	}
 	return nil
 }

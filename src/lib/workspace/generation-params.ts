@@ -4,6 +4,15 @@
  * parameter: the size controls are the parameters with the output-size semantic,
  * the count is whatever parameter the Offering prices by
  * (estimated_credits_unit_parameter), and the rest are listed as declared.
+ *
+ * The count control therefore appears only on an Offering that prices by a
+ * count, and that is deliberate (#486): such a parameter is the only one whose
+ * number means "how many images this task produces". It is the Schema's own
+ * declaration (estimated_credits_unit_parameter), never a name written here, so
+ * a new model declares its count instead of this file learning it. The person's
+ * own count is one value for the whole session: the server keeps it and hands
+ * the same number to whichever Offering is shown, so switching model does not
+ * reset the count to the model's declared default.
  */
 
 import { offeringParamSchemas, offeringUsesNativePricing, type OfferingParameterWire, type OfferingWire } from '@/lib/agent-offerings';
