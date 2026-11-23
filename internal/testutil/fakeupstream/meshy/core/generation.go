@@ -58,22 +58,42 @@ const (
 )
 
 // ImageRequestError returns what is wrong with the data URI images of an
-// image-to-3d or multi-image-to-3d request, or "". Only data URIs are checked:
-// the platform inlines the pictures, and a remote URL is the upstream's to
-// fetch. The refusal text is constructed (no real rejection was captured).
+// image-to-3d or multi-image-to-3d request, or "". Every list the request may
+// carry is checked, texture_image_urls included: the Multi Image page gives
+// each of its texture views the bounds of the single texture picture
+// (docs.meshy.ai/en/api/multi-image-to-3d, read 2026-11-23). Only data URIs
+// are checked: the platform inlines the pictures, and a remote URL is the
+// upstream's to fetch. The refusal text is constructed (no real rejection was
+// captured).
 func ImageRequestError(request map[string]any) string {
 	values := make([]any, 0, 1)
 	if value, ok := request["image_url"].(string); ok {
 		values = append(values, value)
 	}
-	if list, ok := request["image_urls"].([]any); ok {
-		values = append(values, list...)
+	for _, field := range []string{"image_urls", "texture_image_urls"} {
+		if list, ok := request[field].([]any); ok {
+			values = append(values, list...)
+		}
 	}
 	for _, value := range values {
 		uri, _ := value.(string)
 		if message := imageDataURIError(uri); message != "" {
 			return message
 		}
+	}
+	return ""
+}
+
+// TextureImageListError is the documented conflict of the Multi Image page
+// (https://docs.meshy.ai/en/api/multi-image-to-3d, read 2026-11-23): the
+// texture views guide a texture the request must still generate, so sending
+// them with should_texture false answers 400.
+func TextureImageListError(request map[string]any) string {
+	if _, ok := request["texture_image_urls"].([]any); !ok {
+		return ""
+	}
+	if textured, present := request["should_texture"].(bool); present && !textured {
+		return "texture_image_urls cannot be sent with should_texture: false"
 	}
 	return ""
 }
@@ -104,9 +124,15 @@ func imageDataURIError(uri string) string {
 	return ""
 }
 
-// TextTo3DRequestError is the Text to 3D create validation. The official
-// preview parameter table has no enable_pbr, texture_prompt or
-// texture_image_url; sending them on a preview is refused. pose_mode is
+// TextTo3DRequestError is the Text to 3D create validation. Two stage rules
+// are documented (https://docs.meshy.ai/en/api/text-to-3d, read 2026-11-23):
+// geometry_resolution "applies only to preview tasks. A refine with this
+// parameter returns 400", and texture_resolution "applies only to refine
+// tasks. A preview with this parameter returns 400". enable_pbr,
+// texture_prompt and texture_image_url are documented on the refine request
+// only, but neither the page nor the OpenAPI spec says a preview carrying them
+// is refused, so the fake does not invent a refusal for them (#487; before that
+// it answered 400, contrary to the review's reading of the page). pose_mode is
 // optional and "leave it out for no pose", so an explicit empty string is
 // refused rather than sent.
 func TextTo3DRequestError(request map[string]any) string {
@@ -119,11 +145,11 @@ func TextTo3DRequestError(request map[string]any) string {
 		}
 	}
 	if mode, _ := request["mode"].(string); mode != "refine" {
-		for _, field := range []string{"enable_pbr", "texture_prompt", "texture_image_url"} {
-			if has(request, field) {
-				return field + " is only valid for a refine task"
-			}
+		if has(request, "texture_resolution") {
+			return "texture_resolution is only valid for a refine task"
 		}
+	} else if has(request, "geometry_resolution") {
+		return "geometry_resolution is only valid for a preview task"
 	}
 	return ""
 }

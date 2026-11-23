@@ -15,7 +15,8 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// #103: Meshy Rigging accepts at most 320,000 faces; the Schema counts
+// #103: Meshy Rigging accepts at most 380,000 faces ("a quad counts as 2",
+// docs.meshy.ai/en/api/rigging, read 2026-11-23); the Schema counts
 // triangles. These tests drive the real default-catalog Rigging Offering.
 func riggingFaceRequest(t *testing.T, raw []byte, source string) (generation.InputValidationRequest, *catalog.Catalog) {
 	t.Helper()

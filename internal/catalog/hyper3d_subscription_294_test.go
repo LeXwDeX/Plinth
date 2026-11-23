@@ -39,10 +39,13 @@ func TestHyper3DSubscriptionRefusalsAreAccountFailuresNotAuthentication(t *testi
 		// The two codes about the subscription: not an authentication failure.
 		"API_NO_ACTIVE_SUBSCRIPTION":    "insufficient_balance",
 		"API_SUBSCRIPTION_PLAN_TOO_LOW": "insufficient_balance",
-		// The neighbours keep their classes: funds are funds, a refused permission
-		// is the key's, a full pool is a rate limit.
+		// The neighbours keep their classes: funds are funds, a refused
+		// permission is the account's (not a bad key), a full pool is a rate
+		// limit. PERMISSION_DENIED is a 403-class authorization refusal
+		// (https://docs.hyper3d.ai/api/errors, read 2026-11-23), not an
+		// authentication failure.
 		"API_INSUFFICIENT_FUNDS":        "insufficient_balance",
-		"PERMISSION_DENIED":             "authentication",
+		"PERMISSION_DENIED":             "upstream_denied",
 		"API_PARALLELISM_LIMIT_REACHED": "rate_limited",
 	} {
 		if classes[code] != want {

@@ -55,6 +55,11 @@ type Config struct {
 	// RetrySubmitServerError is the connection-level declaration that a 5xx
 	// answer to a create may be retried (#460 C25). Meshy does not declare it.
 	RetrySubmitServerError bool
+	// PollTimeout bounds one status poll (#487): the connection timeout also
+	// covers artifact downloads, which must be allowed to run long, while the
+	// official GET guidance is 30 s (docs.meshy.ai/en/api/task-lifecycle, read
+	// 2026-11-23). Zero keeps the connection timeout for polls.
+	PollTimeout time.Duration
 }
 
 type Adapter struct {
@@ -89,6 +94,7 @@ func New(config Config) (*Adapter, error) {
 		SubmitTimeout:          submitTimeout,
 		LargeSubmitTimeout:     largeSubmitTimeout,
 		RetrySubmitServerError: config.RetrySubmitServerError,
+		PollTimeout:            config.PollTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("meshy: %w", err)
@@ -738,6 +744,14 @@ func (a *Adapter) inlineImageArray(ctx context.Context, request generation.Start
 		closeErr := reader.Close()
 		if readErr != nil || closeErr != nil || int64(len(content)) > parameter.MaxBytes {
 			return nil, providerFailure(generation.FailureInvalidInput, false, fmt.Sprintf("Meshy 参数 %q 的图片超过 %d 字节上限或不可读取", parameter.Name, parameter.MaxBytes))
+		}
+		// An image_input list is checked picture by picture, as the single
+		// picture is: the Multi-Image texture views carry the official bounds
+		// of the one texture picture (#487).
+		if parameter.ImageInput != nil {
+			if message := imageBoundsError(content, *parameter.ImageInput); message != "" {
+				return nil, providerFailure(generation.FailureInvalidInput, false, fmt.Sprintf("Meshy 参数 %q 的图片不符合已声明的像素约束: %s", parameter.Name, message))
+			}
 		}
 		uris = append(uris, "data:"+asset.MediaType+";base64,"+base64.StdEncoding.EncodeToString(content))
 	}

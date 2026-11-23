@@ -483,6 +483,12 @@ func TestCreateAndPollEchoTheRequestUnderInput(t *testing.T) {
 
 // #460 B24: the preview parameter table has no refine-only fields, and an
 // empty pose_mode is not "leave it out".
+// #460 B24, corrected by #487: the two stage rules the official page states
+// are geometry_resolution on a refine and texture_resolution on a preview,
+// both 400 (https://docs.meshy.ai/en/api/text-to-3d, read 2026-11-23). The
+// refine-only texture fields are documented on the refine request only and the
+// page never says a preview carrying them is refused, so they are not refused
+// here either; pose_mode is optional and an empty string is not "leave it out".
 func TestTextTo3DCreateValidatesStageFieldsAndPose(t *testing.T) {
 	f := newFixture(t)
 	cases := []struct {
@@ -490,11 +496,13 @@ func TestTextTo3DCreateValidatesStageFieldsAndPose(t *testing.T) {
 		body map[string]any
 		want int
 	}{
-		{"preview with enable_pbr", map[string]any{"mode": "preview", "prompt": "p", "enable_pbr": true}, http.StatusBadRequest},
-		{"preview with texture_prompt", map[string]any{"mode": "preview", "prompt": "p", "texture_prompt": "t"}, http.StatusBadRequest},
-		{"preview with texture_image_url", map[string]any{"mode": "preview", "prompt": "p", "texture_image_url": "u"}, http.StatusBadRequest},
+		{"refine with geometry_resolution", map[string]any{"mode": "refine", "prompt": "p", "geometry_resolution": "2k"}, http.StatusBadRequest},
+		{"preview with texture_resolution", map[string]any{"mode": "preview", "prompt": "p", "texture_resolution": "2k"}, http.StatusBadRequest},
 		{"empty pose_mode", map[string]any{"mode": "preview", "prompt": "p", "pose_mode": ""}, http.StatusBadRequest},
 		{"refine with enable_pbr", map[string]any{"mode": "refine", "prompt": "p", "enable_pbr": true}, http.StatusAccepted},
+		{"preview with enable_pbr", map[string]any{"mode": "preview", "prompt": "p", "enable_pbr": true}, http.StatusAccepted},
+		{"preview with texture_prompt", map[string]any{"mode": "preview", "prompt": "p", "texture_prompt": "t"}, http.StatusAccepted},
+		{"preview with texture_image_url", map[string]any{"mode": "preview", "prompt": "p", "texture_image_url": "u"}, http.StatusAccepted},
 		{"preview without refine fields", map[string]any{"mode": "preview", "prompt": "p"}, http.StatusAccepted},
 	}
 	for _, test := range cases {

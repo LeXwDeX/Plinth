@@ -17,9 +17,11 @@ import (
 // carries it as one text part per mark, in picture order and ahead of the
 // pictures (two real requests of 2026-11-19; the wire is the Offering's own
 // declaration order, imagewire.EncodeMultipart). More marks than pictures is
-// refused by the service (IMAGE_LABEL_LENGTH_TOO_LONG); what it does with fewer
-// marks than pictures was not observed, so Plinth never sends that: the
-// parameter is either absent or holds exactly one mark per picture.
+// refused by the service (IMAGE_LABEL_LENGTH_TOO_LONG). A short list is
+// documented, not invented: "Entries default to ? (unknown) and the list is
+// padded to the image count" (https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5,
+// read 2026-11-23), so Plinth pads the missing positions with ? before sending
+// (#487; before that the comment claimed the behaviour was unobserved).
 
 // imageLabelsWire is the field the marks are sent in.
 const imageLabelsWire = "image_label"

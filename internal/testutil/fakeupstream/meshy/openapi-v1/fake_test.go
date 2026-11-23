@@ -268,6 +268,60 @@ func TestCanceledTaskStopsWithoutArtifacts(t *testing.T) {
 	}
 }
 
+// #487: every texture view carries the official bounds of the single texture
+// picture (docs.meshy.ai/en/api/multi-image-to-3d, read 2026-11-23), and the
+// texture views cannot travel with should_texture false.
+func TestMultiImageTextureViewsFollowThePictureBounds(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := f.source()
+	for name, body := range map[string]map[string]any{
+		"a texture view under 32 px": {"input_task_id": source, "texture_image_urls": []string{dataURI(t, 16, 16)}},
+		"texture views with texturing off": {"input_task_id": source, "should_texture": false,
+			"texture_image_urls": []string{dataURI(t, 64, 64)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, response := f.Do("POST", f.v1("/multi-image-to-3d"), key, body)
+			if status != http.StatusBadRequest {
+				t.Fatalf("status %d body %v", status, response)
+			}
+			if _, ok := response["message"].(string); !ok || len(response) != 1 {
+				t.Fatalf("error body must be {message}: %v", response)
+			}
+		})
+	}
+	f.create("/multi-image-to-3d", map[string]any{"input_task_id": source, "texture_image_urls": []string{dataURI(t, 64, 64)}})
+}
+
+// The documented Resize rule (https://docs.meshy.ai/en/api/resize, read
+// 2026-11-23): exactly one of resize_height, resize_longest_side and auto_size.
+func TestResizeRequiresExactlyOneSizingMode(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	source := f.source()
+	for name, body := range map[string]map[string]any{
+		"no mode at all":        {"input_task_id": source},
+		"two numbered modes":    {"input_task_id": source, "resize_height": 1.7, "resize_longest_side": 2},
+		"auto_size with height": {"input_task_id": source, "auto_size": true, "resize_height": 1.7},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, _, response := f.Do("POST", f.v1("/resize"), key, body)
+			if status != http.StatusBadRequest {
+				t.Fatalf("status %d body %v", status, response)
+			}
+			if _, ok := response["message"].(string); !ok || len(response) != 1 {
+				t.Fatalf("error body must be {message}: %v", response)
+			}
+		})
+	}
+	// Each mode on its own is accepted, the third one included (#487).
+	for _, body := range []map[string]any{
+		{"input_task_id": source, "resize_height": 1.7},
+		{"input_task_id": source, "resize_longest_side": 2},
+		{"input_task_id": source, "auto_size": true},
+	} {
+		f.create("/resize", body)
+	}
+}
+
 // The documented 403 refusal (moderation, plan or IP restriction).
 func TestForbiddenScenarioAnswersTheDocumentedRefusal(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
