@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
@@ -29,11 +30,13 @@ func TestAgentVendorBehaviorFollowsModelProfiles(t *testing.T) {
 	if deepseek == nil || !deepseek.ReasoningPassback || deepseek.EffortField != "reasoning_effort" ||
 		deepseek.DefaultEffort != "low" || strings.Join(deepseek.EffortLevels, ",") != "low,high,max" ||
 		!deepseek.StreamIncludeUsage || deepseek.RequestFields["reasoning_effort"] != nil ||
+		deepseek.ReasoningKind != agents.ReasoningPlaintext ||
 		!orchestratorChatSchema(chat, "deepseek").DSML.Enabled {
 		t.Fatalf("deepseek options = %#v", deepseek)
 	}
 	qwen := chatThinkingOptions(chat.Agent, "qwen3.8-flash")
 	if qwen == nil || string(qwen.RequestFields["enable_thinking"]) != "true" || qwen.ReasoningPassback ||
+		qwen.ReasoningKind != agents.ReasoningPlaintext ||
 		strings.Join(qwen.EffortLevels, ",") != "low,medium,xhigh" || qwen.DefaultEffort != "xhigh" ||
 		orchestratorChatSchema(chat, "qwen3.8-flash").DSML.Enabled {
 		t.Fatalf("qwen options = %#v", qwen)
@@ -49,6 +52,7 @@ func TestAgentVendorBehaviorFollowsModelProfiles(t *testing.T) {
 	//     (interleaved thinking). GLM does not write DSML tool calls.
 	glm := chatThinkingOptions(chat.Agent, "GLM-5.3")
 	if glm == nil || !glm.ReasoningPassback || glm.DefaultEffort != "max" || glm.StreamIncludeUsage ||
+		glm.ReasoningKind != agents.ReasoningPlaintext ||
 		strings.Join(glm.EffortLevels, ",") != "low,high,max" ||
 		strings.Join(strings.Fields(string(glm.RequestFields["thinking"])), "") != `{"type":"enabled"}` ||
 		orchestratorChatSchema(chat, "glm-5.3").DSML.Enabled {

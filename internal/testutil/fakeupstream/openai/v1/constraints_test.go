@@ -131,3 +131,48 @@ func TestConstraintRefusalComesAfterTheRequestValidation(t *testing.T) {
 		t.Fatalf("model-not-found scenario: %d %v", status, response)
 	}
 }
+
+// #377: the thinking mode of DeepSeek requires the reasoning_content of an
+// assistant message that calls tools back in the next round of the same tool
+// loop; a request that drops the field is refused, and one that carries it as
+// the empty string (a round that produced no reasoning at all) is served.
+func TestDeepSeekRequiresTheReasoningOfAToolCallMessage(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	call := map[string]any{"role": "assistant", "content": "",
+		"tool_calls": []any{map[string]any{"id": "call-a", "type": "function",
+			"function": map[string]any{"name": "lookup_note", "arguments": "{}"}}}}
+	// user() already returns the message slice, so the assistant and tool
+	// messages are appended to it: nesting it as one element would make
+	// messages[0] a JSON array, which the fake rejects before it reaches the
+	// constraint.
+	without := append(user("go"), call)
+	with := append(user("go"),
+		map[string]any{"role": "assistant", "content": "", "reasoning_content": "",
+			"tool_calls": call["tool_calls"]},
+		map[string]any{"role": "tool", "tool_call_id": "call-a", "content": "[]"})
+	status, raw := f.refuse(map[string]any{"model": "deepseek", "messages": without, "tools": lookupTools})
+	if status != http.StatusBadRequest || !strings.Contains(raw, `"param":"messages"`) ||
+		!strings.Contains(raw, "reasoning_content") {
+		t.Fatalf("a tool-call message without reasoning: %d %s", status, raw)
+	}
+	// The empty string the thinking mode sends for a round without reasoning is
+	// a value, not a missing field: the same request is served.
+	response, body := f.send("POST", "/chat/completions", "test-key",
+		map[string]any{"model": "deepseek", "messages": with, "tools": lookupTools})
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), FixedReply) {
+		t.Errorf("with an empty reasoning: %d %s", response.StatusCode, body)
+	}
+	// A request without an assistant tool-call message is not judged by the
+	// rule, whatever else it carries.
+	response, body = f.send("POST", "/chat/completions", "test-key",
+		map[string]any{"model": "deepseek", "messages": user("hi"), "tools": lookupTools})
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), FixedReply) {
+		t.Errorf("a first round: %d %s", response.StatusCode, body)
+	}
+	// Another model keeps the field optional: only a declared rule refuses.
+	response, body = f.send("POST", "/chat/completions", "test-key",
+		map[string]any{"model": "gpt-6", "messages": without, "tools": lookupTools})
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), FixedReply) {
+		t.Errorf("another model: %d %s", response.StatusCode, body)
+	}
+}

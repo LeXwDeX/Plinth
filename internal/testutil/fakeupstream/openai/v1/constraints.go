@@ -30,6 +30,12 @@ import (
 //     effort to none, that the model supports Chat Completions but tool calling
 //     requires Responses, and that a Chat Completions request must omit
 //     temperature. The wording of the none refusal is constructed.
+//   - Documented, not observed: DeepSeek's thinking mode requires the
+//     reasoning_content of an assistant message that calls tools back in the
+//     next round (https://api-docs.deepseek.com/guides/thinking_mode, its Tool
+//     Calls rule), and the API answers 400 to a request that drops the field.
+//     The wording of that refusal is constructed; it counts the index of the
+//     message in the request, which the real API does not write (#377).
 //
 // The rules are those of the model, not of a wire: POST /responses judges the
 // same models by the same table and answers in its own words
@@ -62,11 +68,18 @@ type modelConstraint struct {
 	// defaultTemperatureOnly refuses a temperature other than the default 1
 	// (observed); an absent or null temperature passes.
 	defaultTemperatureOnly bool
+	// reasoningContentRequired refuses an assistant message that calls tools
+	// without reasoning_content: a thinking model must be given its own
+	// reasoning back in every round of the tool loop, and the empty string the
+	// vendor accepts for a round that produced none is a value, not a missing
+	// field.
+	reasoningContentRequired bool
 }
 
 var constrainedModels = map[string]modelConstraint{
 	"gpt-astra":     astraConstraint,
 	"gpt-6.2-astra": astraConstraint,
+	"deepseek":      deepseekConstraint,
 }
 
 var astraConstraint = modelConstraint{
@@ -75,6 +88,15 @@ var astraConstraint = modelConstraint{
 	noEffortMinimal:        true,
 	noFunctionTools:        true,
 	defaultTemperatureOnly: true,
+}
+
+// deepseekConstraint is the thinking mode of the model the dev-test stack uses:
+// its official Tool Calls guide requires reasoning_content on the assistant
+// message that calls tools, and the API answers 400 to a request that drops it
+// (#377).
+var deepseekConstraint = modelConstraint{
+	resolved:                 "deepseek",
+	reasoningContentRequired: true,
 }
 
 // constraintRefusal is the error envelope of a refusal. Its field order is the
@@ -105,6 +127,14 @@ func (r chatRequest) modelRefusal() (constraintRefusal, bool) {
 		return constraintRefusal{}, false
 	}
 	none := r.effortIsNone()
+	if rule.reasoningContentRequired {
+		if index := r.toolCallWithoutReasoning(); index >= 0 {
+			return newConstraintRefusal(fmt.Sprintf(
+				"The reasoning_content of the assistant message at index %d that calls tools is required "+
+					"in the thinking mode. Pass the reasoning of the previous round back, or set "+
+					"reasoning_effort to none.", index), "messages", ""), true
+		}
+	}
 	if rule.noEffortNone && none {
 		return newConstraintRefusal(
 			"Unsupported value: 'reasoning_effort' does not support 'none' with this model.",
@@ -131,6 +161,19 @@ func (r chatRequest) modelRefusal() (constraintRefusal, bool) {
 func (r chatRequest) effortIsNone() bool {
 	var effort string
 	return json.Unmarshal(r.ReasoningEffort, &effort) == nil && effort == "none"
+}
+
+// toolCallWithoutReasoning is the index of the first assistant message that
+// calls tools without reasoning_content, or -1 when every such message carries
+// the field (its content may well be empty, as a round without reasoning is
+// sent back as "").
+func (r chatRequest) toolCallWithoutReasoning() int {
+	for index, message := range r.Messages {
+		if message.Role == "assistant" && len(message.ToolCalls) > 0 && message.ReasoningContent == nil {
+			return index
+		}
+	}
+	return -1
 }
 
 // temperatureOtherThanDefault returns the temperature as the request wrote it

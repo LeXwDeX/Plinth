@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/LeXwDeX/Plinth/internal/agents"
 )
 
 // The levels and windows below are the vendors' own documented values (#322),
@@ -174,7 +176,7 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 		t.Fatalf("public chat lacks the compaction view")
 	}
 	// The prompts and the vendor profiles stay on the server.
-	for _, private := range []string{compaction.SummaryPrompt, `"model_profiles"`, `"effort_field"`} {
+	for _, private := range []string{compaction.SummaryPrompt, `"model_profiles"`, `"effort_field"`, `"thinking_kind"`} {
 		if strings.Contains(string(encoded), private) {
 			t.Fatalf("public Schema leaks %q", private)
 		}
@@ -328,5 +330,102 @@ func TestLoadValidatesContextCompaction(t *testing.T) {
 	}
 	if err := mutateDefaultCatalog(t, disabled); err != nil {
 		t.Fatalf("compaction off rejected: %v", err)
+	}
+}
+
+// The thinking kind is how a profile says which reasoning its model carries
+// (#377). Only the families whose thinking the wire hands us are declared:
+// DeepSeek, Qwen and GLM answer plaintext reasoning_content, the Responses
+// wire carries the encrypted items of its own protocol; the profiles served on
+// chat completions without reasoning passback get no kind, because nothing
+// reaches the turn from them.
+func TestDefaultCatalogDeclaresThinkingKinds(t *testing.T) {
+	loaded, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thinking := loaded.Application().Chat.Agent.Thinking
+	for model, want := range map[string]string{
+		"deepseek":       ChatThinkingPlaintext,
+		"DeepSeek-Flash": ChatThinkingPlaintext,
+		"qwen-plus":      ChatThinkingPlaintext,
+		"qwen3.8-max":    ChatThinkingPlaintext,
+		"glm-5.2":        ChatThinkingPlaintext,
+		"gpt-astra":      ChatThinkingEncrypted,
+		// Served on chat completions, and their reasoning never reaches a turn.
+		"gpt-6-astra":   ChatThinkingNone,
+		"claude-sonnet": ChatThinkingNone,
+		"gpt-4o":        ChatThinkingNone,
+	} {
+		profile, _ := thinking.ProfileFor(model)
+		if got := profile.ReasoningKind(); got != want {
+			t.Errorf("%s: thinking kind %q, want %q", model, got, want)
+		}
+	}
+	// A profile that passes reasoning back declares the kind that can go back,
+	// and the Responses wire the kind only it can replay.
+	for index, profile := range thinking.ModelProfiles {
+		if profile.ReasoningPassback && profile.ReasoningKind() != ChatThinkingPlaintext {
+			t.Errorf("profile %d (%s) passes reasoning back with kind %q",
+				index, profile.ModelPrefixes[0], profile.ReasoningKind())
+		}
+		if profile.Wire() == ChatWireResponses && profile.ReasoningKind() != ChatThinkingEncrypted {
+			t.Errorf("profile %d (%s) is on the responses wire with kind %q",
+				index, profile.ModelPrefixes[0], profile.ReasoningKind())
+		}
+	}
+}
+
+// The kind values are the Agent port's: the Catalog declares them and the
+// Agent marks its reasoning items with them, so the two cannot drift apart.
+func TestThinkingKindValuesAreTheAgentPorts(t *testing.T) {
+	if ChatThinkingNone != agents.ReasoningNone || ChatThinkingPlaintext != agents.ReasoningPlaintext ||
+		ChatThinkingEncrypted != agents.ReasoningEncrypted {
+		t.Fatalf("catalog kinds %q/%q/%q, agent kinds %q/%q/%q", ChatThinkingNone, ChatThinkingPlaintext,
+			ChatThinkingEncrypted, agents.ReasoningNone, agents.ReasoningPlaintext, agents.ReasoningEncrypted)
+	}
+}
+
+// The thinking kind is validated with the other profile members: a known value,
+// plaintext for a profile that passes reasoning back, encrypted on the
+// Responses wire. A profile that declares only a kind is a declaration.
+func TestLoadValidatesThinkingKinds(t *testing.T) {
+	profile := func(fields string) func(map[string]any) {
+		return func(document map[string]any) {
+			agent := document["application"].(map[string]any)["chat"].(map[string]any)["agent"].(map[string]any)
+			var profiles []any
+			if err := json.Unmarshal([]byte(fields), &profiles); err != nil {
+				t.Fatal(err)
+			}
+			agent["thinking"] = map[string]any{"enabled": true, "model_profiles": profiles}
+		}
+	}
+	tests := []struct {
+		name      string
+		profiles  string
+		wantError string
+	}{
+		{name: "plaintext with passback", profiles: `[{"model_prefixes":["deepseek"],"reasoning_passback":true,"thinking_kind":"plaintext"}]`},
+		{name: "kind alone", profiles: `[{"model_prefixes":["deepseek"],"thinking_kind":"plaintext"}]`},
+		{name: "none spelled out", profiles: `[{"model_prefixes":["gpt-6"],"thinking_kind":"none"}]`},
+		{name: "encrypted on responses", profiles: `[{"model_prefixes":["gpt-astra"],"wire_api":"responses","thinking_kind":"encrypted"}]`},
+		{name: "unknown kind", profiles: `[{"model_prefixes":["deepseek"],"thinking_kind":"signed"}]`, wantError: "thinking_kind"},
+		{name: "passback without a kind", profiles: `[{"model_prefixes":["deepseek"],"reasoning_passback":true}]`, wantError: "thinking_kind"},
+		{name: "passback with the wrong kind", profiles: `[{"model_prefixes":["deepseek"],"reasoning_passback":true,"thinking_kind":"encrypted"}]`, wantError: "thinking_kind"},
+		{name: "responses without the encrypted kind", profiles: `[{"model_prefixes":["gpt-astra"],"wire_api":"responses"}]`, wantError: "thinking_kind"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := mutateDefaultCatalog(t, profile(testCase.profiles))
+			if testCase.wantError == "" {
+				if err != nil {
+					t.Fatalf("valid profiles rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), testCase.wantError) {
+				t.Fatalf("error = %v, want mention of %q", err, testCase.wantError)
+			}
+		})
 	}
 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.329-332-416-435.1",
+    "revision": "2026-11-22.377.1",
     "terminology": {
       "user_facing": [
         {
@@ -6593,7 +6593,8 @@
                 "summary": "low",
                 "prompt_enhance": "low"
               },
-              "context_window_tokens": 1000000
+              "context_window_tokens": 1000000,
+              "thinking_kind": "plaintext"
             },
             {
               "model_prefixes": [
@@ -6608,7 +6609,8 @@
                 "prompt_enhance": "low"
               },
               "omit_temperature": true,
-              "wire_api": "responses"
+              "wire_api": "responses",
+              "thinking_kind": "encrypted"
             },
             {
               "model_prefixes": [
@@ -6707,6 +6709,7 @@
               },
               "context_window_tokens": 1000000,
               "reasoning_passback": true,
+              "thinking_kind": "plaintext",
               "dsml_tool_calls": true
             },
             {
@@ -6724,7 +6727,8 @@
                 "summary": "low",
                 "prompt_enhance": "low"
               },
-              "context_window_tokens": 1000000
+              "context_window_tokens": 1000000,
+              "thinking_kind": "plaintext"
             },
             {
               "model_prefixes": [
@@ -6740,7 +6744,8 @@
                 "title": "low",
                 "summary": "low",
                 "prompt_enhance": "low"
-              }
+              },
+              "thinking_kind": "plaintext"
             },
             {
               "model_prefixes": [
@@ -6751,7 +6756,8 @@
               },
               "effort_field": "reasoning_effort",
               "effort_levels": ["xhigh"],
-              "default_effort": "xhigh"
+              "default_effort": "xhigh",
+              "thinking_kind": "plaintext"
             },
             {
               "model_prefixes": [
@@ -6771,7 +6777,8 @@
                 "prompt_enhance": "low"
               },
               "stream_include_usage": false,
-              "reasoning_passback": true
+              "reasoning_passback": true,
+              "thinking_kind": "plaintext"
             }
           ]
         },

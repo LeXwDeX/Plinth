@@ -1,6 +1,10 @@
 package openairesponses
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/LeXwDeX/Plinth/internal/agents"
+)
 
 // The reasoning items of a reply travel back to the model through the Port's
 // ReasoningContent, which the orchestrator copies from a Completion onto the
@@ -33,6 +37,12 @@ type carriedReasoning struct {
 	Before int             `json:"before"`
 	Item   json.RawMessage `json:"item"`
 }
+
+// ReasoningKind is how this Adapter's reasoning items are marked on the
+// assistant message of a tool loop (#377): the encrypted items of the Responses
+// API, the kind the Catalog's thinking profile declares for a model on this
+// wire.
+const ReasoningKind = agents.ReasoningEncrypted
 
 // encodeReasoning is the ReasoningContent for the items; "" for none.
 func encodeReasoning(items []carriedReasoning) string {

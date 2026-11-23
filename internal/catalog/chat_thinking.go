@@ -24,6 +24,17 @@ func (profile ChatThinkingModelProfile) OffersEffort() bool {
 	return profile.EffortField != "" && len(profile.EffortLevels) > 0
 }
 
+// ReasoningKind is how the model family carries its thinking (thinking_kind,
+// #377): a profile that declares nothing carries none.
+func (profile ChatThinkingModelProfile) ReasoningKind() string {
+	switch profile.ThinkingKind {
+	case ChatThinkingPlaintext, ChatThinkingEncrypted:
+		return profile.ThinkingKind
+	default:
+		return ChatThinkingNone
+	}
+}
+
 // EffortFor is the level a request sends for a chosen one: the choice when
 // the profile offers it, else the profile default; empty when the profile
 // offers no level choice.

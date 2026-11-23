@@ -3807,7 +3807,7 @@ func TestLoadValidatesChatThinkingDeclaration(t *testing.T) {
 		},
 		{
 			name:        "vendor profile",
-			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["deepseek"],"request_fields":{"thinking":{"type":"enabled"},"reasoning_effort":"max"},"reasoning_passback":true}]}`,
+			declaration: `"thinking":{"enabled":true,"model_profiles":[{"model_prefixes":["deepseek"],"request_fields":{"thinking":{"type":"enabled"},"reasoning_effort":"max"},"reasoning_passback":true,"thinking_kind":"plaintext"}]}`,
 		},
 		{
 			// #401: a request constraint alone is a declaration.

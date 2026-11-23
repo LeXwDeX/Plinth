@@ -428,8 +428,8 @@ func conversionConcurrency(options providerOptions) int {
 // When an upstream pool is registered, one attempt holds one slot, so the Task
 // keeps at most one child in flight: the account-wide limit then bounds the sum
 // across Tasks instead of being multiplied by every Task's declared fan-out.
-func (a *Adapter) conversionConcurrency(options providerOptions) int {
-	if a.poolEnabled() {
+func (a *Adapter) conversionConcurrency(offering generation.Offering, options providerOptions) int {
+	if a.poolEnabled(offering) {
 		return 1
 	}
 	return conversionConcurrency(options)
@@ -720,7 +720,7 @@ func (a *Adapter) observePostSuccessConversion(
 	//    的独立已授权转换优先于未兑现重发（A1 整改，resources-review
 	//    REJECT）：某个格式的本地下载永久失败不得占据每一轮观察、饿死其余
 	//    尚未派发的选中格式；重发只在全部选中格式都已开始之后进行。
-	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < a.conversionConcurrency(options) {
+	if inflight := len(submittedFormats(selections, state.Conversions)); inflight < a.conversionConcurrency(request.Offering, options) {
 		if format, ok := nextConversionDispatch(selections, state.Conversions); ok {
 			if err := planPostSuccessConversion(request.Offering, request.Input); err != nil {
 				// 未知/超预算/缺同意：零 Checkpoint、零发送；剩余格式 denied。
@@ -746,6 +746,10 @@ func (a *Adapter) observePostSuccessConversion(
 			// upstream queue clock.
 			slot, acquired, wait := a.acquirePool(ctx, request.Offering, request.AttemptID)
 			if !acquired {
+				// 派发意图（stage=models/convert）在崩溃后由 parsePostSuccessState
+				// 恢复进 state，而带 dispatching 残留的意图会先被上面的 1) 保守
+				// 收尾并返回，走不到这里；所以这里写回的一定是读入的状态，不会
+				// 用空表覆盖 intent 里的 details.conversions（#478）。
 				queued := base
 				queued.Phase = generation.UpstreamRunning
 				queued.Progress = 50
@@ -791,7 +795,7 @@ func (a *Adapter) observePostSuccessConversion(
 				// the pool: restore the entry, release the slot and queue again
 				// without spending the retry budget (C4). Without a pool the
 				// historical per-format budget below applies.
-				if a.poolEnabled() {
+				if a.poolEnabled(request.Offering) {
 					if retryAfter, full := poolFullRetryAfter(err); full && permit != nil {
 						permit.Result = generation.DispatchResultNotDispatched
 						restoreConversionItem(state.Conversions, format, previous, existed)
@@ -1410,10 +1414,29 @@ func frozenConversionSelections(
 }
 
 // parsePostSuccessState 解析上一轮私有状态（空/nil → 空表）。
+//
+// 检查点事务会把私有派发意图（stage=models/convert）原样写进 opaque_json 并
+// 覆盖上一轮状态。若进程在 convertModel 收到回执前崩溃，下一轮读到的就是这份
+// 意图：顶层 conversions 为空，但 details.conversions 里记着本轮派发的格式
+// （dispatching）。这里把它恢复到顶层，好让 hasDispatchingRemnant 保守收尾而
+// 不是把已派发格式当成未开始、再次付费（#478，对齐 parsePreCompletionState）。
 func parsePostSuccessState(opaque json.RawMessage) postSuccessState {
 	state := postSuccessState{Conversions: map[string]conversionItem{}}
 	if len(opaque) > 0 {
 		_ = json.Unmarshal(opaque, &state)
+	}
+	if len(state.Conversions) > 0 {
+		return state
+	}
+	var intent struct {
+		Stage   string `json:"stage"`
+		Details struct {
+			Conversions map[string]conversionItem `json:"conversions"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(opaque, &intent) == nil && intent.Stage == "models/convert" &&
+		len(intent.Details.Conversions) > 0 {
+		state.Conversions = intent.Details.Conversions
 	}
 	if state.Conversions == nil {
 		state.Conversions = map[string]conversionItem{}

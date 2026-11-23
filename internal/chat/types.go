@@ -135,6 +135,13 @@ type TurnOptions struct {
 	// empty (a turn stored before it, or a deployment with one model) is the
 	// deployment's own connection.
 	ModelConnection string `json:"ModelConnection,omitempty"`
+	// Thinking is the thinking contract of the turn's model, frozen when the
+	// turn starts: the wire it is served on, how it carries its thinking and
+	// whether its vendor requires the reasoning of a tool loop back (#377). A
+	// turn keeps it across restarts, so a Catalog that changed under a running
+	// or recovered turn cannot change how that turn's reasoning is sent. Nil (a
+	// turn stored before it) leaves the deployment's current profile deciding.
+	Thinking *agents.Thinking `json:"Thinking,omitempty"`
 	// ProductionBrief is the session's production brief when the turn started
 	// (#103). The service reads it from the stored session, never from the
 	// request, and freezes it with the turn. Nil or empty is no brief.
@@ -249,10 +256,13 @@ type TurnCheckpoint struct {
 // still needs: the frozen configuration snapshot the turn ran on, the round
 // number, the assistant message, the round's completions and tool replies,
 // the malformed calls and the waiting list. The checkpoint of a turn that
-// never started carries nothing anyway.
+// never started carries nothing anyway. The reasoning a reply carried is
+// dropped with them (#377): it is one model's thinking, no reader needs it
+// once the turn has ended, and it is plaintext.
 func (checkpoint TurnCheckpoint) WithoutRequests() TurnCheckpoint {
 	checkpoint.Request = agents.Request{}
 	checkpoint.ImageURLs = nil
+	checkpoint.Completion = checkpoint.Completion.WithoutReasoning()
 	return checkpoint
 }
 

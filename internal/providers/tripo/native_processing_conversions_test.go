@@ -19,6 +19,9 @@ import (
 
 func nativeDeliveryFixture(cap generation.Capability) generation.StartRequest {
 	r := nativeProcessingFixture(cap)
+	// The offering carries its connection's adapter key, as a Catalog-loaded
+	// Offering does: the upstream pool is registered under that key (#478).
+	r.Offering.AdapterKey = "tripo.v3"
 	r.Offering.AssetHosts = []string{"assets.example"}
 	r.Offering.Outputs[0].Delivery = schema.AssetDeliveryRequired
 	formats := []string{"FBX"}

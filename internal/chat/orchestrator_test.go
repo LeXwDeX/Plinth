@@ -1950,7 +1950,7 @@ func TestOrchestratorFollowUpCarriesReasoningContent(t *testing.T) {
 		var out []string
 		for _, message := range request.Messages {
 			if message.Role == schema.Roles.Assistant && len(message.ToolCalls) > 0 {
-				out = append(out, message.ReasoningContent)
+				out = append(out, message.ReasoningText(agents.ReasoningPlaintext))
 			}
 		}
 		return out
@@ -1978,7 +1978,9 @@ func TestOrchestratorFollowUpCarriesReasoningContent(t *testing.T) {
 // it must keep the reasoning the follow-up has to send back.
 func TestTurnCheckpointKeepsReasoningContent(t *testing.T) {
 	checkpoint := chat.TurnCheckpoint{
-		Request:    agents.Request{Messages: []agents.Message{{Role: "assistant", ReasoningContent: "earlier plan"}}},
+		Request: agents.Request{Messages: []agents.Message{{Role: "assistant",
+			Reasoning: []agents.ReasoningItem{{Model: "configured-model", Wire: "chat_completions",
+				Kind: agents.ReasoningPlaintext, Content: "earlier plan"}}}}},
 		Completion: agents.Completion{ReasoningContent: "current plan"},
 	}
 	encoded, err := json.Marshal(checkpoint)
@@ -1989,7 +1991,8 @@ func TestTurnCheckpointKeepsReasoningContent(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Request.Messages[0].ReasoningContent != "earlier plan" || decoded.Completion.ReasoningContent != "current plan" {
+	if decoded.Request.Messages[0].ReasoningText(agents.ReasoningPlaintext) != "earlier plan" ||
+		decoded.Completion.ReasoningContent != "current plan" {
 		t.Fatalf("checkpoint lost reasoning: %+v", decoded)
 	}
 }

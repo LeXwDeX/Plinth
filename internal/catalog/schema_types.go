@@ -5164,6 +5164,19 @@ const (
 	ChatWireResponses   = "responses"
 )
 
+// The kinds of thinking a chat model profile declares (thinking_kind, #377):
+// none carries no thinking content at all, plaintext is the OpenAI-compatible
+// reasoning_content string, encrypted is the vendor's own opaque reasoning item
+// (Anthropic's signature and redacted_thinking, the Responses API's
+// encrypted_content) that only the protocol which produced it can replay. The
+// values are the Agent port's (agents.Reasoning*); a Catalog test holds the two
+// vocabularies together.
+const (
+	ChatThinkingNone      = "none"
+	ChatThinkingPlaintext = "plaintext"
+	ChatThinkingEncrypted = "encrypted"
+)
+
 type ChatThinkingModelProfile struct {
 	ModelPrefixes []string `json:"model_prefixes"`
 	// RequestFields are top-level request body fields sent verbatim, e.g. a
@@ -5224,6 +5237,14 @@ type ChatThinkingModelProfile struct {
 	// ReasoningPassback returns each assistant message's reasoning_content in
 	// later requests of the same tool loop, as the vendor contract requires.
 	ReasoningPassback bool `json:"reasoning_passback"`
+	// ThinkingKind is how the model family carries its thinking: none (also the
+	// value of a profile that declares nothing), plaintext as reasoning_content
+	// or encrypted as the vendor's opaque reasoning item. It is what marks a
+	// reply's reasoning with its source, so that an item is only ever sent back
+	// to the same connection, model, wire and kind, and a model that carries no
+	// thinking is sent none. A profile that passes reasoning back must declare
+	// plaintext; a profile on the responses wire carries encrypted items (#377).
+	ThinkingKind string `json:"thinking_kind,omitempty"`
 	// DSMLToolCalls lets the orchestrator read DeepSeek-style DSML tool calls
 	// written into the reply text (#253); chat.dsml stays off otherwise.
 	DSMLToolCalls bool `json:"dsml_tool_calls,omitempty"`

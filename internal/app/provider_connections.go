@@ -244,6 +244,28 @@ func poolSecondsSetting(setting *catalog.ProviderPoolSettingSchema) time.Duratio
 	return time.Duration(value) * time.Second
 }
 
+// tripoPoolName resolves the upstream pool the Tripo adapter queues through
+// from the connection's own declaration, not a Go constant (#478). Tripo shares
+// one pool across format-convert, texture and refine, so a connection that
+// declares one pool is the normal case; a connection that declares none keeps
+// the previous no-queue behaviour, and one that declares several cannot be
+// represented by the single-pool adapter and is refused rather than silently
+// queueing through an arbitrary one.
+func tripoPoolName(connection catalog.ProviderConnectionSchema) (string, error) {
+	if connection.Concurrency == nil || len(connection.Concurrency.Pools) == 0 {
+		return "", nil
+	}
+	if len(connection.Concurrency.Pools) > 1 {
+		return "", fmt.Errorf(
+			"连接 %q 声明了 %d 个 upstream 池，但 Tripo 只支持一个共享池",
+			connection.ID, len(connection.Concurrency.Pools))
+	}
+	for name := range connection.Concurrency.Pools {
+		return name, nil
+	}
+	return "", nil
+}
+
 // buildProviderAdapterWithTransport 每个受支持协议恰有一个构造分支；新增
 // 同协议身份零代码改动，未知协议启动期报错。
 func buildProviderAdapterWithTransport(
@@ -336,6 +358,10 @@ func buildProviderAdapterWithTransport(
 				return nil, fmt.Errorf("Tripo Offering %q 的 wire Schema 无效: %w", offering.ID, err)
 			}
 		}
+		poolID, err := tripoPoolName(connection)
+		if err != nil {
+			return nil, err
+		}
 		return tripo.New(tripo.Config{
 			BaseURL:                baseURL,
 			APIKey:                 apiKey,
@@ -351,7 +377,7 @@ func buildProviderAdapterWithTransport(
 			ScratchDir:             scratchDir,
 			OfferingRoutes:         offerings,
 			Pool:                   pool,
-			PoolID:                 tripo.TripoPoolName,
+			PoolID:                 poolID,
 			RetrySubmitServerError: connection.RetrySubmitServerError,
 		})
 	case "hyper3d.rodin":
@@ -777,6 +803,7 @@ func chatThinkingOptions(
 	return &openaicompatible.ThinkingOptions{
 		RequestFields:      profile.RequestFields,
 		ReasoningPassback:  profile.ReasoningPassback,
+		ReasoningKind:      profile.ReasoningKind(),
 		EffortField:        profile.EffortField,
 		EffortLevels:       profile.EffortLevels,
 		DefaultEffort:      profile.DefaultEffort,

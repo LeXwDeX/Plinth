@@ -87,13 +87,13 @@ func TestAssistantItemsPlaceReasoningWhereItCameFrom(t *testing.T) {
 		message agents.Message
 		want    []string
 	}{
-		"two calls": {agents.Message{Role: "assistant", ToolCalls: calls, ReasoningContent: carried},
+		"two calls": {agents.Message{Role: "assistant", ToolCalls: calls, Reasoning: reasoningOf(carried)},
 			[]string{r0, call("c0", "a"), r1, call("c1", "b")}},
-		"text and calls": {agents.Message{Role: "assistant", Content: "preamble", ToolCalls: calls, ReasoningContent: carried},
+		"text and calls": {agents.Message{Role: "assistant", Content: "preamble", ToolCalls: calls, Reasoning: reasoningOf(carried)},
 			[]string{r0, `{"role":"assistant","content":"preamble"}`, call("c0", "a"), r1, call("c1", "b")}},
 		// With no call to lead to, only what came before any call is placed.
-		"text only":    {agents.Message{Role: "assistant", Content: "answer", ReasoningContent: carried}, []string{r0, `{"role":"assistant","content":"answer"}`}},
-		"nothing else": {agents.Message{Role: "assistant", ReasoningContent: carried}, nil},
+		"text only":    {agents.Message{Role: "assistant", Content: "answer", Reasoning: reasoningOf(carried)}, []string{r0, `{"role":"assistant","content":"answer"}`}},
+		"nothing else": {agents.Message{Role: "assistant", Reasoning: reasoningOf(carried)}, nil},
 		"no reasoning": {agents.Message{Role: "assistant", ToolCalls: calls}, []string{call("c0", "a"), call("c1", "b")}},
 	} {
 		if got, want := marshalItems(t, assistantItems(test.message)), "["+strings.Join(test.want, ",")+"]"; got != want {
@@ -102,7 +102,15 @@ func TestAssistantItemsPlaceReasoningWhereItCameFrom(t *testing.T) {
 	}
 }
 
-// ReasoningContent that is not this Adapter's list, or lists something that is
+// reasoningOf is what the Adapter's own reply produced: one encrypted item on
+// the assistant message, the way the orchestrator records it (#377).
+func reasoningOf(content string) []agents.ReasoningItem {
+	return []agents.ReasoningItem{{
+		Model: "gpt-6.2-astra", Wire: "responses", Kind: ReasoningKind, Content: content,
+	}}
+}
+
+// A reasoning content that is not this Adapter's list, or lists something that is
 // not a reasoning item, is ignored.
 func TestDecodeReasoningKeepsOnlyReasoningItems(t *testing.T) {
 	for _, content := range []string{"", "plain text", "{}", "[1,2]", `[{"before":0,"item":"x"}]`, `[{"before":-1,"item":{"type":"reasoning"}}]`,
