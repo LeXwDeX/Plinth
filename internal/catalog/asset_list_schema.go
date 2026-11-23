@@ -2,6 +2,26 @@ package catalog
 
 import schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 
+// AssetListExecutionEnabled 报告 Catalog 是否开启了清单的自动制作闭环：
+// application.asset_list.execution 且 enabled=true。未声明该段或 enabled=false
+// 时保持 #327 行为——清单可以提出、可以读，但没有 run 能推进它，项也进不到
+// working（#494）。
+func (s ApplicationSchema) AssetListExecutionEnabled() bool {
+	return s.AssetList != nil && s.AssetList.Execution != nil && s.AssetList.Execution.Enabled
+}
+
+// IsAssetListTool 报告 name 是否是推动清单自动闭环的 Agent 工具：#327 的
+// propose_asset_list、#328 的 submit_asset_list_item 与 #329f 的 get_asset_list。
+// Catalog 仍在 chat.agent_tools 里声明它们（能力不删），但闭环关闭时它们做不成
+// 事，所以注入层把这三个名字留在默认工具表之外（#494）。
+func IsAssetListTool(name string) bool {
+	switch name {
+	case "propose_asset_list", "submit_asset_list_item", "get_asset_list":
+		return true
+	}
+	return false
+}
+
 // AssetListSchema 是 application.asset_list（#327）：项目下的一份制作清单。
 //
 // 清单是“工作”，不是素材库：Agent 提出一组待做资产，用户确认后逐项推进。
