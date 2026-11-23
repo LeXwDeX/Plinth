@@ -87,7 +87,7 @@ func TestReasoningTextKeepsOnlyTheAdaptersOwnKind(t *testing.T) {
 // there, and no request can be traced back to it (#377).
 func TestAMessageOfAnOlderCheckpointStillReadsItsReasoning(t *testing.T) {
 	var message agents.Message
-	legacy := `[{"Role":"assistant","Content":"","ReasoningContent":"earlier plan"}]`
+	legacy := `{"Role":"assistant","Content":"","ReasoningContent":"earlier plan"}`
 	if err := json.Unmarshal([]byte(legacy), &message); err != nil {
 		t.Fatal(err)
 	}

@@ -2468,19 +2468,25 @@ var chatThinkingKinds = []string{
 // turn freezes to mark the reasoning it is given, so a declaration that no
 // later request can check would pass another model's thinking on.
 func validateThinkingKind(index int, profile ChatThinkingModelProfile) error {
-	if !slices.Contains(chatThinkingKinds, profile.ReasoningKind()) {
+	// The raw field is checked, not ReasoningKind(): the getter folds anything
+	// it does not know into "none", so an unknown value would pass unnoticed.
+	kind := profile.ThinkingKind
+	if kind == "" {
+		kind = ChatThinkingNone
+	}
+	if !slices.Contains(chatThinkingKinds, kind) {
 		return fmt.Errorf(
 			"agent.thinking.model_profiles[%d] 的 thinking_kind %q 无效（none、plaintext 或 encrypted）",
 			index, profile.ThinkingKind,
 		)
 	}
-	if profile.ReasoningPassback && profile.ReasoningKind() != ChatThinkingPlaintext {
+	if profile.ReasoningPassback && kind != ChatThinkingPlaintext {
 		return fmt.Errorf(
 			"agent.thinking.model_profiles[%d] 声明 reasoning_passback 时 thinking_kind 必须是 %q",
 			index, ChatThinkingPlaintext,
 		)
 	}
-	if profile.Wire() == ChatWireResponses && profile.ReasoningKind() != ChatThinkingEncrypted {
+	if profile.Wire() == ChatWireResponses && kind != ChatThinkingEncrypted {
 		return fmt.Errorf(
 			"agent.thinking.model_profiles[%d] 使用 responses 协议时必须声明 thinking_kind %q（推理项只有该协议自己能回传）",
 			index, ChatThinkingEncrypted,
