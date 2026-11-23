@@ -92,7 +92,7 @@ func TestNativeTripoAvailabilityKeepsExactSourcesFullQuotesAndDelivery(t *testin
 			// since #292, and the rig exports its GLB too since #305; the retarget has
 			// no export.
 			revision := map[string]string{"texture": "2026-11-12.292.1", "rigging": "2026-11-16.305.1", "animation": "2026-11-12.277.1"}[candidate.name]
-			if !ok || o.Enabled != enabled || o.Revision != revision || o.ModelID != "tripo-"+candidate.name || o.Capability != candidate.capability || o.AdapterKey != "tripo.v3" || !o.CreditsMetered || o.EstimatedCredits != candidate.credits || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || o.IdempotentSubmission {
+			if !ok || o.Enabled != enabled || o.Revision != revision || o.ModelID != "tripo-"+candidate.name || o.Capability != candidate.capability || o.AdapterKey != "tripo.v3" || !o.CreditsMetered || o.EstimatedCredits != candidate.credits || o.IdempotentSubmission {
 				t.Fatalf("unsafe qualification candidate: %+v", o)
 			}
 			input := map[string]string{

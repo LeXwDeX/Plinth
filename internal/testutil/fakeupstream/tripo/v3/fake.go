@@ -671,7 +671,11 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			switch outcome := convertTaskOutcome(r); outcome {
 			case statusFailed:
 				if t.failCode == 0 {
-					t.failCode, t.failMessage = 3000, "Fake injected convert failure"
+					// The injected failure is a server-side one, so it carries the
+					// official transient code (1001 "Fatal server error"): a task
+					// level 1004/2008/2018 would be a determinate failure, which
+					// the format retry path must not resend (#487).
+					t.failCode, t.failMessage = 1001, "Fake injected convert failure"
 				}
 			case statusCancelled:
 				t.terminal = statusCancelled
@@ -754,7 +758,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			}
 		}
 		if t.scenario == fakeupstream.ScenarioTaskFailed && t.failCode == 0 {
-			t.failCode, t.failMessage = 3000, "Fake injected task failure"
+			t.failCode, t.failMessage = 1001, "Fake injected task failure"
 		}
 		h.mu.Lock()
 		// The rate-limits page's pools are per task category: a category that is
@@ -891,7 +895,10 @@ func concurrencyCategory(t *task) string {
 		return categoryAnimation
 	case "texture_model", "convert_model":
 		return categoryModelProcessing
-	case "mesh_segmentation", "mesh_completion", "highpoly_to_lowpoly", "smartsegment_image":
+	// Smart Segmentation reports smartsegment_image or smartsegment_model by
+	// seg_type; both are the page's segmentation category, so both belong to
+	// the mesh operations pool.
+	case "mesh_segmentation", "mesh_completion", "highpoly_to_lowpoly", "smartsegment_image", "smartsegment_model":
 		return categoryMeshOperations
 	}
 	// text_to_model, image_to_model, multiview_to_model and image_to_splat are

@@ -45,6 +45,10 @@ type smartSegmentDeliveryFixture struct {
 	latestIntent             json.RawMessage
 	permit                   *nativeDeliveryPermit
 	childStatus              string
+	// childCode is the task-level error_code a failed child reports (#487):
+	// 1001 is the official transient one, which the format retry path may
+	// resend; 1004/2008/2018 would end the format at once.
+	childCode                int
 	unexpectedWire           []string
 	segURL, maskURL, outBase string
 }
@@ -59,7 +63,7 @@ func newSmartSegmentDeliveryFixture(t *testing.T, kind string) *smartSegmentDeli
 	if !ok {
 		t.Fatal("Smart Segmentation declaration missing")
 	}
-	f := &smartSegmentDeliveryFixture{remoteType: "smartsegment_" + kind, sourceBytes: nativeTestGLB(), childStatus: "success",
+	f := &smartSegmentDeliveryFixture{remoteType: "smartsegment_" + kind, sourceBytes: nativeTestGLB(), childStatus: "success", childCode: 1001,
 		segURL: "https://cdn.tripo3d.ai/output/seg_model.glb", maskURL: "https://cdn.tripo3d.ai/output/mask.png", outBase: "https://cdn.tripo3d.ai/output/converted."}
 	inputs := &smartSegmentDeliveryInputs{}
 	name, id, media := "image", "owned-image", "image/png"
@@ -109,7 +113,11 @@ func newSmartSegmentDeliveryFixture(t *testing.T, kind string) *smartSegmentDeli
 			writeTestEnvelope(w, map[string]any{"task_id": "child_" + strings.ToLower(body["format"].(string))})
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v3/tasks/child_"):
 			child := strings.TrimPrefix(r.URL.Path, "/v3/tasks/")
-			writeTestEnvelope(w, map[string]any{"task_id": child, "status": f.childStatus, "progress": 100, "credits_consumed": 10, "output": map[string]any{"model_url": f.outBase + strings.TrimPrefix(child, "child_")}})
+			body := map[string]any{"task_id": child, "status": f.childStatus, "progress": 100, "credits_consumed": 10, "output": map[string]any{"model_url": f.outBase + strings.TrimPrefix(child, "child_")}}
+			if f.childStatus == "failed" {
+				body["error_code"] = f.childCode
+			}
+			writeTestEnvelope(w, body)
 		default:
 			f.unexpectedWire = append(f.unexpectedWire, r.Method+" "+r.URL.Path)
 			http.NotFound(w, r)
@@ -117,6 +125,9 @@ func newSmartSegmentDeliveryFixture(t *testing.T, kind string) *smartSegmentDeli
 	}))
 	t.Cleanup(server.Close)
 	f.adapter, err = New(Config{BaseURL: server.URL + "/v3", APIKey: "fixture-key", HTTPClient: server.Client(), InputAssets: inputs,
+		// #487: a failed child's resubmission is decided by the connection's
+		// task-level vocabulary.
+		ErrorMapping: taskErrorMapping(t),
 		StatusMapping: &generation.StatusMapping{UpstreamStatus: map[string]generation.StatusRule{"success": {Phase: "completed"}, "running": {Phase: "running"}, "failed": {Phase: "failed"}}}})
 	if err != nil {
 		t.Fatal(err)

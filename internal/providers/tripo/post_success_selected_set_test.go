@@ -58,7 +58,7 @@ func newSelectedSetUpstream(t *testing.T) *selectedSetUpstream {
 					"code": 0,
 					"data": map[string]any{
 						"task_id": "child-gltf", "status": "failed", "progress": 100,
-						"credits_consumed": 0,
+						"credits_consumed": 0, "error_code": 1001,
 					},
 				})
 			case strings.HasSuffix(r.URL.Path, "/tasks/child-fbx"):

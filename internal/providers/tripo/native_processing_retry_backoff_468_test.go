@@ -44,7 +44,7 @@ func TestNativeConversionFailedChildRoundCarriesItsBackoff(t *testing.T) {
 		case id == "task_processed":
 			data["output"] = map[string]any{"model_url": "https://assets.example/processed.glb"}
 		case id == "child_1":
-			data = map[string]any{"task_id": id, "status": "failed", "progress": 0, "credits_consumed": 0}
+			data = map[string]any{"task_id": id, "status": "failed", "progress": 0, "credits_consumed": 0, "error_code": 1001}
 		default:
 			data["output"] = map[string]any{"model_url": "https://assets.example/" + id + ".glb"}
 		}
@@ -61,6 +61,9 @@ func TestNativeConversionFailedChildRoundCarriesItsBackoff(t *testing.T) {
 			BaseURL:       server.URL + "/v3",
 			APIKey:        "test",
 			HTTPClient:    server.Client(),
+			// #487: whether a failed child may be resent is decided by the
+			// connection's task-level vocabulary, not by the Adapter.
+			ErrorMapping:  taskErrorMapping(t),
 			StatusMapping: statusMapping,
 		})
 		if err != nil {

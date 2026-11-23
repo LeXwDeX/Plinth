@@ -19,7 +19,7 @@ func TestRigCheckOfferingHasNativeSourceAndRequiredBoundedReport(t *testing.T) {
 	if !ok {
 		t.Fatal("missing independent Rig Check offering")
 	}
-	if !o.Enabled || o.Capability != "rig-check" || o.ModelID != "tripo-rig-check" || o.EstimatedCredits != 0 || !o.CreditsMetered || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || o.IdempotentSubmission {
+	if !o.Enabled || o.Capability != "rig-check" || o.ModelID != "tripo-rig-check" || o.EstimatedCredits != 0 || !o.CreditsMetered || o.IdempotentSubmission {
 		t.Fatalf("unsafe offering contract: %+v", o)
 	}
 	if len(o.Parameters) != 1 {
@@ -40,7 +40,10 @@ func TestRigCheckOfferingHasNativeSourceAndRequiredBoundedReport(t *testing.T) {
 	if err = json.Unmarshal(o.ProviderOptions, &wire); err != nil {
 		t.Fatal(err)
 	}
-	if len(wire) != 2 || wire["endpoint"] != "animations/rig-check" || wire["observe_endpoint"] != "tasks/{task_id}" {
+	// #487: the route plus the upstream pool the Offering queues through; no
+	// upload/model/URL alias may appear.
+	if len(wire) != 3 || wire["endpoint"] != "animations/rig-check" ||
+		wire["observe_endpoint"] != "tasks/{task_id}" || wire["pool"] != "animation" {
 		t.Fatalf("wire must not imply upload/model/URL aliases: %+v", wire)
 	}
 	app := c.Application()

@@ -130,7 +130,9 @@ func TestSplatCatalogRejectsRepresentationBypass(t *testing.T) {
 		})
 	}
 }
-func TestSplatAdapterRejectsMeshWireAndRetries(t *testing.T) {
+// #487: the retry policy is the Catalog's now, so the closed splat protocol
+// rejects an unsupported wire, not a non-default retry block.
+func TestSplatAdapterRejectsUnsupportedWire(t *testing.T) {
 	for name, mutate := range map[string]func(*schema.Offering){
 		"model field": func(o *schema.Offering) {
 			var p map[string]any
@@ -138,7 +140,6 @@ func TestSplatAdapterRejectsMeshWireAndRetries(t *testing.T) {
 			p["model"] = "v3.1"
 			o.ProviderOptions, _ = json.Marshal(p)
 		},
-		"retry":               func(o *schema.Offering) { o.Retry.MaxAttempts = 2 },
 		"idempotent":          func(o *schema.Offering) { o.IdempotentSubmission = true },
 		"duplicate parameter": func(o *schema.Offering) { o.Parameters = append(o.Parameters, o.Parameters[0]) },
 		"asset array":         func(o *schema.Offering) { o.Parameters[0].Type = "asset-array" },

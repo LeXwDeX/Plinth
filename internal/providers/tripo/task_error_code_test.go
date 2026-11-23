@@ -15,9 +15,12 @@ import (
 
 // A Tripo task that ends "failed" carries error_code and error_message in its
 // task object (official Python SDK: error_code / error_msg). The adapter reads
-// the code through the connection's upstream_code_map (the same table as the
-// HTTP envelope codes), keeps retryability with the status rule, and puts only
-// the sanitized message into the internal evidence (#142).
+// the code through the connection's task_error_code_map only: the official
+// error-handling page states that the request-level code and a failed task's
+// error_code are two vocabularies and that "the same number can mean something
+// else", and the task-query page publishes no complete task-level table. So a
+// task code refines the class only when the Schema declares it, and anything
+// else is kept as evidence (#142, #487).
 
 func observeFailedTask(t *testing.T, body map[string]any, input string) generation.Observation {
 	t.Helper()
@@ -45,20 +48,21 @@ func TestFailedTaskErrorCodeIsClassifiedBySchemaTable(t *testing.T) {
 		code   any
 		want   generation.FailureClass
 	}{
-		{"2010 insufficient credits", "failed", 2010, generation.FailureInsufficientBalance},
-		// Observed 2026-10-29 (#96): retargeting a rig built with a v2 rig model
-		// ends failed with 1004 "Invalid input parameter".
-		{"1004 unsupported source after a v2 rig", "failed", 1004, generation.FailureInvalidInput},
-		{"2008 content moderation", "failed", 2008, generation.FailureRejected},
-		{"2004 unsupported file type", "failed", 2004, generation.FailureInvalidInput},
-		{"1001 internal error (real sample)", "failed", 1001, generation.FailureUpstreamUnavailable},
-		{"1000 internal error", "failed", 1000, generation.FailureUpstreamUnavailable},
-		{"code as quoted number", "failed", "2010", generation.FailureInsufficientBalance},
+		// The task-level table declares the two server errors as transient.
+		{"1001 fatal server error", "failed", 1001, generation.FailureUpstreamUnavailable},
+		{"1000 unknown server error", "failed", 1000, generation.FailureUpstreamUnavailable},
+		{"code as quoted number", "failed", "1001", generation.FailureUpstreamUnavailable},
+		// 2018 is a request-level code ("model too complex to remesh"); as a
+		// task-level error_code the official pages publish no meaning, so the
+		// adapter does not borrow the request-level one.
+		{"2018 stays unclassified", "failed", 2018, generation.FailureRejected},
+		{"2008 stays unclassified", "failed", 2008, generation.FailureRejected},
+		{"2010 stays unclassified", "failed", 2010, generation.FailureRejected},
 		{"unmapped code stays rejected", "failed", 3000, generation.FailureRejected},
 		{"no code stays rejected", "failed", nil, generation.FailureRejected},
 		{"non numeric code is dropped", "failed", "boom", generation.FailureRejected},
-		// banned declares no class of its own, so the code applies; expired too.
-		{"banned with a moderation code", "banned", 2008, generation.FailureRejected},
+		// banned declares no class of its own, so the task-level table applies.
+		{"banned with a task code", "banned", 1001, generation.FailureUpstreamUnavailable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,7 +85,29 @@ func TestFailedTaskErrorCodeIsClassifiedBySchemaTable(t *testing.T) {
 			if failure.SafeDetail != "Tripo 任务状态为 "+tc.status {
 				t.Errorf("public detail = %q: it must not carry upstream text", failure.SafeDetail)
 			}
+			if numeric, isNumeric := tc.code.(int); isNumeric && numeric > 0 && failure.UpstreamCode == "" {
+				t.Errorf("the task code must stay in evidence, got %q", failure.UpstreamCode)
+			}
 		})
+	}
+}
+
+// #487: the request-level table and the task-level table are separate, so a
+// number that only exists in the request-level one never classifies a task.
+func TestRequestLevelCodeNeverClassifiesATask(t *testing.T) {
+	mapping, _ := declaredTripoMappings(t)
+	if _, declared := mapping.TaskErrorCodeMap["2010"]; declared {
+		t.Fatal("2010 is a request-level code and must not be declared at task level")
+	}
+	if _, declared := mapping.UpstreamCodeMap["1001"]; !declared {
+		t.Fatal("the request-level table lost 1001")
+	}
+	observation := observeFailedTask(t, map[string]any{
+		"task_id": "uuid-1", "status": "failed", "progress": 100,
+		"output": map[string]any{}, "error_code": 2010,
+	}, `{"prompt":"ship"}`)
+	if observation.Failure == nil || observation.Failure.Class != generation.FailureRejected {
+		t.Fatalf("failure = %+v, want the status rule's rejection", observation.Failure)
 	}
 }
 
@@ -122,9 +148,9 @@ func TestFailedTaskMessageIsSanitizedIntoEvidenceOnly(t *testing.T) {
 }
 
 // The #96 fake injects the failed-task shape: task-failed ends the task with
-// error_code 3000 (not in the Schema table), so it must stay a plain rejection
-// whose evidence carries the fake's words. The observed 1004 of the retarget
-// path and the real 1001 sample are replayed by the table test above and by
+// the official transient code 1001, so the attempt keeps the upstream class and
+// the evidence carries the fake's words. The observed 1004 of the retarget path
+// is replayed by the table test above and by
 // TestOfficialFailedSmartSegmentationEndsTheAttemptWithoutArtifacts.
 func TestFakeInjectedTaskFailureIsReadFromTheTaskObject(t *testing.T) {
 	fake, err := fakeupstream.New(fakeupstream.Config{}, tripov3.Version())
@@ -165,8 +191,8 @@ func TestFakeInjectedTaskFailureIsReadFromTheTaskObject(t *testing.T) {
 	if observation.Phase != generation.UpstreamFailed || failure == nil {
 		t.Fatalf("observation = %+v", observation)
 	}
-	if failure.Class != generation.FailureRejected || failure.UpstreamCode != "3000" ||
-		failure.UpstreamExcerpt != "code=3000 message=Fake injected task failure" {
+	if failure.Class != generation.FailureUpstreamUnavailable || failure.UpstreamCode != "1001" ||
+		failure.UpstreamExcerpt != "code=1001 message=Fake injected task failure" {
 		t.Fatalf("failure = %+v", failure)
 	}
 }

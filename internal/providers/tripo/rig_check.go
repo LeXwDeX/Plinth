@@ -17,6 +17,9 @@ import (
 type rigCheckOptions struct {
 	Endpoint        string `json:"endpoint"`
 	ObserveEndpoint string `json:"observe_endpoint"`
+	// Pool is the upstream concurrency pool this Offering's dispatches draw
+	// slots from (#487).
+	Pool string `json:"pool,omitempty"`
 }
 type rigCheckState struct {
 	Version          int                   `json:"version"`
@@ -66,7 +69,7 @@ func validRigCheckRoute(value string, observe bool) bool {
 }
 func rigCheckDeclaration(offering generation.Offering) (generation.Parameter, generation.AssetRequirement, rigCheckOptions, error) {
 	var options rigCheckOptions
-	if offering.Capability != schema.RigCheck || len(offering.Parameters) != 1 || len(offering.Outputs) != 1 || offering.Retry.MaxAttempts != 1 || offering.EstimatedCredits != 0 || !offering.CreditsMetered || offering.Cost != nil || strictUploadedJSON(offering.ProviderOptions, &options) != nil || !validRigCheckRoute(options.Endpoint, false) || !validRigCheckRoute(options.ObserveEndpoint, true) {
+	if offering.Capability != schema.RigCheck || len(offering.Parameters) != 1 || len(offering.Outputs) != 1 || offering.EstimatedCredits != 0 || !offering.CreditsMetered || offering.Cost != nil || strictUploadedJSON(offering.ProviderOptions, &options) != nil || !validRigCheckRoute(options.Endpoint, false) || !validRigCheckRoute(options.ObserveEndpoint, true) {
 		return generation.Parameter{}, generation.AssetRequirement{}, options, rigCheckProtocolError()
 	}
 	parameter := offering.Parameters[0]
