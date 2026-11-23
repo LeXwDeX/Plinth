@@ -207,15 +207,16 @@ func newBrokenStream(t *testing.T) string {
 	return server.URL
 }
 
-// reasoningItems is what the orchestrator records of a reply: one encrypted
-// item on the assistant message of the same tool loop, marked with the source
-// it came from (#377).
-func reasoningItems(completion agents.Completion) []agents.ReasoningItem {
+// reasoningItems is what the orchestrator records on the assistant message of
+// the same tool loop (#377): one item marked with the source of the request it
+// answers, so a test that sends the request again gets its own item back.
+func reasoningItems(request agents.Request, completion agents.Completion) []agents.ReasoningItem {
 	if completion.ReasoningContent == "" {
 		return nil
 	}
+	source := agents.ForRequest(request)
 	return []agents.ReasoningItem{{
-		Model: "gpt-6.2-astra", Wire: "responses", Kind: openairesponses.ReasoningKind,
+		Connection: source.Connection, Model: source.Model, Wire: openairesponses.Wire, Kind: openairesponses.ReasoningKind,
 		Content: completion.ReasoningContent,
 	}}
 }

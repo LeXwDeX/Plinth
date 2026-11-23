@@ -226,6 +226,55 @@ func TestErrorEvidencePrefersNestedOpenAIMessage(t *testing.T) {
 	}
 }
 
+// 官方 Google 的两种错误体都必须可读：Interactions 的错误对象把字符串 code
+// 放在 error 里（{"error":{"code":"safety","message":…},"event_type":"error"}），
+// legacy generateContent 把数字 code 放在同一个位置
+// （{"error":{"code":400,"message":…,"status":"INVALID_ARGUMENT"}}）。
+// 一种类型读不出来时整个 body 都被丢弃，UpstreamCode/UpstreamMessage 与摘录
+// 全为空，连接声明的 gemini 码表（content_rejected 等）就一条也命中不了。
+func TestErrorEvidenceReadsBothOfficialGoogleEnvelopes(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		body     string
+		wantMsg  string
+		wantCode string
+	}{
+		"interactions string code": {
+			body:     `{"error":{"code":"safety","message":"Request blocked due to safety violations (harmful content). Please modify your input and retry."},"event_type":"error"}`,
+			wantMsg:  "Request blocked due to safety violations (harmful content). Please modify your input and retry.",
+			wantCode: "safety",
+		},
+		"legacy generateContent numeric code": {
+			body:     `{"error":{"code":400,"message":"Image safety violation.","status":"INVALID_ARGUMENT"}}`,
+			wantMsg:  "Image safety violation.",
+			wantCode: "400",
+		},
+		// 顶层字符串 code 同样不能拖垮整份 body（某些网关变体这样写）。
+		"top-level string code": {
+			body:     `{"code":"image_safety","message":"The image was blocked."}`,
+			wantMsg:  "The image was blocked.",
+			wantCode: "image_safety",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			message, code := errorEvidence([]byte(testCase.body))
+			if message != testCase.wantMsg || code != testCase.wantCode {
+				t.Fatalf("message=%q code=%q, want %q and %q", message, code, testCase.wantMsg, testCase.wantCode)
+			}
+			// 分类器读取的是同一个 code 字段：官方内容拦截因此不再落到
+			// invalid_input，而是按连接的码表命中 content_rejected。
+			mapping := &generation.ErrorMapping{UpstreamCodeMap: map[string]generation.ErrorClassRule{
+				testCase.wantCode: {Class: string(generation.FailureContentRejected)},
+			}}
+			classifier := ClassifyWithMapping(mapping)
+			err := classifier(&http.Response{StatusCode: http.StatusBadRequest}, []byte(testCase.body))
+			var providerErr *generation.ProviderError
+			if !errors.As(err, &providerErr) || providerErr.Failure.Class != generation.FailureContentRejected {
+				t.Fatalf("a mapped official code must classify as content_rejected, got %v", err)
+			}
+		})
+	}
+}
+
 // 网宿网关专属分类器：401 鉴权、403 上游拒绝服务、其余回退通用分类。
 func TestClassifyGatewayErrorMatchesGatewaySemantics(t *testing.T) {
 	cases := []struct {

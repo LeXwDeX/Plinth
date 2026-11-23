@@ -41,7 +41,7 @@ func TestConvertMessagesMapsEveryRole(t *testing.T) {
 		{Role: "tool", ToolCallID: "t3"},
 		{Role: "user", Parts: []agents.ContentPart{{Kind: "text", Text: "pictures"}, picture}, PicturesOnly: true},
 		{Role: "assistant"},
-	})
+	}, replayTestSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestConvertMessagesMapsEveryRole(t *testing.T) {
 	if got := marshalItems(t, input); got != "["+strings.Join(want, ",")+"]" {
 		t.Fatalf("input:\n got %s\nwant [%s]", got, strings.Join(want, ","))
 	}
-	if _, _, err := convertMessages([]agents.Message{{Role: "developer", Content: "x"}}); err == nil {
+	if _, _, err := convertMessages([]agents.Message{{Role: "developer", Content: "x"}}, replayTestSource); err == nil {
 		t.Fatal("an unknown role was accepted")
 	}
 }
@@ -96,18 +96,69 @@ func TestAssistantItemsPlaceReasoningWhereItCameFrom(t *testing.T) {
 		"nothing else": {agents.Message{Role: "assistant", Reasoning: reasoningOf(carried)}, nil},
 		"no reasoning": {agents.Message{Role: "assistant", ToolCalls: calls}, []string{call("c0", "a"), call("c1", "b")}},
 	} {
-		if got, want := marshalItems(t, assistantItems(test.message)), "["+strings.Join(test.want, ",")+"]"; got != want {
+		if got, want := marshalItems(t, assistantItems(test.message, replayTestSource)), "["+strings.Join(test.want, ",")+"]"; got != want {
 			t.Errorf("%s:\n got %s\nwant %s", name, got, want)
 		}
 	}
 }
 
+// replayTestSource is the source a request built by these tests replays for:
+// the connection and model the request names, this Adapter's Responses wire and
+// the encrypted kind.
+var replayTestSource = agents.Source{Connection: "chat-llm", Model: "gpt-6.2-astra", Wire: Wire, Kind: ReasoningKind}
+
 // reasoningOf is what the Adapter's own reply produced: one encrypted item on
 // the assistant message, the way the orchestrator records it (#377).
 func reasoningOf(content string) []agents.ReasoningItem {
 	return []agents.ReasoningItem{{
-		Model: "gpt-6.2-astra", Wire: "responses", Kind: ReasoningKind, Content: content,
+		Connection: "chat-llm", Model: "gpt-6.2-astra", Wire: Wire, Kind: ReasoningKind, Content: content,
 	}}
+}
+
+// #487: an item of another source is another model's context and must not be
+// replayed, whatever its kind. The Chat Completions Adapter learned this in
+// e8af5264; the Responses Adapter read back only the kind, so an item of
+// another model, connection or wire on the same assistant message went out with
+// this request. The official Reasoning guide says an encrypted item is reusable
+// only within the same model family and that a mismatched item is dropped by
+// the upstream (model_mismatch, organization_mismatch, end_user_mismatch), so
+// sending it is at best ignored and at worst refused.
+func TestAssistantItemsOnlyReplaysThisRequestsOwnReasoning(t *testing.T) {
+	carried := encodeReasoning([]carriedReasoning{{Before: 0, Item: reasoningItem("own")}})
+	foreign := encodeReasoning([]carriedReasoning{{Before: 0, Item: reasoningItem("other")}})
+	calls := []agents.ToolCall{{ID: "c0", Name: "a", Arguments: json.RawMessage(`{}`)}}
+	for name, testCase := range map[string]struct {
+		reasoning []agents.ReasoningItem
+		want      []string
+	}{
+		"own item goes back": {
+			reasoning: reasoningOf(carried),
+			want:      []string{string(reasoningItem("own")), `{"type":"function_call","call_id":"c0","name":"a","arguments":"{}"}`},
+		},
+		"another model's item is not replayed": {
+			reasoning: []agents.ReasoningItem{{Model: "gpt-6.1-sol", Wire: Wire, Kind: ReasoningKind, Content: foreign}},
+			want:      []string{`{"type":"function_call","call_id":"c0","name":"a","arguments":"{}"}`},
+		},
+		"another wire's item is not replayed": {
+			reasoning: []agents.ReasoningItem{{Model: "gpt-6.2-astra", Wire: "chat_completions", Kind: ReasoningKind, Content: foreign}},
+			want:      []string{`{"type":"function_call","call_id":"c0","name":"a","arguments":"{}"}`},
+		},
+		"another connection's item is not replayed": {
+			reasoning: []agents.ReasoningItem{{Connection: "other-llm", Model: "gpt-6.2-astra", Wire: Wire, Kind: ReasoningKind, Content: foreign}},
+			want:      []string{`{"type":"function_call","call_id":"c0","name":"a","arguments":"{}"}`},
+		},
+		"another kind's item is not replayed": {
+			reasoning: []agents.ReasoningItem{{Model: "gpt-6.2-astra", Wire: Wire, Kind: agents.ReasoningPlaintext, Content: foreign}},
+			want:      []string{`{"type":"function_call","call_id":"c0","name":"a","arguments":"{}"}`},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			message := agents.Message{Role: "assistant", ToolCalls: calls, Reasoning: testCase.reasoning}
+			if got, want := marshalItems(t, assistantItems(message, replayTestSource)), "["+strings.Join(testCase.want, ",")+"]"; got != want {
+				t.Fatalf("items:\n got %s\nwant %s", got, want)
+			}
+		})
+	}
 }
 
 // A reasoning content that is not this Adapter's list, or lists something that is
