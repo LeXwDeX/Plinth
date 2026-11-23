@@ -1379,6 +1379,11 @@ func (service *Service) startTurn(
 	command.Options.Model = model.Model
 	command.Options.ModelConnection = model.ID
 	command.Options.ReasoningEffort = effort
+	// The thinking contract of the model is frozen with the turn for the same
+	// reason (#377): the reasoning of a tool loop is only ever sent back to the
+	// connection, model, wire and kind it came from, and a Catalog that changed
+	// under a running or recovered turn must not change that rule.
+	command.Options.Thinking = service.models.TurnThinking(model.Model)
 	if command.Options.InputSource != "" && command.Options.InputSource != service.canvasInputSource {
 		return Message{}, ErrInvalidInputSource
 	}

@@ -47,7 +47,9 @@ func (h *handler) responsesModelRefusal(request responsesRequest) (int, string, 
 		return http.StatusBadRequest, h.responses.noneRefusal, true
 	case effort == "minimal" && rule.noEffortMinimal:
 		return http.StatusBadRequest, h.responses.minimalRefusal, true
-	case presentJSON(request.Temperature):
+	// Only a model whose own rule is the default temperature refuses one here;
+	// the others keep the temperature the request carries.
+	case rule.defaultTemperatureOnly && presentJSON(request.Temperature):
 		return http.StatusBadRequest, h.responses.temperatureRefusal, true
 	}
 	return 0, "", false

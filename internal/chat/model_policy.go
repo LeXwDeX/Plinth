@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
 
@@ -64,6 +65,23 @@ func (policy ModelPolicy) SessionModel() string { return policy.Model }
 // Profile is the model's thinking profile.
 func (policy ModelPolicy) Profile(model string) (catalog.ChatThinkingModelProfile, bool) {
 	return policy.Thinking.ProfileFor(model)
+}
+
+// TurnThinking is the thinking contract a turn freezes for its model (#377):
+// the profile's wire and thinking kind, and whether the profile requires the
+// reasoning of a tool loop back. A model that matches no profile, and a
+// deployment with thinking off, carries no thinking at all: nothing is ever
+// sent back to it.
+func (policy ModelPolicy) TurnThinking(model string) *agents.Thinking {
+	profile, matched := policy.Profile(model)
+	if !matched {
+		return &agents.Thinking{Wire: catalog.ChatWireCompletions, Kind: agents.ReasoningNone}
+	}
+	return &agents.Thinking{
+		Wire:     profile.Wire(),
+		Kind:     profile.ReasoningKind(),
+		Passback: profile.ReasoningPassback,
+	}
 }
 
 // Window is the model's context window in tokens; 0 when none is declared.

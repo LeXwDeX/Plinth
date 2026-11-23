@@ -23,19 +23,28 @@ type chatWire struct {
 	wireFor         func(model string) string
 }
 
-func (wire chatWire) adapter(model string) agents.Adapter {
-	if wire.wireFor(model) == catalog.ChatWireResponses {
+// wireOf is the wire a request is served on: the one the turn froze with its
+// model (#377), else the live profile's (every request that is not a turn).
+func (wire chatWire) wireOf(request agents.Request) string {
+	if request.Thinking != nil {
+		return request.Thinking.Wire
+	}
+	return wire.wireFor(request.Model)
+}
+
+func (wire chatWire) adapter(request agents.Request) agents.Adapter {
+	if wire.wireOf(request) == catalog.ChatWireResponses {
 		return wire.responses
 	}
 	return wire.chatCompletions
 }
 
 func (wire chatWire) Stream(ctx context.Context, request agents.Request, emit func(agents.Delta) error) (agents.Completion, error) {
-	return wire.adapter(request.Model).Stream(ctx, request, emit)
+	return wire.adapter(request).Stream(ctx, request, emit)
 }
 
 func (wire chatWire) Complete(ctx context.Context, request agents.Request) (agents.Completion, error) {
-	return wire.adapter(request.Model).Complete(ctx, request)
+	return wire.adapter(request).Complete(ctx, request)
 }
 
 // responsesOptions are the request extensions of a model served on the

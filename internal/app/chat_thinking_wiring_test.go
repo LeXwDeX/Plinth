@@ -207,7 +207,10 @@ func TestChatAgentWiringSelectsVendorThinkingProfileByModel(t *testing.T) {
 			Model: model,
 			Messages: []agents.Message{
 				{Role: "user", Content: "hello"},
-				{Role: "assistant", Content: "", ReasoningContent: "earlier plan"},
+				{Role: "assistant", Content: "", Reasoning: []agents.ReasoningItem{{
+					Model: model, Wire: "chat_completions", Kind: agents.ReasoningPlaintext,
+					Content: "earlier plan",
+				}}},
 			},
 		}); err != nil {
 			t.Fatal(err)
@@ -224,6 +227,85 @@ func TestChatAgentWiringSelectsVendorThinkingProfileByModel(t *testing.T) {
 		messages, _ := body["messages"].([]any)
 		if assistant, _ := messages[1].(map[string]any); assistant["reasoning_content"] != "earlier plan" {
 			t.Fatalf("%s did not pass reasoning back: %#v", model, messages)
+		}
+	}
+}
+
+// Only the reasoning of the request's own source goes back on the wire: an item
+// of another model, another wire or another thinking kind is dropped, and the
+// assistant message that calls tools still carries the field the vendor
+// requires — as the empty string when nothing of its own is left (#377).
+func TestChatAgentWiringPassesBackOnlyTheRequestsOwnReasoning(t *testing.T) {
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := taskCatalog.Application()
+	bodies := make(chan map[string]any, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode wire request: %v", err)
+		}
+		bodies <- body
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	t.Cleanup(server.Close)
+	adapter, err := buildChatAgent(Config{
+		AgentMode: "live",
+		RuntimeSettings: map[string]string{
+			"llm_base_url": server.URL + "/v1",
+			"llm_api_key":  "configured-test-key",
+			"llm_model":    "deepseek",
+		},
+	}, application)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assistant := func(items ...agents.ReasoningItem) agents.Message {
+		return agents.Message{
+			Role:      application.Chat.Roles.Assistant,
+			ToolCalls: []agents.ToolCall{{ID: "call-a", Name: "lookup_note", Arguments: []byte(`{}`)}},
+			Reasoning: items,
+		}
+	}
+	send := func(message agents.Message) map[string]any {
+		t.Helper()
+		if _, err := adapter.Complete(context.Background(), agents.Request{
+			Model:    "deepseek",
+			Messages: []agents.Message{{Role: application.Chat.Roles.User, Content: "go"}, message},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		body := <-bodies
+		messages, _ := body["messages"].([]any)
+		sent, _ := messages[1].(map[string]any)
+		return sent
+	}
+	// The plaintext reasoning of this very model.
+	own := assistant(agents.ReasoningItem{
+		Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan",
+	})
+	if got := send(own)["reasoning_content"]; got != "plan" {
+		t.Fatalf("reasoning_content = %#v", got)
+	}
+	// The reasoning another model produced, the encrypted items of the Responses
+	// protocol, and an item with no source at all (an older checkpoint).
+	for name, message := range map[string]agents.Message{
+		"another model": assistant(
+			agents.ReasoningItem{Model: "qwen-max", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "qwen plan"},
+			agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+		"another wire": assistant(
+			agents.ReasoningItem{Model: "deepseek", Wire: "responses", Kind: agents.ReasoningEncrypted, Content: `{"type":"reasoning"}`},
+			agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+		"an older checkpoint": assistant(
+			agents.ReasoningItem{Content: "legacy plan"},
+			agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+	} {
+		value, present := send(message)["reasoning_content"]
+		if !present || value != "" {
+			t.Errorf("%s: reasoning_content = %#v (present %t)", name, value, present)
 		}
 	}
 }

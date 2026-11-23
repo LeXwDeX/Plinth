@@ -1303,6 +1303,10 @@ func (orchestrator *Orchestrator) Process(
 	command.Options.Model = turn.Options.Model
 	command.Options.ModelConnection = turn.Options.ModelConnection
 	command.Options.ReasoningEffort = turn.Options.ReasoningEffort
+	// And so is the thinking contract the turn started with: a turn recovered
+	// after a restart must keep the wire, the kind and the passback rule it ran
+	// on, not the ones today's Catalog declares for its model (#377).
+	command.Options.Thinking = turn.Options.Thinking
 	// So are the production brief and the explicitly picked 3D model (#103):
 	// the first run of a turn must honor the lock the service froze, or an
 	// Agent-named model would replace the person's pick.
@@ -2367,6 +2371,10 @@ func (orchestrator *Orchestrator) agentRequest(
 		Connection:      orchestrator.turnChatModel(options).connection,
 		Temperature:     orchestrator.schema.Agent.Temperature,
 		ReasoningEffort: options.ReasoningEffort,
+		// The frozen contract says which wire serves this turn and how its model
+		// carries thinking, so the Adapter does not read today's profile for it
+		// (#377).
+		Thinking: options.Thinking,
 		Messages: []agents.Message{{
 			Role:    orchestrator.schema.Roles.System,
 			Content: systemPrompt,
@@ -3488,17 +3496,60 @@ func (orchestrator *Orchestrator) followUpRequest(
 	)
 	messages = append(messages, base.Messages...)
 	messages = append(messages, agents.Message{
-		Role:             orchestrator.schema.Roles.Assistant,
-		Content:          completion.Content,
-		ToolCalls:        completion.ToolCalls,
-		ReasoningContent: completion.ReasoningContent,
+		Role:      orchestrator.schema.Roles.Assistant,
+		Content:   completion.Content,
+		ToolCalls: completion.ToolCalls,
+		Reasoning: reasoningItems(base, completion),
 	})
 	messages = append(messages, orchestrator.withToolPictures(toolResults)...)
+	// #377: only the reasoning of the request's own source goes back. Every item
+	// names the connection, model, wire and kind it came from, so a model is
+	// never handed another model's thinking — not even after a restart into a
+	// changed Catalog. The assistant message itself always goes, so a vendor
+	// that requires the field on a tool-call message keeps a legal request.
+	filterReasoning(messages, agents.ForRequest(base))
 	base.Messages = messages
 	// B4 有界工具循环：续跑请求保留工具定义，模型可在同一轮内
 	//（例如同意获批后）继续调用生成工具；调用次数上限由
 	// chat.agent.max_tool_calls_per_reply 约束（#275）。
 	return base
+}
+
+// reasoningItems is what a reply's reasoning becomes on the assistant message
+// of the same tool loop: one item marked with the source it came from, so that
+// only the same connection, model, wire and kind is given it back (#377). A
+// reply without reasoning carries none.
+func reasoningItems(
+	request agents.Request,
+	completion agents.Completion,
+) []agents.ReasoningItem {
+	if completion.ReasoningContent == "" {
+		return nil
+	}
+	source := agents.ForRequest(request)
+	return []agents.ReasoningItem{{
+		Connection: source.Connection,
+		Model:      source.Model,
+		Wire:       source.Wire,
+		Kind:       source.Kind,
+		Content:    completion.ReasoningContent,
+	}}
+}
+
+// filterReasoning drops the reasoning items a request may not carry (#377):
+// only items of the request's own source stay, so a model is never given
+// another connection's, another model's, another wire's or another kind's
+// thinking. Messages keep their place whatever is left of them.
+func filterReasoning(messages []agents.Message, source agents.Source) {
+	for index := range messages {
+		var kept []agents.ReasoningItem
+		for _, item := range messages[index].Reasoning {
+			if item.Matches(source) {
+				kept = append(kept, item)
+			}
+		}
+		messages[index].Reasoning = kept
+	}
 }
 
 func agentCallsToMessages(calls []agents.ToolCall) []ToolCall {

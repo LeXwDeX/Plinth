@@ -4,6 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
+)
+
+// The kinds of thinking a reasoning item can carry, as the Catalog's
+// chat.agent.thinking.model_profiles[].thinking_kind declares them (#377).
+// ReasoningNone is also what an item of a message written before the kind
+// existed carries.
+const (
+	ReasoningNone      = "none"
+	ReasoningPlaintext = "plaintext"
+	ReasoningEncrypted = "encrypted"
 )
 
 // ErrImagesRejected marks an upstream refusal of a request that carried
@@ -108,10 +119,76 @@ type Message struct {
 	// it is not a new person message. Text-only test adapters skip it when they
 	// look for the latest request; real adapters ignore the flag.
 	PicturesOnly bool `json:"-"`
-	// ReasoningContent is the model's private reasoning for an assistant
-	// message. It is never shown to users; adapters whose vendor contract
-	// requires it send it back within the same tool loop.
-	ReasoningContent string `json:",omitempty"`
+	// Reasoning is what the model thought, kept only so that the same model's
+	// next round of the same tool loop can be given it back. Every item names
+	// the source it came from and is never shown to users; an item is sent back
+	// only to that source (#377).
+	Reasoning []ReasoningItem `json:",omitempty"`
+}
+
+// ReasoningItem is one piece of a reply's thinking with the source it came
+// from: the chat connection and model that produced it, the wire it came on and
+// how that vendor carries thinking. A model is never given another connection's,
+// another model's or another kind's reasoning (#377).
+type ReasoningItem struct {
+	Connection string `json:"connection,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Wire       string `json:"wire,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Content    string `json:"content,omitempty"`
+}
+
+// Matches reports whether the item may be sent back to source: the same
+// connection, model and wire, and a thinking kind both sides declare. An item
+// that names no kind (a message of a checkpoint written before #377) matches
+// nothing, because no request can tell where it came from.
+func (item ReasoningItem) Matches(source Source) bool {
+	if item.Kind == "" || item.Kind == ReasoningNone || item.Kind != source.Kind {
+		return false
+	}
+	return item.Connection == source.Connection && item.Model == source.Model &&
+		item.Wire == source.Wire
+}
+
+// ReasoningText is the reasoning an Adapter reads back: the content of the
+// items of one kind, in order, "" when the message carries none of it. Kind is
+// the kind the Adapter's own protocol carries (a profile's thinking_kind, or
+// the Responses API's encrypted items); an item of another kind is another
+// model's and is never sent on (#377).
+func (message Message) ReasoningText(kind string) string {
+	if kind == "" || kind == ReasoningNone {
+		return ""
+	}
+	var text strings.Builder
+	for _, item := range message.Reasoning {
+		if item.Kind == kind {
+			text.WriteString(item.Content)
+		}
+	}
+	return text.String()
+}
+
+// UnmarshalJSON reads a message, including one of a checkpoint written before
+// #377 whose assistant message carried a single reasoning_content string: that
+// string becomes one item with no source, so the text is still readable while
+// no request can be traced back to it and nothing passes it on.
+func (message *Message) UnmarshalJSON(data []byte) error {
+	type plain Message
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*message = Message(decoded)
+	if len(message.Reasoning) > 0 {
+		return nil
+	}
+	var legacy struct {
+		ReasoningContent string
+	}
+	if err := json.Unmarshal(data, &legacy); err == nil && legacy.ReasoningContent != "" {
+		message.Reasoning = []ReasoningItem{{Content: legacy.ReasoningContent}}
+	}
+	return nil
 }
 
 type ToolCall struct {
@@ -148,6 +225,43 @@ type Request struct {
 	// is a context compaction's summary call (#322). Model adapters send
 	// nothing of it; the mock Agent reads it.
 	Purpose string `json:",omitempty"`
+	// Thinking is the thinking contract the request runs under, frozen when the
+	// turn started (#377): the wire its model is served on, how that model
+	// carries its reasoning and whether its vendor requires the reasoning of a
+	// tool loop back. An Adapter decides from it rather than from its own
+	// configured profile, so a Catalog that changed under a running or
+	// recovered turn cannot change how that turn's reasoning is sent. Nil: the
+	// Adapter's configured profile decides (every request that is not a turn).
+	Thinking *Thinking `json:",omitempty"`
+}
+
+// Thinking is a request's frozen thinking contract: the part of a Catalog
+// thinking profile that decides how the request's reasoning is carried and
+// whether it must be given back (#377).
+type Thinking struct {
+	Wire     string `json:"wire,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Passback bool   `json:"passback,omitempty"`
+}
+
+// Source is where a reasoning item came from and so the only request it may be
+// sent back to: the connection and model, the wire and the thinking kind.
+type Source struct {
+	Connection string
+	Model      string
+	Wire       string
+	Kind       string
+}
+
+// ForRequest is the source of the reasoning a request's assistant messages
+// carry. A request without a frozen thinking contract has no kind, so nothing
+// matches it.
+func ForRequest(request Request) Source {
+	source := Source{Connection: request.Connection, Model: request.Model}
+	if request.Thinking != nil {
+		source.Wire, source.Kind = request.Thinking.Wire, request.Thinking.Kind
+	}
+	return source
 }
 
 // PurposeSummary marks the summary call of a context compaction.
@@ -182,6 +296,13 @@ type Completion struct {
 	// Usage is what the upstream reported for this request; nil when it
 	// reported nothing (#322).
 	Usage *Usage `json:",omitempty"`
+}
+
+// WithoutReasoning is a completion with its reasoning dropped, for what a turn
+// keeps after it has ended (#377).
+func (completion Completion) WithoutReasoning() Completion {
+	completion.ReasoningContent = ""
+	return completion
 }
 
 type Adapter interface {

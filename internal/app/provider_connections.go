@@ -777,6 +777,7 @@ func chatThinkingOptions(
 	return &openaicompatible.ThinkingOptions{
 		RequestFields:      profile.RequestFields,
 		ReasoningPassback:  profile.ReasoningPassback,
+		ReasoningKind:      profile.ReasoningKind(),
 		EffortField:        profile.EffortField,
 		EffortLevels:       profile.EffortLevels,
 		DefaultEffort:      profile.DefaultEffort,
