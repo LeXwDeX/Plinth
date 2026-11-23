@@ -290,18 +290,18 @@ func TestChatAgentWiringPassesBackOnlyTheRequestsOwnReasoning(t *testing.T) {
 	if got := send(own)["reasoning_content"]; got != "plan" {
 		t.Fatalf("reasoning_content = %#v", got)
 	}
-	// The reasoning another model produced, the encrypted items of the Responses
-	// protocol, and an item with no source at all (an older checkpoint).
+	// None of these is this request's own reasoning: another model's plaintext,
+	// the encrypted items of the Responses protocol, and an item with no source
+	// at all (an older checkpoint). Each message is purely foreign, so nothing
+	// of the request's own is left and the assistant message that calls tools
+	// still carries the field the vendor requires — as the empty string.
 	for name, message := range map[string]agents.Message{
 		"another model": assistant(
-			agents.ReasoningItem{Model: "qwen-max", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "qwen plan"},
-			agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+			agents.ReasoningItem{Model: "qwen-max", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "qwen plan"}),
 		"another wire": assistant(
-			agents.ReasoningItem{Model: "deepseek", Wire: "responses", Kind: agents.ReasoningEncrypted, Content: `{"type":"reasoning"}`},
-			agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+			agents.ReasoningItem{Model: "deepseek", Wire: "responses", Kind: agents.ReasoningEncrypted, Content: `{"type":"reasoning"}`}),
 		"an older checkpoint": assistant(
-			agents.ReasoningItem{Content: "legacy plan"},
-			agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+			agents.ReasoningItem{Content: "legacy plan"}),
 	} {
 		value, present := send(message)["reasoning_content"]
 		if !present || value != "" {

@@ -585,6 +585,16 @@ func marshalRequest(
 	}
 	effort := thinking.effort(request.ReasoningEffort)
 	vendorFields := thinking != nil && (len(thinking.RequestFields) > 0 || effort != "")
+	// The source a reasoning item must name to be sent back (#377): this
+	// request's own connection and model, this Adapter's Chat Completions wire
+	// (a Responses request is routed to the Responses Adapter, #401), and the
+	// thinking kind the request runs under.
+	source := agents.Source{
+		Connection: request.Connection,
+		Model:      request.Model,
+		Wire:       "chat_completions",
+		Kind:       thinking.reasoningKind(),
+	}
 	for _, message := range request.Messages {
 		item := wireMessage{
 			Role:       message.Role,
@@ -593,11 +603,18 @@ func marshalRequest(
 		}
 		if thinking != nil && thinking.ReasoningPassback &&
 			(len(message.Reasoning) > 0 || len(message.ToolCalls) > 0) {
-			// Only the reasoning of this model's own kind goes back (#377); the
-			// field itself is sent even when none is left, because the vendor
-			// requires it on an assistant message that calls tools.
-			reasoning := message.ReasoningText(thinking.reasoningKind())
-			item.ReasoningContent = &reasoning
+			// Only the reasoning of the request's own source goes back (#377):
+			// the same connection, model, wire and kind. The field itself is sent
+			// even when nothing is left, because the vendor requires it on an
+			// assistant message that calls tools.
+			var reasoning strings.Builder
+			for _, entry := range message.Reasoning {
+				if entry.Matches(source) {
+					reasoning.WriteString(entry.Content)
+				}
+			}
+			text := reasoning.String()
+			item.ReasoningContent = &text
 		}
 		if len(message.Parts) > 0 {
 			parts := make([]wireContentPart, 0, len(message.Parts))
