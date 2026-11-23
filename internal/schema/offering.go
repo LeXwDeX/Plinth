@@ -588,6 +588,20 @@ type ImageProtocol struct {
 		URLField         string `json:"url_field"`
 		MediaTypeField   string `json:"media_type_field"`
 		Role             string `json:"role"`
+		// FinishReasonPath is the dot path of the reason word a 200 answer
+		// carries when it produced no picture: Google's legacy finishReason
+		// (SAFETY, IMAGE_SAFETY, IMAGE_PROHIBITED_CONTENT, IMAGE_RECITATION,
+		// NO_IMAGE, …) on each candidate. The class of a word comes from the
+		// connection's error_mapping code map, so an upstream that blocks the
+		// prompt with 200 and no image is not reported as a protocol error.
+		// Empty means the upstream has no such field and every picture-less 200
+		// answer is a protocol failure.
+		FinishReasonPath string `json:"finish_reason_path,omitempty"`
+		// PromptFeedbackPath is the dot path of a prompt-level block reason the
+		// answer carries instead of candidates: Google's
+		// promptFeedback.blockReason (SAFETY, IMAGE_SAFETY, …). Read before
+		// FinishReasonPath, because a blocked prompt has no candidate at all.
+		PromptFeedbackPath string `json:"prompt_feedback_path,omitempty"`
 	} `json:"response"`
 }
 

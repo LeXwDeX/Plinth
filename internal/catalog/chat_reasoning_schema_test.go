@@ -52,9 +52,18 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	// value ... Supported values are: 'low', 'medium', 'high', 'xhigh', and 'max'" and served xhigh
 	// (#401): the profile offers exactly these five and never none or minimal.
 	astra := []string{"low", "medium", "high", "xhigh", "max"}
+	// #487: gpt-6.2 (the family gpt-6.2-astra belongs to) is served on the
+	// Responses wire like the gpt-astra alias that resolves to it; gpt-6.1 and
+	// the versioned gpt-6-astra stay on Chat Completions for the requests
+	// without tools but cannot run an Agent turn there (OpenAI's Reasoning and
+	// model pages, read 2026-11-23: Chat Completions does not support function
+	// calling with GPT-6 Astra or GPT-6.1 Sol). Both keep the levels the gpt-6
+	// family is verified to take.
 	wants := []want{
 		{prefix: "qwen-omni-flash", levels: []string{"low", "medium", "xhigh"}, fallback: "xhigh", window: 1000000},
 		{prefix: "gpt-astra", levels: astra, fallback: "high"},
+		{prefix: "gpt-6.2", levels: astra, fallback: "high"},
+		{prefix: "gpt-6.1", levels: []string{"low", "medium", "high"}, fallback: "high"},
 		{prefix: "gpt-6-astra", levels: astra, fallback: "high"},
 		{prefix: "gpt-6", levels: []string{"low", "medium", "high"}, fallback: "high"},
 		{prefix: "gpt-terra", levels: []string{"low", "medium", "high"}, fallback: "high"},
@@ -91,19 +100,37 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	// page, read 2026-11-20) runs function tools only on the Responses API.
 	// So its profile omits the temperature and is served on the Responses wire
 	// (step 2), where it runs Agent tools; it no longer says chat completions
-	// cannot (chat_completions_tools is a field for another model). No other
-	// profile declares a wire, omits the temperature or limits its tools, and
-	// the Schema names the path of the Responses wire.
+	// cannot (chat_completions_tools is a field for another model).
+	// #487: the gpt-6.2 family (gpt-6.2-astra and gpt-6.2-sol, which a versioned
+	// model name resolves to) is the same model family, so its profile declares
+	// the same wire, the same five levels and the same omitted temperature. The
+	// rest of the family keeps Chat Completions for the requests without tools
+	// (title, summary, prompt enhancement, connection test) but says in
+	// chat_completions_tools that it cannot run an Agent turn there, so a
+	// session is never offered a model whose every turn carries tools it cannot
+	// run. No other profile declares a wire, omits the temperature or limits
+	// its tools, and the Schema names the path of the Responses wire.
+	responsesWire := map[string]bool{"gpt-astra": true, "gpt-6.2": true}
+	withoutChatTools := map[string]bool{"gpt-6.1": true, "gpt-6-astra": true}
 	for index, profile := range thinking.ModelProfiles {
-		astraProfile := profile.ModelPrefixes[0] == "gpt-astra"
+		prefix := profile.ModelPrefixes[0]
 		wantWire := ChatWireCompletions
-		if astraProfile {
+		if responsesWire[prefix] {
 			wantWire = ChatWireResponses
 		}
-		if profile.OmitTemperature != astraProfile || !profile.RunsAgentTools() || profile.ChatCompletionsTools != nil ||
-			(profile.WireAPI == ChatWireResponses) != astraProfile || profile.Wire() != wantWire {
-			t.Fatalf("profile %d (%s): omit temperature = %t, runs agent tools = %t, wire = %q (declared %q), chat completions tools = %v",
-				index, profile.ModelPrefixes[0], profile.OmitTemperature, profile.RunsAgentTools(), profile.Wire(), profile.WireAPI, profile.ChatCompletionsTools)
+		if profile.OmitTemperature != responsesWire[prefix] || profile.Wire() != wantWire ||
+			(profile.WireAPI == ChatWireResponses) != responsesWire[prefix] {
+			t.Fatalf("profile %d (%s): omit temperature = %t, wire = %q (declared %q)",
+				index, prefix, profile.OmitTemperature, profile.Wire(), profile.WireAPI)
+		}
+		if profile.ChatCompletionsTools != nil && !withoutChatTools[prefix] {
+			t.Fatalf("profile %d (%s) limits its chat completions tools unexpectedly: %v", index, prefix, *profile.ChatCompletionsTools)
+		}
+		if withoutChatTools[prefix] && (profile.ChatCompletionsTools == nil || *profile.ChatCompletionsTools) {
+			t.Fatalf("profile %d (%s) must say chat completions cannot run tools", index, prefix)
+		}
+		if withoutChatTools[prefix] && profile.RunsAgentTools() {
+			t.Fatalf("profile %d (%s) must not be offered for conversation turns", index, prefix)
 		}
 	}
 	if !thinking.UsesResponses() || thinking.WireFor("GPT-Astra") != ChatWireResponses || thinking.WireFor("deepseek-flash") != ChatWireCompletions ||
@@ -123,7 +150,8 @@ func TestDefaultCatalogDeclaresThinkingLevelsAndContextWindows(t *testing.T) {
 	// gpt-6 covers the versioned family; the bare aliases and Claude match
 	// their own prefixes, and the first matching profile wins.
 	for model, prefix := range map[string]string{
-		"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6", "gpt-6.1-sol": "gpt-6", "gpt-6.1-terra": "gpt-6",
+		"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6",
+		"gpt-6.1-sol": "gpt-6.1", "gpt-6.1-terra": "gpt-6.1", "gpt-6.2-astra": "gpt-6.2", "gpt-6.2-sol": "gpt-6.2",
 		"gpt-terra": "gpt-terra", "gpt-sol": "gpt-sol", "gpt-luna": "gpt-luna",
 		"claude-sonnet-4": "claude",
 	} {

@@ -495,18 +495,53 @@ func safeMessage(payload []byte) string {
 	return message
 }
 
+// errorCode is an upstream code field that may be encoded as a JSON string or
+// as a JSON number. Google's Interactions error object answers a snake_case
+// string at the top level ({code, message}) while its legacy generateContent
+// envelope answers a number under error ({error:{code,message,status}}): a
+// json.Number field made the whole body unreadable for the first form and a
+// string field for the second, leaving UpstreamCode, UpstreamMessage and the
+// excerpt empty, so a declared code mapping never ran. A value that is neither
+// (null, an object) reads as no code rather than failing the whole body.
+type errorCode string
+
+func (code *errorCode) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	switch {
+	case trimmed == "" || trimmed == "null":
+		*code = ""
+	case trimmed[0] == '"':
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return nil
+		}
+		*code = errorCode(strings.TrimSpace(text))
+	case trimmed[0] == '-' || trimmed[0] >= '0' && trimmed[0] <= '9':
+		var number json.Number
+		if err := json.Unmarshal(data, &number); err != nil {
+			return nil
+		}
+		*code = errorCode(number.String())
+	default:
+		*code = ""
+	}
+	return nil
+}
+
 // errorEvidence 从上游错误体提取可读消息与机器错误码。
-// 覆盖四类已核实契约：网宿网关 {message}、OpenAI/Ark 信封 {error:{code,message,type}}、
-// Tripo {code,message,suggestion}、Meshy {message}（含 task_error 透传场景）。
+// 覆盖五类已核实契约：网宿网关 {message}、OpenAI/Ark 信封 {error:{code,message,type}}、
+// Tripo {code,message,suggestion}、Meshy {message}（含 task_error 透传场景）、
+// Google 官方两种信封（Interactions 顶层 {code,message} 与 legacy
+// generateContent 的 {error:{code:number,message,status}}）。
 func errorEvidence(payload []byte) (string, string) {
 	var body struct {
-		Code    json.Number `json:"code"`
-		Message string      `json:"message"`
-		Detail  string      `json:"detail"`
+		Code    errorCode `json:"code"`
+		Message string    `json:"message"`
+		Detail  string    `json:"detail"`
 		Error   struct {
-			Code    string `json:"code"`
-			Type    string `json:"type"`
-			Message string `json:"message"`
+			Code    errorCode `json:"code"`
+			Type    string    `json:"type"`
+			Message string    `json:"message"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(payload, &body) != nil {
@@ -519,12 +554,12 @@ func errorEvidence(payload []byte) (string, string) {
 	if message == "" {
 		message = body.Detail
 	}
-	code := strings.TrimSpace(body.Error.Code)
+	code := strings.TrimSpace(string(body.Error.Code))
 	if code == "" {
 		code = strings.TrimSpace(body.Error.Type)
 	}
-	if code == "" && body.Code.String() != "" && body.Code.String() != "0" {
-		code = body.Code.String()
+	if code == "" && body.Code != "" && body.Code != "0" {
+		code = string(body.Code)
 	}
 	const maximumRunes = 500
 	runes := []rune(strings.TrimSpace(message))

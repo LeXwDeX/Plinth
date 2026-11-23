@@ -205,20 +205,33 @@ func TestGeminiConnectionReadsTheDocumentedErrorCodes(t *testing.T) {
 	}
 	// Every generation-blocked code asks for different input. The page lists no
 	// HTTP status for them, so the class must not depend on one: 409 is a status
-	// the default reading would call a plain rejection.
+	// The generation-blocked codes all mean the model refused to produce this
+	// output for this input, so they are one class: the same input fails again and
+	// the way forward is other input, not another attempt. #487: recitation,
+	// language, image_recitation and image_other were invalid_input, which told the
+	// person their prompt was malformed when the prompt was refused; the official
+	// page groups them with the safety codes ("modify your input and retry").
 	for _, code := range []string{"recitation", "language", "image_recitation", "image_other"} {
 		answers = append(answers,
-			stubbedAnswer{"blocked " + code + " 400", 400, errorEnvelope(code, "blocked"), generation.FailureInvalidInput, false},
-			stubbedAnswer{"blocked " + code + " 409", 409, errorEnvelope(code, "blocked"), generation.FailureInvalidInput, false})
+			stubbedAnswer{"blocked " + code + " 400", 400, errorEnvelope(code, "blocked"), generation.FailureContentRejected, false},
+			stubbedAnswer{"blocked " + code + " 409", 409, errorEnvelope(code, "blocked"), generation.FailureContentRejected, false})
 	}
 	// #35: the safety-filter codes are a content-safety refusal, told apart
 	// from a malformed request so the person learns to change the picture.
+	// content_filter is what the gateway itself reports for a filtered answer.
 	for _, code := range []string{"safety", "prohibited_content", "spii", "blocklist",
-		"image_safety", "image_prohibited_content", "content_blocked"} {
+		"image_safety", "image_prohibited_content", "content_blocked", "content_filter"} {
 		answers = append(answers,
 			stubbedAnswer{"safety " + code + " 400", 400, errorEnvelope(code, "blocked"), generation.FailureContentRejected, false},
 			stubbedAnswer{"safety " + code + " 409", 409, errorEnvelope(code, "blocked"), generation.FailureContentRejected, false})
 	}
+	// A missing thought signature is the request's own defect, not a refusal.
+	answers = append(answers,
+		stubbedAnswer{"missing_thought_signature 400", 400, errorEnvelope("missing_thought_signature", "missing"), generation.FailureInvalidInput, false})
+	// The upstream expected an image and produced none (also a finishReason, see
+	// finish_reason_test.go): the same input may succeed, so it is retryable.
+	answers = append(answers,
+		stubbedAnswer{"no_image 400", 400, errorEnvelope("no_image", "no image"), generation.FailureUpstreamUnavailable, true})
 	runStubbedAnswers(t, gemini, func(url string) string { return url + "/v1" }, answers)
 }
 
@@ -289,4 +302,57 @@ func TestOpenAIConnectionReadsSafetyRefusalsAsContentRejected(t *testing.T) {
 		{"content_policy_violation 400", 400, errorEnvelope("content_policy_violation", "Your request was rejected as a result of our safety system."), generation.FailureContentRejected, false},
 		{"invalid_request 400 stays invalid input", 400, errorEnvelope("invalid_request", "bad parameter"), generation.FailureInvalidInput, false},
 	})
+}
+
+// #487: OpenAI's error-code page (read 2026-11-23) lists 429 codes that mean
+// the account or one of its spend limits is used up, and says to read
+// error.code because error.type can still be the broader insufficient_quota.
+// Read as a rate limit they queue and resend a request that never recovers.
+func TestOpenAIConnectionReadsSpendLimitCodesAsAnEmptyBalance(t *testing.T) {
+	answers := []stubbedAnswer{}
+	for _, code := range []string{
+		"credit_balance_exhausted",
+		"organization_spend_limit_exceeded",
+		"project_spend_limit_exceeded",
+		"organization_usage_limit_exceeded",
+	} {
+		answers = append(answers, stubbedAnswer{
+			name:   "spend limit " + code + " 429",
+			status: 429,
+			body:   fmt.Sprintf(`{"error":{"message":"billing","type":"insufficient_quota","code":%q}}`, code),
+			class:  generation.FailureInsufficientBalance,
+		})
+	}
+	runStubbedAnswers(t, imageConnections[0], func(url string) string { return url }, answers)
+}
+
+// #487: Ark's error-code page (https://docs.volcengine.com/docs/82379/1299023,
+// read 2026-11-23) spells the content-safety codes with a reason suffix
+// (InputImageSensitiveContentDetected.PolicyViolation, .PrivacyInformation,
+// OutputImageSensitiveContentDetected.DeepFake, …), adds the risk-detection
+// codes and ContentSecurityDetectionError (the detection service itself
+// failed), and answers 404 for a model that is missing, not open or not
+// accessible. The exact-match table knew only the bare words, so every variant
+// fell back to its HTTP status: a refused picture read as invalid input, an
+// unusable model as a plain rejection, a failed detection service as a bad
+// prompt that retrying could never fix.
+func TestJimengConnectionReadsTheDocumentedCodeVariants(t *testing.T) {
+	jimeng := imageConnections[2]
+	body := func(code string) string {
+		return fmt.Sprintf(`{"error":{"code":%q,"message":"m","param":"","type":"t"}}`, code)
+	}
+	answers := []stubbedAnswer{
+		{"InputImageSensitiveContentDetected.PolicyViolation 400", 400, body("InputImageSensitiveContentDetected.PolicyViolation"), generation.FailureContentRejected, false},
+		{"InputImageSensitiveContentDetected.PrivacyInformation 400", 400, body("InputImageSensitiveContentDetected.PrivacyInformation"), generation.FailureContentRejected, false},
+		{"OutputImageSensitiveContentDetected.DeepFake 400", 400, body("OutputImageSensitiveContentDetected.DeepFake"), generation.FailureContentRejected, false},
+		{"InputImageRiskDetection 400", 400, body("InputImageRiskDetection"), generation.FailureContentRejected, false},
+		{"OutputImageRiskDetection 400", 400, body("OutputImageRiskDetection"), generation.FailureContentRejected, false},
+		// The detection service failed, not the prompt: the same request may
+		// succeed once it is back.
+		{"ContentSecurityDetectionError 400", 400, body("ContentSecurityDetectionError"), generation.FailureUpstreamUnavailable, true},
+		{"InvalidEndpointOrModel.NotFound 404", 404, body("InvalidEndpointOrModel.NotFound"), generation.FailureUpstreamDenied, false},
+		{"ModelIDAccessDisabled 404", 404, body("ModelIDAccessDisabled"), generation.FailureUpstreamDenied, false},
+		{"ModelNotOpen 404", 404, body("ModelNotOpen"), generation.FailureUpstreamDenied, false},
+	}
+	runStubbedAnswers(t, jimeng, func(url string) string { return url }, answers)
 }

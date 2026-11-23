@@ -144,6 +144,29 @@ func exhaustionClass(class string) bool {
 	}
 }
 
+// MappedCodeRule reports the rule a connection's declared code map gives an
+// upstream code word that arrived outside an HTTP error response: a 200
+// answer's finish reason or prompt block reason (Google reports a blocked
+// prompt or a refused image this way), or a task-level code. The word is
+// matched case-insensitively, because the code map is written in the
+// lower-case vocabulary the Schema uses while the reason words arrive in
+// upper case (SAFETY, IMAGE_SAFETY). ok is false when the connection declares
+// nothing for the word, and the caller keeps its own classification.
+func MappedCodeRule(mapping *generation.ErrorMapping, word string) (generation.ErrorClassRule, bool) {
+	if mapping == nil {
+		return generation.ErrorClassRule{}, false
+	}
+	word = strings.ToLower(strings.TrimSpace(word))
+	if word == "" {
+		return generation.ErrorClassRule{}, false
+	}
+	rule, ok := mapping.UpstreamCodeMap[word]
+	if !ok || rule.Class == "" {
+		return generation.ErrorClassRule{}, false
+	}
+	return rule, true
+}
+
 // matchDeclaredMessage is the one loop over a connection's message matchers:
 // the first matcher that selected accepts, applies to this HTTP status and
 // hits the declared error message wins.

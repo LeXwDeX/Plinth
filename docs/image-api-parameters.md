@@ -78,7 +78,7 @@ Gemini 当前按已验证的网宿渠道配置：Base URL 含 `/v1/`，相对端
 
 按上述网关文档手工验证文生图（2026-09-17）：`model=gemini-3-pro-image`、`stream=false`、`modalities=["text","image"]`、`eca_image_config={"aspect_ratio":"16:9","image_size":"2K"}`，单次请求返回 200，47.234 秒，PNG 实际解码为 2752×1536。响应图片位于 `choices[0].message.content[0].image_url.url`。输出按模型像素对齐，不因比例存在小幅偏差而判失败；此记录不代表所有选项均已逐项实测，也不解释图生图未提取到图片的情形。
 
-启用的 Gemini Pro 文生图和图生图共用十种比例选项及 1K/2K/4K 档位，默认 1:1/1K。工作台经 `useProviders` 读取 extended 投影，由 `SchemaParameters` 展示并提交 `aspect_ratio`、`image_size`；Chat/Canvas 共用 `ChatInput` 与浏览器客户端，同名选项经工具的 Schema override 映射进入 generation。`imagewire` 最后将这两个字段写入 `eca_image_config`，UI 不直接提交上游私有信封。`modalities` 与 `stream` 是协议固定字段，不作为用户调参控件。
+启用的 Gemini Pro 文生图和图生图共用十种比例选项及 1K/2K/4K 档位，默认 1:1/4K（官方默认是 1K，平台按“最新 API、最高质量”固定 4K，2026-11-23 核对 https://aistudio.google.com/docs/image-generation）。`image_size` 是 `readonly` + `adjustment_policy: advised`，面板只读，Agent 可以按参数调整规则带理由改写；`aspect_ratio` 才由面板提交。工作台经 `useProviders` 读取 extended 投影，由 `SchemaParameters` 展示 `aspect_ratio` 与只读的 `image_size`；Chat/Canvas 共用 `ChatInput` 与浏览器客户端，同名选项经工具的 Schema override 映射进入 generation。`imagewire` 最后将这两个字段写入 `eca_image_config`，UI 不直接提交上游私有信封。`modalities` 与 `stream` 是协议固定字段，不作为用户调参控件。
 
 GPT Image 2 文生图和图生图、Seedream 4.5、Meshy Nano Banana Pro/2 已各完成两次真实生成并校验落盘哈希。GPT 实际为 1536×1024 WebP / 1024×1536 PNG；Seedream 为 2560×1440 / 2048×2048。探针与部署后站点任务验收分别记录，不将直接请求网关的成功冒充为站点任务成功。dev-test 脱敏结果位于 `production/reports/live-images-20260909/`。2026-09-17 的 2.5 Sunburst / Gemini Pro 最小探针见上节「声明与实测边界」。旧站点（2026-09-09 记录）的 GPT 图生图走 JSON `images[].image_url`，与线上契约（multipart）不一致；以 S2 实测的 multipart 为准，不把历史记录当作现行协议依据。
 

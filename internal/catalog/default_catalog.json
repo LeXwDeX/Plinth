@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-23.473-486-416.1",
+    "revision": "2026-11-23.487c.1",
     "terminology": {
       "user_facing": [
         {
@@ -861,6 +861,18 @@
               "insufficient_quota": {
                 "class": "insufficient_balance"
               },
+              "credit_balance_exhausted": {
+                "class": "insufficient_balance"
+              },
+              "organization_spend_limit_exceeded": {
+                "class": "insufficient_balance"
+              },
+              "project_spend_limit_exceeded": {
+                "class": "insufficient_balance"
+              },
+              "organization_usage_limit_exceeded": {
+                "class": "insufficient_balance"
+              },
               "quota_exceeded": {
                 "class": "credential_quota"
               },
@@ -933,10 +945,10 @@
                 "class": "content_rejected"
               },
               "recitation": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "language": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "prohibited_content": {
                 "class": "content_rejected"
@@ -954,16 +966,30 @@
                 "class": "content_rejected"
               },
               "image_recitation": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "image_other": {
-                "class": "invalid_input"
+                "class": "content_rejected"
               },
               "content_blocked": {
                 "class": "content_rejected"
               },
+              "content_filter": {
+                "class": "content_rejected"
+              },
               "content_policy_violation": {
                 "class": "content_rejected"
+              },
+              "no_image": {
+                "class": "upstream_unavailable",
+                "retryable": true
+              },
+              "malformed_response": {
+                "class": "upstream_unavailable",
+                "retryable": true
+              },
+              "missing_thought_signature": {
+                "class": "invalid_input"
               }
             },
             "message_matchers": [
@@ -1016,7 +1042,19 @@
               "InputTextSensitiveContentDetected": {
                 "class": "content_rejected"
               },
+              "InputTextSensitiveContentDetected.PolicyViolation": {
+                "class": "content_rejected"
+              },
+              "InputTextSensitiveContentDetected.PrivacyInformation": {
+                "class": "content_rejected"
+              },
               "InputImageSensitiveContentDetected": {
+                "class": "content_rejected"
+              },
+              "InputImageSensitiveContentDetected.PolicyViolation": {
+                "class": "content_rejected"
+              },
+              "InputImageSensitiveContentDetected.PrivacyInformation": {
                 "class": "content_rejected"
               },
               "OutputTextSensitiveContentDetected": {
@@ -1025,8 +1063,36 @@
               "OutputImageSensitiveContentDetected": {
                 "class": "content_rejected"
               },
+              "OutputImageSensitiveContentDetected.PolicyViolation": {
+                "class": "content_rejected"
+              },
+              "OutputImageSensitiveContentDetected.DeepFake": {
+                "class": "content_rejected"
+              },
               "SensitiveContentDetected": {
                 "class": "content_rejected"
+              },
+              "InputImageRiskDetection": {
+                "class": "content_rejected"
+              },
+              "OutputImageRiskDetection": {
+                "class": "content_rejected"
+              },
+              "ContentSecurityDetectionError": {
+                "class": "upstream_unavailable",
+                "retryable": true
+              },
+              "InvalidEndpointOrModel.NotFound": {
+                "class": "upstream_denied"
+              },
+              "ModelIDAccessDisabled": {
+                "class": "upstream_denied"
+              },
+              "ModelNotOpen": {
+                "class": "upstream_denied"
+              },
+              "UnsupportedModel": {
+                "class": "upstream_denied"
               }
             },
             "message_matchers": [
@@ -1398,6 +1464,18 @@
           "error_mapping": {
             "upstream_code_map": {
               "insufficient_quota": {
+                "class": "insufficient_balance"
+              },
+              "credit_balance_exhausted": {
+                "class": "insufficient_balance"
+              },
+              "organization_spend_limit_exceeded": {
+                "class": "insufficient_balance"
+              },
+              "project_spend_limit_exceeded": {
+                "class": "insufficient_balance"
+              },
+              "organization_usage_limit_exceeded": {
                 "class": "insufficient_balance"
               },
               "quota_exceeded": {
@@ -6614,6 +6692,36 @@
             },
             {
               "model_prefixes": [
+                "gpt-6.2"
+              ],
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
+              "omit_temperature": true,
+              "wire_api": "responses",
+              "thinking_kind": "encrypted"
+            },
+            {
+              "model_prefixes": [
+                "gpt-6.1"
+              ],
+              "effort_field": "reasoning_effort",
+              "effort_levels": ["low", "medium", "high"],
+              "default_effort": "high",
+              "turn_efforts": {
+                "title": "low",
+                "summary": "low",
+                "prompt_enhance": "low"
+              },
+              "chat_completions_tools": false
+            },
+            {
+              "model_prefixes": [
                 "gpt-6-astra"
               ],
               "effort_field": "reasoning_effort",
@@ -6623,7 +6731,8 @@
                 "title": "low",
                 "summary": "low",
                 "prompt_enhance": "low"
-              }
+              },
+              "chat_completions_tools": false
             },
             {
               "model_prefixes": [
@@ -21641,6 +21750,12 @@
             "Extreme High 几何": "Extreme High geometry",
             "Extreme High 纹理": "Extreme High texture",
             "Gemini 3 Pro (高质量)": "Gemini 3 Pro (High quality)",
+            "Gemini 图片（网关）": "Gemini images (gateway)",
+            "Google Gemini API errors（错误词表）": "Google Gemini API errors (error vocabulary)",
+            "Google Gemini image generation（官方契约，非本连接上游，仅作能力与错误词表参考）": "Google Gemini image generation (official contract; not this connection's upstream, referenced for capabilities and error vocabulary only)",
+            "火山方舟 Seedream 图片生成 API（参数契约）": "Volcengine Ark Seedream image generation API (parameter contract)",
+            "火山方舟 图片生成错误码": "Volcengine Ark image generation error codes",
+            "网关的 OpenAI 兼容 chat/completions 图片契约（本连接的实际上游，需登录）": "The gateway's OpenAI-compatible chat/completions image contract (this connection's actual upstream, login required)",
             "HD 精细几何": "HD detailed geometry",
             "HD 精细纹理": "HD detailed texture",
             "Hyper3D 纹理生成（模型文件）": "Hyper3D texture generation (model file)",
@@ -21840,8 +21955,8 @@
             "单杠悬挂慢移向左 (Slow_Bar_Hang_Left)": "Slow bar hang left",
             "单膝跪地后站起 (Kneel_on_One_Knee_and_Stand)": "Kneel on one knee and stand",
             "卧姿换弹 (Prone_Reload)": "Prone reload",
-            "即梦 AI": "Jimeng AI",
-            "即梦 Seedream 4.5 (高质量)": "Jimeng Seedream 4.5 (High quality)",
+            "火山方舟 Seedream": "Volcengine Ark Seedream",
+            "Seedream 4.5 (高质量)": "Seedream 4.5 (High quality)",
             "压缩质量": "Compression quality",
             "原地播放": "Play in place",
             "原点位置": "Origin position",
@@ -22232,7 +22347,7 @@
             "攀爬失败坠落 3 (Climb_Attempt_and_Fall_3)": "Failed climb and fall 3",
             "攀爬失败坠落 4 (Climb_Attempt_and_Fall_4)": "Failed climb and fall 4",
             "攀爬失败坠落 5 (Climb_Attempt_and_Fall_5)": "Failed climb and fall 5",
-            "支持文生图、参考图编辑；组图模式下可描述所需图像序列。": "Supports text-to-image and reference image editing; in image set mode you can describe the sequence of images you want.",
+            "支持文生图、参考图编辑；组图模式下可描述所需图像序列。中文提示词不超过 300 字（英文不超过 600 词），过长会被上游截断或忽略细节。": "Supports text-to-image and reference image editing; in image set mode you can describe the sequence of images you want. A Chinese prompt is limited to 300 characters (600 words in English); a longer one is truncated or has its details ignored upstream.",
             "收割横扫 (Reaping_Swing)": "Reaping swing",
             "收集物品 (Collect_Object)": "Collect object",
             "攻击 (Attack)": "Attack",
@@ -23116,6 +23231,25 @@
           }
         ],
         "exemptions": []
+      },
+      {
+        "provider_id": "gemini",
+        "verified_at": "2026-11-23",
+        "sources": [
+          "https://aistudio.google.com/docs/deprecations",
+          "https://aistudio.google.com/docs/image-generation"
+        ],
+        "model_fields": [
+          "model"
+        ],
+        "models": [
+          {
+            "value": "gemini-2.5-flash-image",
+            "replacement": "gemini-3-pro-image",
+            "reason": "官方 2026-11-23 标注 deprecated，2027-03-15 关停（继任 gemini-3.1-flash-lite-image）；本平台当前交付 gemini-3-pro-image"
+          }
+        ],
+        "exemptions": []
       }
     ]
   },
@@ -23987,10 +24121,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -24327,10 +24461,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -24670,10 +24804,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -25065,10 +25199,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -25405,7 +25539,7 @@
       "id": "gemini/gemini-3-pro-image/text-to-image",
       "revision": "2026-10-16.213.1",
       "provider_id": "gemini",
-      "provider_name": "Google Gemini",
+      "provider_name": "Gemini 图片（网关）",
       "provider_short_label": "GEMINI",
       "provider_order": 3,
       "model_id": "gemini-3-pro-image",
@@ -25438,9 +25572,19 @@
         ],
         "sources": [
           {
-            "title": "Gemini image generation",
-            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
-            "checked_at": "2026-11-10"
+            "title": "网关的 OpenAI 兼容 chat/completions 图片契约（本连接的实际上游，需登录）",
+            "url": "http://doc.model-store.ai/ai-gateway/model/api-detail?code=api-chat-completions1",
+            "checked_at": "2026-11-23"
+          },
+          {
+            "title": "Google Gemini image generation（官方契约，非本连接上游，仅作能力与错误词表参考）",
+            "url": "https://aistudio.google.com/docs/image-generation",
+            "checked_at": "2026-11-23"
+          },
+          {
+            "title": "Google Gemini API errors（错误词表）",
+            "url": "https://aistudio.google.com/docs/api-errors",
+            "checked_at": "2026-11-23"
           }
         ]
       },
@@ -25454,10 +25598,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -25589,7 +25733,9 @@
           "images_path": "choices.*.message.content.*.image_url",
           "base64_field": "url",
           "role": "image",
-          "default_media_type": "image/png"
+          "default_media_type": "image/png",
+          "finish_reason_path": "choices.*.finish_reason",
+          "prompt_feedback_path": "promptFeedback.blockReason"
         },
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
@@ -25604,7 +25750,7 @@
       "id": "gemini/gemini-3-pro-image/image-to-image",
       "revision": "2026-10-16.213.1",
       "provider_id": "gemini",
-      "provider_name": "Google Gemini",
+      "provider_name": "Gemini 图片（网关）",
       "provider_short_label": "GEMINI",
       "model_id": "gemini-3-pro-image",
       "model_name": "Gemini 3 Pro (高质量)",
@@ -25638,9 +25784,19 @@
         ],
         "sources": [
           {
-            "title": "Gemini image generation",
-            "url": "https://ai.google.dev/gemini-api/docs/image-generation",
-            "checked_at": "2026-11-10"
+            "title": "网关的 OpenAI 兼容 chat/completions 图片契约（本连接的实际上游，需登录）",
+            "url": "http://doc.model-store.ai/ai-gateway/model/api-detail?code=api-chat-completions1",
+            "checked_at": "2026-11-23"
+          },
+          {
+            "title": "Google Gemini image generation（官方契约，非本连接上游，仅作能力与错误词表参考）",
+            "url": "https://aistudio.google.com/docs/image-generation",
+            "checked_at": "2026-11-23"
+          },
+          {
+            "title": "Google Gemini API errors（错误词表）",
+            "url": "https://aistudio.google.com/docs/api-errors",
+            "checked_at": "2026-11-23"
           }
         ]
       },
@@ -25654,10 +25810,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -25814,7 +25970,9 @@
           "images_path": "choices.*.message.content.*.image_url",
           "base64_field": "url",
           "role": "image",
-          "default_media_type": "image/png"
+          "default_media_type": "image/png",
+          "finish_reason_path": "choices.*.finish_reason",
+          "prompt_feedback_path": "promptFeedback.blockReason"
         },
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
@@ -25830,11 +25988,11 @@
       "estimated_credits_unit_parameter": "max_images",
       "revision": "2026-09-08.1",
       "provider_id": "jimeng",
-      "provider_name": "即梦 AI",
+      "provider_name": "火山方舟 Seedream",
       "provider_short_label": "JIMENG",
       "provider_order": 4,
       "model_id": "doubao-seedream-4-5-251128",
-      "model_name": "即梦 Seedream 4.5 (高质量)",
+      "model_name": "Seedream 4.5 (高质量)",
       "knowledge": {
         "strengths": [
           "中文提示词理解好，适合中文创作需求。",
@@ -25854,7 +26012,7 @@
           "form": "descriptive",
           "unit": "characters",
           "words_min": 20,
-          "words_max": 200,
+          "words_max": 300,
           "reads_text": true,
           "negative_prompt": false
         },
@@ -25863,9 +26021,14 @@
         ],
         "sources": [
           {
-            "title": "Volcengine ModelArk image generation",
+            "title": "火山方舟 Seedream 图片生成 API（参数契约）",
+            "url": "https://docs.volcengine.com/docs/82379/1541523",
+            "checked_at": "2026-11-23"
+          },
+          {
+            "title": "火山方舟 图片生成错误码",
             "url": "https://docs.volcengine.com/docs/82379/1299023",
-            "checked_at": "2026-11-10"
+            "checked_at": "2026-11-23"
           }
         ]
       },
@@ -25879,10 +26042,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -25891,9 +26054,9 @@
           "label": "提示词",
           "type": "text",
           "required": true,
-          "max_length": 2000,
+          "max_length": 300,
           "semantic": "prompt",
-          "description": "支持文生图、参考图编辑；组图模式下可描述所需图像序列。"
+          "description": "支持文生图、参考图编辑；组图模式下可描述所需图像序列。中文提示词不超过 300 字（英文不超过 600 词），过长会被上游截断或忽略细节。"
         },
         {
           "name": "size",
@@ -26155,10 +26318,10 @@
       "estimated_credits_unit_parameter": "max_images",
       "revision": "2026-09-08.1",
       "provider_id": "jimeng",
-      "provider_name": "即梦 AI",
+      "provider_name": "火山方舟 Seedream",
       "provider_short_label": "JIMENG",
       "model_id": "doubao-seedream-4-5-251128",
-      "model_name": "即梦 Seedream 4.5 (高质量)",
+      "model_name": "Seedream 4.5 (高质量)",
       "knowledge": {
         "strengths": [
           "中文编辑指令理解好。",
@@ -26178,7 +26341,7 @@
           "form": "descriptive",
           "unit": "characters",
           "words_min": 20,
-          "words_max": 200,
+          "words_max": 300,
           "reads_text": true,
           "negative_prompt": false
         },
@@ -26188,9 +26351,14 @@
         ],
         "sources": [
           {
-            "title": "Volcengine ModelArk image generation",
+            "title": "火山方舟 Seedream 图片生成 API（参数契约）",
+            "url": "https://docs.volcengine.com/docs/82379/1541523",
+            "checked_at": "2026-11-23"
+          },
+          {
+            "title": "火山方舟 图片生成错误码",
             "url": "https://docs.volcengine.com/docs/82379/1299023",
-            "checked_at": "2026-11-10"
+            "checked_at": "2026-11-23"
           }
         ]
       },
@@ -26204,10 +26372,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 5,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 2,
         "initial_backoff_seconds": 1,
         "max_backoff_seconds": 30,
-        "retryable": []
+        "retryable": ["rate_limited"]
       },
       "materialize_attempts": 5,
       "parameters": [
@@ -26216,9 +26384,9 @@
           "label": "提示词",
           "type": "text",
           "required": true,
-          "max_length": 2000,
+          "max_length": 300,
           "semantic": "prompt",
-          "description": "支持文生图、参考图编辑；组图模式下可描述所需图像序列。"
+          "description": "支持文生图、参考图编辑；组图模式下可描述所需图像序列。中文提示词不超过 300 字（英文不超过 600 词），过长会被上游截断或忽略细节。"
         },
         {
           "name": "reference_assets",

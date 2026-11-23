@@ -2,6 +2,7 @@ package openairesponses
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 )
@@ -43,6 +44,32 @@ type carriedReasoning struct {
 // API, the kind the Catalog's thinking profile declares for a model on this
 // wire.
 const ReasoningKind = agents.ReasoningEncrypted
+
+// Wire is the wire this Adapter's items name as their source: the Responses
+// API, whichever path the deployment serves it under.
+const Wire = "responses"
+
+// reasoningSource is the source a reasoning item must name to be replayed on a
+// request (#377): the request's own connection and model, this Adapter's
+// Responses wire, and the encrypted kind. An item of another connection,
+// another model, another wire or another kind is not this model's context: the
+// documents say the upstream drops such an item rather than reasoning from it.
+func reasoningSource(request agents.Request) agents.Source {
+	return agents.Source{Connection: request.Connection, Model: request.Model, Wire: Wire, Kind: ReasoningKind}
+}
+
+// replayedReasoning is the ReasoningContent a request sends back: the content
+// of the items that name this request's own source, in the order they were
+// produced.
+func replayedReasoning(message agents.Message, source agents.Source) string {
+	var text strings.Builder
+	for _, entry := range message.Reasoning {
+		if entry.Matches(source) {
+			text.WriteString(entry.Content)
+		}
+	}
+	return text.String()
+}
 
 // encodeReasoning is the ReasoningContent for the items; "" for none.
 func encodeReasoning(items []carriedReasoning) string {
