@@ -18,12 +18,19 @@ const (
 	ConsentClaimKey     = "consent_claim"
 	ConsentRequestIDKey = "consent_request_id"
 	AgentTaskIDKey      = "task_id"
+	// ImageCountKey holds the 2D image count the person set for this session
+	// (#486). It is one value per session, not one per Offering: the count is
+	// the person's own expectation, and Offerings name the parameter they price
+	// by differently (n, max_images), so no parameter name can carry it. It is
+	// private state like the consent keys: it never appears in a parameter
+	// projection and never reaches a generation request under its own name.
+	ImageCountKey = "image_count"
 )
 
 func isPrivateAgentStateKey(key string) bool {
 	switch key {
 	case ConsentPendingKey, ConsentDecisionKey, ConsentApprovedKey, ConsentRequestIDKey,
-		ConsentSnapshotKey, ConsentClaimKey, AgentTaskIDKey:
+		ConsentSnapshotKey, ConsentClaimKey, AgentTaskIDKey, ImageCountKey:
 		return true
 	default:
 		return false

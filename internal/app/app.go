@@ -1165,6 +1165,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return states
 		},
+		// #486: the Offering's declared count parameter runs with the
+		// person's own session count, not with whatever one Offering kept.
+		ImageCount: func(ownerID, sessionID string) (int, bool) {
+			return paramsStore.ImageCount(agentparams.ScopeKey(ownerID, sessionID))
+		},
 		Gateway:         module,
 		Tasks:           module,
 		Operations:      repository,
@@ -1396,6 +1401,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			return executionGrants.StepStatus(ctx, ownerID, sessionID)
 		},
 		StepBalances: stepBalancesFromSchema(applicationSchema, stepBalanceCache),
+		// #486: the person's own 2D image count, one value per session.
+		ImageCount: func(ownerID, sessionID string) (int, bool) {
+			return paramsStore.ImageCount(agentparams.ScopeKey(ownerID, sessionID))
+		},
 		StepCosts: func(ctx context.Context, ownerID, sessionID string) []chat.StepCost {
 			if applicationSchema.StepPolicy == nil {
 				return nil
