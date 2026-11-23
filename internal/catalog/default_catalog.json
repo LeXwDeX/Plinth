@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.377.1",
+    "revision": "2026-11-23.473.1",
     "terminology": {
       "user_facing": [
         {
@@ -29754,6 +29754,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -31368,6 +31369,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -32323,6 +32325,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/multiview-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -39480,6 +39483,7 @@
         }
       },
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/convert",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -40711,6 +40715,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/convert",
         "upload_endpoint": "files",
         "observe_endpoint": "tasks/{task_id}",
@@ -42229,6 +42234,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/texture",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -42583,6 +42589,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "animations/rig",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -42962,6 +42969,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "animations/rig",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -47690,6 +47698,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/decimate",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -48053,6 +48062,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/decimate",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -48390,6 +48400,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/segment",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -48708,6 +48719,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/complete",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -49026,6 +49038,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/complete",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -49193,6 +49206,7 @@
       ],
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "protocol": "smartsegment",
         "endpoint": "mesh/smartsegment",
         "upload_endpoint": "files",
@@ -49264,6 +49278,7 @@
       ],
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "protocol": "smartsegment",
         "endpoint": "mesh/smartsegment",
         "upload_endpoint": "files",

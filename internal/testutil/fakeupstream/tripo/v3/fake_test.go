@@ -1060,9 +1060,10 @@ func TestUploadFailureScenario(t *testing.T) {
 	}
 }
 
-// #468: the account concurrency pool is shared by generation and conversion
-// jobs. When it is full, task creation answers 429 code 2000 with Retry-After;
-// a job that reaches a terminal poll frees its slot.
+// #468: a category over its pool answers task creation with 429 code 2000 and
+// Retry-After; a job that reaches a terminal poll frees its slot. A positive
+// AccountConcurrencyLimit pins every category to the same small pool, which this
+// exercises on the generation category.
 func TestAccountConcurrencyPoolRefusesCreationWhenFull(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: 1})
 	first := f.create("/generation/text-to-model", textBody(), key)
@@ -1078,15 +1079,50 @@ func TestAccountConcurrencyPoolRefusesCreationWhenFull(t *testing.T) {
 	}
 }
 
-func TestAccountConcurrencyPoolIsSharedWithConversions(t *testing.T) {
-	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: 1})
-	parent := f.create("/generation/text-to-model", textBody(), key)
-	if status, _, body := f.do(http.MethodPost, "/models/convert", key, map[string]any{"input": parent, "format": "GLTF"}); status != http.StatusTooManyRequests ||
-		field(t, body, "code").(float64) != 2000 {
-		t.Fatalf("convert under a full pool = %d %v", status, body)
-	}
-	f.finish(parent, key)
-	if status, _, body := f.do(http.MethodPost, "/models/convert", key, map[string]any{"input": parent, "format": "GLTF"}); status != http.StatusOK {
-		t.Fatalf("convert after the pool freed = %d %v", status, body)
-	}
+// #468, rate-limits page (checked 2026-11-23): the pools are per task category,
+// not one account-wide pool. Filling the 3D-generation H pool (default 10) refuses
+// the 11th generation, while the other categories keep their own pools and accept
+// work. The inverse (a full model-processing pool leaves generation free) proves
+// the block is not global, and the P series has its own smaller pool (5).
+func TestConcurrencyPoolsAreIndependentByCategory(t *testing.T) {
+	t.Run("a full generation pool leaves conversion free", func(t *testing.T) {
+		f := newFixture(t, fakeupstream.Config{})
+		for i := 0; i < 10; i++ {
+			f.create("/generation/text-to-model", textBody(), key)
+		}
+		if status, _, body := f.do(http.MethodPost, "/generation/text-to-model", key, textBody()); status != http.StatusTooManyRequests ||
+			field(t, body, "code").(float64) != 2000 {
+			t.Fatalf("the 11th generation under a full H pool = %d %v", status, body)
+		}
+		if status, _, body := f.do(http.MethodPost, "/models/convert", key, convertBody()); status != http.StatusOK {
+			t.Fatalf("convert under a full generation pool = %d %v", status, body)
+		}
+	})
+	t.Run("a full model-processing pool leaves generation free", func(t *testing.T) {
+		f := newFixture(t, fakeupstream.Config{})
+		for i := 0; i < 5; i++ {
+			f.create("/models/convert", convertBody(), key)
+		}
+		if status, _, body := f.do(http.MethodPost, "/models/convert", key, convertBody()); status != http.StatusTooManyRequests ||
+			field(t, body, "code").(float64) != 2000 {
+			t.Fatalf("the 6th convert under a full model-processing pool = %d %v", status, body)
+		}
+		if status, _, body := f.do(http.MethodPost, "/generation/text-to-model", key, textBody()); status != http.StatusOK {
+			t.Fatalf("generation under a full model-processing pool = %d %v", status, body)
+		}
+	})
+	t.Run("the P-series generation has its own pool of 5", func(t *testing.T) {
+		f := newFixture(t, fakeupstream.Config{})
+		pSeries := func() map[string]any { return map[string]any{"model": "P2-20260801", "prompt": "a robot"} }
+		for i := 0; i < 5; i++ {
+			f.create("/generation/text-to-model", pSeries(), key)
+		}
+		if status, _, body := f.do(http.MethodPost, "/generation/text-to-model", key, pSeries()); status != http.StatusTooManyRequests ||
+			field(t, body, "code").(float64) != 2000 {
+			t.Fatalf("the 6th P-series generation under a full P pool = %d %v", status, body)
+		}
+		if status, _, body := f.do(http.MethodPost, "/generation/text-to-model", key, textBody()); status != http.StatusOK {
+			t.Fatalf("an H-series generation under a full P pool = %d %v", status, body)
+		}
+	})
 }

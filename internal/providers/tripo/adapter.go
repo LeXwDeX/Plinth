@@ -97,10 +97,17 @@ type providerOptions struct {
 	// run: how many children may be in flight at once.
 	FormatConversion *formatConversionOptions   `json:"format_conversion,omitempty"`
 	ResponseAliases  []generation.ResponseAlias `json:"response_aliases,omitempty"`
-	NativeConversion *nativeConversionOptions   `json:"native_conversion,omitempty"`
-	SourceRig        *nativeSourceRig           `json:"source_rig,omitempty"`
-	SourceRigs       []nativeSourceRigRule      `json:"source_rigs,omitempty"`
-	Transform        []float64                  `json:"transform,omitempty"`
+	// ResponseMetadata names task output fields the Offering wants preserved as
+	// asset metadata on the model claim rather than dropped: a model conversion
+	// reports the origin move it made as output.normalize_scale and
+	// output.normalize_translation, and without them a later step cannot tell
+	// the delivered model's coordinates back to the source's. The names come
+	// from this declaration; the Adapter hardcodes no upstream field.
+	ResponseMetadata []string                 `json:"response_metadata,omitempty"`
+	NativeConversion *nativeConversionOptions `json:"native_conversion,omitempty"`
+	SourceRig        *nativeSourceRig         `json:"source_rig,omitempty"`
+	SourceRigs       []nativeSourceRigRule    `json:"source_rigs,omitempty"`
+	Transform        []float64                `json:"transform,omitempty"`
 	// ReferenceWire selects a non-default reference image wire for
 	// image-to-3d; "multiview_inputs" sends view-key `inputs` (multiview_model.go).
 	ReferenceWire string `json:"reference_wire,omitempty"`
@@ -174,7 +181,7 @@ func (a *Adapter) optionsFor(offering generation.Offering) (providerOptions, err
 		if err := json.Unmarshal(declared.ProviderOptions, &current); err != nil {
 			return providerOptions{}, err
 		}
-		for _, key := range []string{"endpoint", "observe_endpoint", "upload_endpoint", "convert_endpoint", "response_aliases"} {
+		for _, key := range []string{"endpoint", "observe_endpoint", "upload_endpoint", "convert_endpoint", "response_aliases", "response_metadata"} {
 			if _, pinned := values[key]; !pinned {
 				if value, present := current[key]; present {
 					values[key] = value
@@ -757,6 +764,7 @@ func (a *Adapter) observation(
 			)
 		}
 		observation.Artifacts = claims(value, request.AttemptID, options.ResponseAliases)
+		attachResponseMetadata(observation.Artifacts, value.Output, options.ResponseMetadata)
 	case "canceled":
 		observation.Phase = generation.UpstreamCanceled
 		observation.Failure = &generation.Failure{
@@ -1007,6 +1015,52 @@ func claims(
 		claims = append(claims, claim)
 	}
 	return claims
+}
+
+// responseMetadata builds the asset metadata for the output fields an Offering
+// declares under response_metadata (a model conversion reports the origin move it
+// made as output.normalize_scale / output.normalize_translation). The field names
+// come from the Offering declaration, never from the Adapter. A field the output
+// does not carry is skipped; no declaration, or none present, yields no metadata.
+func responseMetadata(output map[string]any, fields []string) json.RawMessage {
+	if len(fields) == 0 || len(output) == 0 {
+		return nil
+	}
+	metadata := make(map[string]json.RawMessage, len(fields))
+	for _, name := range fields {
+		value, present := output[name]
+		if !present {
+			continue
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			continue
+		}
+		metadata[name] = encoded
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return nil
+	}
+	return encoded
+}
+
+// attachResponseMetadata copies the declared output fields onto the model claim's
+// metadata (asset metadata), so a conversion's reported transform survives the
+// Adapter. A claim that already carries metadata keeps it.
+func attachResponseMetadata(claims []generation.ArtifactClaim, output map[string]any, fields []string) {
+	metadata := responseMetadata(output, fields)
+	if metadata == nil {
+		return
+	}
+	for i := range claims {
+		if claims[i].Role == "model" && len(claims[i].Metadata) == 0 {
+			claims[i].Metadata = metadata
+		}
+	}
 }
 
 // firstHTTPOutput 按顺序返回第一个 HTTP URL 值。
