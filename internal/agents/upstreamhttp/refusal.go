@@ -36,8 +36,11 @@ type Refusal struct {
 //   - content moderation (#35): a vendor content-safety refusal names its own
 //     error code and comes first, because its message may mention image data;
 //   - a used-up balance or key quota (#120), as the Schema declares it;
-//   - a request with pictures refused as invalid input whose error names
-//     image, vision or multimodal content (#253): a model without image input;
+//   - a request with pictures that the model or endpoint takes no picture
+//     input for (#253): a model without image input;
+//   - a request with pictures the model read and refused as pictures (#497):
+//     a 400/422 that objects to the pictures' dimensions, size, format or
+//     number, which is a bad picture rather than a model without image input;
 //   - a request field the upstream refuses (#401): an invalid_request_error
 //     that names the field it refuses, with the field's name.
 //
@@ -61,8 +64,13 @@ func (refusal Refusal) Err() error {
 			return errors.Join(&agents.QuotaExhaustion{Class: class}, err)
 		}
 	}
-	if imageRefusalStatus(refusal.Status) && refusal.HasImages && mentionsImageInput(refusal.Body) {
-		return errors.Join(agents.ErrImagesRejected, err)
+	if refusal.HasImages && imageRefusalStatus(refusal.Status) && mentionsImageInput(refusal.Body) {
+		if imageInputUnsupported(refusal.Status, refusal.Body) {
+			return errors.Join(agents.ErrImagesRejected, err)
+		}
+		if reasons := invalidPictureReasons(refusal.Status, refusal.Body); len(reasons) > 0 {
+			return errors.Join(&agents.ImageInvalidity{Reasons: reasons}, err)
+		}
 	}
 	if param := rejectedParameter(refusal.Status, refusal.Body); param != "" {
 		return errors.Join(&agents.RequestRejection{Param: param}, err)
@@ -165,6 +173,9 @@ func imageRefusalStatus(status int) bool {
 	return false
 }
 
+// mentionsImageInput is whether the error body talks about picture input at
+// all. It is only the gate of the two classes below: what decides between
+// them is a wording of the vendor's own.
 func mentionsImageInput(body []byte) bool {
 	text := strings.ToLower(string(body))
 	for _, word := range []string{"image", "vision", "multimodal", "multi-modal"} {
@@ -173,4 +184,122 @@ func mentionsImageInput(body []byte) bool {
 		}
 	}
 	return false
+}
+
+// imageInputUnsupportedPhrases are the wordings a vendor uses when its model
+// or endpoint takes no picture input at all (#253): the error has to say so in
+// as many words. Deliberately narrow, and deliberately not "the body mentions
+// an image" — a body that objects to the picture itself (#497) mentions one
+// too, and reading that as a model without image input sends the person to
+// change a model that reads images fine.
+var imageInputUnsupportedPhrases = []string{
+	"image input is not supported",
+	"image input isn't supported",
+	"image input is unsupported",
+	"image input not supported",
+	"image input unsupported",
+	"image input is not allowed",
+	"image inputs are not supported",
+	"image inputs are not allowed",
+	"image inputs not supported",
+	"image inputs unsupported",
+	"does not support image input",
+	"do not support image input",
+	"does not support image inputs",
+	"doesn't support image input",
+	"don't support image input",
+	"not support image input",
+	"no support for image input",
+	"no image input support",
+	"without image input support",
+	"does not support vision",
+	"do not support vision",
+	"doesn't support vision",
+	"vision input is not supported",
+	"vision input not supported",
+	"vision is not supported",
+	"vision not supported",
+	"does not support multimodal",
+	"does not support multi-modal",
+	"doesn't support multimodal",
+	"multimodal input is not supported",
+	"multimodal input not supported",
+	"multimodal content is not allowed",
+	"multimodal content not allowed",
+	"unknown content type image",
+	"unsupported content type image",
+	"invalid content type image",
+	// The same wordings from a vendor that answers in Chinese.
+	"不支持图片输入",
+	"不支持图像输入",
+	"图片输入不支持",
+	"图片输入不受支持",
+	"不支持读图",
+	"不支持视觉输入",
+	"不支持多模态输入",
+}
+
+// imageInputUnsupported is whether the refusal says the model or endpoint
+// takes no picture input: HTTP 415 is the media type of the request being
+// refused, and any other status needs one of the wordings above.
+func imageInputUnsupported(status int, body []byte) bool {
+	if status == http.StatusUnsupportedMediaType {
+		return true
+	}
+	text := strings.ToLower(string(body))
+	for _, phrase := range imageInputUnsupportedPhrases {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// invalidPictureReasonVocabulary is what an upstream may object to about a
+// picture it read and refused (#497): the token is the Product Schema's label
+// key, the phrases are the vendor wordings that name it (English, plus the
+// Chinese of a vendor that answers in Chinese). The upstream's own words never
+// travel on; only the token does.
+var invalidPictureReasonVocabulary = []struct {
+	Token   string
+	Phrases []string
+}{
+	{"dimensions", []string{
+		"height", "width", "resolution", "dimension", "aspect ratio",
+		"length and width", "尺寸", "分辨率", "宽高", "长宽",
+	}},
+	{"size", []string{
+		"image size", "file size", "size limit", "maximum size", "max size",
+		"too large", "too big", "too small", "size exceeds", "exceeds the maximum",
+		"megapixel", "too many pixels", "pixel limit",
+		"文件大小", "体积", "过大", "过小",
+	}},
+	{"format", []string{
+		"format", "codec", "mime", "file type", "not a valid image",
+		"格式", "编码",
+	}},
+	{"count", []string{
+		"too many images", "number of images", "image count", "too many pictures",
+		"maximum number of images", "数量", "张数",
+	}},
+}
+
+// invalidPictureReasons are the reason tokens of a refusal that objects to the
+// pictures themselves; nil for any other refusal. It reads a 400 or 422 only:
+// other statuses are the classes above or a plain failure.
+func invalidPictureReasons(status int, body []byte) []string {
+	if status != http.StatusBadRequest && status != http.StatusUnprocessableEntity {
+		return nil
+	}
+	text := strings.ToLower(string(body))
+	var reasons []string
+	for _, reason := range invalidPictureReasonVocabulary {
+		for _, phrase := range reason.Phrases {
+			if strings.Contains(text, phrase) {
+				reasons = append(reasons, reason.Token)
+				break
+			}
+		}
+	}
+	return reasons
 }

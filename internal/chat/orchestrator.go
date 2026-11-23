@@ -3798,6 +3798,16 @@ func (orchestrator *Orchestrator) contentRejectedReasons(ctx context.Context, er
 		func(text string) string { return orchestrator.text(ctx, text) })
 }
 
+// imageInvalidReasons is the Schema's reasons text for what a refusal in err
+// objected to about the request's picture, in the turn's locale (#497): the
+// tokens come from a closed vocabulary, never the upstream's own words.
+func (orchestrator *Orchestrator) imageInvalidReasons(ctx context.Context, err error) string {
+	messages := orchestrator.schema.Presentation.Messages
+	return moderation.Explain(messages.AgentImageInvalidReasons, agents.ImageInvalidReasons(err),
+		messages.AgentImageInvalidReasonLabels, messages.AgentImageInvalidReasonSeparator,
+		func(text string) string { return orchestrator.text(ctx, text) })
+}
+
 // withoutPictures copies request with each picture part replaced by the
 // Schema's moderated-image note in the request's locale, followed by the
 // reasons the review gave, if any.
@@ -3849,7 +3859,9 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // agentFailureMessage is what the person reads when the Agent request failed:
 // a deployment without Agent settings says the Agent is not configured, a
 // refusal of a request with pictures says the model may not read images
-// (#253), an upstream content-safety refusal says the input tripped it (#35),
+// (#253), a picture the model read and refused says the picture does not meet
+// the model's limits and what it objected to (#497), an upstream
+// content-safety refusal says the input tripped it (#35),
 // a used-up upstream balance or key quota says so (#120), a picture the
 // model drew itself says it was not kept, a request field the upstream
 // refused names that field (#401: only the plain field name is shown, the
@@ -3868,6 +3880,9 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	}
 	if errors.Is(err, agents.ErrImagesRejected) && messages.AgentImagesUnsupported != "" {
 		return orchestrator.text(ctx, messages.AgentImagesUnsupported)
+	}
+	if errors.Is(err, agents.ErrImageInvalid) && messages.AgentImageInvalid != "" {
+		return orchestrator.text(ctx, messages.AgentImageInvalid) + orchestrator.imageInvalidReasons(ctx, err)
 	}
 	if errors.Is(err, agents.ErrInlineImageOutput) && messages.AgentInlineImageOutput != "" {
 		return orchestrator.text(ctx, messages.AgentInlineImageOutput)

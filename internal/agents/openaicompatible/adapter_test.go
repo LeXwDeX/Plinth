@@ -462,10 +462,11 @@ func TestAdapterMarksARefusedRequestWithImages(t *testing.T) {
 	}
 }
 
-// #253: only a 400/415/422 whose error names image, vision or multimodal
-// input means "this model cannot read images"; any other refusal of a request
-// with pictures (a too-long context, a bad parameter, a 404 model) stays a
-// generic failure so the person is not told to switch models wrongly.
+// #253: only a 415, or a 400/422 whose error says the model or endpoint takes
+// no picture input, means "this model cannot read images"; any other refusal
+// of a request with pictures (a too-long context, a bad parameter, a 404
+// model, a picture the model refuses) stays out of that class so the person is
+// not told to switch models wrongly.
 func TestAdapterMarksImagesRejectedOnlyForImageRefusals(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -509,6 +510,46 @@ func TestAdapterMarksImagesRejectedOnlyForImageRefusals(t *testing.T) {
 	}
 }
 
+// #497: a 400 whose error objects to the picture itself is a bad picture, not
+// a model without image input. The body is the dev-test refusal verbatim: a
+// qwen model answered 400 invalid_parameter_error for a 1-pixel picture, and
+// the person was told to switch models while the picture was the thing to fix.
+func TestAdapterMarksAPictureTheModelRefusedAsInvalid(t *testing.T) {
+	const body = `{"error":{"code":"invalid_parameter_error","param":null,` +
+		`"message":"The image length and width do not meet the model restrictions. ` +
+		`[height:1 or width:1 must be larger than 32]","type":"invalid_parameter_error"}}`
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	adapter, err := openaicompatible.New(openaicompatible.Config{
+		BaseURL: "https://configured-agent.test/v1/", APIKey: "k", EndpointPath: "/chat/completions",
+		AuthorizationName: "Authorization", AuthorizationType: "Bearer", RequestTimeout: time.Minute,
+		ScannerMaxBytes: 1 << 20, ErrorBodyMaxBytes: 1 << 16, Client: &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withImage := agents.Request{Model: "m", Messages: []agents.Message{{Role: "user", Parts: []agents.ContentPart{
+		{Kind: "text", Text: "what is this"}, {Kind: "image_url", URL: "data:image/png;base64,QQ=="},
+	}}}}
+	for _, call := range []func() error{
+		func() error { _, err := adapter.Complete(context.Background(), withImage); return err },
+		func() error { _, err := adapter.Stream(context.Background(), withImage, nil); return err },
+	} {
+		err := call()
+		if !errors.Is(err, agents.ErrImageInvalid) || errors.Is(err, agents.ErrImagesRejected) {
+			t.Fatalf("err = %v, want the picture marked invalid and not the model without image input", err)
+		}
+		if reasons := strings.Join(agents.ImageInvalidReasons(err), ","); reasons != "dimensions" {
+			t.Fatalf("reasons = %q", reasons)
+		}
+	}
+}
+
 // #35: an upstream content-safety refusal is not a model without image input.
 // DashScope answers 400 data_inspection_failed for a picture its moderation
 // flags; it must not tell the person to switch models, while a real refusal
@@ -533,7 +574,11 @@ func TestAdapterMarksContentModerationRefusals(t *testing.T) {
 		{"azure content filter", http.StatusBadRequest, `{"error":{"code":"content_filter","message":"The response was filtered due to the prompt triggering content management policy."}}`, withImage, true, false},
 		{"openai content policy", http.StatusBadRequest, `{"error":{"code":"content_policy_violation","message":"Your request was rejected as a result of our safety system. Image descriptions may contain text that is not allowed."}}`, withImage, true, false},
 		{"image input unsupported", http.StatusBadRequest, `{"error":{"code":"invalid_request_error","message":"Image input is not supported"}}`, withImage, false, true},
-		{"moderation word only in message", http.StatusBadRequest, `{"error":{"message":"image data may contain inappropriate content"}}`, withImage, false, true},
+		// #497: a message that only mentions an image is neither class. It
+		// names no incapability, so the model is not sent away, and it objects
+		// to nothing a person can read off a picture, so no picture reason
+		// either; it stays the plain status error.
+		{"moderation word only in message", http.StatusBadRequest, `{"error":{"message":"image data may contain inappropriate content"}}`, withImage, false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			transport := roundTripFunc(func(*http.Request) (*http.Response, error) {

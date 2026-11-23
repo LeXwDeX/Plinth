@@ -6499,6 +6499,19 @@ type ChatMessageTexts struct {
 	// AgentImagesUnsupported replaces UnknownError when the Agent model
 	// refused a request that carried pictures (#253).
 	AgentImagesUnsupported string `json:"agent_images_unsupported"`
+	// AgentImageInvalid replaces UnknownError when the upstream read the
+	// request's picture and refused that picture: its dimensions, size, format
+	// or number is outside what the model takes (#497). It says the picture is
+	// the problem, so the person is not sent to change a model that reads
+	// images fine. Optional: without it such a refusal reads as the unknown
+	// error. AgentImageInvalidReasons follows it with what the upstream
+	// objected to ({reasons}), labelled by AgentImageInvalidReasonLabels and
+	// joined with AgentImageInvalidReasonSeparator, the way a content-safety
+	// refusal reads its reasons.
+	AgentImageInvalid                string            `json:"agent_image_invalid,omitempty"`
+	AgentImageInvalidReasons         string            `json:"agent_image_invalid_reasons,omitempty"`
+	AgentImageInvalidReasonLabels    map[string]string `json:"agent_image_invalid_reason_labels,omitempty"`
+	AgentImageInvalidReasonSeparator string            `json:"agent_image_invalid_reason_separator,omitempty"`
 	// AgentContentRejected replaces UnknownError when the upstream's content
 	// moderation refused the request's pictures or text (#35).
 	AgentContentRejected string `json:"agent_content_rejected"`
