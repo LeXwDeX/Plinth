@@ -1267,6 +1267,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ProposeAssetList:          chatService.ProposeAssetList,
 		SubmitAssetListItem:       chatService.SubmitAssetListItem,
 		ReadAssetList:             chatService.ReadAssetList,
+		AssetListUnavailable:      assetListUnavailableCopy(applicationSchema),
 		WriteVisualAnchor:         chatService.WriteVisualAnchor,
 		Project:                   applicationSchema.Project,
 		ChoiceKinds:               applicationSchema.Chat.Choice.Kinds,
@@ -1379,6 +1380,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		),
 		config.AgentMaxToolCallsPerReply,
 	)
+	// #494: the base registry is the fallback for a turn that froze no Agent
+	// configuration; it takes the same injection view as the frozen one, so the
+	// production-list tools are absent whenever asset_list.execution is off.
+	orchestratorSchema.AgentTools = withoutAssetListTools(
+		orchestratorSchema.AgentTools, applicationSchema.AssetListExecutionEnabled())
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Project: applicationSchema.Project,
 		Texts:   texts,
