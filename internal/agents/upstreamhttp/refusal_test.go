@@ -90,6 +90,16 @@ func TestRefusalSeparatesABadPictureFromAModelWithoutImageInput(t *testing.T) {
 			status: 400,
 			body:   `{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 8192 tokens"}}`,
 		},
+		{
+			// The wording of a content refusal without a code the moderation
+			// table knows: neither picture class owns it, so it stays a plain
+			// failure. It is asserted so the day someone widens the capability
+			// phrases this goes red instead of silently turning a moderation
+			// refusal into "switch models".
+			name:   "a content wording without a known moderation code",
+			status: 400,
+			body:   `{"error":{"message":"image data may contain inappropriate content"}}`,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			refusal := upstreamhttp.Refusal{Status: test.status, Body: []byte(test.body), HasImages: true}
