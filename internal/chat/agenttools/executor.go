@@ -96,6 +96,11 @@ const (
 	ToolListProjectAssets = "list_project_assets"
 )
 
+// removedRequestConsentContent answers the retired request_consent tool (#491).
+// It only ever recorded an intent, so the Agent is sent to the generation tool
+// that freezes the exact input and asks for the human decision.
+const removedRequestConsentContent = "request_consent has been removed: it only recorded an intent and never authorized a paid operation. Call the generation tool with the final prompt and references to freeze the input; the server then asks the user to approve that operation."
+
 // 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
 const (
 	ConsentPendingKey  = agentparams.ConsentPendingKey
@@ -195,6 +200,14 @@ type Config struct {
 	// item's state, artifacts and self-check conclusion. Nil leaves the tool
 	// unavailable.
 	ReadAssetList func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	// AssetListUnavailable is the Schema's "tool {tool} is not available in
+	// this turn" copy, set when the Catalog keeps application.asset_list.execution
+	// off (#494). Only submit_asset_list_item answers it instead of running:
+	// without a run no item reaches working, so the call could not finish. It
+	// also covers a turn frozen while the tool was still offered. Propose and
+	// read need no run and dispatch as before. {tool} is filled with the called
+	// name; empty leaves the tool dispatched as before.
+	AssetListUnavailable string
 	// WriteVisualAnchor applies one explicitly confirmed visual-anchor write
 	// (#250). The service owns the owner/session checks and the bounds; this
 	// tool cannot touch the user's style lock.
@@ -215,10 +228,6 @@ type Config struct {
 	BriefSavedMessage    string
 	BriefInvalidTemplate string
 	BriefMessages        catalog.ChatProductionBriefMessages
-	// Consent 创建待批准项。snapshot 是服务端计算的生成目标快照
-	//（当前模型+合并参数哈希），与 pending 一并存入会话状态；
-	// 生成执行前校验一致性（AGT-05）。
-	Consent func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error
 	// Preflight 在同意门禁之前执行无需用户交互即可判定的校验
 	//（如"未选择生成模型"），返回面向 LLM 的失败文案；空串表示
 	// 通过。批准不再被一次注定失败的调用白白消耗（AGT-04）。
@@ -230,25 +239,20 @@ type Config struct {
 	SubmissionGate func(ctx context.Context, command chat.ToolCommand) string
 	// ConsentState 读取会话的同意状态；ConsentClear 在一次付费生成
 	// 消费掉批准后清空同意状态（一次性语义）。二者必须同时提供。
-	// ConsentWaitTimeout 界定 request_consent 挂起等待用户决定的最长
-	// 时长（来自 Product Schema chat.agent.consent_*，禁止硬编码）。
-	ConsentState       func(scope string) map[string]json.RawMessage
-	ConsentClear       func(scope string)
-	ConsentClaim       func(scope, callID, idempotencyKey string, snapshot json.RawMessage) (taskID string, allowed bool, err error)
-	ConsentAccepted    func(scope, callID, taskID string) error
-	ConsentRelease     func(scope, callID, idempotencyKey string) error
-	ConsentWaitTimeout time.Duration
+	// 生成工具自己维护批准快照，agenttools 只读状态。
+	ConsentState    func(scope string) map[string]json.RawMessage
+	ConsentClear    func(scope string)
+	ConsentClaim    func(scope, callID, idempotencyKey string, snapshot json.RawMessage) (taskID string, allowed bool, err error)
+	ConsentAccepted func(scope, callID, taskID string) error
+	ConsentRelease  func(scope, callID, idempotencyKey string) error
 	// TaskObservationTimeout bounds recovery when the accepted Task cannot be
 	// read. Application assembly supplies the Schema request timeout.
 	TaskObservationTimeout time.Duration
 	// MaxGenerationCallsPerTurn 限定单轮付费生成次数（Schema 声明；
 	// <=0 表示不设限，仅测试允许）。
 	MaxGenerationCallsPerTurn int
-	// Consent*Content 是 request_consent 与付费硬门禁回给 LLM 的文案
-	// （Product Schema chat.agent.consent_*，B16 迁入 Schema，禁止硬编码）。
-	ConsentApprovedContent  string
-	ConsentDeniedContent    string
-	ConsentWaitingContent   string
+	// Consent*Content 是付费硬门禁回给 LLM 的文案（Product Schema
+	// chat.agent.consent_*，B16 迁入 Schema，禁止硬编码）。
 	ConsentBlockedContent   string
 	ConsentReconcileContent string
 	ConsentRequiredContent  string
@@ -293,6 +297,7 @@ type Executor struct {
 	proposeAssetList       func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	submitAssetListItem    func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	readAssetList          func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
+	assetListUnavailable   string
 	writeVisualAnchor      func(context.Context, chat.ToolCommand) (chat.ToolResult, error)
 	project                *catalog.ProjectSchema
 	choiceKinds            map[string]catalog.ChatChoiceKindSchema
@@ -300,13 +305,11 @@ type Executor struct {
 	briefSavedMessage      string
 	briefInvalidTemplate   string
 	briefMessages          catalog.ChatProductionBriefMessages
-	consent                func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error
 	consentState           func(scope string) map[string]json.RawMessage
 	consentClear           func(scope string)
 	consentClaim           func(scope, callID, idempotencyKey string, snapshot json.RawMessage) (string, bool, error)
 	consentAccepted        func(scope, callID, taskID string) error
 	consentRelease         func(scope, callID, idempotencyKey string) error
-	consentWaitTimeout     time.Duration
 	taskObservationTimeout time.Duration
 
 	// 每轮生成次数统计：scope → (轮次 assistant 消息 ID, 已用次数)。
@@ -445,22 +448,18 @@ func New(config Config) (*Executor, error) {
 		proposeAssetList:       config.ProposeAssetList,
 		submitAssetListItem:    config.SubmitAssetListItem,
 		readAssetList:          config.ReadAssetList,
+		assetListUnavailable:   config.AssetListUnavailable,
 		writeVisualAnchor:      config.WriteVisualAnchor,
 		project:                config.Project,
-		consent:                config.Consent,
 		consentState:           config.ConsentState,
 		consentClear:           config.ConsentClear,
 		consentClaim:           config.ConsentClaim,
 		consentAccepted:        config.ConsentAccepted,
 		consentRelease:         config.ConsentRelease,
-		consentWaitTimeout:     config.ConsentWaitTimeout,
 		taskObservationTimeout: config.TaskObservationTimeout,
 		usage:                  map[string]generationUsage{},
 		maxGeneration:          config.MaxGenerationCallsPerTurn,
 		consentContents: consentContents{
-			approved:  config.ConsentApprovedContent,
-			denied:    config.ConsentDeniedContent,
-			waiting:   config.ConsentWaitingContent,
 			blocked:   config.ConsentBlockedContent,
 			reconcile: config.ConsentReconcileContent,
 			required:  config.ConsentRequiredContent,
@@ -513,21 +512,36 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "production plans unavailable", NoSubmission: true}, nil
 		}
 		return e.proposePlan(ctx, command)
-	case ToolProposeAssetList:
-		if e.proposeAssetList == nil {
-			return chat.ToolResult{Error: "asset lists unavailable", NoSubmission: true}, nil
+	case ToolProposeAssetList, ToolSubmitAssetListItem, ToolGetAssetList:
+		// #494: the Catalog keeps submit_asset_list_item declared but out of
+		// the table while asset_list.execution is off. A turn frozen while it
+		// was still offered can still name it; answer with the Schema's "not
+		// available in this turn" copy, which names the way out, instead of
+		// starting a completion nothing can advance. Propose and read need no
+		// run, so they fall through to their dispatchers.
+		if e.assetListUnavailable != "" && command.Call.Name == ToolSubmitAssetListItem {
+			return chat.ToolResult{
+				Error:        strings.ReplaceAll(e.assetListUnavailable, "{tool}", command.Call.Name),
+				NoSubmission: true,
+			}, nil
 		}
-		return e.proposeAssetList(ctx, command)
-	case ToolSubmitAssetListItem:
-		if e.submitAssetListItem == nil {
-			return chat.ToolResult{Error: "asset list item reports unavailable", NoSubmission: true}, nil
+		switch command.Call.Name {
+		case ToolProposeAssetList:
+			if e.proposeAssetList == nil {
+				return chat.ToolResult{Error: "asset lists unavailable", NoSubmission: true}, nil
+			}
+			return e.proposeAssetList(ctx, command)
+		case ToolSubmitAssetListItem:
+			if e.submitAssetListItem == nil {
+				return chat.ToolResult{Error: "asset list item reports unavailable", NoSubmission: true}, nil
+			}
+			return e.submitAssetListItem(ctx, command)
+		default:
+			if e.readAssetList == nil {
+				return chat.ToolResult{Error: "asset lists unavailable", NoSubmission: true}, nil
+			}
+			return e.readAssetList(ctx, command)
 		}
-		return e.submitAssetListItem(ctx, command)
-	case ToolGetAssetList:
-		if e.readAssetList == nil {
-			return chat.ToolResult{Error: "asset lists unavailable", NoSubmission: true}, nil
-		}
-		return e.readAssetList(ctx, command)
 	case ToolFindHistoryImages:
 		return e.findHistoryImages(command), nil
 	case ToolInspectImage:
@@ -894,76 +908,15 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 }
 
 func (e *Executor) requestConsent(
-	ctx context.Context,
-	command chat.ToolCommand,
+	_ context.Context,
+	_ chat.ToolCommand,
 ) chat.ToolResult {
-	if exact, ok := e.generate.(interface{ UsesExecutionGrants() bool }); ok && exact.UsesExecutionGrants() {
-		// The actual operation has not yet been constructed. Describe the
-		// required next step; never create or wait on a model/params approval.
-		return chat.ToolResult{AgentContent: e.consentContents.required, NoSubmission: true}
-	}
-	if e.consent == nil {
-		return chat.ToolResult{Error: "consent unavailable"}
-	}
-	scope := e.scopeKey(command)
-	// AGT-12 挂起恢复重放：决定已写入（用户在挂起期间批准/拒绝）时
-	// 直接返回对应结果，不重写待决状态、不再挂起。批准只对快照目标
-	// 有效（AGT-05）：快照与当前生成目标不一致（如批准后切换模型）
-	// 时，旧决定对本目标无效，继续走重写待决状态与快照的新授权流程，
-	// 否则旧批准与本工具的 AGT-05 门禁互锁，生成永远被拦。
-	if e.consentState != nil {
-		state := e.consentState(scope)
-		if raw := state[agentparams.ConsentClaimKey]; len(raw) > 0 {
-			var claim struct {
-				TaskID string `json:"task_id"`
-			}
-			if json.Unmarshal(raw, &claim) != nil || claim.TaskID == "" {
-				// An unknown prior submission must be reconciled before a new
-				// approval can overwrite its durable reservation.
-				return chat.ToolResult{AgentContent: e.consentContents.reconcile}
-			}
-		}
-		switch consentDecision(state) {
-		case ConsentDecisionApproved:
-			if (e.consentClaim == nil || len(state[ConsentSnapshotKey]) > 0) && e.consentSnapshotMatches(scope, command) {
-				return chat.ToolResult{AgentContent: e.consentContents.approved}
-			}
-		case ConsentDecisionDenied:
-			if e.consentSnapshotMatches(scope, command) {
-				return chat.ToolResult{AgentContent: e.consentContents.denied}
-			}
-		}
-	}
-	// 恢复重放且已超过最长挂起时长仍无决定：返回等待文案收束本轮，
-	// 与旧阻塞超时语义一致（生成工具在批准前不会执行）。
-	if !command.ConsentWaitDeadline.IsZero() &&
-		!time.Now().Before(command.ConsentWaitDeadline) {
-		return chat.ToolResult{AgentContent: e.consentContents.waiting}
-	}
-	// 服务端计算生成目标快照（AGT-05）：以当前所选模型与合并参数
-	// 为准，不信任 LLM 自报内容。
-	options := e.mergedOptions(e.scopeKey(command), command)
-	snapshot, snapshotErr := json.Marshal(struct {
-		AIModel    string `json:"ai_model"`
-		ParamsHash string `json:"params_hash"`
-	}{
-		AIModel:    options.AIModel,
-		ParamsHash: paramsHash(options.Parameters),
-	})
-	if snapshotErr != nil {
-		snapshot = nil
-	}
-	if err := e.consent(command, command.Call.Arguments, snapshot); err != nil {
-		return chat.ToolResult{Error: "consent request failed"}
-	}
-	if e.consentState == nil || e.consentWaitTimeout <= 0 {
-		return chat.ToolResult{
-			AgentContent: "consent requested, awaiting approval",
-		}
-	}
-	// AGT-12：不再在 worker 内阻塞轮询——登记挂起由编排器释放
-	// worker，用户决定或超时唤醒后按 resumingPlan 路径重放续跑。
-	return chat.ToolResult{Suspend: true}
+	// request_consent was removed (#491): it never created or waited for an
+	// approval, so a published configuration that still offers it is sent
+	// straight to the generation tool that freezes the input and asks for the
+	// decision. Answering here keeps the name from falling into the generic
+	// unknown-tool branch.
+	return chat.ToolResult{AgentContent: removedRequestConsentContent, NoSubmission: true}
 }
 
 // consentDecision 解析同意状态：consent_pending 不存在视为无待批准项；
@@ -1073,9 +1026,9 @@ func (e *Executor) generateWithParams(
 			return chat.ToolResult{AgentContent: message}, nil
 		}
 	}
-	// 硬门禁一：付费生成必须持有批准。无论 LLM 是否自行调用
-	// request_consent，服务端都以 store 状态为准；待批准/已拒绝/
-	// 从未请求一律不执行。
+	// 硬门禁一：付费生成必须持有批准。无论 LLM 是否先调用过同意
+	// 工具，服务端都以 store 状态为准；待批准/已拒绝/从未请求一律
+	// 不执行。
 	approved := false
 	command.ExplicitParameters = explicitParameters(command)
 	options := e.mergedOptions(scope, command)
@@ -1319,9 +1272,6 @@ func (e *Executor) scopeKey(command chat.ToolCommand) string {
 // consentContents 聚合 Product Schema chat.agent.consent_* 声明的
 // 同意门禁文案（原代码常量已迁入 Schema，B16）。
 type consentContents struct {
-	approved  string
-	denied    string
-	waiting   string
 	blocked   string
 	reconcile string
 	required  string

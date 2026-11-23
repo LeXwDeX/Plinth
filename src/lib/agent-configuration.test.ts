@@ -6,7 +6,7 @@ import { AgentConfigurationResource, sessionSkillId } from './agent-configuratio
 import type { ChatSkill } from './chat/browser-client';
 
 const schema = structuredClone(defaultCatalog.application) as unknown as ProductSchema;
-const configuration: AgentConfiguration = { system_prompt: 'edited prompt', domain_context: { image: '2D' }, skills: [], enabled_tool_names: ['observe_task'], enabled_mcp_preset_ids: [] };
+const configuration: AgentConfiguration = { system_prompt: 'edited prompt', domain_context: { image: '2D' }, skills: [], enabled_tool_names: ['get_task'], enabled_mcp_preset_ids: [] };
 function response(body: unknown, status = 200) { return { ok: status < 400, status, json: async () => body } as Response; }
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { resolve, reject, promise }; }
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };

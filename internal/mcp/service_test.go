@@ -22,7 +22,7 @@ func (p *testPeer) CallTool(context.Context, string, json.RawMessage) (json.RawM
 	return p.result, nil
 }
 func testPreset() catalog.AgentMCPPresetSchema {
-	return catalog.AgentMCPPresetSchema{ID: "workspace", Tools: []catalog.AgentMCPToolSchema{{Name: "read_tasks", RemoteName: "tasks", Parameters: json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":5}},"additionalProperties":false}`), Execution: catalog.ChatToolExecutionSchema{ImplementationKey: "mcp/read", Effects: []string{"READ"}, Scope: "session", Consent: "none"}}}}
+	return catalog.AgentMCPPresetSchema{ID: "workspace", Tools: []catalog.AgentMCPToolSchema{{Name: "read_tasks", RemoteName: "tasks", Parameters: json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":5}},"additionalProperties":false}`), Execution: catalog.ChatToolExecutionSchema{ImplementationKey: "mcp/read", Effects: []string{"READ"}, Scope: "session"}}}}
 }
 func testPolicy() catalog.AgentMCPPolicySchema {
 	return catalog.AgentMCPPolicySchema{TimeoutMilliseconds: 100, MaxResponseBytes: 4096, MaxTools: 5}

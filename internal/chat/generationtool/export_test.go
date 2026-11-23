@@ -18,3 +18,10 @@ func (executor *Executor) ModelReviewCacheForTest() (bytes int64, entries int) {
 	defer cache.mu.Unlock()
 	return cache.bytes, len(cache.entries)
 }
+
+// ModelInspectReadRefusalForTest reports whether a refusal kind is one the
+// inspect tool keeps as failed self-check evidence, to the package's external
+// tests.
+func (executor *Executor) ModelInspectReadRefusalForTest(kind string) bool {
+	return modelInspectReadRefusal(kind)
+}

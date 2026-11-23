@@ -185,7 +185,8 @@ func (executor *Executor) prepareAgentOperation(
 	if len(recharge) > 0 {
 		rechargeTaskID = string(recharge[0])
 	}
-	if rechargeTaskID != "" || executor.approvalNeedsHumanSpend(ctx, command.OwnerID, command.SessionID, capability, extraSpend) {
+	if rechargeTaskID != "" || executor.approvalNeedsHuman(ctx, command.OwnerID, command.SessionID,
+		capability, prepared.EstimatedCredits, extraSpend) {
 		// A step that gets an approval card: when the same thing is already
 		// waiting on a card, point the agent at that card instead of creating a
 		// second one. The lock is held until this call's own card is detached

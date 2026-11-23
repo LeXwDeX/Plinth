@@ -1262,36 +1262,27 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				brief,
 			)
 		},
-		AskChoice:            chatService.AskChoice,
-		ProposePlan:          chatService.ProposeProductionPlan,
-		ProposeAssetList:     chatService.ProposeAssetList,
-		SubmitAssetListItem:  chatService.SubmitAssetListItem,
-		ReadAssetList:        chatService.ReadAssetList,
-		WriteVisualAnchor:    chatService.WriteVisualAnchor,
-		Project:              applicationSchema.Project,
-		ChoiceKinds:          applicationSchema.Chat.Choice.Kinds,
-		ChoiceOptionInvalid:  applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
-		BriefSavedMessage:    applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
-		BriefInvalidTemplate: applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
-		BriefMessages:        applicationSchema.Chat.Model3DUsage.Brief.Messages,
-		Consent: func(command chat.ToolCommand, request json.RawMessage, snapshot json.RawMessage) error {
-			scope := agentparams.ScopeKey(command.OwnerID, command.SessionID)
-			return agentStateStore.BeginConsent(scope, request, snapshot)
-		},
+		AskChoice:                 chatService.AskChoice,
+		ProposePlan:               chatService.ProposeProductionPlan,
+		ProposeAssetList:          chatService.ProposeAssetList,
+		SubmitAssetListItem:       chatService.SubmitAssetListItem,
+		ReadAssetList:             chatService.ReadAssetList,
+		AssetListUnavailable:      assetListUnavailableCopy(applicationSchema),
+		WriteVisualAnchor:         chatService.WriteVisualAnchor,
+		Project:                   applicationSchema.Project,
+		ChoiceKinds:               applicationSchema.Chat.Choice.Kinds,
+		ChoiceOptionInvalid:       applicationSchema.Chat.Presentation.Messages.ChoiceOptionInvalid,
+		BriefSavedMessage:         applicationSchema.Chat.Model3DUsage.Brief.SavedMessage,
+		BriefInvalidTemplate:      applicationSchema.Chat.Model3DUsage.Brief.InvalidTemplate,
+		BriefMessages:             applicationSchema.Chat.Model3DUsage.Brief.Messages,
 		Preflight:                 toolExecutor.SelectionError,
 		SubmissionGate:            newAssetListSubmissionGate(assetListService, applicationSchema.AssetList),
 		MaxGenerationCallsPerTurn: applicationSchema.Chat.Agent.MaxGenerationCallsPerTurn,
-		ConsentApprovedContent:    applicationSchema.Chat.Agent.ConsentApprovedContent,
-		ConsentDeniedContent:      applicationSchema.Chat.Agent.ConsentDeniedContent,
-		ConsentWaitingContent:     applicationSchema.Chat.Agent.ConsentWaitingContent,
 		ConsentBlockedContent:     applicationSchema.Chat.Agent.ConsentBlockedContent,
 		ConsentReconcileContent:   applicationSchema.Chat.Agent.ConsentReconcileContent,
 		ConsentRequiredContent:    applicationSchema.Chat.Agent.ConsentRequiredContent,
 		ConsentLimitContent:       applicationSchema.Chat.Agent.ConsentLimitContent,
-		ConsentWaitTimeout: time.Duration(
-			applicationSchema.Chat.Agent.ConsentWaitTimeoutSeconds,
-		) * time.Second,
-		TaskObservationTimeout: time.Duration(applicationSchema.Chat.Agent.RequestTimeoutSeconds) * time.Second,
+		TaskObservationTimeout:    time.Duration(applicationSchema.Chat.Agent.RequestTimeoutSeconds) * time.Second,
 		Projection: func(capability, model string) json.RawMessage {
 			return buildAgentOfferingsProjection(
 				applicationSchema.Capabilities,
@@ -1389,6 +1380,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		),
 		config.AgentMaxToolCallsPerReply,
 	)
+	// #494: the base registry is the fallback for a turn that froze no Agent
+	// configuration; it takes the same injection view as the frozen one, so the
+	// production-list completion tool is absent whenever asset_list.execution is
+	// off (propose and read stay in).
+	orchestratorSchema.AgentTools = withoutAssetListExecutionTools(
+		orchestratorSchema.AgentTools, applicationSchema.AssetListExecutionEnabled())
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Project: applicationSchema.Project,
 		Texts:   texts,
@@ -2789,7 +2786,8 @@ func approvalPolicyFromSchema(application catalog.ApplicationSchema) approvalpol
 	for _, capability := range application.Capabilities {
 		known = append(known, string(capability.ID))
 	}
-	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known)
+	policy := approvalpolicy.New(declared.DefaultMode, declared.Modes, manual, known).
+		WithCreditsThreshold(declared.ManualCreditsThreshold)
 	if application.StepPolicy != nil {
 		// The internal steps mode exists only when the Catalog declares the 3D
 		// step policy (#330). It is not an offered mode: nothing assigns it to a

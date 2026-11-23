@@ -19,6 +19,12 @@ func TestAssetListKernelGateIsNotInstalledWithoutExecution(t *testing.T) {
 	if gate := newAssetListKernelSubmissionGate(service, &catalog.AssetListSchema{}); gate != nil {
 		t.Fatal("kernel gate installed without an execution section")
 	}
+	// #494: a declared but switched-off section starts no runner, so there is
+	// no run to pause and nothing for the gate to refuse.
+	switchedOff := &catalog.AssetListSchema{Execution: &catalog.AssetListExecutionSchema{}}
+	if gate := newAssetListKernelSubmissionGate(service, switchedOff); gate != nil {
+		t.Fatal("kernel gate installed for a switched-off execution section")
+	}
 }
 
 func TestAssetListKernelGateAllowsWithoutAnItem(t *testing.T) {
@@ -45,6 +51,12 @@ func TestAssetListSubmissionGateIsNotInstalledWithoutExecution(t *testing.T) {
 	}
 	if gate := newAssetListSubmissionGate(service, &catalog.AssetListSchema{}); gate != nil {
 		t.Fatal("gate installed without an execution section")
+	}
+	// #494: the tool Preflight gate belongs to the automatic loop, which a
+	// switched-off section does not run.
+	switchedOff := &catalog.AssetListSchema{Execution: &catalog.AssetListExecutionSchema{}}
+	if gate := newAssetListSubmissionGate(service, switchedOff); gate != nil {
+		t.Fatal("gate installed for a switched-off execution section")
 	}
 }
 

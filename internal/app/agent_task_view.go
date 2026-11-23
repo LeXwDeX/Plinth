@@ -12,7 +12,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
-// agentTaskView 是 get_task/observe_task 回给对话 LLM 的公开 Task 事实。
+// agentTaskView 是 get_task 回给对话 LLM 的公开 Task 事实。
 // 只包含平台 Task 身份、Offering 路由、状态、进度、公开失败分类与已落盘
 // Asset；上游 remote ID、Provider Opaque、取证字段和输入参数一律不出面。
 type agentTaskView struct {

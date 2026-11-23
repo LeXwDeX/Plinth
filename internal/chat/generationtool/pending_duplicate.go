@@ -161,12 +161,11 @@ func canonicalInput(raw json.RawMessage, bySHA map[string]string) any {
 
 // approvalNeedsHuman reports whether the session's approval mode would leave
 // this step waiting for a person (the only steps that get a card): a capability
-// the manual policy lists, or any step that spends extra credits.
+// the manual policy lists, a step that spends extra credits, or a step whose
+// own credit estimate reaches the policy's manual threshold (#490). credits is
+// the step's total estimate, the number its approval card shows.
 func (executor *Executor) approvalNeedsHuman(ctx context.Context, owner, session string,
-	capability generation.Capability, extraCredits int) bool {
-	return executor.approvalNeedsHumanSpend(ctx, owner, session, capability, extraCredits > 0)
-}
-func (executor *Executor) approvalNeedsHumanSpend(ctx context.Context, owner, session string, capability generation.Capability, extra bool) bool {
+	capability generation.Capability, credits int, extraSpend bool) bool {
 	if executor.grants == nil || executor.grants.Modes == nil {
 		return true // without a mode reader every grant waits for a human
 	}
@@ -174,8 +173,8 @@ func (executor *Executor) approvalNeedsHumanSpend(ctx context.Context, owner, se
 	if err != nil {
 		return false // unknown: the normal path reports the failure
 	}
-	return approvalpolicy.RequiresHuman(executor.grants.Policy, mode, string(capability)) ||
-		approvalpolicy.RequiresHumanForExtraSpend(executor.grants.Policy, mode, extra)
+	return approvalpolicy.RequiresHumanForCredits(executor.grants.Policy, mode, string(capability), credits) ||
+		approvalpolicy.RequiresHumanForExtraSpend(executor.grants.Policy, mode, extraSpend)
 }
 
 // lockApprovals serializes card creation of one session, so two calls of one

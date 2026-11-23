@@ -10,7 +10,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// #131: get_task and observe_task tell the Agent that the Provider still holds
+// #131: get_task tells the Agent that the Provider still holds
 // the accepted job in its own queue, with the count ahead when reported and
 // the Schema note (in the turn's locale) on what to tell the waiting person.
 func TestAgentTaskViewCarriesTheUpstreamQueue(t *testing.T) {

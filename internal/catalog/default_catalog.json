@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-23.487.3",
+    "revision": "2026-11-23.493.1",
     "terminology": {
       "user_facing": [
         {
@@ -2641,7 +2641,6 @@
           "uv-unwrap",
           "resize",
           "analyze-printability",
-          "repair-printability",
           "multi-color-print",
           "rig-check",
           "model-split",
@@ -6961,14 +6960,14 @@
         "consent_duplicate_content": "an approval card for exactly this operation (same tool, same input, same source assets) already exists and is still waiting for the user; no second card was created and nothing was submitted. Tell the user it is waiting on that card and do not call the tool again for it",
         "consent_waiting_status": "已创建批准卡，等你在卡片上批准后才会执行；现在还没有提交，也没有开始。",
         "consent_recharge_content": "nothing was submitted: earlier in this session task {task_id} failed after the upstream had already finished and charged, and its result was not stored, so a new generation of the same kind charges again. This step now waits for the user's explicit decision on its approval card whatever the session approval mode is, and the card says the earlier attempt was already charged and approving charges again. Call get_task on {task_id}: when its result_recovery.available is true, the earlier result can be fetched again at no charge with recover_task_result, so offer that first and tell the user the card is only needed if they want a new generation; otherwise tell them why it cannot be fetched again. Tell the user plainly that approving the card charges again and that not approving costs nothing, and do not call the generation tool again for it",
-        "refetch_started_content": "失败任务已被上游受理的结果正在作为任务 {task_id} 重新取回：没有提交新的生成，也不会再次扣费。请如实告诉用户，用 observe_task 跟进 {task_id}，成功后将结果作为先前生成的结果恢复并展示。不要对同一任务再次调用 recover_task_result，也不要重新提交生成",
+        "refetch_started_content": "失败任务已被上游受理的结果正在作为任务 {task_id} 重新取回：没有提交新的生成，也不会再次扣费。请如实告诉用户，用 get_task 跟进 {task_id}，成功后将结果作为先前生成的结果恢复并展示。不要对同一任务再次调用 recover_task_result，也不要重新提交生成",
         "refetch_unavailable_content": {
           "not_applicable": "这个任务没有在上游已受理结果后失败，没有可重新取回的结果。不要为它调用 recover_task_result",
           "not_supported": "这个模型的供应商只交付一次结果，无法重新取回。请如实告诉用户；重新生成会再次扣费，需要用户明确决定",
           "expired": "供应商已不再保留这个结果（超过保留期），无法重新取回。请如实告诉用户；重新生成会再次扣费，需要用户明确决定",
           "provider_unavailable": "这个任务的供应商当前未配置，暂时无法重新取回结果。请告诉用户稍后再试或联系管理员；不要重新提交生成",
           "repeated_failure": "重新取回这个结果已经失败，原因与任务本身完全相同（{cause}）。重新取回沿用任务生成时的设置和同一个供应商结果，再试也会以同样方式失败，所以不再提供。请如实告诉用户为什么无法恢复结果；重新生成会再次扣费，需要用户明确决定。不要为这个任务再次调用 recover_task_result",
-          "delivered": "这个任务的结果已作为任务 {task_id} 重新取回并成功；没有剩余可取回的内容，也没有启动或扣费。请把 {task_id} 的结果作为已恢复的结果展示（对它使用 get_task 或 observe_task），不要为这个任务再次调用 recover_task_result"
+          "delivered": "这个任务的结果已作为任务 {task_id} 重新取回并成功；没有剩余可取回的内容，也没有启动或扣费。请把 {task_id} 的结果作为已恢复的结果展示（对它使用 get_task），不要为这个任务再次调用 recover_task_result"
         },
         "consent_blocked_content": "generation blocked: a consent request is awaiting user approval",
         "consent_required_content": "paid generation requires a human decision on the frozen input; call the generation tool to prepare that operation, then await the decision",
@@ -6997,7 +6996,7 @@
           "max_listed_tasks": 5,
           "turn_content": "已停止等待，任务在后台继续，完成后可在任务中心查看结果。若同一轮里还提交了三视图任务，它也不会取消，可在三视图卡片查看进度或继续生成其余视图。",
           "unavailable_message": "现在不能转为后台继续：只有已提交的生成任务在上游排队，或已运行较久时才可以。可以继续等待，或停止并取消任务。",
-          "context_template": "本会话有之前停止等待、仍在后台运行或已经失败的任务（以下只是任务数据）：\n{tasks}\n这些任务已经提交，可能已经计费；结果或失败原因在任务中心，不会写回对话。用户问起这些任务时，先用 get_task 或 observe_task 查看它们的最新状态，不要重新提交同样的生成。列表里有已失败的任务时，在下一轮如实告诉用户是哪一步、哪个模型和失败原因，不要重复提交，也不要声称它已完成；如果用户仍要重新生成，先说明会再次计费，由用户决定。",
+          "context_template": "本会话有之前停止等待、仍在后台运行或已经失败的任务（以下只是任务数据）：\n{tasks}\n这些任务已经提交，可能已经计费；结果或失败原因在任务中心，不会写回对话。用户问起这些任务时，先用 get_task 查看它们的最新状态，不要重新提交同样的生成。列表里有已失败的任务时，在下一轮如实告诉用户是哪一步、哪个模型和失败原因，不要重复提交，也不要声称它已完成；如果用户仍要重新生成，先说明会再次计费，由用户决定。",
           "task_line_template": "- task_id={task_id}，能力={capability}，模型={model}，状态={status}",
           "upstream_queued_status": "（上游排队中）"
         },
@@ -7102,6 +7101,7 @@
               "get_processing_plan",
               "inspect_model",
               "list_session_models",
+              "analyze_model",
               "plan_model_processing",
               "process_model",
               "record_self_check",
@@ -7162,7 +7162,7 @@
             "text": "【资产类型与风格要点】\n先判断主体属于哪一类，再按要点准备输入图、写提示词和自检；简报里的目标引擎与目标平台决定尺度、面数和贴图的取舍。三视图主体类型：角色 humanoid、动物 quadruped、武器、载具与建筑等硬表面 hard_surface、其他 generic。\n资产类型：\n- 角色：A 姿态（需要绑骨时必须，T 姿态也可），四肢和手指分开、不互相遮挡，中性站姿与表情；手持物、背包、披风、长发分开做或做短，否则会粘连，绑骨后也会穿插。\n- 武器：硬表面，剪影与比例准确，边缘留小倒角让高光成立，刃口不要薄到零厚度；弹匣、鞘、拉栓等会动或可装卸的部件分件；按握持点定原点与朝向。\n- 道具：单件、剪影清晰，细节烘进法线贴图而不是堆面；原点放在底面中心（手持物放握持点）；成套道具统一比例与贴图精度。\n- 载具：左右严格对称，车轮、炮塔、舱门、旋翼等会动的部件分件并把轴心放在转动中心，车头朝向统一，尺度按真实大小（轿车约 4.5 米）；内部不建模。\n- 建筑与场景件：按统一的模块网格建模（如 1、2 或 4 米），两端接口对齐便于引擎拼接；墙面和地面用无缝可平铺的贴图；看不见的内部和背面不建；整栋建筑拆成外墙、屋顶、门窗等件；需要 LOD 时先出最高精度再逐档减面，不要每档单独生成。\n风格：\n- 写实 PBR：贴图只含固有色，不烘光影与阴影；法线、粗糙度、金属度走 PBR 通道；输入图用中性均匀光。\n- 手绘：光影和笔触可以直接画进贴图，材质简单，通常只用一张固有色贴图；轮廓概括，贴图分辨率要够。\n- 卡通渲染（toon/cel）：大块平涂、色阶分明，几何干净，贴图不烘光影；描边和明暗阶交给引擎的着色。\n- 低模：用剪影和转折处的面数表达形体，细节靠贴图；面数以用途预算为准。\n- 像素风：先定网格（每格像素数）与调色板，贴图用最近邻采样、关闭滤波与 mipmap；图生 3D 很难保住像素格，先如实告诉用户，必要时改用体素或低分辨率贴图的低模。"
           }
         ],
-        "system_prompt": "Plinth 是多模型创作平台：用户在对话里说要做什么，你调用平台工具生成或处理 2D 图像与 3D 模型，结果直接进入他们的画布、资产库和项目。付费步骤由服务端按会话的「批准方式」授权，你只负责准备、提交和说明。\n\n用户多是美术、设计或独立开发者。他们清楚自己想要什么，但不必了解平台背后有哪些模型、服务和参数。所以做得好不好只看一件事：用户拿到的图或模型能不能直接用在作品里；某一步跑成功不算完成。\n\n决定权：\n- 用户已经明确说过的（要做什么、本会话锁定的模型、服务、参数、画幅或尺寸、目标引擎与平台、是否绑骨）照办。做不到就说明原因，不换成别的再付费提交，因为那既违背用户的决定，也可能重复扣费。用户选的模型已停用时，服务端会换用可用模型并提示，你照实转告。\n- 其余由你决定：选模型、写提示词、定加工路线、怎么修。工具会按用途给推荐，你可以带理由偏离；结果里的 model_choice 说明模型来源，按实说。用户的模型与用途推荐冲突时，服务端会拒绝并要你先问用户保留哪个；除停用后换用继任模型外，用户锁定的模型不能被换成别的。别把平台内部的模式、服务或参数当成用户该做的决定。\n- 互不依赖的付费步骤在同一次回复里一起发出，有依赖的按顺序等前一步完成：少一次往返，也不会让后一步用到还没定下来的输入。\n\n提问：\n- 只问只有用户知道的事（用途、给谁用、目标引擎与平台、是否绑骨）。能从对话和图片推断的先推断，写进制作简报并说明，用户不满意再改，这样不会为一个可推断的字段多耗一轮。用户给了明确的生成指令且输入齐全时，直接开始。\n- 一次一张卡，一回合最多一张。需要用户在几个方向里选时用 ask_choice 开一张方向卡，不要写成编号或列表让用户打字：卡片上的选择能带着参数继续，文字回答还得再对一次。\n- 用户说的图不在本轮附件里时，先用 find_history_images 在本会话历史里找；找不到或分不清就简短地问。\n\n自检后交付：\n- 每个 2D、3D 结果交付前都要看过（inspect_image、inspect_model，3D 还要渲染或对照参考图），发现问题先修再交付。自检以真实调用为据，3D 自检记录由服务端按真实调用生成；没检查过的结果说成已检查，既误导用户，也会让不能用的东西进项目。轮次和修正次数有上限，到上限就停下并如实列出剩余问题。\n- 汇报说清结果、供应商与模型、关键参数、自检发现、剩余问题和下一步。模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过，因为用户会拿它复现。结果带 notices 时说明哪部分没做出来，并问是否只补那部分；不要把部分完成说成全部完成。\n- 计划没做完就结束回合时，必须在这一轮的回复里说清三件事：停在哪一步（第几步、什么能力）、为什么停（例如本回合自检次数用完、某一步失败、在等用户决定）、怎么继续（例如在计划卡上点「继续」，或回一句继续）。不要把没做完的计划说成已完成，也不要既不说明就沉默结束。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n\n事实与边界：\n- 图片和模型只用句柄引用（@img3、@model2、@selected），不构造 URL，不用上游 ID，服务端只认本会话的句柄。价格、积分、可导出格式、模型能力一律照工具结果写，不估算，因为用户据此决定是否付费。\n- 批准由服务端决定：结果里 approval=policy 表示按批准方式自动批准，不是用户点的；human 才是用户在卡上批准。在等卡时让用户去卡上决定，不要说已提交。不要让用户去勾选设置或切换模式。\n- 某一步失败时说明是哪一步、哪个模型、工具给的原因。余额不足或 Key 额度问题请用户联系管理员，不要换模型重试。可能已扣费的失败先用 get_task 看 result_recovery，能免费取回就取回，否则让用户决定是否重新付费，不要自动重新提交。\n- 写提示词、选模型前先读【偏好摘要】：已选用方向照原文沿用，已否决方向不要换说法重试；用户重新生成过只说明方向还没定，不是确认。\n\n表达：\n- 回复用用户最近一条消息所用的语言，不要中英混杂；工具名、参数名、模型名保持原文。系统指定界面语言时按它来。工具参数中的 prompt 用英文。\n- 普通对话、看图或提问直接回答，不调用生成工具。不输出原始 URL、内部字段、工具诊断或上游错误原文，用户看不懂，也可能泄露内部信息。",
+        "system_prompt": "Plinth 是多模型创作平台：用户在对话里说要做什么，你调用平台工具生成或处理 2D 图像与 3D 模型，结果直接进入他们的画布、资产库和项目。付费步骤由服务端按会话的「批准方式」授权，你只负责准备、提交和说明。\n\n用户多是美术、设计或独立开发者。他们清楚自己想要什么，但不必了解平台背后有哪些模型、服务和参数。所以做得好不好只看一件事：用户拿到的图或模型能不能直接用在作品里；某一步跑成功不算完成。\n\n决定权：\n- 用户已经明确说过的（要做什么、本会话锁定的模型、服务、参数、画幅或尺寸、目标引擎与平台、是否绑骨）照办。做不到就说明原因，不换成别的再付费提交，因为那既违背用户的决定，也可能重复扣费。用户选的模型已停用时，服务端会换用可用模型并提示，你照实转告。\n- 其余由你决定：选模型、写提示词、定加工路线、怎么修。工具会按用途给推荐，你可以带理由偏离；结果里的 model_choice 说明模型来源，按实说。用户的模型与用途推荐冲突时，服务端会拒绝并要你先问用户保留哪个；除停用后换用继任模型外，用户锁定的模型不能被换成别的。别把平台内部的模式、服务或参数当成用户该做的决定。\n- 互不依赖的付费步骤在同一次回复里一起发出，有依赖的按顺序等前一步完成：少一次往返，也不会让后一步用到还没定下来的输入。\n\n提问：\n- 只问只有用户知道的事（用途、给谁用、目标引擎与平台、是否绑骨）。能从对话和图片推断的先推断，写进制作简报并说明，用户不满意再改，这样不会为一个可推断的字段多耗一轮。用户给了明确的生成指令且输入齐全时，直接开始。\n- 一次一张卡，一回合最多一张。需要用户在几个方向里选时用 ask_choice 开一张方向卡，不要写成编号或列表让用户打字：卡片上的选择能带着参数继续，文字回答还得再对一次。\n- 用户说的图不在本轮附件里时，先用 find_history_images 在本会话历史里找；找不到或分不清就简短地问。\n\n自检后交付：\n- 每个 2D、3D 结果交付前都要看过（inspect_image、inspect_model，3D 还要渲染或对照参考图），发现问题先修再交付。自检以真实调用为据，3D 自检记录由服务端按真实调用生成；没检查过的结果说成已检查，既误导用户，也会让不能用的东西进项目。轮次和修正次数有上限，到上限就停下并如实列出剩余问题。\n- 模型格式读不了（例如只交付 FBX，模型检查只认 GLB）时不得为此付费转换：记下真实的那次失败检查，用 record_self_check 写 not_inspectable，并在回复里如实说明没做模型检查。要看这个模型，只能先由用户同意付费转成 GLB。\n- 汇报说清结果、供应商与模型、关键参数、自检发现、剩余问题和下一步。模型参数只照工具结果里的 parameters 写，没有列出的参数就是默认值，不得说成设置过，因为用户会拿它复现。结果带 notices 时说明哪部分没做出来，并问是否只补那部分；不要把部分完成说成全部完成。\n- 计划没做完就结束回合时，必须在这一轮的回复里说清三件事：停在哪一步（第几步、什么能力）、为什么停（例如本回合自检次数用完、某一步失败、在等用户决定）、怎么继续（例如在计划卡上点「继续」，或回一句继续）。不要把没做完的计划说成已完成，也不要既不说明就沉默结束。\n- 用户要把照片做成钥匙扣、手办、灯罩等可打印的 Creative Lab 作品时，用 create_creative_lab_design 从可用模板里选，满意后再用 build_creative_lab_item 做成品，两步不要连续自动提交。\n\n事实与边界：\n- 图片和模型只用句柄引用（@img3、@model2、@selected），不构造 URL，不用上游 ID，服务端只认本会话的句柄。价格、积分、可导出格式、模型能力一律照工具结果写，不估算，因为用户据此决定是否付费。\n- 批准由服务端决定：结果里 approval=policy 表示按批准方式自动批准，不是用户点的；human 才是用户在卡上批准。在等卡时让用户去卡上决定，不要说已提交。不要让用户去勾选设置或切换模式。\n- 某一步失败时说明是哪一步、哪个模型、工具给的原因。余额不足或 Key 额度问题请用户联系管理员，不要换模型重试。可能已扣费的失败先用 get_task 看 result_recovery，能免费取回就取回，否则让用户决定是否重新付费，不要自动重新提交。\n- 写提示词、选模型前先读【偏好摘要】：已选用方向照原文沿用，已否决方向不要换说法重试；用户重新生成过只说明方向还没定，不是确认。\n\n表达：\n- 回复用用户最近一条消息所用的语言，不要中英混杂；工具名、参数名、模型名保持原文。系统指定界面语言时按它来。工具参数中的 prompt 用英文。\n- 普通对话、看图或提问直接回答，不调用生成工具。不输出原始 URL、内部字段、工具诊断或上游错误原文，用户看不懂，也可能泄露内部信息。",
         "domain_context": {
           "image": "本轮用户正在 2D 图片工作区（仅为提示）。用户要的是图片时用 2D 工具，你负责判断文生图或图生图；要的是 3D 模型时直接用 3D 工具。 用户明确要求的主体、动作、关系和场景内容优先。所选 Skill 默认提供兼容的画风、色彩、光影和构图参考；不要把示例角色或事件写入工具提示词来替换用户主体。只有用户明确要求复现该 Skill 完整场景时才复用该场景；用户未指定主体时可用其场景补充。",
           "model-3d": "本轮用户正在 3D 模型工作区（仅为提示）。用户要的是 3D 模型时用 3D 工具，你负责判断文生模型或图生模型；要的是图片时直接用 2D 工具。"
@@ -7536,8 +7536,8 @@
           "source_not_found": "No finished 3D model with that ID exists in this session. Call list_session_models and use one of its task IDs or model handles.",
           "source_not_ready": "The source task has not finished or has no saved model file. Wait for it to finish, or choose another model.",
           "source_not_model": "The asset {asset} is not a saved model file of that task. Use the asset_id of a model file listed by list_session_models, or omit source_asset_id to use the model's main file.",
-          "source_not_glb": "The saved file {asset} is {media}, not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first.",
-          "source_bytes_not_glb": "The saved file {asset} is stored as {media}, but its bytes are not binary glTF (GLB). These read-only tools can only inspect and render the GLB version of a model; choose a GLB file from list_session_models, or convert the model to GLB first."
+          "source_not_glb": "The saved file {asset} is {media}, not binary glTF (GLB), so these read-only tools cannot read or render it. Choose a GLB file of the same model from list_session_models; to check this file itself, the person has to agree to a paid conversion to GLB. Otherwise deliver it with record_self_check status not_inspectable and say plainly that the model was not checked.",
+          "source_bytes_not_glb": "The saved file {asset} is stored as {media}, but its bytes are not binary glTF (GLB), so these read-only tools cannot read or render it. Choose a GLB file of the same model from list_session_models; to check this file itself, the person has to agree to a paid conversion to GLB. Otherwise deliver it with record_self_check status not_inspectable and say plainly that the model was not checked."
         },
         "texts": {
           "inspect_ready": "{model} inspected: {triangles} triangles.",
@@ -7660,7 +7660,7 @@
           "record_invalid_arguments": "The self-check arguments were rejected: {detail}. Nothing was saved.",
           "record_unknown_task": "No finished 3D model with a saved model file matches {model} in this session. Nothing was saved.",
           "record_usage_failed": "A passed conclusion is refused: the latest inspect_model judged these purpose checks as failed: {checks}. Fix them and inspect again, record has_issues with the remaining items, or, only when the person accepted them, pass waiver with that reason.",
-          "record_uncheckable_unproven": "The status {status} only applies when the latest inspect_model of this model was refused, for example because the file is above the inspection limit. Inspect the model first.",
+          "record_uncheckable_unproven": "The status {status} only applies when the latest inspect_model of this model was refused, for example because the file is above the inspection limit or the saved format cannot be read. Inspect the model first, and record not_inspectable only when that call was refused.",
           "record_default_purpose": "No production brief chose a purpose, so the checks judged the model as {purpose}. Say so when you report the result, and confirm the purpose with the person before calling it ready for another use.",
           "reference_ready": "Compared {model} with {image} in view {view}: silhouette IoU {iou}.",
           "reference_unreadable": "Reference picture {handle} cannot be read: {reason}. Nothing was compared for that view.",
@@ -7788,7 +7788,7 @@
       "agent_tools": [
         {
           "name": "set_params",
-          "execution": {"implementation_key":"params.set","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"params.set","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Set legal creative parameters for the exact offering_id. User-pinned parameters take precedence. Normal settings default to automatic (no user pin). For advised parameters, provide a non-empty reason keyed by parameter in reasons when changing the recommended value. Hidden and protocol parameters cannot be changed, and a count the person owns (adjustment_policy user, such as the per-task image count) cannot be raised here: their session value applies. This does not authorize generation; the next step freezes its actual values, explanations and estimate under the session approval policy.",
           "parameters": {
             "type": "object",
@@ -7818,7 +7818,7 @@
         },
         {
           "name": "update_session_notes",
-          "execution": {"implementation_key":"session.notes","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"session.notes","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Replace this session's settings summary with a complete, concise updated version. Use it when the user and you settle creative settings that must survive a long conversation (character, style, palette, materials, things to avoid; never sizes, ratios or resolutions, which come only from the user's chosen generation parameters) or when the user asks you to remember or forget something. The text you submit replaces the previous summary entirely, so keep every setting that is still in force. Short plain lines; no URLs or IDs. Submit an empty string to clear it.",
           "parameters": {
             "type": "object",
@@ -7836,7 +7836,7 @@
         },
         {
           "name": "update_production_brief",
-          "execution": {"implementation_key":"session.brief","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"session.brief","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Replace this session's production brief with a complete, concise version. Before 2D or 3D work, record what the result is for: ask briefly when the request leaves it open, then write the brief and say what you recorded; the person can change it in the brief panel, and generation does not wait for their confirmation. A clear generation instruction with all its inputs needs no separate purpose question: infer the purpose from the conversation and pictures (or use the default purpose), write the brief and say what you recorded instead of asking again. For 3D, the purpose sets the default model, triangle budget, UV and watertight requirements. For a game or real-time asset also ask for, and record, the target engine (target_engine), the target platform (target_platform) and, for a character, whether it needs a skeleton (needs_rig) and animation (needs_animation); skip what the person already stated. For 2D, image_use sets the recommended model, aspect ratio, background and size requirements; image_transparent and image_for_3d record delivery choices. A value the person explicitly locked must be kept exactly, while unlocked choices are yours to decide and explain. The object you submit replaces the previous brief entirely, so repeat every field still in force. Omit fields to clear them; submit an empty object to clear the brief. Use ask_choice with kind usage_profile or image_usage_profile when the person should pick a purpose from a card, and kind direction for a stylistic or compositional choice.",
           "parameters": {
             "type": "object",
@@ -7901,7 +7901,7 @@
         },
         {
           "name": "ask_choice",
-          "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind concept_quantity first when a 2D request is open (only a subject, purpose or vague idea, no style, references, stated count or request to start): this opens the card that asks how many low-cost concept sketches to draw, and the reply must submit no generation at all. After the answer, draw exactly the chosen number. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind concept_direction after drawing concept sketches: each option carries a label, one sentence, the thumbnail handle of its sketch, and the exact refine_image arguments that continue that direction. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Use kind next_step when the person must choose how to continue and no other kind fits, for example when the request has more than one workable direction, or when something blocks submitting (such as pictures that are not the same design): give 2 to 4 options, each with an id, a short label and a one-sentence description; the person's pick comes back to you as text and calls no tool. Whenever you would offer the person two or more directions to choose from, open this card instead of writing a numbered or bulleted list in the message, and put every blocking question on one card: at most one card per reply. An option may carry an action that the page performs when the person picks it, before the answer is sent: switch_operation with an operation_id from switchable_operations in the function context fixes that function, and clear_operation clears the function selection so that all your tools are available again; never invent a function name. While a function is fixed, next_step is the only kind you can open. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
           "parameters": {
             "type": "object",
@@ -7995,7 +7995,7 @@
         },
         {
           "name": "propose_production_plan",
-          "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"plan.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Use this tool only when the session's approval mode is budget (the approval block of the system context states the mode). A plan and its budget decide nothing in auto mode, where the server approves every paid step itself, or in strict mode, where the steps that need a person get their own approval card, so do not open a plan card there. In budget mode: propose a production plan with a credit budget per credit unit when the work needs several paid steps (for example: generate a model, inspect it, then fix what the self-check finds). Providers bill in their own units (tripo.credit, hyper3d.credit, meshy.credit, and legacy.credits for steps priced in historical credits); the budget limits and counts each unit separately and never adds different units. The person approves the plan and its budget on one card; afterwards the plan's steps and the correction capabilities you list run continuously by budget without a card per step. The server re-estimates every step from the Catalog in its own unit and refuses a budget whose unit is missing or below that unit's estimate; the refusal lists the estimate of each unit, and the numbers you send are only a summary. A capability outside the plan and its correction capabilities, a step that would exceed what remains in its unit (or whose unit has no budget), and a step that would charge again (extra export formats, additional fees) still show an approval card. Browser-started steps do not use this budget. Optional checkpoints after a processing capability and contingencies (declared repair steps) make the plan a contract: the server derives the checkpoint thresholds from the purpose budget, the card shows the acceptance criteria, the checkpoints and the separate worst-case contingency estimates, and a failed checkpoint stops the next processing step. Contingency estimates count toward the approved limit even if they never run. To let the person compare results, optionally declare candidates on one step (source provider, seed or input_image, with count or models up to the Schema maximum): the server quotes every candidate and the approved continuation submits them in parallel, keeping the losers as assets. Propose once and wait for the person: do not open a second plan while one is pending, and do not use this tool to avoid a card the rules require. A step the person may skip (the optional extra view of a three-view recipe, say) is declared with optional=true: the plan is complete without it, an unrun optional step reads \"optional, not run\" on the card, and its estimate still counts toward the approved limit.",
           "parameters": {
             "type": "object",
@@ -8153,7 +8153,7 @@
         },
         {
           "name": "revise_processing_plan",
-          "execution": {"implementation_key":"processing.revise","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"processing.revise","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"3d"},
           "description": "Revise one processing plan of this session within the approval the person already gave. Use it after a step's server-evaluated checkpoint failed, after a Task failed for a retryable reason, or to remove a step that never started. Operations: insert (after a failed checkpoint, or after a Task failure for a contingency triggered by task_failed; only a contingency the approved production plan declared, matched by contingency_id; its estimate is already in the approved budget), replace or skip (only a step that never started and has no frozen input), retry (the same rules as a person's retry: a failure that may already have been charged or is ambiguous still asks the person), and waive_checkpoint (bounded per plan and needs a reason). Every revision needs expected_plan_version from the latest get_processing_plan; a stale version is refused. A revision outside the approved plan or budget returns approval_required: stop and ask the person; do not create a second plan on your own. Parameters are ordinary Offering parameters only, never a source or consent parameter; the server binds and re-prices the step.",
           "parameters": {
             "type": "object",
@@ -8174,7 +8174,7 @@
         },
         {
           "name": "find_history_images",
-          "execution": {"implementation_key":"history.images","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"history.images","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Look through the pictures of this chat session when the user's words refer to images (for example 'keep the pose of the white-clad gunman and use the outfit of the other one') but this turn does not attach or select all of them. Without handles it lists the newest pictures of this session, newest first, with their handle, source (upload, generated, capture, canvas), the user's words that came with them, the generation prompt of a generated picture, and whether the picture is part of this turn or the current selection. With handles it also shows you those pictures so you can check them. Only this session's pictures are reachable. One reply may surface a limited number of distinct pictures (the server counts it and the result says how many remain); listing them again or looking at a listed picture costs nothing. Read-only: it never selects or changes anything; put the pictures you settle on into reference_handles of the generation tool yourself.",
           "parameters": {
             "type": "object",
@@ -8190,7 +8190,7 @@
         },
         {
           "name": "inspect_image",
-          "execution": {"implementation_key":"image.inspect","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"image.inspect","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read-only deterministic inspection of one picture of this session. Pass an image handle such as @img3 (generated results and history lookups both report their handles) or @selected for the currently selected picture. The result reports the picture's size and aspect, whether it has a transparent channel, how transparent it is, the border/background colour spread, the subject's pixel share and box, whether the subject touches an edge, and how many separate subject components there are. A checklist (delivery, the default, or 3d_input) turns those facts into pass/fail checks with a fix hint. The delivery checklist also judges the picture against the session's 2D purpose from the production brief (or the default purpose, and says which): the purpose's minimum short edge in pixels, seamless tiling for textures (a broken seam is reported with its position), and, when a transparent background is wanted, a real alpha channel and clean edges with no light rim. A failed check carries a hint with the next step; a check that cannot be judged is unknown, not passed. The 3d_input checklist also lists visual_items that pixels cannot judge (pose, perspective, cast shadows): look at the picture (show_picture) and give your verdict on each in visual_review; the server records them beside the deterministic checks, so a failed item shows up in the self-check record. Use it to self-check a generated 2D result before delivering it, or to check an input picture before image-to-3D. It never creates a Task, charges credits or changes the session; a look at a picture that is not readable is refused with the reason.",
           "parameters": {
             "type": "object",
@@ -8252,7 +8252,7 @@
         },
         {
           "name": "create_selection_mask",
-          "execution": {"implementation_key":"image.mask","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"image.mask","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Build a selection mask for one picture of this session locally, without calling any model, creating a Task or charging credits. Use it when the person describes the area in words instead of painting it. mode=subject keeps the picture's opaque pixels (or its subject against a plain background) as the editable region; mode=region with x0,y0,x1,y1 selects a rectangle; add invert=true to swap kept and editable. The result is a PNG mask where transparent pixels are redrawn and opaque pixels are kept, stored as the owner's input asset. Pass the returned mask_url as the mask argument of refine_image (the server binds it), and show the mask to the person first; never submit a paid step before they confirm it. A picture that cannot be read or has no subject is refused with the reason.",
           "parameters": {
             "type": "object",
@@ -8278,7 +8278,7 @@
         },
         {
           "name": "crop_image_regions",
-          "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. The result gives each crop's input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
           "parameters": {
             "type": "object",
@@ -8322,7 +8322,7 @@
         },
         {
           "name": "get_production_step",
-          "execution": {"implementation_key":"ledger.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"ledger.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read one production step of this session's work ledger in full. Use it instead of rewriting a step's prompt from memory: a changed word produces a different result. Pass the step handle shown in the ledger summary (such as @step3) or the Task ID. The result returns the step's capability, offering and model, state and progress, failure class, the exact prompt the Agent asked for and the final prompt that was frozen for the upstream (including the style lock and any template rewriting), the negative prompt, every declared parameter with its effective value and where it came from (agent, default, style_lock or unknown), input pictures by handle and purpose, result handles and roles, the read-only self-check conclusions (inspect_model leftovers with fix hints, inspect_image pass/fail counts, render/compare failed views) and the adopted or rejected decision. The ledger is a projection of the session's public Tasks and persisted tool calls: it never creates a Task, charges credits or changes the session.",
           "parameters": {
             "type": "object",
@@ -8338,7 +8338,7 @@
         },
         {
           "name": "list_offerings",
-          "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"catalog.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "List the capabilities and offerings available now. With no argument it lists only capability, domain and each offering's offering_id and model_id; pass capability (a capability id such as text-to-3d or image-to-image) to get that capability's offerings with their description, knowledge, inputs and prices, and model to get only the offerings of one model_id. Read the detail before you choose or chain a model: a processing offering's description says what the step keeps or changes (for example textures or model size), max_source_triangles is the most triangles its source model may have, and chain_limits gives, per topology, the largest target face count a later step still accepts. reference_image_max is the read-only number of reference pictures an offering takes; it is absent when the Schema declares no positive limit, so never read an absent value as one. Query this list before comparing unselected models' limits; do not infer them from the selected model or a tool description. Each offering also carries knowledge when declared: strengths, weaknesses, limitations, prompt guidance (language, form, length, negative-prompt support, whether it reads a text prompt) and reference_use (what a reference picture controls). Read the offering's prompt guidance before writing that model's prompt; never invent a value the knowledge leaves unknown. A model the person locked in this session is never switched on your own; when nothing is locked, choose by the production brief's purpose and the purpose recommendation and tell the person which model and why.",
           "parameters": {
             "type": "object",
@@ -8357,13 +8357,13 @@
         },
         {
           "name": "get_processing_plan",
-          "description": "Read the persistent processing plan of this session by plan_id. Reports each step's offering, parameters, estimated credits, state and public task_id. Read-only: never approves, resumes, retries or submits a step. Use observe_task on returned task IDs for output details.",
+          "description": "Read the persistent processing plan of this session by plan_id. Reports each step's offering, parameters, estimated credits, state and public task_id. Read-only: never approves, resumes, retries or submits a step. Use get_task on returned task IDs for output details.",
           "parameters": {"type":"object","properties":{"plan_id":{"type":"string"}},"required":["plan_id"],"additionalProperties":false},
-          "execution": {"implementation_key":"processing.read","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"}
+          "execution": {"implementation_key":"processing.read","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"}
         },
         {
           "name": "list_session_models",
-          "execution": {"implementation_key":"model.list","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.list","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"3d"},
           "description": "List the finished 3D models of this chat session (task ID, capability, provider, model, creation time, saved file formats, export_formats and the processing steps each can feed). model_assets lists the saved model files by format; main marks the model's main file, the one a step uses when only the task ID or handle is given, and next_steps are judged on it. export_formats is the format coverage the Formats tab shows: available (a file exists), obtainable (can be converted), converting, unavailable (cannot be exported now). Only claim a format can be exported or converted when it is available, obtainable or converting there. version is the label the version strip and the approval card show for the model (for example 3D v5): when you name a model's version, use it exactly and never number models yourself. Use the returned task_id as the source of retexture_model and process_model.",
           "parameters": {
             "type": "object",
@@ -8372,7 +8372,7 @@
         },
         {
           "name": "inspect_model",
-          "execution": {"implementation_key":"model.inspect","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.inspect","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Read-only structural inspection of a finished 3D model of this session: triangle and vertex counts, parts with their bounding boxes and triangle shares, materials and texture slots, UV sets, skins, animations, the world bounding box (including the bottom-centre offset) and topology (connected components, debris, boundary and non-manifold edges, winding, watertightness). Reading the facts: triangles counts drawn triangles only, so for a triangle-strip model it leaves out the degenerate triangles that join strips and can be lower than the index count suggests. topology.inconsistent_winding_edges above 0 means neighbouring faces point opposite ways, and topology.inside_out true means the closed surface faces inward as a whole; either makes watertight false and the model unfit for printing until it is repaired (the watertight item of usage_check names the fix). The warning skin_bind_pose means the skeleton could not be evaluated, so the skinned mesh was measured in its bind pose: the bounding box, sizes and pivot refer to that pose, and you should say so when you report them. Use it to answer questions about a model's geometry, to judge whether it is fit for printing or processing, or to choose part IDs for render_model_views. It also returns usage_check: when the Schema declares production purposes, every purpose budget and production-readiness property (triangle range, UV, watertightness, skin, texture size, bottom-centre pivot, Y-up, plausible scale, debris and degenerate triangles) is judged pass, fail or unknown against the purpose selected by the session's production brief, with the actual value, the budget value and, for a failure, a fix_hint naming the currently enabled tools that can fix it. Use these facts instead of inventing requirements. Pass a task ID or model handle in model (such as @model2, or @selected); omit it to inspect the selected model. source_asset_id optionally names one saved model file of that task; omit it to use the model's main file. It never creates a task, charges credits or changes the session. A model above the configured size or triangle limit is refused with the limit and the reason; report that clearly instead of guessing the model's contents.",
           "parameters": {
             "type": "object",
@@ -8391,7 +8391,7 @@
         },
         {
           "name": "render_model_views",
-          "execution": {"implementation_key":"model.render","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.render","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Render one or more still views of a finished 3D model of this session as PNG pictures and attach them to your reply. Use it when the person asks what a model looks like from some direction, wants a visual check, or when you need to show a result. model takes a task ID or model handle (such as @model2 or @selected); omit it for the selected model. views lists any of front, back, left, right, top, three_quarter (the Schema's default views apply when omitted). mode is textured, clay, normals or wireframe (default textured). parts highlights part IDs returned by inspect_model, and isolate draws only those parts. size is the output edge in pixels; the server caps it at the Schema maximum. The pictures are attached with @img handles reported in the result's views; say which view each handle shows, and never guess handle numbers. It never creates a task or charges credits. Wireframe above the configured triangle limit is refused; use clay instead. Each view uses the configured per-view and per-reply limits, and the result reports how many renders remain in this reply.",
           "parameters": {
             "type": "object",
@@ -8435,7 +8435,7 @@
         },
         {
           "name": "compare_models",
-          "execution": {"implementation_key":"model.compare","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.compare","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Render two finished 3D models of this session side by side, left then right, one picture per requested view, and attach the pictures to your reply. Use it to compare shape, silhouette or texture between two versions or candidates. models takes exactly two task IDs or model handles (such as @model2 and @model3, or @selected for one of them when it is the selected model). views and mode work like render_model_views. Each model is framed by its own bounding box, so the comparison shows proportions rather than absolute scale; the result also lists each model's triangle count and bounding box. The pictures are attached with @img handles reported in the result's views; left is models[0] and right is models[1]. It never creates a task or charges credits, and it counts toward the per-reply render limit like render_model_views.",
           "parameters": {
             "type": "object",
@@ -8471,7 +8471,7 @@
         },
         {
           "name": "compare_model_reference",
-          "execution": {"implementation_key":"model.compare_reference","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"model.compare_reference","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Compare a finished 3D model of this session with its reference picture, one side-by-side picture per view: the reference on the left, the model render on the right. Use it before delivering an image-to-3D or multiview result to check whether the result still looks like the reference. model takes a task ID or model handle (such as @model2, or @selected); omit it for the selected model. With no image or pairs, the reference pictures frozen in the task's input are used automatically, paired with their recorded views. image names one reference picture handle or asset id and view names its assumed view; pairs names several {image, view} pairs (at most the Schema limit). mode and size work like render_model_views but use the reference comparison's own defaults. The result attaches the comparison pictures with @img handles and reports deterministic metrics: normalized silhouette intersection-over-union, bounding-box aspect delta and subject mean-colour distance. Those metrics are a reference, not a verdict: the renderer uses approximate PBR, reads GLB only, frames each subject by its own bounding box and assumes the reference's view. It never creates a task or charges credits, and it counts toward the per-reply render limit.",
           "parameters": {
             "type": "object",
@@ -8523,7 +8523,7 @@
         },
         {
           "name": "record_self_check",
-          "execution": {"implementation_key":"self_check.record","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"3d"},
+          "execution": {"implementation_key":"self_check.record","effects":["SESSION_WRITE"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"},
           "description": "Write the conclusion of one finished 3D model's self-check into its persisted record. The server has already appended a check for every real inspect_model, render_model_views, compare_models and compare_model_reference call of this session; use only those calls as evidence, never claim a check you did not make. status is a delivery state declared by the Product Schema: passed means no remaining issue, has_issues means the result is delivered with remaining issues listed in remaining. A passed conclusion requires at least one real inspect check and one render, compare or reference check, and no failed purpose check in the latest inspect_model unless waiver gives the reason the person accepted it. not_inspectable is only for a model the latest inspect_model refused. The saved conclusion names the purpose it was judged against. summary, findings, fixes and remaining are the Agent's words, bounded by the Schema; an over-long text is refused, never silently cut. The record persists across turns and context compaction and appears in the conversation as a folded card. This tool never creates a Task, charges credits or changes the Task's terminal state; an unchecked result stays downloadable but must never be reported as checked.",
           "parameters": {
             "type": "object",
@@ -8535,7 +8535,7 @@
               "status": {
                 "type": "string",
                 "enum": ["passed", "has_issues", "not_inspectable"],
-                "description": "The delivery state being recorded: passed (no remaining issue), has_issues (delivered with remaining issues) or not_inspectable (the latest inspect_model of this model was refused, for example above the inspection limit, so it could not be checked)."
+                "description": "The delivery state being recorded: passed (no remaining issue), has_issues (delivered with remaining issues) or not_inspectable (the latest inspect_model of this model was refused, for example because the file is above the inspection limit or its format is not readable, so it could not be checked)."
               },
               "summary": {
                 "type": "string",
@@ -8567,7 +8567,7 @@
         },
         {
           "name": "get_task",
-          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Read the current state, progress and assets of a generation task by task_id. While the provider still holds the accepted task in its own queue, the result has upstream_queue (ahead: the provider's count of tasks before it, when reported; note: what to tell the waiting user).",
           "parameters": {
             "type": "object",
@@ -8582,25 +8582,9 @@
           }
         },
         {
-          "name": "observe_task",
-          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Observe live progress of a running generation task by task_id. The result has upstream_queue while the provider still holds the task in its own queue; follow its note to tell the waiting user.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "task_id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "task_id"
-            ]
-          }
-        },
-        {
           "name": "recover_task_result",
-          "execution": {"implementation_key":"task.refetch","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Fetch again, at no charge, the result of a failed task of this session whose upstream generation had already finished and been charged but whose result could not be stored (get_task shows result_recovery.available true). It only reads the already accepted upstream job again: it never submits a new generation and never charges. It returns the recovery task_id to follow with observe_task, or why the result cannot be fetched again. Calling it again returns the same recovery task instead of starting another one.",
+          "execution": {"implementation_key":"task.refetch","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "description": "Fetch again, at no charge, the result of a failed task of this session whose upstream generation had already finished and been charged but whose result could not be stored (get_task shows result_recovery.available true). It only reads the already accepted upstream job again: it never submits a new generation and never charges. It returns the recovery task_id to follow with get_task, or why the result cannot be fetched again. Calling it again returns the same recovery task instead of starting another one.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8616,27 +8600,8 @@
           }
         },
         {
-          "name": "request_consent",
-          "execution": {"implementation_key":"consent.request","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Optionally explain the intended paid action and expected credits. This tool records intent only; it cannot authorize execution. Call the generation tool with the final prompt and references to freeze the exact input, then wait for the user's decision on that operation.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string"
-              },
-              "credits": {
-                "type": "number"
-              }
-            },
-          "required": [
-              "reason"
-            ]
-          }
-        },
-        {
           "name": "create_three_view",
-          "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model the session's model choice picks. Pick purpose: model_input (the default) renders an orthographic set for 3D, where the subject_type class decides the pose and the frame; design_sheet renders a design sheet that keeps the source's own pose, art style and aspect ratio. Each view is one picture of its own: never a row or a grid of several views, and never one horizontal composite. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, with the original picture as a second reference for a design sheet, so clothing, proportions and colors stay consistent. For model_input, pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. For design_sheet the source's pose is kept as it is. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, or the source picture's own shape for a design sheet, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
           "parameters": {
             "type": "object",
@@ -8667,7 +8632,7 @@
         },
         {
           "name": "set_visual_anchor",
-          "execution": {"implementation_key":"anchor.write","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"anchor.write","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Create, update or delete one of this session's visual anchors, or decline a proposed one. An identity anchor is a character or object's standard look: its reference pictures become automatic references when a later generation call names the anchor in its anchors argument. A style anchor is a reference-backed look. The user must confirm a new anchor on a choice card first: call ask_choice with kind visual_anchor and put this tool's exact arguments in proposal. A user-set style lock is never changed by this tool. The result names the anchors; it never returns asset ids or URLs.",
           "parameters": {
             "type": "object",
@@ -8704,7 +8669,7 @@
         },
         {
           "name": "list_project_assets",
-          "execution": {"implementation_key":"project.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"project.list","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "List the assets of the project this session belongs to: each asset's read-only handle, kind, name, description and picture references, plus any saved 3D model references. Use the handles (for example @project1) in reference_handles of a generation tool to reuse a finished character or prop; the server attaches the project's style references automatically. Saved 3D model references are listed for reference only: this version cannot use a project model as the source of a paid processing step. A session outside any project has nothing to list.",
           "parameters": {
             "type": "object",
@@ -8714,7 +8679,7 @@
         },
         {
           "name": "propose_asset_list",
-          "execution": {"implementation_key":"assetlist.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"assetlist.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Propose a production list of assets for the current project. The user must confirm the list before any work starts. Returns the list id, item count, planned steps and availability warnings.",
           "parameters": {
             "type": "object",
@@ -8743,7 +8708,7 @@
         },
         {
           "name": "submit_asset_list_item",
-          "execution": {"implementation_key":"assetlist.submit_item","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"assetlist.submit_item","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
           "description": "Report the outcome of the current production-list item: done when its task succeeded, failed with a reason otherwise. Only valid inside a list item's own session.",
           "parameters": {
             "type": "object",
@@ -8757,7 +8722,7 @@
         },
         {
           "name": "get_asset_list",
-          "execution": {"implementation_key":"assetlist.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"none","cancellation":"none","agent_scope":"utility"},
+          "execution": {"implementation_key":"assetlist.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
           "description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
           "parameters": {
             "type": "object",
@@ -8774,7 +8739,7 @@
           "canvas_source": "bind",
           "selection_mask": "bind",
           "reference_size": "single",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count.",
           "cross_domain_model_fallback": true,
           "model_argument": "model",
@@ -8880,7 +8845,7 @@
           "name": "remove_background",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["background-removal"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["background-removal"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Remove the background of the referenced images using the background-removal offering. Use it whenever the background itself should go: an image edit changes the picture and does not reliably produce real transparency. Use reference_handles (such as @img3, or @selected) or reference_image_indices for existing images; without either, the images selected on the workspace are used. A result with notices means some pictures were not processed even though the task succeeded: tell the user which ones, as the notice message says, and do not call the batch complete.",
           "ignore_user_model": true,
           "default_to_selection": true,
@@ -8937,7 +8902,7 @@
           "name": "create_model_3d",
           "canvas_source": "refuse",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["text-to-3d"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from an English text description.",
           "model_argument": "model",
           "model_choices": {"from": "available_offerings", "require_parameters": ["prompt"]},
@@ -9022,7 +8987,7 @@
           "name": "create_model_3d_from_image",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d","text-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d","text-to-3d"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate a 3D model from reference image(s). Without references the images selected on the workspace are used. How many pictures a model uses depends on the model picked for 3D (stated below when known): never say that pictures beyond that number are used, or that they are used as views of one object. When a result has reference_note, including while the step waits on its approval card, it states the facts about the pictures: which pictures are used, how many were given, and that using several pictures needs a model that takes several pictures. Your reply must state each of these facts; put them in your own words if you like. Several views of the same object (a front view plus left, back or right views) belong to create_model_3d_from_views instead. For a model that takes angle marks for its pictures, say in view_labels which side of the object each picture shows when you can see it; the server ignores view_labels for any other model.",
           "default_to_selection": true,
           "model_argument": "model",
@@ -9149,7 +9114,7 @@
           "name": "create_model_3d_from_views",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["image-to-3d"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Generate one 3D model from several views of the SAME object with a multiview image-to-3D model. The available models are derived from the Catalog's enabled multiview Offerings: those that label each picture's view (reference_views) and order-only models such as Meshy 7.1 multiview, whose pictures are read as front, left, back, right by position. For a three-view group of this chat, pass three_view_group (the group's run ID) and nothing else about the pictures: the server reads the finished views and their view keys from the group. Otherwise use it only when the user gives 2 to 4 views of one object (a front view plus left, back or right views, for example the four pictures of a four-view image group) and wants a 3D model: pass the handles in front, left, back, right order, or say which view each handle is in reference_views (front, left, back, right); a front view is required. An order-only model accepts only a contiguous front, left, back, right prefix, so never give it front plus back without left. Left and right are the object's own left and right sides. For one picture, or pictures of different objects, use create_model_3d_from_image instead. Use list_offerings for actual quotes; do not assume one multiview model costs the same as another.",
           "ignore_user_model": true,
           "model_argument": "model",
@@ -9233,7 +9198,7 @@
           "name": "retexture_model",
           "canvas_source": "ignore",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
           "description": "Re-texture a finished 3D model of this session from an English text prompt, one reference image or both, as the selected service's inputs in list_offerings allow. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "retexture",
@@ -9361,21 +9326,17 @@
               "animation",
               "uv-unwrap",
               "resize",
-              "analyze-printability",
-              "repair-printability",
               "multi-color-print",
-              "rig-check",
               "mesh-segmentation",
               "mesh-completion",
               "model-split",
               "model-merge"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
           },
-          "description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Process one owned model with a paid step: a step that changes the model, its topology, its surface, its size or its file format, and costs the credits the tool result quotes. The zero-credit report steps are not here: printability analysis and rig-check are analyze_model steps (call analyze_model with step analyze-printability or step rig-check), so never call this tool for a report. This tool submits one Task for one step and counts as 1 3D step however many files it yields; a pure file-format change belongs to convert_model_format. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap may remove textures; resize requires one exact dimension; multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Before rigging a character that is not a plain biped humanoid, call analyze_model with step rig-check on it first and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -9393,16 +9354,13 @@
                   "animation",
                   "uv-unwrap",
                   "resize",
-                  "analyze-printability",
-                  "repair-printability",
                   "multi-color-print",
-                  "rig-check",
                   "mesh-segmentation",
                   "mesh-completion",
                   "model-split",
                   "model-merge"
                 ],
-                "description": "Declared processing operation. Check list_offerings for exact source, parameters, delivery and cost; print analysis/report/archive are not model previews. model-merge takes source_assets (2-64 models) instead of source_task_id."
+                "description": "Declared paid processing operation. Check list_offerings for exact source, parameters, delivery and cost; a report or print archive is not a model preview. model-merge takes source_assets (2-64 models) instead of source_task_id."
               },
               "source_task_id": {
                 "type": "string",
@@ -9562,10 +9520,7 @@
               "animation": "animation",
               "uv-unwrap": "uv-unwrap",
               "resize": "resize",
-              "analyze-printability": "analyze-printability",
-              "repair-printability": "repair-printability",
               "multi-color-print": "multi-color-print",
-              "rig-check": "rig-check",
               "mesh-segmentation": "mesh-segmentation",
               "mesh-completion": "mesh-completion",
               "model-split": "model-split",
@@ -9652,6 +9607,109 @@
           }
         },
         {
+          "name": "analyze_model",
+          "canvas_source": "ignore",
+          "selection_mask": "ignore",
+          "execution": {
+            "implementation_key": "generation.execute",
+            "effects": ["PAID_TASK"],
+            "scope": "session",
+            "domains": ["model-3d"],
+            "capabilities": [
+              "analyze-printability",
+              "rig-check"
+            ],
+            "idempotency": "required",
+            "cancellation": "task",
+            "agent_scope": "3d"
+          },
+          "description": "Analyze one owned model with a zero-credit report step and get a report back: analyze-printability (Meshy, on one of its own successful tasks or a saved self-contained GLB) or rig-check (Tripo, on a native Tripo text-to-3D or image-to-3D task of this session). Both steps only read the model: they change nothing, deliver a report instead of a model, and each declares 0 estimated credits, so the result quotes no cost and the session approval mode has nothing to decide for them. Use this tool only for such a report. Anything that changes the model, its topology, its surface, its size or its file format is a process_model step (a pure file-format change is convert_model_format), and a chain of paid steps is a plan_model_processing plan; never call this tool to make a change. Before rigging a character that is not a plain biped humanoid, run rig-check here first and pass the report's recommended type as the rig_type of the rigging step. A report is not a model preview: do not describe it as a 3D model, and a printability report is a diagnostic, not a guarantee that the model is printable. Check list_offerings for source constraints and exact parameters. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine).",
+          "ignore_user_model": true,
+          "capability": "analyze-printability",
+          "fallback_capability": "analyze-printability",
+          "pending_capability": "analyze-printability",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "offering_id": {"type": "string", "description": "Exact Offering ID for this step, only when the person chose one (on the choice card, by naming its provider or model, or by an earlier answer). Never pick one yourself."},
+              "use_default_offering": {"type": "boolean", "description": "Set true only when the person said any service or the default is fine; the first compatible Offering in Schema order then runs."},
+              "step": {
+                "type": "string",
+                "enum": [
+                  "analyze-printability",
+                  "rig-check"
+                ],
+                "description": "Declared report operation. Check list_offerings for exact source and parameters. rig-check takes only a native Tripo text-to-3D or image-to-3D task; analyze-printability takes one of its own Meshy tasks or a saved model file."
+              },
+              "source_task_id": {
+                "type": "string",
+                "description": "Task ID from list_session_models. A model handle such as @model2 (or @selected for the selected model) is accepted instead."
+              },
+              "source_asset_id": {
+                "type": "string",
+                "description": "Optional owned saved model asset of source_task_id; active Harness binds its uploaded source on the server."
+              }
+            },
+            "required": [
+              "step"
+            ],
+            "additionalProperties": false
+          },
+          "processing": {
+            "source_task_argument": "source_task_id",
+            "step_argument": "step",
+            "steps": {
+              "analyze-printability": "analyze-printability",
+              "rig-check": "rig-check"
+            },
+            "source_variant_preference": [
+              "glb",
+              "gltf",
+              "fbx",
+              "obj",
+              "stl"
+            ],
+            "messages": {
+              "source_required": "Provide source_task_id, a finished 3D task of this session (see list_session_models).",
+              "source_not_found": "No finished 3D model with that ID exists in this session. Call list_session_models and use one of its task IDs.",
+              "source_not_ready": "The source task has not finished or has no saved model file. Wait for it to finish, or choose another model.",
+              "source_incompatible": "No available {step} offering accepts this model as its source: rig-check takes only a native Tripo text-to-3D or image-to-3D task, and printability analysis takes one of its own Meshy tasks or a saved model file. Check list_session_models next_steps and list_offerings.",
+              "source_expired": "No available {step} offering can use this model: the provider no longer keeps its original task (past the provider's retention), and the offering takes no saved model file. Nothing was submitted. Tell the person why; the source must be generated again before this step.",
+              "step_unknown": "Unknown step \"{step}\". Use one of the declared step values.",
+              "argument_unsupported": "The argument \"{argument}\" is not supported by this step or by the offering that would run it. Remove it and retry.",
+              "reference_unsupported": "A reference image cannot be used with this step or service. Neither report step takes one.",
+              "no_offering": "No available offering can run {step} right now.",
+              "invalid_input": "The request was rejected before submission: {detail}",
+              "unavailable": "Model analysis is not available in this deployment.",
+              "service": {"refused": "Nothing was submitted. The service the person wants ({requested}) cannot run {step} on {source}: {reasons}. Do not call again without a service or with another service on your own. Tell the person this reason in one or two sentences and ask how to go on{options}. Call again only with what they choose.", "confirmation": "Nothing was submitted. The person asked for {requested}, but this call would run {step} on {source} with {service} ({cost}). {reasons}Do not switch services on your own: tell the person why {requested} cannot be used here and ask whether to use {service} instead{options}. Call again only after they answer.", "declined": "Nothing was submitted. The person said not to use {service}, but this call would run {step} on {source} with it ({cost}). Do not run it on your own: ask the person how to go on{options}. Call again only after they answer.", "reasons_sentence": "{reasons}. ", "too_large": "{service} accepts at most {limit} and the model is {size}", "media": "{service} does not take this kind of model file", "task": "{service} only takes {provider} {capabilities} results", "unavailable": "{service} is not available right now", "expired": "{service} needs the model's original task, which the provider no longer keeps (past its retention), and takes no saved model file", "options": "; workable options: {options}", "option_source": "{service} on {handle}, the model {selected} was made from ({cost})", "option_service": "{service} on {source} ({cost})", "reason_separator": "; ", "option_separator": ", or ", "cost_credits": "{total} credits", "cost_credits_extra": "{total} credits: {base} base + {extra} for {extra_for}", "cost_native": "{amount} {unit}", "no_service": "Nothing was submitted. No available service can run {step} on {source}: {reasons}.{prerequisite} Tell the person why in one or two sentences{options}. Do not call again with another model or service on your own; call again only with what the person chooses.", "prerequisite_runs": " {prerequisite} can run on {source} first ({services}) and its result can go into {step}; the Process panel offers the same two steps. Ask whether to do that; with a yes, call plan_model_processing with {prerequisite} then {step}.", "prerequisite_refused": " Doing {prerequisite} on {source} first is not possible either: {reasons}.", "option_prerequisite": "{prerequisite} with {service} on {handle}, the model {selected} was made from ({cost}), then {step}"}
+            },
+            "choice": {
+              "offering_argument": "offering_id",
+              "default_argument": "use_default_offering",
+              "content": "Several available services can run {step} on this model and the person has not chosen one. A choice card listing them (offering_choices) is now shown in the chat; nothing was submitted. End your reply with one short sentence asking the person to choose on the card; name services by their provider and model, never by offering_id. Do not call this tool again for this step until they answer; do not choose for them.",
+              "unknown_offering": "Nothing was submitted: the service in offering_id is not an available service for {step}. Do not choose another service yourself; ask the person which one to use (list_session_models next_steps lists the services that take each model).",
+              "unavailable_offering": "Nothing was submitted: the service in offering_id exists, but it is currently unavailable in this deployment for {step} (its service configuration is not active). Tell the person that service is unavailable right now. Do not recommend it, do not choose another service yourself, and do not run the step on a different service unless the person asks for one; ask which one to use (list_session_models next_steps lists the services that take each model)."
+            },
+            "source_asset_argument": "source_asset_id"
+          },
+          "result_attachment_kind": "model",
+          "result_asset_roles": [
+            "thumbnail"
+          ],
+          "idempotency_key_template": "chat:{session_id}:{call_id}",
+          "result_fields": {
+            "success": "success",
+            "task_id": "task_id",
+            "image_urls": "image_urls",
+            "parameters": "parameters",
+            "error": "error",
+            "warning": "warning",
+            "estimated_credits": "estimated_credits",
+            "reason": "reason",
+            "steps": "steps"
+          }
+        },
+        {
           "name": "plan_model_processing",
           "canvas_source": "ignore",
           "selection_mask": "ignore",
@@ -9662,15 +9720,14 @@
             "uv-unwrap",
             "resize",
             "analyze-printability",
-            "repair-printability",
             "multi-color-print",
             "mesh-segmentation",
             "mesh-completion",
             "model-split",
             "retexture",
             "format-conversion"
-          ],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          ],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. A single step is one process_model call, not a plan, and a report the person only wants is one analyze_model call; do not open a plan for one step. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run analyze_model with step rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "remesh",
           "fallback_capability": "remesh",
@@ -9688,7 +9745,6 @@
                 "uv-unwrap",
                 "resize",
                 "analyze-printability",
-                "repair-printability",
                 "multi-color-print",
                 "mesh-segmentation",
                 "mesh-completion",
@@ -9710,7 +9766,6 @@
               "uv-unwrap": "uv-unwrap",
               "resize": "resize",
               "analyze-printability": "analyze-printability",
-              "repair-printability": "repair-printability",
               "multi-color-print": "multi-color-print",
               "mesh-segmentation": "mesh-segmentation",
               "mesh-completion": "mesh-completion",
@@ -9769,8 +9824,8 @@
           "name": "convert_model_format",
           "canvas_source": "ignore",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["format-conversion"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Convert a finished 3D model of this session to another file format. A service that exports every format it supports in one run (Meshy Convert) bills once for all of them.",
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["format-conversion"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
+          "description": "Convert a finished 3D model of this session to another file format, and nothing else. Use it when the person wants the model in another format: a local conversion (static GLB to glTF, a platform GLB packed to a glTF bundle) costs 0 credits and runs at once, while a service conversion (Meshy Convert in one run for every format it supports, or an uploaded GLB to STL) costs the credits the tool result quotes and follows session approval. Do not use it for a step that changes geometry, topology, surface or size: those are process_model steps (a conversion inside a longer chain belongs to that chain's plan_model_processing plan). Do not use process_model for a pure format change either.",
           "ignore_user_model": true,
           "capability": "format-conversion",
           "fallback_capability": "format-conversion",
@@ -9854,7 +9909,6 @@
             "capabilities": [
               "text-to-motion"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -9946,7 +10000,6 @@
             "capabilities": [
               "image-to-splat"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -10025,7 +10078,7 @@
           "name": "create_multiview_images",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-multiview"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-multiview"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Create one Tripo four-view image Task from exactly one owned reference image. Keep the four returned views together in front, left, back, right order; do not substitute the older three-view recipe. The estimated native price is 10 Tripo credits.",
           "ignore_user_model": true,
           "require_unique_offering": true,
@@ -10047,7 +10100,7 @@
           "name": "edit_multiview_images",
           "canvas_source": "ignore",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["edit-multiview"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["edit-multiview"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Edit selected views of a successful Tripo four-view image Task from this same session. Give its public source Task ID and at least one view prompt. Only prompted views are generated, at 5 Tripo credits each; unedited views remain assets of the original Task.",
           "accept_reference_images": false,
           "ignore_user_model": true,
@@ -10080,7 +10133,6 @@
               "creative-lab-prototype",
               "creative-lab-build"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -10204,7 +10256,6 @@
             "capabilities": [
               "creative-lab-build"
             ],
-            "consent": "human",
             "idempotency": "required",
             "cancellation": "task",
             "agent_scope": "3d"
@@ -10259,7 +10310,7 @@
           "name": "create_concept_sketch",
           "canvas_source": "bind",
           "selection_mask": "ignore",
-          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+          "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
           "description": "Draw one low-cost 2D concept sketch for an open request. Call it several times in the same reply (the Product Schema declares how many) to offer visibly different directions, each with its own English prompt that names the style, medium and key visual differences. Without references it draws from text; with reference_handles it keeps the referenced subject. After drawing, open an ask_choice card of the concept_direction kind whose options carry each sketch's handle and the exact refine_image arguments that continue it. The Product Schema may override cheap parameters per Offering; a model that declares none of them is used as is.",
           "require_user_model": true,
           "cross_domain_model_fallback": true,
@@ -10681,6 +10732,7 @@
         "default_mode": "auto",
         "modes": ["auto", "budget", "manual"],
         "manual_approval_capabilities": ["text-to-3d", "image-to-3d", "image-to-splat", "retexture"],
+        "manual_credits_threshold": 20,
         "budget": {
           "max_credits": 20000,
           "max_steps": 12,
@@ -10756,7 +10808,7 @@
             {
               "id": "manual",
               "label": "严格（逐步批准）",
-              "description": "严格（逐步批准）方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡，等用户在卡片上批准后才执行。2D 步骤、重拓扑、绑骨、动画按策略自动批准，不出卡。任何步骤只要会额外消耗积分（例如额外导出格式、Tripo 的附加费用），即使它本来自动批准，也要在批准卡上由用户批准。"
+              "description": "严格（逐步批准）方式下，文生 3D、图生 3D、Gaussian Splat 生成、换贴图这几类步骤会先出批准卡，等用户在卡片上批准后才执行。单步预计积分达到服务端阈值的步骤同样先出批准卡，不论能力类别，所以重拓扑、绑骨、分割、补面这类加工步骤通常也要批准；具体阈值由服务端 Schema 声明，不要猜数字。2D 步骤、动画、格式转换这类单步积分较低的步骤按策略自动批准，不出卡。任何步骤只要会额外消耗积分（例如额外导出格式、Tripo 的附加费用），即使它本来自动批准，也要在批准卡上由用户批准。"
             }
           ]
         }
@@ -12043,7 +12095,7 @@
             "description": "分析静态 GLB 并生成可打印性诊断报告；报告不保证模型可打印。",
             "group": "common",
             "capability": "analyze-printability",
-            "tool_name": "process_model",
+            "tool_name": "analyze_model",
             "tool_arguments": {
               "step": "analyze-printability"
             }
@@ -12054,10 +12106,6 @@
             "description": "Meshy Repair Printability；候选待真实端点与完整交付验收，当前停用。会移除原纹理。",
             "group": "common",
             "capability": "repair-printability",
-            "tool_name": "process_model",
-            "tool_arguments": {
-              "step": "repair-printability"
-            },
             "unavailable_reason": "该候选尚待真实端点、费用与完整产物交付验收，当前未启用。"
           },
           {
@@ -12077,7 +12125,7 @@
             "description": "检查原生 Tripo 模型是否适合绑骨；只返回报告，不执行绑骨。",
             "group": "common",
             "capability": "rig-check",
-            "tool_name": "process_model",
+            "tool_name": "analyze_model",
             "tool_arguments": {
               "step": "rig-check"
             },
@@ -12130,7 +12178,6 @@
           "list_offerings",
           "list_session_models",
           "get_task",
-          "observe_task",
           "get_processing_plan",
           "update_session_notes",
           "inspect_model",
@@ -16970,7 +17017,6 @@
                   "model-3d"
                 ],
                 "capabilities": [],
-                "consent": "none",
                 "idempotency": "none",
                 "cancellation": "context",
                 "agent_scope": "utility"
@@ -17002,7 +17048,6 @@
                   "model-3d"
                 ],
                 "capabilities": [],
-                "consent": "none",
                 "idempotency": "none",
                 "cancellation": "context",
                 "agent_scope": "utility"
@@ -17033,7 +17078,6 @@
                   "model-3d"
                 ],
                 "capabilities": [],
-                "consent": "none",
                 "idempotency": "none",
                 "cancellation": "context",
                 "agent_scope": "utility"
@@ -21721,19 +21765,19 @@
             "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop: either stop waiting and let the task keep running in the background (this turn ends, the task is not cancelled, and the result shows in the task center when it finishes), or stop and cancel the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
             "chat.agent.background_wait.turn_content": "Stopped waiting. The task keeps running in the background; when it finishes, see the result in the task center. If a three-view task was submitted in the same turn, it is not cancelled either; see its progress or continue the remaining views on the three-view card.",
             "chat.agent.background_wait.unavailable_message": "This turn cannot continue in the background right now: that is only possible while a submitted generation task is queued at the provider or has been running for a while. Keep waiting, or stop and cancel the task.",
-            "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task or observe_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",
+            "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",
             "chat.agent.background_wait.task_line_template": "- task_id={task_id}, capability={capability}, model={model}, status={status}",
             "chat.agent.background_wait.upstream_queued_status": " (queued at the provider)",
-            "chat.agent.refetch_started_content": "the accepted upstream result of the failed task is being fetched again as task {task_id}: nothing was submitted for generation and nothing is charged. Tell the user so, follow {task_id} with observe_task, and when it succeeds present its result as the earlier generation recovered. Do not call recover_task_result again for the same task and do not resubmit the generation",
+            "chat.agent.refetch_started_content": "the accepted upstream result of the failed task is being fetched again as task {task_id}: nothing was submitted for generation and nothing is charged. Tell the user so, follow {task_id} with get_task, and when it succeeds present its result as the earlier generation recovered. Do not call recover_task_result again for the same task and do not resubmit the generation",
             "chat.agent.refetch_unavailable_content.not_applicable": "this task did not fail after its upstream result was accepted, so there is nothing to fetch again. Do not call recover_task_result for it",
             "chat.agent.refetch_unavailable_content.not_supported": "this model's provider handed over its result only once, so it cannot be fetched again. Tell the user plainly; a new generation would charge again and needs their explicit decision",
             "chat.agent.refetch_unavailable_content.expired": "the provider no longer keeps this result (past its retention period), so it cannot be fetched again. Tell the user plainly; a new generation would charge again and needs their explicit decision",
             "chat.agent.refetch_unavailable_content.provider_unavailable": "the provider of this task is not configured right now, so its result cannot be fetched again at the moment. Tell the user to try again later or contact the administrator; do not resubmit the generation",
             "chat.agent.refetch_unavailable_content.repeated_failure": "fetching this result again already failed for exactly the same reason as the task itself ({cause}). A refetch reuses the settings the task was generated with and the same provider result, so another try would fail the same way; it is no longer offered. Tell the user plainly why the result cannot be recovered; a new generation would charge again and needs their explicit decision. Do not call recover_task_result again for this task",
-            "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task or observe_task on it), and do not call recover_task_result again for this task",
+            "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task on it), and do not call recover_task_result again for this task",
             "chat.agent_scope.mock_refusal": "The current mode does not allow this request (it needs {tool}); this step is currently unavailable and cannot be done.",
-            "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
-            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=process_model].description": "Process one owned model with a paid step: a step that changes the model, its topology, its surface, its size or its file format, and costs the credits the tool result quotes. The zero-credit report steps are not here: printability analysis and rig-check are analyze_model steps (call analyze_model with step analyze-printability or step rig-check), so never call this tool for a report. This tool submits one Task for one step and counts as 1 3D step however many files it yields; a pure file-format change belongs to convert_model_format. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap may remove textures; resize requires one exact dimension; multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Before rigging a character that is not a plain biped humanoid, call analyze_model with step rig-check on it first and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+            "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. A single step is one process_model call, not a plan, and a report the person only wants is one analyze_model call; do not open a plan for one step. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run analyze_model with step rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=refine_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",

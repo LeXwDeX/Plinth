@@ -733,7 +733,7 @@ const minimalApplication = `"application":{
 		},
 		"tools":[{
 			"name":"refine_image","description":"configured tool","canvas_source":"bind",
-			"execution":{"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
+			"execution":{"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
 			"capability":"text-to-image",
 			"fallback_capability":"text-to-image",
 			"pending_capability":"image-to-image",

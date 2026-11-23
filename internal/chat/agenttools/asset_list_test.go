@@ -81,3 +81,51 @@ func TestSubmitAssetListItemDispatchesToTheService(t *testing.T) {
 		t.Fatalf("unwired asset list item tool = %+v, %v", result, err)
 	}
 }
+
+// #494: a turn frozen while submit_asset_list_item was still offered can name
+// it after the Catalog stopped injecting it. The executor answers the Schema's
+// tool-unavailable copy, names the called tool and runs nothing. Propose and
+// read need no run, so the same Catalog keeps them dispatched.
+func TestAssetListToolsRefuseWithSchemaCopyWithoutExecution(t *testing.T) {
+	called := ""
+	executor, err := New(Config{
+		Params: agentparams.NewStore(), Generate: &exactPendingGenerate{},
+		AssetListUnavailable: "工具 {tool} 本回合不可用，没有执行。",
+		ProposeAssetList: func(context.Context, chat.ToolCommand) (chat.ToolResult, error) {
+			called = ToolProposeAssetList
+			return chat.ToolResult{AgentContent: "{}"}, nil
+		},
+		SubmitAssetListItem: func(context.Context, chat.ToolCommand) (chat.ToolResult, error) {
+			called = ToolSubmitAssetListItem
+			return chat.ToolResult{AgentContent: "{}"}, nil
+		},
+		ReadAssetList: func(context.Context, chat.ToolCommand) (chat.ToolResult, error) {
+			called = ToolGetAssetList
+			return chat.ToolResult{AgentContent: "{}"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
+		Call: agents.ToolCall{ID: "call-submit", Name: ToolSubmitAssetListItem, Arguments: json.RawMessage(`{}`)},
+	}, nil)
+	if err != nil || !result.NoSubmission ||
+		result.Error != "工具 "+ToolSubmitAssetListItem+" 本回合不可用，没有执行。" {
+		t.Fatalf("%s = %+v, %v", ToolSubmitAssetListItem, result, err)
+	}
+	if called != "" {
+		t.Fatalf("the refused completion tool still ran %s", called)
+	}
+	for _, name := range []string{ToolProposeAssetList, ToolGetAssetList} {
+		called = ""
+		result, err := executor.Execute(context.Background(), chat.ToolCommand{
+			OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
+			Call: agents.ToolCall{ID: "call-" + name, Name: name, Arguments: json.RawMessage(`{}`)},
+		}, nil)
+		if err != nil || result.Error != "" || called != name {
+			t.Fatalf("%s = %+v called=%q err=%v", name, result, called, err)
+		}
+	}
+}

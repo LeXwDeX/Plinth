@@ -231,3 +231,26 @@ func TestRefusedInputReachesTheAgentAsAToolFailure(t *testing.T) {
 		t.Fatal("an unavailable store must stay an error")
 	}
 }
+
+// #490: manual mode cards a step by its frozen credit estimate even when the
+// capability is not listed. The harness offering estimates 7 credits, so a
+// threshold above that leaves the step to the capability list, and a threshold at
+// it sends the step to a person.
+func TestAgentToolManualModeCardsAStepByItsCredits(t *testing.T) {
+	executor, command, gateway, _ := policyHarnessConfigured(t, sessionMode{mode: "manual"},
+		"refine_image", "text-to-image", func(service *executiongrant.Service) {
+			service.Policy = service.Policy.WithCreditsThreshold(10)
+		})
+	result, err := executor.Execute(context.Background(), command, nil)
+	if err != nil || result.Suspend || gateway.submitCount != 1 {
+		t.Fatalf("manual step under the threshold: %+v submits=%d err=%v", result, gateway.submitCount, err)
+	}
+	executor, command, gateway, _ = policyHarnessConfigured(t, sessionMode{mode: "manual"},
+		"refine_image", "text-to-image", func(service *executiongrant.Service) {
+			service.Policy = service.Policy.WithCreditsThreshold(7)
+		})
+	result, err = executor.Execute(context.Background(), command, nil)
+	if err != nil || result.Suspend || !result.NoSubmission || gateway.submitCount != 0 {
+		t.Fatalf("manual step at the threshold must wait: %+v submits=%d err=%v", result, gateway.submitCount, err)
+	}
+}

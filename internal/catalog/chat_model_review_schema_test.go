@@ -63,9 +63,9 @@ func TestShippedModelReviewToolsAreReadOnlySessionBound3D(t *testing.T) {
 		if len(execution.Domains) != 1 || execution.Domains[0] != "model-3d" || len(execution.Capabilities) != 0 {
 			t.Errorf("%s domains/capabilities = %v/%v", tool.Name, execution.Domains, execution.Capabilities)
 		}
-		if execution.Consent != "none" || execution.Idempotency != "none" || execution.Cancellation != "none" {
-			t.Errorf("%s consent/idempotency/cancellation = %q/%q/%q",
-				tool.Name, execution.Consent, execution.Idempotency, execution.Cancellation)
+		if execution.Idempotency != "none" || execution.Cancellation != "none" {
+			t.Errorf("%s idempotency/cancellation = %q/%q",
+				tool.Name, execution.Idempotency, execution.Cancellation)
 		}
 		if strings.TrimSpace(tool.Description) == "" {
 			t.Errorf("%s has no description", tool.Name)

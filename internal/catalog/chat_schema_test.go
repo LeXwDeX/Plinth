@@ -325,6 +325,13 @@ func TestApprovalPolicyValidationRejectsUnsafeDeclarations(t *testing.T) {
 		approvalPolicyWithPrompt(validApprovalPrompt)+",\n      "))); err != nil {
 		t.Fatalf("the minimal policy fixture is rejected: %v", err)
 	}
+	// #490: a declared cost threshold loads, and a policy without one (every
+	// Catalog written before it) still loads with the rule off.
+	withThreshold := approvalPolicyWithPrompt(validApprovalPrompt)[:len(approvalPolicyWithPrompt(validApprovalPrompt))-1] +
+		`, "manual_credits_threshold": 20}`
+	if _, err := catalog.Load(bytes.NewReader(replaceRange(source, start, end, withThreshold+",\n      "))); err != nil {
+		t.Fatalf("a declared credit threshold is rejected: %v", err)
+	}
 	promptWith := func(from, to string) string { return strings.Replace(validApprovalPrompt, from, to, 1) }
 	for name, testCase := range map[string]struct{ replacement, detail string }{
 		"no modes":     {`"approval_policy": {"default_mode": "manual", "modes": [], "manual_approval_capabilities": []}`, "modes"},
@@ -341,6 +348,9 @@ func TestApprovalPolicyValidationRejectsUnsafeDeclarations(t *testing.T) {
 			`"approval_policy": {"default_mode": "manual", "modes": ["auto", "manual"], "manual_approval_capabilities": []}`, "context_template"},
 		"template without mode": {
 			approvalPolicyWithPrompt(promptWith("{mode}: ", "")), "{mode}"},
+		"negative credit threshold": {
+			`"approval_policy": {"default_mode": "manual", "modes": ["auto", "manual"], "manual_approval_capabilities": [], "manual_credits_threshold": -1}`,
+			"manual_credits_threshold"},
 		"template without description": {
 			approvalPolicyWithPrompt(promptWith("{description}", "")), "{description}"},
 		"mode without label": {

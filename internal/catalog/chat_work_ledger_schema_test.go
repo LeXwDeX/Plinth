@@ -27,7 +27,7 @@ func TestDefaultWorkLedgerDeclarationIsValid(t *testing.T) {
 			declared = true
 			if tool.Execution.ImplementationKey != "ledger.read" ||
 				len(tool.Execution.Effects) != 1 || tool.Execution.Effects[0] != "READ" ||
-				tool.Execution.Consent != "none" || tool.Execution.AgentScope != "utility" {
+				tool.Execution.AgentScope != "utility" {
 				t.Fatalf("tool execution = %+v", tool.Execution)
 			}
 		}

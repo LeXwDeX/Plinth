@@ -14,7 +14,10 @@ import (
 // published), its enabled built-in tools, and the tools of the MCP presets the
 // administrator enabled (#445). A preset a new configuration does not enable
 // by default is simply absent here; a published configuration that selected
-// it keeps it.
+// it keeps it. The production list's completion tool is the one exception a
+// published selection cannot keep: without an enabled asset_list.execution it is
+// left out of every turn's table (#494); proposing and reading a list need no
+// run and stay in.
 func agentTurnConfiguration(
 	ctx context.Context,
 	owner string,
@@ -36,7 +39,7 @@ func agentTurnConfiguration(
 			frozen.Tools = append(frozen.Tools, tool)
 		}
 	}
-	for _, tool := range application.Chat.AgentTools {
+	for _, tool := range withoutAssetListExecutionTools(application.Chat.AgentTools, application.AssetListExecutionEnabled()) {
 		if enabled[tool.Name] {
 			frozen.AgentTools = append(frozen.AgentTools, tool)
 		}

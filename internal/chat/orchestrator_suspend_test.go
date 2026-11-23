@@ -1,6 +1,6 @@
 package chat_test
 
-// AGT-12 挂起/恢复回归：request_consent 不再在 worker 内阻塞轮询，
+// AGT-12 挂起/恢复回归：挂起的工具不再在 worker 内阻塞轮询，
 // 而是登记挂起立即释放 worker；用户决定/超时/停止唤醒后按落库计划
 // 重放续跑。以下测试覆盖 worker 释放、四条续跑路径与幂等。
 
@@ -16,13 +16,11 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
-	"github.com/LeXwDeX/Plinth/internal/chat/agentparams"
-	"github.com/LeXwDeX/Plinth/internal/chat/agenttools"
 	"github.com/LeXwDeX/Plinth/internal/harness"
 	"github.com/LeXwDeX/Plinth/internal/harness/resolve"
 )
 
-// suspendConsentToolExecutor 把 request_consent 实现为挂起标记，
+// suspendConsentToolExecutor 把 wait_for_approval 实现为挂起标记，
 // 其余工具回执空内容。
 type suspendConsentToolExecutor struct {
 	mu                sync.Mutex
@@ -260,7 +258,7 @@ func (e *suspendConsentToolExecutor) Execute(
 	command chat.ToolCommand,
 	_ func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
-	if command.Call.Name != "request_consent" {
+	if command.Call.Name != "wait_for_approval" {
 		return chat.ToolResult{}, nil
 	}
 	e.mu.Lock()
@@ -336,6 +334,21 @@ func suspendSchema(t *testing.T) catalog.ChatSchema {
 	schema.Agent.WorkerCount = 1
 	schema.Agent.QueueSize = 8
 	schema.Agent.MaxToolCallsPerReply = 3
+	// These tests drive the generic suspend/resume path through a tool the
+	// test executors make suspend. request_consent was removed (#491), so the
+	// name is declared here instead of borrowed from the product catalog.
+	schema.AgentTools = append(schema.AgentTools, catalog.ChatAgentToolSchema{
+		Name: "wait_for_approval",
+		Execution: catalog.ChatToolExecutionSchema{
+			ImplementationKey: "test.suspend",
+			Effects:           []string{"SESSION_WRITE"},
+			Scope:             "session",
+			Domains:           []string{"image"},
+			AgentScope:        "utility",
+		},
+		Description: "Suspend the turn until the test decides.",
+		Parameters:  json.RawMessage(`{"type":"object"}`),
+	})
 	return schema
 }
 
@@ -397,7 +410,7 @@ func testOrchestratorConsentSuspendsAndReleasesWorker(t *testing.T, recoverSuspe
 			Content: "requesting consent",
 			ToolCalls: []agents.ToolCall{{
 				ID:        "call-consent-a",
-				Name:      "request_consent",
+				Name:      "wait_for_approval",
 				Arguments: json.RawMessage(`{"reason":"paint"}`),
 			}},
 		},
@@ -526,9 +539,9 @@ func testOrchestratorConsentSuspendsAndReleasesWorker(t *testing.T, recoverSuspe
 		t.Fatalf("session B did not reach its done state: %q, %v", turn.State, err)
 	}
 
-	// 唤醒 A：重放 request_consent 返回挂起标记——但决定已写入时
+	// 唤醒 A：重放挂起工具返回挂起标记——但决定已写入时
 	// executor 层直接放行；本 fake 始终挂起，因此为让 A 完成需要
-	// 走真实 agenttools 组合。这里改为验证幂等唤醒语义后以停止收束。
+	// 真实工具组合。这里改为验证幂等唤醒语义后以停止收束。
 	if !orchestrator.ResumeConsentWait("owner-a", sessionA.ID) {
 		t.Fatal("ResumeConsentWait reported no suspension")
 	}
@@ -572,7 +585,7 @@ func TestOrchestratorConsentTimeoutFinalizesWithWaiting(t *testing.T) {
 		initial: agents.Completion{
 			ToolCalls: []agents.ToolCall{{
 				ID:        "call-consent-t",
-				Name:      "request_consent",
+				Name:      "wait_for_approval",
 				Arguments: json.RawMessage(`{}`),
 			}},
 		},
@@ -645,7 +658,7 @@ func TestOrchestratorSuspensionBlocksSameSessionNewTurn(t *testing.T) {
 		initial: agents.Completion{
 			ToolCalls: []agents.ToolCall{{
 				ID:        "call-consent-s",
-				Name:      "request_consent",
+				Name:      "wait_for_approval",
 				Arguments: json.RawMessage(`{}`),
 			}},
 		},
@@ -711,7 +724,7 @@ func (e *cancelDuringConsentToolExecutor) Execute(
 	command chat.ToolCommand,
 	_ func(chat.ToolObservation) error,
 ) (chat.ToolResult, error) {
-	if command.Call.Name != "request_consent" {
+	if command.Call.Name != "wait_for_approval" {
 		return chat.ToolResult{}, nil
 	}
 	e.mu.Lock()
@@ -732,7 +745,7 @@ func TestOrchestratorStopRacingSuspensionFinalizesStopped(t *testing.T) {
 		initial: agents.Completion{
 			ToolCalls: []agents.ToolCall{{
 				ID:        "call-consent-race",
-				Name:      "request_consent",
+				Name:      "wait_for_approval",
 				Arguments: json.RawMessage(`{}`),
 			}},
 		},
@@ -779,120 +792,4 @@ func TestOrchestratorStopRacingSuspensionFinalizesStopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartTurn after raced stop: %v", err)
 	}
-}
-
-// 真实 agenttools 批准唤醒端到端：request_consent 登记挂起 → 写入
-// approved 决定 → ResumeConsentWait 重放读到决定 → 轮次继续（审查
-// R4 测试缺口：此前两层分开测，组合行为只在 dev-test 手工覆盖）。
-func TestOrchestratorApprovalWakeEndToEndWithRealAgentTools(t *testing.T) {
-	service := newChatService(t, newMemoryChatRepository())
-	schema := suspendSchema(t)
-	state := agentparams.NewStore()
-	tools, err := agenttools.New(agenttools.Config{
-		Params:                 agentparams.NewStore(),
-		Generate:               &wakeFakeGenerate{},
-		ConsentApprovedContent: "consent approved",
-		ConsentDeniedContent:   "consent denied",
-		ConsentWaitingContent:  "consent waiting",
-		ConsentBlockedContent:  "consent blocked",
-		ConsentRequiredContent: "consent required",
-		ConsentLimitContent:    "consent limit",
-		ConsentState:           state.Get,
-		ConsentClear: func(scope string) {
-			state.Delete(scope, agenttools.ConsentPendingKey,
-				agenttools.ConsentDecisionKey, agenttools.ConsentApprovedKey)
-		},
-		ConsentWaitTimeout: time.Minute,
-		Consent: func(command chat.ToolCommand, request json.RawMessage, _ json.RawMessage) error {
-			scope := agentparams.ScopeKey(command.OwnerID, command.SessionID)
-			state.Set(scope, map[string]json.RawMessage{
-				agenttools.ConsentPendingKey:  request,
-				agenttools.ConsentDecisionKey: json.RawMessage(`"pending"`),
-				agenttools.ConsentApprovedKey: json.RawMessage(`false`),
-			})
-			return nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	agent := &scriptedSuspendAgent{
-		initial: agents.Completion{
-			Content: "requesting approval",
-			ToolCalls: []agents.ToolCall{{
-				ID:        "e2e-consent-call",
-				Name:      "request_consent",
-				Arguments: json.RawMessage(`{"reason":"paint"}`),
-			}},
-		},
-		resume: []agents.Completion{{Content: " painted after approval"}},
-	}
-	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
-		Service: service,
-		Schema:  schema,
-		Model:   "configured-model",
-		Agent:   agent,
-		Tools:   tools,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() { _ = orchestrator.Run(ctx) }()
-	session, err := service.CreateSession(ctx, "owner-e2e", "E", "chat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	assistant := startTurnFor(t, service, "owner-e2e", session.ID, "draw")
-	if err := orchestrator.Schedule(ctx, chat.ProcessTurn{
-		OwnerID:            "owner-e2e",
-		SessionID:          session.ID,
-		AssistantMessageID: assistant,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && orchestrator.PendingConsentWaits() == 0 {
-		time.Sleep(2 * time.Millisecond)
-	}
-	if orchestrator.PendingConsentWaits() != 1 {
-		t.Fatal("turn did not suspend with real agenttools executor")
-	}
-	// 用户批准（与 HTTP handler 等价的写入）→ 唤醒。
-	scope := agentparams.ScopeKey("owner-e2e", session.ID)
-	t.Logf("DEBUG scope=%q stored=%v sessionID=%q", scope, state.Get(scope), session.ID)
-	state.Set(scope, map[string]json.RawMessage{
-		agenttools.ConsentDecisionKey: json.RawMessage(`"approved"`),
-	})
-	if !orchestrator.ResumeConsentWait("owner-e2e", session.ID) {
-		t.Fatal("ResumeConsentWait reported no suspension")
-	}
-	wakeDeadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(wakeDeadline) {
-		msg := lastAssistant(t, service, "owner-e2e", session.ID)
-		if strings.Contains(msg.Content, "painted after approval") {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	msg := lastAssistant(t, service, "owner-e2e", session.ID)
-	if !strings.Contains(msg.Content, "painted after approval") {
-		t.Fatalf("approval wake did not complete the turn: %q", msg.Content)
-	}
-	if orchestrator.PendingConsentWaits() != 0 {
-		t.Fatal("suspension not drained after completion")
-	}
-}
-
-// wakeFakeGenerate 是 agenttools.Config.Generate 的最小生成工具：
-// 批准后的重放路径不会真正执行到它（本轮以文本收尾），仅满足依赖。
-type wakeFakeGenerate struct{}
-
-func (*wakeFakeGenerate) Execute(
-	_ context.Context,
-	_ chat.ToolCommand,
-	_ func(chat.ToolObservation) error,
-) (chat.ToolResult, error) {
-	return chat.ToolResult{}, nil
 }

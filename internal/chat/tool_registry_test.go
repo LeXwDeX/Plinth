@@ -29,7 +29,6 @@ func TestToolRegistryUsesOnePolicyForDescriptionAndExecution(t *testing.T) {
 		// only a hint), as long as one of their capabilities can run.
 		"create_model_3d":            true,
 		"create_model_3d_from_image": true,
-		"request_consent":            true,
 		"list_session_models":        true,
 		// No retexture/rigging/format offering is available.
 		"retexture_model":      false,
@@ -143,7 +142,7 @@ func TestToolRegistryNarrowsTheTableToTheTurnPlan(t *testing.T) {
 	// retexture and refine both run, so a plan that refuses one of them still
 	// offers the other; the pinned Harness tool stays whatever the plan says.
 	plan := &TurnPlan{
-		Tools: []string{"request_consent"},
+		Tools: []string{"get_task"},
 		Domains: []TurnPlanDomain{
 			{Capability: "retexture", Conflict: &TurnPlanConflict{Kind: ModelConflictWorkspace}},
 			{Capability: "refine", OfferingID: "gpt-image/refine"},
@@ -156,7 +155,7 @@ func TestToolRegistryNarrowsTheTableToTheTurnPlan(t *testing.T) {
 	if !offered["refine_image"] {
 		t.Error("a capability the plan resolved lost its tool")
 	}
-	if !offered["request_consent"] {
+	if !offered["get_task"] {
 		t.Error("the plan's pinned tool is missing")
 	}
 	// A capability the plan only wants confirmed keeps its tool: the call is

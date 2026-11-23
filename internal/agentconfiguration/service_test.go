@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -515,4 +516,79 @@ func TestSystemSkillsAreNotPublishableOrPersonal(t *testing.T) {
 			t.Fatalf("%s: Validate accepted a published Skill", name)
 		}
 	}
+}
+
+// #494: the production-list tools stay declared in the Catalog while
+// application.asset_list.execution is off, but a default configuration must not
+// offer the completion tool: without a run no item reaches working. Proposing
+// and reading a list need no run and stay offered. Switching the section on
+// brings the completion tool back with no other change.
+func TestProductionListToolsStayOutOfADefaultConfigurationWithoutExecution(t *testing.T) {
+	ctx := context.Background()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	open := func(t *testing.T, application catalog.ApplicationSchema) *agentconfiguration.Service {
+		t.Helper()
+		repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = repository.Close() })
+		service, err := agentconfiguration.New(repository, application, skills, product.List(""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return service
+	}
+	declared := []string{"propose_asset_list", "get_asset_list", "submit_asset_list_item"}
+	off := product.Application()
+	for _, name := range declared {
+		if !slices.Contains(declaredToolNames(t, off), name) {
+			t.Fatalf("the shipped Catalog no longer declares %s", name)
+		}
+	}
+	offService := open(t, off)
+	management, err := offService.Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(toolNames(management.Tools), "submit_asset_list_item") ||
+		slices.Contains(management.Configuration.EnabledToolNames, "submit_asset_list_item") {
+		t.Fatal("submit_asset_list_item is offered although asset_list.execution is off")
+	}
+	for _, name := range []string{"propose_asset_list", "get_asset_list"} {
+		if !slices.Contains(toolNames(management.Tools), name) ||
+			!slices.Contains(management.Configuration.EnabledToolNames, name) {
+			t.Fatalf("%s is missing from a default configuration while asset_list.execution is off", name)
+		}
+	}
+	on := product.Application()
+	on.AssetList.Execution.Enabled = true
+	onManagement, err := open(t, on).Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range declared {
+		if !slices.Contains(toolNames(onManagement.Tools), name) ||
+			!slices.Contains(onManagement.Configuration.EnabledToolNames, name) {
+			t.Fatalf("%s is missing although asset_list.execution is on", name)
+		}
+	}
+}
+
+// declaredToolNames lists the Agent tool names the Schema declares, whatever
+// the deployment does with them.
+func declaredToolNames(t *testing.T, application catalog.ApplicationSchema) []string {
+	t.Helper()
+	names := make([]string, 0, len(application.Chat.AgentTools))
+	for _, tool := range application.Chat.AgentTools {
+		names = append(names, tool.Name)
+	}
+	return names
 }

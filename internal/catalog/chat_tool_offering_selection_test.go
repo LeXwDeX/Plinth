@@ -31,7 +31,7 @@ func TestCreativeLabAgentToolsDeclareTemplatesAndPairing(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, design := creativeLabTool(t, c, "create_creative_lab_design")
-	if design.OfferingArgument != "template" || !design.IgnoreUserModel || design.RequireUniqueOffering || design.Execution.Consent != "human" || design.Execution.AgentScope != "3d" {
+	if design.OfferingArgument != "template" || !design.IgnoreUserModel || design.RequireUniqueOffering || design.Execution.AgentScope != "3d" {
 		t.Fatalf("design tool contract = %+v", design)
 	}
 	var parameters struct {

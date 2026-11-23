@@ -129,7 +129,7 @@ func validateAgentConfiguration(schema AgentConfigurationSchema) error {
 			names[tool.Name] = true
 			count++
 			execution := tool.Execution
-			if execution.ImplementationKey != "mcp/read" || len(execution.Effects) != 1 || execution.Effects[0] != "READ" || execution.Scope != "session" || execution.Consent != "none" || execution.Idempotency != "none" || (execution.Cancellation != "context" && execution.Cancellation != "none") || len(execution.Capabilities) != 0 {
+			if execution.ImplementationKey != "mcp/read" || len(execution.Effects) != 1 || execution.Effects[0] != "READ" || execution.Scope != "session" || execution.Idempotency != "none" || (execution.Cancellation != "context" && execution.Cancellation != "none") || len(execution.Capabilities) != 0 {
 				return fmt.Errorf("MCP tools must be read-only session tools")
 			}
 			if err := validateToolAgentScope(tool.Name, execution); err != nil {

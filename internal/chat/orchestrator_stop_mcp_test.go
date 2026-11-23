@@ -31,7 +31,6 @@ func mcpReadOnlyTool(name string) catalog.ChatAgentToolSchema {
 			ImplementationKey: "mcp/read",
 			Effects:           []string{"READ"},
 			Scope:             "session",
-			Consent:           "none",
 			Idempotency:       "none",
 			Cancellation:      "context",
 			AgentScope:        "utility",

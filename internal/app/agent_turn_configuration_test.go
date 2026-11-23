@@ -85,3 +85,77 @@ func TestAgentTurnConfigurationDoesNotRepeatBuiltInReadsByDefault(t *testing.T) 
 		}
 	}
 }
+
+// #494: the production-list tools are declared in the shipped Catalog but the
+// execution section that could advance a list is off, so the default tool table
+// must not offer the completion tool; proposing and reading a list need no run
+// and stay. Turning execution on puts the completion tool back with no other
+// change.
+func TestAgentTurnConfigurationOffersAssetListToolsOnlyWithExecution(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := product.Application()
+	if off.AssetListExecutionEnabled() {
+		t.Fatal("the shipped Catalog already enables asset_list.execution")
+	}
+	on := product.Application()
+	on.AssetList.Execution.Enabled = true
+	if !on.AssetListExecutionEnabled() {
+		t.Fatal("the switched execution section does not read as enabled")
+	}
+	mcpService, err := buildWorkspaceMCP(product, &generation.Module{}, &chat.Service{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := func(t *testing.T, application catalog.ApplicationSchema) map[string]bool {
+		t.Helper()
+		repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer repository.Close()
+		service, err := agentconfiguration.New(repository, application, skills, product.List(""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		frozen, err := agentTurnConfiguration(context.Background(), "owner-a", service, application, mcpService)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := make(map[string]bool, len(frozen.AgentTools))
+		for _, tool := range frozen.AgentTools {
+			result[tool.Name] = true
+		}
+		return result
+	}
+	// Only the completion tool needs a run: it is the one the default table
+	// must not offer while asset_list.execution is off.
+	if names(t, off)["submit_asset_list_item"] {
+		t.Fatal("the default tool table still offers submit_asset_list_item while asset_list.execution is off")
+	}
+	// Proposing and reading a list need no run, so the default table keeps them.
+	for _, name := range []string{"propose_asset_list", "get_asset_list"} {
+		if !names(t, off)[name] {
+			t.Fatalf("the default tool table lost %s while asset_list.execution is off", name)
+		}
+	}
+	// Turning execution on brings the completion tool back with no other change.
+	enabled := names(t, on)
+	for _, name := range []string{"propose_asset_list", "get_asset_list", "submit_asset_list_item"} {
+		if !enabled[name] {
+			t.Fatalf("the tool table lost %s although asset_list.execution is on", name)
+		}
+	}
+	// An unrelated Agent tool is untouched by the gate, in both directions.
+	for _, application := range []catalog.ApplicationSchema{off, on} {
+		if !names(t, application)["get_task"] {
+			t.Fatal("the gate removed an unrelated Agent tool")
+		}
+	}
+}
