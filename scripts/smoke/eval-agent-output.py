@@ -92,7 +92,7 @@ def answer_choice(live, session, card, purpose, domain, model, stats):
     if pick is None:
         return False
     status, _ = send_message(live, session, "按这个用途继续。", domain, model, stats,
-                             choiceAnswer={"choice_id": card["id"], "option_id": pick["id"]})
+                             extra={"choiceAnswer": {"choice_id": card["id"], "option_id": pick["id"]}})
     return status in (200, 201, 202)
 
 
@@ -573,7 +573,7 @@ def scoring_markdown(packet):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    _shape, refusal = upstream_shape.resolve("live-only", "--live" in argv, os.environ)
+    shape, refusal = upstream_shape.resolve("chat-live", "--live" in argv, os.environ)
     if refusal:
         print(refusal, file=sys.stderr)
         return 2
@@ -623,7 +623,7 @@ def main(argv=None):
     rubric = {"version": quality.load_json(rubric_path).get("version"), "sha256": quality.file_sha256(rubric_path)}
     summary = quality.summarize(cases, "output-live", revision, dirty,
                                 {"path": os.path.relpath(path, REPO), "version": data["version"], "sha256": digest},
-                                rubric=rubric)
+                                rubric=rubric, shape=shape)
     os.makedirs(args.report, exist_ok=True)
     packet_path, sheet_path = write_scoring(summary, rubric_path, requests, args.report, args.scores)
     json_path, markdown_path = quality.write_report(summary, args.report, "agent-quality-output")

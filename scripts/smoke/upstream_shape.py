@@ -21,6 +21,7 @@ as live, so a script never assumes the fake and calls a real upstream.
 
   upstream_shape.py fake-default [--live]   # L1: fake target runs; live target needs both switches
   upstream_shape.py live-only [--live]      # L2-L5: real upstream only, both switches, refuses a fake target
+  upstream_shape.py chat-live [--live]      # chat-only measures: live or mixed, refuses a fake chat target
   upstream_shape.py shape                   # print the target shape only (no gate)
 
 Prints the shape (fake, mixed or live) on success.
@@ -75,6 +76,16 @@ def resolve(kind, live_flag, environ):
                            f"(shape {shape}); release dev-test with --live-upstream and {ACK_VARIABLE}=1 first "
                            "(user consent required)")
         return shape, live_switch_error(live_flag, environ)
+    if kind == "chat-live":
+        # The chat side must be a real gateway; the generation side may be fake.
+        # A script that only measures how the model decides (the prompt and tool
+        # table it sees, the turns it takes, the questions it asks) is comparable
+        # across live and mixed, while its artifact metrics are not (#407).
+        if shape == "fake":
+            return shape, ("refusing to run: the target runs the fake chat model "
+                           f"(shape {shape}); release dev-test with --live-chat or --live-upstream and "
+                           f"{ACK_VARIABLE}=1 first (user consent required)")
+        return shape, live_switch_error(live_flag, environ)
     raise ValueError(f"unknown gate {kind}")
 
 
@@ -84,7 +95,7 @@ def main(argv=None, environ=None):
     if argv == ["shape"]:
         print(target_shape(environ))
         return 0
-    if not argv or argv[0] not in ("fake-default", "live-only") or any(a != LIVE_FLAG for a in argv[1:]):
+    if not argv or argv[0] not in ("fake-default", "live-only", "chat-live") or any(a != LIVE_FLAG for a in argv[1:]):
         print(__doc__, file=sys.stderr)
         return 2
     shape, refusal = resolve(argv[0], LIVE_FLAG in argv[1:], environ)
