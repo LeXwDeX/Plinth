@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-23.487.2",
+    "revision": "2026-11-23.487.3",
     "terminology": {
       "user_facing": [
         {
@@ -35264,6 +35264,11 @@
           }
         }
       ],
+      "post_success": {
+        "observe": true,
+        "interval_seconds": 5,
+        "deadline_seconds": 7200
+      },
       "asset_hosts": [
         "assets.meshy.ai",
         "cdn.meshy.ai"

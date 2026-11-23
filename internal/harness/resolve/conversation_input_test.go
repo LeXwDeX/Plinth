@@ -26,13 +26,18 @@ func referenceImageSelection(t *testing.T, s Service, offeringID, operation stri
 	return selection
 }
 
-// #187 D: a required reference image has no place in the saved settings; it
-// comes from the conversation, so it neither blocks the operation nor hides
-// its tool. The tool contract asks for an image handle of this chat.
-func TestRequiredReferenceImageComesFromTheConversation(t *testing.T) {
-	for _, tc := range []struct{ offering, operation string }{
-		{"hyper3d/texture/local-model", "retexture"},
-		{"hyper3d/bang/local-model", "mesh-segmentation"},
+// #187 D: a reference image has no place in the saved settings; it comes from
+// the conversation, so it neither blocks the operation nor hides its tool. The
+// tool contract asks for an image handle of this chat. Texture requires the
+// picture; Bang's is optional (material None needs no picture), and both still
+// come from the conversation.
+func TestReferenceImageComesFromTheConversation(t *testing.T) {
+	for _, tc := range []struct {
+		offering, operation string
+		required            bool
+	}{
+		{"hyper3d/texture/local-model", "retexture", true},
+		{"hyper3d/bang/local-model", "mesh-segmentation", false},
 	} {
 		t.Run(tc.offering, func(t *testing.T) {
 			s, store, g := fixture(t)
@@ -68,8 +73,8 @@ func TestRequiredReferenceImageComesFromTheConversation(t *testing.T) {
 			if !ok || field.Type != "string" || field.Pattern == "" || field.Description == "" {
 				t.Fatalf("reference image field = %+v (%v) in %s", field, ok, snapshot.ToolParameters)
 			}
-			if !slices.Contains(contract.Properties.Parameters.Required, "reference_image") {
-				t.Fatalf("required reference image is optional in the tool: %s", snapshot.ToolParameters)
+			if required := slices.Contains(contract.Properties.Parameters.Required, "reference_image"); required != tc.required {
+				t.Fatalf("required reference image = %v, want %v in %s", required, tc.required, snapshot.ToolParameters)
 			}
 			if store.writes != 1 || g.paid != 0 {
 				t.Fatal("readiness created work")

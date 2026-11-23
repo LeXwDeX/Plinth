@@ -11,7 +11,7 @@ import (
 // remain Schema copy and are translated.
 func TestFrozenQuoteUnitLabelStaysProviderData(t *testing.T) {
 	server, _, english := localizedTestServer(t)
-	const unit = "即梦 AI"
+	const unit = "火山方舟 Seedream"
 	translated := english.OfferingTexts[unit]
 	if translated == "" || translated == unit {
 		t.Fatalf("fixture unit label is not translated by the dictionary: %q", translated)
