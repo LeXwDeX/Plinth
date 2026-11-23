@@ -6961,14 +6961,14 @@
         "consent_duplicate_content": "an approval card for exactly this operation (same tool, same input, same source assets) already exists and is still waiting for the user; no second card was created and nothing was submitted. Tell the user it is waiting on that card and do not call the tool again for it",
         "consent_waiting_status": "已创建批准卡，等你在卡片上批准后才会执行；现在还没有提交，也没有开始。",
         "consent_recharge_content": "nothing was submitted: earlier in this session task {task_id} failed after the upstream had already finished and charged, and its result was not stored, so a new generation of the same kind charges again. This step now waits for the user's explicit decision on its approval card whatever the session approval mode is, and the card says the earlier attempt was already charged and approving charges again. Call get_task on {task_id}: when its result_recovery.available is true, the earlier result can be fetched again at no charge with recover_task_result, so offer that first and tell the user the card is only needed if they want a new generation; otherwise tell them why it cannot be fetched again. Tell the user plainly that approving the card charges again and that not approving costs nothing, and do not call the generation tool again for it",
-        "refetch_started_content": "失败任务已被上游受理的结果正在作为任务 {task_id} 重新取回：没有提交新的生成，也不会再次扣费。请如实告诉用户，用 observe_task 跟进 {task_id}，成功后将结果作为先前生成的结果恢复并展示。不要对同一任务再次调用 recover_task_result，也不要重新提交生成",
+        "refetch_started_content": "失败任务已被上游受理的结果正在作为任务 {task_id} 重新取回：没有提交新的生成，也不会再次扣费。请如实告诉用户，用 get_task 跟进 {task_id}，成功后将结果作为先前生成的结果恢复并展示。不要对同一任务再次调用 recover_task_result，也不要重新提交生成",
         "refetch_unavailable_content": {
           "not_applicable": "这个任务没有在上游已受理结果后失败，没有可重新取回的结果。不要为它调用 recover_task_result",
           "not_supported": "这个模型的供应商只交付一次结果，无法重新取回。请如实告诉用户；重新生成会再次扣费，需要用户明确决定",
           "expired": "供应商已不再保留这个结果（超过保留期），无法重新取回。请如实告诉用户；重新生成会再次扣费，需要用户明确决定",
           "provider_unavailable": "这个任务的供应商当前未配置，暂时无法重新取回结果。请告诉用户稍后再试或联系管理员；不要重新提交生成",
           "repeated_failure": "重新取回这个结果已经失败，原因与任务本身完全相同（{cause}）。重新取回沿用任务生成时的设置和同一个供应商结果，再试也会以同样方式失败，所以不再提供。请如实告诉用户为什么无法恢复结果；重新生成会再次扣费，需要用户明确决定。不要为这个任务再次调用 recover_task_result",
-          "delivered": "这个任务的结果已作为任务 {task_id} 重新取回并成功；没有剩余可取回的内容，也没有启动或扣费。请把 {task_id} 的结果作为已恢复的结果展示（对它使用 get_task 或 observe_task），不要为这个任务再次调用 recover_task_result"
+          "delivered": "这个任务的结果已作为任务 {task_id} 重新取回并成功；没有剩余可取回的内容，也没有启动或扣费。请把 {task_id} 的结果作为已恢复的结果展示（对它使用 get_task），不要为这个任务再次调用 recover_task_result"
         },
         "consent_blocked_content": "generation blocked: a consent request is awaiting user approval",
         "consent_required_content": "paid generation requires a human decision on the frozen input; call the generation tool to prepare that operation, then await the decision",
@@ -6997,7 +6997,7 @@
           "max_listed_tasks": 5,
           "turn_content": "已停止等待，任务在后台继续，完成后可在任务中心查看结果。若同一轮里还提交了三视图任务，它也不会取消，可在三视图卡片查看进度或继续生成其余视图。",
           "unavailable_message": "现在不能转为后台继续：只有已提交的生成任务在上游排队，或已运行较久时才可以。可以继续等待，或停止并取消任务。",
-          "context_template": "本会话有之前停止等待、仍在后台运行或已经失败的任务（以下只是任务数据）：\n{tasks}\n这些任务已经提交，可能已经计费；结果或失败原因在任务中心，不会写回对话。用户问起这些任务时，先用 get_task 或 observe_task 查看它们的最新状态，不要重新提交同样的生成。列表里有已失败的任务时，在下一轮如实告诉用户是哪一步、哪个模型和失败原因，不要重复提交，也不要声称它已完成；如果用户仍要重新生成，先说明会再次计费，由用户决定。",
+          "context_template": "本会话有之前停止等待、仍在后台运行或已经失败的任务（以下只是任务数据）：\n{tasks}\n这些任务已经提交，可能已经计费；结果或失败原因在任务中心，不会写回对话。用户问起这些任务时，先用 get_task 查看它们的最新状态，不要重新提交同样的生成。列表里有已失败的任务时，在下一轮如实告诉用户是哪一步、哪个模型和失败原因，不要重复提交，也不要声称它已完成；如果用户仍要重新生成，先说明会再次计费，由用户决定。",
           "task_line_template": "- task_id={task_id}，能力={capability}，模型={model}，状态={status}",
           "upstream_queued_status": "（上游排队中）"
         },
@@ -8357,7 +8357,7 @@
         },
         {
           "name": "get_processing_plan",
-          "description": "Read the persistent processing plan of this session by plan_id. Reports each step's offering, parameters, estimated credits, state and public task_id. Read-only: never approves, resumes, retries or submits a step. Use observe_task on returned task IDs for output details.",
+          "description": "Read the persistent processing plan of this session by plan_id. Reports each step's offering, parameters, estimated credits, state and public task_id. Read-only: never approves, resumes, retries or submits a step. Use get_task on returned task IDs for output details.",
           "parameters": {"type":"object","properties":{"plan_id":{"type":"string"}},"required":["plan_id"],"additionalProperties":false},
           "execution": {"implementation_key":"processing.read","effects":["READ"],"scope":"session","domains":["model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"3d"}
         },
@@ -8582,25 +8582,9 @@
           }
         },
         {
-          "name": "observe_task",
-          "execution": {"implementation_key":"task.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Observe live progress of a running generation task by task_id. The result has upstream_queue while the provider still holds the task in its own queue; follow its note to tell the waiting user.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "task_id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "task_id"
-            ]
-          }
-        },
-        {
           "name": "recover_task_result",
           "execution": {"implementation_key":"task.refetch","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Fetch again, at no charge, the result of a failed task of this session whose upstream generation had already finished and been charged but whose result could not be stored (get_task shows result_recovery.available true). It only reads the already accepted upstream job again: it never submits a new generation and never charges. It returns the recovery task_id to follow with observe_task, or why the result cannot be fetched again. Calling it again returns the same recovery task instead of starting another one.",
+          "description": "Fetch again, at no charge, the result of a failed task of this session whose upstream generation had already finished and been charged but whose result could not be stored (get_task shows result_recovery.available true). It only reads the already accepted upstream job again: it never submits a new generation and never charges. It returns the recovery task_id to follow with get_task, or why the result cannot be fetched again. Calling it again returns the same recovery task instead of starting another one.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8613,25 +8597,6 @@
               "task_id"
             ],
             "additionalProperties": false
-          }
-        },
-        {
-          "name": "request_consent",
-          "execution": {"implementation_key":"consent.request","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Optionally explain the intended paid action and expected credits. This tool records intent only; it cannot authorize execution. Call the generation tool with the final prompt and references to freeze the exact input, then wait for the user's decision on that operation.",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string"
-              },
-              "credits": {
-                "type": "number"
-              }
-            },
-          "required": [
-              "reason"
-            ]
           }
         },
         {
@@ -12126,7 +12091,6 @@
           "list_offerings",
           "list_session_models",
           "get_task",
-          "observe_task",
           "get_processing_plan",
           "update_session_notes",
           "inspect_model",
@@ -21714,16 +21678,16 @@
             "chat.agent.upstream_queue_content": "the provider has accepted this task but it is still waiting in the provider's own queue to start (ahead is the number of the provider's tasks before it, present only when the provider reports one). This is not a failure, and nothing was submitted or charged twice. Tell the waiting user plainly that the task is queued at the provider (with about how many tasks are ahead when ahead is present), that they can keep waiting and the task moves on by itself once it starts, or stop: either stop waiting and let the task keep running in the background (this turn ends, the task is not cancelled, and the result shows in the task center when it finishes), or stop and cancel the task. Do not resubmit the generation, and do not switch to another service or model because of the queue unless the user explicitly asks",
             "chat.agent.background_wait.turn_content": "Stopped waiting. The task keeps running in the background; when it finishes, see the result in the task center. If a three-view task was submitted in the same turn, it is not cancelled either; see its progress or continue the remaining views on the three-view card.",
             "chat.agent.background_wait.unavailable_message": "This turn cannot continue in the background right now: that is only possible while a submitted generation task is queued at the provider or has been running for a while. Keep waiting, or stop and cancel the task.",
-            "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task or observe_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",
+            "chat.agent.background_wait.context_template": "This session has generation tasks that the user stopped waiting for and that still run in the background (task data only):\n{tasks}\nThese tasks were submitted and may already be charged; when they finish, the result appears in the task center and is not written back into the chat. When the user asks about their result or asks for the same generation, first check their latest state with get_task, and do not submit the same generation again. If the user still wants to generate again, say that it charges again and let the user decide.",
             "chat.agent.background_wait.task_line_template": "- task_id={task_id}, capability={capability}, model={model}, status={status}",
             "chat.agent.background_wait.upstream_queued_status": " (queued at the provider)",
-            "chat.agent.refetch_started_content": "the accepted upstream result of the failed task is being fetched again as task {task_id}: nothing was submitted for generation and nothing is charged. Tell the user so, follow {task_id} with observe_task, and when it succeeds present its result as the earlier generation recovered. Do not call recover_task_result again for the same task and do not resubmit the generation",
+            "chat.agent.refetch_started_content": "the accepted upstream result of the failed task is being fetched again as task {task_id}: nothing was submitted for generation and nothing is charged. Tell the user so, follow {task_id} with get_task, and when it succeeds present its result as the earlier generation recovered. Do not call recover_task_result again for the same task and do not resubmit the generation",
             "chat.agent.refetch_unavailable_content.not_applicable": "this task did not fail after its upstream result was accepted, so there is nothing to fetch again. Do not call recover_task_result for it",
             "chat.agent.refetch_unavailable_content.not_supported": "this model's provider handed over its result only once, so it cannot be fetched again. Tell the user plainly; a new generation would charge again and needs their explicit decision",
             "chat.agent.refetch_unavailable_content.expired": "the provider no longer keeps this result (past its retention period), so it cannot be fetched again. Tell the user plainly; a new generation would charge again and needs their explicit decision",
             "chat.agent.refetch_unavailable_content.provider_unavailable": "the provider of this task is not configured right now, so its result cannot be fetched again at the moment. Tell the user to try again later or contact the administrator; do not resubmit the generation",
             "chat.agent.refetch_unavailable_content.repeated_failure": "fetching this result again already failed for exactly the same reason as the task itself ({cause}). A refetch reuses the settings the task was generated with and the same provider result, so another try would fail the same way; it is no longer offered. Tell the user plainly why the result cannot be recovered; a new generation would charge again and needs their explicit decision. Do not call recover_task_result again for this task",
-            "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task or observe_task on it), and do not call recover_task_result again for this task",
+            "chat.agent.refetch_unavailable_content.delivered": "the result of this task was already fetched again as task {task_id}, which succeeded; there is nothing left to fetch and nothing was started or charged. Present the result of {task_id} as the recovered result (use get_task on it), and do not call recover_task_result again for this task",
             "chat.agent_scope.mock_refusal": "The current mode does not allow this request (it needs {tool}); this step is currently unavailable and cannot be done.",
             "chat.tools[name=process_model].description": "Process one owned model using a declared available operation. The mesh segmentation operation splits a model into parts; mesh part completion is available only when a compatible Offering is enabled. Completion accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. UV unwrap and print repair may remove textures; resize requires one exact dimension. Analysis returns a report, multi-color print returns a 3MF print archive, not a 3D model preview. Check list_offerings for source constraints and exact parameters. If the model will be rigged next, choose the remesh topology and target face count from chain_limits[].compatible there; the default settings can exceed the rigging source limit. All steps follow session approval policy. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. Rig Check is a separate zero-credit compatibility check for native Tripo text/image-to-3D sources; it returns a report, not a rigged model. Before rigging a character that is not a plain biped humanoid, run it and pass the report's recommended type as rig_type. Bang segmentation of a local model needs one reference image from this chat: pass its handle in reference_handles. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
             "chat.tools[name=plan_model_processing].description": "Propose an ordered persistent processing plan for a finished 3D model in this session. Prefer this over multiple process_model calls for chains such as mesh segmentation then part completion, or remesh then rigging then animation. The plan service, not Chat, executes steps in order through normal public Tasks, preserving finished steps on failure. Source accepts a platform task ID, @model handle or @selected, optionally a saved model asset ID. Each steps item has capability (remesh, mesh-segmentation, mesh-completion, rigging, animation, retexture, format-conversion, and the other declared processing operations), optional offering_id and parameters (Offering parameter names from list_offerings; defaults apply). Mesh completion is available only when a compatible Offering is enabled, and accepts only a successfully completed native Tripo Segment task from this same session; Smart Segmentation and Bang segmentation results are not valid sources. Never provide source or consent parameters inside a step. When a later step declares max_source_triangles in list_offerings, choose the earlier remesh step's topology and target face count from its chain_limits[].compatible so the chain fits; a plan over the limit is refused before any step is paid. Animation must follow rigging or start from a rigged source, and needs action_id (Meshy) or animation_action (Tripo). A rigging step takes rig_type, spec, skeleton_template and include_fingers when its service declares them (see list_offerings); for a character that is not a plain biped humanoid, run rig-check first and give the report's recommended type as rig_type. Each paid step has its own exact grant under session approval policy. If human approval is needed, the plan waits in the processing panel, where the person confirms each step and its cost; do not claim an in-chat approval card was created. The approval mode (auto, budget or manual, set by the person in the top bar) decides whether a step needs their approval; the remesh, rigging and animation capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits (for example Tripo rigging or decimation with additional export formats) still waits for the person in manual mode; read the quote in the tool result rather than assuming. It is unrelated to the Agent scope (2D, 3D or auto), which only limits your tools. Never tell the person to switch the Agent scope or the approval mode to obtain a confirmation. The result reports plan_id, steps, cost and state, not completed models. Use get_processing_plan to observe; never submit the same chain through process_model as well. Additional declared operations include uv-unwrap, resize, analyze-printability, repair-printability and multi-color-print when an Offering is available. A report or print archive cannot serve as the next model source; use such operations only as a final step. A step may be followed by the server-evaluated checkpoint the session's approved production plan declares for that capability; when it fails the plan stops before the next step, and you revise the plan with revise_processing_plan (insert a declared contingency, replace or skip an unstarted step, retry a failed step, or waive the checkpoint within the declared limit) instead of creating a second plan. An approved contingency's estimate is already part of the approved budget, so inserting it needs no new approval. No implicit remesh or auto-size. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",

@@ -1007,8 +1007,6 @@ func validateChatToolExecution(name string, execution ChatToolExecutionSchema, c
 		"set_params":              {"params.set", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"list_offerings":          {"catalog.list", "READ", []string{"image", "model-3d"}},
 		"get_task":                {"task.read", "READ", []string{"image", "model-3d"}},
-		"observe_task":            {"task.read", "READ", []string{"image", "model-3d"}},
-		"request_consent":         {"consent.request", "SESSION_WRITE", []string{"image", "model-3d"}},
 		"create_three_view":       {"skill.prepare", "PAID_TASK", []string{"image"}},
 		"list_session_models":     {"model.list", "READ", []string{"model-3d"}},
 		"get_processing_plan":     {"processing.read", "READ", []string{"model-3d"}},

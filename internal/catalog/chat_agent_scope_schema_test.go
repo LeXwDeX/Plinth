@@ -50,8 +50,6 @@ var shippedToolScopes = map[string]string{
 	"recover_task_result":        "utility",
 	"list_offerings":             "utility",
 	"get_task":                   "utility",
-	"observe_task":               "utility",
-	"request_consent":            "utility",
 	"list_project_assets":        "utility",
 	"propose_asset_list":         "utility",
 	"submit_asset_list_item":     "utility",

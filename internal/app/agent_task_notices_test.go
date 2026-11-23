@@ -10,7 +10,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
-// #284: get_task and observe_task tell the Agent that a succeeded Task did not
+// #284: get_task tells the Agent that a succeeded Task did not
 // deliver everything it was asked for, with the Schema sentence in the turn's
 // locale and the positions it names.
 func TestAgentTaskViewCarriesTheNoticesOfASucceededTask(t *testing.T) {
