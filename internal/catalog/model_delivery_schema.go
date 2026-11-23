@@ -645,8 +645,16 @@ func validateModelDeliveryAutoCompletion(
 		}
 		switch conversion.Auto {
 		case ConversionAutoFree:
+			// A free route must cost nothing. The legacy estimate alone is not
+			// enough: an Offering priced in native units (NativePricing) reports
+			// HighestEstimatedCredits()==0 while still charging, and the
+			// automatic completion would treat it as free and never count it
+			// against the per-Task paid ceiling (#478).
 			if offering.HighestEstimatedCredits() != 0 {
 				return fmt.Errorf("conversions[%d] 声明 auto=%q，但 Offering %q 的估价不是 0", index, ConversionAutoFree, conversion.OfferingID)
+			}
+			if offering.NativePricing != nil {
+				return fmt.Errorf("conversions[%d] 声明 auto=%q，但 Offering %q 按原生计价（native_pricing），不能作为免费自动补齐路线", index, ConversionAutoFree, conversion.OfferingID)
 			}
 		case ConversionAutoPaid:
 			if bound := offering.HighestEstimatedCredits(); bound <= 0 || bound > conversion.MaxCredits {

@@ -606,7 +606,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 	}
 	if allFormatsDone(names, s.Conversions) {
 		// Every required format is converted: refresh below.
-	} else if inflight := countSubmitted(names, s.Conversions); inflight < a.conversionConcurrency(options) {
+	} else if inflight := countSubmitted(names, s.Conversions); inflight < a.conversionConcurrency(request.Offering, options) {
 		if format, ok := nextConversionDispatch(names, s.Conversions); ok {
 			if _, ok := generation.DispatchCheckpointerFromContext(ctx); !ok {
 				return generation.Observation{}, failure(generation.FailureRejected, false, "Tripo 私有转换缺少持久执行派发许可")
@@ -665,7 +665,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 				// the pool: restore the entry, release the slot and queue again
 				// without spending the retry budget (C4). Without a pool the
 				// historical per-format budget below applies.
-				if a.poolEnabled() {
+				if a.poolEnabled(request.Offering) {
 					if retryAfter, full := poolFullRetryAfter(err); full && permit != nil {
 						permit.Result = generation.DispatchResultNotDispatched
 						restoreConversionItem(s.Conversions, format, previous, existed)

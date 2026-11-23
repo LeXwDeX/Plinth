@@ -330,9 +330,26 @@ func (s *Service) resolve(ctx context.Context, task generation.Task) view {
 				continue
 			}
 			plan = s.completedPlan(ctx, task.OwnerID, plan)
-			if format, ok := s.completionFormat(plan); ok {
-				s.record(ctx, &v, plan, format)
+			format, ok := s.completionFormat(plan)
+			if !ok {
+				continue
 			}
+			// A run under another Offering revision has another key and is not
+			// found above. When it failed ambiguously (the provider may already
+			// have been paid and may still deliver its format), hold the format
+			// as converting so neither the automatic completion nor a person
+			// pays a second time, the same judgment the key path makes for a
+			// plan it found by key (#478). A run whose failure is definite stays
+			// missing and convertible.
+			if s.ambiguousPlan(ctx, task, plan) {
+				for _, held := range s.planFormats(plan, format) {
+					if _, taken := v.active[held]; !taken {
+						v.active[held] = plan
+					}
+				}
+				continue
+			}
+			s.record(ctx, &v, plan, format)
 		}
 	}
 	v.err = s.directConversions(ctx, &v)
@@ -515,6 +532,37 @@ func (s *Service) record(ctx context.Context, v *view, plan processing.Plan, can
 	for format, asset := range classified {
 		s.keepObtained(v, format, asset, result)
 	}
+}
+
+// ambiguousPlan reports whether a failed plan's last step may already have been
+// paid for: its provider may have finished, or the submission is unknown, so
+// the format may still arrive upstream and must not be paid for a second time
+// (#478). A step that failed for a definite reason, or whose failed Task proves
+// it never charged, is not ambiguous; neither is a step with no Task to read,
+// because then nothing was charged.
+func (s *Service) ambiguousPlan(ctx context.Context, task generation.Task, plan processing.Plan) bool {
+	if plan.State != processing.Failed || len(plan.Steps) == 0 {
+		return false
+	}
+	step := plan.Steps[len(plan.Steps)-1]
+	if step.State != processing.Failed {
+		return false
+	}
+	switch step.Failure {
+	case processing.ReasonSubmitUnknown, processing.ReasonSubmitUnreconciled,
+		processing.ReasonReconciledAbsent, processing.ReasonReconciledMismatch:
+		return true
+	}
+	if step.TaskID == "" {
+		return false
+	}
+	result, err := s.gateway.GetScoped(ctx, generation.OwnTasks(task.OwnerID), step.TaskID)
+	if err != nil || result.OwnerID != task.OwnerID {
+		// The failed Task cannot be read, so it cannot be proved to have never
+		// charged: hold the format rather than risk paying twice.
+		return true
+	}
+	return result.Failure == nil || result.Failure.Ambiguous
 }
 
 // givenUp reports a failed plan that holds nothing any more (#330): its

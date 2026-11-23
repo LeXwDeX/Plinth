@@ -392,7 +392,7 @@ func (a *Adapter) Observe(
 	// Public jobs in the shared pool are counted, never blocked (C3): Start
 	// registered them, every Observe refreshes them, and a terminal observation
 	// releases them. The private conversion paths below do their own Acquire.
-	if a.poolEnabled() && poolCountsPublicJob(request.Offering) {
+	if a.poolEnabled(request.Offering) && poolCountsPublicJob(request.Offering) {
 		// Readopt (not just Touch) so a restart re-registers the still-running
 		// public job; it also refreshes last-seen.
 		a.readoptPool(request.Offering, request.AttemptID)

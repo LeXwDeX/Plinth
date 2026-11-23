@@ -992,3 +992,27 @@ func TestUpstreamPoolLimitEnvironmentOverride(t *testing.T) {
 	t.Setenv("TRIPO_POOL_WAIT_HINT_SECONDS", "-1")
 	assert(build(), 5, 2, 600, 2)
 }
+
+// #478 P1-11: the Tripo adapter's pool name comes from the connection's own
+// declaration, not a Go constant. The shipped connection declares exactly one
+// pool, so it is used; a connection with none keeps no queueing, and one that
+// declares several cannot be represented by the single-pool adapter and is
+// refused.
+func TestTripoPoolNameFollowsConnectionDeclaration(t *testing.T) {
+	pool := func(names ...string) *catalog.ProviderConcurrencySchema {
+		pools := map[string]catalog.ProviderPoolSchema{}
+		for _, name := range names {
+			pools[name] = catalog.ProviderPoolSchema{Default: 5}
+		}
+		return &catalog.ProviderConcurrencySchema{Pools: pools}
+	}
+	if name, err := tripoPoolName(catalog.ProviderConnectionSchema{ID: "none"}); err != nil || name != "" {
+		t.Fatalf("none = %q %v; want empty, nil", name, err)
+	}
+	if name, err := tripoPoolName(catalog.ProviderConnectionSchema{ID: "one", Concurrency: pool("model-processing")}); err != nil || name != "model-processing" {
+		t.Fatalf("one = %q %v; want model-processing", name, err)
+	}
+	if _, err := tripoPoolName(catalog.ProviderConnectionSchema{ID: "two", Concurrency: pool("a", "b")}); err == nil || !strings.Contains(err.Error(), "只支持一个共享池") {
+		t.Fatalf("two = %v; want the single-pool refusal", err)
+	}
+}

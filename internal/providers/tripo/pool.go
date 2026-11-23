@@ -9,8 +9,11 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 )
 
-// TripoPoolName is the connection-declared pool shared by format-convert,
-// texture and refine (the official default holds five jobs across the three).
+// TripoPoolName is the pool the shipped connection declares, shared by
+// format-convert, texture and refine (the official default holds five jobs
+// across the three). The Adapter takes its pool name from the connection
+// declaration at build time (#478); this constant names that declaration in
+// tests and fixtures, it is not a value the Adapter hardcodes.
 const TripoPoolName = "model-processing"
 
 // defaultPoolQueuePoll is the fallback poll a queued round asks for when the
@@ -19,9 +22,15 @@ const TripoPoolName = "model-processing"
 // timeout, measures this wait (N1).
 const defaultPoolQueuePoll = 2 * time.Second
 
-// poolEnabled reports whether this Adapter queues through an upstream pool.
-func (a *Adapter) poolEnabled() bool {
-	return a.pool != nil && a.poolID != ""
+// poolEnabled reports whether the offering's declared pool is registered with a
+// positive limit. A pool the connection does not declare (or declares with limit
+// 0) is not really enabled: gating children behind it would serialize or stall
+// work against a queue that never admits them (#478).
+func (a *Adapter) poolEnabled(offering generation.Offering) bool {
+	if a.pool == nil || a.poolID == "" {
+		return false
+	}
+	return a.pool.Enabled(a.poolHolder(offering, ""))
 }
 
 func (a *Adapter) poolHolder(offering generation.Offering, attempt generation.AttemptID) upstreampool.Holder {
@@ -33,7 +42,7 @@ func (a *Adapter) poolHolder(offering generation.Offering, attempt generation.At
 }
 
 func (a *Adapter) touchPool(offering generation.Offering, attempt generation.AttemptID) {
-	if a.poolEnabled() {
+	if a.poolEnabled(offering) {
 		a.pool.Touch(a.poolHolder(offering, attempt))
 	}
 }
@@ -43,26 +52,26 @@ func (a *Adapter) acquirePool(
 	offering generation.Offering,
 	attempt generation.AttemptID,
 ) (upstreampool.Ticket, bool, time.Duration) {
-	if !a.poolEnabled() {
+	if !a.poolEnabled(offering) {
 		return upstreampool.Ticket{}, true, 0
 	}
 	return a.pool.Acquire(ctx, a.poolHolder(offering, attempt))
 }
 
 func (a *Adapter) readoptPool(offering generation.Offering, attempt generation.AttemptID) {
-	if a.poolEnabled() {
+	if a.poolEnabled(offering) {
 		a.pool.Readopt(a.poolHolder(offering, attempt))
 	}
 }
 
 func (a *Adapter) handoffPool(offering generation.Offering, attempt generation.AttemptID) {
-	if a.poolEnabled() {
+	if a.poolEnabled(offering) {
 		a.pool.Handoff(a.poolHolder(offering, attempt))
 	}
 }
 
 func (a *Adapter) releasePool(offering generation.Offering, attempt generation.AttemptID) {
-	if a.poolEnabled() {
+	if a.poolEnabled(offering) {
 		a.pool.ReleaseHolder(a.poolHolder(offering, attempt))
 	}
 }
@@ -80,7 +89,7 @@ func poolCountsPublicJob(offering generation.Offering) bool {
 // queuePoll is the configured poll a queued round uses for this offering's
 // pool, or the code fallback.
 func (a *Adapter) queuePoll(offering generation.Offering) time.Duration {
-	if a.poolEnabled() {
+	if a.poolEnabled(offering) {
 		if poll := a.pool.QueuePoll(offering.AdapterKey, a.poolID); poll > 0 {
 			return poll
 		}

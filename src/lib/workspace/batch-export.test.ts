@@ -87,6 +87,16 @@ describe('extensionOf', () => {
     expect(extensionOf('image/avif')).toBe('avif');
     expect(extensionOf('')).toBe('bin');
   });
+
+  it('maps the media types the Catalog declares instead of the subtype fallback (#478)', () => {
+    // USDZ would fall back to the subtype `vnd.usdz+zip` -> `vndusdzzip`.
+    expect(extensionOf('model/vnd.usdz+zip')).toBe('usdz');
+    expect(extensionOf('model/obj')).toBe('obj');
+    expect(extensionOf('model/stl')).toBe('stl');
+    expect(extensionOf('application/octet-stream')).toBe('bin');
+    expect(extensionOf('image/tiff')).toBe('tiff');
+    expect(extensionOf('image/x-ms-bmp')).toBe('bmp');
+  });
 });
 
 describe('buildArchive', () => {
