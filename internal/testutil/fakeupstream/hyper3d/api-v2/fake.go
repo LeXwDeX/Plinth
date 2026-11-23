@@ -619,9 +619,11 @@ func validateGenerationForm(fields map[string]string) string {
 }
 
 // The value domains of the Bang and Texture forms, from
-// docsRoot+"bang" and docsRoot+"generate-texture" (read 2026-11-22): material
-// accepts PBR, Shaded and All (Bang also None and Hybrid), resolution Basic or
-// High, and the geometry format one of the supported model formats.
+// docsRoot+"bang" and docsRoot+"generate-texture" (read 2026-11-22, re-read
+// 2026-11-23 for #487): material accepts PBR, Shaded, All and Hybrid on both
+// pages, and Bang additionally takes None (the Bang page lists all five, the
+// Generate Texture page lists the first four); resolution is Basic or High, and
+// the geometry format one of the supported model formats.
 var (
 	bangMaterials         = []string{"PBR", "Shaded", "All", "Hybrid", "None"}
 	textureMaterials      = []string{"PBR", "Shaded", "All", "Hybrid"}

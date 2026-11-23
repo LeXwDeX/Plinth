@@ -26,10 +26,12 @@ func validateImageInputParameter(p schema.Parameter) error {
 		return nil
 	}
 	c := p.ImageInput
-	// A single asset carries the bound, and so does a reference-image array:
-	// Meshy's image-to-3d and multi-image Offerings take 1–4 pictures, each of
-	// which has to satisfy the same official pixel bounds (#460 B16).
-	if (p.Type != "asset" && !(p.Type == "asset-array" && p.Semantic == "reference-image")) ||
+	// A single asset carries the bound, and so does an image list: Meshy's
+	// image-to-3d and multi-image Offerings take 1–4 pictures, each of which
+	// has to satisfy the same official pixel bounds (#460 B16 for the reference
+	// pictures, #487 for the Multi-Image texture views, whose page gives them
+	// the bounds of the single texture picture).
+	if (p.Type != "asset" && p.Type != "asset-array") ||
 		p.MaxBytes <= 0 || len(p.MediaTypes) == 0 || c.MinWidth <= 0 || c.MinHeight <= 0 ||
 		c.MaxPixels <= 0 || c.MaxPixels/c.MinWidth < c.MinHeight {
 		return fmt.Errorf("invalid frozen image_input contract")
@@ -40,6 +42,24 @@ func validateImageInputParameter(p schema.Parameter) error {
 		}
 	}
 	return nil
+}
+
+// imageBoundsError reports what is wrong with one picture of an image_input
+// list against the frozen bounds, or "". The message is a detail: the caller
+// wraps it in the frozen Offering's own refusal.
+func imageBoundsError(raw []byte, c schema.ImageInputConstraint) string {
+	config, _, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return "图片必须是可解码的 PNG、JPEG 或 WebP"
+	}
+	width, height := int64(config.Width), int64(config.Height)
+	if width < int64(c.MinWidth) || height < int64(c.MinHeight) {
+		return fmt.Sprintf("图片每边至少 %d 像素", c.MinWidth)
+	}
+	if width > c.MaxPixels/height {
+		return fmt.Sprintf("图片像素不得超过 %d", c.MaxPixels)
+	}
+	return ""
 }
 
 func imageInputFailure(code generation.ErrorCode, cause error) error {

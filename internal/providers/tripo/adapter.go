@@ -58,8 +58,8 @@ type Config struct {
 	// Pool is the optional process-wide upstream concurrency pool (#468). Nil
 	// disables queueing and keeps the previous behavior.
 	Pool *upstreampool.Manager
-	// PoolID names the pool this Adapter acquires slots from; empty disables
-	// queueing even when Pool is set.
+	// PoolID names the pool an Offering queues through when its own
+	// declaration names none (#487); empty disables queueing for those.
 	PoolID string
 }
 
@@ -75,6 +75,10 @@ type Adapter struct {
 	clock              func() time.Time
 	pool               *upstreampool.Manager
 	poolID             string
+	// poolIDs is the upstream pool each routed Offering declared (#487),
+	// resolved once at build time so the dispatch paths never parse provider
+	// options to find their queue.
+	poolIDs map[generation.OfferingID]string
 	// unknownPolls counts consecutive polls per remote task that returned a
 	// status word with a declared max_consecutive bound (see observation).
 	// unknownSince is when the current run of a status word with a declared
@@ -93,6 +97,12 @@ type providerOptions struct {
 	ObserveEndpoint string `json:"observe_endpoint"`
 	UploadEndpoint  string `json:"upload_endpoint"`
 	ConvertEndpoint string `json:"convert_endpoint"`
+	// Pool names the upstream concurrency pool this Offering's dispatches draw
+	// slots from (#487). Upstream pools are per task category, so one
+	// connection registers several and the Offering says which one it belongs
+	// to; an Offering that names none (or one the connection does not
+	// register) is never queued.
+	Pool string `json:"pool,omitempty"`
 	// FormatConversion declares how an Offering's private format conversions
 	// run: how many children may be in flight at once.
 	FormatConversion *formatConversionOptions   `json:"format_conversion,omitempty"`
@@ -141,7 +151,7 @@ func New(config Config) (*Adapter, error) {
 		}
 		nativeSourceClient.Transport = transport
 	}
-	return &Adapter{
+	adapter := &Adapter{
 		client:             client,
 		allowHTTPAssets:    config.AllowHTTPAssets,
 		inputAssets:        config.InputAssets,
@@ -153,7 +163,22 @@ func New(config Config) (*Adapter, error) {
 		clock:              config.Clock,
 		pool:               config.Pool,
 		poolID:             strings.TrimSpace(config.PoolID),
-	}, nil
+		poolIDs:            map[generation.OfferingID]string{},
+	}
+	// Each Offering's own declaration names its upstream pool (#487). An
+	// Offering whose declaration is unreadable keeps no pool: queueing is an
+	// optimization, and refusing to build over it would take the whole
+	// connection down for one bad route.
+	for id, offering := range routes {
+		options, err := adapter.optionsFor(offering)
+		if err != nil {
+			continue
+		}
+		if pool := strings.TrimSpace(options.Pool); pool != "" {
+			adapter.poolIDs[id] = pool
+		}
+	}
+	return adapter, nil
 }
 
 // now is the Adapter's wall clock.
@@ -609,9 +634,19 @@ func classifyErrorWithMapping(mapping *generation.ErrorMapping) httpjson.HTTPErr
 		if mapping != nil && strings.TrimSpace(mapping.RetryAfterHeader) != "" {
 			retryHeader = mapping.RetryAfterHeader
 		}
+		resetHeader := ""
+		if mapping != nil {
+			resetHeader = strings.TrimSpace(mapping.RateLimitResetHeader)
+		}
 		retryAfterValue := time.Duration(0)
 		if retryable {
+			// Retry-After wins; the reset header is the documented fallback for
+			// a refusal that carries only the window's end (rate-limits page:
+			// "prefer Retry-After / X-RateLimit-Reset").
 			retryAfterValue = retryAfter(response.Header.Get(retryHeader))
+			if retryAfterValue <= 0 && resetHeader != "" {
+				retryAfterValue = rateLimitReset(response.Header.Get(resetHeader))
+			}
 		}
 		detail := fmt.Sprintf("Tripo 返回 HTTP %d", response.StatusCode)
 		if code != "" {
@@ -658,6 +693,21 @@ func retryAfter(value string) time.Duration {
 		}
 	}
 	return 0
+}
+
+// rateLimitReset 解析限流窗口的重置头（Unix 秒，rate-limits 页的
+// X-RateLimit-Reset）为还要等待多久。窗口已经过去或取值不可解析时返回 0，
+// 让调用方退回自己的退避。
+func rateLimitReset(value string) time.Duration {
+	seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	delay := time.Until(time.Unix(seconds, 0))
+	if delay <= 0 {
+		return 0
+	}
+	return delay
 }
 
 // businessEnvelopeError 按连接级 error_mapping 词表分类业务信封错误；
@@ -890,15 +940,32 @@ func taskErrorCode(raw json.RawMessage) string {
 	return text
 }
 
+// mappedTaskErrorClass 按连接级的任务级错误码词表（error_mapping.
+// task_error_code_map）分类一个失败任务的 error_code。请求级顶层 code 与
+// 任务级 error_code 是两套语义（官方 error-handling 页：同一个数字可能
+// 含义不同），所以任务级码只查任务级表：表里没有的一律不分类，只作为证据
+// 保留在 UpstreamCode/UpstreamExcerpt 中。
 func (a *Adapter) mappedTaskErrorClass(code string) (generation.FailureClass, bool) {
 	if code == "" || a.errorMapping == nil {
 		return "", false
 	}
-	rule, ok := a.errorMapping.UpstreamCodeMap[code]
+	rule, ok := a.errorMapping.TaskErrorCodeMap[code]
 	if !ok || rule.Class == "" {
 		return "", false
 	}
 	return generation.FailureClass(rule.Class), true
+}
+
+// taskErrorCodeRetryable 报告一个失败任务的 error_code 是否被任务级词表声明
+// 为可重试（瞬时类）。未声明、声明为不可重试或没有码的任务都不是瞬时失败：
+// 转换子作业只对瞬时失败重提，确定性失败（1004 参数无效、2008 内容策略、
+// 2018 模型过于复杂等）重发不会成功。
+func (a *Adapter) taskErrorCodeRetryable(code string) bool {
+	if code == "" || a.errorMapping == nil {
+		return false
+	}
+	rule, ok := a.errorMapping.TaskErrorCodeMap[code]
+	return ok && rule.Retryable
 }
 
 // taskErrorExcerpt builds the internal-only evidence for a failed task. The

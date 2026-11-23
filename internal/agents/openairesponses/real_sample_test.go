@@ -233,7 +233,7 @@ func TestSendsTheRequestsTheRealGatewayAccepted(t *testing.T) {
 	call.ID = "msg_x_r1_tool_1"
 	next := request
 	next.Messages = append(append([]agents.Message{}, request.Messages...),
-		agents.Message{Role: "assistant", ToolCalls: []agents.ToolCall{call}, Reasoning: reasoningItems(first)},
+		agents.Message{Role: "assistant", ToolCalls: []agents.ToolCall{call}, Reasoning: reasoningItems(request, first)},
 		agents.Message{Role: "tool", ToolCallID: call.ID, Content: `{"temp_c":21}`})
 	requestEqual(t, "reasoning-replay-accepted", record(nil, next), sample["reasoning-replay-accepted"].body(t))
 

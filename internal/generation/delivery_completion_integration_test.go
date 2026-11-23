@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/modeldelivery"
 	"github.com/LeXwDeX/Plinth/internal/providers"
 	"github.com/LeXwDeX/Plinth/internal/providers/mock"
+	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 type switchableConversionRule struct {
@@ -42,6 +44,65 @@ func (r *switchableConversionRule) PendingFormats(task generation.Task) []string
 		return nil
 	}
 	return r.base.PendingFormats(task)
+}
+
+// blockingConvertCatalog makes the Meshy Convert Offering's six model files
+// required again. These cases are about the #330 delivery-completion mechanics,
+// not the #462 on-demand slots (the mock package's
+// TestConvertRejectedOnceIsCleanForTheRefetch330 does the same), so the success
+// round must write the files for a local failure to leave a failed Task behind.
+type blockingConvertCatalog struct {
+	generation.Catalog
+}
+
+func (c blockingConvertCatalog) blocking(offering generation.Offering) generation.Offering {
+	if offering.ID != "meshy/processing/convert" {
+		return offering
+	}
+	outputs := make([]generation.AssetRequirement, len(offering.Outputs))
+	copy(outputs, offering.Outputs)
+	for index := range outputs {
+		if outputs[index].Role == "model" && outputs[index].Variant != "" {
+			outputs[index].Delivery = generation.AssetDeliveryRequired
+			outputs[index].RequestedWhen = nil
+		}
+	}
+	offering.Outputs = outputs
+	return offering
+}
+
+func (c blockingConvertCatalog) Get(id generation.OfferingID) (generation.Offering, bool) {
+	offering, ok := c.Catalog.Get(id)
+	if !ok {
+		return offering, false
+	}
+	return c.blocking(offering), true
+}
+
+func (c blockingConvertCatalog) Normalize(capability generation.Capability, id generation.OfferingID, input json.RawMessage) (generation.Offering, json.RawMessage, error) {
+	offering, normalized, err := c.Catalog.Normalize(capability, id, input)
+	if err != nil {
+		return offering, normalized, err
+	}
+	return c.blocking(offering), normalized, nil
+}
+
+func (c blockingConvertCatalog) List(capability generation.Capability) []generation.Offering {
+	offerings := c.Catalog.List(capability)
+	for index := range offerings {
+		offerings[index] = c.blocking(offerings[index])
+	}
+	return offerings
+}
+
+// ResultRefetchPolicy forwards the optional Catalog capability the refetch path
+// type-asserts; without it every refetch would report not_supported.
+func (c blockingConvertCatalog) ResultRefetchPolicy(adapterKey string) (schemacontract.ResultRefetchPolicy, bool) {
+	source, ok := c.Catalog.(generation.ResultRefetchPolicySource)
+	if !ok {
+		return schemacontract.ResultRefetchPolicy{}, false
+	}
+	return source.ResultRefetchPolicy(adapterKey)
 }
 
 // tamperStore lets the auto path stay disabled while a targeted later
@@ -73,6 +134,7 @@ func newCompletionHarnessWithPort(t *testing.T, port generation.ProviderPort) (*
 	counting, _ := port.(*countingPort)
 	var store *switchableStore
 	h := newConfiguredHarness(t, port, nil, func(deps *generation.Dependencies) {
+		deps.Catalog = blockingConvertCatalog{deps.Catalog}
 		store = &switchableStore{AssetStore: deps.Assets}
 		deps.Assets = store
 		deps.Conversions = modeldelivery.NewSchemaConversionRule(product.Application().ModelDelivery)
@@ -329,7 +391,7 @@ func secondSchemaModule(t *testing.T, h *harness) *generation.Module {
 		}
 	}
 	module, err := generation.New(generation.Dependencies{
-		Repository: h.repository, Catalog: product, Providers: registry, Assets: h.assets,
+		Repository: h.repository, Catalog: blockingConvertCatalog{product}, Providers: registry, Assets: h.assets,
 		Inputs: h.inputs, Cache: h.cache, Clock: h.clock, SchemaVersion: "completion-second-schema",
 		Conversions: modeldelivery.NewSchemaConversionRule(product.Application().ModelDelivery),
 	})
@@ -457,6 +519,7 @@ func TestDeliveryCompletionRejectsTamperedBytesAndLeavesTheFailedTask330(t *test
 	port := &countingPort{ProviderPort: mock.New()}
 	var store *tamperStore
 	h := newConfiguredHarness(t, port, nil, func(deps *generation.Dependencies) {
+		deps.Catalog = blockingConvertCatalog{deps.Catalog}
 		deps.Conversions = rule
 		store = &tamperStore{AssetStore: deps.Assets}
 		deps.Assets = store
@@ -713,6 +776,7 @@ func TestDeliveryCompletionRejectsAGrantWhoseOwnPreparedHashNoLongerMatches330(t
 	var store *switchableStore
 	var corrupt *corruptGrantRepository
 	h := newConfiguredHarness(t, port, nil, func(deps *generation.Dependencies) {
+		deps.Catalog = blockingConvertCatalog{deps.Catalog}
 		base = deps.Repository.(*sqlite.Repository)
 		corrupt = &corruptGrantRepository{Repository: base}
 		deps.Repository = corrupt
@@ -767,6 +831,7 @@ func TestDeliveryCompletionWaitsForTemporaryCASReadFailure330(t *testing.T) {
 	var store *switchableStore
 	var flaky *flakyDeliveryStore
 	h := newConfiguredHarness(t, port, nil, func(deps *generation.Dependencies) {
+		deps.Catalog = blockingConvertCatalog{deps.Catalog}
 		store = &switchableStore{AssetStore: deps.Assets}
 		flaky = &flakyDeliveryStore{AssetStore: store}
 		deps.Assets = flaky
@@ -996,6 +1061,7 @@ func TestRefetchSourceDeletedBeforeCompletionCommitSkipsAndSucceeds330(t *testin
 	var store *switchableStore
 	var hook *hookStore
 	h := newConfiguredHarness(t, port, nil, func(deps *generation.Dependencies) {
+		deps.Catalog = blockingConvertCatalog{deps.Catalog}
 		store = &switchableStore{AssetStore: deps.Assets}
 		hook = &hookStore{AssetStore: store}
 		deps.Assets = hook
@@ -1072,6 +1138,7 @@ func TestPlanRetrySourceDeletedBeforeCompletionCommitSkipsAndSucceeds330(t *test
 	var store *switchableStore
 	var hook *hookStore
 	h := newConfiguredHarness(t, port, nil, func(deps *generation.Dependencies) {
+		deps.Catalog = blockingConvertCatalog{deps.Catalog}
 		store = &switchableStore{AssetStore: deps.Assets}
 		hook = &hookStore{AssetStore: store}
 		deps.Assets = hook
@@ -1127,5 +1194,64 @@ func TestPlanRetrySourceDeletedBeforeCompletionCommitSkipsAndSucceeds330(t *test
 	}
 	if attempts, assets := tombstonedTaskAttemptsAndAssets(t, h, failed.ID); attempts != 1 || assets != 0 {
 		t.Fatalf("completion wrote rows for a tombstoned source: attempts=%d assets=%d", attempts, assets)
+	}
+}
+
+// #462: with the shipped Catalog every converted format of a Meshy Convert task
+// is an on-demand slot, so the Task succeeds on its blocking round and the six
+// formats arrive as post-success resources. The Offering's post_success
+// declaration is what keeps the kernel asking after success: without it the
+// round is never scheduled, the formats are never requested, and the Task stays
+// owing them forever — a shape no other test in this package exercises, because
+// newCompletionHarness pins the formats to blocking.
+func TestConversionDeliversItsOnDemandFormatsAfterSuccess462(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newConfiguredHarness(t, mock.New(), nil, func(deps *generation.Dependencies) {
+		deps.Conversions = modeldelivery.NewSchemaConversionRule(product.Application().ModelDelivery)
+	})
+	ctx := context.Background()
+	source := runToTerminal(t, h, "owner-a", submitConversionSource(t, h, "on-demand formats source"), 30)
+	accepted, err := h.submitApproved(t, ctx, generation.SubmitCommand{
+		OwnerID: "owner-a", Capability: generation.FormatConversion,
+		OfferingID: "meshy/processing/convert",
+		Input: []byte(`{"source_task":"` + string(source.ID) +
+			`","target_formats":["glb","fbx","obj","usdz","stl","3mf"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	converted := runToTerminal(t, h, "owner-a", accepted.TaskID, 30)
+	if converted.State != generation.TaskSucceeded {
+		detail := ""
+		if converted.Failure != nil {
+			detail = converted.Failure.SafeDetail
+		}
+		t.Fatalf("state = %s, failure = %q", converted.State, detail)
+	}
+	// Succeeded only means the blocking round is done: the six formats are
+	// still owed, so keep reconciling until the post-success resources settle.
+	for range 30 {
+		h.reconcile(t)
+		current, err := h.module.Get(ctx, "owner-a", accepted.TaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		converted = current
+		if !generation.ResourcesPending(current.Resources) && current.NextActionAt.IsZero() {
+			break
+		}
+	}
+	variants := make([]string, 0, len(converted.Assets))
+	for _, asset := range converted.Assets {
+		if asset.Role == "model" {
+			variants = append(variants, asset.Variant)
+		}
+	}
+	sort.Strings(variants)
+	if want := "3mf,fbx,glb,obj,stl,usdz"; strings.Join(variants, ",") != want {
+		t.Fatalf("converted variants = %v (resources %#v), want %s", variants, converted.Resources, want)
 	}
 }

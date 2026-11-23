@@ -127,6 +127,11 @@ func newLifecycleUpstream(t *testing.T) *lifecycleUpstream {
 			data := map[string]any{
 				"task_id": "child-" + format, "status": status, "progress": 100,
 			}
+			if status == "failed" {
+				// #487: a failed child carries its own task-level error_code;
+				// 1001 is the official transient one, so the format is resent.
+				data["error_code"] = 1001
+			}
 			if running {
 				data["status"] = "running"
 				data["progress"] = 50

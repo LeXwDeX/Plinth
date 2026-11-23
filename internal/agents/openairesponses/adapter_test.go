@@ -98,7 +98,7 @@ func TestToolLoopSendsTheCallAndItsOutputOnTheSameCallID(t *testing.T) {
 			}
 			first.ToolCalls[0].ID = rewrite(first.ToolCalls[0].ID)
 			request.Messages = append(request.Messages,
-				agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, Reasoning: reasoningItems(first)},
+				agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, Reasoning: reasoningItems(request, first)},
 				agents.Message{Role: "tool", ToolCallID: first.ToolCalls[0].ID, Content: `{"note":"a cube"}`})
 			second, deltas, err := collect(adapter, request)
 			if err != nil {
@@ -428,7 +428,7 @@ func TestReasoningItemsAreSentBackAheadOfTheirFunctionCall(t *testing.T) {
 		t.Fatalf("round 1: %#v %v", first, err)
 	}
 	request.Messages = append(request.Messages,
-		agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, Reasoning: reasoningItems(first)},
+		agents.Message{Role: "assistant", ToolCalls: first.ToolCalls, Reasoning: reasoningItems(request, first)},
 		agents.Message{Role: "tool", ToolCallID: first.ToolCalls[0].ID, Content: "x"})
 	second, err := adapter.Stream(ctx, request, nil)
 	if err != nil || second.Content != openaiv1.FixedReply || second.ReasoningContent != "" {

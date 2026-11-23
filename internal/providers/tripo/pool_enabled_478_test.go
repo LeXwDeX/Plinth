@@ -7,6 +7,7 @@ package tripo
 import (
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 )
@@ -43,4 +44,22 @@ func TestPoolEnabledReflectsRegistration478(t *testing.T) {
 	if got := unregistered.conversionConcurrency(offering, options); got != 3 {
 		t.Fatalf("未启用池时 conversionConcurrency = %d，want 声明的 3", got)
 	}
+}
+
+// taskErrorMapping is the connection's request- and task-level error vocabulary
+// as the default Schema declares it. A test whose adapter must decide whether a
+// failed child may be resent (#487) reads that decision from here.
+func taskErrorMapping(t *testing.T) *generation.ErrorMapping {
+	t.Helper()
+	c, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, connection := range c.Application().Runtime.ProviderConnections {
+		if connection.AdapterKey == "tripo.v3" {
+			return connection.ErrorMapping
+		}
+	}
+	t.Fatal("默认 Catalog 缺少 tripo.v3 Provider 连接声明")
+	return nil
 }

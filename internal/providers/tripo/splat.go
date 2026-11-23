@@ -26,6 +26,10 @@ type splatOptions struct {
 	ObserveEndpoint string                     `json:"observe_endpoint"`
 	UploadEndpoint  string                     `json:"upload_endpoint"`
 	ResponseAliases []generation.ResponseAlias `json:"response_aliases"`
+	// Pool is the upstream concurrency pool this Offering's dispatches draw
+	// slots from (#487); the closed wire protocol tolerates it because every
+	// Offering of the connection carries one.
+	Pool string `json:"pool,omitempty"`
 }
 
 type splatState struct {
@@ -73,7 +77,7 @@ func splatDeclaration(o generation.Offering) (generation.Parameter, *generation.
 	var source generation.Parameter
 	var seed *generation.Parameter
 	var output generation.AssetRequirement
-	if o.Capability != schema.ImageToSplat || len(o.Parameters) < 1 || len(o.Parameters) > 2 || len(o.Outputs) != 1 || o.IdempotentSubmission || o.Retry.MaxAttempts != 1 || len(o.Retry.Retryable) != 0 || o.PostSuccess != nil || o.Cost != nil || strictUploadedJSON(o.ProviderOptions, &options) != nil || !validRigCheckRoute(options.Endpoint, false) || !validRigCheckRoute(options.UploadEndpoint, false) || !validRigCheckRoute(options.ObserveEndpoint, true) || len(options.ResponseAliases) != 1 {
+	if o.Capability != schema.ImageToSplat || len(o.Parameters) < 1 || len(o.Parameters) > 2 || len(o.Outputs) != 1 || o.IdempotentSubmission || o.PostSuccess != nil || o.Cost != nil || strictUploadedJSON(o.ProviderOptions, &options) != nil || !validRigCheckRoute(options.Endpoint, false) || !validRigCheckRoute(options.UploadEndpoint, false) || !validRigCheckRoute(options.ObserveEndpoint, true) || len(options.ResponseAliases) != 1 {
 		return source, seed, output, options, splatProtocolError()
 	}
 	for _, p := range o.Parameters {

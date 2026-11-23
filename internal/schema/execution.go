@@ -55,9 +55,25 @@ type ErrorMapping struct {
 	HTTPStatusRanges  []HTTPStatusClass         `json:"http_status_ranges,omitempty"`
 	UpstreamStatusMap map[string]ErrorClassRule `json:"upstream_status_map,omitempty"`
 	UpstreamCodeMap   map[string]ErrorClassRule `json:"upstream_code_map,omitempty"`
-	MessageMatchers   []ErrorMessageMatcher     `json:"message_matchers,omitempty"`
-	ErrorFields       ErrorFieldPaths           `json:"error_fields,omitempty"`
-	RetryAfterHeader  string                    `json:"retry_after_header,omitempty"`
+	// TaskErrorCodeMap classifies a failed task's own error_code. The request
+	// level code (UpstreamCodeMap) and the task level error_code are two
+	// vocabularies: a Provider states so explicitly and the same number may
+	// carry another meaning, so a task's code is read from this table only. A
+	// code absent here stays unclassified (it is kept as evidence and never
+	// refines a FailureClass). Empty means the connection declares no task
+	// level vocabulary at all.
+	TaskErrorCodeMap map[string]ErrorClassRule `json:"task_error_code_map,omitempty"`
+	MessageMatchers  []ErrorMessageMatcher     `json:"message_matchers,omitempty"`
+	ErrorFields      ErrorFieldPaths           `json:"error_fields,omitempty"`
+	// RetryAfterHeader names the header carrying how long to wait after a
+	// refusal (Tripo: Retry-After).
+	RetryAfterHeader string `json:"retry_after_header,omitempty"`
+	// RateLimitResetHeader names the header carrying when the rate limit
+	// window resets, as a Unix timestamp in seconds (Tripo:
+	// X-RateLimit-Reset). It is the fallback of RetryAfterHeader: a refusal
+	// without the former still has a documented wait. Empty means the
+	// connection declares no such header.
+	RateLimitResetHeader string `json:"rate_limit_reset_header,omitempty"`
 }
 
 // StatusRule 声明一个上游任务状态词到观察相位（及失败分类）的映射。

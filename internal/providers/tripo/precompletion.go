@@ -244,7 +244,7 @@ func (a *Adapter) observePreCompletionFormats(ctx context.Context, request gener
 				return preCompletionFailure(base, state, "Tripo 转换缺少模型产物"), nil
 			}
 		}
-		updated, wait := applyConversionChild(item, phase, locator, child.CreditsConsumed)
+		updated, wait := a.applyConversionChild(item, phase, locator, child.CreditsConsumed, taskErrorCode(child.ErrorCode))
 		if wait > 0 {
 			backoff = true
 		}

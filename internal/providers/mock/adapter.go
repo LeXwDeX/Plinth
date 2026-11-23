@@ -406,6 +406,11 @@ func (a *Adapter) observePostSuccess(
 		if err != nil {
 			return generation.Observation{}, err
 		}
+		// These bytes embed the job's textureTail the way the locator path does,
+		// so the tail has been served from here too (#330 markers).
+		if stored.tailOnce && len(stored.textureTail) > 0 && (plan.format == "glb" || plan.format == "usdz") {
+			stored.tailServed = true
+		}
 		artifacts = append(artifacts, generation.ArtifactClaim{
 			ID:        stored.remoteID + ":post-success:" + variant,
 			Role:      slot.Role,

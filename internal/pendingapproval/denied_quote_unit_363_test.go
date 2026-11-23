@@ -41,7 +41,7 @@ func TestDeniedNativeExtraKeepsProviderUnitLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const unit = "即梦 AI"
+	const unit = "火山方舟 Seedream"
 	if translated := texts.Text("en", unit); translated == unit {
 		t.Fatalf("fixture unit label is not translated by the dictionary: %q", translated)
 	}

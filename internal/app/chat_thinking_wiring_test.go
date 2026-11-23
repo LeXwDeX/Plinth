@@ -290,11 +290,40 @@ func TestChatAgentWiringPassesBackOnlyTheRequestsOwnReasoning(t *testing.T) {
 	if got := send(own)["reasoning_content"]; got != "plan" {
 		t.Fatalf("reasoning_content = %#v", got)
 	}
-	// None of these is this request's own reasoning: another model's plaintext,
-	// the encrypted items of the Responses protocol, and an item with no source
-	// at all (an older checkpoint). Each message is purely foreign, so nothing
-	// of the request's own is left and the assistant message that calls tools
-	// still carries the field the vendor requires — as the empty string.
+	// Each of these also carries reasoning of this very request's own, so the
+	// foreign entry beside it must be dropped and only the own one sent: another
+	// model's plaintext, the encrypted items of the Responses protocol, and an
+	// item with no source at all (an older checkpoint).
+	for name, testCase := range map[string]struct {
+		message  agents.Message
+		expected string
+	}{
+		"another model": {
+			message: assistant(
+				agents.ReasoningItem{Model: "qwen-max", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "qwen plan"},
+				agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+			expected: "plan",
+		},
+		"another wire": {
+			message: assistant(
+				agents.ReasoningItem{Model: "deepseek", Wire: "responses", Kind: agents.ReasoningEncrypted, Content: `{"type":"reasoning"}`},
+				agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+			expected: "plan",
+		},
+		"an older checkpoint": {
+			message: assistant(
+				agents.ReasoningItem{Content: "legacy plan"},
+				agents.ReasoningItem{Model: "deepseek", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "plan"}),
+			expected: "plan",
+		},
+	} {
+		value, present := send(testCase.message)["reasoning_content"]
+		if !present || value != testCase.expected {
+			t.Errorf("%s: reasoning_content = %#v (present %t)", name, value, present)
+		}
+	}
+	// With nothing of the request's own left, the assistant message that calls
+	// tools still carries the field the vendor requires — as the empty string.
 	for name, message := range map[string]agents.Message{
 		"another model": assistant(
 			agents.ReasoningItem{Model: "qwen-max", Wire: "chat_completions", Kind: agents.ReasoningPlaintext, Content: "qwen plan"}),

@@ -79,6 +79,59 @@ func TestMockDeliversOnlyTheSelectedTripoFormats(t *testing.T) {
 	}
 }
 
+// The post-success round must honour the slot set the kernel reports. The
+// Offering's on-demand set and the reported set are the same list in the happy
+// path, so this drives a strict subset: only one of the selected converted
+// formats is reported, and the round may deliver nothing else. A mock that
+// converted every on-demand slot of the Offering would answer with both.
+func TestMockPostSuccessDeliversOnlyTheSlotsItIsGiven(t *testing.T) {
+	loaded, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "tripo/tripo-v3.1-full/text-to-3d"
+	offering, ok := loaded.Get(generation.OfferingID(id))
+	if !ok {
+		t.Fatalf("%s missing", id)
+	}
+	// GLTF plus two converted formats, so the round has a real choice to make.
+	input := `{"prompt":"a crate","authorize_extra_credits":true,"output_formats":["GLTF","STL","3MF"]}`
+	_, frozen, err := loaded.Normalize(generation.TextTo3D, id, json.RawMessage(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := generation.ResolveConditionalOutputs(offering, frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDemand := make([]generation.ResourceSlotState, 0, len(pinned.Outputs))
+	for _, output := range pinned.Outputs {
+		if output.Role != "converted_model" || output.Delivery != generation.AssetDeliveryOnDemand {
+			continue
+		}
+		onDemand = append(onDemand, generation.ResourceSlotState{
+			Role: output.Role, Variant: output.Variant, State: generation.ResourcePending,
+		})
+	}
+	if len(onDemand) < 2 {
+		t.Fatalf("on-demand converted slots = %d, want at least 2 to choose from", len(onDemand))
+	}
+	subset := onDemand[:1]
+	adapter := New()
+	complete(t, adapter, pinned, "formats-subset", json.RawMessage(frozen))
+	job := generation.UpstreamJob{ProviderID: pinned.ProviderID, RemoteID: adapter.jobs[adapter.submissions["formats-subset"]].remoteID}
+	result, err := adapter.Observe(context.Background(), generation.ObserveRequest{
+		TaskID: generation.TaskID("task-formats-subset"), Offering: pinned, Job: job,
+		PostSuccess: true, Input: json.RawMessage(frozen), ResourceSlots: subset,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if post := convertedVariants(convertFiles(result.Artifacts)); !slices.Equal(post, []string{subset[0].Variant}) {
+		t.Fatalf("post-success delivered %v, want only the reported slot %v", post, subset[0].Variant)
+	}
+}
+
 func convertedVariants(files []deliveredFile) []string {
 	variants := make([]string, 0, len(files))
 	for _, file := range files {

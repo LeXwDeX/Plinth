@@ -43,12 +43,15 @@ const (
 )
 
 // imageGenerationRequestError checks the remesh options and the official pixel
-// bounds of every inlined picture (#460 B24).
+// bounds of every inlined picture (#460 B24, #487 for the texture views).
 func imageGenerationRequestError(request map[string]any) string {
 	if message := core.GenerationRequestError(request); message != "" {
 		return message
 	}
-	return core.ImageRequestError(request)
+	if message := core.ImageRequestError(request); message != "" {
+		return message
+	}
+	return core.TextureImageListError(request)
 }
 
 // texturedUnlessDisabled follows the should_texture default (true).
@@ -74,7 +77,8 @@ var kinds = []core.Kind{
 		Validate: riggingRequestError, ValidateSource: riggingSourceError},
 	{Path: "/animations", Type: "animate", Need: [][]string{{"rig_task_id"}, {"action_id", "action_ids", "motion_task_id"}}, Sources: []string{"rig_task_id", "motion_task_id"}, Fidelity: "animation", Real: true},
 	{Path: "/uv-unwrap", Type: "uv-unwrap", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
-	{Path: "/resize", Type: "resize", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
+	{Path: "/resize", Type: "resize", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
+		Validate: resizeRequestError},
 	{Path: "/print/analyze", Type: "print-analyze", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true,
 		Patch: patchPrintAnalyze},
 	{Path: "/print/multi-color", Type: "print-multi-color", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
@@ -87,6 +91,25 @@ var kinds = []core.Kind{
 var rigSkeletonTemplates = []string{
 	"meshyrig", "mixamo", "ue5_mannequin", "max_biped", "unity_humanoid", "maya_human_ik",
 	"blender_rigify_basic_human", "cc5_hd_neutral_base", "daz_genesis9",
+}
+
+// resizeRequestError is the one rule the Resize page states about its sizing
+// modes (https://docs.meshy.ai/en/api/resize, read 2026-11-23): "Send exactly
+// one of resize_height, resize_longest_side, or auto_size. Sending none of
+// them, or more than one, returns 400." The fake used to create the task for
+// any body, so a projection that dropped auto_size still looked fine against
+// it (#487). The refusal text is constructed; no real rejection was captured.
+func resizeRequestError(request map[string]any) string {
+	modes := 0
+	for _, field := range []string{"resize_height", "resize_longest_side", "auto_size"} {
+		if _, present := request[field]; present {
+			modes++
+		}
+	}
+	if modes != 1 {
+		return "send exactly one of resize_height, resize_longest_side or auto_size"
+	}
+	return ""
 }
 
 // riggingRequestError checks the documented rigging fields (#277). The page
@@ -176,7 +199,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		}
 		checkedAt := captured
 		switch kind.Path {
-		case "/rigging", "/animations", "/print/analyze", "/print/multi-color":
+		case "/rigging", "/animations", "/print/analyze", "/print/multi-color", "/resize":
 			checkedAt = docsChecked
 		}
 		var parts []string
@@ -185,6 +208,8 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			parts = append(parts, "an input over 320000 faces is accepted (202) and the task ends FAILED with an invalid_input task_error (observed with a 300000-face quad remesh); the documentation says 400, the official API did not answer it at submit; the rig-non-humanoid scenario answers the documented 422 (constructed from docs); the request values skeleton_template (nine templates), include_fingers (not with texture_image_url) and height_meters (not negative) are checked as the page read on 2026-11-12 documents them, which has not been requested from the real API (riggingRequestError); include_fingers on a source task made with quad topology answers the real HTTP 400 {message} observed 2026-11-12 (#294, riggingSourceError)")
 		case "/print/analyze":
 			parts = append(parts, "the report's printability._version key cannot be held by a sample (a policy key must start with a letter or a digit), so the draft drops it and the fake adds it back")
+		case "/resize":
+			parts = append(parts, "a request that names none of resize_height, resize_longest_side and auto_size, or more than one, answers the documented 400 (resizeRequestError; constructed from docs, checked "+docsChecked+")")
 		case "/image-to-3d", "/multi-image-to-3d", "/retexture":
 			parts = append(parts, "the 2026-10-29 samples were captured with the cheapest texture options, so texture_urls and the PBR maps were constructed from the documented texture fields (docs checked "+docsChecked+"); the 2026-11-20 window re-captured image-to-3d and retexture with the Catalog defaults (textures and PBR on) and their PBR maps are real")
 		}

@@ -175,6 +175,19 @@ func validateProviderConnections(schema RuntimeSchema) error {
 				connection.ID,
 			)
 		}
+		if connection.PollRequestTimeoutSeconds < 0 {
+			return fmt.Errorf(
+				"连接 %q 的 poll_request_timeout_seconds 不能为负数",
+				connection.ID,
+			)
+		}
+		if connection.PollRequestTimeoutSeconds > 0 && connection.RequestTimeoutSeconds > 0 &&
+			connection.PollRequestTimeoutSeconds > connection.RequestTimeoutSeconds {
+			return fmt.Errorf(
+				"连接 %q 的 poll_request_timeout_seconds 不能大于 request_timeout_seconds",
+				connection.ID,
+			)
+		}
 		capabilities := map[schemacontract.Capability]struct{}{}
 		for _, capability := range connection.Capabilities {
 			if !capability.Valid() {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/LeXwDeX/Plinth/internal/generation"
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
 )
 
@@ -75,7 +76,12 @@ func TestMeshy330ConvertOfferingFollowsTheDocumentedContract(t *testing.T) {
 		_ = json.Unmarshal(formats.Default, &defaults)
 	}
 	six := []string{"glb", "fbx", "obj", "usdz", "stl", "3mf"}
-	if !ok || !formats.Required || !formats.Fixed || formats.Type != "string-array" || !slices.Equal(defaults, six) ||
+	// The official Convert page requires at least one format
+	// (docs.meshy.ai/en/api/convert, read 2026-11-23): the default stays the
+	// full set of six, but a request may carry a subset (#487), so the
+	// parameter is adjustable advice rather than fixed.
+	if !ok || !formats.Required || formats.Fixed || formats.Type != "string-array" || !slices.Equal(defaults, six) ||
+		formats.MinItems != 1 || formats.MaxItems != 6 || formats.AdjustmentPolicy != "advised" ||
 		formats.Presentation == nil || formats.Presentation.Surface != "readonly" {
 		t.Fatalf("target_formats = %#v", formats)
 	}
@@ -89,14 +95,57 @@ func TestMeshy330ConvertOfferingFollowsTheDocumentedContract(t *testing.T) {
 	}
 	var outputs []string
 	for _, output := range convert.Outputs {
-		if output.Role != "model" || output.Minimum == nil || *output.Minimum != 1 {
+		if output.Role != "model" || output.Minimum == nil || *output.Minimum != 1 || output.Variant == "" {
 			t.Fatalf("convert output %#v: only the six model files are delivered", output)
+		}
+		if output.RequestedWhen == nil || output.RequestedWhen.Parameter != "target_formats" ||
+			output.RequestedWhen.Operator != "contains" || output.RequestedWhen.Value == nil ||
+			string(output.RequestedWhen.Value) != `"`+output.Variant+`"` {
+			t.Fatalf("convert output %#v: every format is an on-demand slot of target_formats", output)
 		}
 		outputs = append(outputs, output.Variant)
 	}
 	if !slices.Equal(outputs, six) {
 		t.Fatalf("convert outputs = %v", outputs)
 	}
+}
+
+// #487: a Convert run may ask for one format. The frozen Offering keeps only
+// the requested slot, so the person who wants nothing but a GLB no longer pays
+// the failure risk of five formats they never asked for
+// (docs.meshy.ai/en/api/convert: "List at least one", read 2026-11-23).
+func TestMeshy330ConvertKeepsOnlyTheRequestedFormats(t *testing.T) {
+	product, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	convert := meshy330Offering(t, product, meshyConvertID)
+	_, input, err := product.Normalize(convert.Capability, convert.ID,
+		json.RawMessage(`{"source_task":"task-1","target_formats":["glb"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := generation.ResolveConditionalOutputs(convert, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frozen.Outputs) != 1 || frozen.Outputs[0].Variant != "glb" {
+		t.Fatalf("a glb-only Convert keeps %d outputs: %#v", len(frozen.Outputs), frozen.Outputs)
+	}
+	// An empty list is still refused: the parameter is required and at least
+	// one format must be named.
+	if _, _, err := product.Normalize(convert.Capability, convert.ID,
+		json.RawMessage(`{"source_task":"task-1","target_formats":[]}`)); err == nil {
+		t.Fatal("an empty target_formats was accepted, want the documented 400")
+	}
+}
+
+func TestMeshy330ConvertOfferingKeepsItsProviderOptions(t *testing.T) {
+	product, err := LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	convert := meshy330Offering(t, product, meshyConvertID)
 	var options map[string]any
 	if err := json.Unmarshal(convert.ProviderOptions, &options); err != nil {
 		t.Fatal(err)

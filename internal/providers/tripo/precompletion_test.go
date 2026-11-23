@@ -179,7 +179,7 @@ func TestFullFormatChildFailureRetriesThenFailsPublicTask(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/tasks/child" {
-			writeJSON(w, map[string]any{"code": 0, "data": map[string]any{"task_id": "child", "status": "failed"}})
+			writeJSON(w, map[string]any{"code": 0, "data": map[string]any{"task_id": "child", "status": "failed", "error_code": 1001}})
 			return
 		}
 		writeJSON(w, map[string]any{"code": 0, "data": map[string]any{

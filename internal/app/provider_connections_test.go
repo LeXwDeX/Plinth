@@ -966,17 +966,27 @@ func TestUpstreamPoolLimitEnvironmentOverride(t *testing.T) {
 	const connection, pool = "tripo.v3", "model-processing"
 	assert := func(manager *upstreampool.Manager, limit, queuePoll, idleTTL, waitHint int) {
 		t.Helper()
-		stats := manager.Stats()
-		if len(stats.Pools) != 1 || stats.Pools[0].Connection != connection || stats.Pools[0].Pool != pool {
-			t.Fatalf("pool not registered: %+v", stats)
+		// #487: the connection declares one pool per task category; this check
+		// follows the model-processing pool the environment overrides.
+		found := false
+		for _, registered := range manager.Stats().Pools {
+			if registered.Connection != connection || registered.Pool != pool {
+				continue
+			}
+			found = true
+			if registered.Limit != limit {
+				t.Fatalf("limit = %d, want %d", registered.Limit, limit)
+			}
 		}
-		if stats.Pools[0].Limit != limit ||
-			manager.QueuePoll(connection, pool) != time.Duration(queuePoll)*time.Second ||
+		if !found {
+			t.Fatalf("pool not registered: %+v", manager.Stats())
+		}
+		if manager.QueuePoll(connection, pool) != time.Duration(queuePoll)*time.Second ||
 			manager.IdleTTL(connection, pool) != time.Duration(idleTTL)*time.Second ||
 			manager.WaitHint(connection, pool) != time.Duration(waitHint)*time.Second {
-			t.Fatalf("policy = limit %d queue %v idle %v hint %v, want %d/%ds/%ds/%ds",
-				stats.Pools[0].Limit, manager.QueuePoll(connection, pool), manager.IdleTTL(connection, pool),
-				manager.WaitHint(connection, pool), limit, queuePoll, idleTTL, waitHint)
+			t.Fatalf("policy = queue %v idle %v hint %v, want %ds/%ds/%ds",
+				manager.QueuePoll(connection, pool), manager.IdleTTL(connection, pool),
+				manager.WaitHint(connection, pool), queuePoll, idleTTL, waitHint)
 		}
 	}
 	assert(build(), 5, 2, 600, 2)
@@ -993,11 +1003,11 @@ func TestUpstreamPoolLimitEnvironmentOverride(t *testing.T) {
 	assert(build(), 5, 2, 600, 2)
 }
 
-// #478 P1-11: the Tripo adapter's pool name comes from the connection's own
-// declaration, not a Go constant. The shipped connection declares exactly one
-// pool, so it is used; a connection with none keeps no queueing, and one that
-// declares several cannot be represented by the single-pool adapter and is
-// refused.
+// #478 P1-11 / #487: the Tripo adapter's pool comes from the connection's own
+// declaration, not a Go constant. Upstream pools are per task category, so a
+// connection may declare several; an Offering that names none falls back to the
+// connection's single pool, and one that names a pool nothing registers is
+// refused at startup instead of silently never queueing.
 func TestTripoPoolNameFollowsConnectionDeclaration(t *testing.T) {
 	pool := func(names ...string) *catalog.ProviderConcurrencySchema {
 		pools := map[string]catalog.ProviderPoolSchema{}
@@ -1006,13 +1016,31 @@ func TestTripoPoolNameFollowsConnectionDeclaration(t *testing.T) {
 		}
 		return &catalog.ProviderConcurrencySchema{Pools: pools}
 	}
-	if name, err := tripoPoolName(catalog.ProviderConnectionSchema{ID: "none"}); err != nil || name != "" {
-		t.Fatalf("none = %q %v; want empty, nil", name, err)
+	if name := tripoPoolDefault(catalog.ProviderConnectionSchema{ID: "none"}); name != "" {
+		t.Fatalf("none = %q; want empty", name)
 	}
-	if name, err := tripoPoolName(catalog.ProviderConnectionSchema{ID: "one", Concurrency: pool("model-processing")}); err != nil || name != "model-processing" {
-		t.Fatalf("one = %q %v; want model-processing", name, err)
+	if name := tripoPoolDefault(catalog.ProviderConnectionSchema{ID: "one", Concurrency: pool("model-processing")}); name != "model-processing" {
+		t.Fatalf("one = %q; want model-processing", name)
 	}
-	if _, err := tripoPoolName(catalog.ProviderConnectionSchema{ID: "two", Concurrency: pool("a", "b")}); err == nil || !strings.Contains(err.Error(), "只支持一个共享池") {
-		t.Fatalf("two = %v; want the single-pool refusal", err)
+	// Several declared pools: no default, every Offering names its own.
+	if name := tripoPoolDefault(catalog.ProviderConnectionSchema{ID: "many", Concurrency: pool("a", "b")}); name != "" {
+		t.Fatalf("many = %q; want no default", name)
+	}
+	offering := func(id, name string) generation.Offering {
+		options, err := json.Marshal(map[string]string{"endpoint": "models/convert", "pool": name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return generation.Offering{ID: generation.OfferingID(id), ProviderOptions: options}
+	}
+	connection := catalog.ProviderConnectionSchema{ID: "tripo", Concurrency: pool("model-processing", "mesh-operations")}
+	if err := validateTripoPoolDeclarations(connection, []generation.Offering{
+		offering("a", "model-processing"), offering("b", "mesh-operations"),
+	}); err != nil {
+		t.Fatalf("declared pools = %v, want accepted", err)
+	}
+	err := validateTripoPoolDeclarations(connection, []generation.Offering{offering("c", "meshing")})
+	if err == nil || !strings.Contains(err.Error(), "未注册") {
+		t.Fatalf("unregistered pool = %v; want the refusal", err)
 	}
 }

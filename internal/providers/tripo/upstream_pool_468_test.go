@@ -126,6 +126,18 @@ func newPoolAdapterWithPolicy(t *testing.T, upstream *poolUpstream, config upstr
 	errorMapping, statusMapping := declaredTripoMappings(t)
 	pool := upstreampool.New(upstreampool.Options{WaitHint: 2 * time.Second})
 	pool.Register("tripo.v3", tripo.TripoPoolName, config)
+	// #487: an Offering queues through the pool it declares, so a fixture that
+	// wants queueing registers that pool too (the shipped connection declares
+	// one per task category).
+	for _, offering := range offerings {
+		name, err := tripo.OfferingPool(offering)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if name != "" && name != tripo.TripoPoolName {
+			pool.Register("tripo.v3", name, config)
+		}
+	}
 	adapter, err := tripo.New(tripo.Config{
 		BaseURL:         upstream.server.URL,
 		APIKey:          "tripo-key",

@@ -51,6 +51,11 @@ type exportFixture struct {
 	polls map[string]int
 	// failFormats makes a child of that format end failed forever.
 	failFormats map[string]bool
+	// failCodes is the task-level error_code a failed child of that format
+	// reports; absent means the official transient 1001, which the format's
+	// retry path may resend (#487). A determinate code (1004, 2008, 2018…)
+	// ends the format instead.
+	failCodes map[string]int
 	// cancelFormats makes the next child of that format end cancelled.
 	cancelFormats map[string]bool
 	// refusals counts the 429 answers per format; a format below its count is
@@ -74,6 +79,7 @@ func newExportFixture(t *testing.T) *exportFixture {
 	f := &exportFixture{
 		polls:         map[string]int{},
 		failFormats:   map[string]bool{},
+		failCodes:     map[string]int{},
 		cancelFormats: map[string]bool{},
 		refusals:      map[string]int{},
 		submitted:     map[string]string{},
@@ -155,6 +161,16 @@ func newExportFixture(t *testing.T) *exportFixture {
 				status = "running"
 			}
 			data := map[string]any{"task_id": id, "status": status, "progress": 50}
+			if status == "failed" {
+				// A failed task reports its own error_code: 1001 (a transient
+				// server error) by default, or the code the test pinned.
+				code := f.failCodes[format]
+				if code == 0 {
+					code = 1001
+				}
+				data["error_code"] = code
+				data["error_message"] = "Fake injected convert failure"
+			}
 			if status == "success" {
 				data["progress"] = 100
 				data["output"] = map[string]any{"model_url": f.server.URL + "/" + id + ".glb"}
@@ -280,9 +296,11 @@ func TestFailedConvertChildIsResubmittedForItsOwnFormat(t *testing.T) {
 	}
 }
 
-// A1: a cancelled child is treated like a failed one (also not charged): the
-// same format is sent again and the run completes.
-func TestCancelledConvertChildIsResubmitted(t *testing.T) {
+// #487: a cancelled child is terminal. The official lifecycle page ends the
+// flow at status=cancelled ("stop polling and report cancellation") and the
+// billing page returns the frozen credits, but "not charged" does not mean
+// "worth sending again": the format is not resent, and the run fails on it.
+func TestCancelledConvertChildIsNotResent(t *testing.T) {
 	upstream := newExportFixture(t)
 	upstream.set(func(f *exportFixture) {
 		f.runningPolls = 0
@@ -292,15 +310,16 @@ func TestCancelledConvertChildIsResubmitted(t *testing.T) {
 	permit := &conversionPermit{}
 	request := fullFormatRequest(t)
 	observation := driveExport(t, adapter, request, permit, 40)
-	if observation.Phase != generation.UpstreamCompleted {
-		t.Fatalf("phase = %s, want completed: %+v", observation.Phase, observation.Failure)
+	if observation.Phase != generation.UpstreamFailed {
+		t.Fatalf("phase = %s, want failed: %+v", observation.Phase, observation.Failure)
 	}
 	posts, _, _ := upstream.snapshot()
-	if len(posts) != 2 || posts[0] != "GLTF" || posts[1] != "GLTF" {
-		t.Fatalf("convert posts = %v, want the cancelled GLTF resent once", posts)
+	if len(posts) != 1 || posts[0] != "GLTF" {
+		t.Fatalf("convert posts = %v, want the cancelled GLTF alone", posts)
 	}
 	var state struct {
 		Conversions map[string]struct {
+			Status   string `json:"status"`
 			Attempts []struct {
 				Outcome string `json:"outcome"`
 			} `json:"attempts"`
@@ -310,8 +329,32 @@ func TestCancelledConvertChildIsResubmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempts := state.Conversions["GLTF"].Attempts
-	if len(attempts) != 2 || attempts[0].Outcome != "canceled" || attempts[1].Outcome != "done" {
-		t.Fatalf("GLTF attempts = %+v, want the cancelled attempt and the successful resubmission", attempts)
+	if len(attempts) != 1 || attempts[0].Outcome != "canceled" {
+		t.Fatalf("GLTF attempts = %+v, want the cancelled attempt alone", attempts)
+	}
+}
+
+// #487: a failed child whose task-level error_code is determinate (1004 invalid
+// parameter, 2008 content policy, 2018 model too complex) is not resent: the
+// official error-handling page sends those back as 400-class answers, so the
+// same request fails the same way. Only the transient codes (1000, 1001) are.
+func TestDeterminateConvertChildFailureIsNotResent(t *testing.T) {
+	for _, code := range []int{1004, 2008, 2018} {
+		upstream := newExportFixture(t)
+		upstream.set(func(f *exportFixture) {
+			f.runningPolls = 0
+			f.failFormats["GLTF"] = true
+			f.failCodes["GLTF"] = code
+		})
+		adapter := newAdapter(t, upstream.server)
+		permit := &conversionPermit{}
+		observation := driveExport(t, adapter, fullFormatRequest(t), permit, 40)
+		if observation.Phase != generation.UpstreamFailed {
+			t.Fatalf("code %d: phase = %s, want failed: %+v", code, observation.Phase, observation.Failure)
+		}
+		if posts, _, _ := upstream.snapshot(); len(posts) != 1 || posts[0] != "GLTF" {
+			t.Fatalf("code %d: convert posts = %v, want the GLTF alone", code, posts)
+		}
 	}
 }
 

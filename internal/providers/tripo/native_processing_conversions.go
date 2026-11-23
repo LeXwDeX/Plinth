@@ -409,6 +409,11 @@ func (a *Adapter) observeNativeTask(ctx context.Context, options providerOptions
 		}
 		value.CreditsConsumed = bytes.Clone(credit)
 	}
+	// A failed child's own error_code decides whether its format may be sent
+	// again (#487); the strict reader above drops it otherwise.
+	if code, ok := data["error_code"]; ok && !bytes.Equal(bytes.TrimSpace(code), []byte("null")) {
+		value.ErrorCode = bytes.Clone(code)
+	}
 	rule, ok := declaredStatusRule(a.statusMapping, strings.ToLower(strings.TrimSpace(value.Status)))
 	if !ok {
 		return task{}, nativeProcessingProtocolError()
@@ -575,7 +580,7 @@ func (a *Adapter) observeNativeConversions(ctx context.Context, request generati
 			locator = firstHTTPOutput(child.Output, "model_url")
 		}
 		previous := item.Status
-		updated, wait := applyConversionChild(item, phase, locator, child.CreditsConsumed)
+		updated, wait := a.applyConversionChild(item, phase, locator, child.CreditsConsumed, taskErrorCode(child.ErrorCode))
 		s.Conversions[f.Format] = updated
 		if updated.Status != previous || len(updated.Attempts) != len(item.Attempts) {
 			changed = true

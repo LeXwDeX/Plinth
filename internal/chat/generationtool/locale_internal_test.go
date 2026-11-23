@@ -393,8 +393,8 @@ func TestAskChoiceFollowsTheTurnLocale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerZH := "即梦 AI"
-	modelZH := "即梦 Seedream 4.5 (高质量)"
+	providerZH := "火山方舟 Seedream"
+	modelZH := "Seedream 4.5 (高质量)"
 	providerEN := texts.Text("en", providerZH)
 	modelEN := texts.Text("en", modelZH)
 	if providerEN == providerZH || modelEN == modelZH {
@@ -464,7 +464,7 @@ func TestSourceViewTranslatesOnlySchemaNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerZH, modelZH := "即梦 AI", "即梦 Seedream 4.5 (高质量)"
+	providerZH, modelZH := "火山方舟 Seedream", "Seedream 4.5 (高质量)"
 	localize := func(text string) string { return texts.Text("en", text) }
 	task := generation.Task{ID: "task-1", Capability: generation.TextTo3D,
 		Offering: generation.Offering{ProviderName: providerZH, ModelName: modelZH}}
@@ -495,13 +495,13 @@ func TestSourceRefusalProviderFollowsTheTurnLocale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerZH := "即梦 AI"
+	providerZH := "火山方舟 Seedream"
 	providerEN := texts.Text("en", providerZH)
 	if providerEN == providerZH {
 		t.Fatalf("no English mapping for %q", providerZH)
 	}
 	localize := func(text string) string { return texts.Text("en", text) }
-	offering := generation.Offering{ProviderName: providerZH, ModelName: "即梦 Seedream 4.5 (高质量)"}
+	offering := generation.Offering{ProviderName: providerZH, ModelName: "Seedream 4.5 (高质量)"}
 	refusal := sourceRefusal{Kind: "task", Provider: providerZH, Capabilities: []string{"text-to-3d"}}
 	messages := &catalog.ChatToolServiceMessages{Task: "task {service} {provider} {capabilities}"}
 	got := reasonText(messages, offering, refusal, ", ", localize)
@@ -531,7 +531,7 @@ func TestNativeUnitLabelStaysRaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawUnit := "即梦 AI"
+	rawUnit := "火山方舟 Seedream"
 	translated := texts.Text("en", rawUnit)
 	if translated == rawUnit {
 		t.Fatalf("no English mapping for %q", rawUnit)
@@ -561,7 +561,7 @@ func TestFormatRefusalLocalizesServiceName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerZH, modelZH := "即梦 AI", "即梦 Seedream 4.5 (高质量)"
+	providerZH, modelZH := "火山方舟 Seedream", "Seedream 4.5 (高质量)"
 	offering := generation.Offering{ProviderName: providerZH, ModelName: modelZH}
 	executor := Executor{chat: application.Chat, texts: texts}
 	english := executor.formatRefusal(chat.ToolCommand{Options: chat.TurnOptions{Locale: "en"}}, offering, "stl")

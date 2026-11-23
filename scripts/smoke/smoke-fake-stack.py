@@ -2370,7 +2370,10 @@ FAULTS = {
                   "hyper3d": ("FAILED", "insufficient_balance"), "openai": ("FAILED", "insufficient_balance"),
                   "gemini": ("FAILED", "insufficient_balance"), "jimeng": ("FAILED", "credential_quota")},
     # The image fakes fail a task with their vendor's content-safety refusal, read as content_rejected (#35).
-    "task-failed": {"tripo": ("FAILED", "rejected"), "meshy": ("FAILED", "invalid_input"), "hyper3d": ("FAILED", "rejected"),
+    # Tripo's injected failure carries task-level error_code 1001, which the official error table
+    # calls transient: the platform retries it and the task ends as upstream_unavailable once the
+    # budget is spent (#487). It used to read as rejected, when 1001 was not yet classified.
+    "task-failed": {"tripo": ("FAILED", "upstream_unavailable"), "meshy": ("FAILED", "invalid_input"), "hyper3d": ("FAILED", "rejected"),
                     "openai": ("FAILED", "content_rejected"), "gemini": ("FAILED", "content_rejected"),
                     "jimeng": ("FAILED", "content_rejected"), "matting": ("FAILED", "rejected")},
     # An inline picture that is not a picture is a protocol failure; a corrupt download fails the integrity check.

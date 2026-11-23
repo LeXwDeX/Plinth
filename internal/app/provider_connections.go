@@ -244,26 +244,44 @@ func poolSecondsSetting(setting *catalog.ProviderPoolSettingSchema) time.Duratio
 	return time.Duration(value) * time.Second
 }
 
-// tripoPoolName resolves the upstream pool the Tripo adapter queues through
-// from the connection's own declaration, not a Go constant (#478). Tripo shares
-// one pool across format-convert, texture and refine, so a connection that
-// declares one pool is the normal case; a connection that declares none keeps
-// the previous no-queue behaviour, and one that declares several cannot be
-// represented by the single-pool adapter and is refused rather than silently
-// queueing through an arbitrary one.
-func tripoPoolName(connection catalog.ProviderConnectionSchema) (string, error) {
-	if connection.Concurrency == nil || len(connection.Concurrency.Pools) == 0 {
-		return "", nil
-	}
-	if len(connection.Concurrency.Pools) > 1 {
-		return "", fmt.Errorf(
-			"连接 %q 声明了 %d 个 upstream 池，但 Tripo 只支持一个共享池",
-			connection.ID, len(connection.Concurrency.Pools))
+// tripoPoolDefault 返回 Tripo 连接为「未声明自己用哪个池」的 Offering 准备的
+// 默认池（#487）。上游按 task category 分池，正常声明是多个池、每个 Offering
+// 自己声明所属池；只有一个池的连接（测试、自建网关）继续让整个连接共用它。
+func tripoPoolDefault(connection catalog.ProviderConnectionSchema) string {
+	if connection.Concurrency == nil || len(connection.Concurrency.Pools) != 1 {
+		return ""
 	}
 	for name := range connection.Concurrency.Pools {
-		return name, nil
+		return name
 	}
-	return "", nil
+	return ""
+}
+
+// validateTripoPoolDeclarations 校验每个 Tripo Offering 声明的上游池都在连接的
+// concurrency.pools 里注册过（#487）。池是否真的排队由注册决定，所以一个拼错
+// 或已删除的池名会让该 Offering 静默地永不排队；宁可启动期失败。
+func validateTripoPoolDeclarations(
+	connection catalog.ProviderConnectionSchema,
+	offerings []generation.Offering,
+) error {
+	if connection.Concurrency == nil || len(connection.Concurrency.Pools) == 0 {
+		return nil
+	}
+	for _, offering := range offerings {
+		pool, err := tripo.OfferingPool(offering)
+		if err != nil {
+			return fmt.Errorf(
+				"Tripo Offering %q 的 provider_options.pool 无效: %w", offering.ID, err)
+		}
+		if pool == "" {
+			continue
+		}
+		if _, declared := connection.Concurrency.Pools[pool]; !declared {
+			return fmt.Errorf(
+				"Tripo Offering %q 声明了连接未注册的 upstream 池 %q", offering.ID, pool)
+		}
+	}
+	return nil
 }
 
 // buildProviderAdapterWithTransport 每个受支持协议恰有一个构造分支；新增
@@ -351,6 +369,7 @@ func buildProviderAdapterWithTransport(
 			ScratchDir:             scratchDir,
 			InputPublisher:         publisher,
 			RetrySubmitServerError: connection.RetrySubmitServerError,
+			PollTimeout:            time.Duration(connection.PollRequestTimeoutSeconds) * time.Second,
 		})
 	case "tripo":
 		for _, offering := range offerings {
@@ -358,8 +377,7 @@ func buildProviderAdapterWithTransport(
 				return nil, fmt.Errorf("Tripo Offering %q 的 wire Schema 无效: %w", offering.ID, err)
 			}
 		}
-		poolID, err := tripoPoolName(connection)
-		if err != nil {
+		if err := validateTripoPoolDeclarations(connection, offerings); err != nil {
 			return nil, err
 		}
 		return tripo.New(tripo.Config{
@@ -377,7 +395,7 @@ func buildProviderAdapterWithTransport(
 			ScratchDir:             scratchDir,
 			OfferingRoutes:         offerings,
 			Pool:                   pool,
-			PoolID:                 poolID,
+			PoolID:                 tripoPoolDefault(connection),
 			RetrySubmitServerError: connection.RetrySubmitServerError,
 		})
 	case "hyper3d.rodin":

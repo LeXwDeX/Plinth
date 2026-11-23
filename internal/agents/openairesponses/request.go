@@ -103,7 +103,7 @@ const (
 )
 
 func marshalRequest(request agents.Request, stream, parallelToolCalls bool, options *Options) ([]byte, error) {
-	instructions, input, err := convertMessages(request.Messages)
+	instructions, input, err := convertMessages(request.Messages, reasoningSource(request))
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func marshalRequest(request agents.Request, stream, parallelToolCalls bool, opti
 // A call_id is the Port's ToolCall.ID as the caller sent it (the orchestrator
 // makes them unique per round), so a function_call and its output meet on the
 // same string whatever the upstream called it.
-func convertMessages(messages []agents.Message) (instructions string, input []any, err error) {
+func convertMessages(messages []agents.Message, source agents.Source) (instructions string, input []any, err error) {
 	var system []string
 	leading := true
 	for _, message := range messages {
@@ -181,7 +181,7 @@ func convertMessages(messages []agents.Message) (instructions string, input []an
 			}
 		case roleAssistant:
 			leading = false
-			input = append(input, assistantItems(message)...)
+			input = append(input, assistantItems(message, source)...)
 		case roleTool:
 			leading = false
 			input = append(input, wireFunctionCallOutput{
@@ -235,6 +235,13 @@ func userContent(message agents.Message) (content any, ok bool) {
 // documented to refuse one that leads nowhere (the gateway's answer to that
 // was not probed).
 //
+// Only an item that names this request's own source goes back (#377): the same
+// connection, model, wire and kind. Encrypted reasoning is reusable only
+// within the same model family, and the documents say an item from another
+// family, organization or end user is dropped by the upstream as
+// model_mismatch / organization_mismatch / end_user_mismatch rather than
+// replayed into the context.
+//
 // The function_call items are built from the Port's ToolCall (call_id, name,
 // arguments); the id and status the upstream gave are not sent back, so no item
 // refers to a response the upstream never stored. Observed: a function_call
@@ -242,8 +249,8 @@ func userContent(message agents.Message) (content any, ok bool) {
 // answered by a function_call_output of the same call_id, is accepted. The
 // assistant's text goes without the phase the upstream gave it (the probes
 // replayed no assistant message, so its effect is not known).
-func assistantItems(message agents.Message) []any {
-	carried := decodeReasoning(message.ReasoningText(ReasoningKind))
+func assistantItems(message agents.Message, source agents.Source) []any {
+	carried := decodeReasoning(replayedReasoning(message, source))
 	var items []any
 	next := 0 // the next carried reasoning item to place
 	placeReasoning := func(before int) {
