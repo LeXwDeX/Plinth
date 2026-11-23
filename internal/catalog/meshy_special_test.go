@@ -33,6 +33,14 @@ func specialParameter(t *testing.T, o schema.Offering, name string) schema.Param
 	t.Fatalf("%s missing %s", o.ID, name)
 	return schema.Parameter{}
 }
+
+// meshyStepTools are the Meshy processing steps each tool declares (#493).
+var meshyStepTools = map[string][]schema.Capability{
+	"process_model":         {"uv-unwrap", "resize", "multi-color-print"},
+	"plan_model_processing": {"uv-unwrap", "resize", "analyze-printability", "multi-color-print"},
+	"analyze_model":         {"analyze-printability"},
+}
+
 func TestMeshySpecialQualifiedAvailabilityWithExactDelivery(t *testing.T) {
 	c, err := LoadDefault()
 	if err != nil {
@@ -245,10 +253,16 @@ func TestMeshySpecialToolsAndHarnessAreSchemaMapped(t *testing.T) {
 		if tool.Name == "create_motion_clip" {
 			motion = tool
 		}
-		if tool.Name == "process_model" || tool.Name == "plan_model_processing" {
+		if want, ok := meshyStepTools[tool.Name]; ok {
 			for _, tc := range meshySpecial[:5] {
-				if !slices.Contains(tool.Execution.Capabilities, schema.Capability(tc.capability)) || tool.Processing.Steps[tc.capability] != schema.Capability(tc.capability) {
-					t.Fatalf("%s lacks %s", tool.Name, tc.capability)
+				// #493: Repair Printability has no enabled Offering, so no tool
+				// declares it; the report step moved to analyze_model and the
+				// paid Meshy steps stay on process_model and the plan.
+				declared := slices.Contains(want, schema.Capability(tc.capability))
+				if slices.Contains(tool.Execution.Capabilities, schema.Capability(tc.capability)) != declared ||
+					(tool.Processing.Steps[tc.capability] == schema.Capability(tc.capability)) != declared {
+					t.Fatalf("%s declares %s = %v, want declared=%v", tool.Name, tc.capability,
+						slices.Contains(tool.Execution.Capabilities, schema.Capability(tc.capability)), declared)
 				}
 			}
 		}
@@ -261,7 +275,14 @@ func TestMeshySpecialToolsAndHarnessAreSchemaMapped(t *testing.T) {
 		for _, op := range a.Chat.Harness.Operations {
 			if op.ID == tc.capability {
 				found = true
-				if op.Group != "common" || len(op.ModelIDs) != 0 || op.ToolName != "process_model" || len(op.Prerequisites) != 0 {
+				wantTool := "process_model"
+				if tc.capability == "analyze-printability" {
+					wantTool = "analyze_model"
+				} else if tc.capability == "repair-printability" {
+					// The disabled candidate keeps an operation without a tool.
+					wantTool = ""
+				}
+				if op.Group != "common" || len(op.ModelIDs) != 0 || op.ToolName != wantTool || len(op.Prerequisites) != 0 {
 					t.Fatalf("invalid common operation: %+v", op)
 				}
 				if tc.capability != "repair-printability" && op.UnavailableReason != "" {

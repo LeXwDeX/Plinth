@@ -22,8 +22,9 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 	// #327's propose_asset_list, #328's submit_asset_list_item, #331's
 	// crop_image_regions and #329f's get_asset_list, less #491's
 	// observe_task and request_consent.
-	// 16 generation tools: the shipped 15 plus #242's create_concept_sketch.
-	if len(app.Chat.Tools) != 16 || len(app.Chat.AgentTools) != 27 {
+	// 17 generation tools: the shipped 15 plus #242's create_concept_sketch and
+	// #493's analyze_model (the zero-credit report steps split off process_model).
+	if len(app.Chat.Tools) != 17 || len(app.Chat.AgentTools) != 27 {
 		t.Fatalf("chat tool inventory = generation:%d controls:%d", len(app.Chat.Tools), len(app.Chat.AgentTools))
 	}
 	if err := catalog.ValidateApplicationSchema(app); err != nil {
@@ -31,7 +32,7 @@ func TestDefaultChatToolsDeclareRuntimeExecutionContracts(t *testing.T) {
 	}
 	for _, tool := range app.Chat.Tools {
 		switch tool.Name {
-		case "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_gaussian_splat", "retexture_model", "process_model", "plan_model_processing", "convert_model_format",
+		case "create_model_3d", "create_model_3d_from_image", "create_model_3d_from_views", "create_gaussian_splat", "retexture_model", "process_model", "analyze_model", "plan_model_processing", "convert_model_format",
 			"create_creative_lab_design", "build_creative_lab_item":
 		default:
 			continue

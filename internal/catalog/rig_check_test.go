@@ -54,7 +54,7 @@ func TestRigCheckOfferingHasNativeSourceAndRequiredBoundedReport(t *testing.T) {
 	for _, op := range app.Chat.Harness.Operations {
 		if op.ID == "rig-check" {
 			found = true
-			if op.UnavailableReason != "" || op.UploadedSourceUnavailableReason == "" || op.Capability != "rig-check" || op.ToolName != "process_model" {
+			if op.UnavailableReason != "" || op.UploadedSourceUnavailableReason == "" || op.Capability != "rig-check" || op.ToolName != "analyze_model" {
 				t.Fatalf("operation must be enabled for native sources and explicitly unavailable for uploads: %+v", op)
 			}
 		}

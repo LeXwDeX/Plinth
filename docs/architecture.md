@@ -3084,3 +3084,14 @@ Texture 修订 `2026-10-21.187.2` 按独立端点的最高分辨率合同固定 
 - 不写审计：读本人任务、读取失败、普通用户（跨 owner 本就 404）。资产下载与模型包下载仍分别写 `download_asset`、`download_model_archive`，不与本动作重复。归属判定对持有 read-any 的调用者多一次内核读取，普通用户零额外开销。
 - 旧兼容路由 `GET /api/tasks`（`legacyTaskHistory`）对所有角色固定为本人范围。依据：前端不使用该路由（`legacy_routes.tasks` 无消费者），`scripts/test-go-candidate-http.sh` 仅以 `search=<任务ID>` 查自己的任务；管理员跨 owner 查看任务的列表入口是 `/api/admin/generations`。
 - `TestAdminReadingAnotherUsersTaskWritesAudit`、`TestAdminTaskReadPathsShareHistoryScope`、`TestLegacyTaskHistoryAdminFiltersPagesAndRecentAreDataDriven` 验证。状态：仅本机验证，未部署。
+
+**加工工具按风险分层：`process_model` 只留付费改造，0 积分报告独立为 `analyze_model`（#493，Catalog revision `2026-11-23.493.1`）。**
+
+- **拆分口径。** `process_model` 的 `step` 枚举、`execution.capabilities` 与 `processing.steps` 收窄为“会改变模型并计费”的十步（重拓扑、绑骨、动画、UV 展开、精确尺寸、多色打印、模型分件、部件补全、模型拆分、模型合并）；`analyze-printability` 与 `rig-check` 移入新工具 `analyze_model`。两步都是 0 积分、只读、只交付报告，不改变模型。`mesh-segmentation` 留在付费工具：目录里三个已启用供给项分别是 40、55 积分与按量计价的 Bang，不是免费分析。
+- **为什么选“不同工具”而不是“同一工具不同授权路径”。** 授权路径本来就按单步预计积分判定（#490），所以继续把 0 积分步骤留在 `process_model` 并不会让它变得需要批准；真正的问题是模型看不到“哪一步花钱”。`effects` 是服务端声明（不进公开 DTO），表达的是“是否提交 Task”：两步分析同样提交真实上游 Task，标成 `READ` 会连带影响 Harness 操作绑定、后台等待与幂等/取消要求。因此分层落在工具边界上：两个工具的步骤枚举不重叠，描述各自写清“只出报告”与“会改模型并计费”。
+- **三个入口的边界写进各自描述。** `process_model` 单步付费改造；`analyze_model` 单步 0 积分报告；`convert_model_format` 只做格式转换（平台本地转换 0 积分且立即完成，Meshy Convert / 上传 GLB 转 STL 按 Schema 报价并走批准），几何、拓扑、表面或尺寸变化归 `process_model`，长链中的转换归计划；`plan_model_processing` 是两步及以上的有序链，单步不要建计划、只想要报告用 `analyze_model`。
+- **删除跑不通的 `repair-printability`。** 唯一供给项 `meshy/processing/repair-printability` 为 `enabled:false`。已从 `process_model` 与 `plan_model_processing` 的步骤枚举、`execution.capabilities`、`processing.steps` 以及 `frontend.model_processing_capabilities` 移除；Harness 操作保留为不可用项（去掉 `tool_name`/`tool_arguments`），提示文案不变。检查了 `process_model` 其余能力：只有这一个没有已启用供给项（`tripo/geometry/decimate-quad` 同属 remesh 的停用变体，不影响该能力）。
+- **不变量测试。** `internal/catalog/model_analysis_split_test.go`：两个工具的 `step` 枚举必须与 `processing.steps` 完全一致；每个声明步骤至少一个已启用 Offering；`process_model` 不再声明报告步骤且 `analyze_model` 的供给项都是 0 积分；任何工具都不得声明 `repair-printability`，面板与 Harness 也不得再列出它。
+- **反证（三种都红）。** 把 `repair-printability` 加回 `processing.steps`（capabilities 闭包校验红）、把 `analyze-printability` 混进 `process_model`（新测试“still declares the report step”红）、只把它加回 `step` 枚举（枚举一致性红）。
+- **同步范围。** `chat_validation.go` 未改：新工具带 `capability`、走既有 `generation.execute` 校验与 `PAID_TASK` 契约。测试更新 `catalog/meshy_special_test.go`、`catalog/rig_check_test.go`、`catalog/chat_tool_execution_schema_test.go`（生成工具 16→17）、`catalog/chat_agent_scope_schema_test.go`（`analyze_model` 记 3d）、`chat/agent_scope_test.go`；`TestWireCoverageMatrix` 用 `UPDATE_WIRE_COVERAGE=1 go test ./internal/testutil/wirefixture -run Coverage` 重生成（只变 `catalog_sha256`）。
+- 验证：`go build ./...` 与 `go test ./internal/...` 全绿；未跑完整 CI，未部署。
