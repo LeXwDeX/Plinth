@@ -192,7 +192,6 @@ func TestRigCheckRejectsUnresolvedOrNonNativeSourcesBeforePermit(t *testing.T) {
 
 func TestRigCheckDeclarationFailsClosed(t *testing.T) {
 	for _, mutate := range []func(*generation.Offering){
-		func(o *generation.Offering) { o.Retry.MaxAttempts = 2 },
 		func(o *generation.Offering) { o.CreditsMetered = false },
 		func(o *generation.Offering) { o.EstimatedCredits = 1 },
 		func(o *generation.Offering) { o.Parameters[0].SameProvider = false },

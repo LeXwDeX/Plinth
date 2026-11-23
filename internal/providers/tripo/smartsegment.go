@@ -114,7 +114,7 @@ func smartSegmentDeclaration(o generation.Offering) error {
 func smartSegmentOptions(o generation.Offering) (providerOptions, error) {
 	var options providerOptions
 	if o.ID == "" || o.Revision == "" || o.ProviderID == "" || o.IdempotentSubmission ||
-		o.Retry.MaxAttempts != 1 || o.PostSuccess != nil ||
+		o.PostSuccess != nil ||
 		strictUploadedJSON(o.ProviderOptions, &options) != nil ||
 		options.Protocol != smartSegmentKind || options.Endpoint != "mesh/smartsegment" ||
 		options.UploadEndpoint != "files" || options.ObserveEndpoint != "tasks/{task_id}" ||

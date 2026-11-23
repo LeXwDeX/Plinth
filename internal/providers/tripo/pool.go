@@ -2,17 +2,19 @@ package tripo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers/upstreampool"
 )
 
-// TripoPoolName is the pool the shipped connection declares, shared by
-// format-convert, texture and refine (the official default holds five jobs
-// across the three). The Adapter takes its pool name from the connection
-// declaration at build time (#478); this constant names that declaration in
+// TripoPoolName is the pool the shipped connection declares for texture,
+// format-convert and refine (the official default holds five jobs across the
+// three). The Adapter resolves an Offering's pool from that Offering's own
+// declaration (#487); this constant only names the model-processing pool in
 // tests and fixtures, it is not a value the Adapter hardcodes.
 const TripoPoolName = "model-processing"
 
@@ -22,12 +24,46 @@ const TripoPoolName = "model-processing"
 // timeout, measures this wait (N1).
 const defaultPoolQueuePoll = 2 * time.Second
 
+// poolIDFor is the upstream pool an Offering's dispatches draw slots from: the
+// pool that Offering declared, else the Adapter's default one (#487). Empty
+// means no queueing, which is also what an unregistered pool resolves to.
+func (a *Adapter) poolIDFor(offering generation.Offering) string {
+	if pool, ok := a.poolIDs[offering.ID]; ok {
+		return pool
+	}
+	return a.poolID
+}
+
+// OfferingPool is the upstream pool name an Offering declared for its
+// dispatches, empty when it declared none (#487). The assembly layer checks a
+// declared name against the connection's registered pools at startup: a name
+// nothing registers would silently queue nothing.
+func OfferingPool(offering generation.Offering) (string, error) {
+	var values map[string]json.RawMessage
+	if len(offering.ProviderOptions) == 0 {
+		return "", nil
+	}
+	if err := json.Unmarshal(offering.ProviderOptions, &values); err != nil {
+		return "", err
+	}
+	raw, declared := values["pool"]
+	if !declared {
+		return "", nil
+	}
+	var name string
+	if err := json.Unmarshal(raw, &name); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(name), nil
+}
+
 // poolEnabled reports whether the offering's declared pool is registered with a
 // positive limit. A pool the connection does not declare (or declares with limit
 // 0) is not really enabled: gating children behind it would serialize or stall
 // work against a queue that never admits them (#478).
 func (a *Adapter) poolEnabled(offering generation.Offering) bool {
-	if a.pool == nil || a.poolID == "" {
+	poolID := a.poolIDFor(offering)
+	if a.pool == nil || poolID == "" {
 		return false
 	}
 	return a.pool.Enabled(a.poolHolder(offering, ""))
@@ -36,7 +72,7 @@ func (a *Adapter) poolEnabled(offering generation.Offering) bool {
 func (a *Adapter) poolHolder(offering generation.Offering, attempt generation.AttemptID) upstreampool.Holder {
 	return upstreampool.Holder{
 		Connection: offering.AdapterKey,
-		Pool:       a.poolID,
+		Pool:       a.poolIDFor(offering),
 		Attempt:    string(attempt),
 	}
 }
@@ -90,7 +126,7 @@ func poolCountsPublicJob(offering generation.Offering) bool {
 // pool, or the code fallback.
 func (a *Adapter) queuePoll(offering generation.Offering) time.Duration {
 	if a.poolEnabled(offering) {
-		if poll := a.pool.QueuePoll(offering.AdapterKey, a.poolID); poll > 0 {
+		if poll := a.pool.QueuePoll(offering.AdapterKey, a.poolIDFor(offering)); poll > 0 {
 			return poll
 		}
 	}

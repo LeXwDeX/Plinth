@@ -29,6 +29,9 @@ type multiviewOptions struct {
 	ResponseType    string            `json:"response_type"`
 	ViewOrder       []string          `json:"view_order"`
 	ViewPrompts     map[string]string `json:"view_prompts"`
+	// Pool is the upstream concurrency pool this Offering's dispatches draw
+	// slots from (#487).
+	Pool string `json:"pool,omitempty"`
 }
 
 type multiviewState struct {
@@ -88,7 +91,7 @@ func multiviewDeclaration(o generation.Offering) (generation.Parameter, multivie
 	var options multiviewOptions
 	if !multiviewCapability(o.Capability) || strictUploadedJSON(o.ProviderOptions, &options) != nil ||
 		!validRigCheckRoute(options.Endpoint, false) || !validRigCheckRoute(options.ObserveEndpoint, true) ||
-		!slices.Equal(options.ViewOrder, multiviewWireOrder) || len(o.Outputs) != 4 || o.Retry.MaxAttempts != 1 || o.IdempotentSubmission {
+		!slices.Equal(options.ViewOrder, multiviewWireOrder) || len(o.Outputs) != 4 || o.IdempotentSubmission {
 		return generation.Parameter{}, options, multiviewProtocolError()
 	}
 	if o.Capability == schema.ImageToMultiview && (!validRigCheckRoute(options.UploadEndpoint, false) || options.ResponseType != "image_to_multiview" || len(options.ViewPrompts) != 0 || len(o.Parameters) != 1) {

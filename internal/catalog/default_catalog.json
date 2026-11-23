@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-23.473-486-416.1",
+    "revision": "2026-11-23.487a.1",
     "terminology": {
       "user_facing": [
         {
@@ -1171,7 +1171,52 @@
           "auth_prefix": "Bearer ",
           "request_timeout_seconds": 1800,
           "result_refetch": {"mode": "observe", "retention_hours": 168},
-          "concurrency": {"pools": {"model-processing": {"limit_env": "TRIPO_CONVERSION_CONCURRENCY", "default": 5, "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2}, "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600}, "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}}}},
+          "concurrency": {
+            "pools": {
+              "generation-h": {
+                "limit_env": "TRIPO_POOL_GENERATION_H_CONCURRENCY",
+                "default": 10,
+                "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2},
+                "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600},
+                "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}
+              },
+              "generation-p": {
+                "limit_env": "TRIPO_POOL_GENERATION_P_CONCURRENCY",
+                "default": 5,
+                "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2},
+                "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600},
+                "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}
+              },
+              "image-generation": {
+                "limit_env": "TRIPO_POOL_IMAGE_GENERATION_CONCURRENCY",
+                "default": 1,
+                "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2},
+                "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600},
+                "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}
+              },
+              "animation": {
+                "limit_env": "TRIPO_POOL_ANIMATION_CONCURRENCY",
+                "default": 10,
+                "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2},
+                "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600},
+                "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}
+              },
+              "model-processing": {
+                "limit_env": "TRIPO_CONVERSION_CONCURRENCY",
+                "default": 5,
+                "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2},
+                "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600},
+                "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}
+              },
+              "mesh-operations": {
+                "limit_env": "TRIPO_POOL_MESH_OPERATIONS_CONCURRENCY",
+                "default": 10,
+                "queue_poll_seconds": {"env": "TRIPO_POOL_QUEUE_POLL_SECONDS", "default": 2},
+                "idle_ttl_seconds": {"env": "TRIPO_POOL_IDLE_TTL_SECONDS", "default": 600},
+                "wait_hint_seconds": {"env": "TRIPO_POOL_WAIT_HINT_SECONDS", "default": 2}
+              }
+            }
+          },
           "capabilities": [
             "text-to-3d",
             "image-to-3d",
@@ -1193,6 +1238,11 @@
               "message_path": "message"
             },
             "retry_after_header": "Retry-After",
+            "rate_limit_reset_header": "X-RateLimit-Reset",
+            "task_error_code_map": {
+              "1000": {"class": "upstream_unavailable", "retryable": true},
+              "1001": {"class": "upstream_unavailable", "retryable": true}
+            },
             "upstream_code_map": {
               "1000": {
                 "class": "upstream_unavailable",
@@ -29028,13 +29078,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -29758,6 +29805,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-h",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/text-to-model",
@@ -29901,13 +29949,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -30450,6 +30495,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-h",
         "model": "v3.1-20260211",
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -30567,13 +30613,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -31373,6 +31416,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-h",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/image-to-model",
@@ -31519,13 +31563,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -32329,6 +32370,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-h",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/multiview-to-model",
@@ -32477,13 +32519,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -33102,6 +33141,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-h",
         "model": "v3.1-20260211",
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -33221,13 +33261,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -33580,6 +33617,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-p",
         "model": "P2-20260801",
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -33704,13 +33742,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -34082,6 +34117,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-p",
         "model": "P2-20260801",
         "endpoint": "generation/multiview-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -34207,13 +34243,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -34499,6 +34532,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-p",
         "model": "P2-20260801",
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -39266,13 +39300,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 2,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": [
-          "rate_limited",
-          "upstream_unavailable"
-        ]
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -39487,6 +39518,7 @@
         }
       },
       "provider_options": {
+        "pool": "model-processing",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/convert",
         "observe_endpoint": "tasks/{task_id}",
@@ -40646,10 +40678,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
+        "max_attempts": 5,
         "initial_backoff_seconds": 1,
-        "max_backoff_seconds": 1,
-        "retryable": []
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "cost": {
@@ -40719,6 +40751,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "model-processing",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/convert",
         "upload_endpoint": "files",
@@ -41891,10 +41924,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -41932,6 +41965,7 @@
       ],
       "asset_hosts": [],
       "provider_options": {
+        "pool": "animation",
         "endpoint": "animations/rig-check",
         "observe_endpoint": "tasks/{task_id}"
       },
@@ -41959,10 +41993,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -42238,6 +42272,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "model-processing",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/texture",
         "observe_endpoint": "tasks/{task_id}",
@@ -42353,10 +42388,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -42593,6 +42628,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "animation",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "animations/rig",
         "observe_endpoint": "tasks/{task_id}",
@@ -42696,10 +42732,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -42973,6 +43009,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "animation",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "animations/rig",
         "observe_endpoint": "tasks/{task_id}",
@@ -43076,10 +43113,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -43265,6 +43302,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "animation",
         "endpoint": "animations/retarget",
         "observe_endpoint": "tasks/{task_id}",
         "source_rigs": [
@@ -47437,10 +47475,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -47702,6 +47740,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "mesh-operations",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/decimate",
         "observe_endpoint": "tasks/{task_id}",
@@ -47829,10 +47868,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -48066,6 +48105,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "mesh-operations",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/decimate",
         "observe_endpoint": "tasks/{task_id}",
@@ -48180,10 +48220,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -48404,6 +48444,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "mesh-operations",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/segment",
         "observe_endpoint": "tasks/{task_id}",
@@ -48518,10 +48559,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -48723,6 +48764,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "mesh-operations",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/complete",
         "observe_endpoint": "tasks/{task_id}",
@@ -48837,10 +48879,10 @@
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -49042,6 +49084,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "mesh-operations",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/complete",
         "observe_endpoint": "tasks/{task_id}",
@@ -49188,7 +49231,7 @@
       "idempotent_submission": false,
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
-      "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
+      "retry": {"max_attempts": 5, "initial_backoff_seconds": 1, "max_backoff_seconds": 32, "retryable": ["rate_limited", "upstream_unavailable"]},
       "materialize_attempts": 8,
       "parameters": [
         {"name": "image", "label": "待分件图片", "type": "asset", "required": true, "semantic": "reference-image", "wire_name": "input", "media_types": ["image/png", "image/jpeg", "image/webp"], "extensions": [".png", ".jpg", ".jpeg", ".webp"], "max_bytes": 20000000},
@@ -49210,6 +49253,7 @@
       ],
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
       "provider_options": {
+        "pool": "mesh-operations",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "protocol": "smartsegment",
         "endpoint": "mesh/smartsegment",
@@ -49260,7 +49304,7 @@
       "idempotent_submission": false,
       "timeout_seconds": 3600,
       "poll_interval_seconds": 2,
-      "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
+      "retry": {"max_attempts": 5, "initial_backoff_seconds": 1, "max_backoff_seconds": 32, "retryable": ["rate_limited", "upstream_unavailable"]},
       "materialize_attempts": 8,
       "parameters": [
         {"name": "source_asset", "label": "来源 GLB", "type": "asset", "required": true, "semantic": "source-asset", "wire_name": "input", "media_types": ["model/gltf-binary"], "extensions": [".glb"], "max_bytes": 150000000, "uploaded_model": {"profile_id": "static-glb-v1", "requirements": "本人已保存或上传的 GLB；在原始资产坐标中以单位矩阵处理。"}},
@@ -49282,6 +49326,7 @@
       ],
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
       "provider_options": {
+        "pool": "mesh-operations",
         "response_metadata": ["normalize_scale", "normalize_translation"],
         "protocol": "smartsegment",
         "endpoint": "mesh/smartsegment",
@@ -49334,10 +49379,10 @@
       "timeout_seconds": 1800,
       "poll_interval_seconds": 2,
       "retry": {
-        "max_attempts": 1,
-        "initial_backoff_seconds": 30,
-        "max_backoff_seconds": 300,
-        "retryable": []
+        "max_attempts": 5,
+        "initial_backoff_seconds": 1,
+        "max_backoff_seconds": 32,
+        "retryable": ["rate_limited", "upstream_unavailable"]
       },
       "materialize_attempts": 8,
       "parameters": [
@@ -49381,6 +49426,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "pool": "generation-h",
         "endpoint": "generation/image-to-splat",
         "upload_endpoint": "files",
         "observe_endpoint": "tasks/{task_id}",
@@ -49416,7 +49462,7 @@
       "idempotent_submission": false,
       "timeout_seconds": 1800,
       "poll_interval_seconds": 2,
-      "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
+      "retry": {"max_attempts": 5, "initial_backoff_seconds": 1, "max_backoff_seconds": 32, "retryable": ["rate_limited", "upstream_unavailable"]},
       "materialize_attempts": 8,
       "credits_metered": true,
       "native_pricing": {"version": 1, "unit": "tripo.credit", "unit_label": "Tripo credits", "base_amount": "10"},
@@ -49430,7 +49476,7 @@
         {"role":"image","variant":"right","delivery":"required","minimum":1,"media_types":["image/png","image/jpeg"],"max_bytes":16777216}
       ],
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
-      "provider_options": {"endpoint":"generation/image-to-multiview","upload_endpoint":"files","observe_endpoint":"tasks/{task_id}","response_type":"image_to_multiview","view_order":["front","left","back","right"]},
+      "provider_options": {"pool": "image-generation","endpoint":"generation/image-to-multiview","upload_endpoint":"files","observe_endpoint":"tasks/{task_id}","response_type":"image_to_multiview","view_order":["front","left","back","right"]},
       "display_order": 11,
       "capability_order": 23
     },
@@ -49451,7 +49497,7 @@
       "idempotent_submission": false,
       "timeout_seconds": 1800,
       "poll_interval_seconds": 2,
-      "retry": {"max_attempts": 1, "initial_backoff_seconds": 30, "max_backoff_seconds": 300, "retryable": []},
+      "retry": {"max_attempts": 5, "initial_backoff_seconds": 1, "max_backoff_seconds": 32, "retryable": ["rate_limited", "upstream_unavailable"]},
       "materialize_attempts": 8,
       "credits_metered": true,
       "parameters": [
@@ -49476,7 +49522,7 @@
         {"id":"right","label":"编辑右侧","amount":"5","when":{"parameter":"right_prompt","operator":"present"}}
       ],"consent_parameter":"authorize_extra_credits","max_authorized_extra_amount":"20"},
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
-      "provider_options": {"endpoint":"generation/edit-multiview","observe_endpoint":"tasks/{task_id}","response_type":"edit_multiview","view_order":["front","left","back","right"],"view_prompts":{"front":"front_prompt","left":"left_prompt","back":"back_prompt","right":"right_prompt"}},
+      "provider_options": {"pool": "image-generation","endpoint":"generation/edit-multiview","observe_endpoint":"tasks/{task_id}","response_type":"edit_multiview","view_order":["front","left","back","right"],"view_prompts":{"front":"front_prompt","left":"left_prompt","back":"back_prompt","right":"right_prompt"}},
       "display_order": 12,
       "capability_order": 24
     }

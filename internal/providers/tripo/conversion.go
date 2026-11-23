@@ -396,6 +396,10 @@ type conversionItem struct {
 	// RetryAttempts counts the resubmissions this format already made after a
 	// child ended failed or cancelled.
 	RetryAttempts int `json:"retry_attempts,omitempty"`
+	// LastErrorCode is the task-level error_code the last child of this format
+	// reported (#487). It is private evidence: whether a failed child may be
+	// sent again is decided by the Schema's task-level vocabulary, not here.
+	LastErrorCode string `json:"last_error_code,omitempty"`
 	// RetryWaitSeconds is the backoff the format is waiting out before its
 	// next resubmission (retry_pending only).
 	RetryWaitSeconds int `json:"retry_wait_seconds,omitempty"`
@@ -465,18 +469,24 @@ func conversionOutcome(phase generation.UpstreamPhase) string {
 // applyConversionChild folds one poll of a private convert child into the
 // format's state: a child that is still queued or running changes nothing, and
 // a child that reached an outcome is recorded as one more attempt with its
-// remote id, credits and end state. A completed child becomes done; a failed or
-// cancelled one becomes retry_pending with the documented backoff while its own
-// budget lasts, and failed once it does not (the official billing page: neither
-// is charged, so the same format is worth sending again). A child whose bounded
-// unknown window ran out never reaches here: the caller ends the format as
-// unknown, which is never resent and never asserted as a failure. It returns the
-// updated item and, for a retry, the wait before the resubmission.
-func applyConversionChild(
+// remote id, credits and end state. A completed child becomes done; a failed
+// child becomes retry_pending with the documented backoff only while its own
+// budget lasts and only when its task-level error_code is declared transient
+// (the official rate-limits/error-handling pages: retry 429 and 5xx; a
+// determinate failure such as 1004 invalid parameter, 2008 content policy or
+// 2018 model too complex is not made good by sending it again). A cancelled
+// child is terminal: the official lifecycle page ends the flow at
+// status=cancelled ("stop polling and report cancellation") and bills neither,
+// so it is never resent as a new task. A child whose bounded unknown window
+// ran out never reaches here: the caller ends the format as unknown, which is
+// never resent and never asserted as a failure. It returns the updated item
+// and, for a retry, the wait before the resubmission.
+func (a *Adapter) applyConversionChild(
 	item conversionItem,
 	phase generation.UpstreamPhase,
 	locator string,
 	credits json.RawMessage,
+	errorCode string,
 ) (conversionItem, time.Duration) {
 	// A running child already reports the price frozen when it was created, and
 	// the private ledger keeps it as evidence for the stage it belongs to.
@@ -495,6 +505,7 @@ func applyConversionChild(
 		Outcome:         conversionOutcome(phase),
 	})
 	item.RetryWaitSeconds = 0
+	item.LastErrorCode = errorCode
 	switch phase {
 	case generation.UpstreamCompleted:
 		item.Locator = locator
@@ -504,9 +515,19 @@ func applyConversionChild(
 			item.Status = conversionItemFailed
 			item.RemoteID = ""
 		}
+	case generation.UpstreamCanceled:
+		// 取消是终态：不为这个格式再建一个新任务。
+		item.Locator = ""
+		item.RemoteID = ""
+		item.Status = conversionItemFailed
 	default:
 		item.Locator = ""
 		item.RemoteID = ""
+		if !a.taskErrorCodeRetryable(errorCode) {
+			// 确定性失败：重发不会成功，直接终结该格式。
+			item.Status = conversionItemFailed
+			return item, 0
+		}
 		if item.RetryAttempts >= maximumConversionChildRetries {
 			item.Status = conversionItemFailed
 			return item, 0
@@ -692,7 +713,7 @@ func (a *Adapter) observePostSuccessConversion(
 		if phase == generation.UpstreamCompleted {
 			locator = firstHTTPOutput(value.Output, "model_url", "model")
 		}
-		updated, wait := applyConversionChild(item, phase, locator, value.CreditsConsumed)
+		updated, wait := a.applyConversionChild(item, phase, locator, value.CreditsConsumed, taskErrorCode(value.ErrorCode))
 		if wait > 0 {
 			backoff = true
 		}
