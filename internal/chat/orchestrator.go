@@ -1981,11 +1981,11 @@ func (orchestrator *Orchestrator) Process(
 			return toolErr
 		}
 		if errors.Is(toolErr, ErrTurnSuspended) {
-			// AGT-12：request_consent 已写待决状态，挂起轮次并立即
-			// 释放 worker。assistant 计划（含工具调用）已在上方
-			// UpdateMessage 落库，唤醒后按 resumingPlan 路径重放续跑。
-			// 登记失败（suspendForConsent 返回 false）或登记后复查到
-			// 取消标记，都表示停止与挂起竞态命中：丢弃登记并原地按
+			// AGT-12：挂起的工具已写入待决状态（生成工具已建批准卡），
+			// 挂起轮次并立即释放 worker。assistant 计划（含工具调用）
+			// 已在上方 UpdateMessage 落库，唤醒后按 resumingPlan 路径重放
+			// 续跑。登记失败（suspendForConsent 返回 false）或登记后复查
+			// 到取消标记，都表示停止与挂起竞态命中：丢弃登记并原地按
 			// 停止收束——不得在取消后继续挂起续跑计费（审查 R2）。
 			registered := orchestrator.suspendForConsent(command)
 			orchestrator.activeMu.Lock()

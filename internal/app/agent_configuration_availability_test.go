@@ -65,7 +65,7 @@ func TestDefaultAppProjectsAvailableLocalMCPPreset(t *testing.T) {
 		return response.Body.String()
 	}
 	first := effective()
-	for _, builtIn := range []string{`"list_offerings"`, `"get_task"`, `"observe_task"`} {
+	for _, builtIn := range []string{`"list_offerings"`, `"get_task"`} {
 		if !strings.Contains(first, builtIn) {
 			t.Fatalf("default projection lost built-in read %s: %s", builtIn, first)
 		}

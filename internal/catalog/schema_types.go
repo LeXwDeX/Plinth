@@ -5296,9 +5296,9 @@ type ChatAgentSchema struct {
 	ContextWindowSetting  string `json:"context_window_setting,omitempty"`
 	Vision                bool   `json:"vision"`
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
-	// ConsentWaitTimeoutSeconds 界定 request_consent 工具挂起等待用户
-	// 批准决定的最长时长（AGT-12：挂起不占 worker；由 agenttools 与
-	// orchestrator 消费，不得在代码中硬编码）。
+	// ConsentWaitTimeoutSeconds 界定一轮对话因等待用户批准决定而挂起的
+	// 最长时长（AGT-12：挂起不占 worker；由 orchestrator 消费，不得在
+	// 代码中硬编码）。
 	ConsentWaitTimeoutSeconds int `json:"consent_wait_timeout_seconds"`
 	// MaxGenerationCallsPerTurn 限定单个对话轮次内付费生成工具的执行
 	// 次数上限（服务端硬约束，防止 LLM 一次输出大量工具调用连击扣费）。
@@ -5315,8 +5315,8 @@ type ChatAgentSchema struct {
 	// MaxListedModels bounds how many of the session's succeeded 3D tasks
 	// the list_session_models tool returns (most recent first).
 	MaxListedModels int `json:"max_listed_models"`
-	// Consent*Content 是 request_consent 与付费硬门禁回给对话 LLM 的
-	// 工具内容文案（B16：原代码常量迁入 Schema，禁止硬编码）。
+	// Consent*Content 是付费硬门禁回给对话 LLM 的工具内容文案（B16：
+	// 原代码常量迁入 Schema，禁止硬编码）。
 	ConsentApprovedContent string `json:"consent_approved_content"`
 	ConsentDeniedContent   string `json:"consent_denied_content"`
 	ConsentWaitingContent  string `json:"consent_waiting_content"`
@@ -5344,9 +5344,9 @@ type ChatAgentSchema struct {
 	ConsentRequiredContent    string            `json:"consent_required_content"`
 	ConsentLimitContent       string            `json:"consent_limit_content"`
 	ConsentReconcileContent   string            `json:"consent_reconcile_content"`
-	// UpstreamQueueContent is the note get_task and observe_task attach while
-	// the Provider holds the accepted job in its own queue (#131): what the
-	// Agent tells the person waiting. Optional.
+	// UpstreamQueueContent is the note get_task attaches while the Provider
+	// holds the accepted job in its own queue (#131): what the Agent tells the
+	// person waiting. Optional.
 	UpstreamQueueContent string `json:"upstream_queue_content,omitempty"`
 	// BackgroundWait lets a person stop waiting for the Tasks a turn waits on
 	// (a single generation step, or a SkillRun submit batched after one) while
@@ -5358,7 +5358,6 @@ type ChatAgentSchema struct {
 	// 起算；恢复与续跑时已执行的调用计入同一次回复。一批调用超出剩余
 	// 预算时只执行到上限，其余与总结轮仍写出的调用一起列给用户确认。
 	// 每轮至少执行一个调用，所以它同时是工具循环的防死循环上限。
-	// request_consent 批准后模型可在同一次回复内继续调用生成工具。
 	MaxToolCallsPerReply int `json:"max_tool_calls_per_reply"`
 	// MaxToolCallsPerReplySetting names the runtime setting (environment
 	// variable) that may override MaxToolCallsPerReply per deployment; an
@@ -6252,8 +6251,7 @@ type ChatToolResultFields struct {
 }
 
 // ChatAgentToolSchema 声明非生成类 agent 控制工具（set_params /
-// list_offerings / get_task / observe_task / upload_input_asset /
-// request_consent）。与生成工具（ChatToolSchema）分离：控制工具无
+// list_offerings / get_task）。与生成工具（ChatToolSchema）分离：控制工具无
 // capability/idempotency/结果资产语义，仅 name/description/parameters。
 type ChatAgentToolSchema struct {
 	Name        string                  `json:"name"`

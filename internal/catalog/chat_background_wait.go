@@ -34,7 +34,7 @@ type ChatBackgroundWaitSchema struct {
 	UnavailableMessage string `json:"unavailable_message"`
 	// ContextTemplate is the system context a later turn adds while such a
 	// Task still runs; {tasks} is one TaskLineTemplate per Task. It tells the
-	// Agent to look a Task up with get_task or observe_task before submitting
+	// Agent to look a Task up with get_task before submitting
 	// the same generation again.
 	ContextTemplate string `json:"context_template"`
 	// TaskLineTemplate names one running Task: {task_id}, {capability},
