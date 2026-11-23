@@ -294,6 +294,10 @@ type OrchestratorConfig struct {
 	// StepCosts reads the approximate per-step costs of the services the asset
 	// used. Nil writes them as unknown.
 	StepCosts func(ctx context.Context, ownerID, sessionID string) []StepCost
+	// ImageCount reads the 2D image count the person set for this session
+	// (#486). The second result is false when they set none, and the prompt
+	// then leaves the count out rather than naming a number nobody chose.
+	ImageCount func(ownerID, sessionID string) (int, bool)
 }
 
 type Orchestrator struct {
@@ -348,6 +352,9 @@ type Orchestrator struct {
 	stepUsage    func(ctx context.Context, ownerID, sessionID string) (executiongrant.StepSummary, error)
 	stepBalances func(ctx context.Context) []StepBalance
 	stepCosts    func(ctx context.Context, ownerID, sessionID string) []StepCost
+	// imageCount reads the person's own 2D image count (#486); nil keeps the
+	// block out of every prompt.
+	imageCount func(ownerID, sessionID string) (int, bool)
 	queue        chan ProcessTurn
 	queueMu      sync.Mutex
 	// titleWaiters counts background title summaries in flight.
@@ -751,6 +758,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		stepUsage:          config.StepUsage,
 		stepBalances:       config.StepBalances,
 		stepCosts:          config.StepCosts,
+		imageCount:         config.ImageCount,
 		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
 		queued:             map[string]struct{}{},
 		activeCancel:       map[string]context.CancelFunc{},
@@ -2301,6 +2309,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		// selection and the framed session notes stay at the end of the prompt.
 		sections.add("craft", orchestrator.craftPrompt(registry, scope, options.CreativeDomain, options.ProductionBrief))
 		sections.add("concept_directions", orchestrator.conceptDirectionsPrompt(registry, scope))
+		sections.add("image_count", orchestrator.imageCountPrompt(ownerID, sessionID))
 		sections.add("candidates", orchestrator.candidatesPrompt(registry, scope))
 		sections.add("scope", orchestrator.scopePrompt(registry, scope))
 	}

@@ -3314,6 +3314,10 @@ type ChatSchema struct {
 	// side only; the card's visible words come from the Schema's option labels
 	// and ui.chat.choice.*.
 	ConceptDirections ChatConceptDirectionsSchema `json:"concept_directions,omitempty"`
+	// ImageCount declares the block that tells the Agent the 2D image count
+	// the person set for this session (#486). Server side only; the count is
+	// read from the session's stored settings, never from the Schema.
+	ImageCount ChatImageCountSchema `json:"image_count,omitempty"`
 	// Candidates declares how many parallel candidates one production-plan step
 	// may name (#242) and where they may come from. Server side only; the plan
 	// card reads the expanded steps and their candidate group.
@@ -3551,6 +3555,17 @@ type ChatConceptQuantitySchema struct {
 	// SketchRefusal refuses a sketch in the reply that opened the quantity
 	// card, before the person answered.
 	SketchRefusal string `json:"sketch_refusal"`
+}
+
+// ChatImageCountSchema is application.chat.image_count (#486). The 2D image
+// count is the person's own setting for the whole session, not one value per
+// Offering, so the system prompt states the count they set and the Agent stops
+// guessing one or asking again. ContextTemplate is added to the system prompt
+// while the person has a count on record ({count}); without one the block is
+// left out and nothing names a number nobody chose. Server side only.
+type ChatImageCountSchema struct {
+	// ContextTemplate is the injected block ({count}).
+	ContextTemplate string `json:"context_template"`
 }
 
 // ChatCandidatesSchema is application.chat.candidates (#242). A production

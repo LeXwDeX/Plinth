@@ -111,11 +111,13 @@ type Config struct {
 	ArtifactOrigin string
 	// Now is the clock; tests inject one. Default time.Now.
 	Now func() time.Time
-	// AccountConcurrencyLimit, when positive, makes a provider version that
-	// declares it answer task creation with 429 code 2000 and Retry-After once
-	// that many tasks are in flight across all of its job kinds (#468). It
-	// models an account-wide upstream pool shared by generation and conversion
-	// jobs; 0 disables the limit.
+	// AccountConcurrencyLimit tunes the task-category pools. 0 keeps the official
+	// per-category defaults (3D generation H 10 / P 5, image generation 1,
+	// animation 10, model processing 5, mesh operations 10); a positive value pins
+	// every category to that many in-flight tasks; a negative value disables the
+	// pools. A category over its pool answers task creation with 429 code 2000 and
+	// Retry-After (#468). Categories have independent pools, so one filling up
+	// never blocks another.
 	AccountConcurrencyLimit int
 }
 

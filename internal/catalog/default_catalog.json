@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-22.377.1",
+    "revision": "2026-11-23.473-486-416.1",
     "terminology": {
       "user_facing": [
         {
@@ -6988,7 +6988,7 @@
               "edit_multiview_images",
               "create_three_view"
             ],
-            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用途推荐的参数会进入冻结输入。用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认，不要静默替换。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；与用途建议的画幅不一致时用一句话说明，不要要求用户改画板，也不必为此先确认；只有用户明确要求换尺寸时，才提示可以调整画板。工具结果里的 model_choice 说明模型来源，按实告诉用户。\n提示词：用英文写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图或多视角只改变视角。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。改写已有步骤时先用 get_production_step 取回该步完整提示词，只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图要单主体、完整、纯色或透明背景、无投影阴影、弱透视，角色用 A-pose 或 T-pose，四肢和手指分开。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background，因为图生图改的是画面内容，不保证真透明；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动，达到自检与修正上限就停下说明。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时按用途推荐选择；带理由偏离时把理由写进参数说明。"
+            "text": "【2D 制作要领】\n用途先行：制作简报里的 2D 用途决定推荐模型、画幅、背景与尺寸要求；用途推荐的参数会进入冻结输入。用户明确锁定的模型与参数优先，用途推荐与用户所选冲突时先确认，不要静默替换。画幅只是用途的建议：用户的画板尺寸或明确给出的尺寸是用户的决定，按它出图；与用途建议的画幅不一致时用一句话说明，不要要求用户改画板，也不必为此先确认；只有用户明确要求换尺寸时，才提示可以调整画板。工具结果里的 model_choice 说明模型来源，按实告诉用户。\n提示词：用英文写完整描述句，按「主体 → 关键细节（外形、比例、材质、服装、配色）→ 背景/环境 → 画风与媒介 → 光线与镜头 → 约束」组织，不堆砌标签。用户和 Skill 都没指定时，按用途补一种明确的画风或媒介、主光与氛围、焦点主体与构图，要求细节精致、边缘干净、比例与结构正确；末尾写 no text, no watermark, no logo, no extra objects（用户要文字时把文字原样放进引号并说明位置）。不写 masterpiece、8k、best quality 这类空泛质量词；工具有质量参数时画质由它控制，尺寸与比例由尺寸参数控制，都不写进 prompt。用户明确要求的主体、风格和内容优先，所选 Skill 的画风次之，不擅自换主题或加入用户没要求的角色与情节。\n系列一致：同一角色或成组图片先定身份锚（外形、比例、配色、服装、标志性细节）和风格锚（画风、色板、光线、线条与细节密度），每张 prompt 逐字复用，只改需要变化的部分；三视图或多视角只改变视角。\n基于已有图修改时写明 change only ...; keep everything else the same，并列出要保持的身份、构图、光线和画风；参考多张图时按句柄写清每张图负责什么。改写已有步骤时先用 get_production_step 取回该步完整提示词，只改用户要求的局部。\n构图与主体：单主体用途（立绘、图标、道具、3D 输入图）只画一个主体，完整不贴边、占画面主要位置；概念设定可以多主体，但要写清前后关系与视觉焦点。图标与道具图用方形、干净背景并支持去背景；贴图要方形、均匀光、弱透视、可平铺；3D 输入图要单主体、完整、纯色或透明背景、无投影阴影、弱透视，角色用 A-pose 或 T-pose，四肢和手指分开。\n修图还是重画：换颜色、换背景和局部修改用图生图；要真正去掉背景时用 remove_background，因为图生图改的是画面内容，不保证真透明；改构图、改姿势、主体不一致或连续编辑已经累积失真时重画。不要在多次编辑后继续叠改动，达到自检与修正上限就停下说明。\n何时用参考图：用户提供角色、构图、风格或产品参考时用参考图，并按句柄写清每张图负责身份、构图、风格还是材质；没有参考图时用文字描述身份与风格锚。参考图不是风格锁的替代，用户设置风格锁时两者一致使用。\n按任务选模型：文字排版、图解和信息图优先擅长文字的模型；写实人像与商品优先写实质感强的模型；风格化插画优先风格范围宽、角色一致性好的模型；批量草稿与变体优先成本低、速度快的模型。用户没有锁定模型时按用途推荐选择；带理由偏离时把理由写进参数说明。生成张数由用户决定：用户自己设的出图张数（本会话一个值，切换模型不变）是用户的期望，不是你的判断，也不是上游限制；按这个张数执行，不要自行加量，也不要靠多提交几次来凑数。"
           },
           {
             "id": "model3d_assets",
@@ -7629,7 +7629,7 @@
         {
           "name": "set_params",
           "execution": {"implementation_key":"params.set","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"consent":"none","idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Set legal creative parameters for the exact offering_id. User-pinned parameters take precedence. Normal settings default to automatic (no user pin). For advised parameters, provide a non-empty reason keyed by parameter in reasons when changing the recommended value. Hidden and protocol parameters cannot be changed. This does not authorize generation; the next step freezes its actual values, explanations and estimate under the session approval policy.",
+          "description": "Set legal creative parameters for the exact offering_id. User-pinned parameters take precedence. Normal settings default to automatic (no user pin). For advised parameters, provide a non-empty reason keyed by parameter in reasons when changing the recommended value. Hidden and protocol parameters cannot be changed, and a count the person owns (adjustment_policy user, such as the per-task image count) cannot be raised here: their session value applies. This does not authorize generation; the next step freezes its actual values, explanations and estimate under the session approval policy.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8615,7 +8615,7 @@
           "selection_mask": "bind",
           "reference_size": "single",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"consent":"human","idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape.",
+          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count.",
           "cross_domain_model_fallback": true,
           "model_argument": "model",
           "model_choices": {"from": "available_offerings"},
@@ -10705,6 +10705,9 @@
           "jimeng/seedream-4-5/image-to-image": {"sequential_image_generation": "disabled", "max_images": null},
           "gemini/gemini-3-pro-image/text-to-image": {"image_size": "1K"}
         }
+      },
+      "image_count": {
+        "context_template": "\n\n【生成张数】用户本会话把 2D 生成的张数设为 {count} 张（用户自己设的，是用户的期望，不是你的判断，也不是上游限制）。按这个张数执行：一次任务能出 {count} 张就一次出，出不了就分几次补齐，合计 {count} 张；不要自行加量，也不要把“多画几个方向”“多提交几次”当成默认。用户这次消息里明确说了别的张数时，按用户这次说的执行。"
       },
       "candidates": {
         "enabled": true,
@@ -21175,6 +21178,7 @@
             "chat.concept_directions.quantity.option_description": "Generate {count} low-cost concept image(s); look at the directions before deciding",
             "chat.concept_directions.context_template": "\n\nDiverge then converge (#242/#360): when the person gave only a subject, a use or a vague idea, named no style, composition or reference picture, stated no count and did not ask to start directly, first open an ask_choice card of kind {quantity_kind} that asks how many concept images to look at, with options from {quantity_minimum} to {quantity_maximum} built by the server; in that reply call no {sketch_tool} or any other generation tool and open no direction card. In the next reply after the person chooses N, draw visibly different directions in parallel (each prompt names that direction's style, medium and key visual differences): for N >= 2 open one {direction_kind} card whose options carry an id, a label, one sentence of description, the thumbnail handle of the sketch and the complete refine_image arguments that continue it (rewrite prompt for that direction and point reference_handles at the sketch), with {minimum} to {maximum} options and never more than N; for N = 1 draw one sketch, open no direction card and continue refine_image with that sketch as the current direction. Directions must differ visibly (for example realistic, cartoon, low-poly), not only in colour. When the person already stated a count, do not ask: draw exactly that many (N >= 2 opens the direction card, N = 1 does not). When the style or references are already clear, or the person asked to start directly, skip both the count and the sketches and call refine_image. Never draw concept sketches in 3D mode; open at most one direction card and never repeat the same card.",
             "chat.concept_directions.limit_reached": "One reply may draw at most {maximum} concept directions; let the person choose among them before developing further.",
+            "chat.image_count.context_template": "\n\n[Image count] The person set this session's 2D image count to {count} (their own setting: their expectation, not your judgement and not an upstream limit). Work to that count: produce {count} images in one task when the model can, otherwise across calls that add up to {count}; never do more on your own and never treat \"draw several directions\" or \"submit several times\" as the default. When this message states another count, follow what it says.",
             "chat.candidates.context_template": "\n\nCandidates (#242): in a budget production plan, when the person wants to pick a result instead of seeing one generation, declare candidates on one step: source is one of {sources}, with count (2 to {maximum}, several samples of the same or the default model) or models (2 to {maximum} different Offerings). The server expands the step into side-by-side candidate plan steps and quotes every candidate into the budget. After the plan is approved, submit the candidate generation calls in parallel in the same reply: use different model_seed/texture_seed for source seed, different models for source provider and different input pictures for source input_image. Show the candidates side by side on the plan card; losers stay as assets. When the budget is short, stop and wait for approval; never bypass it.",
             "chat.reroll.messages.not_succeeded": "Only a succeeded task can be rerolled.",
             "chat.reroll.messages.no_frozen_input": "This task kept no frozen input, so it cannot be rerolled as-is.",
@@ -29754,6 +29758,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/text-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -31368,6 +31373,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/image-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -32323,6 +32329,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "model": "v3.1-20260211",
         "endpoint": "generation/multiview-to-model",
         "observe_endpoint": "tasks/{task_id}",
@@ -39480,6 +39487,7 @@
         }
       },
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/convert",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -40711,6 +40719,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/convert",
         "upload_endpoint": "files",
         "observe_endpoint": "tasks/{task_id}",
@@ -42229,6 +42238,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "models/texture",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -42583,6 +42593,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "animations/rig",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -42962,6 +42973,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "animations/rig",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -47690,6 +47702,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/decimate",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -48053,6 +48066,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/decimate",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -48390,6 +48404,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/segment",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -48708,6 +48723,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/complete",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -49026,6 +49042,7 @@
         "tripo3d.ai"
       ],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "endpoint": "mesh/complete",
         "observe_endpoint": "tasks/{task_id}",
         "response_aliases": [
@@ -49193,6 +49210,7 @@
       ],
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "protocol": "smartsegment",
         "endpoint": "mesh/smartsegment",
         "upload_endpoint": "files",
@@ -49264,6 +49282,7 @@
       ],
       "asset_hosts": ["tripo3d.com", "tripo3d.ai"],
       "provider_options": {
+        "response_metadata": ["normalize_scale", "normalize_translation"],
         "protocol": "smartsegment",
         "endpoint": "mesh/smartsegment",
         "upload_endpoint": "files",

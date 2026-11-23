@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -236,5 +237,85 @@ func TestAgentParamsOfferingHTTPIsolationAndLegacyCompatibility(t *testing.T) {
 	failed := put("&offering_id=openai%2Fgpt-image-2%2Ftext-to-image", `{"params":{"background":"opaque"}}`, "owner")
 	if failed.Code != http.StatusInternalServerError {
 		t.Fatalf("failed persistence status=%d body=%s", failed.Code, failed.Body.String())
+	}
+}
+
+// #486: the panel's count is one value for the whole session. One Offering's
+// edit is what the person chose everywhere, so the Offering they switch to
+// reports the same count instead of the number it kept for itself.
+func TestAgentParamsImageCountFollowsThePersonAcrossOfferings(t *testing.T) {
+	t.Parallel()
+	repository, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "count.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets, err := local.New(filepath.Join(t.TempDir(), "assets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: taskCatalog, Assets: assets, Providers: providers.NewRegistry()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := agentparams.NewPersistentParameterStore(nil, nil)
+	server := &Server{generation: module, agentParams: store, ownsAgentSession: func(_ context.Context, owner, scope string) bool { return owner == "owner" && scope == "session" }}
+	key := agentparams.ScopeKey("owner", "session")
+	put := func(offeringID, body string) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		server.agentParamsPut(response, httptest.NewRequest(http.MethodPut,
+			"/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape(offeringID), strings.NewReader(body)), "owner")
+		if response.Code != http.StatusOK {
+			t.Fatalf("put %s: %d %s", offeringID, response.Code, response.Body.String())
+		}
+	}
+	paramsOf := func(offeringID string) map[string]json.RawMessage {
+		t.Helper()
+		response := httptest.NewRecorder()
+		server.agentParamsGet(response, httptest.NewRequest(http.MethodGet,
+			"/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape(offeringID), nil), "owner")
+		var result struct {
+			Params map[string]json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Params
+	}
+
+	put("openai/gpt-image-2/text-to-image", `{"params":{"n":4}}`)
+	if count, ok := store.ImageCount(key); !ok || count != 4 {
+		t.Fatalf("session count = %d (set=%v), want 4", count, ok)
+	}
+	// The person's own Offering reports it as their value, and so does the
+	// Offering that prices by a parameter of another name.
+	for _, input := range []struct{ offeringID, parameter string }{
+		{"openai/gpt-image-2/text-to-image", "n"},
+		{"jimeng/seedream-4-5/text-to-image", "max_images"},
+	} {
+		if got := string(paramsOf(input.offeringID)[input.parameter]); got != "4" {
+			t.Fatalf("%s.%s = %q, want 4", input.offeringID, input.parameter, got)
+		}
+	}
+
+	// An edit about something else is not an edit of the count.
+	put("openai/gpt-image-2/text-to-image", `{"params":{"background":"transparent"}}`)
+	if count, ok := store.ImageCount(key); !ok || count != 4 {
+		t.Fatalf("another parameter's edit changed the count to %d (set=%v)", count, ok)
+	}
+
+	// Clearing the field hands the session back to the Offerings' own values:
+	// no count to state, nothing named in the prompt.
+	put("openai/gpt-image-2/text-to-image", `{"params":{"n":null}}`)
+	if count, ok := store.ImageCount(key); ok {
+		t.Fatalf("a cleared count is still set: %d", count)
+	}
+	if got, exists := paramsOf("openai/gpt-image-2/text-to-image")["n"]; exists {
+		t.Fatalf("a cleared count is still projected: %s", got)
 	}
 }
