@@ -239,6 +239,10 @@ type visionPlan struct {
 	// priority order. A visual anchor's unreadable picture is named here too
 	// (#250); the style lock keeps its historical silence.
 	Dropped []string
+	// Skipped names the pictures that were not sent because the upstream
+	// refuses them (#522): the session remembers a refusal of the same
+	// picture, or its size is outside the Schema's invalid_picture bounds.
+	Skipped []string
 	Spend   visionSpend
 	// Off says no picture at all is sent because vision is off.
 	Off bool
@@ -259,6 +263,16 @@ func (budget visionBudget) overflowText(dropped []string) string {
 		return ""
 	}
 	return strings.ReplaceAll(budget.Overflow, "{handles}", strings.Join(dropped, " "))
+}
+
+// skippedText is the declared note naming the pictures skipped because the
+// upstream refuses them (#522).
+func (budget visionBudget) skippedText(skipped []string) string {
+	if budget.Vision == nil || len(skipped) == 0 ||
+		strings.TrimSpace(budget.Vision.InvalidPicture.SkippedTemplate) == "" {
+		return ""
+	}
+	return strings.ReplaceAll(budget.Vision.InvalidPicture.SkippedTemplate, "{handles}", strings.Join(skipped, " "))
 }
 
 // visionCandidate is one picture the budget may show.
@@ -308,6 +322,11 @@ func (orchestrator *Orchestrator) planVision(
 		return plan
 	}
 	candidates := orchestrator.visionCandidates(history, indexed, summarized, lastUser, options, budget)
+	invalid := orchestrator.visionInvalidPolicy()
+	var refused map[string]bool
+	if invalid.MaximumExcluded > 0 {
+		refused = orchestrator.visionExclusions(ctx, ownerID, sessionID)
+	}
 	for _, role := range budget.Roles {
 		// The legacy fallback keeps the historical split (#247): generated and
 		// render pictures have their own recent_generated_image_limit and do
@@ -333,6 +352,15 @@ func (orchestrator *Orchestrator) planVision(
 				// silent skip: the lock is a hint, not a picture the turn asked for.
 				if candidate.anchor {
 					plan.Dropped = append(plan.Dropped, candidate.dropped)
+				}
+				continue
+			}
+			// A picture the upstream refuses is not sent (#522): the session
+			// remembers its refusal, or its size is one no upstream reads. It
+			// spends no place and is named, so the Agent can say so.
+			if (len(refused) > 0 && refused[pictureKey(url)]) || pictureTooSmall(invalid, url) {
+				if candidate.dropped != "" {
+					plan.Skipped = append(plan.Skipped, candidate.dropped)
 				}
 				continue
 			}

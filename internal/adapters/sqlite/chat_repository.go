@@ -438,6 +438,62 @@ func (r *Repository) SetVisualAnchors(ctx context.Context, ownerID, sessionID st
 	return true, nil
 }
 
+// VisionExclusions reads the pictures the owner's session remembers as refused
+// by the upstream (#522), oldest first.
+func (r *Repository) VisionExclusions(ctx context.Context, ownerID, sessionID string) ([]string, bool, error) {
+	var stored string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT vision_excluded FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read chat session vision exclusions: %w", err)
+	}
+	return chat.DecodeVisionExclusions(stored), true, nil
+}
+
+// UpdateVisionExclusions replaces the session's remembered refused pictures
+// with what change returns for the stored ones, in one transaction so two
+// refusals of one session cannot drop each other. It keeps updated_at
+// unchanged, like the other session-level settings.
+func (r *Repository) UpdateVisionExclusions(
+	ctx context.Context,
+	ownerID, sessionID string,
+	change func([]string) []string,
+) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin update chat session vision exclusions: %w", err)
+	}
+	defer tx.Rollback()
+	var stored string
+	err = tx.QueryRowContext(ctx, `
+		SELECT vision_excluded FROM go_chat_sessions WHERE id = ? AND owner_id = ?`,
+		sessionID, ownerID).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read chat session vision exclusions: %w", err)
+	}
+	encoded, err := chat.EncodeVisionExclusions(change(chat.DecodeVisionExclusions(stored)))
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE go_chat_sessions
+		SET vision_excluded = ?
+		WHERE id = ? AND owner_id = ?`, encoded, sessionID, ownerID); err != nil {
+		return false, fmt.Errorf("update chat session vision exclusions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit chat session vision exclusions: %w", err)
+	}
+	return true, nil
+}
+
 // SessionBrief reads the production brief of the owner's own session (#103).
 func (r *Repository) SessionBrief(ctx context.Context, ownerID, sessionID string) (chat.ProductionBrief, bool, error) {
 	var stored string
