@@ -30,11 +30,19 @@ type Refusal struct {
 	// RetryAfter is the wait the response's Retry-After header asked for
 	// (RetryAfter); a transient refusal carries it (#509).
 	RetryAfter time.Duration
+	// Echoes are the request's own texts (RequestTexts): an upstream that
+	// echoes the prompt in its refusal must not carry it into the error text
+	// (#563).
+	Echoes []string
 }
 
 // Err is the error an Adapter returns for the refusal. The status travels as
 // agents.StatusError (#322), so a caller can classify the refusal without
-// reading the body, and the upstream's wording stays in the text for the log.
+// reading the body. The error text carries only the sanitized, bounded excerpt
+// of the body (ResponseExcerpt, #563): the error is logged as it is by the
+// turn and by the retry loop, and the raw body (up to the Adapter's 64 KiB
+// bound) may echo the prompt, URLs or keys. The classes below still read the
+// whole body.
 // A refusal that one of the classes below owns carries that class's mark too,
 // checked in this order:
 //   - content moderation (#35): a vendor content-safety refusal names its own
@@ -58,7 +66,7 @@ func (refusal Refusal) Err() error {
 	err := fmt.Errorf(
 		"%w: %s",
 		&agents.StatusError{Status: refusal.Status},
-		strings.TrimSpace(string(refusal.Body)),
+		ResponseExcerpt(refusal.Body, refusal.Echoes...),
 	)
 	if code := ModerationCode(refusal.Body); refusal.Status >= 400 && refusal.Status < 500 && code != "" {
 		reasons := moderation.Reasons(string(refusal.Body))

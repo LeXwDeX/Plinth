@@ -285,3 +285,48 @@ func TestAgentParamsImageCountFollowsThePersonAcrossOfferings(t *testing.T) {
 		t.Fatalf("a cleared count is still projected: %s", got)
 	}
 }
+
+// #564: a count set on Seedream (up to 15) reaches GPT Image's panel at GPT
+// Image's own maximum (10), the value its next call really runs with, so the
+// panel never shows a number the model refuses.
+func TestAgentParamsImageCountIsClampedToEachOfferingsRange(t *testing.T) {
+	t.Parallel()
+	repository, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "count.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	taskCatalog, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets, err := local.New(filepath.Join(t.TempDir(), "assets"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	module, err := generation.New(generation.Dependencies{Conversions: generation.NoConversions, Repository: repository, Catalog: taskCatalog, Assets: assets, Providers: providers.NewRegistry()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := agentparams.NewPersistentParameterStore(nil, nil)
+	server := &Server{generation: module, agentParams: store, ownsAgentSession: func(_ context.Context, owner, scope string) bool { return owner == "owner" && scope == "session" }}
+	key := agentparams.ScopeKey("owner", "session")
+	store.SetImageCount(key, 15)
+	for _, input := range []struct{ offeringID, parameter, want string }{
+		{"jimeng/seedream-4-5/text-to-image", "max_images", "15"},
+		{"openai/gpt-image-2/text-to-image", "n", "10"},
+	} {
+		response := httptest.NewRecorder()
+		server.agentParamsGet(response, httptest.NewRequest(http.MethodGet,
+			"/api/v1/agent/params?scope=session&offering_id="+url.QueryEscape(input.offeringID), nil), "owner")
+		var result struct {
+			Params map[string]json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(result.Params[input.parameter]); got != input.want {
+			t.Fatalf("%s.%s = %q, want %s", input.offeringID, input.parameter, got, input.want)
+		}
+	}
+}

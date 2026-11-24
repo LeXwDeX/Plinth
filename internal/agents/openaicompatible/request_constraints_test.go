@@ -12,6 +12,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agents/openaicompatible"
+	"github.com/LeXwDeX/Plinth/internal/agents/upstreamhttp"
 )
 
 // #401: gpt-astra (gpt-6.2-astra behind the gateway) refuses any temperature
@@ -196,9 +197,9 @@ func TestAdapterMarksARejectedRequestParameter(t *testing.T) {
 				if !errors.As(err, &status) || status.Status != test.status {
 					t.Fatalf("%s: the status is lost: %v", label, err)
 				}
-				// The upstream's wording is the internal reason: it stays in
-				// the error the log reads.
-				if !strings.Contains(err.Error(), strings.TrimPrefix(test.body, "data: ")) {
+				// The sanitized head of the upstream's wording is the internal
+				// reason: it stays in the error the log reads (#563).
+				if !strings.Contains(err.Error(), upstreamhttp.ResponseExcerpt([]byte(test.body))) {
 					t.Fatalf("%s: the refusal body is not in the error: %v", label, err)
 				}
 				if errors.Is(err, agents.ErrContentRejected) || errors.Is(err, agents.ErrImagesRejected) || errors.Is(err, agents.ErrQuotaExhausted) {

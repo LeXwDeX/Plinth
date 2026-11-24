@@ -1024,6 +1024,24 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	// is paused. The helper returns nil outside a declared execution section.
 	module.SetSubmissionGate(newAssetListKernelSubmissionGate(assetListService, applicationSchema.AssetList))
 	paramsStore := agentparams.NewPersistentParameterStore(repository, logger)
+	// The values a generation call starts from for one Offering: the person's
+	// and the Agent's layers, without a pin the Offering no longer lets the
+	// person set. The image count block reads them too (#564).
+	offeringParameterValues := func(ownerID, sessionID, offeringID string) map[string]json.RawMessage {
+		scope := agentparams.ScopeKey(ownerID, sessionID)
+		values := paramsStore.OfferingOverrides(scope, offeringID)
+		states := paramsStore.OfferingStates(scope, offeringID)
+		offering, ok := taskCatalog.Get(generation.OfferingID(offeringID))
+		if !ok {
+			return nil
+		}
+		for _, p := range offering.Parameters {
+			if states[p.Name].Source == "user" && !offering.UserParameterAllowed(p) {
+				delete(values, p.Name)
+			}
+		}
+		return values
+	}
 	// The ledger's parameter source is the existing parameter store's
 	// last-writer state (#248): when the person's pin still equals the frozen
 	// value, the step reports "user"; otherwise the source stays unknown. A
@@ -1141,21 +1159,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}
 			return reasons
 		},
-		OfferingParameters: func(ownerID, sessionID, offeringID string) map[string]json.RawMessage {
-			scope := agentparams.ScopeKey(ownerID, sessionID)
-			values := paramsStore.OfferingOverrides(scope, offeringID)
-			states := paramsStore.OfferingStates(scope, offeringID)
-			offering, ok := taskCatalog.Get(generation.OfferingID(offeringID))
-			if !ok {
-				return nil
-			}
-			for _, p := range offering.Parameters {
-				if states[p.Name].Source == "user" && !offering.UserParameterAllowed(p) {
-					delete(values, p.Name)
-				}
-			}
-			return values
-		},
+		OfferingParameters: offeringParameterValues,
 		// #296: the parameters list of a tool result names who wrote a remembered
 		// value, the person's pin or the Agent's setting, from the same store.
 		OfferingParameterStates: func(ownerID, sessionID, offeringID string) map[string]generationtool.RememberedParameter {
@@ -1389,6 +1393,12 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ImageCount: func(ownerID, sessionID string) (int, bool) {
 			return paramsStore.ImageCount(agentparams.ScopeKey(ownerID, sessionID))
 		},
+		// #564: the parameter values the session holds per Offering, shown
+		// to the Agent before it submits.
+		SessionParameters: sessionParameterGroups(paramsStore, taskCatalog.Get),
+		// #564: whether an Offering's count parameter is sent depends on its
+		// current values (Seedream's image set switch).
+		OfferingParameters: offeringParameterValues,
 		StepCosts: func(ctx context.Context, ownerID, sessionID string) []chat.StepCost {
 			if applicationSchema.StepPolicy == nil {
 				return nil

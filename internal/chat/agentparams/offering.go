@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 )
 
@@ -280,4 +281,32 @@ func cloneParameterValues(in map[string]json.RawMessage) map[string]json.RawMess
 		out[k] = append(json.RawMessage(nil), v...)
 	}
 	return out
+}
+
+// OfferingIDs lists, sorted, the Offerings this scope holds a per-Offering
+// value for (the person's or the Agent's, including a cleared one), so a
+// reader can report the session's parameters without knowing in advance
+// which Offerings the person opened (#564).
+func (s *Store) OfferingIDs(scope string) []string {
+	seen := map[string]bool{}
+	for key := range s.rawParams(scope) {
+		if !isOfferingStateKey(key) {
+			continue
+		}
+		encoded, _, found := strings.Cut(strings.TrimPrefix(key, offeringStatePrefix), ":")
+		if !found {
+			continue
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil || len(decoded) == 0 {
+			continue
+		}
+		seen[string(decoded)] = true
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }

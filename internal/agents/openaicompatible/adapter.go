@@ -561,6 +561,7 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 		HasImages:      upstreamhttp.RequestHasImages(request),
 		ExhaustedQuota: adapter.exhaustedQuota,
 		RetryAfter:     upstreamhttp.RetryAfter(response.Header, time.Now()),
+		Echoes:         upstreamhttp.RequestTexts(request),
 	}.Err()
 }
 

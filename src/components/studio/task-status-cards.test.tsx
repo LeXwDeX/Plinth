@@ -9,7 +9,7 @@ import { formatSchemaText, schemaText, type ProductSchema } from '@/lib/product-
 import type { TrackedTask } from '@/store/workspace-store';
 
 const schema = defaultCatalog.application as unknown as ProductSchema;
-const state: { tracked: TrackedTask[] } = { tracked: [] };
+const state: { tracked: TrackedTask[]; session: string } = { tracked: [], session: 's1' };
 
 vi.mock('@/components/product-schema-provider', () => ({
   useProductSchema: () => ({ schema, text: (key: string) => schemaText(schema, key) }),
@@ -19,7 +19,7 @@ vi.mock('@/hooks/use-task-retry', () => ({
 }));
 // Server rendering reads a store's initial state, so both stores answer from fixed values here.
 vi.mock('@/store/chat-store', () => ({
-  useChatStore: (selector: (value: { activeSessionId: string }) => unknown) => selector({ activeSessionId: 's1' }),
+  useChatStore: (selector: (value: { activeSessionId: string }) => unknown) => selector({ activeSessionId: state.session }),
 }));
 vi.mock('@/store/workspace-store', () => ({
   useWorkspaceStore: (selector: (value: { trackedTasks: TrackedTask[] }) => unknown) => selector({ trackedTasks: state.tracked }),
@@ -37,6 +37,7 @@ const running = (extra: Partial<TrackedTask> = {}): TrackedTask => ({
 
 beforeEach(() => {
   state.tracked = [];
+  state.session = 's1';
   cleanup();
 });
 
@@ -96,6 +97,30 @@ describe('TaskStatusCards', () => {
       capability: schema.capabilities.find((item) => item.id === 'text-to-3d')?.label_cn ?? '',
       result: schema.task_states.find((item) => item.internal_state === 'SUCCEEDED')?.label ?? '',
     }));
+  });
+
+  it('keeps each session its own batch: switching while both run neither counts nor lists the other session (#565)', () => {
+    state.tracked = [running({ taskId: 'a' }), running({ taskId: 'b' })];
+    const view = render(<TaskStatusCards part="running" />);
+    expect(view.container.innerHTML).toContain(formatSchemaText(schema.content.messages['ui.studio.task.batch_title'], { done: 0, total: 2 }));
+    // s1 still runs a and b; the user switches to s2, which runs c.
+    state.tracked = [running({ taskId: 'a' }), running({ taskId: 'b' }), running({ taskId: 'c', sessionId: 's2' })];
+    state.session = 's2';
+    view.rerender(<TaskStatusCards part="running" />);
+    let html = view.container.innerHTML;
+    expect(html).toContain(formatSchemaText(schema.content.messages['ui.studio.task.batch_title'], { done: 0, total: 1 }));
+    expect(html).not.toContain('data-testid="chat-task-ended"');
+    expect(html.match(/data-testid="chat-task-progress"/g)).toHaveLength(1);
+    // While s2 is in view, a of s1 ends; back on s1, its batch is still a and b.
+    state.tracked = [running({ taskId: 'a', state: 'SUCCEEDED', terminal: true }), running({ taskId: 'b' }), running({ taskId: 'c', sessionId: 's2' })];
+    view.rerender(<TaskStatusCards part="running" />);
+    state.session = 's1';
+    view.rerender(<TaskStatusCards part="running" />);
+    html = view.container.innerHTML;
+    expect(html).toContain(formatSchemaText(schema.content.messages['ui.studio.task.batch_title'], { done: 1, total: 2 }));
+    expect(html.match(/data-testid="chat-task-ended"/g)).toHaveLength(1);
+    expect(html).toContain('data-task-id="a"');
+    expect(html).not.toContain('data-task-id="c"');
   });
 
   it('shows the queue reason in place of the bar while the provider holds the task', () => {

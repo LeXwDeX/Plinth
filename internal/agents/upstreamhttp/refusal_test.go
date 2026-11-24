@@ -147,13 +147,14 @@ func TestRefusalSeparatesABadPictureFromAModelWithoutImageInput(t *testing.T) {
 			if param, rejected := agents.RequestRejectedParam(err); rejected != (test.param != "") || param != test.param {
 				t.Fatalf("param = %q rejected = %t, want %q: %v", param, rejected, test.param, err)
 			}
-			// The status travels as a StatusError and the upstream's wording
-			// stays in the error, which only the log reads.
+			// The status travels as a StatusError and the sanitized head of
+			// the upstream's wording stays in the error, which only the log
+			// reads (#563).
 			var status *agents.StatusError
 			if !errors.As(err, &status) || status.Status != test.status {
 				t.Fatalf("status error = %v", err)
 			}
-			if !strings.Contains(err.Error(), strings.TrimSpace(strings.TrimPrefix(test.body, "data: "))) {
+			if !strings.Contains(err.Error(), upstreamhttp.ResponseExcerpt([]byte(test.body))) {
 				t.Fatalf("the refusal body is not in the error: %v", err)
 			}
 		})

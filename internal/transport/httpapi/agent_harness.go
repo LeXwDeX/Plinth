@@ -632,6 +632,8 @@ func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
 	// every Offering that prices by a count shows the same number instead of
 	// the value one Offering kept. A session with none on record keeps the
 	// declared default, which the panel already reads from the Offering.
+	// #564: each Offering shows the count inside its own declared range, the
+	// value its next call really runs with.
 	count, hasCount := s.agentParams.ImageCount(key)
 	visible := map[string]agentparams.ParameterState{}
 	for _, o := range s.generation.Offerings("") {
@@ -640,7 +642,7 @@ func (s *Server) projectAgentParameters(key, offeringID string) map[string]any {
 		}
 		for _, p := range o.Parameters {
 			if hasCount && p.Name == o.EstimatedCreditsUnitParameter && o.UserParameterAllowed(p) {
-				value := json.RawMessage(strconv.Itoa(count))
+				value := json.RawMessage(strconv.Itoa(p.ClampedCount(count)))
 				values[p.Name] = value
 				visible[p.Name] = agentparams.ParameterState{Value: value, Source: "user"}
 				continue

@@ -464,6 +464,18 @@ func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeup
 		body := fakeupstream.Clone(h.badBody)
 		body["error"], body["statusCode"], body["message"] = "Too Many Requests", json.Number("429"), []any{"Too many requests"}
 		writeJSON(w, http.StatusTooManyRequests, body)
+	case fakeupstream.ScenarioServiceUnavailable:
+		// The overloaded service's explicit "not now": HTTP 503 with
+		// Retry-After, the work not taken (#563). The body follows the
+		// observed NestJS error envelope; the 503 itself is constructed.
+		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+		body := fakeupstream.Clone(h.badBody)
+		body["error"], body["statusCode"], body["message"] = "Service Unavailable", json.Number("503"), []any{"Service unavailable"}
+		writeJSON(w, http.StatusServiceUnavailable, body)
+	case fakeupstream.ScenarioAcceptedServerError:
+		body := fakeupstream.Clone(h.badBody)
+		body["error"], body["statusCode"], body["message"] = "Bad Gateway", json.Number("502"), []any{"Bad gateway"}
+		writeJSON(w, http.StatusBadGateway, body)
 	default:
 		body := fakeupstream.Clone(h.badBody)
 		body["error"], body["statusCode"], body["message"] = "Internal Server Error", json.Number("500"), []any{"Internal server error"}
@@ -874,6 +886,11 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		if h.renderSubmissionScenario(w, r) {
 			return
 		}
+		if scenario := fakeupstream.ScenarioOf(r); scenario == fakeupstream.ScenarioServiceUnavailable &&
+			h.env.StillFails(r, scenario) {
+			h.render(w, r, scenario)
+			return
+		}
 		form, err := readForm(r)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, h.badBody)
@@ -1009,6 +1026,11 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		h.mu.Unlock()
 		if t.scenario == fakeupstream.ScenarioLostResponse {
 			fakeupstream.AbortConnection(w)
+			return
+		}
+		if t.scenario == fakeupstream.ScenarioAcceptedServerError {
+			// Accepted and billed above; the answer is the gateway's 502.
+			h.render(w, r, t.scenario)
 			return
 		}
 		body := fakeupstream.Clone(sample)

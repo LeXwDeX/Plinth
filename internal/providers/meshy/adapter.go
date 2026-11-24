@@ -52,8 +52,9 @@ type Config struct {
 	// LargeSubmitTimeout is the creation timeout above 100 MB. Zero takes the
 	// official default (120 s).
 	LargeSubmitTimeout time.Duration
-	// RetrySubmitServerError is the connection-level declaration that a 5xx
-	// answer to a create may be retried (#460 C25). Meshy does not declare it.
+	// RetrySubmitServerError is the connection-level declaration that a 503
+	// with Retry-After to a create may be resent (#460 C25, #563). Meshy does
+	// not declare it.
 	RetrySubmitServerError bool
 	// PollTimeout bounds one status poll (#487): the connection timeout also
 	// covers artifact downloads, which must be allowed to run long, while the

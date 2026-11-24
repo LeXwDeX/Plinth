@@ -29,8 +29,8 @@ type Config struct {
 	RequestTimeout time.Duration
 	HTTPClient     *http.Client
 	InputAssets    generation.InputAssetResolver
-	// RetrySubmitServerError is the connection-level declaration that a 5xx
-	// answer to a create may be retried (#460 C25).
+	// RetrySubmitServerError is the connection-level declaration that a 503
+	// with Retry-After to a create may be resent (#460 C25, #563).
 	RetrySubmitServerError bool
 	// ScratchDir holds private upload copies (spooled multipart bodies).
 	// Empty means os.TempDir(); production passes the storage volume's tmp

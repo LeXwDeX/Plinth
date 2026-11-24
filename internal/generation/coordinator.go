@@ -246,6 +246,12 @@ func (m *Module) startAttempt(ctx context.Context, lease Lease) error {
 	})
 	if err != nil {
 		failure := providerFailure(err, true)
+		// 连接声明可重发的提交拒绝（503 + Retry-After）在重试不再放行时按
+		// 「提交结果不明」收尾：5xx 不能证明上游没有受理和计费（#563）。
+		if errors.Is(err, ErrDeclaredSubmitRetry) && failure.Retryable && !failure.Ambiguous &&
+			!task.Offering.Retry.Allows(failure.Class, attempt.Ordinal+1-attempt.RateLimitQueued) {
+			failure.Ambiguous = true
+		}
 		// 只有 Start 的明确限流拒绝可以排队（上游未受理、不计费）；
 		// 其余路径沿用 handleAttemptFailure 的原有重试规则。
 		var refused *DispatchReceiptSettlement
@@ -1463,6 +1469,7 @@ func (m *Module) handleMaterializationFailure(
 	failure *Failure,
 	events []Event,
 ) error {
+	failure = chargedMaterializationFailure(failure)
 	task := lease.Task
 	now := m.clock.Now()
 	task.MaterializeFailures++
@@ -1504,6 +1511,24 @@ func (m *Module) handleMaterializationFailure(
 	// Keep the final pass count without changing the version used by the lease CAS.
 	lease.Task.MaterializeFailures = task.MaterializeFailures
 	return m.finishFailed(ctx, lease, attempt, failure, "materialization.failed", nil, events...)
+}
+
+// chargedMaterializationFailure is the class of a failure while materializing:
+// the upstream already finished and billed the result, so a download that
+// timed out, a CDN that refused or a store that failed is a charged result not
+// in hand, the integrity_failure the Schema's generation_failed_metered_by_class
+// declares, not the transport or upstream capacity class a submission with the
+// same cause has (#563). Retryable and the upstream evidence stay as they are;
+// an ambiguous failure keeps its own class, and source_expired keeps its own
+// recovery path.
+func chargedMaterializationFailure(failure *Failure) *Failure {
+	if failure == nil || failure.Ambiguous || failure.Class == FailureIntegrity ||
+		failure.Class == FailureSourceExpired {
+		return failure
+	}
+	charged := *failure
+	charged.Class = FailureIntegrity
+	return &charged
 }
 
 func (m *Module) tryRefreshClaims(
