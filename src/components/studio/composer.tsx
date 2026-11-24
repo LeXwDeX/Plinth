@@ -392,6 +392,9 @@ export function Composer({
     onChange: (event) => {
       setCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
       setActiveIndex(0);
+      // Typing refilters an open list and moves the highlight back to the first option, so the list returns to
+      // its top too. scrollTop stays inside the list; scrollIntoView could also scroll the page or the dialog.
+      if (mentionListRef.current) mentionListRef.current.scrollTop = 0;
       setPreviewIndex(null);
       setDismissed(null);
       onChange(event.currentTarget.value);

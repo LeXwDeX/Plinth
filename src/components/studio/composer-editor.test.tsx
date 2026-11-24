@@ -310,4 +310,20 @@ describe('mention list follows the keyboard highlight', () => {
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(screen.queryByRole('listbox')).toBeNull();
   });
+
+  it('returns the list to the top when typing refilters it, but not on keyboard or pointer moves', () => {
+    const input = openList();
+    const list = screen.getByRole('listbox');
+    // jsdom keeps scrollTop at 0; record writes so a reset is visible even from a scrolled list.
+    const writes: number[] = [];
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => 120, set: (top: number) => { writes.push(top); } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    fireEvent.mouseEnter(screen.getAllByRole('option')[2]);
+    expect(writes).toEqual([]);
+    fireEvent.change(input, { target: { value: '@img', selectionStart: 4 } });
+    expect(screen.getByRole('listbox')).toBe(list);
+    expect(writes).toEqual([0]);
+    expect(screen.getAllByRole('option')[0].getAttribute('aria-selected')).toBe('true');
+  });
 });
