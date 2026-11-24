@@ -353,12 +353,22 @@ func TestShippedPromptTellsTheAgentToFindHistoryPicturesOrAsk(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt := product.Application().Chat.Agent.SystemPrompt
-	for _, want := range []string{"find_history_images", "找不到或分不清就简短地问"} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("system prompt lacks %q", want)
+	// #407: when to look and when to ask is the tool's own rule, said once in its
+	// description; the system prompt no longer repeats it.
+	var description string
+	for _, tool := range product.Application().Chat.AgentTools {
+		if tool.Name == "find_history_images" {
+			description = tool.Description
 		}
 	}
-	if strings.Contains(prompt, "需要时让用户重新指定") {
-		t.Fatal("the old re-specify rule is still in the system prompt")
+	for _, want := range []string{"does not attach or select all of them", "ask the user briefly instead of guessing"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("find_history_images description lacks %q", want)
+		}
+	}
+	for _, repeated := range []string{"find_history_images", "需要时让用户重新指定"} {
+		if strings.Contains(prompt, repeated) {
+			t.Fatalf("the system prompt repeats %q", repeated)
+		}
 	}
 }

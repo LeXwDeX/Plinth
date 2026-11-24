@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 )
@@ -42,6 +43,8 @@ func TestShippedSystemPromptStatesTheSituationInsteadOfAPersona(t *testing.T) {
 		"topology.inconsistent_winding_edges", "skin_bind_pose",
 		"【生产账本】", "设定摘要", "update_session_notes",
 		"final_prompt", "prompt_note", "确认制作简报",
+		// Second pass: tool mechanics and injected-block rules.
+		"find_history_images", "偏好摘要", "已否决", "一次一张卡",
 	} {
 		if strings.Contains(prompt, moved) {
 			t.Errorf("the system prompt repeats %q, which lives in a tool description or an injected block", moved)
@@ -91,5 +94,36 @@ func TestShippedImageCraftKeepsBackgroundRemovalOnItsTool(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "自检以真实调用为据") {
 		t.Error("the system prompt states self-check records for 2D too")
+	}
+}
+
+// #407 second pass: the 2D craft texts repeat none of the rules the system prompt
+// states, and the prompt and the craft briefs together stay below the size they
+// had before the pass (7814 characters: 2084 + 5730). The ceilings are not a
+// target to fill; a rule added to one place should come out of another.
+func TestShippedPromptAndCraftStayShortAndStateRulesOnce(t *testing.T) {
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := product.Application().Chat.Agent
+	system := utf8.RuneCountInString(agent.SystemPrompt)
+	total := system
+	for _, prompt := range agent.CraftPrompts {
+		total += utf8.RuneCountInString(prompt.Text)
+		if prompt.ID != "image2d" && prompt.ID != "image2d_production" {
+			continue
+		}
+		for _, repeated := range []string{"修正轮数有上限", "自检与修正上限", "model_choice 说明模型来源"} {
+			if strings.Contains(prompt.Text, repeated) {
+				t.Errorf("craft %q repeats %q, which the system prompt states", prompt.ID, repeated)
+			}
+		}
+	}
+	if system > 2000 {
+		t.Errorf("the system prompt is %d characters, want at most 2000", system)
+	}
+	if total > 7500 {
+		t.Errorf("the system prompt and craft briefs are %d characters together, want at most 7500", total)
 	}
 }
