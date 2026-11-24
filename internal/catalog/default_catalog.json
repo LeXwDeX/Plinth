@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.22",
+    "revision": "2026-11-24.19.23",
     "terminology": {
       "user_facing": [
         {
@@ -3511,6 +3511,7 @@
         "ui.generation_formats.estimate_one": "附加导出预计额外消耗：{credits} 积分（{count} × {per}）",
         "ui.generation_formats.consent_label": "我同意按选中格式数消耗额外积分（每个格式转换成功后自动交付）",
         "post_success.resource_incomplete": "部分可选资源未在截止时间内就绪",
+        "post_success.resource_rejected": "该可选资源未通过交付校验，已放弃保存",
         "post_success.conversion_denied": "附加导出格式未获授权或超出同意上限，已停止发送",
         "post_success.conversion_abandoned": "附加导出发送结果不确定，已按安全策略放弃重发",
         "post_success.conversion_failed": "附加导出转换未成功完成",
@@ -18118,6 +18119,7 @@
             "ui.generation_formats.estimate_one": "Estimated additional export cost in credits: {credits} ({count} × {per})",
             "ui.generation_formats.consent_label": "I agree to spend extra credits per selected format (each format is delivered automatically once its conversion succeeds)",
             "post_success.resource_incomplete": "Some optional resources were not ready before the deadline",
+            "post_success.resource_rejected": "This optional resource failed delivery checks and was not kept",
             "post_success.conversion_denied": "Additional export formats were not authorized or exceeded the consent limit; sending has stopped",
             "post_success.conversion_abandoned": "The result of sending the additional export is uncertain; resending was abandoned under the safety policy",
             "post_success.conversion_failed": "The additional export conversion did not complete successfully",

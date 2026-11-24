@@ -2,6 +2,7 @@ package generation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -487,6 +488,60 @@ func finalizeExpiredResources(
 
 // ResourceReasonMessageKey 是 incomplete 槽位的缺省文案键。
 const ResourceReasonMessageKey = "post_success.resource_incomplete"
+
+// ResourceRejectedMessageKey 是非阻断产物被确定性拒收后 failed 槽位的
+// 文案键（#576）：公开投影只给出原因类别，不含阶段、字节或地址。
+const ResourceRejectedMessageKey = "post_success.resource_rejected"
+
+// errOptionalMediaType 标记可选产物的声明媒体类型不符合供给项约束：同一
+// 声明重试仍不符，属于确定性拒收。
+var errOptionalMediaType = errors.New("媒体类型不符")
+
+// rejectedResourceUpdate 是内核对确定性拒收产物的槽位断言（#576）：与
+// Provider 断言走同一 applyResourceUpdates 校验——只命中声明的非必需、
+// 仍 pending 且没有本地资产证据的精确/逐项槽位；聚合前缀槽位与
+// role 通配槽位不受单个产物的拒收影响。
+func rejectedResourceUpdate(claim ArtifactClaim) ResourceUpdate {
+	return ResourceUpdate{
+		Role:    claim.Role,
+		Variant: claim.Variant,
+		State:   ResourceFailed,
+		Reason:  ResourceRejectedMessageKey,
+	}
+}
+
+// deterministicAssetRejection 报告同一字节再次下载仍会得到的拒收：资产库
+// 内容检查结论、保真检查结论或媒体类型不符。下载、I/O 与检查不可用等
+// 可能下次成功的失败不在其内，槽位保持 pending 由 deadline 收尾。
+func deterministicAssetRejection(err error) bool {
+	if errors.Is(err, errOptionalMediaType) || isFidelityRejection(err) {
+		return true
+	}
+	var diagnosed DiagnosedAssetStorageError
+	return errors.As(err, &diagnosed) && deterministicStoreRejection(storageDiagnosticOf(err))
+}
+
+// resourceUpdateEvents 为实际应用的槽位断言写 post_success.resource 事件。
+func resourceUpdateEvents(taskID TaskID, applied []ResourceUpdate, now time.Time) []Event {
+	events := make([]Event, 0, len(applied))
+	for _, update := range applied {
+		scope := update.Variant
+		if scope == "" {
+			scope = update.VariantPrefix
+		}
+		events = append(events, Event{
+			TaskID: taskID,
+			Type:   "post_success.resource",
+			Data: eventData(map[string]string{
+				"role":  update.Role,
+				"scope": scope,
+				"state": string(update.State),
+			}),
+			CreatedAt: now,
+		})
+	}
+	return events
+}
 
 // EncodeResourceStatesForColumn 序列化 0022 列（仓储写入路径）：
 // nil/空态写 NULL（无成功后观察）。

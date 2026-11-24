@@ -133,6 +133,11 @@ type postSuccessAdapter struct {
 	childRunningRounds int
 	childFails         bool
 	crashAfterSend     bool
+	// thumbnail 替换常规路径交付的缩略图字节；omitThumbnail 让常规路径
+	// 不交付缩略图，lateThumbnail 非空时由成功后完成观察迟到交付（#576）。
+	thumbnail     []byte
+	omitThumbnail bool
+	lateThumbnail []byte
 	// 子作业状态：format → {remote, polls, done}
 	children map[string]*postSuccessChild
 	starts   int
@@ -153,6 +158,16 @@ func postSuccessThumbnailPNG() []byte {
 		panic(err)
 	}
 	return body.Bytes()
+}
+
+func postSuccessThumbnailClaim(data []byte) generation.ArtifactClaim {
+	return generation.ArtifactClaim{
+		ID:        "ps:thumbnail",
+		Role:      "thumbnail",
+		Variant:   "rendered_image",
+		Inline:    data,
+		MediaType: "image/png",
+	}
 }
 
 func (a *postSuccessAdapter) Start(
@@ -187,23 +202,25 @@ func (a *postSuccessAdapter) Observe(
 				DedupeKey: "ps-parent:running",
 			}, nil
 		}
+		artifacts := []generation.ArtifactClaim{{
+			ID:        "ps:model",
+			Role:      "model",
+			Inline:    validGLB("post-success parent"),
+			MediaType: "model/gltf-binary",
+		}}
+		if !a.omitThumbnail {
+			thumbnail := a.thumbnail
+			if thumbnail == nil {
+				thumbnail = postSuccessThumbnailPNG()
+			}
+			artifacts = append(artifacts, postSuccessThumbnailClaim(thumbnail))
+		}
 		return generation.Observation{
 			Phase:     generation.UpstreamCompleted,
 			Job:       &request.Job,
 			Progress:  100,
 			DedupeKey: "ps-parent:completed",
-			Artifacts: []generation.ArtifactClaim{{
-				ID:        "ps:model",
-				Role:      "model",
-				Inline:    validGLB("post-success parent"),
-				MediaType: "model/gltf-binary",
-			}, {
-				ID:        "ps:thumbnail",
-				Role:      "thumbnail",
-				Variant:   "rendered_image",
-				Inline:    postSuccessThumbnailPNG(),
-				MediaType: "image/png",
-			}},
+			Artifacts: artifacts,
 		}, nil
 	}
 	return a.observePostSuccessLocked(ctx, request)
@@ -363,7 +380,11 @@ func (a *postSuccessAdapter) observePostSuccessLocked(
 		}, nil
 	}
 	// 5) 全部终态：完成断言（任一成功 → ready；全失败 → failed）。
-	return completionObservation(base, request, state.Conversions, encode), nil
+	completed := completionObservation(base, request, state.Conversions, encode)
+	if a.lateThumbnail != nil {
+		completed.Artifacts = append(completed.Artifacts, postSuccessThumbnailClaim(a.lateThumbnail))
+	}
+	return completed, nil
 }
 
 func completionObservation(
