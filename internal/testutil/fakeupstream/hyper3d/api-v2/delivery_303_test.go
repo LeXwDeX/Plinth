@@ -270,9 +270,10 @@ func TestDeliveredModelIsTheFileTheFakeServes(t *testing.T) {
 	}
 }
 
-// Only the Gen-2.5 generation's PBR pack follows the request. The Extreme-High
-// tier's extra mesh, the preview and the Bang and Texture outputs stay the
-// plain fixture: they are not what the issue's real run measured.
+// Only the Gen-2.5 generation's PBR pack and the Texture output (#568, see
+// TextureModel) follow the request. The Extreme-High tier's extra mesh, the
+// preview and the Bang output stay the plain fixture: they are not what a real
+// run measured.
 func TestOnlyTheGenerationPBRPackFollowsTheRequest(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	plain, err := fakeupstream.ModelFile("glb")
@@ -289,18 +290,28 @@ func TestOnlyTheGenerationPBRPackFollowsTheRequest(t *testing.T) {
 	if _, _, data := f.Download(files[2].url); !bytes.Equal(data, plain.Data) {
 		t.Errorf("the extra mesh (%d bytes) is not the plain fixture (%d bytes)", len(data), len(plain.Data))
 	}
-	// Bang and Texture deliver the plain fixture whatever the generation was.
+	// Bang delivers the plain fixture whatever the generation was; Texture
+	// delivers TextureModel of its own form.
 	bang := submit(t, f, "/bang", form(map[string]string{"asset_id": s.uuid, "material": "PBR", "resolution": "High"}))
 	poll(t, f, bang)
-	texture := submit(t, f, "/rodin_texture_only", form(map[string]string{"material": "PBR", "texture_mode": "extreme-high"}, "model", "image"))
+	textureFields := map[string]string{"material": "PBR", "texture_mode": "extreme-high"}
+	texture := submit(t, f, "/rodin_texture_only", form(textureFields, "model", "image"))
 	poll(t, f, texture)
+	textured, err := TextureModel(textureFields)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, task := range map[string]submitted{"bang": bang, "texture": texture} {
 		list := listOf(t, f, task)
 		if len(list) != 1 {
 			t.Fatalf("%s lists %v", name, list)
 		}
-		if _, _, data := f.Download(list[0].url); !bytes.Equal(data, plain.Data) {
-			t.Errorf("%s delivered %d bytes, want the plain fixture's %d", name, len(data), len(plain.Data))
+		want := plain.Data
+		if name == "texture" {
+			want = textured.Data
+		}
+		if _, _, data := f.Download(list[0].url); !bytes.Equal(data, want) {
+			t.Errorf("%s delivered %d bytes, want %d", name, len(data), len(want))
 		}
 	}
 }
@@ -354,9 +365,9 @@ func TestTextureAndFileEndpointNotesRecordTheirRules(t *testing.T) {
 	}
 	for endpoint, wants := range map[string][]string{
 		"POST /rodin_texture_only": {
-			"consumed is 2 for texture_mode=extreme-high", "#187", "0.5", "without saying they add up", formDocs, "plain fixture",
+			"consumed is 2 for texture_mode=extreme-high", "#187", "0.5", "without saying they add up", formDocs, "#568", "12288", "base_high_pbr.glb",
 		},
-		"GET /files/{task_uuid}/{name}": {"PBR pack of a Gen-2.5 generation", "follows its request"},
+		"GET /files/{task_uuid}/{name}": {"PBR pack of a Gen-2.5 generation", "follows its request", "Texture pack"},
 	} {
 		for _, want := range wants {
 			if !strings.Contains(notes[endpoint], want) {

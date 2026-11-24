@@ -117,10 +117,14 @@ func kindRequests(source, plain, rig string) map[string]map[string]any {
 		// 2026-11-23 window did the same for multi-image-to-3d, which is now the
 		// newest sample of both. Ask for the same, so the drift comparison checks
 		// the sample's structure rather than the request-driven texture shaping
-		// (see TestTextureOptionsShapeTheSuccessBody).
-		"/image-to-3d":       {"image_url": "https://example.test/a.png", "should_texture": true, "enable_pbr": true},
-		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}, "should_texture": true, "enable_pbr": true},
-		"/remesh":            {"input_task_id": source},
+		// (see TestTextureOptionsShapeTheSuccessBody). The newest Multi Image to
+		// 3D sample (2026-11-24) was sent 2k geometry and an 8K texture, which
+		// its object repeats; the request asks for the same, since the fake
+		// echoes the request and not the template (TestResolutionOptionsEchoTheRequest).
+		"/image-to-3d": {"image_url": "https://example.test/a.png", "should_texture": true, "enable_pbr": true},
+		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}, "should_texture": true, "enable_pbr": true,
+			"ai_model": "meshy-7.1", "geometry_resolution": "2k", "texture_resolution": "8k"},
+		"/remesh": {"input_task_id": source},
 		// The newest convert sample is a real export of an untextured model: its
 		// model_urls carries an OBJ and no MTL, so the comparison converts one.
 		"/convert":           {"input_task_id": plain, "target_formats": []string{"glb", "obj", "fbx", "stl", "usdz", "3mf"}},

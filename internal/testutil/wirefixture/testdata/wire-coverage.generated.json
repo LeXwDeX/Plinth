@@ -12,6 +12,7 @@
     "internal/testutil/fakeupstream/gemini/images-v1/testdata/gemini-images-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-label-overflow.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-376-rodin-labeled.candidate.json",
+    "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-568-processing-high.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-bang.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-image-to-3d.candidate.json",
     "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/hyper3d-api-v2-text-to-3d.candidate.json",
@@ -33,6 +34,7 @@
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-analyze.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-print-multi-color.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-remesh.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-resize.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-retexture.candidate.json",
@@ -40,6 +42,7 @@
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-motion.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-uv-unwrap.candidate.json",
+    "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json",
     "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2.candidate.json",
@@ -85,11 +88,11 @@
       "total": 84
     },
     "units": {
-      "derived": 37,
+      "derived": 38,
       "disabled-zero-egress": 11,
       "local-no-wire": 4,
       "real": 138,
-      "total": 190
+      "total": 191
     }
   },
   "incomplete": [],
@@ -195,6 +198,22 @@
     {
       "adapter_key": "hyper3d.rodin.v1",
       "capability": "(scenario)",
+      "endpoint": "GET /assets/api/{id}/pack/glb/base_high_pbr.glb",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "media"
+      ],
+      "evidence": "derived",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-568-processing-high.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "hyper3d.rodin.v1",
+      "capability": "(scenario)",
       "endpoint": "GET /{asset}.glb",
       "hosts": [
         "file.hyper3d.com"
@@ -229,14 +248,16 @@
       "capability": "(scenario)",
       "endpoint": "POST /api/v2/download",
       "hosts": [
-        "api.hyper3d.com"
+        "api.hyper3d.com",
+        "example.test"
       ],
       "protocols": [
         "json"
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-568-processing-high.candidate.json"
       ],
       "offerings": []
     },
@@ -261,14 +282,16 @@
       "capability": "(scenario)",
       "endpoint": "POST /api/v2/status",
       "hosts": [
-        "api.hyper3d.com"
+        "api.hyper3d.com",
+        "example.test"
       ],
       "protocols": [
         "json"
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/app/testdata/agent-flow/agent-flow.candidate.json"
+        "internal/app/testdata/agent-flow/agent-flow.candidate.json",
+        "internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-568-processing-high.candidate.json"
       ],
       "offerings": []
     },
@@ -1120,7 +1143,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json"
       ],
       "offerings": []
     },
@@ -1152,7 +1176,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d-2026-11-23.candidate.json"
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d-2026-11-23.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json"
       ],
       "offerings": []
     },
@@ -1216,7 +1241,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json"
       ],
       "offerings": []
     },
@@ -1264,6 +1290,7 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json",
         "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json"
       ],
       "offerings": []
@@ -1408,7 +1435,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json"
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json",
+        "internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json"
       ],
       "offerings": []
     },
@@ -1456,6 +1484,7 @@
       ],
       "evidence": "real",
       "evidence_files": [
+        "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json",
         "internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json"
       ],
       "offerings": []

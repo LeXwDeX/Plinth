@@ -154,3 +154,23 @@ func textureEdges(fields map[string]string) []int {
 func DeliveredModel(fields map[string]string) (fakeupstream.File, error) {
 	return fakeupstream.SizedModelFile(deliveredTriangles(fields), textureEdges(fields)...)
 }
+
+// textureRoute is the Generate Texture route.
+const textureRoute = "/rodin_texture_only"
+
+// TextureModel is the GLB a valid Generate Texture task submitted with these form
+// fields delivers: the plain fixture's geometry (the real service keeps the
+// uploaded mesh; the fake does not read it) under a PBR pack whose edges follow
+// the request. The 1.9 real round (2026-11-24, #568) sent the Catalog's form
+// (texture_mode=extreme-high, resolution=High, hd_texture=true) and got a
+// base_high_pbr.glb whose texture edge was 12288: the generation table's
+// extreme-high with HighPack. So resolution=High is taken for the HighPack
+// add-on and hd_texture for uhd_texture, and every other cell of the table
+// (6144 for extreme-high at Basic, 2K to 8K for the other modes) is that table
+// applied, not observed. The two other maps of the 12288 pack follow
+// packMapEdge (4096, as in the Bang sample of the 12K pack).
+func TextureModel(fields map[string]string) (fakeupstream.File, error) {
+	base := baseTextureEdge(fields["texture_mode"], fields["hd_texture"] == "true", fields["resolution"] == "High")
+	other := packMapEdge(base)
+	return fakeupstream.SizedModelFile(fakeupstream.SizedModelTriangles(0), base, other, other)
+}

@@ -90,7 +90,7 @@ var kinds = []core.Kind{
 	{Path: "/image-to-image", Type: "image-to-image", Need: [][]string{{"prompt"}, {"reference_image_urls", "input_task_id"}}, Sources: []string{"input_task_id"},
 		SourceTypes: imageSources, Real: true, Validate: pictureRequestError(core.ImageToImageRequestError)},
 	{Path: "/image-to-3d", Type: "image-to-3d", Need: [][]string{{"image_url", "input_task_id"}}, Sources: []string{"input_task_id"}, Real: true,
-		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError(false)},
+		Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError(false), EchoResolution: true},
 	{Path: "/multi-image-to-3d", Type: "multi-image-to-3d", Need: [][]string{{"image_urls", "input_task_id"}}, Sources: []string{"input_task_id"},
 		SourceTypes: imageSources, Real: true, Textured: texturedUnlessDisabled, Validate: imageGenerationRequestError(true), EchoResolution: true},
 	{Path: "/remesh", Type: "remesh", Need: [][]string{{"input_task_id", "model_url"}}, Sources: []string{"input_task_id"}, Real: true},
@@ -244,7 +244,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		case "/text-to-image", "/image-to-image":
 			parts = append(parts, "the create is checked as the pages read on 2026-11-24 document it (#542): ai_model required and one of ten, aspect_ratio one of seven with 3:2 and 2:3 for the GPT Image models only, generate_multi_view and aspect_ratio conflict, and image-to-image takes 1 to 5 reference_image_urls or an input_task_id of a succeeded text-to-image or image-to-image task (which wins); none of the refusals was requested from the real API (constructed)")
 		case "/image-to-3d", "/multi-image-to-3d":
-			parts = append(parts, "the option combinations of the pages read on 2026-11-24 answer 400 (#542, core.ImageTo3DRequestError): geometry_resolution 2k needs meshy-7.1, latest or meshy-7 and 4k needs meshy-7.1 or latest (multi-image takes no 4k), texture_model, texture_resolution 4k/8k with meshy-6-lite or meshy-n1 (the pricing page's NS cells, read as 400), PBR with meshy-n1, and for multi-image 1 to 4 image_urls and texture_image_urls with their conflicts; the refusal texts are constructed. The success bodies with textures, several views, PBR and 8K stay constructed until a real run replaces them")
+			parts = append(parts, "the option combinations of the pages read on 2026-11-24 answer 400 (#542, core.ImageTo3DRequestError): geometry_resolution 2k needs meshy-7.1, latest or meshy-7 and 4k needs meshy-7.1 or latest (multi-image takes no 4k), texture_model, texture_resolution 4k/8k with meshy-6-lite or meshy-n1 (the pricing page's NS cells, read as 400), PBR with meshy-n1, and for multi-image 1 to 4 image_urls and texture_image_urls with their conflicts; the refusal texts are constructed. The success bodies of the 1.9 real round (2026-11-24, #568: a meshy-t2.5 image-to-3d with a 2k PBR texture and a meshy-7.1 multi-image-to-3d of two views with 2k geometry and an accepted 8K PBR texture) are the newest samples (meshy-openapi-v1-real-round-2026-11-24.candidate.json); their creates carried inlined pictures over the recorder's 1 MiB limit and were not kept")
 		case "/retexture":
 			parts = append(parts, "the create is checked as the page read on 2026-11-24 documents it (#542, core.RetextureRequestError): one of text_style_prompt, image_style_url or multiview_image_urls is required, multiview excludes the other two and needs an explicit meshy-7 or meshy-n1, the prompt is at most 800 characters, and the meshy-6-lite and meshy-n1 conflicts; the page's ai_model enum has no meshy-7.1 and the fake answers 400 for it, which is constructed because the page does not say what an unlisted value does")
 		case "/animations", "/text-to-motion":
@@ -252,12 +252,12 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		}
 		parts = append(parts,
 			"consumed_credits follows the request from the Pricing page read on 2026-11-24 (#542, core.Credits): the price is reported from the first poll, a failed task reports 0, and the prices a real capture of 2026-11-20 to 2026-11-23 showed are asserted as such")
-		// The 2026-11-23 capture is the newest multi-image-to-3d sample: every
-		// poll repeats geometry_resolution and ultra_mode, so the kind answers
-		// both keys even when the request names no geometry option (#497).
+		// The newest multi-image-to-3d sample (2026-11-24) repeats
+		// geometry_resolution and ultra_mode, so the kind answers both keys even
+		// when the request names no geometry option (#497).
 		parts = append(parts,
-			"the 2026-11-20 window re-captured the processing chain: the poll repeats geometry_resolution and texture_resolution as sent (ultra_mode and hd_texture set from them), a successful rig answers result.basic_animations with six clips and the OBJ of a textured model comes with an MTL",
-			"multi-image-to-3d's own 2026-11-23 capture repeats geometry_resolution and ultra_mode in every poll",
+			"the 2026-11-20 window re-captured the processing chain: a successful rig answers result.basic_animations with six clips and the OBJ of a textured model comes with an MTL",
+			"the resolution keys follow the request, not the template (core shapeResolution, #568): a 2k or 4k geometry_resolution is repeated with ultra_mode true (image-to-3d 2026-11-20, multi-image-to-3d 2026-11-23 and 2026-11-24), and texture_resolution with hd_texture true only for a 4k or 8k texture (8k repeated by retexture 2026-11-20 and multi-image-to-3d 2026-11-24; every real 2k task, the 2026-11-24 retexture among them, carried neither key; 4k never sent)",
 			"the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked "+docsChecked+")")
 		note := strings.Join(parts, "; ")
 		out = append(out,
@@ -266,7 +266,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 				Note: note},
 			fakeupstream.Endpoint{Method: "GET", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
 				Sample: "GET " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
-				Note: "IN_PROGRESS and SUCCEEDED polls are real (the 2026-11-20 capture is the newest and the engine templates from it); PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"},
+				Note: "IN_PROGRESS and SUCCEEDED polls are real (the engine templates from the newest capture of the type: 2026-11-24 for image-to-3d, multi-image-to-3d and retexture, 2026-11-20 or earlier for the others, whose 2026-11-24 polls matched them in structure and were not committed again); PENDING is constructed from the field docs (start/finish timestamps absent, preceding_tasks while queued); FAILED is real for rigging and constructed elsewhere (the terminal timestamps are added); CANCELED is constructed (task-canceled scenario)"},
 			fakeupstream.Endpoint{Method: "DELETE", Path: kind.Path + "/{id}", Evidence: fakeupstream.EvidenceReal,
 				Sample: "DELETE " + samplePrefix + kind.Path + "/{id}", DocURL: page, CheckedAt: checkedAt,
 				Note: "a sample exists for the routes the alignment run deleted (text-to-image, image-to-3d, remesh, text-to-motion); the others answer the same"},

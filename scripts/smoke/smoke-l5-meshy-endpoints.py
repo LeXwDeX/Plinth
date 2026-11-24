@@ -89,9 +89,12 @@ UPSTREAM_PATH = {
     MULTI_COLOR: "/openapi/v1/print/multi-color", MOTION: "/openapi/v1/text-to-motion",
 }
 SIX_FORMATS = ("glb", "obj", "fbx", "stl", "usdz", "3mf")
-# A triangle bound the real service keeps within a few percent; the fake's model is one fixed fixture and is not sized
-# to the request, so the bound is enforced against a real upstream only (the count is recorded either way).
-BOUND_SLACK = 1.05
+# target_polycount is a target, not a ceiling: the 1.9 real round (2026-11-24, #568) asked meshy-t2.5 text-to-3D for
+# 15000 and got a GLB of 15804 triangles, +5.4%, the largest overshoot measured. The bound allows +10%, about twice that,
+# and still catches what would be a real fault: a quad counted as two triangles (+100%) or a target that is ignored.
+# The fake's model is one fixed fixture and is not sized to the request, so the bound is enforced against a real
+# upstream only (the count is recorded either way).
+BOUND_SLACK = 1.10
 
 CHARACTER = ("A single full-body low-poly humanoid game character standing upright in a T-pose, "
              "arms straight out to the sides, plain neutral clothing, plain white background, no text")
@@ -127,7 +130,7 @@ def glb_checks(ctx, name, bound=None, textured=True, height=None):
         enforce = not ctx.fake
         within = summary["triangles"] <= bound * BOUND_SLACK
         checks.append(("GLB triangles", within or not enforce,
-                       f"{summary['triangles']} triangles, limit {bound}" + ("" if enforce else " (recorded; enforced on a real upstream only)")))
+                       f"{summary['triangles']} triangles, target {bound}, limit {int(bound * BOUND_SLACK)}" + ("" if enforce else " (recorded; enforced on a real upstream only)")))
     if height is not None and summary["height"] is not None:
         enforce = not ctx.fake
         near = abs(summary["height"] - height) <= height * 0.05

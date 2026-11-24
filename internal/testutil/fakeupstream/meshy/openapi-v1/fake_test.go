@@ -746,10 +746,15 @@ func TestResolutionOptionsEchoTheRequest(t *testing.T) {
 	if retextureBody["texture_resolution"] != "4k" || retextureBody["hd_texture"] != true {
 		t.Fatalf("texture = %v hd_texture = %v", retextureBody["texture_resolution"], retextureBody["hd_texture"])
 	}
+	// A 2k texture is not repeated: every real task sent "2k" carried neither
+	// key (the 2026-11-24 retexture among them), although the 2026-11-20
+	// retexture template, sent "8k", carries both.
 	plain := f.create("/retexture", map[string]any{"input_task_id": f.source(), "text_style_prompt": "p", "texture_resolution": "2k"})
 	_, plainBody := f.finish("/retexture", plain, key)
-	if plainBody["texture_resolution"] != "2k" || plainBody["hd_texture"] != false {
-		t.Fatalf("a 2k texture answers %v %v", plainBody["texture_resolution"], plainBody["hd_texture"])
+	for _, field := range []string{"texture_resolution", "hd_texture"} {
+		if _, has := plainBody[field]; has {
+			t.Fatalf("a 2k texture answers %s: %v", field, plainBody[field])
+		}
 	}
 	// A kind whose object carries no resolution keys gains none.
 	image := f.create("/text-to-image", map[string]any{"ai_model": "nano-banana-pro", "prompt": "p"})
