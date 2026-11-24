@@ -1417,9 +1417,13 @@ def common_dimensions(data):
     return image_dimensions(data)
 
 
-def execute(name, body, description="", add_arguments=None):
-    """Entry point shared by every script: ACK gate, environment, login, body(live, report), summary."""
-    _shape, refusal = upstream_shape.resolve("live-only", upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
+def execute(name, body, description="", add_arguments=None, gate="live-only"):
+    """Entry point shared by every script: ACK gate, environment, login, body(live, report), summary.
+
+    gate is the upstream_shape gate: live-only (the default, every paid L5 script) or fake-default
+    (a script that also runs against the fake upstream, and needs both live switches only for a
+    live or mixed target; #536)."""
+    _shape, refusal = upstream_shape.resolve(gate, upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
     if refusal:
         print(refusal, file=sys.stderr)
         return 2
