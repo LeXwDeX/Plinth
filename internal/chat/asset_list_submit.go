@@ -140,6 +140,14 @@ func (service *Service) SubmitAssetListItem(ctx context.Context, command ToolCom
 			return assetListRefusal(assetListMessage(messages.ItemNoSuccessfulTask,
 				"the session has no successful task")), nil
 		}
+		// A rework session reports a new version (#508): until the rework
+		// produced another success, the newest success of the sub-session is
+		// the Task the person sent back, and reporting it again would put the
+		// returned version back into review.
+		if item.ReturnCount > 0 && string(task.ID) == assetListReviewedTaskID(item.Review) {
+			return assetListRefusal(assetListMessage(messages.ItemNoNewTask,
+				"the returned version cannot be reported again; produce a new result first")), nil
+		}
 		// A success can still owe formats: the platform converts the other
 		// formats as post-success resources after the main model landed
 		// (#457). The item must not enter review before that delivery is
@@ -295,6 +303,13 @@ func (service *Service) SettleReportedItem(
 ) (assetlist.Item, bool, error) {
 	policy := service.assetLists
 	if policy == nil || policy.Service == nil || policy.Tasks == nil {
+		return input.Item, false, nil
+	}
+	// Only a deferred done report is settled here (#508). A stored result
+	// without the deferral mark is not a report of this work session (an
+	// older row's returned version), so the item continues as an ordinary one
+	// instead of re-entering review with it.
+	if !input.Item.DeliveryDeferred {
 		return input.Item, false, nil
 	}
 	taskID := AssetListItemResultTaskID(input.Item.Result)
@@ -472,6 +487,14 @@ func AssetListItemResultTaskID(raw json.RawMessage) string {
 		return ""
 	}
 	return snapshot.TaskID
+}
+
+// assetListReviewedTaskID reads the Task of the item's review snapshot: the
+// version the person last decided. A return keeps that snapshot while it clears
+// the reported result (#508), so a rework report can tell the returned version
+// from a new one. An item without a snapshot names no Task.
+func assetListReviewedTaskID(raw json.RawMessage) string {
+	return AssetListItemResultTaskID(raw)
 }
 
 // assetListItemReported renders the stored terminal state with the Schema's

@@ -152,6 +152,8 @@ func TestSettleReportedItemWaitsThenFinishes459(t *testing.T) {
 	runs := workingSubmitRuns()
 	createdAt := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
 	runs.item.Result = json.RawMessage(`{"task_id":"task-pending","assets":[]}`)
+	// SetItemResult stores a deferred report with the deferral mark.
+	runs.item.DeliveryDeferred = true
 
 	// While a format is still converting the item keeps its state, no review
 	// is written, and the next check moves one observation interval ahead.
@@ -201,6 +203,8 @@ func TestSettleReportedItemFinishesWhenOnlyABackgroundSlotIsPending459(t *testin
 	runs := workingSubmitRuns()
 	createdAt := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
 	runs.item.Result = json.RawMessage(`{"task_id":"task-thumb","assets":[]}`)
+	// SetItemResult stores a deferred report with the deferral mark.
+	runs.item.DeliveryDeferred = true
 	task := postSuccessTask("task-thumb", createdAt, map[string]generation.ResourceState{
 		"converted_model|converted.fbx|": {State: generation.ResourceReady},
 		"thumbnail|rendered_image|":      {State: generation.ResourcePending},

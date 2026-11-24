@@ -222,3 +222,59 @@ func TestDecideConfirmSurvivesARunWriteFailure(t *testing.T) {
 		t.Fatalf("failed run write left a run: %v", err)
 	}
 }
+
+// missingRunStore adds the confirmed lists without a run to the EnsureRun
+// fixture (#508).
+type missingRunStore struct {
+	*ensureRunStore
+	missing []assetlist.Run
+}
+
+func (store *missingRunStore) ConfirmedListsWithoutRun(_ context.Context, limit int) ([]assetlist.Run, error) {
+	result := make([]assetlist.Run, 0, len(store.missing))
+	for _, key := range store.missing {
+		if _, found := store.runs[ensureRunKey(key.OwnerID, key.ListID)]; found {
+			continue
+		}
+		result = append(result, key)
+		if len(result) == limit {
+			break
+		}
+	}
+	return result, nil
+}
+
+// #508 asset-list-04: a confirmed list whose run was never stored (EnsureRun
+// failed at confirm, or the list was confirmed while automatic production was
+// off) gets an idle run, so the card offers the person's explicit start. It is
+// never started automatically, even when the owner runs nothing else.
+func TestBackfillIdleRunsGivesAConfirmedListWithoutARunAnIdleRun508(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runs := &missingRunStore{ensureRunStore: newEnsureRunStore(), missing: []assetlist.Run{
+		{OwnerID: "owner-a", ProjectID: "prj_1", ListID: "alist_1"},
+	}}
+	service := newEnsureRunService(t, runs, nil)
+	created, err := service.BackfillIdleRuns(ctx)
+	if err != nil || created != 1 {
+		t.Fatalf("backfill = %d, %v; want one idle run", created, err)
+	}
+	run := runs.runs[ensureRunKey("owner-a", "alist_1")]
+	if run.Status != assetlist.RunIdle || run.ProjectID != "prj_1" || !strings.HasPrefix(run.ID, "run_") {
+		t.Fatalf("backfilled run = %+v; want idle", run)
+	}
+	again, err := service.BackfillIdleRuns(ctx)
+	if err != nil || again != 0 || runs.createCalls != 1 {
+		t.Fatalf("second backfill = %d, %v; creates = %d", again, err, runs.createCalls)
+	}
+
+	// With automatic production off nothing is created.
+	off := &missingRunStore{ensureRunStore: newEnsureRunStore(), missing: runs.missing}
+	disabled := newEnsureRunService(t, off, func(config *assetlist.Config) {
+		config.Schema.Execution = &catalog.AssetListExecutionSchema{Enabled: false}
+	})
+	if created, err := disabled.BackfillIdleRuns(ctx); !errors.Is(err, assetlist.ErrExecutionDisabled) ||
+		created != 0 || off.createCalls != 0 {
+		t.Fatalf("disabled backfill = %d, %v; creates = %d", created, err, off.createCalls)
+	}
+}

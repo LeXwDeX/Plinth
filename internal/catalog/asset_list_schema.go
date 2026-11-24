@@ -48,8 +48,9 @@ type AssetListSchema struct {
 	// 平台既有角色词汇（pending/active/denied/expired/replaced）。
 	States     []AssetListStateSchema `json:"states"`
 	ItemStates []AssetListStateSchema `json:"item_states"`
-	// ItemBlocks 是 #328 的第二轴（暂停/审批/步数上限），本步只预留声明，
-	// 状态机不可达。
+	// ItemBlocks 是 #328 的第二轴（等待审批/步数上限）：awaiting_approval 由
+	// runner 在项的回合停在审批卡时写入、卡片决定或过期后清除（#508），step_cap
+	// 由步数上限写入。从未写入的 paused 已删除（#508）。
 	ItemBlocks []ValueLabel            `json:"item_blocks"`
 	Messages   AssetListMessagesSchema `json:"messages"`
 	// Review is the acceptance board's decision contract (#329b), optional so
@@ -247,6 +248,15 @@ type AssetListMessagesSchema struct {
 	ItemNotInSession     string `json:"item_not_in_session"`
 	ItemNotWorking       string `json:"item_not_working"`
 	ItemNoSuccessfulTask string `json:"item_no_successful_task"`
+	// ItemNoNewTask refuses a rework session's done report that still names
+	// the Task the person returned (#508): the rework must produce a new
+	// successful Task before it reports again.
+	ItemNoNewTask string `json:"item_no_new_task"`
+	// ManualProduction tells the Agent that a confirmed list is not produced
+	// automatically (#508): with execution off, the proposal result and the
+	// decompose guidance end with it, so the Agent makes the items itself after
+	// the confirmation instead of waiting for a run that never starts.
+	ManualProduction string `json:"manual_production"`
 	// ItemDeliveryPending is the completion tool's answer when the reported
 	// Task still owes formats as post-success resources (#459): the item keeps
 	// its state until the delivery is stable, and the report is stored.

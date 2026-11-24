@@ -735,6 +735,11 @@ function BoardCell({
               {text('ui.asset_list.board.steps_exhausted')}
             </span>
           ) : null}
+          {item.block === 'awaiting_approval' ? (
+            <span className="shrink-0 rounded-sm bg-warning/10 px-1.5 py-0.5 text-[11px] text-warning" data-testid={`asset-board-awaiting-approval-${item.id}`}>
+              {text('ui.asset_list.item_awaiting_approval')}
+            </span>
+          ) : null}
           <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" data-testid={`asset-board-state-${item.id}`}>
             {stateLabel}
           </span>

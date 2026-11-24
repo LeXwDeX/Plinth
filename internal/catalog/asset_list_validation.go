@@ -17,7 +17,7 @@ var (
 	assetListStateIDs     = []string{"draft", "confirmed", "rejected", "expired", "superseded"}
 	assetListItemStateIDs = []string{"todo", "working", "review", "accepted", "returned", "failed", "skipped"}
 	assetListProjectKinds = []string{"character", "prop", "style_reference", "other"}
-	assetListItemBlocks   = []string{"awaiting_approval", "paused", "step_cap"}
+	assetListItemBlocks   = []string{"awaiting_approval", "step_cap"}
 )
 
 // validateAssetList 校验 application.asset_list（#327）。未声明该段时直接放行，
@@ -198,6 +198,8 @@ func validateAssetList(
 		"item_not_in_session":                  list.Messages.ItemNotInSession,
 		"item_not_working":                     list.Messages.ItemNotWorking,
 		"item_no_successful_task":              list.Messages.ItemNoSuccessfulTask,
+		"item_no_new_task":                     list.Messages.ItemNoNewTask,
+		"manual_production":                    list.Messages.ManualProduction,
 		"item_report_failed":                   list.Messages.ItemReportFailed,
 		"item_delivery_pending":                list.Messages.ItemDeliveryPending,
 	} {

@@ -41,17 +41,18 @@ const (
 
 	// roundLimitReason is the item state reason of a working item that used
 	// all its rounds (#328). It is not one of the five upstream failure
-	// categories: the person may continue the item manually.
+	// categories. failed is terminal: there is no continue or retry entry for
+	// the item, so the copy around it must not promise one (#508).
 	roundLimitReason = "round_limit"
 
 	// defaultContinuation is only used when a caller builds the runner without
 	// the Catalog copy. The declared message always carries the four
 	// placeholders.
-	defaultContinuation = "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。"
+	defaultContinuation = "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。完成后调用 submit_asset_list_item 报告。"
 
 	// defaultRework is the returned-item turn when the Catalog declares no
 	// rework copy (#329b).
-	defaultRework = "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请按原因修正后重新自检并重新申报。"
+	defaultRework = "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请按原因修正，新的任务成功后调用 submit_asset_list_item 重新申报。"
 )
 
 // Runs is the run store port. It is the narrow subset of assetlist.RunStore
@@ -87,6 +88,9 @@ type Chat interface {
 	// TurnEndedInError reports whether the turn recorded the Schema's error
 	// reason.
 	TurnEndedInError(turn chat.Turn) bool
+	// TurnEndedAwaitingApproval reports whether the turn ended on an approval
+	// card the person has to decide (#508).
+	TurnEndedAwaitingApproval(turn chat.Turn) bool
 	// SettleReportedItem moves a working item whose done report is stored into
 	// review once its delivery is stable (#459). It reports false when the item
 	// has no such report, and true when it finished the item or left it waiting
@@ -116,6 +120,23 @@ type StepCaps interface {
 	StepCapReached(ctx context.Context, ownerID, sessionID string) (bool, error)
 }
 
+// Approvals reports whether an item's sub-session still has an approval card
+// that waits for the person (#508). The runner blocks such an item as
+// awaiting_approval instead of continuing it, and clears the block once the
+// card was decided or expired. A nil port means the deployment observes no
+// cards, and a turn that ended on one continues like any other.
+type Approvals interface {
+	PendingApproval(ctx context.Context, ownerID, sessionID string) (bool, error)
+}
+
+// Backfill stores an idle run for confirmed lists that have none (#508):
+// confirm creates the run best-effort, and a list confirmed while automatic
+// production was off never got one. assetlist.Service implements it. A nil
+// port means the deployment backfills nothing.
+type Backfill interface {
+	BackfillIdleRuns(ctx context.Context) (int, error)
+}
+
 // Config is the runner's ports and Schema values. Execution nil keeps the
 // defaults above; the application only starts the runner when execution is
 // declared and enabled.
@@ -127,6 +148,8 @@ type Config struct {
 	Scheduler Scheduler
 	Presence  Presence
 	StepCaps  StepCaps
+	Backfill  Backfill
+	Approvals Approvals
 	// Steps reads how many steps one item's asset actually used (#330): the
 	// list-end summary reports it per item. nil leaves the summary without a
 	// per-item number rather than guessing one.
@@ -165,6 +188,8 @@ type Runner struct {
 	scheduler    Scheduler
 	presence     Presence
 	stepCaps     StepCaps
+	backfill     Backfill
+	approvals    Approvals
 	steps        func(ctx context.Context, ownerID, sessionID string) (int, error)
 	texts        *catalog.TextLocalizer
 	interval     time.Duration
@@ -194,6 +219,8 @@ func New(config Config) *Runner {
 		scheduler:    config.Scheduler,
 		presence:     config.Presence,
 		stepCaps:     config.StepCaps,
+		backfill:     config.Backfill,
+		approvals:    config.Approvals,
 		steps:        config.Steps,
 		texts:        config.Texts,
 		interval:     defaultPollInterval,
@@ -262,6 +289,13 @@ func (runner *Runner) Run(ctx context.Context) {
 func (runner *Runner) Advance(ctx context.Context) error {
 	now := runner.clock()
 	var errs []error
+	// A confirmed list without a run gets an idle one (#508), so the card
+	// offers the person's start. It never starts on its own.
+	if runner.backfill != nil {
+		if _, err := runner.backfill.BackfillIdleRuns(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("backfill asset list runs: %w", err))
+		}
+	}
 	if err := runner.resumePresencePauses(ctx, now); err != nil {
 		errs = append(errs, err)
 	}
@@ -438,9 +472,31 @@ func (runner *Runner) advanceRun(ctx context.Context, run assetlist.Run, now tim
 // that needs the person). A step-cap block no longer pauses here: the item is
 // left blocked and the tick keeps working on the other items.
 func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item assetlist.Item, now time.Time) (bool, error) {
+	if item.Block == assetlist.BlockAwaitingApproval && runner.approvals != nil {
+		// The card is the person's (#508): while it waits, the item opens no
+		// turn. Once it was decided or expired the block clears and the newest
+		// turn is judged again below; a card that no longer waits does not
+		// block it a second time. Without the port nothing can tell the card
+		// was decided, so the block stays.
+		waiting, err := runner.approvalPending(ctx, run.OwnerID, item.SessionID)
+		if err != nil || waiting {
+			return false, err
+		}
+		cleared, err := runner.runs.SetItemBlock(ctx, run.OwnerID, run.ListID, item.ID,
+			assetlist.BlockNone, assetlist.VersionUnchecked, now)
+		if err != nil {
+			if errors.Is(err, assetlist.ErrConflict) || errors.Is(err, assetlist.ErrItemState) ||
+				errors.Is(err, assetlist.ErrNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+		item = cleared
+	}
 	if item.Block != assetlist.BlockNone {
-		// awaiting_approval waits for the person; step_cap waits for the person
-		// to extend, skip or report the item. Neither may open another turn.
+		// step_cap waits for the person to extend, skip or report the item (and
+		// awaiting_approval without the approvals port has nothing to observe);
+		// neither may open another turn.
 		return false, nil
 	}
 	if !item.NextActionAt.IsZero() && item.NextActionAt.After(now) {
@@ -519,6 +575,18 @@ func (runner *Runner) advanceItem(ctx context.Context, run assetlist.Run, item a
 		}
 		if capped {
 			return false, runner.blockStepCap(ctx, run, item, turn.AssistantMessageID, now)
+		}
+		// A turn that ended on an approval card waits for the person (#508):
+		// continuing it would only open turns that meet the same card until
+		// the round limit fails the item. The block releases the slot.
+		if runner.chat.TurnEndedAwaitingApproval(turn) {
+			waiting, err := runner.approvalPending(ctx, run.OwnerID, sessionID)
+			if err != nil {
+				return false, err
+			}
+			if waiting {
+				return false, runner.blockAwaitingApproval(ctx, run, item, now)
+			}
 		}
 		report, failed, err := runner.failureReport(ctx, run.OwnerID, sessionID, turn)
 		if err != nil {
@@ -612,7 +680,8 @@ func (runner *Runner) openTurn(
 	now time.Time,
 ) error {
 	if round < 1 {
-		// A manual "continue" resets round to zero before the item is reopened.
+		// A stored round below one (an item claimed before its first turn was
+		// counted) still opens the first turn.
 		round = 1
 	}
 	if workRound < 1 {
@@ -922,6 +991,29 @@ func (runner *Runner) blockStepCap(ctx context.Context, run assetlist.Run, item 
 		return err
 	}
 	runner.logger.Info("asset list item blocked at the step cap",
+		"run_id", run.ID, "item_id", item.ID)
+	return nil
+}
+
+// approvalPending asks whether the sub-session still has an undecided approval
+// card. Without the port there is nothing to observe.
+func (runner *Runner) approvalPending(ctx context.Context, ownerID, sessionID string) (bool, error) {
+	if runner.approvals == nil || sessionID == "" {
+		return false, nil
+	}
+	return runner.approvals.PendingApproval(ctx, ownerID, sessionID)
+}
+
+// blockAwaitingApproval marks a working item as waiting for the person's
+// approval card (#508). Another writer that moved the item meanwhile wins.
+func (runner *Runner) blockAwaitingApproval(ctx context.Context, run assetlist.Run, item assetlist.Item, now time.Time) error {
+	_, err := runner.runs.SetItemBlock(ctx, run.OwnerID, run.ListID, item.ID,
+		assetlist.BlockAwaitingApproval, assetlist.VersionUnchecked, now)
+	if err != nil && !errors.Is(err, assetlist.ErrConflict) &&
+		!errors.Is(err, assetlist.ErrItemState) && !errors.Is(err, assetlist.ErrNotFound) {
+		return err
+	}
+	runner.logger.Info("asset list item waits for an approval card",
 		"run_id", run.ID, "item_id", item.ID)
 	return nil
 }

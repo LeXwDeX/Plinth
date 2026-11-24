@@ -384,6 +384,18 @@ describe('AssetListBoard (#329)', () => {
     expect(screen.getByTestId('asset-board-detail')).toBeTruthy();
   });
 
+  // #508: an item whose turn waits for an approval card is marked, so the
+  // person knows to open its session and decide the card.
+  it('marks an item that waits for an approval card', async () => {
+    const waiting = boardItem({ id: 'item-card', name: '待批角色', state: 'working', block: 'awaiting_approval' });
+    const plain = boardItem({ id: 'item-plain', name: '普通角色', state: 'working' });
+    renderBoard(board([waiting, plain]));
+    await waitFor(() => expect(screen.getByTestId('asset-board-awaiting-approval-item-card')).toBeTruthy());
+    expect(screen.getByTestId('asset-board-awaiting-approval-item-card').textContent)
+      .toBe(text('ui.asset_list.item_awaiting_approval'));
+    expect(screen.queryByTestId('asset-board-awaiting-approval-item-plain')).toBeNull();
+  });
+
   // #330 step 5C: a capped item reads "used / limit" with the person's grant,
   // is marked as used up, and offers "give it a few more steps"; the dialog
   // sends the whole grant (current extra + the amount) and the board re-reads.

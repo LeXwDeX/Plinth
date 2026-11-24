@@ -265,7 +265,10 @@ func TestProposeAssetListResolvesReferencesAndReportsThePlan(t *testing.T) {
 	if items, ok := content["unavailable_items"].([]any); !ok || len(items) != 0 {
 		t.Fatalf("unavailable items = %v", content["unavailable_items"])
 	}
-	wantMessage := strings.NewReplacer("{count}", "2", "{steps}", "2").Replace(schema.Messages.Proposed)
+	// The shipped Schema keeps automatic production off, so the message ends
+	// with the manual-production note (#508).
+	wantMessage := strings.NewReplacer("{count}", "2", "{steps}", "2").Replace(schema.Messages.Proposed) +
+		" " + schema.Messages.ManualProduction
 	if content["message"] != wantMessage {
 		t.Fatalf("proposal message = %q, want %q", content["message"], wantMessage)
 	}
@@ -647,5 +650,26 @@ func TestProposeAssetListReferenceRefusalFallsBackWithoutDecompose(t *testing.T)
 	}
 	if result.Error != schema.Messages.ProposeInvalidItems {
 		t.Fatalf("refusal = %q, want the generic invalid-items copy", result.Error)
+	}
+}
+
+// #508 asset-list-01: with automatic production on, a confirmed list is made by
+// the runner, so the proposal message carries no manual-production note.
+func TestProposeAssetListOmitsTheManualNoteWhenProductionIsAutomatic508(t *testing.T) {
+	repository := newAssetListRepo()
+	schema := automaticAssetListSchema(t, defaultAssetListSchema(t))
+	service := newAssetListProposalService(t, repository, schema, nil)
+	result, err := service.ProposeAssetList(context.Background(), assetListCommand(`{
+		"title":"剑","items":[{"kind":"prop","name":"Sword","description":"blade"}]}`))
+	if err != nil || result.Error != "" {
+		t.Fatalf("proposal = %+v err=%v", result, err)
+	}
+	var content map[string]any
+	if err := json.Unmarshal([]byte(result.AgentContent), &content); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.NewReplacer("{count}", "1", "{steps}", "1").Replace(schema.Messages.Proposed)
+	if content["message"] != want {
+		t.Fatalf("proposal message = %q, want %q", content["message"], want)
 	}
 }

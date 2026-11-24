@@ -944,3 +944,41 @@ func TestAssetListRunRepositoryRunSummaries(t *testing.T) {
 		t.Fatalf("empty owner = %v; want ErrInvalid", err)
 	}
 }
+
+// #508 asset-list-04: the runner finds confirmed lists without a run. A
+// confirmed list that has its run, drafts and other statuses are not listed.
+func TestAssetListRunRepositoryConfirmedListsWithoutRun508(t *testing.T) {
+	repository, lists, runs, _ := newAssetListRunRepositories(t)
+	ctx := context.Background()
+	seedRunList(t, lists, "alist_withrun", 1)
+	seedRunList(t, lists, "alist_norun", 1)
+	setStatus := func(listID, status string) {
+		t.Helper()
+		if _, err := repository.db.Exec(`UPDATE asset_lists SET status = ? WHERE id = ?`,
+			status, listID); err != nil {
+			t.Fatalf("set %s %s: %v", listID, status, err)
+		}
+	}
+	// One confirmed list per project: first the one that has its run.
+	setStatus("alist_withrun", assetlist.StatusConfirmed)
+	if _, err := runs.CreateRun(ctx, newAssetListRun("run_1", "owner-a", "prj_1", "alist_withrun", assetlist.RunRunning)); err != nil {
+		t.Fatal(err)
+	}
+	if missing, err := runs.ConfirmedListsWithoutRun(ctx, 10); err != nil || len(missing) != 0 {
+		t.Fatalf("with every confirmed list run = %+v, %v; want none", missing, err)
+	}
+	// The draft stays out; once it is the confirmed one, it is listed.
+	setStatus("alist_withrun", assetlist.StatusSuperseded)
+	setStatus("alist_norun", assetlist.StatusConfirmed)
+	missing, err := runs.ConfirmedListsWithoutRun(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 1 || missing[0].ListID != "alist_norun" || missing[0].OwnerID != "owner-a" ||
+		missing[0].ProjectID != "prj_1" || missing[0].ID != "" {
+		t.Fatalf("confirmed lists without a run = %+v; want only alist_norun", missing)
+	}
+	if none, err := runs.ConfirmedListsWithoutRun(ctx, 0); err != nil || len(none) != 0 {
+		t.Fatalf("zero limit = %+v, %v", none, err)
+	}
+}
