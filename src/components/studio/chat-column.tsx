@@ -95,7 +95,7 @@ import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
 import { InFlightGuard } from '@/lib/chat/in-flight-guard';
 import { flushExplicitModel3D, flushExplicitModelImage } from '@/lib/chat/explicit-model';
-import { reloadSessionBudget } from '@/lib/chat/session-budget';
+import { budgetFollowsTasks, followSettledBudget, reloadSessionBudget } from '@/lib/chat/session-budget';
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { continuePlanOnce } from '@/lib/chat/plan-continue';
@@ -2048,6 +2048,21 @@ export function ChatColumn() {
     const timers = LATE_RESULT_RELOAD_MILLISECONDS.map((delay) => window.setTimeout(reload, delay));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [activeSessionId, applyNewestMessagePage, chatClient, messagePageSize, settledWatchedKey]);
+  // #561: a decided plan's figures and state move on the server after its Tasks end (the settlement charges the
+  // step a moment later, and the plan turns used up or completed). Read the budget again at the same moments as the
+  // late result, so the plan card does not keep the state it had when it was approved. No polling: only an ended
+  // Task starts it.
+  const budgetFollows = budgetFollowsTasks(schema, sessionBudget);
+  useEffect(() => {
+    if (!activeSessionId || settledWatchedKey === '' || !budgetFollows) return;
+    const sessionId = activeSessionId;
+    return followSettledBudget(chatClient, sessionId, {
+      delays: [0, ...LATE_RESULT_RELOAD_MILLISECONDS],
+      apply: ({ budget }) => {
+        if (useChatStore.getState().activeSessionId === sessionId) useChatStore.getState().updateSessionBudget(sessionId, budget);
+      },
+    });
+  }, [activeSessionId, budgetFollows, chatClient, settledWatchedKey]);
   const refreshApprovalRef = useRef(refreshApproval);
   refreshApprovalRef.current = refreshApproval;
   // Credits are server-summed: ask again whenever a task or a view starts or ends.
