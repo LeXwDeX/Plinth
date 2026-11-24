@@ -18,16 +18,16 @@
 
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
-| `tripo/v3` | 22 | 19 | 1 | 42 | 2026-11-23 |
+| `tripo/v3` | 26 | 21 | 1 | 48 | 2026-11-24 |
 | `openai/v1` | 4 | 9 | 0 | 13 | 2026-11-23 |
-| `meshy/openapi-v1` | 19 | 17 | 2 | 38 | 2026-11-23 |
-| `meshy/openapi-v2` | 4 | 4 | 2 | 10 | 2026-11-22 |
-| `hyper3d/api-v2` | 8 | 11 | 1 | 20 | 2026-11-19 |
+| `meshy/openapi-v1` | 22 | 21 | 0 | 43 | 2026-11-24 |
+| `meshy/openapi-v2` | 7 | 4 | 0 | 11 | 2026-11-24 |
+| `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
 | `openai/images-v1` | 3 | 4 | 1 | 8 | 2026-11-09 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 67 | 77 | 7 | 151 | 2026-11-23 |
+| 合计 | 78 | 85 | 2 | 165 | 2026-11-24 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -40,8 +40,7 @@
 | `tripo-v3/text-to-model-p-series` | `tripo.v3\|text-to-3d\|POST /v3/generation/text-to-model` | `tripo/tripo-p2/text-to-3d` | constructed | 该单元的 real 来自 v3.1-20260211 的文生样本；P2 与 H 系列共用端点，P2 的请求值、拒绝与价格没有真实样本。矩阵的 Offering 行已是 partial，但单元仍把 P2 列在 real 证据下。 |
 | `tripo-v3/image-to-model-p-series` | `tripo.v3\|image-to-3d\|POST /v3/generation/image-to-model` | `tripo/tripo-p2/image-to-3d` | constructed | 该单元的 real 来自 v3.1-20260211 的图生样本；P2 共用端点但没有真实样本。 |
 | `tripo-v3/multiview-to-model-p-series` | `tripo.v3\|image-to-3d\|POST /v3/generation/multiview-to-model` | `tripo/tripo-p2-multiview/image-to-3d` | constructed | 该单元的 real 来自 v3.1-20260211 的多视图样本（evidence-386）；P2 多视图共用端点但没有真实样本。 |
-| `meshy-openapi-v1/t25-image-to-3d` | `meshy.v2\|image-to-3d\|POST /openapi/v1/image-to-3d` | `meshy/meshy-t2.5/image-to-3d` | gap | 矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；在 #569 之前没有任何入库样本请求过 meshy-t2.5。 |
-| `meshy-openapi-v2/t25-text-to-3d` | `meshy.v2\|text-to-3d\|POST /openapi/v2/text-to-3d` | `meshy/meshy-t2.5/text-to-3d` | gap | 该单元的 real 来自 meshy-7.1 的样本；meshy-t2.5 共用端点，在 #569 之前没有入库样本请求过它。 |
+| `meshy-openapi-v1/t25-image-to-3d-create` | `meshy.v2\|image-to-3d\|POST /openapi/v1/image-to-3d` | `meshy/meshy-t2.5/image-to-3d` | constructed | 矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；入库样本里仍没有 ai_model 为 meshy-t2.5 的图生 3D 创建请求（#575）。 |
 
 ## 明细
 
@@ -56,9 +55,10 @@
 
 #### `tripo-v3/auth-401` · error-code-and-text · real
 
-- 端点：`GET /account/balance`
-- 行为：缺少 Key 返回 401，错误信封为 code 2、status error、message 与 suggestion。
+- 端点：`GET /account/balance`、`POST /generation/text-to-model`
+- 行为：缺少 Authorization 答 401 code 2「Authentication required」；错误的 Key 答 401 code 2「Invalid API key」，suggestion 提到 tsk_ 前缀；两种 401 都不带 request_id。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-negative-probes.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/files-upload` · response-shape · real
 
@@ -67,24 +67,38 @@
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-image.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-upload-model.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json`（2026-11-23，derived，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 - 备注：上传的参考图在样本里替换为固定 recipe，响应为真实；2026-11-23 的样本 provenance 为 derived。
 
 #### `tripo-v3/files-refusals` · error-code-and-text · constructed
 
 - 端点：`POST /files`
-- 行为：空文件 400/code 2003，不支持的类型 400/code 2004，沿用真实 400 信封。
+- 行为：空文件 400/code 2003「The image file is empty」（suggestion「Check if the file is corrupted」），不支持的类型 400/code 2004「This image file type is not supported」（suggestion「Refer to API documentation for supported image file types」），沿用真实 400 信封。
 - 依据：https://developers.tripo3d.ai/en/docs/files（Files）
 - 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling）
-- 核对日期：2026-11-08
-- 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
+- 依据：2026-11-24（UTC）免费否定探测的真实答复，记在 internal/testutil/fakeupstream/tripo/v3/align.go 的 Probes 表并由 probes_577_test.go 钉住（#577）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：真实答复已取到，但录制器不保留空文件或 text/plain 文件分片，没有样本文件可引用；登记表的 real 只认已提交的 wirefixture 样本
+- 备注：码、message 与 suggestion 已按真实答复改正；在录制器能保留这两种分片之前保持 constructed。
 
 #### `tripo-v3/task-poll-states` · state-machine · real
 
 - 端点：`GET /tasks/{task_id}`
-- 行为：任务轮询 queued → running → success / failed，各状态的轮询体结构与样本一致。
+- 行为：任务轮询 queued → running → success / failed，各状态的轮询体结构与样本一致；credits_consumed 从 queued 轮询起就带报价。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json`（2026-11-23，derived，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+- 备注：queued 轮询带报价见 evidence-577-real-round 里转换任务的 queued 轮询（progress 0，credits_consumed 10）。真实 progress 并不单调（智能分割依次为 50、10、25、75），首个轮询通常已是 running：这两点只在运行记录里，样本每个任务只留首末两次轮询，fake 不复现（见 tripo-v3/poll-progress-not-modelled）。
+
+#### `tripo-v3/poll-progress-not-modelled` · state-machine · gap
+
+- 端点：`GET /tasks/{task_id}`、`POST /models/convert`
+- 行为：未建模：真实 progress 不单调（50、10、25、75）、首个轮询通常已是 running、转换任务的 running 轮询有时没有 output 有时已带 output.model_url；fake 依次答 queued、0/50/100，running 的 output 为空。
+- 依据：smoke-l5-tripo-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制，只入库最小集 evidence-577-real-round）（#577，2026-11-24）
+- 核对日期：2026-11-24
+- 计划：Adapter 不依赖这些细节，暂不建模；若某个 Plinth 行为开始依赖，再用运行记录补样本并建模。
+- Issue：#577
 
 #### `tripo-v3/task-cancelled-unknown` · state-machine · constructed
 
@@ -97,9 +111,10 @@
 
 #### `tripo-v3/task-404` · error-code-and-text · real
 
-- 端点：`GET /tasks/{task_id}`
-- 行为：未知或不属于本账号的任务返回 404/code 2001 信封。
+- 端点：`GET /tasks/{task_id}`、`POST /animations/rig-check`
+- 行为：未知或不属于本账号的任务返回 404/code 2001「The task is not found」信封（带 request_id）；对不存在的任务 id 做 rig-check 同样如此。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-negative-probes.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/artifacts-route` · artifact-shape · constructed
 
@@ -108,6 +123,16 @@
 - 依据：https://developers.tripo3d.ai/en/docs/task-query（Task query：output 字段）
 - 核对日期：2026-09-30
 - 没有真实样本的原因：产物主机不是 API 的一部分，wire 样本只记 API 交换，媒体字节按 recipe 替换
+
+#### `tripo-v3/render-webp` · artifact-shape · constructed
+
+- 端点：`GET /artifacts/{task_id}/{name}`、`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /models/texture`、`POST /mesh/decimate`
+- 行为：每个带渲染图的任务，rendered_image 都是 WebP 文件（rendered_image.webp，binary/octet-stream），不再是 2026-10-29 的 PNG（#576、#577）。
+- 依据：smoke-l5-tripo-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制，只入库最小集 evidence-577-real-round）（#577，2026-11-24）
+- 依据：#386 多视图建模真实运行的渲染图字节（webp）（2026-11-19）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：录制器把产物 URL 脱敏、把媒体字节替换掉，样本里看不到文件名后缀与字节；证据是运行记录里的 URL 名（legacy_mesh.webp）与 Plinth 按 image/webp 读取每个文件
+- 备注：真实渲染图字节被录制器替换，「真实 WebP 是否带元数据块」是未证实的推断，fake 的 WebP 不据此构造。资产库对 WebP 的检查是 Plinth 侧行为，不在本表登记。
 
 #### `tripo-v3/artifact-expired` · error-code-and-text · constructed
 
@@ -122,12 +147,33 @@
 - 端点：`POST /generation/text-to-model`
 - 行为：H 系列（v3.1-20260211）文生模型的创建信封与任务对象结构；输出含 model_url、rendered_image_url 与 generated_image_url。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/create-400-1004` · error-code-and-text · real
 
-- 端点：`POST /generation/text-to-model`
-- 行为：缺少或非法参数的创建请求返回 400/code 1004 信封；其余创建端点的参数拒绝复用这一信封。
+- 端点：`POST /generation/text-to-model`、`POST /mesh/smartsegment`、`POST /models/convert`
+- 行为：参数拒绝答 400/code 1004 信封（带 request_id）。真实文案：未知或退役的模型名答「invalid model '<name>', allowed values: P1-20260311, P2-20260801, v2.5-20250123, v3.0-20250812, v3.1-20260211」（按字节序，退役的 v2.0-20240919 也是这一答复）；未给 texture 时 generate_parts 答「generate_parts is incompatible with texture; set texture=false to generate parts」；v2.5 贴图配 fast 答「texture_quality 'fast' requires texture v3.5-20260815; got v2.5-20250123」；未知 seg_type 答「invalid seg_type; allowed: image, model」；转换到 GLB 答「invalid format 'GLB', allowed values: 3MF, FBX, GLTF, OBJ, STL, USDZ」。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-negative-probes.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+- 备注：其余 1004 文案（其他枚举、范围、来源任务与 v3.0 门槛、pbr=true 时的 generate_parts、v2.5 模型隐含的 fast）没有免费请求能取到，仍为构造，见 tripo-v3/generation-request-contract。
+
+#### `tripo-v3/generation-h-echo` · request-validation · real
+
+- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`
+- 行为：H 系列（v3.1-20260211）文生与图生：请求的每个参数在轮询的 input 下原样回显（face_limit、geometry_quality、texture_quality、texture_version、texture_alignment、generate_parts、quad、smart_low_poly 等），model 以 model_version 出现；图生另有 input.file.object。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+
+#### `tripo-v3/generation-request-contract` · request-validation · constructed
+
+- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`
+- 行为：生成请求契约（#541）中没有真实请求过的部分：P 系列（P2-20260801、P1-20260311）的参数与取值、各参数的范围与枚举拒绝、来源任务与 v3.0 门槛，以及多视图建模的参数；非法值答真实 400/code 1004 信封。
+- 依据：https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard（Text to model）
+- 依据：https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard（Image to model）
+- 依据：https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard（Multiview to model）
+- 依据：https://developers.tripo3d.ai/en/docs/changelog（Changelog）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：真实请求只覆盖 H 系列文生与图生的合法请求（见 tripo-v3/generation-h-echo）和 create-400-1004 所列的几种拒绝；P 系列从未请求
+- 备注：H 系列合法请求的回显已为 real（tripo-v3/generation-h-echo）；本条只覆盖其余部分。
 
 #### `tripo-v3/text-to-model-p-series` · request-validation · constructed
 
@@ -136,19 +182,8 @@
 - 依据：https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard（Text to model（P Series））
 - 依据：https://developers.tripo3d.ai/en/pricing（Pricing）
 - 核对日期：2026-11-24
-- 没有真实样本的原因：P 系列从未以文生任务真实请求过；已提交的文生样本只用 H 系列 v3.1-20260211
+- 没有真实样本的原因：P 系列从未以文生任务真实请求过；2026-11-24 的真实一轮也没有跑 P 系列
 - 纠正 wire coverage：单元 `tripo.v3|text-to-3d|POST /v3/generation/text-to-model` 下的 `tripo/tripo-p2/text-to-3d`。该单元的 real 来自 v3.1-20260211 的文生样本；P2 与 H 系列共用端点，P2 的请求值、拒绝与价格没有真实样本。矩阵的 Offering 行已是 partial，但单元仍把 P2 列在 real 证据下。
-
-#### `tripo-v3/generation-request-contract` · request-validation · constructed
-
-- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`
-- 行为：生成请求契约（#541）：各模型版本允许的参数、取值与来源任务按官方页校验，非法值答真实 400/code 1004 信封。
-- 依据：https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard（Text to model）
-- 依据：https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard（Image to model）
-- 依据：https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard（Multiview to model）
-- 依据：https://developers.tripo3d.ai/en/docs/changelog（Changelog）
-- 核对日期：2026-11-24
-- 没有真实样本的原因：参数层面的拒绝没有真实请求过；样本只有一次合法请求与一次缺参 400
 
 #### `tripo-v3/p-quad-fbx` · artifact-shape · constructed
 
@@ -163,6 +198,7 @@
 - 端点：`POST /generation/image-to-model`
 - 行为：H 系列 v3.1 图生模型：任务类型 image_to_model，输出 model_url 与 rendered_image_url（没有 generated_image_url）。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/image-to-model-p-series` · request-validation · constructed
 
@@ -171,7 +207,7 @@
 - 依据：https://developers.tripo3d.ai/en/docs/generation-image-to-model/p（Image to model（P Series））
 - 依据：https://developers.tripo3d.ai/en/pricing（Pricing）
 - 核对日期：2026-11-24
-- 没有真实样本的原因：P 系列从未在图生端点真实请求过
+- 没有真实样本的原因：P 系列从未在图生端点真实请求过；2026-11-24 的真实一轮也没有跑 P 系列
 - 纠正 wire coverage：单元 `tripo.v3|image-to-3d|POST /v3/generation/image-to-model` 下的 `tripo/tripo-p2/image-to-3d`。该单元的 real 来自 v3.1-20260211 的图生样本；P2 共用端点但没有真实样本。
 
 #### `tripo-v3/multiview-to-model-shape` · response-shape · real
@@ -187,7 +223,7 @@
 - 行为：inputs 为单键视图对象数组（front 必需，2–4 张），代替 input。
 - 依据：https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard（Multiview to model）
 - 核对日期：2026-11-24
-- 没有真实样本的原因：只有一次合法的三视图请求入库（evidence-386），缺视图或越界的拒绝没有真实请求过
+- 没有真实样本的原因：只有一次合法的三视图请求入库（evidence-386），缺视图或越界的拒绝没有真实请求过；2026-11-24 的真实一轮没有入库多视图建模的交换
 
 #### `tripo-v3/multiview-to-model-p-series` · request-validation · constructed
 
@@ -202,8 +238,9 @@
 #### `tripo-v3/image-to-splat` · response-shape · real
 
 - 端点：`POST /generation/image-to-splat`
-- 行为：任务类型 image_to_splat，输出只有 model_url（.splat）。
+- 行为：任务类型 image_to_splat，输出只有 model_url（.splat），任务回显 input.file 与 model_version default。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/image-to-multiview` · response-shape · real
 
@@ -230,19 +267,21 @@
 #### `tripo-v3/rig-shape` · response-shape · real
 
 - 端点：`POST /animations/rig`
-- 行为：rig（biped、spec tripo，v2.5 与 v3.0）的创建与结果；v3.0 运行中即显示 25 credits。
+- 行为：rig（biped、spec tripo、out_format glb，v2.5 与 v3.0）的创建与结果；轮询回显 out_format、spec 与 topology（骨架类型）；运行中即显示 25 credits。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-rigging-v3.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json`（2026-11-16，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/rig-request-values` · request-validation · constructed
 
 - 端点：`POST /animations/rig`
-- 行为：rig_type、spec、out_format 的取值与 v3.0 专有值按官方页校验，非法值答 400/code 1004；轮询回显 spec、out_format 与骨架类型。
+- 行为：rig_type、spec、out_format 中除 biped/tripo/glb 以外的取值与 v3.0 专有值按官方页校验，非法值答 400/code 1004。
 - 依据：https://developers.tripo3d.ai/en/docs/animations-rig（Rig）
 - 依据：https://developers.tripo3d.ai/en/docs/animations-rig-check（Rig check）
 - 核对日期：2026-11-12
-- 没有真实样本的原因：样本只有 biped + tripo 的请求，其余取值未真实请求过
+- 没有真实样本的原因：真实请求（2026-10-29 与 2026-11-24）都只发了 biped + tripo + glb，其余取值未真实请求过
+- 备注：biped/tripo/glb 被受理并在 input 下回显 topology、spec、out_format 已为 real（tripo-v3/rig-shape）。
 
 #### `tripo-v3/retarget-shape` · response-shape · real
 
@@ -257,56 +296,83 @@
 - 行为：animation 与 animations 二选一（至多 5 个）、11 个 v3.0 biped 预设、5 个生物预设与 v1.0 preset:biped: 名称；预设与骨架不符时以 failed/1004 结束（推定）。
 - 依据：https://developers.tripo3d.ai/en/docs/animations-retarget（Retarget）
 - 核对日期：2026-11-12
-- 没有真实样本的原因：只真实请求过 preset:walk
+- 没有真实样本的原因：只真实请求过 preset:walk；2026-11-24 的样本没有 retarget 交换
 
 #### `tripo-v3/segment` · response-shape · real
 
 - 端点：`POST /mesh/segment`
-- 行为：segment 的创建与结果结构。
+- 行为：segment 的创建与结果结构；轮询回显 segmentation_granularity、split_by_connectivity 与 model_version。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-segment.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/complete` · response-shape · real
 
 - 端点：`POST /mesh/complete`
-- 行为：complete 的创建与结果结构。
+- 行为：complete 的创建与结果结构；quick_cap 的结果只有 model_url，轮询回显 completion_mode。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/smartsegment` · response-shape · real
 
 - 端点：`POST /mesh/smartsegment`
-- 行为：smartsegment_image 与 smartsegment_model：输出 seg_model_url、mask_url、prompt、seg_task_id、model_task_id；着色球体输入以 failed/1001 结束且不计费。
+- 行为：smartsegment_image 与 smartsegment_model：输出 seg_model_url、mask_url、prompt、seg_task_id、model_task_id；着色球体输入以 failed/1001 结束且不计费；模型输入的结果另带 normalize_scale 与 normalize_translation，轮询回显 granularity 与 model_ext。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image-failed.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-model.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
-- 备注：两种 seg_type 各只观测到一次成功。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+- 备注：2026-11-24 只跑了模型输入；图片输入仍只有 2026-10-29 的一次成功与一次失败，见 tripo-v3/smartsegment-image-unrun。
+
+#### `tripo-v3/smartsegment-image-unrun` · response-shape · constructed
+
+- 端点：`POST /mesh/smartsegment`
+- 行为：图片输入的智能分割在 2026-11-24 回灌后的形态（normalize 字段、input 回显）沿用模型输入的规则。
+- 依据：https://developers.tripo3d.ai/en/docs/mesh-smartsegment（Mesh smartsegment）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：2026-11-24 的真实一轮没有跑图片输入，回灌后的规则只由模型输入验证过
 
 #### `tripo-v3/decimate-shape` · response-shape · real
 
 - 端点：`POST /mesh/decimate`
 - 行为：任务类型 highpoly_to_lowpoly，输出 model_url 与 rendered_image_url。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-decimate.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+
+#### `tripo-v3/decimate-request-echo` · request-validation · real
+
+- 端点：`POST /mesh/decimate`
+- 行为：v3.0 降面请求（face_limit 1000、bake、quad false、smart_uv）被受理，轮询在 input 下回显 face_limit、bake、quad、smart_uv 与 original_model_id。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+- 备注：face_limit 是目标值而非上限：这次真实产物约 1566 三角面，约目标的 1.57 倍；产物字节未入库，这一数字来自运行记录，fake 不复现上浮（decimate.go）。
 
 #### `tripo-v3/decimate-request` · request-validation · constructed
 
 - 端点：`POST /mesh/decimate`
-- 行为：来源只能是文生、图生等生成任务，面数与四边面选项按官方页校验，回显默认值并按面数交付带贴图的 GLB 或四边面 FBX（decimate.go）。
+- 行为：来源只能是文生、图生等生成任务，面数与四边面选项的取值和拒绝按官方页校验，回显默认值并按面数交付带贴图的 GLB 或四边面 FBX（decimate.go）。
 - 依据：https://developers.tripo3d.ai/en/docs/mesh-decimate（Mesh decimate）
 - 核对日期：2026-11-12
-- 没有真实样本的原因：样本只有一次合法的 v3.0 请求
+- 没有真实样本的原因：来源限制、四边面与越界拒绝没有真实请求过；合法 v3.0 请求的回显见 tripo-v3/decimate-request-echo
 
 #### `tripo-v3/texture` · response-shape · real
 
 - 端点：`POST /models/texture`
-- 行为：任务类型 texture_model（standard、无 PBR），输出 model_url 与 rendered_image_url。
+- 行为：任务类型 texture_model，输出 model_url 与 rendered_image_url；轮询回显 texture_quality、pbr、bake、delight、texture_alignment、texture_prompt 与 model_version。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-texture.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/convert-shape` · response-shape · real
 
 - 端点：`POST /models/convert`
-- 行为：格式转换：任务在 input 下回显请求与 original_model_id；GLTF/FBX 结果带 normalize_scale 与 normalize_translation，3MF 结果只有 model_url。
+- 行为：格式转换：任务在 input 下回显请求与 original_model_id。导入模型（URL 或 file_token）的转换对每种格式都报 normalize_scale 与 normalize_translation；按任务 id 指定来源的转换两者都不报。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-convert.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json`（2026-11-16，captured，app_revision `unknown`，catalog_revision `unknown`）
-- 备注：3MF 一轮的样本 evidence-386-convert-3mf 只含轮询，按任务 id 指定来源，见 convert-3mf-package。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+- 备注：evidence-305（2026-11-16）的 GLTF/FBX 以 URL 为输入，带 normalize 字段；2026-11-24 的 OBJ（URL）与 STL（file_token）带、按任务 id 的 GLTF 不带。3MF 一轮（evidence-386，按任务 id）也不带，见 convert-3mf-package。
+
+#### `tripo-v3/convert-input-forms` · request-validation · real
+
+- 端点：`POST /models/convert`
+- 行为：三种输入都被受理：URL（OBJ，带 bake、fbx_preset、texture_format PNG、texture_size 8192、with_animation）、file_token（STL）与任务 id（GLTF）；轮询的 input 回显请求参数并给出 original_model_id。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/convert-request` · request-validation · constructed
 
@@ -314,7 +380,7 @@
 - 行为：format 限 GLTF、FBX、USDZ、OBJ、STL、3MF；texture_format、export_orientation、fbx_preset、texture_packaging 取值与类型按官方页校验，texture_packaging 只给 FBX。
 - 依据：https://developers.tripo3d.ai/en/docs/models-convert（Models convert）
 - 核对日期：2026-11-12
-- 没有真实样本的原因：取值层面的拒绝没有真实请求过
+- 没有真实样本的原因：取值层面的拒绝除 GLB 外都没有真实请求过（GLB 的真实文案见 tripo-v3/create-400-1004）
 
 #### `tripo-v3/convert-3mf-package` · artifact-shape · constructed
 
@@ -334,8 +400,8 @@
 
 #### `tripo-v3/pricing-observed` · pricing · real
 
-- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/image-to-splat`、`POST /generation/image-to-multiview`、`POST /generation/edit-multiview`、`POST /models/texture`、`POST /mesh/decimate`、`POST /mesh/smartsegment`、`POST /models/convert`、`POST /animations/rig`
-- 行为：已真实观测的扣费回显：H 系列图生（纯几何）20、splat 30、多视图 10、编辑多视图 5、texture 10、decimate 35、smartsegment 85/55、convert 10（GLTF/FBX）、rig（v3.0）25。
+- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/image-to-splat`、`POST /generation/image-to-multiview`、`POST /generation/edit-multiview`、`POST /models/texture`、`POST /mesh/decimate`、`POST /mesh/smartsegment`、`POST /models/convert`、`POST /animations/rig`、`POST /mesh/segment`、`POST /mesh/complete`
+- 行为：已真实观测的扣费回显（credits_consumed，从 queued 轮询起即显示）：H 系列文生（detailed、PBR、extreme 贴图）60、图生（纯几何）20、splat 30、多视图 10、编辑多视图 5、texture 10（standard）与 30（extreme + PBR）、decimate 35、segment 40、complete（quick_cap）30、smartsegment 85（图片）/55（模型）、convert 10（URL 输入的 GLTF、FBX、OBJ）与 5（file_token 的 STL、按任务 id 的 GLTF）、rig 25。
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-model.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-text-to-3d.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-image-to-splat.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
@@ -346,14 +412,15 @@
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-image.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-smartsegment-model.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json`（2026-11-16，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
 
 #### `tripo-v3/pricing-table` · pricing · constructed
 
 - 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /generation/image-to-splat`、`POST /generation/image-to-multiview`、`POST /generation/edit-multiview`、`POST /models/texture`、`POST /mesh/decimate`、`POST /models/convert`
-- 行为：未观测的参数组合（P 系列、PBR、纹理档位、quad 等）按官方价格表计价（billing.go）。
+- 行为：未观测的参数组合（P 系列、其他纹理档位、quad 等）按官方价格表计价（billing.go）。
 - 依据：https://developers.tripo3d.ai/en/pricing（Pricing）
 - 核对日期：2026-11-24
-- 没有真实样本的原因：只有样本里那几种参数组合被真实扣费过
+- 没有真实样本的原因：只有 pricing-observed 所列组合被真实扣费过；P2 价格从未观测
 
 #### `tripo-v3/rate-limit-concurrency` · rate-limit-concurrency · constructed
 
@@ -362,22 +429,23 @@
 - 依据：https://developers.tripo3d.ai/en/docs/rate-limits（Rate limits）
 - 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling）
 - 核对日期：2026-11-08
-- 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
+- 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本；2026-11-24 的真实一轮与免费探测都没有触发 1007 或 2000
 
 #### `tripo-v3/fault-scenarios` · error-code-and-text · constructed
 
 - 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /generation/image-to-splat`、`POST /generation/image-to-multiview`、`POST /generation/edit-multiview`、`POST /animations/rig-check`、`POST /animations/rig`、`POST /animations/retarget`、`POST /mesh/segment`、`POST /mesh/complete`、`POST /mesh/smartsegment`、`POST /mesh/decimate`、`POST /models/texture`、`POST /models/convert`
-- 行为：余额不足、Key 额度、5xx、超时、丢响应、受理后 502、畸形请求体 400/code 1003、未知来源任务 404/code 2001 等故障场景，复用真实错误信封。
+- 行为：余额不足、Key 额度、5xx、超时、丢响应、受理后 502、畸形请求体 400/code 1003、未知来源任务 404/code 2001，以及业务码 2008、2015、2018、2002、4001 与创建拒绝 2006、2007，复用真实错误信封。
 - 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling）
 - 核对日期：2026-11-08
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
+- 备注：2015「version has been deprecated」不是退役模型名的真实答复：2026-11-24 的免费探测里退役的 v2.0-20240919 得到的是 1004（见 tripo-v3/create-400-1004），fake 已删除按退役名单答 2015 的规则，2015 只剩按文档构造的注入。
 
-#### `tripo-v3/real-round-567` · other · gap
+#### `tripo-v3/real-round-567` · other · real
 
-- 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /generation/image-to-splat`、`POST /generation/image-to-multiview`、`POST /generation/edit-multiview`、`POST /animations/rig-check`、`POST /animations/rig`、`POST /animations/retarget`、`POST /mesh/segment`、`POST /mesh/complete`、`POST /mesh/smartsegment`、`POST /mesh/decimate`、`POST /models/texture`、`POST /models/convert`
-- 行为：2026-11-24 的 Tripo 公开任务 API 全功能真实一轮正在回灌，本表仍按其之前的样本与构造登记。
-- 计划：回灌完成后按功能更新对应条目的状态、样本与日期（P 系列、请求契约、计价等 constructed 条目优先）。
-- Issue：#567
+- 端点：`POST /files`、`GET /tasks/{task_id}`、`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/image-to-splat`、`POST /animations/rig`、`POST /mesh/segment`、`POST /mesh/complete`、`POST /mesh/smartsegment`、`POST /mesh/decimate`、`POST /models/texture`、`POST /models/convert`
+- 行为：2026-11-24 经 Plinth 的 Tripo 公开任务 API 全功能真实一轮：入库的最小集（12 个任务）的任务类型、状态词、output 键、input 回显与 credits_consumed 与 fake 一致（real_round_577_test.go 用录到的创建请求逐个比对）。
+- 样本：`internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json`（2026-11-24，captured，app_revision `b705f2032096c5c90cbbd180ead4f592dbf6b4ee`，catalog_revision `unknown`）
+- 备注：整轮 17 个功能、按报价扣 855 积分来自运行报告；样本只保留 12 个任务（合计 345 积分），其余功能（rig-check、retarget、多视图、编辑多视图、图片智能分割等）的这一轮结果未入库。
 
 ### `openai/v1`
 
@@ -763,20 +831,60 @@
 - 核对日期：2026-11-24
 - 没有真实样本的原因：真实投递需要公网 https 地址并会影响账号下其他应用，未做真实验证
 
-#### `meshy-openapi-v1/t25-image-to-3d` · response-shape · gap
+#### `meshy-openapi-v1/t25-image-to-3d` · response-shape · real
 
-- 端点：`POST /image-to-3d`、`GET /image-to-3d/{id}`
-- 行为：meshy-t2.5 图生 3D 的创建与轮询体按 meshy-7.1 样本的结构给出。
-- 计划：#569 合并后，用 2026-11-24 真实一轮的 meshy-openapi-v1-real-round-2026-11-24 样本把本条改为 real 并补样本路径与日期。
-- Issue：#568、#569
-- 纠正 wire coverage：单元 `meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d` 下的 `meshy/meshy-t2.5/image-to-3d`。矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；在 #569 之前没有任何入库样本请求过 meshy-t2.5。
+- 端点：`GET /image-to-3d/{id}`
+- 行为：meshy-t2.5 图生 3D（2k 贴图）的轮询体：IN_PROGRESS → SUCCEEDED，2k 贴图不回显 texture_resolution 与 hd_texture，consumed_credits 15。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 备注：样本只留了这个任务的轮询，创建请求没有入库，模型名来自 #568 的运行记录（轮询体本身不带 ai_model）。该轮询也没有 geometry_resolution，fake 对没给几何的请求沿用模板（#497），这里一致是因为这份样本就是模板，见 meshy-openapi-v1/resolution-echo-unsampled。wire coverage 仍按请求体的 model 字段判定，看不到 Meshy 的 ai_model，#575 未修。
 
-#### `meshy-openapi-v1/real-round-568` · response-shape · gap
+#### `meshy-openapi-v1/t25-image-to-3d-create` · request-validation · constructed
 
-- 端点：`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /retexture/{id}`、`POST /retexture`
-- 行为：2026-11-24 的 Meshy 15 功能真实一轮（#568）发现分辨率键的回显应按请求（2k 不回显、4k/8k 回显 texture_resolution 与 hd_texture），并确认了 15 个功能的价格；主线 fake 仍按模板回显。
-- 计划：#569 合并后把分辨率回显、t2.5 与多图、retexture 的样本和价格登记为 real，并引用新样本路径。
-- Issue：#568、#569
+- 端点：`POST /image-to-3d`
+- 行为：ai_model 为 meshy-t2.5 的图生 3D 创建请求被受理，按 meshy-7.1 样本的创建信封答复。
+- 依据：smoke-l5-meshy-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制 462 条，只入库最小集）（#568，2026-11-24）
+- 依据：https://docs.meshy.ai/en/api/image-to-3d（Image to 3D）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：#568 的最小样本没有保留 t2.5 图生 3D 的创建交换
+- 纠正 wire coverage：单元 `meshy.v2|image-to-3d|POST /openapi/v1/image-to-3d` 下的 `meshy/meshy-t2.5/image-to-3d`。矩阵只比较请求体的 model 字段，Meshy 用 ai_model，所以 meshy-t2.5 继承了 meshy-7.1 样本的 real；入库样本里仍没有 ai_model 为 meshy-t2.5 的图生 3D 创建请求（#575）。
+
+#### `meshy-openapi-v1/resolution-echo` · response-shape · real
+
+- 端点：`GET /multi-image-to-3d/{id}`、`GET /retexture/{id}`、`POST /retexture`
+- 行为：任务对象按请求回显分辨率键：8k 贴图回显 texture_resolution 并置 hd_texture，2k 几何回显 geometry_resolution 并置 ultra_mode（多图）；2k 贴图（retexture）不回显 texture_resolution 与 hd_texture（core 的 shapeResolution）。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `meshy-openapi-v1/resolution-echo-unsampled` · response-shape · constructed
+
+- 端点：`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /retexture/{id}`
+- 行为：4k 贴图同样回显 texture_resolution 并置 hd_texture；请求没给几何时仍按最新模板回显（#497）。
+- 依据：https://docs.meshy.ai/en/api/image-to-3d（Image to 3D：texture_resolution 别名）
+- 依据：smoke-l5-meshy-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制 462 条，只入库最小集）（#568，2026-11-24）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：4k 贴图从未真实请求过，按别名文档构造；未给几何时的默认回显只来自旧模板，#568 没有按此规则核对
+
+#### `meshy-openapi-v1/pricing-568` · pricing · real
+
+- 端点：`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /retexture/{id}`
+- 行为：2026-11-24 的真实价格：t2.5 图生 3D（2k 贴图）15、7.1 多图（2k 几何、8k 贴图）40（8k 被受理）、retexture（meshy-7、2k、PBR）10；价格从第一次轮询起就带上。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `meshy-openapi-v1/pricing-568-unrecorded` · pricing · constructed
+
+- 端点：`GET /text-to-image/{id}`、`GET /image-to-image/{id}`、`GET /remesh/{id}`、`GET /convert/{id}`、`GET /rigging/{id}`、`GET /animations/{id}`、`GET /uv-unwrap/{id}`、`GET /resize/{id}`、`GET /print/analyze/{id}`、`GET /print/multi-color/{id}`、`GET /text-to-motion/{id}`
+- 行为：#568 一轮里其余功能的价格与 fake 一致：nano-banana-2 带 pose_mode 的文生图与图生图 6、remesh 5、convert 1、rigging 5、动画 3、uv-unwrap 5、resize 1、print analyze 0、multi-color 10、prime text-to-motion 10。
+- 依据：smoke-l5-meshy-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制 462 条，只入库最小集）（#568，2026-11-24）
+- 依据：https://docs.meshy.ai/en/api/pricing（Pricing）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：这些价格只在运行记录与报告里，最小样本没有保留对应的轮询，登记表不能按 real 计
+
+#### `meshy-openapi-v1/asset-file-names` · artifact-shape · constructed
+
+- 端点：`GET /assets/{task_id}/{name}`
+- 行为：fake 按字段路径给产物命名（model.glb、texture_0.png 等）；真实文件名不同（如 Character_output.glb、Animation_Running_withSkin.glb、clip.fbx）。
+- 依据：smoke-l5-meshy-endpoints.py 经 Plinth 的真实一轮运行记录（运行时录制 462 条，只入库最小集）（#568，2026-11-24）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：真实文件名只在运行记录里，样本的 URL 已脱敏；Adapter 按字段取 URL，不依赖文件名，所以 fake 未改
 
 ### `meshy/openapi-v2`
 
@@ -842,20 +950,24 @@
 - 核对日期：2026-10-29
 - 没有真实样本的原因：v2 对齐只请求了 glb；产物主机不在 API 样本里
 
-#### `meshy-openapi-v2/t25-text-to-3d` · response-shape · gap
+#### `meshy-openapi-v2/t25-text-to-3d` · response-shape · real
 
 - 端点：`POST /text-to-3d`、`GET /text-to-3d/{id}`
-- 行为：meshy-t2.5 文生 3D 的 preview 与 refine 按 meshy-7.1 样本的结构给出。
-- 计划：#569 合并后，用 meshy-openapi-v2-real-round-2026-11-24 样本把本条改为 real 并补样本路径与日期。
-- Issue：#568、#569
-- 纠正 wire coverage：单元 `meshy.v2|text-to-3d|POST /openapi/v2/text-to-3d` 下的 `meshy/meshy-t2.5/text-to-3d`。该单元的 real 来自 meshy-7.1 的样本；meshy-t2.5 共用端点，在 #569 之前没有入库样本请求过它。
+- 行为：meshy-t2.5 文生 3D：preview（target_polycount 15000）与 refine（2k 贴图、PBR）的创建对象（202，PENDING，已带价格）与 IN_PROGRESS → SUCCEEDED 轮询，input 回显请求（preview 带 ai_model meshy-t2.5）。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 备注：wire coverage 仍按请求体的 model 字段判定，Meshy 的 ai_model 不被区分，#575 未修；矩阵里 meshy-t2.5/text-to-3d 的证据并不来自这份样本的模型判定。
 
-#### `meshy-openapi-v2/real-round-568` · response-shape · gap
+#### `meshy-openapi-v2/resolution-echo` · response-shape · real
 
 - 端点：`POST /text-to-3d`、`GET /text-to-3d/{id}`
-- 行为：2026-11-24 真实一轮（#568）的 t2.5 preview/refine 结构、价格与分辨率回显规则尚未合入主线 fake。
-- 计划：#569 合并后登记为 real 并引用 meshy-openapi-v2-real-round-2026-11-24。
-- Issue：#568、#569
+- 行为：refine 请求 2k 贴图时，任务对象顶层不回显 texture_resolution 与 hd_texture（input 里仍有 texture_resolution 2k）。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `meshy-openapi-v2/pricing-568` · pricing · real
+
+- 端点：`POST /text-to-3d`、`GET /text-to-3d/{id}`
+- 行为：2026-11-24 的真实价格：t2.5 preview（15000 面）5、其 2k PBR refine 10；价格在创建应答与每次轮询里都有。
+- 样本：`internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
 
 ### `hyper3d/api-v2`
 
@@ -871,7 +983,7 @@
 - 行为：usage_page（从 1 起，每页至多 20 条，新的在前）返回 usage 列表；非法页码答 400 信封（#537）。
 - 依据：https://docs.hyper3d.ai/en/api-specification/check-balance（Check balance）
 - 核对日期：2026-11-24
-- 没有真实样本的原因：带 usage_page 的真实请求待真实一轮
+- 没有真实样本的原因：带 usage_page 的真实请求待真实一轮；#568 的一轮没有请求 usage_page
 
 #### `hyper3d-api-v2/status-states` · state-machine · real
 
@@ -915,7 +1027,7 @@
 - 依据：https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5（Gen-2.5）
 - 核对日期：2026-11-16
 - 没有真实样本的原因：文件主机不在 API 样本里；PBR 包的面数与贴图边长按页面表与少数观测构造
-- 备注：真实文件的体量与形状不复现：200 万面的展示请求交付的是 121,032 三角面上限的夹具，贴图是平涂。
+- 备注：真实文件的体量与形状不复现：200 万面的展示请求交付的是 121,032 三角面上限的夹具，贴图是平涂。Quad 面换算三角面的系数 fake 与 Catalog 仍用 2.18（2026-11-13）；#568 的第二个样本 10000 面得 21002 三角面（约 2.10），只有两个观测点，系数未改，属构造。
 
 #### `hyper3d-api-v2/rodin-shape` · response-shape · real
 
@@ -994,6 +1106,7 @@
 - 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture）
 - 核对日期：2026-11-24
 - 没有真实样本的原因：单数 image 是否仍被容忍待真实一轮
+- 备注：#568 经 Plinth 的 Texture 请求（Catalog 用单数 image）被受理并完成，说明 2026-11-24 单数字段仍被容忍；但创建请求没有入库，fake 两个名字都收的规则与 images 的 1–5 张上限都没有真实样本，保持 constructed。
 
 #### `hyper3d-api-v2/texture-pricing` · pricing · constructed
 
@@ -1012,12 +1125,30 @@
 - 核对日期：2026-11-08
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
-#### `hyper3d-api-v2/real-round-568` · artifact-shape · gap
+#### `hyper3d-api-v2/real-round-568` · artifact-shape · real
 
-- 端点：`POST /rodin_texture_only`、`GET /files/{task_uuid}/{name}`
-- 行为：2026-11-24 的 Rodin 真实一轮（#568）显示 Texture（extreme-high、High、hd_texture）交付 base_high_pbr.glb、贴图边长 12288；主线 fake 的 Texture 包仍是 Basic 命名的夹具。
-- 计划：#569 合并后按分辨率命名 Texture 包并按表单给贴图边长，引用 evidence-568-processing-high 样本；Bang 子作业数等未回灌项另记。
-- Issue：#568、#569
+- 端点：`POST /status`、`POST /download`
+- 行为：Catalog 的处理表单（extreme-high、High、hd_texture）：子作业全部 Done 后下载列表给出一个 PBR 包，交付路径为 pack/glb/base_high_pbr.glb、model/gltf-binary；fake 的 Texture 包随之按分辨率命名（Basic 仍是 base_basic_pbr.glb）。
+- 样本：`internal/testutil/fakeupstream/hyper3d/api-v2/testdata/evidence-568-processing-high.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 备注：文件名在样本的下载请求路径里（下载列表的 name 已脱敏）；该样本是对照证据，不进 fake 模板。
+
+#### `hyper3d-api-v2/texture-12288` · artifact-shape · constructed
+
+- 端点：`GET /files/{task_uuid}/{name}`
+- 行为：TextureModel 按表单给贴图边长：extreme-high + High 为 12288；High 视同 HighPack、hd_texture 视同 uhd_texture（fixture 几何）。
+- 依据：smoke-l5-hyper3d.py 经 Plinth 的真实一轮运行记录（5 个请求，只入库处理步骤的对照证据）（#568，2026-11-24）
+- 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：12288 来自 #568 的私有媒体证据，录制器不保存媒体字节；其他组合的边长按页面表推定
+
+#### `hyper3d-api-v2/subjob-counts` · state-machine · constructed
+
+- 端点：`POST /status`
+- 行为：fake 的 Bang 任务固定 4 个子作业、Texture 3 个。
+- 依据：smoke-l5-hyper3d.py 经 Plinth 的真实一轮运行记录（5 个请求，只入库处理步骤的对照证据）（#568，2026-11-24）
+- 核对日期：2026-11-24
+- 没有真实样本的原因：真实子作业数只有 3 个观测点（High PBR 来源任务的 Bang 6、上传模型带图的 Bang 8、Texture 4），不足以定规则；Adapter 只等全部 Done，不依赖数量
+- 备注：evidence-568-processing-high 里能看到 6 个与 4 个子作业的状态；fake 未改。
 
 ### `openai/images-v1`
 
