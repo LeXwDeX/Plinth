@@ -1158,12 +1158,12 @@ func consentSnapshot(options chat.TurnOptions) (json.RawMessage, error) {
 // 既防止同意状态被当作生成参数合并进请求，也保证批准快照的参数
 // 哈希在"同意写入前后"保持一致（AGT-05 回归）。
 var consentStateKeys = map[string]struct{}{
-	ConsentPendingKey:           {},
-	ConsentDecisionKey:          {},
-	ConsentApprovedKey:          {},
-	ConsentSnapshotKey:          {},
-	agentparams.ConsentClaimKey: {},
-	agentparams.AgentTaskIDKey:  {},
+	ConsentPendingKey:                {},
+	ConsentDecisionKey:               {},
+	ConsentApprovedKey:               {},
+	ConsentSnapshotKey:               {},
+	agentparams.ConsentClaimKey:      {},
+	agentparams.LegacyAgentTaskIDKey: {},
 }
 
 // explicitParameters retains provenance without changing Options or its hash.

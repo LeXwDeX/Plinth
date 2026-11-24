@@ -17,7 +17,11 @@ const (
 	ConsentSnapshotKey  = "consent_snapshot"
 	ConsentClaimKey     = "consent_claim"
 	ConsentRequestIDKey = "consent_request_id"
-	AgentTaskIDKey      = "task_id"
+	// LegacyAgentTaskIDKey is the task id the retired PUT /api/v1/agent/bind
+	// stored per session (#511). Nothing writes or reads it any more; it stays a
+	// private key so rows an older server stored never reach a parameter
+	// projection or a generation request.
+	LegacyAgentTaskIDKey = "task_id"
 	// ImageCountKey holds the 2D image count the person set for this session
 	// (#486). It is one value per session, not one per Offering: the count is
 	// the person's own expectation, and Offerings name the parameter they price
@@ -30,7 +34,7 @@ const (
 func isPrivateAgentStateKey(key string) bool {
 	switch key {
 	case ConsentPendingKey, ConsentDecisionKey, ConsentApprovedKey, ConsentRequestIDKey,
-		ConsentSnapshotKey, ConsentClaimKey, AgentTaskIDKey, ImageCountKey:
+		ConsentSnapshotKey, ConsentClaimKey, LegacyAgentTaskIDKey, ImageCountKey:
 		return true
 	default:
 		return false

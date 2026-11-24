@@ -254,7 +254,6 @@ export function ChatColumn() {
       createAgentHarnessClient({
         routes: {
           params: schema.runtime.http.routes.agent_params,
-          bind: schema.runtime.http.routes.agent_bind,
           consent: schema.runtime.http.routes.agent_consent,
         },
       }),
@@ -802,7 +801,6 @@ export function ChatColumn() {
             progressMaximum:
               schema.runtime.frontend.percentage_multiplier,
           });
-          harness.bindTask(sessionId, event.taskID).catch(() => {});
           { const step = paidStepFromTaskRegistered(event);
             if (step) addStreamPaidStep(sessionId, step);
           }
@@ -847,7 +845,6 @@ export function ChatColumn() {
       updateSessionTitle,
       registerTask,
       applyTaskLive,
-      harness,
       refreshApproval,
       schema,
     ],

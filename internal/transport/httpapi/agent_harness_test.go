@@ -71,42 +71,6 @@ func TestConsentHTTPRejectsMissingAndStaleRequestIdentity(t *testing.T) {
 	}
 }
 
-func TestBindingNewVersionPreservesSessionHarness(t *testing.T) {
-	t.Parallel()
-	server := &Server{
-		agentParams: agentparams.NewStore(),
-		agentState:  agentparams.NewStore(),
-		ownsAgentSession: func(context.Context, string, string) bool {
-			return true
-		},
-	}
-	owner := generation.OwnerID("owner")
-	scope := agentparams.ScopeKey(string(owner), "session")
-	bind := func(task string) {
-		t.Helper()
-		body, err := json.Marshal(map[string]string{"session": "session", "task": task})
-		if err != nil {
-			t.Fatal(err)
-		}
-		request := httptest.NewRequest(http.MethodPut, "/api/v1/agent/bind", strings.NewReader(string(body)))
-		response := httptest.NewRecorder()
-		server.agentBindPut(response, request, owner)
-		if response.Code != http.StatusOK {
-			t.Fatalf("bind %q status = %d body=%s", task, response.Code, response.Body.String())
-		}
-	}
-	bind("first")
-	server.agentParams.SetUser(scope, map[string]json.RawMessage{"size": json.RawMessage(`"large"`)})
-	bind("first")
-	if got := string(server.agentParams.Get(scope)["size"]); got != `"large"` {
-		t.Fatalf("same task lost harness size: %s", got)
-	}
-	bind("second")
-	if got := string(server.agentParams.Get(scope)["size"]); got != `"large"` {
-		t.Fatalf("new version lost session harness size: %s", got)
-	}
-}
-
 func TestAgentParamsPutCannotForgeOrEraseConsent(t *testing.T) {
 	t.Parallel()
 	repository, err := OpenMigratedTestRepository(filepath.Join(t.TempDir(), "agent.db"))

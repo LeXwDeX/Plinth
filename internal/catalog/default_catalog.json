@@ -2343,7 +2343,6 @@
           "model_formats_complete": "/api/v1/tasks/{taskID}/formats/complete",
           "model_archive": "/api/v1/tasks/{taskID}/archive",
           "agent_params": "/api/v1/agent/params",
-          "agent_bind": "/api/v1/agent/bind",
           "agent_consent": "/api/v1/agent/consent",
           "account_usage": "/api/v1/account/usage",
           "account_resources": "/api/v1/account/resources",

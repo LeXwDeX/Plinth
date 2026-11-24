@@ -1,17 +1,17 @@
 /**
- * AGENTS 模式 harness 端点浏览器客户端（P0 契约）。
+ * AGENTS 模式 harness 端点浏览器客户端。
  *
- * 后端端点由 internal/transport/httpapi/agent_harness.go 固定注册：
+ * 路由取 Product Schema `runtime.http.routes`，处理器在 internal/transport/httpapi/agent_harness.go：
  * - GET/PUT /api/v1/agent/params?scope=<session>  权威请求参数（agent set_params 与用户编辑共写）
- * - PUT     /api/v1/agent/bind                    会话绑定任务（按任务隔离）
  * - GET/PUT /api/v1/agent/consent?scope=<session> 待批准项读取/批准
+ *
+ * #511：原 `PUT /api/v1/agent/bind` 只把任务 ID 写进会话状态、没有任何读取方，已与其调用一并删除。
  *
  * 错误 detail 一律为 error.* 词汇键，由 Product Schema content.messages 映射文案。
  */
 
 export interface AgentHarnessRoutes {
   params: string;
-  bind: string;
   consent: string;
 }
 
@@ -36,7 +36,6 @@ export function parseAgentParameterProjection(payload: Record<string, unknown>):
 export interface AgentConsentProjection {
   pending: Record<string, unknown> | null;
   approved: boolean;
-  taskId: string | null;
   requestId: string | null;
 }
 
@@ -58,11 +57,6 @@ export interface AgentHarnessClient {
     scope: string,
     requestId: string,
     approved: boolean,
-    signal?: AbortSignal,
-  ): Promise<void>;
-  bindTask(
-    session: string,
-    task: string,
     signal?: AbortSignal,
   ): Promise<void>;
 }
@@ -157,15 +151,6 @@ export function createAgentHarnessClient(
       });
       await unwrap(response);
     },
-    async bindTask(session, task, signal) {
-      const response = await fetcher(routes.bind, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session, task }),
-        signal,
-      });
-      await unwrap(response);
-    },
   };
 }
 
@@ -193,12 +178,11 @@ export function projectConsentState(
   state: Record<string, unknown> | null,
 ): AgentConsentProjection {
   if (!isRecord(state)) {
-    return { pending: null, approved: false, taskId: null, requestId: null };
+    return { pending: null, approved: false, requestId: null };
   }
   return {
     pending: isRecord(state.consent_pending) ? state.consent_pending : null,
     approved: state.consent_approved === true,
-    taskId: typeof state.task_id === 'string' ? state.task_id : null,
     requestId: typeof state.consent_request_id === 'string' ? state.consent_request_id : null,
   };
 }
