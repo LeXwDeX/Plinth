@@ -20,14 +20,14 @@
 |---|---|---|---|---|---|
 | `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
 | `openai/v1` | 4 | 9 | 1 | 14 | 2026-11-23 |
-| `meshy/openapi-v1` | 22 | 21 | 0 | 43 | 2026-11-24 |
-| `meshy/openapi-v2` | 7 | 4 | 0 | 11 | 2026-11-24 |
+| `meshy/openapi-v1` | 22 | 22 | 3 | 47 | 2026-11-24 |
+| `meshy/openapi-v2` | 7 | 5 | 0 | 12 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
 | `openai/images-v1` | 3 | 4 | 1 | 8 | 2026-11-09 |
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 78 | 86 | 3 | 167 | 2026-11-24 |
+| 合计 | 78 | 88 | 6 | 172 | 2026-11-24 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -602,6 +602,7 @@
 - 端点：`GET /balance`、`GET /image-to-3d/{id}`、`POST /image-to-3d`、`POST /remesh`
 - 行为：错误体为 {message}：缺 Key 401、非法 id 400、未知任务 404、非法创建请求 400。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-text-to-image.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 备注：2026-11-25 文档复核：状态码与 {message} 信封一致。
 
 #### `meshy-openapi-v1/assets-route` · artifact-shape · constructed
 
@@ -723,9 +724,10 @@
 #### `meshy-openapi-v1/delete-running-409` · error-code-and-text · constructed
 
 - 端点：`DELETE /text-to-image/{id}`、`DELETE /image-to-image/{id}`、`DELETE /image-to-3d/{id}`、`DELETE /multi-image-to-3d/{id}`、`DELETE /remesh/{id}`、`DELETE /convert/{id}`、`DELETE /retexture/{id}`、`DELETE /rigging/{id}`、`DELETE /animations/{id}`、`DELETE /uv-unwrap/{id}`、`DELETE /resize/{id}`、`DELETE /print/analyze/{id}`、`DELETE /print/multi-color/{id}`、`DELETE /text-to-motion/{id}`
-- 行为：删除运行中任务的 409。
+- 行为：删除运行中（IN_PROGRESS）任务答 409，文案取 Text to 3D 页 DELETE 的原文 "Task is IN_PROGRESS and cannot be deleted."（#579）。
 - 依据：https://docs.meshy.ai/en/api/errors（Errors）
-- 核对日期：2026-11-08
+- 依据：https://docs.meshy.ai/en/api/text-to-3d（Delete：409）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `meshy-openapi-v1/poll-pending-canceled` · state-machine · constructed
@@ -733,22 +735,25 @@
 - 端点：`GET /text-to-image/{id}`、`GET /image-to-image/{id}`、`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /remesh/{id}`、`GET /convert/{id}`、`GET /retexture/{id}`、`GET /rigging/{id}`、`GET /animations/{id}`、`GET /uv-unwrap/{id}`、`GET /resize/{id}`、`GET /print/analyze/{id}`、`GET /print/multi-color/{id}`、`GET /text-to-motion/{id}`
 - 行为：PENDING（无 started/finished 时间戳，排队时带 preceding_tasks）与 task-canceled 场景的 CANCELED 轮询体。
 - 依据：https://docs.meshy.ai/en/api/image-to-3d（各端点的任务对象字段说明）
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED（rigging 另有 FAILED）
+- 备注：2026-11-25 核对：PENDING 下 started_at/finished_at 的形状文档前后不一（v1 写缺省、v2 写 0、v2 创建对象为 null），只有 IN_PROGRESS/SUCCEEDED 的真实样本，文档无法确认，保持不动。
 
 #### `meshy-openapi-v1/rigging-failed-oversize` · state-machine · real
 
 - 端点：`POST /rigging`、`GET /rigging/{id}`
 - 行为：超过 32 万面的输入在提交时被受理（202，文档写 400），任务运行到约 10% 后以 FAILED、task_error.type=invalid_input 结束。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-rigging.candidate.json`（2026-10-29，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 备注：2026-11-25 文档写 38 万三角形以上提交即答 400，与 2026-10-29 实测（受理后 FAILED）不同，保留实测。
 
 #### `meshy-openapi-v1/poll-failed-other-kinds` · state-machine · constructed
 
 - 端点：`GET /text-to-image/{id}`、`GET /image-to-image/{id}`、`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /remesh/{id}`、`GET /convert/{id}`、`GET /retexture/{id}`、`GET /rigging/{id}`、`GET /animations/{id}`、`GET /uv-unwrap/{id}`、`GET /resize/{id}`、`GET /print/analyze/{id}`、`GET /print/multi-color/{id}`、`GET /text-to-motion/{id}`
 - 行为：rigging 之外各族的 FAILED 轮询体（task-failed 场景），由进行中结构加终态时间戳与 task_error 构造。
 - 依据：https://docs.meshy.ai/en/api/errors（Errors）
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：只有 rigging 观测到过 FAILED
+- 备注：2026-11-25 复核 task_error 类型与状态集与文档一致。
 
 #### `meshy-openapi-v1/image-models-request` · request-validation · constructed
 
@@ -756,18 +761,20 @@
 - 行为：ai_model 必填且取十个之一，aspect_ratio 七值且 3:2、2:3 只给 GPT Image 模型，generate_multi_view 与 aspect_ratio 冲突；图生图接受 1–5 张 reference_image_urls 或成功任务的 input_task_id（任务优先）（#542）。
 - 依据：https://docs.meshy.ai/en/api/text-to-image（Text to image）
 - 依据：https://docs.meshy.ai/en/api/image-to-image（Image to image）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：拒绝从未向真实 API 请求过，拒绝文案为构造
+- 备注：2026-11-25 复核与 Text to image、Image to image 页一致。
 
 #### `meshy-openapi-v1/image-to-3d-request` · request-validation · constructed
 
 - 端点：`POST /image-to-3d`、`POST /multi-image-to-3d`
-- 行为：geometry_resolution 2k/4k 与模型的组合、texture_model、4k/8k 贴图与 meshy-6-lite/meshy-n1（定价表 NS 格读作 400）、meshy-n1 不配 PBR；多图 1–4 张、不收 4k、texture_image_urls 的互斥（core.ImageTo3DRequestError，#542）。
+- 行为：geometry_resolution 2k/4k 与模型的组合、texture_model、4k/8k 贴图与 meshy-6-lite/meshy-n1（定价表 NS 格读作 400）、meshy-n1 不配 PBR；多图 1–4 张、不收 4k、texture_image_urls 的互斥（core.ImageTo3DRequestError，#542）。2026-11-25 起两图共用 core.textureOptionError（#579）：image_enhancement 不配 meshy-6-lite（单图另不配 smart-topology），texture_model meshy-n1 不配 texture_prompt、remove_lighting true 与重拓扑后的 quad，remove_lighting 不配 meshy-6-lite 默认纹理模型（单图另不配 smart-topology）；单图 surface_mode 只收 organic、hard。
 - 依据：https://docs.meshy.ai/en/api/image-to-3d（Image to 3D）
 - 依据：https://docs.meshy.ai/en/api/multi-image-to-3d（Multi-image to 3D）
 - 依据：https://docs.meshy.ai/en/api/pricing（Pricing）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：组合拒绝没有真实请求过
+- 备注：文档另写单图 enable_pbr true 配 should_texture false 答 400，fake 未实现：Catalog 在 should_texture 为 false 时仍发 enable_pbr 默认值，校验会拒绝平台实际可发的请求，见 gap 条目 image-to-3d-pbr-without-texture。
 
 #### `meshy-openapi-v1/image-to-3d-rich-success` · response-shape · constructed
 
@@ -782,16 +789,18 @@
 - 端点：`POST /retexture`
 - 行为：text_style_prompt、image_style_url、multiview_image_urls 三选一，multiview 互斥且须显式 meshy-7 或 meshy-n1，风格文本不超过 800 字符；页面 ai_model 枚举外的值（如 meshy-7.1）答 400（core.RetextureRequestError，#542）。
 - 依据：https://docs.meshy.ai/en/api/retexture（Retexture）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：页面没写枚举外取值的结果，待零费用探测定稿
+- 备注：2026-11-25 复核与 Retexture 页一致。
 
 #### `meshy-openapi-v1/rigging-request` · request-validation · constructed
 
 - 端点：`POST /rigging`
-- 行为：skeleton_template（九种）、include_fingers（不与 texture_image_url 同用）、height_meters（非负）按官方页校验（riggingRequestError）；rig-non-humanoid 场景答文档的 422。
+- 行为：skeleton_template（九种）、include_fingers（不与 texture_image_url 同用）、height_meters（非负）按官方页校验（riggingRequestError）；rig-non-humanoid 场景答文档的 422。2026-11-25 补（#579）：animation_type 只收 biped、quadruped；quadruped 不收 skeleton_template 与 include_fingers true；texture_image_url 非 PNG（data URI 的媒体类型或 URL 扩展名，无扩展名放行）答 400。
 - 依据：https://docs.meshy.ai/en/api/rigging（Rigging）
 - 依据：https://docs.meshy.ai/en/api/rigging-and-animation（Rigging and animation）
-- 核对日期：2026-11-12
+- 依据：https://docs.meshy.ai/en/api/rigging（Quadruped / Failure modes（2026-11-25））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：取值未真实请求过
 
 #### `meshy-openapi-v1/rigging-quad-fingers` · error-code-and-text · constructed
@@ -805,18 +814,19 @@
 #### `meshy-openapi-v1/motion-request` · request-validation · constructed
 
 - 端点：`POST /animations`、`POST /text-to-motion`
-- 行为：动画三种动作来源恰好一个（action_ids 至多 10 个、不重复）；text-to-motion 的 prompt 至多 400 字符、mode 为 prime 或 swift、duration 2–10 秒半秒步进（#542）。
+- 行为：动画三种动作来源恰好一个（action_ids 至多 10 个、不重复）；text-to-motion 的 prompt 至多 400 字符、mode 为 prime 或 swift、duration 2–10 秒半秒步进（#542）。2026-11-25 补（#579）：post_process.fps 只收 24、25、30、60（非 change_fps 时忽略、不拒绝）；motion_task_id 配 quadruped 骨骼（来源 rigging 请求的 animation_type）答 400。
 - 依据：https://docs.meshy.ai/en/api/animation（Animation）
 - 依据：https://docs.meshy.ai/en/api/text-to-motion（Text to motion）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：拒绝从未向真实 API 请求过
+- 备注：action_id 的 rig_type 与骨骼不符答 400 未建模，见 gap 条目 animation-rig-type。
 
 #### `meshy-openapi-v1/resize-request` · request-validation · constructed
 
 - 端点：`POST /resize`
-- 行为：resize_height、resize_longest_side、auto_size 恰好一个，否则答文档的 400（resizeRequestError）。
+- 行为：resize_height、resize_longest_side、auto_size 恰好一个，否则答文档的 400（resizeRequestError）。resize_height、resize_longest_side 须为大于 0 的数，负值与 0 答 400（#579）。
 - 依据：https://docs.meshy.ai/en/api/resize（Resize）
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `meshy-openapi-v1/pricing-observed` · pricing · real
@@ -825,31 +835,37 @@
 - 行为：2026-11-20 至 23 的真实价格作为断言：nano-banana-pro 9、image-to-3d 4k 几何 2k 贴图 35、多图 2k 几何 2k 贴图 35、retexture 8k 15、remesh 5、rigging 5、动画 3、resize 与 convert 1；价格从第一次轮询起就带上。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-processing-2026-11-20.candidate.json`（2026-11-20，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v1/testdata/meshy-openapi-v1-multi-image-to-3d-2026-11-23.candidate.json`（2026-11-23，captured，app_revision `unknown`，catalog_revision `unknown`）
+- 备注：2026-11-25 文档复核：价格与 Pricing 页一致。
 
 #### `meshy-openapi-v1/pricing-table` · pricing · constructed
 
 - 端点：`GET /text-to-image/{id}`、`GET /image-to-image/{id}`、`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /remesh/{id}`、`GET /convert/{id}`、`GET /retexture/{id}`、`GET /rigging/{id}`、`GET /animations/{id}`、`GET /uv-unwrap/{id}`、`GET /resize/{id}`、`GET /print/analyze/{id}`、`GET /print/multi-color/{id}`、`GET /text-to-motion/{id}`
 - 行为：其余参数组合的 consumed_credits 按官方 Pricing 页随请求计算（core.Credits），失败任务为 0（#542）。
 - 依据：https://docs.meshy.ai/en/api/pricing（Pricing）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：只有上一条所列组合被真实扣费过
+- 备注：2026-11-25 复核积分表与 Pricing 页一致。
 
 #### `meshy-openapi-v1/fault-scenarios` · error-code-and-text · constructed
 
 - 端点：`POST /text-to-image`、`POST /image-to-image`、`POST /image-to-3d`、`POST /multi-image-to-3d`、`POST /remesh`、`POST /convert`、`POST /retexture`、`POST /rigging`、`POST /animations`、`POST /uv-unwrap`、`POST /resize`、`POST /print/analyze`、`POST /print/multi-color`、`POST /text-to-motion`
-- 行为：403 forbidden（{message}）、余额不足（非 Key 额度）、429、5xx、超时与丢响应；402 API key credit limit reached 沿用 #73 的观测。
+- 行为：403 forbidden（{message}）、余额不足（非 Key 额度）、429、5xx、超时与丢响应；402 API key credit limit reached 沿用 #73 的观测。rigging 与 animations 的 403 用页面文案 "This model type does not support this operation"（#579），其余路由沿用 Errors 页的通用文案。
 - 依据：https://docs.meshy.ai/en/api/errors（Errors）
 - 依据：#73 的 402 Key 额度观测（未入库）
-- 核对日期：2026-11-08
+- 依据：https://docs.meshy.ai/en/api/rigging（403）
+- 依据：https://docs.meshy.ai/en/api/animation（403）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
+- 备注：2026-11-25 核对：Errors 页没有给 402 与 429 的示例文案（429 文案的句号沿用 Rate limits 页），文档无法确认，保持不动。
 
 #### `meshy-openapi-v1/rate-limit` · rate-limit-concurrency · constructed
 
 - 端点：`POST /text-to-image`、`POST /image-to-image`、`POST /image-to-3d`、`POST /multi-image-to-3d`、`POST /remesh`、`POST /convert`、`POST /retexture`、`POST /rigging`、`POST /animations`、`POST /uv-unwrap`、`POST /resize`、`POST /print/analyze`、`POST /print/multi-color`、`POST /text-to-motion`
 - 行为：rate-limit 场景答 429 与 Retry-After；非终态轮询带 Retry-After: 5。
 - 依据：https://docs.meshy.ai/en/api/rate-limits（Rate limits）
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：429 没有在官方 API 上触发；Retry-After: 5 在轮询中已观测，但未单独断言为样本
+- 备注：2026-11-25 核对：429 头与 Rate limits 页一致；并发 429 只建模 NoMorePendingTasks，NoMoreConcurrentTasks 未建模。
 
 #### `meshy-openapi-v1/partial-formats` · other · constructed
 
@@ -864,8 +880,9 @@
 - 端点：`POST /text-to-image`、`POST /image-to-image`、`POST /image-to-3d`、`POST /multi-image-to-3d`、`POST /remesh`、`POST /convert`、`POST /retexture`、`POST /rigging`、`POST /animations`、`POST /uv-unwrap`、`POST /resize`、`POST /print/analyze`、`POST /print/multi-color`、`POST /text-to-motion`
 - 行为：按账号登记的 webhook 收到全部 API 任务的状态更新，投递体为该任务 GET 端点的任务对象（webhook.go，#542）。
 - 依据：https://docs.meshy.ai/en/api/webhooks（Webhooks）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实投递需要公网 https 地址并会影响账号下其他应用，未做真实验证
+- 备注：2026-11-25 核对：文档要求 webhook 地址为 https，fake 放行 http（webhook.go 自述，供本地测试）；重试间隔文档未给，文档无法确认。
 
 #### `meshy-openapi-v1/t25-image-to-3d` · response-shape · real
 
@@ -922,6 +939,39 @@
 - 核对日期：2026-11-24
 - 没有真实样本的原因：真实文件名只在运行记录里，样本的 URL 已脱敏；Adapter 按字段取 URL，不依赖文件名，所以 fake 未改
 
+#### `meshy-openapi-v1/remesh-request` · request-validation · constructed
+
+- 端点：`POST /remesh`
+- 行为：target_formats 取七种（含 blend），topology 只收 quad、triangle，target_polycount 100–300000，resize_height、resize_longest_side、auto_size true 至多一个，convert_format_only true 时 target_formats 为空或 null 答 400（core.RemeshRequestError，#579）。
+- 依据：https://docs.meshy.ai/en/api/remesh（Remesh：参数与 400 failure modes）
+- 核对日期：2026-11-25
+- 没有真实样本的原因：拒绝从未向真实 API 请求过，拒绝文案为构造
+- 备注：auto_size 只在为 true 时计入互斥（页面没说显式 false 如何处理）；真实 remesh 样本（300000 quad、5800/10000 triangle、六种格式）都被放行。
+
+#### `meshy-openapi-v1/list-and-stream` · other · gap
+
+- 端点：`GET /text-to-image/{id}`、`GET /image-to-image/{id}`、`GET /image-to-3d/{id}`、`GET /multi-image-to-3d/{id}`、`GET /remesh/{id}`、`GET /convert/{id}`、`GET /retexture/{id}`、`GET /rigging/{id}`、`GET /animations/{id}`、`GET /uv-unwrap/{id}`、`GET /resize/{id}`、`GET /print/analyze/{id}`、`GET /print/multi-color/{id}`、`GET /text-to-motion/{id}`
+- 行为：官方各任务族另有列表端点（GET /<族>）与 SSE 流端点（GET /<族>/{id}/stream），fake 只实现单任务轮询（本条挂在轮询端点上）。
+- 核对日期：2026-11-25
+- 计划：Adapter 只用单任务轮询与 webhook，暂不实现；Adapter 改用列表或流时再按文档补 fake。
+- Issue：#579
+
+#### `meshy-openapi-v1/image-to-3d-pbr-without-texture` · request-validation · gap
+
+- 端点：`POST /image-to-3d`
+- 行为：Image to 3D 页写 enable_pbr true 配 should_texture false 答 400，fake 放行。
+- 核对日期：2026-11-25
+- 计划：Catalog 的图生 3D Offering 先在 should_texture 为 false 时省略 enable_pbr（现在会发默认值 true），再在 fake 补这条 400 与回归测试。
+- Issue：#579
+
+#### `meshy-openapi-v1/animation-rig-type` · request-validation · gap
+
+- 端点：`POST /animations`
+- 行为：Animation 页写 action_id / action_ids 的 rig_type 与骨骼不符答 400，fake 不判断（没有动作库的 rig_type）。
+- 核对日期：2026-11-25
+- 计划：需要时把动作库的 rig_type 表放进 fake 再校验；Catalog 当前只给人形动作。
+- Issue：#579
+
 ### `meshy/openapi-v2`
 
 #### `meshy-openapi-v2/text-to-3d-shape` · response-shape · real
@@ -951,17 +1001,18 @@
 - 端点：`GET /text-to-3d/{id}`
 - 行为：PENDING（started_at/finished_at 为 0、排队时带 preceding_tasks）、FAILED（task_error 与 expires_at null）与 CANCELED 的轮询体。
 - 依据：https://docs.meshy.ai/en/api/text-to-3d（Text to 3D：任务对象）
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED
+- 备注：2026-11-25 核对：PENDING 时间戳形状同 v1 条目，文档自相矛盾，保持不动。
 
 #### `meshy-openapi-v2/text-to-3d-request` · request-validation · constructed
 
 - 端点：`POST /text-to-3d`
-- 行为：preview 需要不超过 800 字符的 prompt，refine 需要指向本账号已成功 preview 的 preview_task_id（否则 400），2k/4k 几何与模型的组合，模型、mode、格式枚举（#542）；refine 的任意已知模型名都接受。
+- 行为：preview 需要不超过 800 字符的 prompt，refine 需要指向本账号已成功 preview 的 preview_task_id（否则 400），2k/4k 几何与模型的组合，模型、mode、格式枚举（#542）；refine 的任意已知模型名都接受。refine 显式带 ai_model 时按页面答 400（#579）：4k/8k 贴图（或 hd_texture true）须 meshy-6、meshy-7、latest（meshy-7.1 按实测放行）；meshy-n1 不配 enable_pbr true、texture_prompt、remove_lighting true；meshy-6-lite 不配 remove_lighting。不带 ai_model 的 refine 不判断。
 - 依据：https://docs.meshy.ai/en/api/text-to-3d（Text to 3D）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：拒绝文案为构造，参数层面的拒绝没有真实请求过
-- 备注：refine 带 meshy-7.1 被接受是 2026-11-20 的真实观测。
+- 备注：refine 带 meshy-7.1 被接受是 2026-11-20 的真实观测。 2026-11-25 核对：ai_model 枚举不收紧，meshy-7.1 在 4k/8k 下的真实行为未知，fake 放行。
 
 #### `meshy-openapi-v2/pricing-observed` · pricing · real
 
@@ -969,14 +1020,16 @@
 - 行为：2026-11-20 与 22 的真实价格作为断言：7.1 preview 4k 几何 25、refine 2k 10、8k 15。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-20.candidate.json`（2026-11-20，captured，app_revision `unknown`，catalog_revision `unknown`）
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-text-to-3d-2026-11-22.candidate.json`（2026-11-22，captured，app_revision `unknown`，catalog_revision `2026-11-22.456-460.1`）
+- 备注：2026-11-25 文档复核：价格与 Pricing 页一致。
 
 #### `meshy-openapi-v2/pricing-table` · pricing · constructed
 
 - 端点：`GET /text-to-3d/{id}`
 - 行为：其余组合按 Pricing 页计价：preview 20 或 5，2k/4k 几何加 5；refine 10，8k 为 15。
 - 依据：https://docs.meshy.ai/en/api/pricing（Pricing）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：只有上一条的组合被真实扣费过
+- 备注：2026-11-25 复核积分表与 Pricing 页一致。
 
 #### `meshy-openapi-v2/assets-route` · artifact-shape · constructed
 
@@ -1004,6 +1057,14 @@
 - 端点：`POST /text-to-3d`、`GET /text-to-3d/{id}`
 - 行为：2026-11-24 的真实价格：t2.5 preview（15000 面）5、其 2k PBR refine 10；价格在创建应答与每次轮询里都有。
 - 样本：`internal/testutil/fakeupstream/meshy/openapi-v2/testdata/meshy-openapi-v2-real-round-2026-11-24.candidate.json`（2026-11-24，captured，app_revision `unknown`，catalog_revision `unknown`）
+
+#### `meshy-openapi-v2/delete-running-409` · error-code-and-text · constructed
+
+- 端点：`DELETE /text-to-3d/{id}`
+- 行为：删除运行中（IN_PROGRESS）任务答 409，文案为页面原文 "Task is IN_PROGRESS and cannot be deleted."（#579）。
+- 依据：https://docs.meshy.ai/en/api/text-to-3d（Delete：409）
+- 核对日期：2026-11-25
+- 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 ### `hyper3d/api-v2`
 
