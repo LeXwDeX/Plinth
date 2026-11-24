@@ -160,7 +160,7 @@ echo "--- part 1: 2D in manual mode is approved by policy"
 S2D=$(mk "smoke2-2D")
 [ -n "$S2D" ] || { bad "2D session"; exit 1; }
 set_mode "$S2D" manual && ok "2D session set to manual ($S2D)" || { bad "set manual mode (2D)"; exit 1; }
-send "$S2D" "请使用已选择的 $IMAGE_MODEL 模型调用 refine_image，生成一只橘猫简笔画；直接调用生成工具，不要调用 request_consent。" image "$IMAGE_MODEL" >/dev/null \
+send "$S2D" "请使用已选择的 $IMAGE_MODEL 模型调用 refine_image，生成一只橘猫简笔画；直接调用生成工具。" image "$IMAGE_MODEL" >/dev/null \
   || { bad "2D message request failed"; exit 1; }
 
 SAW_PENDING=0; P1=timeout; nudges=0; dl=$((SECONDS+300)); t0=$SECONDS
@@ -266,8 +266,8 @@ wait_consent() { # $1=session $2=nudge content
 consent_card() { # $1=session → 最新一张待批准卡片的 "request_id capability"
   pending_cards "$1" | head -n 1
 }
-NUDGE_A="请立即使用已选择的 $M3D 模型调用 create_model_3d，生成一个简单的木凳；直接调用生成工具以准备本次确切输入；不要调用 request_consent，也不要在未获批准前提交生成。"
-NUDGE_B="请立即使用已选择的 $M3D 模型调用 create_model_3d，生成一个简单的花瓶；直接调用生成工具以准备本次确切输入；不要调用 request_consent，也不要在未获批准前提交生成。"
+NUDGE_A="请立即使用已选择的 $M3D 模型调用 create_model_3d，生成一个简单的木凳；直接调用生成工具以准备本次确切输入；不要在未获批准前提交生成。"
+NUDGE_B="请立即使用已选择的 $M3D 模型调用 create_model_3d，生成一个简单的花瓶；直接调用生成工具以准备本次确切输入；不要在未获批准前提交生成。"
 
 # 顺序化挂起（降低并发限流噪声）：A 挂起后再发 B，双挂起就绪后发 C
 send "$SA" "$NUDGE_A" model-3d "$M3D" >/dev/null || { bad "A message request failed"; exit 1; }
