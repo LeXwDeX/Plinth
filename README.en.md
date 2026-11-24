@@ -222,9 +222,8 @@ check `docker compose logs art-ai`.
   (`/tmp` is tmpfs, which `docker cp` cannot read). The full flow and the privacy notes are in the
   [partner deployment guide](docs/partner-deployment.md) (in Chinese, with an English summary);
   usage and options are in the [deployment entry](docs/deployment.md) ("导出诊断包").
-- **Agent tool calls:** `AGENT_MAX_TOOL_CALLS_PER_REPLY` caps tool calls in one Agent reply;
-  each new reply starts from zero. Empty uses the default 100; allowed values are 1–100. See
-  [Provider configuration](docs/provider-configuration.md#agent-对话模型--agent-chat-model).
+- **Agent tool calls:** one Agent reply has no tool call limit; the composer shows how many tool
+  calls this turn has made. `AGENT_MAX_TOOL_CALLS_PER_REPLY` is no longer read and can be removed from `.env`.
 
 ## Provider configuration
 

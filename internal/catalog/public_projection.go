@@ -34,7 +34,6 @@ func (source ApplicationSchema) Public() PublicApplicationSchema {
 	}
 	publicChat.Harness = cloned.Chat.Harness.Public()
 	publicChat.AgentStatus.Available = !cloned.Chat.AgentNotConfigured
-	publicChat.AgentLimits.MaxToolCallsPerReply = cloned.Chat.Agent.MaxToolCallsPerReply
 	publicChat.ThreeViewLimits.QueueLimitSeconds = cloned.Chat.ThreeView.QueueLimitSeconds
 	// #103: the conversation recognises review calls by these public tool
 	// names; the brief panel and approval card label purposes and fields from

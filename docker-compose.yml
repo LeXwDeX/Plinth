@@ -42,8 +42,6 @@ services:
       DATABASE_PATH: /app/data/art-ai.db
       STORAGE_ROOT: /app/storage
       WEB_ASSETS_ROOT: /app/web
-      # Tool calls one Agent reply may run; empty keeps the default 20 (1..100).
-      AGENT_MAX_TOOL_CALLS_PER_REPLY: ${AGENT_MAX_TOOL_CALLS_PER_REPLY:-}
       # Required: compose refuses to start without them instead of running with
       # a guessable value. Generate each with `openssl rand -base64 48`.
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required in .env; generate one with openssl rand -base64 48}

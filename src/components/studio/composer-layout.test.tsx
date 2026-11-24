@@ -16,7 +16,6 @@ import { useSessionContextStore } from '@/store/session-context-store';
 // that carries its own test id (its tabs are tested in composer-settings-405.test.tsx); the context meter is the
 // real component.
 const schema = { ...(defaultCatalog.application as unknown as ProductSchema) };
-schema.chat = { ...schema.chat, agent_limits: { max_tool_calls_per_reply: 20 } };
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: 'owner' } }) }));

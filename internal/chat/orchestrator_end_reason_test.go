@@ -78,45 +78,9 @@ func TestTurnEndReasonCompletedForANormalReply(t *testing.T) {
 	wantTurnEnd(t, storedEndReasonTurn(t, service, command), "configured-turn-done", configuredEndReasons.Completed)
 }
 
-// The tool-less summary round runs at two places: when a batch overflows the
-// remaining budget, and when the next batch finds the budget already spent.
-func TestTurnEndReasonToolLimitAtEitherSummaryCallSite(t *testing.T) {
-	for name, responses := range map[string]func(tool string) []agents.Completion{
-		"a batch overflows the budget": func(tool string) []agents.Completion {
-			return []agents.Completion{
-				{ToolCalls: []agents.ToolCall{budgetCall("g1", tool, "a"), budgetCall("g2", tool, "b")}},
-				{Content: "configured summary"},
-			}
-		},
-		"the next batch finds the budget spent": func(tool string) []agents.Completion {
-			return []agents.Completion{
-				{ToolCalls: []agents.ToolCall{budgetCall("g1", tool, "a")}},
-				{ToolCalls: []agents.ToolCall{budgetCall("g2", tool, "b")}},
-				{Content: "configured summary"},
-			}
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			service := newChatService(t, newMemoryChatRepository())
-			schema := budgetSchema(t, 1)
-			agent := &scriptedAgent{responses: responses(schema.Tools[0].Name)}
-			tools := &recordingToolExecutor{commands: make(chan chat.ToolCommand, 8)}
-			stored := runBudgetTurn(t, service, schema, agent, tools, nil)
-			if !strings.Contains(stored.Content, "limit 1") {
-				t.Fatalf("the summary round did not run: %q", stored.Content)
-			}
-			turn, err := service.GetTurn(context.Background(), "owner-a", stored.SessionID, stored.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			wantTurnEnd(t, turn, "configured-turn-done", configuredEndReasons.ToolLimit)
-		})
-	}
-}
-
-func TestTurnEndReasonStaysCompletedWithinTheToolBudget(t *testing.T) {
+func TestTurnEndReasonCompletedAfterToolCalls(t *testing.T) {
 	service := newChatService(t, newMemoryChatRepository())
-	schema := budgetSchema(t, 3)
+	schema := configuredChatSchema(t)
 	tool := schema.Tools[0].Name
 	agent := &scriptedAgent{responses: []agents.Completion{
 		{ToolCalls: []agents.ToolCall{budgetCall("g1", tool, "a"), budgetCall("g2", tool, "b")}},
@@ -447,7 +411,6 @@ func TestTurnEndReasonServiceMapsKindsToTheSchemaStrings(t *testing.T) {
 		reason string
 	}{
 		{chat.TurnEndCompleted, "configured-turn-done", "configured-end-completed"},
-		{chat.TurnEndToolLimit, "configured-turn-done", "configured-end-tool-limit"},
 		{chat.TurnEndAwaitingApproval, "configured-turn-done", "configured-end-awaiting-approval"},
 		{chat.TurnEndStopped, "configured-turn-done", "configured-end-stopped"},
 		{chat.TurnEndBackground, "configured-turn-done", "configured-end-background"},

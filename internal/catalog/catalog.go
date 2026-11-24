@@ -36,7 +36,13 @@ func DefaultDocument() []byte {
 }
 
 func Load(reader io.Reader) (*Catalog, error) {
-	decoder := json.NewDecoder(reader)
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("读取 Offering Catalog: %w", err)
+	}
+	// Keys an earlier release declared and this one retired are dropped
+	// first, so a custom CATALOG_FILE written for that release still loads.
+	decoder := json.NewDecoder(bytes.NewReader(dropRetiredFields(data)))
 	decoder.DisallowUnknownFields()
 	var doc document
 	if err := decoder.Decode(&doc); err != nil {

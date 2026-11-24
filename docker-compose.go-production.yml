@@ -45,8 +45,6 @@ services:
       AUTH_MODE: session
       PROVIDER_MODE: live
       AGENT_MODE: live
-      # #275：一次 Agent 回复最多执行的工具调用数；留空用 Schema 默认 20，范围 1..100。
-      AGENT_MAX_TOOL_CALLS_PER_REPLY: ${AGENT_MAX_TOOL_CALLS_PER_REPLY:-}
       # #233：默认 DEBUG；应用日志写入挂载的 logs 目录并按大小/天数滚动。
       LOG_LEVEL: ${GO_LOG_LEVEL:-debug}
       LOG_DIR: /app/logs

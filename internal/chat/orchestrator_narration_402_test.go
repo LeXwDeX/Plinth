@@ -65,7 +65,6 @@ func runNarration402(t *testing.T, rounds []narrationRound402) (stored, streamed
 	repository := newMemoryChatRepository()
 	service := newChatService(t, repository)
 	schema := configuredChatSchema(t)
-	schema.Agent.MaxToolCallsPerReply = 6
 	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
 		Service: service,
 		Schema:  schema,

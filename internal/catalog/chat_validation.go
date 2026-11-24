@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
@@ -372,9 +371,6 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateInputGapTexts(schema.Presentation.Messages); err != nil {
 		return err
 	}
-	if err := validateToolRoundLimitPending(schema.Presentation.Messages); err != nil {
-		return err
-	}
 	if err := validateToolRejectionTexts(schema.Presentation.Messages); err != nil {
 		return err
 	}
@@ -557,9 +553,6 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	}
 	if value := schema.Agent.ConsentRechargeContent; value != "" && !strings.Contains(value, "{task_id}") {
 		return errors.New("agent 的 consent_recharge_content 必须包含 {task_id}")
-	}
-	if err := validateToolCallBudget(schema.Agent, runtime); err != nil {
-		return err
 	}
 	if err := validateBackgroundWait(schema, runtime); err != nil {
 		return err
@@ -2697,23 +2690,6 @@ func validateInputGapTexts(messages ChatMessageTexts) error {
 	return nil
 }
 
-// validateToolRoundLimitPending checks the texts that list the tool calls the
-// model still wanted once the tool rounds ran out (#275).
-func validateToolRoundLimitPending(messages ChatMessageTexts) error {
-	if !strings.Contains(messages.ToolRoundLimit, "{limit}") {
-		return errors.New("presentation.tool_round_limit 须含 {limit}（本次回复的工具调用次数上限）")
-	}
-	if strings.TrimSpace(messages.ToolRoundLimitPending) == "" ||
-		!strings.Contains(messages.ToolRoundLimitPendingItem, "{tool}") ||
-		!strings.Contains(messages.ToolRoundLimitPendingItem, "{intent}") ||
-		!strings.Contains(messages.ToolRoundLimitPendingTool, "{tool}") {
-		return errors.New(
-			"presentation.tool_round_limit_pending 不能为空，pending_item 须含 {tool} 与 {intent}，pending_tool 须含 {tool}",
-		)
-	}
-	return nil
-}
-
 // validateToolRejectionTexts checks the two tool results the orchestrator
 // writes itself when it does not run a call: arguments the model wrote as
 // invalid JSON, and a call to a tool this reply cannot run ({tool}) (#378).
@@ -2792,48 +2768,6 @@ func validateStreamWatchdog(frontend ChatFrontendSchema, stream ChatStreamSchema
 		return errors.New("chat.frontend.stream_reconnect_attempts 必须至少为 1")
 	}
 	return nil
-}
-
-// validateToolCallBudget checks the per-reply tool call budget (#275): the
-// Schema value and any declared default of its runtime override lie within
-// 1..max_tool_calls_per_reply_maximum.
-func validateToolCallBudget(agent ChatAgentSchema, runtime RuntimeSchema) error {
-	maximum := agent.MaxToolCallsPerReplyMaximum
-	if maximum <= 0 || agent.MaxToolCallsPerReply <= 0 || agent.MaxToolCallsPerReply > maximum {
-		return fmt.Errorf(
-			"agent 的 max_tool_calls_per_reply 必须在 1..%d（max_tool_calls_per_reply_maximum，须为正数）之间",
-			maximum,
-		)
-	}
-	setting, exists := runtime.Configuration.Settings[agent.MaxToolCallsPerReplySetting]
-	if !exists {
-		return fmt.Errorf("agent 的 max_tool_calls_per_reply_setting 引用了未知运行设置 %q", agent.MaxToolCallsPerReplySetting)
-	}
-	defaults := []string{setting.Default}
-	for _, value := range setting.DefaultByEnvironment {
-		defaults = append(defaults, value)
-	}
-	for _, value := range defaults {
-		if _, err := ParseToolCallBudget(value, maximum); err != nil {
-			return fmt.Errorf("运行设置 %s 的默认值无效: %w", agent.MaxToolCallsPerReplySetting, err)
-		}
-	}
-	return nil
-}
-
-// ParseToolCallBudget reads a per-reply tool call budget override (#275). An
-// empty value means "keep the Schema value" and returns 0; otherwise the value
-// must be an integer in 1..maximum.
-func ParseToolCallBudget(value string, maximum int) (int, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, nil
-	}
-	number, err := strconv.Atoi(value)
-	if err != nil || number < 1 || number > maximum {
-		return 0, fmt.Errorf("工具调用次数上限必须是 1..%d 的整数: %q", maximum, value)
-	}
-	return number, nil
 }
 
 // validateHistoryImageLookup checks the bound and the texts of the history

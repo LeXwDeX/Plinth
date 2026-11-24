@@ -372,15 +372,6 @@
             ],
             "default": "qwen-omni-flash"
           },
-          "agent_max_tool_calls_per_reply": {
-            "type": "string",
-            "environment": [
-              {
-                "name": "AGENT_MAX_TOOL_CALLS_PER_REPLY"
-              }
-            ],
-            "default": ""
-          },
           "llm_context_window_tokens": {
             "type": "string",
             "environment": [
@@ -5080,8 +5071,8 @@
         "ui.studio.context.compacted": "已压缩上下文，下一轮回复后更新用量",
         "ui.studio.context.compact_failed": "压缩上下文失败，对话保持原样",
         "ui.studio.context.compact_busy": "回复进行中，结束后再压缩",
-        "ui.studio.tool_calls.label": "工具调用次数",
-        "ui.studio.tool_calls.hint": "本次回复已执行的工具调用；到上限后 Agent 会总结并请你确认。",
+        "ui.studio.tool_calls.turn": "本轮对话 工具调用次数：{count}",
+        "ui.studio.tool_calls.turn_one": "本轮对话 工具调用次数：{count}",
         "ui.chat.context_compacted": "已压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
         "ui.chat.branch_canvas_current": "画布、3D 舞台与版本为创建分支时的当前状态，可能与该条消息时不同。",
         "ui.chat.context_compacted_one": "已压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
@@ -6692,7 +6683,6 @@
         "turn_error": "error",
         "turn_end_reasons": {
           "completed": "completed",
-          "tool_limit": "tool_limit",
           "awaiting_approval": "awaiting_approval",
           "stopped": "stopped",
           "background": "background",
@@ -7003,9 +6993,6 @@
         "max_parallel_generation_submissions": 8,
         "parallel_tool_calls": true,
         "max_listed_models": 20,
-        "max_tool_calls_per_reply": 100,
-        "max_tool_calls_per_reply_setting": "agent_max_tool_calls_per_reply",
-        "max_tool_calls_per_reply_maximum": 100,
         "consent_denied_content": "the user pressed Do not approve on the approval card: this step was not done and no credits were spent. Say plainly in the chat that the step was not done, then propose an alternative and let the user choose: when the step had extra credits (extra export formats or billed options), offer to run it again with fewer or no extra options, or on a model without extra charges, at the lower base price; otherwise offer a cheaper or different option. Do not resubmit on your own, and never ask the user to tick a checkbox or change a setting elsewhere to give consent: consent is only the approval card",
         "consent_waiting_content": "the frozen operation still awaits the user's decision and stays approvable on the approval card after this turn; the card states the base credits, any extra credits and what they are for, and the total, and has Approve and Do not approve buttons. Once the user decides, the result is posted into the session automatically. Nothing has been submitted or started yet: tell the user it is waiting for their approval on that card, in the words of status_text when the result has it, and never say the request was submitted, resubmitted, started or is running; do not submit another operation. Never ask the user to tick a checkbox or change a setting elsewhere: approving the card is the whole consent",
         "consent_duplicate_content": "an approval card for exactly this operation (same tool, same input, same source assets) already exists and is still waiting for the user; no second card was created and nothing was submitted. Tell the user it is waiting on that card and do not call the tool again for it",
@@ -10817,10 +10804,6 @@
           "chat_model_invalid": "所选的对话模型当前不可用，请重新选择",
           "agent_busy": "对话任务较多，请稍后重试",
           "turn_stopped": "已按要求停止本轮生成",
-          "tool_round_limit": "本次回复的工具调用次数已用完（上限 {limit} 次），如需继续请再发一条消息",
-          "tool_round_limit_pending": "以下操作本轮未执行，确认后请再发一条消息继续：",
-          "tool_round_limit_pending_item": "- {tool}：{intent}",
-          "tool_round_limit_pending_tool": "- {tool}",
           "tool_arguments_invalid": "工具参数不是合法的 JSON，该工具没有执行。请按工具定义重新生成参数后再调用。",
           "tool_unavailable": "工具 {tool} 本回合不可用，没有执行。请改用当前可用的工具，或不用工具直接回答。",
           "input_gap_missing": "缺少必填输入「{name}」（{type}）{options}：{supply}",
@@ -19679,8 +19662,8 @@
             "ui.studio.context.compacted": "Context compacted; usage updates after the next reply",
             "ui.studio.context.compact_failed": "Could not compact the context; the conversation is unchanged",
             "ui.studio.context.compact_busy": "A reply is running; compact after it ends",
-            "ui.studio.tool_calls.label": "Tool calls",
-            "ui.studio.tool_calls.hint": "Tool calls in this reply; at the limit the Agent summarizes and asks you to continue.",
+            "ui.studio.tool_calls.turn": "Tool calls this turn: {count}",
+            "ui.studio.tool_calls.turn_one": "Tool calls this turn: {count}",
             "ui.chat.context_compacted": "Context compacted: the earliest {rounds} rounds are now a summary; the chat history is unchanged",
             "ui.chat.branch_canvas_current": "The canvas, 3D stage and versions are copied from their current state when the branch is created; they may differ from the selected message's state.",
             "ui.chat.context_compacted_one": "Context compacted: the earliest {rounds} round is now a summary; the chat history is unchanged",
@@ -21792,9 +21775,6 @@
             "chat.choice.mock_summary": "Several services can do this step. Please choose one on the card below.",
             "chat.presentation.messages.agent_busy": "The chat is busy. Please try again later",
             "chat.presentation.messages.turn_stopped": "Generation for this turn was stopped as requested",
-            "chat.presentation.messages.tool_round_limit": "The tool call limit for this reply has been reached (limit: {limit}). Send another message to continue",
-            "chat.presentation.messages.tool_round_limit_pending": "The following actions were not run this turn. After confirming, send another message to continue:",
-            "chat.presentation.messages.tool_round_limit_pending_item": "- {tool}: {intent}",
             "chat.presentation.messages.tool_arguments_invalid": "The tool arguments are not valid JSON, so the tool did not run. Write the arguments again as the tool definition says, then call it again.",
             "chat.presentation.messages.tool_unavailable": "The tool {tool} is not available in this turn and did not run. Use a tool you are offered now, or answer without a tool.",
             "chat.presentation.messages.input_gap_missing": "missing required input \"{name}\" ({type}){options}: {supply}",
