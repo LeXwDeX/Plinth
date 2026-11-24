@@ -275,7 +275,7 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 | `internal/agentconfiguration` | 有界共享 Agent 配置及版本管理；`SnapshotForOwner` 始终把 Schema 系统 Skill 放在最前（不属于任何已发布版本，已发布或个人 Skill 不得绑定工具或复用其 ID，修订号附加系统 Skill 摘要）；另按 owner 管理文本 Skill（#152：`UpdatePersonalSkill` 按 owner+ID 整体替换，名称/提示词校验与创建共享），并在新轮次创建 owner 快照；编辑只影响尚未首次冻结的轮次，不编辑执行代码、运行凭据或付费授权 |
 | `internal/mcp` | Schema 固定只读工具、参数与 owner/session 范围的业务准入；协议传输和数据读取由端口注入 |
 | `internal/modeldelivery` | 3D 交付投影：按 Schema `model_delivery` 计算每个 3D 任务的格式覆盖（可下载/可补齐含积分/不可用含原因）、把“补齐格式”规划成 Processing Plan 步骤、并把已隔离的本地资产流式打成 ZIP；不持有任务状态，不调用供应商，不做本地转换 |
-| `internal/modeldelivery`（自动补齐） | 生成成功后由平台自己补齐缺失格式（#461）：`application.model_delivery.auto_completion` 声明源能力、路线顺序、扫描间隔、并发与单任务上限，`conversions[].auto: free\|paid` 声明每条路线是否可自动付费。对账器由 `internal/app` 的 ticker 驱动，持久表 `model_delivery_auto_completions` 一行一个任务（策略修订、状态、尝试次数、计划、已花积分、付费次数、原因、下次执行），水位线单表只写当前时间、永不回扫历史任务；计划复用 `modeldelivery.Service.Complete` 的路径，`Origin=delivery`、`model-delivery` ACTOR，不出卡片、不发消息、不计 #330 步数、不占会话预算。生成内核不派生补齐任务 |
+| `internal/modeldelivery`（自动补齐） | 生成成功后由平台自己补齐缺失格式（#461）：`application.model_delivery.auto_completion` 声明源能力、路线顺序、扫描间隔、等名额间隔（`slot_wait_interval_milliseconds`，#510）、并发与单任务上限，`conversions[].auto: free\|paid` 声明每条路线是否可自动付费。对账器由 `internal/app` 的 ticker 驱动，持久表 `model_delivery_auto_completions` 一行一个任务（策略修订、状态、尝试次数、计划、已花积分、付费次数、原因、下次执行），水位线单表只写当前时间、永不回扫历史任务；计划复用 `modeldelivery.Service.Complete` 的路径，`Origin=delivery`、`model-delivery` ACTOR，不出卡片、不发消息、不计 #330 步数、不占会话预算。生成内核不派生补齐任务 |
 | `internal/skillrun` / `processing` | 配方/处理计划、步骤、审核、暂停/恢复/重试；#251 的检查点评估（`checkpoint.go`）、受控修订（`revise.go`）与失败分类（`failure.go`），每个公开步骤仍使用 Generation |
 | `internal/pendingapproval` | 轮次结束后仍可批准的 Agent 请求：步骤卡与制作计划卡的列表投影、批准/拒绝、一次提交、结果消息、后台巡检；预算结算/过期通知由 `internal/executiongrant` 提供，不拥有批准策略 |
 | `internal/generation` | PrepareInput/SubmitPrepared、Task/Attempt、租约、幂等、依赖、观察、物化和唯一公开终态 |
@@ -598,8 +598,18 @@ Rig 在精确源码 `95e65d67252a64136da8cb6820fae7f2d56e84af` 的独立 App 中
 - **429/2000（C4）**：有池闸门的路径把 code 2000（并发池满）视为回到池里排队：释放当前名额、按 `Retry-After` 等待、不消耗 `RateLimitRetries`；code 1007 与其他 429 保持原有每格式预算。
 - **恢复与回收（C5）**：进程重启后计数归零，Adapter 在第一次 Observe 时对仍提交的子作业 `Readopt`（允许超过 limit，一个轮询周期由上游 429 兜底收敛）。每次 Adapter 调用 `Touch` 刷新 lastSeen；闲置 TTL 取 `max(10min, 3×最大轮询间隔)`，绝对上限取 `job_timeout + upstream_queue_timeout`，按 lastSeen 回收，绝不回收仍在轮询的持有者。
 - **公平性**：等待者按首次 `Acquire` 的序号 FIFO；有 k 个空位就放行序号最小的 k 个仍存活的等待者，已超等待者 TTL 的跳过。
+- **不把名额放给已消失的等待者（#510）**：「存活」指仍在轮询——认领窗口（`max(5×queue_poll, 30s)`，不超过闲置 TTL）内没有 `Acquire`/`Touch` 的等待者（取消或消失的 attempt）在放行时被跳过，保留原序号以防它回来。释放时代为放行的名额只是预留，不刷新 lastSeen；等待者自己的 `Acquire` 或 `Touch` 才认领，认领窗口内无人认领则退回等待并让给下一个存活等待者，不再占住名额到 10 分钟闲置 TTL。`ReleaseHolder` 也把仍在排队的持有者移出队列。
 - **Agent 等待截止时间（#460 review 4）**：`internal/chat/generationtool/executor.go` 的 `taskWaitDeadline` 覆盖 `timeout × max_attempts + max_backoff × max_attempts + upstream_queue_timeout`；到期时任务仍未终态则返回「任务仍在进行或排队」（`chat.presentation.messages.generation_pending`，带 task_id）而不是 `generationFailure`，Agent 可以如实告知用户继续等待，回合正常收尾。
 - **fake 与验证**：fake Tripo 支持 `AccountConcurrencyLimit`（超出返回 429 code 2000 + `Retry-After`，模拟 texture/refine 主作业与 convert 共用）。回归见 `internal/providers/upstreampool/pool_test.go`、`internal/providers/tripo/upstream_pool_468_test.go`、`internal/providers/tripo/native_processing_rate_limit_test.go` 的 `TestNativeExportFullPoolQueuesWithoutBudget`、`internal/testutil/fakeupstream/tripo/v3/fake_test.go` 的账号池测试，以及 `internal/app/provider_connections_test.go` 的环境变量覆盖测试。跨栈共用账号的配额由部署环境变量设置，仓库不写死。
+
+### 自动补齐排队与成功后空转（#510；源码与本机 fake 测试，未部署验收）
+
+- **等名额不再睡一个扫描间隔**：对账器发现平台自己的计划名额（`auto_completion.max_inflight_plans`）已满时，记录原因写 `slot_wait`，下次检查按 Schema 新增的 `slot_wait_interval_milliseconds`（默认 15000，必须为正且不大于 `scan_interval_milliseconds`，加载期校验）安排，而不是 `scan_interval_milliseconds`（默认 300000）；上一轮是 `slot_wait` 且名额仍满时只数一次在途计划并重排，不重读该任务的格式。没有引入名额释放事件：名额由短间隔轮询接住，等待记录之间按 `next_run_at` 先后轮转。
+- **排队时间不计入期限**：`deadline_hours` 仍从 `first_run_at` 起算，但紧接一次 `slot_wait` 的一轮把 `first_run_at` 推后刚等的时长（至多两个等名额间隔，进程停摆期间的时间仍计入），批量排队再长也不会因为期限被一刀切放弃；拿到名额后才开始真正消耗期限。持久表没有新增列。
+- **并行度**：`max_inflight_plans` 的默认值由 1 改为 2（Catalog revision `2026-11-24.510.1`）。本地 glTF 转换的 Offering 仍声明 `max_concurrent: 1`，两个本地计划同时在途时第二个在适配器内等槽，最多多占一个协调器 worker；免费本地路线与付费 Meshy 路线可以并行。
+- **单条失败不挡队**：某条记录这一轮报错时，对账器把它按扫描间隔推后并继续处理其后的记录，扫描结束返回第一个错误供 App 记日志；此前直接返回，失败记录每拍都排在最前，后面的记录看不到。
+- **成功后观察不空转**：`generation.observePostSuccess` 在「当前 Attempt 没有上游作业」或「适配器未注册」时不调上游、不写事件，把 `next_action_at` 推后 `max(post_success.interval_seconds, 成功以来已过时长)`（约每次翻倍的退避），封顶于成功后观察 deadline，保证本地 finalizer 按时收尾；此前只释放租约，任务一直到期，协调器每拍领取并重写一次直到 deadline。
+- **验证范围**：`internal/modeldelivery/auto_completion_slot_wait_510_test.go`、`internal/providers/upstreampool/pool_vanished_waiter_510_test.go`、`internal/generation/post_success_idle_510_test.go`（「无上游作业」路径与「适配器未注册」共用同一实现，只测了后者），全部用 fake 时钟。未部署到 `dev-test`，未做批量或多用户的端到端验收。
 
 ### Tripo P2 低模的官方价与启用（#192）
 

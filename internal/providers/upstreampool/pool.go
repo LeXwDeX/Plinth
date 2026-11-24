@@ -32,6 +32,14 @@
 //   - Waiting is FIFO by the sequence number assigned at the first Acquire. When
 //     slots free, the smallest still-live sequence numbers are admitted; a
 //     waiter whose idle TTL ran out is skipped.
+//   - A waiter is live only while it keeps polling: one not seen within the
+//     claim window (a canceled or vanished attempt) is passed over, keeping its
+//     place in case it comes back. A slot admitted on a waiter's behalf is a
+//     reservation until that waiter's own Acquire or Touch claims it; an
+//     unclaimed reservation lapses after the claim window and goes to the next
+//     live waiter, so a vanished waiter cannot pin a slot for the idle TTL
+//     (#510). Terminal cleanup (ReleaseHolder) also takes a waiter out of the
+//     queue.
 package upstreampool
 
 import (
@@ -130,6 +138,10 @@ type entry struct {
 	created time.Time
 	seen    time.Time
 	token   uint64
+	// reserved is when a released slot was admitted on this waiter's behalf;
+	// zero once the waiter itself claimed it (Acquire or Touch) or for a slot it
+	// took directly.
+	reserved time.Time
 }
 
 // retiredEntry remembers when a reclaimed entry first held a slot. A public job
@@ -235,15 +247,18 @@ func (m *Manager) Acquire(ctx context.Context, holder Holder) (Ticket, bool, tim
 	now := m.now()
 	m.reclaimLocked(p, now)
 	if existing, exists := p.entries[holder.Attempt]; exists {
+		// The holder is polling: it is live, and a reservation made for it
+		// is claimed.
+		existing.seen = now
 		if existing.held {
-			existing.seen = now
+			existing.reserved = time.Time{}
 			return m.ticket(p, existing), true, 0
 		}
 		m.admitLocked(p, now)
 		if existing.held {
+			existing.reserved = time.Time{}
 			return m.ticket(p, existing), true, 0
 		}
-		existing.seen = now
 		return Ticket{}, false, m.poolWaitHint(p)
 	}
 	m.admitLocked(p, now)
@@ -300,13 +315,14 @@ func (m *Manager) Touch(holder Holder) {
 	}
 	if existing, exists := p.entries[holder.Attempt]; exists {
 		existing.seen = m.now()
+		existing.reserved = time.Time{}
 	}
 }
 
-// ReleaseHolder releases whatever slot the holder currently owns. It is for
-// terminal cleanup, where the caller holds no live ticket. Unlike Release it
-// does not prove a specific grant; the caller must only use it once the holder
-// is known to be finished.
+// ReleaseHolder releases whatever slot the holder currently owns, or takes it
+// out of the queue while it still waits. It is for terminal cleanup, where the
+// caller holds no live ticket. Unlike Release it does not prove a specific
+// grant; the caller must only use it once the holder is known to be finished.
 func (m *Manager) ReleaseHolder(holder Holder) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -315,11 +331,13 @@ func (m *Manager) ReleaseHolder(holder Holder) {
 		return
 	}
 	current, exists := p.entries[holder.Attempt]
-	if !exists || !current.held {
+	if !exists {
 		return
 	}
 	delete(p.entries, holder.Attempt)
-	m.admitLocked(p, m.now())
+	if current.held {
+		m.admitLocked(p, m.now())
+	}
 }
 
 // Readopt registers holders whose private children were submitted before a
@@ -338,6 +356,7 @@ func (m *Manager) Readopt(holders ...Holder) {
 		if existing, exists := p.entries[holder.Attempt]; exists {
 			existing.held = true
 			existing.seen = now
+			existing.reserved = time.Time{}
 			continue
 		}
 		// grantLocked keeps the original created time of a reclaimed holder.
@@ -440,6 +459,26 @@ func (m *Manager) poolIdleTTL(p *pool) time.Duration {
 	return m.idleTTL
 }
 
+// claimWindowFloor is the shortest claim window: a live waiter polls every
+// queue poll, but a busy coordinator may lease it later than that.
+const claimWindowFloor = 30 * time.Second
+
+// claimWindowPolls is how many queue polls a waiter may miss before it is
+// treated as gone.
+const claimWindowPolls = 5
+
+// poolClaimWindow is how long a waiter may go unseen and still be admitted, and
+// how long a reservation made for it waits to be claimed: several queue polls,
+// at least claimWindowFloor and never beyond the idle TTL.
+func (m *Manager) poolClaimWindow(p *pool) time.Duration {
+	poll := m.queuePoll
+	if p != nil && p.queuePoll > 0 {
+		poll = p.queuePoll
+	}
+	window := max(claimWindowPolls*poll, claimWindowFloor)
+	return min(window, m.poolIdleTTL(p))
+}
+
 func (m *Manager) ticket(p *pool, e *entry) Ticket {
 	return Ticket{manager: m, pool: p, attempt: e.attempt, seq: e.seq, token: e.token}
 }
@@ -474,12 +513,16 @@ func (m *Manager) grantLockedAt(p *pool, attempt string, created, now time.Time)
 
 // admitLocked grants free slots to the waiting entries with the smallest
 // sequence numbers. A waiter whose idle TTL ran out is skipped (reclaim already
-// removed it before admission runs).
+// removed it before admission runs), and so is one not seen within the claim
+// window: it keeps its place, but a slot is never handed to an attempt that
+// stopped polling (#510). The admission is a reservation; it does not count as
+// the waiter being seen.
 func (m *Manager) admitLocked(p *pool, now time.Time) {
+	window := m.poolClaimWindow(p)
 	for p.heldCountLocked() < p.limit {
 		var next *entry
 		for _, e := range p.entries {
-			if e.held {
+			if e.held || now.Sub(e.seen) > window {
 				continue
 			}
 			if next == nil || e.seq < next.seq {
@@ -492,7 +535,7 @@ func (m *Manager) admitLocked(p *pool, now time.Time) {
 		p.nextToken++
 		next.held = true
 		next.token = p.nextToken
-		next.seen = now
+		next.reserved = now
 	}
 }
 
@@ -501,7 +544,16 @@ func (m *Manager) admitLocked(p *pool, now time.Time) {
 // that never reports a terminal state. The dropped entry's created time is
 // remembered so a later Readopt cannot reset the hard cap's clock.
 func (m *Manager) reclaimLocked(p *pool, now time.Time) {
+	window := m.poolClaimWindow(p)
 	for attempt, e := range p.entries {
+		if e.held && !e.reserved.IsZero() && now.Sub(e.reserved) > window {
+			// Nobody claimed the slot admitted for this waiter: it goes back
+			// to waiting with its place kept, and the slot to the next live
+			// waiter (#510).
+			e.held = false
+			e.reserved = time.Time{}
+			continue
+		}
 		if p.maxLifetime > 0 && now.Sub(e.created) > p.maxLifetime {
 			p.retired[attempt] = retiredEntry{created: e.created, seen: now}
 			delete(p.entries, attempt)

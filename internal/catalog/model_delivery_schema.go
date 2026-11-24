@@ -67,6 +67,12 @@ type ModelDeliveryAutoCompletionSchema struct {
 	// ScanIntervalMilliseconds is how long the reconciler waits between two
 	// scans of the same record.
 	ScanIntervalMilliseconds int `json:"scan_interval_milliseconds"`
+	// SlotWaitIntervalMilliseconds is how soon a record that only waits for one
+	// of the platform's plan slots is looked at again. It is shorter than the
+	// scan interval, so a freed slot is taken within seconds rather than at the
+	// next scan, and the time spent waiting does not count toward DeadlineHours
+	// (#510).
+	SlotWaitIntervalMilliseconds int `json:"slot_wait_interval_milliseconds"`
 	// MaxInflightPlans bounds the platform's own conversion plans that may be
 	// running at once: a local conversion is one process wide, and a queue of
 	// them must not occupy the coordinator's workers.
@@ -604,6 +610,9 @@ func validateAutoCompletionShape(delivery ModelDeliverySchema) error {
 	}
 	if auto.ScanIntervalMilliseconds <= 0 || auto.MaxInflightPlans <= 0 || auto.DeadlineHours <= 0 {
 		return fmt.Errorf("auto_completion 的扫描间隔、并发上限与截止时间必须为正数")
+	}
+	if auto.SlotWaitIntervalMilliseconds <= 0 || auto.SlotWaitIntervalMilliseconds > auto.ScanIntervalMilliseconds {
+		return fmt.Errorf("auto_completion.slot_wait_interval_milliseconds 必须为正数且不大于扫描间隔")
 	}
 	if auto.MaxCreditsPerTask <= 0 || auto.MaxPaidRunsPerTask <= 0 {
 		return fmt.Errorf("auto_completion 的单任务积分上限与付费次数上限必须为正数")

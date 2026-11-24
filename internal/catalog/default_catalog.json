@@ -16710,7 +16710,8 @@
           "meshy/processing/convert"
         ],
         "scan_interval_milliseconds": 300000,
-        "max_inflight_plans": 1,
+        "slot_wait_interval_milliseconds": 15000,
+        "max_inflight_plans": 2,
         "max_credits_per_task": 30,
         "max_paid_runs_per_task": 1,
         "deadline_hours": 2,
