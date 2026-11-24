@@ -18,6 +18,15 @@ import (
 // million pixels); Seedream's reference limit is 6000x6000.
 const MaxPicturePixels = 36_000_000
 
+// MaxPictureEdge bounds one side of a fake picture: no official output or
+// reference is wider than 8K, so a longer side is a caller mistake, and the
+// bound keeps every dimension far inside the PNG header's 32-bit fields.
+const MaxPictureEdge = 16_384
+
+// MaxPaddedJPEGBytes bounds what PadJPEG will allocate: the heaviest real
+// answer the fake stands in for is a few megabytes.
+const MaxPaddedJPEGBytes = 64 << 20
+
 // PictureSpec describes one fake picture at its real pixel size (issue I17).
 //
 // The fake used to answer every request with the same 64x64 PNG (or a 1x1
@@ -48,8 +57,9 @@ var pictureCache sync.Map // PictureSpec -> File
 // Picture returns the fake picture of spec. The returned bytes are shared:
 // callers must copy before changing them (Corrupt does).
 func Picture(spec PictureSpec) (File, error) {
-	if spec.Width <= 0 || spec.Height <= 0 || int64(spec.Width)*int64(spec.Height) > MaxPicturePixels {
-		return File{}, fmt.Errorf("fakeupstream: picture size %dx%d is outside 1..%d pixels", spec.Width, spec.Height, MaxPicturePixels)
+	if spec.Width <= 0 || spec.Height <= 0 || spec.Width > MaxPictureEdge || spec.Height > MaxPictureEdge ||
+		int64(spec.Width)*int64(spec.Height) > MaxPicturePixels {
+		return File{}, fmt.Errorf("fakeupstream: picture size %dx%d is outside 1..%d pixels and 1..%d per side", spec.Width, spec.Height, MaxPicturePixels, MaxPictureEdge)
 	}
 	if cached, ok := pictureCache.Load(spec); ok {
 		return cached.(File), nil
@@ -117,6 +127,9 @@ func subjectShade(variant int) (red, green, blue uint8) {
 
 func subjectPNGAt(spec PictureSpec) ([]byte, error) {
 	width, height := spec.Width, spec.Height
+	if width < 1 || height < 1 || width > MaxPictureEdge || height > MaxPictureEdge {
+		return nil, fmt.Errorf("fakeupstream: picture size %dx%d is outside 1..%d per side", width, height, MaxPictureEdge)
+	}
 	x0, x1, y0, y1 := subjectBox(width, height)
 	red, green, blue := subjectShade(spec.Variant)
 	pixel := func(subject bool) []byte {
@@ -180,6 +193,9 @@ func subjectPNGAt(spec PictureSpec) ([]byte, error) {
 // encoder takes its direct path and the picture needs no RGB pixel buffer.
 func subjectJPEGAt(spec PictureSpec) ([]byte, error) {
 	width, height := spec.Width, spec.Height
+	if width < 1 || height < 1 || width > MaxPictureEdge || height > MaxPictureEdge {
+		return nil, fmt.Errorf("fakeupstream: picture size %dx%d is outside 1..%d per side", width, height, MaxPictureEdge)
+	}
 	picture := image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio420)
 	x0, x1, y0, y1 := subjectBox(width, height)
 	red, green, blue := subjectShade(spec.Variant)
@@ -221,6 +237,9 @@ func subjectJPEGAt(spec PictureSpec) ([]byte, error) {
 func PadJPEG(data []byte, size int) []byte {
 	if size <= len(data) || len(data) < 2 || data[0] != 0xFF || data[1] != 0xD8 {
 		return data
+	}
+	if size > MaxPaddedJPEGBytes {
+		size = MaxPaddedJPEGBytes
 	}
 	const segment = 65533 // a COM segment holds at most 65533 bytes of text
 	out := make([]byte, 0, size)
