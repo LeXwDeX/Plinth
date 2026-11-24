@@ -125,7 +125,7 @@ def glb_checks(ctx, name, bound=None, textured=True, height=None):
                        f"{summary['materials']} material(s), {summary['images']} image(s), edges {summary['texture_edges']}"))
     if bound is not None:
         enforce = not ctx.fake
-        within = summary["triangles"] <= bound * engine_slack()
+        within = summary["triangles"] <= bound * BOUND_SLACK
         checks.append(("GLB triangles", within or not enforce,
                        f"{summary['triangles']} triangles, limit {bound}" + ("" if enforce else " (recorded; enforced on a real upstream only)")))
     if height is not None and summary["height"] is not None:
@@ -136,13 +136,12 @@ def glb_checks(ctx, name, bound=None, textured=True, height=None):
     return checks
 
 
-def engine_slack():
-    return BOUND_SLACK
-
-
 def verify_t2i(ctx, task):
     asset = engine.find_asset(task, "image")
-    dims = common.image_dimensions(open(ctx.file("t2i", "image"), "rb").read(64 << 10)) if ctx.file("t2i", "image") else None
+    dims = None
+    if ctx.file("t2i", "image"):
+        with open(ctx.file("t2i", "image"), "rb") as handle:
+            dims = common.image_dimensions(handle.read(64 << 10))
     return [("one PNG picture", bool(asset) and asset.get("media_type") == "image/png", f"{asset and asset.get('media_type')}, {dims}")]
 
 
@@ -222,7 +221,10 @@ def verify_analyze(ctx, task):
 def verify_multi_color(ctx, task):
     archive = engine.find_asset(task, "print-archive", "3mf")
     path = ctx.file("multi_color", "print-archive", "3mf")
-    head = open(path, "rb").read(4) if path else b""
+    head = b""
+    if path:
+        with open(path, "rb") as handle:
+            head = handle.read(4)
     return [("3MF archive", archive is not None and head == engine.ZIP_MAGIC, f"ZIP magic {head[:4]!r}")]
 
 
@@ -231,13 +233,6 @@ def verify_motion(ctx, task):
 
 
 # ------------------------------------------------------------------ the chain
-
-def source_image(name):
-    def picture(ctx):
-        asset = ctx.asset_id(name, "image")
-        return asset
-    return picture
-
 
 def build_t2i(ctx):
     return {"prompt": CHARACTER, "aspect_ratio": "1:1", "pose_mode": "t-pose"}
