@@ -169,6 +169,37 @@
 //     answer with that header and no Retry-After; businessErrors and the task-failed-<word>
 //     words inject 2008, 2015, 2018, 2002 and 4001 (fake.go).
 //
+// The real round of 2026-11-24 (#577). One run of smoke-l5-tripo-endpoints.py through
+// Plinth on dev-test (17 functions, 855 credits as quoted) was recorded by the runtime
+// recorder; evidence-577-real-round.candidate.json keeps the minimal set and
+// real_round_577_test.go holds the fake to it (every create sent with its recorded
+// request: the structure of the first and the finished poll, the price, the input).
+// Prices, task types, status words, output keys and the CDN content types matched the
+// fake already. What it changed:
+//
+//   - A poll repeats the request under input (echo.go): every parameter as sent over
+//     the template's defaults, the model as model_version where the type shows one. The
+//     fake used to keep the 2026-10-29 template, so a request's face_limit,
+//     texture_quality or segmentation_granularity never showed.
+//   - credits_consumed shows the price from the queued poll on (billing.go); image to
+//     splat costs 30.
+//   - A conversion of an imported model (URL or file token) reports normalize_scale and
+//     normalize_translation for every format; one of a task named by its id reports
+//     neither (convert.go). A Smart Segmentation of a model reports them too.
+//   - Every render (rendered_image) is a WebP.
+//   - A decimation's face_limit is a target the real task overshot by 57% (decimate.go);
+//     the fake does not model the overshoot.
+//
+// Not modelled: the real running poll of a conversion sometimes has no output, and
+// sometimes output.model_url before the task succeeds (the fake's running poll has an
+// empty output); the real progress values (the fake answers 0, 50 and 100, and the real
+// Smart Segmentation went 50, 10, 25, 75); and the real first poll is usually already
+// running (the fake answers one queued poll first). Not run in that round, so still
+// constructed: the P2 Offerings (text, image, multiview), Smart Segmentation of a
+// picture, the 2000 concurrency refusal and the 1007 rate limit. The free negative probes
+// of align.go (Probes) are there to capture the real refusal texts; until they run, every
+// refusal text but the samples' 401, 404/2001 and 400/1004 is constructed.
+//
 // Balance scenarios. insufficient-balance and key-quota are credit refusals of
 // task creation, so they never apply to POST /files; the files page defines no
 // such refusal for an upload.

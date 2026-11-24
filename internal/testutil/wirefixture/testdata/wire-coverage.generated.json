@@ -51,6 +51,7 @@
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-386-convert-3mf.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-386-multiview-model.candidate.json",
+    "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-animation.candidate.json",
     "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-complete.candidate.json",
@@ -88,8 +89,8 @@
       "derived": 37,
       "disabled-zero-egress": 11,
       "local-no-wire": 4,
-      "real": 138,
-      "total": 190
+      "real": 145,
+      "total": 197
     }
   },
   "incomplete": [],
@@ -3227,6 +3228,7 @@
       "evidence": "real",
       "evidence_files": [
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json"
@@ -3286,6 +3288,7 @@
       "capability": "(scenario)",
       "endpoint": "POST /v3/animations/rig",
       "hosts": [
+        "example.test",
         "openapi.tripo3d.ai"
       ],
       "protocols": [
@@ -3293,7 +3296,8 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json"
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
       ],
       "offerings": []
     },
@@ -3326,6 +3330,7 @@
       ],
       "evidence": "derived",
       "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-20.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-multiview-2026-11-23.candidate.json",
@@ -3353,6 +3358,22 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "(scenario)",
+      "endpoint": "POST /v3/generation/image-to-model",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
       "endpoint": "POST /v3/generation/image-to-multiview",
       "hosts": [
         "example.test"
@@ -3370,8 +3391,25 @@
     {
       "adapter_key": "tripo.v3",
       "capability": "(scenario)",
+      "endpoint": "POST /v3/generation/image-to-splat",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
       "endpoint": "POST /v3/generation/text-to-model",
       "hosts": [
+        "example.test",
         "openapi.tripo3d.ai"
       ],
       "protocols": [
@@ -3380,7 +3418,72 @@
       "evidence": "real",
       "evidence_files": [
         "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json",
         "internal/testutil/fakeupstream/tripo/v3/testdata/tripo-v3-account.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/mesh/complete",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/mesh/decimate",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/mesh/segment",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/mesh/smartsegment",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
       ],
       "offerings": []
     },
@@ -3389,6 +3492,7 @@
       "capability": "(scenario)",
       "endpoint": "POST /v3/models/convert",
       "hosts": [
+        "example.test",
         "openapi.tripo3d.ai"
       ],
       "protocols": [
@@ -3396,7 +3500,24 @@
       ],
       "evidence": "real",
       "evidence_files": [
-        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json"
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-305-rig-convert.candidate.json",
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
+      ],
+      "offerings": []
+    },
+    {
+      "adapter_key": "tripo.v3",
+      "capability": "(scenario)",
+      "endpoint": "POST /v3/models/texture",
+      "hosts": [
+        "example.test"
+      ],
+      "protocols": [
+        "json"
+      ],
+      "evidence": "real",
+      "evidence_files": [
+        "internal/testutil/fakeupstream/tripo/v3/testdata/evidence-577-real-round.candidate.json"
       ],
       "offerings": []
     },

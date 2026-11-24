@@ -1,0 +1,11 @@
+{
+  "api_version": "unknown",
+  "candidate_sha256": "d95373ee5f11c261307ea5a902c600cda336c5e2265f438edb4057e6ad5f8770",
+  "captured_at_utc": "2026-11-24",
+  "exchanges": 37,
+  "provenance": "captured",
+  "scenario": "upstream-record",
+  "source_revision": "b705f2032096c5c90cbbd180ead4f592dbf6b4ee",
+  "transformation": "Draft from the opt-in upstream recorder: prompts, long text, URLs and IDs are placeholders; query values, headers outside the replay set and media bytes are not stored.",
+  "version": 1
+}

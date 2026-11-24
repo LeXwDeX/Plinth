@@ -174,8 +174,8 @@ func TestMultiviewModelPollPlacesViewsByNameAndEchoesOnlyWhatWasSent(t *testing.
 }
 
 // The render of a multiview model task is a WebP file named so, like the real one
-// (the bytes of the run: webp, binary/octet-stream); the generation tasks the
-// samples of 2026-10-29 cover keep their PNG.
+// (the bytes of the run: webp, binary/octet-stream). Since the round of 2026-11-24
+// (#577) the render of every task is a WebP; the PNG of 2026-10-29 is gone.
 func TestMultiviewModelRenderIsAWebP(t *testing.T) {
 	samples := loadEvidence386(t, evidenceMultiviewFile)
 	f := newFixture(t, fakeupstream.Config{})
@@ -197,8 +197,8 @@ func TestMultiviewModelRenderIsAWebP(t *testing.T) {
 	text := f.create("/generation/text-to-model", textBody(), key)
 	_, textDone := f.finish(text, key)
 	_, _, render := f.download(f.outputURL(textDone, "rendered_image_url"))
-	if align.DetectFormat(render) != "png" {
-		t.Errorf("the text task's render is %s, want the png of 2026-10-29", align.DetectFormat(render))
+	if align.DetectFormat(render) != "webp" {
+		t.Errorf("the text task's render is %s, want the webp of 2026-11-24", align.DetectFormat(render))
 	}
 }
 
