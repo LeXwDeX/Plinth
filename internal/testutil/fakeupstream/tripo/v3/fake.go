@@ -99,6 +99,8 @@ const (
 //   - content-policy, version-deprecated, model-too-complex, task-type-unsupported,
 //     endpoint-not-found: a task creation refused with the business code of the
 //     same name on the error-handling page (2008, 2015, 2018, 2002, 4001; businessErrors).
+//     All five are constructed from the page; a retired model name does not draw 2015
+//     from the real API (1004, the free probes of 2026-11-25, #577).
 //   - task-failed-content-policy, task-failed-model-too-complex,
 //     task-failed-version-deprecated, task-failed-task-type-unsupported: the task is
 //     created and ends "failed" with that business code as its error_code (the page says
@@ -549,17 +551,32 @@ func (h *handler) renderLocalRateLimit(w http.ResponseWriter, r *http.Request) b
 }
 
 // auth answers 401 unless the request carries a bearer key.
+//
+// Both 401 answers are captured: a missing Authorization is code 2 "Authentication
+// required" (2026-10-29, the auth-error sample), and a key the upstream does not know
+// is code 2 "Invalid API key" with a suggestion that names the tsk_ prefix (the free
+// probe of 2026-11-25, #577, evidence-577-negative-probes). Neither carries a
+// request_id. The probe's key did not start with tsk_; what the real API says for a
+// tsk_ key it does not know is not captured, so the fake answers every key it is told
+// is wrong (the invalid-key scenario, the align script's probe-wrong-key) the same way
+// and accepts any other key.
 func (h *handler) auth(w http.ResponseWriter, r *http.Request) bool {
-	// A key the upstream does not know (the invalid-key scenario, the align
-	// script's probe-wrong-key) gets the same 401 envelope as a missing one; the
-	// real answer to a wrong key has not been captured yet (#577), so this is
-	// constructed from the captured missing-key answer.
-	if fakeupstream.BearerKey(r) != "" && fakeupstream.ScenarioOf(r) != fakeupstream.ScenarioInvalidKey {
-		return true
+	if fakeupstream.BearerKey(r) == "" {
+		writeJSON(w, http.StatusUnauthorized, h.authError)
+		return false
 	}
-	writeJSON(w, http.StatusUnauthorized, h.authError)
-	return false
+	if fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioInvalidKey {
+		writeJSON(w, http.StatusUnauthorized, h.envelope(h.authError, 2, invalidKeyMessage, invalidKeySuggestion))
+		return false
+	}
+	return true
 }
+
+// The real answer to an unknown key (captured 2026-11-25, #577).
+const (
+	invalidKeyMessage    = "Invalid API key"
+	invalidKeySuggestion = "API key must start with 'tsk_'. If you are sending a client_id (tcli_...), use the secret key instead"
+)
 
 // ---- endpoints ----
 
@@ -628,7 +645,7 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if !uploadTypeAllowed(part.Header.Get("Content-Type"), part.FileName()) {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "This image file type is not supported", "Refer to the API documentation for the supported file types"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "This image file type is not supported", "Refer to API documentation for supported image file types"))
 				return
 			}
 			// Drain the whole part: the official limit for a model is 150 MB, so a
@@ -640,7 +657,7 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if written == 0 {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2003, "The image file is empty", "Please check if you passed the file, or it may be rejected by our firewall"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2003, "The image file is empty", "Check if the file is corrupted"))
 				return
 			}
 			err = nil
@@ -736,7 +753,12 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		}
 		for _, field := range k.Required {
 			if value, ok := body[field].(string); !ok || strings.TrimSpace(value) == "" {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, field+" is required", "Refer to the API documentation for parameter requirements"))
+				message := field + " is required"
+				if field == "model" && isGenerationPath(k.Path) {
+					// The real answer lists the allowed names (captured 2026-10-29).
+					message = missingModel().message
+				}
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
 				return
 			}
 		}
@@ -822,7 +844,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			case "model":
 				t.typ = "smartsegment_model"
 			default:
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "seg_type must be image or model", "Refer to the API documentation for parameter requirements"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "invalid seg_type; allowed: image, model", "Refer to the API documentation for parameter requirements"))
 				return
 			}
 		}

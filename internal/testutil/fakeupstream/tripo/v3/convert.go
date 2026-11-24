@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
@@ -70,7 +71,10 @@ var convertParameters = map[string]convertParameter{
 func convertRequestError(body map[string]any) string {
 	format, _ := body["format"].(string)
 	if !slices.Contains(convertFormats, format) {
-		return fmt.Sprintf("format must be one of %v", convertFormats)
+		// The real answer to GLB (captured 2026-11-25, #577) lists the formats in byte
+		// order. An absent format is the "format is required" of the create handler.
+		allowed := slices.Sorted(slices.Values(convertFormats))
+		return fmt.Sprintf("invalid format '%s', allowed values: %s", format, strings.Join(allowed, ", "))
 	}
 	for name, spec := range convertParameters {
 		value, present := body[name]

@@ -65,9 +65,10 @@ func TestGenerationRequestsAreCheckedAgainstTheOfficialContract(t *testing.T) {
 		// model.
 		{"unknown model", "v9.9-20990101", nil, 1004},
 		{"a name from no family", "default", nil, 1004},
-		{"deprecated v2.0 is 2015", "v2.0-20240919", nil, 2015},
-		{"deprecated v1.4 is 2015", "v1.4-20240625", nil, 2015},
-		{"deprecated Turbo is 2015", "Turbo-v1.0-20250506", nil, 2015},
+		// A retired name is an unknown name (v2.0 captured 2026-11-25, #577), not 2015.
+		{"retired v2.0 is 1004", "v2.0-20240919", nil, 1004},
+		{"retired v1.4 is 1004", "v1.4-20240625", nil, 1004},
+		{"retired Turbo is 1004", "Turbo-v1.0-20250506", nil, 1004},
 		{"H3.1 plain", modelH31, nil, 0},
 		{"H3.0 plain", modelH30, nil, 0},
 		{"H2.5 plain", modelH25, nil, 0},
@@ -231,6 +232,42 @@ func TestGenerationAcceptsTheProductionDefaults(t *testing.T) {
 			status, _, response := f.do(http.MethodPost, path, key, generationBody(path, tc.model, tc.extra))
 			if status != http.StatusOK {
 				t.Errorf("%s %s: %d %v", path, name, status, response)
+			}
+		}
+	}
+}
+
+// A generation request without a model gets the real answer of the 2026-10-29
+// account sample (1004 "model is required, allowed values: ..."), and a name no
+// family has the real "invalid model" answer of the 2026-11-25 probes (#577), on
+// every generation endpoint: the same five names in byte order.
+func TestModelRefusalsCarryTheRealText(t *testing.T) {
+	samples, err := fakeupstream.LoadSamples(sampleFS, "testdata/tripo-v3-account.candidate.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missing string
+	for _, exchange := range samples.Find("POST /v3/generation/text-to-model", "") {
+		if exchange.Response.Status == http.StatusBadRequest {
+			missing, _ = mustBody(t, exchange)["message"].(string)
+		}
+	}
+	if missing == "" {
+		t.Fatal("the account sample has no refused generation request")
+	}
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
+	for _, path := range generationPaths {
+		for _, tc := range []struct{ model, want string }{
+			{"", missing},
+			{"v2.0-20240919", "invalid model 'v2.0-20240919', allowed values: " + probeModels},
+		} {
+			body := generationBody(path, tc.model, nil)
+			if tc.model == "" {
+				delete(body, "model")
+			}
+			status, _, response := f.do(http.MethodPost, path, key, body)
+			if status != http.StatusBadRequest || codeOf(t, response) != 1004 || response["message"] != tc.want {
+				t.Errorf("%s model %q: %d %v, want 400/1004 %q", path, tc.model, status, response, tc.want)
 			}
 		}
 	}
