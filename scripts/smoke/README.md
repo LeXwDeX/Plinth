@@ -157,6 +157,30 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- \
 
 四视图链的 `--generate-image` 会先用自动方式会话生成一张角色图（多一次付费图任务，`--max-paid` 需相应加 1）；`--no-control` 跳过单视角对照组。脚本不批准计划外的 `image-to-3D` 逐步卡，故成功复现后该会话会留待处理的卡，属预期证据，不自动清理。
 
+### 3D 端点链脚本（#539，Meshy 与 Hyper3D Rodin）
+
+1.9.0 发布前「每个 Provider 的每个 API 功能只调用真实上游一轮」用两个脚本覆盖 Meshy 与 Rodin 的 3D 端点。它们和上面的 Agent 脚本不同：不经 Agent，固定 Offering，直接走公开任务 API 的 `prepare`、`grants`、`tasks` 三步，公共逻辑在 `l5_endpoints.py`。
+
+**默认连 fake。** 门禁用 `upstream_shape.py` 的 fake-default：目标是 fake 形态（`ART_AI_UPSTREAM_SHAPE=fake`，`release-env.py smoke` 会按环境设置）时不带任何开关直接运行，并拒绝 `--live`；目标不是 fake（live、mixed 或形态未知）时必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`，缺一退出码 2，且在发出任何请求之前。每次真实运行还须先在对话里取得用户当次同意（`AGENTS.md`「上游接口与 Fake」）。
+
+| 脚本 | 链路（每步一个请求，后者以前者为来源） | 预计费用与默认上限 |
+|---|---|---|
+| `smoke-l5-meshy-endpoints.py` | 文生图 `nano-banana-2`（T-pose 人形）→ 图生图（侧视图）→ t2.5 文生 3D（preview 与 refine 在同一 Task 内）→ t2.5 图生 3D（2k）→ 7.1 多图生 3D（两张图，2k 几何、8K 纹理；8K 被明确拒绝时另发一个 2K 纹理的新请求 `multiview_2k`，不是重放）→ remesh（来源 t2.5 图生 3D，三角面、10000 面）→ convert、retexture、rigging、uv-unwrap、resize、analyze、multi-color（共用 remesh 来源）→ animation（接 rigging）→ text-to-motion（独立） | 按 Catalog 预估合计约 142 Meshy credits（审计表的官方价合计约 132，差在 t2.5 图生 3D 与 retexture 的默认预估高于 2K 官方价）；默认 `--max-credits 160`；t2.5 refine 价与积分单价官方未列 |
+| `smoke-l5-hyper3d.py` | Rodin 文生 3D（Quad、10000 面、`texture_mode=high`、TAPose、quad_normal、seed 1）→ Bang（来源任务）→ 取回其 GLB 作为 Bang 上传模式与 Texture 的模型（超过 Offering 的上传上限则这两步 SKIP 并说明）→ 图生 3D（两张图只带一个 `image_label`，Adapter 补 `?`） | 约 5.0 Hyper3D credits（文生 1.0、Bang 两次各 0.5、Texture 产品路径默认 2.0、图生 1.0）；默认 `--max-credits 7`；`--no-texture` 去掉 Texture；需要 Full API access |
+
+通用规则：
+
+- **每个 POST 只发一次。** 失败或超时只读取任务（Observe），不重放；要再跑某一步，用 `--only 步骤名 --seed 来源步骤=任务ID`（新请求，须先读懂第一次为什么失败）。服务端对 Rodin 提交 5xx 的重发由 Catalog 连接声明（`retry_submit_server_error`），脚本关不掉，重复计费会在收尾的余额对账里显现。
+- **预算上限。** 每步提交前用冻结报价（没有就用 Offering 预估价，免费步骤另行声明）累计，超过 `--max-credits` 的那一步与之后的步骤都不发送，报告里记为未提交。
+- **余额对账。** 整轮前后各读一次公开余额面板（面板有短时缓存，收尾前等 `--balance-wait` 秒），差值与各步报价之和写入 `RECONCILE` 行与证据文件；报价是估算，差值不当作通过条件，只要求余额没有增加。
+- **产物检查。** 必需槽位齐全、每个产物的字节数与 SHA-256 与公开声明一致、模型文件二次下载一致、魔数与格式相符；GLB 从自身字节读三角面、贴图边长、网格数与包围盒高度。Meshy 的三角面上限、resize 高度，以及 Bang 的分部件数，只对真实上游强制（fake 的模型是固定夹具，数值只记录）；Rodin 文生 3D 的三角面按「每个 Quad 面约 2.18 个三角面，±35%」强制，fake 与真实上游都查。
+- **原始结果。** 任务载荷与下载的字节只写到工作树外的 0700 临时目录，结束即删除（`--keep-raw` 保留并打印路径）；`--report <目录>` 只写脱敏的 `<脚本>.json` 与 `<脚本>-evidence.json`（每步的 Offering、任务 ID、状态序列、报价、产物角色/大小/SHA-256 前缀、失败类别，不含 URL 查询串、提示词与凭据）。密钥只读环境变量，从不打印。
+- **Meshy 收尾。** Plinth 的公开 API 没有上游删除，也不暴露上游作业 ID，所以收尾是单独、显式的命令：运行写出的证据文件里有按依赖逆序排好的 `cleanup`（任务 ID 与上游路径）；操作者从服务端库（`generation_attempts.upstream_job_id`，按创建顺序）整理出 `{任务ID: [上游作业ID, …]}`，再运行 `python3 scripts/smoke/smoke-l5-meshy-endpoints.py --cleanup 证据.json --remote-ids 映射.json`（环境里要有 `MESHY_API_KEY`，非官方地址再设 `MESHY_BASE_URL`）。每个 DELETE 只发一次，依赖它的先删、refine 先于 preview；404 视为已删，409（仍在运行）报告而不重试。指向非回环地址同样要双开关。Meshy 结果只保留三天，所以真实一轮的步骤不要拖到隔天。
+
+本机验证：`python3 -m unittest scripts.tests.test_l5_endpoints`（离线，随脚本单测门禁运行）覆盖门禁、一次提交、预算、计划、检查与收尾；整链对 fake 栈的验证用 `python3 scripts/smoke/smoke-fake-stack.py --only meshy-endpoints,hyper3d-endpoints`（作为进程运行两个脚本，fake 形态、无开关，不在 `verify-local.py` 的门禁子集里，在不带 `--only` 的全量运行里；全程零真实上游）。这一整链第一次对 fake 运行就发现 `meshy/meshy-t2.5/image-to-3d` 默认请求会把空的 `pose_mode` 发给 Meshy（其余三个 Meshy 生成 Offering 都声明了「为空则不发」），已补 Catalog 的 `omit_when`，回归是 `internal/catalog` 的 `TestEveryMeshyGenerationOfferingOmitsAnEmptyPoseMode`。
+
+Rodin 还有几项只能直连上游探测，由对齐工具 `cmd/fake-upstream-align` 的 `hyper3d/api-v2` Profile 新增的步骤承担（每个提交步骤带两个免费的 `-status`、`-download` 后续步骤，须单独运行、用户当次同意、带 `-confirm-paid`，全部按官方页面构造、待真实一轮定稿）：`balance-usage`（`check_balance?usage_page=1`，免费，取 `usage[]` 形态）；`reject-seed-probe`（`seed=65536`，超出文档上限，看真实拒绝是 400 信封还是 HTTP 201 加 `INVALID_REQUEST`，被受理则计 0.5）；`rodin-text-quadpose`（游戏角色请求的原始体，约 1）；`rodin-image-label-short`（两张图一个 `image_label`，直接发短列表看服务是否受理，约 0.5）；`bang-upload`（model 上传模式加参考图，约 0.5，模型取 `bang` 步骤的产物）；`texture-images`（Texture 参考图用官方页面的复数字段 `images`，Plinth 与 fake 现用单数 `image`，约 0.5，结果决定是否改 Catalog 的 `wire_name`；fake 目前只认单数，所以该步骤暂不对 fake 重跑）。Meshy 的对齐 Profile 已含 DELETE、余额、各生成与加工端点，本轮不新增。
+
 ## Agent 产出质量评测（#238）
 
 固定请求集在 `scripts/smoke/agent-quality/requests.json`（版本 5：9 个 3D 用例：人形角色、硬表面道具、场景件、生物、打印手办、AR 商品、参考图生 3D、多步检查点加工、开放候选；7 个 2D 用例：角色立绘、图标/道具图、系列一致性、项目系列复用、3D 输入图、开放概念方向、多轮偏好），视觉量表与评分提示词在 `scripts/smoke/agent-quality/rubric.json`，两者都带版本号。共用逻辑在 `agent_quality.py`，离线单测：`python3 -m unittest scripts.tests.test_agent_quality`。
