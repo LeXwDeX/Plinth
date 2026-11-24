@@ -397,6 +397,9 @@ export function Composer({
     onChange: (event) => {
       setCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
       setActiveIndex(0);
+      // Typing refilters an open list and moves the highlight back to the first option, so the list returns to
+      // its top too. scrollTop stays inside the list; scrollIntoView could also scroll the page or the dialog.
+      if (mentionListRef.current) mentionListRef.current.scrollTop = 0;
       setPreviewIndex(null);
       setDismissed(null);
       onChange(event.currentTarget.value);
@@ -422,8 +425,17 @@ export function Composer({
     onKeyDown: (event) => {
       if (event.nativeEvent.isComposing || event.keyCode === 229) return;
       if (listOpen) {
-        if (event.key === 'ArrowDown') { event.preventDefault(); const next = (highlighted + 1) % matches.length; previewFromPointer.current = false; setActiveIndex(next); setPreviewIndex(next); return; }
-        if (event.key === 'ArrowUp') { event.preventDefault(); const next = (highlighted - 1 + matches.length) % matches.length; previewFromPointer.current = false; setActiveIndex(next); setPreviewIndex(next); return; }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const next = (highlighted + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length;
+          previewFromPointer.current = false;
+          setActiveIndex(next);
+          setPreviewIndex(next);
+          // Keyboard moves bring the new option into the scrolling list, wrap included. Pointer moves do not,
+          // so the list never jumps under the mouse. The guard keeps jsdom (no scrollIntoView) harmless.
+          mentionListRef.current?.querySelectorAll<HTMLElement>('[role="option"]')[next]?.scrollIntoView?.({ block: 'nearest' });
+          return;
+        }
         if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); pickMention(matches[highlighted]); return; }
         if (event.key === 'Escape' && mention) { event.preventDefault(); event.stopPropagation(); setDismissed(mention.start); return; }
       }
