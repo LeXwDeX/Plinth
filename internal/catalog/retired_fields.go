@@ -14,7 +14,7 @@ import (
 // not belong here: the strict decode refuses it instead (#521).
 //
 // Each entry is the path of object keys from the document root; "*" stands for
-// every key of that object.
+// every key of that object and "[]" for every element of an array.
 var retiredCatalogFields = [][]string{
 	// #553: a reply has no tool call limit; the limit, its runtime override,
 	// the texts of the summary that ended a reply at the limit, the end reason
@@ -32,6 +32,13 @@ var retiredCatalogFields = [][]string{
 	{"application", "localization", "bundles", "*", "fields", "chat.presentation.messages.tool_round_limit_pending_item"},
 	{"application", "localization", "bundles", "*", "fields", "chat.presentation.messages.tool_round_limit_pending_tool"},
 	{"application", "chat", "state", "turn_end_reasons", "tool_limit"},
+	// #490, #511: a tool's execution no longer declares a consent mode (the
+	// approval policy decides), and the runtime routes no longer name agent_bind
+	// (the call binds its Task through the operation record).
+	{"application", "chat", "tools", "[]", "execution", "consent"},
+	{"application", "chat", "agent_tools", "[]", "execution", "consent"},
+	{"application", "agent_configuration", "mcp_presets", "[]", "tools", "[]", "execution", "consent"},
+	{"application", "runtime", "http", "routes", "agent_bind"},
 	{"application", "content", "messages", "ui.studio.tool_calls.label"},
 	{"application", "content", "messages", "ui.studio.tool_calls.hint"},
 	{"application", "localization", "bundles", "*", "messages", "ui.studio.tool_calls.label"},
@@ -58,6 +65,27 @@ func dropRetiredFields(document []byte) []byte {
 // dropRetiredField removes one path from an object. Only the objects along a
 // path that changed are encoded again; every other value keeps its raw bytes.
 func dropRetiredField(raw []byte, path []string) ([]byte, bool) {
+	if path[0] == "[]" {
+		var elements []json.RawMessage
+		if json.Unmarshal(raw, &elements) != nil || elements == nil {
+			return raw, false
+		}
+		changed := false
+		for index, element := range elements {
+			if next, elementChanged := dropRetiredField(element, path[1:]); elementChanged {
+				elements[index] = next
+				changed = true
+			}
+		}
+		if !changed {
+			return raw, false
+		}
+		encoded, err := json.Marshal(elements)
+		if err != nil {
+			return raw, false
+		}
+		return encoded, true
+	}
 	var object map[string]json.RawMessage
 	if json.Unmarshal(raw, &object) != nil || object == nil {
 		return raw, false
