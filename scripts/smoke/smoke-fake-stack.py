@@ -2755,16 +2755,20 @@ FAULTS = {
     "artifact-corrupt": {**{p: ("FAILED", "integrity_failure") for p in THREE_D}, "openai": ("FAILED", "protocol"),
                          "gemini": ("FAILED", "protocol"), "jimeng": ("FAILED", "integrity_failure"),
                          "matting": ("FAILED", "integrity_failure")},
-    "artifact-404": {**{p: ("FAILED", "upstream_unavailable") for p in THREE_D}, "jimeng": ("FAILED", "upstream_unavailable"),
-                     "matting": ("FAILED", "rejected")},
+    # A download that fails after the upstream finished is the platform's own materialization failing: every
+    # Provider ends integrity_failure, whatever the transport error was (#563).
+    "artifact-404": {**{p: ("FAILED", "integrity_failure") for p in THREE_D}, "jimeng": ("FAILED", "integrity_failure"),
+                     "matting": ("FAILED", "integrity_failure")},
     # The signed URLs of the first read have expired. Tripo, Meshy and Hyper3D read the job again on the
     # materialization retry and get fresh URLs, so the Task still ends SUCCEEDED (self-healing) ...
-    "artifact-expired": {**{p: ("SUCCEEDED", None) for p in THREE_D}, "jimeng": ("FAILED", "upstream_unavailable")},
+    "artifact-expired": {**{p: ("SUCCEEDED", None) for p in THREE_D}, "jimeng": ("FAILED", "integrity_failure")},
     # ... and when every URL issued before a renewal has expired (the key asks for 1000 issues; Tripo re-reads
     # its task for the format conversions too, so no small count is reliable), the Task fails like a missing
     # artifact. After the fake renews its URLs (POST /fake/control/renew-artifacts) the free result refetch
     # delivers it. Jimeng's one-shot answer has no job to read again.
-    "artifact-expired-stuck": {**{p: ("FAILED", "upstream_unavailable") for p in THREE_D}, "jimeng": ("FAILED", "upstream_unavailable")},
+    # The upstream had already finished and charged: a download that never succeeds is a charged failure of
+    # the platform's own materialization, class integrity_failure, which the #294 recharge guard knows (#563).
+    "artifact-expired-stuck": {**{p: ("FAILED", "integrity_failure") for p in THREE_D}, "jimeng": ("FAILED", "integrity_failure")},
 }
 # The API key a stack uses for a scenario, where it is not just fake-<scenario>.
 FAULT_KEYS = {"artifact-expired-stuck": "fake-artifact-expired-1000"}
