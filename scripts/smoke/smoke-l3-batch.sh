@@ -133,7 +133,7 @@ drive_step() {
     sleep 3
     if [ $nudges -lt 2 ] && [ $((SECONDS - dl + 180)) -gt $((nudges*60+45)) ]; then
       nudges=$((nudges+1))
-      send "$1" "$2" "请立即使用已选择的 $2 模型调用 refine_image，生成指定的测试图。直接调用生成工具；不要调用 request_consent。"
+      send "$1" "$2" "请立即使用已选择的 $2 模型调用 refine_image，生成指定的测试图。直接调用生成工具。"
     fi
   done
   return 1
@@ -236,11 +236,11 @@ for MODEL_ID in $(echo "$MODELS" | tr ',' ' '); do
   LAST_TASK_ID=""
   for i in $(seq 1 "$IMAGES"); do
     LABEL="$MODEL_ID#$i"
-    if ! send "$SID" "$MODEL_ID" "请立即使用已选择的 $MODEL_ID 模型调用 refine_image，生成第 $i 张测试图：极简风格的小木船漂浮在平静湖面，晨雾。直接调用生成工具准备本次确切输入；不要调用 request_consent。"; then
+    if ! send "$SID" "$MODEL_ID" "请立即使用已选择的 $MODEL_ID 模型调用 refine_image，生成第 $i 张测试图：极简风格的小木船漂浮在平静湖面，晨雾。直接调用生成工具准备本次确切输入。"; then
       bad "$LABEL message request failed"; continue
     fi
     if ! drive_step "$SID" "$MODEL_ID" "$LAST_TASK_ID"; then
-      if ! send "$SID" "$MODEL_ID" "继续第 $i 张：请调用 refine_image 准备并生成指定图片，不要调用 request_consent。"; then
+      if ! send "$SID" "$MODEL_ID" "继续第 $i 张：请调用 refine_image 准备并生成指定图片。"; then
         bad "$LABEL nudge request failed"; continue
       fi
       if ! drive_step "$SID" "$MODEL_ID" "$LAST_TASK_ID"; then bad "$LABEL no consent and no new task"; continue; fi

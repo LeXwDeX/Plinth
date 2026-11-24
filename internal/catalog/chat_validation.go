@@ -531,12 +531,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		return errors.New("agent 的 max_listed_models 必须为正数")
 	}
 	for name, value := range map[string]string{
-		"consent_approved_content":  schema.Agent.ConsentApprovedContent,
 		"consent_denied_content":    schema.Agent.ConsentDeniedContent,
 		"consent_waiting_content":   schema.Agent.ConsentWaitingContent,
 		"consent_duplicate_content": schema.Agent.ConsentDuplicateContent,
-		"consent_blocked_content":   schema.Agent.ConsentBlockedContent,
-		"consent_required_content":  schema.Agent.ConsentRequiredContent,
 		"consent_limit_content":     schema.Agent.ConsentLimitContent,
 		"consent_reconcile_content": schema.Agent.ConsentReconcileContent,
 	} {

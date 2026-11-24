@@ -246,12 +246,6 @@ func (orchestrator *Orchestrator) finalizeBackgroundTurnOnce(ctx context.Context
 				return ErrTurnCheckpointConflict
 			}
 			call.Background = true
-			if orchestrator.stopConsent != nil {
-				if err := orchestrator.stopConsent(command.OwnerID, command.SessionID, call.ID,
-					call.IdempotencyKey, call.TaskID); err != nil {
-					return err
-				}
-			}
 		}
 		if !found {
 			orchestrator.logger.Warn("后台继续的等待调用不在回复里",

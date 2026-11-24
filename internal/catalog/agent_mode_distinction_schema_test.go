@@ -44,8 +44,27 @@ func TestAgentTextsSeparateAgentScopeFromApprovalMode(t *testing.T) {
 		seen++
 		require("tool "+tool.Name, tool.Description,
 			"approval mode (auto, budget or manual",
-			"capabilities are approved by policy in auto and manual modes and by the approved plan in budget mode, except that a step with fixed extra credits",
+			"In manual mode the capabilities the policy lists",
+			"any step whose own credit estimate reaches the server's threshold",
+			"In budget mode a step the approved plan covers runs within its remaining budget without a card",
 			"unrelated to the Agent scope", "Never tell the person to switch the Agent scope or the approval mode")
+		// #521: only an Agent's own step is held for its extra credits alone
+		// (RequiresHumanForExtraSpend on AgentPending grants); a plan step is
+		// asked for as HumanBrowser or Delivery and is decided by the capability
+		// list and the threshold, so the plan tool must not claim the extra rule.
+		hasExtraRule := strings.Contains(tool.Description, "any step with extra credits")
+		if tool.Name == "process_model" && !hasExtraRule {
+			t.Errorf("tool %s omits the extra-credits rule of an Agent step", tool.Name)
+		}
+		if tool.Name == "plan_model_processing" && hasExtraRule {
+			t.Errorf("tool %s claims extra credits alone hold a plan step for the person", tool.Name)
+		}
+		// #521: manual mode cards the expensive steps whatever their capability
+		// (#490), so the description no longer says remesh, rigging and animation
+		// are approved by policy there.
+		if strings.Contains(tool.Description, "capabilities are approved by policy in auto and manual modes") {
+			t.Errorf("tool %s still says remesh, rigging and animation are approved by policy in manual mode", tool.Name)
+		}
 	}
 	if seen != 2 {
 		t.Fatalf("found %d of the 2 processing tools", seen)

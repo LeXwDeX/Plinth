@@ -180,7 +180,7 @@ for i in (json.load(open('/tmp/s1-pa.json')) or {}).get('items') or []:
     retry_nudge() {
       req /tmp/s1-m.json -X POST "$BASE/api/chat/sessions/$SID/messages" \
         -H 'Content-Type: application/json' -H "Origin: $BASE" -b /tmp/s1-cookies.txt \
-        -d "{\"content\":\"请使用已选择的 $M3D 模型调用 create_model_3d 生成一个简单的木凳，准备确切输入并等待同意；不要调用 request_consent，不要调用任何 2D 图片工具，也不要在批准前提交生成。$FAKE_TOOL_MARKER\",\"creative_domain\":\"model-3d\",\"ai_model\":\"$M3D\"}" >/dev/null
+        -d "{\"content\":\"请使用已选择的 $M3D 模型调用 create_model_3d 生成一个简单的木凳，准备确切输入并等待同意；不要调用任何 2D 图片工具，也不要在批准前提交生成。$FAKE_TOOL_MARKER\",\"creative_domain\":\"model-3d\",\"ai_model\":\"$M3D\"}" >/dev/null
     }
     # LLM 噪声兜底：超时则重发一次再等，最多两次；出现任务时立即停止等待
     pend; WRC=$?

@@ -265,8 +265,6 @@ type OrchestratorConfig struct {
 	// was lost before the assistant message could be updated.
 	TaskLookup func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
 	TaskGet    func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
-	// StopConsent settles only the matching durable claim after task lookup.
-	StopConsent func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
 	// ToolAllowed 声明 capability 是否属于当前会话领域（B14：2D 会话
 	// 不收 3D 工具）。nil 时不过滤（测试）。
 	ToolAllowed func(capability, domain string) bool
@@ -344,7 +342,6 @@ type Orchestrator struct {
 	capabilities   []catalog.CapabilityPresentation
 	taskLookup     func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
 	taskGet        func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
-	stopConsent    func(ownerID, sessionID, callID, idempotencyKey, taskID string) error
 	texts          *catalog.TextLocalizer
 	// stepPolicy, stepUsage, stepBalances and stepCosts render the Agent's
 	// 「3D 步数」segment (#330); a nil policy keeps the segment out.
@@ -525,17 +522,11 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 				taskID = string(task.ID)
 			case generation.IsCode(err, generation.ErrNotFound):
 				if taskID == "" {
-					if orchestrator.stopConsent != nil {
-						combined = errors.Join(combined, orchestrator.stopConsent(ownerID, sessionID, call.ID, call.IdempotencyKey, ""))
-					}
 					continue
 				}
 			case generation.IsCode(err, generation.ErrConflict):
 				// A tombstoned key is permanently consumed, with no live Task
-				// left to cancel. Settle only this call's claim and continue.
-				if orchestrator.stopConsent != nil {
-					combined = errors.Join(combined, orchestrator.stopConsent(ownerID, sessionID, call.ID, call.IdempotencyKey, taskID))
-				}
+				// left to cancel.
 				continue
 			default:
 				combined = errors.Join(combined, fmt.Errorf("lookup stopped turn task for call %s: %w", call.ID, err))
@@ -557,9 +548,6 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 			}
 		}
 		calls[index].TaskID = taskID
-		if orchestrator.stopConsent != nil {
-			combined = errors.Join(combined, orchestrator.stopConsent(ownerID, sessionID, call.ID, call.IdempotencyKey, taskID))
-		}
 		if orchestrator.taskCanceler != nil {
 			if err := orchestrator.taskCanceler(ctx, ownerID, taskID); err != nil {
 				combined = errors.Join(combined, fmt.Errorf("cancel stopped turn task %s: %w", taskID, err))
@@ -752,7 +740,6 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		capabilities:       config.Capabilities,
 		taskLookup:         config.TaskLookup,
 		taskGet:            config.TaskGet,
-		stopConsent:        config.StopConsent,
 		texts:              config.Texts,
 		stepPolicy:         config.StepPolicy,
 		stepUsage:          config.StepUsage,

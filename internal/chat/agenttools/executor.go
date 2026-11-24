@@ -5,12 +5,9 @@ package agenttools
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -28,12 +25,10 @@ const (
 	ToolSetParams         = "set_params"
 	ToolListOfferings     = "list_offerings"
 	ToolGetTask           = "get_task"
-	ToolObserveTask       = "observe_task"
 	ToolGetProcessingPlan = "get_processing_plan"
 	// ToolReviseProcessingPlan applies one controlled revision to an
 	// existing processing plan within the approval already given (#251).
 	ToolReviseProcessingPlan = "revise_processing_plan"
-	ToolRequestConsent       = "request_consent"
 	ToolCreateThreeView      = "create_three_view"
 	// ToolListSessionModels lets the Agent find the session's finished 3D
 	// models that the processing tools can take as a source.
@@ -94,26 +89,6 @@ const (
 	// ToolListProjectAssets lists the project assets frozen with this turn,
 	// with the @projectN handles the Agent may pass to a generation tool (#240).
 	ToolListProjectAssets = "list_project_assets"
-)
-
-// removedRequestConsentContent answers the retired request_consent tool (#491).
-// It only ever recorded an intent, so the Agent is sent to the generation tool
-// that freezes the exact input and asks for the human decision.
-const removedRequestConsentContent = "request_consent has been removed: it only recorded an intent and never authorized a paid operation. Call the generation tool with the final prompt and references to freeze the input; the server then asks the user to approve that operation."
-
-// 同意状态键与决定值（agent 状态 store 与 harness consent 端点共用词汇）。
-const (
-	ConsentPendingKey  = agentparams.ConsentPendingKey
-	ConsentDecisionKey = agentparams.ConsentDecisionKey
-	ConsentApprovedKey = agentparams.ConsentApprovedKey
-	// ConsentSnapshotKey 保存批准时的生成目标快照（模型+参数哈希，
-	// 服务端在创建待批准项时写入）。生成执行前必须与当前选择一致，
-	// 防止批准后被 set_params 或换模型改写计费范围（AGT-05）。
-	ConsentSnapshotKey = agentparams.ConsentSnapshotKey
-
-	ConsentDecisionPending  = "pending"
-	ConsentDecisionApproved = "approved"
-	ConsentDecisionDenied   = "denied"
 )
 
 type Config struct {
@@ -228,35 +203,28 @@ type Config struct {
 	BriefSavedMessage    string
 	BriefInvalidTemplate string
 	BriefMessages        catalog.ChatProductionBriefMessages
-	// Preflight 在同意门禁之前执行无需用户交互即可判定的校验
-	//（如"未选择生成模型"），返回面向 LLM 的失败文案；空串表示
-	// 通过。批准不再被一次注定失败的调用白白消耗（AGT-04）。
+	// Preflight 在准备付费操作（创建待批准项）之前执行无需用户交互即可
+	// 判定的校验（如"未选择生成模型"），返回面向 LLM 的失败文案；空串表示
+	// 通过。批准卡不再为一次注定失败的调用而出现（AGT-04）。
 	Preflight func(command chat.ToolCommand) string
 	// SubmissionGate 是第一层付费闸门（#328 §2.5.5）：生成类工具在提交
 	// 前检查清单 run/项状态与在场，返回非空文案即拒绝。fresh 与已 prepared
 	// 的重放都经过这里；已绑定的 Task 属观察而非新提交，不经过。
 	// nil 表示未装配自动制作，行为不变。
 	SubmissionGate func(ctx context.Context, command chat.ToolCommand) string
-	// ConsentState 读取会话的同意状态；ConsentClear 在一次付费生成
-	// 消费掉批准后清空同意状态（一次性语义）。二者必须同时提供。
-	// 生成工具自己维护批准快照，agenttools 只读状态。
-	ConsentState    func(scope string) map[string]json.RawMessage
-	ConsentClear    func(scope string)
-	ConsentClaim    func(scope, callID, idempotencyKey string, snapshot json.RawMessage) (taskID string, allowed bool, err error)
-	ConsentAccepted func(scope, callID, taskID string) error
-	ConsentRelease  func(scope, callID, idempotencyKey string) error
 	// TaskObservationTimeout bounds recovery when the accepted Task cannot be
 	// read. Application assembly supplies the Schema request timeout.
 	TaskObservationTimeout time.Duration
 	// MaxGenerationCallsPerTurn 限定单轮付费生成次数（Schema 声明；
 	// <=0 表示不设限，仅测试允许）。
 	MaxGenerationCallsPerTurn int
-	// Consent*Content 是付费硬门禁回给 LLM 的文案（Product Schema
-	// chat.agent.consent_*，B16 迁入 Schema，禁止硬编码）。
-	ConsentBlockedContent   string
-	ConsentReconcileContent string
-	ConsentRequiredContent  string
+	// ConsentLimitContent is what the Agent reads when the turn's generation
+	// call limit is reached; ConsentReconcileContent is the failure text of a
+	// three-view view whose submission outcome stayed unknown past its wait
+	// (Product Schema chat.agent.consent_limit_content and
+	// consent_reconcile_content).
 	ConsentLimitContent     string
+	ConsentReconcileContent string
 }
 
 type Executor struct {
@@ -305,11 +273,6 @@ type Executor struct {
 	briefSavedMessage      string
 	briefInvalidTemplate   string
 	briefMessages          catalog.ChatProductionBriefMessages
-	consentState           func(scope string) map[string]json.RawMessage
-	consentClear           func(scope string)
-	consentClaim           func(scope, callID, idempotencyKey string, snapshot json.RawMessage) (string, bool, error)
-	consentAccepted        func(scope, callID, taskID string) error
-	consentRelease         func(scope, callID, idempotencyKey string) error
 	taskObservationTimeout time.Duration
 
 	// 每轮生成次数统计：scope → (轮次 assistant 消息 ID, 已用次数)。
@@ -318,8 +281,10 @@ type Executor struct {
 	usage         map[string]generationUsage
 	maxGeneration int
 
-	// consentContents 承载 Schema 声明的同意门禁文案。
-	consentContents consentContents
+	// limitContent and reconcileContent are the Schema's texts for a reached
+	// generation call limit and an unknown three-view submission outcome.
+	limitContent     string
+	reconcileContent string
 }
 
 type SkillReferenceResolver interface {
@@ -395,20 +360,6 @@ func New(config Config) (*Executor, error) {
 	if config.Params == nil || config.Generate == nil {
 		return nil, errors.New("agent tools: incomplete dependencies")
 	}
-	if (config.ConsentState == nil) != (config.ConsentClear == nil) {
-		return nil, errors.New(
-			"agent tools: consent state and clear must be provided together",
-		)
-	}
-	if (config.ConsentClaim == nil) != (config.ConsentAccepted == nil) {
-		return nil, errors.New("agent tools: consent claim and accepted must be provided together")
-	}
-	if config.ConsentClaim != nil && config.ConsentRelease == nil {
-		return nil, errors.New("agent tools: durable consent requires release for pre-submit rejection")
-	}
-	if config.ConsentClaim != nil && config.ConsentState == nil {
-		return nil, errors.New("agent tools: durable consent requires state reader")
-	}
 	choiceKinds := make(map[string]catalog.ChatChoiceKindSchema, len(config.ChoiceKinds))
 	for _, kind := range config.ChoiceKinds {
 		choiceKinds[kind.ID] = kind
@@ -451,20 +402,11 @@ func New(config Config) (*Executor, error) {
 		assetListUnavailable:   config.AssetListUnavailable,
 		writeVisualAnchor:      config.WriteVisualAnchor,
 		project:                config.Project,
-		consentState:           config.ConsentState,
-		consentClear:           config.ConsentClear,
-		consentClaim:           config.ConsentClaim,
-		consentAccepted:        config.ConsentAccepted,
-		consentRelease:         config.ConsentRelease,
 		taskObservationTimeout: config.TaskObservationTimeout,
 		usage:                  map[string]generationUsage{},
 		maxGeneration:          config.MaxGenerationCallsPerTurn,
-		consentContents: consentContents{
-			blocked:   config.ConsentBlockedContent,
-			reconcile: config.ConsentReconcileContent,
-			required:  config.ConsentRequiredContent,
-			limit:     config.ConsentLimitContent,
-		},
+		limitContent:           config.ConsentLimitContent,
+		reconcileContent:       config.ConsentReconcileContent,
 	}, nil
 }
 
@@ -478,7 +420,7 @@ func (e *Executor) Execute(
 		return e.setParams(command), nil
 	case ToolListOfferings:
 		return e.listOfferings(command), nil
-	case ToolGetTask, ToolObserveTask:
+	case ToolGetTask:
 		return e.readTaskState(ctx, command), nil
 	case ToolRecoverTaskResult:
 		return e.recoverTaskResult(ctx, command), nil
@@ -585,8 +527,6 @@ func (e *Executor) Execute(
 			return chat.ToolResult{Error: "self-check record unavailable", NoSubmission: true}, nil
 		}
 		return e.recordSelfCheck(ctx, command)
-	case ToolRequestConsent:
-		return e.requestConsent(ctx, command), nil
 	case ToolCreateThreeView:
 		return e.createThreeView(ctx, command, observe)
 	default:
@@ -907,44 +847,8 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 	return result
 }
 
-func (e *Executor) requestConsent(
-	_ context.Context,
-	_ chat.ToolCommand,
-) chat.ToolResult {
-	// request_consent was removed (#491): it never created or waited for an
-	// approval, so a published configuration that still offers it is sent
-	// straight to the generation tool that freezes the input and asks for the
-	// decision. Answering here keeps the name from falling into the generic
-	// unknown-tool branch.
-	return chat.ToolResult{AgentContent: removedRequestConsentContent, NoSubmission: true}
-}
-
-// consentDecision 解析同意状态：consent_pending 不存在视为无待批准项；
-// 存在时以 consent_decision 为准（兼容只写 consent_approved 的旧状态）。
-func consentDecision(state map[string]json.RawMessage) string {
-	if state == nil || state[ConsentPendingKey] == nil {
-		return ""
-	}
-	var decision string
-	if raw := state[ConsentDecisionKey]; raw != nil {
-		_ = json.Unmarshal(raw, &decision)
-	}
-	switch decision {
-	case ConsentDecisionApproved, ConsentDecisionDenied:
-		return decision
-	}
-	var approved bool
-	if raw := state[ConsentApprovedKey]; raw != nil {
-		_ = json.Unmarshal(raw, &approved)
-	}
-	if approved {
-		return ConsentDecisionApproved
-	}
-	return ConsentDecisionPending
-}
-
 // submissionRefused runs the first paid-gate layer (#328). A non-empty Schema
-// text refuses the call before any consent claim or generation side effect.
+// text refuses the call before any approval card or generation side effect.
 func (e *Executor) submissionRefused(
 	ctx context.Context,
 	command chat.ToolCommand,
@@ -969,152 +873,36 @@ func (e *Executor) generateWithParams(
 	if command.BoundTaskID != "" {
 		return e.generate.Execute(ctx, command, observe)
 	}
-	// Exact execution grants are prepared by the generation tool from the full
-	// normalized input. A legacy request_consent decision is only conversational
-	// intent and must never be claimed as authorization for that operation.
-	if exact, ok := e.generate.(interface{ UsesExecutionGrants() bool }); ok && exact.UsesExecutionGrants() {
-		// The first paid-gate layer runs for a fresh operation and for its
-		// already-prepared replay: both are one new submission here.
-		if result, refused := e.submissionRefused(ctx, command); refused {
-			return result, nil
-		}
-		alreadyPrepared := false
-		if reader, ok := e.generate.(interface {
-			ExistingOperation(context.Context, chat.ToolCommand) (bool, error)
-		}); ok {
-			var err error
-			alreadyPrepared, err = reader.ExistingOperation(ctx, command)
-			if err != nil {
-				return chat.ToolResult{}, err
-			}
-		}
-		if !alreadyPrepared && e.preflight != nil {
-			if message := e.preflight(command); message != "" {
-				return chat.ToolResult{AgentContent: message, NoSubmission: true}, nil
-			}
-		}
-		if !alreadyPrepared && e.generationLimitReachedForCall(scope, command.AssistantMessageID,
-			command.Call.ID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.consentContents.limit, NoSubmission: true}, nil
-		}
-		command.ExplicitParameters = explicitParameters(command)
-		command.Options = e.mergedOptions(scope, command)
-		return e.generate.Execute(ctx, command, observe)
-	}
-	if e.consentClaim != nil {
-		// A crash may leave an accepted Task without its chat binding. A
-		// recovery-only lookup must run before current-model preflight and
-		// per-turn limits; it cannot reserve a new approval.
-		taskID, _, err := e.consentClaim(scope, command.Call.ID, command.IdempotencyKey(), nil)
-		if err != nil {
-			return chat.ToolResult{Error: "consent recovery unavailable"}, err
-		}
-		if taskID != "" {
-			command.BoundTaskID = taskID
-			return e.generate.Execute(ctx, command, observe)
-		}
-	}
-	// 第一层付费闸门（#328）：清单项会话只在 run 运行且在场时提交新操作。
-	// 已恢复的绑定 Task 在上面按观察返回，不经过这里。
+	// The generation tool prepares the exact operation from the full normalized
+	// input and asks for the decision by the session approval policy (#491);
+	// nothing here claims, records or consumes a conversational consent. The
+	// first paid-gate layer runs for a fresh operation and for its
+	// already-prepared replay: both are one new submission here.
 	if result, refused := e.submissionRefused(ctx, command); refused {
 		return result, nil
 	}
-	// 预检（AGT-04）：不需要用户交互就能判定的失败（未选模型等）
-	// 在同意门禁之前直接返回，批准不再被无效调用消耗。
-	if e.preflight != nil {
+	alreadyPrepared := false
+	if reader, ok := e.generate.(interface {
+		ExistingOperation(context.Context, chat.ToolCommand) (bool, error)
+	}); ok {
+		var err error
+		alreadyPrepared, err = reader.ExistingOperation(ctx, command)
+		if err != nil {
+			return chat.ToolResult{}, err
+		}
+	}
+	if !alreadyPrepared && e.preflight != nil {
 		if message := e.preflight(command); message != "" {
-			return chat.ToolResult{AgentContent: message}, nil
+			return chat.ToolResult{AgentContent: message, NoSubmission: true}, nil
 		}
 	}
-	// 硬门禁一：付费生成必须持有批准。无论 LLM 是否先调用过同意
-	// 工具，服务端都以 store 状态为准；待批准/已拒绝/从未请求一律
-	// 不执行。
-	approved := false
+	if !alreadyPrepared && e.generationLimitReachedForCall(scope, command.AssistantMessageID,
+		command.Call.ID, command.PriorGenerationCalls) {
+		return chat.ToolResult{AgentContent: e.limitContent, NoSubmission: true}, nil
+	}
 	command.ExplicitParameters = explicitParameters(command)
-	options := e.mergedOptions(scope, command)
-	if e.consentClaim != nil {
-		state := e.consentState(scope)
-		if consentDecision(state) != ConsentDecisionApproved ||
-			len(state[ConsentSnapshotKey]) == 0 ||
-			!e.consentSnapshotMatches(scope, command) {
-			return chat.ToolResult{AgentContent: e.consentContents.required}, nil
-		}
-		// Check the turn limit before creating a durable claim. An existing
-		// accepted Task already took the recovery branch above.
-		if e.generationLimitReached(scope, command.AssistantMessageID, command.PriorGenerationCalls) {
-			return chat.ToolResult{AgentContent: e.consentContents.limit}, nil
-		}
-		snapshot, err := consentSnapshot(options)
-		if err != nil {
-			return chat.ToolResult{Error: "consent snapshot unavailable"}, err
-		}
-		taskID, allowed, err := e.consentClaim(scope, command.Call.ID, command.IdempotencyKey(), snapshot)
-		if err != nil {
-			return chat.ToolResult{Error: "consent storage unavailable"}, err
-		}
-		if !allowed {
-			return chat.ToolResult{AgentContent: e.consentContents.required}, nil
-		}
-		if taskID != "" {
-			command.BoundTaskID = taskID
-			command.Options = options
-			return e.generate.Execute(ctx, command, observe)
-		}
-		approved = true
-	} else if e.consentState != nil {
-		if decision := consentDecision(e.consentState(scope)); decision != ConsentDecisionApproved {
-			return chat.ToolResult{AgentContent: e.consentContents.required}, nil
-		}
-		// 硬门禁二：批准与生成目标绑定（AGT-05）。当前模型或参数
-		// 与批准快照不一致时必须重新请求同意；原批准保持有效。
-		if !e.consentSnapshotMatches(scope, command) {
-			return chat.ToolResult{AgentContent: e.consentContents.required}, nil
-		}
-		approved = true
-	}
-	// 硬门禁三：单轮生成次数上限（Schema 声明），防止一次回复里
-	// 连发大量付费工具调用。
-	if e.consentClaim == nil && e.generationLimitReached(scope, command.AssistantMessageID, command.PriorGenerationCalls) {
-		return chat.ToolResult{AgentContent: e.consentContents.limit}, nil
-	}
-	command.Options = options
-	accepted := false
-	recordAccepted := func(taskID string) error {
-		if accepted || taskID == "" || !approved {
-			return nil
-		}
-		if e.consentAccepted != nil {
-			if err := e.consentAccepted(scope, command.Call.ID, taskID); err != nil {
-				return err
-			}
-		} else if e.consentClear != nil {
-			e.consentClear(scope)
-		}
-		accepted = true
-		return nil
-	}
-	result, err := e.generate.Execute(ctx, command, func(observation chat.ToolObservation) error {
-		if observation.Registered {
-			if err := recordAccepted(observation.TaskID); err != nil {
-				return err
-			}
-		}
-		if observe != nil {
-			return observe(observation)
-		}
-		return nil
-	})
-	if result.NoSubmission && e.consentRelease != nil {
-		if releaseErr := e.consentRelease(scope, command.Call.ID, command.IdempotencyKey()); releaseErr != nil {
-			return result, releaseErr
-		}
-	}
-	if result.TaskID != "" {
-		if acceptErr := recordAccepted(result.TaskID); acceptErr != nil {
-			return result, acceptErr
-		}
-	}
-	return result, err
+	command.Options = e.mergedOptions(scope, command)
+	return e.generate.Execute(ctx, command, observe)
 }
 
 func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, prior int) bool {
@@ -1146,26 +934,6 @@ func (e *Executor) generationLimitReachedForCall(scope, turn, callID string, pri
 	return false
 }
 
-func consentSnapshot(options chat.TurnOptions) (json.RawMessage, error) {
-	return json.Marshal(struct {
-		AIModel    string `json:"ai_model"`
-		ParamsHash string `json:"params_hash"`
-	}{AIModel: options.AIModel, ParamsHash: paramsHash(options.Parameters)})
-}
-
-// consentStateKeys 是会话状态里属于同意门禁的键。paramsStore 与
-// agent 状态 store 共用同一持久化表（B10），params 侧必须排除它们：
-// 既防止同意状态被当作生成参数合并进请求，也保证批准快照的参数
-// 哈希在"同意写入前后"保持一致（AGT-05 回归）。
-var consentStateKeys = map[string]struct{}{
-	ConsentPendingKey:           {},
-	ConsentDecisionKey:          {},
-	ConsentApprovedKey:          {},
-	ConsentSnapshotKey:          {},
-	agentparams.ConsentClaimKey: {},
-	agentparams.AgentTaskIDKey:  {},
-}
-
 // explicitParameters retains provenance without changing Options or its hash.
 func explicitParameters(command chat.ToolCommand) map[string]json.RawMessage {
 	values := command.ExplicitParameters
@@ -1180,16 +948,13 @@ func explicitParameters(command chat.ToolCommand) map[string]json.RawMessage {
 }
 
 // mergedOptions 返回存储参数与工具参数合并后的命令选项（与生成执行
-// 的合并规则一致），同时用于批准快照哈希。
+// 的合并规则一致）；参数存储本身不返回私有状态键。
 func (e *Executor) mergedOptions(scope string, command chat.ToolCommand) chat.TurnOptions {
 	merged := make(map[string]json.RawMessage, len(command.Options.Parameters))
 	for name, value := range command.Options.Parameters {
 		merged[name] = append(json.RawMessage(nil), value...)
 	}
 	for name, value := range e.params.Get(scope) {
-		if _, blocked := consentStateKeys[name]; blocked {
-			continue
-		}
 		if _, exists := merged[name]; !exists {
 			merged[name] = append(json.RawMessage(nil), value...)
 		}
@@ -1199,81 +964,7 @@ func (e *Executor) mergedOptions(scope string, command chat.ToolCommand) chat.Tu
 	return options
 }
 
-// consentSnapshotMatches 校验当前生成目标（模型+合并参数哈希）与
-// 批准时服务端写入的快照一致。快照缺失（旧状态或测试桩）视为匹配；
-// strict 校验只约束新写入的快照。
-func (e *Executor) consentSnapshotMatches(scope string, command chat.ToolCommand) bool {
-	state := e.consentState(scope)
-	raw := state[ConsentSnapshotKey]
-	if len(raw) == 0 {
-		return true
-	}
-	var snapshot struct {
-		AIModel    string `json:"ai_model"`
-		ParamsHash string `json:"params_hash"`
-	}
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
-		return false
-	}
-	if snapshot.AIModel != command.Options.AIModel {
-		return false
-	}
-	return snapshot.ParamsHash == paramsHash(e.mergedOptions(scope, command).Parameters)
-}
-
-func paramsHash(params map[string]json.RawMessage) string {
-	if len(params) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(params))
-	for name := range params {
-		keys = append(keys, name)
-	}
-	sort.Strings(keys)
-	hasher := sha256.New()
-	for _, name := range keys {
-		_, _ = hasher.Write([]byte(name))
-		_, _ = hasher.Write([]byte{0})
-		_, _ = hasher.Write(params[name])
-		_, _ = hasher.Write([]byte{0})
-	}
-	return hex.EncodeToString(hasher.Sum(nil))
-}
-
-// generationLimitReached 报告本轮生成次数是否已达上限；未达限时
-// 记一次占用。轮次以 assistant 消息 ID 界定，同会话新轮次自动重置。
-func (e *Executor) generationLimitReached(scope, turn string, prior int) bool {
-	if e.maxGeneration <= 0 {
-		return false
-	}
-	e.usageMu.Lock()
-	defer e.usageMu.Unlock()
-	current := e.usage[scope]
-	if current.turn != turn {
-		current = generationUsage{turn: turn}
-	}
-	if current.count < prior {
-		current.count = prior
-	}
-	if current.count >= e.maxGeneration {
-		e.usage[scope] = current
-		return true
-	}
-	current.count++
-	e.usage[scope] = current
-	return false
-}
-
-// scopeKey 组合 owner+session 作为 store/consent 键，保证按用户隔离。
+// scopeKey 组合 owner+session 作为参数存储和生成次数的键，保证按用户隔离。
 func (e *Executor) scopeKey(command chat.ToolCommand) string {
 	return agentparams.ScopeKey(command.OwnerID, command.SessionID)
-}
-
-// consentContents 聚合 Product Schema chat.agent.consent_* 声明的
-// 同意门禁文案（原代码常量已迁入 Schema，B16）。
-type consentContents struct {
-	blocked   string
-	reconcile string
-	required  string
-	limit     string
 }
