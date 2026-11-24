@@ -41,6 +41,8 @@ type Refusal struct {
 //   - a request with pictures the model read and refused as pictures (#497):
 //     a 400/422 that objects to the pictures' dimensions, size, format or
 //     number, which is a bad picture rather than a model without image input;
+//     neither picture class reads a refusal that names a field outside the
+//     conversation or objects to a tool declaration (a tool named refine_image);
 //   - a request field the upstream refuses (#401): an invalid_request_error
 //     that names the field it refuses, with the field's name.
 //
@@ -64,7 +66,9 @@ func (refusal Refusal) Err() error {
 			return errors.Join(&agents.QuotaExhaustion{Class: class}, err)
 		}
 	}
-	if refusal.HasImages && imageRefusalStatus(refusal.Status) && mentionsImageInput(refusal.Body) {
+	param := rejectedParameter(refusal.Status, refusal.Body)
+	if refusal.HasImages && imageRefusalStatus(refusal.Status) && mentionsImageInput(refusal.Body) &&
+		pictureField(param) && !mentionsToolDeclaration(refusal.Body) {
 		if imageInputUnsupported(refusal.Status, refusal.Body) {
 			return errors.Join(agents.ErrImagesRejected, err)
 		}
@@ -72,7 +76,7 @@ func (refusal Refusal) Err() error {
 			return errors.Join(&agents.ImageInvalidity{Reasons: reasons}, err)
 		}
 	}
-	if param := rejectedParameter(refusal.Status, refusal.Body); param != "" {
+	if param != "" {
 		return errors.Join(&agents.RequestRejection{Param: param}, err)
 	}
 	return err
@@ -180,6 +184,38 @@ func mentionsImageInput(body []byte) bool {
 	text := strings.ToLower(string(body))
 	for _, word := range []string{"image", "vision", "multimodal", "multi-modal"} {
 		if strings.Contains(text, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// pictureField is whether a refusal's named request field can hold a
+// picture: none named, or one under the conversation (messages for Chat
+// Completions, input for Responses). A refusal that names any other field — a
+// tool's parameters, tool_choice, a sampling setting — is about that field
+// even when its words say "image", because the Agent's tool names do
+// (refine_image, create_model_3d_from_image).
+func pictureField(param string) bool {
+	if param == "" {
+		return true
+	}
+	root, _, _ := strings.Cut(strings.SplitN(param, "[", 2)[0], ".")
+	return root == "messages" || root == "input"
+}
+
+// toolDeclarationPhrases are the wordings of a refusal of the request's tool
+// declarations. Such an error names the tool (refine_image) and the schema
+// keywords it objects to (width, format, maximum), which is the picture
+// vocabulary below; it is still no picture refusal.
+var toolDeclarationPhrases = []string{
+	"schema", "for function", "tools[", "tool_choice", "function.parameters",
+}
+
+func mentionsToolDeclaration(body []byte) bool {
+	text := strings.ToLower(string(body))
+	for _, phrase := range toolDeclarationPhrases {
+		if strings.Contains(text, phrase) {
 			return true
 		}
 	}

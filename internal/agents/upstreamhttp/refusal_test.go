@@ -86,6 +86,34 @@ func TestRefusalSeparatesABadPictureFromAModelWithoutImageInput(t *testing.T) {
 			param:  "temperature",
 		},
 		{
+			// A tool declaration refused in a request that carried pictures:
+			// the Agent's tool names say "image" (refine_image), and the
+			// schema's own words ("width", "format") are the picture
+			// vocabulary. The named field is a tool's, not a picture's, so
+			// it is the request field the upstream refuses (#401).
+			name:   "a tool schema refusal that names an image tool",
+			status: 400,
+			body: `{"error":{"code":"invalid_function_parameters","message":"Invalid schema for function 'refine_image': ` +
+				`In context=('properties', 'width'), 'format' is not permitted.","param":"tools[3].function.parameters","type":"invalid_request_error"}}`,
+			param: "tools[3].function.parameters",
+		},
+		{
+			// The same refusal from a vendor that names no field: it is about
+			// a tool's schema, so it is no picture class either.
+			name:   "a tool schema refusal without a named field",
+			status: 400,
+			body: `{"error":{"code":"invalid_parameter_error","message":"Invalid schema for function 'create_model_3d_from_image': ` +
+				`property 'resolution' has too large a maximum","type":"invalid_parameter_error"}}`,
+		},
+		{
+			// A picture refusal that names the picture's own field stays a
+			// bad picture: the field is in the messages.
+			name:    "a picture refusal that names the picture's field",
+			status:  400,
+			body:    `{"error":{"message":"Invalid image: the image format is not supported","param":"messages[1].content[1].image_url","type":"invalid_request_error"}}`,
+			invalid: []string{"format"},
+		},
+		{
 			name:   "a context too long",
 			status: 400,
 			body:   `{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 8192 tokens"}}`,
