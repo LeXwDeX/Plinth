@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
 	"github.com/LeXwDeX/Plinth/internal/agents/upstreamhttp"
 )
 
@@ -110,6 +111,10 @@ type Config struct {
 	// level, duration, first byte, tokens and the upstream's request id
 	// (#382). Nil writes nothing.
 	Logger *slog.Logger
+	// Pictures encodes every inline picture of a request into the format
+	// chat.agent.request_pictures declares, just before the request is
+	// encoded; nil sends the pictures as they came.
+	Pictures *inlinepictures.Encoder
 }
 
 type Adapter struct {
@@ -125,6 +130,7 @@ type Adapter struct {
 	parallelToolCalls bool
 	exhaustedQuota    func(status int, body []byte) (string, bool)
 	logs              *upstreamhttp.CallLogger
+	pictures          *inlinepictures.Encoder
 }
 
 func New(config Config) (*Adapter, error) {
@@ -154,6 +160,7 @@ func New(config Config) (*Adapter, error) {
 		parallelToolCalls: config.ParallelToolCalls,
 		exhaustedQuota:    config.ExhaustedQuota,
 		logs:              upstreamhttp.NewCallLogger(config.Logger),
+		pictures:          config.Pictures,
 	}, nil
 }
 
@@ -175,23 +182,28 @@ func (adapter *Adapter) Complete(
 		first     time.Duration
 		bodyBytes int
 		response  *http.Response
+		pictures  inlinepictures.Stats
+		refused   []byte
 		usage     *agents.Usage
 	)
 	defer func() {
 		if first == 0 {
 			first = time.Since(started)
 		}
-		adapter.logCall(request, false, started, first, bodyBytes, usage, response, err)
+		adapter.logCall(request, false, started, first, bodyBytes, usage, response, pictures, refused, err)
 	}()
 	// The answer arrives whole, so only the request timeout bounds it; the
 	// guard only classifies a broken connection as transient (#509).
 	guard := upstreamhttp.GuardFirstByte(ctx, 0)
-	response, bodyBytes, err = adapter.send(ctx, request, false)
+	// Every inline picture goes out in the declared format.
+	var sent agents.Request
+	sent, pictures = adapter.pictures.Request(request)
+	response, bodyBytes, err = adapter.send(ctx, sent, false)
 	if err != nil {
 		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
-	if err = adapter.requireSuccess(response, request); err != nil {
+	if refused, err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
 	first = time.Since(started)
@@ -251,11 +263,17 @@ func (adapter *Adapter) send(ctx context.Context, request agents.Request, stream
 // logCall writes the one line of a finished model call (#382).
 func (adapter *Adapter) logCall(
 	request agents.Request, stream bool, started time.Time, first time.Duration,
-	bodyBytes int, usage *agents.Usage, response *http.Response, err error,
+	bodyBytes int, usage *agents.Usage, response *http.Response,
+	pictures inlinepictures.Stats, refused []byte, err error,
 ) {
-	requestID := ""
+	requestID, status := "", 0
 	if response != nil {
 		requestID = upstreamhttp.RequestID(response.Header)
+		status = response.StatusCode
+	}
+	var echoes []string
+	if len(refused) > 0 {
+		echoes = upstreamhttp.RequestTexts(request)
 	}
 	adapter.logs.Log(upstreamhttp.Call{
 		Model:        request.Model,
@@ -268,7 +286,14 @@ func (adapter *Adapter) logCall(
 		RequestBytes: bodyBytes,
 		Usage:        usage,
 		RequestID:    requestID,
-		Err:          err,
+		Images:       pictures.Images,
+		// The bytes the pictures had before any encoding, and on the wire.
+		OriginalImageBytes: pictures.OriginalBytes,
+		ImageBytes:         pictures.Bytes,
+		Status:             status,
+		ResponseBody:       refused,
+		Echoes:             echoes,
+		Err:                err,
 	})
 }
 
@@ -279,12 +304,12 @@ func (adapter *Adapter) logCall(
 // apart by the helper every chat model Adapter shares. The refusal bodies the
 // probe of 2026-11-20 saw, for temperature and for an unknown reasoning.effort,
 // name the field in param (observed): both read as agents.RequestRejection.
-func (adapter *Adapter) requireSuccess(response *http.Response, request agents.Request) error {
+func (adapter *Adapter) requireSuccess(response *http.Response, request agents.Request) ([]byte, error) {
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		return nil
+		return nil, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(response.Body, adapter.errorBodyMaxBytes))
-	return upstreamhttp.Refusal{
+	return body, upstreamhttp.Refusal{
 		Status:         response.StatusCode,
 		Body:           body,
 		HasImages:      upstreamhttp.RequestHasImages(request),

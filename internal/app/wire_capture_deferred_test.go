@@ -39,6 +39,12 @@ func wireCaptureDeferredFixture(t *testing.T) (string, string, wireCaptureManife
 	// These are known synthetic inputs, not strings discovered in captured raw data.
 	m.Policy.Aliases[probe.Prompt] = "[redacted]"
 	m.Policy.Aliases[probePicture(probe.ImageSize)] = "[redacted]"
+	// The probe picture reaches the wire in the declared request format (#555).
+	pictures, err := requestPictureEncoder(product.Application().Chat.Agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Policy.Aliases[pictures.URL(probePicture(probe.ImageSize))] = "[redacted]"
 	return worktree, root, m, env
 }
 

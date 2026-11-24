@@ -80,3 +80,41 @@ func TestAdapterLogsNoEffortForAModelWithoutLevels(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A failed call is a WARN line with its status, a request id (the fake sends
+// none, so the local sequence number), the request's size and pictures, and
+// the sanitized head of the upstream's answer.
+func TestAdapterLogsAFailedCallWithStatusRequestIDAndExcerpt(t *testing.T) {
+	var buffer strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	s := newStack(t)
+	adapter := s.adapter(func(config *openairesponses.Config) {
+		config.APIKey = "fake-server-error"
+		config.Logger = logger
+	})
+	_, err := adapter.Stream(context.Background(), agents.Request{
+		Model: "gpt-astra", Connection: "chat-llm",
+		Messages: []agents.Message{{Role: "user", Parts: []agents.ContentPart{
+			{Kind: "text", Text: "secret prompt text"},
+			{Kind: "image", URL: "data:image/png;base64,AAAA"},
+		}}},
+	}, nil)
+	if err == nil {
+		t.Fatal("the server error was not reported")
+	}
+	logged := buffer.String()
+	for _, field := range []string{
+		"level=WARN", "status=500", "request_id=1", "model=gpt-astra", "connection=chat-llm",
+		"elapsed_ms=", "request_bytes=", "images=1", "response_excerpt=",
+		"internal server error",
+	} {
+		if !strings.Contains(logged, field) {
+			t.Fatalf("failed call log misses %q: %s", field, logged)
+		}
+	}
+	for _, secret := range []string{"secret prompt text", "AAAA", "fake-server-error"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("failed call log carries %q: %s", secret, logged)
+		}
+	}
+}

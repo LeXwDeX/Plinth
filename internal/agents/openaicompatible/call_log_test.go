@@ -156,3 +156,57 @@ func TestAdapterLogIsJSON(t *testing.T) {
 		t.Fatalf("record = %v", record)
 	}
 }
+
+// #555: a gateway's 502 leaves a WARN line with the status, the request id the
+// gateway sent, the request's size and the first 200 bytes of its answer with
+// every data URI and every echo of the prompt cut out.
+func TestAdapterLogsAGatewayFailureWithRequestIDAndBoundedExcerpt(t *testing.T) {
+	var buffer strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	body := "Bad Gateway: upstream refused secret prompt text data:image/png;base64,QUJDREVGRw== " +
+		strings.Repeat("x", 400)
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusBadGateway,
+			Header: http.Header{
+				"Content-Type": []string{"text/plain"},
+				"X-Request-Id": []string{"gateway-42"},
+			},
+			Body: io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})
+	adapter, err := openaicompatible.New(openaicompatible.Config{
+		BaseURL: "https://configured-agent.test/v1/", APIKey: "k",
+		EndpointPath: "/chat/completions", AuthorizationName: "Authorization",
+		AuthorizationType: "Bearer", RequestTimeout: time.Minute,
+		ScannerMaxBytes: 1 << 20, ErrorBodyMaxBytes: 1 << 16,
+		Client: &http.Client{Transport: transport}, Logger: logger,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Stream(context.Background(), agents.Request{
+		Model: "configured-model", Connection: "chat-llm",
+		Messages: []agents.Message{{Role: "user", Parts: []agents.ContentPart{
+			{Kind: "text", Text: "secret prompt text"},
+			{Kind: "image", URL: "data:image/png;base64,AAAA"},
+		}}},
+	}, nil); err == nil {
+		t.Fatal("the 502 was not reported")
+	}
+	logged := buffer.String()
+	for _, field := range []string{
+		"level=WARN", "status=502", "request_id=gateway-42", "model=configured-model",
+		"connection=chat-llm", "elapsed_ms=", "request_bytes=", "images=1",
+		"Bad Gateway", "[data-uri]", "[input]",
+	} {
+		if !strings.Contains(logged, field) {
+			t.Fatalf("gateway failure log misses %q: %s", field, logged)
+		}
+	}
+	for _, secret := range []string{"secret prompt text", "QUJDREVGRw", "AAAA", strings.Repeat("x", 201)} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("gateway failure log carries %q: %s", secret, logged)
+		}
+	}
+}

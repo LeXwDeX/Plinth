@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.1",
+    "revision": "2026-11-24.19.11",
     "terminology": {
       "user_facing": [
         {
@@ -7032,6 +7032,12 @@
         },
         "scanner_max_bytes": 1048576,
         "error_body_max_bytes": 65536,
+        "request_pictures": {
+          "format": "jpeg",
+          "quality": 95,
+          "background_color": "#ffffff",
+          "max_pixels": 16777216
+        },
         "prompt_sections": [
           {
             "id": "creative-lab-workflow",

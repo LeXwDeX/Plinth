@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
 	"github.com/LeXwDeX/Plinth/internal/agents/upstreamhttp"
 )
 
@@ -105,6 +106,10 @@ type Config struct {
 	// level, duration, first byte, tokens and the upstream's request id
 	// (#382). Nil writes nothing.
 	Logger *slog.Logger
+	// Pictures encodes every inline picture of a request into the format
+	// chat.agent.request_pictures declares, just before the request is
+	// encoded; nil sends the pictures as they came.
+	Pictures *inlinepictures.Encoder
 }
 
 type Adapter struct {
@@ -122,6 +127,7 @@ type Adapter struct {
 	parallelToolCalls bool
 	exhaustedQuota    func(status int, body []byte) (string, bool)
 	logs              *upstreamhttp.CallLogger
+	pictures          *inlinepictures.Encoder
 }
 
 func New(config Config) (*Adapter, error) {
@@ -162,6 +168,7 @@ func New(config Config) (*Adapter, error) {
 		parallelToolCalls: config.ParallelToolCalls,
 		exhaustedQuota:    config.ExhaustedQuota,
 		logs:              upstreamhttp.NewCallLogger(config.Logger),
+		pictures:          config.Pictures,
 	}, nil
 }
 
@@ -215,20 +222,25 @@ func (adapter *Adapter) Stream(
 		usage     *agents.Usage
 		bodyBytes int
 		response  *http.Response
+		pictures  inlinepictures.Stats
+		refused   []byte
 	)
 	defer func() {
-		adapter.logCall(request, true, started, first, bodyBytes, usage, response, err)
+		adapter.logCall(request, true, started, first, bodyBytes, usage, response, pictures, refused, err)
 	}()
 	// An upstream that sends nothing ends at the first-byte timeout, not at the
 	// request timeout (#509).
 	guard := upstreamhttp.GuardFirstByte(ctx, adapter.firstByteTimeout)
 	defer guard.Release()
-	response, bodyBytes, err = adapter.send(guard.Context(), request, true)
+	// Every inline picture goes out in the declared format.
+	var sent agents.Request
+	sent, pictures = adapter.pictures.Request(request)
+	response, bodyBytes, err = adapter.send(guard.Context(), sent, true)
 	if err != nil {
 		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
-	if err = adapter.requireSuccess(response, request); err != nil {
+	if refused, err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
 	// first is when the upstream answered: the first stream frame is what a
@@ -389,21 +401,26 @@ func (adapter *Adapter) Complete(
 		first     time.Duration
 		bodyBytes int
 		response  *http.Response
+		pictures  inlinepictures.Stats
+		refused   []byte
 		usage     *agents.Usage
 	)
 	defer func() {
 		// A call that failed before the response has no first byte to report.
-		adapter.logCall(request, false, started, first, bodyBytes, usage, response, err)
+		adapter.logCall(request, false, started, first, bodyBytes, usage, response, pictures, refused, err)
 	}()
 	// A non-streamed answer arrives whole, so only the request timeout bounds
 	// it; the guard only classifies a broken connection as transient (#509).
 	guard := upstreamhttp.GuardFirstByte(ctx, 0)
-	response, bodyBytes, err = adapter.send(ctx, request, false)
+	// Every inline picture goes out in the declared format.
+	var sent agents.Request
+	sent, pictures = adapter.pictures.Request(request)
+	response, bodyBytes, err = adapter.send(ctx, sent, false)
 	if err != nil {
 		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
-	if err = adapter.requireSuccess(response, request); err != nil {
+	if refused, err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
 	first = time.Since(started)
@@ -493,12 +510,18 @@ func (adapter *Adapter) send(
 // logCall writes the one line of a finished model call (#382).
 func (adapter *Adapter) logCall(
 	request agents.Request, stream bool, started time.Time, first time.Duration,
-	bodyBytes int, usage *agents.Usage, response *http.Response, err error,
+	bodyBytes int, usage *agents.Usage, response *http.Response,
+	pictures inlinepictures.Stats, refused []byte, err error,
 ) {
 	options := adapter.optionsFor(request)
-	requestID := ""
+	requestID, status := "", 0
 	if response != nil {
 		requestID = upstreamhttp.RequestID(response.Header)
+		status = response.StatusCode
+	}
+	var echoes []string
+	if len(refused) > 0 {
+		echoes = upstreamhttp.RequestTexts(request)
 	}
 	adapter.logs.Log(upstreamhttp.Call{
 		Model:        request.Model,
@@ -511,13 +534,20 @@ func (adapter *Adapter) logCall(
 		RequestBytes: bodyBytes,
 		Usage:        usage,
 		RequestID:    requestID,
-		Err:          err,
+		Images:       pictures.Images,
+		// The bytes the pictures had before any encoding, and on the wire.
+		OriginalImageBytes: pictures.OriginalBytes,
+		ImageBytes:         pictures.Bytes,
+		Status:             status,
+		ResponseBody:       refused,
+		Echoes:             echoes,
+		Err:                err,
 	})
 }
 
-func (adapter *Adapter) requireSuccess(response *http.Response, request agents.Request) error {
+func (adapter *Adapter) requireSuccess(response *http.Response, request agents.Request) ([]byte, error) {
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		return nil
+		return nil, nil
 	}
 	body, _ := io.ReadAll(
 		io.LimitReader(response.Body, adapter.errorBodyMaxBytes),
@@ -525,7 +555,7 @@ func (adapter *Adapter) requireSuccess(response *http.Response, request agents.R
 	// The refusal's class (content moderation, used-up quota, no image input,
 	// a refused request field) is read by the helper every chat model Adapter
 	// shares; the status always travels as agents.StatusError (#322).
-	return upstreamhttp.Refusal{
+	return body, upstreamhttp.Refusal{
 		Status:         response.StatusCode,
 		Body:           body,
 		HasImages:      upstreamhttp.RequestHasImages(request),
