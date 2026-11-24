@@ -4013,10 +4013,10 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "至多 16 张图（array_above_max_length）；mask 须为带 alpha、与首图同尺寸的 PNG，否则 400 invalid_image；每张图与 mask 都须小于 50MB，否则 400 image_file_too_large；带 mask 只改透明像素并保持尺寸；model 可省略（默认 gpt-image-2.6-sunburst）。非 multipart 的编辑请求答 400 Invalid Content-Type（code、param 为 null），不再答缺 model（2026-11-25）。guide 的“mask 与图同格式”规则未强制：Catalog 只限 mask 为 PNG，Plinth 可能配 JPEG/WebP 参考图发出，强制会拒绝 Plinth 的实际请求，待真实一轮确认网关是否执行。当前 Create image edit 参考另列 application/json 请求体（images[] 的 image_url/file_id），fake 未建模。",
+      "behavior": "至多 16 张图（array_above_max_length）；mask 须为带 alpha、与首图同尺寸同格式的 PNG，否则 400 invalid_image（param mask）：同格式按字节嗅探比较（PNG/JPEG/WebP/GIF 的文件头），不看 Content-Type 或文件名，JPEG/WebP 首图配 PNG mask 即拒绝（#582，2026-11-25 起强制）；每张图与 mask 都须小于 50MB，否则 400 image_file_too_large；带 mask 只改透明像素并保持尺寸；model 可省略（默认 gpt-image-2.6-sunburst）。既非 multipart 也非 JSON 的编辑请求答 400 Invalid Content-Type（code、param 为 null）。拒绝文案（含同格式那条）均为构造。Plinth 一侧：MCP generate_image 在提交前按字节嗅探第一张参考图，不是 PNG 即答 mask_format_mismatch，不会把不同格式的组合发到上游。",
       "basis": [
         {
-          "source": "https://platform.openai.com/docs/api-reference/images/",
+          "source": "https://developers.openai.com/api/reference/resources/images/methods/edit",
           "section": "Create image edit"
         },
         {
@@ -4025,7 +4025,26 @@
         }
       ],
       "checked_at": "2026-11-25",
-      "why_not_real": "mask 规则与 50MB 限制出自 image-generation guide（编辑参考本身没有），网关对这些拒绝的措辞未记录"
+      "why_not_real": "mask 规则与 50MB 限制出自 image-generation guide（编辑参考本身没有），网关对这些拒绝（含同格式）的状态码与措辞未记录；需真实否定探测确认"
+    },
+    {
+      "id": "openai-images-v1/edits-json-body",
+      "provider": "openai",
+      "api": "images-v1",
+      "endpoints": [
+        "POST /images/edits"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "application/json 编辑请求：images 为 1–16 个 {image_url | file_id}、mask 为 {image_url | file_id}（恰好其一），与 multipart 共用同一套校验（model 默认、n 须为 JSON 整数、size、枚举、16 张上限报在 images、50MB、mask 规则），同样输入的结果与 multipart 逐字节相同。image_url 接受 base64 data URL 与 fake 可取回的 http(s) 地址（取不到答 400 invalid_value）；fake 没有 Files API，任何 file_id 答 400 invalid_value「No such File object」。缺 images 答 missing_required_parameter，非数组 invalid_type，空数组 empty_array，条目非对象 invalid_type、两者皆无 missing_required_parameter；mask 两者都给或都不给答 400；JSON 解析失败答 could not parse（code、param 为 null）。Plinth 仍发 multipart，本分支只由 fake 测试与 fake 栈冒烟（直连 fake）覆盖。",
+      "basis": [
+        {
+          "source": "https://developers.openai.com/api/reference/resources/images/methods/edit",
+          "section": "Create image edit（application/json：images[]、mask、image_url、file_id）"
+        }
+      ],
+      "checked_at": "2026-11-25",
+      "why_not_real": "没有 JSON 编辑的真实样本；参考页只给结构，未给 file_id 未找到、URL 取不到等拒绝的状态码与措辞，均为构造"
     },
     {
       "id": "gemini-images-v1/chat-image-shape",

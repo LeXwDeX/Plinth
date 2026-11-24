@@ -842,6 +842,12 @@ def make_rgba_picture(width, height, transparent=None):
             + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 
 
+# A 64x64 baseline JPEG (Go image/jpeg, quality 75): the script has no imaging
+# library, and the #582 checks need a picture that is no PNG.
+JPEG_64 = base64.b64decode(
+    "/9j/2wCEAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDIBCQkJDAsMGA0NGDIhHCEyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMv/AABEIAEAAQAMBIgACEQEDEQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/AMWiiivKPvgooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigD/2Q==")
+
+
 def upload_asset(api, filename, data, mime):
     """Library upload (POST /api/v1/assets); returns the asset id or None."""
     status, body = api.upload("/api/v1/assets", "file", filename, data, mime)
@@ -1190,6 +1196,44 @@ def scenario_images(api, offerings):
              {"prompt": "make the cube blue", "reference_assets": [picture]}, session)
     step(api, offerings, "matting background-removal", MATTING, "background-removal", {"source_assets": [picture]}, session)
     scenario_style_lock_direct(api, offerings)
+    scenario_openai_json_edit()
+
+
+def scenario_openai_json_edit():
+    """#582: the fake upstream's OpenAI image edit takes the JSON body the
+    Create image edit reference lists (images[] and mask by image_url), with the
+    multipart edit's rules, and refuses a mask beside a picture of another
+    format. Plinth sends the multipart edit, so this posts to the fake itself."""
+    url = f"http://127.0.0.1:{FAKE_PORT}/openai/images/v1/images/edits"
+
+    def post(body):
+        request = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
+            "Content-Type": "application/json", "Authorization": f"Bearer {GOOD_KEY}"})
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            try:
+                return error.code, json.loads(error.read())
+            except ValueError:
+                return error.code, {}
+        except (OSError, ValueError) as error:
+            return 0, {"error": {"message": str(error)}}
+
+    def data_url(data):
+        return "data:image/png;base64," + base64.b64encode(data).decode()
+
+    mask = {"image_url": data_url(make_rgba_picture(64, 64, (16, 16, 48, 48)))}
+    status, body = post({"prompt": "repaint the middle", "images": [{"image_url": data_url(make_png(64))}], "mask": mask})
+    data = body.get("data") or [{}]
+    record("fake OpenAI JSON edit is taken (#582)", status == 200 and bool(data[0].get("b64_json")) and body.get("size") == "64x64",
+           f"status {status}, size {body.get('size')}")
+    status, body = post({"prompt": "repaint the middle", "images": [{"image_url": data_url(JPEG_64)}], "mask": mask})
+    problem = body.get("error") or {}
+    record("fake OpenAI JSON edit refuses a mask of another format (#582)",
+           status == 400 and problem.get("code") == "invalid_image" and problem.get("param") == "mask"
+           and "same format" in (problem.get("message") or ""),
+           f"status {status}, code {problem.get('code')}, param {problem.get('param')}")
 
 
 def scenario_matting_faults(api, offerings):
@@ -1590,6 +1634,23 @@ def scenario_mcp(api, mcp_base):
            f"status {upload['http_status']}, media {image.get('media_type')}")
     if not image_id:
         return
+
+    # #582: the image-edit wire takes a mask of the first picture's format only;
+    # a JPEG first picture is refused before a Task exists, with the Schema
+    # sentence that names both formats and says to convert to PNG.
+    jpeg = mcp.tool("upload_image", {"data": base64.b64encode(JPEG_64).decode(), "filename": "mcp-mask-reference.jpg"})
+    mask = mcp.tool("upload_image", {"data": base64.b64encode(make_rgba_picture(64, 64, (16, 16, 48, 48))).decode(),
+                                     "filename": "mcp-mask.png"})
+    jpeg_id = (jpeg["structured"].get("image") or {}).get("id") or ""
+    mask_id = (mask["structured"].get("image") or {}).get("id") or ""
+    refused = mcp.tool("generate_image", {"prompt": "repaint the middle", "images": [jpeg_id], "mask": mask_id,
+                                          "idempotency_key": "mcp-mask-format-" + uuid.uuid4().hex})
+    problem = refused["structured"].get("error") or {}
+    message = problem.get("message") or ""
+    record("mcp generate_image refuses a PNG mask beside a JPEG first picture (#582)",
+           bool(jpeg_id) and bool(mask_id) and refused["is_error"] and problem.get("code") == "mask_format_mismatch"
+           and "JPEG" in message and "PNG" in message and "upload_image" in message,
+           f"jpeg {bool(jpeg_id)}, mask {bool(mask_id)}, code {problem.get('code')}")
 
     asset = "mcp-fake-stack"
     idem = "mcp-" + uuid.uuid4().hex
