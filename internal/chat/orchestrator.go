@@ -448,8 +448,10 @@ func (orchestrator *Orchestrator) clearTurnCanceled(key string) {
 // reconcileStoppedTasks observes only persisted task identities and frozen
 // idempotency keys. A transient read/cancel error keeps the durable turn open
 // for restart recovery; a missing key never triggers a new paid submission.
+// unexecuted is the checkpoint's list of calls answered without running a
+// tool (#501): those are task-free whatever the registry says about them.
 func (orchestrator *Orchestrator) reconcileStoppedTasks(
-	ctx context.Context, ownerID, sessionID, assistantID string, calls []ToolCall, options TurnOptions,
+	ctx context.Context, ownerID, sessionID, assistantID string, calls []ToolCall, unexecuted []string, options TurnOptions,
 ) error {
 	var combined error
 	registry := orchestrator.turnRegistry(ctx)
@@ -502,6 +504,12 @@ func (orchestrator *Orchestrator) reconcileStoppedTasks(
 			calls[index] = call
 		}
 		if call.TaskID == "" && call.IdempotencyKey == "" {
+			// #501: the turn answered this call without running a tool (an
+			// unknown or unavailable tool, a scope refusal, invalid
+			// arguments), so it never submitted anything.
+			if slices.Contains(unexecuted, call.ID) {
+				continue
+			}
 			// Pre-upgrade tool_calls_json has no frozen key. A generation
 			// call (or a tool since removed from the registry) might have
 			// committed a paid Task without a binding. Keep stop recoverable
@@ -646,7 +654,8 @@ func (orchestrator *Orchestrator) CancelTurn(
 			continue
 		}
 		if err := orchestrator.reconcileStoppedTasks(context.WithoutCancel(ctx),
-			ownerID, sessionID, turn.AssistantMessageID, messages[index].ToolCalls, turn.Options); err != nil {
+			ownerID, sessionID, turn.AssistantMessageID, messages[index].ToolCalls,
+			stored.Checkpoint.UnexecutedCalls, turn.Options); err != nil {
 			orchestrator.logger.Warn("停止轮次即时核对任务失败，等待恢复重试", "error", err)
 		}
 		break
@@ -682,9 +691,16 @@ func (orchestrator *Orchestrator) finalizeStoppedTurn(
 	} else {
 		return err
 	}
+	// The durable checkpoint says which calls were answered without running
+	// a tool (#501); a read failure keeps the turn open for a retry.
+	stored, err := orchestrator.service.GetTurn(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID)
+	if err != nil {
+		return err
+	}
 	// 停止收尾兜底取消在飞任务：CancelTurn 扫描与工具提交之间的
 	// TOCTOU 窗口里落库的绑定也在这里被取消（计费止损）。
-	if err := orchestrator.reconcileStoppedTasks(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID, assistant.ToolCalls, command.Options); err != nil {
+	if err := orchestrator.reconcileStoppedTasks(ctx, command.OwnerID, command.SessionID, command.AssistantMessageID,
+		assistant.ToolCalls, stored.Checkpoint.UnexecutedCalls, command.Options); err != nil {
 		return err
 	}
 	stopped := orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.TurnStopped)
@@ -1898,7 +1914,10 @@ func (orchestrator *Orchestrator) Process(
 			assistant.ToolCalls = assistant.ToolCalls[:executedCalls+remainingCalls]
 		}
 		if !checkpointResuming || round != startRound {
-			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls}
+			// The calls answered without running stay listed for the whole
+			// turn (#501): a stop in a later round still reconciles them.
+			turn.Checkpoint = TurnCheckpoint{Configuration: turn.Checkpoint.Configuration, Round: round, Assistant: assistant, Request: request, Completion: completion, MalformedCalls: malformedCalls,
+				UnexecutedCalls: turn.Checkpoint.UnexecutedCalls}
 			version, saveErr := orchestrator.service.SaveTurnCheckpoint(context.WithoutCancel(ctx), turn,
 				orchestrator.service.TurnRunningState(), turn.Checkpoint, false)
 			if saveErr != nil {
@@ -3060,6 +3079,7 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			turn.Checkpoint.markUnexecuted(call.ID)
 			waiting = removeWaiting(waiting, call.ID)
 			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
@@ -3141,6 +3161,9 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			if boundTaskID == "" {
+				turn.Checkpoint.markUnexecuted(call.ID)
+			}
 			waiting = removeWaiting(waiting, call.ID)
 			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
@@ -3164,6 +3187,9 @@ func (orchestrator *Orchestrator) executeTools(
 				ToolCallID: call.ID,
 			})
 			turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+			if boundTaskID == "" {
+				turn.Checkpoint.markUnexecuted(call.ID)
+			}
 			waiting = removeWaiting(waiting, call.ID)
 			turn.Checkpoint.SetWaiting(waiting)
 			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
