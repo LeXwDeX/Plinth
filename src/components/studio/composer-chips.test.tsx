@@ -52,11 +52,11 @@ describe('context chip', () => {
 describe('every chip above the composer is one component of one size', () => {
   const composer = source('./composer.tsx');
 
-  it('builds the object, "not this turn", mask, branch, attachment and Skill chips from ContextChip', () => {
+  it('builds the object, mask, branch, attachment and Skill chips from ContextChip', () => {
     for (const id of ['composer-object-chip', 'composer-mask-chip', 'composer-branch-chip', 'composer-attachment-chip', 'composer-skill-chip']) {
       expect(composer).toContain(`testId="${id}"`);
     }
-    expect(composer.match(/<ContextChip/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(composer.match(/<ContextChip/g)?.length).toBeGreaterThanOrEqual(5);
     // no leftover small chips
     expect(composer).not.toMatch(/h-8 max-w-full|size-9 shrink-0/);
   });

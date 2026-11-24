@@ -53,8 +53,8 @@ export function useCanvasArtboard(sessionId: string | null, referenceContext?: b
   const generation = useGenerationParams('image', sessionId, hasReference);
   const saved = useCanvasStore((state) => (sessionId ? state.canvasSizeBySession[sessionId] : undefined));
   const nodes = useCanvasStore((state) => (sessionId ? state.nodesBySession?.[sessionId] : undefined));
-  // The composer's chip was dismissed: the turn does not carry the artboard (chat-column's skipped rule).
-  const skipped = context?.sessionId === sessionId && context.objectSkipped === true;
+  // The object was deselected with the composer chip's ✕ (#557): the turn does not carry the artboard.
+  const skipped = context?.sessionId === sessionId && context.objectDeselected === true;
   const anchor = schema.canvas.frontend.artboard;
   const { offering, model, values } = generation.nextTurn;
   const sizeParams = model.sizeParams;

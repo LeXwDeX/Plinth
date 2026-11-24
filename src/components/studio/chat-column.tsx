@@ -414,8 +414,12 @@ export function ChatColumn() {
   // 正在编辑最后一条用户消息：发送时才替换那一轮，放弃编辑不丢任何东西。
   const [editing, setEditing] = useSessionState<{ deleteIds: string[] } | null>(null);
   const [attachedImages, setAttachedImages] = useSessionState<string[]>([]);
-  // 芯片上的 ✕：这一个对象本轮不随消息发出。换了对象就重新带上。
-  const [skippedObject, setSkippedObject] = useSessionState<string | null>(null);
+  // 芯片上的 ✕ 取消选中（#557）：这个对象不再是默认目标，消息不带它，也不带画板快照。
+  // 舞台上再选中对象（包括再点一次同一个）就恢复选中。
+  const [deselectedObject, setDeselectedObject] = useSessionState<string | null>(null);
+  useEffect(() => {
+    setDeselectedObject(null);
+  }, [currentObject, setDeselectedObject]);
   // What the attached pictures are for; written into the message as one line.
   const [attachmentPurpose, setAttachmentPurpose] = useSessionState<AttachmentPurpose | null>(null);
   // Per-picture purposes, aligned with `attachedImages`; `attachmentPurpose` stays the last choice.
@@ -475,18 +479,18 @@ export function ChatColumn() {
   // The next turn's settings and estimate. A turn that carries a picture (the
   // object on the stage, an upload or a pinned canvas image) runs the Offering
   // that takes references, so that is the one priced.
-  const objectSkipped = sessionSelection != null && skippedObject === objectKey(sessionSelection);
-  const hasReference = attachedImages.length > 0 || hasCanvasReference || (sessionSelection?.kind === 'image' && !objectSkipped);
+  const objectDeselected = sessionSelection != null && deselectedObject === objectKey(sessionSelection);
+  const hasReference = attachedImages.length > 0 || hasCanvasReference || (sessionSelection?.kind === 'image' && !objectDeselected);
   useEffect(() => {
     if (!activeSessionId) return;
-    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectSkipped };
+    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectDeselected };
     useStudioStore.getState().setGenerationReferenceContext(context);
     return () => {
       if (useStudioStore.getState().generationReferenceContext === context) {
         useStudioStore.getState().setGenerationReferenceContext(null);
       }
     };
-  }, [activeSessionId, hasReference, objectSkipped]);
+  }, [activeSessionId, hasReference, objectDeselected]);
   const imageGeneration = useGenerationParams('image', activeSessionId, hasReference);
   const modelGeneration = useGenerationParams('model-3d', activeSessionId, hasReference);
   const generation = stageDomain === 'image' ? imageGeneration : modelGeneration;
@@ -1026,9 +1030,10 @@ export function ChatColumn() {
         return source ? [{ kind: 'image', imageSlot: index + 1, ...source }] : [];
       });
       const canvasState = useCanvasStore.getState();
-      // A handle written in the text takes the turn from the object on the stage (the chip says so).
+      // #557: the selected object is the default target. A deselected object, or a handle written in the text
+      // (which wins over the selection; the chip says so), leaves the object and the artboard out of the turn.
       const skipped = sessionObject != null
-        && (skippedObjectRef.current === objectKey(sessionObject) || overridingHandle(written, chipHandleRef.current) !== '');
+        && (deselectedObjectRef.current === objectKey(sessionObject) || overridingHandle(written, chipHandleRef.current) !== '');
       // The Agent's current object is what the dashed artboard shows: whenever the artboard holds anything,
       // it is rasterised at the chosen output pixels like every other delivery (export, send to chat,
       // inpaint, merge) and uploaded as an input asset, even a lone untouched picture.
@@ -1465,8 +1470,8 @@ export function ChatColumn() {
   );
   const sendRef = useRef(send);
   sendRef.current = send;
-  const skippedObjectRef = useRef(skippedObject);
-  skippedObjectRef.current = skippedObject;
+  const deselectedObjectRef = useRef(deselectedObject);
+  deselectedObjectRef.current = deselectedObject;
   const sessionSelectionRef = useRef(sessionSelection);
   sessionSelectionRef.current = sessionSelection;
   const versionsRef = useRef(versions);
@@ -1511,18 +1516,18 @@ export function ChatColumn() {
     });
   }, [activeSessionId, drainTick, isStreaming, preparing, queue, schema, setAttachmentPurposes, setInput, uploading]);
 
-  // 「从这里继续」：这个对象成为下一次要求的引用（取消"不带它"），输入框拿到焦点。
+  // 「从这里继续」：这个对象成为下一次要求的引用（恢复选中），输入框拿到焦点。
   useEffect(() => {
     if (!continueRequest) return;
     clearContinueRequest();
-    setSkippedObject(null);
+    setDeselectedObject(null);
     const from = sessionSelectionRef.current;
     setBranchFrom(from && !from.taskId.startsWith('canvas:')
       ? { key: objectKey(from), label: versionLabel(schema, tileOfObject(versionsRef.current, from), from.kind) }
       : null);
     if (useStudioStore.getState().chatCollapsed) setCollapsed(false);
     window.requestAnimationFrame(() => focusWhenUnblocked(() => document.getElementById('art-ai-chat-composer')));
-  }, [continueRequest, clearContinueRequest, schema, setBranchFrom, setCollapsed, setSkippedObject]);
+  }, [continueRequest, clearContinueRequest, schema, setBranchFrom, setCollapsed, setDeselectedObject]);
 
   // 起步卡片和"重新发起"只把文字放进输入框，让用户确认后自己发送。
   useEffect(() => {
@@ -2086,7 +2091,6 @@ export function ChatColumn() {
       handle: sessionSelection.handle ?? handleOfObject(sessionMessages, sessionSelection),
     };
   }, [artboard, boardNodes, previewAssetUrl, schema, sessionMessages, sessionSelection, versions]);
-  const chipSkipped = objectSkipped;
   // The branch chip belongs to the version it was made for: another version on the stage drops it.
   const branchChip = useMemo((): ComposerBranch | null => {
     if (!branchFrom || !sessionSelection || objectKey(sessionSelection) !== branchFrom.key) return null;
@@ -2095,10 +2099,10 @@ export function ChatColumn() {
       onClear: () => {
         // The new version follows the object the turn carries; leaving the branch leaves the object too.
         setBranchFrom(null);
-        setSkippedObject(branchFrom.key);
+        setDeselectedObject(branchFrom.key);
       },
     };
-  }, [branchFrom, sessionSelection, setBranchFrom, setSkippedObject]);
+  }, [branchFrom, sessionSelection, setBranchFrom, setDeselectedObject]);
   chipHandleRef.current = chip?.handle ?? '';
   // The mask being painted shows above the box so it is never forgotten while chatting.
   const maskTool = useCanvasStore((state) => state.activeTool === 'mask');
@@ -2493,10 +2497,9 @@ export function ChatColumn() {
             streaming={isStreaming}
             locked={uploading || preparing}
             canSend={(input.trim() !== '' || attachedImages.length > 0 || hasCanvasReference || Boolean(currentSkill?.tool)) && Boolean(activeSessionId)}
-            chip={chip}
-            chipSkipped={chipSkipped}
-            onToggleChip={() => {
-              if (sessionSelection) setSkippedObject(chipSkipped ? null : objectKey(sessionSelection));
+            chip={objectDeselected ? null : chip}
+            onDeselectChip={() => {
+              if (sessionSelection) setDeselectedObject(objectKey(sessionSelection));
             }}
             mask={maskChip}
             branch={branchChip}

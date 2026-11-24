@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import catalog from '../../../internal/catalog/default_catalog.json';
 import type { CanvasDelivery } from '../use-canvas-artboard';
 const runtime = vi.hoisted(() => ({
-  context: null as { sessionId: string; hasReference: boolean; objectSkipped?: boolean } | null,
+  context: null as { sessionId: string; hasReference: boolean; objectDeselected?: boolean } | null,
   nodes: {} as Record<string, Array<Record<string, unknown>>>,
   object: null as { kind: string; sessionId: string; taskId: string } | null,
   selected: vi.fn(),
@@ -66,8 +66,8 @@ describe('canvas geometry follows the actual composer Offering context', () => {
     const delivery = board();
     expect(delivery.fit.kind).toBe('conflict');
     expect(delivery.turn).toMatchObject({ value: '1536x1024', nearest: true });
-    // A dismissed chip, or a 3D object on the stage, does not send the artboard.
-    runtime.context = { sessionId: 's', hasReference: false, objectSkipped: true };
+    // A deselected object, or a 3D object on the stage, does not send the artboard.
+    runtime.context = { sessionId: 's', hasReference: false, objectDeselected: true };
     expect(board().turn).toBeNull();
     runtime.context = null;
     runtime.object = { kind: 'model', sessionId: 's', taskId: 't' };
