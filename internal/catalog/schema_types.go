@@ -4050,9 +4050,6 @@ type ChatThreeViewSchema struct {
 	// step of the recipe is one view (slot) of the group. It is the recipe of
 	// the default purpose and the one a historical run used.
 	RecipeID string `json:"recipe_id"`
-	// PurposeArgument names the create_three_view argument whose value picks one
-	// of Purposes; an absent or empty value means DefaultPurpose (#409).
-	PurposeArgument string `json:"purpose_argument,omitempty"`
 	// DefaultPurpose is the use a call that names none takes.
 	DefaultPurpose string `json:"default_purpose,omitempty"`
 	// Purposes are the uses the tool declares: a design sheet keeps the source's
@@ -5325,11 +5322,12 @@ type ChatAgentSchema struct {
 	// MaxListedModels bounds how many of the session's succeeded 3D tasks
 	// the list_session_models tool returns (most recent first).
 	MaxListedModels int `json:"max_listed_models"`
-	// Consent*Content 是付费硬门禁回给对话 LLM 的工具内容文案（B16：
-	// 原代码常量迁入 Schema，禁止硬编码）。
-	ConsentApprovedContent string `json:"consent_approved_content"`
-	ConsentDeniedContent   string `json:"consent_denied_content"`
-	ConsentWaitingContent  string `json:"consent_waiting_content"`
+	// Consent*Content 是付费批准回给对话 LLM 的工具内容文案（B16：
+	// 原代码常量迁入 Schema，禁止硬编码）。#491 之后批准只有执行授权一条
+	// 路径，以前给旧同意状态机用的 consent_approved_content、
+	// consent_blocked_content 与 consent_required_content 已删除。
+	ConsentDeniedContent  string `json:"consent_denied_content"`
+	ConsentWaitingContent string `json:"consent_waiting_content"`
 	// ConsentWaitingStatus is the state of a step that waits on its approval
 	// card, in words the Agent uses as they are (#327: a reply called such a
 	// step "resubmitted"). Tool results carry it as status_text; optional.
@@ -5350,8 +5348,6 @@ type ChatAgentSchema struct {
 	// when the recover_task_result tool is declared.
 	RefetchStartedContent     string            `json:"refetch_started_content,omitempty"`
 	RefetchUnavailableContent map[string]string `json:"refetch_unavailable_content,omitempty"`
-	ConsentBlockedContent     string            `json:"consent_blocked_content"`
-	ConsentRequiredContent    string            `json:"consent_required_content"`
 	ConsentLimitContent       string            `json:"consent_limit_content"`
 	ConsentReconcileContent   string            `json:"consent_reconcile_content"`
 	// UpstreamQueueContent is the note get_task attaches while the Provider
@@ -5713,7 +5709,6 @@ type ChatStreamSchema struct {
 	RetryMilliseconds        int                   `json:"retry_milliseconds"`
 	HeartbeatMilliseconds    int                   `json:"heartbeat_milliseconds"`
 	CleanupTTLMilliseconds   int                   `json:"cleanup_ttl_milliseconds"`
-	CompletionFlushMillis    int                   `json:"completion_flush_milliseconds"`
 	StatusCheckMilliseconds  int                   `json:"status_check_milliseconds"`
 	SubscriberBufferSize     int                   `json:"subscriber_buffer_size"`
 	EventPrefix              string                `json:"event_prefix"`

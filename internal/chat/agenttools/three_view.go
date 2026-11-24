@@ -427,7 +427,7 @@ func (e *Executor) TaskIdentityForCall(ctx context.Context, command chat.ToolCom
 func (e *Executor) awaitThreeView(command chat.ToolCommand, taskID string, offering generation.Offering, err error) (chat.ToolResult, error) {
 	deadline := e.threeViewWaitUntil(command, offering)
 	if !time.Now().Before(deadline) {
-		return chat.ToolResult{TaskID: taskID, Error: e.consentContents.reconcile}, err
+		return chat.ToolResult{TaskID: taskID, Error: e.reconcileContent}, err
 	}
 	return chat.ToolResult{TaskID: taskID, AwaitTask: true, WaitUntil: deadline}, err
 }

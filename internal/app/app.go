@@ -1215,17 +1215,15 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			}),
 		})
 	}
-	// B10：agent 状态（参数/绑定/同意）写穿透 SQLite——重启后同意
-	// 门禁仍然生效；会话删除时级联清理（chat_repository.DeleteSession）。
+	// B10：agent 状态（参数/绑定）写穿透 SQLite，会话删除时级联清理
+	// （chat_repository.DeleteSession）。付费批准不在这里：生成工具按
+	// 会话批准方式准备确切输入并取得执行授权（#491），与 Provider/Agent
+	// 模式无关。
 	agentStateStore := agentparams.NewPersistentStore(repository, logger)
-	// 付费同意硬门禁按真实计费侧（ProviderMode）启用（AGT-03）：
-	// mock Agent 也会对每条消息自动提交付费生成，门禁依据不能是
-	// AgentMode，否则 live Provider + mock Agent 会免同意扣费。
-	consentEnforced := config.ProviderMode != "mock"
-	if consentEnforced && config.AgentMode == "mock" {
+	if config.ProviderMode != "mock" && config.AgentMode == "mock" {
 		logger.Warn(
 			"live Provider 搭配 mock Agent：每条消息都会自动提交付费生成，" +
-				"同意硬门禁已按计费侧强制启用",
+				"付费步骤仍按会话批准方式取得执行授权",
 		)
 	}
 	agentToolsConfig := agenttools.Config{
@@ -1278,9 +1276,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		Preflight:                 toolExecutor.SelectionError,
 		SubmissionGate:            newAssetListSubmissionGate(assetListService, applicationSchema.AssetList),
 		MaxGenerationCallsPerTurn: applicationSchema.Chat.Agent.MaxGenerationCallsPerTurn,
-		ConsentBlockedContent:     applicationSchema.Chat.Agent.ConsentBlockedContent,
 		ConsentReconcileContent:   applicationSchema.Chat.Agent.ConsentReconcileContent,
-		ConsentRequiredContent:    applicationSchema.Chat.Agent.ConsentRequiredContent,
 		ConsentLimitContent:       applicationSchema.Chat.Agent.ConsentLimitContent,
 		TaskObservationTimeout:    time.Duration(applicationSchema.Chat.Agent.RequestTimeoutSeconds) * time.Second,
 		Projection: func(capability, model string) json.RawMessage {
@@ -1298,21 +1294,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 				capability != "" || model != "",
 			)
 		},
-	}
-	if consentEnforced {
-		agentToolsConfig.ConsentState = agentStateStore.Get
-		agentToolsConfig.ConsentClaim = agentStateStore.ClaimConsent
-		agentToolsConfig.ConsentAccepted = agentStateStore.AcceptConsent
-		agentToolsConfig.ConsentRelease = agentStateStore.ReleaseConsent
-		agentToolsConfig.ConsentClear = func(scope string) {
-			agentStateStore.Delete(
-				scope,
-				agenttools.ConsentPendingKey,
-				agenttools.ConsentDecisionKey,
-				agenttools.ConsentApprovedKey,
-				agenttools.ConsentSnapshotKey,
-			)
-		}
 	}
 	agentToolExecutor, err := agenttools.New(agentToolsConfig)
 	if err != nil {
@@ -1494,26 +1475,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		},
 		TaskGet: func(ctx context.Context, ownerID, taskID string) (generation.Task, error) {
 			return module.Get(ctx, generation.OwnerID(ownerID), generation.TaskID(taskID))
-		},
-		StopConsent: func(ownerID, sessionID, callID, idempotencyKey, taskID string) error {
-			scope := agentparams.ScopeKey(ownerID, sessionID)
-			raw := agentStateStore.Get(scope)[agentparams.ConsentClaimKey]
-			if len(raw) == 0 {
-				return nil
-			}
-			var claim struct {
-				CallID string `json:"call_id"`
-			}
-			if err := json.Unmarshal(raw, &claim); err != nil {
-				return fmt.Errorf("decode stopped turn consent claim: %w", err)
-			}
-			if claim.CallID != callID {
-				return nil
-			}
-			if taskID != "" {
-				return agentStateStore.AcceptConsent(scope, callID, taskID)
-			}
-			return agentStateStore.ReleaseConsent(scope, callID, idempotencyKey)
 		},
 	})
 	if err != nil {

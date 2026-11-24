@@ -3,8 +3,8 @@ package agenttools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,57 +20,22 @@ const testOwner = "owner"
 // testScope 与 executor 内部 scopeKey(owner, session) 一致。
 var testScope = agentparams.ScopeKey(testOwner, "s1")
 
-func testConsentRequestID(t *testing.T, store *agentparams.Store, scope string) string {
-	t.Helper()
-	var requestID string
-	if err := json.Unmarshal(store.Get(scope)[agentparams.ConsentRequestIDKey], &requestID); err != nil || requestID == "" {
-		t.Fatalf("missing consent request ID: %q, %v", requestID, err)
-	}
-	return requestID
-}
-
 type fakeGenerate struct {
 	callCount  int
 	lastArgs   json.RawMessage
 	lastParams map[string]json.RawMessage
 }
 
-type exactPendingGenerate struct{ calls int }
-
-func (g *exactPendingGenerate) UsesExecutionGrants() bool { return true }
-func (g *exactPendingGenerate) Execute(_ context.Context, _ chat.ToolCommand, _ func(chat.ToolObservation) error) (chat.ToolResult, error) {
-	g.calls++
-	return chat.ToolResult{Suspend: true, NoSubmission: true}, nil
+type exactPendingGenerate struct {
+	calls          int
+	lastParameters map[string]json.RawMessage
 }
 
-func TestExactGrantGenerationNeverClaimsLegacyConsent(t *testing.T) {
-	store := agentparams.NewStore()
-	store.Set(testScope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-	})
-	generate := &exactPendingGenerate{}
-	executor, err := New(Config{Params: store, Generate: generate,
-		ConsentState: func(string) map[string]json.RawMessage { return store.Get(testScope) },
-		ConsentClear: func(string) {},
-		ConsentClaim: func(string, string, string, json.RawMessage) (string, bool, error) {
-			t.Fatal("legacy consent claim used for exact execution grant")
-			return "", false, nil
-		},
-		ConsentAccepted: func(string, string, string) error { t.Fatal("legacy consent accepted"); return nil },
-		ConsentRelease:  func(string, string, string) error { return nil },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// An approved legacy decision is still in the store; the exact-grant
-	// handoff must not claim it and must not write one.
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
-		Call: agents.ToolCall{ID: "call-a", Name: "refine_image", Arguments: json.RawMessage(`{}`)},
-	}, nil)
-	if err != nil || !result.Suspend || generate.calls != 1 {
-		t.Fatalf("exact grant handoff: result=%+v calls=%d err=%v", result, generate.calls, err)
-	}
+func (g *exactPendingGenerate) UsesExecutionGrants() bool { return true }
+func (g *exactPendingGenerate) Execute(_ context.Context, command chat.ToolCommand, _ func(chat.ToolObservation) error) (chat.ToolResult, error) {
+	g.calls++
+	g.lastParameters = command.Options.Parameters
+	return chat.ToolResult{Suspend: true, NoSubmission: true}, nil
 }
 
 func TestExactGrantTurnLimitCountsUniqueCallsAfterConsentWait(t *testing.T) {
@@ -102,36 +67,6 @@ func TestExactGrantTurnLimitCountsUniqueCallsAfterConsentWait(t *testing.T) {
 	if result := call("call-4"); !result.Suspend || generate.calls != 5 {
 		t.Fatalf("same call resume counted again: %+v calls=%d", result, generate.calls)
 	}
-}
-
-type acceptedThenFailedGenerate struct {
-	submits int
-}
-
-type preSubmitRejectThenAccept struct{ calls int }
-
-func (f *preSubmitRejectThenAccept) Execute(_ context.Context, _ chat.ToolCommand, observe func(chat.ToolObservation) error) (chat.ToolResult, error) {
-	f.calls++
-	if f.calls == 1 {
-		return chat.ToolResult{NoSubmission: true}, errors.New("input rejected before submit")
-	}
-	if err := observe(chat.ToolObservation{Registered: true, TaskID: "accepted-task"}); err != nil {
-		return chat.ToolResult{}, err
-	}
-	return chat.ToolResult{TaskID: "accepted-task"}, nil
-}
-
-func (f *acceptedThenFailedGenerate) Execute(
-	_ context.Context, command chat.ToolCommand, observe func(chat.ToolObservation) error,
-) (chat.ToolResult, error) {
-	if command.BoundTaskID != "" {
-		return chat.ToolResult{TaskID: command.BoundTaskID}, nil
-	}
-	f.submits++
-	if err := observe(chat.ToolObservation{Registered: true, TaskID: "accepted-task"}); err != nil {
-		return chat.ToolResult{}, err
-	}
-	return chat.ToolResult{TaskID: "accepted-task"}, errors.New("task failed after acceptance")
 }
 
 func (f *fakeGenerate) Execute(
@@ -238,60 +173,51 @@ func TestGetTaskReturnsState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	// observe_task was retired (#491) but stays executable: a published Agent
-	// configuration freezes its tool table and may still call it.
-	for _, name := range []string{ToolGetTask, ToolObserveTask} {
+	result, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: "owner",
+		Call:    agents.ToolCall{Name: ToolGetTask, Arguments: json.RawMessage(`{"task_id":"task_1"}`)},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute %s: %v", ToolGetTask, err)
+	}
+	// 只读查询不绑定 TaskID，避免把被查询任务伪装成本次工具调用的产物。
+	if result.AgentContent != `{"state":"SUCCEEDED"}` || result.TaskID != "" {
+		t.Fatalf("%s result = %+v", ToolGetTask, result)
+	}
+}
+
+// #491 retired observe_task and request_consent from the Schema, and the tool
+// registry resolves only Schema-declared tools, so a call by either name never
+// reaches this executor. The executor therefore carries no branch for them:
+// a direct call by such a name is an ordinary unknown name that goes to the
+// generation tool, never to the task reader and never to a removal notice.
+func TestRetiredToolNamesHaveNoExecutorBranch(t *testing.T) {
+	gen := &fakeGenerate{}
+	executor, err := New(Config{
+		Params:   agentparams.NewStore(),
+		Generate: gen,
+		ReadTask: func(context.Context, string, string) (json.RawMessage, error) {
+			t.Fatal("a retired tool name reached the task reader")
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"observe_task", "request_consent"} {
 		result, err := executor.Execute(context.Background(), chat.ToolCommand{
-			OwnerID: "owner",
-			Call:    agents.ToolCall{Name: name, Arguments: json.RawMessage(`{"task_id":"task_1"}`)},
+			OwnerID: testOwner, SessionID: "s1",
+			Call: agents.ToolCall{ID: "call-" + name, Name: name, Arguments: json.RawMessage(`{"task_id":"task_1"}`)},
 		}, nil)
 		if err != nil {
 			t.Fatalf("Execute %s: %v", name, err)
 		}
-		// 只读查询不绑定 TaskID，避免把被查询任务伪装成本次工具调用的产物。
-		if result.AgentContent != `{"state":"SUCCEEDED"}` || result.TaskID != "" {
-			t.Fatalf("%s result = %+v", name, result)
+		if strings.Contains(result.AgentContent, "request_consent has been removed") {
+			t.Fatalf("%s answered a removal notice: %q", name, result.AgentContent)
 		}
 	}
-}
-
-// #491：request_consent 已移除。已发布的配置仍可能带着这个名字，所以它
-// 必须回一条指向生成工具的移除说明，而不是 unknown tool 的泛化错误，也
-// 不再写任何待决状态或挂起轮次。
-func TestRequestConsentIsRemovedAndPointsAtTheGenerationTool(t *testing.T) {
-	store := agentparams.NewStore()
-	store.Set(testScope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-	})
-	executor, err := New(Config{
-		Params:   store,
-		Generate: &fakeGenerate{},
-		// The old execution-grant branch answered consent_required_content;
-		// the removal notice must be its own answer.
-		ConsentRequiredContent: testConsentRequired,
-		ConsentState: func(string) map[string]json.RawMessage {
-			return store.Get(testScope)
-		},
-		ConsentClear: func(string) { t.Fatal("a removed tool must not clear consent state") },
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: ToolRequestConsent, Arguments: json.RawMessage(`{"credits":10}`)},
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute request_consent: %v", err)
-	}
-	if result.Suspend || result.Error != "" || !result.NoSubmission {
-		t.Fatalf("removed request_consent result = %+v", result)
-	}
-	if result.AgentContent != removedRequestConsentContent {
-		t.Fatalf("removed request_consent content = %q", result.AgentContent)
-	}
-	if store.Get(testScope)[ConsentPendingKey] != nil {
-		t.Fatal("removed request_consent wrote a pending request")
+	if gen.callCount != 2 {
+		t.Fatalf("retired names are not routed like any other name: generation calls = %d", gen.callCount)
 	}
 }
 
@@ -327,529 +253,7 @@ func TestGeneratePassesHarnessParamsToGeneration(t *testing.T) {
 }
 
 // consentTestContents 与 Product Schema chat.agent.consent_* 测试文案一致。
-const (
-	testConsentRequired = "required"
-	testConsentLimit    = "limit"
-)
-
-func consentExecutor(t *testing.T, gen chat.ToolExecutor, state *agentparams.Store) *Executor {
-	t.Helper()
-	executor, err := New(Config{
-		Params:                 agentparams.NewStore(),
-		Generate:               gen,
-		ConsentBlockedContent:  "blocked",
-		ConsentRequiredContent: testConsentRequired,
-		ConsentLimitContent:    testConsentLimit,
-		ConsentState:           state.Get,
-		ConsentClear: func(scope string) {
-			state.Delete(scope, ConsentPendingKey, ConsentDecisionKey, ConsentApprovedKey)
-		},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	return executor
-}
-
-func pendingConsentState(scope string) *agentparams.Store {
-	state := agentparams.NewStore()
-	state.Set(scope, map[string]json.RawMessage{
-		ConsentPendingKey:  json.RawMessage(`{"reason":"extra credits"}`),
-		ConsentDecisionKey: json.RawMessage(`"pending"`),
-		ConsentApprovedKey: json.RawMessage(`false`),
-	})
-	return state
-}
-
-func TestGenerateBlockedWhileConsentPending(t *testing.T) {
-	gen := &fakeGenerate{}
-	executor := consentExecutor(t, gen, pendingConsentState(testScope))
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute generate: %v", err)
-	}
-	if gen.lastArgs != nil {
-		t.Fatalf("generation must not proceed without approval, args = %s", gen.lastArgs)
-	}
-	if result.AgentContent == "" {
-		t.Fatalf("expected blocked-consent content for the agent")
-	}
-}
-
-func TestGenerateBlockedAfterConsentDenied(t *testing.T) {
-	gen := &fakeGenerate{}
-	state := pendingConsentState(testScope)
-	state.Set(testScope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"denied"`),
-	})
-	executor := consentExecutor(t, gen, state)
-	_, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute generate: %v", err)
-	}
-	if gen.lastArgs != nil {
-		t.Fatalf("denied consent must not generate, args = %s", gen.lastArgs)
-	}
-}
-
-func TestGenerateProceedsAfterConsentApproved(t *testing.T) {
-	gen := &fakeGenerate{}
-	state := pendingConsentState(testScope)
-	state.Set(testScope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-		ConsentApprovedKey: json.RawMessage(`true`),
-	})
-	executor := consentExecutor(t, gen, state)
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute generate: %v", err)
-	}
-	if result.TaskID != "task_x" {
-		t.Fatalf("approved generation should reach the generate tool, got %+v", result)
-	}
-}
-
-// 付费生成必须先持有批准：从未请求同意时服务端直接拒绝，
-// 不依赖 LLM 自觉调用任何同意工具。
-func TestGenerateRequiresConsentWithoutPendingRequest(t *testing.T) {
-	gen := &fakeGenerate{}
-	executor := consentExecutor(t, gen, agentparams.NewStore())
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-	}, nil)
-	if err != nil {
-		t.Fatalf("Execute generate: %v", err)
-	}
-	if gen.lastArgs != nil {
-		t.Fatalf("generation must not proceed without consent, args = %s", gen.lastArgs)
-	}
-	if result.AgentContent != testConsentRequired {
-		t.Fatalf("content = %q", result.AgentContent)
-	}
-}
-
-// 批准一次性消费：一次批准只放行一次付费生成，随后同意状态被清除，
-// 后续生成必须重新请求同意，防止一次批准永久放行。
-func TestApprovedConsentIsConsumedBySingleGeneration(t *testing.T) {
-	gen := &fakeGenerate{}
-	state := pendingConsentState(testScope)
-	state.Set(testScope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-		ConsentApprovedKey: json.RawMessage(`true`),
-	})
-	executor := consentExecutor(t, gen, state)
-	command := chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-	}
-	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
-		t.Fatalf("first generation: %v", err)
-	}
-	if remaining := state.Get(testScope); remaining != nil &&
-		(remaining[ConsentPendingKey] != nil || remaining[ConsentDecisionKey] != nil) {
-		t.Fatalf("consent must be consumed after one generation: %#v", remaining)
-	}
-	result, err := executor.Execute(context.Background(), command, nil)
-	if err != nil {
-		t.Fatalf("second generation: %v", err)
-	}
-	if gen.callCount != 1 {
-		t.Fatalf("generation calls = %d, want 1", gen.callCount)
-	}
-	if result.AgentContent != testConsentRequired {
-		t.Fatalf("content = %q", result.AgentContent)
-	}
-}
-
-func TestAcceptedFailureCannotReuseConsentAndSameCallRecovers(t *testing.T) {
-	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	state := agentparams.NewPersistentStore(repository, nil)
-	gen := &acceptedThenFailedGenerate{}
-	executor, err := New(Config{
-		Params:   agentparams.NewStore(),
-		Generate: gen,
-		Preflight: func(command chat.ToolCommand) string {
-			if command.Options.AIModel == "" {
-				return "select model"
-			}
-			return ""
-		},
-		ConsentState:           state.Get,
-		ConsentClear:           func(string) {},
-		ConsentClaim:           state.ClaimConsent,
-		ConsentAccepted:        state.AcceptConsent,
-		ConsentRelease:         state.ReleaseConsent,
-		ConsentRequiredContent: testConsentRequired,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	command := chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call:    agents.ToolCall{ID: "call-a", Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-		Options: chat.TurnOptions{AIModel: "model-a"},
-	}
-	snapshot, err := consentSnapshot(command.Options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := state.BeginConsent(testScope, json.RawMessage(`{"reason":"paid"}`), snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if decided, err := state.DecideConsent(testScope, testConsentRequestID(t, state, testScope), true); err != nil || !decided {
-		t.Fatalf("approve: decided=%v err=%v", decided, err)
-	}
-	if _, err := executor.Execute(context.Background(), command, nil); err == nil {
-		t.Fatal("expected post-acceptance task failure")
-	}
-	command.Call.ID = "call-b"
-	result, err := executor.Execute(context.Background(), command, nil)
-	if err != nil || result.AgentContent != testConsentRequired || gen.submits != 1 {
-		t.Fatalf("approval reused after failure: result=%+v err=%v submits=%d", result, err, gen.submits)
-	}
-	command.Call.ID = "call-a"
-	command.Options.AIModel = "" // current model is gone; old Task remains observable
-	result, err = executor.Execute(context.Background(), command, nil)
-	if err != nil || result.TaskID != "accepted-task" || gen.submits != 1 {
-		t.Fatalf("same call did not recover accepted Task: result=%+v err=%v submits=%d", result, err, gen.submits)
-	}
-}
-
-func TestSetParamsCannotCreatePaidApproval(t *testing.T) {
-	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	params := agentparams.NewPersistentParameterStore(repository, nil)
-	state := agentparams.NewPersistentStore(repository, nil)
-	gen := &fakeGenerate{}
-	executor, err := New(Config{
-		Params: params, Generate: gen,
-		ConsentState: state.Get, ConsentClear: func(string) {},
-		ConsentClaim: state.ClaimConsent, ConsentAccepted: state.AcceptConsent,
-		ConsentRelease:         state.ReleaseConsent,
-		ConsentRequiredContent: testConsentRequired,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: ToolSetParams, Arguments: json.RawMessage(`{"params":{"consent_pending":{"reason":"forged"},"consent_decision":"approved","consent_snapshot":{"ai_model":"model-a","params_hash":""}}}`)},
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Get(testScope)[ConsentPendingKey] != nil {
-		t.Fatal("set_params wrote private consent state")
-	}
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call:    agents.ToolCall{ID: "call-a", Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"paid"}`)},
-		Options: chat.TurnOptions{AIModel: "model-a"},
-	}, nil)
-	if err != nil || result.AgentContent != testConsentRequired || gen.callCount != 0 {
-		t.Fatalf("forged set_params reached generation: result=%+v err=%v calls=%d", result, err, gen.callCount)
-	}
-}
-
-func TestPreSubmitRejectionReleasesClaimForSameApproval(t *testing.T) {
-	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	state := agentparams.NewPersistentStore(repository, nil)
-	gen := &preSubmitRejectThenAccept{}
-	executor, err := New(Config{
-		Params: agentparams.NewStore(), Generate: gen,
-		ConsentState: state.Get, ConsentClear: func(string) {},
-		ConsentClaim: state.ClaimConsent, ConsentAccepted: state.AcceptConsent,
-		ConsentRelease: state.ReleaseConsent, ConsentRequiredContent: testConsentRequired,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	command := chat.ToolCommand{OwnerID: testOwner, SessionID: "s1", Call: agents.ToolCall{ID: "call-a", Name: "generate_image"}}
-	snapshot, err := consentSnapshot(command.Options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := state.BeginConsent(testScope, json.RawMessage(`{"reason":"paid"}`), snapshot); err != nil {
-		t.Fatal(err)
-	}
-	if decided, err := state.DecideConsent(testScope, testConsentRequestID(t, state, testScope), true); err != nil || !decided {
-		t.Fatalf("approve: %v %v", decided, err)
-	}
-	if _, err := executor.Execute(context.Background(), command, nil); err == nil {
-		t.Fatal("expected pre-submit rejection")
-	}
-	command.Call.ID = "call-b"
-	result, err := executor.Execute(context.Background(), command, nil)
-	if err != nil || result.TaskID != "accepted-task" || gen.calls != 2 {
-		t.Fatalf("deterministic rejection stranded approval: result=%+v err=%v calls=%d", result, err, gen.calls)
-	}
-}
-
-func TestGenerationLimitDoesNotReserveUnusedConsent(t *testing.T) {
-	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	state := agentparams.NewPersistentStore(repository, nil)
-	gen := &fakeGenerate{}
-	executor, err := New(Config{
-		Params: agentparams.NewStore(), Generate: gen,
-		ConsentState: state.Get, ConsentClear: func(string) {},
-		ConsentClaim: state.ClaimConsent, ConsentAccepted: state.AcceptConsent,
-		ConsentRelease:            state.ReleaseConsent,
-		ConsentRequiredContent:    testConsentRequired,
-		ConsentLimitContent:       testConsentLimit,
-		MaxGenerationCallsPerTurn: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	command := chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
-		Call: agents.ToolCall{ID: "call-a", Name: "generate_image"},
-	}
-	snapshot, err := consentSnapshot(command.Options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	approve := func() {
-		t.Helper()
-		if err := state.BeginConsent(testScope, json.RawMessage(`{"reason":"paid"}`), snapshot); err != nil {
-			t.Fatal(err)
-		}
-		if decided, err := state.DecideConsent(testScope, testConsentRequestID(t, state, testScope), true); err != nil || !decided {
-			t.Fatalf("approve: %v %v", decided, err)
-		}
-	}
-	approve()
-	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
-		t.Fatal(err)
-	}
-	approve()
-	command.Call.ID = "call-b"
-	result, err := executor.Execute(context.Background(), command, nil)
-	if err != nil || result.AgentContent != testConsentLimit || gen.callCount != 1 {
-		t.Fatalf("limit result=%+v err=%v calls=%d", result, err, gen.callCount)
-	}
-	if state.Get(testScope)[agentparams.ConsentClaimKey] != nil {
-		t.Fatal("limit reserved unused approval")
-	}
-	command.AssistantMessageID = "turn-b"
-	if _, err := executor.Execute(context.Background(), command, nil); err != nil || gen.callCount != 2 {
-		t.Fatalf("unused approval was stranded: err=%v calls=%d", err, gen.callCount)
-	}
-}
-
-func TestUnboundAcceptedTaskRecoversBeforeCurrentModelPreflight(t *testing.T) {
-	gen := &acceptedThenFailedGenerate{}
-	executor, err := New(Config{
-		Params: agentparams.NewStore(), Generate: gen,
-		Preflight:    func(chat.ToolCommand) string { return "current model unavailable" },
-		ConsentState: func(string) map[string]json.RawMessage { return nil },
-		ConsentClear: func(string) {},
-		ConsentClaim: func(_, _, _ string, snapshot json.RawMessage) (string, bool, error) {
-			if len(snapshot) != 0 {
-				t.Fatal("recovery unexpectedly reserved a new claim")
-			}
-			return "accepted-task", true, nil
-		},
-		ConsentAccepted: func(string, string, string) error { return nil },
-		ConsentRelease:  func(string, string, string) error { return nil },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := executor.Execute(context.Background(), chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1", Call: agents.ToolCall{ID: "call-a", Name: "generate_image"},
-	}, nil)
-	if err != nil || result.TaskID != "accepted-task" || gen.submits != 0 {
-		t.Fatalf("unbound recovery blocked or resubmitted: result=%+v err=%v submits=%d", result, err, gen.submits)
-	}
-}
-
-// 单轮生成次数上限独立于同意状态生效：即使批准持续有效，
-// 超出 Schema 上限的调用也必须被拒绝。
-func TestGenerationPerTurnLimitEnforced(t *testing.T) {
-	gen := &fakeGenerate{}
-	approved := map[string]json.RawMessage{
-		ConsentPendingKey:  json.RawMessage(`{"reason":"x"}`),
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-		ConsentApprovedKey: json.RawMessage(`true`),
-	}
-	executor, err := New(Config{
-		Params:                    agentparams.NewStore(),
-		Generate:                  gen,
-		ConsentState:              func(string) map[string]json.RawMessage { return approved },
-		ConsentClear:              func(string) {},
-		MaxGenerationCallsPerTurn: 1,
-		ConsentLimitContent:       testConsentLimit,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	command := chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		AssistantMessageID: "msg_turn_1",
-		Call:               agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a"}`)},
-	}
-	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
-		t.Fatalf("first generation: %v", err)
-	}
-	result, err := executor.Execute(context.Background(), command, nil)
-	if err != nil {
-		t.Fatalf("second generation: %v", err)
-	}
-	if gen.callCount != 1 {
-		t.Fatalf("generation calls = %d, want 1", gen.callCount)
-	}
-	if result.AgentContent != testConsentLimit {
-		t.Fatalf("content = %q", result.AgentContent)
-	}
-	// 新轮次（不同 assistant 消息）重置计数。
-	command.AssistantMessageID = "msg_turn_2"
-	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
-		t.Fatalf("next turn generation: %v", err)
-	}
-	if gen.callCount != 2 {
-		t.Fatalf("generation calls after new turn = %d, want 2", gen.callCount)
-	}
-}
-
-// ConsentState 与 ConsentClear 必须成对接线：只给其一属于装配缺陷，
-// 会导致一次性消费语义静默失效。
-func TestNewRejectsUnpairedConsentState(t *testing.T) {
-	_, err := New(Config{
-		Params:       agentparams.NewStore(),
-		Generate:     &fakeGenerate{},
-		ConsentState: func(string) map[string]json.RawMessage { return nil },
-	})
-	if err == nil {
-		t.Fatal("expected error for ConsentState without ConsentClear")
-	}
-	_, err = New(Config{
-		Params:       agentparams.NewStore(),
-		Generate:     &fakeGenerate{},
-		ConsentClear: func(string) {},
-	})
-	if err == nil {
-		t.Fatal("expected error for ConsentClear without ConsentState")
-	}
-}
-
-// AGT-12 挂起语义：首次调用登记挂起（Suspend=true，不阻塞 worker）；
-// 决定写入后的恢复重放直接返回对应文案；超过最长挂起时长仍无决定则
-// 返回等待文案收束本轮（生成在批准前不会执行）。
-// 批准与生成目标绑定（AGT-05）：模型或参数与批准快照不一致时必须
-// 重新请求同意；一致时正常放行并在成功后消费批准。
-func TestConsentSnapshotBindsGenerationTarget(t *testing.T) {
-	gen := &fakeGenerate{}
-	state := pendingConsentState(testScope)
-	params := map[string]json.RawMessage{"n": json.RawMessage(`4`)}
-	snapshot, err := json.Marshal(struct {
-		AIModel    string `json:"ai_model"`
-		ParamsHash string `json:"params_hash"`
-	}{AIModel: "model-a", ParamsHash: paramsHash(params)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	state.Set(testScope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-		ConsentApprovedKey: json.RawMessage(`true`),
-		ConsentSnapshotKey: snapshot,
-	})
-	executor := consentExecutor(t, gen, state)
-	command := chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-		Options: chat.TurnOptions{
-			AIModel:    "model-b",
-			Parameters: map[string]json.RawMessage{"n": json.RawMessage(`4`)},
-		},
-	}
-	result, err := executor.Execute(context.Background(), command, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.AgentContent != testConsentRequired || gen.callCount != 0 {
-		t.Fatalf("mismatched target must be blocked: %+v calls=%d", result, gen.callCount)
-	}
-	if decision := state.Get(testScope)[ConsentDecisionKey]; string(decision) != `"approved"` {
-		t.Fatalf("mismatched target must not consume approval: %s", decision)
-	}
-
-	command.Options.AIModel = "model-a"
-	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
-		t.Fatalf("matching target: %v", err)
-	}
-	if gen.callCount != 1 {
-		t.Fatalf("generation calls = %d, want 1", gen.callCount)
-	}
-	if remaining := state.Get(testScope); remaining != nil && remaining[ConsentDecisionKey] != nil {
-		t.Fatalf("consent must be consumed after success: %#v", remaining)
-	}
-}
-
-// 预检先于同意门禁（AGT-04）：即使批准有效，无需用户交互即可判定
-// 的失败（未选模型）也直接返回，批准不被无效调用消耗。
-func TestPreflightRunsBeforeConsentGate(t *testing.T) {
-	gen := &fakeGenerate{}
-	state := pendingConsentState(testScope)
-	state.Set(testScope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-		ConsentApprovedKey: json.RawMessage(`true`),
-	})
-	executor, err := New(Config{
-		Params:                 agentparams.NewStore(),
-		Generate:               gen,
-		Preflight:              func(chat.ToolCommand) string { return "select a model first" },
-		ConsentBlockedContent:  "blocked",
-		ConsentRequiredContent: testConsentRequired,
-		ConsentLimitContent:    testConsentLimit,
-		ConsentState:           state.Get,
-		ConsentClear: func(scope string) {
-			state.Delete(scope, ConsentPendingKey, ConsentDecisionKey, ConsentApprovedKey)
-		},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	command := chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-	}
-	result, err := executor.Execute(context.Background(), command, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.AgentContent != "select a model first" || gen.callCount != 0 {
-		t.Fatalf("preflight must short-circuit: %+v calls=%d", result, gen.callCount)
-	}
-	if decision := state.Get(testScope)[ConsentDecisionKey]; string(decision) != `"approved"` {
-		t.Fatalf("preflight failure must not consume approval: %s", decision)
-	}
-}
+const testConsentLimit = "limit"
 
 // fakePersister 复现 B10 装配：paramsStore 与 agent 状态 store 共享
 // 同一持久层（go_agent_state，owner+scope+key 行）。
@@ -885,74 +289,6 @@ func (p *fakePersister) LoadAgentState(_, scope string) (map[string]json.RawMess
 		out[key] = append(json.RawMessage(nil), value...)
 	}
 	return out, nil
-}
-
-// 同意键写入共享持久层后，params 侧不得把它们当作生成参数合并，
-// 批准快照的参数哈希也必须保持一致：写入批准快照 → 批准 →
-// refine_image 必须放行并消费批准（生产验收回归）。
-func TestConsentKeysDoNotPolluteSharedStateParams(t *testing.T) {
-	persister := newFakePersister()
-	paramsStore := agentparams.NewPersistentStore(persister, nil)
-	stateStore := agentparams.NewPersistentStore(persister, nil)
-	scope := testScope
-	gen := &fakeGenerate{}
-	executor, err := New(Config{
-		Params:                 paramsStore,
-		Generate:               gen,
-		Preflight:              func(chat.ToolCommand) string { return "" },
-		ConsentBlockedContent:  "blocked",
-		ConsentRequiredContent: testConsentRequired,
-		ConsentLimitContent:    testConsentLimit,
-		ConsentState:           stateStore.Get,
-		ConsentClear: func(scope string) {
-			stateStore.Delete(scope, ConsentPendingKey, ConsentDecisionKey, ConsentApprovedKey, ConsentSnapshotKey)
-		},
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	command := chat.ToolCommand{
-		OwnerID: testOwner, SessionID: "s1",
-		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
-		Options: chat.TurnOptions{
-			AIModel:    "model-a",
-			Parameters: map[string]json.RawMessage{"n": json.RawMessage(`4`)},
-		},
-	}
-	snapshot, err := consentSnapshot(command.Options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(snapshot) == 0 {
-		t.Fatal("snapshot must be captured")
-	}
-	stateStore.Set(scope, map[string]json.RawMessage{
-		ConsentPendingKey:  json.RawMessage(`{"reason":"paid"}`),
-		ConsentDecisionKey: json.RawMessage(`"pending"`),
-		ConsentApprovedKey: json.RawMessage(`false`),
-		ConsentSnapshotKey: snapshot,
-	})
-	stateStore.Set(scope, map[string]json.RawMessage{
-		ConsentDecisionKey: json.RawMessage(`"approved"`),
-		ConsentApprovedKey: json.RawMessage(`true`),
-	})
-	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
-		t.Fatalf("refine after approval: %v", err)
-	}
-	if gen.callCount != 1 {
-		t.Fatalf("generation calls = %d, want 1", gen.callCount)
-	}
-	if gen.lastParams["n"] == nil || string(gen.lastParams["n"]) != `4` {
-		t.Fatalf("merged params = %#v", gen.lastParams)
-	}
-	for key := range consentStateKeys {
-		if _, leaked := gen.lastParams[key]; leaked {
-			t.Fatalf("consent key %s leaked into generation params", key)
-		}
-	}
-	if remaining := stateStore.Get(scope); remaining != nil && remaining[ConsentDecisionKey] != nil {
-		t.Fatalf("consent must be consumed: %#v", remaining)
-	}
 }
 
 func TestListSessionModelsUsesTheServerHeldScope(t *testing.T) {
@@ -1172,5 +508,146 @@ func TestSelfCheckToolsDispatchAndRefuseWhenUnavailable(t *testing.T) {
 		if err != nil || result.Error == "" || !result.NoSubmission {
 			t.Fatalf("unavailable %s = %+v err=%v", name, result, err)
 		}
+	}
+}
+
+// The generation tool owns the decision (#491): this executor claims, records
+// and consumes no conversational consent. A retired consent row an earlier
+// version persisted is never read, never written and never consumed, and it
+// never reaches a generation request as a parameter.
+func TestRetiredConsentRowsAreNeitherReadNorConsumedNorLeaked(t *testing.T) {
+	persister := newFakePersister()
+	paramsStore := agentparams.NewPersistentParameterStore(persister, nil)
+	stateStore := agentparams.NewPersistentStore(persister, nil)
+	retired := map[string]json.RawMessage{
+		agentparams.ConsentPendingKey:   json.RawMessage(`{"reason":"paid"}`),
+		agentparams.ConsentDecisionKey:  json.RawMessage(`"approved"`),
+		agentparams.ConsentApprovedKey:  json.RawMessage(`true`),
+		agentparams.ConsentSnapshotKey:  json.RawMessage(`{"ai_model":"model-a","params_hash":""}`),
+		agentparams.ConsentClaimKey:     json.RawMessage(`{"call_id":"old"}`),
+		agentparams.ConsentRequestIDKey: json.RawMessage(`"old-request"`),
+	}
+	stateStore.Set(testScope, retired)
+	gen := &exactPendingGenerate{}
+	executor, err := New(Config{Params: paramsStore, Generate: gen})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1", AssistantMessageID: "turn-a",
+		Call:    agents.ToolCall{ID: "call-a", Name: "refine_image", Arguments: json.RawMessage(`{}`)},
+		Options: chat.TurnOptions{AIModel: "model-a", Parameters: map[string]json.RawMessage{"n": json.RawMessage(`4`)}},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if gen.calls != 1 {
+		t.Fatalf("generation calls = %d, want 1", gen.calls)
+	}
+	for key, want := range retired {
+		if got := stateStore.Get(testScope)[key]; string(got) != string(want) {
+			t.Fatalf("retired row %s changed: %s", key, got)
+		}
+	}
+	for key := range retired {
+		if _, leaked := gen.lastParameters[key]; leaked {
+			t.Fatalf("retired consent key %s leaked into generation params", key)
+		}
+	}
+	if string(gen.lastParameters["n"]) != `4` {
+		t.Fatalf("merged params = %#v", gen.lastParameters)
+	}
+}
+
+// set_params cannot write the retired private state either: parameters are
+// parameters, whatever name they carry.
+func TestSetParamsCannotWritePrivateAgentState(t *testing.T) {
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	params := agentparams.NewPersistentParameterStore(repository, nil)
+	state := agentparams.NewPersistentStore(repository, nil)
+	executor, err := New(Config{Params: params, Generate: &fakeGenerate{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1",
+		Call: agents.ToolCall{Name: ToolSetParams, Arguments: json.RawMessage(
+			`{"params":{"consent_pending":{"reason":"forged"},"consent_decision":"approved","consent_snapshot":{"ai_model":"model-a","params_hash":""}}}`)},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{agentparams.ConsentPendingKey, agentparams.ConsentDecisionKey, agentparams.ConsentSnapshotKey} {
+		if state.Get(testScope)[key] != nil {
+			t.Fatalf("set_params wrote private state %s", key)
+		}
+	}
+}
+
+// Preflight failures that need no person (no model chosen) answer before any
+// operation is prepared, so nothing is spent on a call that cannot succeed.
+func TestPreflightShortCircuitsBeforeGeneration(t *testing.T) {
+	gen := &fakeGenerate{}
+	executor, err := New(Config{
+		Params:    agentparams.NewStore(),
+		Generate:  gen,
+		Preflight: func(chat.ToolCommand) string { return "select a model first" },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	result, err := executor.Execute(context.Background(), chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1",
+		Call: agents.ToolCall{Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a cube"}`)},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.AgentContent != "select a model first" || !result.NoSubmission || gen.callCount != 0 {
+		t.Fatalf("preflight must short-circuit: %+v calls=%d", result, gen.callCount)
+	}
+}
+
+// The per-turn generation limit counts distinct calls of one assistant message
+// and resets for the next turn.
+func TestGenerationPerTurnLimitEnforced(t *testing.T) {
+	gen := &fakeGenerate{}
+	executor, err := New(Config{
+		Params:                    agentparams.NewStore(),
+		Generate:                  gen,
+		MaxGenerationCallsPerTurn: 1,
+		ConsentLimitContent:       testConsentLimit,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	command := chat.ToolCommand{
+		OwnerID: testOwner, SessionID: "s1",
+		AssistantMessageID: "msg_turn_1",
+		Call:               agents.ToolCall{ID: "call-1", Name: "generate_image", Arguments: json.RawMessage(`{"prompt":"a"}`)},
+	}
+	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
+		t.Fatalf("first generation: %v", err)
+	}
+	command.Call.ID = "call-2"
+	result, err := executor.Execute(context.Background(), command, nil)
+	if err != nil {
+		t.Fatalf("second generation: %v", err)
+	}
+	if gen.callCount != 1 {
+		t.Fatalf("generation calls = %d, want 1", gen.callCount)
+	}
+	if result.AgentContent != testConsentLimit {
+		t.Fatalf("content = %q", result.AgentContent)
+	}
+	command.AssistantMessageID = "msg_turn_3"
+	command.Call.ID = "call-3"
+	if _, err := executor.Execute(context.Background(), command, nil); err != nil {
+		t.Fatalf("next turn generation: %v", err)
+	}
+	if gen.callCount != 2 {
+		t.Fatalf("generation calls after new turn = %d, want 2", gen.callCount)
 	}
 }

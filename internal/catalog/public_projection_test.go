@@ -253,11 +253,15 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		}
 	}
 	// Dot-containing message keys are single JSON object keys.
-	for _, key := range []string{"error.consent_unavailable", "error.consent_not_pending"} {
+	for _, key := range []string{"error.consent_not_pending"} {
 		messages := public["content"].(map[string]any)["messages"].(map[string]any)
 		if value, ok := messages[key].(string); !ok || value == "" {
 			t.Errorf("public consent message %s missing", key)
 		}
+	}
+	// #521: the stored consent state is retired, so its error message is gone.
+	if _, retired := public["content"].(map[string]any)["messages"].(map[string]any)["error.consent_unavailable"]; retired {
+		t.Error("the retired error.consent_unavailable message is still public")
 	}
 	for _, path := range []string{
 		"provider_webhooks", "provider_discovery",

@@ -80,11 +80,15 @@ func TestPlanToolDescriptionKeepsScopeAndApprovalApart(t *testing.T) {
 			continue
 		}
 		found = true
-		for _, want := range []string{"approved by policy in auto and manual modes and by the approved plan in budget mode",
+		for _, want := range []string{"In budget mode a step the approved plan covers runs within its remaining budget without a card",
 			"unrelated to the Agent scope"} {
 			if !strings.Contains(tool.Description, want) {
 				t.Errorf("plan_model_processing omits %q", want)
 			}
+		}
+		// #521: manual mode cards the expensive steps whatever the capability.
+		if strings.Contains(tool.Description, "approved by policy in auto and manual modes") {
+			t.Error("plan_model_processing still says remesh, rigging and animation are approved by policy in manual mode")
 		}
 	}
 	if !found {

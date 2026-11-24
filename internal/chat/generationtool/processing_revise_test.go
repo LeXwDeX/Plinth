@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/processing"
@@ -59,6 +60,43 @@ func TestReviseProcessingPlanRefusesStaleAndUnsupportedRequests(t *testing.T) {
 		if result.Error == "" {
 			t.Fatalf("%s accepted: %+v", name, result)
 		}
+	}
+}
+
+// #521: a revision without a reason is refused with the Schema's own
+// reason_required text, the declaration that names why, and not with the
+// generic invalid-arguments wording that says nothing about the missing reason.
+func TestReviseProcessingPlanWithoutAReasonUsesTheDeclaredRefusal(t *testing.T) {
+	loaded, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := loaded.Application().Chat.Processing.Failures.ReasonRequired
+	if want == "" {
+		t.Fatal("the default Catalog declares no reason_required text")
+	}
+	h := newAgentPlanHarness(t, "auto", false)
+	_, plan := h.propose(agentPlanArguments)
+	for _, reason := range []string{` "reason":" "`, ` "reason":""`} {
+		arguments := `{"plan_id":"` + plan.ID + `","expected_plan_version":` + jsonNumber(plan.Version) +
+			`,"operation":"skip","step_index":2,` + reason + `}`
+		result, err := h.executor.ReviseProcessingPlan(context.Background(), reviseCommand(arguments))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(result.AgentContent, want) {
+			t.Fatalf("reason %q refusal = %s, want the declared text %q", reason, result.AgentContent, want)
+		}
+	}
+	// A call that omits the field is the same mistake.
+	omitted := `{"plan_id":"` + plan.ID + `","expected_plan_version":` + jsonNumber(plan.Version) +
+		`,"operation":"skip","step_index":2}`
+	result, err := h.executor.ReviseProcessingPlan(context.Background(), reviseCommand(omitted))
+	if err != nil || !strings.Contains(result.AgentContent, want) {
+		t.Fatalf("omitted reason refusal = %s %v", result.AgentContent, err)
+	}
+	if revised := h.get(plan.ID); revised.Steps[2].State == "SKIPPED" {
+		t.Fatal("a revision without a reason was applied")
 	}
 }
 
