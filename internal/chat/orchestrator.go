@@ -70,6 +70,11 @@ type ToolCommand struct {
 	// this turn's Agent scope (#103). ask_choice uses it to refuse a card whose
 	// answer would call a tool the turn cannot run. Nil means no check.
 	ToolAvailable func(name string) bool
+	// ChoiceScope is set when this turn answers a direction card on the card
+	// (#549): a paid step must be the chosen option's step. The generation
+	// tools check the capability the call resolves to against it. Nil means
+	// the turn is not scoped by a card.
+	ChoiceScope *ChoiceScope
 	// ExplicitParameters preserves caller inputs before legacy defaults merge.
 	// Non-nil enables offering overrides without changing the command hash.
 	ExplicitParameters map[string]json.RawMessage `json:"-"`
@@ -3099,6 +3104,9 @@ func (orchestrator *Orchestrator) executeTools(
 		return ErrTurnSuspended
 	}
 	var inflight []WaitingCall
+	// #549: what this turn may submit when it answers a direction card on the
+	// card, read from storage every round so a resumed turn is scoped alike.
+	choiceScope := orchestrator.turnChoiceScope(ctx, command.OwnerID, command.SessionID, history)
 	// 提交阶段：按调用顺序逐个执行。付费步骤提交后若要等待任务，不再立即
 	// 挂起轮次，记为在途并继续提交同批互不依赖的下一个付费步骤；本批提交
 	// 完（或遇到必须按序处理的调用）后，由循环之后的等待阶段一次性挂起。
@@ -3239,6 +3247,31 @@ func (orchestrator *Orchestrator) executeTools(
 			}
 			continue
 		}
+		if boundTaskID == "" {
+			// #549: the turn that answers a direction card on the card runs the
+			// chosen option's one step, once. Any other paid step is answered,
+			// not run: an ordinary tool result in the Schema's words, nothing
+			// submitted and nothing charged, and the Agent reports and asks.
+			if refusal := orchestrator.choiceStepRefusal(ctx, command, choiceScope, call, tool,
+				earlierCalls(storedCalls, call.ID), taskBindings); refusal != "" {
+				orchestrator.logger.Info("方向卡回合拒绝了未选择的付费步骤",
+					"session_id", command.SessionID, "assistant_message_id", command.AssistantMessageID,
+					"call_id", call.ID, "tool", call.Name, "choice_id", choiceScope.ChoiceID, "option_id", choiceScope.OptionID)
+				results = append(results, agents.Message{
+					Role:       orchestrator.schema.Roles.Tool,
+					Content:    refusal,
+					ToolCallID: call.ID,
+				})
+				turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+				turn.Checkpoint.markUnexecuted(call.ID)
+				waiting = removeWaiting(waiting, call.ID)
+				turn.Checkpoint.SetWaiting(waiting)
+				if err := persist(orchestrator.service.TurnRunningState()); err != nil {
+					return results, imageURLs, taskBindings, err
+				}
+				continue
+			}
+		}
 		result, err := orchestrator.tools.Execute(
 			ctx,
 			ToolCommand{
@@ -3256,6 +3289,7 @@ func (orchestrator *Orchestrator) executeTools(
 				History:              history,
 				Turn:                 copyMessage(*produced),
 				Options:              command.Options,
+				ChoiceScope:          choiceScope,
 				EarlierCalls:         earlierCalls(storedCalls, call.ID),
 				ToolAvailable: func(name string) bool {
 					candidate, exists := registry.byName[name]

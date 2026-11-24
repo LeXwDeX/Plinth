@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -542,6 +543,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// exact refine_image arguments, checked against the declared tool.
 		ConceptDirections:     applicationSchema.Chat.ConceptDirections,
 		ChoiceTargetArguments: chatToolArgumentNames(applicationSchema.Chat.Tools),
+		// A direction card option names the one paid step it runs (#549).
+		ChoiceStepTools: choiceStepTools(applicationSchema.Chat.Tools),
 		// A direction card option may switch the session to one of these
 		// functions (#374).
 		HarnessOperations: applicationSchema.Chat.Harness.Operations,
@@ -2901,6 +2904,27 @@ func (origins taskRerollOrigins) GrantByKey(ctx context.Context, owner, key stri
 // chatToolArgumentNames lists each declared generation tool's parameter names,
 // so an Agent-supplied choice option can only carry arguments the target tool
 // really accepts (#242).
+// choiceStepTools are the tools a direction-card option may name as its one
+// paid step (#549), with their declared capabilities: paid tools that submit
+// one step per call. A processing plan tool submits a chain of steps, so it is
+// never one option's one thing; a tool with no declared capability cannot be
+// quoted from an Offering.
+func choiceStepTools(tools []catalog.ChatToolSchema) map[string][]string {
+	steps := map[string][]string{}
+	for _, tool := range tools {
+		if !slices.Contains(tool.Execution.Effects, "PAID_TASK") || len(tool.Execution.Capabilities) == 0 ||
+			(tool.Processing != nil && tool.Processing.Plan != nil) {
+			continue
+		}
+		capabilities := make([]string, 0, len(tool.Execution.Capabilities))
+		for _, capability := range tool.Execution.Capabilities {
+			capabilities = append(capabilities, string(capability))
+		}
+		steps[tool.Name] = capabilities
+	}
+	return steps
+}
+
 func chatToolArgumentNames(tools []catalog.ChatToolSchema) map[string][]string {
 	names := make(map[string][]string, len(tools))
 	for _, tool := range tools {

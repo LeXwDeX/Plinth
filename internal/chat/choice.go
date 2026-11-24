@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/schema"
 )
@@ -68,6 +71,57 @@ type ChoiceOption struct {
 	// it sends the answer (#374). Only a kind that declares actions carries
 	// one; the server stores and shows it but never performs it.
 	Action *ChoiceAction `json:"action,omitempty"`
+	// Step is the one paid step the option runs (#549), on a kind that
+	// declares steps: the tool and the capability. Nil is an option that runs
+	// no paid step (an explanation, a hand-off). The quote fields above are
+	// the server's estimate of this step.
+	Step *ChoiceStep `json:"step,omitempty"`
+}
+
+// ChoiceStep is the one paid step a direction-card option names (#549).
+type ChoiceStep struct {
+	Tool       string `json:"tool"`
+	Capability string `json:"capability,omitempty"`
+}
+
+// ChoiceScope is what the turn that answers a direction card on the card may
+// submit (#549): only the chosen option's step, once. It is derived from the
+// stored card and the turn's last user message on every round, so a restarted
+// turn is scoped the same way. A nil scope is a turn nobody scoped (a typed
+// instruction, a plan continuation, a card of another kind).
+type ChoiceScope struct {
+	ChoiceID    string
+	OptionID    string
+	OptionLabel string
+	// Step is the chosen option's step; nil authorizes no paid step.
+	Step *ChoiceStep
+	// Refusal is the kind's Schema text for a step outside the scope ({tool},
+	// {option}).
+	Refusal string
+}
+
+// Permits reports whether the scope lets this tool run this capability. An
+// empty capability matches on the tool alone (the orchestrator does not know
+// the capability a call resolves to; the generation tools check it again).
+func (scope *ChoiceScope) Permits(tool, capability string) bool {
+	if scope == nil {
+		return true
+	}
+	if scope.Step == nil || scope.Step.Tool != tool {
+		return false
+	}
+	return capability == "" || scope.Step.Capability == "" || scope.Step.Capability == capability
+}
+
+// RefusalFor words the refusal of a step outside the scope. localize
+// translates the Schema template into the turn's locale first; nil keeps the
+// default-locale copy.
+func (scope *ChoiceScope) RefusalFor(tool string, localize func(string) string) string {
+	template := scope.Refusal
+	if localize != nil {
+		template = localize(template)
+	}
+	return strings.NewReplacer("{tool}", tool, "{option}", scope.OptionLabel).Replace(template)
 }
 
 // ChoiceAction is an option's action (#374): Type is one of the catalog's
@@ -272,10 +326,12 @@ type directionContinuationItem struct {
 	Title       string        `json:"title"`
 	Description string        `json:"description,omitempty"`
 	Action      *ChoiceAction `json:"action,omitempty"`
+	Step        *ChoiceStep   `json:"step,omitempty"`
 }
 
 func directionItem(option ChoiceOption) directionContinuationItem {
-	return directionContinuationItem{ID: option.ID, Title: option.Title(), Description: option.Description, Action: option.Action}
+	return directionContinuationItem{ID: option.ID, Title: option.Title(), Description: option.Description,
+		Action: option.Action, Step: option.Step}
 }
 
 // AnsweredDirection is the continuation of an answered card that names no
@@ -326,6 +382,117 @@ func (orchestrator *Orchestrator) directionKind(choice Choice) (catalog.ChatChoi
 		}
 	}
 	return catalog.ChatChoiceKindSchema{}, false
+}
+
+// turnChoiceScope derives the scope of a turn that answers a direction card on
+// the card (#549) from stored data only: the last user message of the turn's
+// history and the card answered with that message. A turn whose last user
+// message answered no card, a card answered by the Agent mapping a typed reply
+// and a card of a kind that declares no step are not scoped. When the cards
+// cannot be read the turn is scoped with no step at all: an unreadable answer
+// must never widen what the turn may charge.
+func (orchestrator *Orchestrator) turnChoiceScope(ctx context.Context, ownerID, sessionID string, history []Message) *ChoiceScope {
+	if orchestrator.service == nil || sessionID == "" {
+		return nil
+	}
+	steps := map[string]catalog.ChatChoiceStepSchema{}
+	failClosed := ""
+	for _, kind := range orchestrator.schema.Choice.Kinds {
+		if kind.Step != nil && kind.ToolName == "" {
+			steps[kind.ID] = *kind.Step
+			if failClosed == "" {
+				failClosed = kind.Step.UnchosenRefusal
+			}
+		}
+	}
+	if len(steps) == 0 {
+		return nil
+	}
+	messageID := ""
+	for index := len(history) - 1; index >= 0; index-- {
+		if history[index].Role == orchestrator.schema.Roles.User {
+			messageID = history[index].ID
+			break
+		}
+	}
+	if messageID == "" {
+		return nil
+	}
+	choices, err := orchestrator.service.ListChoices(ctx, ownerID, sessionID)
+	if err != nil {
+		if orchestrator.logger != nil {
+			orchestrator.logger.Warn("读取方向卡失败，本回合不放行任何付费步骤", "session_id", sessionID, "error", err)
+		}
+		return &ChoiceScope{Refusal: failClosed}
+	}
+	for _, choice := range choices {
+		if choice.State != ChoiceAnswered || choice.AnswerSource != ChoiceAnsweredOnCard ||
+			choice.AnswerMessageID != messageID || !choice.namesNoTargetTool() {
+			continue
+		}
+		kind, declared := steps[choice.Kind]
+		if !declared {
+			continue
+		}
+		scope := &ChoiceScope{ChoiceID: choice.ID, OptionID: choice.AnswerOptionID, Refusal: kind.UnchosenRefusal}
+		if option, found := choice.Option(choice.AnswerOptionID); found {
+			scope.OptionLabel = option.Title()
+			if option.Step != nil {
+				step := *option.Step
+				scope.Step = &step
+			}
+		}
+		return scope
+	}
+	return nil
+}
+
+// choiceStepRefusal is the orchestrator's half of the answer-turn scope
+// (#549): before a paid tool runs in a scoped turn, it refuses a tool the
+// chosen option does not name and a second submission of the one it names.
+// The capability a call resolves to is checked again by the generation tools,
+// which know it. A tool whose capability the session's approved budget plan
+// lists is left to them and to the plan: the person approved those steps as
+// a whole. It returns "" when the call may run.
+func (orchestrator *Orchestrator) choiceStepRefusal(ctx context.Context, command ProcessTurn, scope *ChoiceScope,
+	call agents.ToolCall, tool catalog.ChatToolSchema, earlier []ToolCall, submitted map[string]string) string {
+	if scope == nil || !paidTool(tool.Execution) {
+		return ""
+	}
+	if scope.Permits(call.Name, "") {
+		again := false
+		for _, previous := range earlier {
+			if previous.Name == call.Name && (previous.TaskID != "" || submitted[previous.ID] != "") {
+				again = true
+			}
+		}
+		if !again {
+			return ""
+		}
+	}
+	if orchestrator.choicePlanCovers(ctx, command.OwnerID, command.SessionID, tool) {
+		return ""
+	}
+	return scope.RefusalFor(call.Name, func(text string) string { return orchestrator.text(ctx, text) })
+}
+
+// choicePlanCovers reports whether the session is in budget mode with an
+// active plan that lists one of the tool's capabilities (#549).
+func (orchestrator *Orchestrator) choicePlanCovers(ctx context.Context, ownerID, sessionID string, tool catalog.ChatToolSchema) bool {
+	mode, err := orchestrator.service.SessionApprovalMode(ctx, ownerID, sessionID)
+	if err != nil || mode != approvalpolicy.ModeBudget {
+		return false
+	}
+	summary, found, err := orchestrator.service.ProductionBudgetSummary(ctx, ownerID, sessionID)
+	if err != nil || !found || summary.State != budget.StateActive {
+		return false
+	}
+	for _, capability := range tool.Execution.Capabilities {
+		if summary.Plan.ListsCapability(string(capability)) {
+			return true
+		}
+	}
+	return false
 }
 
 // pendingChoicePrompt tells the Agent about the session's open card, so a
