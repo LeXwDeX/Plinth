@@ -48,8 +48,8 @@ type Client struct {
 	// largeSubmitBytes.
 	largeSubmitTimeout time.Duration
 	largeSubmitBytes   int64
-	// retrySubmitServerError is the connection-level declaration that a 5xx
-	// answer to a creation request may be retried (#460 C25).
+	// retrySubmitServerError is the connection-level declaration that a 503
+	// with Retry-After to a creation request may be resent (#460 C25, #563).
 	retrySubmitServerError bool
 	// pollTimeout bounds one non-creation request (a status poll) without
 	// touching the client timeout that also covers downloads (#487).
@@ -99,9 +99,10 @@ type Config struct {
 	// LargeSubmitBytes 是创建请求使用 LargeSubmitTimeout 的请求体大小阈值；
 	// 零值取 100 MiB（Meshy 官方：model_url 文件超过 100 MB）。
 	LargeSubmitBytes int64
-	// RetrySubmitServerError 是连接级声明：创建请求收到 5xx 时可以重试
-	// （#460 C25）。上游可能已经受理创建，因此重试有重复扣费风险；
-	// 只有声明允许的连接才这样做，未声明的连接保持「结果不明不重发」。
+	// RetrySubmitServerError 是连接级声明：创建请求收到上游明确的「暂不
+	// 受理」（503 且带 Retry-After）时可以重发（#460 C25，#563 收窄）。
+	// 其余 5xx 可能发生在上游已受理并计费之后，一律保持「结果不明不重发」，
+	// 未声明的连接同样如此。
 	RetrySubmitServerError bool
 	// PollTimeout 限定非创建请求（任务状态轮询）的单次时长（#487）。连接级
 	// 请求超时同时覆盖轮询与产物下载，官方对 GET 的建议是 30 秒
@@ -402,21 +403,23 @@ func (c *Client) do(
 		// Apply this before provider-specific wording so classifiers cannot turn an
 		// uncertain acceptance into an automatic second submission.
 		if submitting && (response.StatusCode == http.StatusRequestTimeout || response.StatusCode >= 500) {
-			// A connection that declares it may retry a 5xx creation: the
-			// upstream might have accepted the work before failing, so the
-			// retry risks a second charge. The connection owns that trade-off
-			// (#460 C25); the default stays "unknown, never resend".
-			if c.retrySubmitServerError && response.StatusCode >= 500 {
+			// A connection that declares it may resend a creation only on the
+			// upstream's explicit "not now": 503 with Retry-After (#460 C25,
+			// narrowed by #563). Any other 5xx (500, 502, 504, a 503 without
+			// Retry-After) may follow a create the upstream took and billed,
+			// so it stays "unknown, never resend", as it does by default.
+			if c.retrySubmitServerError && response.StatusCode == http.StatusServiceUnavailable &&
+				hasRetryAfter(response.Header.Get("Retry-After")) {
 				return Response{}, &generation.ProviderError{Failure: withUpstreamEvidence(
 					&generation.Failure{
 						Class:      generation.FailureUpstreamUnavailable,
 						Retryable:  true,
-						SafeDetail: "上游返回错误，按连接声明重试提交",
+						SafeDetail: "上游暂不可用，按连接声明重试提交",
 						RetryAfter: retryAfter(response.Header.Get("Retry-After")),
 					},
 					response.StatusCode,
 					payload,
-				)}
+				), Cause: generation.ErrDeclaredSubmitRetry}
 			}
 			return Response{}, &generation.ProviderError{Failure: withUpstreamEvidence(
 				&generation.Failure{
@@ -619,6 +622,20 @@ func AttachUpstreamEvidence(
 		return nil
 	}
 	return withUpstreamEvidence(failure, status, payload)
+}
+
+// hasRetryAfter reports whether a Retry-After value is present and readable
+// (delay-seconds or an HTTP date).
+func hasRetryAfter(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		return seconds >= 0
+	}
+	_, err := http.ParseTime(value)
+	return err == nil
 }
 
 func retryAfter(value string) time.Duration {

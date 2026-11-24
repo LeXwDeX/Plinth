@@ -164,8 +164,8 @@ func refetchOffering(offering Offering) Offering {
 // source's failure deterministically, so that another refetch cannot succeed:
 //
 //   - both failures are integrity_failure, the class of a delivered result
-//     that does not satisfy the frozen output contract (network, timeout,
-//     upstream, expiry and refetch-specific failures have other classes);
+//     that was not stored (since #563 every unambiguous materialization
+//     failure has it; refetch-specific failures have other classes);
 //   - the kernel marked both non-retryable and unambiguous: the same bytes
 //     checked against the same contract give the same verdict (wrong media
 //     type, fidelity rejection). A retryable integrity failure (a store write

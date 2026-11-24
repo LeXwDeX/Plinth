@@ -579,6 +579,34 @@ func TestFaultScenarios(t *testing.T) {
 			t.Fatalf("lost task %s = %d %v", lost, status, polled)
 		}
 	})
+	// #563: the overloaded service's explicit "not now" is a 503 with
+	// Retry-After and takes no work; under the fail-times bound the next
+	// submission is accepted.
+	t.Run("service unavailable is a 503 with Retry-After", func(t *testing.T) {
+		f := newFixture(t, fakeupstream.Config{TimeoutHold: 50 * time.Millisecond, FailTimes: 1})
+		status, header, body := post(f, "service-unavailable")
+		if status != http.StatusServiceUnavailable || header.Get("Retry-After") != "1" || body["error"] != "Service Unavailable" {
+			t.Fatalf("%d %v %v", status, header, body)
+		}
+		next := submit(t, f, "/rodin", textForm(), "X-Fake-Scenario", "service-unavailable")
+		if !strings.HasSuffix(next.uuid, "000000000001") {
+			t.Fatalf("the refused submission took work: the next task is %s", next.uuid)
+		}
+	})
+	// #563: a gateway 502 after the create was accepted: the work exists (and
+	// is billed) although the caller saw only the 502.
+	t.Run("accepted then 502 keeps the work", func(t *testing.T) {
+		f := newFixture(t, short)
+		if status, _, body := post(f, "accepted-502"); status != http.StatusBadGateway || body["error"] != "Bad Gateway" {
+			t.Fatalf("%d %v", status, body)
+		}
+		next := submit(t, f, "/rodin", textForm())
+		accepted := next.uuid[:len(next.uuid)-12] + "000000000001"
+		status, _, polled := f.Do("POST", Prefix+"/status", key, map[string]any{"subscription_key": "fake-subscription-" + accepted})
+		if status != http.StatusCreated || len(testkit.Field(t, polled, "jobs").([]any)) != next.jobs {
+			t.Fatalf("accepted task %s = %d %v", accepted, status, polled)
+		}
+	})
 	t.Run("task failed", func(t *testing.T) {
 		f := newFixture(t, short)
 		s := submit(t, f, "/rodin", textForm(), "X-Fake-Scenario", "task-failed")

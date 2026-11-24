@@ -1080,6 +1080,14 @@ type ProviderError struct {
 	Cause   error
 }
 
+// ErrDeclaredSubmitRetry is the Cause of a Start failure whose task-creation
+// request the upstream refused with the one answer a connection may declare
+// retryable (retry_submit_server_error: HTTP 503 with Retry-After, #563). The
+// coordinator resends it while the Offering's retry allows; the attempt that
+// can no longer be retried ends as an ambiguous submission, because a 5xx is
+// no proof the create was not taken and billed.
+var ErrDeclaredSubmitRetry = errors.New("declared retryable submission refusal")
+
 func (e *ProviderError) Error() string {
 	if e == nil {
 		return ""

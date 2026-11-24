@@ -2401,10 +2401,12 @@ type ProviderConnectionSchema struct {
 	// registered pool queues when it is full, and one that asks for an
 	// unregistered pool is never queued.
 	Concurrency *ProviderConcurrencySchema `json:"concurrency,omitempty"`
-	// RetrySubmitServerError declares that a 5xx answer to a task-creation
-	// submission may be retried (#460 C25). The upstream may have accepted the
-	// create before failing, so the retry risks a second charge; a connection
-	// that does not declare it keeps "unknown, never resend".
+	// RetrySubmitServerError declares that the upstream's explicit "not now"
+	// to a task-creation submission, HTTP 503 with Retry-After, may be resent
+	// (#460 C25, narrowed by #563). Any other 5xx may follow a create the
+	// upstream took and billed, so it stays "unknown, never resend", as it does
+	// for a connection that does not declare it; the last refused attempt the
+	// Offering's retry no longer allows ends as an ambiguous submission.
 	RetrySubmitServerError bool `json:"retry_submit_server_error,omitempty"`
 }
 

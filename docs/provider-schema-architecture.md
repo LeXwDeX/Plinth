@@ -120,7 +120,7 @@ Provider 连接可以声明私有运行配置 `result_refetch: {mode: "observe",
 
 ### Rodin / Hyper3D（C25–C32）
 
-- **C25（F1）429 / 5xx 重试**：官方 `docs.hyper3d.ai/en/api-specification/errors`（“Retry `429` and `5xx` responses with backoff.”，读取 2026-11-22）。5 个 Hyper3D Offering 的 `retry` 改为 `max_attempts: 2`、`retryable: [rate_limited, upstream_unavailable]`。提交阶段 5xx 由连接级 `retry_submit_server_error: true` 声明允许，`httpjson` 在 `submitting && >=500` 处读取；Hyper3D 声明允许，Tripo/Meshy 不声明。**风险**：上游可能已在 5xx 前受理创建，重试有重复扣费风险；这是连接显式接受的取舍，官方原文没有给出幂等键或“5xx 后查询”的替代。已实现，测试 `TestSubmitServerErrorRetryFollowsConnectionDeclaration`、`TestHyper3DRetryCoversRateLimitAndUpstreamUnavailable`、`TestHyper3DSubmit5xxIsRetriedWhenDeclared`。
+- **C25（F1）429 / 5xx 重试**：官方 `docs.hyper3d.ai/en/api-specification/errors`（“Retry `429` and `5xx` responses with backoff.”，读取 2026-11-22）。5 个 Hyper3D Offering 的 `retry` 改为 `max_attempts: 2`、`retryable: [rate_limited, upstream_unavailable]`。提交阶段的重发由连接级 `retry_submit_server_error: true` 声明允许（Hyper3D 声明，Tripo/Meshy 不声明）。#563 收窄：`httpjson` 只对 `503` 且带 `Retry-After` 的明确「暂不受理」重发（`Cause` 为 `generation.ErrDeclaredSubmitRetry`）；`500`/`502`/`504` 与不带 `Retry-After` 的 `503` 可能发生在上游已受理并计费之后，按 `submission_unknown` + `Ambiguous` 收尾、不重发；重试耗尽的最后一次由协调器标 `Ambiguous`，计入可能已扣费。官方原文没有给出幂等键或“5xx 后查询”的替代。已实现，测试 `TestSubmitServerErrorRetryFollowsConnectionDeclaration`、`TestHyper3DRetryCoversRateLimitAndUpstreamUnavailable`、`TestHyper3DSubmit503WithRetryAfterIsRetriedWhenDeclared`、`TestHyper3DSubmit503RetriesExhaustedEndAmbiguous`、`TestHyper3DSubmitAcceptedThen502IsNeverResent`。
 - **C26（F4）`API_PARALLELISM_LIMIT_REACHED`**：官方 Errors 写明 “Retry once one finishes.”。Hyper3D 连接 `upstream_code_map` 该码补 `retryable: true`（class 仍是 `rate_limited`），由内核退避或 #468 的上游池排队。已实现，测试 `TestHyper3DParallelismLimitIsRetryable`。
 - **C27（F2）图生 prompt 1024**：`hyper3d/rodin-gen-2.5/image-to-3d` 的 `prompt.max_length` 已是官方 `1024`（`docs.hyper3d.ai/en/api-specification/rodin-gen2-5` 与 FAQ “up to 1,024 characters”，读取 2026-11-22）；本批次补了 Catalog 回归锁定，未改值。
 - **C28（F3）Gen-2.5 sources / checked_at**：两个 Gen-2.5 Offering 的 `knowledge.sources` 改指 `https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5`，`checked_at: 2026-11-22`。官方 2026-08 新增、本平台不发送的参数记录如下：`is_symmetric`、`soft`、`detail_level`、`addons`（HighPack）、`uhd_texture`、`preview_render`、`use_original_alpha`、`geometry_instruct_mode`、`bbox_condition`（来源：官方 Changelog 2026-08 与 rodin-gen2-5 页，读取 2026-11-22）。已实现，测试 `TestHyper3DGen25SourcesPromptAndRetention`。
@@ -147,7 +147,7 @@ Rodin：Texture 价格是 2 还是 2.5；各 `material` 实际交付的文件；
 
 - 实现与测试见上面各条；本批次没有改动 F8。
 - 门禁：`gofmt`、`go vet ./...`、`go test ./... -count=1`、`-race ./internal/providers/... ./internal/generation/... -count=1`、wire coverage（`UPDATE_WIRE_COVERAGE=1`）、fake 栈 `--only meshy,hyper3d,hyper3d-agent`、公开快照检查。实际结果见任务回执。
-- **风险**：C25 的提交阶段 5xx 重试可能导致重复扣费（连接级声明已接受该风险）；C31 的短标记补 `?` 实现的是官方写明的缺省补齐规则（2026-11-23 复核），未经真实上游验证；C30 的 `Hybrid` 在 2026-11-23 复核时两个官方页面都已列出（Bang 与 Generate Texture 的 material 值域都含 Hybrid，Bang 另有 None），平台当前模板仍发送 `PBR`。
+- **风险**：C25 的提交阶段重发自 #563 起只覆盖 `503` 带 `Retry-After`，其余 5xx 不重发；C31 的短标记补 `?` 实现的是官方写明的缺省补齐规则（2026-11-23 复核），未经真实上游验证；C30 的 `Hybrid` 在 2026-11-23 复核时两个官方页面都已列出（Bang 与 Generate Texture 的 material 值域都含 Hybrid，Bang 另有 None），平台当前模板仍发送 `PBR`。
 
 ### 本批次的证据边界
 

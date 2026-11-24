@@ -61,23 +61,35 @@ func TestSubmitTimeoutUsesLargeTimeoutAboveThreshold(t *testing.T) {
 	}
 }
 
-// #460 C25: a 5xx answer to a create is retried only when the connection
-// declares it; the default stays "unknown, never resend".
+// #460 C25, narrowed by #563: a declared connection resends a create only on
+// the upstream's explicit "not now" (503 with Retry-After). Any other 5xx
+// (500, 502, 504) or a 503 without Retry-After may follow an accepted, billed
+// create, so it stays "unknown, never resend"; the default does too. The
+// retryable refusal carries ErrDeclaredSubmitRetry, so the coordinator can end
+// its last attempt as ambiguous.
 func TestSubmitServerErrorRetryFollowsConnectionDeclaration(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		declared  bool
-		status    int
-		wantClass generation.FailureClass
-		retryable bool
-		ambiguous bool
+		name       string
+		declared   bool
+		status     int
+		retryAfter string
+		wantClass  generation.FailureClass
+		retryable  bool
+		ambiguous  bool
 	}{
-		{"declared 5xx retries", true, http.StatusInternalServerError, generation.FailureUpstreamUnavailable, true, false},
-		{"undeclared 5xx stays unknown", false, http.StatusInternalServerError, generation.FailureSubmissionUnknown, false, true},
-		{"declared 408 stays unknown", true, http.StatusRequestTimeout, generation.FailureSubmissionUnknown, false, true},
+		{"declared 503 with Retry-After retries", true, http.StatusServiceUnavailable, "7", generation.FailureUpstreamUnavailable, true, false},
+		{"declared 503 without Retry-After stays unknown", true, http.StatusServiceUnavailable, "", generation.FailureSubmissionUnknown, false, true},
+		{"declared 500 stays unknown", true, http.StatusInternalServerError, "", generation.FailureSubmissionUnknown, false, true},
+		{"declared 502 stays unknown", true, http.StatusBadGateway, "7", generation.FailureSubmissionUnknown, false, true},
+		{"declared 504 stays unknown", true, http.StatusGatewayTimeout, "", generation.FailureSubmissionUnknown, false, true},
+		{"undeclared 503 with Retry-After stays unknown", false, http.StatusServiceUnavailable, "7", generation.FailureSubmissionUnknown, false, true},
+		{"declared 408 stays unknown", true, http.StatusRequestTimeout, "", generation.FailureSubmissionUnknown, false, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if test.retryAfter != "" {
+					w.Header().Set("Retry-After", test.retryAfter)
+				}
 				w.WriteHeader(test.status)
 				_, _ = w.Write([]byte(`{"message":"upstream failed"}`))
 			}))
@@ -91,6 +103,16 @@ func TestSubmitServerErrorRetryFollowsConnectionDeclaration(t *testing.T) {
 			}
 			err = client.DoJSON(context.Background(), http.MethodPost, "/x", map[string]string{"a": "b"}, "id", nil, true)
 			assertProviderFailure(t, err, test.wantClass, test.retryable, test.ambiguous)
+			if declared := errors.Is(err, generation.ErrDeclaredSubmitRetry); declared != test.retryable {
+				t.Fatalf("ErrDeclaredSubmitRetry = %v, want %v", declared, test.retryable)
+			}
+			if test.retryable {
+				var provider *generation.ProviderError
+				_ = errors.As(err, &provider)
+				if provider.Failure.RetryAfter != 7*time.Second || provider.Failure.UpstreamStatus != test.status {
+					t.Fatalf("the refusal lost its evidence: %#v", provider.Failure)
+				}
+			}
 		})
 	}
 }
