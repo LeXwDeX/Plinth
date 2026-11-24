@@ -141,14 +141,14 @@ func TestFailureMessageNamesContentRejectedReasons(t *testing.T) {
 	failure := &generation.Failure{Class: generation.FailureContentRejected, UpstreamCode: "moderation_blocked",
 		UpstreamExcerpt: `safety_violations=[sexual]`}
 	mark := func(text string) string { return "L:" + text }
-	if got := LocalizedFailureMessage(chat, false, failure, mark); got != "L:blockedL: reasons: L:porn" {
+	if got := LocalizedFailureMessage(chat, "", false, failure, mark); got != "L:blockedL: reasons: L:porn" {
 		t.Fatalf("message = %q", got)
 	}
-	if got := LocalizedFailureMessage(chat, false, &generation.Failure{Class: generation.FailureRejected}, nil); got != "generic" {
+	if got := LocalizedFailureMessage(chat, "", false, &generation.Failure{Class: generation.FailureRejected}, nil); got != "generic" {
 		t.Fatalf("other class = %q", got)
 	}
 	chat.Presentation.Messages.ContentRejectedReasons = ""
-	if got := LocalizedFailureMessage(chat, false, failure, nil); got != "blocked" {
+	if got := LocalizedFailureMessage(chat, "", false, failure, nil); got != "blocked" {
 		t.Fatalf("no template = %q", got)
 	}
 }

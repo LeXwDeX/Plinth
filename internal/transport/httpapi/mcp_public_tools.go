@@ -320,6 +320,9 @@ func (r *mcpRuntime) GetTask(ctx context.Context, taskID string) (mcphttp.Public
 		failure := &mcphttp.PublicTaskFailure{Code: -32000, Message: view.StateLabel, Data: data}
 		if view.Failure != nil {
 			failure.Message = view.Failure.Advice
+			if view.Failure.upstream {
+				failure.Message = view.Failure.Detail
+			}
 			data["failure"] = view.Failure
 		}
 		answer.Error = failure
@@ -423,6 +426,9 @@ type mcpFailureView struct {
 	UserDecisionRequired bool   `json:"user_decision_required"`
 	Advice               string `json:"advice"`
 	Detail               string `json:"detail"`
+	// upstream: Detail is the Schema's upstream HTTP error text, which the
+	// failure's message then carries.
+	upstream bool
 }
 
 type mcpTaskView struct {
@@ -497,12 +503,13 @@ func (s *Server) mcpTaskView(locale string, task generation.Task) (mcpTaskView, 
 		}
 		advice = s.mcpText(locale, advice)
 		detail := ""
-		if public := s.publicFailure(locale, task.Failure); public != nil {
-			detail = public.Detail
+		upstream := false
+		if public := s.publicTaskFailure(locale, task); public != nil {
+			detail, upstream = public.Detail, public.upstream
 		}
 		view.Failure = &mcpFailureView{
 			Category: string(report.Category), NextAction: string(report.Action), Retryable: report.Retryable,
-			UserDecisionRequired: report.UserDecisionRequired, Advice: advice, Detail: detail,
+			UserDecisionRequired: report.UserDecisionRequired, Advice: advice, Detail: detail, upstream: upstream,
 		}
 		attribution = &mcppublic.Failure{
 			TaskID: string(task.ID), Category: string(report.Category), NextAction: string(report.Action),

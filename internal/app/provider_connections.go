@@ -812,6 +812,17 @@ func chatAgentConnection(
 	return connection, nil
 }
 
+// chatAgentDisplayName is the chat model connection's display name, which
+// names the upstream in the text of a refused model call; "" when the Schema
+// declares no chat connection.
+func chatAgentDisplayName(schema catalog.ApplicationSchema) string {
+	connection, err := chatAgentConnection(schema)
+	if err != nil {
+		return ""
+	}
+	return connection.DisplayName
+}
+
 func chatThinkingOptions(
 	agent catalog.ChatAgentSchema,
 	model string,

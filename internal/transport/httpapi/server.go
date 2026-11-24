@@ -1905,7 +1905,7 @@ func (s *Server) legacyGetTask(
 	response["updatedAt"] = task.UpdatedAt
 	if task.Failure != nil {
 		response["task_error"] = map[string]string{
-			"message": s.publicFailure(requestLocale(request), task.Failure).Detail,
+			"message": s.publicTaskFailure(requestLocale(request), task).Detail,
 		}
 	}
 	writeJSON(writer, http.StatusOK, response)
@@ -3254,6 +3254,8 @@ type publicFailure struct {
 	// source_incompatible (generation.SourceRetry). Only the owner's task
 	// detail carries it.
 	SourceRetry generation.SourceRetry `json:"source_retry,omitempty"`
+	// upstream: Detail is the Schema's upstream HTTP error text.
+	upstream bool
 }
 
 // withSourceRetry adds the owner's judgment of running a failed step again
@@ -3292,7 +3294,7 @@ func (s *Server) newTaskResponse(locale string, task generation.Task) taskRespon
 		ModelID:         task.Offering.ModelID,
 		State:           task.State,
 		Progress:        task.Progress,
-		Failure:         s.publicFailure(locale, task.Failure),
+		Failure:         s.publicTaskFailure(locale, task),
 		Version:         task.Version,
 		CreatedAt:       task.CreatedAt,
 		UpstreamJobGone: task.UpstreamJobGone,
@@ -3431,19 +3433,36 @@ type problem struct {
 	RequestID  string `json:"request_id,omitempty"`
 }
 
+// publicFailure is a failure without its Task (an event, a lineage node): it
+// keeps the failure class text, since no upstream is named.
 func (s *Server) publicFailure(locale string, failure *generation.Failure) *publicFailure {
+	return s.publicFailureOf(locale, "", failure)
+}
+
+// publicTaskFailure is a Task's failure. One the upstream answered with an
+// HTTP error reads the Schema's upstream text naming the Task's connection,
+// the status and its reason (generationtool.PublicFailureDetail).
+func (s *Server) publicTaskFailure(locale string, task generation.Task) *publicFailure {
+	return s.publicFailureOf(locale,
+		catalog.ProviderDisplayName(s.application.Runtime.ProviderConnections, task.Offering.AdapterKey), task.Failure)
+}
+
+func (s *Server) publicFailureOf(locale, provider string, failure *generation.Failure) *publicFailure {
 	if failure == nil {
 		return nil
 	}
 	messages := s.application.Chat.Presentation.Messages
+	localize := func(text string) string { return s.localizedText(locale, text) }
+	detail := s.messageIn(locale, "failure."+string(failure.Class)) +
+		moderation.Explain(messages.ContentRejectedReasons, generation.ContentRejectedReasons(failure),
+			messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator, localize)
+	withUpstream := generationtool.PublicFailureDetail(s.application.Chat, provider, failure, detail, localize)
 	return &publicFailure{
 		Class:     failure.Class,
 		Retryable: failure.Retryable,
 		Ambiguous: failure.Ambiguous,
-		Detail: s.messageIn(locale, "failure."+string(failure.Class)) +
-			moderation.Explain(messages.ContentRejectedReasons, generation.ContentRejectedReasons(failure),
-				messages.ContentRejectedReasonLabels, messages.ContentRejectedReasonSeparator,
-				func(text string) string { return s.localizedText(locale, text) }),
+		Detail:    withUpstream,
+		upstream:  withUpstream != detail,
 	}
 }
 

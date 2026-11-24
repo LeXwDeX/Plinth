@@ -256,7 +256,7 @@ func (s *Server) projectTaskStream(
 	response[fields.UpdatedAt] = task.UpdatedAt.UnixMilli()
 	if task.Failure != nil {
 		response[fields.TaskError] = map[string]string{
-			fields.Message: s.publicFailure(locale, task.Failure).Detail,
+			fields.Message: s.publicTaskFailure(locale, task).Detail,
 		}
 	}
 	redactExternalAddresses(response)
