@@ -491,6 +491,117 @@ class ComparabilityTest(unittest.TestCase):
             self.assertIn("agent-quality-output-a.json", markdown)
             self.assertNotIn("无法与基线对比", markdown)
 
+class RefusalAndRoundMetricsTest(unittest.TestCase):
+    """#407: refused tool calls, the Agent round proxy and the text-question heuristic."""
+
+    def test_visible_refusal_counts_read_a_wire_that_exposes_refusals(self):
+        messages = [
+            message({"name": "create_model_3d_from_views",
+                     "result": {"refused": True, "code": "multiview_views"}}),
+            message({"name": "create_model_3d", "refusal_code": "model_choice_conflict"}),
+            message({"name": "inspect_model", "result": {"refused": True}}),
+            message({"name": "refine_image", "result": {"refused": False, "code": "offering_choice"}}),
+            message({"name": "refine_image", "result": {"status": "ok", "code": "ignored"}}),
+        ]
+        self.assertEqual(quality.common.visible_refusal_counts(messages),
+                         {"multiview_views": 1, "model_choice_conflict": 1})
+
+    def test_refusal_log_records_are_read_and_windowed(self):
+        lines = [
+            '{"time":"2026-11-20T10:00:00.123456789+00:00","level":"WARN","msg":"agent tool call refused",'
+            '"tool":"create_model_3d_from_views","session_id":"s1","code":"multiview_views"}',
+            '{"time":"2026-11-20T10:01:00Z","level":"WARN","msg":"agent tool call refused",'
+            '"tool":"create_model_3d_from_views","session_id":"s1","code":"multiview_views"}',
+            '{"time":"2026-11-20T10:02:00+00:00","level":"WARN","msg":"agent tool call refused",'
+            '"tool":"create_model_3d","session_id":"s2","code":"offering_choice"}',
+            '{"time":"2026-11-20T10:03:00+00:00","level":"WARN","msg":"agent tool call refused",'
+            '"tool":"create_model_3d","session_id":"s1","code":"model_choice_conflict"}',
+            '{"time":"2026-11-20T09:00:00+00:00","level":"WARN","msg":"agent tool call refused",'
+            '"tool":"refine_image","session_id":"s1","code":"offering_choice"}',
+            '{"msg":"agent tool call refused","session_id":"s1","code":"step_cap"}',
+            '{"msg":"agent tool call refused","session_id":"s1"}',
+            "not json",
+            '{"time":"2026-11-20T10:00:00Z","msg":"another message","session_id":"s1","code":"ignored"}',
+        ]
+        records = quality.refusal_records(lines)
+        self.assertEqual(len(records), 6)
+        self.assertIsNone(records[-1]["time"], "a line without a time still counts by session")
+        since = quality.parse_log_time("2026-11-20T09:59:00Z")
+        until = quality.parse_log_time("2026-11-20T10:04:00Z")
+        counts = quality.refusal_counts_in_window(records, "s1", since, until, pad=0)
+        self.assertEqual(counts, {"multiview_views": 2, "model_choice_conflict": 1, "step_cap": 1})
+        self.assertEqual(quality.refusal_counts_in_window(records, "s2", since, until, pad=0),
+                         {"offering_choice": 1})
+
+    def test_a_padded_window_tolerates_clock_skew_and_ignores_other_sessions(self):
+        records = quality.refusal_records([
+            '{"time":"2026-11-20T10:00:00Z","msg":"agent tool call refused","session_id":"s1","code":"a"}',
+        ])
+        since = quality.parse_log_time("2026-11-20T10:05:00Z")
+        self.assertEqual(quality.refusal_counts_in_window(records, "s1", since, since, pad=600), {"a": 1})
+        self.assertEqual(quality.refusal_counts_in_window(records, "s1", since, since, pad=60), {})
+        self.assertEqual(quality.refusal_counts_in_window(records, "s2", None, None), {})
+
+    def test_rounds_and_text_questions_are_counted_from_the_message_wire(self):
+        messages = [
+            {"role": "user", "content": "go", "toolCalls": "[]"},
+            message({"name": "ask_choice"}),
+            {"role": "assistant", "content": "做完了。", "toolCalls": "[]"},
+            {"role": "assistant", "content": "要保留哪个方向？", "toolCalls": "[]"},
+            {"role": "assistant", "content": "还要继续吗? ", "toolCalls": "[]"},
+            {"role": "assistant", "content": "要生成吗？", "toolCalls": json.dumps([{"name": "create_model_3d"}])},
+        ]
+        self.assertEqual(quality.agent_rounds(messages), 2)
+        self.assertEqual(quality.text_questions(messages), 2)
+
+    def test_evaluate_case_records_the_new_metrics_and_prefers_the_api(self):
+        run = {
+            "session_id": "s1",
+            "messages": [
+                message({"name": "create_model_3d_from_views",
+                         "result": {"refused": True, "code": "multiview_views"}}),
+                {"role": "assistant", "content": "请确认要不要继续？", "toolCalls": "[]"},
+            ],
+            "tasks": [],
+            "cards": [],
+            "final_reply": {"content": "请确认要不要继续？"},
+            "refusals": {"by_code": {"multiview_views": 3, "offering_choice": 1}, "source": "log"},
+        }
+        case = quality.evaluate_case(base_request(), run)
+        metrics = case["metrics"]
+        self.assertEqual(metrics["agent_rounds"], 1)
+        self.assertEqual(metrics["text_questions"], 1)
+        self.assertEqual(metrics["refusals"], {"total": 1, "by_code": {"multiview_views": 1}, "source": "api"})
+        # Without an API-visible refusal the runner's log counts are used.
+        run["messages"] = [message({"name": "create_model_3d"})]
+        case = quality.evaluate_case(base_request(), run)
+        self.assertEqual(case["metrics"]["refusals"],
+                         {"total": 4, "by_code": {"multiview_views": 3, "offering_choice": 1}, "source": "log"})
+
+    def test_compare_flags_more_refusals_and_rounds(self):
+        def report(rounds=1, refusals=0):
+            cases = [{
+                "id": "case", "title": "case",
+                "metrics": {
+                    "tool_call_count": 1, "paid_call_count": 0, "interruption_count": 0,
+                    "agent_rounds": rounds, "text_questions": 0,
+                    "refusals": {"total": refusals, "by_code": {"model_choice_conflict": refusals}},
+                    "self_inspection": {"inspect_model": 0, "render_model_views": 0}, "elapsed_ms": 1,
+                },
+                "checks": [{"id": "final_reply", "status": "pass", "detail": ""}],
+                "tasks": [],
+            }]
+            return quality.summarize(cases, "trajectory-fake", "a", False, {"version": 1, "sha256": "x"})
+
+        base = report()
+        result = quality.compare_reports(base, report(refusals=1))
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(item["check"] == "metric:refusals" for item in result["regressions"]))
+        result = quality.compare_reports(base, report(rounds=2))
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(item["check"] == "metric:agent_rounds" for item in result["regressions"]))
+        self.assertTrue(quality.compare_reports(base, report())["ok"])
+
 
 class OutputMetricsTest(unittest.TestCase):
     def test_an_rgb_png_reports_its_subject_coverage(self):

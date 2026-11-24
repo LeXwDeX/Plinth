@@ -150,15 +150,18 @@ func TestShippedAgentPromptAsksForDirectionCardsAndFewerQuestions(t *testing.T) 
 		}
 	}
 	for _, want := range []string{
-		"一次一张卡", "一回合最多一张", "方向卡", "不要写成编号或列表",
+		"方向卡", "不要写成编号或列表",
 		"用户给了明确的生成指令且输入齐全时，直接开始",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("system prompt lacks %q", want)
 		}
 	}
-	if strings.Contains(prompt, "kind=next_step") || strings.Contains(prompt, "switchable_operations") {
-		t.Error("the system prompt repeats the card vocabulary that lives in the ask_choice description")
+	// #407: how many cards per reply is a tool rule, said once in ask_choice.
+	for _, repeated := range []string{"kind=next_step", "switchable_operations", "一次一张卡", "一回合最多一张"} {
+		if strings.Contains(prompt, repeated) {
+			t.Errorf("the system prompt repeats %q, which lives in the ask_choice description", repeated)
+		}
 	}
 	ask := askChoiceDescription(t, app)
 	for _, want := range []string{

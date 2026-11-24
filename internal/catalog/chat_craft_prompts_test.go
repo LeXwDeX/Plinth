@@ -307,10 +307,14 @@ func TestShippedImage2DProductionCraftCoversThe2DToolbox(t *testing.T) {
 	if !slices.Equal(triggers, declared) {
 		t.Fatalf("image2d_production triggers = %v, 2d tools = %v", triggers, declared)
 	}
-	for _, want := range []string{"单主体", "参考图", "model_choice"} {
+	for _, want := range []string{"单主体", "参考图"} {
 		if !strings.Contains(craft.Text, want) {
 			t.Fatalf("image2d_production omits %q", want)
 		}
+	}
+	// model_choice is read aloud once, in the system prompt's decision rule (#407).
+	if strings.Contains(craft.Text, "model_choice") {
+		t.Fatal("image2d_production repeats the model_choice rule that the system prompt states")
 	}
 	// The delivery checks live once, in the 2D self-check craft (#407).
 	var selfCheck string

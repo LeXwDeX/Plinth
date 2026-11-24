@@ -986,6 +986,23 @@ class Images(unittest.TestCase):
         self.assertEqual(c.tool_arguments({"arguments": "bad"}), {})
         self.assertEqual(len(c.calls_named([{"toolCalls": [{"name": "a"}, {"name": "b"}]}], "b")), 1)
 
+    def test_visible_refusal_counts_are_empty_on_the_current_wire(self):
+        messages = [{"role": "assistant", "toolCalls": json.dumps(
+            [{"name": "create_model_3d_from_views", "arguments": "{}", "taskId": "t1"}])}]
+        self.assertEqual(c.visible_refusal_counts(messages), {})
+        self.assertEqual(c.visible_refusal_counts(None), {})
+
+    def test_visible_refusal_counts_read_a_wire_that_exposes_refusals(self):
+        messages = [{"role": "assistant", "toolCalls": json.dumps([
+            {"name": "a", "refusal": {"code": "multiview_views"}},
+            {"name": "b", "refusal_code": "offering_choice"},
+            {"name": "c", "result": {"refused": True, "code": "model_choice_conflict"}},
+            {"name": "d", "result": {"refused": True}},
+            {"name": "e", "error": {"code": "step_cap"}},
+        ])}]
+        self.assertEqual(c.visible_refusal_counts(messages),
+                         {"multiview_views": 1, "offering_choice": 1, "model_choice_conflict": 1})
+
 
 def png(width, height, colour, depth, rows, filters, palette=b""):
     """A PNG whose rows (raw samples, one bytes per row) are stored with the given per-row filter types."""

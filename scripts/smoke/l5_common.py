@@ -117,6 +117,49 @@ def tool_arguments(call):
     return raw if isinstance(raw, dict) else {}
 
 
+def _refusal_code(call):
+    """The refusal code one tool call carries, when the wire exposes it (#407).
+
+    The server logs a refused call under "agent tool call refused" and answers the Agent with
+    the Schema's text; today's public wire keeps no tool result, so this reads the members a
+    later wire would carry instead of guessing from the arguments.
+    """
+    call = call if isinstance(call, dict) else {}
+    for name in ("refusal", "refusal_code", "refusalCode"):
+        value = call.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            code = value.get("code") or value.get("refusal_code")
+            if isinstance(code, str) and code.strip():
+                return code.strip()
+    for name in ("error", "result", "toolResult"):
+        value = call.get(name)
+        if not isinstance(value, dict):
+            continue
+        refused = value.get("refused") is True or value.get("ok") is False or value.get("status") in ("refused", "error")
+        code = value.get("code") or value.get("refusal_code")
+        if refused and isinstance(code, str) and code.strip():
+            return code.strip()
+    return None
+
+
+def visible_refusal_counts(messages):
+    """Refusals the public tool calls show, by code; empty on the wire that carries no tool result.
+
+    The server-side count comes from the "agent tool call refused" log line, keyed by the same
+    codes (model_choice_conflict, multiview_views, ...); a runner that has that log adds it
+    separately. This function only reads what the API itself shows.
+    """
+    counts = {}
+    for message in messages or []:
+        for call in parse_tool_calls(message):
+            code = _refusal_code(call)
+            if code:
+                counts[code] = counts.get(code, 0) + 1
+    return counts
+
+
 def is_multiview_task(task, model_id):
     """The task ran on the multi-view Offering: its offering id names multiview and its model is the chosen one."""
     return "multiview" in str(task.get("offering_id", "")) and task.get("model_id") == model_id
