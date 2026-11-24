@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/dsml"
@@ -268,6 +269,10 @@ type OrchestratorConfig struct {
 		pictureURL string,
 		maskAssetID string,
 	) (string, bool)
+	// Pictures encodes every picture the Agent may see into the format
+	// chat.agent.request_pictures declares before the vision budget counts
+	// its bytes (#555); nil keeps the pictures as they were inlined.
+	Pictures *inlinepictures.Encoder
 	// TaskCanceler 供停止轮次时取消该轮已绑定的生成任务（尽力而为，
 	// 失败只记录日志，不阻塞停止语义）。
 	TaskCanceler func(ctx context.Context, ownerID, taskID string) error
@@ -361,6 +366,7 @@ type Orchestrator struct {
 		pictureURL string,
 		maskAssetID string,
 	) (string, bool)
+	pictures       *inlinepictures.Encoder
 	taskCanceler   func(ctx context.Context, ownerID, taskID string) error
 	toolNote       func(tool catalog.ChatToolSchema, options TurnOptions) string
 	selfCheckTasks func(context.Context, string, string) ([]SelfCheckTask, error)
@@ -776,6 +782,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		visionAssetInline:  config.VisionAssetInline,
 		visionAnchorInline: config.VisionAnchorInline,
 		selectionPreview:   config.SelectionPreview,
+		pictures:           config.Pictures,
 		agent:              config.Agent,
 		tools:              config.Tools,
 		logger:             config.Logger,
@@ -2386,6 +2393,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		if snapshot, found := canvasSnapshotAttachment(options); found {
 			if url, ok := orchestrator.selectionPreview(ctx, ownerID, snapshot.URL,
 				options.SelectionMask.MaskAssetID); ok {
+				url = orchestrator.pictures.URL(url)
 				selectionParts = append(selectionParts,
 					agents.ContentPart{
 						Kind:   orchestrator.schema.Context.ImagePartKind,

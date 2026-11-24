@@ -1,13 +1,18 @@
 package upstreamhttp
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
 // Call is one model call as the log sees it (#382). Every Agent model call
@@ -41,8 +46,65 @@ type Call struct {
 	// RequestID is the upstream's own id for the call; empty when it sent none
 	// and the logger then names the call locally.
 	RequestID string
+	// Images counts the request's pictures; OriginalImageBytes and ImageBytes
+	// are their inline sizes before and after they were encoded for the wire
+	// (chat.agent.request_pictures).
+	Images             int
+	OriginalImageBytes int64
+	ImageBytes         int64
+	// Status is the HTTP status the upstream answered with, 0 when the call
+	// failed before any answer. ResponseBody is a refusal's body: only an
+	// excerpt of it is logged, sanitized (ResponseExcerpt), and never for a
+	// call that succeeded.
+	Status       int
+	ResponseBody []byte
+	// Echoes are the request's own texts, removed from the excerpt so that an
+	// upstream echoing the prompt does not put it in the log.
+	Echoes []string
 	// Err is the call's error, nil when it succeeded.
 	Err error
+}
+
+// ResponseExcerptBytes bounds the refusal body excerpt of a failed call.
+const ResponseExcerptBytes = 200
+
+var dataURI = regexp.MustCompile(`(?i)data:[a-z0-9.+/-]*(?:;[a-z0-9=.+-]*)*,[A-Za-z0-9+/=_-]*`)
+
+// ResponseExcerpt is the first ResponseExcerptBytes bytes of an upstream
+// response body that may be logged: every data URI is cut out (an upstream may
+// echo a picture), then the body goes through the one sanitizer of upstream
+// text (generation.UpstreamExcerpt: the request's own texts, URLs, keys and
+// e-mail addresses), and the result is cut on a character boundary.
+func ResponseExcerpt(body []byte, echoes ...string) string {
+	if len(body) == 0 {
+		return ""
+	}
+	text := dataURI.ReplaceAllString(string(body), "[data-uri]")
+	text = generation.UpstreamExcerpt(text, len(text)+1, echoes...)
+	if len(text) <= ResponseExcerptBytes {
+		return text
+	}
+	cut := ResponseExcerptBytes
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
+}
+
+// RequestTexts are the texts of a request that an upstream refusal might echo.
+func RequestTexts(request agents.Request) []string {
+	var texts []string
+	for _, message := range request.Messages {
+		if message.Content != "" {
+			texts = append(texts, message.Content)
+		}
+		for _, part := range message.Parts {
+			if part.Text != "" {
+				texts = append(texts, part.Text)
+			}
+		}
+	}
+	return texts
 }
 
 // CallLogger writes the one line of each Agent model call. Its zero value (or
@@ -91,22 +153,36 @@ func (calls *CallLogger) Log(call Call) {
 	if call.RequestID != "" {
 		attributes = append(attributes, "request_id", call.RequestID)
 	}
+	// A request's size, not its content: the size says whether a round paid
+	// for its pictures again (#382) and whether a body grew past what the
+	// path to the upstream carries.
+	attributes = append(attributes,
+		"request_bytes", call.RequestBytes,
+		"images", call.Images,
+		"image_bytes_before", call.OriginalImageBytes,
+		"image_bytes_after", call.ImageBytes)
 	if call.Usage != nil {
 		attributes = append(attributes,
 			"prompt_tokens", call.Usage.PromptTokens,
 			"completion_tokens", call.Usage.CompletionTokens)
 	}
 	if call.Err != nil {
-		attributes = append(attributes, "error", call.Err)
+		// A failed call (a refusal, a network error, a broken stream) always
+		// has its status, its request id and the head of the upstream's
+		// answer, so a gateway's 502 can be traced without the request.
+		attributes = append(attributes, "status", call.Status)
+		if excerpt := ResponseExcerpt(call.ResponseBody, call.Echoes...); excerpt != "" {
+			attributes = append(attributes, "response_excerpt", excerpt)
+		}
+		// The refusal's error carries the raw body; the line keeps only the
+		// sanitized excerpt above.
+		message := call.Err.Error()
+		if body := strings.TrimSpace(string(call.ResponseBody)); body != "" {
+			message = strings.ReplaceAll(message, body, "[response_excerpt]")
+		}
+		attributes = append(attributes, "error", message)
 	}
-	calls.logger.Log(nil, level, "Agent 模型调用", attributes...)
-	if call.RequestBytes > 0 {
-		// A request's size, not its content: the size is what says whether a
-		// round paid for its pictures again (#382).
-		calls.logger.Debug("Agent 模型请求体积",
-			"model", call.Model, "stream", call.Stream,
-			"request_bytes", call.RequestBytes)
-	}
+	calls.logger.Log(context.Background(), level, "Agent 模型调用", attributes...)
 }
 
 // RequestID is the upstream's own id for a call, empty when it sent none: the

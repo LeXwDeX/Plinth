@@ -1306,11 +1306,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		applicationSchema,
 		applicationSchema.Chat.Agent.ModelSetting,
 	)
+	// One encoder for the chat layer and the chat model Adapters (#555).
+	requestPictures, err := requestPictureEncoder(applicationSchema.Chat.Agent)
+	if err != nil {
+		return nil, err
+	}
 	agentAdapter, err := buildChatAgentWithTransport(
 		config,
 		applicationSchema,
 		overrides.httpTransport,
 		logger,
+		requestPictures,
 	)
 	if err != nil {
 		return nil, err
@@ -1427,6 +1433,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// and the session (including a branch's ancestor Tasks).
 		VisionAnchorInline: referenceResolver.OpenVisionReference,
 		SelectionPreview:   referenceResolver.OpenSelectionPreview,
+		Pictures:           requestPictures,
 		ToolAllowed: func(capability, _ string) bool {
 			// ToolExecution.domains is the creative workspace (image/model).
 			// CapabilityPresentation.domain is a product category, where

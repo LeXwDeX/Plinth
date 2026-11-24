@@ -5323,6 +5323,30 @@ type ChatAgentRetrySchema struct {
 	MaxRetryAfterSeconds int `json:"max_retry_after_seconds"`
 }
 
+// ChatAgentRequestPicturesSchema is chat.agent.request_pictures: every picture
+// the Agent may see is re-encoded into Format before the vision budget counts
+// its bytes and before the request goes out. A picture with transparency is
+// first composited over BackgroundColor (the alpha_flatten convention); a JPEG
+// that needs no EXIF rotation is kept as it is; a picture over MaxPixels is
+// not decoded and is kept as it is. Pictures are never resized here.
+//
+// Upstream limits as confirmed so far: OpenAI confirmed a single request body
+// limit of 30 MB (asked on 2026-11-24). Plinth sets no request body limit and
+// no downscaling ladder today; it only sends inline pictures as JPEG to make
+// them smaller. context.vision.maximum_bytes (16 MiB) is a picture byte budget
+// and counts the encoded bytes. /v1/responses requests of 10–12 MB were once
+// seen to fail at once while being sent over the internal LLMS gateway's
+// WebSocket channel; that channel has since been closed on the gateway side,
+// and the failure is still being watched.
+type ChatAgentRequestPicturesSchema struct {
+	// Format is the declared encoding; only "jpeg" is supported.
+	Format string `json:"format"`
+	// Quality is the JPEG quality, 1–100.
+	Quality         int    `json:"quality"`
+	BackgroundColor string `json:"background_color"`
+	MaxPixels       int64  `json:"max_pixels"`
+}
+
 type ChatAgentSchema struct {
 	AdapterKey        string              `json:"adapter_key"`
 	ConnectionID      string              `json:"connection_id,omitempty"`
@@ -5488,6 +5512,10 @@ type ChatAgentSchema struct {
 	// the approval card while the turn was still attached: it says the step
 	// was not done and proposes an alternative.
 	MockDeniedSummary string `json:"mock_denied_summary,omitempty"`
+
+	// RequestPictures declares the format every picture of a chat model
+	// request is sent in. Nil keeps the pictures as they were inlined.
+	RequestPictures *ChatAgentRequestPicturesSchema `json:"request_pictures,omitempty"`
 }
 
 // ChatOfferingKnowledgeSchema is application.chat.agent.offering_knowledge

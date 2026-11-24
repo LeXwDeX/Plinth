@@ -531,6 +531,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateChatAgentResilience(schema.Agent); err != nil {
 		return err
 	}
+	if err := validateChatAgentRequestPictures(schema.Agent.RequestPictures); err != nil {
+		return err
+	}
 	if schema.Agent.ConsentWaitTimeoutSeconds <= 0 {
 		return errors.New("agent 的 consent 等待时长必须为正数")
 	}
@@ -4304,6 +4307,28 @@ func validateVisionCrop(schema ChatSchema, crop ChatVisionCropSchema) error {
 		}
 	}
 	return errors.New("context.vision.crop 启用时必须声明 inspect_image 工具")
+}
+
+// validateChatAgentRequestPictures checks chat.agent.request_pictures: the
+// only declared format is jpeg, the quality is 1–100, the background is
+// #rrggbb and the decode bound is positive. The block is optional.
+func validateChatAgentRequestPictures(pictures *ChatAgentRequestPicturesSchema) error {
+	if pictures == nil {
+		return nil
+	}
+	if pictures.Format != "jpeg" {
+		return fmt.Errorf("agent.request_pictures.format 只支持 jpeg，不能是 %q", pictures.Format)
+	}
+	if pictures.Quality < 1 || pictures.Quality > 100 {
+		return errors.New("agent.request_pictures.quality 必须在 1 到 100 之间")
+	}
+	if !isHexColor(pictures.BackgroundColor) {
+		return errors.New("agent.request_pictures.background_color 必须是 #rrggbb")
+	}
+	if pictures.MaxPixels <= 0 {
+		return errors.New("agent.request_pictures.max_pixels 必须为正数")
+	}
+	return nil
 }
 
 // validateChatAgentResilience checks the first-byte timeout, the round bound

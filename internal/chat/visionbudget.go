@@ -459,7 +459,18 @@ func visionRoleCandidates(candidates map[string][]visionCandidate, role catalog.
 // visual anchor is resolved through VisionAnchorInline, which accepts an input
 // asset ID or a canonical Task asset URL and proves owner and session (#250);
 // the style lock only ever stores input asset IDs.
+//
+// Every picture comes back in the declared request format (#555), so the
+// plan's byte budget counts the bytes that will be sent, not the original's.
 func (orchestrator *Orchestrator) inlineVisionURL(ctx context.Context, ownerID, sessionID string, candidate visionCandidate) (string, bool) {
+	url, ok := orchestrator.inlineVisionSource(ctx, ownerID, sessionID, candidate)
+	if !ok {
+		return "", false
+	}
+	return orchestrator.pictures.URL(url), true
+}
+
+func (orchestrator *Orchestrator) inlineVisionSource(ctx context.Context, ownerID, sessionID string, candidate visionCandidate) (string, bool) {
 	if candidate.anchor {
 		if orchestrator.visionAnchorInline == nil {
 			return "", false

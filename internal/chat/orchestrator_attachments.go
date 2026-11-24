@@ -449,6 +449,8 @@ func (orchestrator *Orchestrator) canvasSnapshotParts(
 			}
 			pictureURL = inlined
 		}
+		// The canvas role spends the bytes that are sent (#555).
+		pictureURL = orchestrator.pictures.URL(pictureURL)
 		parts = append(parts,
 			agents.ContentPart{
 				Kind:   orchestrator.schema.Context.ImagePartKind,
