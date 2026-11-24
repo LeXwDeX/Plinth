@@ -40,7 +40,21 @@ const (
 	// UnknownEventMarker puts an event of a type no client knows into the
 	// stream, and an unknown member into the response object.
 	UnknownEventMarker = "[[fake:unknown-event]]"
+	// RefusalMarker answers with the model's refusal instead of the text: the
+	// message item's content part is {type: refusal, refusal}, streamed as
+	// response.refusal.delta events (content_index, delta, item_id,
+	// output_index, sequence_number) and one response.refusal.done (the same
+	// members with refusal instead of delta), between the content part's added
+	// and done events. Constructed from the official streaming events (the
+	// openai-python ResponseRefusalDeltaEvent and ResponseRefusalDoneEvent
+	// types, checked 2026-11-25); no sample has a refusal, so the refusal
+	// part's added event and its wording are the fake's. A response with
+	// function calls has no message item and so no refusal.
+	RefusalMarker = "[[fake:refusal]]"
 )
+
+// FixedRefusal is the text of the RefusalMarker answer.
+const FixedRefusal = "I'm sorry, but I can't help with that."
 
 // The fixed encrypted_content values of the fake's reasoning item, in the form
 // the real ones take (a token that begins gAAAAAB). The real gateway sent three
@@ -69,6 +83,9 @@ type fakeItem struct {
 	// carries a summary part (the request asked for one).
 	encrypted bool
 	summary   bool
+	// refusal: a message item whose content part is a refusal (RefusalMarker)
+	// and whose text is the refusal text.
+	refusal bool
 }
 
 type itemStage int
@@ -142,8 +159,8 @@ func (h *handler) createResponse(w http.ResponseWriter, r *http.Request) {
 		h.writeQuotaFault(w, code)
 		return
 	}
-	if _, message, refused := chat.imageRefusal(); refused {
-		writeJSON(w, imageRefusalStatus, responsesImageRefusalBody(message))
+	if kind, message, refused := chat.imageRefusal(); refused {
+		writeJSON(w, imageRefusalStatus, responsesImageRefusalBody(kind, message))
 		return
 	}
 	if scenario == fakeupstream.ScenarioLostResponse {
@@ -207,7 +224,11 @@ func (h *handler) planResponse(request responsesRequest, chat chatRequest, items
 			encrypted: request.includes("reasoning.encrypted_content"), summary: request.summaryRequested()})
 	}
 	if len(calls) == 0 {
-		plan.items = append(plan.items, fakeItem{kind: "message", id: placeholderID("msg_", 50, number), text: reply})
+		message := fakeItem{kind: "message", id: placeholderID("msg_", 50, number), text: reply}
+		if strings.Contains(last, RefusalMarker) {
+			message.text, message.refusal = FixedRefusal, true
+		}
+		plan.items = append(plan.items, message)
 	}
 	for index, call := range calls {
 		plan.items = append(plan.items, fakeItem{kind: "function_call", id: placeholderID("fc_", 50, number*100+int64(index)),
@@ -245,6 +266,10 @@ func (h *handler) itemObject(item fakeItem, stage itemStage) map[string]any {
 		case stageCut:
 			text, object["status"] = firstHalf(item.text), "incomplete"
 		}
+		if item.refusal {
+			object["content"] = []any{refusalPart(text)}
+			return object
+		}
 		if parts, _ := object["content"].([]any); len(parts) > 0 {
 			if part, _ := parts[0].(map[string]any); part != nil {
 				part["text"] = text
@@ -275,6 +300,12 @@ func (h *handler) itemObject(item fakeItem, stage itemStage) map[string]any {
 		}
 		return object
 	}
+}
+
+// refusalPart is the content part of a refused answer (the official
+// ResponseOutputRefusal: type refusal and the refusal text).
+func refusalPart(text string) map[string]any {
+	return map[string]any{"type": "refusal", "refusal": text}
 }
 
 // firstHalf is the first half of text in runes: what a cut answer got to.
@@ -450,10 +481,16 @@ func (h *handler) itemEvents(request responsesRequest, item fakeItem, cut bool) 
 		added["item"], added["output_index"] = h.itemObject(item, stageAdded), item.index
 		partAdded := t.textEvent("response.content_part.added")
 		partAdded["item_id"], partAdded["output_index"] = item.id, item.index
+		if item.refusal {
+			partAdded["part"] = refusalPart("")
+		}
 		events = append(events, added, partAdded)
 		text := item.text
 		if cut {
 			text = firstHalf(text)
+		}
+		if item.refusal {
+			return append(events, h.refusalEvents(item, text, cut)...)
 		}
 		for _, piece := range chunks(text, 6) {
 			delta := t.textEvent("response.output_text.delta")
@@ -499,6 +536,29 @@ func (h *handler) itemEvents(request responsesRequest, item fakeItem, cut bool) 
 		done["item"], done["output_index"] = h.itemObject(item, stageDone), item.index
 		return append(events, done)
 	}
+}
+
+// refusalEvents are the events of a refused message after its content part's
+// added event: response.refusal.delta pieces and, unless the answer is cut,
+// response.refusal.done, the content part's done and the item's done. The
+// members of the two refusal events are the official ones; no sample has them.
+func (h *handler) refusalEvents(item fakeItem, text string, cut bool) []map[string]any {
+	t := h.responses
+	var events []map[string]any
+	for _, piece := range chunks(text, 6) {
+		events = append(events, map[string]any{"type": "response.refusal.delta", "content_index": 0,
+			"delta": piece, "item_id": item.id, "output_index": item.index})
+	}
+	if cut {
+		return events
+	}
+	done := map[string]any{"type": "response.refusal.done", "content_index": 0,
+		"refusal": item.text, "item_id": item.id, "output_index": item.index}
+	partDone := t.textEvent("response.content_part.done")
+	partDone["item_id"], partDone["output_index"], partDone["part"] = item.id, item.index, refusalPart(item.text)
+	itemDone := t.textEvent("response.output_item.done")
+	itemDone["item"], itemDone["output_index"] = h.itemObject(item, stageDone), item.index
+	return append(events, done, partDone, itemDone)
 }
 
 // writeRaw answers a JSON body kept as text, byte for byte plus the newline the

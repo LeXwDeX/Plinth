@@ -58,10 +58,10 @@ const unauthorizedBody = "unauthorized\n"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/images/generations", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/images/generations",
 		DocURL: docsRoot + "create", CheckedAt: captured,
-		Note: "JSON request with inline base64 pictures; 400 empty_string (missing prompt) and 401 text/plain are real samples. The picture is drawn at the requested size (an auto or omitted size is 1024x1024) in the requested output_format, and the response reports the drawn size, output_format and background (background=transparent answers an alpha PNG); the committed samples only ask for 1024x1024 png, so the size, the format and the transparent behaviors are constructed-from-docs. The documented parameter contract is enforced with constructed 400s that reuse the real envelope and OpenAI's error vocabulary: size (gpt-image-2: both edges divisible by 16, longest edge at most 3840, ratio at most 3:1, 655360 to 8294400 pixels), quality, output_format, background, moderation, n (1 to 10, integer_above_max_value / integer_below_min_value, never clamped), output_compression (0 to 100, only jpeg and webp), a transparent background with jpeg, and a prompt over 32000 characters; the real gateway's wording for these refusals is not recorded (free negative probes are planned). quality max is accepted although the official page limits xhigh and max to the 2.5 snapshots: the gateway answered 200 for both on 2.6 (2026-11-09), and only a paid real answer can settle it (matrix B2), so the fake does not refuse it. gif and svg output_format are documented but not modelled (Plinth never sends them), and WebP answers the fixed 1x1 fixture whatever the size. n is documented by the official Create image reference (1-10) and returns that many distinct inline candidates. A content-policy refusal (400 moderation_blocked) and the 402/500 faults are not observed: they reuse the real 400 envelope with the documented code or message. The quota-exceeded 429 (the gateway's error.quota body), forbidden 403 (the gateway's eca_access_denied) and service-unavailable 503 (documented service_unavailable_error/server_is_overloaded) are constructed-from-docs answers built from the recorded gateway refusals and the error-code guide (" + docsErrors + ", checked " + docsCheckedAt + ")"},
+		Note: "JSON request with inline base64 pictures; 400 empty_string (missing prompt) and 401 text/plain are real samples. The picture is drawn at the requested size (an auto or omitted size is 1024x1024) in the requested output_format, and the response reports the drawn size, output_format and background (background=transparent answers an alpha PNG); the committed samples only ask for 1024x1024 png, so the size, the format and the transparent behaviors are constructed-from-docs. The documented parameter contract is enforced with constructed 400s that reuse the real envelope and OpenAI's error vocabulary: size (gpt-image-2: both edges divisible by 16, longest edge at most 3840, ratio at most 3:1, 655360 to 8294400 pixels), quality, output_format, background, moderation, n (1 to 10, integer_above_max_value / integer_below_min_value, never clamped), output_compression (0 to 100; it is documented for jpeg and webp only and is ignored with png or no output_format, since the documents do not say png refuses it), a transparent background with jpeg, and a prompt over 32000 characters; the real gateway's wording for these refusals is not recorded (free negative probes are planned). quality max is accepted although the official page limits xhigh and max to the 2.5 snapshots: the gateway answered 200 for both on 2.6 (2026-11-09), and only a paid real answer can settle it (matrix B2), so the fake does not refuse it. gif and svg output_format are documented but not modelled (Plinth never sends them), and WebP answers the fixed 1x1 fixture whatever the size. n is documented by the official Create image reference (1-10) and returns that many distinct inline candidates. A content-policy refusal (400 moderation_blocked) and the billing and 500 faults are not observed: they reuse the real 400 envelope with the documented code or message and a null param; the billing answers are the error-code guide's 429 (credit_balance_exhausted for an empty balance, project_spend_limit_exceeded for the key-quota scenario, type insufficient_quota; the guide has no 402, checked 2026-11-25). The quota-exceeded 429 (the gateway's error.quota body), forbidden 403 (the gateway's eca_access_denied: a gateway form, the official guide has no such code) and service-unavailable 503 (documented service_unavailable_error/server_is_overloaded) are constructed-from-docs answers built from the recorded gateway refusals and the error-code guide (" + docsErrors + ", checked " + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/images/edits", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/images/edits",
 		DocURL: docsRoot + "createEdit", CheckedAt: captured,
-		Note: "multipart request with the reference picture in the image part (Plinth sends image[], the committed sample says image because the sample key rule rejects brackets; the fake accepts both). model is optional on this route, per the official Create image edit reference (default gpt-image-2.6-sunburst, checked 2026-11-24); the same constructed-from-docs 403/429/503 faults and the same parameter contract as generations apply (the text fields are multipart strings, so n is parsed as an integer). An edit takes at most 16 pictures (array_above_max_length on image). A mask is a PNG with an alpha channel and the size of the first picture, otherwise 400 invalid_image on mask (constructed: the official edit reference gives no mask rules and the gateway's wording is not recorded). With a mask only the transparent pixels change and the answer keeps the picture's size, for every one of the n candidates and in the requested output_format (PNG keeps the other pixels exactly, JPEG is lossy). A missing prompt on this route answers the documented missing_required_parameter: the empty_string answer is recorded for generations only"},
+		Note: "multipart request with the reference picture in the image part (Plinth sends image[], the committed sample says image because the sample key rule rejects brackets; the fake accepts both). model is optional on this route, per the official Create image edit reference (default gpt-image-2.6-sunburst, checked 2026-11-24); the same constructed-from-docs 403/429/503 faults and the same parameter contract as generations apply (the text fields are multipart strings, so n is parsed as an integer). An edit takes at most 16 pictures (array_above_max_length on image). A mask is a PNG with an alpha channel and the size of the first picture, otherwise 400 invalid_image on mask; every picture and the mask must be less than 50MB, otherwise 400 image_file_too_large (the image-generation guide's mask rules, checked 2026-11-25; the edit reference itself gives none, and the gateway's wording is not recorded). The guide's rule that the mask has the picture's format is not enforced: Plinth may send a PNG mask beside a JPEG or WebP picture, and whether the gateway refuses that is for a real round to settle. A request that is no multipart form answers 400 Invalid Content-Type (code and param null; the current reference also lists a JSON body, which the fake does not model). With a mask only the transparent pixels change and the answer keeps the picture's size, for every one of the n candidates and in the requested output_format (PNG keeps the other pixels exactly, JPEG is lossy). A missing prompt on this route answers the documented missing_required_parameter: the empty_string answer is recorded for generations only"},
 }
 
 // Version is the OpenAI-compatible images /v1 fake.
@@ -117,8 +117,11 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_, _ = w.Write(append(raw, '\n'))
 }
 
-// errorBody clones the real 400 envelope with another status text.
-func (h *handler) errorBody(endpoint, kind, code, message, param string) map[string]any {
+// errorBody clones the real 400 envelope with another status text. param is a
+// string, or nil for an answer about no one parameter: the official Error
+// declares param nullable (OpenAPI components.schemas.Error), and no recorded
+// answer of this gateway has an empty-string param.
+func (h *handler) errorBody(endpoint, kind, code, message string, param any) map[string]any {
 	body := fakeupstream.Clone(h.invalid[endpoint])
 	if object, ok := body["error"].(map[string]any); ok {
 		object["type"], object["code"], object["message"], object["param"] = kind, code, message, param
@@ -171,19 +174,27 @@ func (h *handler) documentedFault(w http.ResponseWriter, scenario fakeupstream.S
 	return true
 }
 
+// render answers the scenarios the shared Env.Intercept owns. The two billing
+// answers are the error-code guide's (checked 2026-11-25): it has no 402, and a
+// used-up balance or spend limit is HTTP 429 whose error.code names the cause
+// while error.type stays insufficient_quota. An empty balance is
+// credit_balance_exhausted; the key-quota scenario (a limit on the caller's
+// spending, not the account's balance) is project_spend_limit_exceeded, the
+// nearest documented limit, as OpenAI has no per-key spend limit. The messages
+// paraphrase the guide's causes; its wording of the body is not given.
 func (h *handler) render(endpoint string) fakeupstream.ErrorRenderer {
 	return func(w http.ResponseWriter, _ *http.Request, scenario fakeupstream.Scenario) {
 		status, kind, code, message := http.StatusInternalServerError, "server_error", "internal_error", "The server had an error while processing your request."
 		switch scenario {
 		case fakeupstream.ScenarioInsufficientBalance:
-			status, kind, code, message = http.StatusPaymentRequired, "insufficient_quota", "insufficient_quota", "insufficient balance"
+			status, kind, code, message = http.StatusTooManyRequests, "insufficient_quota", "credit_balance_exhausted", "Your organization has no prepaid credits remaining."
 		case fakeupstream.ScenarioKeyQuota:
-			status, kind, code, message = http.StatusPaymentRequired, "insufficient_quota", "insufficient_quota", "API key credit limit reached"
+			status, kind, code, message = http.StatusTooManyRequests, "insufficient_quota", "project_spend_limit_exceeded", "Your project reached its enforced spend limit."
 		case fakeupstream.ScenarioRateLimit:
 			status, kind, code, message = http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded", "rate limit exceeded"
 			w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
 		}
-		writeJSON(w, status, h.errorBody(endpoint, kind, code, message, ""))
+		writeJSON(w, status, h.errorBody(endpoint, kind, code, message, nil))
 	}
 }
 
@@ -206,6 +217,25 @@ type request struct {
 	// and leave every other pixel of the picture byte for byte equal.
 	imageData []byte
 	maskData  []byte
+	// oversized names the first picture part (image or mask) of an edit whose
+	// file is not under maxEditFileBytes; its bytes are not kept.
+	oversized string
+}
+
+// maxEditFileBytes bounds each picture of an edit: the image-generation guide
+// (checked 2026-11-25) says "The image to edit and mask must be of the same
+// format and size (less than 50MB in size)".
+const maxEditFileBytes = 50 << 20
+
+// readEditFile reads one picture part. A part of maxEditFileBytes or more is
+// drained, not kept, and reported as too large.
+func readEditFile(part io.Reader) (data []byte, tooLarge bool) {
+	data, _ = io.ReadAll(io.LimitReader(part, maxEditFileBytes))
+	if len(data) < maxEditFileBytes {
+		return data, false
+	}
+	_, _ = io.Copy(io.Discard, part)
+	return nil, true
 }
 
 func readRequest(r *http.Request, endpoint string) (request, bool) {
@@ -227,27 +257,36 @@ func readRequest(r *http.Request, endpoint string) (request, bool) {
 			return out, false
 		}
 		out.multipart = true
-		reader := multipart.NewReader(io.LimitReader(r.Body, 64<<20), params["boundary"])
+		// The body bound leaves room for a picture over the per-file limit, so
+		// that refusal can be told apart from a truncated body.
+		reader := multipart.NewReader(io.LimitReader(r.Body, 2*maxEditFileBytes+(64<<20)), params["boundary"])
 		for {
 			part, err := reader.NextPart()
 			if err != nil {
 				break
 			}
-			data, _ := io.ReadAll(part)
 			switch name := part.FormName(); {
-			case name == "image" || name == "image[]":
-				if len(data) > 0 {
+			case name == "image" || name == "image[]" || name == "mask":
+				data, tooLarge := readEditFile(part)
+				if tooLarge && out.oversized == "" {
+					out.oversized = strings.TrimSuffix(name, "[]")
+				}
+				switch {
+				case name == "mask":
+					out.maskData = data
+				case len(data) > 0 || tooLarge:
 					out.hasImg = true
 					out.imageCount++
 					if out.imageData == nil {
 						out.imageData = data
 					}
 				}
-			case name == "mask":
-				out.maskData = data
 			case part.FileName() == "":
+				data, _ := io.ReadAll(part)
 				out.form[name] = string(data)
 				out.raw[name] = string(data)
+			default:
+				_, _ = io.Copy(io.Discard, part)
 			}
 		}
 	}
@@ -421,10 +460,12 @@ func (r request) validate() *refusal {
 	if bad != nil {
 		return bad
 	}
-	if compression, present, bad := r.intParam("output_compression", 0, 100); bad != nil {
+	// output_compression is "for jpeg or webp output" (Create image reference,
+	// checked 2026-11-25); the documents do not say that png refuses it, and
+	// the fake ignores it there (no recorded answer either way). The 0-100
+	// range is checked for every format.
+	if _, _, bad := r.intParam("output_compression", 0, 100); bad != nil {
 		return bad
-	} else if present && (format == "" || format == "png") {
-		return &refusal{"invalid_value", fmt.Sprintf("Invalid 'output_compression' (%d): output_compression is only supported with the jpeg and webp output formats.", compression), "output_compression"}
 	}
 	background, _, bad := r.enumParam("background", backgroundValues)
 	if bad != nil {
@@ -473,6 +514,19 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 	}
 	req, parsed := readRequest(r, endpoint)
 	switch {
+	case !parsed && endpoint == "/images/edits":
+		// An edit that is no multipart form. The fake models only the multipart
+		// edit (the recorded sample and Plinth send one); the current Create
+		// image edit reference (checked 2026-11-25) also lists a JSON body
+		// (images[] of image_url or file_id), which the fake does not model, so
+		// this answer says what the fake reads instead of blaming a parameter.
+		// The wording is constructed in OpenAI's style and code and param are
+		// null (no parameter is at fault); no answer is recorded.
+		body := h.errorBody(endpoint, "invalid_request_error", "",
+			fmt.Sprintf("Invalid Content-Type header (%s), expected multipart/form-data.", contentTypeOf(r)), nil)
+		body["error"].(map[string]any)["code"] = nil
+		writeJSON(w, http.StatusBadRequest, body)
+		return
 	case !parsed || (endpoint == "/images/generations" && req.model == ""):
 		// The official Create image edit reference makes model optional there.
 		writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", "missing_required_parameter", "Missing required parameter: 'model'.", "model"))
@@ -496,6 +550,14 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", bad.code, bad.message, bad.param))
 		return
 	}
+	if req.oversized != "" {
+		// The guide's 50MB limit; the code and wording are constructed (OpenAI's
+		// own name for a picture file over a limit, from the Responses
+		// ResponseError enum), no answer is recorded.
+		writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "invalid_request_error", "image_file_too_large",
+			fmt.Sprintf("Invalid '%s': the file must be less than 50MB.", req.oversized), req.oversized))
+		return
+	}
 	var editor *maskedEditor
 	if endpoint == "/images/edits" && len(req.maskData) > 0 {
 		// #244: an edit with a mask changes only the mask's transparent pixels
@@ -514,7 +576,7 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		return
 	case fakeupstream.ScenarioTaskFailed:
 		writeJSON(w, http.StatusBadRequest, h.errorBody(endpoint, "image_generation_user_error", "moderation_blocked",
-			"Your request was rejected by the safety system. If you believe this is an error, contact us.", ""))
+			"Your request was rejected by the safety system. If you believe this is an error, contact us.", nil))
 		return
 	}
 	format := req.form["output_format"]
@@ -573,6 +635,16 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request, endpoint string
 		body["quality"] = quality
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// contentTypeOf is the request's media type for an error message, without
+// its parameters.
+func contentTypeOf(r *http.Request) string {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType == "" {
+		return "none"
+	}
+	return mediaType
 }
 
 // outputSize is the size of the picture drawn for a request's size value:

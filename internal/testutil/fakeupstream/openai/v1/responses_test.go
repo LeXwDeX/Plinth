@@ -798,3 +798,56 @@ func TestResponsesIdentifiersArePlaceholdersOfTheRealShapes(t *testing.T) {
 		t.Fatalf("reasoning id = %q, function call id = %q", reasoningID, callItemID)
 	}
 }
+
+// #579: RefusalMarker answers with a refusal content part, streamed as the
+// official response.refusal.delta / response.refusal.done events (members
+// content_index, delta or refusal, item_id, output_index, sequence_number).
+func TestResponsesRefusalMarkerStreamsTheRefusalEvents(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	input := []map[string]any{{"role": "user", "content": "go " + RefusalMarker}}
+	frames := f.respondStream(map[string]any{"model": "m", "input": input})
+	byType := dataByType(frames)
+	if len(byType["response.output_text.delta"]) != 0 || len(byType["response.refusal.delta"]) < 2 || len(byType["response.refusal.done"]) != 1 {
+		t.Fatalf("frames = %v", types(frames))
+	}
+	var streamed strings.Builder
+	for _, delta := range byType["response.refusal.delta"] {
+		for _, member := range []string{"content_index", "delta", "item_id", "output_index", "sequence_number", "type"} {
+			if _, has := delta[member]; !has {
+				t.Fatalf("refusal.delta lacks %s: %v", member, delta)
+			}
+		}
+		if len(delta) != 6 {
+			t.Fatalf("refusal.delta members: %v", delta)
+		}
+		streamed.WriteString(delta["delta"].(string))
+	}
+	done := byType["response.refusal.done"][0]
+	if len(done) != 6 || done["refusal"] != FixedRefusal || streamed.String() != FixedRefusal || done["content_index"] == nil {
+		t.Fatalf("refusal.done = %v, streamed %q", done, streamed.String())
+	}
+	if part := dig(t, byType["response.content_part.added"][0], "part").(map[string]any); part["type"] != "refusal" || part["refusal"] != "" {
+		t.Fatalf("part added = %v", part)
+	}
+	order := collapsed(types(frames))
+	want := []string{"response.created", "response.in_progress", "response.output_item.added", "response.content_part.added",
+		"response.refusal.delta", "response.refusal.done", "response.content_part.done", "response.output_item.done", "response.completed"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("order = %v", order)
+	}
+	last := frames[len(frames)-1]
+	if dig(t, last.data, "response", "output", 0, "content", 0, "type") != "refusal" ||
+		dig(t, last.data, "response", "output", 0, "content", 0, "refusal") != FixedRefusal {
+		t.Fatalf("completed = %v", last.data["response"])
+	}
+	// The non-stream answer carries the same refusal part.
+	status, body := f.respondJSON(map[string]any{"model": "m", "input": input})
+	if status != http.StatusOK || dig(t, body, "output", 0, "content", 0, "type") != "refusal" ||
+		dig(t, body, "output", 0, "content", 0, "refusal") != FixedRefusal {
+		t.Fatalf("json = %d %v", status, body)
+	}
+	// Without the marker the answer is the text.
+	if frames := f.respondStream(map[string]any{"model": "m", "input": "hi"}); len(dataByType(frames)["response.refusal.delta"]) != 0 {
+		t.Fatalf("a refusal nobody asked for: %v", types(frames))
+	}
+}

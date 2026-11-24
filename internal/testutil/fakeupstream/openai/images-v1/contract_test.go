@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"strings"
 	"testing"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
@@ -173,20 +174,25 @@ func TestGenerationRefusesCandidateCountsOutsideOneToTen(t *testing.T) {
 	}
 }
 
-// I18: output_compression is 0 to 100 and only for jpeg and webp.
+// I18: output_compression is 0 to 100. It is documented for jpeg and webp
+// only; with png or no output_format the fake ignores it (#579: the documents
+// do not say png refuses it, checked 2026-11-25).
 func TestGenerationChecksOutputCompression(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	status, body := generate(f, map[string]any{"model": Model, "prompt": "x", "output_format": "jpeg", "output_compression": 101})
 	refused(t, status, body, "integer_above_max_value", "output_compression")
 	status, body = generate(f, map[string]any{"model": Model, "prompt": "x", "output_format": "webp", "output_compression": -1})
 	refused(t, status, body, "integer_below_min_value", "output_compression")
-	// The Catalog omits output_compression for png; sending it anyway is the
-	// regression this refusal exists to catch (constructed: the real answer is
-	// not recorded).
-	status, body = generate(f, map[string]any{"model": Model, "prompt": "x", "output_format": "png", "output_compression": 80})
-	refused(t, status, body, "invalid_value", "output_compression")
-	status, body = generate(f, map[string]any{"model": Model, "prompt": "x", "output_compression": 80})
-	refused(t, status, body, "invalid_value", "output_compression")
+	status, body = generate(f, map[string]any{"model": Model, "prompt": "x", "output_format": "png", "output_compression": 101})
+	refused(t, status, body, "integer_above_max_value", "output_compression")
+	for _, request := range []map[string]any{
+		{"model": Model, "prompt": "x", "output_format": "png", "output_compression": 80},
+		{"model": Model, "prompt": "x", "output_compression": 80},
+	} {
+		if status, body = generate(f, request); status != http.StatusOK || body["output_format"] != "png" {
+			t.Fatalf("png with compression is ignored, not refused: %d %v", status, body)
+		}
+	}
 	for _, format := range []string{"jpeg", "webp"} {
 		if status, body = generate(f, map[string]any{"model": Model, "prompt": "x", "output_format": format, "output_compression": 80}); status != http.StatusOK {
 			t.Fatalf("%s with compression: %d %v", format, status, body)
@@ -482,5 +488,41 @@ func TestSizeRuleConstantsAreTheOfficialContract(t *testing.T) {
 	if sizeMultiple != 16 || sizeMaxEdge != 3840 || sizeMaxRatio != 3 || sizeMinPixels != 655360 || sizeMaxPixels != 8294400 ||
 		maxCandidates != 10 || maxReferences != 16 {
 		t.Fatal("the fake's gpt-image-2 limits drifted from the official contract")
+	}
+}
+
+// #579: the image-generation guide (checked 2026-11-25) bounds every picture
+// and the mask of an edit: "less than 50MB in size". A file at the limit is
+// refused on its own part; one byte under it is read.
+func TestEditRefusesAPictureOrMaskOf50MB(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	big := bytes.Repeat([]byte{0}, maxEditFileBytes)
+	status, body := edit(f, editParts(t, [][]byte{big}, nil, nil))
+	refused(t, status, body, "image_file_too_large", "image")
+	status, body = edit(f, editParts(t, [][]byte{solidPNG(t, 8, 8, color.NRGBA{A: 255}), big}, nil, nil))
+	refused(t, status, body, "image_file_too_large", "image")
+	status, body = edit(f, editParts(t, [][]byte{solidPNG(t, 8, 8, color.NRGBA{A: 255})}, big, nil))
+	refused(t, status, body, "image_file_too_large", "mask")
+	// A picture under the limit is not refused for its size (the fake reads
+	// the edit without a mask without decoding it).
+	if status, body = edit(f, editParts(t, [][]byte{big[:maxEditFileBytes-1]}, nil, nil)); status != http.StatusOK {
+		t.Fatalf("a picture under 50MB: %d %v", status, body)
+	}
+}
+
+// #579: an edit that is no multipart form gets a 400 that names the content
+// type, not a missing model (the fake models only the multipart edit).
+func TestEditRefusesARequestThatIsNoMultipartForm(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	status, body := edit(f, testkit.Body{ContentType: "application/json", Data: []byte(`{"model":"` + Model + `","prompt":"x"}`)})
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d %v", status, body)
+	}
+	object, _ := body["error"].(map[string]any)
+	message, _ := object["message"].(string)
+	if object["type"] != "invalid_request_error" || object["code"] != nil || object["param"] != nil ||
+		!strings.Contains(message, "multipart/form-data") || !strings.Contains(message, "application/json") ||
+		strings.Contains(message, "'model'") {
+		t.Fatalf("body = %v", body)
 	}
 }
