@@ -6492,10 +6492,23 @@ type ChatMessageTexts struct {
 	// the turn reports that it is still in progress instead of a failure, with
 	// the Task ID ({task_id}) so the Agent can tell the person to keep waiting.
 	GenerationPending string `json:"generation_pending,omitempty"`
-	GenerationError   string `json:"generation_error"`
-	SummaryFailed     string `json:"summary_failed"`
-	NoResult          string `json:"no_result"`
-	UnknownError      string `json:"unknown_error"`
+	// GenerationInputStale is the tool result of a step the generation kernel
+	// refused before writing any Task because its frozen input no longer
+	// matches today's Schema, Offering, assets, dependencies or canvas, or its
+	// adapter is gone (#516). Nothing was submitted or charged; the Agent
+	// prepares the step again instead of the turn replaying it. Optional:
+	// without it the generic generation error text is returned.
+	GenerationInputStale string `json:"generation_input_stale,omitempty"`
+	// SubmissionUnconfirmed is the failure text of a turn whose paid call could
+	// not be confirmed submitted or not within the Agent request timeout: the
+	// turn stops replaying it and ends failed, and a Task that was accepted
+	// stays with the generation kernel (#516). Optional: without it the
+	// unknown error text is shown.
+	SubmissionUnconfirmed string `json:"submission_unconfirmed,omitempty"`
+	GenerationError       string `json:"generation_error"`
+	SummaryFailed         string `json:"summary_failed"`
+	NoResult              string `json:"no_result"`
+	UnknownError          string `json:"unknown_error"`
 	// AgentImagesUnsupported replaces UnknownError when the Agent model
 	// refused a request that carried pictures (#253).
 	AgentImagesUnsupported string `json:"agent_images_unsupported"`

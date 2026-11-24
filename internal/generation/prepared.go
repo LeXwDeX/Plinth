@@ -238,6 +238,36 @@ func (m *Module) verifyPreparedTaskReplay(ctx context.Context, cmd SubmitPrepare
 	return nil
 }
 
+// ErrNotSubmitted marks a SubmitPrepared refusal decided after the kernel
+// confirmed that no Task holds the idempotency key and before anything was
+// written: the frozen input no longer matches today's Product Schema, Offering
+// revision or quote, source representation, input assets, Task dependencies or
+// canvas output proof, or the Offering's adapter is gone. Replaying the same
+// authorization meets the same refusal, so the caller prepares the step again
+// instead of waiting for a Task that cannot exist (#516).
+var ErrNotSubmitted = errors.New("generation: prepared input refused before any task was written")
+
+// refusedBeforeWrite is a SubmitPrepared refusal marked ErrNotSubmitted. The
+// Detail and Code stay what callers already read.
+func refusedBeforeWrite(code ErrorCode, detail string, cause error) *Error {
+	return &Error{Code: code, Operation: "submit_prepared", Detail: detail,
+		Cause: errors.Join(ErrNotSubmitted, cause)}
+}
+
+// markRefusedBeforeWrite marks a conflict a helper of SubmitPrepared returned
+// (an input asset or the canvas output no longer matching its frozen proof).
+// Other refusals keep their own meaning: a read that may succeed on a retry is
+// not a decision.
+func markRefusedBeforeWrite(err error) error {
+	var refusal *Error
+	if !errors.As(err, &refusal) || refusal.Code != ErrConflict || errors.Is(err, ErrNotSubmitted) {
+		return err
+	}
+	marked := *refusal
+	marked.Cause = errors.Join(ErrNotSubmitted, refusal.Cause)
+	return &marked
+}
+
 func (m *Module) SubmitPrepared(ctx context.Context, cmd SubmitPreparedCommand) (Accepted, error) {
 	if !cmd.Harness.Valid() || cmd.OwnerID == "" || cmd.PreparedInputID == "" ||
 		cmd.IdempotencyKey == "" || len(cmd.IdempotencyKey) > 200 {
@@ -272,7 +302,7 @@ func (m *Module) SubmitPrepared(ctx context.Context, cmd SubmitPreparedCommand) 
 		return Accepted{}, err
 	}
 	if m.schemaVersion != "" && prepared.SchemaVersion != m.schemaVersion {
-		return Accepted{}, &Error{Code: ErrConflict, Operation: "submit_prepared", Detail: "Product Schema 已变化，请重新准备输入"}
+		return Accepted{}, refusedBeforeWrite(ErrConflict, "Product Schema 已变化，请重新准备输入", nil)
 	}
 	offering, normalized, err := m.catalog.Normalize(prepared.Capability, prepared.OfferingID, prepared.NormalizedInput)
 	if err != nil {
@@ -280,10 +310,10 @@ func (m *Module) SubmitPrepared(ctx context.Context, cmd SubmitPreparedCommand) 
 	}
 	currentQuote, quoteErr := offering.EvaluateNativeQuote(normalized)
 	if quoteErr != nil || !reflect.DeepEqual(currentQuote, prepared.NativeQuote) {
-		return Accepted{}, &Error{Code: ErrConflict, Operation: "submit_prepared", Cause: quoteErr}
+		return Accepted{}, refusedBeforeWrite(ErrConflict, "供给项报价已变化，请重新准备输入", quoteErr)
 	}
 	if offering.Revision != prepared.OfferingRevision || !reflect.DeepEqual(normalized, prepared.NormalizedInput) {
-		return Accepted{}, &Error{Code: ErrConflict, Operation: "submit_prepared", Detail: "供给项修订或规范化输入已变化"}
+		return Accepted{}, refusedBeforeWrite(ErrConflict, "供给项修订或规范化输入已变化", nil)
 	}
 	if err := rejectUnfrozenSourceURLs(offering, normalized); err != nil {
 		return Accepted{}, err
@@ -294,10 +324,10 @@ func (m *Module) SubmitPrepared(ctx context.Context, cmd SubmitPreparedCommand) 
 		return Accepted{}, err
 	}
 	if sourceRepresentationID != prepared.SourceSceneRepresentationID {
-		return Accepted{}, &Error{Code: ErrConflict, Operation: "submit_prepared", Detail: "来源场景表示已变化，请重新准备输入"}
+		return Accepted{}, refusedBeforeWrite(ErrConflict, "来源场景表示已变化，请重新准备输入", nil)
 	}
 	if _, ok := m.providers.Provider(offering); !ok {
-		return Accepted{}, &Error{Code: ErrUnavailable, Operation: "submit_prepared", Detail: "供给项适配器不可用"}
+		return Accepted{}, refusedBeforeWrite(ErrUnavailable, "供给项适配器不可用", nil)
 	}
 	resolved, err := m.inputs.Resolve(ctx, prepared.OwnerID, offering, prepared.NormalizedInput)
 	if err != nil {
@@ -308,21 +338,21 @@ func (m *Module) SubmitPrepared(ctx context.Context, cmd SubmitPreparedCommand) 
 	}
 	assets, err := m.snapshotPreparedAssets(ctx, prepared.OwnerID, resolved)
 	if err != nil {
-		return Accepted{}, err
+		return Accepted{}, markRefusedBeforeWrite(err)
 	}
 	if !reflect.DeepEqual(assets, prepared.Assets) {
-		return Accepted{}, &Error{Code: ErrConflict, Operation: "submit_prepared", Detail: "输入资产已变化，请重新准备输入"}
+		return Accepted{}, refusedBeforeWrite(ErrConflict, "输入资产已变化，请重新准备输入", nil)
 	}
 	if err := m.verifyPreparedOutputAsset(ctx, prepared.OwnerID, prepared.SessionID,
 		prepared.SceneID, prepared.ManifestID, prepared.ManifestHash, assets); err != nil {
-		return Accepted{}, err
+		return Accepted{}, markRefusedBeforeWrite(err)
 	}
 	dependencies, err := m.resolveTaskDependencies(ctx, prepared.OwnerID, offering, prepared.NormalizedInput, prepared.SessionID)
 	if err != nil {
 		return Accepted{}, err
 	}
 	if !reflect.DeepEqual(snapshotPreparedDependencies(dependencies), prepared.Dependencies) {
-		return Accepted{}, &Error{Code: ErrConflict, Operation: "submit_prepared", Detail: "任务依赖已变化，请重新准备输入"}
+		return Accepted{}, refusedBeforeWrite(ErrConflict, "任务依赖已变化，请重新准备输入", nil)
 	}
 	// Create atomically checks the separate human decision against this exact
 	// frozen input and binds its single-use grant to the accepted Task.
