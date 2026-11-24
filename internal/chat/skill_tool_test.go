@@ -57,6 +57,16 @@ func TestToolBindingSkillDirectsTheAgentToItsTool(t *testing.T) {
 	if system := run("auto", skill.ID); !strings.Contains(system, directive) || !strings.Contains(system, skill.Prompt) {
 		t.Fatalf("auto scope with the Skill: no directive in %q", system)
 	}
+	// #550: every Schema system Skill (three-view and four-view) reaches the turn.
+	if len(configuredChatSchema(t).Skills.SystemSkills) < 2 {
+		t.Fatal("the four-view system Skill is not declared")
+	}
+	for _, other := range configuredChatSchema(t).Skills.SystemSkills[1:] {
+		if system := run("auto", other.ID); !strings.Contains(system, "本轮必须用工具 "+other.Tool) ||
+			!strings.Contains(system, other.Prompt) {
+			t.Fatalf("auto scope with Skill %s: no directive in %q", other.ID, system)
+		}
+	}
 	if system := run("2d", skill.ID); !strings.Contains(system, directive) {
 		t.Fatalf("2d scope allows the tool but no directive in %q", system)
 	}

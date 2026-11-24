@@ -202,7 +202,8 @@ func TestPersonalSkillRoutesScopeContentAndRejectInvalidWrites(t *testing.T) {
 		t.Fatalf("owner Skill catalog can enter a shared cache: %q", cache)
 	}
 	ownerA, err := service.SnapshotForOwner(context.Background(), "owner-a")
-	if err != nil || len(ownerA.Configuration.Skills) != 2 || ownerA.Configuration.Skills[1].Category != "" {
+	system := len(schema.Chat.Skills.SystemSkills)
+	if err != nil || len(ownerA.Configuration.Skills) != system+1 || ownerA.Configuration.Skills[system].Category != "" {
 		t.Fatalf("category-free owner effective: %#v %v", ownerA, err)
 	}
 	legacy := send(http.MethodPost, route, `{"name":"Legacy category","prompt":"ink wash","category":"anime","recommended_size":"1536x1024"}`)
@@ -222,7 +223,7 @@ func TestPersonalSkillRoutesScopeContentAndRejectInvalidWrites(t *testing.T) {
 		t.Fatalf("cross-owner list: %d %s", response.Code, response.Body.String())
 	}
 	snap, err := service.SnapshotForOwner(context.Background(), "owner-b")
-	if err != nil || len(snap.Configuration.Skills) != 1 || snap.Configuration.Skills[0].Tool == "" {
+	if err != nil || len(snap.Configuration.Skills) != system || snap.Configuration.Skills[0].Tool == "" {
 		t.Fatalf("cross-owner effective: %#v %v", snap, err)
 	}
 	_ = io.Discard
