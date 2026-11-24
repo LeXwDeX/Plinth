@@ -2084,10 +2084,10 @@ func (orchestrator *Orchestrator) Process(
 				return followUpRound.receive(delta, streamFilter)
 			},
 		)
-		if requestHasPictures(followUp) && !requestHasPictures(sentFollowUp) {
-			// The upstream blocked a picture of this context: later rounds
+		if requestHasPictures(followUp) {
+			// The upstream refused a picture of this context: later rounds
 			// start from the request without it, so they do not hit it again.
-			request = orchestrator.withoutPictures(processCtx, request, "")
+			request = carryStrippedPictures(request, followUp, sentFollowUp)
 		}
 		followUp = sentFollowUp
 		if streamErr != nil {
@@ -2449,7 +2449,7 @@ func (orchestrator *Orchestrator) agentRequest(
 	// with the latest user message: image parts are not valid in assistant turns.
 	generatedParts := orchestrator.plannedGeneratedParts(plan)
 	styleParts := orchestrator.plannedStyleParts(plan)
-	overflowNote := budget.overflowText(plan.Dropped)
+	overflowNote := budget.overflowText(plan.Dropped) + budget.skippedText(plan.Skipped)
 	visionOffNote := ""
 	if plan.Off {
 		visionOffNote = budget.VisionOff
@@ -3761,12 +3761,22 @@ func mergeStoredToolCall(target *ToolCall, stored ToolCall) {
 	target.Background = target.Background || stored.Background
 }
 
-// streamAgent streams one Agent request. When the upstream's content-safety
-// review refused a request that carried pictures (#35), it sends the request
-// once more with every picture replaced by the Schema note, so the Agent can
-// answer knowing the picture was blocked instead of the turn failing. It
-// returns the request actually sent. The refusal comes before any delta, so
-// nothing was streamed from the refused attempt.
+// streamAgent streams one Agent request. When the upstream refused a request
+// that carried pictures, it sends the request once more with the pictures
+// replaced by a Schema note, so the Agent can answer knowing it could not see
+// them instead of the turn failing:
+//   - the upstream's content-safety review (#35): every picture;
+//   - a picture the model read and refused as a bad picture (#497, #522): the
+//     pictures the Schema's size bounds show to be unreadable if the request has
+//     any, else every picture; a refusal that remains is answered once more with
+//     every picture. The pictures stripped are remembered by the session, so no
+//     later round or turn sends them again;
+//   - a model that takes no picture input (#253, #522): every picture, for this
+//     request only, because the next model the person picks may read them.
+//
+// It returns the request actually sent. The refusal comes before any delta, so
+// nothing was streamed from the refused attempt. A refusal that is none of
+// these (a refused tool declaration, a context too long) is returned as it is.
 func (orchestrator *Orchestrator) streamAgent(
 	ctx context.Context,
 	command ProcessTurn,
@@ -3774,19 +3784,129 @@ func (orchestrator *Orchestrator) streamAgent(
 	emit func(agents.Delta) error,
 ) (agents.Completion, agents.Request, error) {
 	completion, err := orchestrator.agent.Stream(ctx, request, emit)
-	if err == nil || !errors.Is(err, agents.ErrContentRejected) ||
-		orchestrator.schema.Agent.ModeratedImageNote == "" || !requestHasPictures(request) {
+	refusal := classifyPictureRefusal(err)
+	if refusal == pictureRefusalNone || !requestHasPictures(request) {
 		return completion, request, err
 	}
-	orchestrator.logger.Warn(
-		"Agent 请求的图片被上游内容审核拦截，去掉图片后重试",
-		"session_id", command.SessionID,
-		"assistant_message_id", command.AssistantMessageID,
-		"error", err,
-	)
-	stripped := orchestrator.withoutPictures(ctx, request, orchestrator.contentRejectedReasons(ctx, err))
-	completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
-	return completion, stripped, err
+	switch refusal {
+	case pictureRefusalContent:
+		if orchestrator.schema.Agent.ModeratedImageNote == "" {
+			return completion, request, err
+		}
+		orchestrator.logger.Warn(
+			"Agent 请求的图片被上游内容审核拦截，去掉图片后重试",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"error", err,
+		)
+		stripped := orchestrator.withoutPictures(ctx, request, orchestrator.contentRejectedReasons(ctx, err))
+		completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
+		return completion, stripped, err
+	case pictureRefusalInvalid:
+		return orchestrator.retryWithoutInvalidPictures(ctx, command, request, err, emit)
+	case pictureRefusalUnsupported:
+		if orchestrator.schema.Agent.ImagesUnsupportedNote == "" {
+			return completion, request, err
+		}
+		orchestrator.logger.Warn(
+			"Agent 模型不接受图片输入，去掉图片后重试（不记入会话）",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"error", err,
+		)
+		stripped := orchestrator.replacePictures(
+			request, orchestrator.text(ctx, orchestrator.schema.Agent.ImagesUnsupportedNote), nil)
+		completion, err = orchestrator.agent.Stream(ctx, stripped, emit)
+		return completion, stripped, err
+	}
+	return completion, request, err
+}
+
+// retryWithoutInvalidPictures answers an upstream refusal of a picture it read
+// (#522). The refusal does not say which picture, so the pictures the Schema's
+// bounds show to be unreadable go first when the request has some; a refusal
+// that remains, or a request with none, strips every picture. Once a request
+// went through, the pictures it stripped are remembered by the session. A
+// failure of another kind ends the retry and is returned as it is.
+func (orchestrator *Orchestrator) retryWithoutInvalidPictures(
+	ctx context.Context,
+	command ProcessTurn,
+	request agents.Request,
+	refused error,
+	emit func(agents.Delta) error,
+) (agents.Completion, agents.Request, error) {
+	if orchestrator.schema.Agent.InvalidImageNote == "" {
+		return agents.Completion{}, request, refused
+	}
+	note := orchestrator.text(ctx, orchestrator.schema.Agent.InvalidImageNote) + orchestrator.imageInvalidReasons(ctx, refused)
+	every := requestPictureKeys(request)
+	stages := []map[string]bool{nil}
+	if suspects := orchestrator.unreadablePictureKeys(request); len(suspects) > 0 && len(suspects) < len(every) {
+		stages = []map[string]bool{suspects, nil}
+	}
+	var completion agents.Completion
+	err := refused
+	sent := request
+	for _, stage := range stages {
+		count := len(stage)
+		if stage == nil {
+			count = len(every)
+		}
+		orchestrator.logger.Warn(
+			"Agent 请求的图片被上游模型拒绝读取，去掉图片后重试",
+			"session_id", command.SessionID,
+			"assistant_message_id", command.AssistantMessageID,
+			"stripped_pictures", count,
+			"error", err,
+		)
+		sent = orchestrator.replacePictures(request, note, stage)
+		completion, err = orchestrator.agent.Stream(ctx, sent, emit)
+		if err == nil {
+			stripped := every
+			if stage != nil {
+				stripped = stripped[:0:0]
+				for _, key := range every {
+					if stage[key] {
+						stripped = append(stripped, key)
+					}
+				}
+			}
+			orchestrator.rememberRefusedPictures(ctx, command, stripped)
+			return completion, sent, nil
+		}
+		if classifyPictureRefusal(err) != pictureRefusalInvalid {
+			break
+		}
+	}
+	return completion, sent, err
+}
+
+// rememberRefusedPictures stores the pictures a request was answered without,
+// so the session no longer sends them. A failed write is logged: the next
+// request that carries them is refused and stripped again.
+func (orchestrator *Orchestrator) rememberRefusedPictures(ctx context.Context, command ProcessTurn, keys []string) {
+	maximum := orchestrator.visionInvalidPolicy().MaximumExcluded
+	if orchestrator.service == nil || maximum <= 0 || len(keys) == 0 {
+		return
+	}
+	stored, err := orchestrator.service.ExcludeVisionPictures(
+		context.WithoutCancel(ctx), command.OwnerID, command.SessionID, keys, maximum)
+	if err != nil {
+		orchestrator.logger.Warn(
+			"记录会话中被上游拒绝的图片失败",
+			"session_id", command.SessionID,
+			"pictures", len(keys),
+			"error", err,
+		)
+		return
+	}
+	if !stored {
+		orchestrator.logger.Warn(
+			"会话没有保存被上游拒绝的图片记录（会话不存在或仓库不支持）",
+			"session_id", command.SessionID,
+			"pictures", len(keys),
+		)
+	}
 }
 
 // contentRejectedReasons is the Schema's reasons text for the reasons a

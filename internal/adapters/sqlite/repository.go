@@ -490,6 +490,9 @@ var processingPlanDeliveryMigration string
 //go:embed migrations/0112_auto_completion_first_run.sql
 var autoCompletionFirstRunMigration string
 
+//go:embed migrations/0113_chat_session_vision_excluded.sql
+var chatSessionVisionExcludedMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -600,6 +603,8 @@ func migrations() []migration {
 			sql: processingPlanDeliveryMigration},
 		migration{version: 112, name: "auto_completion_first_run",
 			sql: autoCompletionFirstRunMigration},
+		migration{version: 113, name: "chat_session_vision_excluded",
+			sql: chatSessionVisionExcludedMigration},
 	)
 }
 
