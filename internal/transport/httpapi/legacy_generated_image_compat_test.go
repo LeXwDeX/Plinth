@@ -91,7 +91,7 @@ func TestLegacyGeneratedImageReadsOwnedTaskHistoricalFile(
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK ||
 		recorder.Header().Get("Content-Type") != "image/webp" ||
-		recorder.Body.String() != "historical-image" {
+		recorder.Body.String() != legacyHistoricalImage {
 		t.Fatalf(
 			"historical response = %d, headers = %#v, body = %q",
 			recorder.Code,
@@ -182,7 +182,7 @@ func TestLegacyGeneratedImageKeepsAdministratorTaskReadScope(t *testing.T) {
 	)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/gpt-images/historical_0.webp", nil))
-	if response.Code != http.StatusOK || response.Body.String() != "historical-image" {
+	if response.Code != http.StatusOK || response.Body.String() != legacyHistoricalImage {
 		t.Fatalf("administrator read: status=%d body=%q", response.Code, response.Body)
 	}
 }
@@ -381,7 +381,7 @@ func assertLegacyGeneratedImageRefused(
 			filename, recorder.Code, expected, recorder.Body.String(),
 		)
 	}
-	if strings.Contains(recorder.Body.String(), "historical-image") {
+	if strings.Contains(recorder.Body.String(), legacyHistoricalImage) {
 		t.Fatalf("%s 回退到了无归属校验的历史文件", filename)
 	}
 	if recorder.Header().Get("ETag") != "" ||

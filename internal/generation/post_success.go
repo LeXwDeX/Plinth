@@ -259,22 +259,7 @@ func (m *Module) applyPostSuccessObservation(
 
 	// Provider 状态断言（§6.5）：通用合法性校验后应用；非法断言忽略。
 	applied := applyResourceUpdates(resources, task.Offering.Outputs, obs.ResourceUpdates, assets)
-	for _, update := range applied {
-		scope := update.Variant
-		if scope == "" {
-			scope = update.VariantPrefix
-		}
-		events = append(events, Event{
-			TaskID: task.ID,
-			Type:   "post_success.resource",
-			Data: eventData(map[string]string{
-				"role":  update.Role,
-				"scope": scope,
-				"state": string(update.State),
-			}),
-			CreatedAt: now,
-		})
-	}
+	events = append(events, resourceUpdateEvents(task.ID, applied, now)...)
 
 	if len(obs.Opaque) > 0 {
 		attempt.Opaque = obs.Opaque
@@ -285,10 +270,13 @@ func (m *Module) applyPostSuccessObservation(
 	if obs.Phase == UpstreamCompleted {
 		var mergeEvents []Event
 		var merged []Asset
-		merged, mergeEvents, assets = m.mergeOptionalArtifacts(ctx, task, attempt, obs.Artifacts, assets)
+		var rejected []ResourceUpdate
+		merged, mergeEvents, assets, rejected = m.mergeOptionalArtifacts(ctx, task, attempt, obs.Artifacts, assets)
 		newAssets = merged
 		events = append(events, mergeEvents...)
 		markMergedResources(resources, task.Offering, task.Offering.Outputs, assets)
+		// 同一字节再下载也会被拒（#576）：槽位落 failed，不空等 deadline。
+		events = append(events, resourceUpdateEvents(task.ID, applyResourceUpdates(resources, task.Offering.Outputs, rejected, assets), now)...)
 	} else {
 		// 非 COMPLETED（私有子作业运行中/失败/取消/进度回退）＝陈旧：
 		// 丢弃 + 事件，资源保持 pending，父任务终态永不回退（§6.2 触点 3；
@@ -366,19 +354,21 @@ func (m *Module) rejectPostSuccessReceipt(
 
 // mergeOptionalArtifacts 幂等合并迟到可选产物（§6.3）：只接受非阻断
 // （background/on-demand）声明的 claims；逻辑身份 (role, variant) 去重；
-// ordinal 取该 role 既有资产之外的下一个空闲值；失败只写事件、资源
-// 保持 pending（deadline 收尾），绝不失败任务。返回新增资产、事件与
-// 合并后的资产全集。
+// ordinal 取该 role 既有资产之外的下一个空闲值；失败只写事件、绝不失败
+// 任务：可能下次成功的失败（下载、I/O）资源保持 pending（deadline 收尾），
+// 确定性拒收（内容检查、保真检查、媒体类型不符，#576）另返回 failed
+// 断言。返回新增资产、事件、合并后的资产全集与拒收断言。
 func (m *Module) mergeOptionalArtifacts(
 	ctx context.Context,
 	task Task,
 	attempt *Attempt,
 	claims []ArtifactClaim,
 	existing []Asset,
-) ([]Asset, []Event, []Asset) {
+) ([]Asset, []Event, []Asset, []ResourceUpdate) {
 	merged := append([]Asset(nil), existing...)
 	newAssets := make([]Asset, 0)
 	events := make([]Event, 0)
+	rejected := make([]ResourceUpdate, 0)
 	ordinals := map[string]int{}
 	for _, asset := range merged {
 		if asset.Ordinal > ordinals[asset.Role] {
@@ -412,6 +402,9 @@ func (m *Module) mergeOptionalArtifacts(
 				}),
 				CreatedAt: now,
 			})
+			if deterministicAssetRejection(err) {
+				rejected = append(rejected, rejectedResourceUpdate(claim))
+			}
 			continue
 		}
 		existingByIdentity[identity] = struct{}{}
@@ -427,7 +420,7 @@ func (m *Module) mergeOptionalArtifacts(
 			CreatedAt: now,
 		})
 	}
-	return newAssets, events, merged
+	return newAssets, events, merged, rejected
 }
 
 // storeOptionalClaim 下载并落盘单个可选产物（复用 materialize 的校验
@@ -455,9 +448,10 @@ func (m *Module) storeOptionalClaim(
 	}
 	if !mediaTypeAllowed(requirement.MediaTypes, claim.MediaType) {
 		return Asset{}, fmt.Errorf(
-			"可选产物 %q 的媒体类型 %q 不符合供给项约束",
+			"可选产物 %q 的媒体类型 %q 不符合供给项约束: %w",
 			claim.Variant,
 			claim.MediaType,
+			errOptionalMediaType,
 		)
 	}
 	if requirement.MaxBytes > 0 && len(claim.Inline) > 0 && int64(len(claim.Inline)) > requirement.MaxBytes {

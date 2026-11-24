@@ -1,6 +1,10 @@
 package generation
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
 
 // A content verdict (stage inspect) is deterministic: the kernel records it
 // non-retryable, so a refetch of the same source that repeats it is
@@ -45,5 +49,34 @@ func TestAssetStoreFailureInspectionUnavailableStaysRetryable(t *testing.T) {
 	}
 	if repeatsSourceFailure(failure, failure) {
 		t.Fatal("retryable inspection failure must keep the refetch open")
+	}
+}
+
+type diagnosedStoreError struct{ diagnostic AssetStorageDiagnostic }
+
+func (diagnosedStoreError) Error() string { return "store refused" }
+func (e diagnosedStoreError) StorageDiagnostic() AssetStorageDiagnostic {
+	return e.diagnostic
+}
+
+// #576: only a refusal the same bytes meet again settles a background slot as
+// failed; a download, write or busy inspection keeps it pending for the next
+// round or the deadline.
+func TestDeterministicAssetRejectionFollowsTheSameRule576(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"content verdict", diagnosedStoreError{AssetStorageDiagnostic{Stage: "inspect", Reason: "content_rejected"}}, true},
+		{"fidelity verdict", diagnosedStoreError{AssetStorageDiagnostic{Stage: "unknown", Reason: "fidelity_invalid_structure"}}, true},
+		{"media type", fmt.Errorf("optional: %w", errOptionalMediaType), true},
+		{"busy inspection", diagnosedStoreError{AssetStorageDiagnostic{Stage: "inspect_unavailable", Reason: "inspection_busy"}}, false},
+		{"write", diagnosedStoreError{AssetStorageDiagnostic{Stage: "write", Reason: "io_failure"}}, false},
+		{"download", errors.New("connection reset"), false},
+	} {
+		if got := deterministicAssetRejection(test.err); got != test.want {
+			t.Fatalf("%s: deterministic=%v want %v", test.name, got, test.want)
+		}
 	}
 }

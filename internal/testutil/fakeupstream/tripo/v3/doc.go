@@ -144,13 +144,14 @@
 // that only needed a model and a prompt or an input:
 //
 //   - The three generation endpoints check the request like the real API checks it for
-//     the families the pages list: model names (H v3.1/v3.0/v2.5, P P2/P1; a retired name
-//     is 400/code 2015, any other 1004), the enumerations, the v3.0 gate of the new
-//     parameters, the face_limit ceilings, quad for P2 only, generate_parts, fast with a
-//     v2.5 texture, and the text lengths. Real evidence exists for the H3.1 model only:
-//     the P series, the rule that P2 refuses the H-only parameters, the retired names that
-//     answer 2015 and every refusal text are constructed, and the wire coverage matrix
-//     counts an Offering of another model as having no real sample of those endpoints.
+//     the families the pages list: model names (H v3.1/v3.0/v2.5, P P2/P1; any other
+//     name, a retired one included, is 400/code 1004), the enumerations, the v3.0 gate of
+//     the new parameters, the face_limit ceilings, quad for P2 only, generate_parts, fast
+//     with a v2.5 texture, and the text lengths. Real evidence exists for the H3.1 model
+//     only: the P series, the rule that P2 refuses the H-only parameters and every refusal
+//     text the free probes of 2026-11-25 did not capture are constructed, and the wire
+//     coverage matrix counts an Offering of another model as having no real sample of
+//     those endpoints.
 //   - The processing endpoints check their values (texture, segmentation, completion,
 //     Smart Segmentation) and their source tasks (processing.go): a rig check and a rig
 //     take a text, image or multiview task; a retarget takes a rigged model or a task run
@@ -167,7 +168,72 @@
 //     splat have no published price and keep the sample's placeholder.
 //   - X-RateLimit-Reset is a Unix timestamp in seconds; rate-limit-reset-only is the 1007
 //     answer with that header and no Retry-After; businessErrors and the task-failed-<word>
-//     words inject 2008, 2015, 2018, 2002 and 4001 (fake.go).
+//     words inject 2008, 2015, 2018, 2002 and 4001 (fake.go). Those five answers are the
+//     error-handling page's, constructed: no request has drawn one from the real API.
+//     2015 in particular is not what a retired model name gets (the probes, below).
+//
+// The real round of 2026-11-24 (#577). One run of smoke-l5-tripo-endpoints.py through
+// Plinth on dev-test (17 functions, 855 credits as quoted) was recorded by the runtime
+// recorder; evidence-577-real-round.candidate.json keeps the minimal set and
+// real_round_577_test.go holds the fake to it (every create sent with its recorded
+// request: the structure of the first and the finished poll, the price, the input).
+// Prices, task types, status words, output keys and the CDN content types matched the
+// fake already. What it changed:
+//
+//   - A poll repeats the request under input (echo.go): every parameter as sent over
+//     the template's defaults, the model as model_version where the type shows one. The
+//     fake used to keep the 2026-10-29 template, so a request's face_limit,
+//     texture_quality or segmentation_granularity never showed.
+//   - credits_consumed shows the price from the queued poll on (billing.go); image to
+//     splat costs 30.
+//   - A conversion of an imported model (URL or file token) reports normalize_scale and
+//     normalize_translation for every format; one of a task named by its id reports
+//     neither (convert.go). A Smart Segmentation of a model reports them too.
+//   - Every render (rendered_image) is a WebP.
+//   - A decimation's face_limit is a target the real task overshot by 57% (decimate.go);
+//     the fake does not model the overshoot.
+//
+// Not modelled: the real running poll of a conversion sometimes has no output, and
+// sometimes output.model_url before the task succeeds (the fake's running poll has an
+// empty output); the real progress values (the fake answers 0, 50 and 100, and the real
+// Smart Segmentation went 50, 10, 25, 75); and the real first poll is usually already
+// running (the fake answers one queued poll first). Not run in that round, so still
+// constructed: the P2 Offerings (text, image, multiview), Smart Segmentation of a
+// picture, the 2000 concurrency refusal and the 1007 rate limit.
+//
+// The free negative probes of 2026-11-25 (#577). The eleven probes of align.go (Probes)
+// ran against the official API after the upload: twelve requests, no credit spent, no
+// task made, every probe refused. evidence-577-negative-probes.candidate.json keeps the
+// nine JSON probes (the recorder keeps no empty or text/plain file part) and
+// probes_577_test.go holds the probe table to it and the fake to the table. What the
+// fake took from it:
+//
+//   - A model no family has is 1004 "invalid model '<name>', allowed values: P1-20260311,
+//     P2-20260801, v2.5-20250123, v3.0-20250812, v3.1-20260211" (the names in byte
+//     order). The retired v2.0-20240919 got exactly that, not the 2015 "version has been
+//     deprecated" the fake answered for its list of retired names, which is gone. The
+//     allowed list is the fake's own five names; only their order changed.
+//   - generate_parts with texture omitted: "generate_parts is incompatible with texture;
+//     set texture=false to generate parts". fast with the v2.5 texture: "texture_quality
+//     'fast' requires texture v3.5-20260815; got v2.5-20250123". An unknown seg_type:
+//     "invalid seg_type; allowed: image, model". Conversion to GLB: "invalid format
+//     'GLB', allowed values: 3MF, FBX, GLTF, OBJ, STL, USDZ" (byte order again).
+//   - Upload refusals: 2003 "The image file is empty" with the suggestion "Check if the
+//     file is corrupted", 2004 "This image file type is not supported" with "Refer to API
+//     documentation for supported image file types" (the codes and messages were right,
+//     the suggestions were not).
+//   - A wrong key is 401 code 2 "Invalid API key", its suggestion naming the tsk_ prefix;
+//     a missing Authorization is the captured "Authentication required". Neither 401
+//     carries a request_id; every 400 and the 404 does.
+//   - A rig check of a task id that does not exist is 404/2001 "The task is not found",
+//     as the task poll's sample already said.
+//
+// Still constructed, because no free request draws them: the text of every other 1004
+// (the remaining enumerations, ranges, source-task and v3.0-gate refusals, the generate_parts
+// refusal for pbr=true, fast implied by a v2.5 model), the business codes 2008, 2015,
+// 2018, 2002 and 4001, the task-creation refusals 2006 and 2007, the credit refusals,
+// the 1007 rate limit and the 2000 concurrency refusal, and the answer to a tsk_ key the
+// real API does not know.
 //
 // Balance scenarios. insufficient-balance and key-quota are credit refusals of
 // task creation, so they never apply to POST /files; the files page defines no

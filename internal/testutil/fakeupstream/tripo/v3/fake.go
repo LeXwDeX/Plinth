@@ -99,6 +99,8 @@ const (
 //   - content-policy, version-deprecated, model-too-complex, task-type-unsupported,
 //     endpoint-not-found: a task creation refused with the business code of the
 //     same name on the error-handling page (2008, 2015, 2018, 2002, 4001; businessErrors).
+//     All five are constructed from the page; a retired model name does not draw 2015
+//     from the real API (1004, the free probes of 2026-11-25, #577).
 //   - task-failed-content-policy, task-failed-model-too-complex,
 //     task-failed-version-deprecated, task-failed-task-type-unsupported: the task is
 //     created and ends "failed" with that business code as its error_code (the page says
@@ -245,8 +247,8 @@ var realKindNotes = map[string]string{
 	"/generation/image-to-multiview": "captured: task type image_to_multiview, 10 credits; the output is the object generate_multiview_image with front/left/back/right_view_url (JPEG); re-captured through the production path (POST /v3/files then the task) on 2026-11-20 and again on 2026-11-23, where the running polls answered output {} and the task echoed input.file.object {bucket tripo-data, key} with model_version default (tripo-v3-multiview-2026-11-20.candidate.json, tripo-v3-multiview-2026-11-23.candidate.json)",
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
 	"/models/texture":                "captured: task type texture_model, 10 credits at texture_quality standard without PBR; the output has model_url and rendered_image_url",
-	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url",
-	"/models/convert":                "captured twice. 2026-10-29: an STL export of a segmentation result with PNG textures of 512 pixels (the task echoes its request under input, the output has only model_url). 2026-11-16 (#305, evidence-305-rig-convert.candidate.json): a GLTF and an FBX export of a v3.0 rig's GLB with PNG textures of 2048 pixels and with_animation, 10 credits each, shown already while the task runs (creation from a URL took 47 to 48 seconds; the poll names a new original_model_id); the finished GLTF and FBX tasks add output.normalize_scale and output.normalize_translation, the move that put the middle of the bounding box on the origin because pivot_to_center_bottom was not set; the GLB keeps the skin, the textures follow the request. What the fake writes for pivot_to_center_bottom, for a texture larger than the source's and for the formats the runs did not cover is constructed from the official page (convert.go). A third capture, 2026-11-19 (#386, evidence-386-convert-3mf.candidate.json): a 3MF export of a multiview model named by its task id, with nothing in the request but input and format, 5 credits shown from the queued poll on; the task echoes {format, original_model_id}, the output has only model_url (no normalize_scale or normalize_translation for a 3MF), and the delivered file is a 35,952,441-byte ZIP64 3MF package with a Tripo vendor namespace (AIGC label) that the archive isolation refused until the namespace was listed. The fake delivers a package of that structure (tripo3mf.go), not the generic 3MF fixture",
+	"/mesh/decimate":                 "captured: the task type is highpoly_to_lowpoly (not mesh_decimation as assumed), 35 credits; the output has model_url and rendered_image_url. 2026-11-24 (#577, evidence-577-real-round.candidate.json): a request's face_limit is repeated under input, and face_limit 1000 delivered 1,566 triangles (a target, not a ceiling; the fake builds at or below it)",
+	"/models/convert":                "captured twice. 2026-10-29: an STL export of a segmentation result with PNG textures of 512 pixels (the task echoes its request under input, the output has only model_url). 2026-11-16 (#305, evidence-305-rig-convert.candidate.json): a GLTF and an FBX export of a v3.0 rig's GLB with PNG textures of 2048 pixels and with_animation, 10 credits each, shown already while the task runs (creation from a URL took 47 to 48 seconds; the poll names a new original_model_id); the finished GLTF and FBX tasks add output.normalize_scale and output.normalize_translation, the move that put the middle of the bounding box on the origin because pivot_to_center_bottom was not set; the GLB keeps the skin, the textures follow the request. What the fake writes for pivot_to_center_bottom, for a texture larger than the source's and for the formats the runs did not cover is constructed from the official page (convert.go). A third capture, 2026-11-19 (#386, evidence-386-convert-3mf.candidate.json): a 3MF export of a multiview model named by its task id, with nothing in the request but input and format, 5 credits shown from the queued poll on; the task echoes {format, original_model_id}, the output has only model_url (no normalize_scale or normalize_translation for a 3MF), and the delivered file is a 35,952,441-byte ZIP64 3MF package with a Tripo vendor namespace (AIGC label) that the archive isolation refused until the namespace was listed. The fake delivers a package of that structure (tripo3mf.go), not the generic 3MF fixture. A fourth capture, 2026-11-24 (#577, evidence-577-real-round.candidate.json): conversions of imported models (a URL or a file token) to every format report normalize_scale and normalize_translation, those of a task named by its id report neither, and the queued poll already shows the price",
 	"/animations/rig":                "the response is captured (rig_type biped, spec tripo, both v2.5 and v3.0; 25 credits on v3.0-20260909, shown while the task runs, observed 2026-11-16); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: rig_type (biped, quadruped, hexapod, octopod, avian, serpentine, aquatic, others), spec (tripo, mixamo, actorcore, unity, unreal, vrm), out_format, which of them exist only under v3.0, and a spec having no effect on a non-biped rig; a poll repeats spec, out_format and the rig type (named topology, as captured)",
 	"/animations/retarget":           "the response is captured (preset:walk on a v3.0 biped rig; a v2 rig ended failed, code 1004); the request values beyond that are constructed from the official page read on " + rigDocsChecked + " and not yet observed: animation XOR animations (at most 5), the 11 v3.0 biped presets, the five creature presets (quadruped walk, hexapod walk, octopod walk, serpentine march, aquatic march) and the v1.0 preset:biped: names; a preset that does not fit its rig ends failed with code 1004 like the captured v2 case, which is an assumption",
 	"/mesh/smartsegment":             "captured for both seg_type values: smartsegment_image (85 credits; the first request, on a shaded sphere, ended failed with error 1001 \"Segmentation pipeline failed\" and was not charged, a second picture with distinct parts succeeded) and smartsegment_model (55 credits, a 36 KB GLB uploaded to /files); the output is seg_model_url, mask_url, prompt, seg_task_id and model_task_id",
@@ -549,13 +551,32 @@ func (h *handler) renderLocalRateLimit(w http.ResponseWriter, r *http.Request) b
 }
 
 // auth answers 401 unless the request carries a bearer key.
+//
+// Both 401 answers are captured: a missing Authorization is code 2 "Authentication
+// required" (2026-10-29, the auth-error sample), and a key the upstream does not know
+// is code 2 "Invalid API key" with a suggestion that names the tsk_ prefix (the free
+// probe of 2026-11-25, #577, evidence-577-negative-probes). Neither carries a
+// request_id. The probe's key did not start with tsk_; what the real API says for a
+// tsk_ key it does not know is not captured, so the fake answers every key it is told
+// is wrong (the invalid-key scenario, the align script's probe-wrong-key) the same way
+// and accepts any other key.
 func (h *handler) auth(w http.ResponseWriter, r *http.Request) bool {
-	if fakeupstream.BearerKey(r) != "" {
-		return true
+	if fakeupstream.BearerKey(r) == "" {
+		writeJSON(w, http.StatusUnauthorized, h.authError)
+		return false
 	}
-	writeJSON(w, http.StatusUnauthorized, h.authError)
-	return false
+	if fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioInvalidKey {
+		writeJSON(w, http.StatusUnauthorized, h.envelope(h.authError, 2, invalidKeyMessage, invalidKeySuggestion))
+		return false
+	}
+	return true
 }
+
+// The real answer to an unknown key (captured 2026-11-25, #577).
+const (
+	invalidKeyMessage    = "Invalid API key"
+	invalidKeySuggestion = "API key must start with 'tsk_'. If you are sending a client_id (tcli_...), use the secret key instead"
+)
 
 // ---- endpoints ----
 
@@ -624,7 +645,7 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if !uploadTypeAllowed(part.Header.Get("Content-Type"), part.FileName()) {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "This image file type is not supported", "Refer to the API documentation for the supported file types"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "This image file type is not supported", "Refer to API documentation for supported image file types"))
 				return
 			}
 			// Drain the whole part: the official limit for a model is 150 MB, so a
@@ -636,7 +657,7 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if written == 0 {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2003, "The image file is empty", "Please check if you passed the file, or it may be rejected by our firewall"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2003, "The image file is empty", "Check if the file is corrupted"))
 				return
 			}
 			err = nil
@@ -732,7 +753,12 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		}
 		for _, field := range k.Required {
 			if value, ok := body[field].(string); !ok || strings.TrimSpace(value) == "" {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, field+" is required", "Refer to the API documentation for parameter requirements"))
+				message := field + " is required"
+				if field == "model" && isGenerationPath(k.Path) {
+					// The real answer lists the allowed names (captured 2026-10-29).
+					message = missingModel().message
+				}
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
 				return
 			}
 		}
@@ -818,7 +844,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			case "model":
 				t.typ = "smartsegment_model"
 			default:
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "seg_type must be image or model", "Refer to the API documentation for parameter requirements"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "invalid seg_type; allowed: image, model", "Refer to the API documentation for parameter requirements"))
 				return
 			}
 		}
@@ -847,6 +873,11 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			}
 			if from != nil {
 				t.sourceFidelity, t.sourceTriangles = from.fidelity(), from.modelTriangles()
+			}
+			if strings.HasPrefix(source, "file_") {
+				// An uploaded model is imported like a URL: the poll names a new
+				// original_model_id and the task reports normalize_* (2026-11-24, #577).
+				t.importedID = h.newID()
 			}
 			if isHTTP(source) {
 				// A URL is fetched before the answer: the real API took 47 to 48
@@ -1122,6 +1153,9 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 	}
 	body := fakeupstream.Clone(h.pollTemplate(template, templateStatus))
 	data, _ := fakeupstream.DigMap(body, "data")
+	// A template of another task type (a cancelled text task takes the failed
+	// retarget poll) keeps its own input: only a task's own type repeats the request.
+	ownTemplate := data["type"] == t.typ
 	data["task_id"], data["type"], data["status"] = t.id, t.typ, status
 	for _, key := range []string{"created_at", "completed_at"} {
 		if _, has := data[key]; has {
@@ -1149,6 +1183,9 @@ func (h *handler) pollBody(r *http.Request, t *task, status string) map[string]a
 			if _, has := input[field]; has {
 				input[field] = t.parentID()
 			}
+		}
+		if ownTemplate {
+			t.echoRequest(input)
 		}
 		t.echoedInput(input)
 		// A convert task shows the request it ran: the committed sample lists the
@@ -1239,13 +1276,14 @@ func (t *task) parentID() string {
 func (t *task) artifactName(field string) string {
 	switch field {
 	case "rendered_image":
-		if t.typ == "multiview_to_model" {
-			// The multiview model's render is a WebP (observed 2026-11-19, #386: the
-			// bytes of a real task, a textured PBR model). The text, image, texture and
-			// decimation tasks of 2026-10-29 delivered PNG bytes.
-			return "rendered_image.webp"
-		}
-		return "rendered_image.png"
+		// Every render is a WebP. The multiview model's was on 2026-11-19 (#386: the
+		// bytes of a real task); on 2026-11-24 (#577) the render URL of every task that
+		// had one (text, image and multiview generation, rig, decimation, segmentation,
+		// texture) named legacy_mesh.webp and Plinth read each as image/webp, from 25
+		// to 210 KB (the 210 KB one, of the extreme/detailed text task, is #576). The
+		// text, image, texture and decimation tasks of 2026-10-29 had delivered PNG
+		// bytes.
+		return "rendered_image.webp"
 	case "generated_image":
 		return "generated_image.jpg"
 	case "front_view", "left_view", "back_view", "right_view":
@@ -1317,7 +1355,9 @@ func artifactFile(name, fidelity, texture string) (fakeupstream.File, error) {
 	case ".png":
 		return fakeupstream.ModelFile("png")
 	case ".webp":
-		return fakeupstream.ImageFile("webp")
+		// Only a render is a WebP here: an extended WebP with metadata, the
+		// shape the old generic address scan refused (#576).
+		return fakeupstream.RenderWebP()
 	case ".jpg":
 		return fakeupstream.ImageFile("jpeg")
 	}

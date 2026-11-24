@@ -32,9 +32,11 @@ ART_AI_UPSTREAM_SHAPE (release-env.py smoke sets it). Each real run also needs t
   ART_AI_UPSTREAM_SHAPE=fake BASE=... ADMIN_USERNAME=... ADMIN_PASSWORD=... python3 scripts/smoke/smoke-l5-hyper3d.py
   python3 scripts/release-env.py smoke dev-test -- env ART_AI_LIVE_ACK=1 python3 scripts/smoke/smoke-l5-hyper3d.py --live --report DIR
 
-Every POST is sent once; a failure or timeout is only observed. The Catalog lets the server resend a Rodin submission
-that answered 5xx (the connection's retry_submit_server_error); the script cannot turn that off, and such a
-resend can bill twice, which the balance reconciliation at the end would show. Re-run a failed step with --only STEP
+Every POST is sent once; a failure or timeout is only observed. The server resends a Rodin submission only when
+Rodin answered 503 with a Retry-After (the connection's retry_submit_server_error, narrowed by #563), which means the
+job was not taken; once those resends run out, and for every other 5xx or a timeout, the step ends as "submission
+result unknown" and may have been billed, which the balance reconciliation at the end would show. The script cannot
+turn the resend off. Re-run a failed step with --only STEP
 --seed SOURCE=TASK_ID (a new request, after reading why). Raw payloads and downloaded bytes live in a 0700 directory
 outside the checkout and are removed at the end (--keep-raw keeps them). Rodin keeps results for about seven days.
 
@@ -63,7 +65,8 @@ CHARACTER = ("A game character standing upright in an A pose, simple low-poly ar
              "plain light background, no text")
 TEXTURE_PROMPT = "plain matte red"
 FACES = 10000
-# Rodin Quad returns about 2.18 triangles per requested face (the 2026-11-13 real run, kept in the fake's sized model).
+# Rodin Quad returns about 2.18 triangles per requested face (the 2026-11-13 real run, kept in the fake's sized model);
+# the 1.9 real round (2026-11-24, #568) got 21002 for 10000 faces (2.10), inside the window below.
 TRIANGLES_PER_FACE = 2.18
 TRIANGLE_TOLERANCE = 0.35
 DEFAULT_UPLOAD_LIMIT = 10 << 20

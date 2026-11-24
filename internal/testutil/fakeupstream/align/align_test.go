@@ -249,3 +249,25 @@ func TestReplayOfASubsetKeepsStepsOnTheSameEndpointApart(t *testing.T) {
 		t.Fatalf("the real create replayed %d %s", got.Status, got.Body)
 	}
 }
+
+// A WrongKey step sends its dummy key in place of the target's and says so in the
+// observation, without exposing either key.
+func TestWrongKeyStepSendsTheDummyKey(t *testing.T) {
+	var seen atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.Store(r.Header.Get("Authorization"))
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	steps := []Step{{Name: "wrong-key", Method: "GET", Path: "/balance", WrongKey: "not-a-key"}}
+	bundle, err := Run(context.Background(), "p", "v1", Target{Name: "t", BaseURL: server.URL, Key: "k", AuthHeader: "Authorization", AuthPrefix: "Bearer ", NoPollDelay: true}, steps, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := seen.Load().(string); got != "Bearer not-a-key" {
+		t.Fatalf("Authorization = %q, want the dummy key", got)
+	}
+	if obs := bundle.Obs[0]; obs.Status != http.StatusUnauthorized || obs.AuthHeader != "Authorization: Bearer <wrong key>" {
+		t.Fatalf("obs: %+v", obs)
+	}
+}

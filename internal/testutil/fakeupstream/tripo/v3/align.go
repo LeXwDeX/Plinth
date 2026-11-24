@@ -134,13 +134,126 @@ func drawView(view string) []byte {
 	return out.Bytes()
 }
 
+// Probe is one free negative probe of the alignment script (#577): a request the
+// official API refuses before it creates anything, and the answer it gave. The
+// official run of 2026-11-25 sent all eleven, none was billed and none made a task;
+// its answers are the Want fields, and the fake gives the same ones (the nine JSON
+// probes are also the sample evidence-577-negative-probes; the recorder keeps no
+// empty or text/plain file part, so the two upload refusals are only here).
+type Probe struct {
+	Step align.Step
+	// WantStatus, WantCode, WantMessage and WantSuggestion are the real answer: the
+	// HTTP status and the envelope's code, message and suggestion.
+	WantStatus     int
+	WantCode       int
+	WantMessage    string
+	WantSuggestion string
+	// WantRequestID says the envelope carries a request_id (the 400 and 404 answers
+	// do, the two 401 answers do not).
+	WantRequestID bool
+	// Risk says what the official API would bill if it accepted the request after
+	// all, "" when acceptance costs nothing either.
+	Risk string
+}
+
+// The suggestions of the real answers.
+const (
+	suggestParameters = "Refer to the API documentation for parameter requirements"
+	probeModels       = "P1-20260311, P2-20260801, v2.5-20250123, v3.0-20250812, v3.1-20260211"
+)
+
+// probeText is the prompt of the generation probes: short and plain, so an
+// unexpected acceptance builds the cheapest model.
+const probeText = "a plain grey cube"
+
+// probeWrongKey is the dummy key of the wrong-key probe: unknown to the official API,
+// and the fake's invalid-key scenario word.
+const probeWrongKey = "fake-invalid-key"
+
+// Probes are the free negative probes, each OptIn (a routine refresh does not send
+// them; -steps names them). Those whose input is a file token run after the free
+// "upload" step, which captures file_token:
+//
+//	-steps upload,probe-upload-empty,probe-upload-text,probe-model-invalid,probe-model-retired,probe-generate-parts-texture-omitted,probe-fast-texture-v25,probe-seg-type-invalid,probe-convert-format-glb,probe-create-no-auth,probe-wrong-key,probe-input-task-not-found
+//
+// None is Paid: each is refused by the documented rule it probes (the official run of
+// 2026-11-25 confirmed it: twelve requests with the upload, no credit spent). Risk
+// names what a request would cost if the official API accepted it instead.
+func Probes() []Probe {
+	optIn := func(step align.Step) align.Step { step.OptIn = true; return step }
+	text := func(extra map[string]any) map[string]any {
+		body := map[string]any{"model": "v3.1-20260211", "prompt": probeText, "texture": false, "pbr": false, "face_limit": 1000}
+		for name, value := range extra {
+			if value == nil {
+				delete(body, name)
+				continue
+			}
+			body[name] = value
+		}
+		return body
+	}
+	return []Probe{
+		{Step: optIn(align.Step{Name: "probe-upload-empty", Method: "POST", Path: "/files",
+			Multipart: &align.File{Field: "file", Filename: "empty.png", MediaType: "image/png", Data: []byte{}}}),
+			WantStatus: 400, WantCode: 2003, WantMessage: "The image file is empty",
+			WantSuggestion: "Check if the file is corrupted", WantRequestID: true},
+		{Step: optIn(align.Step{Name: "probe-upload-text", Method: "POST", Path: "/files",
+			Multipart: &align.File{Field: "file", Filename: "notes.txt", MediaType: "text/plain", Data: []byte("not a picture or a model\n")}}),
+			WantStatus: 400, WantCode: 2004, WantMessage: "This image file type is not supported",
+			WantSuggestion: "Refer to API documentation for supported image file types", WantRequestID: true},
+		{Step: optIn(align.Step{Name: "probe-model-invalid", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"model": "v9.9-20990101"})}),
+			WantStatus: 400, WantCode: 1004,
+			WantMessage:    "invalid model 'v9.9-20990101', allowed values: " + probeModels,
+			WantSuggestion: suggestParameters, WantRequestID: true},
+		// A retired name is an unknown name: 1004, not the 2015 of the error page.
+		{Step: optIn(align.Step{Name: "probe-model-retired", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"model": "v2.0-20240919"})}),
+			WantStatus: 400, WantCode: 1004,
+			WantMessage:    "invalid model 'v2.0-20240919', allowed values: " + probeModels,
+			WantSuggestion: suggestParameters, WantRequestID: true,
+			Risk: "a geometry-only text model of a retired version, about 10 credits, if the name is still served"},
+		{Step: optIn(align.Step{Name: "probe-generate-parts-texture-omitted", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"generate_parts": true, "texture": nil})}),
+			WantStatus: 400, WantCode: 1004,
+			WantMessage:    "generate_parts is incompatible with texture; set texture=false to generate parts",
+			WantSuggestion: suggestParameters, WantRequestID: true,
+			Risk: "a textured text model with parts, about 40 credits (10 + texture 10 + parts 20), if an omitted texture is not taken as true"},
+		{Step: optIn(align.Step{Name: "probe-fast-texture-v25", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"texture": true, "texture_quality": "fast", "texture_version": "v2.5-20250123"})}),
+			WantStatus: 400, WantCode: 1004,
+			WantMessage:    "texture_quality 'fast' requires texture v3.5-20260815; got v2.5-20250123",
+			WantSuggestion: suggestParameters, WantRequestID: true,
+			Risk: "a fast-textured text model, about 20 credits, if fast is served with the v2.5 texture"},
+		{Step: optIn(align.Step{Name: "probe-seg-type-invalid", Method: "POST", Path: "/mesh/smartsegment", RequireVar: "file_token",
+			Body: map[string]any{"input": "{file_token}", "seg_type": "mesh", "granularity": "coarse"}}),
+			WantStatus: 400, WantCode: 1004, WantMessage: "invalid seg_type; allowed: image, model",
+			WantSuggestion: suggestParameters, WantRequestID: true,
+			Risk: "a Smart Segmentation of the uploaded picture, 85 credits, if an unknown seg_type falls back to image"},
+		{Step: optIn(align.Step{Name: "probe-convert-format-glb", Method: "POST", Path: "/models/convert", RequireVar: "file_token",
+			Body: map[string]any{"input": "{file_token}", "format": "GLB"}}),
+			WantStatus: 400, WantCode: 1004, WantMessage: "invalid format 'GLB', allowed values: 3MF, FBX, GLTF, OBJ, STL, USDZ",
+			WantSuggestion: suggestParameters, WantRequestID: true,
+			Risk: "a conversion, 5 credits, if GLB were a target (its input is a picture, so the task would fail and a failed task is not billed)"},
+		{Step: optIn(align.Step{Name: "probe-create-no-auth", Method: "POST", Path: "/generation/text-to-model", NoAuth: true,
+			Body: text(nil)}),
+			WantStatus: 401, WantCode: 2, WantMessage: "Authentication required", WantSuggestion: "Check if your credentials is valid"},
+		{Step: optIn(align.Step{Name: "probe-wrong-key", Method: "GET", Path: "/account/balance", WrongKey: probeWrongKey}),
+			WantStatus: 401, WantCode: 2, WantMessage: invalidKeyMessage, WantSuggestion: invalidKeySuggestion},
+		{Step: optIn(align.Step{Name: "probe-input-task-not-found", Method: "POST", Path: "/animations/rig-check",
+			Body: map[string]any{"input": "00000000-0000-4000-8000-000000000000"}}),
+			WantStatus: 404, WantCode: 2001, WantMessage: "The task is not found",
+			WantSuggestion: "Check if the task is committed by you or whether the format is correct", WantRequestID: true},
+	}
+}
+
 // Profile is the alignment script of the Tripo v3 fake. Every paid request,
 // except the two of the multiview run at the end (#386), is the cheapest option
 // of its endpoint and is sent once. The chain mirrors what Plinth drives:
 // generation, rig check, rigging, animation, segmentation, a model export and
 // part completion.
 func Profile() align.Profile {
-	return align.Profile{
+	profile := align.Profile{
 		Provider: "tripo", API: "v3", Official: OfficialBase,
 		Steps: []align.Step{
 			{Name: "balance", Method: "GET", Path: "/account/balance"},
@@ -362,6 +475,10 @@ func Profile() align.Profile {
 		},
 		Notes: smartSegmentFailureNotes(),
 	}
+	for _, probe := range Probes() {
+		profile.Steps = append(profile.Steps, probe.Step)
+	}
+	return profile
 }
 
 // smartSegmentFailureNotes explains the differences of the one official request

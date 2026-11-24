@@ -76,9 +76,9 @@ func (f *fixture) riggedModel() (rig, modelURL string) {
 	return rig, f.outputURL(done, "model_url")
 }
 
-// A rig costs 25 credits and a rig check nothing; the running poll already shows
-// the whole price, and a task that fails is not charged. The queued poll has no
-// real sample and keeps the sample's value.
+// A rig costs 25 credits and a rig check nothing; every poll from the queued one on
+// already shows the whole price (the queued conversions of 2026-11-24, #577), and a
+// task that fails is not charged.
 func TestRigAndRigCheckAreBilledLikeThePaidRun(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	gen := f.create("/generation/text-to-model", textBody(), key)
@@ -88,8 +88,8 @@ func TestRigAndRigCheckAreBilledLikeThePaidRun(t *testing.T) {
 		t.Fatalf("a rig check costs %v", got)
 	}
 	rig := f.create("/animations/rig", map[string]any{"input": gen, "model": "v3.0-20260909"}, key)
-	if queued := f.poll(rig, 1); queued["status"] != statusQueued || credits(t, queued) != 0 {
-		t.Fatalf("queued poll: %v", queued)
+	if queued := f.poll(rig, 1); queued["status"] != statusQueued || credits(t, queued) != 25 {
+		t.Fatalf("queued poll: %v, want the frozen 25 credits", queued)
 	}
 	if running := f.poll(rig, 1); running["status"] != statusRunning || credits(t, running) != 25 {
 		t.Fatalf("running poll: %v, want the frozen 25 credits", running)
@@ -173,11 +173,14 @@ func TestDecimationIsBilledLikeThePricingPage(t *testing.T) {
 	}
 }
 
-// The finished GLTF and FBX conversions report the move they made, the one the
-// paid run showed: normalize_scale and normalize_translation. Without the pivot
-// the translation lifts the middle of the box onto the origin; with it, the middle
-// of the bottom face. A conversion to another format reports neither, like the
-// committed STL sample, and no running poll shows them.
+// The finished conversion of an imported model (here a URL) reports the move it
+// made, the one the paid run showed: normalize_scale and normalize_translation.
+// Without the pivot the translation lifts the middle of the box onto the origin;
+// with it, the middle of the bottom face. Every format reports it, as every
+// conversion of an imported model did on 2026-11-24 (#577; the STL of 2026-10-29
+// reported neither, and the newer round is followed), and no running poll shows
+// it. The conversion of a task named by its id reports none
+// (TestRealRoundPollsKeepTheStructureOfTheRealTasks).
 func TestConversionReportsTheMoveOfTheOrigin(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	_, modelURL := f.riggedModel()
@@ -191,10 +194,10 @@ func TestConversionReportsTheMoveOfTheOrigin(t *testing.T) {
 		"FBX at the middle":      {"FBX", false, -maximum[1] / 2},
 		"GLTF at the bottom":     {"GLTF", true, 0},
 		"FBX at the bottom":      {"FBX", true, 0},
-		"STL has no move":        {"STL", false, math.NaN()},
-		"USDZ has no move":       {"USDZ", true, math.NaN()},
-		"the OBJ has no move":    {"OBJ", false, math.NaN()},
-		"the 3MF has no move":    {"3MF", true, math.NaN()},
+		"STL at the middle":      {"STL", false, -maximum[1] / 2},
+		"USDZ at the bottom":     {"USDZ", true, 0},
+		"OBJ at the middle":      {"OBJ", false, -maximum[1] / 2},
+		"3MF at the bottom":      {"3MF", true, 0},
 		"the pivot named as off": {"GLTF", false, -maximum[1] / 2},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -210,12 +213,6 @@ func TestConversionReportsTheMoveOfTheOrigin(t *testing.T) {
 				t.Fatalf("a running poll reports the move: %v", output)
 			}
 			output, _ := f.poll(id, 1)["output"].(map[string]any)
-			if math.IsNaN(tc.want) {
-				if output["normalize_scale"] != nil || output["normalize_translation"] != nil {
-					t.Fatalf("%s reports a move: %v", tc.format, output)
-				}
-				return
-			}
 			translation, _ := output["normalize_translation"].([]any)
 			if output["normalize_scale"] != float64(1) || len(translation) != 3 {
 				t.Fatalf("output = %v", output)

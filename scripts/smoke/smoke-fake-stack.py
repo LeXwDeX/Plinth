@@ -83,10 +83,11 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, model-parts, model-convert, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, auto-completion, faults, meshy-endpoints, hyper3d-endpoints, l5-direct;
-"meshy-endpoints" and "hyper3d-endpoints" (#539) run the L5 endpoint-chain scripts smoke-l5-meshy-endpoints.py and
-smoke-l5-hyper3d.py as processes against the main stack, with the fake target shape and no live switch: every Meshy and
-Rodin API function once through prepare, grants and tasks (they are in the full run, not in the gate subset);
+agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, auto-completion, faults, meshy-endpoints, hyper3d-endpoints, tripo-endpoints, l5-direct;
+"meshy-endpoints", "hyper3d-endpoints" (#539) and "tripo-endpoints" (#567) run the L5 endpoint-chain scripts
+smoke-l5-meshy-endpoints.py, smoke-l5-hyper3d.py and smoke-l5-tripo-endpoints.py as processes against the main stack,
+with the fake target shape and no live switch: every Meshy, Rodin and Tripo API function once through prepare, grants
+and tasks (the Tripo chain with a ceiling above its whole price; they are in the full run, not in the gate subset);
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
@@ -1798,7 +1799,7 @@ def scenario_mcp(api, mcp_base):
                f"status {status}, already {again.get('alreadyTerminal')}")
 
 
-def scenario_endpoint_script(api, label, script):
+def scenario_endpoint_script(api, label, script, extra=()):
     """#539: an L5 endpoint-chain script, run as a process against the main stack the way an operator runs it: the fake
     target shape, no live switch, the stack's bootstrap administrator. Every request of its chain goes through the
     public task API, so a Catalog or Adapter that sends the fake something it refuses fails the script. The fake's
@@ -1809,7 +1810,7 @@ def scenario_endpoint_script(api, label, script):
     started = time.time()
     try:
         done = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), script),
-                               "--poll", "1", "--task-timeout", "300"], env=environ, capture_output=True, text=True, timeout=1800)
+                               "--poll", "1", "--task-timeout", "300", *extra], env=environ, capture_output=True, text=True, timeout=1800)
     except subprocess.TimeoutExpired:
         record(f"{label}: the script finishes", False, "no result in 1800 seconds")
         return
@@ -8853,7 +8854,7 @@ def scenario_auto_completion(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,multiview-text,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,l5-direct")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,multiview-text,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,tripo-endpoints,l5-direct")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -8863,7 +8864,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults", "meshy-endpoints", "hyper3d-endpoints"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -8879,7 +8880,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "multiview-text", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "multiview-text", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints", "tripo-endpoints"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -8946,6 +8947,9 @@ def main():
                 scenario_endpoint_script(api, "meshy-endpoints", "smoke-l5-meshy-endpoints.py")
             if "hyper3d-endpoints" in selected:
                 scenario_endpoint_script(api, "hyper3d-endpoints", "smoke-l5-hyper3d.py")
+            if "tripo-endpoints" in selected:
+                # The default ceiling stops before the P2 steps; the fake costs nothing, so the whole chain runs.
+                scenario_endpoint_script(api, "tripo-endpoints", "smoke-l5-tripo-endpoints.py", ("--max-credits", "1400"))
             processes.stop(child)
         if "offering-knowledge" in selected:
             offering_catalog = private_catalog(

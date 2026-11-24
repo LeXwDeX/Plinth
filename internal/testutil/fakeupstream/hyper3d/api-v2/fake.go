@@ -80,6 +80,12 @@ const (
 	contractDocs = "2026-11-24"
 )
 
+// realRound568TextureNote records what the Rodin chain of the 1.9 real round
+// (2026-11-24, #568) showed of Generate Texture and Bang. The sanitized evidence
+// is testdata/evidence-568-processing-high; real_round_568_test.go holds the fake
+// to it.
+const realRound568TextureNote = "The 1.9 real round on dev-test (2026-11-24, #568) sent the Catalog's form (texture_mode=extreme-high, resolution=High, hd_texture=true): 4 sub-jobs, one listed file served as base_high_pbr.glb with a 12288 base color. The fake names the pack base_<resolution>_pbr.glb like Bang (Basic stays base_basic_pbr.glb, as on 2026-10-29) and delivers TextureModel: the plain fixture's geometry (the real service keeps the uploaded mesh) under a PBR pack from the generation's resolution table, resolution=High taken for HighPack and hd_texture for uhd_texture, so extreme-high at High is 12288 beside two 4096 maps; only that cell is observed. Not modeled: the sub-job count follows the template (3, from the 2026-10-29 Basic sample), not the 4 of the High form; Bang's count likewise stays the sample's 4 while the round's High PBR Bang on a Rodin task ran 6 and on an uploaded model with a picture 8 (both served base_high_pbr.glb, which the fake already names)"
+
 // Job statuses of the official API.
 const (
 	statusWaiting    = "Waiting"
@@ -185,7 +191,7 @@ type kind struct {
 var kinds = []kind{
 	{Path: "/rodin", DocPage: "rodin-gen2-5", Need: "prompt-or-images"},
 	{Path: "/bang", DocPage: "bang", Need: "asset"},
-	{Path: "/rodin_texture_only", DocPage: "generate-texture", Need: "model-and-image"},
+	{Path: textureRoute, DocPage: "generate-texture", Need: "model-and-image"},
 }
 
 // rodinRealRunNote records the one paid game-character run and what the fake does
@@ -197,7 +203,7 @@ const rodinRealRunNote = "One paid run of the game-character request was made on
 	"The raw bodies were not captured, so the fake answers from the page and from what the run showed, not from a recorded wire: consumed follows the page's price table (generationCharge), and the Extreme-High tier lists the extra mesh that the page and the earlier real lists record (" + extraMeshName + "; the real order of the list and the PBR pack's real name for this request were not kept). " +
 	"The page's \"tier is required\" callout is advice, not enforcement: an omitted tier is Regular (a Gen-1/1.5 asset), which the fake accepts too, and Plinth always sends an explicit Gen-2.5 tier. The run does not verify a rejected value, TAPose on a subject that is not humanoid, or the Quad ceiling. " +
 	"Since #303 the PBR pack follows the request (DeliveredModel, built by fakeupstream.SizedModelFile): its triangle count is the target face count (quality_override, else the page's quality preset, medium when omitted: Quad 50000, 18000, 8000 and 4000 for high to extra-low, Raw 1000000, 500000, 60000 and 20000, and for a form without a Gen-2.5 tier the Gen-1/1.5 page's 50000, 18000, 8000 and 4000 in both topologies) for a triangle mesh and 2.18 triangles per Quad face (this run's one sample: 10,000 quads gave about 21,800 triangles), held to the fixture's 121,032-triangle ceiling, and it carries three PNG textures (base color, metallic-roughness, normal) at the page's texture resolution table: 2048 for texture_mode extreme-low to high and legacy, 4096 with uhd_texture or the HighPack add-on, 8192 with both, and a 6144 base color for extreme-high (12288 with HighPack) beside two 2048 maps (observed in the #188 acceptance; the maps beside the 8192 and 12288 base colors are 4096, observed for 12288 on Bang). " +
-	"Not modeled: the real files' scale (a display request of 2,000,000 faces delivers the 121,032-triangle ceiling, not millions, and the real pack is megabytes of pixels where the fake's flat textures are about 1 MB at 6144), the shape (the fixture humanoid in its rest pose whatever TAPose, seed, quad_normal or the prompt), material other than PBR (none, shaded, all and hybrid still deliver the PBR pack), geometry_file_format other than glb, the extra mesh of the Extreme-High tier (the plain fixture under its real name, not an untextured Draco mesh), the preview, and the Bang and Texture outputs (the plain fixture). " +
+	"Not modeled: the real files' scale (a display request of 2,000,000 faces delivers the 121,032-triangle ceiling, not millions, and the real pack is megabytes of pixels where the fake's flat textures are about 1 MB at 6144), the shape (the fixture humanoid in its rest pose whatever TAPose, seed, quad_normal or the prompt), material other than PBR (none, shaded, all and hybrid still deliver the PBR pack), geometry_file_format other than glb, the extra mesh of the Extreme-High tier (the plain fixture under its real name, not an untextured Draco mesh), the preview, and the Bang output (the plain fixture; the Texture output follows its form since #568, see the /rodin_texture_only note). " +
 	"The page was read again on " + formDocs + " as the complete server-rendered HTML (the 2026-11-13 reading was a summarizing fetch that dropped fields): it lists seed 0-65535, TAPose and quad_normal as booleans that default to false, the Quad ceiling of 200000 and the 1000000 ceiling below the High tiers, legacy among the six texture_mode values and tier as required advice, so the value rules above stand. Fields it lists that Plinth cannot send (bbox_condition, detail_level, geometry_instruct_mode, is_symmetric) are not enforced here, while the length of prompt and is_micro are since #537 (see below); image_label is the one exception, for its count and its values (see the image_label paragraph below)"
 
 // rodinLabelNote records the two paid requests of labelRun (#376) that settled how
@@ -240,7 +246,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			Note: "a download asked before the jobs finished answers an empty list (observed); an unknown task_uuid answers HTTP 201 {\"error\":\"NO_SUCH_TASK\"} (real observation 2026-10-21, charge_evidence_test.go, not committed as a sample)"},
 		{Method: "GET", Path: "/files/{task_uuid}/{name}", Evidence: fakeupstream.EvidenceConstructed,
 			DocURL: docsRoot + "download-results", CheckedAt: captured,
-			Note: "the official file host is not part of the API; this route serves the files the download list names (content types as observed): the fixed fixtures, except the PBR pack of a Gen-2.5 generation, which follows its request (see the /rodin note)"},
+			Note: "the official file host is not part of the API; this route serves the files the download list names (content types as observed): the fixed fixtures, except the PBR pack of a Gen-2.5 generation, which follows its request (see the /rodin note), and the Texture pack, which follows its form (see the /rodin_texture_only note)"},
 	}
 	for _, k := range kinds {
 		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). API_NO_ACTIVE_SUBSCRIPTION was observed on 2026-11-12 (#294): a real submission was refused with it and the product recorded no HTTP status for the refusal (upstream_status 0), which is what the HTTP 201 error body sent here gives; the message text of the real body was not kept, so the message stays the documented description. The other documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
@@ -251,7 +257,7 @@ func buildEndpoints() []fakeupstream.Endpoint {
 			note += ". " + bangInputNote
 		}
 		if k.Need == "model-and-image" {
-			note += ". The receipt's consumed is 2 for texture_mode=extreme-high (real: the Offering's requests at Basic and at High resolution were charged 2, #187) and the base 0.5 for any other mode (the page's table, not observed): " + docsRoot + k.DocPage + " (read in full on " + formDocs + ") lists the two prices without saying they add up, and the receipts say they do not. The delivered GLB is the plain fixture whatever the mode and the resolution. " + textureReferenceNote
+			note += ". The receipt's consumed is 2 for texture_mode=extreme-high (real: the Offering's requests at Basic and at High resolution were charged 2, #187) and the base 0.5 for any other mode (the page's table, not observed): " + docsRoot + k.DocPage + " (read in full on " + formDocs + ") lists the two prices without saying they add up, and the receipts say they do not. " + realRound568TextureNote + " " + textureReferenceNote
 		}
 		out = append(out, fakeupstream.Endpoint{
 			Method: "POST", Path: k.Path, Evidence: fakeupstream.EvidenceReal, Sample: "POST " + samplePrefix + k.Path,
@@ -281,8 +287,8 @@ type task struct {
 	polls         int
 	// names are the files the download list offers.
 	names []string
-	// form is the generation form of a /rodin task (nil for the other routes):
-	// the PBR pack it delivers follows it (DeliveredModel).
+	// form is the form of a /rodin or /rodin_texture_only task (nil for Bang):
+	// the PBR pack it delivers follows it (DeliveredModel, TextureModel).
 	form map[string]string
 	// charge is the receipt's consumed, which the usage records repeat.
 	charge float64
@@ -1010,7 +1016,7 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 			t.jobs = append(t.jobs, h.newUUID())
 		}
 		t.names = h.downloadNames(k, form.fields)
-		if k.Need == "prompt-or-images" {
+		if k.Need == "prompt-or-images" || k.Path == textureRoute {
 			t.form = form.fields
 		}
 		t.charge = fixedCharge
@@ -1072,6 +1078,12 @@ func (h *handler) downloadNames(k kind, fields map[string]string) []string {
 			continue
 		}
 		if k.Path == "/bang" && fields["material"] != "None" && !strings.Contains(name, "_pbr") {
+			name = "base_" + strings.ToLower(orDefault(fields["resolution"], "basic")) + "_pbr.glb"
+		}
+		// The Texture pack is named after its resolution like Bang's: the
+		// 2026-10-29 Basic request listed base_basic_pbr.glb and the 2026-11-24
+		// High request (#568) served base_high_pbr.glb.
+		if k.Path == textureRoute && strings.HasSuffix(name, "_pbr.glb") {
 			name = "base_" + strings.ToLower(orDefault(fields["resolution"], "basic")) + "_pbr.glb"
 		}
 		names = append(names, name)
@@ -1257,11 +1269,15 @@ func (h *handler) getFile(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch path.Ext(name) {
 	case ".glb":
-		// The PBR pack of a generation follows its request; the Extreme-High tier's
-		// extra mesh and the Bang and Texture outputs are the plain fixture.
-		if t.form != nil && name != extraMeshName {
+		// The PBR pack of a generation and the textures of a Texture task follow
+		// their request; the Extreme-High tier's extra mesh and the Bang outputs
+		// are the plain fixture.
+		switch {
+		case t.form != nil && t.kind.Path == textureRoute:
+			file, err = TextureModel(t.form)
+		case t.form != nil && name != extraMeshName:
 			file, err = DeliveredModel(t.form)
-		} else {
+		default:
 			file, err = fakeupstream.ModelFile("glb")
 		}
 	case ".webp":
