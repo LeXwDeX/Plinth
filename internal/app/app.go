@@ -1389,6 +1389,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		ImageCount: func(ownerID, sessionID string) (int, bool) {
 			return paramsStore.ImageCount(agentparams.ScopeKey(ownerID, sessionID))
 		},
+		// #564: the parameter values the session holds per Offering, shown
+		// to the Agent before it submits.
+		SessionParameters: sessionParameterGroups(paramsStore, taskCatalog.Get),
 		StepCosts: func(ctx context.Context, ownerID, sessionID string) []chat.StepCost {
 			if applicationSchema.StepPolicy == nil {
 				return nil

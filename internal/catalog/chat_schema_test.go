@@ -460,7 +460,7 @@ func TestDefaultCatalogDeclaresConceptQuantityFlow(t *testing.T) {
 		t.Fatalf("quantity copy lacks the count: %+v", quantity)
 	}
 	for _, rule := range []string{
-		"{quantity_kind}", "这一轮不要调用", "用户一开始就说了张数时不再询问",
+		"{quantity_kind}", "这一轮不要调用", "用户一开始就说了张数或会话设了生成张数时不再询问", "会话设了【生成张数】也算说过",
 		"已有明确风格、参考图", "N=1", "3D 模式不画概念草图",
 	} {
 		if !strings.Contains(concept.ContextTemplate, rule) {

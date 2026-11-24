@@ -79,20 +79,25 @@ func (orchestrator *Orchestrator) productionBudgetPrompt(ctx context.Context, ow
 		checkpoints = summary.Plan.CheckpointLine()
 		contingencies = summary.Plan.ContingencyLine(format)
 	}
+	// #410: a finished plan may not spend any more, so the sentence that says
+	// its steps are approved by budget would be false. The Schema declares both
+	// sentences and the state picks one; a historical Catalog has no
+	// placeholder and keeps its inline wording. #564: a plan waiting for the
+	// person, used up, closed or refused cannot spend either, so a state may
+	// declare its own note in place of the auto-approval sentence.
+	autoApproval := config.AutoApprovalNote
+	if state == budget.StateCompleted {
+		autoApproval = config.CompletedNote
+	}
 	label := state
 	for _, declared := range config.States {
 		if declared.ID == state {
 			label = declared.Label
+			if strings.TrimSpace(declared.Note) != "" {
+				autoApproval = declared.Note
+			}
 			break
 		}
-	}
-	// #410: a finished plan may not spend any more, so the sentence that says
-	// its steps are approved by budget would be false. The Schema declares both
-	// sentences and the state picks one; a historical Catalog has no
-	// placeholder and keeps its inline wording.
-	autoApproval := config.AutoApprovalNote
-	if state == budget.StateCompleted {
-		autoApproval = config.CompletedNote
 	}
 	report := config.Acceptance.Report
 	if orchestrator.texts != nil {

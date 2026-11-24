@@ -294,3 +294,40 @@ func TestCompletedPlanPromptSaysNothingMoreIsApprovedByBudget(t *testing.T) {
 		t.Error("an active plan lost the sentence that says its steps are approved by budget")
 	}
 }
+
+// #564: only a plan that may spend reads that its steps are approved by
+// budget. A plan still waiting for the person, one whose budget is used up, one
+// that is closed and one the person refused each read the sentence the Schema
+// declares for that state, never the active plan's auto-approval sentence.
+func TestBudgetPromptStatesTheNoteOfEachPlanState(t *testing.T) {
+	shipped, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := shipped.Application().Chat.ApprovalPolicy.Budget
+	notes := map[string]string{}
+	for _, state := range config.States {
+		notes[state.ID] = state.Note
+	}
+	for _, state := range []string{budget.StatePending, budget.StateExhausted, budget.StateClosed, budget.StateDenied} {
+		if strings.TrimSpace(notes[state]) == "" {
+			t.Fatalf("the shipped budget state %q declares no note", state)
+		}
+		summary := budget.Summary{
+			ID: "pb_" + state, State: state,
+			Units: []budget.UnitBudget{budget.NewUnitBudget(budget.Legacy(40), 40, 0)},
+			Plan: budget.Plan{Title: "骑士", Steps: []budget.PlanStep{
+				{Capability: "text-to-3d", Purpose: "主体模型", Estimate: budget.Legacy(20)},
+			}},
+		}
+		system := approvalPromptSystem(t, approvalPromptCase{mode: "budget", budget: &summary})
+		if !strings.Contains(system, notes[state]) {
+			t.Errorf("a %s plan lacks its declared note %q", state, notes[state])
+		}
+		for _, unwanted := range []string{config.AutoApprovalNote, "计划内的步骤由系统按预算自动批准"} {
+			if strings.Contains(system, unwanted) {
+				t.Errorf("a %s plan still says %q", state, unwanted)
+			}
+		}
+	}
+}

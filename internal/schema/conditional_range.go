@@ -51,6 +51,13 @@ func (p Parameter) ClampNumber(number float64, values map[string]any) float64 {
 	return number
 }
 
+// ClampedCount is a whole-number count moved into the parameter's range with
+// no other values known (#564): the session's one image count meets each
+// Offering's own declared n or max_images range.
+func (p Parameter) ClampedCount(count int) int {
+	return int(p.ClampNumber(float64(count), nil))
+}
+
 // ConvergeDefaults moves each number value the Schema supplied into the range
 // its maximum_when entries give under the other values (#139). A default is
 // the Schema's own choice, so it follows the combination the caller chose

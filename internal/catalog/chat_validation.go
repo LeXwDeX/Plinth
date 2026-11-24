@@ -270,6 +270,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateConvergence(schema); err != nil {
 		return err
 	}
+	if err := validateSessionParameters(schema.SessionParameters); err != nil {
+		return err
+	}
 	if err := validateImageCount(schema.ImageCount); err != nil {
 		return err
 	}
@@ -2351,6 +2354,14 @@ func validateAgentScope(scope ChatAgentScopeSchema) error {
 // tool. They carry no style prompt, thumbnail or size, so they are held to
 // their own contract instead of the editable Skill catalog's.
 func validateSystemSkills(skills ChatSkillsSchema, agentTools map[string]struct{}) error {
+	// #564: the style Skill block names the Skill and its gist; a declared
+	// block that cannot do both, or has no summary length, says nothing useful.
+	if style := skills.StyleDirectiveTemplate; strings.TrimSpace(style) != "" {
+		if !strings.Contains(style, "{name}") || !strings.Contains(style, "{summary}") ||
+			skills.StyleSummaryMaxCharacters <= 0 {
+			return errors.New("skills.style_directive_template 必须包含 {name} 与 {summary}，并声明正数的 style_summary_max_characters")
+		}
+	}
 	if len(skills.SystemSkills) == 0 {
 		return nil
 	}
@@ -3018,6 +3029,45 @@ func validateImageCount(config ChatImageCountSchema) error {
 	}
 	if !strings.Contains(config.ContextTemplate, "{count}") {
 		return errors.New("chat.image_count.context_template 缺少 {count}")
+	}
+	if len(config.OfferingCapabilities) == 0 {
+		return nil
+	}
+	// #564: a block that reports per model must be able to name the model and
+	// the count it really runs, and the models the count does not reach.
+	if !strings.Contains(config.LimitTemplate, "{model}") || !strings.Contains(config.LimitTemplate, "{count}") {
+		return errors.New("chat.image_count.limit_template 缺少 {model} 或 {count}")
+	}
+	if !strings.Contains(config.UncountedTemplate, "{models}") {
+		return errors.New("chat.image_count.uncounted_template 缺少 {models}")
+	}
+	return nil
+}
+
+// validateSessionParameters checks the session parameter block (#564). It is
+// optional; a declared block must be able to name each value, the Offering it
+// belongs to and who set it.
+func validateSessionParameters(config ChatSessionParametersSchema) error {
+	if strings.TrimSpace(config.ContextTemplate) == "" {
+		return nil
+	}
+	checks := []struct{ text, field string }{
+		{config.ContextTemplate, "{parameters}"},
+		{config.OfferingTemplate, "{model}"},
+		{config.OfferingTemplate, "{parameters}"},
+		{config.ParameterTemplate, "{label}"},
+		{config.ParameterTemplate, "{value}"},
+		{config.ParameterTemplate, "{source}"},
+	}
+	for _, check := range checks {
+		if !strings.Contains(check.text, check.field) {
+			return fmt.Errorf("chat.session_parameters 的模板缺少 %s", check.field)
+		}
+	}
+	for _, source := range []string{"user", "agent"} {
+		if strings.TrimSpace(config.Sources[source]) == "" {
+			return fmt.Errorf("chat.session_parameters.sources 缺少 %q", source)
+		}
 	}
 	return nil
 }

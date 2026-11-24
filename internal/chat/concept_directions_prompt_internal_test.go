@@ -33,7 +33,7 @@ func TestConceptDirectionsPromptAsksTheQuantityFirst(t *testing.T) {
 			t.Fatalf("prompt kept %s: %q", placeholder, prompt)
 		}
 	}
-	for _, rule := range []string{"这一轮不要调用", "用户一开始就说了张数时不再询问", "N=1"} {
+	for _, rule := range []string{"这一轮不要调用", "用户一开始就说了张数或会话设了生成张数时不再询问", "会话设了【生成张数】也算说过", "N=1"} {
 		if !strings.Contains(prompt, rule) {
 			t.Fatalf("prompt lacks %q: %q", rule, prompt)
 		}
