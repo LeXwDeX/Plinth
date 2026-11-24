@@ -405,6 +405,7 @@ func TestValidateOfferingRejectsIncompleteRefineDeclaration(t *testing.T) {
 		`{"set":{"mode":"refine"}}`,
 		`{"source_parameter":"preview_task_id"}`,
 		`{"set":{"mode":"refine"},"source_parameter":"missing"}`,
+		`{"set":{"mode":"refine"},"source_parameter":"preview_task_id","rate_limit_retries":-1}`,
 	} {
 		var options map[string]any
 		if err := json.Unmarshal(offering.ProviderOptions, &options); err != nil {

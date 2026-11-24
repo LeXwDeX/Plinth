@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-23.493.1",
+    "revision": "2026-11-24.504.1",
     "terminology": {
       "user_facing": [
         {
@@ -27646,7 +27646,8 @@
           "set": {
             "mode": "refine"
           },
-          "source_parameter": "preview_task_id"
+          "source_parameter": "preview_task_id",
+          "rate_limit_retries": 5
         },
         "model_parameter": "ai_model",
         "result_assets": [
@@ -28099,7 +28100,8 @@
           "set": {
             "mode": "refine"
           },
-          "source_parameter": "preview_task_id"
+          "source_parameter": "preview_task_id",
+          "rate_limit_retries": 5
         },
         "result_assets": [
           {
