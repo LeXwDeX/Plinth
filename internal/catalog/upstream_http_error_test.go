@@ -78,8 +78,9 @@ func TestUpstreamHTTPErrorMessageRendersDeclaredReason(t *testing.T) {
 	}
 }
 
-// Every connection reached over the network names its upstream for the
-// person; a local one needs no name.
+// Every default connection reached over the network names its upstream for
+// the person; a local one needs no name. (A connection without one keeps the
+// failure class texts, so a Schema may add a connection before naming it.)
 func TestProviderConnectionsDeclareDisplayNames(t *testing.T) {
 	loaded, err := catalog.LoadDefault()
 	if err != nil {
@@ -113,8 +114,8 @@ func TestUpstreamHTTPErrorValidation(t *testing.T) {
 		})
 	}
 	schema := loaded.Application()
-	schema.Runtime.ProviderConnections[0].DisplayName = ""
+	schema.Runtime.ProviderConnections[0].DisplayName = " MeshyAI"
 	if err := catalog.ValidateApplicationSchema(schema); err == nil {
-		t.Fatal("network connection without display_name was accepted")
+		t.Fatal("display_name with surrounding blanks was accepted")
 	}
 }
