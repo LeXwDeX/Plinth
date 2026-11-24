@@ -113,12 +113,13 @@ func kindRequests(source, plain, rig string) map[string]map[string]any {
 		"/image-to-image": {"prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
 		// The 2026-10-29 image-to-3d and multi-image-to-3d samples were taken with
 		// the cheapest texture options; the 2026-11-20 window asked for the
-		// Catalog defaults (textures on, PBR on), and the newest sample decides.
-		// Ask for the same, so the drift comparison checks the sample's structure
-		// rather than the request-driven texture shaping (see
-		// TestTextureOptionsShapeTheSuccessBody).
+		// Catalog defaults (textures on, PBR on) for image-to-3d and the
+		// 2026-11-23 window did the same for multi-image-to-3d, which is now the
+		// newest sample of both. Ask for the same, so the drift comparison checks
+		// the sample's structure rather than the request-driven texture shaping
+		// (see TestTextureOptionsShapeTheSuccessBody).
 		"/image-to-3d":       {"image_url": "https://example.test/a.png", "should_texture": true, "enable_pbr": true},
-		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}, "should_texture": false, "enable_pbr": false},
+		"/multi-image-to-3d": {"image_urls": []string{"https://example.test/a.png"}, "should_texture": true, "enable_pbr": true},
 		"/remesh":            {"input_task_id": source},
 		// The newest convert sample is a real export of an untextured model: its
 		// model_urls carries an OBJ and no MTL, so the comparison converts one.

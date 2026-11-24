@@ -211,10 +211,14 @@ func buildEndpoints() []fakeupstream.Endpoint {
 		case "/resize":
 			parts = append(parts, "a request that names none of resize_height, resize_longest_side and auto_size, or more than one, answers the documented 400 (resizeRequestError; constructed from docs, checked "+docsChecked+")")
 		case "/image-to-3d", "/multi-image-to-3d", "/retexture":
-			parts = append(parts, "the 2026-10-29 samples were captured with the cheapest texture options, so texture_urls and the PBR maps were constructed from the documented texture fields (docs checked "+docsChecked+"); the 2026-11-20 window re-captured image-to-3d and retexture with the Catalog defaults (textures and PBR on) and their PBR maps are real")
+			parts = append(parts, "the 2026-10-29 samples were captured with the cheapest texture options, so texture_urls and the PBR maps were constructed from the documented texture fields (docs checked "+docsChecked+"); the 2026-11-20 window re-captured image-to-3d and retexture with the Catalog defaults (textures and PBR on) and their PBR maps are real, as are multi-image-to-3d's since 2026-11-23 (meshy-openapi-v1-multi-image-to-3d-2026-11-23.candidate.json)")
 		}
+		// The 2026-11-23 capture is the newest multi-image-to-3d sample: every
+		// poll repeats geometry_resolution and ultra_mode, so the kind answers
+		// both keys even when the request names no geometry option (#497).
 		parts = append(parts,
 			"the 2026-11-20 window re-captured the processing chain: the poll repeats geometry_resolution and texture_resolution as sent (ultra_mode and hd_texture set from them), a successful rig answers result.basic_animations with six clips and the OBJ of a textured model comes with an MTL",
+			"multi-image-to-3d's own 2026-11-23 capture repeats geometry_resolution and ultra_mode in every poll",
 			"the forbidden scenario answers the documented 403 {message} envelope (constructed from docs, checked "+docsChecked+")")
 		note := strings.Join(parts, "; ")
 		out = append(out,
