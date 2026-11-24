@@ -10,10 +10,10 @@ import (
 	_ "image/jpeg" // decoders for the picture formats the Offering accepts, so an upload's size can be read
 	_ "image/png"
 	"io"
-	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,15 +62,15 @@ const outOfMemoryObserved = "2026-11-13"
 const docs = "internal matting service (FastAPI /docs)"
 
 var endpoints = []fakeupstream.Endpoint{
-	{Method: "POST", Path: "/jobs", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v1/jobs",
+	{Method: "POST", Path: pathJobs, Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v1/jobs",
 		DocURL: docs, CheckedAt: captured,
-		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service. Which files of a batch are rejected, fail while processing or come back under another source_name is chosen by the test-only " + FileFaultsHeader + " header or by a " + FileFaultMarker + " list in the file's own bytes, for a deployed stack whose Adapter sends no such header (#301; the partial-images scenario rejects every file but the first): the service's own reasons for refusing a file, and whether it echoes the name of such a file, were never observed, and the one reason it gave for failing a file was seen once (a GPU out of memory, see the batch route)"},
-	{Method: "GET", Path: "/batches/{batch_id}", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/batches/{id}",
+		Note: "multipart request (files + pipeline_params_json); 401 {detail}, 422 validation list and the READY batch envelope are real samples. One task per uploaded files part, the REJECTED task and the PARTIAL_SUCCESS/all-rejected batches are constructed from the " + docs + " SubmitBatchResponse/TaskStatusItem/BatchStatus enums checked " + statusesChecked + ": the samples carry one accepted file per batch and no rejected one. The 422 for a process-resolution value outside the service's range is constructed too: the ranges are the PipelineParams bounds read from the service source on " + limitsChecked + " (birefnet_process_res 512..4096, sdmatte_process_res 512..2048), the body is the FastAPI/pydantic validation list the committed 422 sample already shows (type, loc, msg, input) plus pydantic's ctx bound; the loc prefix (body, pipeline_params_json) was not observed from the live service. Which files of a batch are rejected, fail while processing or come back under another source_name is chosen by the test-only " + FileFaultsHeader + " header or by a " + FileFaultMarker + " list in the file's own bytes, for a deployed stack whose Adapter sends no such header (#301; the partial-images scenario rejects every file but the first): the service's own reasons for refusing a file, and whether it echoes the name of such a file, were never observed, and the one reason it gave for failing a file was seen once (a GPU out of memory, see the batch route)" + constructedNote(pathJobs)},
+	{Method: "GET", Path: pathBatches, Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/batches/{id}",
 		DocURL: docs, CheckedAt: captured,
-		Note: "the 2026-11-20 live window re-captured a RUNNING and a SUCCESS poll through the production path (one uploaded PNG, download_path reported as /api/v1/tasks/<task>/download and downloadable flipping with the batch), and the 2026-11-23 window did the same for four batches end to end: create, one poll per batch, then the PNG of each (testdata/matting-api-v1-batch-2026-11-20.candidate.json, testdata/matting-api-v1-batch-2026-11-23.candidate.json); the fake matches the newest of them. READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED or FAILED), the completed batch with no artifact (every file REJECTED or FAILED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them. One reason a task fails is real: on " + outOfMemoryObserved + " the service failed a batch of a 2048x2048 and a 16x16 picture, both process resolutions at 2048, on a GPU other tenants were already using (#299), and the failed task's error_message was OutOfMemoryMessage's text (a " + FileFaultsHeader + " fault of kind gpu_oom reproduces it). Only that message was recorded: the batch's status word, what the other picture's task showed, and which resolutions the GPU can hold are unknown, so the fake does not claim them"},
-	{Method: "GET", Path: "/tasks/{task_id}/download", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/tasks/{id}/download",
+		Note: "the 2026-11-20 live window re-captured a RUNNING and a SUCCESS poll through the production path (one uploaded PNG, download_path reported as /api/v1/tasks/<task>/download and downloadable flipping with the batch), and the 2026-11-23 window did the same for four batches end to end: create, one poll per batch, then the PNG of each (testdata/matting-api-v1-batch-2026-11-20.candidate.json, testdata/matting-api-v1-batch-2026-11-23.candidate.json); the fake matches the newest of them. READY, RUNNING and SUCCESS polls and the 404 {detail} are real. The FAILED batch (task FAILED with error_message), the PARTIAL_SUCCESS batch (some files REJECTED or FAILED), the completed batch with no artifact (every file REJECTED or FAILED) and the CANCELED batch (batch and its tasks CANCELED) were never observed: they are built from the SUCCESS poll with the " + docs + " BatchStatus/TaskStatus enums checked " + statusesChecked + ". RECEIVED/STORED are accepted states the service's samples never showed (the create route answers READY) and the Adapter treats them like READY, so the fake does not produce them. One reason a task fails is real: on " + outOfMemoryObserved + " the service failed a batch of a 2048x2048 and a 16x16 picture, both process resolutions at 2048, on a GPU other tenants were already using (#299), and the failed task's error_message was OutOfMemoryMessage's text (a " + FileFaultsHeader + " fault of kind gpu_oom reproduces it). Only that message was recorded: the batch's status word, what the other picture's task showed, and which resolutions the GPU can hold are unknown, so the fake does not claim them" + constructedNote(pathBatches)},
+	{Method: "GET", Path: pathDownload, Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v1/tasks/{id}/download",
 		DocURL: docs, CheckedAt: captured,
-		Note: "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it. Request-phase faults (429/500/timeout) answer here like on the other routes; a REJECTED task, and the task of a file that fails (" + FileFaultsHeader + "), has no artifact and answers 404 (constructed from the TaskStatus enum checked " + statusesChecked + ")"},
+		Note: "authenticated download of the PNG result (image/png); 401 {detail} without a key. The service has no signed URLs, so an expired-URL scenario does not apply to it. Request-phase faults (429/500/timeout) answer here like on the other routes; a REJECTED task, and the task of a file that fails (" + FileFaultsHeader + "), has no artifact and answers 404 (constructed from the TaskStatus enum checked " + statusesChecked + ")" + constructedNote(pathDownload)},
 }
 
 // Version is the matting service api/v1 fake.
@@ -98,6 +98,7 @@ type batchTask struct {
 	id            string
 	name          string
 	rejected      bool
+	reason        string // why the service refused the file, when it says
 	failed        bool
 	outOfMemory   bool
 	width, height int
@@ -252,21 +253,41 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 // render answers the request-level scenarios. The service has no price, so
 // insufficient-balance and key-quota have nothing to say and answer like an
-// internal error; rate-limit adds Retry-After.
+// internal error (text/plain); rate-limit adds Retry-After.
 func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeupstream.Scenario) {
-	status, detail := http.StatusInternalServerError, "Internal Server Error"
 	if scenario == fakeupstream.ScenarioRateLimit {
-		status, detail = http.StatusTooManyRequests, "Too Many Requests"
 		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"detail": "Too Many Requests"})
+		return
 	}
-	writeJSON(w, status, map[string]any{"detail": detail})
+	// An unhandled exception in the service is Starlette's default response:
+	// plain text, not a {detail} object (constructed, m8).
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusInternalServerError)
+	_, _ = w.Write([]byte("Internal Server Error"))
 }
 
-func authorized(r *http.Request) bool { return fakeupstream.BearerKey(r) != "" }
+// refuse answers 401 and reports true when the request carries no key, or the
+// invalid-key scenario says the key is wrong. Both carry WWW-Authenticate:
+// Bearer, which FastAPI's bearer security class sends with its 401 (m8; the
+// header and the wrong-key text are constructed, see Constructed()). The fake
+// has no key of its own, so every other non-empty key is accepted.
+func (h *handler) refuse(w http.ResponseWriter, r *http.Request) bool {
+	switch {
+	case fakeupstream.BearerKey(r) == "":
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeJSON(w, http.StatusUnauthorized, h.denied)
+	case fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioInvalidKey:
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"detail": "Invalid authentication credentials"})
+	default:
+		return false
+	}
+	return true
+}
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {
-	if !authorized(r) {
-		writeJSON(w, http.StatusUnauthorized, h.denied)
+	if h.refuse(w, r) {
 		return
 	}
 	if h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
@@ -281,6 +302,14 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": problems})
 		return
 	}
+	if len(form.names) > uploadLimits.MaxFiles {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"detail": []any{map[string]any{
+			"type": "too_long", "loc": []any{"body", "files"}, "input": form.names,
+			"msg": fmt.Sprintf("List should have at most %d items after validation, not %d", uploadLimits.MaxFiles, len(form.names)),
+			"ctx": map[string]any{"field_type": "List", "max_length": uploadLimits.MaxFiles, "actual_length": len(form.names)},
+		}}})
+		return
+	}
 	names := form.names
 	scenario := fakeupstream.ScenarioOf(r)
 	faults := fileFaults(r, scenario, form.marked)
@@ -291,9 +320,10 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		b.tasks = append(b.tasks, batchTask{
 			id:          fmt.Sprintf("task_fake%04d_%02d", number, index+1),
 			name:        name,
-			rejected:    faults[index].rejected,
-			failed:      faults[index].failed && !faults[index].rejected,
-			outOfMemory: faults[index].outOfMemory && !faults[index].rejected,
+			rejected:    faults[index].rejected || form.refusals[index] != "",
+			reason:      form.refusals[index],
+			failed:      faults[index].failed && !faults[index].rejected && form.refusals[index] == "",
+			outOfMemory: faults[index].outOfMemory && !faults[index].rejected && form.refusals[index] == "",
 			width:       form.sizes[index].width,
 			height:      form.sizes[index].height,
 			renamed:     faults[index].renamed,
@@ -373,6 +403,7 @@ type upload struct {
 	names    []string
 	sizes    []pictureSize
 	marked   [][]string
+	refusals []string
 	pipeline string
 }
 
@@ -402,8 +433,9 @@ func readUpload(r *http.Request) (upload, bool) {
 		switch {
 		case part.FormName() == "files" && part.FileName() != "":
 			head, _ := io.ReadAll(io.LimitReader(part, headerRead))
-			_, _ = io.Copy(io.Discard, part)
+			rest, _ := io.Copy(io.Discard, part)
 			result.names = append(result.names, part.FileName())
+			result.refusals = append(result.refusals, uploadRefusal(part.FileName(), int64(len(head))+rest))
 			result.sizes = append(result.sizes, sizeOf(head))
 			result.marked = append(result.marked, markedFaults(head))
 		case part.FormName() == PipelineField && part.FileName() == "":
@@ -414,6 +446,18 @@ func readUpload(r *http.Request) (upload, bool) {
 		}
 	}
 	return result, len(result.names) > 0
+}
+
+// uploadRefusal is the reason the service would not take a file of this name and
+// size, or "" (constructed, I23: the limits are the Offering's declaration).
+func uploadRefusal(name string, size int64) string {
+	switch {
+	case !uploadLimits.extensionAllowed(name):
+		return "Unsupported file type: " + path.Ext(name)
+	case size > uploadLimits.MaxFileBytes:
+		return fmt.Sprintf("File is larger than %d bytes", uploadLimits.MaxFileBytes)
+	}
+	return ""
 }
 
 // sizeOf reads the pixel size from the start of a picture file; zero when it is
@@ -429,85 +473,6 @@ func sizeOf(head []byte) pictureSize {
 // PipelineField is the multipart field that carries the pipeline parameters as
 // one JSON object.
 const PipelineField = "pipeline_params_json"
-
-// ResolutionLimit is the range of one process-resolution field of the
-// service's PipelineParams: an integer from Min to Max. A null birefnet value
-// is "auto" (the service picks GPU 2048, CPU 1024); sdmatte has a default of
-// 1024 instead, so null is not a valid value there.
-type ResolutionLimit struct {
-	Field    string
-	Min, Max int64
-	NullOK   bool
-}
-
-// resolutionLimits are the bounds the service validates (read from the
-// service source on limitsChecked): birefnet_process_res ge=512 le=4096 and
-// sdmatte_process_res ge=512 le=2048. A value outside them is HTTP 422. The
-// service lowers both to 1024 only when it runs on a CPU; that is not a
-// request error and the fake does not model it.
-var resolutionLimits = []ResolutionLimit{
-	{Field: "birefnet_process_res", Min: 512, Max: 4096, NullOK: true},
-	{Field: "sdmatte_process_res", Min: 512, Max: 2048},
-}
-
-// ResolutionLimits returns the process-resolution bounds the fake enforces, so
-// a test can hold the product Schema's declared ranges against them.
-func ResolutionLimits() []ResolutionLimit {
-	return append([]ResolutionLimit(nil), resolutionLimits...)
-}
-
-// pipelineProblems validates the pipeline parameters the fake knows bounds
-// for and answers them as the FastAPI/pydantic validation list. A field that
-// is absent takes the service's default; a pipeline that is not a JSON object
-// is not judged (the service's reaction to it was never observed).
-func pipelineProblems(raw string) []any {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.UseNumber()
-	var fields map[string]any
-	if err := decoder.Decode(&fields); err != nil {
-		return nil
-	}
-	var problems []any
-	for _, limit := range resolutionLimits {
-		value, present := fields[limit.Field]
-		if !present || value == nil && limit.NullOK {
-			continue
-		}
-		if problem := limit.problem(value); problem != nil {
-			problems = append(problems, problem)
-		}
-	}
-	return problems
-}
-
-// problem is the pydantic error of a value that does not fit the limit, or nil.
-func (limit ResolutionLimit) problem(value any) map[string]any {
-	loc := []any{"body", PipelineField, limit.Field}
-	number, isNumber := value.(json.Number)
-	if !isNumber {
-		return map[string]any{"type": "int_type", "loc": loc, "msg": "Input should be a valid integer", "input": value}
-	}
-	parsed, err := number.Float64()
-	if err != nil {
-		return map[string]any{"type": "int_type", "loc": loc, "msg": "Input should be a valid integer", "input": value}
-	}
-	if parsed != math.Trunc(parsed) {
-		return map[string]any{"type": "int_from_float", "loc": loc,
-			"msg": "Input should be a valid integer, got a number with a fractional part", "input": value}
-	}
-	switch {
-	case parsed < float64(limit.Min):
-		return map[string]any{"type": "greater_than_equal", "loc": loc, "input": value,
-			"msg": fmt.Sprintf("Input should be greater than or equal to %d", limit.Min), "ctx": map[string]any{"ge": limit.Min}}
-	case parsed > float64(limit.Max):
-		return map[string]any{"type": "less_than_equal", "loc": loc, "input": value,
-			"msg": fmt.Sprintf("Input should be less than or equal to %d", limit.Max), "ctx": map[string]any{"le": limit.Max}}
-	}
-	return nil
-}
 
 // envelope fills a sample batch with this batch's tasks: the ids, the uploaded
 // names with their indexes, the per-task status and the counts. The sample's
@@ -529,6 +494,9 @@ func (h *handler) envelope(template map[string]any, b *batch, batchStatus, taskS
 			rejected++
 			task["status"], task["downloadable"] = "REJECTED", false
 			task["error_message"], task["invalid_reason"] = nil, "Fake matting rejection."
+			if entry.reason != "" {
+				task["invalid_reason"] = entry.reason
+			}
 			task["download_path"] = ""
 			tasks = append(tasks, task)
 			continue
@@ -554,8 +522,7 @@ func (h *handler) envelope(template map[string]any, b *batch, batchStatus, taskS
 }
 
 func (h *handler) read(w http.ResponseWriter, r *http.Request) {
-	if !authorized(r) {
-		writeJSON(w, http.StatusUnauthorized, h.denied)
+	if h.refuse(w, r) {
 		return
 	}
 	if h.env.Intercept(w, r, fakeupstream.PhaseRead, h.render) {
@@ -614,9 +581,19 @@ func (b *batch) lacksArtifact(taskID string) bool {
 	return false
 }
 
+// sourceSize is the pixel size read from the upload of a task's file; zero when
+// the fake could not read it.
+func (b *batch) sourceSize(taskID string) (int, int) {
+	for _, task := range b.tasks {
+		if task.id == taskID {
+			return task.width, task.height
+		}
+	}
+	return 0, 0
+}
+
 func (h *handler) download(w http.ResponseWriter, r *http.Request) {
-	if !authorized(r) {
-		writeJSON(w, http.StatusUnauthorized, h.denied)
+	if h.refuse(w, r) {
 		return
 	}
 	if h.env.Intercept(w, r, fakeupstream.PhaseRead, h.render) {
@@ -626,21 +603,24 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	b := h.byTask[taskID]
 	noArtifact := b != nil && b.lacksArtifact(taskID)
+	width, height := 0, 0
+	if b != nil {
+		width, height = b.sourceSize(taskID)
+	}
 	h.mu.Unlock()
 	if b == nil || noArtifact || b.scenario == fakeupstream.ScenarioArtifactNotFound {
 		writeJSON(w, http.StatusNotFound, map[string]any{"detail": "Task not found"})
 		return
 	}
-	file, err := fakeupstream.ImageFile("png")
+	data, err := matteFor(width, height)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	data := file.Data
 	if b.scenario == fakeupstream.ScenarioArtifactCorrupt {
 		data = fakeupstream.Corrupt(data)
 	}
-	w.Header().Set("Content-Type", file.MediaType)
+	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Content-Length", fmt.Sprint(len(data)))
 	_, _ = w.Write(data)
 }

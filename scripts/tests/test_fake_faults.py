@@ -493,7 +493,7 @@ class StackScenarioTest(unittest.TestCase):
         source = inspect.getsource(stack.main)
         # The default set (the full run), the group of scenarios that share the main stack, and the call.
         self.assertGreaterEqual(source.count('"matting-faults"'), 3)
-        self.assertIn("images,matting-faults,tripo", source, "the --only help names it")
+        self.assertIn("images,matting-faults,model-parts,model-convert,tripo", source, "the --only help names it")
         self.assertIn("scenario_matting_faults(api, offerings)", source)
 
 

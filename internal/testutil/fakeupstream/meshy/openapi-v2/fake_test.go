@@ -250,11 +250,13 @@ func TestValidationAndSources(t *testing.T) {
 		body              any
 		status            int
 	}{
-		"no key":          {"GET", "/text-to-3d/" + missing, "", nil, http.StatusUnauthorized},
-		"no mode":         {"POST", "/text-to-3d", key, map[string]any{}, http.StatusBadRequest},
-		"unknown task":    {"GET", "/text-to-3d/" + missing, key, nil, http.StatusNotFound},
-		"malformed id":    {"GET", "/text-to-3d/nope", key, nil, http.StatusBadRequest},
-		"unknown preview": {"POST", "/text-to-3d", key, map[string]any{"mode": "refine", "preview_task_id": missing}, http.StatusNotFound},
+		"no key":       {"GET", "/text-to-3d/" + missing, "", nil, http.StatusUnauthorized},
+		"no mode":      {"POST", "/text-to-3d", key, map[string]any{}, http.StatusBadRequest},
+		"unknown task": {"GET", "/text-to-3d/" + missing, key, nil, http.StatusNotFound},
+		"malformed id": {"GET", "/text-to-3d/nope", key, nil, http.StatusBadRequest},
+		// The refine page lists an invalid, unowned or unfinished preview_task_id
+		// under 400, so a preview the account does not have is not a 404.
+		"unknown preview": {"POST", "/text-to-3d", key, map[string]any{"mode": "refine", "preview_task_id": missing}, http.StatusBadRequest},
 	} {
 		t.Run(name, func(t *testing.T) {
 			status, _, body := f.Do(tc.method, Prefix+tc.path, tc.key, tc.body)
@@ -512,15 +514,17 @@ func TestCreateAndPollEchoTheRequestUnderInput(t *testing.T) {
 // here either; pose_mode is optional and an empty string is not "leave it out".
 func TestTextTo3DCreateValidatesStageFieldsAndPose(t *testing.T) {
 	f := newFixture(t)
+	preview := create(t, f, map[string]any{"mode": "preview", "prompt": "p"})
+	finish(t, f, preview)
 	cases := []struct {
 		name string
 		body map[string]any
 		want int
 	}{
-		{"refine with geometry_resolution", map[string]any{"mode": "refine", "prompt": "p", "geometry_resolution": "2k"}, http.StatusBadRequest},
+		{"refine with geometry_resolution", map[string]any{"mode": "refine", "preview_task_id": preview, "geometry_resolution": "2k"}, http.StatusBadRequest},
 		{"preview with texture_resolution", map[string]any{"mode": "preview", "prompt": "p", "texture_resolution": "2k"}, http.StatusBadRequest},
 		{"empty pose_mode", map[string]any{"mode": "preview", "prompt": "p", "pose_mode": ""}, http.StatusBadRequest},
-		{"refine with enable_pbr", map[string]any{"mode": "refine", "prompt": "p", "enable_pbr": true}, http.StatusAccepted},
+		{"refine with enable_pbr", map[string]any{"mode": "refine", "preview_task_id": preview, "enable_pbr": true}, http.StatusAccepted},
 		{"preview with enable_pbr", map[string]any{"mode": "preview", "prompt": "p", "enable_pbr": true}, http.StatusAccepted},
 		{"preview with texture_prompt", map[string]any{"mode": "preview", "prompt": "p", "texture_prompt": "t"}, http.StatusAccepted},
 		{"preview with texture_image_url", map[string]any{"mode": "preview", "prompt": "p", "texture_image_url": "u"}, http.StatusAccepted},

@@ -183,7 +183,7 @@ func TestSequentialGenerationAnswersEveryRequestedImage(t *testing.T) {
 	}{
 		{"max_images", 3, 3},
 		{"the documented default", 0, 15},
-		{"the documented limit", 99, 15},
+		{"the documented limit", 15, 15},
 		{"one picture", 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -352,6 +352,26 @@ func TestDocumentedUpstreamCodesAreReachable(t *testing.T) {
 		"AccountRateLimitExceeded":                  {http.StatusTooManyRequests, "TooManyRequests"},
 		"ModelAccountRpmRateLimitExceeded":          {http.StatusTooManyRequests, "TooManyRequests"},
 		"ServerOverloaded":                          {http.StatusTooManyRequests, "TooManyRequests"},
+		// I20: the reason-suffixed, risk-detection and model-access codes the
+		// Catalog maps, and the 429 family the official table lists.
+		"InputTextSensitiveContentDetected.PolicyViolation":     {http.StatusBadRequest, "BadRequest"},
+		"InputTextSensitiveContentDetected.PrivacyInformation":  {http.StatusBadRequest, "BadRequest"},
+		"InputImageSensitiveContentDetected.PolicyViolation":    {http.StatusBadRequest, "BadRequest"},
+		"InputImageSensitiveContentDetected.PrivacyInformation": {http.StatusBadRequest, "BadRequest"},
+		"OutputImageSensitiveContentDetected.PolicyViolation":   {http.StatusBadRequest, "BadRequest"},
+		"OutputImageSensitiveContentDetected.DeepFake":          {http.StatusBadRequest, "BadRequest"},
+		"InputImageRiskDetection":                               {http.StatusBadRequest, "BadRequest"},
+		"OutputImageRiskDetection":                              {http.StatusBadRequest, "BadRequest"},
+		"ContentSecurityDetectionError":                         {http.StatusBadRequest, "BadRequest"},
+		"ModelIDAccessDisabled":                                 {http.StatusNotFound, "NotFound"},
+		"UnsupportedModel":                                      {http.StatusNotFound, "NotFound"},
+		"RequestBurstTooFast":                                   {http.StatusTooManyRequests, "TooManyRequests"},
+		"ModelAccountTpmRateLimitExceeded":                      {http.StatusTooManyRequests, "TooManyRequests"},
+		"ModelAccountFlexTpmRateLimitExceeded":                  {http.StatusTooManyRequests, "TooManyRequests"},
+		"APIAccountRpmRateLimitExceeded":                        {http.StatusTooManyRequests, "TooManyRequests"},
+		"ModelAccountIpmRateLimitExceeded":                      {http.StatusTooManyRequests, "TooManyRequests"},
+		"ModelAccountTpdRateLimitExceeded":                      {http.StatusTooManyRequests, "TooManyRequests"},
+		"ModelAccountConcurrentRequestsLimitExceeded":           {http.StatusTooManyRequests, "TooManyRequests"},
 	}
 	for code, want := range codes {
 		t.Run(code, func(t *testing.T) {

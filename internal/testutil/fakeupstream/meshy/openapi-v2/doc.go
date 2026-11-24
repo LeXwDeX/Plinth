@@ -15,4 +15,13 @@
 // (read 2026-11-24): ScenarioRateLimit answers "Rate limit exceeded." with
 // Retry-After, ScenarioConcurrencyLimit answers a create with a message
 // starting "NoMorePendingTasks" and no Retry-After (#504).
+//
+// The create is checked as the page read on 2026-11-24 documents it (#542,
+// meshy/core/validate.go): a preview needs a prompt of at most 800 characters,
+// a refine a preview_task_id that names a succeeded preview of the account
+// (anything else is 400), geometry_resolution 2k needs meshy-7.1, latest or
+// meshy-7 and 4k needs meshy-7.1 or latest, and the model, mode and format enums
+// are enforced. consumed_credits follows the Pricing page (meshy/core/
+// credits.go); a Standard task carries no geometry_resolution. The refusal texts
+// are constructed.
 package meshyopenapiv2

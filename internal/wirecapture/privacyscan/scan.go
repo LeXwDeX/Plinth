@@ -339,6 +339,10 @@ func (c scanCtx) scanSSE(path, text string) {
 			continue
 		}
 		linePath := fmt.Sprintf("%s:line%d", path, i)
+		if name, isEvent := strings.CutPrefix(line, "event:"); isEvent {
+			c.scanText(linePath, "event", strings.TrimSpace(name))
+			continue
+		}
 		payload, ok := strings.CutPrefix(line, "data:")
 		if !ok {
 			c.scanText(linePath, "", line)

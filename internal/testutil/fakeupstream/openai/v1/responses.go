@@ -136,6 +136,16 @@ func (h *handler) createResponse(w http.ResponseWriter, r *http.Request) {
 		writeRaw(w, http.StatusBadRequest, refusal)
 		return
 	}
+	// #536: a quota marker and the pictures of the request, as on Chat
+	// Completions, in the Responses envelope.
+	if code, asked := chat.quotaFault(); asked {
+		h.writeQuotaFault(w, code)
+		return
+	}
+	if _, message, refused := chat.imageRefusal(); refused {
+		writeJSON(w, imageRefusalStatus, responsesImageRefusalBody(message))
+		return
+	}
 	if scenario == fakeupstream.ScenarioLostResponse {
 		fakeupstream.AbortConnection(w) // the response ran; its answer is lost
 		return
@@ -308,8 +318,8 @@ func (h *handler) responseObject(request responsesRequest, plan responsesPlan, s
 	body["id"] = placeholderID("resp_", 50, number)
 	body["status"] = status
 	body["model"] = request.Model
-	if rule, constrained := constrainedModels[strings.ToLower(strings.TrimSpace(request.Model))]; constrained {
-		body["model"] = rule.resolved
+	if rule, constrained := constraintFor(request.Model); constrained {
+		body["model"] = rule.resolvedModel(request.Model)
 	}
 	body["instructions"] = nil
 	if instructions := request.instructionsText(); instructions != "" {

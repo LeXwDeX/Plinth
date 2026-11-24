@@ -66,6 +66,86 @@ func TestOfficialRefusesTheLabeledRodinRequestWithoutConfirmation(t *testing.T) 
 	}
 }
 
+// The steps of the 1.9.0 real round (#539) are paid submissions with a free status
+// and download behind them. Without -confirm-paid each refuses before it reads a key
+// or sends anything, counting the one paid request, and leaves nothing behind.
+func TestOfficialRefusesTheRealRoundRodinStepsWithoutConfirmation(t *testing.T) {
+	for _, name := range []string{"reject-seed-probe", "rodin-text-quadpose", "rodin-image-label-short", "bang-upload", "texture-images"} {
+		t.Run(name, func(t *testing.T) {
+			private := t.TempDir()
+			if err := os.Chmod(private, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HYPER3D_API_KEY", "dummy-not-a-key")
+			err := run([]string{"official", "-version", "hyper3d/api-v2", "-key-env", "HYPER3D_API_KEY", "-private", private,
+				"-steps", name + "," + name + "-status," + name + "-download"})
+			if err == nil || !strings.Contains(err.Error(), "sends 1 paid request(s)") || !strings.Contains(err.Error(), "-confirm-paid") {
+				t.Fatalf("an unconfirmed official run must refuse and count its paid request, got %v", err)
+			}
+			if entries, readErr := os.ReadDir(private); readErr != nil || len(entries) != 0 {
+				t.Fatalf("a refused run leaves nothing behind: %v %v", entries, readErr)
+			}
+		})
+	}
+}
+
+// #540: the acceptance-round steps the image profiles gained are costlier
+// than the routine refresh, so an official run skips them unless -steps names
+// them. The default paid list (what -confirm-paid has to acknowledge) leaves
+// them out, naming one brings it in, and the fake and compare commands keep
+// the whole script.
+func TestOfficialRunSkipsOptInStepsUnlessNamed(t *testing.T) {
+	optIn := map[string][]string{
+		"openai/images-v1": {"generations-n2-1536x1152", "generations-quality-max", "generations-invalid-size", "edits-two-images-mask"},
+		"gemini/images-v1": {"generate-16x9-4k", "edit-3x4-two-references", "generate-invalid-ratio"},
+		"jimeng/api-v3":    {"generations-4096", "edits-two-references-4096", "generations-sequential-max2", "generations-invalid-size"},
+	}
+	for version, names := range optIn {
+		profile := registry.Profiles()[version]
+		for _, name := range names {
+			found := false
+			for _, step := range profile.Steps {
+				if step.Name == name {
+					found = step.OptIn
+				}
+			}
+			if !found {
+				t.Errorf("%s step %q must be marked OptIn", version, name)
+			}
+		}
+		private := t.TempDir()
+		if err := os.Chmod(private, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ALIGN_DUMMY_KEY", "dummy-not-a-key")
+		base := []string{"official", "-version", version, "-key-env", "ALIGN_DUMMY_KEY", "-private", private}
+		err := run(base)
+		if err == nil || !strings.Contains(err.Error(), "-confirm-paid") {
+			t.Fatalf("%s: an unconfirmed default run must refuse, got %v", version, err)
+		}
+		for _, name := range names {
+			if strings.Contains(err.Error(), name) {
+				t.Errorf("%s: the default paid list must not contain the opt-in step %q: %v", version, name, err)
+			}
+		}
+		err = run(append(base, "-steps", strings.Join(names, ",")))
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("sends %d paid request(s)", len(names))) {
+			t.Fatalf("%s: naming the opt-in steps must select exactly them, got %v", version, err)
+		}
+		for _, name := range names {
+			if !strings.Contains(err.Error(), name) {
+				t.Errorf("%s: -steps naming %q must bring it in: %v", version, name, err)
+			}
+		}
+		if all := selectSteps("fake", profile.Steps, ""); len(all) != len(profile.Steps) {
+			t.Errorf("%s: the fake command must keep every step, got %d of %d", version, len(all), len(profile.Steps))
+		}
+		if all := selectSteps("compare", profile.Steps, ""); len(all) != len(profile.Steps) {
+			t.Errorf("%s: the compare command must keep every step", version)
+		}
+	}
+}
+
 func TestDraftCommandRequiresPrivateDirectories(t *testing.T) {
 	if err := run([]string{"draft"}); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("draft without flags must fail, got %v", err)

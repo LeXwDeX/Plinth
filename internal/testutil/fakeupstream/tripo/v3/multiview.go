@@ -46,7 +46,11 @@ func (t *task) echoMultiviewInput(input map[string]any) {
 func (t *task) multiviewFiles() []any {
 	tokens := map[string]string{}
 	inputs, _ := t.request["inputs"].([]any)
-	for _, entry := range inputs {
+	for index, entry := range inputs {
+		if token, positional := entry.(string); positional && index < len(multiviewViews) && token != "" {
+			tokens[multiviewViews[index]] = token // the legacy positional form (#541)
+			continue
+		}
 		view, _ := entry.(map[string]any)
 		for name, value := range view {
 			if token, ok := value.(string); ok && slices.Contains(multiviewViews, name) {

@@ -153,6 +153,10 @@ Rodin：Texture 价格是 2 还是 2.5；各 `material` 实际交付的文件；
 - Rigging 上限 380000 之后，`internal/testutil/fakeupstream/meshy/openapi-v1` 的对齐报告与端点说明里仍保留 2026-10-29 捕获时“320000 面以上被接受后 FAILED”的历史记录，它们记录的是当时的观测，不改为 380000。
 - 本批次新增的 fake 校验（preview 专属字段、图片像素、`pose_mode:""`、Hyper3D 表单值域）是按官方页面构造的拒绝；没有真实拒绝样本，消息与代码按页面写，未声称已观测。
 
+### 2D 图像连接的错误码补充（#543）
+
+Jimeng 连接的 `upstream_code_map` 新增 `RequestBurstTooFast`（官方错误码表的 429：请求突发触发保护）：`rate_limited`、`retryable: true`，与其余 429 的默认归类一致，写成显式声明是为了让 fake 的每个 Catalog 已映射码都有回归路径。这一条是 Schema 声明的补充，未改任何 Offering 默认值；OpenAI 的 `quality=max` 与官方“xhigh、max 仅 2.5 系列”的冲突仍待一次真实对账（B2），fake 不拒绝 `max`。2D fake 的参数校验是按官方文档构造的拒绝，没有真实拒绝样本，措辞与代码未声称已观测，细节与待真实定稿项见 `docs/architecture.md` 的 Fake 上游服务一节。
+
 ## Tripo Rig Check 边界
 
 `tripo/processing/rig-check` 已启用（`enabled:true`，revision `2026-10-16.1`），仅提供 `rig-check` 能力，并登记 legacy model `tripo-rig-check`。来源参数由 Schema 固定为同 Provider 原生 `upstream_job` Task，并精确允许当前两个 full 文生/图生 Offering；不接上传、URL、Texture/Rig/Retarget 或报告任务。实际 wire 为 v3 的 `animations/rig-check` 与 `tasks/{task_id}`，单次 Attempt、无幂等提交声明，结果未知不能盲重发。现有会话入口的来源校验保持，底层 owner 范围不额外收窄。
@@ -174,8 +178,8 @@ Rig 默认 `enabled:true`，登记 legacy model `tripo-rigging`。Rig v3（revis
 - 引擎默认：`application.chat.model3d_usage.brief.parameter_defaults[]`（`field`、`value`、`parameter_overrides`：Offering ID → 参数 → 值）把一个 `select` 简报字段的选项映射到公开参数值，仅服务端，不进公开投影。Catalog 加载期要求字段是简报的 `select`、`value` 是其选项、(字段, 选项) 不重复，并对每个值做与用途 `parameter_overrides` 相同的“模拟冻结”（公开 Agent 参数、值合法、不被 Offering 规则改写；“多选一来源”的计数规则用占位来源满足）。`generationtool.purposeParameterValues` 把命中的值并入用途层（不依赖是否设置了用途），`applyPurposeValues` 只填步骤尚未设置的参数，所以 Agent 参数（`process_model` 的 `parameter_arguments`、计划步骤的 `parameters`）永远优先。当前声明：`unity` → Tripo v3.0 `spec=unity`、Meshy `skeleton_template=unity_humanoid`；`unreal` → `spec=unreal`、`ue5_mannequin`；Godot、Web、其他引擎不声明，用服务默认。
 - Agent：`process_model` 新增 `rig_type`、`spec`、`skeleton_template`、`include_fingers`、`animation_action` 参数并映射到同名 Offering 参数；工具与计划工具的描述要求非人形先做绑骨检查、把报告的建议类型作为 `rig_type`，不写时按简报的目标引擎选命名。
 - 前端：加工面板对动作参数按类型提交（Meshy 动作 ID 为数字，Tripo 预设为字符串；此前一律 `Number()`，Tripo 预设会变成 NaN）；被自身条件灰掉的参数显示 Schema 强制值而不是之前选过的值。
-- fake：Tripo v3 fake 与 Meshy v1 fake 先对齐再改实现。Tripo fake 对 `animations/rig`、`animations/retarget` 的请求值按官方页校验（未列出的值、只在 v3.0 文档化的值用于 v2.5 或 v1.0、`animation`/`animations` 互斥与 5 个上限，一律 400/1004），轮询重复所接受的请求值（真实样本把 `rig_type` 叫 `topology`），预设与来源骨架不符的 retarget 以 `failed`/1004 结束（沿用唯一观测到的 v2 失败，其余情形为假设）；Meshy fake 按 Rigging 页校验 `skeleton_template`、`include_fingers`、`height_meters`。这些值全部是 constructed-from-docs，没有真实请求支撑；唯一的例外是手指骨骼配四边面来源的 HTTP 400（2026-11-12 的真实样本，#294）：fake 沿来源任务的请求链（精化的预览、重拓扑或换贴图的输入任务）找到造出模型的拓扑，来源是四边面时返回同样的只含 `message` 的 400。
-- 未验证：上述全部真实上游表现（引擎命名骨架的形态、`others` 与非双足类型的结果、新预设、Meshy 非默认模板及手指骨骼（四边面来源的限制除外，已有真实样本）、非 Tripo 命名的骨架能否被 Retarget）；上游对不匹配动作的失败方式；官方页称 v2.5 的双足请求会被当作 v3.0，而 2026-10-29 实测 v2.5 双足骨架的 retarget 以 1004 失败，二者是否一致未知，因此 v2.5 骨架仍不作 Retarget 来源。真实请求须先取得用户当次同意，结果经 wire capture 回灌 fake。
+- fake：Tripo v3 fake 与 Meshy v1 fake 先对齐再改实现。Tripo fake 对 `animations/rig`、`animations/retarget` 的请求值按官方页校验（未列出的值、只在 v3.0 文档化的值用于 v2.5 或 v1.0、`animation`/`animations` 互斥与 5 个上限，一律 400/1004），轮询重复所接受的请求值（真实样本把 `rig_type` 叫 `topology`），预设与来源骨架不符的 retarget 以 `failed`/1004 结束（沿用唯一观测到的失败形态，其余情形为假设；v2.5 双足骨架默认仍按这次观测失败，场景词 `retarget-v25-biped-as-v3`（#541）才按官方 rig 页视同 v3.0 骨架，属 constructed）；Meshy fake 按 Rigging 页校验 `skeleton_template`、`include_fingers`、`height_meters`。这些值全部是 constructed-from-docs，没有真实请求支撑（#541 起生成与处理端点的请求取值、来源任务规则、计价与业务错误注入也按官方页校验，同样是 constructed，细节见 `docs/architecture.md` 的 Fake 上游服务一节）；唯一的例外是手指骨骼配四边面来源的 HTTP 400（2026-11-12 的真实样本，#294）：fake 沿来源任务的请求链（精化的预览、重拓扑或换贴图的输入任务）找到造出模型的拓扑，来源是四边面时返回同样的只含 `message` 的 400。
+- 未验证：上述全部真实上游表现（引擎命名骨架的形态、`others` 与非双足类型的结果、新预设、Meshy 非默认模板及手指骨骼（四边面来源的限制除外，已有真实样本）、非 Tripo 命名的骨架能否被 Retarget）；上游对不匹配动作的失败方式；官方页称 v2.5 的双足请求会被当作 v3.0，而 2026-10-29 实测 v2.5 双足骨架的 retarget 以 1004 失败，二者是否一致未知，因此 v2.5 骨架仍不作 Retarget 来源（Tripo fake 默认保持该观测，只在场景词 `retarget-v25-biped-as-v3` 下按官方页把 v2.5 双足骨架当作 v3.0 骨架，属 constructed，待一轮真实绑骨加 retarget 定稿后再定默认值，#541）。真实请求须先取得用户当次同意，结果经 wire capture 回灌 fake。
 
 Texture 声明原生 GLB 及五个必需导出（FBX、OBJ、STL、USDZ、3MF），Rig 声明原生 GLB 与必需 FBX，Rig 的这两个槽位均检查 `skeleton`。固定 `output_formats` 与 [转换端点](https://developers.tripo3d.ai/en/docs/models-convert) 高级参数由 Schema 控制：PNG、bake、blender preset，以及 Rig 保留动画/Texture 不保留动画；贴图边长是公开参数 `export_texture_size`（默认 8192，#292 起随会话用途的贴图预算，见「Tripo 加工导出的贴图尺寸按用途设定」）。按[价目表](https://developers.tripo3d.ai/en/pricing)冻结 Texture 30+50、Rig 25+10；全部费用在首个原生 POST 前纳入 PreparedInput/Grant。上游小数积分与缺失情况仅留私有 checkpoint，估算不等于实际结算。Retarget 只声明必需的带动画 GLB（`animation` 保真），与 Meshy 动画只交付动作文件一致，不追加私有 FBX 导出；补 FBX 须另行决定并重新验收。
 
@@ -837,9 +841,26 @@ fake 对齐（`internal/testutil/fakeupstream/meshy/core/generation.go`，v1 `im
 | `tier` | “必填”是页面建议；省略回落为 Regular（Gen-1/1.5） | 省略时接受 | 确认 |
 | 价格 | Gen-2.5：基础 0.5、Extreme-High +0.5、extreme-high 纹理 +2.0，写明相加；Texture：基础 0.5、extreme-high 2.0，没有写相加 | Gen-2.5 同；Texture 固定 0.5 | Texture：extreme-high 回 2（真实扣费），其余 0.5 |
 
-页面另列了 Plinth 不发送的字段（`prompt` 长度 ≤ 1024、`bbox_condition`、`is_micro` 只许 Extreme-High 档、`detail_level` 1–3、`geometry_instruct_mode`、`is_symmetric`）：fake 不校验它们，沿用“只校验页面限制且 Plinth 能发送的字段”的原则。
+页面另列了 Plinth 不发送的字段（`prompt` 长度 ≤ 1024、`bbox_condition`、`is_micro` 只许 Extreme-High 档、`detail_level` 1–3、`geometry_instruct_mode`、`is_symmetric`）：fake 原先不校验它们，沿用“只校验页面限制且 Plinth 能发送的字段”的原则。#537 起 `is_micro`（页面内嵌 schema 写明其他档位以 `INVALID_REQUEST` 拒绝）与 `prompt` 的 1024 字符上限也在 fake 校验，用来在 Adapter 或 Catalog 以后发出这些字段时拦住非法组合；其余字段仍不校验。
 
 `image_label` 是这条原则的例外：#376 起 Plinth 会发送它，fake 校验它的数量（观察到的 `IMAGE_LABEL_LENGTH_TOO_LONG`）与取值（页面列表之外按 `INVALID_REQUEST` 拒绝，构造自页面），见下一节。
+
+### Hyper3D fake 与官方契约的再对齐（#537，只改 fake 与文档；本机测试通过，未部署验收，待真实一轮定稿）
+
+依据 2026-11-24 对 [Check Balance](https://docs.hyper3d.ai/en/api-specification/check-balance)、[Check Status](https://docs.hyper3d.ai/en/api-specification/check-status)、[Errors](https://docs.hyper3d.ai/en/api-specification/errors)、[Bang](https://docs.hyper3d.ai/en/api-specification/bang)、[Generate Texture](https://docs.hyper3d.ai/en/api-specification/generate-texture) 与 Gen-2.5 页的重读，读的是正文和页面内嵌的 OpenAPI schema（两者在 Texture 的参考图张数上不一致：正文“恰好一张”，schema 为 `images` 数组 1–5）。本节只记录 fake 的行为变化；Catalog 与 Adapter 没有改。零真实上游调用，因此下面凡没有真实拒绝样本的状态码、文案与数值都是构造的（fake 的端点说明同样标注，并带 `contractDocs` 日期）。
+
+| 项 | fake 现在的行为 | 依据与状态 |
+|---|---|---|
+| Texture 参考图字段（I14） | `images` 与 `image` 都收，合计 1–5 张；0 张、模型缺失或超过 5 张为 `INVALID_REQUEST`；`image_label` 数量与取值按 Gen-2.5 的规则校验；`prompt` 超过 1024 字符为 `INVALID_REQUEST` | 官方页面写作 `images`；Plinth 与 2026-10-29 的样本用单数 `image`，当时被上游容忍。**待真实一轮**：0.5 credit 发一次单数 `image` 的 Texture。若被拒或被静默忽略，改 Catalog 中 Texture Offering 参考图参数的 `wire_name`（`image` 改 `images`）、`internal/providers/hyper3d/operations.go` 中 Texture 与 Bang 的 `image` 校验和上传，fake 收紧为只收 `images`；若被容忍，保留现状并把说明改为已证实 |
+| 提交类应用错误（I15） | 七个提交类拒绝场景受 `X-Fake-Fail-Times` 与 `Config.FailTimes` 控制：前 n 次拒绝、之后受理；不带计数仍是常驻拒绝 | 机制已有（其他场景用同一计数）；这里补到 fake 自己渲染的 HTTP 201 场景。Offering 当前只有 2 次尝试、30 秒退避，并发上限错误的恢复可能晚于这个窗口：这是 Catalog 决策，本次不改，只在 Issue 提出 |
+| Bang 输入模式（I16） | `asset_id` 与 `model` 同时给、`asset_id` 带 `image` 或 `prompt`：HTTP 400 校验信封；`model` 模式缺 `image` 且 `material` 不是 `None`（省略也算）：`INVALID_REQUEST`；两者都没有：`INVALID_REQUEST`；`asset_id` 指向 Bang 或 Texture 的结果：`ASSET_NOT_AVAILABLE` | 页面：二选一、“HTTP 400 covers ... conflicting input modes”、缺 `image` 时“rejected with INVALID_REQUEST”、`asset_id` 为“a completed Rodin generation task”。状态码取页面句子的字面推断，**待真实探测**（被受理会扣 0.5 credit） |
+| `queue_length`（m6） | 排队阶段第一个作业的值逐次递减到 0；离开排队后不带 | 页面：Waiting 时可带，离开队列后省略。已提交的真实样本只在下一个排队作业上出现过 0；排队阶段的数值构造 |
+| `check_balance?usage_page`（m6） | 带参数时返回 `usage`（每页最多 20 条、新到旧、六个字段）；不带不返回；小于 1 或非数字为 400 | 页面 schema。Bang 与 Texture 的 `item` 名为构造，**待真实 `usage` 样本** |
+| `API_INSUFFICIENT_FUNDS` 文案 | Errors 页示例原文 | 页面示例 |
+| `is_micro` 与 `prompt`（m6） | `is_micro=true` 且 tier 不是 `Gen-2.5-Extreme-High`（含省略）为 `INVALID_REQUEST`；`prompt` 超过 1024 字符同 | 页面内嵌 schema 写明；错误文案构造 |
+| 未收录 | `ANIMATION_PREVIEW_UNAVAILABLE` 与下载的“没有可下载文件”`INVALID_REQUEST` | 前者只在错误码枚举里，没有描述或触发条件；后者没有与已观察到的空列表区分得开的触发条件 |
+
+加严后 Adapter、Catalog、Offering 与 Agent 层的 Hyper3D 现有测试都没有被误拒：Plinth 发出的请求（Bang 的 `asset_id` 模式不带 `image`、`prompt`，Texture 单张参考图）都满足这些规则；唯一被改的是 `TestDriftFakeResponsesMatchTheRealSamples` 的辅助请求，它此前给 `asset_id` 的 Bang 请求带了 `prompt`。Texture 的对齐步骤、`balance-usage` 与被拒取值探测这些真实一轮的 align 步骤不在本次范围，由真实一轮的设计另行新增。
 
 ### Rodin 参考图方位标记（#376 第 2a 步，Provider 侧；源码已实现，本机测试与 fake 栈通过，未部署验收，未做 Agent 侧填写）
 
@@ -885,7 +906,7 @@ Adapter 只需把明确的限流拒绝映射为 `FailureRateLimited`（`Retryabl
 - 读取由通用函数 `httpjson.UpstreamQueue` 完成，只接受非负整数；Adapter 把结果放进 `Observation.Queue`，内核记录、持久化与对外投影都不再需要 Provider 参与。
 - 提示文案是只读 `messages["task.queue_reason.upstream_queued"]` 与 `messages["task.queue_reason.upstream_queued_ahead"]`（后者含 `{ahead}`）；Agent 说明是 `chat.agent.upstream_queue_content`。默认 Catalog 提供中英文；Catalog 加载时校验已声明文案（含各语言 bundle）的占位符。没有新增 Offering 字段。
 
-当前接线：Meshy（`preceding_tasks`）、Tripo（无数字）、Hyper3D（`queue_length`，按子作业读取；含义为推断，未经官方文档确认）。机制、持久化与公开面见 `docs/architecture.md` 的“上游排队提示（#131，本机测试，未部署验收）”。
+当前接线：Meshy（`preceding_tasks`）、Tripo（无数字）、Hyper3D（`queue_length`，按子作业读取；官方 Check Status 页 2026-11-24 写明它是 Waiting 作业“前方作业的近似数量”、离开队列后省略，含义已由官方文档确认，但真实样本只在下一个排队作业上出现过 0）。机制、持久化与公开面见 `docs/architecture.md` 的“上游排队提示（#131，本机测试，未部署验收）”。
 
 **排队等待上限与超时失败（#136）。** 上游排队时间不计入作业执行超时，另由 Schema 声明排队最长等多久，超过后以新的失败分类终止。上面“没有新增 Offering 字段”只对 #131 的提示文案成立；#136 新增了一个可选的 Offering 覆盖字段：
 

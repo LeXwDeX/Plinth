@@ -165,6 +165,7 @@ func Profile() align.Profile {
 		align.Field{Name: "image_label", Value: "F"}, align.Field{Name: "image_label", Value: "L"},
 		align.Field{Name: "image_label", Value: "B"},
 	), views[:2], "")...)
+	steps = append(steps, realRoundSteps(picture)...)
 	return align.Profile{
 		Provider: "hyper3d", API: "api-v2", Official: OfficialBase, Steps: steps,
 		Capture: align.CaptureConfig{
@@ -183,7 +184,79 @@ func Profile() align.Profile {
 			"官方在请求缺少提示词与图片时返回 HTTP 201 + `{\"error\":\"INVALID_REQUEST\"}`（不是 4xx）；fake 复现。",
 			"第三阶段（2026-10-29）补采 Failed 状态：`texture-failed` 三步（提交、轮询、下载）单独成段运行了两次（标签 failed1、failed2）。texture 请求的模型用测试夹具里 400 字节的单三角形 GLB，官方受理（HTTP 201）后第一次轮询三个子作业全部 `Failed`，顶层 `message` 为 `Invalid input.`，`download` 返回空列表；两次结果相同，各计 1 次付费请求。这一段不在上面三段合并的报告里（原始运行已不在工作树外保留），Failed 响应作为独立样本 `hyper3d-api-v2-texture-failed` 入库，漂移测试 `TestFailedPollMatchesTheRealSample` 对它逐字段比较。",
 			"2026-11-19（#376）补采 image_label：两次真实请求都经用户批准，各自单独成段运行（标签 probe376、labeled376），不在上面合并的报告里，共 2 个付费步骤、实际花费 0.5 credit。`rodin-label-overflow`：两张图加重复的三个 image_label 部分（F、L、B），官方在生成前以 HTTP 201 + `{\"error\":\"IMAGE_LABEL_LENGTH_TOO_LONG\",\"message\":\"Input is invalid\"}` 拒绝，未扣费（余额前后相同），说明同名的重复部分被读成一个数组，其长度与图片数比较；fake 此前的 message 是文档里的描述，已改为 `Input is invalid`。`rodin-labeled`：前、左、后三张图，三个 image_label 部分 F、L、B 按图序排在文件之前（Gen-2.5-Extreme-Low、texture_mode=extreme-low、quality=medium、Raw、PBR、glb），官方受理，consumed 0.5，响应带自动生成的 `prompt`，6 个子作业由 Generating 与 Waiting 走到 Done，交付 19,371,768 字节的 PBR GLB 与 2,034 字节的 WebP 预览（fake 不复现文件大小）。fake 只许页面列出的标签取值（F、FL、FR、B、BL、BR、L、R、U、D、?），页外取值按 INVALID_REQUEST 拒绝（错误码与文案构造自页面，没有观察到真实的拒绝）；不校验少于图片数的标签：没有观察到被拒绝，不编造错误码（Plinth 在本地拒绝这种请求，从不发送）。脱敏样本入库为 `evidence-376-rodin-label-overflow` 与 `evidence-376-rodin-labeled`（对照证据，不是 fake 取模板的样本；采集把金额换成占位，样本里 consumed 为 0，真实回执为 0.5），`evidence_376_test.go` 逐项核对 fake 的回答。",
+			"1.9.0 真实一轮（#539）新增六组对齐步骤，只在用户当次同意后单独成段运行，目前都是按官方文档构造、未经真实验证（constructed，待真实一轮定稿）：`balance-usage`（check_balance?usage_page=1，免费，取 usage[] 形态）；`reject-seed-probe`（seed=65536，超出文档上限 65535，真实服务是 400 信封还是 HTTP 201 + INVALID_REQUEST 以探测为准，被受理则计 0.5 credit）；`rodin-text-quadpose`（Gen-2.5-Extreme-High、Quad、10000 面、texture_mode=high、TAPose、quad_normal、seed=1，对应游戏角色请求的原始体，约 1 credit）；`rodin-image-label-short`（两张图只带一个 image_label，官方称列表会补成图片数，Plinth 已在发送前补 ?，此步直接发短列表看服务是否受理，Extreme-Low 约 0.5 credit）；`bang-upload`（model 上传模式 + 参考图，约 0.5 credit，模型取 bang 步骤的产物）；`texture-images`（Texture 参考图用官方文档的复数字段 images，Plinth 与 fake 现用单数 image，约 0.5 credit，结果决定是否改 Catalog 的 wire_name）。fake 对 images 字段的现状见 #539 的记录。",
 		},
 		Notes: align.Notes{},
 	}
+}
+
+// bangFields are the form fields of the cheapest Bang request (no addon).
+func bangFields() []align.Field {
+	return []align.Field{
+		{Name: "geometry_file_format", Value: "glb"}, {Name: "material", Value: "PBR"}, {Name: "resolution", Value: "Basic"},
+		{Name: "mesh_mode", Value: "Raw"}, {Name: "strength", Value: "5"},
+	}
+}
+
+// realRoundSteps are the steps of the 1.9.0 real round (#539). Each is a paid
+// request except the balance read, and each is meant to be run alone, once,
+// after the user approved it (-steps NAME,NAME-status,NAME-download). They are
+// constructed from the official pages (read 2026-11-24); what the real service
+// answers decides the fake's rules, see RequestNotes. All of them are OptIn,
+// so a default official run leaves them out.
+func realRoundSteps(picture align.File) []align.Step {
+	var steps []align.Step
+	// check_balance with the usage page: the real answer carries a usage list
+	// the fake does not produce.
+	steps = append(steps, align.Step{Name: "balance-usage", Method: "GET", Path: "/check_balance?usage_page=1"})
+	// A value the documented range refuses (seed is 0 to 65535). Whether the real
+	// service answers a 400 envelope or HTTP 201 with INVALID_REQUEST is not
+	// observed. It bills 0.5 credit if it is accepted, which is why it is paid.
+	steps = append(steps, submitSteps("reject-seed-probe", "rodin", cheapGeneration(
+		align.Field{Name: "prompt", Value: "a plain solid red cube with sharp edges, no text"},
+		align.Field{Name: "seed", Value: "65536"},
+	), nil, "")...)
+	// The game character request the Catalog's Offering makes: Extreme-High, Quad,
+	// 10000 faces, the 2K texture mode, TAPose and quad_normal, seed 1. Its
+	// download list is the sample of the delivered files (names and order).
+	steps = append(steps, submitSteps("rodin-text-quadpose", "rodin", []align.Field{
+		{Name: "tier", Value: "Gen-2.5-Extreme-High"}, {Name: "geometry_file_format", Value: "glb"},
+		{Name: "material", Value: "PBR"}, {Name: "mesh_mode", Value: "Quad"}, {Name: "quality", Value: "high"},
+		{Name: "quality_override", Value: "10000"}, {Name: "texture_mode", Value: "high"},
+		{Name: "TAPose", Value: "true"}, {Name: "quad_normal", Value: "true"}, {Name: "seed", Value: "1"},
+		{Name: "prompt", Value: "a game character standing upright in an A pose, simple low-poly armor, plain background, no text"},
+	}, nil, "")...)
+	// Two pictures and one image_label. The Gen-2.5 page says a short list is
+	// padded with ? to the number of pictures, and Plinth pads before it sends;
+	// this step sends the short list itself to see whether the service accepts it.
+	steps = append(steps, submitSteps("rodin-image-label-short", "rodin", cheapGeneration(
+		align.Field{Name: "image_label", Value: "F"},
+	), []align.File{
+		{Field: "images", Filename: "front.png", MediaType: "image/png", Data: viewPNG("F")},
+		{Field: "images", Filename: "left.png", MediaType: "image/png", Data: viewPNG("L")},
+	}, "")...)
+	// Bang in the upload mode: a model file plus a reference picture, material
+	// PBR (a material other than None needs the picture). The model is the one the
+	// bang step delivered.
+	steps = append(steps, submitSteps("bang-upload", "bang", bangFields(), []align.File{
+		{Field: "model", Filename: "model.glb", MediaType: "model/gltf-binary", FromVar: "bang_url"},
+		{Field: "image", Filename: "reference.png", MediaType: "image/png", Data: picture.Data},
+	}, "bang_url")...)
+	// Texture with the official page's plural field. Plinth and the fake send the
+	// singular image, which the real service tolerated on 2026-10-29; the page
+	// documents images (1 to 5 pictures). Run this once to see whether images is
+	// accepted, and compare with the texture step (image) of the same model.
+	steps = append(steps, submitSteps("texture-images", "rodin_texture_only", []align.Field{
+		{Name: "geometry_file_format", Value: "glb"}, {Name: "material", Value: "PBR"}, {Name: "resolution", Value: "Basic"},
+		{Name: "texture_mode", Value: "extreme-low"}, {Name: "prompt", Value: "plain matte red"},
+	}, []align.File{
+		{Field: "model", Filename: "model.glb", MediaType: "model/gltf-binary", FromVar: "bang_url"},
+		{Field: "images", Filename: "reference.png", MediaType: "image/png", Data: picture.Data},
+	}, "bang_url")...)
+	// The real round is not part of a routine refresh: an official or export
+	// run sends these steps only when -steps names them (align.Step.OptIn, #540).
+	for i := range steps {
+		steps[i].OptIn = true
+	}
+	return steps
 }

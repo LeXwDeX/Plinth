@@ -291,10 +291,15 @@ func (b *draftBuilder) jsonBody(raw []byte) {
 // sseBody mirrors normalizeSSE's merge: content and reasoning are merged per
 // choice and redacted; tool IDs, names and arguments are merged per tool.
 func (b *draftBuilder) sseBody(raw []byte) {
-	chunks, err := parseSSE(raw)
+	stream, err := parseSSEStream(raw)
 	if err != nil {
 		return
 	}
+	if stream.named {
+		b.namedSSEBody(stream)
+		return
+	}
+	chunks := stream.chunks()
 	type tool struct{ id, name, args, lastArgs strings.Builder }
 	type choice struct {
 		content, reasoning strings.Builder
@@ -369,6 +374,47 @@ func (b *draftBuilder) sseBody(raw []byte) {
 			if args != "" {
 				b.jsonBody([]byte(args))
 			}
+		}
+	}
+}
+
+// namedSSEBody mirrors normalizeNamedSSE: every event's data is read, and the
+// "*.delta" fragments of one value are merged and redacted (function-call
+// arguments as JSON).
+func (b *draftBuilder) namedSSEBody(stream sseStream) {
+	type merged struct {
+		text      strings.Builder
+		arguments bool
+	}
+	groups := map[string]*merged{}
+	var order []string
+	for _, event := range stream.events {
+		b.value("", event.data, 0)
+		if !strings.HasSuffix(event.name, ".delta") {
+			continue
+		}
+		text, ok := sseString(event.data["delta"])
+		if !ok {
+			continue
+		}
+		key := sseDeltaKey(event)
+		group := groups[key]
+		if group == nil {
+			group = &merged{arguments: strings.HasSuffix(event.name, "arguments.delta")}
+			groups[key] = group
+			order = append(order, key)
+		}
+		group.text.WriteString(text)
+	}
+	for _, key := range order {
+		group := groups[key]
+		text := group.text.String()
+		switch {
+		case text == "":
+		case group.arguments && json.Valid([]byte(text)):
+			b.jsonBody([]byte(text))
+		default:
+			b.redact(text)
 		}
 	}
 }

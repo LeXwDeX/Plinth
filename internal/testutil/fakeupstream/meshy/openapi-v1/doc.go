@@ -51,6 +51,20 @@
 //     documentation of each task object; texture_urls and PBR maps follow the
 //     request's should_texture/enable_pbr options.
 //
+//   - The create requests of text-to-image, image-to-image, image-to-3d,
+//     multi-image-to-3d, retexture, animations and text-to-motion are checked
+//     against the pages read on 2026-11-24 (#542, core/validate.go): enums,
+//     counts, character limits and the documented conflicts answer 400
+//     {message}; image-to-image takes reference_image_urls or an input_task_id
+//     of a succeeded image task. The refusal texts are constructed.
+//   - consumed_credits follows the request from the Pricing page (core/
+//     credits.go), from the first poll on; the prices real captures showed are
+//     asserted and the cells the page leaves open are named in core.Credits.
+//   - core/webhook.go is the sender of the account-level webhook of the
+//     Webhooks page: whole task object, progress 50/100/0, the official headers,
+//     retries, duplicates, reordering and deactivation, all constructed from the
+//     page (no real delivery has been received).
+//
 // print/repair (POST /openapi/v1/print/repair and its poll/delete routes) is
 // deliberately not served: the Catalog offering meshy/processing/
 // repair-printability is disabled, so no egress is expected. Enabling it needs

@@ -40,6 +40,22 @@ func decimateSampleRequest(source any) map[string]any {
 	return map[string]any{"input": source, "model": "v3.0", "bake": true, "quad": false, "smart_uv": true}
 }
 
+// driftModel is a model name the endpoint accepts: the kitchen-sink body of the
+// drift comparison names one model, and the fake checks it per endpoint family.
+func driftModel(path string) string {
+	switch path {
+	case "/generation/text-to-model", "/generation/image-to-model", "/generation/multiview-to-model":
+		return "v3.1-20260211"
+	case "/mesh/segment":
+		return "v2.0-20260430"
+	case "/mesh/complete":
+		return "v1.0-20250506"
+	case "/models/texture":
+		return "v3.5-20260815"
+	}
+	return "v3.0-20260909"
+}
+
 func shapeOfBody(t *testing.T, body any) fakeupstream.Shape {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -125,12 +141,24 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 		parent := f.create("/generation/text-to-model", textBody(), key)
 		f.finish(parent, key)
-		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
+		body := map[string]any{"model": driftModel(k.Path), "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
 			"prompts": []map[string]any{{"view": "front", "prompt": "p"}}}
 		if k.Path == "/animations/retarget" {
 			rig := f.create("/animations/rig", map[string]any{"input": parent, "model": "v3.0-20260909"}, key)
 			f.finish(rig, key)
 			body["input"] = rig
+		}
+		switch k.Path {
+		case "/mesh/complete":
+			// A completion completes a segmentation.
+			segment := f.create("/mesh/segment", map[string]any{"input": parent, "model": "v2.0-20260430"}, key)
+			f.finish(segment, key)
+			body["input"] = segment
+		case "/generation/edit-multiview":
+			// An edit edits an Image to Multiview task.
+			multiview := f.create("/generation/image-to-multiview", map[string]any{"input": "file_x"}, key)
+			f.finish(multiview, key)
+			body["input"] = multiview
 		}
 		if k.Path == "/models/convert" {
 			// The request of the committed sample: the poll echoes it under input.
@@ -153,12 +181,24 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 		}
 		parent := f.create("/generation/text-to-model", textBody(), key)
 		f.finish(parent, key)
-		body := map[string]any{"model": "v3.0-20260909", "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
+		body := map[string]any{"model": driftModel(k.Path), "prompt": "p", "input": parent, "animation": "preset:walk", "format": "STL", "seg_type": "image",
 			"prompts": []map[string]any{{"view": "front", "prompt": "p"}}}
 		if k.Path == "/animations/retarget" {
 			rig := f.create("/animations/rig", map[string]any{"input": parent, "model": "v3.0-20260909"}, key)
 			f.finish(rig, key)
 			body["input"] = rig
+		}
+		switch k.Path {
+		case "/mesh/complete":
+			// A completion completes a segmentation.
+			segment := f.create("/mesh/segment", map[string]any{"input": parent, "model": "v2.0-20260430"}, key)
+			f.finish(segment, key)
+			body["input"] = segment
+		case "/generation/edit-multiview":
+			// An edit edits an Image to Multiview task.
+			multiview := f.create("/generation/image-to-multiview", map[string]any{"input": "file_x"}, key)
+			f.finish(multiview, key)
+			body["input"] = multiview
 		}
 		if k.Path == "/models/convert" {
 			// The request of the committed sample: the poll echoes it under input.
@@ -181,9 +221,10 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			assertSameShape(t, k.Type+" "+status, sampleShape(t, *real), shapeOfBody(t, response))
 		}
 	}
-	// The failed poll: a retarget of a v2 rig.
+	// The failed poll: a retarget of a v2.5 biped rig, the way the sample was captured.
 	parent := f.create("/generation/text-to-model", textBody(), key)
-	rig := f.create("/animations/rig", map[string]any{"input": parent, "model": "v2.5-20260210"}, key)
+	f.finish(parent, key)
+	rig := f.create("/animations/rig", map[string]any{"input": parent, "model": rigModelV25}, key)
 	f.finish(rig, key)
 	retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, key)
 	_, failed := f.finish(retarget, key)
@@ -255,7 +296,7 @@ func TestMalformedBodyKeepsTheRealErrorEnvelope(t *testing.T) {
 func TestSmartSegmentationTypesAndFailureMatchTheRealSamples(t *testing.T) {
 	samples := loadSamples(t)
 	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
-	model := f.create("/mesh/smartsegment", map[string]any{"input": "file_x", "seg_type": "model"}, key)
+	model := f.create("/mesh/smartsegment", map[string]any{"input": "file_x", "seg_type": "model", "transform": identity()}, key)
 	_, done := f.finish(model, key)
 	if field(t, done, "data", "type") != "smartsegment_model" {
 		t.Fatalf("type = %v", field(t, done, "data", "type"))

@@ -655,6 +655,8 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			gen = submit(t, f, "/rodin", textForm())
 			poll(t, f, gen)
 			fields["asset_id"] = gen.uuid
+			// The page's asset_id mode takes no prompt (#537).
+			delete(fields, "prompt")
 		case "/rodin_texture_only":
 			files = []string{"model", "image"}
 		}

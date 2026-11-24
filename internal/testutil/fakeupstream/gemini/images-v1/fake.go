@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -55,6 +56,46 @@ const (
 	errorKeyPrefix    = fakeupstream.KeyPrefix + "error-"
 )
 
+// Test-only weight selector. X-Fake-Response-Bytes makes the picture of a
+// success answer at least that many bytes (padded with a comment segment the
+// decoders skip), the way a real 4K answer is several megabytes where the
+// fake's flat picture is a few hundred kilobytes; a stack whose requests cannot
+// carry extra headers selects it with the API key "fake-response-bytes-<n>".
+// The weight is capped at MaxResponseBytes so a request cannot ask the fake for
+// an arbitrary allocation.
+const (
+	ResponseBytesHeader = "X-Fake-Response-Bytes"
+	responseBytesKey    = fakeupstream.KeyPrefix + "response-bytes-"
+	MaxResponseBytes    = 64 << 20
+)
+
+// maxReferences is the documented limit of reference pictures per prompt
+// (Gemini 3 Pro Image: 14). The Catalog declares the same number.
+const maxReferences = 14
+
+// pictureSizes is the output size of each aspect ratio at 1K, 2K and 4K for
+// gemini-3-pro-image. The ten ratios and the three uppercase sizes are
+// documented (Gemini image generation guide; "1k" is rejected); the exact
+// pixel table is the published one, recalled rather than re-read from the
+// documents on 2026-11-24, and unverified against the gateway until the real
+// 16:9 4K and 3:4 1K probes run, so the sizes are constructed.
+var pictureSizes = map[string][3][2]int{
+	"1:1":  {{1024, 1024}, {2048, 2048}, {4096, 4096}},
+	"2:3":  {{848, 1264}, {1696, 2528}, {3392, 5056}},
+	"3:2":  {{1264, 848}, {2528, 1696}, {5056, 3392}},
+	"3:4":  {{896, 1200}, {1792, 2400}, {3584, 4800}},
+	"4:3":  {{1200, 896}, {2400, 1792}, {4800, 3584}},
+	"4:5":  {{928, 1152}, {1856, 2304}, {3712, 4608}},
+	"5:4":  {{1152, 928}, {2304, 1856}, {4608, 3712}},
+	"9:16": {{768, 1376}, {1536, 2752}, {3072, 5504}},
+	"16:9": {{1376, 768}, {2752, 1536}, {5504, 3072}},
+	"21:9": {{1584, 672}, {3168, 1344}, {6336, 2688}},
+}
+
+// imageSizes orders the three documented image_size values; the upper-case K is
+// part of the value.
+var imageSizes = []string{"1K", "2K", "4K"}
+
 // FixedReasoning is the fixed reasoning text of every picture response.
 const FixedReasoning = "Fake upstream reasoning."
 
@@ -63,7 +104,7 @@ const unauthorizedBody = "unauthorized\n"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: docsRoot, CheckedAt: docsChecked,
-		Note: "the gateway's OpenAI-compatible chat completion with modalities [text,image]: the picture comes back as a data URI in choices[0].message.content[].image_url.url. The real text-to-image sample is a JPEG, the image-to-image one a PNG; the fake always sends a PNG. 400 invalid_text_request and 401 text/plain are real samples. No public official documentation exists for this gateway contract (the vendor page at DocURL is login-gated and redirects to its catalog); the only structural evidence is the committed real gateway samples. The fault answers (quota-exceeded, forbidden, permission-denied, model-not-found, service-unavailable, content-filtered, the 402/500 vocabulary and the " + ErrorCodeHeader + "/" + ErrorStatusHeader + " override) are constructed-from-docs from " + errorsURL + " (checked " + docsChecked + ") and the real gateway envelope; none was observed on the gateway"},
+		Note: "the gateway's OpenAI-compatible chat completion with modalities [text,image]: the picture comes back as a data URI in choices[0].message.content[].image_url.url. The real text-to-image sample is a JPEG, the image-to-image one a PNG, and the fake answers the same formats at the size eca_image_config names (aspect_ratio among the ten ratios 1:1 2:3 3:2 3:4 4:3 4:5 5:4 9:16 16:9 21:9 and image_size 1K, 2K or 4K with an upper-case K, default 1:1 at 1K; the pixel table of each pair is constructed, see pictureSizes). A value outside those sets and more than 14 reference pictures answer a constructed 400 invalid_argument: whether the real gateway refuses or silently ignores them is not recorded (the free probe is planned), so the refusal is a conservative guess to be settled by the real round. " + ResponseBytesHeader + " (or the key fake-response-bytes-<n>) pads the picture to a real 4K weight for response-limit and timeout tests. 400 invalid_text_request and 401 text/plain are real samples. No public official documentation exists for this gateway contract (the vendor page at DocURL is login-gated and redirects to its catalog); the only structural evidence is the committed real gateway samples. The fault answers (quota-exceeded, forbidden, permission-denied, model-not-found, service-unavailable, content-filtered, the 402/500 vocabulary and the " + ErrorCodeHeader + "/" + ErrorStatusHeader + " override) are constructed-from-docs from " + errorsURL + " (checked " + docsChecked + ") and the real gateway envelope; none was observed on the gateway"},
 }
 
 // Version is the Gemini image (OpenAI-compatible gateway) /v1 fake.
@@ -237,6 +278,99 @@ func unauthorized(w http.ResponseWriter) {
 type completionRequest struct {
 	Model    string            `json:"model"`
 	Messages []json.RawMessage `json:"messages"`
+	// ImageConfig is the gateway's eca_image_config object; it stays raw so a
+	// value of the wrong type is refused instead of read as empty.
+	ImageConfig map[string]json.RawMessage `json:"eca_image_config"`
+}
+
+// referenceCount counts the picture parts (type image_url) of every message.
+func (r completionRequest) referenceCount() int {
+	count := 0
+	for _, raw := range r.Messages {
+		var message struct {
+			Content []struct {
+				Type string `json:"type"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(raw, &message) != nil {
+			continue // a plain-text content string carries no picture
+		}
+		for _, part := range message.Content {
+			if part.Type == "image_url" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// imageConfig reads eca_image_config: the aspect ratio and size the request
+// asks for ("1:1" and "1K" when it asks for none, the documented defaults), or
+// the refusal of a value outside the documented sets.
+//
+// Whether the real gateway refuses such a value or silently ignores it is not
+// recorded (the free probe with aspect_ratio 7:1 is planned, matrix I18), so
+// the refusal and its wording are constructed; the vocabulary follows Google's
+// status words, which the Catalog's error_mapping already reads.
+func (r completionRequest) imageConfig() (aspect string, sizeIndex int, bad *refusal) {
+	aspect, sizeIndex = "1:1", 0
+	read := func(name string) (string, bool, *refusal) {
+		raw, present := r.ImageConfig[name]
+		if !present || string(raw) == "null" {
+			return "", false, nil
+		}
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return "", true, &refusal{"invalid_argument", "Invalid value at 'eca_image_config." + name + "': expected a string.", name}
+		}
+		return value, true, nil
+	}
+	ratio, present, bad := read("aspect_ratio")
+	if bad != nil {
+		return "", 0, bad
+	}
+	if present {
+		if _, known := pictureSizes[ratio]; !known {
+			return "", 0, &refusal{"invalid_argument", "Invalid value '" + ratio + "' at 'eca_image_config.aspect_ratio': supported values are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 and 21:9.", "aspect_ratio"}
+		}
+		aspect = ratio
+	}
+	size, present, bad := read("image_size")
+	if bad != nil {
+		return "", 0, bad
+	}
+	if present {
+		sizeIndex = -1
+		for index, known := range imageSizes {
+			if known == size {
+				sizeIndex = index
+			}
+		}
+		if sizeIndex < 0 {
+			return "", 0, &refusal{"invalid_argument", "Invalid value '" + size + "' at 'eca_image_config.image_size': supported values are 1K, 2K and 4K (the K is upper-case).", "image_size"}
+		}
+	}
+	return aspect, sizeIndex, nil
+}
+
+// refusal is a constructed gateway 400 for a value the documented contract
+// rejects.
+type refusal struct{ code, message, param string }
+
+// requestedWeight reads the test-only weight selector, in bytes (0 when none).
+func requestedWeight(r *http.Request) int {
+	raw := strings.TrimSpace(r.Header.Get(ResponseBytesHeader))
+	if raw == "" {
+		var found bool
+		if raw, found = strings.CutPrefix(fakeupstream.BearerKey(r), responseBytesKey); !found {
+			return 0
+		}
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return min(parsed, MaxResponseBytes)
 }
 
 // hasReference reports whether a message carries a picture part.
@@ -264,6 +398,14 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 	var request completionRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<20)).Decode(&request); err != nil || len(request.Messages) == 0 || strings.TrimSpace(request.Model) == "" {
 		writeJSON(w, http.StatusBadRequest, h.invalid)
+		return
+	}
+	aspect, sizeIndex, bad := request.imageConfig()
+	if bad == nil && request.referenceCount() > maxReferences {
+		bad = &refusal{"invalid_argument", fmt.Sprintf("Too many reference images: at most %d are accepted, got %d.", maxReferences, request.referenceCount()), "messages"}
+	}
+	if bad != nil {
+		writeJSON(w, http.StatusBadRequest, h.errorBody(bad.code, bad.message))
 		return
 	}
 	scenario := fakeupstream.ScenarioOf(r)
@@ -313,10 +455,21 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, body)
 		return
 	}
-	file, err := fakeupstream.ImageFile("png")
+	// The picture is drawn at the size the aspect ratio and image_size name. The
+	// recorded text-to-image answer is a JPEG and the image-to-image one a PNG,
+	// so the fake answers the same formats.
+	dimensions := pictureSizes[aspect][sizeIndex]
+	format := "jpeg"
+	if request.hasReference() {
+		format = "png"
+	}
+	file, err := fakeupstream.Picture(fakeupstream.PictureSpec{Format: format, Width: dimensions[0], Height: dimensions[1]})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if weight := requestedWeight(r); weight > 0 {
+		file = fakeupstream.PadFile(file, weight)
 	}
 	data := file.Data
 	if scenario == fakeupstream.ScenarioArtifactCorrupt {

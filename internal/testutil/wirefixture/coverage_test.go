@@ -50,6 +50,8 @@ type coverageOffering struct {
 	Enabled    bool   `json:"enabled"`
 	Options    struct {
 		Endpoint string `json:"endpoint"`
+		// Model is the upstream model the Offering requests, when it declares one.
+		Model string `json:"model"`
 		// CreatePath is the submit route of Offerings that declare their routes
 		// as create_path/observe_path/download_path (the matting protocol).
 		CreatePath string `json:"create_path"`
@@ -71,6 +73,9 @@ type coverageUnit struct {
 	Evidence      string                `json:"evidence"`
 	EvidenceFiles []string              `json:"evidence_files"`
 	Offerings     []coverageOfferingRef `json:"offerings"`
+	// requestedModels are the upstream model names the unit's samples asked for (the
+	// "model" field of a JSON request body), kept out of the matrix.
+	requestedModels []string
 }
 
 type coverageOfferingRow struct {
@@ -106,6 +111,9 @@ type coverageSample struct {
 			Method string `json:"method"`
 			Host   string `json:"host"`
 			Path   string `json:"path"`
+			Body   struct {
+				JSON json.RawMessage `json:"json"`
+			} `json:"body"`
 		} `json:"request"`
 	}
 }
@@ -274,6 +282,12 @@ func generateWireCoverage(t *testing.T) []byte {
 			unit.EvidenceFiles = addUnique(unit.EvidenceFiles, sample.candidate)
 			unit.Hosts = addUnique(unit.Hosts, ex.Request.Host)
 			unit.Protocols = addUnique(unit.Protocols, ex.Metadata.Protocol)
+			var requested struct {
+				Model string `json:"model"`
+			}
+			if len(ex.Request.Body.JSON) > 0 && json.Unmarshal(ex.Request.Body.JSON, &requested) == nil {
+				unit.requestedModels = addUnique(unit.requestedModels, requested.Model)
+			}
 
 			// Offerings served by this unit: a declared endpoint it ends with, else
 			// every enabled Offering of the same adapter and capability.
@@ -336,7 +350,17 @@ func generateWireCoverage(t *testing.T) []byte {
 		}
 		for _, o := range u.Offerings {
 			offeringUnits[o.ID] = append(offeringUnits[o.ID], id)
-			offeringEvidence[o.ID] = append(offeringEvidence[o.ID], u.Evidence)
+			// A wire unit is shared by the Offerings of one endpoint, but its samples
+			// were requested with one model. When the samples name a model and the
+			// Offering requests a different one, the evidence does not carry over: the
+			// Offering's own request has never been seen on that wire (#541: the P2
+			// generation endpoints are the H endpoints with another model name).
+			evidence := u.Evidence
+			if model := byID[o.ID].Options.Model; model != "" && len(u.requestedModels) > 0 &&
+				!slices.Contains(u.requestedModels, model) && coverageEvidenceRank[evidence] > coverageEvidenceRank[evidenceMissing] {
+				evidence = evidenceMissing
+			}
+			offeringEvidence[o.ID] = append(offeringEvidence[o.ID], evidence)
 		}
 	}
 	matrix.Counts["units"]["total"] = len(list)
@@ -466,5 +490,31 @@ func TestCaptureMetaSourceRevision(t *testing.T) {
 	}
 	if found == 0 {
 		t.Fatal("no capture metadata found")
+	}
+}
+
+// A wire unit is shared by every Offering of one endpoint, but its samples were
+// requested with one model: an Offering that requests another model (Tripo P2 on the
+// H generation endpoints, #541) must not read as "real" because of them.
+func TestWireCoverageDoesNotCarryEvidenceAcrossModels(t *testing.T) {
+	var matrix coverageMatrix
+	raw, err := os.ReadFile(coverageOutputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &matrix); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range matrix.Offerings {
+		switch row.ID {
+		case "tripo/tripo-p2/text-to-3d", "tripo/tripo-p2/image-to-3d", "tripo/tripo-p2-multiview/image-to-3d":
+			if row.Evidence == evidenceReal {
+				t.Errorf("%s is %q: no real P2 request has been captured, the H samples are not its evidence", row.ID, row.Evidence)
+			}
+		case "tripo/tripo-v3.1-full/text-to-3d":
+			if row.Evidence != evidenceReal {
+				t.Errorf("%s is %q: its model is the one the samples were requested with", row.ID, row.Evidence)
+			}
+		}
 	}
 }

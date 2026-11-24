@@ -236,10 +236,10 @@ var endpoints = []fakeupstream.Endpoint{
 		Note: "the model list and the gateway's text/plain 401 are real samples; the invalid-key 401 ErrorResponse is a constructed-from-docs answer built from the OpenAPI ErrorResponse and the error-code guide (" + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: "https://platform.openai.com/docs/api-reference/chat/create", CheckedAt: "2026-10-29",
-		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples; the newest one is the 2026-11-23 chat capture (testdata/openai-v1-chat-2026-11-23.candidate.json, five completions of the same model and round), which is the template of every text completion: its usage reports prompt_tokens_details.text_tokens and it carries no system_fingerprint. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame, " + StreamCutMarker + " ending a started stream cleanly before any finish_reason or [DONE] and " + StreamPlainMarker + " answering a streaming request with the plain completion object (#509); the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go). Model constraints (#401, constraints.go): a request for gpt-astra or gpt-6.2-astra is judged by that model's rules and refused with a 400 invalid_request_error before any completion runs; the tools and temperature refusals are observed from the gateway's logs of 2026-11-20 (no committed sample), the reasoning_effort none refusal is constructed from the OpenAI documents checked the same day"},
+		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples; the newest one is the 2026-11-23 chat capture (testdata/openai-v1-chat-2026-11-23.candidate.json, five completions of the same model and round), which is the template of every text completion: its usage reports prompt_tokens_details.text_tokens and it carries no system_fingerprint. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame, " + StreamCutMarker + " ending a started stream cleanly before any finish_reason or [DONE] and " + StreamPlainMarker + " answering a streaming request with the plain completion object (#509); the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go). Model constraints (#401, constraints.go): a request for gpt-astra or gpt-6.2-astra is judged by that model's rules and refused with a 400 invalid_request_error before any completion runs; the tools and temperature refusals are observed from the gateway's logs of 2026-11-20 (no committed sample), the reasoning_effort none refusal is constructed from the OpenAI documents checked the same day. Forms and refusals added by #536, all constructed (no committed sample has them; a real round settles each, and the Y items of the live-matrix are the ones to replace): a qwen-family model streams its usage on a last chunk with empty choices after the finish_reason chunk (the Model Studio OpenAI-compatible documents, read 2026-11-24; the deepseek shape, usage on the finish_reason chunk, stays the observed one); a picture is refused by the model's rules (qwen: height or width not larger than 32, the observed body of 2026-11-23; a model named " + TextOnlyModelPrefix + ": no image input, the #253 wording; the default stack model deepseek reads pictures here until a real round says otherwise) or by " + ImageRefusalMarkerPrefix + "KIND]] for the dimensions, size, format, count and unsupported kinds (size, format and count are constructed in the vendor's style); " + DSMLMarker + " writes the matched tool calls as DSML in the reply text (the Schema's chat.dsml spelling) and " + InlineImageMarker + " draws a picture in delta.images or message.images; " + QuotaMarkerPrefix + "CODE]] answers 429 with a quota code the chat connection's error_mapping declares, or rate_limit_exceeded (the official ErrorResponse envelope); deepseek (the family prefix) refuses a reasoning_effort outside low, high, max and the values the vendor maps onto them, and " + StrictReasoningMarker + " switches its reasoning_content rule to the broad reading of the vendor's guide (I28, unproven)"},
 	{Method: "POST", Path: "/responses", Evidence: fakeupstream.EvidenceConstructed,
 		DocURL: "https://platform.openai.com/docs/api-reference/responses/create", CheckedAt: "2026-11-20",
-		Note: "the Responses API (#401). Aligned to two real probes of the gateway on 2026-11-20 whose sanitized excerpt is testdata/responses-2026-11-20.sample.json. Observed and in the sample: the streamed tool call, text answer and two parallel calls (event order, field set, the event: line), a reasoning item at effort xhigh (its added and done events, the three different encrypted_content values of added, done and completed, no status, no summary event without a requested summary), an input_image part, the non-stream response, a tool schema with strict false and an optional property, a function_call without id or status under a rewritten call_id, the replay of the reasoning item without its id and a round without any reasoning item (both accepted), and the 400s byte for byte: temperature on gpt-astra, an unknown reasoning.effort, none and minimal (refused as unsupported values, naming the dated snapshot gpt-6.2-astra-2026-11-17), a function_call_output with no function_call and a function_call with no output (no code member). Kept constructed, not real, because the probes are not wirefixture candidates (the capture pipeline cannot record SSE with event: lines and no [DONE], so the sample is hand-sanitized, and its provenance says which parts were completed from the non-stream response) and because some behavior has no sample: response.incomplete, response.failed, the in-stream error event, response.refusal.delta, the reasoning summary events, a stream line over the bound, and the 400 for a reasoning item with no following item. Fake-only request conventions: the chat ones plus " + ReasoningMarker + ", " + IncompleteMarker + ", " + FailedMarker + " and " + UnknownEventMarker + ". The 2026-11-20 live window ended this route with the gateway's HTTP 429 daily model-group quota (testdata/openai-v1-quota-2026-11-20.candidate.json: error.code and error.type quota_exceeded plus the nested quota object), which is the envelope the quota-exceeded scenario answers and a test holds it to"},
+		Note: "the Responses API (#401). Aligned to two real probes of the gateway on 2026-11-20 whose sanitized excerpt is testdata/responses-2026-11-20.sample.json. Observed and in the sample: the streamed tool call, text answer and two parallel calls (event order, field set, the event: line), a reasoning item at effort xhigh (its added and done events, the three different encrypted_content values of added, done and completed, no status, no summary event without a requested summary), an input_image part, the non-stream response, a tool schema with strict false and an optional property, a function_call without id or status under a rewritten call_id, the replay of the reasoning item without its id and a round without any reasoning item (both accepted), and the 400s byte for byte: temperature on gpt-astra, an unknown reasoning.effort, none and minimal (refused as unsupported values, naming the dated snapshot gpt-6.2-astra-2026-11-17), a function_call_output with no function_call and a function_call with no output (no code member). Kept constructed, not real, because the probes are not wirefixture candidates (the sample is hand-sanitized, and its provenance says which parts were completed from the non-stream response; the capture pipeline records a named SSE stream with event: lines and no [DONE] since #536, so the next real stream is recorded and back-filled by the pipeline instead) and because some behavior has no sample: response.incomplete, response.failed, the in-stream error event, response.refusal.delta, the reasoning summary events, a stream line over the bound, and the 400 for a reasoning item with no following item. Fake-only request conventions: the chat ones plus " + ReasoningMarker + ", " + IncompleteMarker + ", " + FailedMarker + " and " + UnknownEventMarker + ". The 2026-11-20 live window ended this route with the gateway's HTTP 429 daily model-group quota (testdata/openai-v1-quota-2026-11-20.candidate.json: error.code and error.type quota_exceeded plus the nested quota object), which is the envelope the quota-exceeded scenario answers and a test holds it to"},
 }
 
 // Version is the OpenAI-compatible /v1 fake.
@@ -824,10 +824,21 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, officialErrorBody(fmt.Sprintf("The model %q does not exist or you do not have access to it.", request.Model), "invalid_request_error", "model", "model_not_found"))
 		return
 	}
+	// #536: a quota marker answers the 429 of that code before the model judges
+	// the request.
+	if code, asked := request.quotaFault(); asked {
+		h.writeQuotaFault(w, code)
+		return
+	}
 	// #401: a model with declared constraints refuses a request shape it does
 	// not accept before any completion runs, streamed or not.
 	if refusal, refused := request.modelRefusal(); refused {
 		writeJSON(w, http.StatusBadRequest, refusal)
+		return
+	}
+	// #536: the pictures of the request are judged by the model's rules too.
+	if kind, message, refused := request.imageRefusal(); refused {
+		writeJSON(w, imageRefusalStatus, chatImageRefusalBody(kind, message))
 		return
 	}
 	if scenario == fakeupstream.ScenarioLostResponse {
@@ -863,8 +874,13 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	form := request.replyForm()
+	if form.dsml && len(calls) > 0 {
+		// #536: the calls are written into the reply text, not as tool_calls.
+		reply, calls = dsmlBlock(calls), nil
+	}
 	if streamed {
-		h.writeStream(w, request, calls, reasoning, reply)
+		h.writeStream(w, request, calls, reasoning, reply, form)
 		return
 	}
 	body := fakeupstream.Clone(h.text)
@@ -874,6 +890,9 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 	body["model"] = request.Model
 	if message, ok := fakeupstream.DigMap(body, "choices", 0, "message"); ok {
 		message["reasoning_content"] = reasoning
+		if form.inlineImage {
+			message["images"] = inlineImages()
+		}
 		if len(calls) == 0 {
 			message["content"] = reply
 		} else if sample, _ := message["tool_calls"].([]any); len(sample) > 0 {
@@ -1030,7 +1049,7 @@ func (h *handler) writeStreamCut(w http.ResponseWriter, request chatRequest) {
 // a tool call split into its header and its arguments, and a final chunk
 // carrying finish_reason and usage. The envelope fields and the final usage
 // object come from the committed sample.
-func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls []toolCall, reasoning, reply string) {
+func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls []toolCall, reasoning, reply string, form replyForm) {
 	sample := h.stream
 	if len(calls) > 0 {
 		sample = h.toolSSE
@@ -1049,13 +1068,29 @@ func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls 
 	if request.StreamOptions.IncludeUsage {
 		usage, _ = fakeupstream.Dig(fakeupstream.Clone(last), "usage")
 	}
+	// #536: a model whose rules say so ends the stream with a chunk of empty
+	// choices that carries the usage, after the finish_reason chunk.
+	trailing := request.StreamOptions.IncludeUsage && StreamUsageTrailing(request.Model)
+	finishUsage := usage
+	if trailing {
+		finishUsage = nil
+	}
 	events := []map[string]any{
 		chunk(map[string]any{"role": "assistant", "content": nil, "reasoning_content": ""}, nil, nil),
 		chunk(map[string]any{"content": nil, "reasoning_content": reasoning}, nil, nil),
 	}
+	if form.inlineImage {
+		events = append(events, chunk(map[string]any{"images": inlineImages()}, nil, nil))
+	}
 	finish := "stop"
 	if len(calls) == 0 {
-		events = append(events, chunk(map[string]any{"content": reply, "reasoning_content": nil}, nil, nil))
+		pieces := []string{reply}
+		if form.dsml {
+			pieces = splitForStream(reply)
+		}
+		for _, piece := range pieces {
+			events = append(events, chunk(map[string]any{"content": piece, "reasoning_content": nil}, nil, nil))
+		}
 	} else {
 		finish = "tool_calls"
 		for index, call := range calls {
@@ -1072,7 +1107,12 @@ func (h *handler) writeStream(w http.ResponseWriter, request chatRequest, calls 
 				}}}, nil, nil))
 		}
 	}
-	events = append(events, chunk(map[string]any{"content": "", "reasoning_content": nil}, finish, usage))
+	events = append(events, chunk(map[string]any{"content": "", "reasoning_content": nil}, finish, finishUsage))
+	if trailing {
+		tail := chunk(nil, nil, usage)
+		tail["choices"] = []any{}
+		events = append(events, tail)
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)

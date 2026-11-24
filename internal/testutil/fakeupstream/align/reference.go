@@ -35,3 +35,47 @@ func ReferencePNG(size int) []byte {
 func DataURI(data []byte) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
 }
+
+// TranslucentPNG is a half-transparent disc on an opaque pale background with
+// a fully transparent top-left corner, size x size pixels: a reference picture
+// with an alpha channel, so the alpha flattening a protocol asks for has
+// something to flatten (#540).
+func TranslucentPNG(size int) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	radius := float64(size) / 3
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			switch dx, dy := float64(x-size/2), float64(y-size/2); {
+			case x < size/4 && y < size/4:
+				img.SetNRGBA(x, y, color.NRGBA{})
+			case dx*dx+dy*dy <= radius*radius:
+				img.SetNRGBA(x, y, color.NRGBA{R: 40, G: 150, B: 90, A: 128})
+			default:
+				img.SetNRGBA(x, y, color.NRGBA{R: 250, G: 240, B: 200, A: 255})
+			}
+		}
+	}
+	var out bytes.Buffer
+	_ = png.Encode(&out, img)
+	return out.Bytes()
+}
+
+// MaskPNG is an edit mask, size x size pixels: opaque everywhere except a
+// fully transparent central square, which is the region an edit may change
+// (the convention of the OpenAI image edit mask, #540).
+func MaskPNG(size int) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	low, high := size*3/8, size*5/8
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			if x >= low && x < high && y >= low && y < high {
+				img.SetNRGBA(x, y, color.NRGBA{})
+			} else {
+				img.SetNRGBA(x, y, color.NRGBA{A: 255})
+			}
+		}
+	}
+	var out bytes.Buffer
+	_ = png.Encode(&out, img)
+	return out.Bytes()
+}

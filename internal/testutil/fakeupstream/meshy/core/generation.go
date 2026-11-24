@@ -70,7 +70,15 @@ func ImageRequestError(request map[string]any) string {
 	if value, ok := request["image_url"].(string); ok {
 		values = append(values, value)
 	}
-	for _, field := range []string{"image_urls", "texture_image_urls"} {
+	// The single-picture fields of the style, texture and reference inputs
+	// carry the same 20 MB and 32 px bounds (Retexture, Multi Image to 3D and
+	// Image to Image pages, read 2026-11-24).
+	for _, field := range []string{"image_style_url", "texture_image_url"} {
+		if value, ok := request[field].(string); ok {
+			values = append(values, value)
+		}
+	}
+	for _, field := range []string{"image_urls", "texture_image_urls", "multiview_image_urls", "reference_image_urls"} {
 		if list, ok := request[field].([]any); ok {
 			values = append(values, list...)
 		}
@@ -134,7 +142,10 @@ func imageDataURIError(uri string) string {
 // is refused, so the fake does not invent a refusal for them (#487; before that
 // it answered 400, contrary to the review's reading of the page). pose_mode is
 // optional and "leave it out for no pose", so an explicit empty string is
-// refused rather than sent.
+// refused rather than sent. The rest of the page's 400 list (read 2026-11-24)
+// is in validate.go: a preview without prompt, a refine without
+// preview_task_id, the model and geometry_resolution combinations and the
+// enums; the source of a refine must be a succeeded preview (Kind.SourceTypes).
 func TextTo3DRequestError(request map[string]any) string {
 	if message := GenerationRequestError(request); message != "" {
 		return message
@@ -144,14 +155,22 @@ func TextTo3DRequestError(request map[string]any) string {
 			return "pose_mode must be a-pose or t-pose; leave it out for no pose"
 		}
 	}
+	if message := enumError(request, "mode", []string{"preview", "refine"}); message != "" {
+		return message
+	}
+	if message := textTo3DCommonError(request); message != "" {
+		return message
+	}
 	if mode, _ := request["mode"].(string); mode != "refine" {
 		if has(request, "texture_resolution") {
 			return "texture_resolution is only valid for a refine task"
 		}
-	} else if has(request, "geometry_resolution") {
+		return textTo3DPreviewError(request)
+	}
+	if has(request, "geometry_resolution") {
 		return "geometry_resolution is only valid for a preview task"
 	}
-	return ""
+	return textTo3DRefineError(request)
 }
 
 // GenerationRequestError returns what is wrong with the remesh options of a 3D

@@ -65,7 +65,13 @@ type Step struct {
 	NoAuth bool
 	// Paid marks a step that spends credits upstream; only counted/reported.
 	Paid bool
-	Poll *Poll
+	// OptIn marks a step an official or export run skips unless -steps names
+	// it: an extra, costlier request (acceptance rounds such as #540) that a
+	// routine refresh must not send without being asked. The fake and compare
+	// commands ignore it: the fake costs nothing and compare reads the official
+	// bundle.
+	OptIn bool
+	Poll  *Poll
 	// Capture maps a variable name to a dot path in the final response body
 	// ("data.task_id").
 	Capture map[string]string

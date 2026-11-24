@@ -9,5 +9,11 @@
 // forbidden 403 (eca_access_denied) and service-unavailable 503
 // (service_unavailable_error/server_is_overloaded; error-code guide checked
 // 2026-11-08). model is optional on POST /images/edits, as the official Create
-// image edit reference says, and required on POST /images/generations.
+// image edit reference says (it defaults to gpt-image-2.6-sunburst), and
+// required on POST /images/generations.
+//
+// The fake draws the picture at the requested size and output_format (issue
+// I17/I19) and enforces the documented parameter contract with constructed
+// 400s (issue I18); see the endpoint table for what is recorded and what is
+// constructed.
 package openaiimagesv1
