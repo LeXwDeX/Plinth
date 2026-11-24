@@ -137,13 +137,17 @@ func (a *Adapter) observeWithRefine(
 ) (generation.Observation, error) {
 	state, pending := parseRefineState(request.Opaque)
 	if pending {
+		// The paid refine POST may have reached Meshy (the preview certainly
+		// was charged): an ambiguous submission, counted as possibly charged
+		// and never retried, not a rejection (#563).
 		return generation.Observation{
 			Job:       &request.Job,
 			Phase:     generation.UpstreamFailed,
 			Opaque:    request.Opaque,
 			DedupeKey: "refine-dispatch-unknown",
 			Failure: &generation.Failure{
-				Class:      generation.FailureRejected,
+				Class:      generation.FailureSubmissionUnknown,
+				Ambiguous:  true,
 				SafeDetail: "Meshy 精细化提交结果不明，已停止再次付费",
 			},
 		}, nil
