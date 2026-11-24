@@ -320,7 +320,12 @@ func (r *Repository) RecordSkillOutput(ctx context.Context, cmd skillrun.OutputC
 		if err != nil {
 			return err
 		}
-		return touchSkillRun(ctx, conn, run)
+		if err := touchSkillRun(ctx, conn, run); err != nil {
+			return err
+		}
+		// #561: the recorded output may be the last thing the session's used-up
+		// plan waited for; judge it now, in the same write.
+		return completeExhaustedSessionPlanOnConn(ctx, conn, string(run.OwnerID), run.SessionID, time.Now().UTC())
 	})
 }
 

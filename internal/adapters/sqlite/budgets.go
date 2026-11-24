@@ -629,6 +629,46 @@ func plannedCapabilities(plan budget.Plan) []string {
 	return capabilities
 }
 
+// completeExhaustedSessionPlanOnConn reconsiders the session's exhausted plan
+// when a SkillRun step of that session records its output (#561). The
+// settlement judges a plan only when it settles one of its reservations, and a
+// step's Task can be charged before its run records the output: the unfinished
+// step holds the plan back, the plan turns exhausted, and with nothing left to
+// settle it would never be judged again, reading "budget used up" for ever
+// although every step succeeded.
+//
+// Only an exhausted plan is judged here. An active plan still pays for a
+// redraw its review may ask for after the output is recorded (#243), so it
+// keeps waiting for the settlement; an exhausted one has nothing left to pay
+// with, and completing it changes what the card says, not what may spend.
+func completeExhaustedSessionPlanOnConn(ctx context.Context, conn *sql.Conn, ownerID, sessionID string, now time.Time) error {
+	if ownerID == "" || sessionID == "" {
+		return nil
+	}
+	rows, err := conn.QueryContext(ctx, `SELECT id FROM production_budgets
+ WHERE owner_id = ? AND session_id = ? AND state = ?`,
+		ownerID, sessionID, budget.StateExhausted)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	_, err = completeFinishedPlansOnConn(ctx, conn, ids, now)
+	return err
+}
+
 // CompleteFinishedBudgets marks every active or exhausted plan whose required
 // steps all have a succeeded Task as completed, and returns the plans it moved
 // (#410). It is the one-shot a deployment runs at start-up: a plan whose steps
@@ -777,11 +817,12 @@ func (r *Repository) SettleBudgetReservations(ctx context.Context, now time.Time
 			exhausted = append(exhausted, value)
 		}
 	}
-	stamp := formatTime(now)
+	// decided_at stays the person's decision (#561): the step pairing counts only
+	// Tasks submitted after it, so moving it to the settlement would drop the
+	// plan's own Tasks and read every step as not run.
 	for _, value := range exhausted {
 		if _, err := conn.ExecContext(ctx, `UPDATE production_budgets
- SET state = 'exhausted', decided_at = ? WHERE id = ? AND state = 'active'`,
-			stamp, value.ID); err != nil {
+ SET state = 'exhausted' WHERE id = ? AND state = 'active'`, value.ID); err != nil {
 			return nil, err
 		}
 	}
