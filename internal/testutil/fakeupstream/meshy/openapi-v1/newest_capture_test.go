@@ -81,10 +81,12 @@ func TestNewestCaptureDecidesTheMultiImageGeometryEcho(t *testing.T) {
 	}
 
 	low := f.create("/multi-image-to-3d", map[string]any{
-		"image_urls": []string{"https://example.test/a.png"}, "geometry_resolution": "1k",
+		"image_urls": []string{"https://example.test/a.png"}, "geometry_resolution": "standard",
 	})
 	_, body := f.finish("/multi-image-to-3d", low, key)
-	if body["geometry_resolution"] != "1k" || body["ultra_mode"] != false {
-		t.Errorf("a 1k request answers %v %v", body["geometry_resolution"], body["ultra_mode"])
+	// A standard task carries no geometry_resolution (the page: "absent on
+	// standard tasks") and ultra_mode false.
+	if _, has := body["geometry_resolution"]; has || body["ultra_mode"] != false {
+		t.Errorf("a standard request answers %v %v", body["geometry_resolution"], body["ultra_mode"])
 	}
 }

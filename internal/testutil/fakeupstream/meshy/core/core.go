@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -79,6 +80,15 @@ type Kind struct {
 	Need [][]string
 	// Sources are request fields that name another task of the account.
 	Sources []string
+	// SourceTypes limits the task types a source field may name (a refine
+	// takes a text-to-3d preview only); a task of another type answers 400.
+	// A field without an entry takes any type.
+	SourceTypes map[string][]string
+	// SourceNotFoundStatus is the status a source field that names no task of
+	// the account answers: 404 (the default) for the v1 pages, 400 for the
+	// Text to 3D refine, whose page lists "invalid, not yours, or not ready"
+	// preview_task_id under 400.
+	SourceNotFoundStatus int
 	// Fidelity is the structure the delivered model files carry ("skeleton" for
 	// a rigged character, "animation" for keyframes, "" for plain geometry).
 	Fidelity string
@@ -142,6 +152,9 @@ type Store struct {
 	tasks   map[string]*task
 	counter atomic.Int64
 	nonce   string
+	// webhooks are the account's registered webhooks (webhook.go).
+	hookMu   sync.Mutex
+	webhooks []*WebhookHandle
 }
 
 var stores sync.Map // *fakeupstream.Env -> *Store
@@ -176,6 +189,10 @@ type task struct {
 	textured bool
 	// failure is set when the task ends FAILED.
 	failure *taskError
+	// webhookMode is the delivery mode of its webhook updates and announced the
+	// states already sent (webhook.go).
+	webhookMode string
+	announced   map[string]bool
 }
 
 type taskError struct {
@@ -506,7 +523,7 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 			return
 		}
 		store := e.cfg.Store
-		t := &task{id: store.newID(), kind: kind, typ: kind.Type, request: request, scenario: scenario, expiredIssues: fakeupstream.ExpiredIssues(r)}
+		t := &task{id: store.newID(), kind: kind, typ: kind.Type, request: request, scenario: scenario, expiredIssues: fakeupstream.ExpiredIssues(r), webhookMode: webhookModeOf(r)}
 		if kind.TypeOf != nil {
 			t.typ = kind.TypeOf(request)
 		}
@@ -522,7 +539,15 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 			}
 			found := store.lookup(source)
 			if found == nil {
-				e.fail(w, http.StatusNotFound, "Task not found")
+				status := kind.SourceNotFoundStatus
+				if status == 0 {
+					status = http.StatusNotFound
+				}
+				e.fail(w, status, "Task not found")
+				return
+			}
+			if allowed := kind.SourceTypes[field]; len(allowed) > 0 && !slices.Contains(allowed, found.typ) {
+				e.fail(w, http.StatusBadRequest, field+" must name a task of type "+strings.Join(allowed, " or "))
 				return
 			}
 			if e.statusOf(found) != StatusSucceeded {
@@ -683,6 +708,7 @@ func (e *engine) get(kind Kind) http.HandlerFunc {
 		n := t.polls
 		store.mu.Unlock()
 		status := e.statusAt(t, n)
+		e.announce(r, t, status)
 		if status == StatusPending || status == StatusInProgress {
 			// Observed on every non-final poll (the final one carries no header).
 			w.Header().Set("Retry-After", e.cfg.Env.PollRetryAfterSeconds())
@@ -739,6 +765,7 @@ func (e *engine) pollBody(r *http.Request, t *task, status string) map[string]an
 		body["input"] = fakeupstream.Clone(t.request)
 	}
 	e.shapeResolution(t, body)
+	e.shapeCredits(t, body, status)
 	switch status {
 	case StatusPending:
 		body["progress"] = json.Number("0")
@@ -811,6 +838,24 @@ func (e *engine) setTaskError(body map[string]any, failure *taskError) {
 	body["task_error"] = errObject
 }
 
+// shapeCredits sets consumed_credits from the request's own options (Credits):
+// the Pricing page's price in every state that reports one (PENDING,
+// IN_PROGRESS, SUCCEEDED; the 2026-11-20 and 2026-11-23 captures show the price
+// from the first poll), 0 for a FAILED task (refunded, set by the caller) and,
+// constructed, 0 for a CANCELED one. A type the page has no price for keeps the
+// sample's value.
+func (e *engine) shapeCredits(t *task, body map[string]any, status string) {
+	credits, priced := Credits(t.typ, t.request)
+	if !priced {
+		return
+	}
+	switch status {
+	case StatusCanceled, StatusFailed:
+		credits = 0
+	}
+	body["consumed_credits"] = creditsNumber(credits)
+}
+
 func (e *engine) anyTemplate(typ string) map[string]any {
 	for _, byStatus := range e.polls {
 		for _, sample := range byStatus {
@@ -835,9 +880,16 @@ func (e *engine) shapeResolution(t *task, body map[string]any) {
 	resolution, _ := t.request["geometry_resolution"].(string)
 	_, templated := body["geometry_resolution"]
 	if resolution != "" && (templated || t.kind.EchoResolution) {
-		body["geometry_resolution"] = resolution
+		// The Text to 3D and Multi Image to 3D pages: geometry_resolution is
+		// absent for a standard task and "2k" or "4k" for an Ultra one;
+		// ultra_mode is the deprecated flag for 2k and above.
+		if resolution == "standard" {
+			delete(body, "geometry_resolution")
+		} else {
+			body["geometry_resolution"] = resolution
+		}
 		if _, has := body["ultra_mode"]; has || t.kind.EchoResolution {
-			body["ultra_mode"] = resolution != "1k"
+			body["ultra_mode"] = resolution != "standard"
 		}
 	}
 	if _, has := body["texture_resolution"]; has {

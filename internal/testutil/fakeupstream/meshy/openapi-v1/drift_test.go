@@ -109,8 +109,8 @@ func realPoll(samples *fakeupstream.Samples, typ, status string) *wirefixture.Ex
 
 func kindRequests(source, plain, rig string) map[string]map[string]any {
 	return map[string]map[string]any{
-		"/text-to-image":  {"prompt": "p"},
-		"/image-to-image": {"prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
+		"/text-to-image":  {"ai_model": "nano-banana-pro", "prompt": "p"},
+		"/image-to-image": {"ai_model": "nano-banana-pro", "prompt": "p", "reference_image_urls": []string{"https://example.test/a.png"}},
 		// The 2026-10-29 image-to-3d and multi-image-to-3d samples were taken with
 		// the cheapest texture options; the 2026-11-20 window asked for the
 		// Catalog defaults (textures on, PBR on) for image-to-3d and the

@@ -39,6 +39,8 @@ type refineRefusingUpstream struct {
 	refusals     int
 	previewPosts int
 	refinePosts  int
+	// bodies are the create bodies the Adapter sent, in order (#542).
+	bodies []map[string]any
 }
 
 func newRefineRefusingUpstream(t *testing.T, scenario fakeupstream.Scenario, refusals int) *refineRefusingUpstream {
@@ -55,6 +57,7 @@ func newRefineRefusingUpstream(t *testing.T, scenario fakeupstream.Scenario, ref
 			var body map[string]any
 			_ = json.Unmarshal(raw, &body)
 			upstream.mu.Lock()
+			upstream.bodies = append(upstream.bodies, body)
 			if body["mode"] == "refine" {
 				upstream.refinePosts++
 				if upstream.refusals > 0 {
@@ -70,6 +73,12 @@ func newRefineRefusingUpstream(t *testing.T, scenario fakeupstream.Scenario, ref
 	}))
 	t.Cleanup(upstream.server.Close)
 	return upstream
+}
+
+func (u *refineRefusingUpstream) createBodies() []map[string]any {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]map[string]any(nil), u.bodies...)
 }
 
 func (u *refineRefusingUpstream) posts() (int, int) {
