@@ -323,16 +323,12 @@ func TestEmptyToolArgumentsAreNotMalformed(t *testing.T) {
 	}
 }
 
-// A model that keeps writing broken arguments spends the reply's tool budget
-// like any other call; there is no retry loop of its own.
-func TestMalformedToolArgumentsStayWithinTheToolBudget(t *testing.T) {
+// A model that keeps writing broken arguments gets each call answered with the
+// error, like any other call, until it stops calling tools; there is no retry
+// loop of its own and, since #553, no tool call limit that cuts it short.
+func TestMalformedToolArgumentsAreAnsweredUntilTheModelStops(t *testing.T) {
 	h := newHungTurn(t, func(schema *catalog.ChatSchema) {
 		configuredRejectionTexts(schema)
-		schema.Agent.MaxToolCallsPerReply = 2
-		schema.Presentation.Messages.ToolRoundLimit = "limit {limit}"
-		schema.Presentation.Messages.ToolRoundLimitPending = "pending:"
-		schema.Presentation.Messages.ToolRoundLimitPendingItem = "* {tool} -> {intent}"
-		schema.Presentation.Messages.ToolRoundLimitPendingTool = "* {tool}"
 	})
 	tool := h.schema.Tools[0].Name
 	agent := &scriptedAgent{responses: []agents.Completion{
@@ -349,16 +345,16 @@ func TestMalformedToolArgumentsStayWithinTheToolBudget(t *testing.T) {
 	if executed := drainPrompts(tools); executed != "" {
 		t.Fatalf("a call with broken arguments ran: %q", executed)
 	}
-	// Two answered calls, then the tool-less summary round; no fifth request.
-	if len(agent.requests) != 4 || len(agent.requests[3].Tools) != 0 {
-		t.Fatalf("agent requests = %d, summary tools = %d", len(agent.requests), len(agent.requests[len(agent.requests)-1].Tools))
+	// Three answered calls, each followed by a request that keeps the tools.
+	if len(agent.requests) != 4 || len(agent.requests[3].Tools) == 0 {
+		t.Fatalf("agent requests = %d, last request tools = %d", len(agent.requests), len(agent.requests[len(agent.requests)-1].Tools))
 	}
-	wantTurnEnd(t, h.turn(command), "configured-turn-done", configuredEndReasons.ToolLimit)
+	wantTurnEnd(t, h.turn(command), "configured-turn-done", configuredEndReasons.Completed)
 	if status, closed := h.stream(command); status != "configured-done" || !closed {
 		t.Fatalf("stream status = %q, terminal event = %v", status, closed)
 	}
 	stored := h.assistant(command)
-	if !strings.Contains(stored.Content, "configured summary") || !strings.Contains(stored.Content, "limit 2") || len(stored.ToolCalls) != 2 {
+	if !strings.Contains(stored.Content, "configured summary") || len(stored.ToolCalls) != 3 {
 		t.Fatalf("stored reply = %#v", stored)
 	}
 	h.wantSessionOpen()

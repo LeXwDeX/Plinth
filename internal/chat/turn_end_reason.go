@@ -14,9 +14,6 @@ type TurnEndReason int
 const (
 	// TurnEndCompleted is a normal end.
 	TurnEndCompleted TurnEndReason = iota
-	// TurnEndToolLimit is a reply that spent its tool budget and ended with the
-	// tool-less summary round (#275).
-	TurnEndToolLimit
 	// TurnEndAwaitingApproval is a turn that left an approval card (a paid
 	// step or a production plan) for the person to decide.
 	TurnEndAwaitingApproval
@@ -37,8 +34,6 @@ func (service *Service) turnEndReasonText(reason TurnEndReason) (text string, ok
 	switch reason {
 	case TurnEndCompleted:
 		return reasons.Completed, true
-	case TurnEndToolLimit:
-		return reasons.ToolLimit, true
 	case TurnEndAwaitingApproval:
 		return reasons.AwaitingApproval, true
 	case TurnEndStopped:

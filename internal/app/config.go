@@ -67,10 +67,6 @@ type Config struct {
 	// UpstreamCapture is the opt-in sanitized recording of upstream calls
 	// (#233); the zero value (no directory) leaves it off.
 	UpstreamCapture UpstreamCaptureConfig
-	// AgentMaxToolCallsPerReply overrides the Schema's per-reply tool call
-	// budget (chat.agent.max_tool_calls_per_reply, #275); 0 keeps the Schema
-	// value.
-	AgentMaxToolCallsPerReply int
 	// ContextWindowTokens overrides the context window of the configured
 	// chat model (chat.agent.context_window_setting, #322); 0 keeps the
 	// model profile's value.
@@ -270,13 +266,6 @@ func loadConfigFromSchema(
 	}
 	if config.UpstreamCapture, err = upstreamCaptureConfig(values); err != nil {
 		return Config{}, err
-	}
-	budgetSetting := schema.Chat.Agent.MaxToolCallsPerReplySetting
-	if config.AgentMaxToolCallsPerReply, err = catalog.ParseToolCallBudget(
-		values[budgetSetting],
-		schema.Chat.Agent.MaxToolCallsPerReplyMaximum,
-	); err != nil {
-		return Config{}, fmt.Errorf("运行设置 %s 无效: %w", budgetSetting, err)
 	}
 	if setting := schema.Chat.Agent.ContextWindowSetting; setting != "" {
 		if raw := strings.TrimSpace(values[setting]); raw != "" {

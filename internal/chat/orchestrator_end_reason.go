@@ -15,16 +15,13 @@ type turnOutcome struct {
 	background bool
 	// stopped is a turn whose stop the server finalized.
 	stopped bool
-	// toolLimit is a reply whose tool budget ran out: the tool-less summary
-	// round ran (#275).
-	toolLimit bool
 }
 
 // turnEndReason tells why a finished turn ended, by one fixed priority: failed,
-// background, stopped, awaiting approval, tool limit, completed. A turn that
-// failed stays an error however it also looks; a stop or a background end is
-// what the person chose; a turn that left an approval card is waiting for the
-// person; a spent tool budget only says the reply was cut short.
+// background, stopped, awaiting approval, completed. A turn that failed stays
+// an error however it also looks; a stop or a background end is what the
+// person chose; a turn that left an approval card is waiting for the person.
+// A reply has no tool call limit (#553), so no turn ends for spending one.
 func (orchestrator *Orchestrator) turnEndReason(
 	ctx context.Context,
 	command ProcessTurn,
@@ -45,9 +42,6 @@ func (orchestrator *Orchestrator) turnEndReason(
 	}
 	if orchestrator.turnLeftApprovalCard(ctx, command, assistant) {
 		return TurnEndAwaitingApproval
-	}
-	if outcome.toolLimit {
-		return TurnEndToolLimit
 	}
 	return TurnEndCompleted
 }

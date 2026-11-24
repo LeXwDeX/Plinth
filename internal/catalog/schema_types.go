@@ -1398,9 +1398,6 @@ type PublicChatSchema struct {
 	// the prompts stay on the server.
 	ContextCompaction PublicChatContextCompaction `json:"context_compaction"`
 	AgentStatus       PublicChatAgentStatus       `json:"agent_status"`
-	// AgentLimits is the effective per-reply tool call budget the composer's
-	// counter shows (#275); chat.agent itself stays server-only.
-	AgentLimits PublicChatAgentLimits `json:"agent_limits"`
 	// ThreeViewLimits is the one three-view value the page needs to queue a
 	// refused view (#59); chat.three_view itself stays server-only.
 	ThreeViewLimits PublicChatThreeViewLimits `json:"three_view_limits"`
@@ -1527,13 +1524,6 @@ type PublicChatProductionBriefSchema struct {
 // the deployment declares no three-view group.
 type PublicChatThreeViewLimits struct {
 	QueueLimitSeconds int `json:"queue_limit_seconds"`
-}
-
-// PublicChatAgentLimits carries the one Agent value the browser may read: the
-// per-reply tool call budget in force, i.e. chat.agent.max_tool_calls_per_reply
-// after the deployment's AGENT_MAX_TOOL_CALLS_PER_REPLY override.
-type PublicChatAgentLimits struct {
-	MaxToolCallsPerReply int `json:"max_tool_calls_per_reply"`
 }
 
 // PublicChatAgentStatus tells the browser whether the deployment's Agent can
@@ -5398,23 +5388,11 @@ type ChatAgentSchema struct {
 	// (a single generation step, or a SkillRun submit batched after one) while
 	// they keep running (#137). Nil offers no such choice and the server
 	// refuses it.
-	BackgroundWait *ChatBackgroundWaitSchema `json:"background_wait,omitempty"`
-	// MaxToolCallsPerReply 限定一次 Agent 回复内实际执行的工具调用数
-	// （>=1，#275，替代按 LLM 轮数计的 max_tool_rounds）。每次新回复从 0
-	// 起算；恢复与续跑时已执行的调用计入同一次回复。一批调用超出剩余
-	// 预算时只执行到上限，其余与总结轮仍写出的调用一起列给用户确认。
-	// 每轮至少执行一个调用，所以它同时是工具循环的防死循环上限。
-	MaxToolCallsPerReply int `json:"max_tool_calls_per_reply"`
-	// MaxToolCallsPerReplySetting names the runtime setting (environment
-	// variable) that may override MaxToolCallsPerReply per deployment; an
-	// empty value keeps the Schema value. MaxToolCallsPerReplyMaximum bounds
-	// both the Schema value and the override.
-	MaxToolCallsPerReplySetting string            `json:"max_tool_calls_per_reply_setting"`
-	MaxToolCallsPerReplyMaximum int               `json:"max_tool_calls_per_reply_maximum"`
-	ScannerMaxBytes             int               `json:"scanner_max_bytes"`
-	ErrorBodyMaxBytes           int64             `json:"error_body_max_bytes"`
-	SystemPrompt                string            `json:"system_prompt"`
-	DomainContext               map[string]string `json:"domain_context"`
+	BackgroundWait    *ChatBackgroundWaitSchema `json:"background_wait,omitempty"`
+	ScannerMaxBytes   int                       `json:"scanner_max_bytes"`
+	ErrorBodyMaxBytes int64                     `json:"error_body_max_bytes"`
+	SystemPrompt      string                    `json:"system_prompt"`
+	DomainContext     map[string]string         `json:"domain_context"`
 	// PromptSections declares Agent-facing text that only applies while one of
 	// its capabilities has an enabled Offering (#115). See
 	// ChatAgentPromptSection.
@@ -6626,16 +6604,6 @@ type ChatMessageTexts struct {
 	Unauthenticated      string `json:"unauthenticated"`
 	AgentBusy            string `json:"agent_busy"`
 	TurnStopped          string `json:"turn_stopped"`
-	ToolRoundLimit       string `json:"tool_round_limit"`
-	// ToolRoundLimitPending heads the list of tool calls the model still
-	// wanted once the tool rounds ran out: the unexecuted batch and any DSML
-	// the tool-less summary round wrote anyway (#275). Each call is one line
-	// from ToolRoundLimitPendingItem ({tool}, {intent}: the call's prompt
-	// argument shortened to context.tool_prompt_preview_characters), or from
-	// ToolRoundLimitPendingTool ({tool}) when the call carries no prompt.
-	ToolRoundLimitPending     string `json:"tool_round_limit_pending"`
-	ToolRoundLimitPendingItem string `json:"tool_round_limit_pending_item"`
-	ToolRoundLimitPendingTool string `json:"tool_round_limit_pending_tool"`
 	// ToolArgumentsInvalid is the tool result of a call whose arguments the
 	// model wrote as invalid JSON: the tool did not run, and the Agent writes
 	// the call again. ToolUnavailable ({tool}) is the result of a call to a tool

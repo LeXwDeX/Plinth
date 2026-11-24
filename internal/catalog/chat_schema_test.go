@@ -423,10 +423,10 @@ func TestDefaultCatalogDeclaresParallelGeneration(t *testing.T) {
 	}
 	agent := taskCatalog.Application().Chat.Agent
 	admission := taskCatalog.Application().Runtime.HTTP.TaskAdmission.PerOwnerMaxInflightTasks
-	if agent.MaxGenerationCallsPerTurn != 20 || agent.MaxToolCallsPerReply != 100 || !agent.ParallelToolCalls ||
+	if agent.MaxGenerationCallsPerTurn != 20 || !agent.ParallelToolCalls ||
 		agent.MaxParallelGenerationSubmissions != admission || admission != 8 {
-		t.Fatalf("agent = %d/%d parallel=%v submissions=%d admission=%d", agent.MaxGenerationCallsPerTurn,
-			agent.MaxToolCallsPerReply, agent.ParallelToolCalls, agent.MaxParallelGenerationSubmissions, admission)
+		t.Fatalf("agent = %d parallel=%v submissions=%d admission=%d", agent.MaxGenerationCallsPerTurn,
+			agent.ParallelToolCalls, agent.MaxParallelGenerationSubmissions, admission)
 	}
 	if agent.SystemPrompt == "" || !strings.Contains(agent.SystemPrompt, "互不依赖的付费步骤在同一次回复里一起发出") {
 		t.Fatal("system prompt lacks the batch rule")
@@ -466,8 +466,5 @@ func TestDefaultCatalogDeclaresConceptQuantityFlow(t *testing.T) {
 		if !strings.Contains(concept.ContextTemplate, rule) {
 			t.Fatalf("concept_directions.context_template lacks %q", rule)
 		}
-	}
-	if agent := taskCatalog.Application().Chat.Agent; agent.MaxToolCallsPerReply != 100 {
-		t.Fatalf("max_tool_calls_per_reply = %d", agent.MaxToolCallsPerReply)
 	}
 }

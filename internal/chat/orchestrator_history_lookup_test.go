@@ -299,24 +299,21 @@ func TestOrchestratorAsksInsteadOfGeneratingWhenTheLookupStaysAmbiguous(t *testi
 	}
 }
 
-// The lookup calls count toward the reply's tool budget (#275) like any tool,
-// and the history bound (#279) holds within one batch: the second call of a
-// batch sees what the first one surfaced.
-func TestHistoryLookupBudgetsInterplayWithTheReplyToolBudget(t *testing.T) {
+// The history bound (#279) holds within one batch and across rounds of one
+// reply: the second call of a batch sees what the first one surfaced.
+func TestHistoryLookupBudgetHoldsAcrossTheReply(t *testing.T) {
 	rig := newLookupRig(t, []agents.Completion{
 		{ToolCalls: []agents.ToolCall{lookupCall("find-1", `{"handles":["@img2"]}`), lookupCall("find-2", `{"handles":["@img3"]}`)}},
-		{ToolCalls: []agents.ToolCall{lookupCall("find-3", `{}`), {ID: "refine-1", Name: "refine_image",
-			Arguments: []byte(`{"prompt":"p","reference_handles":["@img2"]}`)}}},
+		{ToolCalls: []agents.ToolCall{lookupCall("find-3", `{}`)}},
 		{Content: "summary"},
 	}, func(schema *catalog.ChatSchema) {
 		schema.Context.HistoryImageLookupLimit = 1
-		schema.Agent.MaxToolCallsPerReply = 3
 	})
 	session, assistant := rig.seed(t, gunmanHistory(rig.schema), "姿势和衣服")
 	stored := rig.process(t, session, assistant)
 
 	if len(stored.ToolCalls) != 3 || len(rig.gateway.submitted) != 0 {
-		t.Fatalf("the generation beyond the reply budget ran: calls=%d submitted=%d", len(stored.ToolCalls), len(rig.gateway.submitted))
+		t.Fatalf("calls=%d submitted=%d", len(stored.ToolCalls), len(rig.gateway.submitted))
 	}
 	// Call IDs are renumbered per turn; the replies keep the call order.
 	var replies []chat.HistoryLookupResult

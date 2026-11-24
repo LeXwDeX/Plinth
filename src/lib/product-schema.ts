@@ -1885,7 +1885,6 @@ export interface ChatProductSchema {
     /** #328: why a finished turn ended; absent when the Catalog declares none. */
     turn_end_reasons?: {
       completed: string;
-      tool_limit: string;
       awaiting_approval: string;
       stopped: string;
       background: string;
@@ -1989,11 +1988,6 @@ export interface ChatProductSchema {
     warning_ratio: number;
     keep_recent_rounds: number;
   };
-  /**
-   * #275: the per-reply tool call budget in force (the Schema value after the deployment's
-   * AGENT_MAX_TOOL_CALLS_PER_REPLY override). Absent on older servers: the tool call counter is hidden.
-   */
-  agent_limits?: { max_tool_calls_per_reply: number };
   /**
    * #59: how long the page keeps resubmitting a three-view view the server refused because
    * admission was full. Absent or invalid: the three-view card refuses to start a view.

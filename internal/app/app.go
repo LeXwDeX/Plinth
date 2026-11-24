@@ -357,10 +357,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	overrides.httpTransport = withUpstreamCapture(upstreamCapture, overrides.httpTransport)
 	logUpstreamCapture(logger, upstreamCapture)
-	// The per-reply tool call budget in force (#275) is one value for the
-	// orchestrator and the public Schema, so the composer's counter shows the
-	// limit the Agent is held to rather than the Schema default.
-	applicationSchema.Chat = withToolCallBudget(applicationSchema.Chat, config.AgentMaxToolCallsPerReply)
 	if err := catalog.ValidateSkillCatalogAgainstProductSchema(
 		skillCatalog,
 		applicationSchema,
@@ -1352,14 +1348,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
-	orchestratorSchema := withToolCallBudget(
-		// Prompt text for a capability without an enabled Offering is not sent
-		// to the model (#115).
-		orchestratorChatSchema(
-			applicationSchema.Chat.WithoutInactivePromptText(catalog.ActiveCapabilities(taskCatalog.List(""))),
-			llmModel,
-		),
-		config.AgentMaxToolCallsPerReply,
+	// Prompt text for a capability without an enabled Offering is not sent to
+	// the model (#115).
+	orchestratorSchema := orchestratorChatSchema(
+		applicationSchema.Chat.WithoutInactivePromptText(catalog.ActiveCapabilities(taskCatalog.List(""))),
+		llmModel,
 	)
 	// #494: the base registry is the fallback for a turn that froze no Agent
 	// configuration; it takes the same injection view as the frozen one, so the
@@ -2854,15 +2847,6 @@ func threeViewServiceOrNil(service *threeview.Service) httpapi.ThreeViews {
 		return nil
 	}
 	return service
-}
-
-// withToolCallBudget applies the deployment's per-reply tool call budget
-// (AGENT_MAX_TOOL_CALLS_PER_REPLY, #275); 0 keeps the Schema value.
-func withToolCallBudget(schema catalog.ChatSchema, override int) catalog.ChatSchema {
-	if override > 0 {
-		schema.Agent.MaxToolCallsPerReply = override
-	}
-	return schema
 }
 
 // orchestratorChatSchema turns DSML tool-call reading on only for a model

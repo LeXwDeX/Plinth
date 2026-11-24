@@ -1353,13 +1353,12 @@ func TestOrchestratorInlinesOwnedAssetURLsIntoVisionParts(t *testing.T) {
 	}
 }
 
-// B4 有界工具循环：工具结果后模型可在同一轮内继续调用工具；
+// B4 工具循环：工具结果后模型可在同一轮内继续调用工具；
 // 每轮调用 ID 唯一、调用与产物累积、续跑请求携带工具定义。
-func TestOrchestratorToolLoopContinuesWithinRoundLimit(t *testing.T) {
+func TestOrchestratorToolLoopContinues(t *testing.T) {
 	repository := newMemoryChatRepository()
 	service := newChatService(t, repository)
 	schema := configuredChatSchema(t)
-	schema.Agent.MaxToolCallsPerReply = 2
 	agent := &scriptedAgent{responses: []agents.Completion{
 		{ToolCalls: []agents.ToolCall{{
 			ID:        "gateway-1",
@@ -1427,81 +1426,6 @@ func TestOrchestratorToolLoopContinuesWithinRoundLimit(t *testing.T) {
 	// 续跑请求必须携带工具定义，模型才能在同意获批后继续调用。
 	if len(agent.requests[1].Tools) == 0 {
 		t.Fatal("follow-up request dropped tools")
-	}
-}
-
-// 达到轮数上限后不再执行后续工具调用：未执行调用从消息移除，
-// 内容折叠为 Schema 声明的上限提示。
-func TestOrchestratorToolLoopStopsAtRoundLimit(t *testing.T) {
-	repository := newMemoryChatRepository()
-	service := newChatService(t, repository)
-	schema := configuredChatSchema(t)
-	schema.Agent.MaxToolCallsPerReply = 1
-	schema.Presentation.Messages.ToolRoundLimit = "configured round limit"
-	agent := &scriptedAgent{responses: []agents.Completion{
-		{ToolCalls: []agents.ToolCall{{
-			ID:        "gateway-1",
-			Name:      schema.Tools[0].Name,
-			Arguments: []byte(`{"prompt":"one"}`),
-		}}},
-		{ToolCalls: []agents.ToolCall{{
-			ID:        "gateway-2",
-			Name:      schema.Tools[0].Name,
-			Arguments: []byte(`{"prompt":"two"}`),
-		}}},
-		// AGT-04：命中轮数上限后的无工具总结调用。
-		{Content: "configured summary of failures"},
-	}}
-	orchestrator, err := chat.NewOrchestrator(chat.OrchestratorConfig{
-		Service: service,
-		Schema:  schema,
-		Model:   "configured-model",
-		Agent:   agent,
-		Tools:   scriptedToolExecutor{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	assistant, err := service.StartTurn(ctx, chat.StartTurn{
-		OwnerID:   "owner-a",
-		SessionID: session.ID,
-		Content:   "draw once",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := orchestrator.Process(ctx, chat.ProcessTurn{
-		OwnerID:            "owner-a",
-		SessionID:          session.ID,
-		AssistantMessageID: assistant.ID,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	messages, err := service.ListMessages(ctx, "owner-a", session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stored := messages[1]
-	if len(stored.ToolCalls) != 1 {
-		t.Fatalf("tool calls = %#v", stored.ToolCalls)
-	}
-	if !strings.Contains(stored.Content, "configured round limit") {
-		t.Fatalf("content = %q", stored.Content)
-	}
-	if !strings.Contains(stored.Content, "configured summary of failures") {
-		t.Fatalf("summary missing from content = %q", stored.Content)
-	}
-	if len(agent.requests) != 3 {
-		t.Fatalf("agent requests = %d", len(agent.requests))
-	}
-	// 总结请求不得携带工具定义：模型不能再发起会超限的调用。
-	if len(agent.requests[2].Tools) != 0 {
-		t.Fatalf("summary request tools = %#v", agent.requests[2].Tools)
 	}
 }
 
@@ -1717,10 +1641,9 @@ func TestOrchestratorCancelDoesNotPoisonNextTurn(t *testing.T) {
 }
 
 // 续跑请求必须累积此前各轮的 assistant 调用与 tool 回执（AGT-02），
-// 否则模型每轮失忆、重复调用同一工具直到耗尽轮数上限。
+// 否则模型每轮失忆、反复调用同一工具。
 func TestOrchestratorFollowUpRequestsAccumulateToolRounds(t *testing.T) {
 	schema := configuredChatSchema(t)
-	schema.Agent.MaxToolCallsPerReply = 3
 	toolCall := agents.ToolCall{
 		Name:      schema.Tools[0].Name,
 		Arguments: []byte(`{"prompt":"paint"}`),
@@ -1917,7 +1840,6 @@ func (executor *bindingOnlyToolExecutor) Execute(
 // reasoning of every earlier round, while the user-visible reply never does.
 func TestOrchestratorFollowUpCarriesReasoningContent(t *testing.T) {
 	schema := configuredChatSchema(t)
-	schema.Agent.MaxToolCallsPerReply = 3
 	toolCall := agents.ToolCall{
 		Name:      schema.Tools[0].Name,
 		Arguments: []byte(`{"prompt":"paint"}`),

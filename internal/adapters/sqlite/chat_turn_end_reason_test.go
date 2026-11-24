@@ -13,7 +13,6 @@ import (
 
 var endReasonStrings = catalog.ChatTurnEndReasonsSchema{
 	Completed:        "configured-end-completed",
-	ToolLimit:        "configured-end-tool-limit",
 	AwaitingApproval: "configured-end-awaiting-approval",
 	Stopped:          "configured-end-stopped",
 	Background:       "configured-end-background",
@@ -69,7 +68,6 @@ func TestSQLiteTurnEndReasonRoundTripsThroughEveryRead(t *testing.T) {
 		reason string
 	}{
 		{chat.TurnEndCompleted, "turn-done", endReasonStrings.Completed},
-		{chat.TurnEndToolLimit, "turn-done", endReasonStrings.ToolLimit},
 		{chat.TurnEndAwaitingApproval, "turn-done", endReasonStrings.AwaitingApproval},
 		{chat.TurnEndStopped, "turn-done", endReasonStrings.Stopped},
 		{chat.TurnEndBackground, "turn-done", endReasonStrings.Background},
@@ -137,7 +135,7 @@ func TestSQLiteTurnEndReasonIsEmptyWithoutDeclaredReasons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.FinishTurnWithReason(ctx, assistant.ID, chat.TurnEndToolLimit); err != nil {
+	if err := service.FinishTurnWithReason(ctx, assistant.ID, chat.TurnEndAwaitingApproval); err != nil {
 		t.Fatal(err)
 	}
 	turn, err := service.GetTurn(ctx, "owner-a", session.ID, assistant.ID)

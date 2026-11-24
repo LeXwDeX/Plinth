@@ -1409,9 +1409,6 @@ func (orchestrator *Orchestrator) Process(
 	// backgroundFinalized means the turn ended with its Tasks still running
 	// (#137); a stop requested later must not cancel them.
 	backgroundFinalized := false
-	// toolLimitReached means the reply spent its tool budget and the tool-less
-	// summary round ran; it only feeds the turn's end reason (#328).
-	toolLimitReached := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1556,7 +1553,6 @@ func (orchestrator *Orchestrator) Process(
 					failed:     failedTurn,
 					background: backgroundFinalized,
 					stopped:    stopFinalized,
-					toolLimit:  toolLimitReached,
 				}),
 			),
 		)
@@ -1738,71 +1734,8 @@ func (orchestrator *Orchestrator) Process(
 			return err
 		}
 	}
-	maxToolCalls := max(1, orchestrator.schema.Agent.MaxToolCallsPerReply)
-	// summarizeAtLimit runs the tool-less summary round once the reply's tool
-	// budget is spent (AGT-04, #275). DSML the model still writes is stripped,
-	// never streamed or stored; the unexecuted calls are listed with Schema
-	// texts. exit reports that Process must return err right away.
-	summarizeAtLimit := func(base agents.Request, pendingCalls []agents.ToolCall) (bool, error) {
-		toolLimitReached = true
-		pendingCalls = append([]agents.ToolCall(nil), pendingCalls...)
-		summaryRequest := base
-		summaryRequest.Tools = nil
-		summaryFilter := dsml.NewFilter(dsmlSchema)
-		summaryRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		summary, summaryRequest, summaryErr := orchestrator.streamAgent(
-			processCtx,
-			command,
-			summaryRequest,
-			func(delta agents.Delta) error {
-				return summaryRound.receive(delta, summaryFilter)
-			},
-		)
-		if summaryErr == nil {
-			orchestrator.recordUsage(ctx, command, summaryRequest.Model, summary.Usage, summaryRequest)
-			summaryErr = summaryFilter.Flush(summaryRound.emitText)
-		}
-		if summaryErr != nil {
-			if orchestrator.turnCanceled(turnKey) {
-				return true, finalizeStop()
-			}
-			if ctx.Err() != nil {
-				// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
-				return true, nil
-			}
-			if orchestrator.turnAbandoned(ctx, command) {
-				return true, nil
-			}
-			orchestrator.logger.Warn(
-				"工具预算用完后的总结请求失败",
-				"session_id", command.SessionID,
-				"assistant_message_id", command.AssistantMessageID,
-				"error", summaryErr,
-			)
-		}
-		if summary.Content != "" || len(summary.ToolCalls) > 0 {
-			parsedSummary := dsml.Parse(
-				dsmlSchema,
-				summary.Content,
-			)
-			if strings.TrimSpace(parsedSummary.Content) != "" {
-				assistant.Content += "\n" + parsedSummary.Content
-			}
-			pendingCalls = append(pendingCalls, parsedSummary.ToolCalls...)
-			pendingCalls = append(pendingCalls, summary.ToolCalls...)
-		}
-		assistant.Content += "\n" + strings.ReplaceAll(
-			orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.ToolRoundLimit),
-			"{limit}",
-			strconv.Itoa(maxToolCalls),
-		)
-		if pending := orchestrator.pendingCallsText(pendingCalls); pending != "" {
-			assistant.Content += "\n" + pending
-		}
-		return false, nil
-	}
-	// B4 有界工具循环：模型（例如同意获批后）可在同一轮内继续调用
-	// 工具。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
+	// B4 工具循环：模型（例如同意获批后）可在同一轮内继续调用
+	// 工具，调用次数不设上限（#553），模型不再调用工具时本轮结束。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
 	// 累积在 assistant 消息上（停止可取消全部在飞任务）。
 	// 恢复路径的 completion 来自已落库计划（ID 已定型、内容已剥离
 	// DSML），标记 parsed 跳过重新解析与改写。
@@ -1814,8 +1747,7 @@ func (orchestrator *Orchestrator) Process(
 	// AGT-12 审查 R3：恢复重放后，新 LLM 轮的调用 ID 以落库调用中的
 	// 最大轮次为偏移编号（effectiveRound），避免与已落库的同名轮次
 	// 调用 ID 撞车（严格上游 tool_calls 配对 400，或幂等键静默回放
-	// 旧任务）。循环控制仍从 0 起：round=0 保留“首次赋值”语义；
-	// 工具预算按本次回复已执行的调用数计（#275），不随续跑重置。
+	// 旧任务）。循环控制仍从 0 起：round=0 保留“首次赋值”语义。
 	resumeRound := 0
 	if len(assistant.ToolCalls) > 0 {
 		resumeRound = maxRoundFromCalls(assistant.ToolCalls) + 1
@@ -1897,29 +1829,9 @@ func (orchestrator *Orchestrator) Process(
 		if len(completion.ToolCalls) == 0 {
 			break
 		}
-		// #275：工具预算按本次回复实际执行的调用数计（Schema
-		// chat.agent.max_tool_calls_per_reply，可由运行设置覆盖），每次新
-		// 回复从 0 起算。assistant.ToolCalls 只保留已执行或正要执行的调用，
-		// 恢复/续跑时已执行的调用仍计入同一次回复的预算。
+		// executedCalls is how many calls the reply ran before this round;
+		// the round's own calls leave the reply if it cannot be saved.
 		executedCalls := len(assistant.ToolCalls) - len(completion.ToolCalls)
-		remainingCalls := maxToolCalls - executedCalls
-		if remainingCalls <= 0 {
-			// 预算用完：不再执行本批调用，从消息上移除；进入无工具的
-			// 总结轮，把已执行的失败/结果归纳给用户（AGT-04）。
-			assistant.ToolCalls = assistant.ToolCalls[:executedCalls]
-			if exit, err := summarizeAtLimit(request, completion.ToolCalls); exit {
-				return err
-			}
-			break
-		}
-		var overflowCalls []agents.ToolCall
-		if len(completion.ToolCalls) > remainingCalls {
-			// 本批超出剩余预算：只执行前 remainingCalls 个，其余在总结轮
-			// 列给用户确认。
-			overflowCalls = append([]agents.ToolCall(nil), completion.ToolCalls[remainingCalls:]...)
-			completion.ToolCalls = completion.ToolCalls[:remainingCalls]
-			assistant.ToolCalls = assistant.ToolCalls[:executedCalls+remainingCalls]
-		}
 		if !checkpointResuming || round != startRound {
 			// The calls answered without running stay listed for the whole
 			// turn (#501): a stop in a later round still reconciles them.
@@ -2083,17 +1995,6 @@ func (orchestrator *Orchestrator) Process(
 				"assistant_message_id", command.AssistantMessageID,
 				"error", toolErr,
 			)
-		}
-		if len(overflowCalls) > 0 {
-			// 本批已执行到预算上限：带上已执行结果直接进入总结轮。
-			base := request
-			if len(toolContent) > 0 {
-				base = orchestrator.followUpRequest(request, completion, toolContent)
-			}
-			if exit, err := summarizeAtLimit(base, overflowCalls); exit {
-				return err
-			}
-			break
 		}
 		if len(toolContent) == 0 {
 			break
@@ -2742,46 +2643,6 @@ func (orchestrator *Orchestrator) visionCandidate(value string) bool {
 	return visionSafeImage(value) || orchestrator.visionInline != nil
 }
 
-// pendingCallsText lists, with Schema texts, the tool calls the model still
-// wanted once the tool rounds ran out (#275): one line per distinct call with
-// the tool name and its prompt argument as the intent, never the raw markup.
-func (orchestrator *Orchestrator) pendingCallsText(calls []agents.ToolCall) string {
-	messages := orchestrator.schema.Presentation.Messages
-	maximum := orchestrator.schema.Context.ToolPromptPreviewChars
-	lines := make([]string, 0, len(calls))
-	seen := make(map[string]struct{}, len(calls))
-	for _, call := range calls {
-		name := truncateRunes(strings.TrimSpace(call.Name), maximum)
-		if name == "" {
-			continue
-		}
-		var arguments map[string]json.RawMessage
-		_ = json.Unmarshal(call.Arguments, &arguments)
-		var intent string
-		_ = json.Unmarshal(
-			arguments[orchestrator.schema.Context.ToolPromptArgument],
-			&intent,
-		)
-		intent = strings.TrimSpace(
-			truncateRunes(strings.Join(strings.Fields(intent), " "), maximum),
-		)
-		line := strings.ReplaceAll(messages.ToolRoundLimitPendingTool, "{tool}", name)
-		if intent != "" {
-			line = strings.NewReplacer("{tool}", name, "{intent}", intent).
-				Replace(messages.ToolRoundLimitPendingItem)
-		}
-		if _, duplicate := seen[line]; duplicate {
-			continue
-		}
-		seen[line] = struct{}{}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return messages.ToolRoundLimitPending + "\n" + strings.Join(lines, "\n")
-}
-
 func truncateRunes(value string, maximum int) string {
 	if maximum <= 0 || utf8.RuneCountInString(value) <= maximum {
 		return value
@@ -3108,8 +2969,8 @@ func (orchestrator *Orchestrator) executeTools(
 			// #378: the model wrote this call's arguments as invalid JSON, so
 			// the tool does not run; the error is its result and the model
 			// writes the call again. This is an ordinary tool result, not a
-			// failed tool, and it counts against the reply's tool budget like
-			// any call. Like every call that is answered instead of
+			// failed tool, and it counts as a call of the reply like any
+			// call. Like every call that is answered instead of
 			// submitted, it waits its turn behind a call still in flight. It
 			// was logged when the model wrote it (vetToolArguments).
 			if len(inflight) > 0 {
@@ -3588,9 +3449,8 @@ func (orchestrator *Orchestrator) followUpRequest(
 	// that requires the field on a tool-call message keeps a legal request.
 	filterReasoning(messages, agents.ForRequest(base))
 	base.Messages = messages
-	// B4 有界工具循环：续跑请求保留工具定义，模型可在同一轮内
-	//（例如同意获批后）继续调用生成工具；调用次数上限由
-	// chat.agent.max_tool_calls_per_reply 约束（#275）。
+	// B4 工具循环：续跑请求保留工具定义，模型可在同一轮内
+	//（例如同意获批后）继续调用生成工具；调用次数不设上限（#553）。
 	return base
 }
 
