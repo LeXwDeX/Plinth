@@ -1250,7 +1250,7 @@ describe('AssetListCard run controls (#328)', () => {
     expect(screen.queryByTestId('asset-list-run-controls')).toBeNull();
   });
 
-  it('skips a todo or working item with the item version, but not in a stopped run', async () => {
+  it('skips a todo or working item with the item version, and only a working item in a stopped run', async () => {
     const skipItem = vi.fn(async () => item({ state: 'skipped' }));
     const { onRunChanged } = renderCard({
       detail: confirmed(run({ status: 'running' }), {
@@ -1274,6 +1274,33 @@ describe('AssetListCard run controls (#328)', () => {
       detail: confirmed(run({ status: 'stopped' }), { items: [item({ id: 'item_todo', state: 'todo' })] }),
     });
     expect(screen.queryByTestId('asset-list-item-skip-0')).toBeNull();
+
+    // #508: stopping leaves an in-flight item working; skip is how the person
+    // releases it, so the stopped run still offers it for that item.
+    cleanup();
+    const stoppedSkip = vi.fn(async () => item({ state: 'skipped' }));
+    renderCard({
+      detail: confirmed(run({ status: 'stopped' }), {
+        items: [item({ id: 'item_stuck', state: 'working', version: 3 })],
+      }),
+      skipItem: stoppedSkip,
+    });
+    fireEvent.click(screen.getByTestId('asset-list-item-skip-0'));
+    await waitFor(() => expect(stoppedSkip).toHaveBeenCalledWith('proj', 'listid', 'item_stuck', 3));
+  });
+
+  it('marks an item whose turn waits for an approval card (#508)', () => {
+    renderCard({
+      detail: confirmed(run({ status: 'running' }), {
+        items: [
+          item({ id: 'item_card', state: 'working', block: 'awaiting_approval' }),
+          item({ id: 'item_plain', state: 'working' }),
+        ],
+      }),
+    });
+    const marks = screen.getAllByTestId('asset-list-item-awaiting-approval');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].textContent).toBe('等待审批');
   });
 
   it('shows the Schema translation of a refused control', async () => {

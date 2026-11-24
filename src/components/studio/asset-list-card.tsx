@@ -253,8 +253,12 @@ export function AssetListCard({
   const canResume = detail.status === 'confirmed' && !expired && run?.status === 'paused';
   const canStop = detail.status === 'confirmed' && !expired && Boolean(run) && !runIsTerminal(run);
   const showRunControls = canStart || canPause || canResume || canStop;
+  // #508: stopping a run leaves an in-flight item working (its report is
+  // refused once the run stopped), so a stopped run still offers skip for a
+  // working item; that is the person's way to release it and, with it, the
+  // list's replacement. A todo item of a stopped run is never claimed again.
   const canSkip = (item: AssetListItem) =>
-    Boolean(run) && run?.status !== 'stopped' && (item.state === 'todo' || item.state === 'working');
+    Boolean(run) && (item.state === 'working' || (item.state === 'todo' && run?.status !== 'stopped'));
   // A server detail that names a Schema message is shown in the active locale;
   // anything else falls back to the card's own failure copy.
   const failureMessage = (failure: unknown, fallback = 'ui.asset_list.decide_failed') => {
@@ -1081,6 +1085,11 @@ export function AssetListCard({
                   <span className="min-w-0 text-muted-foreground [overflow-wrap:anywhere]">{item.description}</span>
                 ) : null}
                 <span className="text-muted-foreground">{itemStateLabel(item.state)}</span>
+                {item.block === 'awaiting_approval' ? (
+                  <span className="text-warning" data-testid="asset-list-item-awaiting-approval">
+                    {text('ui.asset_list.item_awaiting_approval')}
+                  </span>
+                ) : null}
                 <span className="tabular-nums text-muted-foreground">
                   {formatSchemaText(text('ui.asset_list.planned_steps'), { steps: item.planned_step_count })}
                 </span>
