@@ -25,6 +25,8 @@ export interface AgentMCPPreset { available: boolean; id: string; name: string; 
 export interface AgentConfigurationSnapshot {
   revision: string;
   configuration: AgentConfiguration;
+  /** True when the published version froze its own prompts instead of following the Schema default (#525). */
+  prompt_customized?: boolean;
   presets: AgentConfiguration;
   tools: AgentToolSummary[];
   mcp_presets: AgentMCPPreset[];
@@ -71,6 +73,26 @@ export function createAgentConfigurationClient(schema: ProductSchema, fetcher: t
       return request<AgentEffectiveConfiguration>(`${routes.effective}?${query}`, undefined, signal);
     },
   };
+}
+
+/**
+ * The draft with the system prompt and every domain context set back to the
+ * Schema defaults. Publishing it makes the version follow the defaults again,
+ * so later releases improve the prompts without a republish (#525).
+ */
+export function withDefaultPrompts(draft: AgentConfiguration, presets: AgentConfiguration): AgentConfiguration {
+  const domainContext = { ...draft.domain_context };
+  for (const key of Object.keys(domainContext)) {
+    if (key in presets.domain_context) domainContext[key] = presets.domain_context[key];
+  }
+  return { ...draft, system_prompt: presets.system_prompt, domain_context: domainContext };
+}
+
+/** True when the draft's prompts already equal the Schema defaults. */
+export function promptsAtDefault(draft: AgentConfiguration, presets: AgentConfiguration): boolean {
+  const reset = withDefaultPrompts(draft, presets);
+  return reset.system_prompt === draft.system_prompt
+    && Object.keys(draft.domain_context).every(key => reset.domain_context[key] === draft.domain_context[key]);
 }
 
 /** A saved selection stays visible when unavailable; sending must stop until cleared. */

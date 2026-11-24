@@ -10,9 +10,11 @@ read the migrated database back without writing to it.
 Before the start it publishes, in the copy only, one Agent configuration version
 in the shape a v1.8.0 build stored (#500, #525): a frozen tool list that still
 enables the tools the Catalog has retired and has one tool turned off by an
-administrator. The candidate must start over it; its startup reconcile must
-publish a version without the retired tools, in the current format, that turns
-off exactly the one tool (a tool added after v1.8.0 must not be turned off).
+administrator, and the default prompts of that release. The candidate must start
+over it; its startup reconcile must publish a version without the retired tools,
+in the current format, that turns off exactly the one tool (a tool added after
+v1.8.0 must not be turned off) and leaves the prompts following the default
+instead of freezing the old text.
 
 It never writes to the source and never talks to a running instance. By default
 it refuses to read a path that belongs to an environment (a release root from the
@@ -76,6 +78,19 @@ DRILL_DISABLED_TOOL = "create_motion_clip"
 DRILL_ADDED_TOOL = "analyze_model"
 # The tool names a version without the current format speaks for: the v1.8.0 set.
 LEGACY_DEFAULTS = Path(__file__).resolve().parent.parent / "internal" / "agentconfiguration" / "legacy_defaults.json"
+# The default prompts v1.8.0 shipped, kept as the Go tests' fixtures.
+V180_PROMPT_DIR = Path(__file__).resolve().parent.parent / "internal" / "agentconfiguration" / "testdata"
+FOLLOWED_PROMPT_PARTS = ["domain_context.image", "domain_context.model-3d", "system_prompt"]
+
+
+def v180_default_prompts():
+    try:
+        system = (V180_PROMPT_DIR / "v1.8.0-system-prompt.txt").read_text(encoding="utf-8")
+        contexts = {key: (V180_PROMPT_DIR / ("v1.8.0-domain-%s.txt" % key)).read_text(encoding="utf-8")
+                    for key in ("image", "model-3d")}
+    except OSError as error:
+        raise DrillError("读不到 v1.8.0 默认提示词 %s：%s" % (V180_PROMPT_DIR, error))
+    return system, contexts
 
 
 def legacy_tool_baseline():
@@ -151,6 +166,7 @@ def seed_legacy_agent_configuration(db_path):
     off. Returns the seeded revision, or None and why it could not be seeded.
     """
     baseline = legacy_tool_baseline()
+    system_prompt, domain_context = v180_default_prompts()
     try:
         connection = sqlite3.connect(str(db_path))
     except sqlite3.Error as error:
@@ -171,7 +187,8 @@ def seed_legacy_agent_configuration(db_path):
                 "system_prompt": "升级演练（#500）", "domain_context": {}, "skills": [],
                 "enabled_tool_names": [], "enabled_mcp_preset_ids": []}
         configuration["enabled_tool_names"] = [name for name in baseline if name != DRILL_DISABLED_TOOL]
-        for key in ("format", "disabled_tool_names"):
+        configuration["system_prompt"], configuration["domain_context"] = system_prompt, domain_context
+        for key in ("format", "disabled_tool_names", "follows_schema"):
             configuration.pop(key, None)
         created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         connection.execute(
@@ -183,7 +200,7 @@ def seed_legacy_agent_configuration(db_path):
         raise DrillError("向演练副本注入旧 Agent 配置失败：%s" % error)
     finally:
         connection.close()
-    return revision + 1, "基于 revision %d 注入 revision %d：v1.8.0 工具清单（含 %s），关闭 %s" % (
+    return revision + 1, "基于 revision %d 注入 revision %d：v1.8.0 工具清单（含 %s），关闭 %s，v1.8.0 默认提示词" % (
         revision, revision + 1, "、".join(RETIRED_AGENT_TOOLS), DRILL_DISABLED_TOOL)
 
 
@@ -220,6 +237,11 @@ def check_legacy_agent_configuration(db_path, seeded):
                     "revision %d 为 format 2，只关闭 %s，其余（含 %s）默认开启" % (latest[0], DRILL_DISABLED_TOOL, DRILL_ADDED_TOOL)
                     if converted else "revision %d 的 format=%r、disabled_tool_names=%r，应为 format 2 且只含 %s"
                     % (latest[0], stored.get("format"), disabled, DRILL_DISABLED_TOOL)))
+    followed = sorted(stored.get("follows_schema") or [])
+    results.append(("v1.8.0 配置提示词跟随", followed == FOLLOWED_PROMPT_PARTS,
+                    "revision %d 的系统提示词与两个领域上下文都跟随默认" % latest[0]
+                    if followed == FOLLOWED_PROMPT_PARTS else "revision %d 的 follows_schema=%r，应为 %r"
+                    % (latest[0], followed, FOLLOWED_PROMPT_PARTS)))
     return results
 
 

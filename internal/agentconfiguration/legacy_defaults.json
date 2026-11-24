@@ -42,5 +42,28 @@
   "create_three_view",
   "set_visual_anchor",
   "list_project_assets"
- ]
+ ],
+ "note_prompts": "Default Agent prompts shipped from v1.7.0 up to the release that introduced format 2 (#525): sha256 of every default text with each subset of prompt sections stripped. A stored row without a format marker is treated as following the default only when its text matches one of these; anything else is a customization and stays frozen.",
+ "default_text_fingerprints": {
+  "domain_context.image": [
+   "6d1d2c778998b6d99c7189a3c17af31138343c5ae2452a4a3bea50a7f1d0425e"
+  ],
+  "domain_context.model-3d": [
+   "e55ec89f0c8702f0972c97e6a878f838914e9457cb8a03fbb1779087801ff40a"
+  ],
+  "system_prompt": [
+   "0313fb2aaeb764b40cde56864d0320ffe0029288cc1a46012c53eac2bb71013a",
+   "1de8c71dba29c30123b424644d677671f84a4330fe6016ddaaad2989cffb8137",
+   "4da790f4537d90a45695cd2cef5767b9033f6b04b885fb12cc50ed167dbce3f2",
+   "5449998f31fdddc5ae396f329351f78fa34dcbbc5ffc1832a6ade07315e1af0a",
+   "581b867129b51e4b327264ad0c3be9809ae845891f1192a58739037fd04ed39e",
+   "5c34dcbdad51f821b73725c1af6b8ffacda384bd9eb7eb15b9bbb7f9f6f14f58",
+   "77888c4c147109ef1cafe8cc957622d321d5e153548332d5b6802464ab18b70d",
+   "7937a1c5ffe7b1d976a8ac5debb6c4915c423a80e47e63f4249fdcba6ea1fbb1",
+   "7e5f8cba13c303a7e9a65e82d2d6c0e812cdab56c1197db3d91314aa7a113ce8",
+   "7f87e596d9f9f2cfb5e1e04b2735b6a422a90ab994f2eb89f0a8622acb59221e",
+   "86822afa99232b1237c6cc185287f00b19289f13321b0e51c467d43dac20acff",
+   "fe097a76da38edb44e3f406d1922fea9257a7866164b92d9aec8f17721e22ea2"
+  ]
+ }
 }

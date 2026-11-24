@@ -3,8 +3,10 @@ package agentconfiguration_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -327,5 +329,282 @@ func TestSnapshotForOwnerRevisionTracksWhatTheVersionResolvesTo(t *testing.T) {
 	again, err := f.service.SnapshotForOwner(ctx, "owner-a")
 	if err != nil || again.Revision != before.Revision {
 		t.Fatalf("the revision is not stable for the same content: %s != %s (%v)", again.Revision, before.Revision, err)
+	}
+}
+
+// ---- prompts (#525 slice 2) ----
+
+func readTestdata(t *testing.T, name string) string {
+	t.Helper()
+	text, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(text)
+}
+
+// openUpgraded returns a service over the same store whose Schema ships a
+// different default prompt, as a later release would.
+func (f followFixture) openUpgraded(t *testing.T) (*agentconfiguration.Service, catalog.ApplicationSchema) {
+	t.Helper()
+	skills, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	application := f.product.Application()
+	application.Chat.Agent.SystemPrompt = application.Chat.Agent.SystemPrompt + "\n- 升级后新增的一条规则。"
+	contexts := map[string]string{}
+	for key, text := range application.Chat.Agent.DomainContext {
+		contexts[key] = text + "（升级后改写）"
+	}
+	application.Chat.Agent.DomainContext = contexts
+	service, err := agentconfiguration.New(f.repo, application, skills, f.product.List(""), agentconfiguration.WithRetiredBuiltInSkills())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, application
+}
+
+// storeV180Prompts writes a version the way v1.8.0 stored a configuration
+// nobody customized: the release's default texts, stripped of the sections of
+// capabilities without an enabled Offering, as the service stored them.
+func (f followFixture) storeV180Prompts(t *testing.T, mutate func(*agentconfiguration.Configuration), source string) agentconfiguration.Version {
+	t.Helper()
+	ctx := context.Background()
+	base, err := f.service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := f.product.Application().Chat
+	active := catalog.ActiveCapabilities(f.product.List(""))
+	strip := func(text string) string {
+		return catalog.StripInactivePromptSections(text, chat.Agent.PromptSections, active)
+	}
+	legacy := base.Configuration
+	legacy.EnabledToolNames = slices.Clone(v180Tools)
+	legacy.SystemPrompt = strip(readTestdata(t, "v1.8.0-system-prompt.txt"))
+	legacy.DomainContext = map[string]string{
+		"image":    strip(readTestdata(t, "v1.8.0-domain-image.txt")),
+		"model-3d": strip(readTestdata(t, "v1.8.0-domain-model-3d.txt")),
+	}
+	if mutate != nil {
+		mutate(&legacy)
+	}
+	stored, err := f.repo.AppendAgentConfiguration(ctx, base.Revision, agentconfiguration.Version{Snapshot: agentconfiguration.Snapshot{Configuration: legacy}, CreatedAt: time.Now().UTC(), ActorID: "admin", Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stored
+}
+
+func TestV180DefaultPromptsFollowTheCurrentSchemaDefault(t *testing.T) {
+	ctx := context.Background()
+	f := newFollowFixture(t)
+	defaults := f.service.Effective(agentconfiguration.Configuration{SystemPrompt: f.product.Application().Chat.Agent.SystemPrompt, DomainContext: f.product.Application().Chat.Agent.DomainContext})
+	old := readTestdata(t, "v1.8.0-system-prompt.txt")
+	if defaults.SystemPrompt == old {
+		t.Fatal("test setup: the Schema default did not change since v1.8.0")
+	}
+	f.storeV180Prompts(t, nil, "publish")
+
+	management, err := f.service.Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if management.PromptCustomized {
+		t.Fatal("a version holding exactly the v1.8.0 default was read as customized")
+	}
+	if management.Configuration.SystemPrompt != defaults.SystemPrompt || management.Configuration.SystemPrompt == old {
+		t.Fatal("the v1.8.0 default prompt did not become the current default")
+	}
+	for key, text := range defaults.DomainContext {
+		if management.Configuration.DomainContext[key] != text {
+			t.Fatalf("domain context %s did not follow the default", key)
+		}
+	}
+	owner, err := f.service.SnapshotForOwner(ctx, "owner-a")
+	if err != nil || owner.Configuration.SystemPrompt != defaults.SystemPrompt {
+		t.Fatalf("a turn does not get the current default prompt: %v", err)
+	}
+
+	// The stored text is not what the turn gets; republishing it as shown
+	// keeps it following, and a later Schema default reaches it.
+	published, err := f.service.Publish(ctx, management.Revision, "admin", "publish", management.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := f.repo.AgentConfigurationVersion(ctx, published.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(row.Configuration.FollowsSchema, []string{"domain_context.image", "domain_context.model-3d", "system_prompt"}) {
+		t.Fatalf("follows_schema = %v", row.Configuration.FollowsSchema)
+	}
+	upgraded, application := f.openUpgraded(t)
+	after, err := upgraded.Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.PromptCustomized || after.Configuration.SystemPrompt != upgraded.Effective(agentconfiguration.Configuration{SystemPrompt: application.Chat.Agent.SystemPrompt}).SystemPrompt || after.Configuration.SystemPrompt == defaults.SystemPrompt {
+		t.Fatal("an upgrade did not reach the version that follows the default")
+	}
+	// The same stored revision names different content after the upgrade.
+	before, err := f.service.SnapshotForOwner(ctx, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterOwner, err := upgraded.SnapshotForOwner(ctx, "owner-a")
+	if err != nil || before.Revision == afterOwner.Revision {
+		t.Fatalf("the revision did not change with the prompt: %s %v", afterOwner.Revision, err)
+	}
+	// Nothing was published or rewritten by reading.
+	latest, err := f.repo.LatestAgentConfiguration(ctx)
+	if err != nil || latest.Revision != published.Revision {
+		t.Fatalf("reading published a version: %s %v", latest.Revision, err)
+	}
+}
+
+func TestCustomizedPromptStaysFrozenAcrossAnUpgrade(t *testing.T) {
+	ctx := context.Background()
+	f := newFollowFixture(t)
+	chat := f.product.Application().Chat
+	custom := catalog.StripInactivePromptSections(readTestdata(t, "v1.8.0-system-prompt.txt"), chat.Agent.PromptSections, catalog.ActiveCapabilities(f.product.List(""))) + "\n- 我们工作室的额外规则。"
+	f.storeV180Prompts(t, func(c *agentconfiguration.Configuration) { c.SystemPrompt = custom }, "publish")
+	upgraded, _ := f.openUpgraded(t)
+	for label, service := range map[string]*agentconfiguration.Service{"current": f.service, "upgraded": upgraded} {
+		management, err := service.Management(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !management.PromptCustomized || management.Configuration.SystemPrompt != custom {
+			t.Fatalf("%s: a customized system prompt changed or was read as default (customized=%v)", label, management.PromptCustomized)
+		}
+		// The domain contexts were never touched, so they still follow.
+		if label == "upgraded" && !strings.HasSuffix(management.Configuration.DomainContext["model-3d"], "（升级后改写）") {
+			t.Fatal("an uncustomized domain context did not follow next to a customized system prompt")
+		}
+	}
+
+	// Publishing keeps the customization; returning to the default follows again.
+	management, err := f.service.Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := f.service.Publish(ctx, management.Revision, "admin", "publish", management.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := f.repo.AgentConfigurationVersion(ctx, kept.Revision)
+	if err != nil || slices.Contains(row.Configuration.FollowsSchema, "system_prompt") {
+		t.Fatalf("a customized prompt was stored as following: %v %v", row.Configuration.FollowsSchema, err)
+	}
+	back := management.Configuration
+	back.SystemPrompt = management.Presets.SystemPrompt
+	restored, err := f.service.Publish(ctx, kept.Revision, "admin", "publish", back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := upgraded.Management(ctx)
+	if err != nil || restored.Revision != after.Revision || after.PromptCustomized {
+		t.Fatalf("submitting the default prompt did not make the version follow again: %v %v", after.PromptCustomized, err)
+	}
+}
+
+func TestUnknownOldPromptTextIsCustomizedAndResetRowFollows(t *testing.T) {
+	ctx := context.Background()
+	f := newFollowFixture(t)
+	f.storeV180Prompts(t, func(c *agentconfiguration.Configuration) { c.SystemPrompt = "完全由管理员重写的提示词。" }, "restore:3")
+	management, err := f.service.Management(ctx)
+	if err != nil || !management.PromptCustomized || management.Configuration.SystemPrompt != "完全由管理员重写的提示词。" {
+		t.Fatalf("a text that is no shipped default must stay frozen: %v %v", management.PromptCustomized, err)
+	}
+	// A version written by a reset is the default of its day by definition,
+	// even when the text is no longer in the shipped list.
+	f.storeV180Prompts(t, func(c *agentconfiguration.Configuration) {
+		c.SystemPrompt = "某个不在清单里的旧默认。"
+		c.DomainContext = map[string]string{"image": "旧图像上下文", "model-3d": "旧三维上下文"}
+	}, "reset")
+	reset, err := f.service.Management(ctx)
+	if err != nil || reset.PromptCustomized || reset.Configuration.SystemPrompt != management.Presets.SystemPrompt {
+		t.Fatalf("a reset version did not follow the default: %v %v", reset.PromptCustomized, err)
+	}
+	// Resetting again stores a following version.
+	stored, err := f.service.Restore(ctx, reset.Revision, "0", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := f.repo.AgentConfigurationVersion(ctx, stored.Revision)
+	if err != nil || !slices.Contains(row.Configuration.FollowsSchema, "system_prompt") || row.Source != "reset" {
+		t.Fatalf("reset stored %v from %q: %v", row.Configuration.FollowsSchema, row.Source, err)
+	}
+}
+
+// The stored text of a following version is a mirror an older build reads;
+// the rolled-back image must find a usable, non-empty prompt in it.
+func TestFollowingVersionKeepsAReadablePromptMirrorForOlderBuilds(t *testing.T) {
+	ctx := context.Background()
+	f := newFollowFixture(t)
+	stored := f.storeV180Prompts(t, nil, "publish")
+	management, err := f.service.Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := f.service.Publish(ctx, stored.Revision, "admin", "publish", management.Configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := f.repo.AgentConfigurationVersion(ctx, published.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Configuration.SystemPrompt != management.Presets.SystemPrompt || row.Configuration.DomainContext["image"] == "" {
+		t.Fatal("the stored mirror of a followed prompt is empty or stale")
+	}
+}
+
+// The shape scripts/upgrade-drill.py seeds into a database copy: a v1.8.0
+// tool list with one tool turned off and the release's raw default prompts.
+// Startup reconcile must publish a format 2 version that keeps exactly that
+// tool off and leaves the prompts following the default.
+func TestStartupReconcileOfAV180ShapedVersionPublishesTheFollowingForm(t *testing.T) {
+	ctx := context.Background()
+	f := newFollowFixture(t)
+	seeded := f.storeV180(t, without(v180Tools, "create_motion_clip"), "publish")
+	// Rewrite the seeded row's prompts to the raw v1.8.0 texts, as the drill does.
+	row, err := f.repo.AgentConfigurationVersion(ctx, seeded.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := row.Configuration
+	raw.SystemPrompt = readTestdata(t, "v1.8.0-system-prompt.txt")
+	raw.DomainContext = map[string]string{"image": readTestdata(t, "v1.8.0-domain-image.txt"), "model-3d": readTestdata(t, "v1.8.0-domain-model-3d.txt")}
+	drill, err := f.repo.AppendAgentConfiguration(ctx, seeded.Revision, agentconfiguration.Version{Snapshot: agentconfiguration.Snapshot{Configuration: raw}, CreatedAt: time.Now().UTC(), ActorID: "upgrade-drill", Source: "publish"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.service.ReconcileRetiredBuiltInSkills(ctx); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := f.repo.LatestAgentConfiguration(ctx)
+	if err != nil || latest.Revision == drill.Revision {
+		t.Fatalf("startup reconcile published nothing: %v", err)
+	}
+	c := latest.Configuration
+	if c.Format != agentconfiguration.ConfigurationFormat || !slices.Equal(c.DisabledToolNames, []string{"create_motion_clip"}) ||
+		!slices.Equal(c.FollowsSchema, []string{"domain_context.image", "domain_context.model-3d", "system_prompt"}) ||
+		slices.Contains(c.EnabledToolNames, "observe_task") || slices.Contains(c.EnabledToolNames, "analyze_model") {
+		t.Fatalf("reconciled version: format=%d disabled=%v follows=%v", c.Format, c.DisabledToolNames, c.FollowsSchema)
+	}
+	snapshot, err := f.service.Snapshot(ctx)
+	if err != nil || !slices.Contains(snapshot.Configuration.EnabledToolNames, "analyze_model") || slices.Contains(snapshot.Configuration.EnabledToolNames, "create_motion_clip") {
+		t.Fatalf("effective tools after reconcile: %v %v", snapshot.Configuration.EnabledToolNames, err)
+	}
+	// Reconcile is idempotent: a second start publishes nothing more.
+	if err := f.service.ReconcileRetiredBuiltInSkills(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.repo.LatestAgentConfiguration(ctx)
+	if err != nil || again.Revision != latest.Revision {
+		t.Fatalf("reconcile is not idempotent: %s != %s (%v)", again.Revision, latest.Revision, err)
 	}
 }

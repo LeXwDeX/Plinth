@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProductSchema } from '@/components/product-schema-provider';
-import { createAgentConfigurationClient, AgentConfigurationError, type AgentConfiguration, type AgentConfigurationSnapshot } from '@/lib/agent-configuration';
+import { createAgentConfigurationClient, AgentConfigurationError, promptsAtDefault, withDefaultPrompts, type AgentConfiguration, type AgentConfigurationSnapshot } from '@/lib/agent-configuration';
 import { schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -72,6 +72,10 @@ export default function AgentConfigurationPage() {
       <Surface padding="md" className="space-y-3">
         <p className="break-all text-xs text-muted-foreground">{ui('revision')}: {snapshot.revision} · {ui('source')}: {snapshot.history.find(version => version.revision === snapshot.revision)?.source ?? ui('defaults')}</p>
         <p className="text-sm text-muted-foreground">{ui('policy_locked')}</p>
+        <div className="flex flex-wrap items-center gap-2" data-testid="agent-prompt-follow">
+          <p role="status" className="text-sm text-muted-foreground" data-customized={snapshot.prompt_customized ? 'true' : 'false'}>{snapshot.prompt_customized ? ui('prompt_customized') : ui('prompt_following')}</p>
+          {snapshot.prompt_customized ? <Action variant="outline" size="sm" disabled={busy || promptsAtDefault(draft, snapshot.presets)} onClick={() => revise(withDefaultPrompts(draft, snapshot.presets))}>{ui('follow_default')}</Action> : null}
+        </div>
         <Field id="agent-system-prompt" label={ui('system_prompt')}>{props => <textarea {...props} value={draft.system_prompt} disabled={busy} maxLength={schema.agent_configuration.limits.max_prompt_characters} onChange={event => revise({ ...draft, system_prompt: event.target.value })} rows={8} className="w-full rounded-md border bg-background p-3 text-sm" />}</Field>
         {Object.entries(draft.domain_context).map(([domain, value]) => <Field key={domain} id={`agent-domain-${domain}`} label={ui(domain === 'image' ? 'domain_image' : 'domain_model_3d')}>{props => <textarea {...props} value={value} disabled={busy} maxLength={schema.agent_configuration.limits.max_prompt_characters} onChange={event => revise({ ...draft, domain_context: { ...draft.domain_context, [domain]: event.target.value } })} rows={4} className="w-full rounded-md border bg-background p-3 text-sm" />}</Field>)}
       </Surface>
