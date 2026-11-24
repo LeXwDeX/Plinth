@@ -68,7 +68,7 @@ class AckAndArguments(unittest.TestCase):
         env = {"PATH": "/usr/bin:/bin", "BASE": "https://example.test", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
                "PYTHONDONTWRITEBYTECODE": "1"}
         for name in ("chat-models", "2d-to-3d", "parallel", "three-view", "split", "2d-params", "canvas", "3d-params",
-                     "2d-split", "agent-hard", "budget"):
+                     "2d-split", "agent-hard", "budget", "four-view-multiview", "astra-tools"):
             result = subprocess.run([sys.executable, str(SMOKE / f"smoke-l5-{name}.py")], env=env,
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, name)
@@ -1002,6 +1002,21 @@ class Images(unittest.TestCase):
         ])}]
         self.assertEqual(c.visible_refusal_counts(messages),
                          {"multiview_views": 1, "offering_choice": 1, "model_choice_conflict": 1})
+
+
+class ExtraArguments(unittest.TestCase):
+    def test_a_script_can_declare_its_own_options(self):
+        def add(parser):
+            parser.add_argument("--image", default="x.png")
+            parser.add_argument("--control", action="store_true")
+
+        arguments = c.parse_arguments(["--image", "p.png", "--control"], add_arguments=add)
+        self.assertEqual(arguments.image, "p.png")
+        self.assertTrue(arguments.control)
+        self.assertEqual(arguments.turn_timeout, 1800)
+        self.assertEqual(c.parse_arguments([], add_arguments=add).image, "x.png")
+        with self.assertRaises(SystemExit):
+            c.parse_arguments(["--nope"], add_arguments=add)
 
 
 def png(width, height, colour, depth, rows, filters, palette=b""):

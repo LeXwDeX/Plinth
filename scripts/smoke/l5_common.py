@@ -55,13 +55,20 @@ def validate_base(base):
     return None
 
 
-def parse_arguments(argv, description=""):
+def parse_arguments(argv, description="", add_arguments=None):
+    """The shared arguments plus whatever `add_arguments(parser)` declares (a script's own options).
+
+    The extra options are added after the shared ones so a script can keep its defaults from the
+    environment without repeating --live, --report and the two timeouts.
+    """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--report", help="directory for the report and downloaded artifacts")
     parser.add_argument("--live", action="store_true",
                         help="confirm real, paid upstream requests (also needs ART_AI_LIVE_ACK=1)")
     parser.add_argument("--turn-timeout", type=int, default=1800, help="seconds to wait for one chat turn")
     parser.add_argument("--task-timeout", type=int, default=2400, help="seconds to wait for expected tasks")
+    if add_arguments is not None:
+        add_arguments(parser)
     arguments = parser.parse_args(argv)
     for name in ("turn_timeout", "task_timeout"):
         if getattr(arguments, name) < 30:
@@ -1410,7 +1417,7 @@ def common_dimensions(data):
     return image_dimensions(data)
 
 
-def execute(name, body, description=""):
+def execute(name, body, description="", add_arguments=None):
     """Entry point shared by every script: ACK gate, environment, login, body(live, report), summary."""
     _shape, refusal = upstream_shape.resolve("live-only", upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
     if refusal:
@@ -1425,7 +1432,7 @@ def execute(name, body, description=""):
     if problem:
         print(problem, file=sys.stderr)
         return 2
-    arguments = parse_arguments(sys.argv[1:], description)
+    arguments = parse_arguments(sys.argv[1:], description, add_arguments)
     report = Report(name, arguments.report)
     live = Live(Client(os.environ["BASE"]), report, arguments)
     try:
