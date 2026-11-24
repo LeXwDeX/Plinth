@@ -225,6 +225,42 @@ func (policy HandlePolicy) IsSelectionAlias(token string) bool {
 		strings.EqualFold(strings.TrimSpace(token), policy.SelectionAlias)
 }
 
+// NamesHandle reports whether the text names an object by its handle (#557):
+// a declared prefix with its number, not glued to a letter, digit or `_` on
+// either side (the page's typedHandles rule). The selection alias is not a
+// handle: it asks for the selection itself.
+func (policy HandlePolicy) NamesHandle(text string) bool {
+	lower := strings.ToLower(text)
+	word := func(char byte) bool {
+		return char == '_' || (char >= '0' && char <= '9') || (char >= 'a' && char <= 'z')
+	}
+	for _, prefix := range policy.Prefixes {
+		prefix = strings.ToLower(prefix)
+		if prefix == "" {
+			continue
+		}
+		for from := 0; from < len(lower); {
+			at := strings.Index(lower[from:], prefix)
+			if at < 0 {
+				break
+			}
+			start := from + at
+			end := start + len(prefix)
+			for end < len(lower) && lower[end] >= '0' && lower[end] <= '9' {
+				end++
+			}
+			from = start + len(prefix)
+			if (start > 0 && word(lower[start-1])) || (end < len(lower) && word(lower[end])) {
+				continue
+			}
+			if _, _, ok := policy.Parse(lower[start:end]); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Assign gives every attachment without a handle the next free number of its
 // kind. Numbers already used by the session's messages, or by attachments
 // earlier in the same slice, are never reused, so a handle stays stable for
