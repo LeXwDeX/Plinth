@@ -991,6 +991,25 @@ class Client:
         except (urllib.error.URLError, TimeoutError, OSError, ValueError):
             return None
 
+    def upload_library(self, data, media_type, filename):
+        """Library upload (POST /api/v1/assets, multipart field `file`) of any bytes. Returns (status, asset id or
+        None). The server's own validation decides what it keeps, so a refused file is a status, not an error."""
+        boundary = "l5boundary7f3a9c"
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                f"Content-Type: {media_type}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        request = urllib.request.Request(self.base + "/api/v1/assets", data=body, method="POST")
+        request.add_header("Origin", self.base)
+        request.add_header("Content-Type", "multipart/form-data; boundary=" + boundary)
+        try:
+            with self.opener.open(request, timeout=120) as response:
+                payload = json.loads(response.read() or b"{}")
+                return response.status, payload.get("id") or payload.get("asset_id")
+        except urllib.error.HTTPError as error:
+            error.read()
+            return error.code, None
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            return 0, None
+
     def fetch(self, path, limit=40 << 20):
         request = urllib.request.Request(self.base + path)
         try:
@@ -1043,6 +1062,8 @@ class Live:
         self._last_send = {}
         self._answered_choices = set()
         self._schema = None
+        # The upstream shape of the target (fake, mixed or live), set by execute(); None outside it.
+        self.shape = None
 
     # sessions
     def new_session(self, title=DEFAULT_SESSION_TITLE, approval="auto"):
@@ -1417,9 +1438,15 @@ def common_dimensions(data):
     return image_dimensions(data)
 
 
-def execute(name, body, description="", add_arguments=None):
-    """Entry point shared by every script: ACK gate, environment, login, body(live, report), summary."""
-    _shape, refusal = upstream_shape.resolve("live-only", upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
+def execute(name, body, description="", add_arguments=None, gate="live-only", precheck=None):
+    """Entry point shared by every script: ACK gate, environment, login, body(live, report), summary.
+
+    `gate` is the upstream_shape gate: "live-only" (the default; every L5 script that drives the Agent
+    and refuses a fake target) or "fake-default" (the direct scripts of #540: they run on a fake target
+    at no cost and need both live switches on any other). `precheck(arguments, shape, environ)` may
+    return a refusal for options that need more than the shared switches; the script then exits 2
+    before it logs in. The target's shape is available to body() as live.shape."""
+    shape, refusal = upstream_shape.resolve(gate, upstream_shape.LIVE_FLAG in sys.argv[1:], os.environ)
     if refusal:
         print(refusal, file=sys.stderr)
         return 2
@@ -1433,8 +1460,14 @@ def execute(name, body, description="", add_arguments=None):
         print(problem, file=sys.stderr)
         return 2
     arguments = parse_arguments(sys.argv[1:], description, add_arguments)
+    if precheck is not None:
+        problem = precheck(arguments, shape, os.environ)
+        if problem:
+            print(problem, file=sys.stderr)
+            return 2
     report = Report(name, arguments.report)
     live = Live(Client(os.environ["BASE"]), report, arguments)
+    live.shape = shape
     try:
         if live.login():
             body(live, report)

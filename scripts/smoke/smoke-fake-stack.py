@@ -83,7 +83,7 @@ same HTTP API the browser uses:
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
 (NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
-agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, auto-completion, faults;
+agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, auto-completion, faults, l5-direct;
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
@@ -91,6 +91,10 @@ files, keyed and signed downloads, inspect_model, remesh); the listener binds lo
 stack reaches them): #284's notice naming the pictures that were not matted, #299's out-of-memory batch as a
 partial success and as a capacity failure, and an unmarked batch (scripts/smoke/fake_faults.py,
 scripts/smoke/smoke-fake-faults.py runs the same checks on a fake-shaped dev-test);
+"l5-direct" the #540 acceptance scripts of the 2D image providers and the matting service run on the fake:
+seven native 2D tasks (smoke-l5-2d-direct.py), a three-file matting batch (smoke-l5-matting.py) and the read-only
+service probes (matting-probe.py); the fake's gaps (small fixed pictures, an opaque matting square, no OpenAPI
+document) are INFO lines there, not passes;
 "auto-approval" the #406/#432 automatic default: a new session and the public Schema start in auto,
 an existing session keeps its mode, the unplanned steps after a generation (retexture, resize, convert,
 an image-to-image rework) submit without a card, the 21st paid call of one turn is refused with the Schema
@@ -133,6 +137,7 @@ import datetime
 import decimal
 import hashlib
 import http.cookiejar
+import importlib.util
 import json
 import os
 import secrets
@@ -1182,6 +1187,55 @@ def scenario_matting_faults(api, offerings):
         record("matting-faults: the matting Offering is registered", False, f"{MATTING} is not in the public Offerings")
         return
     fake_faults.run(api, record)
+
+
+def scenario_l5_direct(api):
+    """#540: the direct L5 scripts of the 2D image providers and the matting service, on the fake. They are
+    the scripts a real round runs (--live, ART_AI_LIVE_ACK=1), here at no cost under the fake shape; a script
+    passes when it has no FAIL and at least one PASS. Their deviations the fake does not model yet are INFO
+    lines in the captured output, shown only when a script fails."""
+    import contextlib
+    import io
+
+    def load(name, filename):
+        spec = importlib.util.spec_from_file_location(name, os.path.join(os.path.dirname(os.path.abspath(__file__)), filename))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    import l5_common
+    import l5_direct
+
+    def verdict(label, report, output):
+        counts = report.counts()
+        ok = counts["FAIL"] == 0 and counts["PASS"] > 0
+        record(label, ok, f"PASS={counts['PASS']} FAIL={counts['FAIL']} SKIP={counts['SKIP']}")
+        if not ok:
+            print(output.getvalue(), flush=True)
+
+    for label, name, filename in (("l5-direct 2D image tasks", "smoke-l5-2d-direct", "smoke-l5-2d-direct.py"),
+                                  ("l5-direct matting batch", "smoke-l5-matting", "smoke-l5-matting.py")):
+        module = load(name.replace("-", "_"), filename)
+        client = l5_common.Client(api.base)
+        client.call("POST", "/api/auth/mock", {})
+        report = l5_common.Report(name)
+        live = l5_common.Live(client, report, l5_common.parse_arguments([], "", module.add_arguments))
+        live.shape = "fake"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            module.body(live, report)
+        verdict(label, report, output)
+    probe = load("matting_probe", "matting-probe.py")
+    report = l5_common.Report("matting-probe")
+    findings = l5_direct.Findings(report, False)
+    private = l5_direct.PrivateDir()
+    output = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(output):
+            probe.run_probe(probe.make_call(f"http://127.0.0.1:{FAKE_PORT}/matting"), GOOD_KEY, report, findings, private, {})
+    finally:
+        private.close()
+    verdict("l5-direct matting service probes", report, output)
 
 
 def mcp_wait_task(mcp, task_id, seconds=90):
@@ -8474,7 +8528,7 @@ def scenario_auto_completion(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,l5-direct")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -8484,7 +8538,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "l5-direct", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -8500,7 +8554,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -8515,6 +8569,8 @@ def main():
                 scenario_images(api, offerings)
             if "matting-faults" in selected:
                 scenario_matting_faults(api, offerings)
+            if "l5-direct" in selected:
+                scenario_l5_direct(api)
             if "tripo" in selected:
                 scenario_tripo_images(api, offerings)
             if "p2" in selected:
