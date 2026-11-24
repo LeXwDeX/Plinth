@@ -216,8 +216,19 @@ func retargetRequestError(body map[string]any) string {
 // preset: the v3.0 biped presets need a v3.0 biped rig (a v2 rig ends "failed",
 // captured 2026-10-29), the creature presets a rig of their own type built with
 // v2.5 or v3.0, and the "preset:biped:" names a v1.0 biped rig.
-func retargetFits(source *task, presets []string) bool {
+//
+// v25BipedAsV3 is the retarget-v25-biped-as-v3 scenario. The rig page says "A biped
+// rig_type, including when it is omitted, is rigged as v3.0-20260909" under
+// v2.5-20260210 (read 2026-11-24), which would make a v2.5 biped rig take the v3.0
+// presets; but the only real retarget of such a rig (2026-10-29) failed, and it
+// predates that note or contradicts it. The observation stays the default; the
+// page's reading is the scenario, constructed until one real rig-and-retarget round
+// settles which is true (#541).
+func retargetFits(source *task, presets []string, v25BipedAsV3 bool) bool {
 	model, rigType := rigModelOf(source.request), rigTypeOf(source.request)
+	if v25BipedAsV3 && model == rigModelV25 && rigType == "biped" {
+		model = rigModelV3
+	}
 	for _, preset := range presets {
 		switch {
 		case choice(preset, retargetBipedV3):

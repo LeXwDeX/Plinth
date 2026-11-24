@@ -80,8 +80,8 @@
       "disabled-zero-egress": 26,
       "enabled": 58,
       "local-no-wire": 6,
-      "partial": 10,
-      "real": 42,
+      "partial": 11,
+      "real": 41,
       "total": 84
     },
     "units": {
@@ -5129,7 +5129,7 @@
       "model_id": "tripo-p2-text",
       "adapter_key": "tripo.v3",
       "enabled": true,
-      "evidence": "real",
+      "evidence": "partial",
       "units": [
         "tripo.v3|text-to-3d|GET /v3/tasks/{id}",
         "tripo.v3|text-to-3d|POST /v3/generation/text-to-model"

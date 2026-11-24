@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -86,12 +87,31 @@ const (
 //     header when the response carries one).
 //   - upload-failed: POST /files answers 500. An upload creates no task, so
 //     this is a retryable transport error, never an ambiguous submission.
+//   - rate-limit-reset-only: the request-rate 429 (1007) with X-RateLimit-Limit,
+//     X-RateLimit-Remaining and X-RateLimit-Reset (a Unix timestamp in seconds) and
+//     no Retry-After, the case the Adapter's reset-header fallback is for (#487;
+//     the rate-limits page says only that Retry-After appears on a concurrency
+//     refusal, so which header a 1007 carries is unverified).
+//   - retarget-v25-biped-as-v3: a retarget treats a v2.5 biped source rig as a v3.0 rig,
+//     the reading of the rig page (rigged as v3.0), instead of the default, the one
+//     real run (2026-10-29), where such a rig ended "failed"/1004. Constructed; the
+//     two conflict until one real rig-and-retarget round settles it (#541; rig.go).
+//   - content-policy, version-deprecated, model-too-complex, task-type-unsupported,
+//     endpoint-not-found: a task creation refused with the business code of the
+//     same name on the error-handling page (2008, 2015, 2018, 2002, 4001; businessErrors).
+//   - task-failed-content-policy, task-failed-model-too-complex,
+//     task-failed-version-deprecated, task-failed-task-type-unsupported: the task is
+//     created and ends "failed" with that business code as its error_code (the page says
+//     a failed task's error_code can mean something else than the request-level one;
+//     only the number is the same, which is what the injection needs).
 const (
 	scenarioTaskUnknown           = "task-unknown"
 	scenarioConvertTask           = "convert-task"
 	scenarioRateLimitNoRetryAfter = "rate-limit-no-retry-after"
 	scenarioConcurrencyNoRetry    = "concurrency-limit-no-retry-after"
 	scenarioUploadFailed          = "upload-failed"
+	scenarioRateLimitResetOnly    = "rate-limit-reset-only"
+	scenarioRetargetV25BipedAsV3  = "retarget-v25-biped-as-v3"
 )
 
 // convertTaskOutcome is the terminal status a convert-task-<outcome> child
@@ -119,7 +139,48 @@ func convertTaskOutcome(r *http.Request) string {
 // noRetryAfter answers whether the request asks for a 429 without Retry-After.
 func noRetryAfter(r *http.Request) bool {
 	return requestedScenario(r, scenarioRateLimitNoRetryAfter) ||
-		requestedScenario(r, scenarioConcurrencyNoRetry)
+		requestedScenario(r, scenarioConcurrencyNoRetry) ||
+		requestedScenario(r, scenarioRateLimitResetOnly)
+}
+
+// businessError is a task-creation refusal of the error-handling page (read
+// 2026-11-24), injected by the scenario word of the same name. The messages are the
+// page's own (it says they may vary); the HTTP statuses are the page's.
+type businessError struct {
+	word    string
+	status  int
+	code    int
+	message string
+}
+
+var businessErrors = []businessError{
+	{"content-policy", http.StatusBadRequest, 2008, "The input is rejected due to violation of content policy"},
+	{"version-deprecated", http.StatusBadRequest, 2015, "The version has been deprecated, please try higher version"},
+	{"model-too-complex", http.StatusBadRequest, 2018, "The model is too complex to remesh"},
+	{"task-type-unsupported", http.StatusBadRequest, 2002, "This task type is not supported"},
+	{"endpoint-not-found", http.StatusNotFound, 4001, "No endpoint found"},
+}
+
+// requestedBusinessError finds the creation refusal the request selects.
+func requestedBusinessError(r *http.Request) (businessError, bool) {
+	for _, candidate := range businessErrors {
+		if requestedScenario(r, candidate.word) {
+			return candidate, true
+		}
+	}
+	return businessError{}, false
+}
+
+// requestedTaskFailure finds the business code a task of this creation request ends
+// failed with: task-failed-<word> for a word of businessErrors, except the endpoint
+// refusal, which is not a task outcome.
+func requestedTaskFailure(r *http.Request) (businessError, bool) {
+	for _, candidate := range businessErrors {
+		if candidate.code != 4001 && requestedScenario(r, string(fakeupstream.ScenarioTaskFailed)+"-"+candidate.word) {
+			return candidate, true
+		}
+	}
+	return businessError{}, false
 }
 
 // docsChecked is when the official error, status and upload pages behind the
@@ -178,8 +239,8 @@ var kinds = []kind{
 // #89 showed (each was requested once with its cheapest option; the credits are
 // what the official poll reported).
 var realKindNotes = map[string]string{
-	"/generation/image-to-model":     "captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go)",
-	"/generation/text-to-model":      "a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go); the rest is the captured text_to_model structure",
+	"/generation/image-to-model":     "real for the H series model v3.1-20260211 only (the P series, P2-20260801 and P1-20260311, shares the endpoint and was never requested: its request values, its refusals and its price are constructed from the official P Series pages read on " + generationDocsChecked + ", generation.go, so the P2 Offerings do not get real evidence from this sample, #541); captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go)",
+	"/generation/text-to-model":      "real for the H series model v3.1-20260211 only (the P series, P2-20260801 and P1-20260311, shares the endpoint and was never requested for a text task: its request values, its refusals and its price are constructed from the official P Series pages read on " + generationDocsChecked + ", generation.go, so the P2 text Offering does not get real evidence from this sample, #541); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go); the rest is the captured text_to_model structure",
 	"/generation/image-to-splat":     "captured: task type image_to_splat, 30 credits; the only output is model_url (a .splat file)",
 	"/generation/image-to-multiview": "captured: task type image_to_multiview, 10 credits; the output is the object generate_multiview_image with front/left/back/right_view_url (JPEG); re-captured through the production path (POST /v3/files then the task) on 2026-11-20 and again on 2026-11-23, where the running polls answered output {} and the task echoed input.file.object {bucket tripo-data, key} with model_version default (tripo-v3-multiview-2026-11-20.candidate.json, tripo-v3-multiview-2026-11-23.candidate.json)",
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
@@ -196,7 +257,7 @@ const multiviewChecked = "2026-11-02"
 
 // constructedKindNotes explains kinds that have no captured sample.
 var constructedKindNotes = map[string]string{
-	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + ": inputs is an array of single-key view objects (front is required, 2-4 images) instead of input; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go). Checked against one real task on 2026-11-19 (#386, evidence-386-multiview-model.candidate.json, not a template sample, so the endpoint stays constructed): three views at Plinth's production defaults (texture and PBR at extreme quality, detailed geometry, 2,000,000 faces), 70 credits shown from the queued poll on. The create envelope, the task type multiview_to_model and the queued > running > success flow are as assumed; the task object shows the request's own parameters under input, the request's model as model_version and a files array of four entries (front, left, back, right; a stored object each, null for the view that was not sent), the output holds model_url (a GLB) and rendered_image_url (a WebP, not the PNG of the other generation tasks), and the real running poll shows the render from progress 99, before the model, which the fake does not (multiview.go). What the real API shows for a parameter the request left out is not known",
+	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + " (the request contract re-read on " + generationDocsChecked + ", generation.go, with the P Series pages: P2-20260801 and P1-20260311 were never requested on this endpoint): inputs is an array of single-key view objects (front is required, 2-4 images) instead of input; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go). Checked against one real task on 2026-11-19 (#386, evidence-386-multiview-model.candidate.json, not a template sample, so the endpoint stays constructed): three views at Plinth's production defaults (texture and PBR at extreme quality, detailed geometry, 2,000,000 faces), 70 credits shown from the queued poll on. The create envelope, the task type multiview_to_model and the queued > running > success flow are as assumed; the task object shows the request's own parameters under input, the request's model as model_version and a files array of four entries (front, left, back, right; a stored object each, null for the view that was not sent), the output holds model_url (a GLB) and rendered_image_url (a WebP, not the PNG of the other generation tasks), and the real running poll shows the render from progress 99, before the model, which the fake does not (multiview.go). What the real API shows for a parameter the request left out is not known",
 }
 
 var endpoints = buildEndpoints()
@@ -290,6 +351,10 @@ type task struct {
 	// done marks a task whose last poll answered a terminal status. The account
 	// concurrency pool (#468) counts tasks that are not done.
 	done bool
+	// final is that terminal status ("" until a poll answered one): a task that
+	// was never polled to its end has not succeeded from a dependent request's
+	// point of view (Smart Segmentation answers 2007 for it, processing.go).
+	final string
 }
 
 type handler struct {
@@ -425,12 +490,23 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_, _ = w.Write(raw)
 }
 
+// rateLimitHeaders writes the rate-limits page's three headers: the window's limit,
+// what is left of it and X-RateLimit-Reset, "Unix timestamp, in seconds, when the rate
+// limit window resets" (read 2026-11-24, #541). Before #541 the fake wrote the relative
+// seconds there, which the Adapter (a Unix timestamp reader, #487) never took as a wait.
+func (h *handler) rateLimitHeaders(w http.ResponseWriter) {
+	retry, _ := strconv.Atoi(h.env.RetryAfterSeconds())
+	w.Header().Set("X-RateLimit-Limit", "100")
+	w.Header().Set("X-RateLimit-Remaining", "0")
+	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(h.env.Now().Add(time.Duration(retry)*time.Second).Unix(), 10))
+}
+
 // render writes the Tripo-shaped error of an injected scenario.
 func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeupstream.Scenario) {
 	status, code, message := http.StatusInternalServerError, 1000, "Internal server error"
 	switch scenario {
 	case fakeupstream.ScenarioInsufficientBalance:
-		status, code, message = http.StatusForbidden, 2010, "You need more credits to complete this task"
+		status, code, message = http.StatusForbidden, 2010, "You don't have enough credit to create this task"
 	case fakeupstream.ScenarioKeyQuota:
 		status, code, message = http.StatusForbidden, 2010, "API key credit limit reached"
 	case fakeupstream.ScenarioRateLimit:
@@ -439,9 +515,10 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeup
 		status, code, message = http.StatusTooManyRequests, 1007, "Rate limit exceeded, you've generated too many requests in a short amount of time"
 		if !noRetryAfter(r) {
 			w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
-			w.Header().Set("X-RateLimit-Limit", "100")
-			w.Header().Set("X-RateLimit-Remaining", "0")
-			w.Header().Set("X-RateLimit-Reset", h.env.RetryAfterSeconds())
+			h.rateLimitHeaders(w)
+		}
+		if requestedScenario(r, scenarioRateLimitResetOnly) {
+			h.rateLimitHeaders(w)
 		}
 	case fakeupstream.ScenarioConcurrencyLimit:
 		status, code, message = http.StatusTooManyRequests, 2000, "You have exceeded the limit of generation"
@@ -461,7 +538,7 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeup
 func (h *handler) renderLocalRateLimit(w http.ResponseWriter, r *http.Request) bool {
 	value := strings.TrimSpace(r.Header.Get(fakeupstream.ScenarioHeader))
 	switch value {
-	case scenarioRateLimitNoRetryAfter:
+	case scenarioRateLimitNoRetryAfter, scenarioRateLimitResetOnly:
 		h.render(w, r, fakeupstream.ScenarioRateLimit)
 		return true
 	case scenarioConcurrencyNoRetry:
@@ -489,9 +566,28 @@ func (h *handler) getBalance(w http.ResponseWriter, r *http.Request) {
 	body := fakeupstream.Clone(h.balance)
 	if data, ok := fakeupstream.DigMap(body, "data"); ok {
 		data["balance"] = fixedBalance
-		data["frozen"] = 0.0
+		// "Task creation freezes the required credits" until the task ends (billing page,
+		// read 2026-11-24): the frozen amount is the price of the tasks still in flight.
+		// The balance itself stays fixed so a long-lived fake never runs dry (#541).
+		data["frozen"] = h.frozenCredits()
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// frozenCredits is the price of the priced tasks that have not reached a terminal poll.
+func (h *handler) frozenCredits() float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var frozen float64
+	for _, t := range h.tasks {
+		if t.done {
+			continue
+		}
+		if price, priced := t.price(); priced {
+			frozen += price
+		}
+	}
+	return frozen
 }
 
 func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
@@ -528,7 +624,7 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if !uploadTypeAllowed(part.Header.Get("Content-Type"), part.FileName()) {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "The file type is unsupported", "Refer to the API documentation for the supported file types"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "This image file type is not supported", "Refer to the API documentation for the supported file types"))
 				return
 			}
 			// Drain the whole part: the official limit for a model is 150 MB, so a
@@ -607,6 +703,10 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		if h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
 			return
 		}
+		if refused, ok := requestedBusinessError(r); ok {
+			writeJSON(w, refused.status, h.envelope(h.taskError, refused.code, refused.message, "Refer to the API documentation for the error codes"))
+			return
+		}
 		// A full concurrency pool refuses task creation only; the shared
 		// Intercept does not know this scenario yet, so it is applied here.
 		if fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioConcurrencyLimit {
@@ -636,8 +736,24 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
+		if isGenerationPath(k.Path) {
+			if refused := generationRequestError(body); refused != nil {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, refused.code, refused.message, "Refer to the API documentation for parameter requirements"))
+				return
+			}
+		}
 		if k.Path == "/generation/multiview-to-model" {
-			if message := multiviewInputsError(body); message != "" {
+			if id, isTask := multiviewTaskInput(body); isTask {
+				source := h.lookup(id)
+				if source == nil {
+					writeJSON(w, http.StatusNotFound, h.envelope(h.taskError, 2001, "The task is not found", "Check if the task is committed by you or whether the format is correct"))
+					return
+				}
+				if (source.kind.Type != "image_to_multiview" && source.kind.Type != "edit_multiview") || source.final != statusSuccess {
+					writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "the inputs task must be a successful image_to_multiview or edit_multiview task", "Refer to the API documentation for parameter requirements"))
+					return
+				}
+			} else if message := multiviewInputsError(body); message != "" {
 				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
 				return
 			}
@@ -654,6 +770,16 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			message = convertRequestError(body)
 		case "/mesh/decimate":
 			message = decimateRequestError(body)
+		case "/models/texture":
+			message = textureRequestError(body)
+		case "/mesh/segment":
+			message = segmentRequestError(body)
+		case "/mesh/complete":
+			message = completeRequestError(body)
+		case "/mesh/smartsegment":
+			message = smartsegmentRequestError(body)
+		case "/generation/edit-multiview":
+			message = editMultiviewPromptsError(body)
 		}
 		if message != "" {
 			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
@@ -664,6 +790,9 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			t.convert = convertEcho(body)
 		}
 		t.terminal = terminalStatus(r)
+		if failure, ok := requestedTaskFailure(r); ok {
+			t.failCode, t.failMessage = failure.code, failure.message
+		}
 		if k.Path == "/models/convert" {
 			// A convert child can be made to end failed, cancelled or unknown
 			// forever (convert-task-<outcome>): the format's own retry path
@@ -712,7 +841,11 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		t.model, _ = body["model"].(string)
 		t.format, _ = body["format"].(string)
 		if source, _ := body["input"].(string); k.Path == "/models/convert" {
-			if from := h.urlSource(source); from != nil {
+			from := h.urlSource(source)
+			if from == nil && !isHTTP(source) {
+				from = h.lookup(source) // a task id names the task whose model is converted
+			}
+			if from != nil {
 				t.sourceFidelity, t.sourceTriangles = from.fidelity(), from.modelTriangles()
 			}
 			if isHTTP(source) {
@@ -734,7 +867,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		// URL pass through; any other value names a task and must exist, or the official
 		// API answers 2001 (error-handling page: the task does not exist or is not the
 		// caller's; checked docsChecked).
-		if parent, _ := body["input"].(string); parent != "" && k.Path != "/models/convert" {
+		if parent, _ := body["input"].(string); parent != "" {
 			switch {
 			case strings.HasPrefix(parent, "file_"), isHTTP(parent):
 			default:
@@ -748,11 +881,18 @@ func (h *handler) create(k kind) http.HandlerFunc {
 					writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "Invalid input parameter", "Refer to the API documentation for parameter requirements"))
 					return
 				}
+				if k.Path == "/mesh/smartsegment" {
+					segType, _ := body["seg_type"].(string)
+					if refused := smartSegmentSourceRefusal(segType, source); refused != nil {
+						writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, refused.code, refused.message, "Refer to the API documentation for parameter requirements"))
+						return
+					}
+				}
 				// Observed once (2026-10-29): retargeting a rig built with a v2 rig
 				// model ends "failed", error 1004 "Invalid input parameter". The other
 				// pairings of preset and rig are constructed from the retarget page
 				// the same way (retargetFits).
-				if presets, _ := retargetPresets(body); k.Type == "animate_retarget" && !retargetFits(source, presets) {
+				if presets, _ := retargetPresets(body); k.Type == "animate_retarget" && !retargetFits(source, presets, requestedScenario(r, scenarioRetargetV25BipedAsV3)) {
 					t.failCode, t.failMessage = 1004, "Invalid input parameter"
 				}
 			}
@@ -915,17 +1055,23 @@ func (h *handler) lookup(id string) *task {
 	return h.tasks[id]
 }
 
-// acceptsSource refuses a source task that cannot feed the kind: a retarget
-// needs a rig, a rig check or rig needs a generated model, a decimation needs
-// a text, image or multiview generation task (decimate.go).
+// acceptsSource refuses a source task that cannot feed the kind (processing.go, rig.go,
+// decimate.go): a retarget needs a rigged model (the rig or a later task run on it), a
+// rig check, a rig and a conversion take a text, image or multiview generation task, a
+// decimation takes the same three, a completion needs a segmentation task and an edit
+// of a multiview needs an Image to Multiview task. Every other kind takes any task.
 func (h *handler) acceptsSource(k kind, source *task) bool {
 	switch k.Type {
 	case "animate_retarget":
-		return source.kind.Type == "animate_rig"
-	case "animate_rig", "animate_prerigcheck":
-		return source.kind.Type == "text_to_model" || source.kind.Type == "image_to_model"
+		return h.riggedLineage(source)
+	case "animate_rig", "animate_prerigcheck", "convert_model":
+		return isGenerationTaskType(source.kind.Type)
 	case "highpoly_to_lowpoly":
 		return acceptsDecimateSource(source)
+	case "mesh_completion":
+		return source.kind.Type == "mesh_segmentation"
+	case "edit_multiview":
+		return source.kind.Type == "image_to_multiview"
 	}
 	return true
 }
@@ -955,6 +1101,7 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if status == statusSuccess || status == statusFailed || status == statusCancelled || status == statusUnknown {
 		t.done = true
+		t.final = status
 	}
 	h.mu.Unlock()
 	writeJSON(w, http.StatusOK, h.pollBody(r, t, status))
@@ -1241,14 +1388,27 @@ const (
 	expiredBody        = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>`
 )
 
-// multiviewInputsError checks the documented multiview-to-model inputs: 2-4 single-key
-// view objects with unique keys front/left/back/right and a front view, each a file token.
+// multiviewInputsError checks the documented multiview-to-model inputs (multiview page,
+// read 2026-11-24; #541 added the positional form): either 2-4 single-key view objects with
+// unique keys front/left/back/right and a front view (the recommended form), or the legacy
+// positional array of exactly four strings in the order front, left, back, right with ""
+// for a view that is skipped, the front one never skipped and at least two views given;
+// each image is a file token (or a URL). The two forms are never mixed. The task_id form
+// is multiviewTaskInput.
 func multiviewInputsError(body map[string]any) string {
 	if _, legacy := body["input"]; legacy {
 		return "input is not accepted; use inputs"
 	}
 	inputs, ok := body["inputs"].([]any)
-	if !ok || len(inputs) < 2 || len(inputs) > 4 {
+	if !ok {
+		return "inputs must contain 2 to 4 views"
+	}
+	if len(inputs) > 0 {
+		if _, positional := inputs[0].(string); positional {
+			return multiviewPositionalError(inputs)
+		}
+	}
+	if len(inputs) < 2 || len(inputs) > 4 {
 		return "inputs must contain 2 to 4 views"
 	}
 	seen := map[string]bool{}
@@ -1269,4 +1429,42 @@ func multiviewInputsError(body map[string]any) string {
 		return "inputs must include the front view"
 	}
 	return ""
+}
+
+// multiviewPositionalError checks the legacy positional inputs array.
+func multiviewPositionalError(inputs []any) string {
+	if len(inputs) != 4 {
+		return "the positional inputs must hold exactly 4 strings in the order front, left, back, right"
+	}
+	given := 0
+	for index, entry := range inputs {
+		token, ok := entry.(string)
+		if !ok {
+			return "inputs must not mix view objects and positional strings"
+		}
+		if strings.TrimSpace(token) != "" {
+			given++
+		} else if index == 0 {
+			return "inputs must include the front view"
+		}
+	}
+	if given < 2 {
+		return "inputs must contain at least 2 views"
+	}
+	return ""
+}
+
+// multiviewTaskInput recognises the task_id form of inputs: a single-element array
+// naming a task, which has to be a successful image_to_multiview or edit_multiview task.
+func multiviewTaskInput(body map[string]any) (id string, isTask bool) {
+	inputs, ok := body["inputs"].([]any)
+	if !ok || len(inputs) != 1 {
+		return "", false
+	}
+	entry, ok := inputs[0].(map[string]any)
+	if !ok || len(entry) != 1 {
+		return "", false
+	}
+	id, isTask = entry["task_id"].(string)
+	return id, isTask
 }

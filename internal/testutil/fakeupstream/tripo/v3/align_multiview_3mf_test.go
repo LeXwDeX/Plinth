@@ -204,7 +204,9 @@ func TestMultiviewTo3MFScriptNeverSendsAPaidRequestWithoutItsInputs(t *testing.T
 			}
 		}
 	}
-	bundle := run(map[string]string{"m2m": "00000000-0000-4000-8000-000000000386"}, "convert-3mf", "convert-3mf-poll")
+	// A conversion names a task the fake knows (a task id is looked up, #541): the resume
+	// seeds the id of a finished multiview model.
+	bundle := run(map[string]string{"m2m": f.multiview()}, "convert-3mf", "convert-3mf-poll")
 	if bundle.PaidRequests != 1 || bundle.Obs[0].Skipped != "" || bundle.Obs[1].Skipped != "" || len(bundle.Obs[1].Polls) == 0 {
 		t.Fatalf("the export with the generation's id given: %+v", bundle)
 	}
