@@ -129,10 +129,12 @@ describe('output strip navigation and details', () => {
     const html = renderToStaticMarkup(<VersionStrip />);
     // A regular card: 2+2 padding, 56 thumbnail, 2 gap, 18 label, 12 caption, 16 detail row = 108px; the list adds 4+4.
     for (const part of ['p-0.5', 'size-14', 'gap-0.5', 'h-[18px]', 'h-3', 'h-4']) expect(html).toContain(part);
-    expect(html).toMatch(/data-testid="version-strip" class="[^"]*\bh-32\b/);
-    expect(html).toMatch(/<ol class="[^"]*\bpy-1\b/);
-    // 128px strip − 1px top border − an 11px thin scrollbar (Chromium) leaves 116px: the card plus its 8px padding.
-    expect(128 - 1 - 11).toBeGreaterThanOrEqual(108 + 8);
+    expect(html).toMatch(/data-testid="version-strip" class="[^"]*\bh-36\b/);
+    expect(html).toMatch(/<ol class="[^"]*\bpy-3\b/);
+    // #546: 144px strip − 1px top border − an 11px thin scrollbar (Chromium) leaves 132px: the card plus 12px above and below.
+    expect(144 - 1 - 11).toBeGreaterThanOrEqual(108 + 24);
+    // The selected card's 2px ring sits 12px below the strip's top edge, with 10px of room left above it.
+    expect(12 - 2).toBeGreaterThanOrEqual(8);
   });
   it('does not turn a drag into pointer navigation and still permits keyboard activation', () => {
     renderToStaticMarkup(<VersionStrip />); primary().props.onDragStart({}); primary().props.onClick(click);
@@ -153,5 +155,30 @@ describe('chat handle badge on a version tile (#87)', () => {
     state.tiles = [tile({ assets: [{ id: 'a', kind: 'image', url: routed('a'), role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] })];
     state.messages = [{ attachments: [{ handle: '@img3', kind: 'image', taskId: 'old', assetId: 'other' }] }];
     expect(renderToStaticMarkup(<VersionStrip />)).not.toContain('version-handle-badge');
+  });
+});
+
+describe('where a version came from, in time order (#558)', () => {
+  const picture = (taskId: string, version: number) => tile({ key: `n:${taskId}`, taskId, taskIds: [taskId], version,
+    assets: [{ id: `${taskId}-a`, kind: 'image', url: `/api/v1/tasks/${taskId}/assets/${taskId}-a`, role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] });
+  const from = (key: string, link: 'to_model' | 'edit') => ({ key, known: true, kind: 'reference' as const, evidence: 'recorded' as const, link, step: '' });
+  const model = (taskId: string, parents: ReturnType<typeof from>[]) => blankTile({ key: `n:${taskId}`, taskId, taskIds: [taskId], domain: 'model', status: 'ready', origin: 'task', version: 1, parents });
+
+  it('names every picture of a multi-view 3D beside it, with no one picture as its source', () => {
+    state.tiles = [picture('p1', 1), picture('p2', 2), picture('p3', 3), model('m1', [from('n:p1', 'to_model'), from('n:p2', 'to_model')])];
+    state.messages = [{ attachments: [{ handle: '@img2', kind: 'image', taskId: 'p1', assetId: 'p1-a' }] }];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(html).toMatch(/data-testid="version-sources"[^>]*data-count="2"/);
+    expect(html.match(/data-testid="version-source-name"[^>]*>([^<]*)</g)?.map((entry) => entry.slice(entry.lastIndexOf('>') + 1, -1))).toEqual(['@img2', '2D v2']);
+    expect(html).toContain('data-full-label="由 @img2 2D v2 转成 3D"');
+    expect(html.match(/data-testid="version-link"/g)).toHaveLength(1);
+  });
+
+  it('keeps a single source as one link and names it when it is not the version just before', () => {
+    state.tiles = [picture('p1', 1), picture('p2', 2), model('m1', [from('n:p1', 'to_model')])];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(html).not.toContain('version-sources');
+    expect(html).toContain('data-full-label="由 2D v1 转成 3D"');
+    expect(html).toMatch(/data-testid="version-link-source"[^>]*>2D v1</);
   });
 });

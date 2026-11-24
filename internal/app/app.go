@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -357,10 +358,6 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	overrides.httpTransport = withUpstreamCapture(upstreamCapture, overrides.httpTransport)
 	logUpstreamCapture(logger, upstreamCapture)
-	// The per-reply tool call budget in force (#275) is one value for the
-	// orchestrator and the public Schema, so the composer's counter shows the
-	// limit the Agent is held to rather than the Schema default.
-	applicationSchema.Chat = withToolCallBudget(applicationSchema.Chat, config.AgentMaxToolCallsPerReply)
 	if err := catalog.ValidateSkillCatalogAgainstProductSchema(
 		skillCatalog,
 		applicationSchema,
@@ -542,6 +539,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// exact refine_image arguments, checked against the declared tool.
 		ConceptDirections:     applicationSchema.Chat.ConceptDirections,
 		ChoiceTargetArguments: chatToolArgumentNames(applicationSchema.Chat.Tools),
+		// A direction card option names the one paid step it runs (#549).
+		ChoiceStepTools: choiceStepTools(applicationSchema.Chat.Tools),
 		// A direction card option may switch the session to one of these
 		// functions (#374).
 		HarnessOperations: applicationSchema.Chat.Harness.Operations,
@@ -1118,6 +1117,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Schema:   applicationSchema.Chat.ImageCrop,
 			Crops:    cropService,
 			Localize: texts.Text,
+			// #552: every crop is shown to the person as a reply picture.
+			AssetItemRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("裁剪工具: %w", err)
@@ -1126,6 +1127,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	toolExecutor, err := generationtool.New(generationtool.Config{
 		Logger:          logger,
+		ProviderNames:   catalog.ProviderDisplayNames(applicationSchema.Runtime.ProviderConnections),
 		Choices:         repository,
 		Harness:         repository,
 		HarnessResolver: harnessResolver,
@@ -1304,11 +1306,17 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		applicationSchema,
 		applicationSchema.Chat.Agent.ModelSetting,
 	)
+	// One encoder for the chat layer and the chat model Adapters (#555).
+	requestPictures, err := requestPictureEncoder(applicationSchema.Chat.Agent)
+	if err != nil {
+		return nil, err
+	}
 	agentAdapter, err := buildChatAgentWithTransport(
 		config,
 		applicationSchema,
 		overrides.httpTransport,
 		logger,
+		requestPictures,
 	)
 	if err != nil {
 		return nil, err
@@ -1352,14 +1360,11 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	if err != nil {
 		return nil, err
 	}
-	orchestratorSchema := withToolCallBudget(
-		// Prompt text for a capability without an enabled Offering is not sent
-		// to the model (#115).
-		orchestratorChatSchema(
-			applicationSchema.Chat.WithoutInactivePromptText(catalog.ActiveCapabilities(taskCatalog.List(""))),
-			llmModel,
-		),
-		config.AgentMaxToolCallsPerReply,
+	// Prompt text for a capability without an enabled Offering is not sent to
+	// the model (#115).
+	orchestratorSchema := orchestratorChatSchema(
+		applicationSchema.Chat.WithoutInactivePromptText(catalog.ActiveCapabilities(taskCatalog.List(""))),
+		llmModel,
 	)
 	// #494: the base registry is the fallback for a turn that froze no Agent
 	// configuration; it takes the same injection view as the frozen one, so the
@@ -1368,8 +1373,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	orchestratorSchema.AgentTools = withoutAssetListExecutionTools(
 		orchestratorSchema.AgentTools, applicationSchema.AssetListExecutionEnabled())
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
-		Project: applicationSchema.Project,
-		Texts:   texts,
+		Project:           applicationSchema.Project,
+		Texts:             texts,
+		AgentProviderName: chatAgentDisplayName(applicationSchema),
 		// #330: the platform Agent's 3D step segment reads the same facts as
 		// the external MCP status block: the shared balance cache, the step
 		// standing under the owner's setting and the per-step costs.
@@ -1427,6 +1433,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		// and the session (including a branch's ancestor Tasks).
 		VisionAnchorInline: referenceResolver.OpenVisionReference,
 		SelectionPreview:   referenceResolver.OpenSelectionPreview,
+		Pictures:           requestPictures,
 		ToolAllowed: func(capability, _ string) bool {
 			// ToolExecution.domains is the creative workspace (image/model).
 			// CapabilityPresentation.domain is a product category, where
@@ -2055,7 +2062,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		}
 	}
 	pendingApprovalService, err := pendingapproval.New(pendingapproval.Config{
-		Texts: texts,
+		Texts:         texts,
+		ProviderNames: catalog.ProviderDisplayNames(applicationSchema.Runtime.ProviderConnections),
 		VerifyPreparedSource: func(ctx context.Context, op generationtool.Operation, prepared generation.PreparedInput) error {
 			turn, err := chatService.GetTurn(ctx, op.OwnerID, op.SessionID, op.AssistantMessageID)
 			if errors.Is(err, chat.ErrMessageNotFound) {
@@ -2856,15 +2864,6 @@ func threeViewServiceOrNil(service *threeview.Service) httpapi.ThreeViews {
 	return service
 }
 
-// withToolCallBudget applies the deployment's per-reply tool call budget
-// (AGENT_MAX_TOOL_CALLS_PER_REPLY, #275); 0 keeps the Schema value.
-func withToolCallBudget(schema catalog.ChatSchema, override int) catalog.ChatSchema {
-	if override > 0 {
-		schema.Agent.MaxToolCallsPerReply = override
-	}
-	return schema
-}
-
 // orchestratorChatSchema turns DSML tool-call reading on only for a model
 // whose vendor profile declares it (#253); chat.dsml stays as declared
 // otherwise, so a standard OpenAI-compatible model gets no vendor parsing.
@@ -2901,6 +2900,27 @@ func (origins taskRerollOrigins) GrantByKey(ctx context.Context, owner, key stri
 // chatToolArgumentNames lists each declared generation tool's parameter names,
 // so an Agent-supplied choice option can only carry arguments the target tool
 // really accepts (#242).
+// choiceStepTools are the tools a direction-card option may name as its one
+// paid step (#549), with their declared capabilities: paid tools that submit
+// one step per call. A processing plan tool submits a chain of steps, so it is
+// never one option's one thing; a tool with no declared capability cannot be
+// quoted from an Offering.
+func choiceStepTools(tools []catalog.ChatToolSchema) map[string][]string {
+	steps := map[string][]string{}
+	for _, tool := range tools {
+		if !slices.Contains(tool.Execution.Effects, "PAID_TASK") || len(tool.Execution.Capabilities) == 0 ||
+			(tool.Processing != nil && tool.Processing.Plan != nil) {
+			continue
+		}
+		capabilities := make([]string, 0, len(tool.Execution.Capabilities))
+		for _, capability := range tool.Execution.Capabilities {
+			capabilities = append(capabilities, string(capability))
+		}
+		steps[tool.Name] = capabilities
+	}
+	return steps
+}
+
 func chatToolArgumentNames(tools []catalog.ChatToolSchema) map[string][]string {
 	names := make(map[string][]string, len(tools))
 	for _, tool := range tools {

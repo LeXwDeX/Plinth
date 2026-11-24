@@ -3,6 +3,7 @@ package schema
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -136,6 +137,29 @@ type InputRule struct {
 	Minimum       int                  `json:"minimum"`
 	Maximum       int                  `json:"maximum"`
 }
+
+// InputRuleViolation is a count InputRule (minimum/maximum) the normalized
+// input broke. It is the structured cause of the kernel's invalid_input
+// refusal, so a caller can name the rule's parameters, its bounds and the
+// rule's own Schema message instead of a generic text. It carries only
+// Schema facts: parameter names and counts, never an input value.
+type InputRuleViolation struct {
+	OfferingID OfferingID
+	Capability Capability
+	Index      int
+	Parameters []string
+	// Present are the rule's parameters the input gave, in rule order.
+	Present []string
+	Minimum int
+	Maximum int
+	// Message is the rule's own Schema copy (default language), or "".
+	Message string
+}
+
+func (v *InputRuleViolation) Error() string {
+	return fmt.Sprintf("输入规则 %d 要求参数 %v 至少出现 %d 个、至多出现 %d 个", v.Index, v.Parameters, v.Minimum, v.Maximum)
+}
+
 type Offering struct {
 	NativePricing *NativePricing `json:"native_pricing,omitempty"`
 	ID            OfferingID     `json:"id"`

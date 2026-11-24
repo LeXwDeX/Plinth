@@ -272,22 +272,28 @@ func TestThreeViewIsASchemaSystemSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	skills := c.Application().Chat.Skills
-	if len(skills.SystemSkills) != 1 {
+	// #550: the three-view and four-view Skills, both bound to the three-view recipe.
+	if len(skills.SystemSkills) != 2 || skills.SystemSkills[0].ID != "system-three-view" ||
+		skills.SystemSkills[1].ID != "system-four-view" {
 		t.Fatalf("system skills = %+v", skills.SystemSkills)
 	}
-	skill := skills.SystemSkills[0]
-	if skill.Tool != "create_three_view" || !skill.RequiresImage || skill.DefaultMessage == "" || !skill.OneShot {
-		t.Fatalf("three-view skill = %+v", skill)
-	}
-	for _, tool := range c.Application().Chat.AgentTools {
-		if tool.Name == skill.Tool && tool.Execution.AgentScope != "2d" {
-			t.Fatalf("bound tool scope = %q, want 2d", tool.Execution.AgentScope)
+	for _, skill := range skills.SystemSkills {
+		if skill.Tool != "create_three_view" || !skill.RequiresImage || skill.DefaultMessage == "" || !skill.OneShot {
+			t.Fatalf("system skill = %+v", skill)
+		}
+		for _, tool := range c.Application().Chat.AgentTools {
+			if tool.Name == skill.Tool && tool.Execution.AgentScope != "2d" {
+				t.Fatalf("bound tool scope = %q, want 2d", tool.Execution.AgentScope)
+			}
 		}
 	}
 	for name, mutate := range map[string]func(*catalog.ApplicationSchema){
-		"unknown tool":      func(a *catalog.ApplicationSchema) { a.Chat.Skills.SystemSkills[0].Tool = "no_such_tool" },
-		"no default text":   func(a *catalog.ApplicationSchema) { a.Chat.Skills.SystemSkills[0].DefaultMessage = "" },
-		"style fields":      func(a *catalog.ApplicationSchema) { a.Chat.Skills.SystemSkills[0].ThumbnailPath = "/x.webp" },
+		"unknown tool":    func(a *catalog.ApplicationSchema) { a.Chat.Skills.SystemSkills[0].Tool = "no_such_tool" },
+		"no default text": func(a *catalog.ApplicationSchema) { a.Chat.Skills.SystemSkills[0].DefaultMessage = "" },
+		"style fields":    func(a *catalog.ApplicationSchema) { a.Chat.Skills.SystemSkills[0].ThumbnailPath = "/x.webp" },
+		"duplicate id": func(a *catalog.ApplicationSchema) {
+			a.Chat.Skills.SystemSkills[1].ID = a.Chat.Skills.SystemSkills[0].ID
+		},
 		"directive no tool": func(a *catalog.ApplicationSchema) { a.Chat.Skills.ToolDirectiveTemplate = "{name}{prompt}" },
 	} {
 		app := c.Application()

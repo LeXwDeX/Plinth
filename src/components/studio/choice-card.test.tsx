@@ -136,6 +136,27 @@ describe('ChoiceCard (#321)', () => {
     expect(render(base)).not.toContain('chat-choice-action-badge');
   });
 
+  // #549: an option that runs one paid step shows the server's quote of that step; an option that runs none shows no price.
+  it('quotes only the direction option that runs one paid step', () => {
+    const direction = parseChoiceCards({ choices: [{
+      id: 'choice_next', assistant_message_id: 'a4', tool: '', kind: 'next_step', capability: 'next_step', question: '接下来想怎么做？',
+      options: [
+        { id: 'balanced', label: '保轮廓：约 5,000 三角面', recommended: true, step: { tool: 'process_model', capability: 'remesh' },
+          credits_metered: true, estimated_credits: 5 },
+        { id: 'bake', label: '保留现在这套木纹', description: '我给你 Blender 的简化与烘焙步骤' },
+      ],
+      default_option_id: '', allow_default: false, state: 'pending', created_at: '2026-11-24T00:00:00Z',
+    }] })[0];
+    expect(direction.options[0].step).toEqual({ tool: 'process_model', capability: 'remesh' });
+    expect(direction.options[1].step).toBeUndefined();
+    swrKeys.length = 0;
+    const html = render(direction);
+    const tiles = html.split('data-testid="chat-choice-option"').slice(1);
+    expect(tiles.map((tile) => tile.includes('data-testid="chat-choice-quote"'))).toEqual([true, false]);
+    expect(tiles[0]).toContain(`${messages['ui.workspace.harness.credits']}: 5`);
+    expect(swrKeys.at(-1)).toBeNull();
+  });
+
   it('keeps the familiar single-column list for an older card without rich option fields (#103)', () => {
     const html = render(base);
     expect(html).toMatch(/data-testid="chat-choice-options"[^>]*data-layout="list"/);

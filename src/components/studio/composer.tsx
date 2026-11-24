@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type DragEvent, type TextareaHTMLAttributes } from 'react';
-import { Ban, Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Maximize2, Paintbrush, RotateCcw, Send, Square, Zap } from 'lucide-react';
+import { Box, Frame, GitBranch, Image as ImageIcon, ImagePlus, Maximize2, Paintbrush, Send, Square, Zap } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { HarnessSummary } from '@/components/workspace/harness-summary';
@@ -102,9 +102,13 @@ export interface ComposerProps {
   /** Uploading or preparing a Skill: the box is locked. A running turn does not lock it. */
   locked: boolean;
   canSend: boolean;
+  /**
+   * The selected object: the turn's default target when the text names no handle (#557). Null when nothing is
+   * selected or the person deselected it.
+   */
   chip: ComposerChip | null;
-  chipSkipped: boolean;
-  onToggleChip: () => void;
+  /** The chip's ✕: deselects the object, so the turn has no implicit target until an object is selected again. */
+  onDeselectChip: () => void;
   /** Set while the mask tool is on; null otherwise. */
   mask?: ComposerMask | null;
   /** Set while the next result continues from an older version; null otherwise. */
@@ -183,7 +187,7 @@ function PurposeSegment({ text, selected, disabled, onClick, radio = false, test
  * 服务端按本人和本会话核对。
  */
 export function Composer({
-  value, onChange, onSend, onStop, onStopInBackground = null, streaming, locked, canSend, chip, chipSkipped, onToggleChip, mask = null, branch = null,
+  value, onChange, onSend, onStop, onStopInBackground = null, streaming, locked, canSend, chip, onDeselectChip, mask = null, branch = null,
   attachmentPurpose = null, onAttachmentPurpose, attachmentPurposes, onAttachmentPurposeAt, pinnedPurpose = null, onPinnedPurpose,
   images, onRemoveImage, pinnedImage, onUnpin, acceptedImages, onFiles, onPasteImages, editing, onCancelEdit,
   skill, params, sendCredits: generationSendCredits, mentions, onMentionPicked, referenceLimit = null,
@@ -204,7 +208,7 @@ export function Composer({
   const fileInput = useRef<HTMLInputElement>(null);
   // A running turn does not lock the box: what is sent meanwhile waits its turn in the chat.
   const disabled = locked;
-  const chipLabel = schemaText(schema, chipSkipped ? 'ui.studio.composer.chip.restore' : 'ui.studio.composer.chip.skip');
+  const deselectLabel = schemaText(schema, 'ui.studio.composer.chip.deselect');
   const base = schema.chat.context.image_index_base;
   const hasAttachments = images.length > 0 || pinnedImage !== null;
   const hasContextChips = chip !== null || mask !== null || branch !== null || Boolean(skill.selectedId);
@@ -214,7 +218,8 @@ export function Composer({
     ...images.map((url, index) => ({ url, index, pinned: false, number: index + base })),
     ...(pinnedImage ? [{ url: pinnedImage, index: -1, pinned: true, number: images.length + base }] : []),
   ];
-  const overriding = chip && !chipSkipped ? overridingHandle(value, chip.handle) : '';
+  const overriding = chip ? overridingHandle(value, chip.handle) : '';
+  const currentName = chip ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label }) : '';
   const skillName = skill.selectedId ? skill.catalog?.skills.find((item) => item.id === skill.selectedId)?.displayName ?? skill.selectedId : '';
   const purposeLabelId = useId();
   const stopLabel = schemaText(schema, 'ui.workspace.agent.stop');
@@ -392,6 +397,9 @@ export function Composer({
     onChange: (event) => {
       setCaret(event.currentTarget.selectionStart ?? event.currentTarget.value.length);
       setActiveIndex(0);
+      // Typing refilters an open list and moves the highlight back to the first option, so the list returns to
+      // its top too. scrollTop stays inside the list; scrollIntoView could also scroll the page or the dialog.
+      if (mentionListRef.current) mentionListRef.current.scrollTop = 0;
       setPreviewIndex(null);
       setDismissed(null);
       onChange(event.currentTarget.value);
@@ -417,8 +425,17 @@ export function Composer({
     onKeyDown: (event) => {
       if (event.nativeEvent.isComposing || event.keyCode === 229) return;
       if (listOpen) {
-        if (event.key === 'ArrowDown') { event.preventDefault(); const next = (highlighted + 1) % matches.length; previewFromPointer.current = false; setActiveIndex(next); setPreviewIndex(next); return; }
-        if (event.key === 'ArrowUp') { event.preventDefault(); const next = (highlighted - 1 + matches.length) % matches.length; previewFromPointer.current = false; setActiveIndex(next); setPreviewIndex(next); return; }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const next = (highlighted + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length;
+          previewFromPointer.current = false;
+          setActiveIndex(next);
+          setPreviewIndex(next);
+          // Keyboard moves bring the new option into the scrolling list, wrap included. Pointer moves do not,
+          // so the list never jumps under the mouse. The guard keeps jsdom (no scrollIntoView) harmless.
+          mentionListRef.current?.querySelectorAll<HTMLElement>('[role="option"]')[next]?.scrollIntoView?.({ block: 'nearest' });
+          return;
+        }
         if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); pickMention(matches[highlighted]); return; }
         if (event.key === 'Escape' && mention) { event.preventDefault(); event.stopPropagation(); setDismissed(mention.start); return; }
       }
@@ -534,40 +551,32 @@ export function Composer({
       {hasChipRow ? (
       <div className="grid min-w-0 grid-cols-2 gap-1.5" data-testid="composer-chips">
         {chip ? (
-          chipSkipped ? (
-            <ContextChip
-              testId="composer-object-chip"
-              data={{ skipped: true }}
-              muted
-              square={<ChipSquare><Ban aria-hidden className="size-4" /></ChipSquare>}
-              title={schemaText(schema, 'ui.studio.composer.chip.off_title')}
-              subtitle={schemaText(schema, 'ui.studio.composer.chip.off_sub')}
-              remove={{ label: chipLabel, onClick: onToggleChip, icon: <RotateCcw aria-hidden className="size-3" />, pressed: true }}
-            />
-          ) : (
-            <ContextChip
-              testId="composer-object-chip"
-              // A handle typed in the box wins this turn: the chip says so and turns grey.
-              data={{ skipped: overriding !== '', 'overridden-by': overriding || undefined }}
-              accent
-              muted={overriding !== ''}
-              square={(
-                <ChipSquare>
-                  {chip.thumbnail ? <img src={chip.thumbnail} alt={''} className="size-full object-cover" /> : null}
-                </ChipSquare>
-              )}
-              label={formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label })}
-              title={(
-                <span className="flex min-w-0 items-center gap-1">
-                  {/* In a narrow column the chip is only half a row wide: the badge keeps its "2D" and gives up its icon so the name fits. */}
-                  <KindBadge kind={chip.kind} className="@max-[24rem]:[&_svg]:hidden" />
-                  <span className="truncate">{formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.current'), { handle: chip.handle || chip.label })}</span>
-                </span>
-              )}
-              subtitle={overriding !== '' ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.override'), { handle: overriding }) : chip.label}
-              remove={{ label: chipLabel, onClick: onToggleChip }}
-            />
-          )
+          <ContextChip
+            testId="composer-object-chip"
+            // The selected object is the turn's default target (#557); a handle typed in the box wins over it: the
+            // chip says so and turns grey. Its ✕ deselects.
+            data={{ skipped: overriding !== '', 'overridden-by': overriding || undefined, handle: chip.handle || undefined }}
+            accent
+            muted={overriding !== ''}
+            square={(
+              <ChipSquare>
+                {chip.thumbnail ? <img src={chip.thumbnail} alt={''} className="size-full object-cover" /> : null}
+              </ChipSquare>
+            )}
+            // #546: the picture and its kind badge only; the name ("当前：画布", "当前：@img5") is the hover hint and the
+            // screen-reader text, not a line of its own. An override still says which handle wins this turn.
+            label={currentName}
+            hint={{ name: currentName }}
+            oneLine={overriding === ''}
+            title={(
+              <span className="flex min-w-0 items-center gap-1">
+                <KindBadge kind={chip.kind} />
+                <span className="sr-only" data-testid="composer-object-name">{currentName}</span>
+              </span>
+            )}
+            subtitle={overriding !== '' ? formatSchemaText(schemaText(schema, 'ui.studio.composer.chip.override'), { handle: overriding }) : undefined}
+            remove={{ label: deselectLabel, onClick: onDeselectChip }}
+          />
         ) : null}
         {mask ? (
           <ContextChip

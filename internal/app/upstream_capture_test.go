@@ -551,7 +551,7 @@ func runMattingAgainstTheFakeStack(t *testing.T, stack *captureStack) {
 func runChatAgainstTheFakeStack(t *testing.T, stack *captureStack) {
 	t.Helper()
 	config := Config{AgentMode: "live", RuntimeSettings: stack.settings}
-	adapter, err := buildChatAgentWithTransport(config, stack.product.Application(), stack.transport(), nil)
+	adapter, err := buildChatAgentWithTransport(config, stack.product.Application(), stack.transport(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestUpstreamCaptureNeverPersistsSecretsFromAdapterTraffic(t *testing.T) {
 	}
 	adapter, err := buildChatAgentWithTransport(Config{AgentMode: "live", RuntimeSettings: map[string]string{
 		"llm_base_url": server.URL + "/v1", "llm_api_key": secretKey, "llm_model": "m"}},
-		product.Application(), withUpstreamCapture(recorder, nil), nil)
+		product.Application(), withUpstreamCapture(recorder, nil), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

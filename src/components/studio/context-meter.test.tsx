@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
 import { formatSchemaText, type ProductSchema } from '@/lib/product-schema';
 import type { ChatContextUsage } from '@/lib/chat/browser-client';
-import { ContextMeter, contextLevel, toolCallLevel } from '@/components/studio/context-meter';
+import { ContextMeter, contextLevel } from '@/components/studio/context-meter';
 import { PICKER_UPPERCASE_CLASS } from '@/components/studio/table-popover';
 import { useChatStore } from '@/store/chat-store';
 import { useSessionContextStore } from '@/store/session-context-store';
@@ -152,74 +152,62 @@ describe('the context meter (#322)', () => {
   });
 });
 
-describe('the tool call counter (#275)', () => {
-  const withLimit = (limit: number | undefined): ProductSchema => {
-    const next = structuredClone(catalog);
-    if (limit !== undefined) next.chat.agent_limits = { max_tool_calls_per_reply: limit };
-    return next;
-  };
+describe('the tool call counter (#553: this turn only, no limit)', () => {
   const assistant = (toolCallCount: number | undefined) => ({ id: 'm1', role: 'assistant' as const, content: 'ok', createdAt: 1, ...(toolCallCount === undefined ? {} : { toolCallCount }) });
   const render = () => renderToStaticMarkup(<ContextMeter />);
-  const label = messages['ui.studio.tool_calls.label'];
+  const text = (count: number) => messages['ui.studio.tool_calls.turn'].replace('{count}', String(count));
+  const counter = (html: string) => html.match(/data-testid="composer-tool-calls"[^>]*>([^<]*)</)?.[1] ?? '';
 
   beforeEach(() => {
-    mock.schema = withLimit(20);
+    mock.schema = structuredClone(catalog);
     open({ tokens: 22_500, window: 1_000_000, compactions: [] });
   });
 
-  it('shows 0 / limit while the session has no assistant reply', () => {
-    expect(render()).toContain(`>${label} 0 / 20<`);
+  it('reads "this turn" from the Schema with the count alone: no slash, no limit', () => {
+    expect(messages['ui.studio.tool_calls.turn']).toBe('本轮对话 工具调用次数：{count}');
+    expect(defaultCatalog.application.localization.bundles.en.messages['ui.studio.tool_calls.turn']).toBe('Tool calls this turn: {count}');
+    useChatStore.setState({ messagesBySession: { s1: [assistant(120)] } });
+    const shown = counter(render());
+    expect(shown).toBe(text(120));
+    expect(shown).not.toContain('/');
+    expect(shown).not.toContain('100');
+  });
+
+  it('shows 0 while the session has no assistant reply', () => {
+    expect(counter(render())).toBe(text(0));
   });
 
   it('counts the newest assistant reply and keeps its final value after the reply ended', () => {
     useChatStore.setState({ messagesBySession: { s1: [assistant(3), { id: 'u2', role: 'user', content: 'again', createdAt: 2 }] } });
-    expect(render()).toContain(`>${label} 3 / 20<`);
+    expect(counter(render())).toBe(text(3));
     useChatStore.setState({ messagesBySession: { s1: [assistant(3), assistant(7)] } });
-    expect(render()).toContain(`>${label} 7 / 20<`);
+    expect(counter(render())).toBe(text(7));
   });
 
-  it('grows with the reply: a new reply starts at 0 and observed counts only rise', () => {
+  it('starts at 0 with a new turn and only grows while it runs', () => {
     useChatStore.setState({ messagesBySession: { s1: [assistant(9)] } });
     useChatStore.getState().initStreaming('s1', { content: 'go' });
-    expect(render()).toContain(`>${label} 0 / 20<`);
+    expect(counter(render())).toBe(text(0));
     useChatStore.getState().observeToolCallCount('s1', 2);
-    expect(render()).toContain(`>${label} 2 / 20<`);
+    expect(counter(render())).toBe(text(2));
     useChatStore.getState().observeToolCallCount('s1', 1);
-    expect(render()).toContain(`>${label} 2 / 20<`);
-    useChatStore.getState().observeToolCallCount('s1', 5);
-    expect(render()).toContain(`>${label} 5 / 20<`);
+    expect(counter(render())).toBe(text(2));
+    useChatStore.getState().observeToolCallCount('s1', 150);
+    expect(counter(render())).toBe(text(150));
     useChatStore.getState().finishStreaming('s1');
-    expect(render()).toContain(`>${label} 5 / 20<`);
-    // The final message read replaces the live value once the reply is over.
-    useChatStore.getState().applyNewestMessagePage('s1', { messages: [assistant(6)], nextCursor: '' });
-    expect(render()).toContain(`>${label} 6 / 20<`);
+    expect(counter(render())).toBe(text(150));
+    // The final message read replaces the live value once the turn is over.
+    useChatStore.getState().applyNewestMessagePage('s1', { messages: [assistant(151)], nextCursor: '' });
+    expect(counter(render())).toBe(text(151));
   });
 
-  it('turns warning from 80% of the limit and destructive when it is spent', () => {
-    expect(toolCallLevel(15, 20)).toBe('normal');
-    expect(toolCallLevel(16, 20)).toBe('warning');
-    expect(toolCallLevel(19, 20)).toBe('warning');
-    expect(toolCallLevel(20, 20)).toBe('critical');
-    expect(toolCallLevel(1, 0)).toBe('normal');
-    const level = (count: number) => tag((useChatStore.setState({ messagesBySession: { s1: [assistant(count)] } }), render()), 'composer-tool-calls');
-    expect(level(15)).toContain('text-muted-foreground');
-    expect(level(16)).toContain('text-warning');
-    expect(level(20)).toContain('text-destructive');
-    expect(level(20)).toContain('data-level="critical"');
-  });
-
-  it('takes the limit from the Schema, never a built-in 20', () => {
-    mock.schema = withLimit(35);
-    useChatStore.setState({ messagesBySession: { s1: [assistant(28)] } });
-    const html = render();
-    expect(html).toContain(`>${label} 28 / 35<`);
-    expect(tag(html, 'composer-tool-calls')).toContain('text-warning');
-    expect(hintOf(html, 'composer-tool-calls')).toContain(`data-hint="${messages['ui.studio.tool_calls.hint']}"`);
-  });
-
-  it('hides the counter on a Schema without the limit', () => {
-    mock.schema = withLimit(undefined);
-    expect(render()).not.toContain('composer-tool-calls');
+  it('never turns warning or destructive, however many calls the turn made', () => {
+    useChatStore.setState({ messagesBySession: { s1: [assistant(500)] } });
+    const html = tag(render(), 'composer-tool-calls');
+    expect(html).toContain('text-muted-foreground');
+    expect(html).not.toContain('text-warning');
+    expect(html).not.toContain('text-destructive');
+    expect(html).not.toContain('data-level');
   });
 
   it('lays out the figure, the compact action and the counter in that order, the counter on the right edge', () => {
@@ -229,7 +217,9 @@ describe('the tool call counter (#275)', () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
     // The counter's wrapper takes the free space to its left; the figure and the counter give way (truncate), the action does not.
     const wrapperClass = (id: string) => hintOf(html, id).match(/data-wrapper-class="([^"]*)"/)?.[1].split(' ') ?? [];
-    expect(wrapperClass('composer-tool-calls')).toEqual(expect.arrayContaining(['ml-auto', 'min-w-0', 'shrink']));
+    // The counter has no tooltip: the span itself takes the free space to its left and gives way.
+    const counterClass = tag(html, 'composer-tool-calls').match(/class="([^"]*)"/)?.[1].split(' ') ?? [];
+    expect(counterClass).toEqual(expect.arrayContaining(['ml-auto', 'min-w-0', 'shrink']));
     expect(wrapperClass('composer-context-meter')).toEqual(expect.arrayContaining(['min-w-0', 'shrink']));
     expect(wrapperClass('composer-context-compact')).toContain('shrink-0');
     expect(tag(html, 'composer-context')).not.toContain('justify-between');

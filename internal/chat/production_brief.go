@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // The session production brief (#103): the user's purpose and locked choices,
@@ -285,6 +287,9 @@ type ChoiceOptionInput struct {
 	// Action is what the page does when the person picks the option (#374);
 	// only a kind that declares actions accepts one.
 	Action *ChoiceAction
+	// Steps are the paid steps the Agent says the option runs (#549). A kind
+	// that declares steps accepts at most one: one option does one thing.
+	Steps []ChoiceStep
 }
 
 // AskChoice opens a generic card of a kind the Schema declares. The usage
@@ -307,6 +312,7 @@ func (service *Service) AskChoice(
 		thumbnail              string
 		arguments              json.RawMessage
 		action                 *ChoiceAction
+		step                   choiceStepQuote
 	}
 	var specs []optionSpec
 	var proposalOptions []ChoiceOption
@@ -468,8 +474,12 @@ func (service *Service) AskChoice(
 			if reason != "" {
 				return choiceOptionsInvalid(reason), nil
 			}
+			step, refusal := service.choiceOptionStep(kind, id, option.Steps, action, command)
+			if refusal != nil {
+				return *refusal, nil
+			}
 			specs = append(specs, optionSpec{id: id, label: label, description: description,
-				thumbnail: thumbnail, arguments: append(json.RawMessage(nil), optionArguments...), action: action})
+				thumbnail: thumbnail, arguments: append(json.RawMessage(nil), optionArguments...), action: action, step: step})
 		}
 	case "agent_proposal":
 		// The Agent's confirmation card offers its exact proposal as accept
@@ -524,6 +534,12 @@ func (service *Service) AskChoice(
 				Arguments:    optionArguments,
 				Action:       spec.action,
 			}
+			if spec.step.step != nil {
+				option.Step = spec.step.step
+				option.CreditsMetered = spec.step.metered
+				option.EstimatedCredits = spec.step.credits
+				option.NativeQuote = spec.step.native
+			}
 			if recommended != "" && spec.id == recommended {
 				option.Recommended = true
 				seenRecommended = true
@@ -574,6 +590,15 @@ func (service *Service) AskChoice(
 		}
 		if option.Action != nil {
 			entry["action"] = option.Action
+		}
+		if option.Step != nil {
+			// #549: the one step the option runs and the server's quote of it.
+			entry["step"] = option.Step
+			entry["credits_metered"] = option.CreditsMetered
+			entry["estimated_credits"] = option.EstimatedCredits
+			if option.NativeQuote != nil {
+				entry["native_quote"] = option.NativeQuote
+			}
 		}
 		wire = append(wire, entry)
 	}
@@ -635,6 +660,93 @@ func (service *Service) choiceOptionAction(
 		return nil, fmt.Sprintf("switch_operation needs an operation_id from switchable_operations (one of: %s)", strings.Join(ids, ", "))
 	}
 	return nil, fmt.Sprintf("action %q is not allowed on this card", action.Type)
+}
+
+// choiceStepQuote is the one step of an option and the server's quote of it.
+type choiceStepQuote struct {
+	step    *ChoiceStep
+	metered bool
+	credits int
+	native  *schema.NativeQuote
+}
+
+// choiceOptionStep checks the step an Agent put on a direction-card option
+// (#549) and quotes it from the Offering the step would run, never from the
+// Agent. One option does one thing: more than one step, or a switch to a
+// function plus another step, is refused in the kind's Schema words. A switch
+// to a function is that function's step. The step must be a paid tool this
+// turn can run with one of its declared capabilities (required when the tool
+// declares several), and the server must be able to quote it.
+func (service *Service) choiceOptionStep(kind catalog.ChatChoiceKindSchema, optionID string, steps []ChoiceStep,
+	action *ChoiceAction, command ToolCommand) (choiceStepQuote, *ToolResult) {
+	if kind.Step == nil {
+		if len(steps) > 0 {
+			refusal := choiceOptionsInvalid("this card's options take no step")
+			return choiceStepQuote{}, &refusal
+		}
+		return choiceStepQuote{}, nil
+	}
+	oneThing := &ToolResult{Error: strings.ReplaceAll(kind.Step.OneStepRefusal, "{option}", optionID), NoSubmission: true}
+	if len(steps) > 1 {
+		return choiceStepQuote{}, oneThing
+	}
+	var chosen *ChoiceStep
+	if len(steps) == 1 {
+		chosen = &ChoiceStep{Tool: strings.TrimSpace(steps[0].Tool), Capability: strings.TrimSpace(steps[0].Capability)}
+	}
+	if action != nil && action.Type == catalog.ChoiceActionSwitchOperation {
+		for _, operation := range service.harnessOperations {
+			if operation.ID != action.OperationID {
+				continue
+			}
+			switched := &ChoiceStep{Tool: operation.ToolName, Capability: string(operation.Capability)}
+			if chosen != nil && (chosen.Tool != switched.Tool ||
+				(chosen.Capability != "" && chosen.Capability != switched.Capability)) {
+				return choiceStepQuote{}, oneThing
+			}
+			chosen = switched
+		}
+	}
+	if chosen == nil {
+		return choiceStepQuote{}, nil
+	}
+	invalid := func(reason string) (choiceStepQuote, *ToolResult) {
+		refusal := choiceOptionsInvalid(reason)
+		return choiceStepQuote{}, &refusal
+	}
+	capabilities, paid := service.choiceStepTools[chosen.Tool]
+	if !paid {
+		return invalid(fmt.Sprintf("step.tool %q is not a paid tool", chosen.Tool))
+	}
+	if command.ToolAvailable != nil && !command.ToolAvailable(chosen.Tool) {
+		return invalid(fmt.Sprintf("step.tool %q is not available in this turn", chosen.Tool))
+	}
+	switch {
+	case chosen.Capability == "" && len(capabilities) == 1:
+		chosen.Capability = capabilities[0]
+	case chosen.Capability == "" && len(capabilities) > 1:
+		return invalid(fmt.Sprintf("step.capability is required for %s (one of: %s)", chosen.Tool, strings.Join(capabilities, ", ")))
+	case chosen.Capability != "" && !slices.Contains(capabilities, chosen.Capability):
+		return invalid(fmt.Sprintf("step.capability %q is not a capability of %s (one of: %s)", chosen.Capability,
+			chosen.Tool, strings.Join(capabilities, ", ")))
+	}
+	if chosen.Capability == "" || service.productionPlans == nil {
+		return invalid(fmt.Sprintf("step %s has no server credit estimate", chosen.Tool))
+	}
+	offering, _, refusal := service.productionPlans.stepOffering(command, chosen.Capability, "")
+	if refusal != "" {
+		return invalid(refusal)
+	}
+	if offering.CreditsMetered && budget.EstimateOffering(offering).Micros <= 0 {
+		return invalid(fmt.Sprintf("step %s has no server credit estimate", chosen.Capability))
+	}
+	quote := choiceStepQuote{step: chosen, metered: offering.CreditsMetered}
+	if offering.NativePricing != nil {
+		quote.native, _ = offering.DefaultNativeQuote(nil)
+	} else {
+		quote.credits = offering.QuotedCredits()
+	}
+	return quote, nil
 }
 
 // choiceKindOf finds the declared choice kind whose options come from one

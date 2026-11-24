@@ -38,7 +38,6 @@ const minimalApplication = `"application":{
 			"llm_base_url":{"type":"string","environment":[{"name":"LLM_BASE_URL"}],"default":"http://127.0.0.1:8000/v1","required":true},
 			"llm_api_key":{"type":"string","environment":[{"name":"LLM_API_KEY"}],"default":"","secret":true},
 			"llm_model":{"type":"string","environment":[{"name":"LLM_MODEL"}],"default":"test-model","required":true},
-			"agent_max_tool_calls_per_reply":{"type":"string","environment":[{"name":"AGENT_MAX_TOOL_CALLS_PER_REPLY"}],"default":""},
 			"gemini_base_url":{"type":"string","environment":[{"name":"GEMINI_BASE_URL"},{"name":"LLM_BASE_URL"}],"default":"http://127.0.0.1:8000/v1"},
 			"gemini_api_key":{"type":"string","environment":[{"name":"GEMINI_API_KEY"},{"name":"LLM_API_KEY"}],"default":"","secret":true},
 			"meshy_base_url":{"type":"string","environment":[{"name":"MESHY_BASE_URL"},{"name":"MESHY_API_BASE_URL"}],"default":"https://api.meshy.ai"},
@@ -332,6 +331,7 @@ const minimalApplication = `"application":{
 			"spinner_frame_milliseconds":80,
 			"percentage_multiplier":100,
 			"percentage_suffix":"%",
+			"task_list_page_size":10,
 			"advanced_model_form_feature":"advanced-model-form",
 			"advanced_model_default_mode":"regular",
 			"task_progress":{
@@ -637,7 +637,6 @@ const minimalApplication = `"application":{
 			"consent_limit_content":"limit",
 			"consent_reconcile_content":"reconcile original paid call before any new submission",
 			"max_generation_calls_per_turn":20,"max_parallel_generation_submissions":8,"max_listed_models":20,
-			"max_tool_calls_per_reply":3,"max_tool_calls_per_reply_setting":"agent_max_tool_calls_per_reply","max_tool_calls_per_reply_maximum":100,
 			"error_body_max_bytes":65536,
 			"system_prompt":"configured system",
 			"title_prompt":"{maximum}: {content}","title_max_characters":20,
@@ -790,15 +789,14 @@ const minimalApplication = `"application":{
 				"turn_active":"当前会话正在处理",
 				"session_delete_blocked":"会话还有进行中的任务",
 				"agent_busy":"任务繁忙",
-				"tool_round_limit":"上限 {limit}","tool_round_limit_pending":"未执行：",
-				"tool_round_limit_pending_item":"{tool} {intent}",
-				"tool_round_limit_pending_tool":"{tool}",
 				"tool_arguments_invalid":"参数不是合法 JSON","tool_unavailable":"工具 {tool} 不可用",
 				"input_gap_missing":"缺少 {name} ({type}){options}: {supply}","input_gap_reference_image":"图片","input_gap_text_limit":"文本 {max}",
 				"input_gap_labeled":"{label}, {type}","input_gap_options":" 可选 {values}","input_gap_supply_reference":"用 {argument}",
 				"input_gap_supply_argument":"用 {argument}","input_gap_supply_unavailable":"不可设置","input_shape":"字段 {fields}",
 				"input_shape_text":"{name}={count}","input_shape_list":"{name}[{count}]","input_shape_boolean":"{name}=布尔",
-				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值"
+				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值",
+				"input_rule_too_many":"{inputs} 至多 {maximum} 项{reason}，给了 {given} 项","input_rule_too_few":"{inputs} 至少 {minimum} 项{reason}，给了 {given} 项",
+				"input_rule_member":"{name}（{argument}）","input_rule_reason":"（{reason}）"
 			},
 			"status":{"generating":"正在生成","queued_submission":"排队等待提交","preparing_tool":"正在准备调用工具"}
 		},
@@ -890,7 +888,7 @@ const minimalApplication = `"application":{
 			"brush":{"minimum_size":1,"maximum_size":200,"default_size":12},
 			"selection":{"ants_dash":[5,5],"ants_tick_milliseconds":120,"tint_color":"#6366f1","tint_opacity":0.3,"preview_max_edge":512},
 			"mask":{"tint_color_token":"--info","tint_opacity":0.75},
-			"snap":{"default_enabled":true,"threshold_pixels":6,"guide_stroke_width":1,"guide_color_token":"--reminder","group_member_targets":false},
+			"snap":{"default_enabled":true,"threshold_pixels":6,"guide_stroke_width":1,"guide_color_token":"--reminder","group_member_targets":false,"bypass_modifier":"mod"},
 			"export_filename_fallback":"canvas","export_extension":".png",
 			"export":{
 				"padding_pixels":20,

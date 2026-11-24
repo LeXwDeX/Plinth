@@ -35,6 +35,8 @@ export interface ChoiceOptionModel {
   recommended: boolean;
   /** #374: what the page does when this option is picked, before the answer is sent; absent when it only continues the conversation. */
   action?: ChoiceAction;
+  /** #549: the one paid step this option runs; absent when it runs none. The quote fields below are the server's estimate of it. */
+  step?: ChoiceStep;
   creditsMetered: boolean;
   estimatedCredits: number | null;
   nativeQuote: NativeQuote | null;
@@ -80,6 +82,17 @@ const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
+/** The one paid step a direction-card option runs (#549). */
+export interface ChoiceStep {
+  tool: string;
+  capability: string;
+}
+
+function parseStep(value: unknown): ChoiceStep | null {
+  const item = record(value);
+  return item && text(item.tool) ? { tool: text(item.tool), capability: text(item.capability) } : null;
+}
+
 /** The action of a wire option: null when it has none, undefined when it names one this page cannot perform. */
 function parseAction(value: unknown): ChoiceAction | null | undefined {
   if (value === undefined || value === null) return null;
@@ -96,6 +109,7 @@ function parseOption(value: unknown): ChoiceOptionModel | null {
   // #374: an option whose action this page cannot perform is left out like a malformed one. Answering it would let the
   // Agent go on as if the function selection had changed.
   if (action === undefined) return null;
+  const step = parseStep(item.step);
   return {
     id: text(item.id),
     providerName: text(item.provider_name),
@@ -105,6 +119,7 @@ function parseOption(value: unknown): ChoiceOptionModel | null {
     thumbnailUrl: text(item.thumbnail_url),
     recommended: item.recommended === true,
     ...(action ? { action } : {}),
+    ...(step ? { step } : {}),
     creditsMetered: item.credits_metered === true,
     estimatedCredits: typeof item.estimated_credits === 'number' ? item.estimated_credits : null,
     nativeQuote: parseNativeQuote(item.native_quote),

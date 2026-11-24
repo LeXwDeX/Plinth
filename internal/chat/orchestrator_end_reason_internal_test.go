@@ -29,7 +29,7 @@ func endReasonOrchestratorForInternal(t *testing.T, tools ToolExecutor, logger *
 	t.Helper()
 	service := newChatServiceForInternal(t)
 	service.turnEndReasons = catalog.ChatTurnEndReasonsSchema{
-		Completed: "c", ToolLimit: "t", AwaitingApproval: "a", Stopped: "s", Background: "b", Error: "e",
+		Completed: "c", AwaitingApproval: "a", Stopped: "s", Background: "b", Error: "e",
 	}
 	schema := suspendTestSchema()
 	orchestrator, err := NewOrchestrator(OrchestratorConfig{
@@ -42,7 +42,7 @@ func endReasonOrchestratorForInternal(t *testing.T, tools ToolExecutor, logger *
 }
 
 // The end reason follows one fixed priority: failed, background, stopped,
-// awaiting approval, tool limit, completed (#328).
+// awaiting approval, completed (#328).
 func TestTurnEndReasonPriority(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -51,12 +51,10 @@ func TestTurnEndReasonPriority(t *testing.T) {
 		want     TurnEndReason
 	}{
 		{"nothing special", turnOutcome{}, false, TurnEndCompleted},
-		{"tool limit", turnOutcome{toolLimit: true}, false, TurnEndToolLimit},
 		{"an approval card", turnOutcome{}, true, TurnEndAwaitingApproval},
-		{"an approval card beats the tool limit", turnOutcome{toolLimit: true}, true, TurnEndAwaitingApproval},
-		{"a stop beats a card and the limit", turnOutcome{stopped: true, toolLimit: true}, true, TurnEndStopped},
-		{"background beats a stop", turnOutcome{background: true, stopped: true, toolLimit: true}, true, TurnEndBackground},
-		{"failed beats everything", turnOutcome{failed: true, background: true, stopped: true, toolLimit: true}, true, TurnEndError},
+		{"a stop beats a card", turnOutcome{stopped: true}, true, TurnEndStopped},
+		{"background beats a stop", turnOutcome{background: true, stopped: true}, true, TurnEndBackground},
+		{"failed beats everything", turnOutcome{failed: true, background: true, stopped: true}, true, TurnEndError},
 		{"failed alone", turnOutcome{failed: true}, false, TurnEndError},
 	} {
 		t.Run(test.name, func(t *testing.T) {

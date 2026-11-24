@@ -1,16 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Loader2, RotateCw, X } from 'lucide-react';
+import { AlertTriangle, RotateCw, X } from 'lucide-react';
 
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
-import { formatSchemaText } from '@/lib/product-schema';
+import { formatSchemaText, taskStatePresentation } from '@/lib/product-schema';
 import { useTaskRetry } from '@/hooks/use-task-retry';
 import { canRetryTask } from '@/lib/workspace/task-retry';
 import { resolveErrorText } from '@/lib/workspace/task-projection';
-import { chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, progressPercent } from '@/lib/workspace/task-progress';
+import {
+  chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, nextTaskBatch, progressPercent, taskBatchProgress,
+} from '@/lib/workspace/task-progress';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore, type TrackedTask } from '@/store/workspace-store';
@@ -18,12 +20,16 @@ import { useWorkspaceStore, type TrackedTask } from '@/store/workspace-store';
 const CLOCK_MILLISECONDS = 1000;
 
 /**
- * 对话里的任务卡：每个进行中的任务一张进度卡（百分比和已用时间，3D 这样的长任务
+ * 对话里的任务进度：每个进行中的任务一条进度（百分比和已用时间，3D 这样的长任务
  * 也能看出还在走），本页看着它跑、后来失败的任务一张失败说明。余额不足只说明
  * 原因并请联系管理员，不给重试：钱没补上之前重试只会再失败一次。
  *
  * `part` 选择渲染哪一部分（#244）：进行中的卡悬浮在消息区底部、不参与消息滚动；
  * 失败说明留在消息流里。两部分各自观察同一组任务，失败只报给本页看着跑过的任务。
+ *
+ * #546：进行中的部分不再是悬浮在消息区底部的卡片，而是对话内容里的一块轻量进度：由最后一条助手消息
+ * 放在正文之后、积分说明之上，随消息滚动。块标题「任务进行中 x/y」只写一次（x 为本批已结束数，y 为本批
+ * 总数），每个进行中的任务一条细进度条，本批已结束的任务收成一行文字结果。
  */
 export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
   const { schema, text } = useProductSchema();
@@ -39,6 +45,9 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
   }
   const watched = useMemo(() => new Set(seen.current.keys()), [tracked]); // eslint-disable-line react-hooks/exhaustive-deps -- `seen` is filled above on every render
   const cards = useMemo(() => chatTaskCards(tracked, sessionId, watched, dismissed), [tracked, sessionId, watched, dismissed]);
+  // The tasks the float counts as one "x/y": all seen running since none ran (nextTaskBatch); kept like `seen`, per render.
+  const batch = useRef<ReadonlySet<string>>(new Set());
+  batch.current = nextTaskBatch(batch.current, cards.running);
 
   const clockNeeded = elapsedClockNeeded(part, cards);
   useEffect(() => {
@@ -59,45 +68,59 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
 
   if (part === 'running') {
     if (cards.running.length === 0) return null;
+    const multiplier = schema.runtime.frontend.percentage_multiplier;
+    const batchProgress = taskBatchProgress(batch.current, cards.running, multiplier);
+    const runningIds = new Set(cards.running.map((task) => task.taskId));
+    const ended = tracked.filter((task) => batch.current.has(task.taskId) && !runningIds.has(task.taskId));
     return (
-      <div className="flex max-h-full flex-col gap-1.5 overflow-y-auto overscroll-contain rounded-lg bg-sidebar" data-testid="chat-task-running">
-        {cards.running.map((task) => {
-        const percent = progressPercent(task, schema.runtime.frontend.percentage_multiplier);
-        return (
-          <article
-            key={task.taskId}
-            data-testid="chat-task-progress"
-            data-task-id={task.taskId}
-            aria-label={text('ui.studio.task.list')}
-            className="flex shrink-0 flex-col gap-1.5 rounded-lg border border-border bg-panel-raised p-3 text-xs shadow-md"
-          >
-            <header className="flex items-center gap-2">
-              <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-primary" />
-              <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                {formatSchemaText(text('ui.studio.task.progress_title'), { capability: capabilityLabel(task) })}
-              </span>
-              <span className="tabular-nums font-medium" data-testid="chat-task-percent">{percent}{suffix}</span>
-            </header>
-            <div
-              role="progressbar"
-              aria-label={text('ui.workspace.tasks.progress')}
-              aria-valuenow={percent}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              className="h-1.5 overflow-hidden rounded-full bg-muted"
-            >
-              <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${percent}%` }} />
-            </div>
-            <p className="tabular-nums text-muted-foreground" data-testid="chat-task-elapsed">
-              {formatSchemaText(text('ui.studio.task.elapsed'), { time: formatElapsed(elapsedSeconds(task, now, seen.current.get(task.taskId))) })}
-            </p>
-            {task.queueNotice ? (
-              <p className="text-muted-foreground" data-testid="chat-task-queue-notice">{task.queueNotice.detail}</p>
-            ) : null}
-          </article>
-        );
-        })}
-      </div>
+      // #546: one light block in the conversation, right after the reply text and above its credit line: a single
+      // "任务进行中 x/y" heading, then one thin bar per running task (name, percent, time used) and one line of text per
+      // task of the batch that has ended. No card frame, no spinner of its own: it scrolls with the messages.
+      <section aria-label={text('ui.studio.task.list')} className="flex flex-col gap-1.5 text-xs text-muted-foreground" data-testid="chat-task-running">
+        <p className="font-medium tabular-nums" data-testid="chat-task-batch-title" data-done={batchProgress.done} data-total={batchProgress.total}>
+          {formatSchemaText(text('ui.studio.task.batch_title'), { done: batchProgress.done, total: batchProgress.total })}
+        </p>
+        <ul className="flex flex-col gap-1.5">
+          {cards.running.map((task) => {
+            const percent = progressPercent(task, multiplier);
+            const name = capabilityLabel(task);
+            return (
+              <li key={task.taskId} data-testid="chat-task-progress" data-task-id={task.taskId} className="flex flex-col gap-1">
+                <span className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate">{name}</span>
+                  {task.queueNotice ? null : <span className="tabular-nums" data-testid="chat-task-percent">{percent}{suffix}</span>}
+                  <span className="tabular-nums" data-testid="chat-task-elapsed">
+                    {formatSchemaText(text('ui.studio.task.elapsed'), { time: formatElapsed(elapsedSeconds(task, now, seen.current.get(task.taskId))) })}
+                  </span>
+                </span>
+                {task.queueNotice ? (
+                  // Waiting in the provider's queue: the reason instead of a bar that would not move.
+                  <span data-testid="chat-task-queue-notice">{task.queueNotice.detail}</span>
+                ) : (
+                  <span
+                    role="progressbar"
+                    aria-label={formatSchemaText(text('ui.studio.task.progress_title'), { capability: name })}
+                    aria-valuenow={percent}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    className="block h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                  >
+                    <span className="block h-full rounded-full bg-primary transition-[width]" style={{ width: `${percent}%` }} />
+                  </span>
+                )}
+              </li>
+            );
+          })}
+          {ended.map((task) => (
+            <li key={task.taskId} data-testid="chat-task-ended" data-task-id={task.taskId} className="truncate">
+              {formatSchemaText(text('ui.studio.task.batch_ended'), {
+                capability: capabilityLabel(task),
+                result: task.failure !== null || task.liveError !== '' ? failureText(task) : taskStatePresentation(schema, task.state).label,
+              })}
+            </li>
+          ))}
+        </ul>
+      </section>
     );
   }
   if (cards.failed.length === 0) return null;
@@ -152,3 +175,4 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
     </div>
   );
 }
+

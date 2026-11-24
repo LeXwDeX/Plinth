@@ -143,6 +143,11 @@ type Config struct {
 	// Texts gives the copy of the turn's UI locale for tool results. Nil
 	// keeps the Schema's default-locale copy.
 	Texts *catalog.TextLocalizer
+	// ProviderNames maps an Offering's adapter key to its connection's
+	// display name, which names the upstream in a failed Task's HTTP error
+	// text (catalog.ProviderDisplayNames). Nil: those failures keep the
+	// failure class text.
+	ProviderNames map[string]string
 	// ModelDelivery orders the conversion routes of a tool that declares a
 	// delivery format argument, exactly as the format coverage orders them.
 	ModelDelivery catalog.ModelDeliverySchema
@@ -194,6 +199,7 @@ type Executor struct {
 	project       *catalog.ProjectSchema
 	stepPolicy    *catalog.StepPolicySchema
 	texts         *catalog.TextLocalizer
+	providerNames map[string]string
 	modelDelivery catalog.ModelDeliverySchema
 	skills        map[string]catalog.SkillSchema
 	publicStates  map[generation.TaskState]string
@@ -269,6 +275,7 @@ func New(config Config) (*Executor, error) {
 		project:       config.Project,
 		stepPolicy:    config.StepPolicy,
 		texts:         config.Texts,
+		providerNames: config.ProviderNames,
 		modelDelivery: config.ModelDelivery,
 		skills:        skills,
 		publicStates:  states,
@@ -1985,7 +1992,7 @@ func (executor *Executor) wait(
 			info.Notices = executor.noticeReport(command, task)
 		}
 		if task.Failure != nil {
-			observation.Error = executor.failureMessage(command, task.Offering.CreditsMetered, task.Failure)
+			observation.Error = executor.failureMessage(command, task.Offering, task.Failure)
 		}
 		if observe != nil {
 			if err := observe(observation); err != nil {
@@ -2254,10 +2261,11 @@ func (executor *Executor) executionFailure(
 // generic failure text. The metered classification itself stays canonical.
 func (executor *Executor) failureMessage(
 	command chat.ToolCommand,
-	metered bool,
+	offering generation.Offering,
 	failure *generation.Failure,
 ) string {
-	return LocalizedFailureMessage(executor.chat, metered, failure, executor.localizeText(command))
+	return LocalizedFailureMessage(executor.chat, executor.providerNames[offering.AdapterKey],
+		offering.CreditsMetered, failure, executor.localizeText(command))
 }
 
 // taskPending is the tool result for a Task that is still running or queued

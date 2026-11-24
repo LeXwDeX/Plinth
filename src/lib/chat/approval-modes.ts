@@ -56,6 +56,11 @@ export function stepCreditsText(schema: ProductSchema, credits: number): string 
   return schemaCountMessage(schema, 'ui.workspace.approval.step_credits', credits, { credits });
 }
 
+/** 同一批准来源的多个已完成付费步骤合并成一行的文案（#546）：积分求和、步数计数。 */
+export function roundCreditsText(schema: ProductSchema, credits: number, steps: number): string {
+  return schemaCountMessage(schema, 'ui.workspace.approval.round_credits', credits, { credits, steps });
+}
+
 /** 未完成（失败或取消）的付费步骤文案：积分只是预计，不能读成已扣。 */
 export function stepFailedText(schema: ProductSchema, credits: number): string {
   return schemaCountMessage(schema, 'ui.studio.result.step_failed', credits, { credits });

@@ -179,7 +179,9 @@ func TestNextStepChoiceCardCarriesOptionActionsOnTheWire(t *testing.T) {
 		{ID: "clear_and_draw", Label: "清空功能选择，先出三视图图片", Description: "回到自由模式", Arguments: json.RawMessage(`{}`),
 			Action: &chat.ChoiceAction{Type: "clear_operation"}},
 		{ID: "switch_retexture", Label: "改为换贴图", Arguments: json.RawMessage(`{}`),
-			Action: &chat.ChoiceAction{Type: "switch_operation", OperationID: "retexture"}},
+			Action: &chat.ChoiceAction{Type: "switch_operation", OperationID: "retexture"},
+			// #549: the option's one step and the server's quote of it.
+			Step: &chat.ChoiceStep{Tool: "retexture_model", Capability: "retexture"}, CreditsMetered: true, EstimatedCredits: 15},
 		{ID: "keep", Label: "保持当前功能", Arguments: json.RawMessage(`{}`)},
 	}
 	if _, err := repository.CreateChoice(context.Background(), chat.Choice{
@@ -216,6 +218,12 @@ func TestNextStepChoiceCardCarriesOptionActionsOnTheWire(t *testing.T) {
 					Type        string `json:"type"`
 					OperationID string `json:"operation_id"`
 				} `json:"action"`
+				Step *struct {
+					Tool       string `json:"tool"`
+					Capability string `json:"capability"`
+				} `json:"step"`
+				CreditsMetered   bool `json:"credits_metered"`
+				EstimatedCredits int  `json:"estimated_credits"`
 			} `json:"options"`
 		} `json:"choices"`
 	}
@@ -234,5 +242,12 @@ func TestNextStepChoiceCardCarriesOptionActionsOnTheWire(t *testing.T) {
 	}
 	if card.Options[2].Action != nil || strings.Count(read.Body.String(), `"action"`) != 2 {
 		t.Fatalf("an option without an action gained one: %s", read.Body.String())
+	}
+	if step := card.Options[1].Step; step == nil || step.Tool != "retexture_model" || step.Capability != "retexture" ||
+		!card.Options[1].CreditsMetered || card.Options[1].EstimatedCredits != 15 {
+		t.Fatalf("one-step option on the wire = %+v", card.Options[1])
+	}
+	if card.Options[0].Step != nil || card.Options[2].Step != nil {
+		t.Fatalf("an option without a step gained one: %s", read.Body.String())
 	}
 }

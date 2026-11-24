@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
 	agentmock "github.com/LeXwDeX/Plinth/internal/agents/mock"
 	"github.com/LeXwDeX/Plinth/internal/agents/openaicompatible"
 	"github.com/LeXwDeX/Plinth/internal/agents/openairesponses"
 
+	"github.com/LeXwDeX/Plinth/internal/assets/imagefit"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/providers"
@@ -604,6 +606,27 @@ func projectCitationTemplate(schema catalog.ApplicationSchema) string {
 	return schema.Project.Agent.CitationTemplate
 }
 
+// requestPictureEncoder builds the encoder of chat.agent.request_pictures
+// (#555); nil when the Catalog declares none. One encoder serves the chat layer
+// and every chat model Adapter, so a picture is encoded once and the call log
+// can still name its size before encoding.
+func requestPictureEncoder(agent catalog.ChatAgentSchema) (*inlinepictures.Encoder, error) {
+	declared := agent.RequestPictures
+	if declared == nil {
+		return nil, nil
+	}
+	background, err := imagefit.ParseHexColor(declared.BackgroundColor)
+	if err != nil {
+		return nil, fmt.Errorf("chat.agent.request_pictures.background_color: %w", err)
+	}
+	return inlinepictures.New(inlinepictures.Policy{
+		Format:        declared.Format,
+		Quality:       declared.Quality,
+		Background:    background,
+		MaximumPixels: declared.MaxPixels,
+	})
+}
+
 // buildChatAgentWithTransport 按 chat.agent.connection_id 解析声明连接并按
 // 协议构造 Chat LLM 适配器；协议分支唯一，未知协议启动期报错。mock 模式不变。
 func buildChatAgentWithTransport(
@@ -611,6 +634,7 @@ func buildChatAgentWithTransport(
 	schema catalog.ApplicationSchema,
 	httpTransport func(connectionID string, base http.RoundTripper) http.RoundTripper,
 	logger *slog.Logger,
+	pictures *inlinepictures.Encoder,
 ) (agents.Adapter, error) {
 	registry := agents.NewRegistry()
 	var adapter agents.Adapter
@@ -702,6 +726,9 @@ func buildChatAgentWithTransport(
 					// Every chat connection speaks the declared connection's
 					// protocol, so its error_mapping reads their refusals.
 					ExhaustedQuota: chatExhaustedQuota(connection.ErrorMapping),
+					// Every inline picture goes out in the declared format,
+					// with the chat layer's encodings shared (#555).
+					Pictures: pictures,
 				},
 			)
 			if err != nil {
@@ -731,6 +758,7 @@ func buildChatAgentWithTransport(
 					ParallelToolCalls: schema.Chat.Agent.ParallelToolCalls,
 					Logger:            logger,
 					ExhaustedQuota:    chatExhaustedQuota(connection.ErrorMapping),
+					Pictures:          pictures,
 				})
 				if err != nil {
 					return nil, fmt.Errorf("Chat Agent 连接 %s: %w", chatConnection.ID, err)
@@ -810,6 +838,17 @@ func chatAgentConnection(
 		)
 	}
 	return connection, nil
+}
+
+// chatAgentDisplayName is the chat model connection's display name, which
+// names the upstream in the text of a refused model call; "" when the Schema
+// declares no chat connection.
+func chatAgentDisplayName(schema catalog.ApplicationSchema) string {
+	connection, err := chatAgentConnection(schema)
+	if err != nil {
+		return ""
+	}
+	return connection.DisplayName
 }
 
 func chatThinkingOptions(

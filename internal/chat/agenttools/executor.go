@@ -781,6 +781,28 @@ func boundedChoiceToken(id string) bool {
 	return true
 }
 
+// choiceOptionSteps reads an option's step (#549): absent or null is none, an
+// object is one, and a list is every step it names, so the service can refuse
+// an option that does more than one thing in the Schema's words.
+func choiceOptionSteps(raw json.RawMessage) ([]chat.ChoiceStep, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil, true
+	}
+	if strings.HasPrefix(trimmed, "[") {
+		var steps []chat.ChoiceStep
+		if json.Unmarshal(raw, &steps) != nil {
+			return nil, false
+		}
+		return steps, true
+	}
+	var step chat.ChoiceStep
+	if json.Unmarshal(raw, &step) != nil {
+		return nil, false
+	}
+	return []chat.ChoiceStep{step}, true
+}
+
 func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) chat.ToolResult {
 	if e.askChoice == nil {
 		return chat.ToolResult{Error: "choice cards unavailable", NoSubmission: true}
@@ -799,6 +821,9 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 				Type        string `json:"type"`
 				OperationID string `json:"operation_id"`
 			} `json:"action"`
+			// Step is one object (#549); a list is read whole so the service
+			// can refuse an option that names more than one step.
+			Step json.RawMessage `json:"step"`
 		} `json:"options"`
 		Proposal struct {
 			Arguments json.RawMessage `json:"arguments"`
@@ -832,6 +857,11 @@ func (e *Executor) askChoiceCard(ctx context.Context, command chat.ToolCommand) 
 		if option.Action != nil {
 			input.Action = &chat.ChoiceAction{Type: strings.TrimSpace(option.Action.Type), OperationID: strings.TrimSpace(option.Action.OperationID)}
 		}
+		steps, valid := choiceOptionSteps(option.Step)
+		if !valid {
+			return chat.ToolResult{Error: "choice options invalid: step must be one object with tool and capability", NoSubmission: true}
+		}
+		input.Steps = steps
 		options = append(options, input)
 	}
 	result, err := e.askChoice(ctx, command, kind, chat.AskChoiceArguments{

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.2",
+    "revision": "2026-11-24.19.20",
     "terminology": {
       "user_facing": [
         {
@@ -371,15 +371,6 @@
               }
             ],
             "default": "qwen-omni-flash"
-          },
-          "agent_max_tool_calls_per_reply": {
-            "type": "string",
-            "environment": [
-              {
-                "name": "AGENT_MAX_TOOL_CALLS_PER_REPLY"
-              }
-            ],
-            "default": ""
           },
           "llm_context_window_tokens": {
             "type": "string",
@@ -830,6 +821,7 @@
       "provider_connections": [
         {
           "id": "openai-images",
+          "display_name": "OpenAI",
           "protocol": "image-sync",
           "adapter_key": "openai-images.v1",
           "base_url_setting": "openai_base_url",
@@ -898,6 +890,7 @@
         },
         {
           "id": "gemini-images",
+          "display_name": "Gemini",
           "protocol": "image-sync",
           "adapter_key": "gemini-images.v1",
           "base_url_setting": "gemini_base_url",
@@ -1007,6 +1000,7 @@
         },
         {
           "id": "jimeng-images",
+          "display_name": "即梦（Jimeng）",
           "protocol": "image-sync",
           "adapter_key": "jimeng-images.v1",
           "base_url_setting": "jimeng_base_url",
@@ -1114,6 +1108,7 @@
         },
         {
           "id": "meshy",
+          "display_name": "MeshyAI",
           "protocol": "meshy",
           "adapter_key": "meshy.v2",
           "base_url_setting": "meshy_base_url",
@@ -1234,6 +1229,7 @@
         },
         {
           "id": "tripo",
+          "display_name": "Tripo",
           "protocol": "tripo",
           "adapter_key": "tripo.v3",
           "base_url_setting": "tripo_base_url",
@@ -1439,6 +1435,7 @@
         },
         {
           "id": "hyper3d",
+          "display_name": "Hyper3D",
           "protocol": "hyper3d.rodin",
           "adapter_key": "hyper3d.rodin.v1",
           "base_url_setting": "hyper3d_base_url",
@@ -1490,6 +1487,7 @@
         },
         {
           "id": "matting",
+          "display_name": "背景去除",
           "protocol": "matting",
           "adapter_key": "matting.v1",
           "base_url_setting": "matting_base_url",
@@ -1512,6 +1510,7 @@
         },
         {
           "id": "chat-llm",
+          "display_name": "对话模型",
           "protocol": "openai-compatible",
           "adapter_key": "openai-compatible-chat",
           "base_url_setting": "llm_base_url",
@@ -2695,6 +2694,7 @@
         "spinner_frame_milliseconds": 80,
         "percentage_multiplier": 100,
         "percentage_suffix": "%",
+        "task_list_page_size": 10,
         "advanced_model_form_feature": "advanced-model-form",
         "advanced_model_default_mode": "regular",
         "task_progress": {
@@ -4115,8 +4115,10 @@
         "ui.workspace.tasks.filter.label": "筛选任务",
         "ui.workspace.tasks.filter.all": "全部",
         "ui.workspace.tasks.filter.active": "进行中",
+        "ui.workspace.tasks.filter.queued": "排队中",
         "ui.workspace.tasks.filter.failed": "失败",
         "ui.workspace.tasks.filter.empty": "没有符合筛选的任务",
+        "ui.workspace.tasks.show_more": "—— 点击查看更多 ——",
         "ui.workspace.canvas.zoom_in": "放大",
         "ui.workspace.canvas.zoom_out": "缩小",
         "ui.workspace.canvas.zoom_reset": "重置视图",
@@ -4140,6 +4142,8 @@
         "ui.workspace.approval.tooltip_manual": "严格（逐步批准）：文生 3D、图生 3D、Gaussian Splat、换贴图，以及单步积分较高或会额外消耗积分的步骤需要你批准；其余步骤自动批准。",
         "ui.workspace.approval.step_credits": "本步消耗 {credits} 积分",
         "ui.workspace.approval.step_credits_one": "本步消耗 {credits} 积分",
+        "ui.workspace.approval.round_credits": "本轮消耗 {credits} 积分（{steps} 步）",
+        "ui.workspace.approval.round_credits_one": "本轮消耗 {credits} 积分（{steps} 步）",
         "ui.workspace.approval.session_credits": "本会话累计约 {credits} 积分（估算；失败且未扣费的任务不计入）",
         "ui.workspace.approval.session_credits_one": "本会话累计约 {credits} 积分（估算；失败且未扣费的任务不计入）",
         "ui.workspace.approval.auto_approved_note": "已按批准方式自动批准",
@@ -4403,7 +4407,7 @@
         "ui.canvas.toolbar.brush_hint": "用前景色涂画，笔触是像素。",
         "ui.canvas.toolbar.eraser_hint": "擦掉画笔涂上去的内容。",
         "ui.canvas.toolbar.crop_hint": "拖出裁剪框，只留下框里的部分。",
-        "ui.canvas.toolbar.snap_hint": "拖动图层时，边线和中线自动贴齐。点一下开或关。",
+        "ui.canvas.toolbar.snap_hint": "移动或缩放时边线和中线自动贴齐，按住 Ctrl/⌘ 暂停。点一下开或关。",
         "ui.canvas.toolbar.undo_hint": "撤销上一步操作。",
         "ui.canvas.toolbar.redo_hint": "重做刚撤销的操作。",
         "ui.canvas.toolbar.undo_empty": "没有可以撤销的操作。",
@@ -4652,8 +4656,6 @@
         "ui.workspace.models.load_failed": "模型加载失败，请重新打开面板重试。",
         "ui.workspace.models.no_results": "没有匹配的模型。试试其他名称或能力。",
         "ui.workspace.models.empty": "当前没有可用模型。",
-        "ui.workspace.tasks.agent_preparing": "Agent 正在准备",
-        "ui.workspace.tasks.agent_no_task": "尚未提交生成任务",
         "ui.workspace.tasks.skill_runs_load_failed": "Skill 步骤加载失败，请稍后重试",
         "ui.workspace.tasks.skill_phase.planned": "待准备",
         "ui.workspace.tasks.skill_phase.prepared": "已准备",
@@ -4935,6 +4937,8 @@
         "ui.studio.task.elapsed": "已用 {time}",
         "ui.studio.task.failed_title": "{capability}没有完成",
         "ui.studio.task.list": "进行中的任务",
+        "ui.studio.task.batch_title": "任务进行中 {done}/{total}",
+        "ui.studio.task.batch_ended": "{capability}：{result}",
         "ui.studio.stage.action.retexture_image": "用这张图换贴图",
         "ui.studio.stage.action.retexture_image_hint": "用这张图做参考，给会话里的 3D 模型整套换贴图；点后先选模型。",
         "ui.studio.stage.action.retexture_image_target": "这张图，加上你选的 3D 模型",
@@ -4995,8 +4999,7 @@
         "ui.studio.chat.resize": "调整对话栏宽度",
         "ui.studio.chat.title": "对话",
         "ui.studio.composer.chip.canvas": "画布",
-        "ui.studio.composer.chip.restore": "重新带上这个对象",
-        "ui.studio.composer.chip.skip": "本轮不带这个对象",
+        "ui.studio.composer.chip.deselect": "取消选中",
         "ui.studio.composer.hint": "Enter 发送，Shift+Enter 换行",
         "ui.studio.composer.placeholder_with_keys": "{placeholder}（{keys}）",
         "ui.studio.composer.expand_editor": "展开编辑",
@@ -5012,6 +5015,12 @@
         "ui.studio.composer.settings.changed": "已更改：{items}",
         "ui.studio.composer.settings.label_changed": "{title}（已更改：{items}）",
         "ui.studio.composer.settings.item_value": "{name}（{value}）",
+        "ui.studio.composer.settings.changed_note.models": "已固定生成模型：Agent 不再自行选择",
+        "ui.studio.composer.settings.changed_note.skills": "已选 Skill：之后的回合按它执行",
+        "ui.studio.composer.settings.changed_note.params": "已手动固定参数：Agent 不会改动这些参数",
+        "ui.studio.composer.settings.changed_note.chat": "对话模型或思考档位与默认不同",
+        "ui.studio.composer.settings.models_locked": "当前：由你固定 {models}，点此恢复由 Agent 选择",
+        "ui.studio.composer.settings.models_reset": "恢复自动",
         "ui.studio.agent_scope.label": "Agent 模式",
         "ui.studio.agent_scope.mode_2d": "2D 模式",
         "ui.studio.agent_scope.mode_3d": "3D 模式",
@@ -5062,8 +5071,8 @@
         "ui.studio.context.compacted": "已压缩上下文，下一轮回复后更新用量",
         "ui.studio.context.compact_failed": "压缩上下文失败，对话保持原样",
         "ui.studio.context.compact_busy": "回复进行中，结束后再压缩",
-        "ui.studio.tool_calls.label": "工具调用次数",
-        "ui.studio.tool_calls.hint": "本次回复已执行的工具调用；到上限后 Agent 会总结并请你确认。",
+        "ui.studio.tool_calls.turn": "本轮对话 工具调用次数：{count}",
+        "ui.studio.tool_calls.turn_one": "本轮对话 工具调用次数：{count}",
         "ui.chat.context_compacted": "已压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
         "ui.chat.branch_canvas_current": "画布、3D 舞台与版本为创建分支时的当前状态，可能与该条消息时不同。",
         "ui.chat.context_compacted_one": "已压缩上下文：较早的 {rounds} 轮对话已整理成摘要，聊天记录保持不变",
@@ -5600,8 +5609,6 @@
         "ui.studio.panel.details.size": "尺寸",
         "ui.studio.composer.chip.current": "当前：{handle}",
         "ui.studio.composer.chip.override": "本轮以 {handle} 为准",
-        "ui.studio.composer.chip.off_title": "本轮不带当前对象",
-        "ui.studio.composer.chip.off_sub": "Agent 只看对话文字",
         "ui.studio.composer.chip.branch": "分支：{label}",
         "ui.studio.composer.chip.branch_sub": "新版本接在它后面",
         "ui.studio.composer.chip.branch_clear": "取消分支",
@@ -6676,7 +6683,6 @@
         "turn_error": "error",
         "turn_end_reasons": {
           "completed": "completed",
-          "tool_limit": "tool_limit",
           "awaiting_approval": "awaiting_approval",
           "stopped": "stopped",
           "background": "background",
@@ -6987,9 +6993,6 @@
         "max_parallel_generation_submissions": 8,
         "parallel_tool_calls": true,
         "max_listed_models": 20,
-        "max_tool_calls_per_reply": 100,
-        "max_tool_calls_per_reply_setting": "agent_max_tool_calls_per_reply",
-        "max_tool_calls_per_reply_maximum": 100,
         "consent_denied_content": "the user pressed Do not approve on the approval card: this step was not done and no credits were spent. Say plainly in the chat that the step was not done, then propose an alternative and let the user choose: when the step had extra credits (extra export formats or billed options), offer to run it again with fewer or no extra options, or on a model without extra charges, at the lower base price; otherwise offer a cheaper or different option. Do not resubmit on your own, and never ask the user to tick a checkbox or change a setting elsewhere to give consent: consent is only the approval card",
         "consent_waiting_content": "the frozen operation still awaits the user's decision and stays approvable on the approval card after this turn; the card states the base credits, any extra credits and what they are for, and the total, and has Approve and Do not approve buttons. Once the user decides, the result is posted into the session automatically. Nothing has been submitted or started yet: tell the user it is waiting for their approval on that card, in the words of status_text when the result has it, and never say the request was submitted, resubmitted, started or is running; do not submit another operation. Never ask the user to tick a checkbox or change a setting elsewhere: approving the card is the whole consent",
         "consent_duplicate_content": "an approval card for exactly this operation (same tool, same input, same source assets) already exists and is still waiting for the user; no second card was created and nothing was submitted. Tell the user it is waiting on that card and do not call the tool again for it",
@@ -7036,6 +7039,12 @@
         },
         "scanner_max_bytes": 1048576,
         "error_body_max_bytes": 65536,
+        "request_pictures": {
+          "format": "jpeg",
+          "quality": 95,
+          "background_color": "#ffffff",
+          "max_pixels": 16777216
+        },
         "prompt_sections": [
           {
             "id": "creative-lab-workflow",
@@ -7155,7 +7164,7 @@
               "create_multiview_images",
               "create_model_3d_from_views"
             ],
-            "text": "【三视图制作要领】\n逐张三视图、四视图和多视角设定图都只用 create_three_view：一个视角一张独立图片，绝不出横排合图或九宫格，也不要把四个视角画进同一张图。先出正面并自检，再用「原图 + 已通过的正面图」依次出左、背和可选的右侧；每一张都是独立任务，因此可以只重做或替换有问题的那一张。\n按目的选 purpose：\n- model_input（缺省）用于要给 3D 做输入的同一主体：正交投影、中性均匀光、统一姿态/比例/画幅；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图的姿态、画风和画幅比例，不强制 A/T 姿态；四张图的主体描述与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n两种用途里，每张完成后都用 inspect_image 比较主体占比、背景和轮廓高度；model_input 的画幅按源图主体的高宽比选择（竖版角色不会落进 1:1），design_sheet 的画幅直接取源图整张比例。服务端的一致性检查还会比对轮廓高度、配件等独立部件数量和左右镜像（design_sheet 停用主体占比差、主色和部件数），这些数字看不出款式和语义，所以完成后要对照正面图逐张复核服装、配色、配件和左右（回执里附有清单），发现问题如实告诉用户并建议重试或替换那一张。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型的能力与价格以 list_offerings 为准。"
+            "text": "【三视图制作要领】\n用户说三视图、四视图（3 视图、4 视图、三视角、四视角）就是每个视角一张独立图片：三视图是正面、左侧、背面，四视图再加右侧。张数由视图数定，不开概念图数量卡、不再问几张，模型选择照常。一律用 create_three_view，不用 refine_image 把几个视角画进一张图；只有用户明确要一张图、拼图或 character sheet 时才出一张。只说设定图、没说视图数时照常处理。没有源图时先用 refine_image 出一张单主体正面源图，再以它为源调用。开工前一句话说明将出几张独立图，以及按 list_offerings 的 estimated_credits 计的预计总积分（没有源图时含源图那张），不自行估价。\ncreate_three_view 先出正面并自检，再以已通过的正面为源依次出左、背、右；每张是独立任务，可单独重做或替换。\n按目的选 purpose：\n- model_input（缺省）给 3D 做输入：正交投影、中性均匀光、统一姿态/比例/画幅，主体类型决定姿态，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图姿态、画风和画幅比例；各张主体与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n每张完成后用 inspect_image 比较主体占比、背景和轮廓高度。服务端一致性检查看不出款式和语义，要对照正面逐张复核服装、配色、配件和左右（回执附清单），有问题如实告诉用户并建议重试或替换那一张。\ncreate_multiview_images 一次出正面、左侧、背面、右侧四张，只在只要一组多视角图片资产、不要逐视角控制和单张重做时用，不替代逐张三视图，也不是 3D 步骤。\n用完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型能力与价格以 list_offerings 为准。"
           },
           {
             "id": "image2d",
@@ -7321,7 +7330,7 @@
           "image.source_scene": "\n[图片 句柄 {handle}：场景原图，只用于风格参考]"
         },
         "kind_labels": { "image": "图片", "model": "3D 模型" },
-        "selection_template": "\n\n当前选中对象：用户在工作区里正选中下列对象。用户说“这个”“这张”“选中的”“这个模型”时指它们；工具参数中用 {alias} 引用全部选中对象，或用各自的句柄。直接用它们做用户要的事，不再追问；它们做不了这一步时，先说明原因并问用户是否改用别的对象，不要自行换成别的对象付费提交。{items}",
+        "selection_template": "\n\n当前选中对象：用户在工作区里正选中下列对象，它们是本轮的默认目标。用户没指明对象时（包括说“这个”“这张”“选中的”“这个模型”）就以它们为准；用户消息里写了明确的句柄（如 @img5、@model2）时，以写出的句柄为准，不要换成选中对象。工具参数中用 {alias} 引用全部选中对象，或用各自的句柄。直接用它们做用户要的事，不再追问；它们做不了这一步时，先说明原因并问用户是否改用别的对象，不要自行换成别的对象付费提交。{items}",
         "selection_item_template": "\n- {handle}（{kind}）{details}",
         "selection_task_template": "，来源任务 {task_id}",
         "selection_capture_template": "，由 3D 视图截图而来（截图记录 {capture_id}）",
@@ -7785,7 +7794,10 @@
           "image_too_large": "图片或裁图区域超过大小上限：{detail}。",
           "crop_limit_reached": "这张源图的裁图数量已达上限 {limit} 张，不能再新增区域；已裁过的矩形仍会返回原来的资产。",
           "image_not_found": "找不到可裁剪的源图：{detail}。只能裁剪本人上传或生成的图片；@projectN 和他人资产不可用。",
-          "image_unavailable": "源图暂时无法读取，或不是可裁剪的图片：{detail}。"
+          "image_unavailable": "源图暂时无法读取，或不是可裁剪的图片：{detail}。",
+          "presented_note": "这 {count} 张裁图已作为本条回复里的会话图片展示给用户：每张的句柄写在 crops[].handle，用户能看到缩略图、点开和下载，后续工具（含参考图参数）用这些句柄引用。用户看得到的才算交付：回复里提到哪张裁图就写它的句柄，不要把句柄以外的资产 ID、像素坐标或「请自行切图」当作交给用户的结果。",
+          "not_presentable": "裁图没有执行：{detail}。用户会看不到也拿不到裁出的图，所以这一步不做。不要说已经裁好或已交付，如实告诉用户这一步现在做不了。",
+          "not_presented": "裁图已存储，但没有全部作为会话图片展示给用户（{detail}）：用户看不到也拿不到这些图，它们不算交付。不要说已经裁好或已交付，也不要把资产 ID 当作给用户的结果；可以再调用一次，仍失败就如实告诉用户。"
         }
       },
       "work_ledger": {
@@ -7943,7 +7955,7 @@
         {
           "name": "ask_choice",
           "execution": {"implementation_key":"choice.ask","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind concept_quantity first when a 2D request is open (only a subject, purpose or vague idea, no style, references, stated count or request to start): this opens the card that asks how many low-cost concept sketches to draw, and the reply must submit no generation at all. After the answer, draw exactly the chosen number. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind concept_direction after drawing concept sketches: each option carries a label, one sentence, the thumbnail handle of its sketch, and the exact refine_image arguments that continue that direction. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Use kind next_step when the person must choose how to continue and no other kind fits, for example when the request has more than one workable direction, or when something blocks submitting (such as pictures that are not the same design): give 2 to 4 options, each with an id, a short label and a one-sentence description; the person's pick comes back to you as text and calls no tool. Whenever you would offer the person two or more directions to choose from, open this card instead of writing a numbered or bulleted list in the message, and put every blocking question on one card: at most one card per reply. An option may carry an action that the page performs when the person picks it, before the answer is sent: switch_operation with an operation_id from switchable_operations in the function context fixes that function, and clear_operation clears the function selection so that all your tools are available again; never invent a function name. While a function is fixed, next_step is the only kind you can open. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
+          "description": "Open a choice card in the chat for a decision the person should make themselves. Use kind concept_quantity first when a 2D request is open (only a subject, purpose or vague idea, no style, references, stated count or request to start): this opens the card that asks how many low-cost concept sketches to draw, and the reply must submit no generation at all. After the answer, draw exactly the chosen number. Use kind usage_profile to ask what the 3D result is for; the card lists the declared production purposes, and the person's answer calls update_production_brief with the chosen purpose. Use kind image_usage_profile to ask what a 2D image is for; its options are the declared 2D purposes and its answer writes image_use. Use kind direction with options to ask a stylistic or compositional direction the person should choose themselves; its answer writes style. Use kind concept_direction after drawing concept sketches: each option carries a label, one sentence, the thumbnail handle of its sketch, and the exact refine_image arguments that continue that direction. Use kind visual_anchor to ask the person to confirm a new visual anchor: put the exact set_visual_anchor arguments in proposal.arguments; the accept option calls that tool with them, and the decline option writes nothing. Use kind next_step when the person must choose how to continue and no other kind fits, for example when the request has more than one workable direction, or when something blocks submitting (such as pictures that are not the same design): give 2 to 4 options, each with an id, a short label and a one-sentence description. Each next_step option is exactly one action: one generation, one processing step, or one unpaid explanation or hand-off. Its label and description state only that action's result and trade-off; never write a route of several steps into one option (no \"…, then …\") and never bundle a later paid step into it. An option that runs a paid step names it in step (tool, plus capability for a tool with several capabilities); the server quotes it on the card from the Offering, refuses an option that names more than one step, and in the turn that answers the card runs only that one step, once. An option without step runs no paid step. When the work needs several paid steps, ask one step per card, or use propose_production_plan so the person approves the whole route on its plan card. The person's pick comes back to you as text and calls no tool. Whenever you would offer the person two or more directions to choose from, open this card instead of writing a numbered or bulleted list in the message, and put every blocking question on one card: at most one card per reply. An option may carry an action that the page performs when the person picks it, before the answer is sent: switch_operation with an operation_id from switchable_operations in the function context fixes that function, and clear_operation clears the function selection so that all your tools are available again; never invent a function name. Switching to a function is that function's one step: the server quotes it and runs only it in the answer turn. While a function is fixed, next_step is the only kind you can open. Ask once, then continue from the answer; do not open the same card again while it is pending. The card grants nothing and charges nothing.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -7967,7 +7979,7 @@
                 "type": "array",
                 "minItems": 2,
                 "maxItems": 8,
-                "description": "Options for a kind whose option_source is agent (direction, concept_direction and next_step). Each id is a short bounded token (for direction, the value the answer passes to the target tool), and label is what the person reads; next_step takes 2 to 4 options. Omit for kinds whose options the server builds.",
+                "description": "Options for a kind whose option_source is agent (direction, concept_direction and next_step). Each id is a short bounded token (for direction, the value the answer passes to the target tool), and label is what the person reads; next_step takes 2 to 4 options, each one action. Omit for kinds whose options the server builds.",
                 "items": {
                   "type": "object",
                   "properties": {
@@ -8011,6 +8023,24 @@
                         }
                       },
                       "required": ["type"],
+                      "additionalProperties": false
+                    },
+                    "step": {
+                      "type": "object",
+                      "description": "For kind next_step only: the one paid step this option runs, as a single object (never a list). Omit for an option that runs no paid step. The server quotes it on the card; an option with a switch_operation action already runs that function's step.",
+                      "properties": {
+                        "tool": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "description": "The paid tool that runs the step, such as process_model or retexture_model."
+                        },
+                        "capability": {
+                          "type": "string",
+                          "maxLength": 64,
+                          "description": "The step's capability, such as remesh. Required when the tool has several capabilities."
+                        }
+                      },
+                      "required": ["tool"],
                       "additionalProperties": false
                     }
                   },
@@ -8320,7 +8350,7 @@
         {
           "name": "crop_image_regions",
           "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. The result gives each crop's input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
+          "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. Every crop is also shown to the user as a session picture of this reply with its own @imgN handle (thumbnail, open, download), which later tools take as a picture handle; a crop that cannot be shown to the user is a failed call, not a delivery. The result gives each crop's handle, label, width, height, input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8643,7 +8673,7 @@
         {
           "name": "create_three_view",
           "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model the session's model choice picks. Pick purpose: model_input (the default) renders an orthographic set for 3D, where the subject_type class decides the pose and the frame; design_sheet renders a design sheet that keeps the source's own pose, art style and aspect ratio. Each view is one picture of its own: never a row or a grid of several views, and never one horizontal composite. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, with the original picture as a second reference for a design sheet, so clothing, proportions and colors stay consistent. For model_input, pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. For design_sheet the source's pose is kept as it is. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, or the source picture's own shape for a design sheet, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
+          "description": "Start the image-three-view recipe from exactly one image of this chat (one the user selected or attached, or one generated earlier, such as a front source picture drawn first) and the image-to-image model the session's model choice picks. Pick purpose: model_input (the default) renders an orthographic set for 3D, where the subject_type class decides the pose and the frame; design_sheet renders a design sheet that keeps the source's own pose, art style and aspect ratio. Each view is one picture of its own: never a row or a grid of several views, and never one horizontal composite. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, with the original picture as a second reference for a design sheet, so clothing, proportions and colors stay consistent. For model_input, pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. For design_sheet the source's pose is kept as it is. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, or the source picture's own shape for a design sheet, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8781,7 +8811,7 @@
           "selection_mask": "bind",
           "reference_size": "single",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count.",
+          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count. Several views of one subject (a three-view or four-view request) go to create_three_view, one picture per view, as the three-view craft brief says.",
           "cross_domain_model_fallback": true,
           "model_argument": "model",
           "model_choices": {"from": "available_offerings"},
@@ -9240,7 +9270,7 @@
           "canvas_source": "ignore",
           "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Re-texture a finished 3D model of this session from an English text prompt, one reference image or both, as the selected service's inputs in list_offerings allow. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Re-texture a finished 3D model of this session from an English text prompt or one reference image, exactly as the selected service's inputs and input_rules in list_offerings allow: some services require both, others take a prompt or an image but not both (an input_rules entry over prompt and the image input with maximum 1), and then you give only one of them. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "retexture",
           "fallback_capability": "retexture",
@@ -9260,7 +9290,7 @@
               },
               "prompt": {
                 "type": "string",
-                "description": "Concise English description of the new texture. Use it only if the selected service lists a prompt input in list_offerings; some services also require a reference image beside it, others accept a prompt or an image but not both."
+                "description": "Concise English description of the new texture. Use it only if the selected service lists a prompt input in list_offerings; some services also require a reference image beside it, others take a prompt or an image but not both (input_rules maximum 1): then send only the one the person wants."
               },
               "reference_handles": {
                 "type": "array",
@@ -9274,7 +9304,7 @@
                   "minimum": 1
                 },
                 "maxItems": 1,
-                "description": "One 1-indexed historical chat image used as the style reference instead of a prompt."
+                "description": "One 1-indexed historical chat image used as the style reference; send it beside a prompt only when the service's input_rules in list_offerings allow both."
               },
               "negative_prompt": {
                 "type": "string",
@@ -9310,7 +9340,7 @@
               "step_unknown": "Unknown step \"{step}\". Use one of the declared step values.",
               "argument_unsupported": "The argument \"{argument}\" is not supported by this step or by the offering that would run it. Remove it and retry.",
               "reference_required": "This service requires exactly one reference image and none (or more than one) was available: the call named none, this turn attached none or several, and nothing is selected. Nothing was submitted and nothing was charged. Ask the person to attach exactly one image to their next message (or select one in the workspace), then call this tool again with the same service. Do not switch service, drop the requirement or invent an image.",
-              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and without a text prompt.",
+              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and beside a text prompt only when the service's input_rules in list_offerings allow both.",
               "no_offering": "No available offering can run {step} right now.",
               "invalid_input": "The request was rejected before submission: {detail}",
               "unavailable": "Model processing is not available in this deployment.",
@@ -9792,7 +9822,7 @@
                 "model-split",
                 "retexture",
                 "format-conversion"
-              ]},"offering_id":{"type":"string","description":"Optional available compatible Offering from list_offerings."},"parameters":{"type":"object","description":"Offering parameter names and values. No source-task/source-asset/consent parameter; defaults are applied by Catalog."}},"required":["capability","parameters"],"additionalProperties":false}}
+              ]},"offering_id":{"type":"string","description":"Optional available compatible Offering from list_offerings."},"parameters":{"type":"object","description":"Offering parameter names and values. No source-task/source-asset/consent parameter; defaults are applied by Catalog. Respect the Offering's input_rules in list_offerings: of the parameters a rule names, give at least minimum and at most maximum."}},"required":["capability","parameters"],"additionalProperties":false}}
             },
             "required": ["source_task_id","steps"],
             "additionalProperties": false
@@ -9902,7 +9932,7 @@
               "source_expired": "No available {step} offering can use this model: the provider no longer keeps its original task (past the provider's retention), and the offerings that need that task take no model file. Nothing was submitted. Tell the person why; the source must be generated again (for animation, rig the model again) before this step.",
               "step_unknown": "Unknown step \"{step}\". Use one of the declared step values.",
               "argument_unsupported": "The argument \"{argument}\" is not supported by this step or by the offering that would run it. Remove it and retry.",
-              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and without a text prompt.",
+              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and beside a text prompt only when the service's input_rules in list_offerings allow both.",
               "no_offering": "No available offering can run {step} right now.",
               "invalid_input": "The request was rejected before submission: {detail}",
               "unavailable": "Model processing is not available in this deployment.",
@@ -10452,10 +10482,24 @@
             "recommended_size": "",
             "thumbnail_path": "",
             "raw_image_url": "",
-            "prompt": "用选中的或随消息附上的那一张图生成三视图：先出正面图，左侧、背面（和可选的右侧）由用户在对话里的三视图卡片上继续。",
+            "prompt": "用选中的或随消息附上的那一张图出三视图：正面、左侧、背面各一张独立图，按【三视图制作要领】以正面为源逐视角生成。先出正面，其余视角在对话里的三视图卡片上继续。",
             "tool": "create_three_view",
             "requires_image": true,
             "default_message": "用这张图生成三视图",
+            "one_shot": true
+          },
+          {
+            "id": "system-four-view",
+            "name": "Four-view",
+            "name_zh": "四视图",
+            "category": "",
+            "recommended_size": "",
+            "thumbnail_path": "",
+            "raw_image_url": "",
+            "prompt": "用选中的或随消息附上的那一张图出四视图：正面、左侧、背面、右侧各一张独立图，按【三视图制作要领】以正面为源逐视角生成。先出正面，其余视角（含右侧）在对话里的三视图卡片上继续。",
+            "tool": "create_three_view",
+            "requires_image": true,
+            "default_message": "用这张图生成四视图",
             "one_shot": true
           }
         ],
@@ -10699,6 +10743,32 @@
           "generation_failed_metered_by_class": {
             "integrity_failure": "上游已经完成生成，可能已经扣除积分，但结果在本地存储或完整性校验时失败。系统没有自动重新提交，以免再次计费；是否重试由用户决定。上游还保留着结果时，可以免费重新取回（任务详情里的「重新取回结果」，或由 Agent 调用 recover_task_result）：只读取已受理的上游作业，不会重新提交，也不再计费。不能取回时，再次生成同类结果需要在批准卡上确认再次计费。"
           },
+          "upstream_http_error": {
+            "template": "{provider} 网关返回 {status}，原因：{reason}",
+            "unreachable_template": "{provider} 网关连接失败，原因：{reason}",
+            "combined_template": "{upstream}{detail}",
+            "reasons": {
+              "401": "上游凭据无效或无权限，请联系管理员。",
+              "402": "上游账户余额不足。",
+              "403": "上游凭据无效或无权限，请联系管理员。",
+              "408": "上游服务器响应超时。",
+              "429": "上游服务器限流，请稍后再试。",
+              "4xx": "上游拒绝了请求，请检查输入。",
+              "5xx": "上游服务器故障。"
+            },
+            "unreachable_reason": "无法连接上游服务器。",
+            "failure_classes": [
+              "invalid_input",
+              "authentication",
+              "rate_limited",
+              "timed_out",
+              "rejected",
+              "insufficient_balance",
+              "upstream_unavailable",
+              "upstream_denied",
+              "transport"
+            ]
+          },
           "generation_error": "生成异常",
           "summary_failed": "生成总结失败",
           "no_result": "⚠️ 未返回结果，请重试。",
@@ -10740,10 +10810,6 @@
           "chat_model_invalid": "所选的对话模型当前不可用，请重新选择",
           "agent_busy": "对话任务较多，请稍后重试",
           "turn_stopped": "已按要求停止本轮生成",
-          "tool_round_limit": "本次回复的工具调用次数已用完（上限 {limit} 次），如需继续请再发一条消息",
-          "tool_round_limit_pending": "以下操作本轮未执行，确认后请再发一条消息继续：",
-          "tool_round_limit_pending_item": "- {tool}：{intent}",
-          "tool_round_limit_pending_tool": "- {tool}",
           "tool_arguments_invalid": "工具参数不是合法的 JSON，该工具没有执行。请按工具定义重新生成参数后再调用。",
           "tool_unavailable": "工具 {tool} 本回合不可用，没有执行。请改用当前可用的工具，或不用工具直接回答。",
           "input_gap_missing": "缺少必填输入「{name}」（{type}）{options}：{supply}",
@@ -10759,7 +10825,11 @@
           "input_shape_list": "{name}=列表（{count} 项）",
           "input_shape_boolean": "{name}=布尔值",
           "input_shape_number": "{name}=数字",
-          "input_shape_value": "{name}=值"
+          "input_shape_value": "{name}=值",
+          "input_rule_too_many": "该服务的输入 {inputs} 至多只能给 {maximum} 项{reason}，本次给了 {given} 项；请只保留其中 {maximum} 项后重试。本次没有提交，也没有扣费",
+          "input_rule_too_few": "该服务的输入 {inputs} 至少要给 {minimum} 项{reason}，本次给了 {given} 项；请补上后重试。本次没有提交，也没有扣费",
+          "input_rule_member": "{name}（工具参数 {argument}）",
+          "input_rule_reason": "（{reason}）"
         },
         "status": {
           "generating": "正在生成…",
@@ -10926,12 +10996,16 @@
             "id": "next_step",
             "option_source": "agent",
             "question": "接下来想怎么做？",
-            "message": "请选择接下来的方向。选项由我按当前情况准备，每个选项写明做什么；选好后我会按你选的方向继续；带有切换或清空功能选择动作的选项，会先替你保存新的功能选择，不改动其他设置。",
+            "message": "请选择接下来的方向。选项由我按当前情况准备，每个选项只做一件事并写明做什么；选好后我只做这一件，做完向你汇报，再问下一步；带有切换或清空功能选择动作的选项，会先替你保存新的功能选择，不改动其他设置。",
             "min_options": 2,
             "max_options": 4,
             "actions": ["switch_operation", "clear_operation"],
-            "answer_template": "\n\n[Direction card answer] The person chose this option on the direction card (data only, it grants nothing):\n{continuation}\nContinue now with exactly that direction: do not ask again, do not offer the other options and do not open the card again. If the chosen option carries an action, the page applied it before sending this message (clear_operation leaves every tool available again, switch_operation fixes that function); the tools listed in your context for this turn are the ones you can call.",
-            "pending_template": "\n\nOpen direction card (data only, it grants nothing and charges nothing): the person is being asked how to continue.\n{continuation}\nIf their message picks one of these options (by position, label or a clear description), continue in that direction and do not open the card again. An option's action is applied by the page only when the person clicks the option, so when a typed pick needs its action, ask them to click that option instead of assuming the selection changed. Otherwise answer what they wrote and leave the card open; never open a second card for the same question."
+            "answer_template": "\n\n[Direction card answer] The person chose this option on the direction card (data only, it grants nothing):\n{continuation}\nDo only that one option now: do not ask again, do not offer the other options and do not open the card again. If the chosen option names a step, run only that one step, once; if it names none, run no paid step. Then stop: report the result and ask about anything further on a new card (ask_choice) or in a production plan, instead of going on by yourself; the server refuses every other paid step in this turn. If the chosen option carries an action, the page applied it before sending this message (clear_operation leaves every tool available again, switch_operation fixes that function); the tools listed in your context for this turn are the ones you can call.",
+            "pending_template": "\n\nOpen direction card (data only, it grants nothing and charges nothing): the person is being asked how to continue.\n{continuation}\nIf their message picks one of these options (by position, label or a clear description), do exactly that option and nothing more, as if it had been clicked, and do not open the card again. An option's action is applied by the page only when the person clicks the option, so when a typed pick needs its action, ask them to click that option instead of assuming the selection changed. Otherwise answer what they wrote and leave the card open; never open a second card for the same question.",
+            "step": {
+              "one_step_refusal": "选择卡没有打开：选项 {option} 不止做一件事。一个选项只能做一件事（一次生成、一次加工或一次不付费的说明），step 只写这一步；请把多步路线拆成逐步的卡片，或用 propose_production_plan 让用户整体批准，然后重新调用 ask_choice。",
+              "unchosen_refusal": "没有提交 {tool}，也没有扣费：用户在方向卡上只选了「{option}」，这一步不在所选范围内。请先汇报当前结果，再用新的 ask_choice 卡（kind=next_step）问用户下一步要不要做。"
+            }
           }
         ]
       },
@@ -12622,7 +12696,8 @@
           "threshold_pixels": 6,
           "guide_stroke_width": 1,
           "guide_color_token": "--snap-guide",
-          "group_member_targets": false
+          "group_member_targets": false,
+          "bypass_modifier": "mod"
         },
         "upload_task_id": "upload",
         "export_filename_fallback": "canvas",
@@ -17198,9 +17273,8 @@
         "mcp_unavailable": "当前接线不可执行",
         "mcp_tools": "MCP 工具",
         "mcp_default_off": "默认不启用（与内置工具重复）",
-        "prompt_following": "提示词未自定义，随版本升级自动更新",
-        "prompt_customized": "提示词已自定义，不随版本升级更新",
-        "follow_default": "恢复跟随默认",
+        "prompts_readonly": "提示词随版本发布，不可在此修改；如需调整请发布新版本的产品 Schema",
+        "prompts_view": "查看当前生效的提示词全文",
         "configuration_source": "配置来源",
         "image_to_image_template": "图生图模板（保留 {user_input} 与 {skill_prompt}）",
         "invalid_configuration": "配置文档无效",
@@ -18633,8 +18707,10 @@
             "ui.workspace.tasks.filter.label": "Filter tasks",
             "ui.workspace.tasks.filter.all": "All",
             "ui.workspace.tasks.filter.active": "In progress",
+            "ui.workspace.tasks.filter.queued": "Queued",
             "ui.workspace.tasks.filter.failed": "Failed",
             "ui.workspace.tasks.filter.empty": "No tasks match the filter",
+            "ui.workspace.tasks.show_more": "—— Show more ——",
             "ui.workspace.canvas.zoom_in": "Zoom in",
             "ui.workspace.canvas.zoom_out": "Zoom out",
             "ui.workspace.canvas.zoom_reset": "Reset view",
@@ -18658,6 +18734,8 @@
             "ui.workspace.approval.tooltip_manual": "Strict (approve each step): text-to-3D, image-to-3D, Gaussian Splat, retexture, and any step that costs many credits or uses extra credits need your approval; other steps are approved automatically.",
             "ui.workspace.approval.step_credits": "This step uses {credits} credits",
             "ui.workspace.approval.step_credits_one": "This step uses {credits} credit",
+            "ui.workspace.approval.round_credits": "This turn uses {credits} credits ({steps} steps)",
+            "ui.workspace.approval.round_credits_one": "This turn uses {credits} credit ({steps} steps)",
             "ui.workspace.approval.session_credits": "About {credits} credits this session (estimate; failed tasks that were not charged are not counted)",
             "ui.workspace.approval.session_credits_one": "About {credits} credit this session (estimate; failed tasks that were not charged are not counted)",
             "ui.workspace.approval.auto_approved_note": "Approved automatically per the approval mode",
@@ -18925,7 +19003,7 @@
             "ui.canvas.toolbar.brush_hint": "Paint with the foreground color; strokes are pixels.",
             "ui.canvas.toolbar.eraser_hint": "Erase what the brush painted.",
             "ui.canvas.toolbar.crop_hint": "Drag out a crop box to keep only what's inside.",
-            "ui.canvas.toolbar.snap_hint": "When dragging a layer, edges and centerlines snap into alignment. Click to turn on or off.",
+            "ui.canvas.toolbar.snap_hint": "When moving or resizing a layer, edges and centerlines snap into alignment; hold Ctrl/⌘ to pause it. Click to turn on or off.",
             "ui.canvas.toolbar.undo_hint": "Undo the last action.",
             "ui.canvas.toolbar.redo_hint": "Redo the action you just undid.",
             "ui.canvas.toolbar.undo_empty": "Nothing to undo.",
@@ -19174,8 +19252,6 @@
             "ui.workspace.models.load_failed": "Failed to load models. Reopen the panel to retry.",
             "ui.workspace.models.no_results": "No matching models. Try another name or capability.",
             "ui.workspace.models.empty": "No models are currently available.",
-            "ui.workspace.tasks.agent_preparing": "Agent is preparing",
-            "ui.workspace.tasks.agent_no_task": "No task submitted yet",
             "ui.workspace.tasks.skill_runs_load_failed": "Failed to load Skill steps. Please try again later",
             "ui.workspace.tasks.skill_phase.planned": "To prepare",
             "ui.workspace.tasks.skill_phase.prepared": "Prepared",
@@ -19457,6 +19533,8 @@
             "ui.studio.task.elapsed": "Elapsed {time}",
             "ui.studio.task.failed_title": "{capability} didn't finish",
             "ui.studio.task.list": "Tasks in progress",
+            "ui.studio.task.batch_title": "Tasks running {done}/{total}",
+            "ui.studio.task.batch_ended": "{capability}: {result}",
             "ui.studio.stage.action.retexture_image": "Retexture with this image",
             "ui.studio.stage.action.retexture_image_hint": "Use this picture as a style reference and retexture a 3D model in this chat; pick the model first.",
             "ui.studio.stage.action.retexture_image_target": "This image, plus the 3D model you choose",
@@ -19517,8 +19595,7 @@
             "ui.studio.chat.resize": "Resize chat panel",
             "ui.studio.chat.title": "Chat",
             "ui.studio.composer.chip.canvas": "Canvas",
-            "ui.studio.composer.chip.restore": "Include this object again",
-            "ui.studio.composer.chip.skip": "Don't include this object this turn",
+            "ui.studio.composer.chip.deselect": "Deselect",
             "ui.studio.composer.hint": "Enter to send, Shift+Enter for a new line",
             "ui.studio.composer.placeholder_with_keys": "{placeholder} ({keys})",
             "ui.studio.composer.expand_editor": "Expand editor",
@@ -19534,6 +19611,12 @@
             "ui.studio.composer.settings.changed": "Changed: {items}",
             "ui.studio.composer.settings.label_changed": "{title} (changed: {items})",
             "ui.studio.composer.settings.item_value": "{name} ({value})",
+            "ui.studio.composer.settings.changed_note.models": "Generation model pinned: the Agent no longer picks one",
+            "ui.studio.composer.settings.changed_note.skills": "Skill selected: the next turns follow it",
+            "ui.studio.composer.settings.changed_note.params": "Parameters set by hand: the Agent keeps them as you set them",
+            "ui.studio.composer.settings.changed_note.chat": "Chat model or thinking level differs from the default",
+            "ui.studio.composer.settings.models_locked": "Now pinned by you: {models}. Restore to let the Agent choose",
+            "ui.studio.composer.settings.models_reset": "Restore auto",
             "ui.studio.agent_scope.label": "Agent mode",
             "ui.studio.agent_scope.mode_2d": "2D mode",
             "ui.studio.agent_scope.mode_3d": "3D mode",
@@ -19584,8 +19667,8 @@
             "ui.studio.context.compacted": "Context compacted; usage updates after the next reply",
             "ui.studio.context.compact_failed": "Could not compact the context; the conversation is unchanged",
             "ui.studio.context.compact_busy": "A reply is running; compact after it ends",
-            "ui.studio.tool_calls.label": "Tool calls",
-            "ui.studio.tool_calls.hint": "Tool calls in this reply; at the limit the Agent summarizes and asks you to continue.",
+            "ui.studio.tool_calls.turn": "Tool calls this turn: {count}",
+            "ui.studio.tool_calls.turn_one": "Tool calls this turn: {count}",
             "ui.chat.context_compacted": "Context compacted: the earliest {rounds} rounds are now a summary; the chat history is unchanged",
             "ui.chat.branch_canvas_current": "The canvas, 3D stage and versions are copied from their current state when the branch is created; they may differ from the selected message's state.",
             "ui.chat.context_compacted_one": "Context compacted: the earliest {rounds} round is now a summary; the chat history is unchanged",
@@ -20122,8 +20205,6 @@
             "ui.studio.panel.details.size": "Size",
             "ui.studio.composer.chip.current": "Current: {handle}",
             "ui.studio.composer.chip.override": "This turn uses {handle}",
-            "ui.studio.composer.chip.off_title": "Don't include the current object this turn",
-            "ui.studio.composer.chip.off_sub": "The Agent only sees the chat text",
             "ui.studio.composer.chip.branch": "Branch: {label}",
             "ui.studio.composer.chip.branch_sub": "The new version follows it",
             "ui.studio.composer.chip.branch_clear": "Cancel branch",
@@ -21041,9 +21122,8 @@
             "agent_configuration.ui.mcp_unavailable": "The current wiring cannot be executed",
             "agent_configuration.ui.mcp_tools": "MCP tools",
             "agent_configuration.ui.mcp_default_off": "Off by default (repeats built-in tools)",
-            "agent_configuration.ui.prompt_following": "Prompts are not customized and update automatically with new versions",
-            "agent_configuration.ui.prompt_customized": "Prompts are customized and do not change with new versions",
-            "agent_configuration.ui.follow_default": "Restore default (follow updates)",
+            "agent_configuration.ui.prompts_readonly": "Prompts ship with each release and cannot be edited here; publish a new Product Schema to change them",
+            "agent_configuration.ui.prompts_view": "View the full prompts in effect",
             "agent_configuration.ui.configuration_source": "Configuration source",
             "agent_configuration.ui.image_to_image_template": "Image-to-image template (keep {user_input} and {skill_prompt})",
             "agent_configuration.ui.invalid_configuration": "Invalid configuration document",
@@ -21460,7 +21540,9 @@
             "chat.choice.kinds[id=concept_direction].question": "Which direction should we develop?",
             "chat.choice.kinds[id=concept_direction].message": "Choose a concept direction for this work. Each direction has a low-cost sketch and one sentence; after you choose, I will continue with that direction's parameters.",
             "chat.choice.kinds[id=next_step].question": "What would you like to do next?",
-            "chat.choice.kinds[id=next_step].message": "Choose how to continue. I prepare the options from the current situation and each one says what it does; after you choose, I will continue in that direction. An option that switches or clears the function selection saves the new selection for you first and changes nothing else.",
+            "chat.choice.kinds[id=next_step].message": "Choose how to continue. I prepare the options from the current situation; each one does one thing and says what it is. After you choose, I do only that one thing, report back and then ask about the next step. An option that switches or clears the function selection saves the new selection for you first and changes nothing else.",
+            "chat.choice.kinds[id=next_step].step.one_step_refusal": "The choice card was not opened: option {option} does more than one thing. One option can do only one thing (one generation, one processing step or one unpaid explanation), and step names only that one step. Split a multi-step route into one card per step, or use propose_production_plan so the person approves it as a whole, then call ask_choice again.",
+            "chat.choice.kinds[id=next_step].step.unchosen_refusal": "{tool} was not submitted and nothing was charged: on the direction card the person chose only \"{option}\", and this step is not part of that one choice. Report the current result first, then ask the person about the next step on a new ask_choice card (kind=next_step).",
             "chat.choice.kinds[id=concept_quantity].question": "How many concept images should we look at first?",
             "chat.choice.kinds[id=concept_quantity].message": "Choose how many concept images to generate this time. Each one is a low-cost paid generation; after you choose, I will draw visibly different directions in that count.",
             "chat.concept_directions.question": "Which direction should we develop?",
@@ -21519,6 +21601,9 @@
             "chat.image_crop.texts.crop_limit_reached": "This source picture already keeps the maximum of {limit} crops, so no new region can be added; rectangles cropped before still return their stored asset.",
             "chat.image_crop.texts.image_not_found": "No crop source was found: {detail}. Only your own uploaded or generated pictures can be cropped; @projectN and another owner's assets are not available.",
             "chat.image_crop.texts.image_unavailable": "The source picture cannot be read right now, or it is not a supported picture: {detail}.",
+            "chat.image_crop.texts.presented_note": "These {count} crops are shown to the user as session pictures in this reply: each crop's handle is in crops[].handle, the user can see the thumbnails, open and download them, and later tools (including reference picture arguments) name them by these handles. Only what the user can see counts as delivered: when your reply mentions a crop, write its handle, and never hand the user asset ids, pixel coordinates or \"cut it yourself\" as the result.",
+            "chat.image_crop.texts.not_presentable": "The crop was not run: {detail}. The user would not see or get the cropped pictures, so this step is not done. Do not say the crops are made or delivered; tell the user plainly that this step cannot be done now.",
+            "chat.image_crop.texts.not_presented": "The crops are stored, but not all of them are shown to the user as session pictures ({detail}): the user cannot see or get them, so they are not delivered. Do not say the crops are made or delivered, and do not give asset ids as the result; you may call the tool once more, and if it still fails tell the user plainly.",
             "chat.model3d_usage.profiles[id=render].label": "Display / rendering",
             "chat.model3d_usage.profiles[id=render].description": "A model for display, preview or promotion; not aimed at real-time use or printing.",
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
@@ -21648,6 +21733,17 @@
             "chat.presentation.messages.generation_failed_metered_by_class.integrity_failure": "The upstream finished generating and may have already charged credits, but the result failed during local storage or integrity verification. The system did not resubmit automatically, to avoid charging again; whether to retry is up to the user. If the upstream still holds the result, you can fetch it again for free (\"Refetch result\" in the task details, or the Agent calling recover_task_result): this only reads the already-accepted upstream job, does not resubmit, and is not billed again. If it cannot be fetched, generating a similar result again requires confirming the repeat charge on the approval card.",
             "chat.presentation.messages.generation_error": "Generation error",
             "chat.presentation.messages.summary_failed": "Failed to generate summary",
+            "chat.presentation.messages.upstream_http_error.template": "{provider} gateway returned {status}: {reason}",
+            "chat.presentation.messages.upstream_http_error.unreachable_template": "{provider} gateway could not be reached: {reason}",
+            "chat.presentation.messages.upstream_http_error.combined_template": "{upstream} {detail}",
+            "chat.presentation.messages.upstream_http_error.reasons.401": "The upstream credentials are invalid or lack permission; please contact an administrator.",
+            "chat.presentation.messages.upstream_http_error.reasons.402": "The upstream account balance is insufficient.",
+            "chat.presentation.messages.upstream_http_error.reasons.403": "The upstream credentials are invalid or lack permission; please contact an administrator.",
+            "chat.presentation.messages.upstream_http_error.reasons.408": "The upstream server timed out.",
+            "chat.presentation.messages.upstream_http_error.reasons.429": "The upstream server is rate limiting requests; please try again later.",
+            "chat.presentation.messages.upstream_http_error.reasons.4xx": "The upstream rejected the request; please check the input.",
+            "chat.presentation.messages.upstream_http_error.reasons.5xx": "The upstream server failed.",
+            "chat.presentation.messages.upstream_http_error.unreachable_reason": "Unable to connect to the upstream server.",
             "chat.presentation.messages.no_result": "⚠️ No result returned. Please retry.",
             "chat.presentation.messages.unknown_error": "Unknown error",
             "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",
@@ -21683,9 +21779,6 @@
             "chat.choice.mock_summary": "Several services can do this step. Please choose one on the card below.",
             "chat.presentation.messages.agent_busy": "The chat is busy. Please try again later",
             "chat.presentation.messages.turn_stopped": "Generation for this turn was stopped as requested",
-            "chat.presentation.messages.tool_round_limit": "The tool call limit for this reply has been reached (limit: {limit}). Send another message to continue",
-            "chat.presentation.messages.tool_round_limit_pending": "The following actions were not run this turn. After confirming, send another message to continue:",
-            "chat.presentation.messages.tool_round_limit_pending_item": "- {tool}: {intent}",
             "chat.presentation.messages.tool_arguments_invalid": "The tool arguments are not valid JSON, so the tool did not run. Write the arguments again as the tool definition says, then call it again.",
             "chat.presentation.messages.tool_unavailable": "The tool {tool} is not available in this turn and did not run. Use a tool you are offered now, or answer without a tool.",
             "chat.presentation.messages.input_gap_missing": "missing required input \"{name}\" ({type}){options}: {supply}",
@@ -21702,6 +21795,10 @@
             "chat.presentation.messages.input_shape_boolean": "{name}=boolean",
             "chat.presentation.messages.input_shape_number": "{name}=number",
             "chat.presentation.messages.input_shape_value": "{name}=value",
+            "chat.presentation.messages.input_rule_too_many": "this service takes at most {maximum} of the inputs {inputs}{reason}, and this call gave {given}; keep only {maximum} of them and call again. Nothing was submitted or charged",
+            "chat.presentation.messages.input_rule_too_few": "this service needs at least {minimum} of the inputs {inputs}{reason}, and this call gave {given}; supply what is missing and call again. Nothing was submitted or charged",
+            "chat.presentation.messages.input_rule_member": "{name} (tool argument {argument})",
+            "chat.presentation.messages.input_rule_reason": " ({reason})",
             "chat.presentation.status.generating": "Generating…",
             "chat.presentation.status.thinking": "Thinking…",
             "chat.presentation.status.compacting": "Compacting context…",
@@ -21711,8 +21808,11 @@
             "chat.presentation.status.preparing_tool": "Preparing to call a tool…",
             "chat.skills.tool_directive_template": "\n\n[Selected Skill] The user selected the Skill \"{name}\": {prompt}\nThis turn must be completed with the tool {tool}. The input image is the image selected in the workspace or the image the user attached to the message. Do not substitute another tool, and do not just describe the result in text.",
             "chat.skills.system_skills[id=system-three-view].name_zh": "Three views",
-            "chat.skills.system_skills[id=system-three-view].prompt": "Generate three views from the single selected image or the image attached to the message: first produce the front view; the user then continues with the left, back (and optional right) views from the three-view card in the chat.",
+            "chat.skills.system_skills[id=system-three-view].prompt": "Make three views from the single selected image or the image attached to the message: the front, left and back views, one separate picture each, generated view by view from the front view as the three-view craft brief says. The front view comes first; the other views continue from the three-view card in the chat.",
             "chat.skills.system_skills[id=system-three-view].default_message": "Generate three views from this image",
+            "chat.skills.system_skills[id=system-four-view].name_zh": "Four views",
+            "chat.skills.system_skills[id=system-four-view].prompt": "Make four views from the single selected image or the image attached to the message: the front, left, back and right views, one separate picture each, generated view by view from the front view as the three-view craft brief says. The front view comes first; the other views, the right view included, continue from the three-view card in the chat.",
+            "chat.skills.system_skills[id=system-four-view].default_message": "Generate four views from this image",
             "chat.skills.categories[id=anime].label": "Anime & manga",
             "chat.skills.categories[id=game].label": "Games",
             "chat.skills.categories[id=cinematic].label": "Film & animation",
@@ -22160,6 +22260,7 @@
             "去除背景": "Remove background",
             "参考图": "Reference image",
             "参考图与生成图片合计最多15张": "Reference images and generated images combined are limited to 15",
+            "Meshy 同时收到两者时只用参考图、忽略提示词": "Meshy uses only the picture and ignores the prompt when it gets both",
             "参考图片": "Reference image",
             "参考图（1–4 张，首张正面）": "Reference images (1–4, first is front)",
             "叉腰手势 (Hand_on_Hip_Gesture)": "Hand on hip gesture",
@@ -35659,7 +35760,8 @@
             "style_asset"
           ],
           "minimum": 1,
-          "maximum": 1
+          "maximum": 1,
+          "message": "Meshy 同时收到两者时只用参考图、忽略提示词"
         }
       ],
       "outputs": [

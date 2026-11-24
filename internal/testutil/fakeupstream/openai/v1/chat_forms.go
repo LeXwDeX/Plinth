@@ -3,6 +3,7 @@ package openaiv1
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"sort"
@@ -40,6 +41,15 @@ const (
 	// ErrorResponse (OpenAPI components.schemas.Error, error-code guide), so
 	// the quota class and the rate-limit class can be told apart by code alone.
 	QuotaMarkerPrefix = "[[fake:quota:"
+	// GatewayFaultMarker, [[fake:gateway-502]] in the last user message,
+	// answers the proxy's own failure (#555): HTTP 502 with a plain-text body
+	// that echoes the request's last text, as the proxy in front of the gateway
+	// did when a request body exceeded what it carried, and an X-Request-Id
+	// header. A fake-only request convention, constructed from the 2026-11-24
+	// gateway investigation (no committed sample).
+	GatewayFaultMarker = "[[fake:gateway-502]]"
+	// GatewayFaultRequestID is the X-Request-Id of that 502.
+	GatewayFaultRequestID = "fake-gateway-502"
 )
 
 // QuotaCodes are the codes QuotaMarkerPrefix accepts, with the error type the
@@ -157,4 +167,14 @@ func (r chatRequest) replyForm() replyForm {
 		dsml:        strings.Contains(last, DSMLMarker),
 		inlineImage: strings.Contains(last, InlineImageMarker),
 	}
+}
+
+// writeGatewayFault answers a GatewayFaultMarker: a 502 whose text body echoes
+// the request's last text after a long filler, so a client that logs the body
+// has to cut it and keep prompt text out of its log.
+func (h *handler) writeGatewayFault(w http.ResponseWriter, request chatRequest) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Request-Id", GatewayFaultRequestID)
+	w.WriteHeader(http.StatusBadGateway)
+	_, _ = io.WriteString(w, "Bad Gateway: upstream refused "+request.lastText()+" "+strings.Repeat("x", 400)+"\n")
 }

@@ -524,6 +524,8 @@ export interface ProductSchema {
       spinner_frame_milliseconds: number;
       percentage_multiplier: number;
       percentage_suffix: string;
+      /** #546: rows the task drawer shows at first and adds with each "show more". */
+      task_list_page_size: number;
       advanced_model_form_feature: string;
       advanced_model_default_mode: 'regular' | 'parts';
       task_progress: {
@@ -1444,6 +1446,8 @@ export interface CanvasProductSchema {
       guide_color_token: string;
       /** A group snaps as one box; true also keeps each member's own edges as secondary targets. */
       group_member_targets: boolean;
+      /** Held to turn snapping off for one move or resize: 'mod' (Ctrl or ⌘), 'alt' or 'shift'. */
+      bypass_modifier: 'mod' | 'alt' | 'shift';
     };
     upload_task_id: string;
     export_filename_fallback: string;
@@ -1885,7 +1889,6 @@ export interface ChatProductSchema {
     /** #328: why a finished turn ended; absent when the Catalog declares none. */
     turn_end_reasons?: {
       completed: string;
-      tool_limit: string;
       awaiting_approval: string;
       stopped: string;
       background: string;
@@ -1989,11 +1992,6 @@ export interface ChatProductSchema {
     warning_ratio: number;
     keep_recent_rounds: number;
   };
-  /**
-   * #275: the per-reply tool call budget in force (the Schema value after the deployment's
-   * AGENT_MAX_TOOL_CALLS_PER_REPLY override). Absent on older servers: the tool call counter is hidden.
-   */
-  agent_limits?: { max_tool_calls_per_reply: number };
   /**
    * #59: how long the page keeps resubmitting a three-view view the server refused because
    * admission was full. Absent or invalid: the three-view card refuses to start a view.

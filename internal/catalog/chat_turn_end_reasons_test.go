@@ -22,7 +22,7 @@ func TestShippedCatalogDeclaresDistinctTurnEndReasons(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for name, value := range map[string]string{
-		"completed": reasons.Completed, "tool_limit": reasons.ToolLimit, "awaiting_approval": reasons.AwaitingApproval,
+		"completed": reasons.Completed, "awaiting_approval": reasons.AwaitingApproval,
 		"stopped": reasons.Stopped, "background": reasons.Background, "error": reasons.Error,
 	} {
 		if strings.TrimSpace(value) == "" || seen[value] {
@@ -45,7 +45,7 @@ func TestShippedCatalogDeclaresDistinctTurnEndReasons(t *testing.T) {
 		t.Fatal(err)
 	}
 	published := decoded.Chat.State.TurnEndReasons
-	if len(published) != 6 || published["completed"] != reasons.Completed || published["tool_limit"] != reasons.ToolLimit ||
+	if len(published) != 5 || published["completed"] != reasons.Completed ||
 		published["awaiting_approval"] != reasons.AwaitingApproval || published["stopped"] != reasons.Stopped ||
 		published["background"] != reasons.Background || published["error"] != reasons.Error {
 		t.Fatalf("published turn end reasons = %v", published)
@@ -84,7 +84,6 @@ func TestTurnEndReasonsAreNeverPartialOrRepeated(t *testing.T) {
 		want   string
 	}{
 		"completed empty":         {func(r *catalog.ChatTurnEndReasonsSchema) { r.Completed = "" }, "turn_end_reasons.completed"},
-		"tool_limit blank":        {func(r *catalog.ChatTurnEndReasonsSchema) { r.ToolLimit = "  " }, "turn_end_reasons.tool_limit"},
 		"awaiting_approval empty": {func(r *catalog.ChatTurnEndReasonsSchema) { r.AwaitingApproval = "" }, "turn_end_reasons.awaiting_approval"},
 		"stopped empty":           {func(r *catalog.ChatTurnEndReasonsSchema) { r.Stopped = "" }, "turn_end_reasons.stopped"},
 		"background empty":        {func(r *catalog.ChatTurnEndReasonsSchema) { r.Background = "" }, "turn_end_reasons.background"},

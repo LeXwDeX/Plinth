@@ -119,8 +119,8 @@ func TestCraftPromptSitsBetweenDomainContextAndScope(t *testing.T) {
 	}
 }
 
-// #243's three-view brief is domain-gated like the other crafts: an auto turn
-// in the 3D workspace must include it, while an image turn must not (#239).
+// #243's three-view brief has no domain gate: an auto turn in the 3D workspace
+// includes it because create_model_3d_from_views is offered.
 func TestThreeViewCraftIsInjectedOnAModel3DTurn(t *testing.T) {
 	rig := newScopeRig(t, agents.Completion{Content: "ok"})
 	rig.turnDomain(t, "auto", "model-3d")
@@ -137,5 +137,31 @@ func TestThreeViewCraftIsInjectedOnAModel3DTurn(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("test setup: no three-view craft prompt")
+	}
+}
+
+// #550: the three-view brief carries the "one picture per view" rule, so an
+// image-workspace turn (where a person types "四视图") must include it too.
+func TestThreeViewCraftIsInjectedOnAnImageTurn(t *testing.T) {
+	for _, scope := range []string{"2d", "auto"} {
+		rig := newScopeRig(t, agents.Completion{Content: "ok"})
+		rig.turnDomain(t, scope, "image")
+		system := rig.agent.requests[0].Messages[0].Content
+		found := false
+		for _, prompt := range rig.schema.Agent.CraftPrompts {
+			if prompt.ID != "three-view" {
+				continue
+			}
+			found = true
+			if !strings.Contains(system, renderedCraftText(prompt)) {
+				t.Fatalf("%s image turn omits the three-view craft brief", scope)
+			}
+			if !strings.Contains(system, "四视图再加右侧") {
+				t.Fatalf("%s image turn lacks the one-picture-per-view rule", scope)
+			}
+		}
+		if !found {
+			t.Fatal("test setup: no three-view craft prompt")
+		}
 	}
 }

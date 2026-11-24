@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
 	"github.com/LeXwDeX/Plinth/internal/agents/upstreamhttp"
 )
 
@@ -52,20 +53,25 @@ func (adapter *Adapter) Stream(
 		first     time.Duration
 		bodyBytes int
 		response  *http.Response
+		pictures  inlinepictures.Stats
+		refused   []byte
 		usage     *agents.Usage
 	)
 	defer func() {
-		adapter.logCall(request, true, started, first, bodyBytes, usage, response, err)
+		adapter.logCall(request, true, started, first, bodyBytes, usage, response, pictures, refused, err)
 	}()
 	// An upstream that sends nothing ends at the first-byte timeout (#509).
 	guard := upstreamhttp.GuardFirstByte(ctx, adapter.firstByteTimeout)
 	defer guard.Release()
-	response, bodyBytes, err = adapter.send(guard.Context(), request, true)
+	// Every inline picture goes out in the declared format.
+	var sent agents.Request
+	sent, pictures = adapter.pictures.Request(request)
+	response, bodyBytes, err = adapter.send(guard.Context(), sent, true)
 	if err != nil {
 		return agents.Completion{}, guard.Err(err)
 	}
 	defer response.Body.Close()
-	if err = adapter.requireSuccess(response, request); err != nil {
+	if refused, err = adapter.requireSuccess(response, request); err != nil {
 		return agents.Completion{}, err
 	}
 	state := &streamState{adapter: adapter, emit: emit, outputs: newOutputs()}

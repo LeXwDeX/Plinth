@@ -250,7 +250,17 @@ func (resolver *Resolver) verifyInputAsset(
 		return chat.Attachment{}, err
 	}
 	role := chat.AttachmentRoleUpload
-	if resolver.renderAssetType != "" && asset.AssetType == resolver.renderAssetType {
+	// A crop_image_regions crop shown as a picture of a reply (#552) keeps the
+	// crop role, from the stored provenance like an item reference, so it is
+	// never labelled as the person's own upload.
+	if resolver.crops != nil {
+		if _, found, err := resolver.crops.CropSource(ctx, owner, id); err != nil {
+			return chat.Attachment{}, err
+		} else if found {
+			role = chat.AttachmentRoleCrop
+		}
+	}
+	if role == chat.AttachmentRoleUpload && resolver.renderAssetType != "" && asset.AssetType == resolver.renderAssetType {
 		role = chat.AttachmentRoleRender
 	}
 	return chat.Attachment{

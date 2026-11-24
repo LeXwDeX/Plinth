@@ -220,7 +220,9 @@ try:
     sg, _, _ = A.j("GET", "/api/admin/agent-configuration"); sr, _, _ = A.j("POST", "/api/admin/agent-configuration/reset", {"expected_revision": rev1})
     srs, rs, _ = admin.j("POST", "/api/admin/agent-configuration/reset", {"expected_revision": rev1})
     r2 = turn("third turn")
-    rec("AGT-11", check(r0 and r1 and r2 and not any(MARK in x for x in r0) and all(MARK in x for x in r1) and not any(MARK in x for x in r2) and all(default_prompt[:40] in x for x in r2)
+    # The prompts are product constants (#554): a submitted prompt is ignored, so
+    # the marker never reaches the model and every turn keeps the Schema prompt.
+    rec("AGT-11", check(r0 and r1 and r2 and not any(MARK in x for x in r0 + r1 + r2) and all(default_prompt[:40] in x for x in r1 + r2)
                         and sv == 200 and spb == 200 and srs == 200 and not leak and sg == 403 and sr == 403 and rs.get("configuration", {}).get("system_prompt") == default_prompt),
         f"turns seen by the fake LLM {len(r0)}/{len(r1)}/{len(r2)}; marker before/after publish/after reset = {[any(MARK in x for x in r) for r in (r0, r1, r2)]}; validate {sv} publish {spb} reset {srs}; ordinary user read {sg} reset {sr}; /effective leaks prompt={leak}; revisions {rev0}->{rev1}->{rs.get('revision')}")
 

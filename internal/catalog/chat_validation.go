@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	schemacontract "github.com/LeXwDeX/Plinth/internal/schema"
@@ -372,9 +371,6 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateInputGapTexts(schema.Presentation.Messages); err != nil {
 		return err
 	}
-	if err := validateToolRoundLimitPending(schema.Presentation.Messages); err != nil {
-		return err
-	}
 	if err := validateToolRejectionTexts(schema.Presentation.Messages); err != nil {
 		return err
 	}
@@ -404,6 +400,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 		if !schemacontract.FailureClass(class).Valid() || strings.TrimSpace(message) == "" {
 			return fmt.Errorf("presentation.generation_failed_by_class[%q] 必须是已声明的失败分类并带文案", class)
 		}
+	}
+	if err := schema.Presentation.Messages.UpstreamHTTPError.validate(); err != nil {
+		return err
 	}
 	for class, message := range schema.Presentation.Messages.GenerationFailedMeteredByClass {
 		if !schemacontract.FailureClass(class).Valid() || strings.TrimSpace(message) == "" {
@@ -532,6 +531,9 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	if err := validateChatAgentResilience(schema.Agent); err != nil {
 		return err
 	}
+	if err := validateChatAgentRequestPictures(schema.Agent.RequestPictures); err != nil {
+		return err
+	}
 	if schema.Agent.ConsentWaitTimeoutSeconds <= 0 {
 		return errors.New("agent 的 consent 等待时长必须为正数")
 	}
@@ -554,9 +556,6 @@ func validateChat(schema ChatSchema, content ContentSchema, runtime RuntimeSchem
 	}
 	if value := schema.Agent.ConsentRechargeContent; value != "" && !strings.Contains(value, "{task_id}") {
 		return errors.New("agent 的 consent_recharge_content 必须包含 {task_id}")
-	}
-	if err := validateToolCallBudget(schema.Agent, runtime); err != nil {
-		return err
 	}
 	if err := validateBackgroundWait(schema, runtime); err != nil {
 		return err
@@ -1846,6 +1845,9 @@ func validateImageCrop(schema ChatSchema) error {
 		"crop_limit_reached": {crop.Texts.CropLimitReached, "{limit}"},
 		"image_not_found":    {crop.Texts.ImageNotFound, "{detail}"},
 		"image_unavailable":  {crop.Texts.ImageUnavailable, "{detail}"},
+		"presented_note":     {crop.Texts.PresentedNote, "{count}"},
+		"not_presentable":    {crop.Texts.NotPresentable, "{detail}"},
+		"not_presented":      {crop.Texts.NotPresented, "{detail}"},
 	}
 	for code, text := range texts {
 		if strings.TrimSpace(text.text) == "" {
@@ -2674,6 +2676,10 @@ func validateInputGapTexts(messages ChatMessageTexts) error {
 		"input_shape_boolean":          {messages.InputShapeBoolean, []string{"{name}"}},
 		"input_shape_number":           {messages.InputShapeNumber, []string{"{name}"}},
 		"input_shape_value":            {messages.InputShapeValue, []string{"{name}"}},
+		"input_rule_too_many":          {messages.InputRuleTooMany, []string{"{inputs}", "{maximum}", "{given}", "{reason}"}},
+		"input_rule_too_few":           {messages.InputRuleTooFew, []string{"{inputs}", "{minimum}", "{given}", "{reason}"}},
+		"input_rule_member":            {messages.InputRuleMember, []string{"{name}", "{argument}"}},
+		"input_rule_reason":            {messages.InputRuleReason, []string{"{reason}"}},
 	} {
 		if strings.TrimSpace(check.text) == "" {
 			return fmt.Errorf("presentation.%s 不能为空", name)
@@ -2683,23 +2689,6 @@ func validateInputGapTexts(messages ChatMessageTexts) error {
 				return fmt.Errorf("presentation.%s 须含 %s", name, placeholder)
 			}
 		}
-	}
-	return nil
-}
-
-// validateToolRoundLimitPending checks the texts that list the tool calls the
-// model still wanted once the tool rounds ran out (#275).
-func validateToolRoundLimitPending(messages ChatMessageTexts) error {
-	if !strings.Contains(messages.ToolRoundLimit, "{limit}") {
-		return errors.New("presentation.tool_round_limit 须含 {limit}（本次回复的工具调用次数上限）")
-	}
-	if strings.TrimSpace(messages.ToolRoundLimitPending) == "" ||
-		!strings.Contains(messages.ToolRoundLimitPendingItem, "{tool}") ||
-		!strings.Contains(messages.ToolRoundLimitPendingItem, "{intent}") ||
-		!strings.Contains(messages.ToolRoundLimitPendingTool, "{tool}") {
-		return errors.New(
-			"presentation.tool_round_limit_pending 不能为空，pending_item 须含 {tool} 与 {intent}，pending_tool 须含 {tool}",
-		)
 	}
 	return nil
 }
@@ -2782,48 +2771,6 @@ func validateStreamWatchdog(frontend ChatFrontendSchema, stream ChatStreamSchema
 		return errors.New("chat.frontend.stream_reconnect_attempts 必须至少为 1")
 	}
 	return nil
-}
-
-// validateToolCallBudget checks the per-reply tool call budget (#275): the
-// Schema value and any declared default of its runtime override lie within
-// 1..max_tool_calls_per_reply_maximum.
-func validateToolCallBudget(agent ChatAgentSchema, runtime RuntimeSchema) error {
-	maximum := agent.MaxToolCallsPerReplyMaximum
-	if maximum <= 0 || agent.MaxToolCallsPerReply <= 0 || agent.MaxToolCallsPerReply > maximum {
-		return fmt.Errorf(
-			"agent 的 max_tool_calls_per_reply 必须在 1..%d（max_tool_calls_per_reply_maximum，须为正数）之间",
-			maximum,
-		)
-	}
-	setting, exists := runtime.Configuration.Settings[agent.MaxToolCallsPerReplySetting]
-	if !exists {
-		return fmt.Errorf("agent 的 max_tool_calls_per_reply_setting 引用了未知运行设置 %q", agent.MaxToolCallsPerReplySetting)
-	}
-	defaults := []string{setting.Default}
-	for _, value := range setting.DefaultByEnvironment {
-		defaults = append(defaults, value)
-	}
-	for _, value := range defaults {
-		if _, err := ParseToolCallBudget(value, maximum); err != nil {
-			return fmt.Errorf("运行设置 %s 的默认值无效: %w", agent.MaxToolCallsPerReplySetting, err)
-		}
-	}
-	return nil
-}
-
-// ParseToolCallBudget reads a per-reply tool call budget override (#275). An
-// empty value means "keep the Schema value" and returns 0; otherwise the value
-// must be an integer in 1..maximum.
-func ParseToolCallBudget(value string, maximum int) (int, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, nil
-	}
-	number, err := strconv.Atoi(value)
-	if err != nil || number < 1 || number > maximum {
-		return 0, fmt.Errorf("工具调用次数上限必须是 1..%d 的整数: %q", maximum, value)
-	}
-	return number, nil
 }
 
 // validateHistoryImageLookup checks the bound and the texts of the history
@@ -4360,6 +4307,28 @@ func validateVisionCrop(schema ChatSchema, crop ChatVisionCropSchema) error {
 		}
 	}
 	return errors.New("context.vision.crop 启用时必须声明 inspect_image 工具")
+}
+
+// validateChatAgentRequestPictures checks chat.agent.request_pictures: the
+// only declared format is jpeg, the quality is 1–100, the background is
+// #rrggbb and the decode bound is positive. The block is optional.
+func validateChatAgentRequestPictures(pictures *ChatAgentRequestPicturesSchema) error {
+	if pictures == nil {
+		return nil
+	}
+	if pictures.Format != "jpeg" {
+		return fmt.Errorf("agent.request_pictures.format 只支持 jpeg，不能是 %q", pictures.Format)
+	}
+	if pictures.Quality < 1 || pictures.Quality > 100 {
+		return errors.New("agent.request_pictures.quality 必须在 1 到 100 之间")
+	}
+	if !isHexColor(pictures.BackgroundColor) {
+		return errors.New("agent.request_pictures.background_color 必须是 #rrggbb")
+	}
+	if pictures.MaxPixels <= 0 {
+		return errors.New("agent.request_pictures.max_pixels 必须为正数")
+	}
+	return nil
 }
 
 // validateChatAgentResilience checks the first-byte timeout, the round bound

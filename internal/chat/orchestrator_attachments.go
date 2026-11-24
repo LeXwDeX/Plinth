@@ -129,6 +129,49 @@ func (orchestrator *Orchestrator) withResultHandles(content string, handles []st
 	return string(updated)
 }
 
+// withPresentedHandles writes the handles a call produced into its result. A
+// result that declares its pictures must reach the person (#552) is checked
+// slot by slot against the reply: when every picture of the call is a handled
+// attachment, the handles are written as usual and each entry of its
+// PresentedEntries array gets its own handle; when one is not, the Agent reads
+// the tool's UnpresentedContent instead of a success.
+func (orchestrator *Orchestrator) withPresentedHandles(
+	content string,
+	result ToolResult,
+	produced Message,
+	imagesBefore int,
+	handles []string,
+) string {
+	if len(result.ImageURLs) == 0 || (result.PresentedEntries == "" && result.UnpresentedContent == "") {
+		return orchestrator.withResultHandles(content, handles)
+	}
+	shown := make([]string, 0, len(result.ImageURLs))
+	for slot := imagesBefore + 1; slot <= imagesBefore+len(result.ImageURLs); slot++ {
+		attachment, found := AttachmentForSlot(produced, slot)
+		if !found || attachment.Handle == "" {
+			if result.UnpresentedContent != "" {
+				return result.UnpresentedContent
+			}
+			return orchestrator.withResultHandles(content, handles)
+		}
+		shown = append(shown, attachment.Handle)
+	}
+	content = orchestrator.withResultHandles(content, shown)
+	if result.PresentedEntries == "" {
+		return content
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(content), &fields) != nil || fields == nil || len(fields[result.PresentedEntries]) == 0 {
+		return content
+	}
+	fields[result.PresentedEntries] = bindViewHandles(fields[result.PresentedEntries], shown)
+	updated, err := json.Marshal(fields)
+	if err != nil {
+		return content
+	}
+	return string(updated)
+}
+
 // withSummaryHandles writes the handles a call produced into its compact
 // summary under the Schema's key, so the conversation can bind each picture to
 // its view by handle (#103 review F9). A summary that is absent or not a JSON
@@ -155,7 +198,7 @@ func (orchestrator *Orchestrator) withSummaryHandles(summary json.RawMessage, ha
 }
 
 // bindViewHandles writes one handle into each entry of a tool result's views
-// array. It returns the array unchanged unless its length matches the handles
+// array or presented entries array (#552). It returns the array unchanged unless its length matches the handles
 // and every entry is a JSON object; a partial pairing could name the wrong
 // picture.
 func bindViewHandles(raw json.RawMessage, handles []string) json.RawMessage {
@@ -406,6 +449,8 @@ func (orchestrator *Orchestrator) canvasSnapshotParts(
 			}
 			pictureURL = inlined
 		}
+		// The canvas role spends the bytes that are sent (#555).
+		pictureURL = orchestrator.pictures.URL(pictureURL)
 		parts = append(parts,
 			agents.ContentPart{
 				Kind:   orchestrator.schema.Context.ImagePartKind,

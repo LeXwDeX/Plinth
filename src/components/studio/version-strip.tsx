@@ -430,6 +430,59 @@ const TileButton = memo(function TileButton({ tile, size, current, inBranch, inC
   );
 });
 
+/** At most this many source names show under a multi-source link; the rest read "+N" (the hover hint names them all). */
+const SOURCE_NAMES_SHOWN = 3;
+
+/** How the strip names a source version: the chat handle of a single picture (@img2), else its version label (2D v2). */
+function useSourceName() {
+  const { schema } = useProductSchema();
+  const messages = useSessionMessages(useChatStore((state) => state.activeSessionId));
+  return useCallback((tile: VersionTile) => {
+    const single = tile.domain === 'image' && tile.slots.length === 0 && tile.views.length === 0 && tile.assets.length === 1;
+    const handle = single ? handleOfPicture(messages, { url: tile.assets[0].url }) : '';
+    return handle || versionLabel(schema, tile, tile.domain);
+  }, [messages, schema]);
+}
+
+/**
+ * A result made from several versions (a multi-view 3D from four pictures): one link that names every source, in
+ * the order the task used them. None of them is "the" source, so none is singled out (#558).
+ */
+const MultiSourceConnector = memo(function MultiSourceConnector({ column, sourceTiles }: { column: VersionColumn; sourceTiles: readonly VersionTile[] }) {
+  const { schema } = useProductSchema();
+  const nameOf = useSourceName();
+  const names = column.sources.map((source) => {
+    const tile = sourceTiles.find((entry) => entry.key === source.key);
+    return { link: source.link, name: tile ? nameOf(tile) : '' };
+  }).filter((entry) => entry.name);
+  const classes = [...new Set(names.map((entry) => entry.link))];
+  // One sentence per kind of link ("由 @img2 @img3 转成 3D"), so a mixed set (an edit with a reference) says both.
+  const title = classes.map((link) => formatSchemaText(schemaText(schema, `ui.studio.strip.link.${link}`), {
+    parent: names.filter((entry) => entry.link === link).map((entry) => entry.name).join(' '),
+  })).join(' · ');
+  const hidden = names.length - SOURCE_NAMES_SHOWN;
+  return (
+    <li className="flex w-12 shrink-0 self-stretch flex-col items-center justify-center gap-0.5" data-testid="version-sources" data-count={names.length}>
+      <HintTooltip name={title} className="w-full">
+        <div className="flex w-full flex-col items-center gap-0.5" data-testid="version-link" data-link={classes.join(' ')} data-known="true" data-full-label={title}>
+          <span className="flex items-center gap-0.5">
+            {classes.map((link) => {
+              const Icon = LINK_ICONS[link];
+              return <Icon key={link} aria-hidden className="size-3 text-muted-foreground" />;
+            })}
+          </span>
+          <span className="h-0 w-full border-t-2 border-muted-foreground/60" />
+          <span className="sr-only">{title}</span>
+        </div>
+      </HintTooltip>
+      {names.slice(0, hidden > 0 ? SOURCE_NAMES_SHOWN - 1 : SOURCE_NAMES_SHOWN).map((entry, index) => (
+        <span key={index} className="max-w-12 truncate text-[9px] leading-3 text-muted-foreground" data-testid="version-source-name">{entry.name}</span>
+      ))}
+      {hidden > 0 ? <span className="text-[9px] leading-3 text-muted-foreground">+{hidden + 1}</span> : null}
+    </li>
+  );
+});
+
 const Connector = memo(function Connector({ column, previous, parentTile }: { column: VersionColumn; previous: VersionColumn | null; parentTile: VersionTile | undefined }) {
   const { schema } = useProductSchema();
   const parent = column.parent;
@@ -461,15 +514,16 @@ const Connector = memo(function Connector({ column, previous, parentTile }: { co
           </HintTooltip>
         );
       })}
-      {parent.known && !adjacent ? <span className="max-w-9 truncate text-[9px] leading-3 text-muted-foreground">{parentLabel}</span> : null}
+      {parent.known && !adjacent ? <span className="max-w-9 truncate text-[9px] leading-3 text-muted-foreground" data-testid="version-link-source">{parentLabel}</span> : null}
     </li>
   );
 });
 
 /**
- * 底部 128px 的版本条：本会话每个 2D / 3D 版本一格，按先后排开；格与格之间用连接线
- * 说明"由谁而来"（转 3D、截图、处理、编辑），来源不明的用虚线。点一格就是把它放上舞台；
- * 同一来源的多个结果在一列里叠起来。
+ * 底部的版本条：本会话每个 2D / 3D 版本一格，严格按创建时间排开（最新的在最右，#558）；格与格之间
+ * 用连接线说明"由谁而来"（转 3D、截图、处理、编辑），来源不明的用虚线。来源不是紧挨着的前一格时，
+ * 连接下写出来源名；用多张图做成的结果（多视图 3D）列出全部来源，不挑其中一张。点一格就是把它放上
+ * 舞台；时间上相邻的同源结果在一列里叠起来。
  */
 /** 切换会话、版本链还没到时的占位：几块与缩略图同尺寸的骨架。 */
 function VersionStripSkeleton({ label }: { label: string }) {
@@ -535,14 +589,15 @@ export function VersionStrip() {
   const open = useCallback((tile: VersionTile) => openLatest.current(tile), []);
 
   return (
-    <section aria-label={schemaText(schema, 'ui.studio.strip.title')} data-testid="version-strip" className="flex h-32 shrink-0 items-stretch border-t border-border bg-panel">
+    <section aria-label={schemaText(schema, 'ui.studio.strip.title')} data-testid="version-strip" className="flex h-36 shrink-0 items-stretch border-t border-border bg-panel">
       <div ref={scrollRef} className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
         {columns.length === 0 && versions.isLoading ? (
           <VersionStripSkeleton label={schemaText(schema, 'ui.studio.strip.loading')} />
         ) : columns.length === 0 ? (
           <p className="flex h-full items-center px-4 text-sm text-muted-foreground" data-testid="version-strip-empty">{schemaText(schema, 'ui.studio.strip.empty')}</p>
         ) : (
-          <ol className="flex h-full w-max items-start px-3 py-1">
+          // #546: 12px above and below the cards, so the 2px ring of the selected card clears the strip's top edge.
+          <ol className="flex h-full w-max items-start px-3 py-3">
             {columns.map((column, index) => (
               <ColumnView
                 key={column.tiles[0].key}
@@ -588,9 +643,14 @@ function ColumnView({ column, previous, tiles, currentKey, branch, inCompareTile
 }) {
   const stacked = column.tiles.length > 1;
   const folded = useMemo(() => foldColumn(column.tiles, branch, currentKey, 2), [column.tiles, branch, currentKey]);
+  const sourceTiles = useMemo(
+    () => (column.sources.length > 1 ? tiles.filter((tile) => column.sources.some((source) => source.key === tile.key)) : []),
+    [column.sources, tiles],
+  );
   return (
     <>
-      {previous ? <Connector column={column} previous={previous} parentTile={column.parent?.known ? tiles.find((tile) => tile.key === column.parent?.key) : undefined} /> : null}
+      {previous && column.sources.length > 1 ? <MultiSourceConnector column={column} sourceTiles={sourceTiles} />
+        : previous ? <Connector column={column} previous={previous} parentTile={column.parent?.known ? tiles.find((tile) => tile.key === column.parent?.key) : undefined} /> : null}
       <li className="shrink-0" data-testid="version-column">
         <ol className={cn('flex flex-col', stacked ? 'gap-0.5 border-l-2 border-border pl-1' : 'gap-1')} data-testid={stacked ? 'version-stack' : undefined} data-count={stacked ? column.tiles.length : undefined}>
           {folded.visible.map((tile) => (

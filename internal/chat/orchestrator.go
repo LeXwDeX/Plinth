@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
+	"github.com/LeXwDeX/Plinth/internal/agents/inlinepictures"
 	"github.com/LeXwDeX/Plinth/internal/agentscope"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat/dsml"
@@ -70,6 +71,11 @@ type ToolCommand struct {
 	// this turn's Agent scope (#103). ask_choice uses it to refuse a card whose
 	// answer would call a tool the turn cannot run. Nil means no check.
 	ToolAvailable func(name string) bool
+	// ChoiceScope is set when this turn answers a direction card on the card
+	// (#549): a paid step must be the chosen option's step. The generation
+	// tools check the capability the call resolves to against it. Nil means
+	// the turn is not scoped by a card.
+	ChoiceScope *ChoiceScope
 	// ExplicitParameters preserves caller inputs before legacy defaults merge.
 	// Non-nil enables offering overrides without changing the command hash.
 	ExplicitParameters map[string]json.RawMessage `json:"-"`
@@ -141,6 +147,17 @@ type ToolResult struct {
 	// Summary is a compact result the frontend can show as one line (#103).
 	// It is persisted with the tool call and never sent to the Agent.
 	Summary json.RawMessage `json:"-"`
+	// PresentedEntries, with ImageURLs, names the array of the JSON result
+	// whose entries describe those pictures one to one and in order (#552).
+	// Once every picture of the call is a handled attachment of the reply,
+	// each entry gets its own handle.
+	PresentedEntries string `json:"-"`
+	// UnpresentedContent, with ImageURLs, is the result the Agent reads
+	// instead of AgentContent when not every picture of the call became a
+	// handled attachment of the reply (#552): a tool whose work only counts
+	// once the person sees it never reports success for a picture the person
+	// cannot see or name.
+	UnpresentedContent string `json:"-"`
 }
 
 // ToolPicture is one picture a tool shows the Agent, by handle and platform URL.
@@ -252,6 +269,10 @@ type OrchestratorConfig struct {
 		pictureURL string,
 		maskAssetID string,
 	) (string, bool)
+	// Pictures encodes every picture the Agent may see into the format
+	// chat.agent.request_pictures declares before the vision budget counts
+	// its bytes (#555); nil keeps the pictures as they were inlined.
+	Pictures *inlinepictures.Encoder
 	// TaskCanceler 供停止轮次时取消该轮已绑定的生成任务（尽力而为，
 	// 失败只记录日志，不阻塞停止语义）。
 	TaskCanceler func(ctx context.Context, ownerID, taskID string) error
@@ -285,6 +306,10 @@ type OrchestratorConfig struct {
 	// Texts gives the copy of the turn's UI locale. Nil keeps the Schema's
 	// default-locale copy.
 	Texts *catalog.TextLocalizer
+	// AgentProviderName is the chat model connection's display name; it names
+	// the upstream in the text of a model call the upstream refused with an
+	// HTTP error status. Empty keeps the generic failure texts.
+	AgentProviderName string
 	// StepPolicy is application.step_policy (#330): the Agent's 3D step
 	// segment. Nil keeps the segment out of every prompt.
 	StepPolicy *catalog.StepPolicySchema
@@ -341,6 +366,7 @@ type Orchestrator struct {
 		pictureURL string,
 		maskAssetID string,
 	) (string, bool)
+	pictures       *inlinepictures.Encoder
 	taskCanceler   func(ctx context.Context, ownerID, taskID string) error
 	toolNote       func(tool catalog.ChatToolSchema, options TurnOptions) string
 	selfCheckTasks func(context.Context, string, string) ([]SelfCheckTask, error)
@@ -348,6 +374,7 @@ type Orchestrator struct {
 	taskLookup     func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
 	taskGet        func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
 	texts          *catalog.TextLocalizer
+	agentProvider  string
 	// stepPolicy, stepUsage, stepBalances and stepCosts render the Agent's
 	// 「3D 步数」segment (#330); a nil policy keeps the segment out.
 	stepPolicy   *catalog.StepPolicySchema
@@ -755,6 +782,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		visionAssetInline:  config.VisionAssetInline,
 		visionAnchorInline: config.VisionAnchorInline,
 		selectionPreview:   config.SelectionPreview,
+		pictures:           config.Pictures,
 		agent:              config.Agent,
 		tools:              config.Tools,
 		logger:             config.Logger,
@@ -768,6 +796,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		taskLookup:         config.TaskLookup,
 		taskGet:            config.TaskGet,
 		texts:              config.Texts,
+		agentProvider:      config.AgentProviderName,
 		stepPolicy:         config.StepPolicy,
 		stepUsage:          config.StepUsage,
 		stepBalances:       config.StepBalances,
@@ -1409,9 +1438,6 @@ func (orchestrator *Orchestrator) Process(
 	// backgroundFinalized means the turn ended with its Tasks still running
 	// (#137); a stop requested later must not cancel them.
 	backgroundFinalized := false
-	// toolLimitReached means the reply spent its tool budget and the tool-less
-	// summary round ran; it only feeds the turn's end reason (#328).
-	toolLimitReached := false
 	finalizeStop := func() error {
 		err := orchestrator.finalizeStoppedTurn(ctx, command, &assistant)
 		if err == nil {
@@ -1556,7 +1582,6 @@ func (orchestrator *Orchestrator) Process(
 					failed:     failedTurn,
 					background: backgroundFinalized,
 					stopped:    stopFinalized,
-					toolLimit:  toolLimitReached,
 				}),
 			),
 		)
@@ -1738,71 +1763,8 @@ func (orchestrator *Orchestrator) Process(
 			return err
 		}
 	}
-	maxToolCalls := max(1, orchestrator.schema.Agent.MaxToolCallsPerReply)
-	// summarizeAtLimit runs the tool-less summary round once the reply's tool
-	// budget is spent (AGT-04, #275). DSML the model still writes is stripped,
-	// never streamed or stored; the unexecuted calls are listed with Schema
-	// texts. exit reports that Process must return err right away.
-	summarizeAtLimit := func(base agents.Request, pendingCalls []agents.ToolCall) (bool, error) {
-		toolLimitReached = true
-		pendingCalls = append([]agents.ToolCall(nil), pendingCalls...)
-		summaryRequest := base
-		summaryRequest.Tools = nil
-		summaryFilter := dsml.NewFilter(dsmlSchema)
-		summaryRound := orchestrator.startThinkingRound(processCtx, command.SessionID)
-		summary, summaryRequest, summaryErr := orchestrator.streamAgent(
-			processCtx,
-			command,
-			summaryRequest,
-			func(delta agents.Delta) error {
-				return summaryRound.receive(delta, summaryFilter)
-			},
-		)
-		if summaryErr == nil {
-			orchestrator.recordUsage(ctx, command, summaryRequest.Model, summary.Usage, summaryRequest)
-			summaryErr = summaryFilter.Flush(summaryRound.emitText)
-		}
-		if summaryErr != nil {
-			if orchestrator.turnCanceled(turnKey) {
-				return true, finalizeStop()
-			}
-			if ctx.Err() != nil {
-				// 进程停机：保留可恢复轮次，交给 RecoverTurns 续跑。
-				return true, nil
-			}
-			if orchestrator.turnAbandoned(ctx, command) {
-				return true, nil
-			}
-			orchestrator.logger.Warn(
-				"工具预算用完后的总结请求失败",
-				"session_id", command.SessionID,
-				"assistant_message_id", command.AssistantMessageID,
-				"error", summaryErr,
-			)
-		}
-		if summary.Content != "" || len(summary.ToolCalls) > 0 {
-			parsedSummary := dsml.Parse(
-				dsmlSchema,
-				summary.Content,
-			)
-			if strings.TrimSpace(parsedSummary.Content) != "" {
-				assistant.Content += "\n" + parsedSummary.Content
-			}
-			pendingCalls = append(pendingCalls, parsedSummary.ToolCalls...)
-			pendingCalls = append(pendingCalls, summary.ToolCalls...)
-		}
-		assistant.Content += "\n" + strings.ReplaceAll(
-			orchestrator.text(ctx, orchestrator.schema.Presentation.Messages.ToolRoundLimit),
-			"{limit}",
-			strconv.Itoa(maxToolCalls),
-		)
-		if pending := orchestrator.pendingCallsText(pendingCalls); pending != "" {
-			assistant.Content += "\n" + pending
-		}
-		return false, nil
-	}
-	// B4 有界工具循环：模型（例如同意获批后）可在同一轮内继续调用
-	// 工具。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
+	// B4 工具循环：模型（例如同意获批后）可在同一轮内继续调用
+	// 工具，调用次数不设上限（#553），模型不再调用工具时本轮结束。每轮调用 ID 按轮次唯一，已执行轮的调用与 TaskID 绑定
 	// 累积在 assistant 消息上（停止可取消全部在飞任务）。
 	// 恢复路径的 completion 来自已落库计划（ID 已定型、内容已剥离
 	// DSML），标记 parsed 跳过重新解析与改写。
@@ -1814,8 +1776,7 @@ func (orchestrator *Orchestrator) Process(
 	// AGT-12 审查 R3：恢复重放后，新 LLM 轮的调用 ID 以落库调用中的
 	// 最大轮次为偏移编号（effectiveRound），避免与已落库的同名轮次
 	// 调用 ID 撞车（严格上游 tool_calls 配对 400，或幂等键静默回放
-	// 旧任务）。循环控制仍从 0 起：round=0 保留“首次赋值”语义；
-	// 工具预算按本次回复已执行的调用数计（#275），不随续跑重置。
+	// 旧任务）。循环控制仍从 0 起：round=0 保留“首次赋值”语义。
 	resumeRound := 0
 	if len(assistant.ToolCalls) > 0 {
 		resumeRound = maxRoundFromCalls(assistant.ToolCalls) + 1
@@ -1897,29 +1858,9 @@ func (orchestrator *Orchestrator) Process(
 		if len(completion.ToolCalls) == 0 {
 			break
 		}
-		// #275：工具预算按本次回复实际执行的调用数计（Schema
-		// chat.agent.max_tool_calls_per_reply，可由运行设置覆盖），每次新
-		// 回复从 0 起算。assistant.ToolCalls 只保留已执行或正要执行的调用，
-		// 恢复/续跑时已执行的调用仍计入同一次回复的预算。
+		// executedCalls is how many calls the reply ran before this round;
+		// the round's own calls leave the reply if it cannot be saved.
 		executedCalls := len(assistant.ToolCalls) - len(completion.ToolCalls)
-		remainingCalls := maxToolCalls - executedCalls
-		if remainingCalls <= 0 {
-			// 预算用完：不再执行本批调用，从消息上移除；进入无工具的
-			// 总结轮，把已执行的失败/结果归纳给用户（AGT-04）。
-			assistant.ToolCalls = assistant.ToolCalls[:executedCalls]
-			if exit, err := summarizeAtLimit(request, completion.ToolCalls); exit {
-				return err
-			}
-			break
-		}
-		var overflowCalls []agents.ToolCall
-		if len(completion.ToolCalls) > remainingCalls {
-			// 本批超出剩余预算：只执行前 remainingCalls 个，其余在总结轮
-			// 列给用户确认。
-			overflowCalls = append([]agents.ToolCall(nil), completion.ToolCalls[remainingCalls:]...)
-			completion.ToolCalls = completion.ToolCalls[:remainingCalls]
-			assistant.ToolCalls = assistant.ToolCalls[:executedCalls+remainingCalls]
-		}
 		if !checkpointResuming || round != startRound {
 			// The calls answered without running stay listed for the whole
 			// turn (#501): a stop in a later round still reconciles them.
@@ -2084,17 +2025,6 @@ func (orchestrator *Orchestrator) Process(
 				"error", toolErr,
 			)
 		}
-		if len(overflowCalls) > 0 {
-			// 本批已执行到预算上限：带上已执行结果直接进入总结轮。
-			base := request
-			if len(toolContent) > 0 {
-				base = orchestrator.followUpRequest(request, completion, toolContent)
-			}
-			if exit, err := summarizeAtLimit(base, overflowCalls); exit {
-				return err
-			}
-			break
-		}
 		if len(toolContent) == 0 {
 			break
 		}
@@ -2170,6 +2100,8 @@ func (orchestrator *Orchestrator) Process(
 		// instead of asking for a retry that cannot succeed.
 		if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, followUpErr); exhausted {
 			assistant.Content = message
+		} else if message, refused := orchestrator.agentUpstreamHTTPMessage(ctx, followUpErr); refused {
+			assistant.Content = message
 		} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
 			assistant.Content = message
 		}
@@ -2179,6 +2111,10 @@ func (orchestrator *Orchestrator) Process(
 	} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
 		// #509: the follow-up broke off after its retries; the reply so far
 		// stays and says it was cut, so the person knows to send it again.
+		// A gateway that answered an error status is named with it (#547).
+		if refused, named := orchestrator.agentUpstreamHTTPMessage(ctx, followUpErr); named {
+			message = refused
+		}
 		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
 	}
 	orchestrator.attachAssistantResults(context.WithoutCancel(ctx), command.OwnerID, &assistant)
@@ -2457,6 +2393,7 @@ func (orchestrator *Orchestrator) agentRequest(
 		if snapshot, found := canvasSnapshotAttachment(options); found {
 			if url, ok := orchestrator.selectionPreview(ctx, ownerID, snapshot.URL,
 				options.SelectionMask.MaskAssetID); ok {
+				url = orchestrator.pictures.URL(url)
 				selectionParts = append(selectionParts,
 					agents.ContentPart{
 						Kind:   orchestrator.schema.Context.ImagePartKind,
@@ -2740,46 +2677,6 @@ func visionSafeImage(value string) bool {
 // 时才候选，最终是否可见由 agentRequest 的内联结果决定。
 func (orchestrator *Orchestrator) visionCandidate(value string) bool {
 	return visionSafeImage(value) || orchestrator.visionInline != nil
-}
-
-// pendingCallsText lists, with Schema texts, the tool calls the model still
-// wanted once the tool rounds ran out (#275): one line per distinct call with
-// the tool name and its prompt argument as the intent, never the raw markup.
-func (orchestrator *Orchestrator) pendingCallsText(calls []agents.ToolCall) string {
-	messages := orchestrator.schema.Presentation.Messages
-	maximum := orchestrator.schema.Context.ToolPromptPreviewChars
-	lines := make([]string, 0, len(calls))
-	seen := make(map[string]struct{}, len(calls))
-	for _, call := range calls {
-		name := truncateRunes(strings.TrimSpace(call.Name), maximum)
-		if name == "" {
-			continue
-		}
-		var arguments map[string]json.RawMessage
-		_ = json.Unmarshal(call.Arguments, &arguments)
-		var intent string
-		_ = json.Unmarshal(
-			arguments[orchestrator.schema.Context.ToolPromptArgument],
-			&intent,
-		)
-		intent = strings.TrimSpace(
-			truncateRunes(strings.Join(strings.Fields(intent), " "), maximum),
-		)
-		line := strings.ReplaceAll(messages.ToolRoundLimitPendingTool, "{tool}", name)
-		if intent != "" {
-			line = strings.NewReplacer("{tool}", name, "{intent}", intent).
-				Replace(messages.ToolRoundLimitPendingItem)
-		}
-		if _, duplicate := seen[line]; duplicate {
-			continue
-		}
-		seen[line] = struct{}{}
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return messages.ToolRoundLimitPending + "\n" + strings.Join(lines, "\n")
 }
 
 func truncateRunes(value string, maximum int) string {
@@ -3099,6 +2996,9 @@ func (orchestrator *Orchestrator) executeTools(
 		return ErrTurnSuspended
 	}
 	var inflight []WaitingCall
+	// #549: what this turn may submit when it answers a direction card on the
+	// card, read from storage every round so a resumed turn is scoped alike.
+	choiceScope := orchestrator.turnChoiceScope(ctx, command.OwnerID, command.SessionID, history)
 	// 提交阶段：按调用顺序逐个执行。付费步骤提交后若要等待任务，不再立即
 	// 挂起轮次，记为在途并继续提交同批互不依赖的下一个付费步骤；本批提交
 	// 完（或遇到必须按序处理的调用）后，由循环之后的等待阶段一次性挂起。
@@ -3108,8 +3008,8 @@ func (orchestrator *Orchestrator) executeTools(
 			// #378: the model wrote this call's arguments as invalid JSON, so
 			// the tool does not run; the error is its result and the model
 			// writes the call again. This is an ordinary tool result, not a
-			// failed tool, and it counts against the reply's tool budget like
-			// any call. Like every call that is answered instead of
+			// failed tool, and it counts as a call of the reply like any
+			// call. Like every call that is answered instead of
 			// submitted, it waits its turn behind a call still in flight. It
 			// was logged when the model wrote it (vetToolArguments).
 			if len(inflight) > 0 {
@@ -3239,6 +3139,31 @@ func (orchestrator *Orchestrator) executeTools(
 			}
 			continue
 		}
+		if boundTaskID == "" {
+			// #549: the turn that answers a direction card on the card runs the
+			// chosen option's one step, once. Any other paid step is answered,
+			// not run: an ordinary tool result in the Schema's words, nothing
+			// submitted and nothing charged, and the Agent reports and asks.
+			if refusal := orchestrator.choiceStepRefusal(ctx, command, choiceScope, call, tool,
+				earlierCalls(storedCalls, call.ID), taskBindings); refusal != "" {
+				orchestrator.logger.Info("方向卡回合拒绝了未选择的付费步骤",
+					"session_id", command.SessionID, "assistant_message_id", command.AssistantMessageID,
+					"call_id", call.ID, "tool", call.Name, "choice_id", choiceScope.ChoiceID, "option_id", choiceScope.OptionID)
+				results = append(results, agents.Message{
+					Role:       orchestrator.schema.Roles.Tool,
+					Content:    refusal,
+					ToolCallID: call.ID,
+				})
+				turn.Checkpoint.Completed = append(turn.Checkpoint.Completed, results[len(results)-1])
+				turn.Checkpoint.markUnexecuted(call.ID)
+				waiting = removeWaiting(waiting, call.ID)
+				turn.Checkpoint.SetWaiting(waiting)
+				if err := persist(orchestrator.service.TurnRunningState()); err != nil {
+					return results, imageURLs, taskBindings, err
+				}
+				continue
+			}
+		}
 		result, err := orchestrator.tools.Execute(
 			ctx,
 			ToolCommand{
@@ -3256,6 +3181,7 @@ func (orchestrator *Orchestrator) executeTools(
 				History:              history,
 				Turn:                 copyMessage(*produced),
 				Options:              command.Options,
+				ChoiceScope:          choiceScope,
 				EarlierCalls:         earlierCalls(storedCalls, call.ID),
 				ToolAvailable: func(name string) bool {
 					candidate, exists := registry.byName[name]
@@ -3390,7 +3316,7 @@ func (orchestrator *Orchestrator) executeTools(
 		// slot is known even when verification skipped one.
 		imagesBefore := len(produced.ImageURLs)
 		handles := orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs)
-		content = orchestrator.withResultHandles(content, handles)
+		content = orchestrator.withPresentedHandles(content, result, *produced, imagesBefore, handles)
 		// #246: the self-check record stores the pictures a check produced by
 		// their attachment handles, once the reply has named them.
 		orchestrator.attachSelfCheckHandles(ctx, command.OwnerID, command.SessionID, result.Summary, handles)
@@ -3588,9 +3514,8 @@ func (orchestrator *Orchestrator) followUpRequest(
 	// that requires the field on a tool-call message keeps a legal request.
 	filterReasoning(messages, agents.ForRequest(base))
 	base.Messages = messages
-	// B4 有界工具循环：续跑请求保留工具定义，模型可在同一轮内
-	//（例如同意获批后）继续调用生成工具；调用次数上限由
-	// chat.agent.max_tool_calls_per_reply 约束（#275）。
+	// B4 工具循环：续跑请求保留工具定义，模型可在同一轮内
+	//（例如同意获批后）继续调用生成工具；调用次数不设上限（#553）。
 	return base
 }
 
@@ -4085,7 +4010,9 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // model drew itself says it was not kept, a request field the upstream
 // refused names that field (#401: only the plain field name is shown, the
 // upstream's own wording stays in the log), a transient failure the retries
-// did not overcome says to send the message again (#509);
+// did not overcome says to send the message again (#509), unless the upstream
+// answered an HTTP error status: that names the connection, the status and
+// its reason in the Schema's upstream text, including after the retries;
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
@@ -4113,10 +4040,27 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	if param, rejected := agents.RequestRejectedParam(err); rejected && messages.AgentRequestRejected != "" {
 		return strings.ReplaceAll(orchestrator.text(ctx, messages.AgentRequestRejected), "{param}", param)
 	}
+	if message, refused := orchestrator.agentUpstreamHTTPMessage(ctx, err); refused {
+		return message
+	}
 	if message, broke := orchestrator.agentInterruptedMessage(ctx, err); broke {
 		return message
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
+}
+
+// agentUpstreamHTTPMessage is the Schema's upstream text for a chat model
+// call the upstream answered with an HTTP error status (agents.StatusError):
+// "{provider} 网关返回 {status}，原因：{reason}", the provider being the chat
+// connection's display name. The upstream's own words stay in the log.
+func (orchestrator *Orchestrator) agentUpstreamHTTPMessage(ctx context.Context, err error) (string, bool) {
+	var status *agents.StatusError
+	if err == nil || !errors.As(err, &status) {
+		return "", false
+	}
+	message := orchestrator.schema.Presentation.Messages.UpstreamHTTPError.Message(
+		orchestrator.agentProvider, status.Status, func(text string) string { return orchestrator.text(ctx, text) })
+	return message, message != ""
 }
 
 // agentInterruptedMessage is the Schema's text for a chat model call that

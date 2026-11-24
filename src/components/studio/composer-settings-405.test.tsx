@@ -20,6 +20,7 @@ const mock = vi.hoisted(() => ({
   chat: { offered: true, sections: [] as unknown[], value: 'glm-5.3 · high', changed: false, attention: [] as string[] },
   params: { pinned: false },
   hint: [] as Array<Record<string, unknown>>,
+  cleared: [] as string[],
 }));
 
 vi.mock('@/components/product-schema-provider', async () => {
@@ -33,7 +34,10 @@ vi.mock('@/components/ui/hint-tooltip', () => ({
   },
 }));
 vi.mock('@/components/studio/model-picker', () => ({
-  useDomainModelPick: (domain: string) => ({ section: { title: domain }, short: domain === 'image' ? 'GPT IMAGE' : 'MESHY', full: domain }),
+  useDomainModelPick: (domain: 'image' | 'model-3d') => ({
+    section: { title: domain }, short: domain === 'image' ? 'GPT IMAGE' : 'MESHY', full: domain,
+    clear: () => { mock.cleared.push(domain); useWorkspaceStore.getState().setModel(domain, null); },
+  }),
   generationModelPair: (_schema: unknown, image: { short: string }, model: { short: string }) => `${image.short} · ${model.short}`,
   ModelPicker: () => <div data-testid="workspace-model-picker-panel"><button type="button">pick model</button></div>,
 }));
@@ -79,6 +83,7 @@ beforeEach(() => {
   mock.chat = { offered: true, sections: [], value: 'glm-5.3 · high', changed: false, attention: [] };
   mock.params.pinned = false;
   mock.hint.length = 0;
+  mock.cleared.length = 0;
   useWorkspaceStore.setState({ modelByDomain: { image: null, 'model-3d': null } });
   useComposerSettingsStore.setState({ open: false, tab: 'models' });
 });
@@ -289,5 +294,58 @@ describe('the settings dialog (#405)', () => {
     expect(body.className).toMatch(/\bmin-h-0\b/);
     const list = within(dialog).getByRole('tablist');
     expect(list.className).toMatch(/\boverflow-x-auto\b/);
+  });
+});
+
+describe('the dot of a changed tab (#546)', () => {
+  it('explains itself on every changed tab, in the hover hint and as the dot\'s name, from the Schema in both languages', async () => {
+    useWorkspaceStore.setState({ modelByDomain: { image: 'gpt-image', 'model-3d': null } });
+    mock.params.pinned = true;
+    mock.chat = { ...mock.chat, changed: true };
+    const view = props();
+    render(<ComposerSettings {...view} skill={{ ...view.skill, selectedId: 'three-view' }} />);
+    await openFromGear();
+    for (const id of COMPOSER_SETTINGS_TABS) {
+      const note = messages[`ui.studio.composer.settings.changed_note.${id}`];
+      expect(note).toBeTruthy();
+      expect(english[`ui.studio.composer.settings.changed_note.${id}`]).toBeTruthy();
+      expect(screen.getByTestId(`composer-settings-tab-dot-${id}`).getAttribute('aria-label')).toBe(note);
+      const wrapper = tab(id).parentElement as HTMLElement;
+      expect(wrapper.getAttribute('data-hint')).toBe(note);
+    }
+    expect(messages['ui.studio.composer.settings.changed_note.models']).toBe('已固定生成模型：Agent 不再自行选择');
+  });
+
+  it('shows no dot, no hint and no restore line while nothing is pinned', async () => {
+    render(<ComposerSettings {...props()} />);
+    await openFromGear();
+    expect(screen.queryByTestId('composer-settings-tab-dot-models')).toBeNull();
+    expect(tab('models').parentElement?.getAttribute('data-testid')).not.toBe('gear-hint');
+    expect(screen.queryByTestId('composer-settings-models-locked')).toBeNull();
+  });
+
+  it('names the pinned models on the models tab and gives the choice back to the Agent', async () => {
+    useWorkspaceStore.setState({ modelByDomain: { image: 'gpt-image', 'model-3d': 'meshy' } });
+    render(<ComposerSettings {...props()} />);
+    await openFromGear();
+    const line = screen.getByTestId('composer-settings-models-locked');
+    expect(line.textContent).toContain('GPT IMAGE');
+    expect(line.textContent).toContain('MESHY');
+    expect(english['ui.studio.composer.settings.models_locked']).toContain('{models}');
+    fireEvent.click(within(line).getByRole('button', { name: messages['ui.studio.composer.settings.models_reset'] }));
+    expect(mock.cleared).toEqual(['image', 'model-3d']);
+    expect(useWorkspaceStore.getState().modelByDomain).toEqual({ image: null, 'model-3d': null });
+    await waitFor(() => expect(screen.queryByTestId('composer-settings-tab-dot-models')).toBeNull());
+    expect(screen.queryByTestId('composer-settings-models-locked')).toBeNull();
+    expect(gear().getAttribute('data-changed')).toBe('false');
+  });
+
+  it('clears only the domain that is pinned', async () => {
+    useWorkspaceStore.setState({ modelByDomain: { image: null, 'model-3d': 'meshy' } });
+    render(<ComposerSettings {...props()} />);
+    await openFromGear();
+    expect(screen.getByTestId('composer-settings-models-locked').textContent).not.toContain('GPT IMAGE');
+    fireEvent.click(screen.getByTestId('composer-settings-models-reset'));
+    expect(mock.cleared).toEqual(['model-3d']);
   });
 });

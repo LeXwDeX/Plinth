@@ -31,7 +31,7 @@ func TestPublicApplicationSchemaKeepsBrowserContractWithoutServerWiring(t *testi
 		"runtime":      {"http", "input_assets", "cache", "asset_delivery", "frontend", "generation_messages"},
 		// #80: the composer's capacity text and the result limit pair.
 		"runtime.generation_messages": {"reference_capacity", "reference_capacity_multiview", "reference_limit", "reference_limit_one"},
-		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "agent_limits", "three_view_limits", "context_compaction", "model_review", "self_check", "model3d_usage", "image2d_usage", "style_lock", "preferences"},
+		"chat":                        {"api", "defaults", "roles", "state", "frontend", "context", "stream", "tools", "skills", "presentation", "approval_policy", "agent_scope", "harness", "agent_status", "three_view_limits", "context_compaction", "model_review", "self_check", "model3d_usage", "image2d_usage", "style_lock", "preferences"},
 		"chat.style_lock":             {"maximum_text_characters", "maximum_reference_images", "sources"},
 		// #241: the sidebar sees the bounds and the declared reason ids only;
 		// the framing templates, markers and prompt paragraph stay server-side.

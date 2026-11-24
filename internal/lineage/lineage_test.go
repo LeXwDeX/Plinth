@@ -249,6 +249,34 @@ func TestCaptureWithoutChildrenIsStillAVersion(t *testing.T) {
 	}
 }
 
+// A multi-view 3D names every picture it was made from, in the order the task used them; none is a main source (#558).
+func TestMultiViewModelRecordsEveryInputPicture(t *testing.T) {
+	multiView := generation.Offering{ID: "multiview-to-3d", Parameters: []schema.Parameter{
+		{Name: "reference_assets", Type: "asset-array", Semantic: schema.SemanticReferenceImage},
+	}}
+	tasks := []generation.Task{
+		task("img-1", 0, imageOffering, input(t, map[string]any{}), imageAsset("img-1-a", "h-1")),
+		task("img-2", 1, imageOffering, input(t, map[string]any{}), imageAsset("img-2-a", "h-2")),
+		task("img-3", 2, imageOffering, input(t, map[string]any{}), imageAsset("img-3-a", "h-3")),
+		task("mdl-1", 3, multiView, input(t, map[string]any{"reference_assets": []string{"img-3-a", "img-1-a", "sketch", "img-2-a"}}), modelAsset("mdl-1-a", "h-mdl1")),
+	}
+	inputs := fakeInputs{"sketch": {ID: "sketch", OwnerID: "owner-a", AssetType: "image", MediaType: "image/png", SHA256: "h-sketch", CreatedAt: start}}
+	graph, err := service(t, tasks, nil, inputs).Session(context.Background(), "owner-a", "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sources []string
+	for _, edge := range edgeOf(graph, "mdl-1") {
+		if edge.Kind != EdgeReference || edge.Evidence != EvidenceRecorded {
+			t.Fatalf("every picture is a recorded reference: %+v", edge)
+		}
+		sources = append(sources, edge.From)
+	}
+	if want := []string{"img-3", "img-1", "upload:sketch", "img-2"}; strings.Join(sources, ",") != strings.Join(want, ",") {
+		t.Fatalf("sources = %v, want %v", sources, want)
+	}
+}
+
 func TestUploadedPictureIsAVersionWhenATaskUsedIt(t *testing.T) {
 	tasks := []generation.Task{
 		task("img-1", 0, imageOffering, input(t, map[string]any{}), imageAsset("img-1-a", "h-1")),

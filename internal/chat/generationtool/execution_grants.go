@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/approvalpolicy"
+	"github.com/LeXwDeX/Plinth/internal/budget"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
@@ -107,6 +109,9 @@ func (executor *Executor) prepareAgentOperation(
 	}
 	if err := executor.checkCurrentHarness(ctx, command); err != nil {
 		return executor.harnessRefusal(command, err)
+	}
+	if result, refused := executor.choiceScopeRefusal(ctx, command, capability, offering); refused {
+		return result, nil
 	}
 	hash, err := executor.agentCommandHash(command)
 	if err != nil {
@@ -232,6 +237,77 @@ func (executor *Executor) prepareAgentOperation(
 		return chat.ToolResult{NoSubmission: true}, err
 	}
 	return executor.resumeAgentOperation(ctx, command, op, observe, cardSettled, trace, styleSources)
+}
+
+// choiceScopeRefusal is the generation tools' half of the answer-turn scope
+// (#549): in a turn that answers a direction card on the card, a step must be
+// the chosen option's tool with the capability it resolved to, unless the
+// session's approved budget plan allows that capability and Offering (the
+// person approved those steps as a whole). The refusal is the Schema's words;
+// nothing is prepared, submitted or charged. The orchestrator already refused
+// other tools and a second run of the chosen one.
+func (executor *Executor) choiceScopeRefusal(ctx context.Context, command chat.ToolCommand,
+	capability generation.Capability, offering generation.Offering) (chat.ToolResult, bool) {
+	scope := command.ChoiceScope
+	if scope == nil {
+		return chat.ToolResult{}, false
+	}
+	if scope.Permits(command.Call.Name, string(capability)) {
+		// The orchestrator counts a second run of the chosen tool by the Task
+		// the first one submitted. A first run that stopped on an approval card
+		// has no Task yet, so a later call of the same reply with other
+		// arguments would raise a second card: that call is the second run.
+		if !executor.cardRaisedByAnotherCall(ctx, command) {
+			return chat.ToolResult{}, false
+		}
+	}
+	if executor.planAllowsStep(ctx, command, capability, offering) {
+		return chat.ToolResult{}, false
+	}
+	return chat.ToolResult{AgentContent: scope.RefusalFor(command.Call.Name, func(text string) string {
+		return executor.localized(command, text)
+	}), NoSubmission: true}, true
+}
+
+// cardRaisedByAnotherCall reports whether another call of this reply already
+// raised an approval card of the same tool that still waits for a person (#549).
+// The call's own card is not another call's: a replay of the same call stays
+// idempotent.
+func (executor *Executor) cardRaisedByAnotherCall(ctx context.Context, command chat.ToolCommand) bool {
+	limit := executor.chat.PendingApprovals.MaximumListed
+	if limit <= 0 || executor.operations == nil || executor.grants == nil {
+		return false
+	}
+	ops, err := executor.operations.ListPendingDetached(ctx, command.OwnerID, command.SessionID,
+		limit, executor.grants.ExpiryCutoff())
+	if err != nil {
+		return false
+	}
+	for _, op := range ops {
+		if op.AssistantMessageID == command.AssistantMessageID && op.ToolName == command.Call.Name &&
+			op.CallID != command.Call.ID {
+			return true
+		}
+	}
+	return false
+}
+
+// planAllowsStep reports whether the session is in budget mode with an active
+// approved plan that allows this capability on this Offering.
+func (executor *Executor) planAllowsStep(ctx context.Context, command chat.ToolCommand,
+	capability generation.Capability, offering generation.Offering) bool {
+	if executor.grants == nil || executor.grants.Modes == nil {
+		return false
+	}
+	mode, err := executor.grants.Modes.SessionApprovalMode(ctx, command.OwnerID, command.SessionID)
+	if err != nil || mode != approvalpolicy.ModeBudget {
+		return false
+	}
+	summary, found, err := executor.grants.BudgetSummary(ctx, command.OwnerID, command.SessionID)
+	if err != nil || !found || summary.State != budget.StateActive {
+		return false
+	}
+	return summary.Plan.Allows(string(capability), string(offering.ID))
 }
 
 // resumeAgentOperation drives a prepared operation. cardSettled, when not nil,

@@ -54,13 +54,72 @@ func MeteredFailureMessage(chat catalog.ChatSchema, metered bool, failure *gener
 // through localize (nil keeps the default locale), followed for a
 // content-safety failure by the Schema's reasons template naming what the
 // review gave (#35: "safety_violations=[sexual]"), so the Agent can rewrite
-// the prompt by it.
-func LocalizedFailureMessage(chat catalog.ChatSchema, metered bool, failure *generation.Failure, localize func(string) string) string {
+// the prompt by it. A failure the upstream answered with an HTTP error opens
+// with the Schema's upstream text naming provider (the connection's display
+// name), the status and its reason; a class text that guides the Agent
+// follows it, the generic failure text is replaced. A metered failure keeps
+// its own text.
+func LocalizedFailureMessage(chat catalog.ChatSchema, provider string, metered bool, failure *generation.Failure, localize func(string) string) string {
 	if localize == nil {
 		localize = func(text string) string { return text }
 	}
-	return localize(FailureMessage(chat, metered, failure)) +
+	message := FailureMessage(chat, metered, failure)
+	if MeteredFailureMessage(chat, metered, failure) == "" {
+		if upstream := UpstreamFailureMessage(chat, provider, failure, localize); upstream != "" {
+			if message == chat.Presentation.Messages.GenerationFailed {
+				return upstream
+			}
+			return chat.Presentation.Messages.UpstreamHTTPError.Combined(upstream, localize(message), localize)
+		}
+	}
+	return localize(message) +
 		contentRejectedReasons(chat.Presentation.Messages, generation.ContentRejectedReasons(failure), localize)
+}
+
+// UpstreamFailureMessage is the Schema's upstream HTTP error text for a
+// failed Task, the one wording a task card, the Agent's tool result and a
+// posted approval result share: "{provider} 网关返回 {status}，原因：{reason}"
+// for a failure whose upstream answered an error status, or the unreachable
+// text for a connection failure with no answer. Only a failure class the
+// Schema lists, or an ambiguous failure, gets it; provider is the display
+// name of the Task's connection. "" otherwise, and the caller keeps its text.
+// The status is internal evidence the kernel kept; the upstream's own words
+// never reach this text.
+func UpstreamFailureMessage(chat catalog.ChatSchema, provider string, failure *generation.Failure, localize func(string) string) string {
+	if failure == nil {
+		return ""
+	}
+	texts := chat.Presentation.Messages.UpstreamHTTPError
+	ambiguous := upstreamFailureAmbiguous(failure)
+	if !ambiguous && !texts.Covers(string(failure.Class)) {
+		return ""
+	}
+	if failure.UpstreamStatus >= 400 {
+		return texts.Message(provider, failure.UpstreamStatus, localize)
+	}
+	if failure.Class == generation.FailureTransport && !ambiguous {
+		return texts.UnreachableMessage(provider, localize)
+	}
+	return ""
+}
+
+// PublicFailureDetail is a failed Task's public detail (detail, already in
+// the reader's locale) with the upstream text: in place of a listed class's
+// text, and in front of an ambiguous failure's text, which must keep saying
+// the upstream may already have charged (#136).
+func PublicFailureDetail(chat catalog.ChatSchema, provider string, failure *generation.Failure, detail string, localize func(string) string) string {
+	upstream := UpstreamFailureMessage(chat, provider, failure, localize)
+	if upstream == "" {
+		return detail
+	}
+	if upstreamFailureAmbiguous(failure) {
+		return chat.Presentation.Messages.UpstreamHTTPError.Combined(upstream, detail, localize)
+	}
+	return upstream
+}
+
+func upstreamFailureAmbiguous(failure *generation.Failure) bool {
+	return failure.Ambiguous || failure.Class == generation.FailureSubmissionUnknown
 }
 
 // contentRejectedReasons is the Schema's reasons text for a content-safety

@@ -25,16 +25,6 @@ export function contextLevel(tokens: number | null, window: number | null, setti
   return 'normal';
 }
 
-/** #275: how much of the per-reply tool call budget is used: warning from 80%, critical when it is spent. */
-export const TOOL_CALLS_WARNING_RATIO = 0.8;
-
-export function toolCallLevel(used: number, limit: number): 'normal' | 'warning' | 'critical' {
-  if (limit <= 0) return 'normal';
-  if (used >= limit) return 'critical';
-  if (used >= limit * TOOL_CALLS_WARNING_RATIO) return 'warning';
-  return 'normal';
-}
-
 const LEVEL_CLASS = { normal: 'text-muted-foreground', warning: 'text-warning', critical: 'text-destructive' } as const;
 
 function contextHint(
@@ -82,7 +72,8 @@ function contextBaseHint(schema: ProductSchema, tokens: number | null, window: n
 export function ContextMeter() {
   const { schema } = useProductSchema();
   const activeSessionId = useChatStore((state) => state.activeSessionId);
-  // The reply's executed tool calls: the live count while it runs and after it, else the newest assistant message's.
+  // #553: the tool calls of this turn (the newest Agent reply), with no limit: the live count while it runs and
+  // after it (0 when a turn starts), else the newest assistant message's.
   const toolCalls = useChatStore((state) => {
     const id = state.activeSessionId;
     if (!id) return 0;
@@ -99,10 +90,7 @@ export function ContextMeter() {
   const visionTokens = context?.visionTokens ?? null;
   const visionTokenBudget = context?.visionTokenBudget ?? null;
   const visionImages = context?.visionBudget ?? null;
-  const toolCallLimit = schema.chat.agent_limits?.max_tool_calls_per_reply ?? 0;
-  const toolCallLabel = schemaText(schema, 'ui.studio.tool_calls.label');
-  const toolCallText = `${toolCallLabel} ${toolCalls} / ${toolCallLimit}`;
-  const toolCallLevelName = toolCallLevel(toolCalls, toolCallLimit);
+  const toolCallText = schemaCountMessage(schema, 'ui.studio.tool_calls.turn', toolCalls, { count: toolCalls });
   const compactLabel = schemaText(schema, compacting ? 'ui.studio.context.compacting' : 'ui.studio.context.compact');
 
   const run = () => {
@@ -153,19 +141,12 @@ export function ContextMeter() {
           </Action>
         </HintTooltip>
       ) : null}
-      {toolCallLimit > 0 ? (
-        <HintTooltip name={toolCallText} hint={schemaText(schema, 'ui.studio.tool_calls.hint')} className="ml-auto min-w-0 shrink">
-          <span
-            tabIndex={0}
-            aria-label={toolCallText}
-            data-testid="composer-tool-calls"
-            data-level={toolCallLevelName}
-            className={cn('block truncate rounded-sm px-1 text-[11px] leading-7 tabular-nums focus-visible:outline-2 focus-visible:outline-ring', PICKER_UPPERCASE_CLASS, LEVEL_CLASS[toolCallLevelName])}
-          >
-            {toolCallText}
-          </span>
-        </HintTooltip>
-      ) : null}
+      <span
+        data-testid="composer-tool-calls"
+        className={cn('ml-auto block min-w-0 shrink truncate px-1 text-[11px] leading-7 tabular-nums', PICKER_UPPERCASE_CLASS, LEVEL_CLASS.normal)}
+      >
+        {toolCallText}
+      </span>
     </div>
   );
 }

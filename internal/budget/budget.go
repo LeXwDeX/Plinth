@@ -319,6 +319,15 @@ func (p Plan) Covers(capability, offeringID string, count int) bool {
 	return matched >= count
 }
 
+// ListsCapability reports whether the plan names the capability at all: as a
+// step, a declared contingency or a correction capability. Unlike Allows it
+// does not check a pinned Offering, so a caller that does not know the
+// Offering yet can tell a step the plan may cover from one it never can (#549).
+func (p Plan) ListsCapability(capability string) bool {
+	return capability != "" && (p.capabilityPlanned(capability) || p.capabilityContingent(capability) ||
+		containsString(p.CorrectionCapabilities, capability))
+}
+
 func (p Plan) capabilityPlanned(capability string) bool {
 	for _, step := range p.Steps {
 		if step.Capability == capability {

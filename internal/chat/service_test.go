@@ -500,7 +500,6 @@ func TestDurableStreamReplaysThenPublishesConfiguredEvents(t *testing.T) {
 // service cannot pass.
 var configuredEndReasons = catalog.ChatTurnEndReasonsSchema{
 	Completed:        "configured-end-completed",
-	ToolLimit:        "configured-end-tool-limit",
 	AwaitingApproval: "configured-end-awaiting-approval",
 	Stopped:          "configured-end-stopped",
 	Background:       "configured-end-background",

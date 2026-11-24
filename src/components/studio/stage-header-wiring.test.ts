@@ -35,8 +35,8 @@ describe('stage header wiring', () => {
     expect(actionsModule).toContain("continue_from: 'stage-continue'");
     expect(stageActions.find((action) => action.id === 'continue_from')).toMatchObject({ group: 'produce', kinds: ['image', 'model'] });
     expect(chat).toContain('continueRequest');
-    // The reference goes back on: the "do not include this object" choice is cleared.
-    expect(chat).toMatch(/clearContinueRequest\(\);\s*setSkippedObject\(null\);/);
+    // The reference goes back on: the object is selected again (#557).
+    expect(chat).toMatch(/clearContinueRequest\(\);\s*setDeselectedObject\(null\);/);
   });
 
   it('shows the branch chip after "continue from here" and drops it on cancel, on sending and when the stage moves on', () => {
@@ -44,8 +44,8 @@ describe('stage header wiring', () => {
     expect(chat).toContain('branch={branchChip}');
     // Only while the version it was made for is still on the stage.
     expect(chat).toContain('objectKey(sessionSelection) !== branchFrom.key');
-    // Cancelling leaves the object out of the turn too, so the new version does not attach to it.
-    expect(chat).toMatch(/setBranchFrom\(null\);\s*setSkippedObject\(branchFrom\.key\);/);
+    // Cancelling deselects the object too (#557), so the new version does not attach to it.
+    expect(chat).toMatch(/setBranchFrom\(null\);\s*setDeselectedObject\(branchFrom\.key\);/);
     expect(chat.match(/setAttachmentPurpose\(null\);\s*setBranchFrom\(null\);/g)?.length).toBe(2);
   });
 
@@ -205,7 +205,7 @@ describe('session list, batch export and balance wiring', () => {
 
   it('counts running tasks only in the top bar, not a turn waiting on a person', () => {
     expect(tasks).toContain('liveCount: activeTasks.length,');
-    expect(tasks).not.toContain('activeTasks.length + (agentPending');
+    expect(tasks).not.toContain('agentPending');
   });
 });
 

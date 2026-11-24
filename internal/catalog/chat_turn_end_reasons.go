@@ -7,16 +7,14 @@ import (
 
 // ChatTurnEndReasonsSchema names why a chat turn ended (#328), one string per
 // reason the orchestrator tells apart. The server stores the string with the
-// finished turn, so a reader can tell a turn that spent its tool budget from
-// one that waits for an approval without a literal of its own. The whole
+// finished turn, so a reader can tell a turn that was stopped from one that
+// waits for an approval without a literal of its own. Turns stored before
+// #553 may still carry the retired tool_limit reason. The whole
 // object is optional: a Catalog that leaves it out records no reason and keeps
 // the empty string.
 type ChatTurnEndReasonsSchema struct {
 	// Completed is a normal end.
 	Completed string `json:"completed"`
-	// ToolLimit is a reply that spent its tool budget (chat.agent.
-	// max_tool_calls_per_reply, #275) and ended with the tool-less summary round.
-	ToolLimit string `json:"tool_limit"`
 	// AwaitingApproval is a turn that left at least one approval card (a paid
 	// step or a production plan) for the person to decide.
 	AwaitingApproval string `json:"awaiting_approval"`
@@ -40,10 +38,9 @@ func (reasons ChatTurnEndReasonsSchema) Validate() error {
 	if !reasons.Declared() {
 		return nil
 	}
-	seen := make(map[string]string, 6)
+	seen := make(map[string]string, 5)
 	for _, entry := range []struct{ name, value string }{
 		{"completed", reasons.Completed},
-		{"tool_limit", reasons.ToolLimit},
 		{"awaiting_approval", reasons.AwaitingApproval},
 		{"stopped", reasons.Stopped},
 		{"background", reasons.Background},

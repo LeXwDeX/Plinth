@@ -60,6 +60,13 @@ describe('a late approval', () => {
     expect(chat).toMatch(/refreshApprovalRef\.current\(\);\s*\}, \[activeSessionId, settledKey, viewsKey\]/);
   });
 
+  it('reads a decided plan again when a watched task ends, at the late result delays (#561)', () => {
+    expect(chat).toContain('const budgetFollows = budgetFollowsTasks(schema, sessionBudget);');
+    expect(chat).toContain('return followSettledBudget(chatClient, sessionId, {');
+    expect(chat).toContain('delays: [0, ...LATE_RESULT_RELOAD_MILLISECONDS],');
+    expect(chat).toContain('}, [activeSessionId, budgetFollows, chatClient, settledWatchedKey]);');
+  });
+
   it('resets the card clock whenever the set of cards changes, so a fresh 24-hour card never reads 25 hours', () => {
     expect(chat).toContain("const pendingCardKey = pending.items.map((item) => item.requestId).join('\\n');");
     expect(chat).toMatch(/if \(pendingCardKey === ''\) return;\s*setNow\(Date\.now\(\)\);/);
@@ -91,15 +98,17 @@ describe('task progress in the chat', () => {
     expect(chat).toContain('<TaskStatusCards part="running" />');
   });
 
-  // #244: running tasks float above the composer instead of growing the scroll area.
-  it('keeps running tasks out of the message scroll container', () => {
+  // #546 (replacing #244's float): the running tasks are part of the conversation, under the newest reply.
+  it('draws the running tasks inside the message list, after the newest reply, never in a floating layer', () => {
     const messagesEnd = chat.indexOf('<div ref={messagesEndRef} />');
-    const running = chat.indexOf('<TaskStatusCards part="running" />');
-    const failed = chat.indexOf('<TaskStatusCards part="failed" />');
-    expect(failed).toBeGreaterThan(-1);
-    expect(failed).toBeLessThan(messagesEnd);
-    expect(running).toBeGreaterThan(messagesEnd);
-    expect(chat).toContain('data-testid="chat-task-float"');
-    expect(chat).toContain('paddingBottom: `calc(0.75rem + ${floatingHeight}px)`');
+    const loose = chat.indexOf('{!progressMessageId && runningTaskCount > 0 ? <TaskStatusCards part="running" /> : null}');
+    expect(loose).toBeGreaterThan(-1);
+    expect(loose).toBeLessThan(messagesEnd);
+    expect(chat).toContain('taskProgress={item.message.id === progressMessageId ? runningTaskBlock : undefined}');
+    expect(chat).toContain('const runningTaskBlock = useMemo(() => <TaskStatusCards part="running" />, []);');
+    expect(chat).not.toContain('chat-task-float');
+    expect(chat).not.toContain('floatingHeight');
+    // One expression of progress at a time: the "generating" bubble gives way to the task block.
+    expect(chat).toContain('statusBubbleShown(isStreaming, statusText, runningTaskCount)');
   });
 });

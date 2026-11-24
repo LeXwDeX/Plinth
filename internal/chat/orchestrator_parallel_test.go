@@ -143,21 +143,17 @@ func (e *parallelExecutor) submissions() []string {
 }
 
 type parallelFixture struct {
-	t          *testing.T
-	service    *chat.Service
-	executor   *parallelExecutor
-	agent      *parallelAgent
-	command    chat.ProcessTurn
-	toolBudget int
+	t        *testing.T
+	service  *chat.Service
+	executor *parallelExecutor
+	agent    *parallelAgent
+	command  chat.ProcessTurn
 }
 
 func (f *parallelFixture) orchestrator() *chat.Orchestrator {
 	f.t.Helper()
 	schema := configuredChatSchema(f.t)
 	schema.Agent.WorkerCount, schema.Agent.QueueSize = 4, 16
-	if f.toolBudget > 0 {
-		schema.Agent.MaxToolCallsPerReply = f.toolBudget
-	}
 	o, err := chat.NewOrchestrator(chat.OrchestratorConfig{Service: f.service, Schema: schema, Model: "model",
 		Agent: f.agent, Tools: f.executor, TaskGet: f.executor.get,
 		TaskCanceler: func(_ context.Context, _, taskID string) error {
@@ -470,11 +466,11 @@ func TestQueuedSubmissionPastTheDeadlineNeverGivesAnEmptyReceipt(t *testing.T) {
 	}
 }
 
-func TestTwentyFirstGenerationIsRefusedByTheToolBudget(t *testing.T) {
+// #553: the orchestrator sets no tool call limit; a batch runs in waves of
+// max_parallel_generation_submissions until every call ran. The per-turn
+// generation limit is the tool executor's (max_generation_calls_per_turn).
+func TestEveryGenerationOfABatchRunsInWaves(t *testing.T) {
 	f := newParallelFixture(t, 21)
-	// The shipped budget is 100 (#360); this test pins its own smaller budget
-	// so the 21st call still exercises the cutoff.
-	f.toolBudget = 20
 	o := f.orchestrator()
 	ctx := context.Background()
 	if err := o.Process(ctx, f.command); err != nil {
@@ -490,10 +486,10 @@ func TestTwentyFirstGenerationIsRefusedByTheToolBudget(t *testing.T) {
 	if turn := f.turn(); turn.State != "configured-turn-done" {
 		t.Fatalf("state = %s", turn.State)
 	}
-	if got := len(f.executor.submissions()); got != 20 {
-		t.Fatalf("submitted %d, want the budget of 20", got)
+	if got := len(f.executor.submissions()); got != 21 {
+		t.Fatalf("submitted %d, want all 21", got)
 	}
-	if len(f.executor.attempts) != 20 {
-		t.Fatalf("21st call was attempted: %d", len(f.executor.attempts))
+	if len(f.executor.attempts) != 21 {
+		t.Fatalf("attempted %d, want all 21", len(f.executor.attempts))
 	}
 }

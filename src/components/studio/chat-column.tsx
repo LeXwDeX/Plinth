@@ -86,7 +86,6 @@ import { boardMentionCandidate, buildMentionCandidates, mentionsBoard, mentionsF
 import { useComposerDraft } from '@/hooks/use-composer-draft';
 import { clearDraft } from '@/lib/chat/composer-draft';
 import { useChatScrollFollow } from '@/hooks/use-chat-scroll-follow';
-import { useElementHeight } from '@/hooks/use-element-height';
 import { useConnectivityStore } from '@/store/connectivity-store';
 import { createChatBrowserClient, paidStepFromTaskRegistered, type ChatSemanticEvent, type ChatTurnOptions, type MultiviewTurnRequest } from '@/lib/chat/browser-client';
 import { choiceCardPlacement, choiceSelectionAction, heldChoiceRelease, type ChoiceCardModel, type ChoiceSelection } from '@/lib/chat/choice-cards';
@@ -96,7 +95,7 @@ import { readPastedImages } from '@/lib/chat/composer-input';
 import { withSessionSendLock } from '@/lib/chat/send-preparation';
 import { InFlightGuard } from '@/lib/chat/in-flight-guard';
 import { flushExplicitModel3D, flushExplicitModelImage } from '@/lib/chat/explicit-model';
-import { reloadSessionBudget } from '@/lib/chat/session-budget';
+import { budgetFollowsTasks, followSettledBudget, reloadSessionBudget } from '@/lib/chat/session-budget';
 import { budgetAwaitsDecision, budgetIsShown } from '@/lib/chat/budget';
 import { PendingApprovalError, type PendingApprovalInput } from '@/lib/chat/pending-approvals';
 import { continuePlanOnce } from '@/lib/chat/plan-continue';
@@ -136,6 +135,7 @@ import { useCanvasStore, type CanvasNode } from '@/store/canvas-store';
 import { maskStrokeCount, sameMaskDraft, useMaskStore } from '@/store/mask-store';
 import { CHAT_RAIL_WIDTH, CHAT_WIDTH_MAX, CHAT_WIDTH_MIN, useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
+import { isRunning, statusBubbleShown } from '@/lib/workspace/task-progress';
 import { useSessionContextStore } from '@/store/session-context-store';
 import { useProjectStore } from '@/store/project-store';
 import { branchConversation, branchCopiedCurrentState, branchUnavailableReason } from '@/lib/chat/session-branch';
@@ -414,8 +414,12 @@ export function ChatColumn() {
   // 正在编辑最后一条用户消息：发送时才替换那一轮，放弃编辑不丢任何东西。
   const [editing, setEditing] = useSessionState<{ deleteIds: string[] } | null>(null);
   const [attachedImages, setAttachedImages] = useSessionState<string[]>([]);
-  // 芯片上的 ✕：这一个对象本轮不随消息发出。换了对象就重新带上。
-  const [skippedObject, setSkippedObject] = useSessionState<string | null>(null);
+  // 芯片上的 ✕ 取消选中（#557）：这个对象不再是默认目标，消息不带它，也不带画板快照。
+  // 舞台上再选中对象（包括再点一次同一个）就恢复选中。
+  const [deselectedObject, setDeselectedObject] = useSessionState<string | null>(null);
+  useEffect(() => {
+    setDeselectedObject(null);
+  }, [currentObject, setDeselectedObject]);
   // What the attached pictures are for; written into the message as one line.
   const [attachmentPurpose, setAttachmentPurpose] = useSessionState<AttachmentPurpose | null>(null);
   // Per-picture purposes, aligned with `attachedImages`; `attachmentPurpose` stays the last choice.
@@ -475,18 +479,18 @@ export function ChatColumn() {
   // The next turn's settings and estimate. A turn that carries a picture (the
   // object on the stage, an upload or a pinned canvas image) runs the Offering
   // that takes references, so that is the one priced.
-  const objectSkipped = sessionSelection != null && skippedObject === objectKey(sessionSelection);
-  const hasReference = attachedImages.length > 0 || hasCanvasReference || (sessionSelection?.kind === 'image' && !objectSkipped);
+  const objectDeselected = sessionSelection != null && deselectedObject === objectKey(sessionSelection);
+  const hasReference = attachedImages.length > 0 || hasCanvasReference || (sessionSelection?.kind === 'image' && !objectDeselected);
   useEffect(() => {
     if (!activeSessionId) return;
-    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectSkipped };
+    const context = { sessionId: activeSessionId, hasReference: Boolean(hasReference), objectDeselected };
     useStudioStore.getState().setGenerationReferenceContext(context);
     return () => {
       if (useStudioStore.getState().generationReferenceContext === context) {
         useStudioStore.getState().setGenerationReferenceContext(null);
       }
     };
-  }, [activeSessionId, hasReference, objectSkipped]);
+  }, [activeSessionId, hasReference, objectDeselected]);
   const imageGeneration = useGenerationParams('image', activeSessionId, hasReference);
   const modelGeneration = useGenerationParams('model-3d', activeSessionId, hasReference);
   const generation = stageDomain === 'image' ? imageGeneration : modelGeneration;
@@ -899,9 +903,13 @@ export function ChatColumn() {
   // ended reads "not run" instead of waiting for ever.
   const planStepsMayStillRun = sessionTurnRunning(messagesBySession[activeSessionId ?? ''], isStreaming);
   const lastDisplayed = displayMessages[displayMessages.length - 1];
-  const [floatingRef, floatingHeight] = useElementHeight<HTMLDivElement>();
+  // #546: the running tasks are drawn under the newest assistant reply (after its text, above its credit line).
+  const runningTaskCount = useWorkspaceStore((state) => state.trackedTasks.filter((task) => task.sessionId === activeSessionId && isRunning(task)).length);
+  // One element for every render, so the memoized messages keep their props (#291).
+  const runningTaskBlock = useMemo(() => <TaskStatusCards part="running" />, []);
+  const progressMessageId = runningTaskCount > 0 ? [...displayMessages].reverse().find((message) => message.role === 'assistant')?.id ?? null : null;
   const {
-    containerRef: messagesRef, endRef: messagesEndRef, showLatest, jumpToLatest, keepPinned, onScroll: onMessagesScroll,
+    containerRef: messagesRef, endRef: messagesEndRef, showLatest, jumpToLatest, onScroll: onMessagesScroll,
   } = useChatScrollFollow({
     // The newest message, not the count: earlier pages put in front must not move the reader.
     // #177: streamed text and pictures grow the last message without changing its id; a reader at the
@@ -909,6 +917,8 @@ export function ChatColumn() {
     changeKey: [
       lastDisplayed?.id ?? '', threeViews.length, pendingCount, collapsed, queuedTurns.length,
       streamBuf?.textContent.length ?? 0, streamBuf?.images.length ?? 0,
+      // #546: the task block sits in the list now, and a task starting or ending changes its height.
+      runningTaskCount,
     ].join('|'),
     // #177: the status line appears and goes away without animation; only real content is followed smoothly.
     pinKey: statusText,
@@ -916,14 +926,6 @@ export function ChatColumn() {
     resetKey: activeSessionId,
     settleMilliseconds: SCROLL_SETTLE_MILLISECONDS,
   });
-  // #177: the floating task cards are absolutely positioned; the list pads by their measured height.
-  // Re-pin in the same layout pass so that padding change never shows as a jump.
-  const lastFloatingHeight = useRef(floatingHeight);
-  useLayoutEffect(() => {
-    if (lastFloatingHeight.current === floatingHeight) return;
-    lastFloatingHeight.current = floatingHeight;
-    keepPinned();
-  }, [floatingHeight, keepPinned]);
 
   // Earlier messages are read only when asked for; the view stays on the message the reader was looking at.
   const [earlierState, setEarlierState] = useState<'idle' | 'loading' | 'failed'>('idle');
@@ -1028,9 +1030,10 @@ export function ChatColumn() {
         return source ? [{ kind: 'image', imageSlot: index + 1, ...source }] : [];
       });
       const canvasState = useCanvasStore.getState();
-      // A handle written in the text takes the turn from the object on the stage (the chip says so).
+      // #557: the selected object is the default target. A deselected object, or a handle written in the text
+      // (which wins over the selection; the chip says so), leaves the object and the artboard out of the turn.
       const skipped = sessionObject != null
-        && (skippedObjectRef.current === objectKey(sessionObject) || overridingHandle(written, chipHandleRef.current) !== '');
+        && (deselectedObjectRef.current === objectKey(sessionObject) || overridingHandle(written, chipHandleRef.current) !== '');
       // The Agent's current object is what the dashed artboard shows: whenever the artboard holds anything,
       // it is rasterised at the chosen output pixels like every other delivery (export, send to chat,
       // inpaint, merge) and uploaded as an input asset, even a lone untouched picture.
@@ -1467,8 +1470,8 @@ export function ChatColumn() {
   );
   const sendRef = useRef(send);
   sendRef.current = send;
-  const skippedObjectRef = useRef(skippedObject);
-  skippedObjectRef.current = skippedObject;
+  const deselectedObjectRef = useRef(deselectedObject);
+  deselectedObjectRef.current = deselectedObject;
   const sessionSelectionRef = useRef(sessionSelection);
   sessionSelectionRef.current = sessionSelection;
   const versionsRef = useRef(versions);
@@ -1513,18 +1516,18 @@ export function ChatColumn() {
     });
   }, [activeSessionId, drainTick, isStreaming, preparing, queue, schema, setAttachmentPurposes, setInput, uploading]);
 
-  // 「从这里继续」：这个对象成为下一次要求的引用（取消"不带它"），输入框拿到焦点。
+  // 「从这里继续」：这个对象成为下一次要求的引用（恢复选中），输入框拿到焦点。
   useEffect(() => {
     if (!continueRequest) return;
     clearContinueRequest();
-    setSkippedObject(null);
+    setDeselectedObject(null);
     const from = sessionSelectionRef.current;
     setBranchFrom(from && !from.taskId.startsWith('canvas:')
       ? { key: objectKey(from), label: versionLabel(schema, tileOfObject(versionsRef.current, from), from.kind) }
       : null);
     if (useStudioStore.getState().chatCollapsed) setCollapsed(false);
     window.requestAnimationFrame(() => focusWhenUnblocked(() => document.getElementById('art-ai-chat-composer')));
-  }, [continueRequest, clearContinueRequest, schema, setBranchFrom, setCollapsed, setSkippedObject]);
+  }, [continueRequest, clearContinueRequest, schema, setBranchFrom, setCollapsed, setDeselectedObject]);
 
   // 起步卡片和"重新发起"只把文字放进输入框，让用户确认后自己发送。
   useEffect(() => {
@@ -2045,6 +2048,21 @@ export function ChatColumn() {
     const timers = LATE_RESULT_RELOAD_MILLISECONDS.map((delay) => window.setTimeout(reload, delay));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [activeSessionId, applyNewestMessagePage, chatClient, messagePageSize, settledWatchedKey]);
+  // #561: a decided plan's figures and state move on the server after its Tasks end (the settlement charges the
+  // step a moment later, and the plan turns used up or completed). Read the budget again at the same moments as the
+  // late result, so the plan card does not keep the state it had when it was approved. No polling: only an ended
+  // Task starts it.
+  const budgetFollows = budgetFollowsTasks(schema, sessionBudget);
+  useEffect(() => {
+    if (!activeSessionId || settledWatchedKey === '' || !budgetFollows) return;
+    const sessionId = activeSessionId;
+    return followSettledBudget(chatClient, sessionId, {
+      delays: [0, ...LATE_RESULT_RELOAD_MILLISECONDS],
+      apply: ({ budget }) => {
+        if (useChatStore.getState().activeSessionId === sessionId) useChatStore.getState().updateSessionBudget(sessionId, budget);
+      },
+    });
+  }, [activeSessionId, budgetFollows, chatClient, settledWatchedKey]);
   const refreshApprovalRef = useRef(refreshApproval);
   refreshApprovalRef.current = refreshApproval;
   // Credits are server-summed: ask again whenever a task or a view starts or ends.
@@ -2088,7 +2106,6 @@ export function ChatColumn() {
       handle: sessionSelection.handle ?? handleOfObject(sessionMessages, sessionSelection),
     };
   }, [artboard, boardNodes, previewAssetUrl, schema, sessionMessages, sessionSelection, versions]);
-  const chipSkipped = objectSkipped;
   // The branch chip belongs to the version it was made for: another version on the stage drops it.
   const branchChip = useMemo((): ComposerBranch | null => {
     if (!branchFrom || !sessionSelection || objectKey(sessionSelection) !== branchFrom.key) return null;
@@ -2097,10 +2114,10 @@ export function ChatColumn() {
       onClear: () => {
         // The new version follows the object the turn carries; leaving the branch leaves the object too.
         setBranchFrom(null);
-        setSkippedObject(branchFrom.key);
+        setDeselectedObject(branchFrom.key);
       },
     };
-  }, [branchFrom, sessionSelection, setBranchFrom, setSkippedObject]);
+  }, [branchFrom, sessionSelection, setBranchFrom, setDeselectedObject]);
   chipHandleRef.current = chip?.handle ?? '';
   // The mask being painted shows above the box so it is never forgotten while chatting.
   const maskTool = useCanvasStore((state) => state.activeTool === 'mask');
@@ -2284,7 +2301,7 @@ export function ChatColumn() {
               event.clipboardData.setData('text/html', payload.html);
             }}
             className="min-h-0 flex-1 overflow-y-auto px-2 pt-3"
-            style={{ paddingBottom: `calc(0.75rem + ${floatingHeight}px)` }}
+            style={{ paddingBottom: '0.75rem' }}
             data-testid="chat-messages"
           >
             {historyLoading && displayMessages.length === 0 ? (
@@ -2318,6 +2335,7 @@ export function ChatColumn() {
                   <Fragment key={item.message.id}>
                   <ChatMessage
                     message={item.message}
+                    taskProgress={item.message.id === progressMessageId ? runningTaskBlock : undefined}
                     sessionId={activeSessionId}
                     onImageClick={openImageDetail}
                     handleReferences={sessionHandleReferences}
@@ -2360,7 +2378,9 @@ export function ChatColumn() {
                   ))}
                   </Fragment>
                 ))}
-                {isStreaming && statusText ? (
+                {/* #546: one expression of progress at a time; the turn's task block replaces the "generating" bubble. */}
+                {!progressMessageId && runningTaskCount > 0 ? <TaskStatusCards part="running" /> : null}
+                {statusBubbleShown(isStreaming, statusText, runningTaskCount) ? (
                   <ChatStatusBubble text={statusText} progress={progress} thinking={streamBuf?.genState?.thinking === true} />
                 ) : null}
               </>
@@ -2449,7 +2469,7 @@ export function ChatColumn() {
             />
             <div ref={messagesEndRef} />
           </div>
-          {/* #244：进行中的任务悬浮在消息区底部、输入区上方，不撑开消息滚动；消息区按其实测高度留出底部空间。 */}
+          {/* 「回到最新」按钮悬浮在消息区底部；#546 起进行中的任务改在对话内容里显示，不再悬浮。 */}
           <div className="pointer-events-none absolute inset-x-2 bottom-2 flex max-h-[45%] flex-col items-stretch gap-2">
             {showLatest ? (
               <Action
@@ -2460,9 +2480,6 @@ export function ChatColumn() {
                 {schemaText(schema, 'ui.chat.scroll.latest')}
               </Action>
             ) : null}
-            <div ref={floatingRef} className="pointer-events-auto flex min-h-0 flex-col" data-testid="chat-task-float">
-              <TaskStatusCards part="running" />
-            </div>
           </div>
           </div>
 
@@ -2495,10 +2512,9 @@ export function ChatColumn() {
             streaming={isStreaming}
             locked={uploading || preparing}
             canSend={(input.trim() !== '' || attachedImages.length > 0 || hasCanvasReference || Boolean(currentSkill?.tool)) && Boolean(activeSessionId)}
-            chip={chip}
-            chipSkipped={chipSkipped}
-            onToggleChip={() => {
-              if (sessionSelection) setSkippedObject(chipSkipped ? null : objectKey(sessionSelection));
+            chip={objectDeselected ? null : chip}
+            onDeselectChip={() => {
+              if (sessionSelection) setDeselectedObject(objectKey(sessionSelection));
             }}
             mask={maskChip}
             branch={branchChip}

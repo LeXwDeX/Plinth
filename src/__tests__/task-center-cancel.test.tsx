@@ -129,7 +129,7 @@ it('renders cancel only for running tasks', () => {
   expect(html).not.toContain('unknown-running');
 });
 
-it('shows a real pending Agent turn and unbound SkillRun steps without inventing Task progress', () => {
+it('shows unbound SkillRun steps, and no row for the pending Agent turn (#546)', () => {
   chatState.messagesBySession = { 'session-a': [{ role: 'assistant', isPending: true }] };
   skillRunResult = {
     runs: [{ id: 'run-a', sessionId: 'session-a', steps: [
@@ -141,7 +141,7 @@ it('shows a real pending Agent turn and unbound SkillRun steps without inventing
   };
   try {
     const html = renderToStaticMarkup(<><TaskCenterButton /><TaskDrawer /></>);
-    expect(html).toContain(msg('ui.workspace.tasks.agent_preparing'));
+    expect(html).not.toContain('workspace-agent-progress');
     expect(html).toContain('正面');
     expect(html).toContain(msg('ui.workspace.tasks.skill_phase.grant_pending'));
     expect(html).toContain(msg('ui.workspace.tasks.skill_checkpoint'));
@@ -153,47 +153,69 @@ it('shows a real pending Agent turn and unbound SkillRun steps without inventing
   }
 });
 
-// #375: the drawer shows the Agent's own work as one row. Without a tracked Task of the session
-// that row is not a task, so it says so; with one, the two rows sit side by side without it.
-it('says an Agent turn without a tracked Task has submitted no task, with no invented progress', () => {
+// #546: the drawer lists the providers' Tasks only. An Agent turn that is thinking is the chat's own "generating"
+// line; it is no row here, with or without a tracked Task, and it adds nothing to the count on the button.
+it('shows no row for a thinking Agent turn without a tracked Task', () => {
   const previous = storeState.trackedTasks;
   storeState.trackedTasks = [{ ...trackedTask('foreign-running', 'RUNNING', false), sessionId: 'session-b' }];
-  chatState.streamingBuffers = { 'session-a': { genState: { statusText: 'configured tool status' } } };
+  chatState.streamingBuffers = { 'session-a': { genState: { statusText: 'configured tool status', thinking: true } } };
+  chatState.messagesBySession = { 'session-a': [{ role: 'assistant', isPending: true }] };
   try {
-    const html = renderToStaticMarkup(<TaskDrawer />);
-    expect(html).toContain('data-testid="workspace-agent-progress"');
-    expect(html).toContain('configured tool status');
-    expect(html).toContain('data-testid="workspace-agent-no-task"');
-    expect(html).toContain(msg('ui.workspace.tasks.agent_no_task'));
-    expect(html).not.toContain('data-testid="workspace-task-card"');
+    const html = renderToStaticMarkup(<><TaskCenterButton /><TaskDrawer /></>);
+    expect(html).not.toContain('workspace-agent-progress');
+    expect(html).not.toContain('configured tool status');
+    expect(html).not.toContain('workspace-agent-no-task');
+    expect(html).toContain('data-testid="workspace-task-empty"');
     expect(html).not.toContain('role="progressbar"');
+    // The button names no listed item either.
+    expect(html).toContain(`aria-label="${msg('ui.workspace.tasks.open')}"`);
   } finally {
     storeState.trackedTasks = previous;
     chatState.streamingBuffers = {};
+    chatState.messagesBySession = {};
   }
 });
 
-it('keeps the Agent row beside the Task rows without the no-task note', () => {
+it('lists the Task rows alone while the Agent turn thinks', () => {
   chatState.streamingBuffers = { 'session-a': { genState: { statusText: 'configured tool status' } } };
   try {
     const html = renderToStaticMarkup(<TaskDrawer />);
-    expect(html).toContain('data-testid="workspace-agent-progress"');
-    expect(html).toContain('configured tool status');
+    expect(html).not.toContain('workspace-agent-progress');
+    expect(html).not.toContain('configured tool status');
     expect(html).toContain('data-testid="workspace-task-card"');
-    expect(html).not.toContain('data-testid="workspace-agent-no-task"');
-    expect(html).not.toContain(msg('ui.workspace.tasks.agent_no_task'));
   } finally {
     chatState.streamingBuffers = {};
   }
 });
 
-it('declares the no-task note in the schema in Chinese and English', () => {
-  expect(msg('ui.workspace.tasks.agent_no_task')).toBe('尚未提交生成任务');
+it('marks a task that waits in a queue, as the Schema states and the server notice say, and offers the queue filter', () => {
+  const previous = storeState.trackedTasks;
+  storeState.trackedTasks = [
+    trackedTask('queued', 'QUEUED', false),
+    trackedTask('retry', 'RETRY_PENDING', false),
+    { ...trackedTask('provider-queue', 'RUNNING', false), queueNotice: { reason: 'upstream_queued', detail: msg('task.queue_reason.upstream_queued') } },
+    trackedTask('running', 'RUNNING', false),
+  ];
+  try {
+    const html = renderToStaticMarkup(<TaskDrawer />);
+    const queued = [...html.matchAll(/data-testid="workspace-task-card" data-queued="true"/g)];
+    expect(queued).toHaveLength(3);
+    expect(html).toContain(msg('task.queue_reason.upstream_queued'));
+    expect(html).toContain('data-testid="workspace-task-filter-queued"');
+    expect(html).toContain(`>${msg('ui.workspace.tasks.filter.queued')}<`);
+  } finally {
+    storeState.trackedTasks = previous;
+  }
+});
+
+it('declares the queue filter in the schema in Chinese and English, and no Agent-row texts any more', () => {
   const bundles = (defaultCatalog.application as unknown as {
     localization: { bundles: Record<string, { messages: Record<string, string>; fields: Record<string, string> }> };
   }).localization.bundles;
-  expect(bundles.en.messages['ui.workspace.tasks.agent_no_task']).toBe('No task submitted yet');
-  expect(bundles.en.fields['chat.presentation.status.preparing_tool']).toBe('Preparing to call a tool…');
+  expect(msg('ui.workspace.tasks.filter.queued')).toBe('排队中');
+  expect(bundles.en.messages['ui.workspace.tasks.filter.queued']).toBe('Queued');
+  expect(catalogMessages?.['ui.workspace.tasks.agent_no_task']).toBeUndefined();
+  expect(catalogMessages?.['ui.workspace.tasks.agent_preparing']).toBeUndefined();
 });
 
 it('keeps durable SkillRun checkpoints visible without an activity count or invented percentage', () => {

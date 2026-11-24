@@ -107,6 +107,10 @@ type Config struct {
 	// Texts gives the copy of the UI locale frozen with the turn that asked
 	// for the approval. Nil keeps the Schema's default-locale copy.
 	Texts *catalog.TextLocalizer
+	// ProviderNames maps an Offering's adapter key to its connection's
+	// display name for a failed Task's upstream HTTP error text
+	// (catalog.ProviderDisplayNames). Nil keeps the failure class text.
+	ProviderNames map[string]string
 	// DefaultLocale is the Schema's default language. A turn frozen before
 	// locales existed has an empty locale; it must not inherit the request
 	// language of whatever sweep happens to pick it up.
@@ -125,6 +129,7 @@ type Service struct {
 	clock                func() time.Time
 	tools                map[string]catalog.ChatToolSchema
 	texts                *catalog.TextLocalizer
+	providerNames        map[string]string
 	defaultLocale        string
 
 	locks [64]sync.Mutex
@@ -154,7 +159,7 @@ func New(config Config) (*Service, error) {
 		verifyPreparedSource: config.VerifyPreparedSource, processingCorrection: config.ProcessingCorrection,
 		operations: config.Operations, grants: config.Grants, gateway: config.Gateway,
 		chat: config.Chat, schema: config.Schema, clock: config.Clock, tools: tools, texts: config.Texts,
-		defaultLocale: config.DefaultLocale,
+		defaultLocale: config.DefaultLocale, providerNames: config.ProviderNames,
 	}, nil
 }
 
@@ -1248,7 +1253,8 @@ func (s *Service) report(ctx context.Context, op generationtool.Operation, task 
 		}
 		s.chat.AttachResults(ctx, op.OwnerID, &posted, modelTasks)
 	case generation.TaskFailed, generation.TaskCanceled:
-		posted.Content = generationtool.LocalizedFailureMessage(s.schema, task.Offering.CreditsMetered, task.Failure,
+		posted.Content = generationtool.LocalizedFailureMessage(s.schema, s.providerNames[task.Offering.AdapterKey],
+			task.Offering.CreditsMetered, task.Failure,
 			func(text string) string { return s.text(ctx, text) })
 	default:
 		return outcome, nil

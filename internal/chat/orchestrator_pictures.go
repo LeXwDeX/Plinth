@@ -120,6 +120,9 @@ func (orchestrator *Orchestrator) attachToolPictures(
 				reply.Content += strings.ReplaceAll(pictureUnreadable, "{handle}", orchestrator.toolPictureHandle(picture))
 				continue
 			}
+			// A tool picture (a render, a crop, show_picture) is budgeted by
+			// the bytes that are sent (#555).
+			pictureURL = orchestrator.pictures.URL(pictureURL)
 			if budget.Vision != nil && spend != nil && !budget.canSpend(*spend, tokenCost, int64(len(pictureURL))) {
 				dropped = append(dropped, orchestrator.toolPictureHandle(picture))
 				continue

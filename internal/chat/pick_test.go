@@ -213,6 +213,67 @@ func TestPickedCandidateIsTheSelectionOfLaterTurnsUntilTheClientSelectsSomething
 	}
 }
 
+// #557: a handle the person wrote is the turn's target and wins over the
+// selection. The page leaves the selection out when the text names another
+// object, so the session pick must not stand in for it either; a turn that
+// names nothing keeps using the pick.
+func TestPickedCandidateDoesNotStandInWhenTheTextNamesAHandle(t *testing.T) {
+	verifier := &recordingVerifier{held: map[string]map[string]bool{}}
+	service, _, _ := newHandleService(t, verifier)
+	ctx := context.Background()
+	session, err := service.CreateSession(ctx, "owner-a", "Owner", "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier.held["owner-a/"+session.ID] = map[string]bool{"task-1": true, "asset-1": true, "task-2": true, "asset-2": true}
+	if _, err := service.PickCandidate(ctx, "owner-a", session.ID, chat.AttachmentRef{TaskID: "task-1", AssetID: "asset-1"}); err != nil {
+		t.Fatal(err)
+	}
+	turnOf := func(command chat.StartTurn) chat.Turn {
+		t.Helper()
+		command.OwnerID, command.SessionID = "owner-a", session.ID
+		started, err := service.StartTurn(ctx, command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		turn, _ := service.GetTurn(ctx, "owner-a", session.ID, started.ID)
+		if err := service.FinishTurn(ctx, started.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.FinishStream(ctx, session.ID, started.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		return turn
+	}
+	// Nothing named: the pick is the default target and gets its handle.
+	turn := turnOf(chat.StartTurn{Content: "make it bigger"})
+	if len(turn.Options.Selection) != 1 || !turn.Options.SelectionPicked {
+		t.Fatalf("selection = %+v picked=%v", turn.Options.Selection, turn.Options.SelectionPicked)
+	}
+	handle := turn.Options.Selection[0].Handle
+	// A typed handle (any case, inside a sentence) is explicit: no implicit target. Naming the pick's own handle
+	// targets it explicitly, so it needs no stand-in either.
+	for _, content := range []string{"把 @img9 变成夜景", "use @IMG9 instead", "@model1 换贴图", "改一下 " + handle} {
+		turn = turnOf(chat.StartTurn{Content: content})
+		if len(turn.Options.Selection) != 0 || turn.Options.SelectionPicked {
+			t.Fatalf("%q: the pick stood in for a typed handle: %+v", content, turn.Options.Selection)
+		}
+	}
+	// An `@` reference claim is explicit too.
+	turn = turnOf(chat.StartTurn{Content: "把 @图层1 放大", Mentions: []chat.MentionRef{{Token: "@图层1",
+		Ref: chat.AttachmentRef{Kind: chat.AttachmentKindImage, TaskID: "task-2", AssetID: "asset-2", URL: "/api/v1/tasks/task-2/assets/asset-2"}}}})
+	if turn.Options.SelectionPicked {
+		t.Fatalf("the pick stood in for a mention: %+v", turn.Options.Selection)
+	}
+	// Text that only looks like a handle is not one; the alias of the selection itself asks for it.
+	for _, content := range []string{"email me@img9", "see @img9x", "用 @selected 去背景"} {
+		turn = turnOf(chat.StartTurn{Content: content})
+		if len(turn.Options.Selection) != 1 || !turn.Options.SelectionPicked {
+			t.Fatalf("%q: selection = %+v picked=%v", content, turn.Options.Selection, turn.Options.SelectionPicked)
+		}
+	}
+}
+
 func TestSelectionPromptTellsTheAgentWhenTheSelectionIsThePickedCandidate(t *testing.T) {
 	policy, schema := handlePolicyForTest(t)
 	repository := newMemoryChatRepository()

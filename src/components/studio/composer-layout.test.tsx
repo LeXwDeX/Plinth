@@ -16,7 +16,6 @@ import { useSessionContextStore } from '@/store/session-context-store';
 // that carries its own test id (its tabs are tested in composer-settings-405.test.tsx); the context meter is the
 // real component.
 const schema = { ...(defaultCatalog.application as unknown as ProductSchema) };
-schema.chat = { ...schema.chat, agent_limits: { max_tool_calls_per_reply: 20 } };
 
 vi.mock('@/components/product-schema-provider', () => ({ useProductSchema: () => ({ schema }) }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: 'owner' } }) }));
@@ -33,7 +32,7 @@ vi.mock('@/components/studio/chat-model-picker', () => ({ ChatModelNotice: () =>
 const noop = () => undefined;
 const props: ComposerProps = {
   value: '', onChange: noop, onSend: noop, onStop: noop, streaming: false, locked: false, canSend: true,
-  chip: null, chipSkipped: false, onToggleChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
+  chip: null, onDeselectChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
   acceptedImages: undefined, onFiles: noop, onPasteImages: noop, editing: false, onCancelEdit: noop, sendCredits: null, mentions: [],
   params: {} as ComposerProps['params'],
   skill: { sessionId: 's1', catalog: null, effective: null, selectedId: null, unavailable: false, loading: false, failed: false, disabled: false, onSelect: noop, onCreated: noop },

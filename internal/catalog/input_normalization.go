@@ -108,21 +108,26 @@ func normalizeInput(offering schemacontract.Offering, raw json.RawMessage) (json
 			}
 			continue
 		}
-		present := 0
+		var present []string
 		for _, name := range rule.Parameters {
 			value, exists := values[name]
 			if exists && inputValuePresent(value) {
-				present++
+				present = append(present, name)
 			}
 		}
-		if present < rule.Minimum || present > rule.Maximum {
-			return nil, fmt.Errorf(
-				"输入规则 %d 要求参数 %v 至少出现 %d 个、至多出现 %d 个",
-				index,
-				rule.Parameters,
-				rule.Minimum,
-				rule.Maximum,
-			)
+		if len(present) < rule.Minimum || len(present) > rule.Maximum {
+			// The structured violation keeps the same diagnostic text for logs
+			// and lets the Agent tools name the rule instead of a generic text.
+			return nil, &schemacontract.InputRuleViolation{
+				OfferingID: offering.ID,
+				Capability: offering.Capability,
+				Index:      index,
+				Parameters: append([]string(nil), rule.Parameters...),
+				Present:    present,
+				Minimum:    rule.Minimum,
+				Maximum:    rule.Maximum,
+				Message:    rule.Message,
+			}
 		}
 	}
 	if err := deliverParametersThroughPrompt(offering, values); err != nil {

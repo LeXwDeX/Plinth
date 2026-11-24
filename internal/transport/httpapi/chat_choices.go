@@ -35,6 +35,14 @@ type choiceOptionWire struct {
 	// the named function (switch_operation) or without one (clear_operation).
 	// The server never performs it.
 	Action *choiceActionWire `json:"action,omitempty"`
+	// Step is the one paid step the option runs (#549); the quote fields
+	// above are the server's estimate of it.
+	Step *choiceStepWire `json:"step,omitempty"`
+}
+
+type choiceStepWire struct {
+	Tool       string `json:"tool"`
+	Capability string `json:"capability,omitempty"`
 }
 
 type choiceActionWire struct {
@@ -80,6 +88,9 @@ func choiceToWire(choice chat.Choice, question string) choiceWire {
 		}
 		if action := option.Action; action != nil {
 			view.Action = &choiceActionWire{Type: action.Type, OperationID: action.OperationID}
+		}
+		if step := option.Step; step != nil {
+			view.Step = &choiceStepWire{Tool: step.Tool, Capability: step.Capability}
 		}
 		wire.Options = append(wire.Options, view)
 	}

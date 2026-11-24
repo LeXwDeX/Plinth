@@ -1398,9 +1398,6 @@ type PublicChatSchema struct {
 	// the prompts stay on the server.
 	ContextCompaction PublicChatContextCompaction `json:"context_compaction"`
 	AgentStatus       PublicChatAgentStatus       `json:"agent_status"`
-	// AgentLimits is the effective per-reply tool call budget the composer's
-	// counter shows (#275); chat.agent itself stays server-only.
-	AgentLimits PublicChatAgentLimits `json:"agent_limits"`
 	// ThreeViewLimits is the one three-view value the page needs to queue a
 	// refused view (#59); chat.three_view itself stays server-only.
 	ThreeViewLimits PublicChatThreeViewLimits `json:"three_view_limits"`
@@ -1527,13 +1524,6 @@ type PublicChatProductionBriefSchema struct {
 // the deployment declares no three-view group.
 type PublicChatThreeViewLimits struct {
 	QueueLimitSeconds int `json:"queue_limit_seconds"`
-}
-
-// PublicChatAgentLimits carries the one Agent value the browser may read: the
-// per-reply tool call budget in force, i.e. chat.agent.max_tool_calls_per_reply
-// after the deployment's AGENT_MAX_TOOL_CALLS_PER_REPLY override.
-type PublicChatAgentLimits struct {
-	MaxToolCallsPerReply int `json:"max_tool_calls_per_reply"`
 }
 
 // PublicChatAgentStatus tells the browser whether the deployment's Agent can
@@ -2069,9 +2059,10 @@ type CanvasArtboardLabelSchema struct {
 	BackgroundOpacity float64 `json:"background_opacity"`
 }
 
-// CanvasSnapSchema declares drag snapping: the default of the toolbar toggle,
-// the screen-pixel capture distance, the guide line style, and whether group
-// members are snap targets of their own.
+// CanvasSnapSchema declares drag and resize snapping: the default of the
+// toolbar toggle, the screen-pixel capture distance, the guide line style,
+// whether group members are snap targets of their own, and the key held to
+// turn it off for one gesture.
 type CanvasSnapSchema struct {
 	DefaultEnabled   bool    `json:"default_enabled"`
 	ThresholdPixels  float64 `json:"threshold_pixels"`
@@ -2082,6 +2073,9 @@ type CanvasSnapSchema struct {
 	// visible members); true also keeps each member's own edges as secondary
 	// targets, used only on an axis no unit is within reach of (#273).
 	GroupMemberTargets bool `json:"group_member_targets"`
+	// BypassModifier is held to turn snapping off for the current move or
+	// resize: "mod" (Ctrl, or Command on macOS), "alt" or "shift".
+	BypassModifier string `json:"bypass_modifier"`
 }
 
 type CanvasExportSchema struct {
@@ -2376,7 +2370,11 @@ type ProviderConditionalCapabilitySchema struct {
 }
 
 type ProviderConnectionSchema struct {
-	ID                    string `json:"id"`
+	ID string `json:"id"`
+	// DisplayName is the upstream's name in the text a person reads for its
+	// HTTP errors ("MeshyAI 网关返回 429，…"); empty: those errors keep the
+	// failure class text.
+	DisplayName           string `json:"display_name,omitempty"`
 	Protocol              string `json:"protocol"`
 	AdapterKey            string `json:"adapter_key"`
 	BaseURLSetting        string `json:"base_url_setting,omitempty"`
@@ -3472,6 +3470,26 @@ type ChatChoiceKindSchema struct {
 	// choice.answer_template and choice.pending_template instead.
 	AnswerTemplate  string `json:"answer_template,omitempty"`
 	PendingTemplate string `json:"pending_template,omitempty"`
+	// Step lets an option of a kind that names no target tool declare the one
+	// paid step it runs (#549): one option does one thing. The server quotes the
+	// step on the card, refuses an option that names more than one step, and in
+	// the turn that answers the card on the card refuses every other paid step.
+	// Nil (historical Catalogs) leaves the kind's options without steps and the
+	// answer turn unscoped.
+	Step *ChatChoiceStepSchema `json:"step,omitempty"`
+}
+
+// ChatChoiceStepSchema is choice.kinds[].step (#549): the words the server
+// returns to the Agent when an option or a turn goes beyond one chosen step.
+type ChatChoiceStepSchema struct {
+	// OneStepRefusal refuses a card whose option names more than one step
+	// ({option}: the option id). Nothing is stored.
+	OneStepRefusal string `json:"one_step_refusal"`
+	// UnchosenRefusal refuses, in the turn that answers a card of this kind on
+	// the card, a paid step the chosen option does not name, or a second run of
+	// the one it names ({tool}: the refused tool, {option}: the chosen option's
+	// label). Nothing is submitted and nothing is charged.
+	UnchosenRefusal string `json:"unchosen_refusal"`
 }
 
 // The actions an option of a choice card may carry (#374). The page performs
@@ -5305,6 +5323,30 @@ type ChatAgentRetrySchema struct {
 	MaxRetryAfterSeconds int `json:"max_retry_after_seconds"`
 }
 
+// ChatAgentRequestPicturesSchema is chat.agent.request_pictures: every picture
+// the Agent may see is re-encoded into Format before the vision budget counts
+// its bytes and before the request goes out. A picture with transparency is
+// first composited over BackgroundColor (the alpha_flatten convention); a JPEG
+// that needs no EXIF rotation is kept as it is; a picture over MaxPixels is
+// not decoded and is kept as it is. Pictures are never resized here.
+//
+// Upstream limits as confirmed so far: OpenAI confirmed a single request body
+// limit of 30 MB (asked on 2026-11-24). Plinth sets no request body limit and
+// no downscaling ladder today; it only sends inline pictures as JPEG to make
+// them smaller. context.vision.maximum_bytes (16 MiB) is a picture byte budget
+// and counts the encoded bytes. /v1/responses requests of 10–12 MB were once
+// seen to fail at once while being sent over the internal LLMS gateway's
+// WebSocket channel; that channel has since been closed on the gateway side,
+// and the failure is still being watched.
+type ChatAgentRequestPicturesSchema struct {
+	// Format is the declared encoding; only "jpeg" is supported.
+	Format string `json:"format"`
+	// Quality is the JPEG quality, 1–100.
+	Quality         int    `json:"quality"`
+	BackgroundColor string `json:"background_color"`
+	MaxPixels       int64  `json:"max_pixels"`
+}
+
 type ChatAgentSchema struct {
 	AdapterKey        string              `json:"adapter_key"`
 	ConnectionID      string              `json:"connection_id,omitempty"`
@@ -5398,23 +5440,11 @@ type ChatAgentSchema struct {
 	// (a single generation step, or a SkillRun submit batched after one) while
 	// they keep running (#137). Nil offers no such choice and the server
 	// refuses it.
-	BackgroundWait *ChatBackgroundWaitSchema `json:"background_wait,omitempty"`
-	// MaxToolCallsPerReply 限定一次 Agent 回复内实际执行的工具调用数
-	// （>=1，#275，替代按 LLM 轮数计的 max_tool_rounds）。每次新回复从 0
-	// 起算；恢复与续跑时已执行的调用计入同一次回复。一批调用超出剩余
-	// 预算时只执行到上限，其余与总结轮仍写出的调用一起列给用户确认。
-	// 每轮至少执行一个调用，所以它同时是工具循环的防死循环上限。
-	MaxToolCallsPerReply int `json:"max_tool_calls_per_reply"`
-	// MaxToolCallsPerReplySetting names the runtime setting (environment
-	// variable) that may override MaxToolCallsPerReply per deployment; an
-	// empty value keeps the Schema value. MaxToolCallsPerReplyMaximum bounds
-	// both the Schema value and the override.
-	MaxToolCallsPerReplySetting string            `json:"max_tool_calls_per_reply_setting"`
-	MaxToolCallsPerReplyMaximum int               `json:"max_tool_calls_per_reply_maximum"`
-	ScannerMaxBytes             int               `json:"scanner_max_bytes"`
-	ErrorBodyMaxBytes           int64             `json:"error_body_max_bytes"`
-	SystemPrompt                string            `json:"system_prompt"`
-	DomainContext               map[string]string `json:"domain_context"`
+	BackgroundWait    *ChatBackgroundWaitSchema `json:"background_wait,omitempty"`
+	ScannerMaxBytes   int                       `json:"scanner_max_bytes"`
+	ErrorBodyMaxBytes int64                     `json:"error_body_max_bytes"`
+	SystemPrompt      string                    `json:"system_prompt"`
+	DomainContext     map[string]string         `json:"domain_context"`
 	// PromptSections declares Agent-facing text that only applies while one of
 	// its capabilities has an enabled Offering (#115). See
 	// ChatAgentPromptSection.
@@ -5482,6 +5512,10 @@ type ChatAgentSchema struct {
 	// the approval card while the turn was still attached: it says the step
 	// was not done and proposes an alternative.
 	MockDeniedSummary string `json:"mock_denied_summary,omitempty"`
+
+	// RequestPictures declares the format every picture of a chat model
+	// request is sent in. Nil keeps the pictures as they were inlined.
+	RequestPictures *ChatAgentRequestPicturesSchema `json:"request_pictures,omitempty"`
 }
 
 // ChatOfferingKnowledgeSchema is application.chat.agent.offering_knowledge
@@ -6626,16 +6660,6 @@ type ChatMessageTexts struct {
 	Unauthenticated      string `json:"unauthenticated"`
 	AgentBusy            string `json:"agent_busy"`
 	TurnStopped          string `json:"turn_stopped"`
-	ToolRoundLimit       string `json:"tool_round_limit"`
-	// ToolRoundLimitPending heads the list of tool calls the model still
-	// wanted once the tool rounds ran out: the unexecuted batch and any DSML
-	// the tool-less summary round wrote anyway (#275). Each call is one line
-	// from ToolRoundLimitPendingItem ({tool}, {intent}: the call's prompt
-	// argument shortened to context.tool_prompt_preview_characters), or from
-	// ToolRoundLimitPendingTool ({tool}) when the call carries no prompt.
-	ToolRoundLimitPending     string `json:"tool_round_limit_pending"`
-	ToolRoundLimitPendingItem string `json:"tool_round_limit_pending_item"`
-	ToolRoundLimitPendingTool string `json:"tool_round_limit_pending_tool"`
 	// ToolArgumentsInvalid is the tool result of a call whose arguments the
 	// model wrote as invalid JSON: the tool did not run, and the Agent writes
 	// the call again. ToolUnavailable ({tool}) is the result of a call to a tool
@@ -6665,6 +6689,18 @@ type ChatMessageTexts struct {
 	InputShapeBoolean         string `json:"input_shape_boolean"`
 	InputShapeNumber          string `json:"input_shape_number"`
 	InputShapeValue           string `json:"input_shape_value"`
+	// The InputRule* texts say which count input rule of the Offering a call
+	// broke (an input group that takes at most or at least some of its
+	// members, such as a prompt or a style picture but not both): TooMany
+	// ({inputs}, {maximum}, {given}, {reason}) and TooFew ({inputs},
+	// {minimum}, {given}, {reason}). {inputs} joins InputRuleMember ({name},
+	// {argument}: the tool argument that carries it) or the bare parameter
+	// name; {reason} is InputRuleReason ({reason}) around the rule's own
+	// Schema message, or empty. Only Schema facts are filled, never a value.
+	InputRuleTooMany string `json:"input_rule_too_many"`
+	InputRuleTooFew  string `json:"input_rule_too_few"`
+	InputRuleMember  string `json:"input_rule_member"`
+	InputRuleReason  string `json:"input_rule_reason"`
 	// GenerationFailedByClass replaces GenerationFailed in the tool result
 	// when the Task failed with one of these failure classes, so the Agent and
 	// the user hear the real cause (for example an exhausted provider balance)
@@ -6690,6 +6726,9 @@ type ChatMessageTexts struct {
 	// submission, an accepted job that timed out; #136) when no class text
 	// applies: the Agent does not resubmit and has the result checked first.
 	GenerationFailedAmbiguous string `json:"generation_failed_ambiguous,omitempty"`
+	// UpstreamHTTPError is the one wording of an upstream HTTP error a person
+	// reads: provider, status and the declared reason.
+	UpstreamHTTPError UpstreamHTTPErrorTexts `json:"upstream_http_error"`
 }
 
 type ChatStatusTexts struct {
@@ -7455,19 +7494,21 @@ type FrontendRuntimeSchema struct {
 	// delays the search request after typing.
 	// The title refresh pair controls how long the page re-reads a session
 	// whose automatic title is still pending after a turn completes.
-	SessionMenuPageSize                     int                       `json:"session_menu_page_size"`
-	SessionMenuSearchDebounceMilliseconds   int                       `json:"session_menu_search_debounce_milliseconds"`
-	SessionTitleRefreshAttempts             int                       `json:"session_title_refresh_attempts"`
-	SessionTitleRefreshIntervalMilliseconds int                       `json:"session_title_refresh_interval_milliseconds"`
-	DisplayLocale                           string                    `json:"display_locale"`
-	TaskAPIPrefix                           string                    `json:"task_api_prefix"`
-	SpinnerFrameMilliseconds                int                       `json:"spinner_frame_milliseconds"`
-	PercentageMultiplier                    float64                   `json:"percentage_multiplier"`
-	PercentageSuffix                        string                    `json:"percentage_suffix"`
-	AdvancedModelFormFeature                string                    `json:"advanced_model_form_feature"`
-	AdvancedModelDefaultMode                string                    `json:"advanced_model_default_mode"`
-	TaskProgress                            TaskProgressRuntimeSchema `json:"task_progress"`
-	Toaster                                 ToasterRuntimeSchema      `json:"toaster"`
+	SessionMenuPageSize                     int     `json:"session_menu_page_size"`
+	SessionMenuSearchDebounceMilliseconds   int     `json:"session_menu_search_debounce_milliseconds"`
+	SessionTitleRefreshAttempts             int     `json:"session_title_refresh_attempts"`
+	SessionTitleRefreshIntervalMilliseconds int     `json:"session_title_refresh_interval_milliseconds"`
+	DisplayLocale                           string  `json:"display_locale"`
+	TaskAPIPrefix                           string  `json:"task_api_prefix"`
+	SpinnerFrameMilliseconds                int     `json:"spinner_frame_milliseconds"`
+	PercentageMultiplier                    float64 `json:"percentage_multiplier"`
+	PercentageSuffix                        string  `json:"percentage_suffix"`
+	// TaskListPageSize is how many tasks the task drawer shows at first and adds with each "show more" (#546).
+	TaskListPageSize         int                       `json:"task_list_page_size"`
+	AdvancedModelFormFeature string                    `json:"advanced_model_form_feature"`
+	AdvancedModelDefaultMode string                    `json:"advanced_model_default_mode"`
+	TaskProgress             TaskProgressRuntimeSchema `json:"task_progress"`
+	Toaster                  ToasterRuntimeSchema      `json:"toaster"`
 	// ChatMessagePageSize is how many messages the chat column reads when it
 	// opens a conversation and each time the person asks for earlier ones.
 	ChatMessagePageSize int `json:"chat_message_page_size"`

@@ -22,7 +22,7 @@ const noop = () => undefined;
 const send = vi.fn();
 const props: ComposerProps = {
   value: '', onChange: noop, onSend: send, onStop: noop, streaming: false, locked: false, canSend: true,
-  chip: null, chipSkipped: false, onToggleChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
+  chip: null, onDeselectChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
   acceptedImages: undefined, onFiles: noop, onPasteImages: noop, editing: false, onCancelEdit: noop, sendCredits: null, mentions: [],
   params: {} as ComposerProps['params'],
   skill: { sessionId: 's1', catalog: null, effective: null, selectedId: null, unavailable: false, loading: false, failed: false, disabled: false, onSelect: noop, onCreated: noop },
@@ -262,5 +262,68 @@ describe('mention picture previews (#157)', () => {
     act(() => { vi.advanceTimersByTime(schema.chat.frontend.handle_preview_delay_milliseconds); });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(screen.queryByTestId('handle-preview')).toBeNull();
+  });
+});
+
+describe('mention list follows the keyboard highlight', () => {
+  const scrolled: { handle: string | null; options: unknown }[] = [];
+  beforeEach(() => {
+    scrolled.length = 0;
+    // jsdom has no layout and no scrollIntoView; record which option asked to be revealed.
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true, writable: true,
+      value(this: HTMLElement, options: unknown) { scrolled.push({ handle: this.getAttribute('data-handle'), options }); },
+    });
+  });
+  afterEach(() => { delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView; });
+  const openList = () => {
+    render(<Editor mentions={['@img1', '@img2', '@img3'].map((handle) => ({ handle, kind: 'image' as const, thumbnail: '', url: '' }))} />);
+    const input = screen.getByRole('textbox');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: '@', selectionStart: 1 } });
+    return input;
+  };
+
+  it('opens without scrolling and reveals each option reached with the arrow keys, wrapping both ways', () => {
+    const input = openList();
+    expect(scrolled).toEqual([]);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(scrolled).toEqual(['@img2', '@img3', '@img1', '@img3'].map((handle) => ({ handle, options: { block: 'nearest' } })));
+    expect(screen.getAllByRole('option')[2].getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('does not scroll on pointer highlight, and Enter and Escape still pick and dismiss', () => {
+    const input = openList();
+    fireEvent.mouseEnter(screen.getAllByRole('option')[2]);
+    expect(scrolled).toEqual([]);
+    expect(screen.getAllByRole('option')[2].getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(scrolled).toEqual([{ handle: '@img2', options: { block: 'nearest' } }]);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect((input as HTMLTextAreaElement).value).toBe('@img2 ');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    fireEvent.change(input, { target: { value: '@img2 @', selectionStart: 7 } });
+    expect(screen.getByRole('listbox')).toBeTruthy();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('returns the list to the top when typing refilters it, but not on keyboard or pointer moves', () => {
+    const input = openList();
+    const list = screen.getByRole('listbox');
+    // jsdom keeps scrollTop at 0; record writes so a reset is visible even from a scrolled list.
+    const writes: number[] = [];
+    Object.defineProperty(list, 'scrollTop', { configurable: true, get: () => 120, set: (top: number) => { writes.push(top); } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    fireEvent.mouseEnter(screen.getAllByRole('option')[2]);
+    expect(writes).toEqual([]);
+    fireEvent.change(input, { target: { value: '@img', selectionStart: 4 } });
+    expect(screen.getByRole('listbox')).toBe(list);
+    expect(writes).toEqual([0]);
+    expect(screen.getAllByRole('option')[0].getAttribute('aria-selected')).toBe('true');
   });
 });

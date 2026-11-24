@@ -333,7 +333,6 @@ func suspendSchema(t *testing.T) catalog.ChatSchema {
 	schema := configuredChatSchema(t)
 	schema.Agent.WorkerCount = 1
 	schema.Agent.QueueSize = 8
-	schema.Agent.MaxToolCallsPerReply = 3
 	// These tests drive the generic suspend/resume path through a tool the
 	// test executors make suspend. request_consent was removed (#491), so the
 	// name is declared here instead of borrowed from the product catalog.

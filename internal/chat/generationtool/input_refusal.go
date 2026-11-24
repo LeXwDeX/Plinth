@@ -2,10 +2,14 @@ package generationtool
 
 import (
 	"errors"
+	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 	"github.com/LeXwDeX/Plinth/internal/generation"
+	"github.com/LeXwDeX/Plinth/internal/schema"
 )
 
 // inputRefusal turns a refused input into a tool failure carrying the real
@@ -35,9 +39,11 @@ func (executor *Executor) inputRefusal(command chat.ToolCommand, err error) (cha
 // refusalDetail is what the Agent is told about a refused step (#321 A). A
 // kernel Detail is diagnostic, not public copy: it is returned only when its
 // source marked it UserFacing. Otherwise an explicitly safe Provider
-// SafeDetail wins, then a model error.* Schema message, then the public
-// invalid-parameters fallback. Upstream excerpts, IDs, parameter names and
-// paths never reach the Agent, and the kernel detail is never appended.
+// SafeDetail wins, then a model error.* Schema message, then the broken count
+// input rule of the Offering in Schema copy (its declared parameter names and
+// bounds only), then the public invalid-parameters fallback. Upstream
+// excerpts, IDs, internal causes and paths never reach the Agent, and the
+// kernel detail is never appended.
 func (executor *Executor) refusalDetail(command chat.ToolCommand, err error, _ string) string {
 	if reason := generation.UserFacingError(err); reason != nil {
 		return reason.LocalizedDetail(executor.localizeText(command))
@@ -46,6 +52,9 @@ func (executor *Executor) refusalDetail(command chat.ToolCommand, err error, _ s
 		return executor.localized(command, reason)
 	}
 	if message, ok := executor.modelInputDetail(command, err); ok {
+		return message
+	}
+	if message := executor.inputRuleDetail(command, err); message != "" {
 		return message
 	}
 	fallback := executor.chat.Presentation.Messages.InvalidParameters
@@ -88,4 +97,96 @@ func (executor *Executor) modelInputDetail(command chat.ToolCommand, err error) 
 		return "", true
 	}
 	return executor.localized(command, fallback), true
+}
+
+// inputRuleSeparator joins the members of an input rule; it reads the same in
+// every language the Schema writes.
+const inputRuleSeparator = " / "
+
+// inputRuleDetail is the Schema copy for a count input rule the kernel's
+// normalization refused (for example "prompt or style_asset, at most one"),
+// or "" when err is not one. It names the rule's declared parameters, the
+// tool argument that carries each, the bound, how many the call gave and the
+// rule's own Schema message: Schema facts only, never an input value.
+func (executor *Executor) inputRuleDetail(command chat.ToolCommand, err error) string {
+	var violation *schema.InputRuleViolation
+	if !errors.As(err, &violation) {
+		return ""
+	}
+	messages := executor.chat.Presentation.Messages
+	template := messages.InputRuleTooMany
+	if len(violation.Present) < violation.Minimum {
+		template = messages.InputRuleTooFew
+	}
+	if template == "" {
+		return ""
+	}
+	parameters := executor.violationParameters(violation)
+	members := make([]string, 0, len(violation.Parameters))
+	for _, name := range violation.Parameters {
+		argument := ""
+		if parameter, found := parameters[name]; found {
+			argument = ruleArgument(executor.chat, command, parameter)
+		}
+		if argument == "" || messages.InputRuleMember == "" {
+			members = append(members, name)
+			continue
+		}
+		members = append(members, executor.fillText(command, messages.InputRuleMember, "{name}", name, "{argument}", argument))
+	}
+	reason := ""
+	if violation.Message != "" && messages.InputRuleReason != "" {
+		reason = executor.fillText(command, messages.InputRuleReason, "{reason}", executor.localized(command, violation.Message))
+	}
+	return executor.fillText(command, template,
+		"{inputs}", strings.Join(members, inputRuleSeparator),
+		"{maximum}", strconv.Itoa(violation.Maximum), "{minimum}", strconv.Itoa(violation.Minimum),
+		"{given}", strconv.Itoa(len(violation.Present)), "{reason}", reason)
+}
+
+// violationParameters are the declared parameters of the refused Offering, by
+// name; empty when the executor has no gateway to read the Offering from.
+func (executor *Executor) violationParameters(violation *schema.InputRuleViolation) map[string]generation.Parameter {
+	parameters := map[string]generation.Parameter{}
+	if executor.gateway == nil {
+		return parameters
+	}
+	for _, offering := range executor.gateway.Offerings(violation.Capability) {
+		if offering.ID != violation.OfferingID {
+			continue
+		}
+		for _, parameter := range offering.Parameters {
+			parameters[parameter.Name] = parameter
+		}
+	}
+	return parameters
+}
+
+// ruleArgument is the argument of this processing tool that carries the
+// parameter, or "" when the tool declares none for it.
+func ruleArgument(chatSchema catalog.ChatSchema, command chat.ToolCommand, parameter generation.Parameter) string {
+	processing := command.Tool.Processing
+	if processing == nil {
+		return ""
+	}
+	switch {
+	case parameter.Semantic == generation.SemanticReferenceImage && processing.ReferenceArgument != "":
+		return chatSchema.Context.ReferenceHandlesArgument
+	case parameter.Semantic == generation.SemanticPrompt && processing.PromptArgument != "":
+		return processing.PromptArgument
+	}
+	if role, isSource := schema.SourceParameterRole(parameter); isSource && role == schema.SemanticSourceTask && parameter.Type == "task" {
+		return processing.SourceTaskArgument
+	}
+	arguments := make([]string, 0, 1)
+	for argument, name := range processing.ParameterArguments {
+		if name == parameter.Name {
+			arguments = append(arguments, argument)
+		}
+	}
+	sort.Strings(arguments)
+	if len(arguments) > 0 {
+		return arguments[0]
+	}
+	return ""
 }

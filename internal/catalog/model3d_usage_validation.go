@@ -638,6 +638,14 @@ func validateChoiceKinds(schema ChatSchema) error {
 			return err
 		}
 	}
+	for _, kind := range schema.Choice.Kinds {
+		if kind.Step != nil {
+			if err := validateChoiceStepParameter(parameters); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	kindProperty, ok := properties["kind"].(map[string]any)
 	if !ok || kindProperty["type"] != "string" {
 		return fmt.Errorf("ask_choice.kind 必须是字符串参数")
@@ -670,6 +678,16 @@ func validateChoiceKindShape(index int, kind ChatChoiceKindSchema, targetless bo
 		}
 	} else if kind.AnswerTemplate != "" || kind.PendingTemplate != "" {
 		return fmt.Errorf("choice.kinds[%d] 只有没有 tool_name 的 kind 才能声明 answer_template 与 pending_template", index)
+	}
+	if kind.Step != nil {
+		// #549: only a card whose answer is text can scope the answer turn to
+		// one step; a card with a target tool already runs exactly one call.
+		if !targetless {
+			return fmt.Errorf("choice.kinds[%d].step 只用于没有 tool_name 的 kind", index)
+		}
+		if strings.TrimSpace(kind.Step.OneStepRefusal) == "" || strings.TrimSpace(kind.Step.UnchosenRefusal) == "" {
+			return fmt.Errorf("choice.kinds[%d].step 的 one_step_refusal 与 unchosen_refusal 不能为空", index)
+		}
 	}
 	if kind.MinOptions != 0 || kind.MaxOptions != 0 {
 		if kind.OptionSource != "agent" {
@@ -722,6 +740,25 @@ func validateChoiceActionParameter(parameters map[string]any, declared map[strin
 	if declared[ChoiceActionSwitchOperation] {
 		if _, ok := actionProperties["operation_id"].(map[string]any); !ok {
 			return fmt.Errorf("ask_choice.options.action 必须声明 operation_id（switch_operation 需要它）")
+		}
+	}
+	return nil
+}
+
+// validateChoiceStepParameter checks that ask_choice offers the Agent the one
+// step an option may name (#549): an object with a string tool and a string
+// capability. One object, never a list: an option does one thing.
+func validateChoiceStepParameter(parameters map[string]any) error {
+	option := askChoiceOptionSchema(parameters)
+	step, _ := option["step"].(map[string]any)
+	properties, _ := step["properties"].(map[string]any)
+	if step == nil || step["type"] != "object" || properties == nil {
+		return fmt.Errorf("choice.kinds 声明 step 时 ask_choice.options 的选项必须声明对象参数 step")
+	}
+	for _, name := range []string{"tool", "capability"} {
+		property, _ := properties[name].(map[string]any)
+		if property == nil || property["type"] != "string" {
+			return fmt.Errorf("ask_choice.options.step 必须声明字符串参数 %s", name)
 		}
 	}
 	return nil

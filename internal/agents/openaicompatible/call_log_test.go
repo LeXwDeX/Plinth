@@ -6,12 +6,15 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/agents/openaicompatible"
+	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
+	openaiv1 "github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream/openai/v1"
 )
 
 // #382: every model call leaves one line with its model, thinking level,
@@ -154,5 +157,54 @@ func TestAdapterLogIsJSON(t *testing.T) {
 	}
 	if record["model"] != "configured-model" {
 		t.Fatalf("record = %v", record)
+	}
+}
+
+// #555: a gateway's 502 leaves a WARN line with the status, the request id the
+// gateway sent, the request's size and the first 200 bytes of its answer with
+// every data URI and every echo of the prompt cut out. The 502 comes from the
+// shared fake (openaiv1.GatewayFaultMarker).
+func TestAdapterLogsAGatewayFailureWithRequestIDAndBoundedExcerpt(t *testing.T) {
+	var buffer strings.Builder
+	logger := slog.New(slog.NewTextHandler(&buffer, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	fake, err := fakeupstream.New(fakeupstream.Config{}, openaiv1.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	adapter, err := openaicompatible.New(openaicompatible.Config{
+		BaseURL: server.URL + openaiv1.Prefix, APIKey: "k",
+		EndpointPath: "/chat/completions", AuthorizationName: "Authorization",
+		AuthorizationType: "Bearer", RequestTimeout: time.Minute,
+		ScannerMaxBytes: 1 << 20, ErrorBodyMaxBytes: 1 << 16,
+		Client: server.Client(), Logger: logger,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Stream(context.Background(), agents.Request{
+		Model: "configured-model", Connection: "chat-llm",
+		Messages: []agents.Message{{Role: "user", Parts: []agents.ContentPart{
+			{Kind: "text", Text: "secret prompt text " + openaiv1.GatewayFaultMarker},
+			{Kind: "image", URL: "data:image/png;base64,AAAA"},
+		}}},
+	}, nil); err == nil {
+		t.Fatal("the 502 was not reported")
+	}
+	logged := buffer.String()
+	for _, field := range []string{
+		"level=WARN", "status=502", "request_id=" + openaiv1.GatewayFaultRequestID, "model=configured-model",
+		"connection=chat-llm", "elapsed_ms=", "request_bytes=", "images=1",
+		"Bad Gateway",
+	} {
+		if !strings.Contains(logged, field) {
+			t.Fatalf("gateway failure log misses %q: %s", field, logged)
+		}
+	}
+	for _, secret := range []string{"secret prompt text", "AAAA", strings.Repeat("x", 201)} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("gateway failure log carries %q: %s", secret, logged)
+		}
 	}
 }

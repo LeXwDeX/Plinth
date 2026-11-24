@@ -6,6 +6,7 @@ import {
   approvalModeOptions,
   paidStepFailed,
   sessionCreditsText,
+  roundCreditsText,
   stepCreditsText,
   stepFailedText,
 } from './approval-modes';
@@ -55,6 +56,22 @@ describe('paid step credit display', () => {
     );
     expect(html).toContain('本步消耗 3 积分 · 已按批准方式自动批准');
     expect(html).toContain('本步消耗 40 积分</li>');
+  });
+
+  it('merges the parallel steps of a turn into one line per approval source (#546)', () => {
+    const schema = schemaFixture();
+    expect(roundCreditsText(schema, 24, 4)).toBe('本轮消耗 24 积分（4 步）');
+    const html = renderToStaticMarkup(
+      <PaidStepNotes
+        steps={['a', 'b', 'c', 'd'].map((taskId) => ({ taskId, credits: 6, approvedByPolicy: true }))}
+        creditsText={(credits) => stepCreditsText(schema, credits)}
+        roundCreditsText={(credits, steps) => roundCreditsText(schema, credits, steps)}
+        autoApprovedText="已按批准方式自动批准"
+      />,
+    );
+    expect(html.match(/<li/g)).toHaveLength(1);
+    expect(html).toContain('本轮消耗 24 积分（4 步） · 已按批准方式自动批准');
+    expect(html).not.toContain('本步消耗');
   });
 
   it('says a failed step did not complete instead of claiming it was charged', () => {
