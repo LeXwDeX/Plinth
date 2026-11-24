@@ -231,24 +231,47 @@ func (s *Service) formatMatches(format catalog.ModelFormatSchema, asset generati
 	return false
 }
 
+// deliveryOrder is the order in which a task's files claim a format row: a
+// required output before an attachment (#326, generation.PrimaryModelAsset),
+// then the task's own model before a converted copy, then the ordinal and the
+// ID. Each role counts its own ordinals and asset IDs are random, so without
+// the role a Tripo model and its converted.gltf (the same GLB bytes, both
+// required at ordinal 1) took the GLB row by ID order (#502).
+func deliveryOrder(left, right generation.Asset) int {
+	if left.Required != right.Required {
+		if left.Required {
+			return -1
+		}
+		return 1
+	}
+	if rank := roleRank(left.Role) - roleRank(right.Role); rank != 0 {
+		return rank
+	}
+	if left.Ordinal != right.Ordinal {
+		return left.Ordinal - right.Ordinal
+	}
+	return strings.Compare(string(left.ID), string(right.ID))
+}
+
+func roleRank(role string) int {
+	switch role {
+	case modelRole:
+		return 0
+	case convertedRole:
+		return 1
+	}
+	return 2
+}
+
 // classify assigns READY assets to target formats: of each format the first
-// matching asset by the task's main-model order (#326: a required output
-// before an attachment, then by ordinal; generation.PrimaryModelAsset), so a
-// format row shows the same file the stage and the 加工 panel use. The second
-// return value holds the assets that match no format, in their given order.
+// matching asset by deliveryOrder, so a format row shows the same file the
+// stage and the 加工 panel use. The second return value holds the assets that
+// match no format, in their given order.
 func (s *Service) classify(assets []generation.Asset) (map[string]generation.Asset, []generation.Asset) {
 	byFormat := make(map[string]generation.Asset, len(s.schema.Formats))
 	var rest []generation.Asset
 	ordered := slices.Clone(assets)
-	slices.SortStableFunc(ordered, func(left, right generation.Asset) int {
-		switch {
-		case left.Required == right.Required:
-			return 0
-		case left.Required:
-			return -1
-		}
-		return 1
-	})
+	slices.SortStableFunc(ordered, deliveryOrder)
 	unassigned := map[generation.AssetID]bool{}
 	for _, asset := range ordered {
 		assigned := false
@@ -270,6 +293,26 @@ func (s *Service) classify(assets []generation.Asset) (map[string]generation.Ass
 		}
 	}
 	return byFormat, rest
+}
+
+// conversionSource is the saved file of the given format a conversion step
+// converts: the first of the task's own model files of that format by
+// deliveryOrder. generation.BindModelSource binds only the model role, so a
+// converted copy (a Tripo converted.gltf over the model's GLB bytes) is never
+// a source, whichever file holds the format row (#502).
+func (s *Service) conversionSource(assets []generation.Asset, formatID string) (generation.Asset, bool) {
+	format, ok := s.format(formatID)
+	if !ok {
+		return generation.Asset{}, false
+	}
+	ordered := slices.Clone(assets)
+	slices.SortStableFunc(ordered, deliveryOrder)
+	for _, asset := range ordered {
+		if asset.Role == modelRole && s.formatMatches(format, asset) {
+			return asset, true
+		}
+	}
+	return generation.Asset{}, false
 }
 
 func (s *Service) format(id string) (catalog.ModelFormatSchema, bool) {

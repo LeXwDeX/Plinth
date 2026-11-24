@@ -868,7 +868,7 @@ func (s *Service) buildStep(ctx context.Context, task generation.Task, v view, c
 	var source generation.Asset
 	found := false
 	for _, format := range candidate.conversion.SourceFormats {
-		if asset, exists := v.own[format]; exists {
+		if asset, exists := s.conversionSource(v.assets, format); exists {
 			source, found = asset, true
 			break
 		}
