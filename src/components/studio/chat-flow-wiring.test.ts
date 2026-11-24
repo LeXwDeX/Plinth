@@ -60,6 +60,13 @@ describe('a late approval', () => {
     expect(chat).toMatch(/refreshApprovalRef\.current\(\);\s*\}, \[activeSessionId, settledKey, viewsKey\]/);
   });
 
+  it('reads a decided plan again when a watched task ends, at the late result delays (#561)', () => {
+    expect(chat).toContain('const budgetFollows = budgetFollowsTasks(schema, sessionBudget);');
+    expect(chat).toContain('return followSettledBudget(chatClient, sessionId, {');
+    expect(chat).toContain('delays: [0, ...LATE_RESULT_RELOAD_MILLISECONDS],');
+    expect(chat).toContain('}, [activeSessionId, budgetFollows, chatClient, settledWatchedKey]);');
+  });
+
   it('resets the card clock whenever the set of cards changes, so a fresh 24-hour card never reads 25 hours', () => {
     expect(chat).toContain("const pendingCardKey = pending.items.map((item) => item.requestId).join('\\n');");
     expect(chat).toMatch(/if \(pendingCardKey === ''\) return;\s*setNow\(Date\.now\(\)\);/);
