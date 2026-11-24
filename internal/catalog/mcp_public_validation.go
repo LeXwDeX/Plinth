@@ -260,6 +260,44 @@ func validateMCPPublic(schema ApplicationSchema, capabilities map[schemacontract
 	if !strings.Contains(messages.ImageBusy, "{seconds}") {
 		return errors.New("mcp_public.messages.image_busy 必须含 {seconds}")
 	}
+	return validateMCPInvalidDetails(messages.InvalidDetails)
+}
+
+// validateMCPInvalidDetails requires every {detail} text of invalid_arguments
+// the server words (#517), with the placeholders it fills.
+func validateMCPInvalidDetails(details MCPPublicInvalidDetails) error {
+	for name, text := range map[string]string{
+		"prompt_or_images":             details.PromptOrImages,
+		"tool_not_offering":            details.ToolNotOffering,
+		"reason_text":                  details.ReasonText,
+		"reason_required":              details.ReasonRequired,
+		"reason_not_taken":             details.ReasonNotTaken,
+		"parameter_not_settable":       details.ParameterNotSettable,
+		"prompt_in_parameters":         details.PromptInParameters,
+		"parameters_not_encodable":     details.ParametersNotEncodable,
+		"prompt_not_taken":             details.PromptNotTaken,
+		"images_not_taken":             details.ImagesNotTaken,
+		"images_exactly_one":           details.ImagesExactlyOne,
+		"mask_not_declared":            details.MaskNotDeclared,
+		"mask_without_image":           details.MaskWithoutImage,
+		"not_a_cursor":                 details.NotACursor,
+		"capability_not_served":        details.CapabilityNotServed,
+		"purpose_unknown":              details.PurposeUnknown,
+		"image_or_task_id":             details.ImageOrTaskID,
+		"image_or_task_id_missing":     details.ImageOrTaskIDMissing,
+		"asset_id_needs_task_id":       details.AssetIDNeedsTaskID,
+		"purpose_with_input_checklist": details.PurposeWithInputChecklist,
+	} {
+		if strings.TrimSpace(text) == "" {
+			return fmt.Errorf("mcp_public.messages.invalid_details.%s 不能为空", name)
+		}
+	}
+	if !strings.Contains(details.ToolNotOffering, "{capability}") {
+		return errors.New("mcp_public.messages.invalid_details.tool_not_offering 必须含 {capability}")
+	}
+	if !strings.Contains(details.PurposeUnknown, "{purposes}") {
+		return errors.New("mcp_public.messages.invalid_details.purpose_unknown 必须含 {purposes}")
+	}
 	return nil
 }
 

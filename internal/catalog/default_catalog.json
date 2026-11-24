@@ -6331,7 +6331,29 @@
         "image_unavailable": "当前服务没有启用图片检查，暂时不能给出检查结果。",
         "image_busy": "图片检查正忙，请 {seconds} 秒后重试。",
         "asset_not_image": "该产物存在，但不是可检查的图片：需要已保存的 role=image 产物。请传该任务里 role 为 image 的产物 ID。",
-        "task_terminal": "任务已经结束（{state}），这次取消没有改变任何状态。"
+        "task_terminal": "任务已经结束（{state}），这次取消没有改变任何状态。",
+        "invalid_details": {
+          "prompt_or_images": "给提示词（文生 3D）或图片（图生 3D）",
+          "tool_not_offering": "这个工具不提供 {capability}",
+          "reason_text": "理由必须是 1 到 4096 字节的文字",
+          "reason_required": "这个参数建议不要改；要改请在 parameter_reasons 里说明理由",
+          "reason_not_taken": "这个参数不用写理由（只有建议不要改的参数才要）",
+          "parameter_not_settable": "不是这个服务允许调用方设置的参数（见 list_services）",
+          "prompt_in_parameters": "提示词请放在 prompt 参数里",
+          "parameters_not_encodable": "无法编码",
+          "prompt_not_taken": "这个服务不接受提示词",
+          "images_not_taken": "这个服务不接受图片",
+          "images_exactly_one": "这个服务只接受一张图片",
+          "mask_not_declared": "这个服务没有声明蒙版参数（见 list_services）",
+          "mask_without_image": "蒙版必须和它要编辑的图片一起给，图片放在 images 里",
+          "not_a_cursor": "不是这个列表的游标",
+          "capability_not_served": "这个能力不经 MCP 提供",
+          "purpose_unknown": "未知用途，可用 {purposes}",
+          "image_or_task_id": "与 task_id 二选一",
+          "image_or_task_id_missing": "image 或 task_id 必须给一个",
+          "asset_id_needs_task_id": "只能与 task_id 同用",
+          "purpose_with_input_checklist": "不能与 checklist=3d_input 同用"
+        }
       }
     },
     "chat": {
@@ -17063,6 +17085,7 @@
                     "type": "string"
                   }
                 },
+                "required": ["task_id"],
                 "additionalProperties": false
               },
               "execution": {
@@ -21242,6 +21265,26 @@
             "mcp_public.messages.image_busy": "Picture inspection is busy; retry in {seconds} seconds.",
             "mcp_public.messages.asset_not_image": "That asset exists but is not an inspectable picture: a saved role=image output is required. Pass the ID of an output whose role is image in that task.",
 "mcp_public.messages.task_terminal": "The task has already ended ({state}); this cancellation changed nothing.",
+            "mcp_public.messages.invalid_details.prompt_or_images": "give a prompt (text-to-3D) or images (image-to-3D)",
+            "mcp_public.messages.invalid_details.tool_not_offering": "this tool does not offer {capability}",
+            "mcp_public.messages.invalid_details.reason_text": "must be a text of 1 to 4096 bytes",
+            "mcp_public.messages.invalid_details.reason_required": "this parameter is advised against changing; say why in parameter_reasons",
+            "mcp_public.messages.invalid_details.reason_not_taken": "this parameter takes no reason (only an advised parameter does)",
+            "mcp_public.messages.invalid_details.parameter_not_settable": "is not a parameter this service lets a caller set (see list_services)",
+            "mcp_public.messages.invalid_details.prompt_in_parameters": "give the prompt in the prompt argument",
+            "mcp_public.messages.invalid_details.parameters_not_encodable": "cannot be encoded",
+            "mcp_public.messages.invalid_details.prompt_not_taken": "this service takes no prompt",
+            "mcp_public.messages.invalid_details.images_not_taken": "this service takes no pictures",
+            "mcp_public.messages.invalid_details.images_exactly_one": "this service takes exactly one picture",
+            "mcp_public.messages.invalid_details.mask_not_declared": "this service declares no mask parameter (see list_services)",
+            "mcp_public.messages.invalid_details.mask_without_image": "a mask must name the picture it edits in images",
+            "mcp_public.messages.invalid_details.not_a_cursor": "is not a cursor of this list",
+            "mcp_public.messages.invalid_details.capability_not_served": "is not served through MCP",
+            "mcp_public.messages.invalid_details.purpose_unknown": "unknown purpose; use one of {purposes}",
+            "mcp_public.messages.invalid_details.image_or_task_id": "give either image or task_id, not both",
+            "mcp_public.messages.invalid_details.image_or_task_id_missing": "give image or task_id",
+            "mcp_public.messages.invalid_details.asset_id_needs_task_id": "only goes with task_id",
+            "mcp_public.messages.invalid_details.purpose_with_input_checklist": "does not go with checklist=3d_input",
             "mcp_public.tools[name=list_services].description": "Lists the services (offerings) usable through MCP, grouped by capability, with whether each is available right now, roughly what one step costs, which inputs it needs and which parameters can be tuned. A service whose inputs include mask takes an image-to-image edit mask. An unavailable service is said to be unavailable; it is never replaced by another model.",
             "mcp_public.tools[name=get_status].description": "Shows the 3D step mode, the 3D steps each of your MCP assets used, the running total and the balances of the three 3D providers. Reading counts no step and charges nothing. Every tool response carries the same status block, so there is no need to call this just to get it.",
             "mcp_public.tools[name=get_task].description": "Reads one task: state, progress, failure attribution with a suggested action, and the asset it belongs to. An unfinished task comes with a suggested polling interval. Only your own tasks can be read; another person's task is treated as missing.",

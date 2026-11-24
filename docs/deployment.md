@@ -358,6 +358,8 @@ python3 scripts/release-env.py smoke <环境> -- bash scripts/smoke/smoke-l1-age
 
 **升级说明：删除已下线的 Catalog 声明（#521）。** 本版本从默认 Catalog 删掉了运行时不再读取的声明，Catalog 的 Go 结构也去掉了对应字段。使用自定义 `CATALOG_FILE` 的部署升级前，必须从文档里删除这五个字段：`application.chat.agent.consent_approved_content`、`consent_blocked_content`、`consent_required_content`（#491 删除的会话级同意状态机的 Agent 文案，付费步骤只由执行授权批准）、`application.chat.three_view.purpose_argument` 与 `application.chat.stream.completion_flush_milliseconds`（从未接线）。Catalog 按严格方式解码，留着任何一个都会报 `unknown field`，进程拒绝启动。消息键 `error.consent_unavailable` 也已不再使用，应同时从 `application.content.messages` 与 `application.localization.bundles.en.messages` 删除；它是消息表里的键而不是结构字段，两边都保留时仍能启动，但只删一边会因中英文键不成对而校验失败。`consent_denied_content` 与 `consent_waiting_content` 仍在使用，不要删。默认 Catalog 已按此更新。回滚到旧镜像时，同时换回升级前的那份自定义 Catalog。
 
+**升级说明：任务摘要投影的计费标记与对外 MCP 参数文案（#517）。** 迁移 `0113_task_summary_credits_metered.sql` 按 0020 原样重建任务摘要投影 `generation_task_summaries` 的两个触发器，只在 `offering_json` 里多写冻结服务的 `credits_metered`（布尔），并用一条 UPDATE 回填存量：只改写按积分计费任务的摘要行（按主键查找，已带 `true` 的行不再写，重复执行无副作用），未计费的旧行不动、解码为 `false`。不改表或列，随启动迁移自动应用；对外 MCP 的 `get_task`、`get_task_assets`、`list_tasks` 经它判定计费失败「问用户、不可重试」。行数很大的保留数据环境里回填在启动迁移中一次完成，耗时随计费任务数增长，晋级前可用「保留数据升级演练」先量一次。回滚到旧版本时按 §7 恢复升级前的数据库备份（迁移版本守卫会拒绝打开 migration 版本高于旧二进制的库）；旧二进制解码摘要时忽略多出的键。使用自定义 `CATALOG_FILE` 且声明了 `application.mcp_public` 时，须补上 `mcp_public.messages.invalid_details` 的全部 20 条参数拒绝原因（`tool_not_offering` 含 `{capability}`，`purpose_unknown` 含 `{purposes}`），并在英文覆盖里成对声明；缺项会让 Catalog 校验失败、进程拒绝启动，默认 Catalog 已包含。尚未在 dev-test 验收，记录见 Issue #517。
+
 ## 7. 冒烟失败后的手工回滚
 
 自动回滚只覆盖发布脚本内的失败。冒烟失败且已有前一版本时（首次 bootstrap 版本没有前一版本，只能停止服务并保留现场）：

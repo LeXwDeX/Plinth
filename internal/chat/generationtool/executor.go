@@ -2317,7 +2317,8 @@ func (executor *Executor) taskFailure(
 ) chat.ToolResult {
 	var report *generation.FailureReport
 	if task.Failure != nil {
-		classified := generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
+		// #517: the same attribution as the task views, metered override included.
+		classified, _ := TaskFailureReport(executor.chat, task)
 		report = &classified
 	}
 	return executor.failureWithReport(command, string(task.ID), publicMessage, report)

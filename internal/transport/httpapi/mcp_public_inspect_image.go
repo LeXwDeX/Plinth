@@ -93,20 +93,21 @@ func (s *Server) mcpInspectImage(call *mcpCall) (mcpOutcome, error) {
 	}
 	switch {
 	case imageID != "" && taskID != "":
-		return s.mcpInvalidArguments(call.locale, "$.image: 与 task_id 二选一"), nil
+		return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.image", s.application.MCPPublic.Messages.InvalidDetails.ImageOrTaskID)), nil
 	case imageID == "" && taskID == "":
-		return s.mcpInvalidArguments(call.locale, "$: image 或 task_id 必须给一个"), nil
+		return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$", s.application.MCPPublic.Messages.InvalidDetails.ImageOrTaskIDMissing)), nil
 	case assetID != "" && taskID == "":
-		return s.mcpInvalidArguments(call.locale, "$.asset_id: 只能与 task_id 同用"), nil
+		return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.asset_id", s.application.MCPPublic.Messages.InvalidDetails.AssetIDNeedsTaskID)), nil
 	}
 	purpose := mcpStringArgument(call, "purpose")
 	if purpose != "" {
 		// The 3D input checklist has its own gate and judges no 2D purpose.
 		if checklist == "3d_input" {
-			return s.mcpInvalidArguments(call.locale, "$.purpose: 不能与 checklist=3d_input 同用"), nil
+			return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.purpose", s.application.MCPPublic.Messages.InvalidDetails.PurposeWithInputChecklist)), nil
 		}
 		if !s.mcpImagePurposeKnown(purpose) {
-			return s.mcpInvalidArguments(call.locale, "$.purpose: 未知用途，可用 "+s.mcpImagePurposeIDs()), nil
+			return s.mcpInvalidArguments(call.locale, s.mcpInvalidDetail(call.locale, "$.purpose",
+				s.application.MCPPublic.Messages.InvalidDetails.PurposeUnknown, "{purposes}", s.mcpImagePurposeIDs())), nil
 		}
 	}
 	if s.imageInspector == nil || s.inputAssets == nil {

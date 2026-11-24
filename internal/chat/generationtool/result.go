@@ -88,6 +88,30 @@ func FailureMessage(chat catalog.ChatSchema, metered bool, failure *generation.F
 	return chat.Presentation.Messages.GenerationFailed
 }
 
+// TaskFailureReport is the platform's one attribution of a failed Task (#517):
+// the actionable category and next action of its failure class (#251), with
+// the person's decision required and no retry offered when the Task may
+// already have been charged. That is a credit-metered Offering whose class the
+// Schema declares a no-auto-retry text for, or an ambiguous failure (#136).
+// The second result is that Schema reason in the default locale, "" for any
+// other failure; a Task without a failure has the zero report. The platform
+// Agent's primary result and task view and the external MCP all project it.
+func TaskFailureReport(chat catalog.ChatSchema, task generation.Task) (generation.FailureReport, string) {
+	if task.Failure == nil {
+		return generation.FailureReport{}, ""
+	}
+	report := generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
+	reason := MeteredFailureMessage(chat, task.Offering.CreditsMetered, task.Failure)
+	if reason == "" {
+		reason = AmbiguousFailureMessage(chat, task.Failure)
+	}
+	if reason != "" {
+		report.Retryable, report.UserDecisionRequired = false, true
+		report.Action = generation.ActionAskUser
+	}
+	return report, reason
+}
+
 // AmbiguousFailureMessage is the Schema text the Agent relays for a failure
 // whose upstream may already have run and charged (#136): the class text,
 // else the shared ambiguous text. Empty for any other failure.
