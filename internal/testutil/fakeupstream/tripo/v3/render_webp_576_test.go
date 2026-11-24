@@ -53,11 +53,13 @@ func TestProductionDefaultTextRenderIsAWebP576(t *testing.T) {
 		t.Fatalf("Plinth's delivery check refuses the render: %v", err)
 	}
 
-	// A request off those defaults keeps the PNG render of 2026-10-29.
+	// Every render is a WebP (#577: the 2026-11-24 run named each one
+	// legacy_mesh.webp and Plinth read each as image/webp), a request off the
+	// production defaults included.
 	plain := f.create("/generation/text-to-model", textBody(), key)
 	_, plainDone := f.finish(plain, key)
 	_, _, render := f.download(f.outputURL(plainDone, "rendered_image_url"))
-	if align.DetectFormat(render) != "png" {
-		t.Fatalf("the plain text task's render is %s, want png", align.DetectFormat(render))
+	if align.DetectFormat(render) != "webp" {
+		t.Fatalf("the plain text task's render is %s, want webp", align.DetectFormat(render))
 	}
 }
