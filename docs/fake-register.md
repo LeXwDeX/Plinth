@@ -18,8 +18,8 @@
 
 | Provider / API | real | constructed | gap | 合计 | 最近一次真实调用 |
 |---|---|---|---|---|---|
-| `tripo/v3` | 26 | 21 | 1 | 48 | 2026-11-24 |
-| `openai/v1` | 4 | 9 | 0 | 13 | 2026-11-23 |
+| `tripo/v3` | 26 | 22 | 1 | 49 | 2026-11-24 |
+| `openai/v1` | 4 | 9 | 1 | 14 | 2026-11-23 |
 | `meshy/openapi-v1` | 22 | 21 | 0 | 43 | 2026-11-24 |
 | `meshy/openapi-v2` | 7 | 4 | 0 | 11 | 2026-11-24 |
 | `hyper3d/api-v2` | 9 | 13 | 0 | 22 | 2026-11-24 |
@@ -27,7 +27,7 @@
 | `gemini/images-v1` | 2 | 3 | 0 | 5 | 2026-10-29 |
 | `jimeng/api-v3` | 2 | 4 | 0 | 6 | 2026-10-29 |
 | `matting/api-v1` | 3 | 6 | 0 | 9 | 2026-11-23 |
-| 合计 | 78 | 85 | 2 | 165 | 2026-11-24 |
+| 合计 | 78 | 86 | 3 | 167 | 2026-11-24 |
 
 「最近一次真实调用」取该版本 `real` 条目所引样本中最新的 `captured_at_utc`；未入库的真实观测不计入。
 
@@ -77,9 +77,10 @@
 - 依据：https://developers.tripo3d.ai/en/docs/files（Files）
 - 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling）
 - 依据：2026-11-24（UTC）免费否定探测的真实答复，记在 internal/testutil/fakeupstream/tripo/v3/align.go 的 Probes 表并由 probes_577_test.go 钉住（#577）
-- 核对日期：2026-11-24
+- 依据：https://developers.tripo3d.ai/en/docs/files（Files：支持的文件类型，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实答复已取到，但录制器不保留空文件或 text/plain 文件分片，没有样本文件可引用；登记表的 real 只认已提交的 wirefixture 样本
-- 备注：码、message 与 suggestion 已按真实答复改正；在录制器能保留这两种分片之前保持 constructed。
+- 备注：码、message 与 suggestion 已按真实答复改正；在录制器能保留这两种分片之前保持 constructed。 2026-11-25 复核（#579）：WebP 上传被受理（fake.go 按 presign 页与 Plinth 的 WebP 参考图放行），文档无法确认 POST /files 是否接受 WebP。
 
 #### `tripo-v3/task-poll-states` · state-machine · real
 
@@ -121,8 +122,10 @@
 - 端点：`GET /artifacts/{task_id}/{name}`
 - 行为：产物 CDN 不属于 API；该路由提供任务输出 URL 指向的固定文件（content type 按观测为 binary/octet-stream）。
 - 依据：https://developers.tripo3d.ai/en/docs/task-query（Task query：output 字段）
-- 核对日期：2026-09-30
+- 依据：https://developers.tripo3d.ai/en/docs/task-query（Task query：output 字段，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：产物主机不是 API 的一部分，wire 样本只记 API 交换，媒体字节按 recipe 替换
+- 备注：2026-11-25 复核（#579）：产物 URL 的有效期文档无法确认，fake 不建模自然过期（过期只由 artifact-expired 场景注入）。
 
 #### `tripo-v3/render-webp` · artifact-shape · constructed
 
@@ -171,9 +174,10 @@
 - 依据：https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard（Image to model）
 - 依据：https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard（Multiview to model）
 - 依据：https://developers.tripo3d.ai/en/docs/changelog（Changelog）
-- 核对日期：2026-11-24
+- 依据：https://developers.tripo3d.ai/en/docs/generation-text-to-model/standard（Text to model：generate_parts、pbr 与 texture_quality，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实请求只覆盖 H 系列文生与图生的合法请求（见 tripo-v3/generation-h-echo）和 create-400-1004 所列的几种拒绝；P 系列从未请求
-- 备注：H 系列合法请求的回显已为 real（tripo-v3/generation-h-echo）；本条只覆盖其余部分。
+- 备注：H 系列合法请求的回显已为 real（tripo-v3/generation-h-echo）；本条只覆盖其余部分。 2026-11-25 复核（#579）：以下三处文档不确定或内部冲突，行为不动，待零费用探测——generate_parts 为 true 且省略 pbr 时（generation.go 按 pbr 默认 false 放行，文档字面读法应答 1004）；v2.5 模型带 texture_quality；P 系列带 H 系列专属参数。
 
 #### `tripo-v3/text-to-model-p-series` · request-validation · constructed
 
@@ -220,10 +224,12 @@
 #### `tripo-v3/multiview-to-model-request` · request-validation · constructed
 
 - 端点：`POST /generation/multiview-to-model`
-- 行为：inputs 为单键视图对象数组（front 必需，2–4 张），代替 input。
+- 行为：inputs 为单键视图对象数组（front 必需，2–4 张），代替 input；视图值收 URL 或 file_token 字符串，以及嵌套的 {url}（须为 http(s) URL）、{file_token}、{object:{bucket,key}}（#579）。
 - 依据：https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard（Multiview to model）
-- 核对日期：2026-11-24
+- 依据：https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard（Multiview to model：inputs 视图值的五种形式，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：只有一次合法的三视图请求入库（evidence-386），缺视图或越界的拒绝没有真实请求过；2026-11-24 的真实一轮没有入库多视图建模的交换
+- 备注：页面只在 inputs 说明里列出嵌套形式、没有示例，也没有说轮询如何显示它们：fake 对 {url}、{file_token} 按字符串处理，{object} 原样显示在 files 里，均为构造。
 
 #### `tripo-v3/multiview-to-model-p-series` · request-validation · constructed
 
@@ -279,9 +285,22 @@
 - 行为：rig_type、spec、out_format 中除 biped/tripo/glb 以外的取值与 v3.0 专有值按官方页校验，非法值答 400/code 1004。
 - 依据：https://developers.tripo3d.ai/en/docs/animations-rig（Rig）
 - 依据：https://developers.tripo3d.ai/en/docs/animations-rig-check（Rig check）
-- 核对日期：2026-11-12
+- 依据：https://developers.tripo3d.ai/en/docs/animations-rig（Rig：model 可选、默认 v1.0-20240301，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实请求（2026-10-29 与 2026-11-24）都只发了 biped + tripo + glb，其余取值未真实请求过
-- 备注：biped/tripo/glb 被受理并在 input 下回显 topology、spec、out_format 已为 real（tripo-v3/rig-shape）。
+- 备注：biped/tripo/glb 被受理并在 input 下回显 topology、spec、out_format 已为 real（tripo-v3/rig-shape）。 2026-11-25（#579）：model 改为可选，省略时按页面默认 v1.0-20240301 处理，见 tripo-v3/processing-model-default。
+
+#### `tripo-v3/processing-model-default` · request-validation · constructed
+
+- 端点：`POST /animations/rig`、`POST /mesh/segment`、`POST /mesh/complete`、`POST /models/texture`
+- 行为：rig、segment、complete 的 model 可省略：rig 按 v1.0-20240301（retarget 只认 v1.0 的 preset:biped: 名称），segment 与 complete 按 v1.0-20250506；给出的 model 仍按页面列表校验，非法值答 400/code 1004。segment 与 texture 接受任意来源任务。
+- 依据：https://developers.tripo3d.ai/en/docs/animations-rig（Rig：model 可选、默认 v1.0-20240301，2026-11-25）
+- 依据：https://developers.tripo3d.ai/en/docs/mesh-segment（Mesh segment：model 可选、默认 v1.0-20250506，2026-11-25）
+- 依据：https://developers.tripo3d.ai/en/docs/mesh-complete（Mesh complete：model 可选、默认且唯一 v1.0-20250506，2026-11-25）
+- 依据：https://developers.tripo3d.ai/en/docs/models-texture（Models texture：来源任务）
+- 核对日期：2026-11-25
+- 没有真实样本的原因：Plinth 与真实一轮（2026-10-29、2026-11-24）都显式发送 model，省略 model 的请求从未真实发出；来源类型的拒绝也没有真实请求过
+- 备注：#579 之前 fake 把这三个端点的 model 当必填，答 1004「model is required」。省略 model 时轮询回显什么没有观测，fake 不补显默认值。segment 与 texture 页面只列生成任务作来源，与 retarget 页「之后在绑骨模型上运行的任务」一句冲突，fake 接受任意来源任务；来源类型的真实拒绝待零费用探测。
 
 #### `tripo-v3/retarget-shape` · response-shape · real
 
@@ -417,10 +436,13 @@
 #### `tripo-v3/pricing-table` · pricing · constructed
 
 - 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /generation/image-to-splat`、`POST /generation/image-to-multiview`、`POST /generation/edit-multiview`、`POST /models/texture`、`POST /mesh/decimate`、`POST /models/convert`
-- 行为：未观测的参数组合（P 系列、其他纹理档位、quad 等）按官方价格表计价（billing.go）。
+- 行为：未观测的参数组合（P 系列、其他纹理档位、quad 等）按官方价格表计价（billing.go）；降面按 model 计价：v3.0 三角面 35、v3.0 quad 40、v2.0 30（省略 model 即 v2.0）、v1.0 10（#579，此前一律 35）。
 - 依据：https://developers.tripo3d.ai/en/pricing（Pricing）
-- 核对日期：2026-11-24
+- 依据：https://developers.tripo3d.ai/en/docs/mesh-decimate（Mesh decimate：model 默认 v2.0 与各版本积分，2026-11-25 复核（#579））
+- 依据：https://developers.tripo3d.ai/en/pricing（Pricing：Retopology 四行（v3.0 Triangle 35、v3.0 Quad 40、v2.0 Smart 30、v1.0 Basic 10），2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：只有 pricing-observed 所列组合被真实扣费过；P2 价格从未观测
+- 备注：2026-11-25 复核：真实样本只有 v3.0 三角面 35（2026-11-24，#577），与文档一致；v2.0、v1.0 与 v3.0 quad 的价格只来自文档。image-to-splat 的 30 积分是 2026-11-24 真实任务报的值，价格页没有 splat 价格，文档无法确认。其余已列价格与价格页一致。
 
 #### `tripo-v3/rate-limit-concurrency` · rate-limit-concurrency · constructed
 
@@ -428,15 +450,18 @@
 - 行为：请求限流 429/code 1007 带 X-RateLimit-* 头；分类并发池（H 10 / P 5、图像 1、动画 10、模型处理 5、网格 10）满时创建答 429/code 2000 与 Retry-After（#468）。
 - 依据：https://developers.tripo3d.ai/en/docs/rate-limits（Rate limits）
 - 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling）
-- 核对日期：2026-11-08
+- 依据：https://developers.tripo3d.ai/en/docs/rate-limits（Rate limits：响应头与并发池，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本；2026-11-24 的真实一轮与免费探测都没有触发 1007 或 2000
+- 备注：2026-11-25 复核（#579）：rate-limits 页写每个响应都带 X-RateLimit-Limit、X-RateLimit-Remaining、X-RateLimit-Reset，fake 只在 1007 答复上带（rate-limit-no-retry-after 场景三个都不带），未建模：录制器不保存响应头，真实非 429 响应是否带这些头没有样本；给每个响应加头会让刻意不带头的 429 场景也带上 Reset，改变 Adapter 回退路径的测试前提。任务类别到并发池的映射（哪些端点归哪个池）文档无法确认。
 
 #### `tripo-v3/fault-scenarios` · error-code-and-text · constructed
 
 - 端点：`POST /generation/text-to-model`、`POST /generation/image-to-model`、`POST /generation/multiview-to-model`、`POST /generation/image-to-splat`、`POST /generation/image-to-multiview`、`POST /generation/edit-multiview`、`POST /animations/rig-check`、`POST /animations/rig`、`POST /animations/retarget`、`POST /mesh/segment`、`POST /mesh/complete`、`POST /mesh/smartsegment`、`POST /mesh/decimate`、`POST /models/texture`、`POST /models/convert`
 - 行为：余额不足、Key 额度、5xx、超时、丢响应、受理后 502、畸形请求体 400/code 1003、未知来源任务 404/code 2001，以及业务码 2008、2015、2018、2002、4001 与创建拒绝 2006、2007，复用真实错误信封。
 - 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling）
-- 核对日期：2026-11-08
+- 依据：https://developers.tripo3d.ai/en/docs/error-handling（Error handling：错误码集合与 fake 一致，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 - 备注：2015「version has been deprecated」不是退役模型名的真实答复：2026-11-24 的免费探测里退役的 v2.0-20240919 得到的是 1004（见 tripo-v3/create-400-1004），fake 已删除按退役名单答 2015 的规则，2015 只剩按文档构造的注入。
 
@@ -458,10 +483,10 @@
 #### `openai-v1/models-invalid-key` · error-code-and-text · constructed
 
 - 端点：`GET /models`、`POST /chat/completions`
-- 行为：invalid-key 场景答 OpenAI ErrorResponse 形态的 401。
+- 行为：invalid-key 场景答 OpenAI ErrorResponse 形态的 401（code invalid_api_key）。2026-11-25 复核：error-codes 指南只写 401 的原因，不给 code 名，invalid_api_key 是否为官方 code 文档无法确认，行为不变。
 - 依据：https://github.com/openai/openai-openapi/blob/master/openapi.yaml（ErrorResponse schema）
 - 依据：https://developers.openai.com/api/docs/guides/error-codes（Error codes）
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：网关对错误 Key 的应答只录到 text/plain 形态
 
 #### `openai-v1/chat-shape` · response-shape · real
@@ -480,18 +505,18 @@
 #### `openai-v1/chat-fault-scenarios` · error-code-and-text · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：403（text/plain JSON 文本）、404 model-not-found、503 带 Retry-After、429 带 error.quota、messages 为空的 400。
+- 行为：403（text/plain JSON 文本）、404 model-not-found、503 带 Retry-After、429 带 error.quota、messages 为空的 400。 rate-limit 场景答 429 rate_limit_exceeded：官方 error-codes 指南未列出这个 code（指南的限流 code 是 slow_down，见 openai-v1/chat-quota-and-reasoning），保留，2026-11-25 复核。
 - 依据：https://platform.openai.com/docs/api-reference/chat/create（Chat create）
 - 依据：https://developers.openai.com/api/docs/guides/error-codes（Error codes）
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `openai-v1/chat-stream-faults` · state-machine · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：[[fake:stream-error]] 以错误帧结束已开始的流，[[fake:stream-cut]] 在 finish_reason 与 [DONE] 前干净断开，[[fake:stream-plain]] 对流式请求答非流式对象（#509）。
+- 行为：[[fake:stream-error]] 以错误帧结束已开始的流，[[fake:stream-cut]] 在 finish_reason 与 [DONE] 前干净断开，[[fake:stream-plain]] 对流式请求答非流式对象（#509）。 2026-11-25 复核：Chat 流内 error 帧的形态，官方文档无法确认，行为不变。
 - 依据：https://platform.openai.com/docs/api-reference/chat/create（Chat create（stream））
-- 核对日期：2026-11-08
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `openai-v1/chat-model-constraints` · request-validation · constructed
@@ -504,47 +529,58 @@
 - 核对日期：2026-11-20
 - 没有真实样本的原因：拒绝只在网关日志里看到，没有入库样本；reasoning_effort none 按文档构造
 
+#### `openai-v1/chat-reasoning-minimal` · request-validation · gap
+
+- 端点：`POST /chat/completions`
+- 行为：gpt-astra / gpt-6.2-astra 在 Chat Completions 上放行 reasoning_effort=minimal（constraints.go noEffortMinimal 只用于 /v1/responses）。latest-model 文档暗示不支持 minimal（use low instead），未验证；行为不变（2026-11-25）。
+- 核对日期：2026-11-25
+- 计划：真实一轮对 Chat Completions 发一次 minimal，按结果决定拒绝或保留放行。
+- Issue：#579
+
 #### `openai-v1/chat-vendor-forms` · response-shape · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：#536 的厂商形态：qwen 系列在 finish_reason 之后用空 choices 的末块报 usage，[[fake:dsml]] 把工具调用写成 DSML 文本，[[fake:inline-image]] 在 delta.images / message.images 里画图。
+- 行为：#536 的厂商形态：qwen 系列在 finish_reason 之后用空 choices 的末块报 usage（这也是官方 stream_options.include_usage 的形态；默认的 deepseek 形态把 usage 放在 finish_reason 块上，是已观测的网关形态，与官方不同，2026-11-25 注明），[[fake:dsml]] 把工具调用写成 DSML 文本，[[fake:inline-image]] 在 delta.images / message.images 里画图。
 - 依据：Model Studio OpenAI 兼容文档（流式 usage）
 - 核对日期：2026-11-24
 - 没有真实样本的原因：这些形态没有入库样本（deepseek 的 usage 在 finish_reason 块上是已观测形态），待真实一轮
 
 #### `openai-v1/chat-image-refusals` · error-code-and-text · constructed
 
-- 端点：`POST /chat/completions`
-- 行为：图片输入按模型规则拒绝：qwen 宽或高不大于 32、fake-text-only 不收图、[[fake:image-refusal:KIND]] 的尺寸/大小/格式/张数/不支持。
+- 端点：`POST /chat/completions`、`POST /responses`
+- 行为：图片输入按模型规则拒绝：qwen 宽或高不大于 32、fake-text-only 不收图、[[fake:image-refusal:KIND]] 的尺寸/大小/格式/张数/不支持。Responses 线上（构造，无样本）尺寸过小、文件过大、格式不支持分别用官方 ResponseError.code 枚举名 image_too_small、image_file_too_large、invalid_image_format（2026-11-25），张数与不支持仍为 invalid_value；Chat 线上沿用网关观测信封 invalid_parameter_error 不变。
 - 依据：2026-11-23 观测到的 qwen 拒绝体（宽高下限）
 - 依据：#253 的不收图文案
-- 核对日期：2026-11-23
+- 依据：https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_error.py（ResponseError.code）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：qwen 的拒绝体只在观测中出现，未入库；大小、格式、张数按厂商风格构造
 
 #### `openai-v1/chat-quota-and-reasoning` · error-code-and-text · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：[[fake:quota:CODE]] 按连接 error_mapping 声明的配额码答 429；deepseek 拒绝 low/high/max 之外的 reasoning_effort，[[fake:strict-reasoning]] 切换 reasoning_content 的严格读法（未证实）。
+- 行为：[[fake:quota:CODE]] 按连接 error_mapping 声明的配额码答 429；限流有两个 code，都带 Retry-After：slow_down（type rate_limit_error，官方 error-codes 指南的限流 code，2026-11-25 新增）与 rate_limit_exceeded（指南未列出，保留）。deepseek 拒绝 low/high/max 之外的 reasoning_effort；[[fake:strict-reasoning]] 切换 reasoning_content 的严格读法：文档字面支持严格读法（工具调用对话的“后续所有请求”都要回传，包括没有调用工具的轮次），真实 API 是否执行未观测，默认仍为窄读法。
 - 依据：https://api-docs.deepseek.com/guides/thinking_mode（Thinking mode）
-- 依据：https://developers.openai.com/api/docs/guides/error-codes（Error codes）
-- 核对日期：2026-11-24
+- 依据：https://developers.openai.com/api/docs/guides/error-codes（Error codes（2026-11-25 复核））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `openai-v1/responses-shape` · response-shape · constructed
 
 - 端点：`POST /responses`
-- 行为：Responses API（#401）：流式工具调用、文本、并行调用、xhigh 推理项、input_image、非流式响应、strict false 的工具 schema、重放推理项，以及按字节对齐的 400。
+- 行为：Responses API（#401）：流式工具调用、文本、并行调用、xhigh 推理项、input_image、非流式响应、strict false 的工具 schema、重放推理项，以及按字节对齐的 400。 缺 input 答 400 missing_required_parameter、非流式 failed 响应答 HTTP 200：2026-11-25 复核，官方文档无法确认，行为不变。
 - 依据：https://platform.openai.com/docs/api-reference/responses/create（Responses create）
 - 依据：2026-11-20 两次网关探测的手工脱敏摘录（internal/testutil/fakeupstream/openai/v1/testdata/responses-2026-11-20.sample.json）
-- 核对日期：2026-11-20
+- 核对日期：2026-11-25
 - 没有真实样本的原因：探测结果不是 wirefixture candidate（手工脱敏，部分由非流式响应补全），不能按 real 计
 
 #### `openai-v1/responses-unsampled-events` · state-machine · constructed
 
 - 端点：`POST /responses`
-- 行为：response.incomplete、response.failed、流内 error 事件、response.refusal.delta、推理摘要事件、超长流行与推理项后无后继项的 400。
+- 行为：response.incomplete、response.failed、流内 error 事件、response.refusal.delta 与 response.refusal.done（[[fake:refusal]]：message 项的内容块为 {type: refusal, refusal}，delta/done 事件字段为 content_index、delta 或 refusal、item_id、output_index、sequence_number，按官方事件类型构造，2026-11-25 补上；此前登记表声称有而代码没有）、推理摘要事件与推理项后无后继项的 400。不再声称“超长流行”：行长界限是 Plinth Adapter 自己的 ScannerMaxBytes 设置，不是上游契约，fake 不产生超长行，Adapter 测试用脚本化 handler 构造（2026-11-25 更正）。incomplete 流在截断项后不发 .done 事件：官方文档无法确认，行为不变。
 - 依据：https://platform.openai.com/docs/api-reference/responses/create（Responses streaming events）
-- 核对日期：2026-11-20
+- 依据：https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_refusal_delta_event.py（ResponseRefusalDeltaEvent）
+- 依据：https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_refusal_done_event.py（ResponseRefusalDoneEvent）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `openai-v1/responses-quota-429` · error-code-and-text · real
@@ -982,8 +1018,10 @@
 - 端点：`GET /check_balance`
 - 行为：usage_page（从 1 起，每页至多 20 条，新的在前）返回 usage 列表；非法页码答 400 信封（#537）。
 - 依据：https://docs.hyper3d.ai/en/api-specification/check-balance（Check balance）
-- 核对日期：2026-11-24
+- 依据：https://docs.hyper3d.ai/en/api-specification/check-balance（Check balance：usage_page，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：带 usage_page 的真实请求待真实一轮；#568 的一轮没有请求 usage_page
+- 备注：2026-11-25 复核（#579）：usage 每页 20 条文档无法确认，文档取不到 schema，保持。
 
 #### `hyper3d-api-v2/status-states` · state-machine · real
 
@@ -999,8 +1037,10 @@
 - 端点：`POST /status`
 - 行为：排队期间第一个作业的 queue_length 逐次递减到 0。
 - 依据：https://docs.hyper3d.ai/en/api-specification/check-status（Check status）
-- 核对日期：2026-11-24
+- 依据：https://docs.hyper3d.ai/en/api-specification/check-status（Check status：queue_length，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实排队中的取值未观测到
+- 备注：2026-11-25 复核（#579）：queue_length 的数值模型（逐次递减）文档无法确认，文档取不到 schema，保持。
 
 #### `hyper3d-api-v2/no-such-task` · error-code-and-text · constructed
 
@@ -1053,7 +1093,8 @@
 - 行为：API_NO_ACTIVE_SUBSCRIPTION（2026-11-12 观测到被拒，正文未保留）与文档列出的 API_PARALLELISM_LIMIT_REACHED、PERMISSION_DENIED、API_SUBSCRIPTION_PLAN_TOO_LOW、API_OBJECT_NOT_FOUND_ON_IMAGE、IMAGE_CONTENT_VIOLATION、API_UNKNOWN、NO_SUCH_TASK。
 - 依据：https://docs.hyper3d.ai/en/api-specification/errors（Errors）
 - 依据：#294 的真实提交被拒观测（2026-11-12）
-- 核对日期：2026-11-08
+- 依据：https://docs.hyper3d.ai/en/api-specification/errors（Errors：错误码集合与 fake 一致，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：这些码没有入库样本；API_NO_ACTIVE_SUBSCRIPTION 的真实正文未保留
 
 #### `hyper3d-api-v2/rodin-gen25-values` · request-validation · constructed
@@ -1061,8 +1102,10 @@
 - 端点：`POST /rodin`
 - 行为：Gen-2.5 表单的取值规则（seed、mesh_mode、quality、texture_mode、quality_override 及 Quad 与档位上限、TAPose、quad_normal、image_label、参考图 1–5 张），越界答 INVALID_REQUEST。
 - 依据：https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5（Gen-2.5）
-- 核对日期：2026-11-16
+- 依据：https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5（Gen-2.5：texture_mode、取值范围与档位，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：拒绝值没有真实请求过；真实服务也可能答 HTTP 400 校验信封
+- 备注：2026-11-25 复核（#579），行为不动：texture_mode 的 legacy（fake.go）当前 Gen-2.5 页不含，当前页面正文与 fake 不一致，OpenAPI schema 取不到，待核对。seed 与 quality_override 的范围、各档位上限、reference_scale 下限文档取不到 schema，保持；Fast 档与 geometry_instruct_mode 未建模。
 
 #### `hyper3d-api-v2/rodin-pricing` · pricing · constructed
 
@@ -1070,7 +1113,8 @@
 - 行为：回执的 consumed 按官方页价格表计（generationCharge）；Extreme-High 档多列额外网格。
 - 依据：https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5（Gen-2.5：价格表）
 - 依据：游戏角色真实付费运行（扣 1 credit）（#294 后续，2026-11-13）
-- 核对日期：2026-11-16
+- 依据：https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5（Gen-2.5：价格表与 fake 一致，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：2026-11-13 的运行没有录原始请求与响应
 
 #### `hyper3d-api-v2/bang-shape` · response-shape · real
@@ -1084,8 +1128,10 @@
 - 端点：`POST /bang`
 - 行为：asset_id 与 model 恰好一个；asset_id 带 model/image/prompt 答 HTTP 400；model 缺 image 且 material 不是 None 答 INVALID_REQUEST；asset_id 指向 Bang 或 Texture 结果答 ASSET_NOT_AVAILABLE（#537）。
 - 依据：https://docs.hyper3d.ai/en/api-specification/bang（Bang）
-- 核对日期：2026-11-24
+- 依据：https://docs.hyper3d.ai/en/api-specification/bang（Bang：asset_id 与 model 二选一，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：冲突与缺图的拒绝状态没有真实请求过；来源未完成的 ASSET_NOT_AVAILABLE 为已观测
+- 备注：2026-11-25 复核（#579），行为不动：asset_id 与 model 两者都没有时 fake 答 HTTP 201 INVALID_REQUEST，页面只写「both or neither is rejected」，没有给状态码与正文，当前页面正文与 fake 不一致，OpenAPI schema 取不到，待核对。
 
 #### `hyper3d-api-v2/texture-shape` · response-shape · real
 
@@ -1104,9 +1150,10 @@
 - 端点：`POST /rodin_texture_only`
 - 行为：参考图字段 images 与 image 都收，合计 1–5 张；image_label 与超过 1024 字符的 prompt 按 Gen-2.5 规则拒绝（#537）。
 - 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture）
-- 核对日期：2026-11-24
+- 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture：material 与参考图数量，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：单数 image 是否仍被容忍待真实一轮
-- 备注：#568 经 Plinth 的 Texture 请求（Catalog 用单数 image）被受理并完成，说明 2026-11-24 单数字段仍被容忍；但创建请求没有入库，fake 两个名字都收的规则与 images 的 1–5 张上限都没有真实样本，保持 constructed。
+- 备注：#568 经 Plinth 的 Texture 请求（Catalog 用单数 image）被受理并完成，说明 2026-11-24 单数字段仍被容忍；但创建请求没有入库，fake 两个名字都收的规则与 images 的 1–5 张上限都没有真实样本，保持 constructed。 2026-11-25 复核（#579），行为不动：material 枚举 fake 收 Hybrid（fake.go），当前 generate-texture 页正文只列 PBR、Shaded、All，当前页面正文与 fake 不一致，OpenAPI schema 取不到，待核对；images 数量 fake 收 1–5 张，页面写恰好一张，文档取不到 schema，保持。
 
 #### `hyper3d-api-v2/texture-pricing` · pricing · constructed
 
@@ -1114,7 +1161,8 @@
 - 行为：extreme-high 回执 consumed 为 2，其余模式为基础 0.5。
 - 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture）
 - 依据：#187 的真实扣费观测（Basic 与 High 分辨率各扣 2）
-- 核对日期：2026-11-16
+- 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture：价格与 fake 一致，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：扣费只在观测中出现，没有入库样本
 
 #### `hyper3d-api-v2/rate-limit-faults` · rate-limit-concurrency · constructed
@@ -1138,7 +1186,8 @@
 - 行为：TextureModel 按表单给贴图边长：extreme-high + High 为 12288；High 视同 HighPack、hd_texture 视同 uhd_texture（fixture 几何）。
 - 依据：smoke-l5-hyper3d.py 经 Plinth 的真实一轮运行记录（5 个请求，只入库处理步骤的对照证据）（#568，2026-11-24）
 - 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture）
-- 核对日期：2026-11-24
+- 依据：https://docs.hyper3d.ai/en/api-specification/generate-texture（Generate texture：贴图分辨率表与 fake 一致，2026-11-25 复核（#579））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：12288 来自 #568 的私有媒体证据，录制器不保存媒体字节；其他组合的边长按页面表推定
 
 #### `hyper3d-api-v2/subjob-counts` · state-machine · constructed
@@ -1175,23 +1224,25 @@
 #### `openai-images-v1/parameter-contract` · request-validation · constructed
 
 - 端点：`POST /images/generations`、`POST /images/edits`
-- 行为：size（16 的倍数、最长边 3840、比例 3:1、65.5 万至 829.4 万像素）、quality、output_format、background、moderation、n（1–10，不截断）、output_compression、prompt 至多 32000 字符，非法值答沿用真实信封的 400（#543）。
+- 行为：size（16 的倍数、最长边 3840、比例 3:1、65.5 万至 829.4 万像素）、quality、output_format、background、moderation、n（1–10，不截断）、output_compression（0–100 对所有格式检查）、prompt 至多 32000 字符，非法值答沿用真实信封的 400（#543）。output_compression 与 png 或未写 output_format 同时出现时忽略、不再答 400：文档只写它用于 jpeg/webp，未写 png 会拒绝，也没有真实样本（2026-11-25 改）。
 - 依据：https://platform.openai.com/docs/api-reference/images/（Images create）
-- 核对日期：2026-11-24
+- 核对日期：2026-11-25
 - 没有真实样本的原因：这些拒绝没有真实请求过
 
 #### `openai-images-v1/fault-scenarios` · error-code-and-text · constructed
 
 - 端点：`POST /images/generations`、`POST /images/edits`
-- 行为：403、429、503 故障与内容审核拒绝。
-- 依据：https://developers.openai.com/api/docs/guides/error-codes（Error codes）
-- 核对日期：2026-11-08
+- 行为：403、429、503 故障与内容审核拒绝。余额耗尽与 key 配额答 429（官方 error-codes 指南没有 402）：insufficient-balance 为 credit_balance_exhausted，key-quota 为 project_spend_limit_exceeded（OpenAI 没有按 key 的消费上限，取最接近的项目上限），type 均为 insufficient_quota，文案转述指南的原因（2026-11-25 由 402 改）。这些构造应答与内容审核拒绝的 param 为 null（官方 Error 的 param 可为 null；已提交样本里没有空串 param，2026-11-25 由空串改）。403 eca_access_denied 是网关形态，不是官方 code。
+- 依据：https://developers.openai.com/api/docs/guides/error-codes（Error codes（2026-11-25 复核））
+- 依据：https://github.com/openai/openai-openapi/blob/master/openapi.yaml（Error schema（param nullable））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `openai-images-v1/quality-max` · request-validation · gap
 
 - 端点：`POST /images/generations`、`POST /images/edits`
-- 行为：quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。
+- 行为：quality=max 仍被接受：官方页称 xhigh、max 只给 2.5 系列，网关 2026-11-09 对 2.6 观测为 200，两者冲突。 2026-11-25 复核：官方两页说法仍冲突，行为不变。
+- 核对日期：2026-11-25
 - 计划：在 2D 真实一轮里对账一次，按结果决定接受或拒绝。
 - Issue：#540
 
@@ -1204,10 +1255,11 @@
 #### `openai-images-v1/edits-mask-and-count` · request-validation · constructed
 
 - 端点：`POST /images/edits`
-- 行为：至多 16 张图（array_above_max_length）；mask 须为带 alpha、与首图同尺寸的 PNG，否则 400 invalid_image；带 mask 只改透明像素并保持尺寸；model 可省略（默认 gpt-image-2.6-sunburst）。
+- 行为：至多 16 张图（array_above_max_length）；mask 须为带 alpha、与首图同尺寸的 PNG，否则 400 invalid_image；每张图与 mask 都须小于 50MB，否则 400 image_file_too_large；带 mask 只改透明像素并保持尺寸；model 可省略（默认 gpt-image-2.6-sunburst）。非 multipart 的编辑请求答 400 Invalid Content-Type（code、param 为 null），不再答缺 model（2026-11-25）。guide 的“mask 与图同格式”规则未强制：Catalog 只限 mask 为 PNG，Plinth 可能配 JPEG/WebP 参考图发出，强制会拒绝 Plinth 的实际请求，待真实一轮确认网关是否执行。当前 Create image edit 参考另列 application/json 请求体（images[] 的 image_url/file_id），fake 未建模。
 - 依据：https://platform.openai.com/docs/api-reference/images/（Create image edit）
-- 核对日期：2026-11-24
-- 没有真实样本的原因：官方编辑参考没有 mask 规则，网关的措辞未记录
+- 依据：https://developers.openai.com/api/docs/guides/image-generation（Edit images（mask 要求：同格式同尺寸、小于 50MB、带 alpha 通道））
+- 核对日期：2026-11-25
+- 没有真实样本的原因：mask 规则与 50MB 限制出自 image-generation guide（编辑参考本身没有），网关对这些拒绝的措辞未记录
 
 ### `gemini/images-v1`
 
@@ -1228,25 +1280,26 @@
 #### `gemini-images-v1/size-table` · artifact-shape · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：按 eca_image_config 的十种 aspect_ratio 与 1K/2K/4K 出图（默认 1:1 的 1K），像素表为构造值（pictureSizes）。
+- 行为：按 eca_image_config 的十种 aspect_ratio 与 1K/2K/4K 出图（默认 1:1 的 1K），像素表（pictureSizes）已于 2026-11-25 对照官方表核对一致（官方表标注为 Nano Banana 2.1，页面称 3.1 Flash Image 与 3 Pro Image 尺寸相同），对网关仍是构造值。
 - 依据：https://doc.model-store.ai/ai-gateway/model/api-detail?code=api-chat-completions1（Chat completions（网关））
-- 核对日期：2026-11-24
+- 依据：https://aistudio.google.com/docs/image-generation（Image generation：宽高比与分辨率表）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：样本只请求过 1K 1:1
 
 #### `gemini-images-v1/out-of-set-400` · request-validation · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：比例或尺寸不在集合内、小写 1k、超过 14 张参考图答 400 invalid_argument。
-- 依据：https://ai.google.dev/gemini-api/docs/api-errors（API errors）
-- 核对日期：2026-11-24
+- 行为：比例或尺寸不在集合内、小写 1k、非字符串值答 400 invalid_request；超过 14 张参考图答 416 out_of_range（#579 按官方错误码表改，原为官方词表没有的 invalid_argument）。
+- 依据：https://aistudio.google.com/docs/api-errors（Standard API error codes：invalid_request 400、out_of_range 416）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实网关是拒绝还是静默忽略没有记录；免费探针待做
 
 #### `gemini-images-v1/fault-scenarios` · error-code-and-text · constructed
 
 - 端点：`POST /chat/completions`
-- 行为：内容审核拒绝、内容过滤（沿用成功信封改 finish_reason）、402/403/404/429/5xx。
-- 依据：https://ai.google.dev/gemini-api/docs/api-errors（API errors）
-- 核对日期：2026-10-29
+- 行为：forbidden 与 permission-denied 场景都答 403 permission_denied（官方没有 forbidden）；内容审核拒绝答 400 prohibited_content（官方拦截码，原为 OpenAI 词汇 content_policy_violation，官方页不给拦截码 HTTP 状态，400 是 fake 自定）；内容过滤沿用成功信封改 finish_reason=content_filter，文档无法确认，保持；402/404/429/5xx；X-Fake-Error-Code 通道可答官方 too_many_requests、unimplemented 501、cancelled 499 等码。
+- 依据：https://aistudio.google.com/docs/api-errors（Standard API error codes 与 Generation blocked codes）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 ### `jimeng/api-v3`
@@ -1267,25 +1320,26 @@
 #### `jimeng-api-v3/size-and-contract` · request-validation · constructed
 
 - 端点：`POST /images/generations`
-- 行为：size（WxH 总像素 3686400–16777216、比例至多 16，或 2K/4K）、response_format、sequential_image_generation、max_images 1–15、参考图至多 14 张与逐张尺寸，非法值答 400 InvalidParameter（param 指明字段）（#543）。
-- 依据：https://www.volcengine.com/docs/82379/1541523（Seedream 图片生成 API）
-- 核对日期：2026-11-24
+- 行为：size 按请求 model 取规则：Seedream 4.0（doubao-seedream-4-0-*）WxH 总像素 921600–16777216 或 1K/2K/4K；其余模型（含 Catalog 的 4.5）总像素 3686400–16777216 或 2K/4K（4.5 的规则仅二手来源，官方页已不含 4.5）；比例至多 16。response_format、sequential_image_generation、max_images 1–15、参考图至多 14 张（4.0/4.5）与逐张尺寸（30MB、36M 像素），非法值答 400 InvalidParameter（param 指明字段；错误体 param 与措辞文档无法确认）（#543、#579）。
+- 依据：https://docs.volcengine.com/docs/82379/1541523（Seedream 图片生成 API：size 与 image 参数（Seedream 4.0））
+- 核对日期：2026-11-25
 - 没有真实样本的原因：样本只请求过 2048x2048；真实措辞未记录，免费探针待做
 
 #### `jimeng-api-v3/documented-codes` · error-code-and-text · constructed
 
 - 端点：`POST /images/generations`
-- 行为：内容安全、风险检测、ContentSecurityDetectionError、模型访问码与 RequestBurstTooFast；429 类带 Retry-After；欠费与限流。
+- 行为：内容安全、风险检测、ContentSecurityDetectionError、模型访问码（官方全名 InvalidEndpointOrModel.ModelIDAccessDisabled，#579 前误为无前缀）、OperationDenied.ServiceOverdue（403 欠费）与 RequestBurstTooFast；欠费与限流。429 类带 Retry-After，文档无法确认；usage.generated_images 的取值文档无法确认。
 - 依据：https://docs.volcengine.com/docs/82379/1299023（错误码）
-- 核对日期：2026-11-24
+- 依据：https://docs.volcengine.com/docs/82379/1541523（Seedream 图片生成 API：组图字段）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：官方 API 上没有触发过这种情况，没有已提交的样本
 
 #### `jimeng-api-v3/files-route` · artifact-shape · constructed
 
 - 端点：`GET /files/{name}`
-- 行为：签名图片主机不属于 API；提供 response_format=url 指向的固定 JPEG。
-- 依据：https://www.volcengine.com/docs/82379/1541523（Seedream 图片生成 API）
-- 核对日期：2026-10-29
+- 行为：签名图片主机不属于 API；提供 response_format=url 指向的固定 JPEG。文件主机行为文档无法确认。
+- 依据：https://docs.volcengine.com/docs/82379/1541523（Seedream 图片生成 API）
+- 核对日期：2026-11-25
 - 没有真实样本的原因：文件主机不在 API 样本里，媒体字节按 recipe 替换
 
 #### `jimeng-api-v3/files-expired` · error-code-and-text · constructed
@@ -1293,8 +1347,9 @@
 - 端点：`GET /files/{name}`
 - 行为：过期 URL 答 TOS 的 403 application/json（Code AccessDenied、Message Request has expired）。
 - 依据：官方 TOS 主机观测：把 X-Tos-Date 改到过去后请求（2026-10-29）
-- 核对日期：2026-10-29
+- 核对日期：2026-11-25
 - 没有真实样本的原因：真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；不是自然过期
+- 备注：文档无法确认：官方文档不描述签名 URL 过期后的响应（2026-11-25 核对），行为保持观测结果。
 
 ### `matting/api-v1`
 
