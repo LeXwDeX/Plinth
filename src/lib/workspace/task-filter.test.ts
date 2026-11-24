@@ -45,7 +45,7 @@ describe('the queue filter (#546)', () => {
   ];
 
   it('keeps the tasks whose Schema outcome waits, and those the server says are queued', () => {
-    expect(filterTasks(all, 'queued', outcomeOf).map((item) => (item as { taskId: string }).taskId)).toEqual(['queued', 'retry', 'provider']);
+    expect(filterTasks(all, 'queued', outcomeOf).map((item) => (item as unknown as { taskId: string }).taskId)).toEqual(['queued', 'retry', 'provider']);
     expect(isQueuedTask(task('gone', 'QUEUED', { notFound: true }) as never, outcomeOf)).toBe(false);
   });
 
