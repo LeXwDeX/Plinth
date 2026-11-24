@@ -202,7 +202,8 @@ func bangFields() []align.Field {
 // request except the balance read, and each is meant to be run alone, once,
 // after the user approved it (-steps NAME,NAME-status,NAME-download). They are
 // constructed from the official pages (read 2026-11-24); what the real service
-// answers decides the fake's rules, see RequestNotes.
+// answers decides the fake's rules, see RequestNotes. All of them are OptIn,
+// so a default official run leaves them out.
 func realRoundSteps(picture align.File) []align.Step {
 	var steps []align.Step
 	// check_balance with the usage page: the real answer carries a usage list
@@ -252,5 +253,10 @@ func realRoundSteps(picture align.File) []align.Step {
 		{Field: "model", Filename: "model.glb", MediaType: "model/gltf-binary", FromVar: "bang_url"},
 		{Field: "images", Filename: "reference.png", MediaType: "image/png", Data: picture.Data},
 	}, "bang_url")...)
+	// The real round is not part of a routine refresh: an official or export
+	// run sends these steps only when -steps names them (align.Step.OptIn, #540).
+	for i := range steps {
+		steps[i].OptIn = true
+	}
 	return steps
 }

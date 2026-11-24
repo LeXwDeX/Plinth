@@ -38,6 +38,17 @@ func TestRealRoundSubmissionsArePaidAndTheirFollowUpsAreNot(t *testing.T) {
 		}
 	}
 	balance := profileSteps(t, "balance-usage")[0]
+	// The whole real round is opt-in: a default official run sends none of it.
+	for _, name := range realRoundNames {
+		for _, step := range profileSteps(t, name, name+"-status", name+"-download") {
+			if !step.OptIn {
+				t.Errorf("%s must be OptIn", step.Name)
+			}
+		}
+	}
+	if !balance.OptIn {
+		t.Errorf("balance-usage must be OptIn")
+	}
 	if balance.Paid || balance.Method != "GET" {
 		t.Fatalf("balance-usage = %+v, want a free GET", balance)
 	}
