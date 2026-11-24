@@ -30,6 +30,19 @@
 // streaming request answered with the plain completion object
 // (StreamPlainMarker).
 //
+// The chat forms and refusals #536 added are constructed too, from the
+// vendors' documents and the Plinth Schema (no committed sample has them): the
+// DashScope stream whose usage rides on a last chunk of empty choices
+// (constraints.go, streamUsageTrailing), the refusals of a request's pictures
+// (image_refusal.go; the 1-pixel refusal of a qwen model and the
+// "no image input" refusal are the observed wordings the #497 and #253 tests
+// hold, the other kinds are in the vendor's style), the DSML tool-call reply,
+// the picture the model draws itself (delta.images), the quota codes the Schema
+// declares (429), the closed reasoning_effort list of DeepSeek and the broad
+// reading of its reasoning_content rule behind a marker (chat_forms.go). Each
+// is asked for by a fake-only request convention or by the model's rules, and
+// each waits for a real round to become a sample.
+//
 // Model constraints (#401, constraints.go) are not scenarios: a request that
 // names gpt-astra or gpt-6.2-astra is judged by that model's rules on every
 // call, as the real gateway does. The tools and temperature refusals are the
@@ -47,9 +60,10 @@
 // its events, an input_image request, the non-stream response and the 400s the
 // constrained models answer (temperature present, an unknown reasoning.effort,
 // none, minimal, a function_call_output or function_call without its pair), byte
-// for byte. The probes are not wirefixture candidates, because the capture
-// pipeline refuses SSE with event: lines, so the endpoint is declared
-// constructed and says what the sample does not cover (response.incomplete and
+// for byte. The probes are not wirefixture candidates (the capture pipeline
+// refused SSE with event: lines then; since #536 it records such a stream, so
+// the next real one is recorded instead of hand-sanitized), so the endpoint is
+// declared constructed and says what the sample does not cover (response.incomplete and
 // response.failed, the in-stream error event, response.refusal.delta, the
 // reasoning summary events, a stream line over the bound, the 400 for a
 // reasoning item without its following item): those parts are built from the
