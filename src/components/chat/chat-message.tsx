@@ -14,7 +14,7 @@ import { useProductSchema } from '@/components/product-schema-provider';
 import { formatSchemaText, schemaCountMessage, schemaText } from '@/lib/product-schema';
 import { PaidStepNotes } from '@/components/chat/paid-step-notes';
 import { GaussianSplatResultCard, ImageResultCard, ModelResultCard, SentImages } from '@/components/chat/result-card';
-import { paidStepFailed, stepCreditsText, stepFailedText } from '@/lib/chat/approval-modes';
+import { paidStepFailed, roundCreditsText, stepCreditsText, stepFailedText } from '@/lib/chat/approval-modes';
 import { unavailableLabel } from '@/lib/unavailable';
 import { fetchSourceRetries, regenerateBlockedBy, sourceExpiredSteps, sourceRetryText } from '@/lib/chat/source-retry';
 import { messageTaskIds, modelCardsOf, modelTaskIdsOf, splitMessagePictures, type MessagePictures, type ModelCardModel } from '@/lib/chat/message-pictures';
@@ -363,6 +363,7 @@ export const ChatMessage = memo(function ChatMessage({
           steps={message.paidSteps}
           creditsText={(credits) => stepCreditsText(schema, credits)}
           failedText={(credits) => stepFailedText(schema, credits)}
+          roundCreditsText={(credits, steps) => roundCreditsText(schema, credits, steps)}
           failed={(taskId) => paidStepFailed(schema, trackedTasks.find((task) => task.taskId === taskId))}
           note={(taskId) => sourceRetryText(schema, sourceRetries?.[taskId] ?? '')}
           noteUnavailableLabel={(taskId) => regenerateBlockedBy({ [taskId]: sourceRetries?.[taskId] ?? '' }) ? unavailableLabel(schema, schemaText(schema, 'ui.unavailable.reason.result.source_retry')) : ''}
