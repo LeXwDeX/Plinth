@@ -837,9 +837,26 @@ fake 对齐（`internal/testutil/fakeupstream/meshy/core/generation.go`，v1 `im
 | `tier` | “必填”是页面建议；省略回落为 Regular（Gen-1/1.5） | 省略时接受 | 确认 |
 | 价格 | Gen-2.5：基础 0.5、Extreme-High +0.5、extreme-high 纹理 +2.0，写明相加；Texture：基础 0.5、extreme-high 2.0，没有写相加 | Gen-2.5 同；Texture 固定 0.5 | Texture：extreme-high 回 2（真实扣费），其余 0.5 |
 
-页面另列了 Plinth 不发送的字段（`prompt` 长度 ≤ 1024、`bbox_condition`、`is_micro` 只许 Extreme-High 档、`detail_level` 1–3、`geometry_instruct_mode`、`is_symmetric`）：fake 不校验它们，沿用“只校验页面限制且 Plinth 能发送的字段”的原则。
+页面另列了 Plinth 不发送的字段（`prompt` 长度 ≤ 1024、`bbox_condition`、`is_micro` 只许 Extreme-High 档、`detail_level` 1–3、`geometry_instruct_mode`、`is_symmetric`）：fake 原先不校验它们，沿用“只校验页面限制且 Plinth 能发送的字段”的原则。#537 起 `is_micro`（页面内嵌 schema 写明其他档位以 `INVALID_REQUEST` 拒绝）与 `prompt` 的 1024 字符上限也在 fake 校验，用来在 Adapter 或 Catalog 以后发出这些字段时拦住非法组合；其余字段仍不校验。
 
 `image_label` 是这条原则的例外：#376 起 Plinth 会发送它，fake 校验它的数量（观察到的 `IMAGE_LABEL_LENGTH_TOO_LONG`）与取值（页面列表之外按 `INVALID_REQUEST` 拒绝，构造自页面），见下一节。
+
+### Hyper3D fake 与官方契约的再对齐（#537，只改 fake 与文档；本机测试通过，未部署验收，待真实一轮定稿）
+
+依据 2026-11-24 对 [Check Balance](https://docs.hyper3d.ai/en/api-specification/check-balance)、[Check Status](https://docs.hyper3d.ai/en/api-specification/check-status)、[Errors](https://docs.hyper3d.ai/en/api-specification/errors)、[Bang](https://docs.hyper3d.ai/en/api-specification/bang)、[Generate Texture](https://docs.hyper3d.ai/en/api-specification/generate-texture) 与 Gen-2.5 页的重读，读的是正文和页面内嵌的 OpenAPI schema（两者在 Texture 的参考图张数上不一致：正文“恰好一张”，schema 为 `images` 数组 1–5）。本节只记录 fake 的行为变化；Catalog 与 Adapter 没有改。零真实上游调用，因此下面凡没有真实拒绝样本的状态码、文案与数值都是构造的（fake 的端点说明同样标注，并带 `contractDocs` 日期）。
+
+| 项 | fake 现在的行为 | 依据与状态 |
+|---|---|---|
+| Texture 参考图字段（I14） | `images` 与 `image` 都收，合计 1–5 张；0 张、模型缺失或超过 5 张为 `INVALID_REQUEST`；`image_label` 数量与取值按 Gen-2.5 的规则校验；`prompt` 超过 1024 字符为 `INVALID_REQUEST` | 官方页面写作 `images`；Plinth 与 2026-10-29 的样本用单数 `image`，当时被上游容忍。**待真实一轮**：0.5 credit 发一次单数 `image` 的 Texture。若被拒或被静默忽略，改 Catalog 中 Texture Offering 参考图参数的 `wire_name`（`image` 改 `images`）、`internal/providers/hyper3d/operations.go` 中 Texture 与 Bang 的 `image` 校验和上传，fake 收紧为只收 `images`；若被容忍，保留现状并把说明改为已证实 |
+| 提交类应用错误（I15） | 七个提交类拒绝场景受 `X-Fake-Fail-Times` 与 `Config.FailTimes` 控制：前 n 次拒绝、之后受理；不带计数仍是常驻拒绝 | 机制已有（其他场景用同一计数）；这里补到 fake 自己渲染的 HTTP 201 场景。Offering 当前只有 2 次尝试、30 秒退避，并发上限错误的恢复可能晚于这个窗口：这是 Catalog 决策，本次不改，只在 Issue 提出 |
+| Bang 输入模式（I16） | `asset_id` 与 `model` 同时给、`asset_id` 带 `image` 或 `prompt`：HTTP 400 校验信封；`model` 模式缺 `image` 且 `material` 不是 `None`（省略也算）：`INVALID_REQUEST`；两者都没有：`INVALID_REQUEST`；`asset_id` 指向 Bang 或 Texture 的结果：`ASSET_NOT_AVAILABLE` | 页面：二选一、“HTTP 400 covers ... conflicting input modes”、缺 `image` 时“rejected with INVALID_REQUEST”、`asset_id` 为“a completed Rodin generation task”。状态码取页面句子的字面推断，**待真实探测**（被受理会扣 0.5 credit） |
+| `queue_length`（m6） | 排队阶段第一个作业的值逐次递减到 0；离开排队后不带 | 页面：Waiting 时可带，离开队列后省略。已提交的真实样本只在下一个排队作业上出现过 0；排队阶段的数值构造 |
+| `check_balance?usage_page`（m6） | 带参数时返回 `usage`（每页最多 20 条、新到旧、六个字段）；不带不返回；小于 1 或非数字为 400 | 页面 schema。Bang 与 Texture 的 `item` 名为构造，**待真实 `usage` 样本** |
+| `API_INSUFFICIENT_FUNDS` 文案 | Errors 页示例原文 | 页面示例 |
+| `is_micro` 与 `prompt`（m6） | `is_micro=true` 且 tier 不是 `Gen-2.5-Extreme-High`（含省略）为 `INVALID_REQUEST`；`prompt` 超过 1024 字符同 | 页面内嵌 schema 写明；错误文案构造 |
+| 未收录 | `ANIMATION_PREVIEW_UNAVAILABLE` 与下载的“没有可下载文件”`INVALID_REQUEST` | 前者只在错误码枚举里，没有描述或触发条件；后者没有与已观察到的空列表区分得开的触发条件 |
+
+加严后 Adapter、Catalog、Offering 与 Agent 层的 Hyper3D 现有测试都没有被误拒：Plinth 发出的请求（Bang 的 `asset_id` 模式不带 `image`、`prompt`，Texture 单张参考图）都满足这些规则；唯一被改的是 `TestDriftFakeResponsesMatchTheRealSamples` 的辅助请求，它此前给 `asset_id` 的 Bang 请求带了 `prompt`。Texture 的对齐步骤、`balance-usage` 与被拒取值探测这些真实一轮的 align 步骤不在本次范围，由真实一轮的设计另行新增。
 
 ### Rodin 参考图方位标记（#376 第 2a 步，Provider 侧；源码已实现，本机测试与 fake 栈通过，未部署验收，未做 Agent 侧填写）
 
@@ -885,7 +902,7 @@ Adapter 只需把明确的限流拒绝映射为 `FailureRateLimited`（`Retryabl
 - 读取由通用函数 `httpjson.UpstreamQueue` 完成，只接受非负整数；Adapter 把结果放进 `Observation.Queue`，内核记录、持久化与对外投影都不再需要 Provider 参与。
 - 提示文案是只读 `messages["task.queue_reason.upstream_queued"]` 与 `messages["task.queue_reason.upstream_queued_ahead"]`（后者含 `{ahead}`）；Agent 说明是 `chat.agent.upstream_queue_content`。默认 Catalog 提供中英文；Catalog 加载时校验已声明文案（含各语言 bundle）的占位符。没有新增 Offering 字段。
 
-当前接线：Meshy（`preceding_tasks`）、Tripo（无数字）、Hyper3D（`queue_length`，按子作业读取；含义为推断，未经官方文档确认）。机制、持久化与公开面见 `docs/architecture.md` 的“上游排队提示（#131，本机测试，未部署验收）”。
+当前接线：Meshy（`preceding_tasks`）、Tripo（无数字）、Hyper3D（`queue_length`，按子作业读取；官方 Check Status 页 2026-11-24 写明它是 Waiting 作业“前方作业的近似数量”、离开队列后省略，含义已由官方文档确认，但真实样本只在下一个排队作业上出现过 0）。机制、持久化与公开面见 `docs/architecture.md` 的“上游排队提示（#131，本机测试，未部署验收）”。
 
 **排队等待上限与超时失败（#136）。** 上游排队时间不计入作业执行超时，另由 Schema 声明排队最长等多久，超过后以新的失败分类终止。上面“没有新增 Offering 字段”只对 #131 的提示文案成立；#136 新增了一个可选的 Offering 覆盖字段：
 
