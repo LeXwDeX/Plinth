@@ -219,3 +219,73 @@ func TestAgentTurnConfigurationSkipsToolsTheCatalogRetired(t *testing.T) {
 	}
 	check("reconciled version")
 }
+
+// #525: a configuration a v1.8.0 build published froze the tool list. A turn
+// must offer the tools added since (analyze_model, which process_model's
+// description points the Agent at) and still leave out what the administrator
+// turned off.
+func TestAgentTurnConfigurationOffersToolsAddedAfterThePublishedVersion(t *testing.T) {
+	ctx := context.Background()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	skills, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := agentconfiguration.New(repository, product.Application(), skills, product.List(""), agentconfiguration.WithRetiredBuiltInSkills())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpService, err := buildWorkspaceMCP(product, &generation.Module{}, &chat.Service{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// What the v1.8.0 default configuration enabled, minus two tools an
+	// administrator turned off, and plus the two it still declared.
+	added := map[string]bool{"analyze_model": true, "crop_image_regions": true, "propose_asset_list": true, "get_asset_list": true}
+	legacy := base.Configuration
+	legacy.EnabledToolNames = []string{"observe_task", "request_consent"}
+	for _, name := range base.Configuration.EnabledToolNames {
+		if !added[name] && name != "create_motion_clip" && name != "compare_models" {
+			legacy.EnabledToolNames = append(legacy.EnabledToolNames, name)
+		}
+	}
+	if _, err := repository.AppendAgentConfiguration(ctx, base.Revision, agentconfiguration.Version{Snapshot: agentconfiguration.Snapshot{Configuration: legacy}, CreatedAt: time.Now().UTC(), ActorID: "admin", Source: "publish"}); err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := agentTurnConfiguration(ctx, "owner-a", service, product.Application(), mcpService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, tool := range frozen.Tools {
+		names[tool.Name] = true
+	}
+	for _, tool := range frozen.AgentTools {
+		names[tool.Name] = true
+	}
+	for name := range added {
+		if !names[name] {
+			t.Errorf("tool table lacks %s, added after the published version", name)
+		}
+	}
+	for _, name := range []string{"create_motion_clip", "compare_models", "observe_task", "request_consent"} {
+		if names[name] {
+			t.Errorf("tool table offers %s", name)
+		}
+	}
+	if !names["process_model"] {
+		t.Fatal("tool table lost a tool the administrator kept")
+	}
+}

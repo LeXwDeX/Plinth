@@ -162,8 +162,18 @@ func (s *Service) SnapshotForOwner(ctx context.Context, owner string) (Snapshot,
 	if err != nil {
 		return Snapshot{}, err
 	}
+	// The tools and prompts a version resolves to follow the Schema, so the same
+	// stored revision can mean different content after an upgrade (#525). The
+	// digest, appended last, keeps a turn's frozen revision from naming two
+	// different configurations, the same way the system Skill digest does.
+	resolvedDigest, err := resolvedContentDigest(snap.Configuration)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	schemaSuffix := ":schema:" + resolvedDigest
 	system := s.schema.Chat.Skills.SystemSkills
 	if len(personal) == 0 && len(system) == 0 {
+		snap.Revision += schemaSuffix
 		return snap, nil
 	}
 	seen := make(map[string]bool, len(snap.Configuration.Skills)+len(personal)+len(system))
@@ -205,5 +215,22 @@ func (s *Service) SnapshotForOwner(ctx context.Context, owner string) (Snapshot,
 		digest := sha256.Sum256(encoded)
 		snap.Revision += ":personal:" + hex.EncodeToString(digest[:8])
 	}
+	snap.Revision += schemaSuffix
 	return snap, nil
+}
+
+// resolvedContentDigest identifies the parts of an effective configuration
+// that follow the Schema: the system prompt, the domain contexts and the
+// enabled tools.
+func resolvedContentDigest(c Configuration) (string, error) {
+	encoded, err := json.Marshal(struct {
+		SystemPrompt  string            `json:"system_prompt"`
+		DomainContext map[string]string `json:"domain_context"`
+		Tools         []string          `json:"tools"`
+	}{c.SystemPrompt, c.DomainContext, c.EnabledToolNames})
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:8]), nil
 }

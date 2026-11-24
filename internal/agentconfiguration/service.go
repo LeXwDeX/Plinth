@@ -19,12 +19,32 @@ import (
 var ErrConflict = errors.New("agent configuration revision conflict")
 var ErrNotFound = errors.New("agent configuration revision not found")
 
+// ConfigurationFormat marks a stored version that records what an
+// administrator chose relative to the Schema (#525), not a frozen copy of it:
+// tools are stored as the ones turned off, so a built-in tool a later release
+// adds is on unless someone turns it off. A version without the marker is the
+// older frozen form and is converted when it is read (see resolve).
+const ConfigurationFormat = 2
+
+// Configuration is both the effective configuration the API, the admin page
+// and a turn see, and the stored form of a version. The stored-only fields
+// (Format, DisabledToolNames) are empty in every effective configuration and
+// are rejected when a client submits them.
 type Configuration struct {
 	SystemPrompt        string                `json:"system_prompt"`
 	DomainContext       map[string]string     `json:"domain_context"`
 	Skills              []catalog.SkillSchema `json:"skills"`
 	EnabledToolNames    []string              `json:"enabled_tool_names"`
 	EnabledMCPPresetIDs []string              `json:"enabled_mcp_preset_ids"`
+	// Format is ConfigurationFormat for a version stored in the current form.
+	// A format 2 version still carries enabled_tool_names, as a compatibility
+	// mirror limited to tools the v1.8.0 Schema declared: an older build that
+	// does not know the format reads it as an ordinary frozen list and finds
+	// no tool name it does not declare, so rolling back never reports an
+	// unknown selection. Format 2 readers ignore the mirror.
+	Format int `json:"format,omitempty"`
+	// DisabledToolNames lists the declared tools the administrator turned off.
+	DisabledToolNames []string `json:"disabled_tool_names,omitempty"`
 }
 type Snapshot struct {
 	Revision      string        `json:"revision"`
@@ -83,6 +103,8 @@ type Service struct {
 	retiredBuiltIns     map[string]string
 	packagedSkillImages map[string]bool
 	personalSkills      PersonalSkillStore
+	// toolBaseline is the tool set a version without a format marker speaks for.
+	toolBaseline map[string]bool
 }
 
 type Option func(*Service)
@@ -101,6 +123,11 @@ func New(store Store, schema catalog.ApplicationSchema, skills catalog.SkillCata
 	for _, option := range options {
 		option(s)
 	}
+	legacy, err := loadLegacyDefaults()
+	if err != nil {
+		return nil, err
+	}
+	s.toolBaseline = legacy.toolBaseline()
 	s.packagedSkillImages = map[string]bool{}
 	retired, err := catalog.RetiredBuiltInSkills()
 	if err != nil {
@@ -216,7 +243,7 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	stored, _ := s.withoutUndeclaredSelections(v.Configuration)
+	stored := s.resolve(v)
 	if err = s.Validate(stored); err != nil {
 		return Snapshot{}, err
 	}
@@ -249,6 +276,9 @@ func (s *Service) Management(ctx context.Context) (Management, error) {
 	return result, nil
 }
 func (s *Service) Validate(c Configuration) error {
+	if c.Format != 0 || len(c.DisabledToolNames) > 0 {
+		return errors.New("format and disabled_tool_names are stored by the server")
+	}
 	limits := s.schema.AgentConfiguration.Limits
 	if strings.TrimSpace(c.SystemPrompt) == "" || utf8.RuneCountInString(c.SystemPrompt) > limits.MaxPromptCharacters {
 		return errors.New("invalid system_prompt length")
@@ -337,6 +367,7 @@ func (s *Service) declaredSelections() (tools, presets map[string]bool) {
 // strict, so a new submission naming it is still rejected. The stored version
 // is never rewritten.
 func (s *Service) withoutUndeclaredSelections(c Configuration) (Configuration, bool) {
+	legacy := c.Format < ConfigurationFormat
 	tools, presets := s.declaredSelections()
 	cleaned := clone(c)
 	keep := func(ids []string, allowed map[string]bool) ([]string, bool) {
@@ -353,7 +384,9 @@ func (s *Service) withoutUndeclaredSelections(c Configuration) (Configuration, b
 	var droppedTools, droppedPresets bool
 	cleaned.EnabledToolNames, droppedTools = keep(cleaned.EnabledToolNames, tools)
 	cleaned.EnabledMCPPresetIDs, droppedPresets = keep(cleaned.EnabledMCPPresetIDs, presets)
-	return cleaned, droppedTools || droppedPresets
+	// A format 2 version keeps tools as a disabled list and a compatibility
+	// mirror that resolve ignores, so a name in the mirror is not a defect.
+	return cleaned, (legacy && droppedTools) || droppedPresets
 }
 func validateIDs(ids []string, allowed map[string]bool) error {
 	seen := map[string]bool{}
@@ -372,7 +405,9 @@ func (s *Service) Publish(ctx context.Context, expected, actor, source string, c
 	if _, err := strconv.ParseUint(expected, 10, 64); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: s.project(c)}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
+	v, err := s.store.AppendAgentConfiguration(ctx, expected, Version{Snapshot: Snapshot{Configuration: s.toStored(c)}, CreatedAt: time.Now().UTC(), ActorID: actor, Source: source})
+	// The caller gets the effective configuration, not the stored form.
+	v.Snapshot.Configuration = s.project(c)
 	return v.Snapshot, err
 }
 func (s *Service) Restore(ctx context.Context, expected, target, actor string) (Snapshot, error) {
@@ -383,11 +418,12 @@ func (s *Service) Restore(ctx context.Context, expected, target, actor string) (
 	if err != nil {
 		return Snapshot{}, err
 	}
-	cleaned, _, err := s.withoutRetiredBuiltIns(v.Configuration)
+	// The old version is restored as the administrator chose it: read through
+	// resolve like any other read, so tools the old version predates are on.
+	cleaned, _, err := s.withoutRetiredBuiltIns(s.resolve(v))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	cleaned, _ = s.withoutUndeclaredSelections(cleaned)
 	return s.Publish(ctx, expected, actor, "restore:"+target, cleaned)
 }
 
@@ -433,11 +469,11 @@ func (s *Service) ReconcileRetiredBuiltInSkills(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		cleaned, retiredSkills, err := s.withoutRetiredBuiltIns(latest.Configuration)
+		cleaned, retiredSkills, err := s.withoutRetiredBuiltIns(s.resolve(latest))
 		if err != nil {
 			return err
 		}
-		cleaned, undeclared := s.withoutUndeclaredSelections(cleaned)
+		_, undeclared := s.withoutUndeclaredSelections(latest.Configuration)
 		if !retiredSkills && !undeclared {
 			return s.Validate(cleaned)
 		}
@@ -463,4 +499,69 @@ func (s *Service) ToolSummaries() []Tool {
 		result[i].Domains = append([]string(nil), tool.Domains...)
 	}
 	return result
+}
+
+// resolve turns a stored version into the effective configuration (#525). A
+// tool is on unless the administrator turned it off, so what the Schema adds
+// later arrives without a republish. Everything else a version carries is
+// returned as stored, minus names the Schema no longer declares.
+func (s *Service) resolve(v Version) Configuration {
+	resolved, _ := s.withoutUndeclaredSelections(v.Configuration)
+	resolved.EnabledToolNames = s.resolveTools(v.Configuration)
+	resolved.Format, resolved.DisabledToolNames = 0, nil
+	return resolved
+}
+
+// resolveTools is the declared, offered tools minus the ones turned off. A
+// version without the format marker did not record what was turned off, only
+// what was on: a tool of the v1.8.0 baseline it does not list was turned off,
+// a tool outside the baseline did not exist yet and stays on.
+func (s *Service) resolveTools(stored Configuration) []string {
+	off := map[string]bool{}
+	if stored.Format >= ConfigurationFormat {
+		for _, name := range stored.DisabledToolNames {
+			off[name] = true
+		}
+	} else {
+		on := map[string]bool{}
+		for _, name := range stored.EnabledToolNames {
+			on[name] = true
+		}
+		for name := range s.toolBaseline {
+			if !on[name] {
+				off[name] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(s.tools))
+	for _, tool := range s.tools {
+		if !off[tool.Name] {
+			result = append(result, tool.Name)
+		}
+	}
+	return result
+}
+
+// toStored is the form a new version is written in: the effective
+// configuration the administrator submitted, with tools recorded as the ones
+// turned off and a compatibility mirror of the enabled list an older build can
+// still read (see Configuration.Format).
+func (s *Service) toStored(c Configuration) Configuration {
+	effective := s.project(c)
+	stored := effective
+	stored.Format = ConfigurationFormat
+	on := make(map[string]bool, len(effective.EnabledToolNames))
+	stored.EnabledToolNames = []string{}
+	for _, name := range effective.EnabledToolNames {
+		on[name] = true
+		if s.toolBaseline[name] {
+			stored.EnabledToolNames = append(stored.EnabledToolNames, name)
+		}
+	}
+	for _, tool := range s.tools {
+		if !on[tool.Name] {
+			stored.DisabledToolNames = append(stored.DisabledToolNames, tool.Name)
+		}
+	}
+	return stored
 }
