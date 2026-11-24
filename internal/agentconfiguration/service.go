@@ -216,10 +216,11 @@ func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = s.Validate(v.Configuration); err != nil {
+	stored, _ := s.withoutUndeclaredSelections(v.Configuration)
+	if err = s.Validate(stored); err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{v.Revision, s.project(v.Configuration)}, nil
+	return Snapshot{v.Revision, s.project(stored)}, nil
 }
 func (s *Service) Management(ctx context.Context) (Management, error) {
 	v, err := s.Snapshot(ctx)
@@ -303,23 +304,56 @@ func (s *Service) Validate(c Configuration) error {
 			}
 		}
 	}
-	allowed := map[string]bool{}
-	for _, t := range s.tools {
-		allowed[t.Name] = true
-	}
-	// A declared tool without an enabled Offering stays acceptable, so an older
-	// client or version can still be validated; Publish drops it.
-	for name := range s.hiddenTools {
-		allowed[name] = true
-	}
-	if err := validateIDs(c.EnabledToolNames, allowed); err != nil {
+	tools, presets := s.declaredSelections()
+	if err := validateIDs(c.EnabledToolNames, tools); err != nil {
 		return err
 	}
-	allowed = map[string]bool{}
-	for _, p := range s.schema.AgentConfiguration.MCPPresets {
-		allowed[p.ID] = true
+	return validateIDs(c.EnabledMCPPresetIDs, presets)
+}
+
+// declaredSelections lists the tool names and MCP preset IDs the current
+// Schema declares. A declared tool without an enabled Offering stays
+// acceptable, so an older client or version can still be validated; Publish
+// drops it.
+func (s *Service) declaredSelections() (tools, presets map[string]bool) {
+	tools = map[string]bool{}
+	for _, t := range s.tools {
+		tools[t.Name] = true
 	}
-	return validateIDs(c.EnabledMCPPresetIDs, allowed)
+	for name := range s.hiddenTools {
+		tools[name] = true
+	}
+	presets = map[string]bool{}
+	for _, p := range s.schema.AgentConfiguration.MCPPresets {
+		presets[p.ID] = true
+	}
+	return tools, presets
+}
+
+// withoutUndeclaredSelections is the read view of a stored version (#500): a
+// tool or MCP preset the Schema no longer declares, such as observe_task and
+// request_consent after #491, was valid when the version was published, so it
+// is left out instead of making the whole version unreadable. Validate stays
+// strict, so a new submission naming it is still rejected. The stored version
+// is never rewritten.
+func (s *Service) withoutUndeclaredSelections(c Configuration) (Configuration, bool) {
+	tools, presets := s.declaredSelections()
+	cleaned := clone(c)
+	keep := func(ids []string, allowed map[string]bool) ([]string, bool) {
+		kept := make([]string, 0, len(ids))
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if allowed[id] && !seen[id] {
+				seen[id] = true
+				kept = append(kept, id)
+			}
+		}
+		return kept, len(kept) != len(ids)
+	}
+	var droppedTools, droppedPresets bool
+	cleaned.EnabledToolNames, droppedTools = keep(cleaned.EnabledToolNames, tools)
+	cleaned.EnabledMCPPresetIDs, droppedPresets = keep(cleaned.EnabledMCPPresetIDs, presets)
+	return cleaned, droppedTools || droppedPresets
 }
 func validateIDs(ids []string, allowed map[string]bool) error {
 	seen := map[string]bool{}
@@ -353,6 +387,7 @@ func (s *Service) Restore(ctx context.Context, expected, target, actor string) (
 	if err != nil {
 		return Snapshot{}, err
 	}
+	cleaned, _ = s.withoutUndeclaredSelections(cleaned)
 	return s.Publish(ctx, expected, actor, "restore:"+target, cleaned)
 }
 
@@ -384,6 +419,8 @@ func (s *Service) withoutRetiredBuiltIns(c Configuration) (Configuration, bool, 
 // ReconcileRetiredBuiltInSkills publishes a new version before any new Agent
 // turn can freeze a configuration. Historical versions and checkpoints stay
 // intact. A concurrent writer is handled through the store's revision CAS.
+// The same version also leaves out tools and MCP presets the Schema no longer
+// declares (#500), so the latest version matches what is read from it.
 func (s *Service) ReconcileRetiredBuiltInSkills(ctx context.Context) error {
 	if s.retiredBuiltIns == nil {
 		return nil
@@ -396,14 +433,19 @@ func (s *Service) ReconcileRetiredBuiltInSkills(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		cleaned, changed, err := s.withoutRetiredBuiltIns(latest.Configuration)
+		cleaned, retiredSkills, err := s.withoutRetiredBuiltIns(latest.Configuration)
 		if err != nil {
 			return err
 		}
-		if !changed {
-			return s.Validate(latest.Configuration)
+		cleaned, undeclared := s.withoutUndeclaredSelections(cleaned)
+		if !retiredSkills && !undeclared {
+			return s.Validate(cleaned)
 		}
-		_, err = s.Publish(ctx, latest.Revision, "system", "retire_builtin_skills", cleaned)
+		source := "retire_builtin_skills"
+		if !retiredSkills {
+			source = "retire_undeclared_selections"
+		}
+		_, err = s.Publish(ctx, latest.Revision, "system", source, cleaned)
 		if errors.Is(err, ErrConflict) {
 			continue
 		}
