@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// #375: the default Schema declares the preparing-tool status of the chat stream and the
-// drawer's "no task submitted yet" note, each in Chinese and English; the public projection
-// carries the status text to the client.
+// #375: the default Schema declares the preparing-tool status of the chat stream in Chinese and
+// English; the public projection carries the status text to the client. #546 removed the task
+// drawer's Agent row, and with it the "no task submitted yet" note: the drawer lists Tasks only.
 func TestDefaultCatalogDeclaresPreparingToolAndNoTaskTexts(t *testing.T) {
 	application := defaultApplicationForLocalization(t)
 	english := application.Localization.Bundles["en"]
@@ -27,12 +27,13 @@ func TestDefaultCatalogDeclaresPreparingToolAndNoTaskTexts(t *testing.T) {
 			t.Fatalf("%s public %s = %v", locale, status, got)
 		}
 	}
-	const note = "ui.workspace.tasks.agent_no_task"
-	if got := application.Content.Messages[note]; got != "尚未提交生成任务" {
-		t.Fatalf("%s = %q", note, got)
-	}
-	if got := english.Messages[note]; got != "No task submitted yet" {
-		t.Fatalf("en %s = %q", note, got)
+	for _, note := range []string{"ui.workspace.tasks.agent_no_task", "ui.workspace.tasks.agent_preparing"} {
+		if got, ok := application.Content.Messages[note]; ok {
+			t.Fatalf("%s = %q, want it removed with the drawer's Agent row", note, got)
+		}
+		if got, ok := english.Messages[note]; ok {
+			t.Fatalf("en %s = %q, want it removed with the drawer's Agent row", note, got)
+		}
 	}
 }
 

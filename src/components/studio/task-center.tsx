@@ -26,7 +26,7 @@ import {
 import { toast } from 'sonner';
 
 import { useProductSchema } from '@/components/product-schema-provider';
-import { formatSchemaText } from '@/lib/product-schema';
+import { formatSchemaText, taskStatePresentation } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { UnavailableNotice } from '@/components/ui/unavailable-notice';
 import { useAssetURLRewriter } from '@/hooks/use-asset-url-rewriter';
@@ -38,7 +38,7 @@ import { HintTooltip } from '@/components/ui/hint-tooltip';
 import { SideDrawer } from '@/components/ui/side-drawer';
 import { useStudioStore } from '@/store/studio-store';
 import { usePreferences } from '@/store/preference-store';
-import { filterTasks, TASK_FILTERS, type TaskFilter } from '@/lib/workspace/task-filter';
+import { filterTasks, isQueuedTask, TASK_FILTERS, type TaskFilter } from '@/lib/workspace/task-filter';
 import {
   findTaskState,
   projectNativeTaskDetail,
@@ -66,14 +66,11 @@ export function useTaskSummary() {
   const { schema } = useProductSchema();
   const trackedTasks = useWorkspaceStore((state) => state.trackedTasks);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const streamingBuffer = useChatStore((state) => activeSessionId ? state.streamingBuffers[activeSessionId] : undefined);
-  const pendingMessages = useChatStore((state) => activeSessionId ? state.messagesBySession[activeSessionId] : undefined);
   const tasks = useMemo(
     () => trackedTasks.filter((task) => Boolean(activeSessionId) && task.sessionId === activeSessionId),
     [trackedTasks, activeSessionId],
   );
   const activeTasks = tasks.filter((task) => !task.terminal && !task.notFound);
-  const agentPending = Boolean(streamingBuffer) || Boolean(pendingMessages?.some((message) => message.role === 'assistant' && message.isPending));
   const overallProgress = activeTasks.length > 0
     ? Math.round(activeTasks.reduce((total, task) => {
       const maximum = task.progressMaximum > 0 ? task.progressMaximum : schema.runtime.frontend.percentage_multiplier;
@@ -81,11 +78,11 @@ export function useTaskSummary() {
     }, 0) / activeTasks.length * 100)
     : 0;
   return {
-    tasks, activeTasks, agentPending,
-    agentStatus: streamingBuffer?.genState?.statusText?.trim() ?? '',
+    tasks, activeTasks,
     // Running tasks only: a turn that waits on a person (an approval) is not work in progress.
     liveCount: activeTasks.length,
-    listedCount: tasks.length + (agentPending ? 1 : 0),
+    // #546: the drawer lists the providers' Tasks only; an Agent turn thinking is the chat's own "generating" line.
+    listedCount: tasks.length,
     overallProgress,
   };
 }
@@ -140,12 +137,14 @@ export function TaskDrawer() {
   const { runs: skillRuns, error: skillRunsError, isLoading: skillRunsLoading, reload: reloadSkillRuns } = useSessionSkillRuns(activeSessionId);
   // FEA-02：只显示当前会话的任务；旧会话轮次（切换会话后仍在完成的）不得串入
   // 新会话的任务列表。
-  const { tasks: allTasks, agentPending, agentStatus: liveStatus } = useTaskSummary();
+  const { tasks: allTasks } = useTaskSummary();
   // The filter is remembered in this browser (preference store); the agent and Skill rows belong to "all" and "in progress".
   const taskFilter = usePreferences((state) => state.taskFilter);
   const setTaskFilter = usePreferences((state) => state.setTaskFilter);
-  const tasks = useMemo(() => filterTasks(allTasks, taskFilter), [allTasks, taskFilter]);
-  const showLiveRows = taskFilter !== 'failed';
+  const outcomeOf = useCallback((state: string) => taskStatePresentation(schema, state).outcome, [schema]);
+  const tasks = useMemo(() => filterTasks(allTasks, taskFilter, outcomeOf), [allTasks, taskFilter, outcomeOf]);
+  // SkillRun checkpoints are work in progress, not a queue or a failure.
+  const showLiveRows = taskFilter === 'all' || taskFilter === 'active';
   const dismissTask = useWorkspaceStore((state) => state.dismissTask);
   const applyTaskDetail = useWorkspaceStore((state) => state.applyTaskDetail);
   const [canceling, setCanceling] = useState<Record<string, boolean>>({});
@@ -235,8 +234,6 @@ export function TaskDrawer() {
       retryAwaiting: text('ui.workspace.tasks.retry_awaiting'),
       open: text('ui.workspace.tasks.open'),
       close: text('ui.workspace.tasks.close'),
-      agentPreparing: text('ui.workspace.tasks.agent_preparing'),
-      agentNoTask: text('ui.workspace.tasks.agent_no_task'),
       skillRunsLoadFailed: text('ui.workspace.tasks.skill_runs_load_failed'),
       noticeEnable: text('ui.workspace.notice.enable'),
       noticeRequesting: text('ui.workspace.notice.requesting'),
@@ -331,7 +328,6 @@ export function TaskDrawer() {
     return `${percent}%`;
   }, []);
 
-  const agentStatus = liveStatus || ui.agentPreparing;
   const trackedTaskIds = new Set(allTasks.map((task) => task.taskId));
   // SkillRun phases are durable checkpoints. A grant may be rejected and a
   // bound Task may fail while its phase remains unchanged.
@@ -403,16 +399,6 @@ export function TaskDrawer() {
           </Action>
         ))}
       </div>
-      {agentPending && showLiveRows ? <Surface as="article" variant="inset" radius="xl" padding="md" className="flex items-center gap-3" data-testid="workspace-agent-progress">
-        <Loader2 className="size-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-sm">{agentStatus}</span>
-          {/* #375: the row is the Agent's own work, not a Task. Until the session tracks one, say so. */}
-          {allTasks.length === 0
-            ? <span className="truncate text-xs text-muted-foreground" data-testid="workspace-agent-no-task">{ui.agentNoTask}</span>
-            : null}
-        </div>
-      </Surface> : null}
       {/* A failed load is reported under every filter, with its retry: the 失败 filter would otherwise hide the very failure. */}
       {skillRunsError ? <p role="alert" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-destructive" data-testid="workspace-task-load-error">
         <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
@@ -439,7 +425,7 @@ export function TaskDrawer() {
           <span>{text(`ui.workspace.tasks.skill_phase.${step.phase}`)}</span>
         </span>
       </Surface>)}
-      {tasks.length === 0 && !(agentPending && showLiveRows) && visibleSkillSteps.length === 0 && !(skillRunsLoading && showLiveRows) && !skillRunsError
+      {tasks.length === 0 && visibleSkillSteps.length === 0 && !(skillRunsLoading && showLiveRows) && !skillRunsError
         ? <p className="py-6 text-center text-sm text-muted-foreground" data-testid="workspace-task-empty">{allTasks.length > 0 ? text('ui.workspace.tasks.filter.empty') : ui.empty}</p> : null}
         {tasks.map((task) => {
           const chip = stateChip(task);
@@ -464,6 +450,7 @@ export function TaskDrawer() {
               key={task.taskId}
               className="relative flex w-full min-w-0 shrink-0 gap-3 transition-colors hover:bg-muted/60"
               data-testid="workspace-task-card"
+              data-queued={isQueuedTask(task, outcomeOf) ? 'true' : undefined}
             >
               <button
                 type="button"

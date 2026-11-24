@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.3",
+    "revision": "2026-11-24.19.5",
     "terminology": {
       "user_facing": [
         {
@@ -4111,6 +4111,7 @@
         "ui.workspace.tasks.filter.label": "筛选任务",
         "ui.workspace.tasks.filter.all": "全部",
         "ui.workspace.tasks.filter.active": "进行中",
+        "ui.workspace.tasks.filter.queued": "排队中",
         "ui.workspace.tasks.filter.failed": "失败",
         "ui.workspace.tasks.filter.empty": "没有符合筛选的任务",
         "ui.workspace.canvas.zoom_in": "放大",
@@ -4650,8 +4651,6 @@
         "ui.workspace.models.load_failed": "模型加载失败，请重新打开面板重试。",
         "ui.workspace.models.no_results": "没有匹配的模型。试试其他名称或能力。",
         "ui.workspace.models.empty": "当前没有可用模型。",
-        "ui.workspace.tasks.agent_preparing": "Agent 正在准备",
-        "ui.workspace.tasks.agent_no_task": "尚未提交生成任务",
         "ui.workspace.tasks.skill_runs_load_failed": "Skill 步骤加载失败，请稍后重试",
         "ui.workspace.tasks.skill_phase.planned": "待准备",
         "ui.workspace.tasks.skill_phase.prepared": "已准备",
@@ -18640,6 +18639,7 @@
             "ui.workspace.tasks.filter.label": "Filter tasks",
             "ui.workspace.tasks.filter.all": "All",
             "ui.workspace.tasks.filter.active": "In progress",
+            "ui.workspace.tasks.filter.queued": "Queued",
             "ui.workspace.tasks.filter.failed": "Failed",
             "ui.workspace.tasks.filter.empty": "No tasks match the filter",
             "ui.workspace.canvas.zoom_in": "Zoom in",
@@ -19183,8 +19183,6 @@
             "ui.workspace.models.load_failed": "Failed to load models. Reopen the panel to retry.",
             "ui.workspace.models.no_results": "No matching models. Try another name or capability.",
             "ui.workspace.models.empty": "No models are currently available.",
-            "ui.workspace.tasks.agent_preparing": "Agent is preparing",
-            "ui.workspace.tasks.agent_no_task": "No task submitted yet",
             "ui.workspace.tasks.skill_runs_load_failed": "Failed to load Skill steps. Please try again later",
             "ui.workspace.tasks.skill_phase.planned": "To prepare",
             "ui.workspace.tasks.skill_phase.prepared": "Prepared",
