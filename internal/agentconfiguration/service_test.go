@@ -273,6 +273,7 @@ func TestPublishedConfigurationSurvivesRestartAndRejectsStaleOrInvalidWrites(t *
 		t.Fatal(err)
 	}
 	draft := base.Configuration
+	// A submitted prompt is ignored (#554): the prompts are the Schema's.
 	draft.SystemPrompt = "custom system instructions"
 	draft.EnabledToolNames = nil
 	draft.Skills = []catalog.SkillSchema{customSkill(t)}
@@ -308,20 +309,29 @@ func TestPublishedConfigurationSurvivesRestartAndRejectsStaleOrInvalidWrites(t *
 	defer repo.Close()
 	service = create(repo)
 	current, err = service.Snapshot(ctx)
-	if err != nil || current.Configuration.SystemPrompt != draft.SystemPrompt {
+	if err != nil || current.Configuration.SystemPrompt != base.Configuration.SystemPrompt || !hasSkill(current.Configuration, "own-skill") {
 		t.Fatalf("restart lost configuration: %#v %v", current, err)
 	}
 	restored, err := service.Restore(ctx, current.Revision, "0", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.Revision == current.Revision || restored.Configuration.SystemPrompt != base.Configuration.SystemPrompt {
+	if restored.Revision == current.Revision || restored.Configuration.SystemPrompt != base.Configuration.SystemPrompt || hasSkill(restored.Configuration, "own-skill") {
 		t.Fatal("reset must publish a new version")
 	}
 	replay, err := service.Restore(ctx, restored.Revision, current.Revision, "admin")
-	if err != nil || replay.Configuration.SystemPrompt != draft.SystemPrompt {
+	if err != nil || replay.Configuration.SystemPrompt != base.Configuration.SystemPrompt || !hasSkill(replay.Configuration, "own-skill") {
 		t.Fatalf("history restoration: %v", err)
 	}
+}
+
+func hasSkill(c agentconfiguration.Configuration, id string) bool {
+	for _, skill := range c.Skills {
+		if skill.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func customSkill(t *testing.T) catalog.SkillSchema {

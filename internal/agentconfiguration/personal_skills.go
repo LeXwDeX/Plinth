@@ -162,8 +162,9 @@ func (s *Service) SnapshotForOwner(ctx context.Context, owner string) (Snapshot,
 	if err != nil {
 		return Snapshot{}, err
 	}
-	// The tools and prompts a version resolves to follow the Schema, so the same
-	// stored revision can mean different content after an upgrade (#525). The
+	// The tools a version resolves to follow the Schema (#525) and its prompts
+	// are the Schema's (#554), so the same stored revision can mean different
+	// content after an upgrade. The
 	// digest, appended last, keeps a turn's frozen revision from naming two
 	// different configurations, the same way the system Skill digest does.
 	resolvedDigest, err := resolvedContentDigest(snap.Configuration)
@@ -220,8 +221,8 @@ func (s *Service) SnapshotForOwner(ctx context.Context, owner string) (Snapshot,
 }
 
 // resolvedContentDigest identifies the parts of an effective configuration
-// that follow the Schema: the system prompt, the domain contexts and the
-// enabled tools.
+// that come from the Schema rather than the stored version: the system prompt
+// and the domain contexts (#554), and the enabled tools (#525).
 func resolvedContentDigest(c Configuration) (string, error) {
 	encoded, err := json.Marshal(struct {
 		SystemPrompt  string            `json:"system_prompt"`

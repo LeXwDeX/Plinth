@@ -88,7 +88,10 @@ func TestAgentConfigurationRoutesEnforcePermissionRevisionAndSafeProjection(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A submitted prompt is ignored, not rejected (#554): an older page or a
+	// script that still sends one can publish its other choices.
 	current.Configuration.SystemPrompt = "managed private prompt"
+	current.Configuration.DomainContext = map[string]string{"image": "managed private context"}
 	body := map[string]any{"expected_revision": current.Revision, "configuration": current.Configuration}
 	response := request("POST", schema.AgentConfiguration.Routes.Publish, body)
 	if response.Code != 200 {
@@ -102,10 +105,16 @@ func TestAgentConfigurationRoutesEnforcePermissionRevisionAndSafeProjection(t *t
 	if !strings.Contains(response.Body.String(), "tool_names") || !strings.Contains(response.Body.String(), "mcp_list_offerings") {
 		t.Fatal("management lacks declared MCP tool names")
 	}
+	if strings.Contains(response.Body.String(), "managed private") {
+		t.Fatal("a submitted prompt was published")
+	}
 	var managed struct {
-		// #525: the page needs to know the saved prompt is a customization.
-		PromptCustomized *bool `json:"prompt_customized"`
-		MCPPresets       []struct {
+		// #554: the page shows the prompts read-only.
+		PromptsReadonly *bool `json:"prompts_readonly"`
+		Configuration   struct {
+			SystemPrompt string `json:"system_prompt"`
+		} `json:"configuration"`
+		MCPPresets []struct {
 			ID        string `json:"id"`
 			Available bool   `json:"available"`
 		} `json:"mcp_presets"`
@@ -116,13 +125,19 @@ func TestAgentConfigurationRoutesEnforcePermissionRevisionAndSafeProjection(t *t
 	if len(managed.MCPPresets) != 1 || managed.MCPPresets[0].Available {
 		t.Fatal("nil runtime marked preset available")
 	}
-	if managed.PromptCustomized == nil || !*managed.PromptCustomized {
-		t.Fatalf("management does not report the published custom prompt as customized: %v", managed.PromptCustomized)
+	if managed.PromptsReadonly == nil || !*managed.PromptsReadonly || managed.Configuration.SystemPrompt == "" {
+		t.Fatalf("management does not show the prompts read-only: %v %q", managed.PromptsReadonly, managed.Configuration.SystemPrompt)
+	}
+	validated := request("POST", schema.AgentConfiguration.Routes.Validate, map[string]any{"configuration": current.Configuration})
+	if validated.Code != 200 || strings.Contains(validated.Body.String(), "managed private") || !strings.Contains(validated.Body.String(), "effective_prompts") {
+		t.Fatalf("validate did not preview the Schema prompts: %d %s", validated.Code, validated.Body.String())
+	}
+	// A page that no longer sends the prompts at all.
+	withoutPrompts := map[string]any{"skills": current.Configuration.Skills, "enabled_tool_names": current.Configuration.EnabledToolNames, "enabled_mcp_preset_ids": current.Configuration.EnabledMCPPresetIDs}
+	if response := request("POST", schema.AgentConfiguration.Routes.Validate, map[string]any{"configuration": withoutPrompts}); response.Code != 200 {
+		t.Fatalf("a configuration without prompts was rejected: %d %s", response.Code, response.Body.String())
 	}
 	// The stored-only fields are never accepted from a client (#525).
-	if response := request("POST", schema.AgentConfiguration.Routes.Validate, map[string]any{"configuration": current.Configuration}); response.Code != 200 {
-		t.Fatalf("a valid configuration was rejected: %d %s", response.Code, response.Body.String())
-	}
 	submitted := current.Configuration
 	submitted.Format = agentconfiguration.ConfigurationFormat
 	if response := request("POST", schema.AgentConfiguration.Routes.Validate, map[string]any{"configuration": submitted}); response.Code != 400 {
