@@ -188,7 +188,8 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
                 {description ? (
                   <span data-clamp className="line-clamp-2 text-[11px] leading-snug text-muted-foreground" data-testid="chat-choice-description">{description}</span>
                 ) : null}
-                {card.kind ? null : (
+                {/* #549: a generic card quotes only an option that runs one paid step, with the server's estimate. */}
+                {card.kind && !option.step ? null : (
                   <span className="text-muted-foreground tabular-nums" data-testid="chat-choice-quote">{choiceOptionQuote(schema, option, offerings)}</span>
                 )}
               </span>

@@ -3480,6 +3480,26 @@ type ChatChoiceKindSchema struct {
 	// choice.answer_template and choice.pending_template instead.
 	AnswerTemplate  string `json:"answer_template,omitempty"`
 	PendingTemplate string `json:"pending_template,omitempty"`
+	// Step lets an option of a kind that names no target tool declare the one
+	// paid step it runs (#549): one option does one thing. The server quotes the
+	// step on the card, refuses an option that names more than one step, and in
+	// the turn that answers the card on the card refuses every other paid step.
+	// Nil (historical Catalogs) leaves the kind's options without steps and the
+	// answer turn unscoped.
+	Step *ChatChoiceStepSchema `json:"step,omitempty"`
+}
+
+// ChatChoiceStepSchema is choice.kinds[].step (#549): the words the server
+// returns to the Agent when an option or a turn goes beyond one chosen step.
+type ChatChoiceStepSchema struct {
+	// OneStepRefusal refuses a card whose option names more than one step
+	// ({option}: the option id). Nothing is stored.
+	OneStepRefusal string `json:"one_step_refusal"`
+	// UnchosenRefusal refuses, in the turn that answers a card of this kind on
+	// the card, a paid step the chosen option does not name, or a second run of
+	// the one it names ({tool}: the refused tool, {option}: the chosen option's
+	// label). Nothing is submitted and nothing is charged.
+	UnchosenRefusal string `json:"unchosen_refusal"`
 }
 
 // The actions an option of a choice card may carry (#374). The page performs

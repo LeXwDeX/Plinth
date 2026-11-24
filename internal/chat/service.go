@@ -367,6 +367,10 @@ type ServiceConfig struct {
 	// so an Agent-supplied option can only carry arguments the target tool
 	// really declares (#242). Nil accepts none when arguments are present.
 	ChoiceTargetArguments map[string][]string
+	// ChoiceStepTools maps each declared paid tool to its capabilities, so a
+	// direction-card option can only name one step the server can run (#549).
+	// Nil accepts no step.
+	ChoiceStepTools map[string][]string
 	// HarnessOperations are the function operations of
 	// application.chat.harness. A choice option's switch_operation action may
 	// only name one of them that is wired, available and enabled in the
@@ -446,6 +450,7 @@ type Service struct {
 	choiceMaxOptions      int
 	conceptDirections     catalog.ChatConceptDirectionsSchema
 	choiceTargetArguments map[string]map[string]bool
+	choiceStepTools       map[string][]string
 	harnessOperations     []catalog.HarnessOperationSchema
 
 	harnessSnapshotResolver HarnessSnapshotResolver
@@ -617,6 +622,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		choiceMaxOptions:           config.ChoiceMaxOptions,
 		conceptDirections:          config.ConceptDirections,
 		choiceTargetArguments:      choiceTargetArgumentIndex(config.ChoiceTargetArguments),
+		choiceStepTools:            config.ChoiceStepTools,
 		harnessOperations:          config.HarnessOperations,
 		models:                     config.Models,
 		visualAnchors:              config.VisualAnchors,
