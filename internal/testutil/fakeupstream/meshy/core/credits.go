@@ -17,8 +17,15 @@ import (
 // 4k geometry and a 2k texture 35, a multi-image-to-3d with 2k geometry and a
 // 2k texture 35, a retexture with an 8k texture 15, nano-banana-pro text and
 // image generation 9, a remesh 5, a rigging 5, one animation 3, a resize 1 and
-// a convert 1. What the page leaves open is constructed: the refine price of a
-// Smart Topology preview (the page lists one refine price for every model), the
+// a convert 1. The 1.9 real round (2026-11-24, #568) agreed on every Meshy
+// function it ran: nano-banana-2 text and image 6, a meshy-t2.5 preview of 15000
+// faces 5 and its 2k PBR refine 10, a meshy-t2.5 image-to-3d with a 2k texture
+// 15, a meshy-7.1 multi-image-to-3d with 2k geometry and an 8k texture 40, a
+// remesh 5, a convert 1, a 2k retexture 10, a rigging 5, one animation 3, a
+// uv-unwrap 5, a resize 1, a print analysis 0, a multi-color print 10 and a
+// prime text-to-motion 10. What the page leaves open is constructed: the refine
+// price of a Smart Topology preview (the page lists one refine price for every
+// model; the one meshy-t2.5 refine observed was 10, the page's 2k price), the
 // price of an animation retargeted from a motion task (taken as one action),
 // and a nano-banana request that Meshy runs on nano-banana-pro for a pose_mode
 // (priced as the requested model).

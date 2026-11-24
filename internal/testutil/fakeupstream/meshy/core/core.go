@@ -94,14 +94,13 @@ type Kind struct {
 	Fidelity string
 	// Real marks kinds with a captured sample of their own.
 	Real bool
-	// EchoResolution marks kinds whose task object repeats the geometry options
-	// the request was sent with, geometry_resolution and its deprecated alias
-	// ultra_mode, in every poll. The 2026-11-23 capture of Multi Image to 3D
-	// shows both in the queued, running and finished objects of a task created
-	// with geometry_resolution "2k". A kind whose committed sample was taken
-	// without the two keys (Multi Image to 3D, 2026-10-29, sent "standard",
-	// which the object does not repeat) needs this to echo them; a kind whose
-	// sample carries them is already shaped by the template.
+	// EchoResolution marks kinds that take geometry_resolution and whose task
+	// object repeats it, with its deprecated alias ultra_mode, in every poll:
+	// Image to 3D and the Text to 3D preview (2026-11-20, "4k") and Multi Image
+	// to 3D (2026-11-23 and 2026-11-24, "2k"). The echo follows the request,
+	// not the template: the newest sample of a kind may have been sent without
+	// the option (the meshy-t2.5 Image to 3D and preview of 2026-11-24 carry
+	// neither key), and a request that names it must still see it repeated.
 	EchoResolution bool
 	// Patch, when set, edits a poll body before it is sent (keys the sample
 	// sanitizer cannot hold).
@@ -866,15 +865,23 @@ func (e *engine) anyTemplate(typ string) map[string]any {
 }
 
 // shapeResolution echoes the geometry and texture options the request asked
-// for. The captures of 2026-11-20 show a poll repeating geometry_resolution
-// (image-to-3d, text-to-3d) and texture_resolution (image-to-3d, retexture,
-// text-to-3d refine) as sent, with ultra_mode and hd_texture set: the two
-// deprecated aliases the Catalog dated 2026-09-18/2026-11-20 names, where
-// ultra_mode=true means 2k geometry or more and hd_texture=true means a 4k
-// texture. A body that carries none of the keys (every other kind) is left
-// alone, unless the kind is marked EchoResolution: the 2026-11-23 capture of
-// Multi Image to 3D repeats geometry_resolution and ultra_mode in every poll,
-// so that kind echoes them even though its own sample was taken without them.
+// for, with ultra_mode and hd_texture set: the two deprecated aliases the
+// Catalog dated 2026-09-18/2026-11-20 names, where ultra_mode=true means 2k
+// geometry or more and hd_texture=true means a 4k texture or more.
+//
+// Geometry: a "2k" or "4k" geometry_resolution is repeated by the kinds marked
+// EchoResolution (2026-11-20 Image to 3D and preview at 4k, 2026-11-23 and
+// 2026-11-24 Multi Image to 3D at 2k); "standard" removes it. A request that
+// names none keeps the template's keys (#497).
+//
+// Texture: the object repeats texture_resolution, with hd_texture true, only for
+// a 4k or 8k texture. Every real task sent "2k" carried neither key (retexture
+// 2026-10-29 and 2026-11-24, refine 2026-11-20 and 2026-11-24, Image to 3D
+// 2026-11-20, Multi Image to 3D 2026-11-23), every one sent "8k" carried both
+// (retexture 2026-11-20, refine 2026-11-22, Multi Image to 3D 2026-11-24); 4k
+// was never sent and follows the alias's documented meaning. So a textured
+// kind's keys follow the request whatever its template holds: a 2k request on
+// an 8k template does not echo, and an 8k request on a 2k template does.
 // The Adapter reads none of them.
 func (e *engine) shapeResolution(t *task, body map[string]any) {
 	resolution, _ := t.request["geometry_resolution"].(string)
@@ -892,14 +899,15 @@ func (e *engine) shapeResolution(t *task, body map[string]any) {
 			body["ultra_mode"] = resolution != "standard"
 		}
 	}
-	if _, has := body["texture_resolution"]; has {
-		resolution, _ := t.request["texture_resolution"].(string)
-		if resolution != "" {
-			body["texture_resolution"] = resolution
-		}
-		if _, has := body["hd_texture"]; has && resolution != "" {
-			body["hd_texture"] = resolution == "4k" || resolution == "8k"
-		}
+	if t.kind.Textured == nil {
+		return
+	}
+	switch texture, _ := t.request["texture_resolution"].(string); texture {
+	case "4k", "8k":
+		body["texture_resolution"], body["hd_texture"] = texture, true
+	default:
+		delete(body, "texture_resolution")
+		delete(body, "hd_texture")
 	}
 }
 
