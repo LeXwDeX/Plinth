@@ -45,7 +45,18 @@ import (
 // documented defaults (bake true, quad false, smart_uv false) when the request
 // leaves them out; the committed real sample shows those three next to
 // original_model_id and no model or face_limit. That the real API echoes the
-// defaults of an omitted field is an assumption.
+// defaults of an omitted field is an assumption. A face_limit the request sends is
+// repeated as sent (2026-11-24, #577, echo.go); model never is.
+//
+// face_limit is a target, not a ceiling. The real round of 2026-11-24 (#577) sent
+// {"model": "v3.0", "face_limit": 1000, "quad": false, "bake": true, "smart_uv": true}
+// for a 2,814-triangle source; the task repeated face_limit 1000 and delivered a model
+// of 1,566 triangles (the binary STL export: (78,384 - 84) / 50 = 1,566; the GLB read
+// the same), 57% over the target. Plinth sent the value it was asked for, so the
+// overshoot is Tripo's reduction, not a parameter Plinth got wrong. The fake still
+// builds at or below face_limit and does not model an overshoot: the L5 script
+// (smoke-l5-tripo-endpoints.py) holds a real decimation to twice the target and to
+// fewer triangles than its source instead.
 //
 // Constructed, not captured: every refusal below. The committed decimate sample
 // is one valid v3.0 request (bake, quad false, smart_uv, no face_limit).

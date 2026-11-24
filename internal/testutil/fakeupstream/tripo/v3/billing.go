@@ -20,12 +20,11 @@ import (
 //   - A decimation costs 35 credits, 40 for a quad mesh on v3.0 (the page; 35
 //     observed for a triangle mesh).
 //
-// A running task already reports the whole price as credits_consumed: the credits
-// are frozen when the task is created, and the poll shows the frozen amount
-// (observed, rig and conversions). The queued poll keeps the sample's value; the
-// runs of 2026-11-19 (#386) show the real API does more there: a 3MF conversion
-// (5) and a multiview model (70) already report their price in the queued poll.
-// A task that fails or is cancelled is not charged (the pricing page), so it
+// Every poll of a task reports the whole price as credits_consumed: the credits are
+// frozen when the task is created, and the poll shows the frozen amount from the
+// queued poll on (observed: the 3MF conversion (5) and the multiview model (70) of
+// 2026-11-19, #386, and the queued polls of four conversions of 2026-11-24, 10 each,
+// #577). A task that fails or is cancelled is not charged (the pricing page), so it
 // reports 0. The account balance stays the fixed value of the fake: only the task
 // object is billed.
 const (
@@ -56,7 +55,14 @@ const (
 //   - texture 10 (fast and standard), 20 (HD), 30 (8K); segmentation 40; completion 50,
 //     30 for quick_cap; Smart Segmentation 85 (image) or 55 (model), as captured;
 //     retarget 10 per animation; image to multiview 10; edit multiview 5 per edited
-//     image. Image to splat has no published price and stays unpriced.
+//     image. Image to splat has no published price: 30 credits is what the real task
+//     of 2026-11-24 reported from its first poll on (#577).
+//
+// The real round of 2026-11-24 (#577) reported every one of these for the requests it
+// sent: text 10 (geometry only) and 60 (extreme PBR texture, detailed geometry), image
+// and multiview 20, texture 30 (extreme), segmentation 40, completion 50 and quick_cap
+// 30, Smart Segmentation of a model 55, rig 25 on v2.5 and on v3.0, retarget 10, image
+// to multiview 10, edit multiview 5, decimation 35, conversion 5 and 10.
 const (
 	creditsGenerationText       = 10
 	creditsGenerationImage      = 20
@@ -76,6 +82,7 @@ const (
 	creditsRetargetPerAnimation = 10
 	creditsImageToMultiview     = 10
 	creditsEditPerView          = 5
+	creditsImageToSplat         = 30
 )
 
 // generationPrice prices a text, image or multiview generation request; false for the
@@ -136,6 +143,8 @@ func (t *task) price() (float64, bool) {
 		return t.generationPrice()
 	case "image_to_multiview":
 		return creditsImageToMultiview, true
+	case "image_to_splat":
+		return creditsImageToSplat, true
 	case "edit_multiview":
 		return float64(creditsEditPerView * len(t.views)), true
 	case "texture_model":
@@ -209,15 +218,15 @@ func convertAdvanced(options map[string]any) bool {
 	return false
 }
 
-// bill writes credits_consumed into a poll body: the frozen price once the task
-// runs and when it succeeds, nothing for a task that ended without a result.
+// bill writes credits_consumed into a poll body: the frozen price from the queued
+// poll on and when the task succeeds, nothing for a task that ended without a result.
 func (t *task) bill(data map[string]any, status string) {
 	price, priced := t.price()
 	if _, shown := data["credits_consumed"]; !priced || !shown {
 		return
 	}
 	switch status {
-	case statusRunning, statusSuccess:
+	case statusQueued, statusRunning, statusSuccess:
 		data["credits_consumed"] = json.Number(strconv.FormatFloat(price, 'f', -1, 64))
 	case statusFailed, statusCancelled, statusUnknown:
 		data["credits_consumed"] = json.Number("0")

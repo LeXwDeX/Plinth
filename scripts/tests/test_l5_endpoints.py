@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Offline tests for the endpoint-chain L5 scripts (#539): l5_endpoints.py, smoke-l5-meshy-endpoints.py and
-smoke-l5-hyper3d.py. No network beyond a loopback listener, no server, no real upstream.
+"""Offline tests for the endpoint-chain L5 scripts (#539, #567): l5_endpoints.py, smoke-l5-meshy-endpoints.py,
+smoke-l5-hyper3d.py and smoke-l5-tripo-endpoints.py. No network beyond a loopback listener, no server, no real upstream.
 
 The chains themselves run end to end against the local fake stack (smoke-fake-stack.py builds it); these tests
 cover every decision the scripts make: the gate, the single submission per step, the budget, the plan, the
@@ -42,6 +42,7 @@ def load(name, filename):
 
 meshy = load("smoke_l5_meshy_endpoints", "smoke-l5-meshy-endpoints.py")
 hyper3d = load("smoke_l5_hyper3d", "smoke-l5-hyper3d.py")
+tripo = load("smoke_l5_tripo_endpoints", "smoke-l5-tripo-endpoints.py")
 
 D = engine.Decimal
 LIVE = {"ART_AI_UPSTREAM_SHAPE": "live"}
@@ -130,7 +131,7 @@ class GateTest(unittest.TestCase):
         self.assertIsNotNone(engine.gate([], {})[1])
 
     def test_execute_refuses_before_any_request(self):
-        for module in (meshy, hyper3d):
+        for module in (meshy, hyper3d, tripo):
             for argv, environ in (([], LIVE), (["--live"], LIVE), ([], {**LIVE, "ART_AI_LIVE_ACK": "1"}),
                                   (["--live"], {**FAKE, "ART_AI_LIVE_ACK": "1"})):
                 err = io.StringIO()
@@ -159,7 +160,7 @@ class GateTest(unittest.TestCase):
 
     def test_the_scripts_refuse_as_processes(self):
         base_env = {"PATH": os.environ.get("PATH", ""), **ENV}
-        for script in ("smoke-l5-meshy-endpoints.py", "smoke-l5-hyper3d.py"):
+        for script in ("smoke-l5-meshy-endpoints.py", "smoke-l5-hyper3d.py", "smoke-l5-tripo-endpoints.py"):
             for extra, argv in ((LIVE, []), (LIVE, ["--live"]), ({**LIVE, "ART_AI_LIVE_ACK": "1"}, [])):
                 result = subprocess.run([sys.executable, str(SMOKE / script), *argv], env={**base_env, **extra},
                                         capture_output=True, text=True, timeout=60)
@@ -200,7 +201,7 @@ class PlanTest(unittest.TestCase):
         self.steps = meshy.steps()
 
     def test_every_chain_is_a_valid_plan_with_unique_names_and_earlier_sources(self):
-        for steps in (meshy.steps(), hyper3d.steps()):
+        for steps in (meshy.steps(), hyper3d.steps(), tripo.steps()):
             names = [step.name for step in steps]
             self.assertEqual(len(names), len(set(names)))
             seen = set()
@@ -225,6 +226,25 @@ class PlanTest(unittest.TestCase):
         self.assertEqual([step.name for step in steps], ["text", "bang_task", "bang_upload", "texture", "image_short"])
         self.assertEqual({step.name: step.needs for step in steps},
                          {"text": (), "bang_task": ("text",), "bang_upload": ("text",), "texture": ("text",), "image_short": ()})
+
+    def test_the_tripo_chain_covers_every_enabled_tripo_offering(self):
+        # #567: one step per Tripo Offering the default Catalog enables, each source the one the Catalog allows.
+        steps = tripo.steps()
+        with open(ROOT / "internal" / "catalog" / "default_catalog.json", encoding="utf-8") as handle:
+            catalog = {item["id"]: item for item in json.load(handle)["offerings"] if item["id"].startswith("tripo/")}
+        enabled = {offering_id for offering_id, item in catalog.items() if item.get("enabled")}
+        self.assertEqual({step.offering for step in steps}, enabled)
+        named = {step.name: step for step in steps}
+        for step in steps:
+            self.assertEqual(step.capability, catalog[step.offering]["capability"], step.name)
+            for need in step.needs:
+                source = next((parameter for parameter in catalog[step.offering]["parameters"]
+                               if parameter.get("type") == "task"), None)
+                if source and source.get("task_offerings"):
+                    self.assertIn(named[need].offering, source["task_offerings"], step.name)
+        self.assertEqual(named["retarget"].needs, ("rig_v3",))
+        self.assertEqual(named["quick_cap"].needs, ("segment",))
+        self.assertEqual(named["edit_mv"].needs, ("i2mv",))
 
     def test_a_selection_needs_its_sources_or_a_seed(self):
         problems = engine.plan_problems(self.steps, ["retexture"], {})
@@ -368,6 +388,14 @@ class AssetTest(unittest.TestCase):
         self.assertTrue(engine.required_slots_declared(offering))
         self.assertFalse(engine.required_slots_declared({"outputs": [{"role": "model", "delivery": "on-demand", "minimum": 1}]}))
 
+    def test_conditional_slots_are_the_tasks(self):
+        # #567: an edited view is required only when its prompt is present; the task freezes which views it owes.
+        edit = {"outputs": [{"role": "image", "variant": view, "delivery": "required", "minimum": 1,
+                             "required_when": {"parameter": f"{view}_prompt", "operator": "present"}}
+                            for view in ("front", "left")]}
+        task = {"assets": [{"role": "image", "variant": "front", "required": True}]}
+        self.assertEqual(engine.slot_problems(edit, task), [])
+
     def test_find_asset(self):
         self.assertEqual(engine.find_asset(self.TASK, "model")["id"], "a1")
         self.assertEqual(engine.find_asset(self.TASK, "thumbnail", "primary")["id"], "a2")
@@ -500,6 +528,24 @@ class RunnerTest(unittest.TestCase):
         data = data or glb()
         item, binary = asset("model", "glb", data, f"/api/v1/tasks/{task_id}/assets/a1")
         return succeeded(task_id, item), binary
+
+    def test_a_step_price_bounds_the_budget_and_each_submitted_step_is_reported(self):
+        # #567: a processing step with fixed export formats is bounded by its whole price, not the base estimate.
+        task, binary = self.good_task("t1")
+        api = ScriptedApi({"t1": [task]})
+        api.bytes[binary[0]] = binary[1]
+        seen = []
+        steps = [self.step("a", price=lambda offering, prepared: (engine.Decimal(7), engine.LEGACY_UNIT)),
+                 self.step("b", price=lambda offering, prepared: (engine.Decimal(50), engine.LEGACY_UNIT))]
+        arguments = types.SimpleNamespace(task_timeout=5, poll=0.001, seeds={}, only_steps=[])
+        ctx = engine.Context(api, self.directory, arguments, "fake")
+        report = common.Report("t")
+        with contextlib.redirect_stdout(io.StringIO()):
+            engine.run_chain(ctx, report, steps, {"x/y/z": self.OFFERING}, "s", "k", engine.Budget(40),
+                             on_step=lambda ctx, report, record, task: seen.append((record["step"], record["quote"]["amount"])))
+        self.assertEqual(seen, [("a", "7")])
+        self.assertEqual(len(api.posts("/api/v1/tasks")), 1)
+        self.assertEqual(ctx.results["b"]["state"], "NOT_SUBMITTED")
 
     def test_one_submission_per_step_and_the_deliverables_are_checked(self):
         task, binary = self.good_task("t1")

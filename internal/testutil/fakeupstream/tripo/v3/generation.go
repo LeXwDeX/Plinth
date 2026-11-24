@@ -16,7 +16,7 @@ import (
 //   - https://developers.tripo3d.ai/en/docs/generation-image-to-model/standard and /p
 //   - https://developers.tripo3d.ai/en/docs/generation-multiview-to-model/standard and /p
 //   - https://developers.tripo3d.ai/en/docs/changelog (the P1/P2 notes)
-//   - https://developers.tripo3d.ai/en/docs/error-handling (codes 1004 and 2015)
+//   - https://developers.tripo3d.ai/en/docs/error-handling (code 1004)
 //
 // An H and a P series request share the endpoint; the model names the family. Before
 // #541 the fake only required model and prompt/input, so a combination the real API
@@ -26,7 +26,16 @@ import (
 // What the pages state, and what the fake does with it:
 //
 //   - model: H is v3.1-20260211, v3.0-20250812 or v2.5-20250123; P is P2-20260801 or
-//     P1-20260311. Any other name is 400/code 1004.
+//     P1-20260311. Any other name is 400/code 1004 "invalid model '<name>', allowed
+//     values: P1-20260311, P2-20260801, v2.5-20250123, v3.0-20250812, v3.1-20260211"
+//     (the five names in byte order), and an absent model is 1004 "model is required,
+//     allowed values: ..." with the same list (both captured: 2026-10-29 and the free
+//     probes of 2026-11-25, #577, evidence-577-negative-probes). A retired name is no
+//     exception: v2.0-20240919 got that same 1004, not the 2015 "version has been
+//     deprecated" of the error-handling page, so the fake keeps no list of retired
+//     names. Which request, if any, the real API answers 2015 is not known; the fake
+//     answers it only when a test asks for it (the version-deprecated scenario word,
+//     fake.go), and that answer stays constructed.
 //   - texture_quality is fast, standard, detailed or extreme; texture_version is
 //     v3.5-20260815, v3.0-20250812 or v2.5-20250123; geometry_quality is standard or
 //     detailed; orientation (image and multiview) is default or align_image;
@@ -34,7 +43,9 @@ import (
 //     or +y; compress is geometry. Each is 1004 outside its list.
 //   - texture_quality=fast with a v2.5 texture model (an explicit texture_version of
 //     v2.5, or a v2.5 geometry model without texture_version) is 1004, "rather than
-//     silently falling back to standard" (official).
+//     silently falling back to standard" (official). The text of the explicit case is
+//     captured (2026-11-25): "texture_quality 'fast' requires texture v3.5-20260815; got
+//     v2.5-20250123"; that the implied case names the same version is assumed.
 //   - geometry_quality, auto_size, quad, smart_low_poly, generate_parts and compress
 //     "require model >= v3.0" (image page); the fake answers 1004 for a v2.5 model.
 //     texture_quality is listed in the same group on the multiview page, but its only
@@ -48,34 +59,33 @@ import (
 //     changelog); P1 also does not support geometry_quality, smart_low_poly or
 //     generate_parts (changelog).
 //   - generate_parts needs texture=false and pbr=false; omitting texture counts as true
-//     and is 1004 (official). The fake accepts an omitted pbr next to texture=false (the
-//     page does not say whether the default pbr=true then conflicts) and refuses pbr=true.
+//     and is 1004 (official; captured 2026-11-25 with texture omitted and pbr=false:
+//     "generate_parts is incompatible with texture; set texture=false to generate
+//     parts"). The fake accepts an omitted pbr next to texture=false (the page does not
+//     say whether the default pbr=true then conflicts) and refuses pbr=true with a
+//     message of the same form (constructed).
 //   - prompt is at most 1024 characters, negative_prompt at most 255 (official).
 //
 // Constructed, not stated: that the P2 model refuses geometry_quality, smart_low_poly,
 // generate_parts and compress (its pages do not list them; P1's changelog line says it
 // does not support them, and the task asked for the P series to refuse the H-only
-// parameters); which model names answer 2015 (the error page says only "the version has
-// been deprecated"; the names below are the retired generations of the earlier public
-// API); the message text of each refusal; and that a v2.5 model refuses auto_size and
-// compress with 1004 rather than ignoring them. None of it has been requested from the
-// real API; the zero-cost negative probes that settle it are listed in the issue.
+// parameters); the message text of every refusal not named as captured above; and that
+// a v2.5 model refuses auto_size and compress with 1004 rather than ignoring them. None
+// of that has been requested from the real API.
 const generationDocsChecked = "2026-11-24"
 
 const (
 	textureQualityFast = "fast"
 	textureV25         = "v2.5-20250123"
+	textureV35         = "v3.5-20260815"
 )
 
 var (
 	generationModelsH = []string{"v3.1-20260211", "v3.0-20250812", textureV25}
 	generationModelsP = []string{"P2-20260801", "P1-20260311"}
-	// deprecatedModels are the model names of the retired generations: the fake
-	// answers 2015 for them. The real list is not published (constructed).
-	deprecatedModels = []string{"v1.3-20240522", "v1.4-20240625", "v2.0-20240919", "Turbo-v1.0-20250506"}
 
 	textureQualities   = []string{"fast", "standard", "detailed", "extreme"}
-	textureVersions    = []string{"v3.5-20260815", "v3.0-20250812", textureV25}
+	textureVersions    = []string{textureV35, "v3.0-20250812", textureV25}
 	geometryQualities  = []string{"standard", "detailed"}
 	orientations       = []string{"default", "align_image"}
 	textureAlignments  = []string{"original_image", "geometry"}
@@ -102,18 +112,28 @@ func isGenerationPath(path string) bool {
 	return false
 }
 
-// modelFamily classifies a model name: "h", "p", "deprecated" or "" for a name no
-// family has.
+// modelFamily classifies a model name: "h", "p" or "" for a name no family has.
 func modelFamily(model string) string {
 	switch {
 	case slices.Contains(generationModelsH, model):
 		return "h"
 	case slices.Contains(generationModelsP, model):
 		return "p"
-	case slices.Contains(deprecatedModels, model):
-		return "deprecated"
 	}
 	return ""
+}
+
+// allowedModels is the model list of the real 1004 answers: every name of both
+// families in byte order, the order the official API lists them in.
+func allowedModels() string {
+	names := append(slices.Clone(generationModelsH), generationModelsP...)
+	slices.Sort(names)
+	return strings.Join(names, ", ")
+}
+
+// missingModel is the real answer to a generation request without a model.
+func missingModel() *refusal {
+	return invalid("model is required, allowed values: %s", allowedModels())
 }
 
 // optionalChoice checks an optional string field against its list. A field that is
@@ -190,11 +210,8 @@ func modelAtLeastV3(model string) bool { return strings.HasPrefix(model, "v3") }
 func generationRequestError(body map[string]any) *refusal {
 	model, _ := body["model"].(string)
 	family := modelFamily(model)
-	switch family {
-	case "":
-		return invalid("model must be one of %s", strings.Join(append(slices.Clone(generationModelsH), generationModelsP...), ", "))
-	case "deprecated":
-		return &refusal{code: 2015, message: "The version has been deprecated, please try higher version"}
+	if family == "" {
+		return invalid("invalid model '%s', allowed values: %s", model, allowedModels())
 	}
 	isP := family == "p"
 
@@ -257,13 +274,16 @@ func generationRequestError(body map[string]any) *refusal {
 			version = textureV25
 		}
 		if version == textureV25 {
-			return invalid("texture_quality fast requires texture_version v3.5-20260815")
+			return invalid("texture_quality '%s' requires texture %s; got %s", textureQualityFast, textureV35, version)
 		}
 	}
 
 	if flag(body, "generate_parts", false) {
-		if flag(body, "texture", true) || flag(body, "pbr", false) {
-			return invalid("generate_parts requires texture=false and pbr=false")
+		if flag(body, "texture", true) {
+			return invalid("generate_parts is incompatible with texture; set texture=false to generate parts")
+		}
+		if flag(body, "pbr", false) {
+			return invalid("generate_parts is incompatible with pbr; set pbr=false to generate parts")
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 )
@@ -70,7 +71,10 @@ var convertParameters = map[string]convertParameter{
 func convertRequestError(body map[string]any) string {
 	format, _ := body["format"].(string)
 	if !slices.Contains(convertFormats, format) {
-		return fmt.Sprintf("format must be one of %v", convertFormats)
+		// The real answer to GLB (captured 2026-11-25, #577) lists the formats in byte
+		// order. An absent format is the "format is required" of the create handler.
+		allowed := slices.Sorted(slices.Values(convertFormats))
+		return fmt.Sprintf("invalid format '%s', allowed values: %s", format, strings.Join(allowed, ", "))
 	}
 	for name, spec := range convertParameters {
 		value, present := body[name]
@@ -175,8 +179,8 @@ func (t *task) convertFormat() string {
 //     requested format and at the requested size;
 //   - the model is moved so the middle of its bounding box sits on the origin,
 //     and the finished task reports the move as output.normalize_scale and
-//     output.normalize_translation (the same values for both formats). A
-//     conversion to STL, observed on an earlier model, reports neither.
+//     output.normalize_translation (the same values for both formats). Which
+//     conversions report it is settled by the round of 2026-11-24 (normalize).
 //
 // What the page promises but the run did not exercise is constructed: with
 // pivot_to_center_bottom the origin is the middle of the bottom face (so the feet
@@ -237,12 +241,27 @@ func (t *task) convertedModelSpec() (fakeupstream.ConvertedModelSpec, bool) {
 	return spec, true
 }
 
-// normalize adds what a GLTF or FBX conversion reports about the move it made.
+// normalize adds what a finished task reports about the move it made to the model.
+//
+// A conversion (#305, #577). The real round of 2026-11-24 converted imported models
+// (a URL, or a file token from POST /files) to every format, GLTF, FBX, OBJ, STL, USDZ
+// and 3MF alike, and every one of those finished tasks reported normalize_scale and
+// normalize_translation; the conversions of a generation task named by its id (GLTF,
+// FBX, OBJ, STL, USDZ, 3MF, and the 3MF of 2026-11-19) reported neither. So it is the
+// source, not the format, that decides: an imported model is normalized, a task's model
+// is not. The STL of 2026-10-29, converted from a URL, reported neither; the newer
+// round is followed. The values are the fake's own (CenterOrigin), not the real ones.
+//
+// A Smart Segmentation of a model reports normalize_scale 1 and normalize_translation
+// [0, 0, 0] for the identity transform Plinth sends (2026-11-24); the 2026-10-29
+// sample of the same request showed neither.
 func (t *task) normalize(output map[string]any) {
-	if t.kind.Type != "convert_model" {
+	if t.typ == "smartsegment_model" {
+		output["normalize_scale"] = json.Number("1")
+		output["normalize_translation"] = []float64{0, 0, 0}
 		return
 	}
-	if format := t.convertFormat(); format != "GLTF" && format != "FBX" {
+	if t.kind.Type != "convert_model" || t.importedID == "" {
 		return
 	}
 	pivot, _ := t.convert["pivot_to_center_bottom"].(bool)

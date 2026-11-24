@@ -1,0 +1,11 @@
+{
+  "api_version": "unknown",
+  "candidate_sha256": "5ccb675a073fa13d99dfa5bfa655ce09670ea05057b69d8bf0cd2beb89ded95d",
+  "captured_at_utc": "2026-11-24",
+  "exchanges": 37,
+  "provenance": "captured",
+  "scenario": "upstream-record",
+  "source_revision": "b705f2032096c5c90cbbd180ead4f592dbf6b4ee",
+  "transformation": "Draft from the opt-in upstream recorder: prompts, long text, URLs and IDs are placeholders; query values, headers outside the replay set and media bytes are not stored. Two credits_consumed amounts of ten are written as an integer instead of with two decimals, which the corpus privacy scan reads as a private address.",
+  "version": 1
+}

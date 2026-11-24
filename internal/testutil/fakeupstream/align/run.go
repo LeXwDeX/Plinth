@@ -63,6 +63,10 @@ type Step struct {
 	Files []File
 	// NoAuth omits the authorization header (negative authentication probe).
 	NoAuth bool
+	// WrongKey, when set, is sent in place of the target's key: a negative
+	// authentication probe with a key the upstream does not know. It is a fixed
+	// dummy value, never a credential.
+	WrongKey string
 	// Paid marks a step that spends credits upstream; only counted/reported.
 	Paid bool
 	// OptIn marks a step an official or export run skips unless -steps names
@@ -276,6 +280,9 @@ func authLabel(target Target, step Step) string {
 	if step.NoAuth {
 		return "none"
 	}
+	if step.WrongKey != "" {
+		return target.AuthHeader + ": " + strings.TrimSpace(target.AuthPrefix) + " <wrong key>"
+	}
 	return target.AuthHeader + ": " + strings.TrimSpace(target.AuthPrefix) + " <key>"
 }
 
@@ -462,7 +469,11 @@ func send(ctx context.Context, target Target, step Step, path string, vars map[s
 		request.Header.Set("Content-Type", contentType)
 	}
 	if !step.NoAuth {
-		request.Header.Set(target.AuthHeader, target.AuthPrefix+target.Key)
+		key := target.Key
+		if step.WrongKey != "" {
+			key = step.WrongKey
+		}
+		request.Header.Set(target.AuthHeader, target.AuthPrefix+key)
 	}
 	response, err := target.Client.Do(request)
 	if err != nil {

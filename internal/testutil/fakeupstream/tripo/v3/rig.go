@@ -252,7 +252,9 @@ func retargetFits(source *task, presets []string, v25BipedAsV3 bool) bool {
 // echoedInput is what a poll of a rig or retarget task repeats of its request in
 // data.input. The real rig poll names the rig type "topology" (captured); only
 // the keys the committed sample's input already holds are written, so the shape
-// stays the sampled one.
+// stays the sampled one. The generation, texture, segmentation, completion,
+// decimation, Smart Segmentation (model) and splat tasks repeat their request
+// first (echoRequest, echo.go, #577).
 func (t *task) echoedInput(input map[string]any) {
 	set := func(key string, value any) {
 		if _, has := input[key]; has && value != nil {
