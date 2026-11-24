@@ -61,9 +61,10 @@ def make_database(path, head=93, rows=2, tables=None):
 
 
 def reconcile_like_startup(image, workdir, port):
-    """Stand-in for the candidate's startup reconcile (#500, #525): append a
-    version in the current format that turns off the baseline tools the seeded
-    version did not list and leaves out the tools the Catalog retired."""
+    """Stand-in for the candidate's startup reconcile (#500, #525, #554): append
+    a version in the current format that turns off the baseline tools the seeded
+    version did not list, leaves out the tools the Catalog retired and stores the
+    Schema's prompts."""
     database = Path(workdir) / "data" / "art-ai.db"
     connection = sqlite3.connect(database)
     revision, encoded = connection.execute(
@@ -73,7 +74,8 @@ def reconcile_like_startup(image, workdir, port):
     baseline = load().legacy_tool_baseline()
     enabled = configuration["enabled_tool_names"]
     configuration["format"] = 2
-    configuration["follows_schema"] = ["domain_context.image", "domain_context.model-3d", "system_prompt"]
+    configuration["system_prompt"] = "Schema 系统提示词"
+    configuration["domain_context"] = {"image": "Schema 2D", "model-3d": "Schema 3D"}
     configuration["disabled_tool_names"] = [name for name in baseline if name not in enabled]
     configuration["enabled_tool_names"] = [
         name for name in enabled if name not in ("observe_task", "request_consent")]
@@ -300,8 +302,10 @@ class DrillRunTests(unittest.TestCase):
         self.assertEqual(seeded["enabled_tool_names"], [n for n in baseline if n != "create_motion_clip"])
         self.assertNotIn("format", seeded)
         self.assertIn("observe_task", seeded["enabled_tool_names"])
-        self.assertEqual(seeded["system_prompt"], self.drill.v180_default_prompts()[0])
+        self.assertTrue(seeded["system_prompt"].startswith(self.drill.v180_default_prompts()[0]))
+        self.assertIn(self.drill.DRILL_PROMPT_MARKER, seeded["system_prompt"])
         self.assertEqual(sorted(seeded["domain_context"]), ["image", "model-3d"])
+        self.assertTrue(all(self.drill.DRILL_PROMPT_MARKER in text for text in seeded["domain_context"].values()))
         reconciled = json.loads(rows[3][1])
         self.assertNotIn("observe_task", reconciled["enabled_tool_names"])
         self.assertEqual(reconciled["disabled_tool_names"], ["create_motion_clip"])
@@ -309,9 +313,9 @@ class DrillRunTests(unittest.TestCase):
         self.assertIn("PASS 旧 Agent 配置可读", report)
         self.assertIn("PASS 旧 Agent 配置保留", report)
         self.assertIn("PASS v1.8.0 配置工具换算", report)
-        self.assertIn("PASS v1.8.0 配置提示词跟随", report)
+        self.assertIn("PASS v1.8.0 配置提示词取 Schema", report)
 
-    def test_a_cleaned_version_that_freezes_the_old_prompt_fails(self):
+    def test_a_cleaned_version_that_keeps_the_stored_prompt_fails(self):
         def startup(image, workdir, port):
             reconcile_like_startup(image, workdir, port)
             connection = sqlite3.connect(Path(workdir) / "data" / "art-ai.db")
@@ -319,13 +323,13 @@ class DrillRunTests(unittest.TestCase):
                 "SELECT revision, configuration_json FROM agent_configuration_versions"
                 " ORDER BY revision DESC LIMIT 1").fetchone()
             configuration = json.loads(encoded)
-            configuration["follows_schema"] = ["domain_context.image", "domain_context.model-3d"]
+            configuration["domain_context"]["model-3d"] = "冻结的旧文本" + load().DRILL_PROMPT_MARKER
             connection.execute("UPDATE agent_configuration_versions SET configuration_json = ?"
                                " WHERE revision = ?", (json.dumps(configuration), revision))
             connection.commit()
             connection.close()
         self.assertEqual(self.run_drill(startup=startup), 1)
-        self.assertIn("FAIL v1.8.0 配置提示词跟随", self.report.read_text(encoding="utf-8"))
+        self.assertIn("FAIL v1.8.0 配置提示词取 Schema", self.report.read_text(encoding="utf-8"))
 
     def test_a_cleaned_version_that_turns_off_a_new_tool_fails(self):
         def startup(image, workdir, port):
