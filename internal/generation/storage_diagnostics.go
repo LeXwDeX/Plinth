@@ -74,11 +74,18 @@ func AssetStoreRejection(err error, role, variant string) (*Failure, bool) {
 func assetStoreFailure(claim ArtifactClaim, diagnostic AssetStorageDiagnostic) *Failure {
 	return &Failure{
 		Class:           FailureIntegrity,
-		Retryable:       diagnostic.Stage != "inspect",
+		Retryable:       !deterministicStoreRejection(diagnostic),
 		SafeDetail:      "资产写入或完整性校验失败",
 		UpstreamCode:    "asset_store_rejected",
 		UpstreamExcerpt: assetStoreForensics(claim, diagnostic),
 	}
+}
+
+// deterministicStoreRejection reports a refusal the same bytes meet again: a
+// content verdict (stage inspect). The kernel's materialization failure and
+// the background slot state (#576) share this rule.
+func deterministicStoreRejection(diagnostic AssetStorageDiagnostic) bool {
+	return diagnostic.Stage == "inspect"
 }
 
 func storageDiagnosticOf(err error) AssetStorageDiagnostic {

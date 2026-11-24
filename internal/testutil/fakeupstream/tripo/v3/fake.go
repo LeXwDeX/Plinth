@@ -1355,7 +1355,9 @@ func artifactFile(name, fidelity, texture string) (fakeupstream.File, error) {
 	case ".png":
 		return fakeupstream.ModelFile("png")
 	case ".webp":
-		return fakeupstream.ImageFile("webp")
+		// Only a render is a WebP here: an extended WebP with metadata, the
+		// shape the old generic address scan refused (#576).
+		return fakeupstream.RenderWebP()
 	case ".jpg":
 		return fakeupstream.ImageFile("jpeg")
 	}
@@ -1505,4 +1507,17 @@ func multiviewTaskInput(body map[string]any) (id string, isTask bool) {
 	}
 	id, isTask = entry["task_id"].(string)
 	return id, isTask
+}
+
+// rendersWebP reports a generation task whose render the fake delivers as WebP
+// bytes: one textured at extreme quality with detailed geometry, Plinth's
+// production defaults. Both real renders known to be WebP bytes came from such
+// requests: the multiview task of 2026-11-19 (#386) and the text-to-3D task of
+// 2026-11-24 (#576, texture and PBR at extreme quality, detailed geometry),
+// whose 209802-byte render Plinth's store took for neither PNG nor JPEG. Every
+// render of the 2026-11-24 run was named legacy_mesh.webp, but a name is not
+// the bytes (#264: renders named .webp were PNG), so the other requests keep the
+// PNG of 2026-10-29.
+func (t *task) rendersWebP() bool {
+	return t.request["texture_quality"] == "extreme" && t.request["geometry_quality"] == "detailed"
 }

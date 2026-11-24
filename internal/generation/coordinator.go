@@ -1025,6 +1025,9 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 	}
 
 	written := make([]Asset, 0, len(lease.Claims))
+	// 非阻断产物被确定性拒收（#576）：成功提交时把对应槽位落 failed，
+	// 不让它以 pending 等到 deadline。
+	rejectedOptional := make([]ResourceUpdate, 0)
 	retainedIdentity := map[AssetID]ArtifactClaim{}
 	events := make([]Event, 0)
 	roleOrdinals := map[string]int{}
@@ -1061,6 +1064,9 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 		// supplied for any required slot must still be persisted before success.
 		if !mediaTypeAllowed(requirement.MediaTypes, claim.MediaType) {
 			events = append(events, artifactSkipped(task.ID, claim, "media_type", m.clock.Now()))
+			if !blocking {
+				rejectedOptional = append(rejectedOptional, rejectedResourceUpdate(claim))
+			}
 			if blocking {
 				contractedFailure = preferFailure(contractedFailure, &Failure{
 					Class:     FailureIntegrity,
@@ -1079,6 +1085,9 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 			asset, err := m.checkStoredClaim(ctx, task, attempt, claim, requirement)
 			if err != nil {
 				events = append(events, artifactSkipped(task.ID, claim, "stored_asset", m.clock.Now()))
+				if !blocking && isFidelityRejection(err) {
+					rejectedOptional = append(rejectedOptional, rejectedResourceUpdate(claim))
+				}
 				if blocking {
 					failure := &Failure{Class: FailureIntegrity, Retryable: true, SafeDetail: m.executionMessages(task).StoredAssetInvalid}
 					if isFidelityRejection(err) {
@@ -1175,6 +1184,9 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 			finishCache()
 			cancel()
 			events = append(events, artifactSkipped(task.ID, claim, "response_media_type", m.clock.Now()))
+			if !blocking {
+				rejectedOptional = append(rejectedOptional, rejectedResourceUpdate(claim))
+			}
 			if blocking {
 				contractedFailure = preferFailure(contractedFailure, &Failure{
 					Class:     FailureIntegrity,
@@ -1226,6 +1238,9 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 				"errno":          diagnostic.Errno,
 			})
 			events = append(events, skipped)
+			if !blocking && deterministicStoreRejection(diagnostic) {
+				rejectedOptional = append(rejectedOptional, rejectedResourceUpdate(claim))
+			}
 			if blocking {
 				// 内部取证字段只落库与日志，公开投影不含：指出哪个产物、
 				// 哪个阶段与原因，不含字节、地址或原始错误文本。内容检查
@@ -1257,6 +1272,9 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 			skipped.Data = eventData(map[string]string{"claim_id": claim.ID, "role": claim.Role, "variant": claim.Variant, "reason": "fidelity", "storage_reason": diagnostic.Reason})
 			events = append(events, skipped)
 			m.deleteAssets(ctx, []Asset{asset})
+			if !blocking && isFidelityRejection(err) {
+				rejectedOptional = append(rejectedOptional, rejectedResourceUpdate(claim))
+			}
 			if blocking {
 				failure := fidelityFailure(err, claim)
 				if !isFidelityRejection(err) {
@@ -1316,6 +1334,7 @@ func (m *Module) materialize(ctx context.Context, lease Lease) error {
 		// 在本路径为空——资产经 NewAssets 列写入，不在任务行内）。
 		task.Assets = written
 		task.Resources = initialResourceStates(task, costSelectionItems)
+		events = append(events, resourceUpdateEvents(task.ID, applyResourceUpdates(task.Resources, task.Offering.Outputs, rejectedOptional, task.Assets), now)...)
 		persistResources = task.Resources != nil
 		if len(pendingResourceKeys(task.Resources)) > 0 {
 			task.NextActionAt = now.Add(PostSuccessInterval(task))

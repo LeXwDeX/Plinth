@@ -55,7 +55,7 @@ func TestAdministrationGenerationDownloadSupportsLegacyHistory(
 			response.Header().Get("Content-Disposition"),
 			"historical_0.webp",
 		) ||
-		response.Body.String() != "historical-image" {
+		response.Body.String() != legacyHistoricalImage {
 		t.Fatalf(
 			"legacy download status=%d headers=%v body=%q",
 			response.Code,

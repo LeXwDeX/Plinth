@@ -1935,7 +1935,7 @@ func (a *countingDependencyAdapter) Start(
 		artifacts = append(artifacts, generation.ArtifactClaim{
 			ID:        string(request.AttemptID) + ":thumbnail",
 			Role:      "thumbnail",
-			Inline:    []byte("RIFF....WEBP"),
+			Inline:    testWebP(),
 			MediaType: "image/webp",
 		})
 	}
@@ -2141,7 +2141,7 @@ func (genericMediaTypeAdapter) Start(
 			{
 				ID:        string(request.AttemptID) + ":thumbnail",
 				Role:      "thumbnail",
-				Inline:    []byte("RIFF....WEBP"),
+				Inline:    testWebP(),
 				MediaType: "image/webp",
 			},
 		},
@@ -2267,4 +2267,11 @@ func eventTypes(events []generation.Event) []string {
 		result = append(result, event.Type)
 	}
 	return result
+}
+
+// testWebP is a valid 1x1 lossless WebP (the webp-1x1 wire fixture). The asset
+// store proves a WebP by its RIFF walk and a decode (#576), so a placeholder
+// header no longer passes as a render.
+func testWebP() []byte {
+	return []byte("RIFF\x1c\x00\x00\x00WEBPVP8L\x0f\x00\x00\x00\x2f\x00\x00\x00\x00\x07\x10\xfd\x8f\xfe\x07\x22\xa2\xff\x01\x00")
 }

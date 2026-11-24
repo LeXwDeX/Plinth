@@ -45,6 +45,14 @@ func validateRasterBytesWithWork(data []byte, format string, work *inspectionWor
 	if format == "jpg" {
 		format = "jpeg"
 	}
+	if format == "webp" {
+		// A RIFF container states its own length, so it has no end marker
+		// and no padding rule (#576).
+		if err := reserveRasterWalkWork(int64(len(data)), work); err != nil {
+			return inspectionPlan{}, err
+		}
+		return validateWebPBytes(data, work)
+	}
 	if format != "png" && format != "jpeg" {
 		return inspectionPlan{}, rejectInspection("raster_unsupported_format", errors.New("图片格式没有可验证的数值字段"))
 	}

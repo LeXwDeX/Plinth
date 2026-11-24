@@ -82,7 +82,7 @@ func TestReaderOpensConfiguredLegacyGeneratedImageRoute(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(
 		filepath.Join(root, "historical.webp"),
-		[]byte("historical"),
+		[]byte(historicalWebP),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -109,9 +109,9 @@ func TestReaderOpensConfiguredLegacyGeneratedImageRoute(t *testing.T) {
 	}
 	body, _ := io.ReadAll(content.Body)
 	_ = content.Body.Close()
-	if string(body) != "historical" ||
+	if string(body) != historicalWebP ||
 		content.MediaType != "image/webp" ||
-		content.Size != int64(len("historical")) {
+		content.Size != int64(len(historicalWebP)) {
 		t.Fatalf("generated content = %+v, body = %q", content, body)
 	}
 
@@ -429,3 +429,7 @@ func response(
 		Request:    request,
 	}
 }
+
+// historicalWebP is a valid 1x1 lossless WebP: a delivered WebP is proved by
+// its RIFF walk and a decode (#576), so placeholder text no longer passes.
+const historicalWebP = "RIFF\x1c\x00\x00\x00WEBPVP8L\x0f\x00\x00\x00\x2f\x00\x00\x00\x00\x07\x10\xfd\x8f\xfe\x07\x22\xa2\xff\x01\x00"
