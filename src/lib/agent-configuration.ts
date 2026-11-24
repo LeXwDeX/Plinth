@@ -14,19 +14,23 @@ export interface AgentSkillConfiguration {
   tags?: string[];
 }
 export interface AgentConfiguration {
+  /** Read-only: the prompts ship with the Product Schema and are never submitted (#554). */
   system_prompt: string;
+  /** Read-only, like system_prompt. */
   domain_context: Record<string, string>;
   skills: AgentSkillConfiguration[];
   enabled_tool_names: string[];
   enabled_mcp_preset_ids: string[];
 }
+/** What an administrator chooses and submits: everything but the prompts (#554). */
+export type AgentConfigurationChoices = Omit<AgentConfiguration, 'system_prompt' | 'domain_context'>;
 export interface AgentToolSummary { name: string; description: string; domains?: string[] }
 export interface AgentMCPPreset { available: boolean; id: string; name: string; description: string; tool_names: string[]; protocol_version?: string; transport?: string; connection_ref?: string; default_enabled?: boolean }
 export interface AgentConfigurationSnapshot {
   revision: string;
   configuration: AgentConfiguration;
-  /** True when the published version froze its own prompts instead of following the Schema default (#525). */
-  prompt_customized?: boolean;
+  /** The prompts in configuration are shown for reference only; they ship with the Schema (#554). */
+  prompts_readonly?: boolean;
   presets: AgentConfiguration;
   tools: AgentToolSummary[];
   mcp_presets: AgentMCPPreset[];
@@ -62,8 +66,8 @@ export function createAgentConfigurationClient(schema: ProductSchema, fetcher: t
   }
   return {
     get: (signal?: AbortSignal) => request<AgentConfigurationSnapshot>(routes.admin, undefined, signal),
-    validate: (configuration: AgentConfiguration, signal?: AbortSignal) => request<{ valid: boolean; effective_prompts: Record<string, string> }>(routes.validate, { configuration }, signal),
-    publish: (expectedRevision: string, configuration: AgentConfiguration, signal?: AbortSignal) => request<AgentConfigurationSnapshot>(routes.publish, { expected_revision: expectedRevision, configuration }, signal),
+    validate: (configuration: AgentConfigurationChoices, signal?: AbortSignal) => request<{ valid: boolean; effective_prompts: Record<string, string> }>(routes.validate, { configuration: choicesOf(configuration) }, signal),
+    publish: (expectedRevision: string, configuration: AgentConfigurationChoices, signal?: AbortSignal) => request<AgentConfigurationSnapshot>(routes.publish, { expected_revision: expectedRevision, configuration: choicesOf(configuration) }, signal),
     restore: (expectedRevision: string, targetRevision: string, signal?: AbortSignal) => request<AgentConfigurationSnapshot>(routes.restore, { expected_revision: expectedRevision, target_revision: targetRevision }, signal),
     reset: (expectedRevision: string, signal?: AbortSignal) => request<AgentConfigurationSnapshot>(routes.reset, { expected_revision: expectedRevision }, signal),
     effective: (domain: string, modelId?: string | null, sessionId?: string | null, signal?: AbortSignal) => {
@@ -75,24 +79,10 @@ export function createAgentConfigurationClient(schema: ProductSchema, fetcher: t
   };
 }
 
-/**
- * The draft with the system prompt and every domain context set back to the
- * Schema defaults. Publishing it makes the version follow the defaults again,
- * so later releases improve the prompts without a republish (#525).
- */
-export function withDefaultPrompts(draft: AgentConfiguration, presets: AgentConfiguration): AgentConfiguration {
-  const domainContext = { ...draft.domain_context };
-  for (const key of Object.keys(domainContext)) {
-    if (key in presets.domain_context) domainContext[key] = presets.domain_context[key];
-  }
-  return { ...draft, system_prompt: presets.system_prompt, domain_context: domainContext };
-}
-
-/** True when the draft's prompts already equal the Schema defaults. */
-export function promptsAtDefault(draft: AgentConfiguration, presets: AgentConfiguration): boolean {
-  const reset = withDefaultPrompts(draft, presets);
-  return reset.system_prompt === draft.system_prompt
-    && Object.keys(draft.domain_context).every(key => reset.domain_context[key] === draft.domain_context[key]);
+/** The submitted form of a configuration: the prompts are left out, the server uses the Schema's (#554). */
+export function choicesOf(configuration: AgentConfigurationChoices): AgentConfigurationChoices {
+  const { skills, enabled_tool_names, enabled_mcp_preset_ids } = configuration;
+  return { skills, enabled_tool_names, enabled_mcp_preset_ids };
 }
 
 /** A saved selection stays visible when unavailable; sending must stop until cleared. */

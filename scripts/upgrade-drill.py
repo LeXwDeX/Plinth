@@ -10,11 +10,11 @@ read the migrated database back without writing to it.
 Before the start it publishes, in the copy only, one Agent configuration version
 in the shape a v1.8.0 build stored (#500, #525): a frozen tool list that still
 enables the tools the Catalog has retired and has one tool turned off by an
-administrator, and the default prompts of that release. The candidate must start
-over it; its startup reconcile must publish a version without the retired tools,
-in the current format, that turns off exactly the one tool (a tool added after
-v1.8.0 must not be turned off) and leaves the prompts following the default
-instead of freezing the old text.
+administrator, and the default prompts of that release with a line an
+administrator added. The candidate must start over it; its startup reconcile
+must publish a version without the retired tools, in the current format, that
+turns off exactly the one tool (a tool added after v1.8.0 must not be turned
+off), and whose prompts are the Schema's, not the stored text (#554).
 
 It never writes to the source and never talks to a running instance. By default
 it refuses to read a path that belongs to an environment (a release root from the
@@ -80,7 +80,9 @@ DRILL_ADDED_TOOL = "analyze_model"
 LEGACY_DEFAULTS = Path(__file__).resolve().parent.parent / "internal" / "agentconfiguration" / "legacy_defaults.json"
 # The default prompts v1.8.0 shipped, kept as the Go tests' fixtures.
 V180_PROMPT_DIR = Path(__file__).resolve().parent.parent / "internal" / "agentconfiguration" / "testdata"
-FOLLOWED_PROMPT_PARTS = ["domain_context.image", "domain_context.model-3d", "system_prompt"]
+# Appended to every seeded prompt as an administrator's edit: the prompts are
+# product constants (#554), so no version the candidate publishes may carry it.
+DRILL_PROMPT_MARKER = "\n- 升级演练：管理员自加的规则（#554）"
 
 
 def v180_default_prompts():
@@ -187,7 +189,8 @@ def seed_legacy_agent_configuration(db_path):
                 "system_prompt": "升级演练（#500）", "domain_context": {}, "skills": [],
                 "enabled_tool_names": [], "enabled_mcp_preset_ids": []}
         configuration["enabled_tool_names"] = [name for name in baseline if name != DRILL_DISABLED_TOOL]
-        configuration["system_prompt"], configuration["domain_context"] = system_prompt, domain_context
+        configuration["system_prompt"] = system_prompt + DRILL_PROMPT_MARKER
+        configuration["domain_context"] = {key: text + DRILL_PROMPT_MARKER for key, text in domain_context.items()}
         for key in ("format", "disabled_tool_names", "follows_schema"):
             configuration.pop(key, None)
         created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -200,7 +203,7 @@ def seed_legacy_agent_configuration(db_path):
         raise DrillError("向演练副本注入旧 Agent 配置失败：%s" % error)
     finally:
         connection.close()
-    return revision + 1, "基于 revision %d 注入 revision %d：v1.8.0 工具清单（含 %s），关闭 %s，v1.8.0 默认提示词" % (
+    return revision + 1, "基于 revision %d 注入 revision %d：v1.8.0 工具清单（含 %s），关闭 %s，v1.8.0 默认提示词加管理员自加规则" % (
         revision, revision + 1, "、".join(RETIRED_AGENT_TOOLS), DRILL_DISABLED_TOOL)
 
 
@@ -237,11 +240,18 @@ def check_legacy_agent_configuration(db_path, seeded):
                     "revision %d 为 format 2，只关闭 %s，其余（含 %s）默认开启" % (latest[0], DRILL_DISABLED_TOOL, DRILL_ADDED_TOOL)
                     if converted else "revision %d 的 format=%r、disabled_tool_names=%r，应为 format 2 且只含 %s"
                     % (latest[0], stored.get("format"), disabled, DRILL_DISABLED_TOOL)))
-    followed = sorted(stored.get("follows_schema") or [])
-    results.append(("v1.8.0 配置提示词跟随", followed == FOLLOWED_PROMPT_PARTS,
-                    "revision %d 的系统提示词与两个领域上下文都跟随默认" % latest[0]
-                    if followed == FOLLOWED_PROMPT_PARTS else "revision %d 的 follows_schema=%r，应为 %r"
-                    % (latest[0], followed, FOLLOWED_PROMPT_PARTS)))
+    # The stored prompts are the Schema's of the candidate (#554): non-empty,
+    # both domain contexts present, and none of the seeded administrator text.
+    system_prompt = stored.get("system_prompt") or ""
+    contexts = stored.get("domain_context") or {}
+    frozen = [part for part, text in [("system_prompt", system_prompt)] + sorted(
+        ("domain_context.%s" % key, text) for key, text in contexts.items())
+        if DRILL_PROMPT_MARKER.strip() in (text or "")]
+    from_schema = bool(system_prompt.strip()) and sorted(contexts) == ["image", "model-3d"] and not frozen
+    results.append(("v1.8.0 配置提示词取 Schema", from_schema,
+                    "revision %d 的系统提示词与两个领域上下文都是 Schema 的，不含注入的自定义文本" % latest[0]
+                    if from_schema else "revision %d 的提示词不是 Schema 的：领域上下文 %r，仍含自定义文本 %r"
+                    % (latest[0], sorted(contexts), frozen)))
     return results
 
 

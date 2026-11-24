@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProductSchema } from '@/components/product-schema-provider';
-import { createAgentConfigurationClient, AgentConfigurationError, promptsAtDefault, withDefaultPrompts, type AgentConfiguration, type AgentConfigurationSnapshot } from '@/lib/agent-configuration';
+import { createAgentConfigurationClient, AgentConfigurationError, type AgentConfiguration, type AgentConfigurationSnapshot } from '@/lib/agent-configuration';
 import { schemaText } from '@/lib/product-schema';
 import { unavailableLabel } from '@/lib/unavailable';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -72,12 +72,15 @@ export default function AgentConfigurationPage() {
       <Surface padding="md" className="space-y-3">
         <p className="break-all text-xs text-muted-foreground">{ui('revision')}: {snapshot.revision} · {ui('source')}: {snapshot.history.find(version => version.revision === snapshot.revision)?.source ?? ui('defaults')}</p>
         <p className="text-sm text-muted-foreground">{ui('policy_locked')}</p>
-        <div className="flex flex-wrap items-center gap-2" data-testid="agent-prompt-follow">
-          <p role="status" className="text-sm text-muted-foreground" data-customized={snapshot.prompt_customized ? 'true' : 'false'}>{snapshot.prompt_customized ? ui('prompt_customized') : ui('prompt_following')}</p>
-          {snapshot.prompt_customized ? <Action variant="outline" size="sm" disabled={busy || promptsAtDefault(draft, snapshot.presets)} onClick={() => revise(withDefaultPrompts(draft, snapshot.presets))}>{ui('follow_default')}</Action> : null}
-        </div>
-        <Field id="agent-system-prompt" label={ui('system_prompt')}>{props => <textarea {...props} value={draft.system_prompt} disabled={busy} maxLength={schema.agent_configuration.limits.max_prompt_characters} onChange={event => revise({ ...draft, system_prompt: event.target.value })} rows={8} className="w-full rounded-md border bg-background p-3 text-sm" />}</Field>
-        {Object.entries(draft.domain_context).map(([domain, value]) => <Field key={domain} id={`agent-domain-${domain}`} label={ui(domain === 'image' ? 'domain_image' : 'domain_model_3d')}>{props => <textarea {...props} value={value} disabled={busy} maxLength={schema.agent_configuration.limits.max_prompt_characters} onChange={event => revise({ ...draft, domain_context: { ...draft.domain_context, [domain]: event.target.value } })} rows={4} className="w-full rounded-md border bg-background p-3 text-sm" />}</Field>)}
+        {/* The prompts ship with the Product Schema and are shown for reference only (#554). */}
+        <p className="text-sm text-muted-foreground">{ui('prompts_readonly')}</p>
+        <details data-testid="agent-prompts-readonly" className="text-sm">
+          <summary className="cursor-pointer">{ui('prompts_view')}</summary>
+          <div className="mt-3 space-y-3">
+            <div><h3 className="text-sm font-medium">{ui('system_prompt')}</h3><pre className="mt-2 whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 text-xs">{snapshot.configuration.system_prompt}</pre></div>
+            {Object.entries(snapshot.configuration.domain_context).map(([domain, value]) => <div key={domain}><h3 className="text-sm font-medium">{ui(domain === 'image' ? 'domain_image' : 'domain_model_3d')}</h3><pre className="mt-2 whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 text-xs">{value}</pre></div>)}
+          </div>
+        </details>
       </Surface>
       <Surface padding="md" className="space-y-3"><h2 className="font-semibold">{ui('tools')}</h2>
         {snapshot.tools.map(tool => <Field key={tool.name} id={`agent-tool-${tool.name}`} label={tool.name} help={tool.description} layout="inline">{props => <input {...props} type="checkbox" disabled={busy} checked={draft.enabled_tool_names.includes(tool.name)} onChange={event => toggle('enabled_tool_names', tool.name, event.target.checked)} />}</Field>)}
