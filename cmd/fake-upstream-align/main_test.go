@@ -66,6 +66,29 @@ func TestOfficialRefusesTheLabeledRodinRequestWithoutConfirmation(t *testing.T) 
 	}
 }
 
+// The steps of the 1.9.0 real round (#539) are paid submissions with a free status
+// and download behind them. Without -confirm-paid each refuses before it reads a key
+// or sends anything, counting the one paid request, and leaves nothing behind.
+func TestOfficialRefusesTheRealRoundRodinStepsWithoutConfirmation(t *testing.T) {
+	for _, name := range []string{"reject-seed-probe", "rodin-text-quadpose", "rodin-image-label-short", "bang-upload", "texture-images"} {
+		t.Run(name, func(t *testing.T) {
+			private := t.TempDir()
+			if err := os.Chmod(private, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HYPER3D_API_KEY", "dummy-not-a-key")
+			err := run([]string{"official", "-version", "hyper3d/api-v2", "-key-env", "HYPER3D_API_KEY", "-private", private,
+				"-steps", name + "," + name + "-status," + name + "-download"})
+			if err == nil || !strings.Contains(err.Error(), "sends 1 paid request(s)") || !strings.Contains(err.Error(), "-confirm-paid") {
+				t.Fatalf("an unconfirmed official run must refuse and count its paid request, got %v", err)
+			}
+			if entries, readErr := os.ReadDir(private); readErr != nil || len(entries) != 0 {
+				t.Fatalf("a refused run leaves nothing behind: %v %v", entries, readErr)
+			}
+		})
+	}
+}
+
 func TestDraftCommandRequiresPrivateDirectories(t *testing.T) {
 	if err := run([]string{"draft"}); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Fatalf("draft without flags must fail, got %v", err)
