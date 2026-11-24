@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -86,12 +87,26 @@ const (
 //     header when the response carries one).
 //   - upload-failed: POST /files answers 500. An upload creates no task, so
 //     this is a retryable transport error, never an ambiguous submission.
+//   - rate-limit-reset-only: the request-rate 429 (1007) with X-RateLimit-Limit,
+//     X-RateLimit-Remaining and X-RateLimit-Reset (a Unix timestamp in seconds) and
+//     no Retry-After, the case the Adapter's reset-header fallback is for (#487;
+//     the rate-limits page says only that Retry-After appears on a concurrency
+//     refusal, so which header a 1007 carries is unverified).
+//   - content-policy, version-deprecated, model-too-complex, task-type-unsupported,
+//     endpoint-not-found: a task creation refused with the business code of the
+//     same name on the error-handling page (2008, 2015, 2018, 2002, 4001; businessErrors).
+//   - task-failed-content-policy, task-failed-model-too-complex,
+//     task-failed-version-deprecated, task-failed-task-type-unsupported: the task is
+//     created and ends "failed" with that business code as its error_code (the page says
+//     a failed task's error_code can mean something else than the request-level one;
+//     only the number is the same, which is what the injection needs).
 const (
 	scenarioTaskUnknown           = "task-unknown"
 	scenarioConvertTask           = "convert-task"
 	scenarioRateLimitNoRetryAfter = "rate-limit-no-retry-after"
 	scenarioConcurrencyNoRetry    = "concurrency-limit-no-retry-after"
 	scenarioUploadFailed          = "upload-failed"
+	scenarioRateLimitResetOnly    = "rate-limit-reset-only"
 )
 
 // convertTaskOutcome is the terminal status a convert-task-<outcome> child
@@ -119,7 +134,48 @@ func convertTaskOutcome(r *http.Request) string {
 // noRetryAfter answers whether the request asks for a 429 without Retry-After.
 func noRetryAfter(r *http.Request) bool {
 	return requestedScenario(r, scenarioRateLimitNoRetryAfter) ||
-		requestedScenario(r, scenarioConcurrencyNoRetry)
+		requestedScenario(r, scenarioConcurrencyNoRetry) ||
+		requestedScenario(r, scenarioRateLimitResetOnly)
+}
+
+// businessError is a task-creation refusal of the error-handling page (read
+// 2026-11-24), injected by the scenario word of the same name. The messages are the
+// page's own (it says they may vary); the HTTP statuses are the page's.
+type businessError struct {
+	word    string
+	status  int
+	code    int
+	message string
+}
+
+var businessErrors = []businessError{
+	{"content-policy", http.StatusBadRequest, 2008, "The input is rejected due to violation of content policy"},
+	{"version-deprecated", http.StatusBadRequest, 2015, "The version has been deprecated, please try higher version"},
+	{"model-too-complex", http.StatusBadRequest, 2018, "The model is too complex to remesh"},
+	{"task-type-unsupported", http.StatusBadRequest, 2002, "This task type is not supported"},
+	{"endpoint-not-found", http.StatusNotFound, 4001, "No endpoint found"},
+}
+
+// requestedBusinessError finds the creation refusal the request selects.
+func requestedBusinessError(r *http.Request) (businessError, bool) {
+	for _, candidate := range businessErrors {
+		if requestedScenario(r, candidate.word) {
+			return candidate, true
+		}
+	}
+	return businessError{}, false
+}
+
+// requestedTaskFailure finds the business code a task of this creation request ends
+// failed with: task-failed-<word> for a word of businessErrors, except the endpoint
+// refusal, which is not a task outcome.
+func requestedTaskFailure(r *http.Request) (businessError, bool) {
+	for _, candidate := range businessErrors {
+		if candidate.code != 4001 && requestedScenario(r, string(fakeupstream.ScenarioTaskFailed)+"-"+candidate.word) {
+			return candidate, true
+		}
+	}
+	return businessError{}, false
 }
 
 // docsChecked is when the official error, status and upload pages behind the
@@ -429,12 +485,23 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_, _ = w.Write(raw)
 }
 
+// rateLimitHeaders writes the rate-limits page's three headers: the window's limit,
+// what is left of it and X-RateLimit-Reset, "Unix timestamp, in seconds, when the rate
+// limit window resets" (read 2026-11-24, #541). Before #541 the fake wrote the relative
+// seconds there, which the Adapter (a Unix timestamp reader, #487) never took as a wait.
+func (h *handler) rateLimitHeaders(w http.ResponseWriter) {
+	retry, _ := strconv.Atoi(h.env.RetryAfterSeconds())
+	w.Header().Set("X-RateLimit-Limit", "100")
+	w.Header().Set("X-RateLimit-Remaining", "0")
+	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(h.env.Now().Add(time.Duration(retry)*time.Second).Unix(), 10))
+}
+
 // render writes the Tripo-shaped error of an injected scenario.
 func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeupstream.Scenario) {
 	status, code, message := http.StatusInternalServerError, 1000, "Internal server error"
 	switch scenario {
 	case fakeupstream.ScenarioInsufficientBalance:
-		status, code, message = http.StatusForbidden, 2010, "You need more credits to complete this task"
+		status, code, message = http.StatusForbidden, 2010, "You don't have enough credit to create this task"
 	case fakeupstream.ScenarioKeyQuota:
 		status, code, message = http.StatusForbidden, 2010, "API key credit limit reached"
 	case fakeupstream.ScenarioRateLimit:
@@ -443,9 +510,10 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeup
 		status, code, message = http.StatusTooManyRequests, 1007, "Rate limit exceeded, you've generated too many requests in a short amount of time"
 		if !noRetryAfter(r) {
 			w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
-			w.Header().Set("X-RateLimit-Limit", "100")
-			w.Header().Set("X-RateLimit-Remaining", "0")
-			w.Header().Set("X-RateLimit-Reset", h.env.RetryAfterSeconds())
+			h.rateLimitHeaders(w)
+		}
+		if requestedScenario(r, scenarioRateLimitResetOnly) {
+			h.rateLimitHeaders(w)
 		}
 	case fakeupstream.ScenarioConcurrencyLimit:
 		status, code, message = http.StatusTooManyRequests, 2000, "You have exceeded the limit of generation"
@@ -465,7 +533,7 @@ func (h *handler) render(w http.ResponseWriter, r *http.Request, scenario fakeup
 func (h *handler) renderLocalRateLimit(w http.ResponseWriter, r *http.Request) bool {
 	value := strings.TrimSpace(r.Header.Get(fakeupstream.ScenarioHeader))
 	switch value {
-	case scenarioRateLimitNoRetryAfter:
+	case scenarioRateLimitNoRetryAfter, scenarioRateLimitResetOnly:
 		h.render(w, r, fakeupstream.ScenarioRateLimit)
 		return true
 	case scenarioConcurrencyNoRetry:
@@ -532,7 +600,7 @@ func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if !uploadTypeAllowed(part.Header.Get("Content-Type"), part.FileName()) {
-				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "The file type is unsupported", "Refer to the API documentation for the supported file types"))
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 2004, "This image file type is not supported", "Refer to the API documentation for the supported file types"))
 				return
 			}
 			// Drain the whole part: the official limit for a model is 150 MB, so a
@@ -611,6 +679,10 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		if h.env.Intercept(w, r, fakeupstream.PhaseCreate, h.render) {
 			return
 		}
+		if refused, ok := requestedBusinessError(r); ok {
+			writeJSON(w, refused.status, h.envelope(h.taskError, refused.code, refused.message, "Refer to the API documentation for the error codes"))
+			return
+		}
 		// A full concurrency pool refuses task creation only; the shared
 		// Intercept does not know this scenario yet, so it is applied here.
 		if fakeupstream.ScenarioOf(r) == fakeupstream.ScenarioConcurrencyLimit {
@@ -684,6 +756,9 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			t.convert = convertEcho(body)
 		}
 		t.terminal = terminalStatus(r)
+		if failure, ok := requestedTaskFailure(r); ok {
+			t.failCode, t.failMessage = failure.code, failure.message
+		}
 		if k.Path == "/models/convert" {
 			// A convert child can be made to end failed, cancelled or unknown
 			// forever (convert-task-<outcome>): the format's own retry path
