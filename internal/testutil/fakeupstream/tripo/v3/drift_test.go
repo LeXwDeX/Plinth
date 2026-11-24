@@ -221,12 +221,10 @@ func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {
 			assertSameShape(t, k.Type+" "+status, sampleShape(t, *real), shapeOfBody(t, response))
 		}
 	}
-	// The failed poll: a retarget of a rig the preset does not fit. The sample was
-	// captured on 2026-10-29 with a v2.5 biped rig; the rig page now says that rig is
-	// rigged as v3.0 (rig.go), so the fake fails the same shape with a v1.0 biped rig.
+	// The failed poll: a retarget of a v2.5 biped rig, the way the sample was captured.
 	parent := f.create("/generation/text-to-model", textBody(), key)
 	f.finish(parent, key)
-	rig := f.create("/animations/rig", map[string]any{"input": parent, "model": rigModelV1}, key)
+	rig := f.create("/animations/rig", map[string]any{"input": parent, "model": rigModelV25}, key)
 	f.finish(rig, key)
 	retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, key)
 	_, failed := f.finish(retarget, key)

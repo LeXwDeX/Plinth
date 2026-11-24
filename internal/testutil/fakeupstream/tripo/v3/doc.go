@@ -157,9 +157,11 @@
 //     on it; a completion needs a segmentation; an edit needs an Image to Multiview task; a
 //     conversion by task id looks the task up. Smart Segmentation answers 2007 for a task
 //     that has not succeeded and 2006 for one with no usable picture or GLB.
-//   - A v2.5 biped rig is treated as a v3.0 rig for retargeting (rig.go), as the rig page
-//     now says; the real failed retarget of 2026-10-29 used such a rig and predates that
-//     note, so the two are in conflict until one real rig-and-retarget round settles it.
+//   - A retarget of a v2.5 biped rig ends "failed"/1004 by default, the one observed run
+//     (2026-10-29). The rig page now says such a rig is rigged as v3.0, which would make it
+//     take the v3.0 presets; the two conflict, so that reading is only the
+//     retarget-v25-biped-as-v3 scenario (rig.go), constructed, until one real
+//     rig-and-retarget round settles which is true (#541).
 //   - A generation, texture, segmentation, completion, Smart Segmentation, retarget and
 //     multiview task reports the price of the pricing page (billing.go); P1 and image to
 //     splat have no published price and keep the sample's placeholder.

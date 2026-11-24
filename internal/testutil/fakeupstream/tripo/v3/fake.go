@@ -92,6 +92,10 @@ const (
 //     no Retry-After, the case the Adapter's reset-header fallback is for (#487;
 //     the rate-limits page says only that Retry-After appears on a concurrency
 //     refusal, so which header a 1007 carries is unverified).
+//   - retarget-v25-biped-as-v3: a retarget treats a v2.5 biped source rig as a v3.0 rig,
+//     the reading of the rig page (rigged as v3.0), instead of the default, the one
+//     real run (2026-10-29), where such a rig ended "failed"/1004. Constructed; the
+//     two conflict until one real rig-and-retarget round settles it (#541; rig.go).
 //   - content-policy, version-deprecated, model-too-complex, task-type-unsupported,
 //     endpoint-not-found: a task creation refused with the business code of the
 //     same name on the error-handling page (2008, 2015, 2018, 2002, 4001; businessErrors).
@@ -107,6 +111,7 @@ const (
 	scenarioConcurrencyNoRetry    = "concurrency-limit-no-retry-after"
 	scenarioUploadFailed          = "upload-failed"
 	scenarioRateLimitResetOnly    = "rate-limit-reset-only"
+	scenarioRetargetV25BipedAsV3  = "retarget-v25-biped-as-v3"
 )
 
 // convertTaskOutcome is the terminal status a convert-task-<outcome> child
@@ -887,7 +892,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				// model ends "failed", error 1004 "Invalid input parameter". The other
 				// pairings of preset and rig are constructed from the retarget page
 				// the same way (retargetFits).
-				if presets, _ := retargetPresets(body); k.Type == "animate_retarget" && !retargetFits(source, presets) {
+				if presets, _ := retargetPresets(body); k.Type == "animate_retarget" && !retargetFits(source, presets, requestedScenario(r, scenarioRetargetV25BipedAsV3)) {
 					t.failCode, t.failMessage = 1004, "Invalid input parameter"
 				}
 			}

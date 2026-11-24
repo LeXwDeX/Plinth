@@ -85,23 +85,55 @@ func TestRetargetTakesTheRiggedModelOrATaskRunOnIt(t *testing.T) {
 	f.expect("/animations/retarget", with(f.multiview()), http.StatusBadRequest, 1004)
 }
 
-// A v2.5 biped rig is rigged as v3.0 (official rig page), so the v3.0 biped presets
-// fit it; the creature presets still need a rig of their own type.
-func TestRetargetFitsAV25BipedRigLikeAV3Rig(t *testing.T) {
+// The one real retarget failure (2026-10-29) was a v3.0 biped preset on a v2.5 biped
+// rig, so that is what the fake still does by default, even though the rig page now says
+// a v2.5 biped rig is rigged as v3.0: which of the two is true is settled by one real
+// rig-and-retarget round (#541), and the observation outranks a reading of the page.
+func TestRetargetOfAV25BipedRigFailsByDefaultLikeTheObservedRun(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
 	for _, rigType := range []string{"biped", ""} {
 		rig := f.rigged(rigModelV25, rigType)
 		retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, key)
-		if statuses, done := f.finish(retarget, key); statuses[len(statuses)-1] != statusSuccess {
+		statuses, done := f.finish(retarget, key)
+		if statuses[len(statuses)-1] != statusFailed || field(t, done, "data", "error_code").(float64) != 1004 {
 			t.Fatalf("rig_type %q: a v3.0 biped preset on a v2.5 biped rig ended %v %v", rigType, statuses, done)
 		}
 	}
-	// The v1.0 names need a v1.0 biped rig, which a v2.5 biped rig is not.
-	rig := f.rigged(rigModelV25, "biped")
-	retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:biped:walk"}, key)
-	if statuses, _ := f.finish(retarget, key); statuses[len(statuses)-1] != statusFailed {
-		t.Fatalf("a v1.0 name on a v2.5 biped rig ended %v", statuses)
+}
+
+// retarget-v25-biped-as-v3 selects the other reading, the rig page's: a v2.5 biped rig
+// is a v3.0 rig for retargeting, so the v3.0 biped presets fit it (constructed, not
+// observed). Creature presets keep needing a rig of their own type, and the v1.0 names a
+// v1.0 biped rig, which a v2.5 biped rig is not.
+func TestRetargetV25BipedAsV3ScenarioFollowsTheRigPage(t *testing.T) {
+	for name, headers := range map[string][]string{
+		"header": {"X-Fake-Scenario", "retarget-v25-biped-as-v3"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
+			for _, rigType := range []string{"biped", ""} {
+				rig := f.rigged(rigModelV25, rigType)
+				retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, key, headers...)
+				if statuses, done := f.finish(retarget, key); statuses[len(statuses)-1] != statusSuccess {
+					t.Fatalf("rig_type %q: a v3.0 biped preset on a v2.5 biped rig ended %v %v", rigType, statuses, done)
+				}
+			}
+			rig := f.rigged(rigModelV25, "biped")
+			retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:biped:walk"}, key, headers...)
+			if statuses, _ := f.finish(retarget, key); statuses[len(statuses)-1] != statusFailed {
+				t.Fatalf("a v1.0 name on a v2.5 biped rig ended %v", statuses)
+			}
+		})
 	}
+	t.Run("key form", func(t *testing.T) {
+		f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
+		rig := f.rigged(rigModelV25, "biped")
+		scenarioKey := "fake-retarget-v25-biped-as-v3"
+		retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, scenarioKey)
+		if statuses, done := f.finish(retarget, scenarioKey); statuses[len(statuses)-1] != statusSuccess {
+			t.Fatalf("ended %v %v", statuses, done)
+		}
+	})
 }
 
 func TestCompleteNeedsASegmentationTask(t *testing.T) {

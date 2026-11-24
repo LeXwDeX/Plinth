@@ -399,15 +399,13 @@ func TestConvertEchoesItsRequestAndDeliversTheRequestedTexture(t *testing.T) {
 	}
 }
 
-// A retarget of a rig its preset does not fit ends "failed" with code 1004, the one
-// failure captured on 2026-10-29 (a v2.5 biped rig, then). The rig page now says a v2.5
-// biped rig is rigged as v3.0 (rig.go), so the v1.0 biped rig stands in for the failing
-// pairing, and the v2.5 biped rig takes the preset.
-func TestRetargetOfARigThePresetDoesNotFitFailsLikeTheOfficialAPI(t *testing.T) {
+// A retarget of a v2.5 biped rig ends "failed" with code 1004 like the real run captured
+// on 2026-10-29, the one observed retarget failure.
+func TestRetargetOfAV2RigFailsLikeTheOfficialAPI(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	gen := f.create("/generation/text-to-model", textBody(), key)
 	f.finish(gen, key)
-	rig := f.create("/animations/rig", map[string]any{"input": gen, "model": rigModelV1}, key)
+	rig := f.create("/animations/rig", map[string]any{"input": gen, "model": "v2.5-20260210"}, key)
 	f.finish(rig, key)
 	retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, key)
 	statuses, body := f.finish(retarget, key)
