@@ -153,6 +153,10 @@ Rodin：Texture 价格是 2 还是 2.5；各 `material` 实际交付的文件；
 - Rigging 上限 380000 之后，`internal/testutil/fakeupstream/meshy/openapi-v1` 的对齐报告与端点说明里仍保留 2026-10-29 捕获时“320000 面以上被接受后 FAILED”的历史记录，它们记录的是当时的观测，不改为 380000。
 - 本批次新增的 fake 校验（preview 专属字段、图片像素、`pose_mode:""`、Hyper3D 表单值域）是按官方页面构造的拒绝；没有真实拒绝样本，消息与代码按页面写，未声称已观测。
 
+### 2D 图像连接的错误码补充（#543）
+
+Jimeng 连接的 `upstream_code_map` 新增 `RequestBurstTooFast`（官方错误码表的 429：请求突发触发保护）：`rate_limited`、`retryable: true`，与其余 429 的默认归类一致，写成显式声明是为了让 fake 的每个 Catalog 已映射码都有回归路径。这一条是 Schema 声明的补充，未改任何 Offering 默认值；OpenAI 的 `quality=max` 与官方“xhigh、max 仅 2.5 系列”的冲突仍待一次真实对账（B2），fake 不拒绝 `max`。2D fake 的参数校验是按官方文档构造的拒绝，没有真实拒绝样本，措辞与代码未声称已观测，细节与待真实定稿项见 `docs/architecture.md` 的 Fake 上游服务一节。
+
 ## Tripo Rig Check 边界
 
 `tripo/processing/rig-check` 已启用（`enabled:true`，revision `2026-10-16.1`），仅提供 `rig-check` 能力，并登记 legacy model `tripo-rig-check`。来源参数由 Schema 固定为同 Provider 原生 `upstream_job` Task，并精确允许当前两个 full 文生/图生 Offering；不接上传、URL、Texture/Rig/Retarget 或报告任务。实际 wire 为 v3 的 `animations/rig-check` 与 `tasks/{task_id}`，单次 Attempt、无幂等提交声明，结果未知不能盲重发。现有会话入口的来源校验保持，底层 owner 范围不额外收窄。
