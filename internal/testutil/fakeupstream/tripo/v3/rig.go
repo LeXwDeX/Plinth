@@ -218,6 +218,13 @@ func retargetRequestError(body map[string]any) string {
 // v2.5 or v3.0, and the "preset:biped:" names a v1.0 biped rig.
 func retargetFits(source *task, presets []string) bool {
 	model, rigType := rigModelOf(source.request), rigTypeOf(source.request)
+	if model == rigModelV25 && rigType == "biped" {
+		// The rig page: "A biped rig_type, including when it is omitted, is rigged as
+		// v3.0-20260909" under v2.5-20260210 (read 2026-11-24). The failed retarget of a
+		// v2.5 biped rig captured on 2026-10-29 predates that note; the real behaviour is
+		// settled by one rig-and-retarget round, so this is constructed.
+		model = rigModelV3
+	}
 	for _, preset := range presets {
 		switch {
 		case choice(preset, retargetBipedV3):

@@ -42,9 +42,126 @@ const (
 	convertDefaultTextureFormat = "JPEG"
 )
 
+// The rest of the pricing page (https://developers.tripo3d.ai/en/pricing, read
+// 2026-11-24, #541), which Plinth's native_pricing follows for the generation tasks:
+//
+//   - generation, H series: base 10 credits for text and 20 for image and multiview;
+//     a texture is +10 (standard, and fast at the same price), +10 more for the HD
+//     texture, +20 more for the ultra (8K) one; geometry_quality=detailed is +20, quad
+//     +5, smart low poly +10, generate parts +20. The 70 credits of the multiview run of
+//     2026-11-19 (extreme texture, detailed geometry) are 20 + 10 + 20 + 20.
+//   - generation, P2: 100 credits without a texture and 110, 120, 130 for the standard,
+//     HD and ultra textures (changelog); quad adds nothing. The pricing page lists no P
+//     Series price, so the P2 figures are the changelog's and P1 is not priced at all.
+//   - texture 10 (fast and standard), 20 (HD), 30 (8K); segmentation 40; completion 50,
+//     30 for quick_cap; Smart Segmentation 85 (image) or 55 (model), as captured;
+//     retarget 10 per animation; image to multiview 10; edit multiview 5 per edited
+//     image. Image to splat has no published price and stays unpriced.
+const (
+	creditsGenerationText       = 10
+	creditsGenerationImage      = 20
+	creditsGenerationP2         = 100
+	creditsTexture              = 10
+	creditsTextureHD            = 10
+	creditsTextureUltra         = 20
+	creditsGeometryDetailed     = 20
+	creditsGenerationQuad       = 5
+	creditsGenerationSmall      = 10
+	creditsGenerationParts      = 20
+	creditsSegment              = 40
+	creditsComplete             = 50
+	creditsQuickCap             = 30
+	creditsSmartSegmentImage    = 85
+	creditsSmartSegmentModel    = 55
+	creditsRetargetPerAnimation = 10
+	creditsImageToMultiview     = 10
+	creditsEditPerView          = 5
+)
+
+// generationPrice prices a text, image or multiview generation request; false for the
+// P1 model, whose price the pages do not list.
+func (t *task) generationPrice() (float64, bool) {
+	model, _ := t.request["model"].(string)
+	var total float64
+	switch {
+	case model == "P1-20260311":
+		return 0, false
+	case t.isPSeries():
+		total = creditsGenerationP2
+	case t.kind.Type == "text_to_model":
+		total = creditsGenerationText
+	default:
+		total = creditsGenerationImage
+	}
+	// Plinth's native_pricing counts the texture when texture is on; pbr=true forces it on.
+	if flag(t.request, "texture", true) || flag(t.request, "pbr", false) {
+		total += creditsTexture
+		switch t.request["texture_quality"] {
+		case "detailed":
+			total += creditsTextureHD
+		case "extreme":
+			total += creditsTextureUltra
+		}
+	}
+	if t.isPSeries() {
+		return total, true
+	}
+	if t.request["geometry_quality"] == "detailed" {
+		total += creditsGeometryDetailed
+	}
+	if flag(t.request, "quad", false) {
+		total += creditsGenerationQuad
+	}
+	if flag(t.request, "smart_low_poly", false) {
+		total += creditsGenerationSmall
+	}
+	if flag(t.request, "generate_parts", false) {
+		total += creditsGenerationParts
+	}
+	return total, true
+}
+
+// retargetAnimations is how many animations a retarget request names.
+func (t *task) retargetAnimations() int {
+	if many, ok := t.request["animations"].([]any); ok {
+		return len(many)
+	}
+	return 1
+}
+
 // price is what the task costs, and whether the fake prices its kind.
 func (t *task) price() (float64, bool) {
 	switch t.kind.Type {
+	case "text_to_model", "image_to_model", "multiview_to_model":
+		return t.generationPrice()
+	case "image_to_multiview":
+		return creditsImageToMultiview, true
+	case "edit_multiview":
+		return float64(creditsEditPerView * len(t.views)), true
+	case "texture_model":
+		switch t.request["texture_quality"] {
+		case "detailed":
+			return creditsTexture + creditsTextureHD, true
+		case "extreme":
+			return creditsTexture + creditsTextureUltra, true
+		}
+		return creditsTexture, true
+	case "mesh_segmentation":
+		return creditsSegment, true
+	case "mesh_completion":
+		if t.request["completion_mode"] == "quick_cap" {
+			return creditsQuickCap, true
+		}
+		return creditsComplete, true
+	case "smartsegment_image":
+		// The kind reports smartsegment_image for both pipelines; the task's own type
+		// follows seg_type.
+		if t.typ == "smartsegment_model" {
+			return creditsSmartSegmentModel, true
+		}
+		return creditsSmartSegmentImage, true
+	case "animate_retarget":
+		return float64(creditsRetargetPerAnimation * t.retargetAnimations()), true
 	case "animate_prerigcheck":
 		return 0, true
 	case "animate_rig":

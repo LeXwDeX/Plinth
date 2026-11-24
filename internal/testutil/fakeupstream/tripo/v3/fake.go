@@ -290,6 +290,10 @@ type task struct {
 	// done marks a task whose last poll answered a terminal status. The account
 	// concurrency pool (#468) counts tasks that are not done.
 	done bool
+	// final is that terminal status ("" until a poll answered one): a task that
+	// was never polled to its end has not succeeded from a dependent request's
+	// point of view (Smart Segmentation answers 2007 for it, processing.go).
+	final string
 }
 
 type handler struct {
@@ -636,6 +640,12 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				return
 			}
 		}
+		if isGenerationPath(k.Path) {
+			if refused := generationRequestError(body); refused != nil {
+				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, refused.code, refused.message, "Refer to the API documentation for parameter requirements"))
+				return
+			}
+		}
 		if k.Path == "/generation/multiview-to-model" {
 			if message := multiviewInputsError(body); message != "" {
 				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
@@ -654,6 +664,16 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			message = convertRequestError(body)
 		case "/mesh/decimate":
 			message = decimateRequestError(body)
+		case "/models/texture":
+			message = textureRequestError(body)
+		case "/mesh/segment":
+			message = segmentRequestError(body)
+		case "/mesh/complete":
+			message = completeRequestError(body)
+		case "/mesh/smartsegment":
+			message = smartsegmentRequestError(body)
+		case "/generation/edit-multiview":
+			message = editMultiviewPromptsError(body)
 		}
 		if message != "" {
 			writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
@@ -712,7 +732,11 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		t.model, _ = body["model"].(string)
 		t.format, _ = body["format"].(string)
 		if source, _ := body["input"].(string); k.Path == "/models/convert" {
-			if from := h.urlSource(source); from != nil {
+			from := h.urlSource(source)
+			if from == nil && !isHTTP(source) {
+				from = h.lookup(source) // a task id names the task whose model is converted
+			}
+			if from != nil {
 				t.sourceFidelity, t.sourceTriangles = from.fidelity(), from.modelTriangles()
 			}
 			if isHTTP(source) {
@@ -734,7 +758,7 @@ func (h *handler) create(k kind) http.HandlerFunc {
 		// URL pass through; any other value names a task and must exist, or the official
 		// API answers 2001 (error-handling page: the task does not exist or is not the
 		// caller's; checked docsChecked).
-		if parent, _ := body["input"].(string); parent != "" && k.Path != "/models/convert" {
+		if parent, _ := body["input"].(string); parent != "" {
 			switch {
 			case strings.HasPrefix(parent, "file_"), isHTTP(parent):
 			default:
@@ -747,6 +771,13 @@ func (h *handler) create(k kind) http.HandlerFunc {
 				if !h.acceptsSource(k, source) {
 					writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "Invalid input parameter", "Refer to the API documentation for parameter requirements"))
 					return
+				}
+				if k.Path == "/mesh/smartsegment" {
+					segType, _ := body["seg_type"].(string)
+					if refused := smartSegmentSourceRefusal(segType, source); refused != nil {
+						writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, refused.code, refused.message, "Refer to the API documentation for parameter requirements"))
+						return
+					}
 				}
 				// Observed once (2026-10-29): retargeting a rig built with a v2 rig
 				// model ends "failed", error 1004 "Invalid input parameter". The other
@@ -915,17 +946,23 @@ func (h *handler) lookup(id string) *task {
 	return h.tasks[id]
 }
 
-// acceptsSource refuses a source task that cannot feed the kind: a retarget
-// needs a rig, a rig check or rig needs a generated model, a decimation needs
-// a text, image or multiview generation task (decimate.go).
+// acceptsSource refuses a source task that cannot feed the kind (processing.go, rig.go,
+// decimate.go): a retarget needs a rigged model (the rig or a later task run on it), a
+// rig check, a rig and a conversion take a text, image or multiview generation task, a
+// decimation takes the same three, a completion needs a segmentation task and an edit
+// of a multiview needs an Image to Multiview task. Every other kind takes any task.
 func (h *handler) acceptsSource(k kind, source *task) bool {
 	switch k.Type {
 	case "animate_retarget":
-		return source.kind.Type == "animate_rig"
-	case "animate_rig", "animate_prerigcheck":
-		return source.kind.Type == "text_to_model" || source.kind.Type == "image_to_model"
+		return h.riggedLineage(source)
+	case "animate_rig", "animate_prerigcheck", "convert_model":
+		return isGenerationTaskType(source.kind.Type)
 	case "highpoly_to_lowpoly":
 		return acceptsDecimateSource(source)
+	case "mesh_completion":
+		return source.kind.Type == "mesh_segmentation"
+	case "edit_multiview":
+		return source.kind.Type == "image_to_multiview"
 	}
 	return true
 }
@@ -955,6 +992,7 @@ func (h *handler) getTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if status == statusSuccess || status == statusFailed || status == statusCancelled || status == statusUnknown {
 		t.done = true
+		t.final = status
 	}
 	h.mu.Unlock()
 	writeJSON(w, http.StatusOK, h.pollBody(r, t, status))

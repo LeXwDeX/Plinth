@@ -399,10 +399,15 @@ func TestConvertEchoesItsRequestAndDeliversTheRequestedTexture(t *testing.T) {
 	}
 }
 
-func TestRetargetOfAV2RigFailsLikeTheOfficialAPI(t *testing.T) {
+// A retarget of a rig its preset does not fit ends "failed" with code 1004, the one
+// failure captured on 2026-10-29 (a v2.5 biped rig, then). The rig page now says a v2.5
+// biped rig is rigged as v3.0 (rig.go), so the v1.0 biped rig stands in for the failing
+// pairing, and the v2.5 biped rig takes the preset.
+func TestRetargetOfARigThePresetDoesNotFitFailsLikeTheOfficialAPI(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	gen := f.create("/generation/text-to-model", textBody(), key)
-	rig := f.create("/animations/rig", map[string]any{"input": gen, "model": "v2.5-20260210"}, key)
+	f.finish(gen, key)
+	rig := f.create("/animations/rig", map[string]any{"input": gen, "model": rigModelV1}, key)
 	f.finish(rig, key)
 	retarget := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, key)
 	statuses, body := f.finish(retarget, key)
@@ -525,6 +530,7 @@ func TestEveryKindCreatesATaskOfItsTypeAndDeliversItsFiles(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	source := f.create("/generation/text-to-model", textBody(), key)
 	f.finish(source, key)
+	multiviewSource := f.imageMultiview()
 	for _, tc := range []struct {
 		path, typ string
 		body      map[string]any
@@ -536,7 +542,7 @@ func TestEveryKindCreatesATaskOfItsTypeAndDeliversItsFiles(t *testing.T) {
 		{"/generation/image-to-splat", "image_to_splat", map[string]any{"input": "file_x", "model_seed": 42},
 			[]delivery{{[]any{"model_url"}, "gaussian-splat", "splat", "application/vnd.art-ai.gaussian-splat"}}},
 		{"/generation/image-to-multiview", "image_to_multiview", map[string]any{"input": "file_x"}, multiviewChecks("front", "left", "back", "right")},
-		{"/generation/edit-multiview", "edit_multiview", map[string]any{"input": source, "prompts": []map[string]any{{"view": "front", "prompt": "green"}}},
+		{"/generation/edit-multiview", "edit_multiview", map[string]any{"input": multiviewSource, "prompts": []map[string]any{{"view": "front", "prompt": "green"}}},
 			multiviewChecks("front")},
 		{"/models/texture", "texture_model", map[string]any{"input": source, "model": "v3.5-20260815"},
 			[]delivery{{[]any{"model_url"}, "model", "glb", "model/gltf-binary"}}},
@@ -544,7 +550,7 @@ func TestEveryKindCreatesATaskOfItsTypeAndDeliversItsFiles(t *testing.T) {
 			[]delivery{{[]any{"model_url"}, "model", "glb", "model/gltf-binary"}}},
 		{"/mesh/smartsegment", "smartsegment_image", map[string]any{"input": "file_x", "seg_type": "image"},
 			[]delivery{{[]any{"seg_model_url"}, "model", "glb", "model/gltf-binary"}, {[]any{"mask_url"}, "image", "", "image/png"}}},
-		{"/mesh/smartsegment", "smartsegment_model", map[string]any{"input": "file_x", "seg_type": "model"},
+		{"/mesh/smartsegment", "smartsegment_model", map[string]any{"input": "file_x", "seg_type": "model", "transform": identity()},
 			[]delivery{{[]any{"seg_model_url"}, "model", "glb", "model/gltf-binary"}}},
 	} {
 		id := f.create(tc.path, tc.body, key)
@@ -713,7 +719,7 @@ func TestFaultScenarios(t *testing.T) {
 	})
 	t.Run("lost response keeps the task", func(t *testing.T) {
 		f := newFixture(t, short)
-		request, _ := http.NewRequest(http.MethodPost, f.base()+"/generation/text-to-model", strings.NewReader(`{"model":"m","prompt":"p"}`))
+		request, _ := http.NewRequest(http.MethodPost, f.base()+"/generation/text-to-model", strings.NewReader(`{"model":"v3.1-20260211","prompt":"p"}`))
 		request.Header.Set("Authorization", "Bearer "+key)
 		request.Header.Set("X-Fake-Scenario", "lost-response")
 		if response, err := http.DefaultClient.Do(request); err == nil {
