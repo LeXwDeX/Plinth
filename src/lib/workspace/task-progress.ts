@@ -70,3 +70,46 @@ export function chatTaskCards(
 export function elapsedClockNeeded(part: 'running' | 'failed', cards: ChatTaskCards): boolean {
   return part === 'running' && cards.running.length > 0;
 }
+
+/**
+ * The tasks the compact float counts together: every task of the session seen running since the last moment none
+ * ran. Parallel tasks started in one turn (or while others still run) form one batch; once all of them have ended
+ * the batch is empty again and the next task starts a new one. Returns `previous` itself when nothing was added.
+ */
+export function nextTaskBatch(previous: ReadonlySet<string>, running: readonly Pick<TrackedTask, 'taskId'>[]): ReadonlySet<string> {
+  if (running.length === 0) return previous.size === 0 ? previous : new Set();
+  if (running.every((task) => previous.has(task.taskId))) return previous;
+  const next = new Set(previous);
+  for (const task of running) next.add(task.taskId);
+  return next;
+}
+
+export interface TaskBatchProgress {
+  /** Tasks of the batch that are no longer running (finished, failed or gone). */
+  done: number;
+  total: number;
+  /** The batch as a whole, 0..100: an ended task counts as complete, a running one by its own percent. */
+  percent: number;
+}
+
+/** "x/y" of the float (ended over all) and its overall bar. */
+export function taskBatchProgress(
+  batch: ReadonlySet<string>,
+  running: readonly Pick<TrackedTask, 'taskId' | 'progress' | 'progressMaximum'>[],
+  defaultMaximum: number,
+): TaskBatchProgress {
+  const ids = new Set([...batch, ...running.map((task) => task.taskId)]);
+  const total = ids.size;
+  if (total === 0) return { done: 0, total: 0, percent: 0 };
+  const done = total - running.length;
+  const runningPercent = running.reduce((sum, task) => sum + progressPercent(task, defaultMaximum), 0);
+  return { done, total, percent: Math.round((done * 100 + runningPercent) / total) };
+}
+
+/**
+ * #546: the conversation shows one expression of progress at a time. The "generating" status bubble is only for a
+ * turn that is still thinking while no task runs; once a task runs, the task block in the conversation says it.
+ */
+export function statusBubbleShown(streaming: boolean, statusText: string, runningTasks: number): boolean {
+  return streaming && statusText !== '' && runningTasks === 0;
+}

@@ -243,16 +243,16 @@ describe('the conversation is read a page at a time', () => {
     expect(column).toMatch(/changeKey: \[\s*lastDisplayed\?\.id \?\? '', threeViews\.length/);
   });
 
-  it('pins status and floating-card height changes without animating them (#177)', () => {
+  it('pins status changes without animating them, and follows the task block in the list (#177, #546)', () => {
     const keys = column.match(/changeKey: \[[^;]*?\]\.join/)?.[0] ?? '';
     expect(keys).not.toContain('statusText');
     // Streamed text grows the last message without a new id; the end follows it instead of catching up once.
     expect(keys).toContain('streamBuf?.textContent.length ?? 0');
     expect(keys).toContain('streamBuf?.images.length ?? 0');
     expect(column).toContain('pinKey: statusText,');
-    // The floating task cards set the list's bottom padding, so their measured height re-pins in layout.
-    expect(column).toContain('lastFloatingHeight.current === floatingHeight');
-    expect(column).toContain('keepPinned();');
+    // #546: no floating task cards any more; the task block is in the list and a task starting or ending moves the end.
+    expect(column).not.toContain('floatingHeight');
+    expect(keys).toContain('runningTaskCount');
   });
 
   it('swaps the stored turn in before ending the live buffer (#177)', () => {

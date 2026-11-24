@@ -1,5 +1,7 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { cleanup, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../../internal/catalog/default_catalog.json';
@@ -24,6 +26,8 @@ vi.mock('@/store/workspace-store', () => ({
 }));
 
 import { TaskStatusCards } from './task-status-cards';
+import { PaidStepNotes } from '@/components/chat/paid-step-notes';
+import { roundCreditsText, stepCreditsText } from '@/lib/chat/approval-modes';
 
 const running = (extra: Partial<TrackedTask> = {}): TrackedTask => ({
   taskId: 't1', sessionId: 's1', capability: 'text-to-3d', prompt: 'castle', state: 'RUNNING', progress: 0, progressMaximum: 100,
@@ -33,6 +37,7 @@ const running = (extra: Partial<TrackedTask> = {}): TrackedTask => ({
 
 beforeEach(() => {
   state.tracked = [];
+  cleanup();
 });
 
 describe('TaskStatusCards', () => {
@@ -61,5 +66,69 @@ describe('TaskStatusCards', () => {
     const html = renderToStaticMarkup(<TaskStatusCards part="running" />);
     expect(html).toContain('data-testid="chat-task-progress"');
     expect(html).not.toContain('chat-task-queue-notice');
+  });
+
+  it('draws one light block: a single heading with the batch count, one thin bar per running task (#546)', () => {
+    state.tracked = ['a', 'b', 'c'].map((taskId, index) => running({ taskId, capability: 'text-to-image', progress: [0, 50, 90][index] }));
+    const html = renderToStaticMarkup(<TaskStatusCards part="running" />);
+    expect(html.match(/data-testid="chat-task-batch-title"/g)).toHaveLength(1);
+    expect(html).toContain(formatSchemaText(schema.content.messages['ui.studio.task.batch_title'], { done: 0, total: 3 }));
+    expect(html.match(/role="progressbar"/g)).toHaveLength(3);
+    for (const value of [0, 50, 90]) expect(html).toContain(`aria-valuenow="${value}"`);
+    // No card frame, no spinner, no floating layer.
+    expect(html).not.toContain('<article');
+    expect(html).not.toMatch(/animate-spin|absolute|fixed|sticky|shadow-md|border-border/);
+  });
+
+  it('folds an ended task of the batch into one line of text, with no bar', () => {
+    const failure = { failureClass: 'provider', detail: '' } as unknown as TrackedTask['failure'];
+    state.tracked = [running({ taskId: 'a' }), running({ taskId: 'b' }), running({ taskId: 'c' })];
+    const view = render(<TaskStatusCards part="running" />);
+    // All three seen running (one batch); then one succeeds and one fails.
+    state.tracked = [running({ taskId: 'a', state: 'SUCCEEDED', terminal: true, progress: 100 }), running({ taskId: 'b' }), running({ taskId: 'c', state: 'FAILED', terminal: true, failure })];
+    view.rerender(<TaskStatusCards part="running" />);
+    const html = view.container.innerHTML;
+    expect(html).toContain(formatSchemaText(schema.content.messages['ui.studio.task.batch_title'], { done: 2, total: 3 }));
+    expect(html.match(/data-testid="chat-task-ended"/g)).toHaveLength(2);
+    expect(html.match(/role="progressbar"/g)).toHaveLength(1);
+    expect(html).toContain('data-testid="chat-task-ended"');
+    expect(html).toContain(formatSchemaText(schema.content.messages['ui.studio.task.batch_ended'], {
+      capability: schema.capabilities.find((item) => item.id === 'text-to-3d')?.label_cn ?? '',
+      result: schema.task_states.find((item) => item.internal_state === 'SUCCEEDED')?.label ?? '',
+    }));
+  });
+
+  it('shows the queue reason in place of the bar while the provider holds the task', () => {
+    state.tracked = [running({ queueNotice: { reason: 'upstream_queued', detail: '上游排队中' } })];
+    const html = renderToStaticMarkup(<TaskStatusCards part="running" />);
+    expect(html).toContain('>上游排队中<');
+    expect(html).not.toContain('role="progressbar"');
+  });
+
+  it('renders nothing while no task runs', () => {
+    state.tracked = [running({ state: 'SUCCEEDED', terminal: true })];
+    expect(renderToStaticMarkup(<TaskStatusCards part="running" />)).toBe('');
+  });
+
+  it('with three parallel tasks and their credits, shows one heading, one count, no spinner and one credit line', () => {
+    state.tracked = ['a', 'b', 'c'].map((taskId) => running({ taskId }));
+    const html = renderToStaticMarkup(
+      <>
+        <TaskStatusCards part="running" />
+        <PaidStepNotes
+          steps={['a', 'b', 'c'].map((taskId) => ({ taskId, credits: 6, approvedByPolicy: true }))}
+          creditsText={(credits) => stepCreditsText(schema, credits)}
+          roundCreditsText={(credits, steps) => roundCreditsText(schema, credits, steps)}
+          autoApprovedText={schema.content.messages['ui.workspace.approval.auto_approved_note']}
+        />
+      </>,
+    );
+    expect(html.match(/data-testid="chat-task-batch-title"/g)).toHaveLength(1);
+    expect(html.match(/0\/3/g)).toHaveLength(1);
+    expect(html).not.toMatch(/animate-spin|chat-status-bubble/);
+    expect(html.match(/data-testid="paid-step-round"/g)).toHaveLength(1);
+    expect(html).not.toContain(stepCreditsText(schema, 6));
+    // The task block comes first, the credit line under it.
+    expect(html.indexOf('chat-task-running')).toBeLessThan(html.indexOf('paid-step-notes'));
   });
 });
