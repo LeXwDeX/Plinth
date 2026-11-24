@@ -36,7 +36,11 @@ func TestScanTextReportsTheRuleAndThePathNeverTheValue(t *testing.T) {
 			}
 		}
 	}
-	for _, clean := range []string{"", "SUCCEEDED", "[redacted]", "id-12", "unsupported-body", "meshy-5", "example.test"} {
+	for _, clean := range []string{"", "SUCCEEDED", "[redacted]", "id-12", "unsupported-body", "meshy-5", "example.test",
+		// A decimal is not the legacy IP shorthand: "10.00" reads as 10.0.0.0
+		// if the two-part form is accepted, and a credit amount is ordinary
+		// sanitized content.
+		`"credits_consumed": 10.00`, "version 11.10"} {
 		if findings := privacyscan.ScanText("f", "$", "status", clean); len(findings) != 0 {
 			t.Errorf("clean text %q flagged: %v", clean, findings)
 		}
