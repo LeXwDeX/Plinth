@@ -82,11 +82,16 @@ same HTTP API the browser uses:
     bytes are the pre-#461 ones).
 
 Usage: python3 scripts/smoke/smoke-fake-stack.py [--only NAME[,NAME]] [--keep] [--work DIR]
-(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, tripo, p2, project, agent, agent-background,
+(NAME: balance, chain, meshy, hyper3d, hyper3d-agent, images, matting-faults, model-parts, model-convert, tripo, p2, project, agent, agent-background,
 agent-quality, image-self-check, image-purpose, next-step, self-check, offering-knowledge, work-ledger, vision-budget, visual-anchors, plan-checkpoint, preferences, mcp, asset-list, asset-list-crops, asset-list-run, asset-list-review, auto-completion, faults;
 "mcp" runs the external MCP listener's generation loop on the main stack (access key, upload, image-to-3D, the twelve
 files, keyed and signed downloads, inspect_model, remesh); the listener binds loopback port 19413
 (FAKE_STACK_MCP_PORT) and the run still proves zero real upstream requests;
+"model-convert" the free local conversions of a static model (no upstream): an uploaded GLB through
+local/static-glb/to-gltf and that Task through local/static-gltf/to-glb, the round trip keeping the triangles,
+nodes and meshes, and a file that is not a GLB creating no Task;
+"model-parts" the free local split (by node and by connected component, with the parts manifest) and merge of a
+model's parts (no upstream), and a merge of a single model refused before any Task exists;
 "matting-faults" the #301 matting fault paths chosen by the uploaded pictures themselves (the only way a deployed
 stack reaches them): #284's notice naming the pictures that were not matted, #299's out-of-memory batch as a
 partial success and as a capacity failure, and an unmarked batch (scripts/smoke/fake_faults.py,
@@ -185,6 +190,12 @@ MESHY_RIGGING = "meshy/processing/rigging"
 MESHY_ANIMATION = "meshy/processing/animation"
 # The free automatic route of #461: the platform's own GLB -> glTF package.
 LOCAL_GENERATED_GLB_TO_GLTF = "local/generated-glb/to-gltf"
+# The free local processing Offerings (no upstream): GLB <-> glTF of a static model and the
+# split/merge of a model's parts.
+LOCAL_STATIC_GLB_TO_GLTF = "local/static-glb/to-gltf"
+LOCAL_STATIC_GLTF_TO_GLB = "local/static-gltf/to-glb"
+LOCAL_MODEL_SPLIT = "local/model-parts/split"
+LOCAL_MODEL_MERGE = "local/model-parts/merge"
 # The fake's image-to-3D answer (#332): six model formats (glb, obj, fbx, stl,
 # usdz, 3mf), the textured OBJ's MTL, four PBR maps (base_color, metallic,
 # normal, roughness) and one thumbnail.
@@ -1183,6 +1194,208 @@ def scenario_matting_faults(api, offerings):
         return
     fake_faults.run(api, record)
 
+
+def make_static_glb(parts):
+    """A valid static GLB 2.0 built here, byte by byte, with no imaging or glTF library: one
+    node and one mesh per part, each a single indexed triangle of the same size laid out side
+    by side along X (so the parts are disjoint in space too), each with its own base-color
+    material. `parts` is a list of (name, rgba); positions carry the exact min/max the
+    platform's model input check requires. Returns the file's bytes."""
+    binary = bytearray()
+    views, accessors, meshes, nodes, materials = [], [], [], [], []
+    for index, (name, rgba) in enumerate(parts):
+        positions = struct.pack("<9f", index * 2.0, 0.0, 0.0, index * 2.0 + 1.0, 0.0, 0.0, index * 2.0, 1.0, 0.0)
+        views.append({"buffer": 0, "byteOffset": len(binary), "byteLength": len(positions), "target": 34962})
+        binary += positions
+        accessors.append({"bufferView": len(views) - 1, "componentType": 5126, "count": 3, "type": "VEC3",
+                          "min": [index * 2.0, 0.0, 0.0], "max": [index * 2.0 + 1.0, 1.0, 0.0]})
+        indices = struct.pack("<3H", 0, 1, 2) + b"\x00\x00"
+        views.append({"buffer": 0, "byteOffset": len(binary), "byteLength": 6, "target": 34963})
+        binary += indices
+        accessors.append({"bufferView": len(views) - 1, "componentType": 5123, "count": 3, "type": "SCALAR"})
+        materials.append({"name": f"{name}-material", "pbrMetallicRoughness": {"baseColorFactor": list(rgba)}})
+        meshes.append({"name": name, "primitives": [{"attributes": {"POSITION": len(accessors) - 2},
+                                                      "indices": len(accessors) - 1, "material": index, "mode": 4}]})
+        nodes.append({"name": name, "mesh": index})
+    document = {"asset": {"version": "2.0", "generator": "smoke-fake-stack"}, "scene": 0,
+                "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes, "meshes": meshes,
+                "materials": materials, "bufferViews": views, "accessors": accessors,
+                "buffers": [{"byteLength": len(binary)}]}
+    text = json.dumps(document, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)
+    binary += b"\x00" * (-len(binary) % 4)
+    total = 12 + 8 + len(text) + 8 + len(binary)
+    return (struct.pack("<4sII", b"glTF", 2, total) + struct.pack("<I4s", len(text), b"JSON") + text
+            + struct.pack("<I4s", len(binary), b"BIN\x00") + bytes(binary))
+
+
+def glb_document(data):
+    """The JSON chunk of a GLB 2.0, or None when the bytes are not one."""
+    if len(data) < 20 or data[:4] != b"glTF" or struct.unpack_from("<I", data, 4)[0] != 2:
+        return None
+    length, kind = struct.unpack_from("<I4s", data, 12)
+    return json.loads(data[20:20 + length]) if kind == b"JSON" else None
+
+
+def model_shape(document):
+    """(triangles, node names, mesh count) of a glTF document: the facts a lossless conversion,
+    a split and a merge must each account for."""
+    triangles = 0
+    for mesh in document.get("meshes", []):
+        for primitive in mesh.get("primitives", []):
+            if primitive.get("mode", 4) == 4:
+                accessor = primitive.get("indices", primitive["attributes"]["POSITION"])
+                triangles += document["accessors"][accessor]["count"] // 3
+    return triangles, sorted(node.get("name", "") for node in document.get("nodes", [])), len(document.get("meshes", []))
+
+
+def task_asset(task, role, variant):
+    return next((a for a in (task or {}).get("assets") or [] if a.get("role") == role and a.get("variant") == variant), None)
+
+
+def fetch_asset(api, task, role, variant):
+    """The bytes of a Task's asset read back through the stack, or None."""
+    asset = task_asset(task, role, variant)
+    if not asset:
+        return None
+    status, raw, _headers = api.call("GET", asset["url"])
+    return raw if status == 200 else None
+
+
+def scenario_model_convert(api, offerings):
+    """The free local GLB <-> glTF conversions of a static model (no upstream is involved): an
+    uploaded GLB becomes a glTF through local/static-glb/to-gltf, and that Task is the source of
+    local/static-gltf/to-glb, which returns a GLB with the same triangles, nodes and meshes. Each
+    Task's delivery is checked (size, SHA-256, sandboxed headers); a source that is not a GLB is
+    refused before any Task exists."""
+    missing = [o for o in (LOCAL_STATIC_GLB_TO_GLTF, LOCAL_STATIC_GLTF_TO_GLB) if o not in offerings]
+    if missing:
+        record("model-convert: the local conversion Offerings are registered", False, f"not in the public Offerings: {missing}")
+        return
+    session = new_session(api)
+    source = make_static_glb([("body", (0.8, 0.2, 0.2, 1.0)), ("head", (0.2, 0.2, 0.8, 1.0))])
+    want = model_shape(glb_document(source))
+    asset = upload_asset(api, "static.glb", source, "model/gltf-binary")
+    if not asset:
+        record("model-convert: upload the static GLB", False, "the library refused the file")
+        return
+    gltf_task = run_step(api, offerings, "local static-glb to-gltf", LOCAL_STATIC_GLB_TO_GLTF, "format-conversion",
+                         payload_for(offerings[LOCAL_STATIC_GLB_TO_GLTF], {"source_asset": asset}), session)
+    if not gltf_task or gltf_task.get("state") != "SUCCEEDED":
+        return
+    raw = fetch_asset(api, gltf_task, "model", "gltf")
+    try:
+        document = json.loads(raw) if raw else None
+    except ValueError:
+        document = None
+    got = model_shape(document) if document else None
+    record("local static-glb to-gltf: the glTF keeps the triangles, nodes and meshes", got == want, f"glTF {got}, source {want}")
+    glb_task = run_step(api, offerings, "local static-gltf to-glb", LOCAL_STATIC_GLTF_TO_GLB, "format-conversion",
+                        payload_for(offerings[LOCAL_STATIC_GLTF_TO_GLB], {"source_task": gltf_task["id"]}), session)
+    if glb_task and glb_task.get("state") == "SUCCEEDED":
+        back = fetch_asset(api, glb_task, "model", "glb")
+        document = glb_document(back) if back else None
+        got = model_shape(document) if document else None
+        record("local static-gltf to-glb: the round trip returns a GLB with the same triangles, nodes and meshes",
+               got == want, f"GLB {got}, source {want}")
+    # A file that is not a GLB is refused up front: the Offering needs a model, so no Task is created.
+    garbage = upload_asset(api, "garbage.glb", b"this is not a glb", "model/gltf-binary")
+    if garbage:
+        task_id, why = submit(api, LOCAL_STATIC_GLB_TO_GLTF, "format-conversion",
+                              payload_for(offerings[LOCAL_STATIC_GLB_TO_GLTF], {"source_asset": garbage}), session)
+        record("local static-glb to-gltf: a file that is not a GLB creates no Task", task_id is None, why[:160] or "a Task was created")
+    else:
+        record("local static-glb to-gltf: a file that is not a GLB creates no Task", True, "the library upload itself refused the file")
+
+
+def task_glb_in_session(api, offerings, session, label, data):
+    """A GLB that is a Task's model output in `session`. The parts Offerings read only such files (the
+    same owner and chat session), not a library upload, so the fixture goes through the free
+    conversions once: GLB -> glTF -> GLB. Returns the output's asset id, or None."""
+    asset = upload_asset(api, f"{label}.glb", data, "model/gltf-binary")
+    if not asset:
+        record(f"model-parts source {label}: upload", False, "the library refused the file")
+        return None
+    gltf = run_step(api, offerings, f"model-parts source {label}: to-gltf", LOCAL_STATIC_GLB_TO_GLTF, "format-conversion",
+                    payload_for(offerings[LOCAL_STATIC_GLB_TO_GLTF], {"source_asset": asset}), session)
+    if not gltf or gltf.get("state") != "SUCCEEDED":
+        return None
+    glb = run_step(api, offerings, f"model-parts source {label}: to-glb", LOCAL_STATIC_GLTF_TO_GLB, "format-conversion",
+                   payload_for(offerings[LOCAL_STATIC_GLTF_TO_GLB], {"source_task": gltf["id"]}), session)
+    model = task_asset(glb, "model", "glb")
+    return (model or {}).get("id")
+
+
+def scenario_model_parts(api, offerings):
+    """The free local split and merge of a model's parts (no upstream is involved): a three-part model is
+    split by node and by connected component, each Task delivering one GLB per part and a parts manifest
+    that names every part with its triangles, and two models are merged into one whose triangles are the
+    sum of its sources. The sources are Task outputs of the session (see task_glb_in_session). A merge of
+    a single model is refused before any Task exists."""
+    wanted = (LOCAL_MODEL_SPLIT, LOCAL_MODEL_MERGE, LOCAL_STATIC_GLB_TO_GLTF, LOCAL_STATIC_GLTF_TO_GLB)
+    missing = [o for o in wanted if o not in offerings]
+    if missing:
+        record("model-parts: the local parts Offerings are registered", False, f"not in the public Offerings: {missing}")
+        return
+    session = new_session(api)
+    names = ["arm", "leg", "torso"]
+    source_three = task_glb_in_session(api, offerings, session, "three", make_static_glb([(name, (0.5, 0.5, 0.5, 1.0)) for name in names]))
+    source_two = task_glb_in_session(api, offerings, session, "two", make_static_glb([("hat", (0.1, 0.9, 0.1, 1.0)), ("cape", (0.9, 0.1, 0.9, 1.0))]))
+    if not source_three or not source_two:
+        record("model-parts: both source models are Task outputs of the session", False, f"three-part {source_three}, two-part {source_two}")
+        return
+    for mode in ("node", "connected_component"):
+        task = run_step(api, offerings, f"local model-parts split ({mode})", LOCAL_MODEL_SPLIT, "model-split",
+                        payload_for(offerings[LOCAL_MODEL_SPLIT], {"source_asset": source_three, "mode": mode}), session)
+        if not task or task.get("state") != "SUCCEEDED":
+            continue
+        raw = fetch_asset(api, task, "parts_manifest", "json")
+        try:
+            manifest = json.loads(raw) if raw else {}
+        except ValueError:
+            manifest = {}
+        parts = manifest.get("parts") or []
+        problems = []
+        if manifest.get("mode") != mode:
+            problems.append(f"mode {manifest.get('mode')}")
+        if len(parts) != len(names):
+            problems.append(f"{len(parts)} parts, want {len(names)}")
+        if [part.get("ordinal") for part in parts] != list(range(1, len(parts) + 1)):
+            problems.append("ordinals are not 1..n")
+        if any(part.get("triangles") != 1 for part in parts):
+            problems.append(f"triangles {[part.get('triangles') for part in parts]}")
+        if mode == "node":
+            nodes = sorted(node for part in parts for node in (part.get("source") or {}).get("nodes") or [])
+            if nodes != sorted(names):
+                problems.append(f"source nodes {nodes}")
+        # Every part is its own GLB (one model/glb asset per part) beside the manifest: each carries one
+        # triangle and the part's name, so the manifest and the files describe the same parts.
+        shapes = []
+        for asset in (a for a in task.get("assets") or [] if a.get("role") == "model" and a.get("variant") == "glb"):
+            status, body, _headers = api.call("GET", asset["url"])
+            document = glb_document(body) if status == 200 else None
+            shapes.append(model_shape(document) if document else None)
+        if len(shapes) != len(parts) or any(shape is None or shape[0] != 1 for shape in shapes):
+            problems.append(f"{len(shapes)} part GLBs {shapes}, want {len(parts)} of one triangle each")
+        else:
+            carried = {name for shape in shapes for name in shape[1]}
+            missing_names = [part.get("name") for part in parts if part.get("name") not in carried]
+            if missing_names:
+                problems.append(f"the manifest names {missing_names}, no part GLB carries them")
+        record(f"local model-parts split ({mode}): the manifest names every part and each part is its own GLB",
+               not problems, "; ".join(problems) or f"{len(parts)} parts, manifest and files agree")
+    merged = run_step(api, offerings, "local model-parts merge (two models)", LOCAL_MODEL_MERGE, "model-merge",
+                      payload_for(offerings[LOCAL_MODEL_MERGE], {"source_assets": [source_three, source_two]}), session)
+    if merged and merged.get("state") == "SUCCEEDED":
+        raw = fetch_asset(api, merged, "model", "glb")
+        document = glb_document(raw) if raw else None
+        got = model_shape(document) if document else None
+        want = 5  # three triangles and two
+        record("local model-parts merge: the GLB carries both sources' triangles",
+               bool(got) and got[0] == want, f"merged {got}, want {want} triangles")
+    task_id, why = submit(api, LOCAL_MODEL_MERGE, "model-merge",
+                          payload_for(offerings[LOCAL_MODEL_MERGE], {"source_assets": [source_three]}), session)
+    record("local model-parts merge: a single model is refused and creates no Task", task_id is None, why[:160] or "a Task was created")
 
 def mcp_wait_task(mcp, task_id, seconds=90):
     """Poll get_task with the listener's suggested interval (or five seconds)
@@ -8474,7 +8687,7 @@ def scenario_auto_completion(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -8484,7 +8697,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="keep the work directory")
     parser.add_argument("--report", default="", help="directory for the #238 agent-quality report (default: a temporary one)")
     args = parser.parse_args()
-    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults"}
+    selected = set(filter(None, args.only.split(","))) or {"balance", "chain", "meshy", "hyper3d", "images", "matting-faults", "model-parts", "model-convert", "tripo", "p2", "agent", "agent-background", "three-view", "next-step", "mcp", "asset-list", "asset-list-crops", "asset-list-run", "asset-list-review", "auto-completion", "faults"}
     work = args.work or tempfile.mkdtemp(prefix="fake-stack-")
     os.makedirs(work, exist_ok=True)
     processes = Processes()
@@ -8500,7 +8713,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -8515,6 +8728,10 @@ def main():
                 scenario_images(api, offerings)
             if "matting-faults" in selected:
                 scenario_matting_faults(api, offerings)
+            if "model-parts" in selected:
+                scenario_model_parts(api, offerings)
+            if "model-convert" in selected:
+                scenario_model_convert(api, offerings)
             if "tripo" in selected:
                 scenario_tripo_images(api, offerings)
             if "p2" in selected:
