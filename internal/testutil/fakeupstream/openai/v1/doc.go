@@ -23,7 +23,12 @@
 // OpenAPI and the error-code guide
 // (https://developers.openai.com/api/docs/guides/error-codes, checked
 // 2026-11-08): invalid-key 401, forbidden 403, model-not-found 404,
-// service-unavailable 503, quota-exceeded 429 and a streamed error frame.
+// service-unavailable 503, quota-exceeded 429 and a streamed error frame. Two
+// more stream faults (#509) are constructed from the streaming contract (every
+// choice ends with a finish_reason chunk, the stream with data: [DONE]): a
+// stream closed cleanly before its last chunk (StreamCutMarker) and a
+// streaming request answered with the plain completion object
+// (StreamPlainMarker).
 //
 // Model constraints (#401, constraints.go) are not scenarios: a request that
 // names gpt-astra or gpt-6.2-astra is judged by that model's rules on every

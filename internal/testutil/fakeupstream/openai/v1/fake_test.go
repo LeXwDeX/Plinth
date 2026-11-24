@@ -596,6 +596,37 @@ func TestStreamedErrorFrame(t *testing.T) {
 	}
 }
 
+// #509: StreamCutMarker ends a started stream cleanly with neither a
+// finish_reason nor [DONE]; StreamPlainMarker answers a streaming request with
+// the plain completion object.
+func TestStreamCutAndPlainAnswers(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	response, raw := f.send("POST", "/chat/completions", "k", map[string]any{
+		"model": "deepseek", "messages": user("hi " + StreamCutMarker), "stream": true,
+	})
+	chunks, done := sseEvents(t, raw)
+	if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") || done {
+		t.Fatalf("cut: %d %q done=%t", response.StatusCode, response.Header.Get("Content-Type"), done)
+	}
+	if len(chunks) != 2 || dig(t, chunks[1], "choices", 0, "delta", "content") != StreamCutPart {
+		t.Fatalf("cut chunks: %v", chunks)
+	}
+	for _, chunk := range chunks {
+		if finish := dig(t, chunk, "choices", 0, "finish_reason"); finish != nil {
+			t.Fatalf("cut stream carries finish_reason %v", finish)
+		}
+	}
+	response, raw = f.send("POST", "/chat/completions", "k", map[string]any{
+		"model": "deepseek", "messages": user("hi " + StreamPlainMarker), "stream": true,
+	})
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil || response.StatusCode != http.StatusOK ||
+		!strings.HasPrefix(response.Header.Get("Content-Type"), "application/json") ||
+		dig(t, body, "choices", 0, "message", "content") != FixedReply {
+		t.Fatalf("plain: %d %q %s", response.StatusCode, response.Header.Get("Content-Type"), raw)
+	}
+}
+
 func TestFaultScenarios(t *testing.T) {
 	short := fakeupstream.Config{TimeoutHold: 50 * time.Millisecond}
 	chat := func(f *fixture, scenario string) (*http.Response, map[string]any) {

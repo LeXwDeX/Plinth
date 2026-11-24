@@ -43,6 +43,25 @@ const (
 // fake-only request convention.
 const StreamErrorMarker = "[[fake:stream-error]]"
 
+// StreamCutMarker in the last message of a streaming request makes the fake
+// answer HTTP 200, stream the opening role chunk and the first part of the
+// reply, and then end the response cleanly without a finish_reason and without
+// [DONE]: a stream a proxy or the upstream closed before its last chunk (#509).
+// The official stream ends every choice with a chunk that carries its
+// finish_reason and the stream with data: [DONE]; this one has neither, so a
+// client cannot tell it apart from a complete answer by the transport alone.
+// A fake-only request convention, like StreamErrorMarker.
+const StreamCutMarker = "[[fake:stream-cut]]"
+
+// StreamPlainMarker in the last message of a streaming request makes the fake
+// answer HTTP 200 with the non-streamed completion object (application/json)
+// instead of an SSE stream, as a gateway that ignores stream=true does (#509).
+// A fake-only request convention.
+const StreamPlainMarker = "[[fake:stream-plain]]"
+
+// StreamCutPart is the part of FixedReply a cut stream sends before it ends.
+const StreamCutPart = "Fake upstream"
+
 // ToolMarkerPrefix triggers a tool call: a request that offers tools and whose
 // last message is a user message containing [[fake:tool:NAME {json args}]] is
 // answered with a call of the tool NAME. The JSON object is scanned by balanced
@@ -206,7 +225,7 @@ var endpoints = []fakeupstream.Endpoint{
 		Note: "the model list and the gateway's text/plain 401 are real samples; the invalid-key 401 ErrorResponse is a constructed-from-docs answer built from the OpenAPI ErrorResponse and the error-code guide (" + docsCheckedAt + ")"},
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: "https://platform.openai.com/docs/api-reference/chat/create", CheckedAt: "2026-10-29",
-		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame; the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go). Model constraints (#401, constraints.go): a request for gpt-astra or gpt-6.2-astra is judged by that model's rules and refused with a 400 invalid_request_error before any completion runs; the tools and temperature refusals are observed from the gateway's logs of 2026-11-20 (no committed sample), the reasoning_effort none refusal is constructed from the OpenAI documents checked the same day"},
+		Note: "non-streaming, SSE streaming, tool_calls, reasoning_content and the model_required error are all real samples. The fault scenarios are constructed-from-docs answers (no committed sample) built from the OpenAPI and " + docsErrors + " (" + docsCheckedAt + "): invalid-key 401 ErrorResponse, forbidden 403 (text/plain JSON error text), model-not-found 404, service-unavailable 503 with Retry-After, quota-exceeded 429 with error.quota, and " + StreamErrorMarker + " ending a started stream with an error frame, " + StreamCutMarker + " ending a started stream cleanly before any finish_reason or [DONE] and " + StreamPlainMarker + " answering a streaming request with the plain completion object (#509); the messages 400 follows the request schema's required/minItems 1. The gateway error envelope lacks the official param and carries path instead (see doc.go). Model constraints (#401, constraints.go): a request for gpt-astra or gpt-6.2-astra is judged by that model's rules and refused with a 400 invalid_request_error before any completion runs; the tools and temperature refusals are observed from the gateway's logs of 2026-11-20 (no committed sample), the reasoning_effort none refusal is constructed from the OpenAI documents checked the same day"},
 	{Method: "POST", Path: "/responses", Evidence: fakeupstream.EvidenceConstructed,
 		DocURL: "https://platform.openai.com/docs/api-reference/responses/create", CheckedAt: "2026-11-20",
 		Note: "the Responses API (#401). Aligned to two real probes of the gateway on 2026-11-20 whose sanitized excerpt is testdata/responses-2026-11-20.sample.json. Observed and in the sample: the streamed tool call, text answer and two parallel calls (event order, field set, the event: line), a reasoning item at effort xhigh (its added and done events, the three different encrypted_content values of added, done and completed, no status, no summary event without a requested summary), an input_image part, the non-stream response, a tool schema with strict false and an optional property, a function_call without id or status under a rewritten call_id, the replay of the reasoning item without its id and a round without any reasoning item (both accepted), and the 400s byte for byte: temperature on gpt-astra, an unknown reasoning.effort, none and minimal (refused as unsupported values, naming the dated snapshot gpt-6.2-astra-2026-11-17), a function_call_output with no function_call and a function_call with no output (no code member). Kept constructed, not real, because the probes are not wirefixture candidates (the capture pipeline cannot record SSE with event: lines and no [DONE], so the sample is hand-sanitized, and its provenance says which parts were completed from the non-stream response) and because some behavior has no sample: response.incomplete, response.failed, the in-stream error event, response.refusal.delta, the reasoning summary events, a stream line over the bound, and the 400 for a reasoning item with no following item. Fake-only request conventions: the chat ones plus " + ReasoningMarker + ", " + IncompleteMarker + ", " + FailedMarker + " and " + UnknownEventMarker + ". The 2026-11-20 live window ended this route with the gateway's HTTP 429 daily model-group quota (testdata/openai-v1-quota-2026-11-20.candidate.json: error.code and error.type quota_exceeded plus the nested quota object), which is the envelope the quota-exceeded scenario answers and a test holds it to"},
@@ -802,6 +821,12 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 		h.writeStreamError(w, request)
 		return
 	}
+	if request.Stream && strings.Contains(request.lastText(), StreamCutMarker) {
+		h.writeStreamCut(w, request)
+		return
+	}
+	// A plain answer to a streaming request is the non-stream body below.
+	streamed := request.Stream && !strings.Contains(request.lastText(), StreamPlainMarker)
 	calls := request.calls()
 	scriptedCalls, scripted := request.scriptCalls()
 	if scripted {
@@ -821,7 +846,7 @@ func (h *handler) chat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if request.Stream {
+	if streamed {
 		h.writeStream(w, request, calls, reasoning, reply)
 		return
 	}
@@ -946,6 +971,35 @@ func (h *handler) writeStreamError(w http.ResponseWriter, request chatRequest) {
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 	for _, event := range []map[string]any{opening, frame} {
+		raw, _ := json.Marshal(event)
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+}
+
+// writeStreamCut starts a normal 200 stream (the opening role chunk and a
+// content chunk with the first part of the reply) and then ends the response
+// cleanly: no chunk carries a finish_reason and no [DONE] follows.
+func (h *handler) writeStreamCut(w http.ResponseWriter, request chatRequest) {
+	chunk := func(delta map[string]any) map[string]any {
+		event := fakeupstream.Clone(h.stream[0])
+		event["model"] = request.Model
+		if choice, ok := fakeupstream.DigMap(event, "choices", 0); ok {
+			choice["delta"], choice["finish_reason"] = delta, nil
+		}
+		event["usage"] = nil
+		return event
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	for _, event := range []map[string]any{
+		chunk(map[string]any{"role": "assistant", "content": nil, "reasoning_content": ""}),
+		chunk(map[string]any{"content": StreamCutPart, "reasoning_content": nil}),
+	} {
 		raw, _ := json.Marshal(event)
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
 		if flusher != nil {
