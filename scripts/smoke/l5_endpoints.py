@@ -1,6 +1,7 @@
-"""Engine of the endpoint-chain L5 scripts: smoke-l5-meshy-endpoints.py and smoke-l5-hyper3d.py (#539).
+"""Engine of the endpoint-chain L5 scripts: smoke-l5-meshy-endpoints.py and smoke-l5-hyper3d.py (#539), and
+smoke-l5-tripo-endpoints.py (#567).
 
-The two scripts walk every API function of one 3D provider once, through Plinth's own public task
+The scripts walk every API function of one 3D provider once, through Plinth's own public task
 API (prepare -> grants -> tasks), with fixed Offerings, and keep the evidence a real round needs.
 Everything that decides something is a plain function, so scripts/tests/test_l5_endpoints.py covers
 it without a server; Api, Runner and the writers are thin.
@@ -141,10 +142,12 @@ def parse_seeds(items):
 # ------------------------------------------------------------------ plan
 
 class Step:
-    """One request of a chain. `build(ctx)` returns the input parameters, or None to skip with ctx.skip_reason."""
+    """One request of a chain. `build(ctx)` returns the input parameters, or None to skip with ctx.skip_reason.
+    `price(offering, prepared)`, when given, returns the (amount, unit) the step is bounded by instead of
+    step_price, or None to fall back to it."""
 
     def __init__(self, name, offering, capability, build, needs=(), optional=False, free=False, verify=None,
-                 only_if=None, reason="L5 acceptance run: the documented value this sample needs"):
+                 only_if=None, reason="L5 acceptance run: the documented value this sample needs", price=None):
         self.name = name
         self.offering = offering
         self.capability = capability
@@ -155,6 +158,7 @@ class Step:
         self.verify = verify
         self.only_if = only_if
         self.reason = reason
+        self.price = price
 
 
 def plan_problems(steps, only, seeds):
@@ -392,11 +396,13 @@ def required_slots_declared(offering):
 
 
 def slot_problems(offering, task):
-    """Required output slots (delivery required, minimum above zero) the task's assets do not fill."""
+    """Required output slots (delivery required, minimum above zero) the task's assets do not fill. A slot required
+    only under a condition (required_when, such as one edited view) is frozen per task, so the task's own required
+    assets (l5_common.required_assets_ready) decide it, not the Offering."""
     delivered = [(asset.get("role"), asset.get("variant")) for asset in (task or {}).get("assets") or []]
     problems = []
     for output in (offering or {}).get("outputs") or []:
-        if output.get("delivery") != "required" or output.get("minimum", 1) == 0:
+        if output.get("delivery") != "required" or output.get("minimum", 1) == 0 or output.get("required_when"):
             continue
         if not any(role == output.get("role") and (output.get("variant") is None or variant == output.get("variant"))
                    for role, variant in delivered):
@@ -509,13 +515,14 @@ class Context:
 class Runner:
     """Runs a chain: one submission per step, every task observed to its end, every delivered byte checked."""
 
-    def __init__(self, ctx, report, offerings, budget, session_id, key_prefix):
+    def __init__(self, ctx, report, offerings, budget, session_id, key_prefix, on_step=None):
         self.ctx = ctx
         self.report = report
         self.offerings = offerings
         self.budget = budget
         self.session_id = session_id
         self.key_prefix = key_prefix
+        self.on_step = on_step
         self.evidence = []
 
     # -- submission: prepare -> grants (-> approval) -> tasks, each POST once
@@ -528,7 +535,7 @@ class Runner:
         status, prepared = api.json("POST", "/api/v1/tasks/prepare", body)
         if status not in (200, 201) or not prepared.get("prepared_input_id"):
             return None, None, f"prepare: HTTP {status} {common.one_line(json.dumps(prepared, ensure_ascii=False), 120)}"
-        price = step_price(prepared, offering, step.free)
+        price = (step.price(offering, prepared) if step.price else None) or step_price(prepared, offering, step.free)
         if price is None:
             return None, None, "no frozen quote and no credit estimate: the step cannot be bounded by the ceiling"
         if not self.budget.fits(price[0]):
@@ -679,13 +686,16 @@ class Runner:
         return self.finish(record, task)
 
     def finish(self, record, task):
+        if self.on_step is not None and record.get("task_id"):
+            self.on_step(self.ctx, self.report, record, task)  # a submitted step, whatever its end
         self.evidence.append(record)
         return record
 
 
-def run_chain(ctx, report, steps, offerings, session_id, key_prefix, budget):
-    """Run the selected steps in order; a seeded step is read, never run."""
-    runner = Runner(ctx, report, offerings, budget, session_id, key_prefix)
+def run_chain(ctx, report, steps, offerings, session_id, key_prefix, budget, on_step=None):
+    """Run the selected steps in order; a seeded step is read, never run. `on_step(ctx, report, record, task)` is
+    called after every submitted step (the evidence record may be extended there)."""
+    runner = Runner(ctx, report, offerings, budget, session_id, key_prefix, on_step)
     for name, task_id in ctx.arguments.seeds.items():
         status, task = ctx.api.json("GET", f"/api/v1/tasks/{task_id}")
         if status != 200 or task.get("state") != "SUCCEEDED":
@@ -723,7 +733,7 @@ def write_json(directory, name, payload):
 
 
 def execute(name, provider, steps, description, default_ceiling, unit_label, argv=None, environ=None,
-            add_arguments=None, make_context=None, after=None):
+            add_arguments=None, make_context=None, after=None, on_step=None, start=None):
     """Gate, environment, login, chain, balance, summary. Returns the exit code:
     0 every check passed, 1 a check failed, 2 refused or misused."""
     argv = sys.argv[1:] if argv is None else list(argv)
@@ -768,7 +778,9 @@ def execute(name, provider, steps, description, default_ceiling, unit_label, arg
         before = read_balance(api, provider)
         report.check("opening balance readable", before is not None, f"{provider} balance {before}")
         budget = Budget(arguments.ceiling)
-        runner = run_chain(ctx, report, steps, offerings, session_id, f"l5-{provider}", budget)
+        if start is not None:
+            start(ctx, report, before)  # the opening balance, before any step is sent
+        runner = run_chain(ctx, report, steps, offerings, session_id, f"l5-{provider}", budget, on_step)
         quoted = quoted_total(ctx.results)
         if arguments.ceiling and budget.spent > arguments.ceiling:
             report.failed("spending ceiling", f"{budget.spent} reserved over {arguments.ceiling}")

@@ -160,9 +160,9 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- \
 
 四视图链的 `--generate-image` 会先用自动方式会话生成一张角色图（多一次付费图任务，`--max-paid` 需相应加 1）；`--no-control` 跳过单视角对照组。脚本不批准计划外的 `image-to-3D` 逐步卡，故成功复现后该会话会留待处理的卡，属预期证据，不自动清理。
 
-### 3D 端点链脚本（#539，Meshy 与 Hyper3D Rodin）
+### 3D 端点链脚本（#539 Meshy 与 Hyper3D Rodin，#567 Tripo）
 
-1.9.0 发布前「每个 Provider 的每个 API 功能只调用真实上游一轮」用两个脚本覆盖 Meshy 与 Rodin 的 3D 端点。它们和上面的 Agent 脚本不同：不经 Agent，固定 Offering，直接走公开任务 API 的 `prepare`、`grants`、`tasks` 三步，公共逻辑在 `l5_endpoints.py`。
+1.9.0 发布前「每个 Provider 的每个 API 功能只调用真实上游一轮」用三个脚本覆盖 Meshy、Rodin 与 Tripo 的 3D 端点。它们和上面的 Agent 脚本不同：不经 Agent，固定 Offering，直接走公开任务 API 的 `prepare`、`grants`、`tasks` 三步，公共逻辑在 `l5_endpoints.py`。
 
 **默认连 fake。** 门禁用 `upstream_shape.py` 的 fake-default：目标是 fake 形态（`ART_AI_UPSTREAM_SHAPE=fake`，`release-env.py smoke` 会按环境设置）时不带任何开关直接运行，并拒绝 `--live`；目标不是 fake（live、mixed 或形态未知）时必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`，缺一退出码 2，且在发出任何请求之前。每次真实运行还须先在对话里取得用户当次同意（`AGENTS.md`「上游接口与 Fake」）。
 
@@ -170,6 +170,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- \
 |---|---|---|
 | `smoke-l5-meshy-endpoints.py` | 文生图 `nano-banana-2`（T-pose 人形）→ 图生图（侧视图）→ t2.5 文生 3D（preview 与 refine 在同一 Task 内）→ t2.5 图生 3D（2k）→ 7.1 多图生 3D（两张图，2k 几何、8K 纹理；8K 被明确拒绝时另发一个 2K 纹理的新请求 `multiview_2k`，不是重放）→ remesh（来源 t2.5 图生 3D，三角面、10000 面）→ convert、retexture、rigging、uv-unwrap、resize、analyze、multi-color（共用 remesh 来源）→ animation（接 rigging）→ text-to-motion（独立） | 按 Catalog 预估合计约 142 Meshy credits（审计表的官方价合计约 132，差在 t2.5 图生 3D 与 retexture 的默认预估高于 2K 官方价）；默认 `--max-credits 160`；t2.5 refine 价与积分单价官方未列 |
 | `smoke-l5-hyper3d.py` | Rodin 文生 3D（Quad、10000 面、`texture_mode=high`、TAPose、quad_normal、seed 1）→ Bang（来源任务）→ 取回其 GLB 作为 Bang 上传模式与 Texture 的模型（超过 Offering 的上传上限则这两步 SKIP 并说明）→ 图生 3D（两张图只带一个 `image_label`，Adapter 补 `?`） | 约 5.0 Hyper3D credits（文生 1.0、Bang 两次各 0.5、Texture 产品路径默认 2.0、图生 1.0）；默认 `--max-credits 7`；`--no-texture` 去掉 Texture；需要 Full API access |
+| `smoke-l5-tripo-endpoints.py` | v3.1 文生 3D（只要几何：纹理与 PBR 关、标准几何、3000 面、只导出 GLTF，`text_geo`）→ rig-check → rigging v2.5 与 v3.0 → retarget（接 v3.0 绑骨，`preset:walk`）→ 三角面降面（1000 面）→ segment → quick_cap 补全与 AI 补全（都接 segment）→ texture（Offering 默认值）→ 取回 `text_geo` 的 GLB 上传，转 STL（`file_token` 输入）与 Smart Segmentation（模型）；独立的：图生 3D、多视图生 3D（正面加左侧两张）、图生四视图 → 编辑其正面、图生 splat、Smart Segmentation（图片）；P2 文/图/多视图生 3D（纹理关、3000 面）；最后一次产品默认参数的文生 3D（极致纹理、精细几何、六种 `output_formats`）。输入图由脚本绘制（白底上几块色块拼成的人形），上传的 GLB 是 `text_geo` 自己的产物 | 按 Catalog 约 1290 Tripo 积分：text_geo 15、rig_check 0、rigging 两次各 45、retarget 10、降面 95、segment 90、quick_cap 80、AI 补全 100、texture 80、转 STL 5、Smart Segmentation 模型 105 / 图片 135、图生 25、多视图 25、四视图 10、编辑 5、splat 30（官方未公布价，按 Catalog 预估）、P2 三项各 100、默认文生 90。加工类 Offering 的附加导出格式是固定的（每种 +10），所以只按基础价算的约 840 达不到；默认 `--max-credits 900`，会在 P2 之前停下，整链要显式给 `--max-credits 1300`（或之后用 `--only/--seed` 补跑）。没有 `--cleanup`：Tripo 结果无需删除 |
 
 通用规则：
 
@@ -178,9 +179,12 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- \
 - **余额对账。** 整轮前后各读一次公开余额面板（面板有短时缓存，收尾前等 `--balance-wait` 秒），差值与各步报价之和写入 `RECONCILE` 行与证据文件；报价是估算，差值不当作通过条件，只要求余额没有增加。
 - **产物检查。** 必需槽位齐全、每个产物的字节数与 SHA-256 与公开声明一致、模型文件二次下载一致、魔数与格式相符；GLB 从自身字节读三角面、贴图边长、网格数与包围盒高度。Meshy 的三角面上限、resize 高度，以及 Bang 的分部件数，只对真实上游强制（fake 的模型是固定夹具，数值只记录）；Rodin 文生 3D 的三角面按「每个 Quad 面约 2.18 个三角面，±35%」强制，fake 与真实上游都查。
 - **原始结果。** 任务载荷与下载的字节只写到工作树外的 0700 临时目录，结束即删除（`--keep-raw` 保留并打印路径）；`--report <目录>` 只写脱敏的 `<脚本>.json` 与 `<脚本>-evidence.json`（每步的 Offering、任务 ID、状态序列、报价、产物角色/大小/SHA-256 前缀、失败类别，不含 URL 查询串、提示词与凭据）。密钥只读环境变量，从不打印。
+- **Tripo 的每步对账。** 公开任务 API 不暴露上游的 `credits_consumed`，所以脚本每步核对三件事：任务自己的 `native_quote` 等于 prepare 时冻结的报价（生成类），任务的 `credits_charged` 不超过这一步的上限（加工类用公开 Offering 的 `maximum_estimated_credits`，即基础价加固定导出格式），以及这一步前后公开余额面板的变化（`INFO: <步骤> cost: quoted …, balance moved …`，写入证据的 `balance_moved`）。真实目标上每次读余额先等 `--balance-wait` 秒（面板缓存 30 秒），`--no-step-balance` 关掉逐步读取；余额变化与报价不符只记为证据（账号的其他用途或缓存也会让它动），整轮仍以开头与收尾的 `RECONCILE` 对账。fake 只给任务计费、账户余额固定，所以 fake 上逐步余额不动，属预期。
+- **Tripo 的成功后格式。** v3.1 生成的主模型与 GLTF 到位即 `SUCCEEDED`，其余请求的格式在成功后陆续补上（#462）；脚本在 `resources_pending` 清空、请求的格式都到齐后才核对格式，并对后到的每个格式重新下载、核对字节数、SHA-256 与魔数（只读任务，不重发）。
+- **Tripo 未覆盖。** `tripo/tripo-v3.1/format-conversion`（以任务为输入的转换）、非 full 的 `tripo/tripo-v3.1/text-to-3d` 与 `image-to-3d`、`tripo/geometry/decimate-quad` 在 Catalog 里是停用的，不在公开 API 上；任务的六种格式由默认文生的 `output_formats` 与降面的固定导出覆盖。
 - **Meshy 收尾。** Plinth 的公开 API 没有上游删除，也不暴露上游作业 ID，所以收尾是单独、显式的命令：运行写出的证据文件里有按依赖逆序排好的 `cleanup`（任务 ID 与上游路径）；操作者从服务端库（`generation_attempts.upstream_job_id`，按创建顺序）整理出 `{任务ID: [上游作业ID, …]}`，再运行 `python3 scripts/smoke/smoke-l5-meshy-endpoints.py --cleanup 证据.json --remote-ids 映射.json`（环境里要有 `MESHY_API_KEY`，非官方地址再设 `MESHY_BASE_URL`）。每个 DELETE 只发一次，依赖它的先删、refine 先于 preview；404 视为已删，409（仍在运行）报告而不重试。指向非回环地址同样要双开关。Meshy 结果只保留三天，所以真实一轮的步骤不要拖到隔天。
 
-本机验证：`python3 -m unittest scripts.tests.test_l5_endpoints`（离线，随脚本单测门禁运行）覆盖门禁、一次提交、预算、计划、检查与收尾；整链对 fake 栈的验证用 `python3 scripts/smoke/smoke-fake-stack.py --only meshy-endpoints,hyper3d-endpoints`（作为进程运行两个脚本，fake 形态、无开关，不在 `verify-local.py` 的门禁子集里，在不带 `--only` 的全量运行里；全程零真实上游）。这一整链第一次对 fake 运行就发现 `meshy/meshy-t2.5/image-to-3d` 默认请求会把空的 `pose_mode` 发给 Meshy（其余三个 Meshy 生成 Offering 都声明了「为空则不发」），已补 Catalog 的 `omit_when`，回归是 `internal/catalog` 的 `TestEveryMeshyGenerationOfferingOmitsAnEmptyPoseMode`。
+本机验证：`python3 -m unittest scripts.tests.test_l5_endpoints`（离线，随脚本单测门禁运行）覆盖门禁、一次提交、预算、计划、检查与收尾；整链对 fake 栈的验证用 `python3 scripts/smoke/smoke-fake-stack.py --only meshy-endpoints,hyper3d-endpoints,tripo-endpoints`（作为进程运行三个脚本，fake 形态、无开关，Tripo 链带 `--max-credits 1400` 以跑完全部步骤；不在 `verify-local.py` 与 CI 的门禁子集里，Tripo 链在 fake 上约需四到五分钟，在不带 `--only` 的全量运行里；全程零真实上游）。这一整链第一次对 fake 运行就发现 `meshy/meshy-t2.5/image-to-3d` 默认请求会把空的 `pose_mode` 发给 Meshy（其余三个 Meshy 生成 Offering 都声明了「为空则不发」），已补 Catalog 的 `omit_when`，回归是 `internal/catalog` 的 `TestEveryMeshyGenerationOfferingOmitsAnEmptyPoseMode`。
 
 Rodin 还有几项只能直连上游探测，由对齐工具 `cmd/fake-upstream-align` 的 `hyper3d/api-v2` Profile 新增的步骤承担（每个提交步骤带两个免费的 `-status`、`-download` 后续步骤，全部标 `OptIn`，默认的官方运行不发，须用 `-steps` 点名单独运行、用户当次同意、带 `-confirm-paid`，全部按官方页面构造、待真实一轮定稿）：`balance-usage`（`check_balance?usage_page=1`，免费，取 `usage[]` 形态）；`reject-seed-probe`（`seed=65536`，超出文档上限，看真实拒绝是 400 信封还是 HTTP 201 加 `INVALID_REQUEST`，被受理则计 0.5）；`rodin-text-quadpose`（游戏角色请求的原始体，约 1）；`rodin-image-label-short`（两张图一个 `image_label`，直接发短列表看服务是否受理，约 0.5）；`bang-upload`（model 上传模式加参考图，约 0.5，模型取 `bang` 步骤的产物）；`texture-images`（Texture 参考图用官方页面的复数字段 `images`，Plinth 与 fake 现用单数 `image`，约 0.5，结果决定是否改 Catalog 的 `wire_name`；fake 目前只认单数，所以该步骤暂不对 fake 重跑）。Meshy 的对齐 Profile 已含 DELETE、余额、各生成与加工端点，本轮不新增。
 
