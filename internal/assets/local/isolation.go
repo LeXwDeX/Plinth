@@ -161,6 +161,10 @@ func inspectDeliveredAssetFormat(file *os.File, role, variant, mediaType string)
 		format, err = "gltf", inspectGLTFJSON(file, info.Size(), nil, "")
 	case rasterFormat(magic[:], variant, mediaType) != "":
 		format, err = "raster", inspectRasterAddresses(file, info.Size(), rasterFormat(magic[:], variant, mediaType))
+	case isWebPFormat(file, variant, mediaType):
+		// Without this a WebP reached the generic address scan below, which
+		// reads its compressed bytes as text (#576).
+		format, err = "raster", inspectRasterAddresses(file, info.Size(), "webp")
 	case isBlendFormat(variant, mediaType):
 		format, err = "blend", inspectBlend(file, info.Size(), magic[:])
 	default:
@@ -253,6 +257,20 @@ func rasterFormat(magic []byte, variant, mediaType string) string {
 		return "jpeg"
 	}
 	return ""
+}
+
+// isWebPFormat reports a delivered WebP: a RIFF WEBP header, or a slot or
+// label that names WebP (the WebP check then refuses bytes that are not one).
+// It is separate from rasterFormat, which also classifies images embedded in
+// models and archives, where WebP stays unsupported.
+func isWebPFormat(file io.ReaderAt, variant, mediaType string) bool {
+	variant = strings.ToLower(variant)
+	if normalizeMediaType(mediaType) == "image/webp" || variant == "webp" || strings.HasSuffix(variant, ".webp") {
+		return true
+	}
+	var header [12]byte
+	count, _ := file.ReadAt(header[:], 0)
+	return isWebPHeader(header[:count])
 }
 
 func inspectRasterAddresses(reader io.Reader, size int64, format string) error {

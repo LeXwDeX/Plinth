@@ -1063,7 +1063,7 @@ func newHTTPHarnessWithCatalogAndProviders(
 	}
 	if err := os.WriteFile(
 		filepath.Join(legacyImagesRoot, "historical_0.webp"),
-		[]byte("historical-image"),
+		[]byte(legacyHistoricalImage),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -2357,3 +2357,8 @@ func testReferencePNG(t *testing.T, width, height int) []byte {
 	}
 	return buffer.Bytes()
 }
+
+// legacyHistoricalImage is the archived picture of the legacy fixtures: a
+// valid 1x1 lossless WebP, because a delivered WebP is proved by its RIFF walk
+// and a decode (#576).
+const legacyHistoricalImage = "RIFF\x1c\x00\x00\x00WEBPVP8L\x0f\x00\x00\x00\x2f\x00\x00\x00\x00\x07\x10\xfd\x8f\xfe\x07\x22\xa2\xff\x01\x00"

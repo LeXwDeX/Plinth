@@ -129,10 +129,9 @@ func TestBackfillMaterializesOnlyDeclaredMissingThumbnailAndIsIdempotent(
 		now.Add(time.Minute),
 	)
 	source := &thumbnailSourceStub{
-		content: []byte{
-			'R', 'I', 'F', 'F', 0x04, 0x00, 0x00, 0x00,
-			'W', 'E', 'B', 'P', 'V', 'P', '8', ' ',
-		},
+		// A valid 1x1 lossless WebP: the store proves a WebP by its RIFF
+		// walk and a decode (#576), so a bare header no longer passes.
+		content:   []byte("RIFF\x1c\x00\x00\x00WEBPVP8L\x0f\x00\x00\x00\x2f\x00\x00\x00\x00\x07\x10\xfd\x8f\xfe\x07\x22\xa2\xff\x01\x00"),
 		mediaType: "application/octet-stream",
 	}
 	service, err := New(Config{
