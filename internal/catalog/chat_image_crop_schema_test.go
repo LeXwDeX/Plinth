@@ -33,6 +33,9 @@ func TestDefaultCatalogDeclaresImageCropContracts(t *testing.T) {
 		"crop_limit_reached": crop.Texts.CropLimitReached,
 		"image_not_found":    crop.Texts.ImageNotFound,
 		"image_unavailable":  crop.Texts.ImageUnavailable,
+		"presented_note":     crop.Texts.PresentedNote,
+		"not_presentable":    crop.Texts.NotPresentable,
+		"not_presented":      crop.Texts.NotPresented,
 	} {
 		if strings.TrimSpace(text) == "" {
 			t.Fatalf("image_crop.texts.%s is empty", code)
@@ -87,6 +90,7 @@ func TestDefaultCatalogDeclaresImageCropContracts(t *testing.T) {
 	for _, code := range []string{
 		"invalid_arguments", "invalid_region", "image_too_small", "image_too_large",
 		"crop_limit_reached", "image_not_found", "image_unavailable",
+		"presented_note", "not_presentable", "not_presented",
 	} {
 		key := "chat.image_crop.texts." + code
 		text, exists := english[key]
@@ -118,6 +122,20 @@ func TestImageCropSchemaRejectsIncompleteDeclarations(t *testing.T) {
 		"missing limit placeholder": func(application *catalog.ApplicationSchema) string {
 			application.Chat.ImageCrop.Texts.CropLimitReached = "no more crops"
 			return "{limit}"
+		},
+		// #552: the presented note names how many crops the person sees, and
+		// both presentation refusals say why.
+		"missing count placeholder": func(application *catalog.ApplicationSchema) string {
+			application.Chat.ImageCrop.Texts.PresentedNote = "crops are shown"
+			return "{count}"
+		},
+		"empty not presentable copy": func(application *catalog.ApplicationSchema) string {
+			application.Chat.ImageCrop.Texts.NotPresentable = ""
+			return "not_presentable"
+		},
+		"missing not presented detail": func(application *catalog.ApplicationSchema) string {
+			application.Chat.ImageCrop.Texts.NotPresented = "not shown"
+			return "{detail}"
 		},
 	}
 	for name, mutate := range cases {

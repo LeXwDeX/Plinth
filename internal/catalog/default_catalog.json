@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.19.1",
+    "revision": "2026-11-24.19.9",
     "terminology": {
       "user_facing": [
         {
@@ -7781,7 +7781,10 @@
           "image_too_large": "图片或裁图区域超过大小上限：{detail}。",
           "crop_limit_reached": "这张源图的裁图数量已达上限 {limit} 张，不能再新增区域；已裁过的矩形仍会返回原来的资产。",
           "image_not_found": "找不到可裁剪的源图：{detail}。只能裁剪本人上传或生成的图片；@projectN 和他人资产不可用。",
-          "image_unavailable": "源图暂时无法读取，或不是可裁剪的图片：{detail}。"
+          "image_unavailable": "源图暂时无法读取，或不是可裁剪的图片：{detail}。",
+          "presented_note": "这 {count} 张裁图已作为本条回复里的会话图片展示给用户：每张的句柄写在 crops[].handle，用户能看到缩略图、点开和下载，后续工具（含参考图参数）用这些句柄引用。用户看得到的才算交付：回复里提到哪张裁图就写它的句柄，不要把句柄以外的资产 ID、像素坐标或「请自行切图」当作交给用户的结果。",
+          "not_presentable": "裁图没有执行：{detail}。用户会看不到也拿不到裁出的图，所以这一步不做。不要说已经裁好或已交付，如实告诉用户这一步现在做不了。",
+          "not_presented": "裁图已存储，但没有全部作为会话图片展示给用户（{detail}）：用户看不到也拿不到这些图，它们不算交付。不要说已经裁好或已交付，也不要把资产 ID 当作给用户的结果；可以再调用一次，仍失败就如实告诉用户。"
         }
       },
       "work_ledger": {
@@ -8316,7 +8319,7 @@
         {
           "name": "crop_image_regions",
           "execution": {"implementation_key":"image.crop","effects":["READ"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. The result gives each crop's input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
+          "description": "Cut rectangular regions out of one picture of this session at original resolution and store every crop as the owner's input-asset reference picture, without calling any model, creating a Task, counting a step or charging credits. First use inspect_image with show_picture to find the regions, then pass them in one batch. image names a picture handle (@imgN or @selected) or one of your own input asset ids; @projectN is not accepted. A picture that came from a finished Task is copied into an input asset first. Each region is normalized (0..1) relative to the source picture and its right and bottom edges are exclusive. Every crop is also shown to the user as a session picture of this reply with its own @imgN handle (thumbnail, open, download), which later tools take as a picture handle; a crop that cannot be shown to the user is a failed call, not a delivery. The result gives each crop's handle, label, width, height, input_asset_id, normalized_region, pixel_rect, source_width, source_height and sha256, never the picture bytes; cropping the same rectangle again returns the same asset. The maximum number of crops one source picture keeps is decided by the product Schema, not by this description; a batch over it is refused and names the limit. A refused region is reported with its position and label, and an invalid batch stores nothing.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -21515,6 +21518,9 @@
             "chat.image_crop.texts.crop_limit_reached": "This source picture already keeps the maximum of {limit} crops, so no new region can be added; rectangles cropped before still return their stored asset.",
             "chat.image_crop.texts.image_not_found": "No crop source was found: {detail}. Only your own uploaded or generated pictures can be cropped; @projectN and another owner's assets are not available.",
             "chat.image_crop.texts.image_unavailable": "The source picture cannot be read right now, or it is not a supported picture: {detail}.",
+            "chat.image_crop.texts.presented_note": "These {count} crops are shown to the user as session pictures in this reply: each crop's handle is in crops[].handle, the user can see the thumbnails, open and download them, and later tools (including reference picture arguments) name them by these handles. Only what the user can see counts as delivered: when your reply mentions a crop, write its handle, and never hand the user asset ids, pixel coordinates or \"cut it yourself\" as the result.",
+            "chat.image_crop.texts.not_presentable": "The crop was not run: {detail}. The user would not see or get the cropped pictures, so this step is not done. Do not say the crops are made or delivered; tell the user plainly that this step cannot be done now.",
+            "chat.image_crop.texts.not_presented": "The crops are stored, but not all of them are shown to the user as session pictures ({detail}): the user cannot see or get them, so they are not delivered. Do not say the crops are made or delivered, and do not give asset ids as the result; you may call the tool once more, and if it still fails tell the user plainly.",
             "chat.model3d_usage.profiles[id=render].label": "Display / rendering",
             "chat.model3d_usage.profiles[id=render].description": "A model for display, preview or promotion; not aimed at real-time use or printing.",
             "chat.model3d_usage.profiles[id=render].reason": "Display does not limit the triangle count; prefer full detail and looks, and use the available high-fidelity models.",
