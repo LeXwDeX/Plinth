@@ -2069,9 +2069,10 @@ type CanvasArtboardLabelSchema struct {
 	BackgroundOpacity float64 `json:"background_opacity"`
 }
 
-// CanvasSnapSchema declares drag snapping: the default of the toolbar toggle,
-// the screen-pixel capture distance, the guide line style, and whether group
-// members are snap targets of their own.
+// CanvasSnapSchema declares drag and resize snapping: the default of the
+// toolbar toggle, the screen-pixel capture distance, the guide line style,
+// whether group members are snap targets of their own, and the key held to
+// turn it off for one gesture.
 type CanvasSnapSchema struct {
 	DefaultEnabled   bool    `json:"default_enabled"`
 	ThresholdPixels  float64 `json:"threshold_pixels"`
@@ -2082,6 +2083,9 @@ type CanvasSnapSchema struct {
 	// visible members); true also keeps each member's own edges as secondary
 	// targets, used only on an axis no unit is within reach of (#273).
 	GroupMemberTargets bool `json:"group_member_targets"`
+	// BypassModifier is held to turn snapping off for the current move or
+	// resize: "mod" (Ctrl, or Command on macOS), "alt" or "shift".
+	BypassModifier string `json:"bypass_modifier"`
 }
 
 type CanvasExportSchema struct {

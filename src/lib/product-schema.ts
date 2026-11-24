@@ -1444,6 +1444,8 @@ export interface CanvasProductSchema {
       guide_color_token: string;
       /** A group snaps as one box; true also keeps each member's own edges as secondary targets. */
       group_member_targets: boolean;
+      /** Held to turn snapping off for one move or resize: 'mod' (Ctrl or ⌘), 'alt' or 'shift'. */
+      bypass_modifier: 'mod' | 'alt' | 'shift';
     };
     upload_task_id: string;
     export_filename_fallback: string;
