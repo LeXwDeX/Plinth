@@ -144,7 +144,7 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- bash scripts/
 
 测试数据按协议保留在 `dev-test`。纯逻辑的离线单元测试：`python3 -m unittest scripts.tests.test_l5_common`。
 
-#417 的两个脚本各有单独的离线单测：`python3 -m unittest scripts.tests.test_l5_four_view` 覆盖四视图脚本的模型选择、计划/任务逐单位报价对比、视角终态与 `verdict` 判定，单测本身不访问网络。`smoke-l5-astra-tools.py` 的只读回合由 live 运行验证，离线只做脚本拒绝检查（无开关时退出码 2）。
+#417 的两个脚本只有离线部分进门禁：`scripts/tests` 的单测门禁（`unittest discover`，见 `dev_test.md` §2 第 10 项）会自动收入 `test_l5_four_view.py`，两个脚本在缺开关时的拒绝（退出码 2）也由 `test_l5_common.py` 与 `test_upstream_shape.py` 覆盖；真实链路本身不进门禁，只在当次同意下手动运行。离线单测：`python3 -m unittest scripts.tests.test_l5_four_view` 覆盖四视图脚本的模型选择、计划/任务逐单位报价对比、视角终态与 `verdict` 判定，单测本身不访问网络。`smoke-l5-astra-tools.py` 的只读回合由 live 运行验证，离线只做脚本拒绝检查（无开关时退出码 2）。
 
 `smoke-l5-all.sh` 默认逐项运行对话模型与 `astra-tools`；四视图链最贵且需要源图，只有显式设置 `L5_INCLUDE_FOUR_VIEW=1` 才加入，源图用 `L5_FOUR_VIEW_IMAGE=<本地图片>` 传入（没有源图时 `four-view-multiview` 记为 SKIP 并说明 `--image`）。单跑四视图链：
 
