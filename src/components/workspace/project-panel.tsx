@@ -1,5 +1,6 @@
 'use client';
 
+import { ClampHint } from '@/components/studio/clamp-hint';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -386,7 +387,11 @@ export function ProjectPanel({ sessionId }: { sessionId: string | null }) {
                 })() : null}
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-medium">{asset.name} <span className="font-normal text-muted-foreground">· {labelOfKind(asset.kind)}</span></p>
-                  {asset.description ? <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{asset.description}</p> : null}
+                  {asset.description ? (
+                    <ClampHint name={asset.name} hint={asset.description} className="mt-0.5 w-full">
+                      <p data-clamp className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">{asset.description}</p>
+                    </ClampHint>
+                  ) : null}
                   {asset.models.length > 0 ? <p className="mt-0.5 text-[11px] text-muted-foreground">{text('asset_models')} · {asset.models.length}</p> : null}
                 </div>
                 {confirmingDelete === asset.id ? (

@@ -7,6 +7,7 @@ import useSWR from 'swr';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
+import { ClampHint } from '@/components/studio/clamp-hint';
 import { fetchCapabilityOfferings } from '@/lib/agent-offerings';
 import {
   choiceActionLabel,
@@ -129,9 +130,11 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
           const checked = option.id === checkedId;
           const title = choiceOptionTitle(option, offerings);
           const thumbnail = option.thumbnailUrl ? safeAssetURL(option.thumbnailUrl) : null;
+          const description = detailed && option.description ? option.description : '';
           return (
+            // #546: a description cut to two lines shows in full (with the title) on hover and on focus.
+            <ClampHint key={option.id} name={title} hint={description || undefined} className="w-full">
             <div
-              key={option.id}
               ref={(node) => { optionRefs.current[index] = node; }}
               role="radio"
               aria-checked={checked}
@@ -143,7 +146,7 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
               onClick={() => choose(index, true)}
               onKeyDown={(event) => onKeyDown(event, index)}
               className={cn(
-                'flex items-start gap-2 rounded-md border px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'flex w-full min-w-0 items-start gap-2 rounded-md border px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 checked ? 'border-primary bg-primary/10' : 'border-border',
                 open && !locked ? 'cursor-pointer hover:bg-muted' : 'cursor-default',
               )}
@@ -182,14 +185,15 @@ export function ChoiceCard({ card, busy, disabled, waiting = false, error, onAns
                     </span>
                   ) : null}
                 </span>
-                {detailed && option.description ? (
-                  <span className="line-clamp-2 text-[11px] leading-snug text-muted-foreground" data-testid="chat-choice-description">{option.description}</span>
+                {description ? (
+                  <span data-clamp className="line-clamp-2 text-[11px] leading-snug text-muted-foreground" data-testid="chat-choice-description">{description}</span>
                 ) : null}
                 {card.kind ? null : (
                   <span className="text-muted-foreground tabular-nums" data-testid="chat-choice-quote">{choiceOptionQuote(schema, option, offerings)}</span>
                 )}
               </span>
             </div>
+            </ClampHint>
           );
         })}
       </div>
