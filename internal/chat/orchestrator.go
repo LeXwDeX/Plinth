@@ -187,6 +187,11 @@ var ErrTurnAwaitTask = errors.New("chat orchestrator: turn awaiting task")
 // 真正的版本冲突仍是 ErrTurnCheckpointConflict，轮次留给那个写入方。
 var ErrTurnCheckpointUnsaved = errors.New("chat orchestrator: turn checkpoint not saved")
 
+// ErrTurnSubmissionUnconfirmed 表示付费调用的提交结果一直无法确认（#516）：
+// 自第一次因此挂起起已超过 Schema 的 Agent 请求超时，回合不再挂起重放，
+// 以 failed 收尾。可能已受理的任务仍归生成内核，不取消、不重新提交。
+var ErrTurnSubmissionUnconfirmed = errors.New("chat orchestrator: paid submission unconfirmed past the request timeout")
+
 // ErrWakeNotReleased 表示唤醒入队时原 Process 尚未返回（命令 ID 仍在
 // queued 去重集合），需要稍后重试；见 enqueueForWake。
 var ErrWakeNotReleased = errors.New("chat orchestrator: wake target not released yet")
@@ -377,6 +382,12 @@ type Orchestrator struct {
 	// （用户决定/超时/停止）只允许一个来源生效——弹出即失效。
 	suspendMu    sync.Mutex
 	consentWaits map[string]*consentSuspend
+
+	// stranded holds the running turns the last reclaim pass found held by no
+	// worker and no consent wait of this process (#516); a turn still
+	// unheld on the next pass is enqueued again. See ReclaimStrandedTurns.
+	strandedMu sync.Mutex
+	stranded   map[string]struct{}
 
 	// compacting serializes the context compactions of each session (#322).
 	compactMu  sync.Mutex
@@ -782,6 +793,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		activeAssistant:    map[string]string{},
 		canceledTurn:       map[string]struct{}{},
 		consentWaits:       map[string]*consentSuspend{},
+		stranded:           map[string]struct{}{},
 		compacting:         map[string]*compactionLock{},
 
 		backgroundWarned: map[string]time.Time{},
@@ -1244,6 +1256,14 @@ func (orchestrator *Orchestrator) markQueued(
 	}
 	orchestrator.queued[assistantMessageID] = struct{}{}
 	return true
+}
+
+// isQueued reports whether the turn's command is queued or being processed.
+func (orchestrator *Orchestrator) isQueued(assistantMessageID string) bool {
+	orchestrator.queueMu.Lock()
+	defer orchestrator.queueMu.Unlock()
+	_, exists := orchestrator.queued[assistantMessageID]
+	return exists
 }
 
 func (orchestrator *Orchestrator) unmarkQueued(
@@ -2025,12 +2045,13 @@ func (orchestrator *Orchestrator) Process(
 			suspended = true
 			return nil
 		}
-		if errors.Is(toolErr, ErrTurnCheckpointUnsaved) {
+		if errors.Is(toolErr, ErrTurnCheckpointUnsaved) || errors.Is(toolErr, ErrTurnSubmissionUnconfirmed) {
 			// #429: 工具执行阶段的检查点写入失败没有人重试，挂起会让会话一直
 			// 忙、SSE 一直开着。本轮的调用可能已经提交了付费任务：先把内存里
 			// 的绑定并回回复（消息上已持久化的绑定保持不变），再按 #378 的
 			// 同一语义以 failed 结束。任务归生成内核，不会被取消，也不会被
 			// 这次失败重新提交；failed 轮次不在 RecoverTurns 的续跑范围内。
+			// #516: 付费提交结果超过请求超时仍无法确认时同样这样收尾。
 			orchestrator.mergeDurableToolCalls(ctx, command, &assistant)
 			for index := range assistant.ToolCalls {
 				if assistant.ToolCalls[index].TaskID == "" {
@@ -2038,7 +2059,11 @@ func (orchestrator *Orchestrator) Process(
 						taskBindings[assistant.ToolCalls[index].ID]
 				}
 			}
-			return endUnsaved("保存工具执行结果", toolErr)
+			stage := "保存工具执行结果"
+			if errors.Is(toolErr, ErrTurnSubmissionUnconfirmed) {
+				stage = "确认付费提交"
+			}
+			return endUnsaved(stage, toolErr)
 		}
 		// A submit callback persisted the task binding together with its estimated
 		// credits and approval source. Merge them before the next write so that
@@ -3056,6 +3081,30 @@ func (orchestrator *Orchestrator) executeTools(
 	turn.Checkpoint.SetWaiting(waiting)
 	requestTimeout := time.Duration(orchestrator.schema.Agent.RequestTimeoutSeconds) * time.Second
 	maxParallel := max(1, orchestrator.schema.Agent.MaxParallelGenerationSubmissions)
+	// suspendUnconfirmed suspends the turn on a paid call whose submission
+	// could be neither confirmed nor ruled out, so a replay looks for its Task
+	// again. The first suspension is stored with the call; once the Schema
+	// request timeout has passed since then the turn stops replaying and ends
+	// failed (#516). A Task that was accepted stays with the kernel.
+	suspendUnconfirmed := func(callID string) error {
+		now := time.Now()
+		since, found := turn.Checkpoint.unconfirmedSince(callID)
+		if !found {
+			since = now
+			turn.Checkpoint.Unconfirmed = append(turn.Checkpoint.Unconfirmed,
+				UnconfirmedCall{CallID: callID, Since: since})
+			if err := persist(orchestrator.service.TurnRunningState()); err != nil {
+				return err
+			}
+		}
+		if requestTimeout > 0 && !now.Before(since.Add(requestTimeout)) {
+			orchestrator.logger.Warn("付费调用的提交结果超时仍无法确认，回合不再重放",
+				"session_id", command.SessionID, "assistant_message_id", command.AssistantMessageID,
+				"call_id", callID, "unconfirmed_since", since)
+			return ErrTurnSubmissionUnconfirmed
+		}
+		return ErrTurnSuspended
+	}
 	var inflight []WaitingCall
 	// 提交阶段：按调用顺序逐个执行。付费步骤提交后若要等待任务，不再立即
 	// 挂起轮次，记为在途并继续提交同批互不依赖的下一个付费步骤；本批提交
@@ -3131,7 +3180,7 @@ func (orchestrator *Orchestrator) executeTools(
 					if errors.Is(readErr, ErrTurnCheckpointConflict) {
 						return results, imageURLs, taskBindings, readErr
 					}
-					return results, imageURLs, taskBindings, ErrTurnSuspended
+					return results, imageURLs, taskBindings, suspendUnconfirmed(call.ID)
 				}
 				if candidate != "" {
 					boundTaskID = candidate
@@ -3245,9 +3294,11 @@ func (orchestrator *Orchestrator) executeTools(
 			// Task acceptance may have committed while the response or chat
 			// binding was lost. Keep this call outside Checkpoint.Completed so
 			// restart can read its durable grant/idempotency binding and observe
-			// the original paid Task. Never plan a fresh paid call here.
-			return results, imageURLs, taskBindings, ErrTurnSuspended
+			// the original paid Task. Never plan a fresh paid call here. The
+			// replays are bounded (#516): see suspendUnconfirmed.
+			return results, imageURLs, taskBindings, suspendUnconfirmed(call.ID)
 		}
+		turn.Checkpoint.clearUnconfirmed(call.ID)
 		if err != nil && result.AwaitTask && result.TaskID != "" {
 			// The Task identity is known, but observation or chat binding failed.
 			// Preserve the original Task for the waiting scanner to retry.
@@ -3885,6 +3936,9 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	messages := orchestrator.schema.Presentation.Messages
 	if errors.Is(err, agents.ErrNotConfigured) && messages.AgentNotConfigured != "" {
 		return orchestrator.text(ctx, messages.AgentNotConfigured)
+	}
+	if errors.Is(err, ErrTurnSubmissionUnconfirmed) && messages.SubmissionUnconfirmed != "" {
+		return orchestrator.text(ctx, messages.SubmissionUnconfirmed)
 	}
 	if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, err); exhausted {
 		return message
