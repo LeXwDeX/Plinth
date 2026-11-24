@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/LeXwDeX/Plinth/internal/testutil/fakeupstream"
 	"github.com/LeXwDeX/Plinth/internal/testutil/wirefixture"
@@ -70,6 +71,13 @@ const (
 	// (evidence_376_test.go), not samples its templates come from (sampleFS does
 	// not embed them).
 	labelRun = "2026-11-19"
+	// contractDocs is when the pages of Check Balance, Check Status, Errors, Bang,
+	// Generate Texture and Gen-2.5 were read again, both their prose and the
+	// OpenAPI schemas the pages embed (#537). The rules added from that reading
+	// (the notes below say which) are constructed: no wire sample covers a
+	// rejection, and the two sources of the Texture page disagree on the reference
+	// count (see textureReferenceNote).
+	contractDocs = "2026-11-24"
 )
 
 // Job statuses of the official API.
@@ -190,7 +198,7 @@ const rodinRealRunNote = "One paid run of the game-character request was made on
 	"The page's \"tier is required\" callout is advice, not enforcement: an omitted tier is Regular (a Gen-1/1.5 asset), which the fake accepts too, and Plinth always sends an explicit Gen-2.5 tier. The run does not verify a rejected value, TAPose on a subject that is not humanoid, or the Quad ceiling. " +
 	"Since #303 the PBR pack follows the request (DeliveredModel, built by fakeupstream.SizedModelFile): its triangle count is the target face count (quality_override, else the page's quality preset, medium when omitted: Quad 50000, 18000, 8000 and 4000 for high to extra-low, Raw 1000000, 500000, 60000 and 20000, and for a form without a Gen-2.5 tier the Gen-1/1.5 page's 50000, 18000, 8000 and 4000 in both topologies) for a triangle mesh and 2.18 triangles per Quad face (this run's one sample: 10,000 quads gave about 21,800 triangles), held to the fixture's 121,032-triangle ceiling, and it carries three PNG textures (base color, metallic-roughness, normal) at the page's texture resolution table: 2048 for texture_mode extreme-low to high and legacy, 4096 with uhd_texture or the HighPack add-on, 8192 with both, and a 6144 base color for extreme-high (12288 with HighPack) beside two 2048 maps (observed in the #188 acceptance; the maps beside the 8192 and 12288 base colors are 4096, observed for 12288 on Bang). " +
 	"Not modeled: the real files' scale (a display request of 2,000,000 faces delivers the 121,032-triangle ceiling, not millions, and the real pack is megabytes of pixels where the fake's flat textures are about 1 MB at 6144), the shape (the fixture humanoid in its rest pose whatever TAPose, seed, quad_normal or the prompt), material other than PBR (none, shaded, all and hybrid still deliver the PBR pack), geometry_file_format other than glb, the extra mesh of the Extreme-High tier (the plain fixture under its real name, not an untextured Draco mesh), the preview, and the Bang and Texture outputs (the plain fixture). " +
-	"The page was read again on " + formDocs + " as the complete server-rendered HTML (the 2026-11-13 reading was a summarizing fetch that dropped fields): it lists seed 0-65535, TAPose and quad_normal as booleans that default to false, the Quad ceiling of 200000 and the 1000000 ceiling below the High tiers, legacy among the six texture_mode values and tier as required advice, so the value rules above stand. Fields it lists that Plinth cannot send (the length of prompt, bbox_condition, is_micro, detail_level, geometry_instruct_mode, is_symmetric) are not enforced here; image_label is the one exception, for its count and its values (see the image_label paragraph below)"
+	"The page was read again on " + formDocs + " as the complete server-rendered HTML (the 2026-11-13 reading was a summarizing fetch that dropped fields): it lists seed 0-65535, TAPose and quad_normal as booleans that default to false, the Quad ceiling of 200000 and the 1000000 ceiling below the High tiers, legacy among the six texture_mode values and tier as required advice, so the value rules above stand. Fields it lists that Plinth cannot send (bbox_condition, detail_level, geometry_instruct_mode, is_symmetric) are not enforced here, while the length of prompt and is_micro are since #537 (see below); image_label is the one exception, for its count and its values (see the image_label paragraph below)"
 
 // rodinLabelNote records the two paid requests of labelRun (#376) that settled how
 // a multipart request carries image_label, and what the fake does and does not do
@@ -202,15 +210,31 @@ const rodinLabelNote = "image_label (#376): on " + labelRun + " two real request
 	"The fake refuses more labels than pictures with the observed body. It also refuses a label outside the page's list (F, FL, FR, B, BL, BR, L, R, U, D and ?) as INVALID_REQUEST, the code of the other constructed value rules: no rejected value was observed, so that code and its message are constructed from the page, not recorded. It does not check a request with fewer labels than pictures: no rejection was observed, so no code is invented for it (Plinth never sends that, its Adapter refuses it locally). " +
 	"The sanitized exchanges are testdata/evidence-376-rodin-label-overflow and testdata/evidence-376-rodin-labeled (the capture replaces amounts with placeholders, so their consumed reads 0). They are evidence, not the samples the fake derives its templates from, and evidence_376_test.go holds the fake's answers to them"
 
+// textureReferenceNote records what the Texture reference field is, as of
+// contractDocs (#537). It is part of the /rodin_texture_only endpoint note.
+const textureReferenceNote = "The reference field of the Texture request: the page's cURL and Python examples and its OpenAPI schema name it images (an array of 1 to 5 files; the prose says \"exactly one reference image\" while the schema says up to five). " +
+	"Plinth's Catalog and the committed texture samples (2026-10-29) use the singular image, which the real service tolerated then. " +
+	"This fake takes both names, together 1 to 5 files, until a real request with the singular field says whether it is still tolerated: that is pending the real round, and if it is refused the Catalog's wire_name of the Texture reference and the Adapter's image check (internal/providers/hyper3d/operations.go) change to images. " +
+	"image_label (the page lists it with the Gen-2.5 rule) and a prompt of more than 1024 characters are rejected like on the Gen-2.5 form (constructed)"
+
+// bangInputNote records the Bang input rules of contractDocs (#537).
+const bangInputNote = "Input modes (#537, " + contractDocs + "): the page says exactly one of asset_id and model is accepted (\"Sending both asset_id and model, or neither, is rejected\"), that asset_id mode omits model, image and prompt, that a model needs an image unless material is None (rejected with INVALID_REQUEST and a descriptive message) and that HTTP 400 covers conflicting input modes. " +
+	"So asset_id with model, image or prompt is answered with the 400 validator envelope, a model without image while material is not None (an omitted material counts) with INVALID_REQUEST, and neither input with INVALID_REQUEST. The statuses of the two conflict rejections and of the neither case are constructed (not observed; a real probe settles them), the missing-image code is the page's. " +
+	"asset_id must be \"a completed Rodin generation task\": the uuid of a Bang or Texture result is answered ASSET_NOT_AVAILABLE (constructed from that sentence); an unfinished generation is the observed ASSET_NOT_AVAILABLE"
+
+// submissionRefusalNote records the submission refusals' counter (#537).
+const submissionRefusalNote = "The injected submission refusals (concurrency-limit, permission-denied, no-active-subscription, plan-too-low, object-not-found-on-image, content-violation, api-unknown) follow the fake's fail-times counter (Config.FailTimes or the X-Fake-Fail-Times header, per scenario and key): the first n requests are refused and the next one is accepted, so \"retry once a running task finishes\" can be replayed; without a count the refusal is permanent. The API_INSUFFICIENT_FUNDS message is the errors page's example body. ANIMATION_PREVIEW_UNAVAILABLE is in the error enum of every generation page but has no description or trigger there, so the fake never emits it; the INVALID_REQUEST of a download with \"no downloadable files\" has no trigger the fake can tell from the observed empty list, so an existing task keeps that list"
+
 var endpoints = buildEndpoints()
 
 func buildEndpoints() []fakeupstream.Endpoint {
 	out := []fakeupstream.Endpoint{
 		{Method: "GET", Path: "/check_balance", Evidence: fakeupstream.EvidenceReal, Sample: "GET /api/v2/check_balance",
-			DocURL: docsRoot + "check-balance", CheckedAt: captured},
+			DocURL: docsRoot + "check-balance", CheckedAt: captured,
+			Note: "usage_page (#537, " + contractDocs + "): \"usage\" is returned only when the one-based usage_page is given, at most 20 records a page, newest first, each with time, item, amount, task_uuid, api_key_id and api_key_description (the page's schema). The fake lists the charges of the tasks it accepted; item is api_generation_rodin for a generation (the page's example) and a constructed name for Bang and Texture; a page below 1 or not a number is the 400 envelope (constructed). Real usage samples are pending the real round"},
 		{Method: "POST", Path: "/status", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v2/status",
 			DocURL: docsRoot + "check-status", CheckedAt: captured,
-			Note: "Waiting, Generating, Done and Failed polls are real samples. The Failed poll was captured twice (2026-10-29, phase 3): a texture request whose model is the 400-byte one-triangle fixture GLB is accepted and every job is Failed on the first poll with the top-level message \"Invalid input.\" (the fake walks its normal poll cycle first, then answers that Failed body). An unknown subscription_key answers HTTP 201 {\"error\":\"NO_SUCH_TASK\"} (real observation 2026-10-21, charge_evidence_test.go, not committed as a sample); a malformed body keeps the 400 envelope"},
+			Note: "Waiting, Generating, Done and Failed polls are real samples. The Failed poll was captured twice (2026-10-29, phase 3): a texture request whose model is the 400-byte one-triangle fixture GLB is accepted and every job is Failed on the first poll with the top-level message \"Invalid input.\" (the fake walks its normal poll cycle first, then answers that Failed body). An unknown subscription_key answers HTTP 201 {\"error\":\"NO_SUCH_TASK\"} (real observation 2026-10-21, charge_evidence_test.go, not committed as a sample); a malformed body keeps the 400 envelope. queue_length (#537, " + contractDocs + "): the page says a Waiting job may carry an approximate count of jobs ahead of it, omitted once it leaves the queue; the real polls carried it on the next job in line only, with value 0 (the Bang sample). The fake keeps that shape and, while the task queues, counts the first job's value down to 0 over the queued polls (constructed; the real value while queued was never observed)"},
 		{Method: "POST", Path: "/download", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v2/download",
 			DocURL: docsRoot + "download-results", CheckedAt: captured,
 			Note: "a download asked before the jobs finished answers an empty list (observed); an unknown task_uuid answers HTTP 201 {\"error\":\"NO_SUCH_TASK\"} (real observation 2026-10-21, charge_evidence_test.go, not committed as a sample)"},
@@ -221,10 +245,13 @@ func buildEndpoints() []fakeupstream.Endpoint {
 	for _, k := range kinds {
 		note := "multipart request, HTTP 201 for a handled request; a rejected request is HTTP 201 with an error body (observed). API_NO_ACTIVE_SUBSCRIPTION was observed on 2026-11-12 (#294): a real submission was refused with it and the product recorded no HTTP status for the refusal (upstream_status 0), which is what the HTTP 201 error body sent here gives; the message text of the real body was not kept, so the message stays the documented description. The other documented submission codes without a wire sample — API_PARALLELISM_LIMIT_REACHED, PERMISSION_DENIED, API_SUBSCRIPTION_PLAN_TOO_LOW, API_OBJECT_NOT_FOUND_ON_IMAGE, IMAGE_CONTENT_VIOLATION, API_UNKNOWN and the unknown-asset NO_SUCH_TASK — are constructed from " + docsRoot + "errors (checked 2026-11-08)"
 		if k.Need == "prompt-or-images" {
-			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, the TAPose and quad_normal switches, and the image_label marks) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed. " + rodinRealRunNote + ". " + rodinLabelNote
+			note += ". The value rules of the Gen-2.5 form (seed, mesh_mode, quality, texture_mode, quality_override with its Quad and tier ceilings, the TAPose and quad_normal switches, and the image_label marks) are constructed from " + docsRoot + k.DocPage + " (checked " + formDocs + "): a value outside them is answered INVALID_REQUEST, the documented code for invalid values. The real service may answer a schema-level violation with its HTTP 400 validator envelope instead; neither the status nor the message text of a rejected value is observed. " + rodinRealRunNote + ". " + rodinLabelNote + ". is_micro is refused with INVALID_REQUEST unless the tier is Gen-2.5-Extreme-High (the schema's own rule, " + contractDocs + ") and a prompt over 1024 characters (the schema's maxLength) is refused the same way (constructed message). " + submissionRefusalNote
+		}
+		if k.Need == "asset" {
+			note += ". " + bangInputNote
 		}
 		if k.Need == "model-and-image" {
-			note += ". The receipt's consumed is 2 for texture_mode=extreme-high (real: the Offering's requests at Basic and at High resolution were charged 2, #187) and the base 0.5 for any other mode (the page's table, not observed): " + docsRoot + k.DocPage + " (read in full on " + formDocs + ") lists the two prices without saying they add up, and the receipts say they do not. The delivered GLB is the plain fixture whatever the mode and the resolution"
+			note += ". The receipt's consumed is 2 for texture_mode=extreme-high (real: the Offering's requests at Basic and at High resolution were charged 2, #187) and the base 0.5 for any other mode (the page's table, not observed): " + docsRoot + k.DocPage + " (read in full on " + formDocs + ") lists the two prices without saying they add up, and the receipts say they do not. The delivered GLB is the plain fixture whatever the mode and the resolution. " + textureReferenceNote
 		}
 		out = append(out, fakeupstream.Endpoint{
 			Method: "POST", Path: k.Path, Evidence: fakeupstream.EvidenceReal, Sample: "POST " + samplePrefix + k.Path,
@@ -257,6 +284,8 @@ type task struct {
 	// form is the generation form of a /rodin task (nil for the other routes):
 	// the PBR pack it delivers follows it (DeliveredModel).
 	form map[string]string
+	// charge is the receipt's consumed, which the usage records repeat.
+	charge float64
 }
 
 type handler struct {
@@ -268,6 +297,8 @@ type handler struct {
 	mu    sync.Mutex
 	tasks map[string]*task
 	byKey map[string]*task
+	// order is the tasks in submission order, for the usage records.
+	order []*task
 
 	balance   map[string]any
 	submit    map[string]map[string]any // by route path
@@ -413,6 +444,10 @@ func (h *handler) auth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// insufficientFundsMessage is the message of the example body on the errors page
+// (docsRoot+"errors", read 2026-11-24).
+const insufficientFundsMessage = "The fund in your wallet is insufficient to perform this operation."
+
 // render writes the Hyper3D-shaped error of an injected scenario. Rodin reports
 // a rejected request with HTTP 201 and an error code (observed for
 // INVALID_REQUEST); the codes follow the Catalog's error mapping.
@@ -422,7 +457,7 @@ func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeup
 		// A per-key credit limit surfaces as the documented insufficient-funds
 		// code: the table has no separate per-key quota code.
 		body := fakeupstream.Clone(h.invalid)
-		body["error"], body["message"] = "API_INSUFFICIENT_FUNDS", "Insufficient credits."
+		body["error"], body["message"] = "API_INSUFFICIENT_FUNDS", insufficientFundsMessage
 		writeJSON(w, http.StatusCreated, body)
 	case fakeupstream.ScenarioRateLimit:
 		w.Header().Set("Retry-After", h.env.RetryAfterSeconds())
@@ -442,27 +477,37 @@ func (h *handler) render(w http.ResponseWriter, _ *http.Request, scenario fakeup
 // description as message. No wire sample covers them (API_NO_ACTIVE_SUBSCRIPTION
 // was observed once, 2026-11-12, #294, as a refusal the product recorded with no
 // HTTP status; the shape here is that of the other HTTP 201 refusals and the
-// message is still the documented description), and the FailTimes counter that
-// Env.Intercept applies to its own scenarios does not reach these codes.
+// message is still the documented description). Env.Intercept does not route
+// them, so the FailTimes counter is applied here (Env.StillFails).
 func (h *handler) renderSubmissionScenario(w http.ResponseWriter, r *http.Request) bool {
-	switch fakeupstream.ScenarioOf(r) {
+	scenario := fakeupstream.ScenarioOf(r)
+	code, message := "", ""
+	switch scenario {
 	case fakeupstream.ScenarioConcurrencyLimit:
-		h.reject(w, "API_PARALLELISM_LIMIT_REACHED", "Too many of the account's tasks are already running. Retry once one finishes.")
+		code, message = "API_PARALLELISM_LIMIT_REACHED", "Too many of the account's tasks are already running. Retry once one finishes."
 	case fakeupstream.ScenarioPermissionDenied:
-		h.reject(w, "PERMISSION_DENIED", "The account may not perform this action.")
+		code, message = "PERMISSION_DENIED", "The account may not perform this action."
 	case fakeupstream.ScenarioNoActiveSubscription:
-		h.reject(w, "API_NO_ACTIVE_SUBSCRIPTION", "The account lacks the API access required by the endpoint or Rodin tier.")
+		code, message = "API_NO_ACTIVE_SUBSCRIPTION", "The account lacks the API access required by the endpoint or Rodin tier."
 	case fakeupstream.ScenarioPlanTooLow:
-		h.reject(w, "API_SUBSCRIPTION_PLAN_TOO_LOW", "The subscription plan does not allow API access.")
+		code, message = "API_SUBSCRIPTION_PLAN_TOO_LOW", "The subscription plan does not allow API access."
 	case fakeupstream.ScenarioObjectNotFoundOnImage:
-		h.reject(w, "API_OBJECT_NOT_FOUND_ON_IMAGE", "No object was detected in the input image, or the image is unsupported.")
+		code, message = "API_OBJECT_NOT_FOUND_ON_IMAGE", "No object was detected in the input image, or the image is unsupported."
 	case fakeupstream.ScenarioContentViolation:
-		h.reject(w, "IMAGE_CONTENT_VIOLATION", "The input image is not allowed in your region. Try another image.")
+		code, message = "IMAGE_CONTENT_VIOLATION", "The input image is not allowed in your region. Try another image."
 	case fakeupstream.ScenarioAPIUnknown:
-		h.reject(w, "API_UNKNOWN", "Unexpected server-side error.")
+		code, message = "API_UNKNOWN", "Unexpected server-side error."
 	default:
 		return false
 	}
+	// The refusal follows the counter of the other injected faults (#537): with
+	// Config.FailTimes or X-Fake-Fail-Times set to n, the first n requests are
+	// refused and the next one is accepted, so "wait for a running task to finish,
+	// then retry" can be replayed. Without a count the refusal is permanent.
+	if !h.env.StillFails(r, scenario) {
+		return false
+	}
+	h.reject(w, code, message)
 	return true
 }
 
@@ -474,7 +519,59 @@ func (h *handler) getBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	body := fakeupstream.Clone(h.balance)
 	body["balance"] = fixedBalance
+	// "usage" is returned only when usage_page is given (the page's schema, read
+	// 2026-11-24): one-based, at most usagePageSize records a page, newest first.
+	// The page's minimum of 1 is enforced as the 400 validator envelope, which is
+	// how the real service answers a schema violation (not observed for this
+	// parameter, so the rejection is constructed).
+	if values, present := r.URL.Query()["usage_page"]; present {
+		page, err := strconv.Atoi(values[0])
+		if err != nil || page < 1 {
+			h.badRequest(w, "usage_page must not be less than 1")
+			return
+		}
+		body["usage"] = h.usagePage(page)
+	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// usagePageSize is the number of usage records of a page ("up to 20").
+const usagePageSize = 20
+
+// usageItems are the wallet-ledger item of a task's charge. api_generation_rodin
+// is the page's example; the Bang and Texture names are constructed (their real
+// values were not observed).
+var usageItems = map[string]string{
+	"/rodin": "api_generation_rodin", "/bang": "api_bang_rodin", "/rodin_texture_only": "api_texture_rodin",
+}
+
+// usagePage lists the charges of the accepted tasks, newest first. Every record
+// carries the six fields the schema requires; the key id and description are the
+// fake's fixed values.
+func (h *handler) usagePage(page int) []any {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	records := []any{}
+	start := (page - 1) * usagePageSize
+	for index := len(h.order) - 1 - start; index >= 0 && len(records) < usagePageSize; index-- {
+		t := h.order[index]
+		records = append(records, map[string]any{
+			"time": fixedUsageTime, "item": usageItems[t.kind.Path], "amount": t.charge,
+			"task_uuid": t.uuid, "api_key_id": 1, "api_key_description": "Fake key",
+		})
+	}
+	return records
+}
+
+// fixedUsageTime has the millisecond form of the page's example.
+const fixedUsageTime = "2026-01-01T00:00:00.000Z"
+
+// badRequest writes the 400 validator envelope of the real service (the sampled
+// body's shape) with the given message.
+func (h *handler) badRequest(w http.ResponseWriter, message string) {
+	body := fakeupstream.Clone(h.badBody)
+	body["message"] = []any{message}
+	writeJSON(w, http.StatusBadRequest, body)
 }
 
 // formData is a parsed multipart submission.
@@ -539,6 +636,10 @@ func (h *handler) reject(w http.ResponseWriter, code, message string) {
 	writeJSON(w, http.StatusCreated, body)
 }
 
+// maxGenerationImages is the page's upper bound of reference images (the Gen-2.5
+// page and the Texture schema both say 1 to 5).
+const maxGenerationImages = 5
+
 // Value rules of the Gen-2.5 form, constructed from the official page
 // (docsRoot+"rodin-gen2-5", checked formDocs). A value outside them is answered
 // like the other invalid requests, HTTP 201 with INVALID_REQUEST, the documented
@@ -572,6 +673,15 @@ var (
 // validateGenerationForm returns the rejection message of the first field that
 // breaks a rule, or "" when the form is valid.
 func validateGenerationForm(fields map[string]string) string {
+	if message := validatePromptLength(fields); message != "" {
+		return message
+	}
+	if fields["is_micro"] == "true" && fields["tier"] != extremeHighTier {
+		// The schema (rodin-gen2-5, read 2026-11-24): "Only allowed when tier is
+		// Gen-2.5-Extreme-High; any other tier is rejected with INVALID_REQUEST".
+		// An omitted tier is Regular, which is another tier.
+		return "is_micro is only allowed when tier is " + extremeHighTier + "."
+	}
 	if value, present := fields["seed"]; present {
 		if number, ok := wholeNumber(value); !ok || number < 0 || number > maxSeed {
 			return fmt.Sprintf("seed must be an integer between 0 and %d.", maxSeed)
@@ -710,10 +820,50 @@ func validateImageLabels(labels []string) string {
 	return ""
 }
 
+// maxPromptLength is the schema's maxLength of prompt on the Gen-2.5 and the
+// Texture pages (read 2026-11-24).
+const maxPromptLength = 1024
+
+// validatePromptLength rejects a prompt longer than maxPromptLength characters
+// (INVALID_REQUEST, the documented code for invalid values; the message is the
+// fake's own).
+func validatePromptLength(fields map[string]string) string {
+	if utf8.RuneCountInString(fields["prompt"]) > maxPromptLength {
+		return fmt.Sprintf("prompt must not exceed %d characters.", maxPromptLength)
+	}
+	return ""
+}
+
 // wholeNumber parses a form value that must be an integer.
 func wholeNumber(value string) (int64, bool) {
 	number, err := strconv.ParseInt(value, 10, 64)
 	return number, err == nil
+}
+
+// rejectBangInput applies the input-mode rules of the Bang page (read 2026-11-24)
+// and reports whether it answered. The page: "BANG to Parts accepts exactly one of
+// two input modes. Sending both asset_id and model, or neither, is rejected";
+// asset_id mode takes no model, image or prompt ("Mutually exclusive"); the custom
+// model mode needs an image "unless material is None ... omitting it is rejected
+// with INVALID_REQUEST and a descriptive message"; and "HTTP 400 covers invalid
+// fields, unsupported files, or conflicting input modes". So the conflicting
+// modes answer the 400 validator envelope (constructed from that sentence: no
+// rejection was observed), the missing image answers INVALID_REQUEST (named by
+// the page), and neither input keeps the fake's earlier INVALID_REQUEST.
+func (h *handler) rejectBangInput(w http.ResponseWriter, form formData) bool {
+	hasAsset, hasModel := form.fields["asset_id"] != "", form.files["model"] > 0
+	switch {
+	case hasAsset && hasModel:
+		h.badRequest(w, "asset_id and model are mutually exclusive; provide exactly one")
+		return true
+	case hasAsset && (form.files["image"] > 0 || form.fields["prompt"] != ""):
+		h.badRequest(w, "model, image and prompt must be omitted when asset_id is given")
+		return true
+	case hasModel && form.files["image"] == 0 && form.fields["material"] != "None":
+		h.reject(w, "INVALID_REQUEST", "A reference image is required unless material is None.")
+		return true
+	}
+	return false
 }
 
 func (h *handler) submitHandler(k kind) http.HandlerFunc {
@@ -750,7 +900,7 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 			// bound is constructed from those docs: no live rejection sample
 			// exists for it. Zero images stays valid for text-to-3D when the
 			// form carries a prompt.
-			if form.files["images"] > 5 {
+			if form.files["images"] > maxGenerationImages {
 				h.reject(w, "INVALID_REQUEST", "Please upload between 1 and 5 images.")
 				return
 			}
@@ -763,6 +913,9 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 				return
 			}
 		case "asset":
+			if h.rejectBangInput(w, form) {
+				return
+			}
 			if message := validateProcessingForm(k.Path, form.fields); message != "" {
 				h.reject(w, "INVALID_REQUEST", message)
 				return
@@ -773,7 +926,10 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 				// existing task whose state does not allow the operation is
 				// ASSET_NOT_AVAILABLE (observed: an unfinished one). The unknown
 				// branch is constructed from docsRoot+"errors" (checked
-				// errorDocs), no wire sample covers it.
+				// errorDocs), no wire sample covers it. The page says asset_id is
+				// "a completed Rodin generation task": a Bang or Texture result is
+				// not one, which is answered ASSET_NOT_AVAILABLE too (constructed
+				// from that sentence and the errors page's description, #537).
 				h.mu.Lock()
 				source := h.tasks[id]
 				h.mu.Unlock()
@@ -781,7 +937,7 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 					h.reject(w, "NO_SUCH_TASK", "The referenced task does not exist or has expired.")
 					return
 				}
-				if !h.finished(source) {
+				if source.kind.Path != "/rodin" || !h.finished(source) {
 					h.reject(w, "ASSET_NOT_AVAILABLE", "")
 					return
 				}
@@ -794,8 +950,31 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 				h.reject(w, "INVALID_REQUEST", message)
 				return
 			}
-			if form.files["model"] == 0 || form.files["image"] == 0 {
+			if message := validatePromptLength(form.fields); message != "" {
+				h.reject(w, "INVALID_REQUEST", message)
+				return
+			}
+			// The Texture page names the reference field images (the schema: 1 to 5
+			// files; the prose: exactly one). Plinth sends the singular image, which
+			// the real service tolerated on 2026-10-29 (the committed texture
+			// samples), so both are taken until a real request settles whether the
+			// singular is still tolerated (#537, textureReferenceNote).
+			references := form.files["images"] + form.files["image"]
+			if form.files["model"] == 0 || references == 0 {
 				h.reject(w, "INVALID_REQUEST", "Please upload one model and one image.")
+				return
+			}
+			if references > maxGenerationImages {
+				h.reject(w, "INVALID_REQUEST", "Please upload between 1 and 5 images.")
+				return
+			}
+			// The Texture page lists image_label with the Gen-2.5 rule.
+			if form.labels > references {
+				h.reject(w, "IMAGE_LABEL_LENGTH_TOO_LONG", "Input is invalid")
+				return
+			}
+			if message := validateImageLabels(form.labelValues); message != "" {
+				h.reject(w, "INVALID_REQUEST", message)
 				return
 			}
 		}
@@ -817,22 +996,23 @@ func (h *handler) submitHandler(k kind) http.HandlerFunc {
 		if k.Need == "prompt-or-images" {
 			t.form = form.fields
 		}
+		t.charge = fixedCharge
+		switch k.Need {
+		case "prompt-or-images":
+			t.charge = generationCharge(form.fields)
+		case "model-and-image":
+			t.charge = textureCharge(form.fields)
+		}
 		h.mu.Lock()
 		h.tasks[t.uuid], h.byKey[t.key] = t, t
+		h.order = append(h.order, t)
 		h.mu.Unlock()
 		if t.scenario == fakeupstream.ScenarioLostResponse {
 			fakeupstream.AbortConnection(w)
 			return
 		}
 		body := fakeupstream.Clone(sample)
-		charge := fixedCharge
-		switch k.Need {
-		case "prompt-or-images":
-			charge = generationCharge(form.fields)
-		case "model-and-image":
-			charge = textureCharge(form.fields)
-		}
-		body["uuid"], body["submit_time"], body["consumed"] = t.uuid, fixedTimestamp, charge
+		body["uuid"], body["submit_time"], body["consumed"] = t.uuid, fixedTimestamp, t.charge
 		if prompt, has := body["prompt"]; has && form.fields["prompt"] != "" {
 			_ = prompt
 			body["prompt"] = form.fields["prompt"]
@@ -934,7 +1114,7 @@ func (h *handler) postStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	body["jobs"] = list
 	if first, _ := list[0].(map[string]any); first != nil && first["status"] == statusWaiting {
-		first["queue_length"] = json.Number("0")
+		first["queue_length"] = json.Number(strconv.Itoa(h.queueLength(n)))
 	}
 	if t.scenario == fakeupstream.ScenarioTaskFailed && n > h.pollsBeforeDone(t) {
 		body["message"] = "Invalid input."
@@ -945,6 +1125,20 @@ func (h *handler) postStatus(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", h.env.PollRetryAfterSeconds())
 	}
 	writeJSON(w, http.StatusCreated, body)
+}
+
+// queueLength is the "approximate count of jobs ahead" of the first job while it
+// is Waiting (docsRoot+"check-status", read 2026-11-24: the field is carried
+// while a job is Waiting and omitted once it leaves the queue). The real polls
+// carried it on the next job in line only, with the value 0 (the committed Bang
+// sample), which is what every poll gave here before; while the task queues it now
+// falls by one per poll to that observed 0, a count that is constructed. It is 0
+// for a job that waits on the one before it.
+func (h *handler) queueLength(poll int) int {
+	if ahead := h.env.QueuedPolls - poll; ahead > 0 {
+		return ahead
+	}
+	return 0
 }
 
 // pollsBeforeDone is how many polls answer a non-final state: the Queued polls

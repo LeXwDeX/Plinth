@@ -261,6 +261,16 @@ func (e *Env) Intercept(w http.ResponseWriter, r *http.Request, phase Phase, ren
 	return true
 }
 
+// StillFails reports whether this request still fails under scenario, counting
+// per scenario and API key against Config.FailTimes or the X-Fake-Fail-Times
+// header (0 means always). It is for a version that renders a scenario's error
+// itself because Intercept does not route it (Hyper3D's HTTP 201 submission
+// refusals): after the configured number of refusals the request is answered
+// normally, which is how a test replays "retry once a running task finishes".
+func (e *Env) StillFails(r *http.Request, scenario Scenario) bool {
+	return e.consume(r, scenario)
+}
+
 // consume reports whether this request still fails, counting per scenario and
 // API key against the configured FailTimes.
 func (e *Env) consume(r *http.Request, scenario Scenario) bool {
