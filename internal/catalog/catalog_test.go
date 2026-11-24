@@ -1195,7 +1195,7 @@ const minimalApplication = `"application":{
 		"path_parameter":"webhookSecret",
 		"path_secret_setting":"meshy_webhook_path_secret",
 		"key_setting":"meshy_webhook_key",
-		"key_headers":["x-webhook-key","x-webhook-secret","x-meshy-webhook-key"],
+		"key_headers":["x-webhook-key","x-webhook-secret","x-meshy-webhook-key","x-meshy-api-webhook-secret-key"],
 		"payload_job_id_fields":["id","task_id"],
 		"event_type":"provider.webhook_received",
 		"api":{
