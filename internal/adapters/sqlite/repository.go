@@ -490,6 +490,9 @@ var processingPlanDeliveryMigration string
 //go:embed migrations/0112_auto_completion_first_run.sql
 var autoCompletionFirstRunMigration string
 
+//go:embed migrations/0113_task_summary_credits_metered.sql
+var taskSummaryCreditsMeteredMigration string
+
 func migrationsBeforeStyleLock() []migration {
 	return []migration{{
 		version: 1,
@@ -600,6 +603,8 @@ func migrations() []migration {
 			sql: processingPlanDeliveryMigration},
 		migration{version: 112, name: "auto_completion_first_run",
 			sql: autoCompletionFirstRunMigration},
+		migration{version: 113, name: "task_summary_credits_metered",
+			sql: taskSummaryCreditsMeteredMigration},
 	)
 }
 
@@ -630,7 +635,8 @@ func migrations() []migration {
 // completion asks for (#461) and 111 the marker of a processing plan the
 // platform started itself (#461) and 112 the first time an automatic
 // completion record was looked at, which is what its deadline runs from
-// (#478).
+// (#478) and 113 the credits_metered flag of the task summary projection, which
+// the failure attribution of the external MCP reads (#517).
 func MigrationVersions() []int {
 	all := migrations()
 	versions := make([]int, 0, len(all))

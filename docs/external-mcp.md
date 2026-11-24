@@ -704,7 +704,7 @@ Key 的持有人必须是平台里真实存在且可用的用户；只存在于�
 | `failure` | 本次调用涉及的任务失败时的归因：`task_id`、`category`、`next_action`、`retryable`、`user_decision_required`、`advice`；否则 `null` |
 | `inspection` | 平台对这条已完成 3D 任务的最后一次自检结论；无记录为 `null`，见 §6.3 |
 
-失败归因的五类 `category`：`input_invalid`、`parameter_invalid`、`upstream_capacity`、`upstream_refused`、`internal`。建议动作 `next_action`：`retry`、`retry_later`、`fix_input`、`fix_parameters`、`ask_user`、`contact_admin`。`user_decision_required: true` 时可能已经扣费，必须由用户决定，**不要自动重试**；此时 `retryable` 恒为 `false`、`next_action` 恒为 `ask_user`。归因与平台内 Agent 的任务视图同源（`generationtool.TaskFailureReport`，#517）：上游可能已运行并计费的歧义失败，以及按积分计费的服务在 Schema 声明了「不自动重试」文案的失败类别（如完整性校验失败），都按此处理。（未完成：`get_task`、`get_task_assets`、`list_tasks` 读取的任务摘要投影目前不带冻结服务的计费标记，这几个工具对计费类失败暂时仍按失败类别本身归因，见 #517。）
+失败归因的五类 `category`：`input_invalid`、`parameter_invalid`、`upstream_capacity`、`upstream_refused`、`internal`。建议动作 `next_action`：`retry`、`retry_later`、`fix_input`、`fix_parameters`、`ask_user`、`contact_admin`。`user_decision_required: true` 时可能已经扣费，必须由用户决定，**不要自动重试**；此时 `retryable` 恒为 `false`、`next_action` 恒为 `ask_user`。归因与平台内 Agent 的任务视图同源（`generationtool.TaskFailureReport`，#517）：上游可能已运行并计费的歧义失败，以及按积分计费的服务在 Schema 声明了「不自动重试」文案的失败类别（如完整性校验失败），都按此处理。`get_task`、`get_task_assets`、`list_tasks` 读取的任务摘要投影也带冻结服务的计费标记（迁移 0113），与生成类工具的结果一致。
 
 读取状态块不计步、不扣费、不建授权或任务。
 
