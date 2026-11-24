@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -232,6 +233,13 @@ type TurnCheckpoint struct {
 	// as arguments, never the raw text; the round answers each of them with the
 	// Schema's error text instead of running the tool, also after a restart.
 	MalformedCalls []string `json:"malformed_calls,omitempty"`
+	// UnexecutedCalls lists the calls of the whole turn, every round kept,
+	// that were answered with a result instead of running a tool (#501): a
+	// tool this reply is not offered, a scope refusal or invalid arguments.
+	// Such a call never reached the tool and cannot have submitted a Task,
+	// so a stop treats it as task-free. A checkpoint of an earlier version
+	// lacks the list and keeps the stop's protective branch for its calls.
+	UnexecutedCalls []string `json:"unexecuted_calls,omitempty"`
 	// Waiting lists the calls of this round that have no receipt yet: tasks
 	// in flight and submissions queued for a retry. It replaces the single
 	// WaitingTaskID/WaitingCallID/WaitDeadline of older checkpoints.
@@ -264,6 +272,15 @@ func (checkpoint TurnCheckpoint) WithoutRequests() TurnCheckpoint {
 	checkpoint.ImageURLs = nil
 	checkpoint.Completion = checkpoint.Completion.WithoutReasoning()
 	return checkpoint
+}
+
+// markUnexecuted records that the call was answered without running a tool
+// (#501). Callers record only a call with no Task bound: a bound Task is
+// reconciled through its binding.
+func (checkpoint *TurnCheckpoint) markUnexecuted(callID string) {
+	if !slices.Contains(checkpoint.UnexecutedCalls, callID) {
+		checkpoint.UnexecutedCalls = append(checkpoint.UnexecutedCalls, callID)
+	}
 }
 
 // WaitingCall is one call of a tool round that still lacks its receipt.
