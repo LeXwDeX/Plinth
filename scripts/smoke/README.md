@@ -36,6 +36,7 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 | L1 `smoke-l1-free.sh` | 直接运行：3D 请求带 fake 对话模型的工具标记 `[[fake:tool:create_model_3d …]]`，确定地得到待批准卡片 | 会调用真实对话模型：需 `--live` + `ART_AI_LIVE_ACK=1` |
 | L1 Agent `smoke-l1-agent-mode.sh` | 先用 `seed-fake-3d-task.py` 经 fake 生成一个本用户 SUCCEEDED 3D 任务（零费用），第 9 节格式/归档验收不再 SKIP | 不提交生成，保持只读 |
 | Fake 故障 `smoke-fake-faults.py`（#301） | 直接运行：用带标记的图片触发抠图 fake 的部分成功与显存不足，断言公开投影 | 拒绝（退出码 2；标记只对 fake 有意义，没有 `--live` 模式） |
+| 直连 L5（#540）`smoke-l5-2d-direct.py`、`smoke-l5-matting.py`、`matting-probe.py` | 直接运行：2D 七任务、抠图多文件批次与服务探针都对 fake 跑通，fake 未建模的偏差记为 INFO；整栈场景 `l5-direct`（`smoke-fake-stack.py`）跑同一批脚本 | 需 `--live` + `ART_AI_LIVE_ACK=1`；fake 形态下给 `--live` 同样拒绝；内容拦截探针另需第三个开关 |
 | L2、L3、L4、L5 | 拒绝（需要真实上游；先以 `--live-upstream` 发布真实形态） | 需 `--live` + `ART_AI_LIVE_ACK=1` |
 
 ## 全新数据起点（#28）
@@ -54,6 +55,7 @@ python3 scripts/release-env.py release dev-test   # 同步→构建→preflight�
 | L3 批量回归 | `smoke-l3-batch.sh` | 只在用户当次同意后、对真实形态发布的 dev-test 跑（`--live` + `ART_AI_LIVE_ACK=1`，#219） | 每模型 5 张小额文生图 |
 | L4 3D 格式与隔离 | `smoke-l4-3d-isolation.py` | 3D Provider、格式或缓存边界变更后跑 | Meshy 一次生成；Tripo 一次生成及六次转换；`ART_AI_3D_PROVIDERS=hyper3d` 时一次 Rodin 文生 3D（3 Hyper3D credits，只核必需 GLB） |
 | L5 真实能力回归 | `smoke-l5-*.py`，入口 `smoke-l5-all.sh` | 只在用户当次同意后运行（`AGENTS.md`「上游接口与 Fake」），结果回灌 fake | 真实付费，必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`，目标须为真实形态；见下文 L5 一节 |
+| 直连 L5（#540） | `smoke-l5-2d-direct.py`、`smoke-l5-matting.py`、`matting-probe.py` | 2D 三家与抠图服务的「每个 API 功能真实调用一轮」验收；只在用户当次同意后对真实形态运行，结果回灌 fake；对 fake 形态可随时运行（见下文「直连 L5」） | fake 形态零；真实形态 2D 约 0.47 美元（`--large` 约 0.57），抠图零费用但占用共享 GPU |
 | 公共 Mock 自部署冒烟 | `smoke-public-mock.sh` | 自部署后本地手动运行（`SMOKE_ENV_FILE=.env bash scripts/smoke/smoke-public-mock.sh`）；不再由公共 CI 运行（#257：CI 不构建镜像） | 零（环境文件须显式写 `PROVIDER_MODE=mock`、`AGENT_MODE=mock`，只接受 Mock Provider/Agent、全部 `*_API_KEY` 为空的回环地址栈）；不用于内部环境 |
 
 L0–L4 各层在 `dev-test` 主机上执行时用 `ART_AI_SERVER_ROOT=<root> bash scripts/smoke/<脚本>`（`<root>` 为该环境发布根，读取本栈 `runtime.env`；L1 Agent 要核对容器 revision 时另设 `RELEASE_CONTAINER=<release-env.py show 的 container>`，脚本不再带缺省容器名，#261）；在本地执行时用 `python3 scripts/release-env.py smoke dev-test -- bash scripts/smoke/<脚本>`（自动设置 `BASE`、`ADMIN_*`、`EXPECT_SHA`、`RELEASE_CONTAINER`）。
@@ -181,6 +183,45 @@ ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- \
 本机验证：`python3 -m unittest scripts.tests.test_l5_endpoints`（离线，随脚本单测门禁运行）覆盖门禁、一次提交、预算、计划、检查与收尾；整链对 fake 栈的验证用 `python3 scripts/smoke/smoke-fake-stack.py --only meshy-endpoints,hyper3d-endpoints`（作为进程运行两个脚本，fake 形态、无开关，不在 `verify-local.py` 的门禁子集里，在不带 `--only` 的全量运行里；全程零真实上游）。这一整链第一次对 fake 运行就发现 `meshy/meshy-t2.5/image-to-3d` 默认请求会把空的 `pose_mode` 发给 Meshy（其余三个 Meshy 生成 Offering 都声明了「为空则不发」），已补 Catalog 的 `omit_when`，回归是 `internal/catalog` 的 `TestEveryMeshyGenerationOfferingOmitsAnEmptyPoseMode`。
 
 Rodin 还有几项只能直连上游探测，由对齐工具 `cmd/fake-upstream-align` 的 `hyper3d/api-v2` Profile 新增的步骤承担（每个提交步骤带两个免费的 `-status`、`-download` 后续步骤，须单独运行、用户当次同意、带 `-confirm-paid`，全部按官方页面构造、待真实一轮定稿）：`balance-usage`（`check_balance?usage_page=1`，免费，取 `usage[]` 形态）；`reject-seed-probe`（`seed=65536`，超出文档上限，看真实拒绝是 400 信封还是 HTTP 201 加 `INVALID_REQUEST`，被受理则计 0.5）；`rodin-text-quadpose`（游戏角色请求的原始体，约 1）；`rodin-image-label-short`（两张图一个 `image_label`，直接发短列表看服务是否受理，约 0.5）；`bang-upload`（model 上传模式加参考图，约 0.5，模型取 `bang` 步骤的产物）；`texture-images`（Texture 参考图用官方页面的复数字段 `images`，Plinth 与 fake 现用单数 `image`，约 0.5，结果决定是否改 Catalog 的 `wire_name`；fake 目前只认单数，所以该步骤暂不对 fake 重跑）。Meshy 的对齐 Profile 已含 DELETE、余额、各生成与加工端点，本轮不新增。
+
+## 直连 L5（#540）
+
+`smoke-l5-2d-direct.py`、`smoke-l5-matting.py`、`matting-probe.py` 不经 Agent：每个任务用公开任务接口（`POST /api/v1/tasks/prepare`、`/grants`、`/tasks`）原生提交，各步骤至多发一次，观察 Task 并核对公开交付。共用 `l5_direct.py`（门禁、图片构造、私有目录、一次性提交、证据脱敏）与 `l5_common.py` 的登录和客户端。它们与上面的 L5 脚本不同的地方是门禁：用 `upstream_shape.py` 的 `fake-default`。
+
+- **fake 形态**（`ART_AI_UPSTREAM_SHAPE=fake`，`release-env.py smoke` 在 fake 形态的 dev-test 上会设置）：直接运行，零费用，不接受 `--live`（给了也拒绝，退出码 2）。
+- **真实或混合形态**：必须同时给 `--live` 与 `ART_AI_LIVE_ACK=1`，缺一退出 2，未知形态按真实处理；每次真实运行前须在当前对话取得用户同意（`AGENTS.md`「上游接口与 Fake」）。三个脚本都不在 `smoke-l5-all.sh` 里。
+- **fake 与真实的判定差别**（混合形态的生成侧与抠图服务也是 fake，按 fake 判定，但门禁仍要求两个开关）：fake 还没建模的行为（固定小图尺寸与固定 JPEG、抠图返回不透明白底 64x64、没有 `/openapi.json`、只有部分参数界）在 fake 形态只记为 INFO（输出 `INFO (not modelled by the fake yet)`，并写入证据的 `info`），不算通过；同一偏差在真实形态记为 FAIL。这样脚本本身能在 fake 栈上验收，又不会把 fake 缺口当成通过。
+
+```
+python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-2d-direct.py
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-2d-direct.py --live --report <目录> [--large] [--only 任务键,...]
+ART_AI_LIVE_ACK=1 python3 scripts/release-env.py smoke dev-test -- python3 scripts/smoke/smoke-l5-matting.py --live --report <目录>
+ART_AI_LIVE_ACK=1 MATTING_BASE_URL=<服务地址> MATTING_API_KEY=<密钥> python3 scripts/smoke/matting-probe.py --live --report <目录>
+```
+
+**2D 七任务**（`smoke-l5-2d-direct.py`，一任务一提交，开服务端脱敏录制 `UPSTREAM_CAPTURE_DIR` 后再运行，见 `docs/deployment.md`「上游调用脱敏录制」，结束后用 `fake-upstream-align draft` 转样本）：
+
+| 任务键 | 请求 | 预计费用（美元，转述估算） |
+|---|---|---|
+| `openai-generate` | gpt-image-2.6-sunburst 文生图：1536x1152、quality=low、n=2；两张图字节不同，解码尺寸记录偏差 | 0.02 |
+| `openai-edits` | 图生图：两张 512 PNG（`image[]`）加同尺寸 mask，1024x1024、low、n=1 | 0.02 |
+| `gemini-generate` | gemini-3-pro-image 文生图：16:9、1K（`--large` 为 4K） | 0.134（4K 0.24，需复核） |
+| `gemini-edit` | 图生图：两张 512 参考图（其一带 alpha），3:4、1K | 0.134 |
+| `jimeng-generate` | seedream-4-5 文生图：1920x1920，内嵌图片（`--large` 为 4096x4096） | 0.04 |
+| `jimeng-edit` | 图生图：两张 512 参考图（其一带 alpha），1920x1920（`--large` 为 4096x4096） | 0.04 |
+| `jimeng-sequence` | 组图：`sequential_image_generation=auto`、`max_images=2`，交付 1 到 2 张 | 0.08 |
+
+默认一轮约 0.47 美元，`--large` 约 0.57 美元；网关与方舟的积分换算未知。`--budget-usd`（默认 0.75）是整轮估算花费的上限，会超的任务被跳过而不是发送，`--max-tasks`（默认 7）限制次数。公开 API 要求「建议不更改」的参数改动附理由，脚本为 `quality` 与 `image_size` 带固定理由（`parameter_reasons`）。Gemini 4K 与 Seedream 4096x4096 响应很大、耗时长，丢了响应的请求可能已被计费，所以只在显式 `--large` 时运行。每项断言：Task SUCCEEDED，交付张数在预期范围内且字节与声明的大小和 SHA-256 一致，多张图互不相同，像素比例符合请求；精确像素尺寸与请求不同、图片格式与惯例不同只记录偏差。
+
+**内容拦截探针**（OpenAI moderation、Gemini 安全拦截、即梦敏感内容）不在默认任务里，因为可能触发账号风控。`--content-probe --provider openai|gemini|jimeng --probe-prompt-file <文件>` 只运行这一个探针，一个 Provider 一次提交，需要第三个开关 `ART_AI_CONTENT_PROBE_ACK=1`（用户须当次确认这段提示词），不能与 `--large`、`--only` 同用，fake 形态拒绝。提示词只读自文件、只发送一次，不打印也不落盘（证据只有长度与 SHA-256 前缀，私有目录只留脱敏摘要）；结果（Task 成功，或失败类别）只观察不判定。
+
+**抠图**（`smoke-l5-matting.py`，零费用）：经 Plinth 提交一个批次：512x512 PNG、256x256 JPEG、一个扩展名 `.png` 的非图片字节（fake 形态改用带 fake 故障标记的 PNG，走同一条部分成功通知路径），默认参数（1024/1024，不用 2048，共享显卡）。期望 Task SUCCEEDED、交付两张带 alpha 的 PNG（颜色类型 6）且尺寸等于各自来源、公开通知为 `partial_inputs` 且 `inputs=[3]`、任务列表与详情一致。服务自己的批次状态词与第 3 个文件的状态、`invalid_reason` 不在公开 Task 里，取自服务端录制或 `matting-probe.py`；若服务对非图片字节整批返回 422，Task 为 FAILED，这就是结论，是否拆开探测由用户决定。`matting-probe.py` 直连服务（`MATTING_BASE_URL`、`MATTING_API_KEY`，只读环境变量），只读探测：`/health`、`/openapi.json`（三个端点、枚举与 PipelineParams 各字段的界，完整文档写到私有目录供做脱敏快照与漂移测试）、`birefnet_process_res=511`、`expand=1001`、`sensitivity=1.5` 的 422、非空错误密钥的状态与 `WWW-Authenticate`、未知批次与未知任务下载的 404、无密钥下载的 401；服务把不该受理的值受理时会留下一个 64x64 的批次，只记录不删除。
+
+**原始结果与证据**：原始 Task JSON 与交付字节写到工作树外的 0700 目录（`--private-dir` 指定已存在的 0700 目录，缺省建临时目录），结束即清理，`--keep-private` 保留；`--report <目录>` 写通常的 PASS/FAIL/SKIP 报告和 `<脚本名>-evidence.json`（状态序列与耗时、每张图的格式、字节数、SHA-256 前缀、像素尺寸、报价与调整、冻结参数，不含提示词、签名 URL 查询、地址与密钥）。密钥只读环境变量。提交只发一次：提交结果未知（无应答或 5xx）只读任务列表观察，失败的 Task 不重试。
+
+**对齐 Profile 的新增步骤**（`cmd/fake-upstream-align`；这些步骤标 `OptIn`：不带 `-steps` 的 `official`/`export` 不发它们，默认的付费清单与例行刷新的费用不变，只有 `-steps` 点名才发；均标付费，需 `-confirm-paid`，每次发起前按 `AGENTS.md`「上游接口与 Fake」说明次数与预计费用并取得当次同意；`fake` 与 `compare` 不受影响，fake 恒跑全部步骤；官方答案在真实运行前没有样本，fake 对应行为是 constructed）：OpenAI `generations-n2-1536x1152`、`generations-quality-max`（Catalog 默认 quality=max 的裁决，约 0.11 美元）、`generations-invalid-size`（1000x1000，预期免费 400）、`edits-two-images-mask`（`image[]` 两张加 `mask`）；Gemini `generate-16x9-4k`、`edit-3x4-two-references`、`generate-invalid-ratio`（7:1，网关可能 400 也可能静默出图）；Jimeng `generations-4096`、`edits-two-references-4096`、`generations-sequential-max2`、`generations-invalid-size`（1024x1024 低于 3686400 像素的官方下限，预期免费 400）。它们在进程内 fake 上全部可运行（`registry_test.go` 守）；现有 `alignment-report.md` 来自此前的官方运行，没有这些步骤，真实运行后用 `compare` 重生成。
+
+离线单测：`python3 -m unittest scripts.tests.test_l5_direct`（门禁拒绝矩阵、输入对 Catalog 的契约、预算、图片、私有目录、一次性提交、提示词不落盘、抠图判定、探针对脚本化服务），随 `scripts/tests` 门禁运行。
 
 ## Agent 产出质量评测（#238）
 
