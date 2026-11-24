@@ -239,6 +239,16 @@ class PlanTest(unittest.TestCase):
         self.assertEqual([s.name for s in engine.selected_steps(self.steps, ["resize", "remesh"])], ["remesh", "resize"])
         self.assertEqual(len(engine.selected_steps(self.steps, [])), len(self.steps))
 
+    def test_a_seeded_step_is_never_selected_to_run_again(self):
+        """--seed NAME=TASK_ID reuses the source: NAME must not be sent again (that would be a second paid
+        generation that also overwrites the seed), whether or not --only names it."""
+        seeded = self.steps[0].name
+        everything = [s.name for s in engine.selected_steps(self.steps, [], [seeded])]
+        self.assertNotIn(seeded, everything)
+        self.assertEqual(len(everything), len(self.steps) - 1)
+        named = [s.name for s in engine.selected_steps(self.steps, [seeded, self.steps[1].name], [seeded])]
+        self.assertEqual(named, [self.steps[1].name])
+
     def test_cleanup_order_is_reverse_run_order_without_unsent_steps(self):
         results = [{"task_id": "a"}, {"task_id": None}, {"task_id": "c"}, {"task_id": "d"}]
         self.assertEqual(engine.cleanup_order(results), ["d", "c", "a"])

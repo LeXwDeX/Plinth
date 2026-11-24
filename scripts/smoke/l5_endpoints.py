@@ -175,9 +175,12 @@ def plan_problems(steps, only, seeds):
     return problems
 
 
-def selected_steps(steps, only):
+def selected_steps(steps, only, seeds=()):
+    """The steps to run, in chain order. A seeded step is a source the operator already has: it is read
+    (run_chain), never sent again, so it is left out here even when `only` names it or selects everything."""
     chosen = set(only)
-    return [step for step in steps if not chosen or step.name in chosen]
+    seeded = set(seeds)
+    return [step for step in steps if (not chosen or step.name in chosen) and step.name not in seeded]
 
 
 def cleanup_order(results):
@@ -691,7 +694,7 @@ def run_chain(ctx, report, steps, offerings, session_id, key_prefix, budget):
         ctx.results[name] = {"state": "SUCCEEDED", "task_id": task_id, "task": task, "seeded": True}
         runner.fetch_assets(name, task)
         report.passed(f"seed {name}", f"task {task_id} reused, nothing sent")
-    for step in selected_steps(steps, ctx.arguments.only_steps):
+    for step in selected_steps(steps, ctx.arguments.only_steps, ctx.arguments.seeds):
         runner.run(step)
     return runner
 

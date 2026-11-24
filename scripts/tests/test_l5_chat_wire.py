@@ -137,5 +137,13 @@ class Shared(unittest.TestCase):
         self.assertIn("does not call real, paid upstreams", result.stderr)
 
 
+
+class ChatWireTitleTests(unittest.TestCase):
+    def test_the_text_session_keeps_the_default_title_so_the_first_turn_names_it(self):
+        """A custom title marks the session as user-titled and the first-turn title request is never made,
+        so the title check would pass on a title the script itself set."""
+        source = (pathlib.Path(__file__).resolve().parents[1] / "smoke" / "smoke-l5-chat-wire.py").read_text(encoding="utf-8")
+        self.assertNotIn('new_session("l5-chat-wire-text"', source)
+
 if __name__ == "__main__":
     unittest.main()

@@ -133,7 +133,7 @@ def body(live, report):
     asked = prompts(shape)
     evidence = {"shape": shape, "turns": []}
 
-    session = live.new_session("l5-chat-wire-text", approval="auto")
+    session = live.new_session(approval="auto")  # the default title stays pending, so the first turn names the session
     if not report.check("session created", bool(session)):
         return
     model, offered = chat_model(live, session)

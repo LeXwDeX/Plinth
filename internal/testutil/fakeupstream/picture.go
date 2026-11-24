@@ -241,8 +241,8 @@ func PadJPEG(data []byte, size int) []byte {
 	if size > MaxPaddedJPEGBytes {
 		size = MaxPaddedJPEGBytes
 	}
-	const segment = 65533 // a COM segment holds at most 65533 bytes of text
-	out := make([]byte, 0, size)
+	const segment = 65533             // a COM segment holds at most 65533 bytes of text
+	out := make([]byte, 0, len(data)) // grows by append up to the bounded size; no allocation by caller value
 	out = append(out, data[:2]...)
 	filler := bytes.Repeat([]byte("fake-upstream-padding "), segment/22+1)[:segment]
 	for len(out)+4+segment+len(data)-2 <= size {
@@ -263,6 +263,9 @@ func PadPNG(data []byte, size int) []byte {
 	const trailer = 12 // the IEND chunk: length, type, CRC
 	if size <= len(data) || len(data) < trailer || !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
 		return data
+	}
+	if size > MaxPaddedJPEGBytes {
+		size = MaxPaddedJPEGBytes
 	}
 	const overhead = 12 + len("Comment\x00") // chunk framing plus the keyword
 	text := size - len(data) - overhead
