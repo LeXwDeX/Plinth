@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/image/bmp"
+
 	"github.com/LeXwDeX/Plinth/internal/agents"
 )
 
@@ -138,6 +140,70 @@ func TestTransparentPictureIsCompositedOverTheBackground(t *testing.T) {
 	if red>>8 < 180 || green>>8 > 30 {
 		t.Fatalf("opaque area = %d,%d, want red", red>>8, green>>8)
 	}
+}
+
+// flat is one opaque colour: a PNG of it is tiny, its JPEG is not.
+func flat(width, height int) *image.NRGBA {
+	picture := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			picture.SetNRGBA(x, y, color.NRGBA{R: 40, G: 120, B: 200, A: 255})
+		}
+	}
+	return picture
+}
+
+func jpegLength(t *testing.T, picture image.Image, quality int) int {
+	t.Helper()
+	var buffer bytes.Buffer
+	if err := jpeg.Encode(&buffer, picture, &jpeg.Options{Quality: quality}); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Len()
+}
+
+func TestOpaquePNGWhoseJPEGIsNotSmallerIsKept(t *testing.T) {
+	encoder := newEncoder(t)
+	picture := flat(512, 512)
+	uri := pngURI(t, picture)
+	raw := len(uri) - len("data:image/png;base64,")
+	if jpegLength(t, picture, testPolicy().Quality) < base64.StdEncoding.DecodedLen(raw)-2 {
+		t.Fatal("fixture: the flat picture's JPEG should not be smaller than its PNG")
+	}
+	encoded, stats := encoder.Request(pictureRequest(uri))
+	if encoded.Messages[1].Parts[0].URL != uri {
+		t.Fatalf("a flat PNG became a larger JPEG: %.40s", encoded.Messages[1].Parts[0].URL)
+	}
+	if stats.Kept != 1 || stats.Encoded != 0 || stats.Bytes != int64(len(uri)) {
+		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestTransparentPictureIsEncodedEvenWhenItsJPEGIsLarger(t *testing.T) {
+	picture := flat(512, 512)
+	for y := 0; y < 512; y++ {
+		for x := 0; x < 256; x++ {
+			picture.SetNRGBA(x, y, color.NRGBA{})
+		}
+	}
+	output := newEncoder(t).URL(pngURI(t, picture))
+	decoded, _ := decodeURI(t, output)
+	if red, green, blue, _ := decoded.At(8, 8).RGBA(); red>>8 < 245 || green>>8 < 245 || blue>>8 < 245 {
+		t.Fatalf("transparent area = %d,%d,%d, want white", red>>8, green>>8, blue>>8)
+	}
+}
+
+func TestPictureInAFormatModelsMayNotReadIsEncodedEvenWhenItsJPEGIsLarger(t *testing.T) {
+	var buffer bytes.Buffer
+	if err := bmp.Encode(&buffer, image.NewGray(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatal(err)
+	}
+	uri := "data:image/bmp;base64," + base64.StdEncoding.EncodeToString(buffer.Bytes())
+	output := newEncoder(t).URL(uri)
+	decodeURI(t, output)
+	// A PNG labelled as something else is not kept either: the label is what the model reads.
+	mislabelled := strings.Replace(pngURI(t, flat(512, 512)), "data:image/png", "data:image/x-picture", 1)
+	decodeURI(t, newEncoder(t).URL(mislabelled))
 }
 
 func TestUprightJPEGIsKeptByteForByte(t *testing.T) {
