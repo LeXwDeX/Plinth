@@ -118,6 +118,14 @@ func (e *Executor) createThreeView(ctx context.Context, command chat.ToolCommand
 		if revision == "" {
 			return chat.ToolResult{NoSubmission: true}, skillrun.ErrInvalid
 		}
+		// A new run is one paid generation of the turn, counted against
+		// max_generation_calls_per_turn like generateWithParams (#563); the
+		// same call back on its own run (recovery, observation) does not
+		// reach here and is not counted again.
+		if e.generationLimitReachedForCall(e.scopeKey(command), command.AssistantMessageID,
+			command.Call.ID, command.PriorGenerationCalls) {
+			return chat.ToolResult{AgentContent: e.limitContent, NoSubmission: true}, nil
+		}
 		// The frame of every view follows the source subject's shape instead
 		// of the Offering's default square (#283), or the source picture's own
 		// shape for a use that declares it (#409). It is frozen with the run;
