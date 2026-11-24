@@ -139,6 +139,34 @@
 // before the model, where the fake's finished poll shows both; and a parameter the
 // request leaves out is not echoed, because the run sent every parameter.
 //
+// Request contracts, source tasks and prices (#541). The official pages read on
+// 2026-11-24 (generation.go, processing.go, billing.go) replaced what had been a body
+// that only needed a model and a prompt or an input:
+//
+//   - The three generation endpoints check the request like the real API checks it for
+//     the families the pages list: model names (H v3.1/v3.0/v2.5, P P2/P1; a retired name
+//     is 400/code 2015, any other 1004), the enumerations, the v3.0 gate of the new
+//     parameters, the face_limit ceilings, quad for P2 only, generate_parts, fast with a
+//     v2.5 texture, and the text lengths. Real evidence exists for the H3.1 model only:
+//     the P series, the rule that P2 refuses the H-only parameters, the retired names that
+//     answer 2015 and every refusal text are constructed, and the wire coverage matrix
+//     counts an Offering of another model as having no real sample of those endpoints.
+//   - The processing endpoints check their values (texture, segmentation, completion,
+//     Smart Segmentation) and their source tasks (processing.go): a rig check and a rig
+//     take a text, image or multiview task; a retarget takes a rigged model or a task run
+//     on it; a completion needs a segmentation; an edit needs an Image to Multiview task; a
+//     conversion by task id looks the task up. Smart Segmentation answers 2007 for a task
+//     that has not succeeded and 2006 for one with no usable picture or GLB.
+//   - A v2.5 biped rig is treated as a v3.0 rig for retargeting (rig.go), as the rig page
+//     now says; the real failed retarget of 2026-10-29 used such a rig and predates that
+//     note, so the two are in conflict until one real rig-and-retarget round settles it.
+//   - A generation, texture, segmentation, completion, Smart Segmentation, retarget and
+//     multiview task reports the price of the pricing page (billing.go); P1 and image to
+//     splat have no published price and keep the sample's placeholder.
+//   - X-RateLimit-Reset is a Unix timestamp in seconds; rate-limit-reset-only is the 1007
+//     answer with that header and no Retry-After; businessErrors and the task-failed-<word>
+//     words inject 2008, 2015, 2018, 2002 and 4001 (fake.go).
+//
 // Balance scenarios. insufficient-balance and key-quota are credit refusals of
 // task creation, so they never apply to POST /files; the files page defines no
 // such refusal for an upload.

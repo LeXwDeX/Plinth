@@ -234,8 +234,8 @@ var kinds = []kind{
 // #89 showed (each was requested once with its cheapest option; the credits are
 // what the official poll reported).
 var realKindNotes = map[string]string{
-	"/generation/image-to-model":     "captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go)",
-	"/generation/text-to-model":      "a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go); the rest is the captured text_to_model structure",
+	"/generation/image-to-model":     "real for the H series model v3.1-20260211 only (the P series, P2-20260801 and P1-20260311, shares the endpoint and was never requested: its request values, its refusals and its price are constructed from the official P Series pages read on " + generationDocsChecked + ", generation.go, so the P2 Offerings do not get real evidence from this sample, #541); captured: task type image_to_model, 20 credits for a geometry-only v3.1 model; the output has model_url and rendered_image_url (no generated_image_url, which only a text prompt produces); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go)",
+	"/generation/text-to-model":      "real for the H series model v3.1-20260211 only (the P series, P2-20260801 and P1-20260311, shares the endpoint and was never requested for a text task: its request values, its refusals and its price are constructed from the official P Series pages read on " + generationDocsChecked + ", generation.go, so the P2 text Offering does not get real evidence from this sample, #541); a P-series request with quad=true delivers an FBX and no GLB (observed 2026-11-12, #294, p2_quad.go); the rest is the captured text_to_model structure",
 	"/generation/image-to-splat":     "captured: task type image_to_splat, 30 credits; the only output is model_url (a .splat file)",
 	"/generation/image-to-multiview": "captured: task type image_to_multiview, 10 credits; the output is the object generate_multiview_image with front/left/back/right_view_url (JPEG); re-captured through the production path (POST /v3/files then the task) on 2026-11-20 and again on 2026-11-23, where the running polls answered output {} and the task echoed input.file.object {bucket tripo-data, key} with model_version default (tripo-v3-multiview-2026-11-20.candidate.json, tripo-v3-multiview-2026-11-23.candidate.json)",
 	"/generation/edit-multiview":     "captured: task type edit_multiview, 5 credits; input.original_task_id is the multiview task and the output carries only the edited views (one prompt, one front_view_url)",
@@ -252,7 +252,7 @@ const multiviewChecked = "2026-11-02"
 
 // constructedKindNotes explains kinds that have no captured sample.
 var constructedKindNotes = map[string]string{
-	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + ": inputs is an array of single-key view objects (front is required, 2-4 images) instead of input; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go). Checked against one real task on 2026-11-19 (#386, evidence-386-multiview-model.candidate.json, not a template sample, so the endpoint stays constructed): three views at Plinth's production defaults (texture and PBR at extreme quality, detailed geometry, 2,000,000 faces), 70 credits shown from the queued poll on. The create envelope, the task type multiview_to_model and the queued > running > success flow are as assumed; the task object shows the request's own parameters under input, the request's model as model_version and a files array of four entries (front, left, back, right; a stored object each, null for the view that was not sent), the output holds model_url (a GLB) and rendered_image_url (a WebP, not the PNG of the other generation tasks), and the real running poll shows the render from progress 99, before the model, which the fake does not (multiview.go). What the real API shows for a parameter the request left out is not known",
+	"/generation/multiview-to-model": "constructed from the official documentation read on " + multiviewChecked + " (the request contract re-read on " + generationDocsChecked + ", generation.go, with the P Series pages: P2-20260801 and P1-20260311 were never requested on this endpoint): inputs is an array of single-key view objects (front is required, 2-4 images) instead of input; a P-series request with quad=true delivers an FBX and no GLB like the observed text and image tasks (assumed, p2_quad.go). Checked against one real task on 2026-11-19 (#386, evidence-386-multiview-model.candidate.json, not a template sample, so the endpoint stays constructed): three views at Plinth's production defaults (texture and PBR at extreme quality, detailed geometry, 2,000,000 faces), 70 credits shown from the queued poll on. The create envelope, the task type multiview_to_model and the queued > running > success flow are as assumed; the task object shows the request's own parameters under input, the request's model as model_version and a files array of four entries (front, left, back, right; a stored object each, null for the view that was not sent), the output holds model_url (a GLB) and rendered_image_url (a WebP, not the PNG of the other generation tasks), and the real running poll shows the render from progress 99, before the model, which the fake does not (multiview.go). What the real API shows for a parameter the request left out is not known",
 }
 
 var endpoints = buildEndpoints()
@@ -561,9 +561,28 @@ func (h *handler) getBalance(w http.ResponseWriter, r *http.Request) {
 	body := fakeupstream.Clone(h.balance)
 	if data, ok := fakeupstream.DigMap(body, "data"); ok {
 		data["balance"] = fixedBalance
-		data["frozen"] = 0.0
+		// "Task creation freezes the required credits" until the task ends (billing page,
+		// read 2026-11-24): the frozen amount is the price of the tasks still in flight.
+		// The balance itself stays fixed so a long-lived fake never runs dry (#541).
+		data["frozen"] = h.frozenCredits()
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// frozenCredits is the price of the priced tasks that have not reached a terminal poll.
+func (h *handler) frozenCredits() float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var frozen float64
+	for _, t := range h.tasks {
+		if t.done {
+			continue
+		}
+		if price, priced := t.price(); priced {
+			frozen += price
+		}
+	}
+	return frozen
 }
 
 func (h *handler) postFile(w http.ResponseWriter, r *http.Request) {
@@ -719,7 +738,17 @@ func (h *handler) create(k kind) http.HandlerFunc {
 			}
 		}
 		if k.Path == "/generation/multiview-to-model" {
-			if message := multiviewInputsError(body); message != "" {
+			if id, isTask := multiviewTaskInput(body); isTask {
+				source := h.lookup(id)
+				if source == nil {
+					writeJSON(w, http.StatusNotFound, h.envelope(h.taskError, 2001, "The task is not found", "Check if the task is committed by you or whether the format is correct"))
+					return
+				}
+				if (source.kind.Type != "image_to_multiview" && source.kind.Type != "edit_multiview") || source.final != statusSuccess {
+					writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, "the inputs task must be a successful image_to_multiview or edit_multiview task", "Refer to the API documentation for parameter requirements"))
+					return
+				}
+			} else if message := multiviewInputsError(body); message != "" {
 				writeJSON(w, http.StatusBadRequest, h.envelope(h.taskError, 1004, message, "Refer to the API documentation for parameter requirements"))
 				return
 			}
@@ -1354,14 +1383,27 @@ const (
 	expiredBody        = `<?xml version="1.0" encoding="UTF-8"?><Error><Code>AccessDenied</Code><Message>Access denied</Message></Error>`
 )
 
-// multiviewInputsError checks the documented multiview-to-model inputs: 2-4 single-key
-// view objects with unique keys front/left/back/right and a front view, each a file token.
+// multiviewInputsError checks the documented multiview-to-model inputs (multiview page,
+// read 2026-11-24; #541 added the positional form): either 2-4 single-key view objects with
+// unique keys front/left/back/right and a front view (the recommended form), or the legacy
+// positional array of exactly four strings in the order front, left, back, right with ""
+// for a view that is skipped, the front one never skipped and at least two views given;
+// each image is a file token (or a URL). The two forms are never mixed. The task_id form
+// is multiviewTaskInput.
 func multiviewInputsError(body map[string]any) string {
 	if _, legacy := body["input"]; legacy {
 		return "input is not accepted; use inputs"
 	}
 	inputs, ok := body["inputs"].([]any)
-	if !ok || len(inputs) < 2 || len(inputs) > 4 {
+	if !ok {
+		return "inputs must contain 2 to 4 views"
+	}
+	if len(inputs) > 0 {
+		if _, positional := inputs[0].(string); positional {
+			return multiviewPositionalError(inputs)
+		}
+	}
+	if len(inputs) < 2 || len(inputs) > 4 {
 		return "inputs must contain 2 to 4 views"
 	}
 	seen := map[string]bool{}
@@ -1382,4 +1424,42 @@ func multiviewInputsError(body map[string]any) string {
 		return "inputs must include the front view"
 	}
 	return ""
+}
+
+// multiviewPositionalError checks the legacy positional inputs array.
+func multiviewPositionalError(inputs []any) string {
+	if len(inputs) != 4 {
+		return "the positional inputs must hold exactly 4 strings in the order front, left, back, right"
+	}
+	given := 0
+	for index, entry := range inputs {
+		token, ok := entry.(string)
+		if !ok {
+			return "inputs must not mix view objects and positional strings"
+		}
+		if strings.TrimSpace(token) != "" {
+			given++
+		} else if index == 0 {
+			return "inputs must include the front view"
+		}
+	}
+	if given < 2 {
+		return "inputs must contain at least 2 views"
+	}
+	return ""
+}
+
+// multiviewTaskInput recognises the task_id form of inputs: a single-element array
+// naming a task, which has to be a successful image_to_multiview or edit_multiview task.
+func multiviewTaskInput(body map[string]any) (id string, isTask bool) {
+	inputs, ok := body["inputs"].([]any)
+	if !ok || len(inputs) != 1 {
+		return "", false
+	}
+	entry, ok := inputs[0].(map[string]any)
+	if !ok || len(entry) != 1 {
+		return "", false
+	}
+	id, isTask = entry["task_id"].(string)
+	return id, isTask
 }

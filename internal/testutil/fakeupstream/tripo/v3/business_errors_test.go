@@ -159,3 +159,29 @@ func TestErrorMessagesAreTheErrorPagesOwn(t *testing.T) {
 		t.Fatalf("2004 = %d %v", status, unsupported)
 	}
 }
+
+// The account's frozen credits follow the price of the tasks in flight and are released
+// when a task ends (billing page: creation freezes the credits).
+func TestBalanceFreezesTheCreditsOfRunningTasks(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
+	frozen := func() float64 {
+		_, _, body := f.do("GET", "/account/balance", key, nil)
+		return field(t, body, "data", "frozen").(float64)
+	}
+	if got := frozen(); got != 0 {
+		t.Fatalf("frozen with no task = %v", got)
+	}
+	textured := f.create("/generation/text-to-model", textBody(), key) // 20 credits
+	segmentSource := f.create("/generation/text-to-model", map[string]any{"model": modelH31, "prompt": "a", "texture": false, "pbr": false}, key)
+	if got := frozen(); got != 30 {
+		t.Fatalf("frozen with two tasks in flight = %v, want 20 + 10", got)
+	}
+	f.finish(textured, key)
+	if got := frozen(); got != 10 {
+		t.Fatalf("frozen after one task ended = %v, want 10", got)
+	}
+	f.finish(segmentSource, key)
+	if got := frozen(); got != 0 {
+		t.Fatalf("frozen after every task ended = %v", got)
+	}
+}
