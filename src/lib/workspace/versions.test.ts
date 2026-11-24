@@ -8,6 +8,7 @@ import {
   domainOfCapability,
   foldColumn,
   isOlderVersion,
+  knownSources,
   layoutColumns,
   primaryParent,
   versionStatusLabel,
@@ -188,15 +189,127 @@ describe('paged versions', () => {
 });
 
 describe('branches', () => {
-  it('stacks results of the same source in one column and highlights the current branch', () => {
+  it('keeps results of one source apart when other work came between them, and highlights the current branch', () => {
     const { tiles } = buildVersionTiles({ schema, graph, tracked: [], sessionId: 's1' });
     const keys = Object.fromEntries(tiles.map((tile) => [tile.taskId, tile.key]));
     const columns = layoutColumns(tiles);
-    // img1 is a root; mdl1 and img3 both come from img1, so they share a column.
-    expect(columns.map((column) => column.tiles.map((tile) => tile.taskId))).toEqual([['img1'], ['mdl1', 'img3'], ['img2']]);
+    // mdl1 and img3 both come from img1, but img2 was made between them: the strip stays in time order (#558).
+    expect(columns.map((column) => column.tiles.map((tile) => tile.taskId))).toEqual([['img1'], ['mdl1'], ['img2'], ['img3']]);
+    expect(columns[3].parent).toMatchObject({ known: true, key: keys.img1, link: 'edit' });
     const branch = branchOf(tiles, keys.img2);
     expect([...branch].sort()).toEqual([keys.img1, keys.mdl1, keys.img2].sort());
     expect(branch.has(keys.img3)).toBe(false);
+  });
+});
+
+describe('time order in the strip (#558)', () => {
+  const at = (minute: number) => `2026-01-01T00:${String(minute).padStart(2, '0')}:00Z`;
+  const uploaded = {
+    id: 'upload:u4', kind: 'upload', created_at: at(4),
+    assets: [{ id: 'u4', role: 'input', media_type: 'image/png', ordinal: 0, url: '/api/v1/assets/u4' }],
+  };
+  // 2D x3, an upload, a 3D made from an earlier picture that already had a result, then two more pictures.
+  const nodes = [
+    task('a1', 1, [image('a1')]),
+    task('a2', 2, [image('a2')]),
+    task('a3', 3, [image('a3')]),
+    uploaded,
+    task('m1', 5, [model('m1')], { capability: 'text-to-3d' }),
+    task('a4', 6, [image('a4')]),
+    task('a5', 7, [image('a5')]),
+  ];
+  const edges = [
+    edge('a1', 'a2', 'source_task', 'recorded'),
+    edge('a2', 'a3', 'source_task', 'recorded'),
+    edge('a2', 'm1', 'source_asset', 'recorded'),
+    edge('upload:u4', 'a4', 'reference', 'recorded'),
+    edge('a4', 'a5', 'source_task', 'recorded'),
+  ];
+  const order = (columns: ReturnType<typeof layoutColumns>) => columns.map((column) => column.tiles.map((tile) => tile.taskId));
+
+  it('lays the versions out strictly by when they were made, not next to their source', () => {
+    const { tiles } = buildVersionTiles({ schema, graph: parseLineage({ nodes, edges }), tracked: [], sessionId: 's1' });
+    const columns = layoutColumns(tiles);
+    expect(order(columns)).toEqual([['a1'], ['a2'], ['a3'], ['upload:u4'], ['m1'], ['a4'], ['a5']]);
+    expect(columns.flatMap((column) => column.tiles.map((tile) => Date.parse(tile.createdAt))))
+      .toEqual([1, 2, 3, 4, 5, 6, 7].map((minute) => Date.parse(at(minute))));
+    // Numbers follow each kind's own order and do not depend on the layout.
+    expect(tiles.map((tile) => `${tile.taskId}:${tile.domain}${tile.version}`))
+      .toEqual(['a1:image1', 'a2:image2', 'a3:image3', 'upload:u4:image0', 'm1:model1', 'a4:image4', 'a5:image5']);
+  });
+
+  it('still says where a result came from when its source is not the column before it', () => {
+    const { tiles } = buildVersionTiles({ schema, graph: parseLineage({ nodes, edges }), tracked: [], sessionId: 's1' });
+    const columns = layoutColumns(tiles);
+    const keyOf = (taskId: string) => tiles.find((tile) => tile.taskId === taskId)!.key;
+    const modelColumn = columns.find((column) => column.tiles[0].taskId === 'm1')!;
+    expect(modelColumn.parent).toMatchObject({ known: true, key: keyOf('a2'), link: 'to_model' });
+    expect(modelColumn.links.map((link) => link.link)).toEqual(['to_model']);
+    expect(columns.find((column) => column.tiles[0].taskId === 'a4')!.parent).toMatchObject({ key: keyOf('upload:u4'), link: 'reference' });
+    expect(columns.find((column) => column.tiles[0].taskId === 'a5')!.parent).toMatchObject({ key: keyOf('a4'), link: 'edit' });
+  });
+
+  it('keeps one order for versions made at the same moment, and stacks results of one source only when they are next to each other', () => {
+    const tiedNodes = [task('root', 1, [image('root')]), task('b-2', 2, [image('b-2')]), task('b-1', 2, [image('b-1')]), task('other', 3, [image('other')]), task('b-3', 4, [image('b-3')])];
+    const tiedEdges = ['b-1', 'b-2', 'b-3'].map((id) => edge('root', id, 'source_task', 'recorded'));
+    const first = layoutColumns(buildVersionTiles({ schema, graph: parseLineage({ nodes: tiedNodes, edges: tiedEdges }), tracked: [], sessionId: 's1' }).tiles);
+    expect(order(first)).toEqual([['root'], ['b-1', 'b-2'], ['other'], ['b-3']]);
+    const reversed = parseLineage({ nodes: [...tiedNodes].reverse(), edges: tiedEdges });
+    expect(order(layoutColumns(buildVersionTiles({ schema, graph: reversed, tracked: [], sessionId: 's1' }).tiles))).toEqual(order(first));
+  });
+
+  it('names every picture a multi-view 3D was made from, none of them as the main one', () => {
+    const multiEdges = [
+      ...edges.filter((entry) => entry.to !== 'm1'),
+      edge('a2', 'm1', 'reference', 'recorded'),
+      edge('a3', 'm1', 'reference', 'recorded'),
+      edge('upload:u4', 'm1', 'reference', 'recorded'),
+    ];
+    const { tiles } = buildVersionTiles({ schema, graph: parseLineage({ nodes, edges: multiEdges }), tracked: [], sessionId: 's1' });
+    const keyOf = (taskId: string) => tiles.find((tile) => tile.taskId === taskId)!.key;
+    const columns = layoutColumns(tiles);
+    expect(order(columns)).toEqual([['a1'], ['a2'], ['a3'], ['upload:u4'], ['m1'], ['a4'], ['a5']]);
+    const modelColumn = columns.find((column) => column.tiles[0].taskId === 'm1')!;
+    expect(modelColumn.parent).toBeNull();
+    expect(modelColumn.sources.map((source) => source.key)).toEqual([keyOf('a2'), keyOf('a3'), keyOf('upload:u4')]);
+    expect(modelColumn.sources.every((source) => source.known && source.link === 'to_model')).toBe(true);
+    expect(knownSources(tiles.find((tile) => tile.taskId === 'm1')!)).toHaveLength(3);
+    // Selecting the 3D keeps every one of its pictures in the highlighted branch.
+    const branch = branchOf(tiles, keyOf('m1'));
+    for (const source of ['a2', 'a3', 'upload:u4']) expect(branch.has(keyOf(source))).toBe(true);
+  });
+
+  it('falls back to one source when the chain recorded only one, and stacks multi-source results only with the same sources', () => {
+    const single = layoutColumns(buildVersionTiles({ schema, graph: parseLineage({ nodes, edges }), tracked: [], sessionId: 's1' }).tiles);
+    const modelColumn = single.find((column) => column.tiles[0].taskId === 'm1')!;
+    expect(modelColumn.sources).toHaveLength(1);
+    expect(modelColumn.parent).toMatchObject({ known: true, link: 'to_model' });
+    const twice = parseLineage({
+      nodes: [task('p1', 1, [image('p1')]), task('p2', 2, [image('p2')]), task('x1', 3, [model('x1')], { capability: 'text-to-3d' }),
+        task('x2', 4, [model('x2')], { capability: 'text-to-3d' }), task('x3', 5, [model('x3')], { capability: 'text-to-3d' })],
+      edges: [edge('p1', 'x1', 'reference', 'recorded'), edge('p2', 'x1', 'reference', 'recorded'),
+        edge('p2', 'x2', 'reference', 'recorded'), edge('p1', 'x2', 'reference', 'recorded'),
+        edge('p1', 'x3', 'reference', 'recorded')],
+    });
+    const columns = layoutColumns(buildVersionTiles({ schema, graph: twice, tracked: [], sessionId: 's1' }).tiles);
+    expect(order(columns)).toEqual([['p1'], ['p2'], ['x1', 'x2'], ['x3']]);
+    expect(columns[3].parent).toMatchObject({ link: 'to_model' });
+  });
+
+  it('appends new work at the end, whether it is still running or has just finished', () => {
+    const running = buildVersionTiles({
+      schema, graph: parseLineage({ nodes, edges }), sessionId: 's1',
+      tracked: [tracked({ taskId: 'm2', capability: 'text-to-3d', state: 'RUNNING', startedAt: Date.parse(at(8)) })],
+    }).tiles;
+    expect(order(layoutColumns(running)).at(-1)).toEqual(['m2']);
+    const finished = buildVersionTiles({
+      schema, graph: parseLineage({ nodes: [...nodes, task('m2', 8, [model('m2')], { capability: 'text-to-3d' })], edges: [...edges, edge('a2', 'm2', 'source_asset', 'recorded')] }),
+      tracked: [], sessionId: 's1',
+    }).tiles;
+    const columns = layoutColumns(finished);
+    expect(order(columns).at(-1)).toEqual(['m2']);
+    expect(columns.at(-1)!.parent).toMatchObject({ link: 'to_model' });
+    expect(finished.find((tile) => tile.taskId === 'm2')!.version).toBe(2);
   });
 });
 

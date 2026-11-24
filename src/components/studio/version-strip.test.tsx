@@ -157,3 +157,28 @@ describe('chat handle badge on a version tile (#87)', () => {
     expect(renderToStaticMarkup(<VersionStrip />)).not.toContain('version-handle-badge');
   });
 });
+
+describe('where a version came from, in time order (#558)', () => {
+  const picture = (taskId: string, version: number) => tile({ key: `n:${taskId}`, taskId, taskIds: [taskId], version,
+    assets: [{ id: `${taskId}-a`, kind: 'image', url: `/api/v1/tasks/${taskId}/assets/${taskId}-a`, role: 'output', variant: '', mediaType: 'image/png', ordinal: 0 }] });
+  const from = (key: string, link: 'to_model' | 'edit') => ({ key, known: true, kind: 'reference' as const, evidence: 'recorded' as const, link, step: '' });
+  const model = (taskId: string, parents: ReturnType<typeof from>[]) => blankTile({ key: `n:${taskId}`, taskId, taskIds: [taskId], domain: 'model', status: 'ready', origin: 'task', version: 1, parents });
+
+  it('names every picture of a multi-view 3D beside it, with no one picture as its source', () => {
+    state.tiles = [picture('p1', 1), picture('p2', 2), picture('p3', 3), model('m1', [from('n:p1', 'to_model'), from('n:p2', 'to_model')])];
+    state.messages = [{ attachments: [{ handle: '@img2', kind: 'image', taskId: 'p1', assetId: 'p1-a' }] }];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(html).toMatch(/data-testid="version-sources"[^>]*data-count="2"/);
+    expect(html.match(/data-testid="version-source-name"[^>]*>([^<]*)</g)?.map((entry) => entry.slice(entry.lastIndexOf('>') + 1, -1))).toEqual(['@img2', '2D v2']);
+    expect(html).toContain('data-full-label="由 @img2 2D v2 转成 3D"');
+    expect(html.match(/data-testid="version-link"/g)).toHaveLength(1);
+  });
+
+  it('keeps a single source as one link and names it when it is not the version just before', () => {
+    state.tiles = [picture('p1', 1), picture('p2', 2), model('m1', [from('n:p1', 'to_model')])];
+    const html = renderToStaticMarkup(<VersionStrip />);
+    expect(html).not.toContain('version-sources');
+    expect(html).toContain('data-full-label="由 2D v1 转成 3D"');
+    expect(html).toMatch(/data-testid="version-link-source"[^>]*>2D v1</);
+  });
+});

@@ -474,9 +474,25 @@ export function branchOf(tiles: readonly VersionTile[], key: string | null): Set
   return branch;
 }
 
-/** 一列版本：同一来源的多个结果竖向堆叠，共享来源连线。 */
+/**
+ * Every version a result was made from, one entry per source version, in the order the task named them: a
+ * multi-view 3D lists each picture it used, and none of them counts as "the" source (#558).
+ */
+export function knownSources(tile: Pick<VersionTile, 'parents'>): VersionParent[] {
+  const seen = new Set<string>();
+  return tile.parents.filter((parent) => {
+    if (!parent.known || seen.has(parent.key)) return false;
+    seen.add(parent.key);
+    return true;
+  });
+}
+
+/** 一列版本：时间上相邻、来源相同的结果竖向堆叠，共享来源连线。 */
 export interface VersionColumn {
+  /** The one source of a single-source column (or its unknown source); null when the column has several sources or none. */
   parent: VersionParent | null;
+  /** Every known source version of the column's results; more than one for a result made from several pictures. */
+  sources: VersionParent[];
   /**
    * The link of every tile in the column, in order ("编辑", "局部重绘"): the results of one source
    * share a connector, so it carries one mark per result and says what each of them was.
@@ -485,28 +501,38 @@ export interface VersionColumn {
   tiles: VersionTile[];
 }
 
+const sourceSignature = (tile: VersionTile) => knownSources(tile).map((source) => source.key).sort().join('\n');
+
+/**
+ * The strip in columns (#558): the versions stay in the order they were made, so the newest is always last and
+ * where a version stands never depends on what it came from. Lineage only shows in the connectors. Results of
+ * the same source(s) share a column only when nothing else was made between them; one made later from the same
+ * source gets a column of its own, whose connector names the source.
+ */
 export function layoutColumns(tiles: readonly VersionTile[]): VersionColumn[] {
-  const children = new Map<string, VersionTile[]>();
-  for (const tile of tiles) {
-    const parent = primaryParent(tile);
-    if (parent?.known) children.set(parent.key, [...(children.get(parent.key) ?? []), tile]);
-  }
   const columns: VersionColumn[] = [];
-  const placed = new Set<string>();
+  let previousSignature = '';
   for (const tile of tiles) {
-    if (placed.has(tile.key)) continue;
-    const parent = primaryParent(tile);
-    const siblings = parent?.known ? children.get(parent.key) ?? [tile] : [tile];
-    const stack = siblings.length > 1 ? siblings : [tile];
-    for (const member of stack) placed.add(member.key);
-    const links: VersionParent[] = [];
-    for (const member of stack) {
-      const link = primaryParent(member);
-      if (link) links.push(link);
+    const signature = sourceSignature(tile);
+    const last = columns.at(-1);
+    if (last && signature !== '' && signature === previousSignature) {
+      last.tiles.push(tile);
+      last.links.push(...linksOf(tile));
+      continue;
     }
-    columns.push({ parent, links, tiles: stack });
+    const sources = knownSources(tile);
+    columns.push({ parent: sources.length > 1 ? null : primaryParent(tile), sources, links: linksOf(tile), tiles: [tile] });
+    previousSignature = signature;
   }
   return columns;
+}
+
+/** What the connector marks for one result: its single link, or one link per source when it has several. */
+function linksOf(tile: VersionTile): VersionParent[] {
+  const sources = knownSources(tile);
+  if (sources.length > 1) return sources;
+  const link = primaryParent(tile);
+  return link ? [link] : [];
 }
 
 /** At most this many results of one source show in its column; the rest fold into "+N". */
