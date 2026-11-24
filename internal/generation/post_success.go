@@ -29,13 +29,16 @@ func (m *Module) observePostSuccess(ctx context.Context, lease Lease) error {
 	}
 	attempt := lease.CurrentAttempt
 	if attempt == nil || attempt.UpstreamJob == nil {
-		// 无可观察上游作业（内联/离线路径）：只能等 deadline 本地收尾；
-		// NextActionAt 已设置，租约过期后可重新领取。
-		return m.releaseLease(ctx, lease, nil)
+		// 无可观察上游作业（内联/离线路径）：只能等 deadline 本地收尾。
+		// 必须推后 NextActionAt：只释放租约会让任务一直到期，协调器每拍
+		// 领取并重写一次，直到 deadline（#510）。
+		return m.deferIdlePostSuccess(ctx, lease, deadline, "no_upstream_job")
 	}
 	port, ok := m.providers.Provider(task.Offering)
 	if !ok {
-		return m.releaseLease(ctx, lease, nil)
+		// 适配器未注册（连接被 Catalog 发布移除、Provider 关闭）：同样无法
+		// 观察，按退避推后，适配器恢复后照常观察（#510）。
+		return m.deferIdlePostSuccess(ctx, lease, deadline, "adapter_unregistered")
 	}
 	callCtx, cancel := m.withOfferingTimeout(ctx, task.Offering.Timeout)
 	defer cancel()
@@ -168,6 +171,53 @@ func (m *Module) reschedulePostSuccess(
 		}},
 		ClearLease: true,
 	}))
+}
+
+// deferIdlePostSuccess 处理无法观察的成功后任务（无上游作业、适配器未
+// 注册）：不调上游、不写事件，只把 NextActionAt 推后并释放租约。推后量
+// 随空转时长退避——取声明的观察间隔与「成功以来已过时长」中较大者，
+// 每次约翻倍——且不越过 deadline，保证本地 finalizer 按时收尾（#510）。
+func (m *Module) deferIdlePostSuccess(
+	ctx context.Context,
+	lease Lease,
+	deadline time.Time,
+	reason string,
+) error {
+	task := lease.Task
+	now := m.clock.Now()
+	next := idlePostSuccessNextAction(task, now, deadline)
+	task.NextActionAt = next
+	task.UpdatedAt = now
+	task.Version++
+	m.logger.Debug(
+		"generation post-success observation idle",
+		"task_id", task.ID,
+		"offering_id", string(task.Offering.ID),
+		"reason", reason,
+		"next_action_at", next,
+	)
+	return mapRepositoryError("defer_idle_post_success", m.repository.Commit(ctx, Commit{
+		LeaseToken:      lease.Token,
+		ExpectedVersion: lease.Task.Version,
+		Task:            task,
+		Attempt:         lease.CurrentAttempt,
+		ClearLease:      true,
+	}))
+}
+
+// idlePostSuccessNextAction 是空转路径的下一次检查时刻：至少一个声明的
+// 观察间隔，随成功以来的时长增长（约每次翻倍），封顶于 deadline。
+func idlePostSuccessNextAction(task Task, now, deadline time.Time) time.Time {
+	base := task.CreatedAt
+	if task.FinishedAt != nil {
+		base = *task.FinishedAt
+	}
+	delay := max(PostSuccessInterval(task), now.Sub(base))
+	next := now.Add(delay)
+	if next.After(deadline) {
+		return deadline
+	}
+	return next
 }
 
 // applyPostSuccessObservation 应用一次成功后观察（§6.2 触点 3/§6.3）：
