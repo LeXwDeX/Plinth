@@ -285,6 +285,10 @@ type OrchestratorConfig struct {
 	// Texts gives the copy of the turn's UI locale. Nil keeps the Schema's
 	// default-locale copy.
 	Texts *catalog.TextLocalizer
+	// AgentProviderName is the chat model connection's display name; it names
+	// the upstream in the text of a model call the upstream refused with an
+	// HTTP error status. Empty keeps the generic failure texts.
+	AgentProviderName string
 	// StepPolicy is application.step_policy (#330): the Agent's 3D step
 	// segment. Nil keeps the segment out of every prompt.
 	StepPolicy *catalog.StepPolicySchema
@@ -348,6 +352,7 @@ type Orchestrator struct {
 	taskLookup     func(ctx context.Context, ownerID, idempotencyKey string) (generation.Task, error)
 	taskGet        func(ctx context.Context, ownerID, taskID string) (generation.Task, error)
 	texts          *catalog.TextLocalizer
+	agentProvider  string
 	// stepPolicy, stepUsage, stepBalances and stepCosts render the Agent's
 	// 「3D 步数」segment (#330); a nil policy keeps the segment out.
 	stepPolicy   *catalog.StepPolicySchema
@@ -768,6 +773,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		taskLookup:         config.TaskLookup,
 		taskGet:            config.TaskGet,
 		texts:              config.Texts,
+		agentProvider:      config.AgentProviderName,
 		stepPolicy:         config.StepPolicy,
 		stepUsage:          config.StepUsage,
 		stepBalances:       config.StepBalances,
@@ -2170,6 +2176,8 @@ func (orchestrator *Orchestrator) Process(
 		// instead of asking for a retry that cannot succeed.
 		if message, exhausted := orchestrator.agentQuotaExhaustedMessage(ctx, followUpErr); exhausted {
 			assistant.Content = message
+		} else if message, refused := orchestrator.agentUpstreamHTTPMessage(ctx, followUpErr); refused {
+			assistant.Content = message
 		} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
 			assistant.Content = message
 		}
@@ -2179,6 +2187,10 @@ func (orchestrator *Orchestrator) Process(
 	} else if message, broke := orchestrator.agentInterruptedMessage(ctx, followUpErr); broke {
 		// #509: the follow-up broke off after its retries; the reply so far
 		// stays and says it was cut, so the person knows to send it again.
+		// A gateway that answered an error status is named with it (#547).
+		if refused, named := orchestrator.agentUpstreamHTTPMessage(ctx, followUpErr); named {
+			message = refused
+		}
 		assistant.Content += "\n\n" + orchestrator.withErrorReference(ctx, message, assistant.ID)
 	}
 	orchestrator.attachAssistantResults(context.WithoutCancel(ctx), command.OwnerID, &assistant)
@@ -4085,7 +4097,9 @@ func (orchestrator *Orchestrator) withErrorReference(ctx context.Context, text, 
 // model drew itself says it was not kept, a request field the upstream
 // refused names that field (#401: only the plain field name is shown, the
 // upstream's own wording stays in the log), a transient failure the retries
-// did not overcome says to send the message again (#509);
+// did not overcome says to send the message again (#509), unless the upstream
+// answered an HTTP error status: that names the connection, the status and
+// its reason in the Schema's upstream text, including after the retries;
 // anything else stays the unknown error, whose ID is in the log.
 func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err error) string {
 	messages := orchestrator.schema.Presentation.Messages
@@ -4113,10 +4127,27 @@ func (orchestrator *Orchestrator) agentFailureMessage(ctx context.Context, err e
 	if param, rejected := agents.RequestRejectedParam(err); rejected && messages.AgentRequestRejected != "" {
 		return strings.ReplaceAll(orchestrator.text(ctx, messages.AgentRequestRejected), "{param}", param)
 	}
+	if message, refused := orchestrator.agentUpstreamHTTPMessage(ctx, err); refused {
+		return message
+	}
 	if message, broke := orchestrator.agentInterruptedMessage(ctx, err); broke {
 		return message
 	}
 	return orchestrator.text(ctx, messages.UnknownError)
+}
+
+// agentUpstreamHTTPMessage is the Schema's upstream text for a chat model
+// call the upstream answered with an HTTP error status (agents.StatusError):
+// "{provider} 网关返回 {status}，原因：{reason}", the provider being the chat
+// connection's display name. The upstream's own words stay in the log.
+func (orchestrator *Orchestrator) agentUpstreamHTTPMessage(ctx context.Context, err error) (string, bool) {
+	var status *agents.StatusError
+	if err == nil || !errors.As(err, &status) {
+		return "", false
+	}
+	message := orchestrator.schema.Presentation.Messages.UpstreamHTTPError.Message(
+		orchestrator.agentProvider, status.Status, func(text string) string { return orchestrator.text(ctx, text) })
+	return message, message != ""
 }
 
 // agentInterruptedMessage is the Schema's text for a chat model call that

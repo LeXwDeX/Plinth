@@ -2380,7 +2380,11 @@ type ProviderConditionalCapabilitySchema struct {
 }
 
 type ProviderConnectionSchema struct {
-	ID                    string `json:"id"`
+	ID string `json:"id"`
+	// DisplayName is the upstream's name in the text a person reads for its
+	// HTTP errors ("MeshyAI 网关返回 429，…"); empty: those errors keep the
+	// failure class text.
+	DisplayName           string `json:"display_name,omitempty"`
 	Protocol              string `json:"protocol"`
 	AdapterKey            string `json:"adapter_key"`
 	BaseURLSetting        string `json:"base_url_setting,omitempty"`
@@ -6694,6 +6698,9 @@ type ChatMessageTexts struct {
 	// submission, an accepted job that timed out; #136) when no class text
 	// applies: the Agent does not resubmit and has the result checked first.
 	GenerationFailedAmbiguous string `json:"generation_failed_ambiguous,omitempty"`
+	// UpstreamHTTPError is the one wording of an upstream HTTP error a person
+	// reads: provider, status and the declared reason.
+	UpstreamHTTPError UpstreamHTTPErrorTexts `json:"upstream_http_error"`
 }
 
 type ChatStatusTexts struct {

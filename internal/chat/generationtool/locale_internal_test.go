@@ -145,7 +145,7 @@ func TestMeteredFailureTextStaysCanonical(t *testing.T) {
 	if english == canonical {
 		t.Fatal("the English turn kept the default metered text")
 	}
-	if executor.failureMessage(command, true, failure) != english {
+	if executor.failureMessage(command, generation.Offering{CreditsMetered: true}, failure) != english {
 		t.Fatal("failureMessage did not use the turn locale")
 	}
 }

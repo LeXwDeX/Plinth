@@ -830,6 +830,7 @@
       "provider_connections": [
         {
           "id": "openai-images",
+          "display_name": "OpenAI",
           "protocol": "image-sync",
           "adapter_key": "openai-images.v1",
           "base_url_setting": "openai_base_url",
@@ -898,6 +899,7 @@
         },
         {
           "id": "gemini-images",
+          "display_name": "Gemini",
           "protocol": "image-sync",
           "adapter_key": "gemini-images.v1",
           "base_url_setting": "gemini_base_url",
@@ -1007,6 +1009,7 @@
         },
         {
           "id": "jimeng-images",
+          "display_name": "即梦（Jimeng）",
           "protocol": "image-sync",
           "adapter_key": "jimeng-images.v1",
           "base_url_setting": "jimeng_base_url",
@@ -1114,6 +1117,7 @@
         },
         {
           "id": "meshy",
+          "display_name": "MeshyAI",
           "protocol": "meshy",
           "adapter_key": "meshy.v2",
           "base_url_setting": "meshy_base_url",
@@ -1234,6 +1238,7 @@
         },
         {
           "id": "tripo",
+          "display_name": "Tripo",
           "protocol": "tripo",
           "adapter_key": "tripo.v3",
           "base_url_setting": "tripo_base_url",
@@ -1439,6 +1444,7 @@
         },
         {
           "id": "hyper3d",
+          "display_name": "Hyper3D",
           "protocol": "hyper3d.rodin",
           "adapter_key": "hyper3d.rodin.v1",
           "base_url_setting": "hyper3d_base_url",
@@ -1490,6 +1496,7 @@
         },
         {
           "id": "matting",
+          "display_name": "背景去除",
           "protocol": "matting",
           "adapter_key": "matting.v1",
           "base_url_setting": "matting_base_url",
@@ -1512,6 +1519,7 @@
         },
         {
           "id": "chat-llm",
+          "display_name": "对话模型",
           "protocol": "openai-compatible",
           "adapter_key": "openai-compatible-chat",
           "base_url_setting": "llm_base_url",
@@ -10706,6 +10714,32 @@
           "generation_failed_ambiguous": "服务商已经受理或可能已经受理这一步，但平台没能确认结果（例如执行超时或提交结果不明）；服务商可能已经执行并扣除积分，所以系统没有自动重新提交。请如实告诉用户：结果未知，可能已经扣费。先用 get_task 查看这个任务的最新状态，不要自行重新提交；是否重新生成由用户决定，重新生成会再次计费。",
           "generation_failed_metered_by_class": {
             "integrity_failure": "上游已经完成生成，可能已经扣除积分，但结果在本地存储或完整性校验时失败。系统没有自动重新提交，以免再次计费；是否重试由用户决定。上游还保留着结果时，可以免费重新取回（任务详情里的「重新取回结果」，或由 Agent 调用 recover_task_result）：只读取已受理的上游作业，不会重新提交，也不再计费。不能取回时，再次生成同类结果需要在批准卡上确认再次计费。"
+          },
+          "upstream_http_error": {
+            "template": "{provider} 网关返回 {status}，原因：{reason}",
+            "unreachable_template": "{provider} 网关连接失败，原因：{reason}",
+            "combined_template": "{upstream}{detail}",
+            "reasons": {
+              "401": "上游凭据无效或无权限，请联系管理员。",
+              "402": "上游账户余额不足。",
+              "403": "上游凭据无效或无权限，请联系管理员。",
+              "408": "上游服务器响应超时。",
+              "429": "上游服务器限流，请稍后再试。",
+              "4xx": "上游拒绝了请求，请检查输入。",
+              "5xx": "上游服务器故障。"
+            },
+            "unreachable_reason": "无法连接上游服务器。",
+            "failure_classes": [
+              "invalid_input",
+              "authentication",
+              "rate_limited",
+              "timed_out",
+              "rejected",
+              "insufficient_balance",
+              "upstream_unavailable",
+              "upstream_denied",
+              "transport"
+            ]
           },
           "generation_error": "生成异常",
           "summary_failed": "生成总结失败",
@@ -21664,6 +21698,17 @@
             "chat.presentation.messages.generation_failed_metered_by_class.integrity_failure": "The upstream finished generating and may have already charged credits, but the result failed during local storage or integrity verification. The system did not resubmit automatically, to avoid charging again; whether to retry is up to the user. If the upstream still holds the result, you can fetch it again for free (\"Refetch result\" in the task details, or the Agent calling recover_task_result): this only reads the already-accepted upstream job, does not resubmit, and is not billed again. If it cannot be fetched, generating a similar result again requires confirming the repeat charge on the approval card.",
             "chat.presentation.messages.generation_error": "Generation error",
             "chat.presentation.messages.summary_failed": "Failed to generate summary",
+            "chat.presentation.messages.upstream_http_error.template": "{provider} gateway returned {status}: {reason}",
+            "chat.presentation.messages.upstream_http_error.unreachable_template": "{provider} gateway could not be reached: {reason}",
+            "chat.presentation.messages.upstream_http_error.combined_template": "{upstream} {detail}",
+            "chat.presentation.messages.upstream_http_error.reasons.401": "The upstream credentials are invalid or lack permission; please contact an administrator.",
+            "chat.presentation.messages.upstream_http_error.reasons.402": "The upstream account balance is insufficient.",
+            "chat.presentation.messages.upstream_http_error.reasons.403": "The upstream credentials are invalid or lack permission; please contact an administrator.",
+            "chat.presentation.messages.upstream_http_error.reasons.408": "The upstream server timed out.",
+            "chat.presentation.messages.upstream_http_error.reasons.429": "The upstream server is rate limiting requests; please try again later.",
+            "chat.presentation.messages.upstream_http_error.reasons.4xx": "The upstream rejected the request; please check the input.",
+            "chat.presentation.messages.upstream_http_error.reasons.5xx": "The upstream server failed.",
+            "chat.presentation.messages.upstream_http_error.unreachable_reason": "Unable to connect to the upstream server.",
             "chat.presentation.messages.no_result": "⚠️ No result returned. Please retry.",
             "chat.presentation.messages.unknown_error": "Unknown error",
             "chat.presentation.messages.agent_inline_image_output": "The current conversation model drew a picture itself instead of calling a generation tool; the picture was not kept and will not appear in the results. Please retry; if it keeps happening, switch to another conversation model.",

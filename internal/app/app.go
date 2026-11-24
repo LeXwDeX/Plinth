@@ -1126,6 +1126,7 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	}
 	toolExecutor, err := generationtool.New(generationtool.Config{
 		Logger:          logger,
+		ProviderNames:   catalog.ProviderDisplayNames(applicationSchema.Runtime.ProviderConnections),
 		Choices:         repository,
 		Harness:         repository,
 		HarnessResolver: harnessResolver,
@@ -1368,8 +1369,9 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 	orchestratorSchema.AgentTools = withoutAssetListExecutionTools(
 		orchestratorSchema.AgentTools, applicationSchema.AssetListExecutionEnabled())
 	chatAgent, err := chat.NewOrchestrator(chat.OrchestratorConfig{
-		Project: applicationSchema.Project,
-		Texts:   texts,
+		Project:           applicationSchema.Project,
+		Texts:             texts,
+		AgentProviderName: chatAgentDisplayName(applicationSchema),
 		// #330: the platform Agent's 3D step segment reads the same facts as
 		// the external MCP status block: the shared balance cache, the step
 		// standing under the owner's setting and the per-step costs.
@@ -2055,7 +2057,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 		}
 	}
 	pendingApprovalService, err := pendingapproval.New(pendingapproval.Config{
-		Texts: texts,
+		Texts:         texts,
+		ProviderNames: catalog.ProviderDisplayNames(applicationSchema.Runtime.ProviderConnections),
 		VerifyPreparedSource: func(ctx context.Context, op generationtool.Operation, prepared generation.PreparedInput) error {
 			turn, err := chatService.GetTurn(ctx, op.OwnerID, op.SessionID, op.AssistantMessageID)
 			if errors.Is(err, chat.ErrMessageNotFound) {

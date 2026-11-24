@@ -118,6 +118,11 @@ func validateProviderConnections(schema RuntimeSchema) error {
 			return fmt.Errorf("连接 id %q 重复", connection.ID)
 		}
 		seenIDs[connection.ID] = struct{}{}
+		if connection.DisplayName != strings.TrimSpace(connection.DisplayName) {
+			// The name a person reads for the upstream's HTTP errors; an
+			// unnamed connection keeps the failure class texts.
+			return fmt.Errorf("连接 %q 的 display_name 不能带首尾空白", connection.ID)
+		}
 		if _, known := ProviderProtocolEnum[connection.Protocol]; !known {
 			return fmt.Errorf(
 				"连接 %q 使用未知协议 %q",
