@@ -123,6 +123,7 @@ func imageInvalidSchema(t *testing.T) catalog.ChatSchema {
 	t.Helper()
 	schema := configuredChatSchema(t)
 	schema.Agent.InvalidImageNote = "configured invalid note"
+	schema.Agent.InvalidImageUnsureNote = "configured unsure note"
 	schema.Agent.ImagesUnsupportedNote = "configured no-vision note"
 	schema.Presentation.Messages.AgentImageInvalidReasons = " reasons: {reasons}"
 	schema.Presentation.Messages.AgentImageInvalidReasonLabels = map[string]string{"dimensions": "dims"}
@@ -515,5 +516,61 @@ func TestPictureRefusedInAToolRoundStaysStrippedForTheRestOfTheReply(t *testing.
 	}
 	if !strings.Contains(invalidRequestText(agent.requests[3]), "configured invalid note") {
 		t.Fatal("the later round lost the note that says the picture was skipped")
+	}
+}
+
+// #522: when the refusal does not say which of several pictures was bad, all of
+// them are stripped for this request only: the Agent is told they were skipped
+// without being judged, the session remembers none of them, and a good picture
+// sent again is not skipped.
+func TestUnidentifiedRefusalStripsTheRequestButIsNotRemembered(t *testing.T) {
+	bad, good, other := pngDataURL(t, 64, 64, 21), pngDataURL(t, 64, 64, 22), pngDataURL(t, 64, 64, 23)
+	harness := newInvalidPictureHarness(t, imageInvalidSchema(t), func(url string) error {
+		if url == bad {
+			return errors.Join(&agents.ImageInvalidity{Reasons: []string{"format"}}, &agents.StatusError{Status: 400})
+		}
+		return nil
+	})
+
+	reply := harness.turn("look at these", bad, good, other)
+	if reply.Content != "configured reply" {
+		t.Fatalf("first reply = %q, want the retried request to answer", reply.Content)
+	}
+	requests := harness.agent.snapshot()
+	if len(requests) != 2 || len(invalidPictureURLs(requests[1])) != 0 {
+		t.Fatalf("requests = %d, want the refused one and a picture-free retry", len(requests))
+	}
+	text := invalidRequestText(requests[1])
+	if !strings.Contains(text, "configured unsure note") || strings.Contains(text, "configured invalid note") {
+		t.Fatalf("retry note = %q, want the unsure note only", text)
+	}
+	if len(harness.remembered()) != 0 {
+		t.Fatalf("remembered = %v, want nothing: no picture was shown to be bad", harness.remembered())
+	}
+
+	// The good picture sent again travels; the refused bad one may be refused
+	// again, which costs a retry, not the session.
+	harness.turn("the good one again", good)
+	requests = harness.agent.snapshot()
+	if len(invalidPictureURLs(requests[2])) == 0 {
+		t.Fatal("the next turn skipped its pictures although none was remembered")
+	}
+	if strings.Contains(invalidRequestText(requests[2]), "configured skipped:") {
+		t.Fatalf("the next turn names skipped pictures: %q", invalidRequestText(requests[2]))
+	}
+}
+
+// #522: a refusal over the number of pictures says nothing about the picture
+// itself, so even the only picture of the request is not remembered.
+func TestCountRefusalIsNotRemembered(t *testing.T) {
+	picture := pngDataURL(t, 64, 64, 24)
+	harness := newInvalidPictureHarness(t, imageInvalidSchema(t), func(string) error {
+		return errors.Join(&agents.ImageInvalidity{Reasons: []string{"count"}}, &agents.StatusError{Status: 400})
+	})
+	if reply := harness.turn("look", picture); reply.Content != "configured reply" {
+		t.Fatalf("reply = %q, want the retried request to answer", reply.Content)
+	}
+	if len(harness.remembered()) != 0 {
+		t.Fatalf("remembered = %v, want nothing", harness.remembered())
 	}
 }

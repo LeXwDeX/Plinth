@@ -178,8 +178,9 @@ func TestDefaultCatalogDeclaresInvalidPicturePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, note := range map[string]string{
-		"invalid_image_note":      application.Chat.Agent.InvalidImageNote,
-		"images_unsupported_note": application.Chat.Agent.ImagesUnsupportedNote,
+		"invalid_image_note":        application.Chat.Agent.InvalidImageNote,
+		"invalid_image_unsure_note": application.Chat.Agent.InvalidImageUnsureNote,
+		"images_unsupported_note":   application.Chat.Agent.ImagesUnsupportedNote,
 	} {
 		if note == "" {
 			t.Fatalf("agent.%s is not declared", name)

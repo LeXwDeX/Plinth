@@ -124,6 +124,23 @@ func TestInvalidRefusalEndsWithEveryPictureStripped(t *testing.T) {
 	}
 }
 
+// #522: the session remembers only pictures known to be bad: the ones the
+// Schema's bounds name, or the only picture; nothing after a count refusal.
+func TestRefusedPictureKeysAreOnlyTheConfirmedOnes(t *testing.T) {
+	every := []string{"a", "b", "c"}
+	dimensions := errors.Join(&agents.ImageInvalidity{Reasons: []string{"dimensions"}}, &agents.StatusError{Status: 400})
+	count := errors.Join(&agents.ImageInvalidity{Reasons: []string{"dimensions", "count"}}, &agents.StatusError{Status: 400})
+	if got := refusedPictureKeys(every, map[string]bool{"b": true}, dimensions); !slices.Equal(got, []string{"b"}) {
+		t.Fatalf("confirmed b: got %v", got)
+	}
+	if got := refusedPictureKeys(every, nil, dimensions); len(got) != 0 {
+		t.Fatalf("nothing confirmed: got %v", got)
+	}
+	if got := refusedPictureKeys(every, map[string]bool{"b": true}, count); len(got) != 0 {
+		t.Fatalf("count refusal: got %v", got)
+	}
+}
+
 // #522: a failure of another kind during the retry ends it and is returned.
 func TestInvalidRetryStopsOnAnotherFailure(t *testing.T) {
 	picture := encodedPNG(t, 64, 64)

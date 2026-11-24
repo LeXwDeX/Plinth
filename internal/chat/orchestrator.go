@@ -3825,9 +3825,13 @@ func (orchestrator *Orchestrator) streamAgent(
 // retryWithoutInvalidPictures answers an upstream refusal of a picture it read
 // (#522). The refusal does not say which picture, so the pictures the Schema's
 // bounds show to be unreadable go first when the request has some; a refusal
-// that remains, or a request with none, strips every picture. Once a request
-// went through, the pictures it stripped are remembered by the session. A
-// failure of another kind ends the retry and is returned as it is.
+// that remains, or a request with none, strips every picture for this request.
+// Only pictures known to be bad are remembered by the session: those the
+// Schema's bounds name, or the one picture of a request that has only one. A
+// request stripped of pictures it could not tell apart, or refused over their
+// number, leaves the session's memory alone, and the Agent is told that the
+// pictures were skipped without being judged. A failure of another kind ends
+// the retry and is returned as it is.
 func (orchestrator *Orchestrator) retryWithoutInvalidPictures(
 	ctx context.Context,
 	command ProcessTurn,
@@ -3835,13 +3839,26 @@ func (orchestrator *Orchestrator) retryWithoutInvalidPictures(
 	refused error,
 	emit func(agents.Delta) error,
 ) (agents.Completion, agents.Request, error) {
-	if orchestrator.schema.Agent.InvalidImageNote == "" {
+	agent := orchestrator.schema.Agent
+	if agent.InvalidImageNote == "" {
 		return agents.Completion{}, request, refused
 	}
-	note := orchestrator.text(ctx, orchestrator.schema.Agent.InvalidImageNote) + orchestrator.imageInvalidReasons(ctx, refused)
+	reasons := orchestrator.imageInvalidReasons(ctx, refused)
+	confirmedNote := orchestrator.text(ctx, agent.InvalidImageNote) + reasons
+	unsureNote := confirmedNote
+	if agent.InvalidImageUnsureNote != "" {
+		unsureNote = orchestrator.text(ctx, agent.InvalidImageUnsureNote) + reasons
+	}
 	every := requestPictureKeys(request)
+	suspects := orchestrator.unreadablePictureKeys(request)
+	// confirmed are the pictures known to be bad: the ones the Schema's bounds
+	// show to be unreadable, or the only picture of the request.
+	confirmed := suspects
+	if len(every) == 1 {
+		confirmed = map[string]bool{every[0]: true}
+	}
 	stages := []map[string]bool{nil}
-	if suspects := orchestrator.unreadablePictureKeys(request); len(suspects) > 0 && len(suspects) < len(every) {
+	if len(suspects) > 0 && len(suspects) < len(every) {
 		stages = []map[string]bool{suspects, nil}
 	}
 	var completion agents.Completion
@@ -3849,8 +3866,12 @@ func (orchestrator *Orchestrator) retryWithoutInvalidPictures(
 	sent := request
 	for _, stage := range stages {
 		count := len(stage)
+		note := confirmedNote
 		if stage == nil {
 			count = len(every)
+			if len(confirmed) < len(every) {
+				note = unsureNote
+			}
 		}
 		orchestrator.logger.Warn(
 			"Agent 请求的图片被上游模型拒绝读取，去掉图片后重试",
@@ -3859,19 +3880,10 @@ func (orchestrator *Orchestrator) retryWithoutInvalidPictures(
 			"stripped_pictures", count,
 			"error", err,
 		)
-		sent = orchestrator.replacePictures(request, note, stage)
+		sent = orchestrator.replacePictures(sent, note, stage)
 		completion, err = orchestrator.agent.Stream(ctx, sent, emit)
 		if err == nil {
-			stripped := every
-			if stage != nil {
-				stripped = stripped[:0:0]
-				for _, key := range every {
-					if stage[key] {
-						stripped = append(stripped, key)
-					}
-				}
-			}
-			orchestrator.rememberRefusedPictures(ctx, command, stripped)
+			orchestrator.rememberRefusedPictures(ctx, command, refusedPictureKeys(every, confirmed, refused))
 			return completion, sent, nil
 		}
 		if classifyPictureRefusal(err) != pictureRefusalInvalid {
@@ -3879,6 +3891,23 @@ func (orchestrator *Orchestrator) retryWithoutInvalidPictures(
 		}
 	}
 	return completion, sent, err
+}
+
+// refusedPictureKeys are the keys of the pictures a request was answered
+// without that the session should remember: the confirmed ones, in request
+// order. A refusal over the number of pictures says nothing about any of them,
+// so none is remembered.
+func refusedPictureKeys(every []string, confirmed map[string]bool, refused error) []string {
+	if slices.Contains(agents.ImageInvalidReasons(refused), "count") {
+		return nil
+	}
+	var keys []string
+	for _, key := range every {
+		if confirmed[key] {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // rememberRefusedPictures stores the pictures a request was answered without,

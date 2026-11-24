@@ -5421,6 +5421,12 @@ type ChatAgentSchema struct {
 	// objected to, so the Agent says which picture was skipped and carries on.
 	// Empty turns that retry off.
 	InvalidImageNote string `json:"invalid_image_note,omitempty"`
+	// InvalidImageUnsureNote replaces the pictures an invalid-picture refusal
+	// stripped without telling which one was bad (several pictures, none of
+	// them shown unreadable by the Schema's bounds): the Agent is told they
+	// were skipped for this request only, not that each is invalid. Empty
+	// falls back to InvalidImageNote.
+	InvalidImageUnsureNote string `json:"invalid_image_unsure_note,omitempty"`
 	// ImagesUnsupportedNote replaces every picture of an Agent request that
 	// the model refused because it takes no picture input (#522, after #253);
 	// the request is sent once more with it. Empty turns that retry off.
