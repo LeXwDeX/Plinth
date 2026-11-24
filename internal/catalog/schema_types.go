@@ -3603,8 +3603,17 @@ type ChatImageCountSchema struct {
 	// UncountedTemplate names the models that declare no count parameter the
 	// person sets, so the session count does not reach them ({models}).
 	UncountedTemplate string `json:"uncounted_template,omitempty"`
-	// ModelSeparator joins the model names of UncountedTemplate.
+	// ModelSeparator joins the model names of UncountedTemplate and the
+	// reasons of OmittedTemplate.
 	ModelSeparator string `json:"model_separator,omitempty"`
+	// OmittedTemplate names a model whose count parameter the current
+	// parameter combination omits (its omit_when matches), so the session
+	// count does not reach it ({model}, {count}, {reason}).
+	OmittedTemplate string `json:"omitted_template,omitempty"`
+	// ReasonTemplate is one matched omit_when condition of OmittedTemplate,
+	// by the controlling parameter's label and the value's option label
+	// ({parameter}, {value}).
+	ReasonTemplate string `json:"reason_template,omitempty"`
 }
 
 // ChatSessionParametersSchema is application.chat.session_parameters (#564).

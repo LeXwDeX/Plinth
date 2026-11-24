@@ -25,22 +25,15 @@ func TestShippedPromptsAgreeOnImageCountAndPromptLanguage(t *testing.T) {
 			t.Errorf("chat.image_count.context_template still says %q", stale)
 		}
 	}
-	if len(count.OfferingCapabilities) == 0 || count.LimitTemplate == "" || count.UncountedTemplate == "" {
-		t.Error("chat.image_count does not report the per-model range and the models without a count")
+	if len(count.OfferingCapabilities) == 0 || count.LimitTemplate == "" || count.UncountedTemplate == "" ||
+		count.OmittedTemplate == "" || count.ReasonTemplate == "" {
+		t.Error("chat.image_count does not report the per-model range, the omitted count and the models without a count")
 	}
 
-	// A session image count is a stated count for the open-request card.
-	if !strings.Contains(chat.ConceptDirections.ContextTemplate, "会话设了【生成张数】也算说过") {
-		t.Error("the concept quantity trigger ignores the session image count")
-	}
-	var askChoice string
-	for _, tool := range chat.AgentTools {
-		if tool.Name == "ask_choice" {
-			askChoice = tool.Description
-		}
-	}
-	if !strings.Contains(askChoice, "stated count, session image count or request to start") {
-		t.Error("the ask_choice concept_quantity trigger ignores the session image count")
+	// #360 keeps the concept sketch count on its own card: the session image
+	// count is not a stated count for the open-request trigger.
+	if strings.Contains(chat.ConceptDirections.ContextTemplate, "生成张数") {
+		t.Error("the concept quantity trigger reads the session image count, which #360 keeps separate")
 	}
 
 	// The English prompt rule yields to a model whose prompt guidance names

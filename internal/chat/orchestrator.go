@@ -329,6 +329,12 @@ type OrchestratorConfig struct {
 	// SessionParameters reads the parameter values the session holds per
 	// Offering (#564). Nil keeps the block out of every prompt.
 	SessionParameters func(ownerID, sessionID string) []SessionParameterGroup
+	// OfferingParameters reads the values the session holds for one Offering
+	// (the person's and the Agent's layers, "null" for a value cleared to the
+	// default), the same values a generation call starts from. The image count
+	// block reads them to tell whether an Offering's count parameter is sent
+	// (#564). Nil reads the declared defaults only.
+	OfferingParameters func(ownerID, sessionID, offeringID string) map[string]json.RawMessage
 }
 
 type Orchestrator struct {
@@ -390,8 +396,11 @@ type Orchestrator struct {
 	// sessionParameters reads the session's parameter values per Offering
 	// (#564); nil keeps the block out of every prompt.
 	sessionParameters func(ownerID, sessionID string) []SessionParameterGroup
-	queue             chan ProcessTurn
-	queueMu           sync.Mutex
+	// offeringParameters reads one Offering's session values (#564); nil
+	// reads the declared defaults only.
+	offeringParameters func(ownerID, sessionID, offeringID string) map[string]json.RawMessage
+	queue              chan ProcessTurn
+	queueMu            sync.Mutex
 	// titleWaiters counts background title summaries in flight.
 	titleWaiters sync.WaitGroup
 	queued       map[string]struct{}
@@ -809,6 +818,7 @@ func NewOrchestrator(config OrchestratorConfig) (*Orchestrator, error) {
 		stepCosts:          config.StepCosts,
 		imageCount:         config.ImageCount,
 		sessionParameters:  config.SessionParameters,
+		offeringParameters: config.OfferingParameters,
 		queue:              make(chan ProcessTurn, config.Schema.Agent.QueueSize),
 		queued:             map[string]struct{}{},
 		activeCancel:       map[string]context.CancelFunc{},

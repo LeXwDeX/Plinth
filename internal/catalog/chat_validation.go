@@ -3041,6 +3041,10 @@ func validateImageCount(config ChatImageCountSchema) error {
 	if !strings.Contains(config.UncountedTemplate, "{models}") {
 		return errors.New("chat.image_count.uncounted_template 缺少 {models}")
 	}
+	if !strings.Contains(config.OmittedTemplate, "{model}") || !strings.Contains(config.OmittedTemplate, "{reason}") ||
+		!strings.Contains(config.ReasonTemplate, "{parameter}") {
+		return errors.New("chat.image_count.omitted_template 缺少 {model} 或 {reason}，或 reason_template 缺少 {parameter}")
+	}
 	return nil
 }
 
