@@ -126,6 +126,7 @@ class ScriptDefaultsTest(unittest.TestCase):
             [sys.executable, str(SMOKE / "smoke-l5-chat-models.py")],
             [sys.executable, str(SMOKE / "smoke-l5-four-view-multiview.py")],  # #417
             [sys.executable, str(SMOKE / "smoke-l5-astra-tools.py")],  # #417
+            [sys.executable, str(SMOKE / "smoke-l5-chat-wire.py")],  # #536
             ["bash", str(SMOKE / "smoke-l1-free.sh")],
         )
         for command in commands:

@@ -18,7 +18,7 @@ while [ $# -gt 0 ]; do
 done
 python3 upstream_shape.py live-only "${LIVE_ARGS[@]+"${LIVE_ARGS[@]}"}" >/dev/null || exit 2
 
-scripts=(chat-models astra-tools 2d-to-3d parallel three-view split 2d-params canvas 3d-params 2d-split agent-hard budget)
+scripts=(chat-models astra-tools chat-wire 2d-to-3d parallel three-view split 2d-params canvas 3d-params 2d-split agent-hard budget)
 # #417: the four-view chain needs a source picture (L5_FOUR_VIEW_IMAGE or --generate-image) and
 # costs the most, so it joins the run only when the operator asks for it explicitly.
 if [ "${L5_INCLUDE_FOUR_VIEW:-}" = "1" ]; then

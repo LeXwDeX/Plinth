@@ -33,7 +33,7 @@ var observedEfforts = map[string]bool{
 // responsesModelRefusal is the refusal the request earns from the rules of its
 // model, if any: the status and the body text.
 func (h *handler) responsesModelRefusal(request responsesRequest) (int, string, bool) {
-	rule, constrained := constrainedModels[strings.ToLower(strings.TrimSpace(request.Model))]
+	rule, constrained := constraintFor(request.Model)
 	if !constrained {
 		return 0, "", false
 	}

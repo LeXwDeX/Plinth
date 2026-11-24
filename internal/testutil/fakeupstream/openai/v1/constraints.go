@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -74,12 +75,70 @@ type modelConstraint struct {
 	// vendor accepts for a round that produced none is a value, not a missing
 	// field.
 	reasoningContentRequired bool
+	// allowedEfforts, when set, is the closed list of reasoning_effort values
+	// the model accepts; any other value is refused as an invalid value
+	// (constructed from the vendor's documents, see deepseekConstraint).
+	allowedEfforts []string
+	// noImageInput refuses any request that carries a picture (imageRefusal in
+	// image_refusal.go): the model reads text only.
+	noImageInput bool
+	// minImageSide refuses a picture whose height or width is not larger than
+	// it (observed: the gateway's refusal of a 1-pixel picture for a qwen model).
+	minImageSide int
+	// streamUsageTrailing: with stream_options.include_usage the usage rides on
+	// its own last chunk with an empty choices array, after the chunk that
+	// carries finish_reason (the DashScope shape, #536); false: the usage rides
+	// on the finish_reason chunk (the DeepSeek shape, observed).
+	streamUsageTrailing bool
 }
 
 var constrainedModels = map[string]modelConstraint{
 	"gpt-astra":     astraConstraint,
 	"gpt-6.2-astra": astraConstraint,
 	"deepseek":      deepseekConstraint,
+}
+
+// constrainedPrefixes are the model families whose rules apply to every model
+// name that starts with the prefix, the way the Catalog's chat profiles are
+// declared (model_prefixes); an exact entry of constrainedModels wins.
+var constrainedPrefixes = []struct {
+	prefix string
+	rule   modelConstraint
+}{
+	{"deepseek", deepseekConstraint},
+	{"qwen", qwenConstraint},
+	{TextOnlyModelPrefix, textOnlyConstraint},
+}
+
+// TextOnlyModelPrefix names a model of the fake that takes no picture input.
+// The default stack model (deepseek) is not one: whether the real gateway's
+// deepseek reads pictures is for the real round to settle, and a refusal there
+// would make Plinth strip the pictures of every vision scenario of the fake
+// stack (#535), so only a model named so, or ImageRefusalMarkerPrefix, gets it.
+const TextOnlyModelPrefix = "fake-text-only"
+
+var textOnlyConstraint = modelConstraint{noImageInput: true}
+
+// constraintFor is the rule set of a model name; false for a model without one.
+func constraintFor(model string) (modelConstraint, bool) {
+	name := strings.ToLower(strings.TrimSpace(model))
+	if rule, found := constrainedModels[name]; found {
+		return rule, true
+	}
+	for _, family := range constrainedPrefixes {
+		if strings.HasPrefix(name, family.prefix) {
+			return family.rule, true
+		}
+	}
+	return modelConstraint{}, false
+}
+
+// resolvedModel is the model name an answer reports for a request's model.
+func (rule modelConstraint) resolvedModel(requested string) string {
+	if rule.resolved != "" {
+		return rule.resolved
+	}
+	return requested
 }
 
 var astraConstraint = modelConstraint{
@@ -94,9 +153,27 @@ var astraConstraint = modelConstraint{
 // its official Tool Calls guide requires reasoning_content on the assistant
 // message that calls tools, and the API answers 400 to a request that drops it
 // (#377).
+//
+// Constructed from the same documents (checked 2026-11-24): reasoning_effort takes low, high and max, plus the
+// values the vendor maps onto them (minimal and low to low, medium, high and
+// xhigh to high, max and ultra to max) and none, which turns thinking off; any
+// other value is an invalid value (#536). The usage of a stream rides on the
+// finish_reason chunk (observed 2026-10-29).
 var deepseekConstraint = modelConstraint{
-	resolved:                 "deepseek",
 	reasoningContentRequired: true,
+	allowedEfforts:           []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"},
+}
+
+// qwenConstraint is the DashScope compatible mode behind the dev-test gateway:
+// a picture whose height or width is not larger than 32 pixels is refused
+// (observed 2026-11-23: invalid_parameter_error for a 1-pixel picture), and a
+// stream with include_usage ends with a chunk of empty choices that carries
+// the usage (constructed from the Model Studio OpenAI-compatible documents,
+// read 2026-11-24; the 2026-11-23 capture is non-stream, so no real stream of
+// a qwen model is committed yet).
+var qwenConstraint = modelConstraint{
+	minImageSide:        32,
+	streamUsageTrailing: true,
 }
 
 // constraintRefusal is the error envelope of a refusal. Its field order is the
@@ -122,11 +199,18 @@ func newConstraintRefusal(message, param, code string) constraintRefusal {
 // modelRefusal is the 400 the request earns from the rules of its model, if
 // any.
 func (r chatRequest) modelRefusal() (constraintRefusal, bool) {
-	rule, constrained := constrainedModels[strings.ToLower(strings.TrimSpace(r.Model))]
+	rule, constrained := constraintFor(r.Model)
 	if !constrained {
 		return constraintRefusal{}, false
 	}
 	none := r.effortIsNone()
+	if len(rule.allowedEfforts) > 0 {
+		if effort, listed := r.effortValue(); listed && !slices.Contains(rule.allowedEfforts, effort) {
+			return newConstraintRefusal(fmt.Sprintf(
+				"Invalid value: '%s'. Supported values are: 'low', 'high', and 'max'.", effort),
+				"reasoning_effort", "invalid_value"), true
+		}
+	}
 	if rule.reasoningContentRequired {
 		if index := r.toolCallWithoutReasoning(); index >= 0 {
 			return newConstraintRefusal(fmt.Sprintf(
@@ -157,6 +241,15 @@ func (r chatRequest) modelRefusal() (constraintRefusal, bool) {
 	return constraintRefusal{}, false
 }
 
+// effortValue is reasoning_effort when the request sent a string.
+func (r chatRequest) effortValue() (string, bool) {
+	var effort string
+	if json.Unmarshal(r.ReasoningEffort, &effort) != nil {
+		return "", false
+	}
+	return effort, true
+}
+
 // effortIsNone reports whether the request sets reasoning_effort to "none".
 func (r chatRequest) effortIsNone() bool {
 	var effort string
@@ -167,13 +260,31 @@ func (r chatRequest) effortIsNone() bool {
 // calls tools without reasoning_content, or -1 when every such message carries
 // the field (its content may well be empty, as a round without reasoning is
 // sent back as "").
+//
+// With StrictReasoningMarker anywhere in the conversation and tools in the
+// request, every assistant message must carry it, a plain text round included:
+// the reading of the vendor's guide (checked 2026-11-24) that "all subsequent
+// requests" of a tool-calling conversation pass the reasoning back "even for
+// turns where the model did not perform a tool call". Which reading the real
+// API enforces is not proven (#536, I28); the default stays the narrower one.
 func (r chatRequest) toolCallWithoutReasoning() int {
+	strict := len(r.Tools) > 0 && r.anyText(StrictReasoningMarker)
 	for index, message := range r.Messages {
-		if message.Role == "assistant" && len(message.ToolCalls) > 0 && message.ReasoningContent == nil {
+		if message.Role == "assistant" && (strict || len(message.ToolCalls) > 0) && message.ReasoningContent == nil {
 			return index
 		}
 	}
 	return -1
+}
+
+// anyText reports whether any message of the conversation contains the text.
+func (r chatRequest) anyText(needle string) bool {
+	for _, message := range r.Messages {
+		if strings.Contains(messageText(message.Content), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // temperatureOtherThanDefault returns the temperature as the request wrote it

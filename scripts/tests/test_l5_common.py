@@ -68,7 +68,7 @@ class AckAndArguments(unittest.TestCase):
         env = {"PATH": "/usr/bin:/bin", "BASE": "https://example.test", "ADMIN_USERNAME": "u", "ADMIN_PASSWORD": "p",
                "PYTHONDONTWRITEBYTECODE": "1"}
         for name in ("chat-models", "2d-to-3d", "parallel", "three-view", "split", "2d-params", "canvas", "3d-params",
-                     "2d-split", "agent-hard", "budget", "four-view-multiview", "astra-tools"):
+                     "2d-split", "agent-hard", "budget", "four-view-multiview", "astra-tools", "chat-wire"):
             result = subprocess.run([sys.executable, str(SMOKE / f"smoke-l5-{name}.py")], env=env,
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, name)
