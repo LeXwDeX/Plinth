@@ -5280,6 +5280,27 @@ type ChatThinkingModelProfile struct {
 	DSMLToolCalls bool `json:"dsml_tool_calls,omitempty"`
 }
 
+// ChatAgentRetrySchema is the retry of a model call after a transient failure
+// (#509): HTTP 408, 429 that error_mapping does not read as a used-up quota,
+// 500, 502, 503 and 504, a broken connection, no first byte in time, and a
+// stream that reported an error or stopped before its end. Only streamed Agent
+// rounds are retried, and only while they have passed nothing on to the
+// person; a non-streamed call (title, context summary, prompt enhancement,
+// connection test) is sent once.
+type ChatAgentRetrySchema struct {
+	// MaxAttempts is how many times one call is sent at most, the first
+	// included.
+	MaxAttempts int `json:"max_attempts"`
+	// InitialBackoffMillis is the wait before the second attempt; each later
+	// wait doubles, up to MaxBackoffMillis.
+	InitialBackoffMillis int `json:"initial_backoff_millis"`
+	MaxBackoffMillis     int `json:"max_backoff_millis"`
+	// MaxRetryAfterSeconds bounds the upstream's Retry-After: a failure that
+	// asks for a longer wait is not retried. The wait is the longer of the
+	// backoff and the Retry-After.
+	MaxRetryAfterSeconds int `json:"max_retry_after_seconds"`
+}
+
 type ChatAgentSchema struct {
 	AdapterKey        string              `json:"adapter_key"`
 	ConnectionID      string              `json:"connection_id,omitempty"`
@@ -5306,6 +5327,18 @@ type ChatAgentSchema struct {
 	ContextWindowSetting  string `json:"context_window_setting,omitempty"`
 	Vision                bool   `json:"vision"`
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
+	// FirstByteTimeoutSeconds bounds how long one streamed model call waits
+	// for its first frame, the response headers included; a call that gets
+	// none in time fails as transient and may be retried (#509). 0 or absent:
+	// only request_timeout_seconds bounds the call.
+	FirstByteTimeoutSeconds int `json:"first_byte_timeout_seconds,omitempty"`
+	// RoundTimeoutSeconds bounds one streamed Agent round: a call with all its
+	// retries and the waits between them (#509). 0 or absent: no bound beyond
+	// each attempt's request_timeout_seconds.
+	RoundTimeoutSeconds int `json:"round_timeout_seconds,omitempty"`
+	// Retry is how a model call meets a transient failure (#509); absent: it
+	// is sent once.
+	Retry *ChatAgentRetrySchema `json:"retry,omitempty"`
 	// ConsentWaitTimeoutSeconds 界定一轮对话因等待用户批准决定而挂起的
 	// 最长时长（AGT-12：挂起不占 worker；由 orchestrator 消费，不得在
 	// 代码中硬编码）。
@@ -6509,6 +6542,11 @@ type ChatMessageTexts struct {
 	// AgentInlineImageOutput replaces UnknownError when the Agent model drew
 	// a picture itself instead of answering or calling a generation tool.
 	AgentInlineImageOutput string `json:"agent_inline_image_output"`
+	// AgentUpstreamInterrupted replaces UnknownError when the chat model call
+	// failed transiently and its retries did not help, or the reply broke off
+	// after it had started streaming (#509): the person may send the message
+	// again. Optional: without it the unknown error is shown.
+	AgentUpstreamInterrupted string `json:"agent_upstream_interrupted,omitempty"`
 	// AgentRequestRejected replaces UnknownError when the upstream refused the
 	// request for one of its own parameters (HTTP 400 invalid_request_error
 	// that names the request field); {param} is that field's name. The
