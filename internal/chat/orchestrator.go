@@ -146,6 +146,17 @@ type ToolResult struct {
 	// Summary is a compact result the frontend can show as one line (#103).
 	// It is persisted with the tool call and never sent to the Agent.
 	Summary json.RawMessage `json:"-"`
+	// PresentedEntries, with ImageURLs, names the array of the JSON result
+	// whose entries describe those pictures one to one and in order (#552).
+	// Once every picture of the call is a handled attachment of the reply,
+	// each entry gets its own handle.
+	PresentedEntries string `json:"-"`
+	// UnpresentedContent, with ImageURLs, is the result the Agent reads
+	// instead of AgentContent when not every picture of the call became a
+	// handled attachment of the reply (#552): a tool whose work only counts
+	// once the person sees it never reports success for a picture the person
+	// cannot see or name.
+	UnpresentedContent string `json:"-"`
 }
 
 // ToolPicture is one picture a tool shows the Agent, by handle and platform URL.
@@ -3436,7 +3447,7 @@ func (orchestrator *Orchestrator) executeTools(
 		// slot is known even when verification skipped one.
 		imagesBefore := len(produced.ImageURLs)
 		handles := orchestrator.recordTurnResult(ctx, command.OwnerID, produced, call.ID, taskBindings[call.ID], result.ImageURLs)
-		content = orchestrator.withResultHandles(content, handles)
+		content = orchestrator.withPresentedHandles(content, result, *produced, imagesBefore, handles)
 		// #246: the self-check record stores the pictures a check produced by
 		// their attachment handles, once the reply has named them.
 		orchestrator.attachSelfCheckHandles(ctx, command.OwnerID, command.SessionID, result.Summary, handles)

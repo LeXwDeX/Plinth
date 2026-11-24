@@ -1849,6 +1849,9 @@ func validateImageCrop(schema ChatSchema) error {
 		"crop_limit_reached": {crop.Texts.CropLimitReached, "{limit}"},
 		"image_not_found":    {crop.Texts.ImageNotFound, "{detail}"},
 		"image_unavailable":  {crop.Texts.ImageUnavailable, "{detail}"},
+		"presented_note":     {crop.Texts.PresentedNote, "{count}"},
+		"not_presentable":    {crop.Texts.NotPresentable, "{detail}"},
+		"not_presented":      {crop.Texts.NotPresented, "{detail}"},
 	}
 	for code, text := range texts {
 		if strings.TrimSpace(text.text) == "" {

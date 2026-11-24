@@ -285,3 +285,40 @@ func TestItemReferenceAttachmentsRefuseInvalidOrForeignReferences(t *testing.T) 
 		t.Fatal("another owner's input asset must be refused")
 	}
 }
+
+// #552: a crop_image_regions crop shown as a picture of a chat reply keeps the
+// crop role its stored provenance gives it, so the session never labels it as
+// the person's own upload; a plain input asset is still an upload.
+func TestVerifyAttachmentNamesAStoredCropByItsProvenance(t *testing.T) {
+	ctx := context.Background()
+	picture := []byte("\x89PNG\r\n\x1a\nchat-crop")
+	inputs := &storedInputs{
+		assets: map[generation.AssetID]generation.InputAsset{
+			"crop-a":   {ID: "crop-a", OwnerID: "owner-a", AssetType: "list_crop"},
+			"upload-a": {ID: "upload-a", OwnerID: "owner-a"},
+		},
+		bodies: map[generation.AssetID][]byte{"crop-a": picture, "upload-a": picture},
+	}
+	resolver := limitedResolver(t, inputs, resolverLimits{
+		upload: 1024, vision: 1024,
+		crops: itemCropProvenance{"crop-a": "sheet-a"},
+	})
+	for assetID, role := range map[string]string{
+		"crop-a":   chat.AttachmentRoleCrop,
+		"upload-a": chat.AttachmentRoleUpload,
+	} {
+		attachment, err := resolver.VerifyAttachment(ctx, "owner-a", "session-a", chat.AttachmentRef{
+			Kind: chat.AttachmentKindImage, URL: "/configured/assets/" + assetID, ImageSlot: 2,
+		})
+		if err != nil || attachment.Role != role || attachment.AssetID != assetID ||
+			attachment.URL != "/configured/assets/"+assetID || attachment.ImageSlot != 2 {
+			t.Fatalf("%s attachment = %+v err=%v; want role %s", assetID, attachment, err, role)
+		}
+	}
+	// Another owner's crop is refused like any foreign input asset.
+	if _, err := resolver.VerifyAttachment(ctx, "owner-b", "session-a", chat.AttachmentRef{
+		Kind: chat.AttachmentKindImage, URL: "/configured/assets/crop-a",
+	}); err == nil {
+		t.Fatal("another owner's crop was verified")
+	}
+}

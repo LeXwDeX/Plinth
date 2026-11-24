@@ -26,6 +26,16 @@ const (
 	cropCodeCropLimitReached = "crop_limit_reached"
 	cropCodeImageNotFound    = "image_not_found"
 	cropCodeImageUnavailable = "image_unavailable"
+	// cropCodeNotPresentable refuses a call before any crop is stored: the
+	// session cannot show crops to the person as handled pictures (#552).
+	cropCodeNotPresentable = "not_presentable"
+	// cropCodeNotPresented replaces a result whose crops did not all become
+	// handled pictures of the reply (#552).
+	cropCodeNotPresented = "not_presented"
+
+	// cropEntriesField is the result array whose entries describe the shown
+	// crops one to one; the orchestrator writes each crop's handle into it.
+	cropEntriesField = "crops"
 )
 
 // CropRegionsService is the read-only batch crop (#331).
@@ -35,10 +45,14 @@ type CropRegionsService interface {
 
 // CropToolConfig declares the read-only crop_image_regions tool. Context
 // carries the handle syntax, Schema the refusal copy and Crops the service.
+// AssetItemRoute is the Schema's input asset route (runtime.http.routes
+// .asset_item): every crop is shown to the person as a picture of the reply
+// by that URL (#552).
 type CropToolConfig struct {
-	Context catalog.ChatContextSchema
-	Schema  catalog.ChatImageCropSchema
-	Crops   CropRegionsService
+	Context        catalog.ChatContextSchema
+	Schema         catalog.ChatImageCropSchema
+	Crops          CropRegionsService
+	AssetItemRoute string
 	// Localize translates one default-locale Schema text for the turn's
 	// locale. Nil returns the text unchanged.
 	Localize func(locale, text string) string
@@ -46,13 +60,16 @@ type CropToolConfig struct {
 
 // CropTool implements crop_image_regions: it resolves one picture of the
 // command's owner, cuts the normalized regions through listcrop and returns
-// each crop's asset id and geometry. It never creates a Task, counts a step,
-// writes a self-check or returns picture bytes.
+// each crop's asset id and geometry. Every crop is also a picture of the reply
+// the person sees and the Agent names by handle (#552): a crop the person
+// cannot see is never reported as done. It never creates a Task, counts a
+// step, writes a self-check or returns picture bytes.
 type CropTool struct {
-	context  catalog.ChatContextSchema
-	schema   catalog.ChatImageCropSchema
-	crops    CropRegionsService
-	localize func(locale, text string) string
+	context        catalog.ChatContextSchema
+	schema         catalog.ChatImageCropSchema
+	crops          CropRegionsService
+	assetItemRoute string
+	localize       func(locale, text string) string
 }
 
 func NewCropTool(config CropToolConfig) (*CropTool, error) {
@@ -67,10 +84,11 @@ func NewCropTool(config CropToolConfig) (*CropTool, error) {
 		localize = func(_, text string) string { return text }
 	}
 	return &CropTool{
-		context:  config.Context,
-		schema:   config.Schema,
-		crops:    config.Crops,
-		localize: localize,
+		context:        config.Context,
+		schema:         config.Schema,
+		crops:          config.Crops,
+		assetItemRoute: strings.TrimSpace(config.AssetItemRoute),
+		localize:       localize,
 	}, nil
 }
 
@@ -88,17 +106,22 @@ type cropArgumentItem struct {
 }
 
 // cropContent is the Agent-facing result. One call cuts out of one source, so
-// the crops are one source group and the source size is carried once.
+// the crops are one source group and the source size is carried once. Note
+// is the Schema's word that the crops are pictures the person sees (#552).
 type cropContent struct {
 	Success      bool       `json:"success"`
 	SourceWidth  int        `json:"source_width"`
 	SourceHeight int        `json:"source_height"`
 	Crops        []cropItem `json:"crops"`
+	Note         string     `json:"note"`
 }
 
-// cropItem is one stored crop beside the label its request gave it.
+// cropItem is one stored crop beside the label its request gave it and its
+// pixel size. The orchestrator adds its handle once the reply shows it.
 type cropItem struct {
-	Label string `json:"label,omitempty"`
+	Label  string `json:"label,omitempty"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 	listcrop.Result
 }
 
@@ -108,6 +131,11 @@ func (tool *CropTool) Execute(ctx context.Context, command chat.ToolCommand) (ch
 	arguments, refused := tool.arguments(command)
 	if refused != nil {
 		return *refused, nil
+	}
+	// Nothing is cut when the crops could not reach the person: a stored
+	// crop nobody can see is no delivery (#552).
+	if detail := tool.unpresentable(); detail != "" {
+		return tool.refusal(command, cropCodeNotPresentable, detail, 0), nil
 	}
 	source, detail, code := tool.source(command, arguments.Image)
 	if code != "" {
@@ -126,8 +154,12 @@ func (tool *CropTool) Execute(ctx context.Context, command chat.ToolCommand) (ch
 		return tool.failure(command, arguments.Regions, err), nil
 	}
 	content := cropContent{Success: true, Crops: make([]cropItem, len(results))}
+	imageURLs := make([]string, len(results))
 	for index, result := range results {
-		content.Crops[index] = cropItem{Result: result}
+		imageURLs[index] = tool.assetURL(result.InputAssetID)
+		content.Crops[index] = cropItem{
+			Width: result.PixelRect.Width(), Height: result.PixelRect.Height(), Result: result,
+		}
 		if index < len(arguments.Regions) {
 			content.Crops[index].Label = arguments.Regions[index].Label
 		}
@@ -135,6 +167,8 @@ func (tool *CropTool) Execute(ctx context.Context, command chat.ToolCommand) (ch
 			content.SourceWidth, content.SourceHeight = result.SourceWidth, result.SourceHeight
 		}
 	}
+	content.Note = strings.ReplaceAll(tool.localize(command.Options.Locale, tool.schema.Texts.PresentedNote),
+		"{count}", strconv.Itoa(len(results)))
 	encoded, err := json.Marshal(content)
 	if err != nil {
 		return chat.ToolResult{Error: "crop result unavailable", NoSubmission: true}, nil
@@ -148,7 +182,45 @@ func (tool *CropTool) Execute(ctx context.Context, command chat.ToolCommand) (ch
 		"crop_count":      len(results),
 		"input_asset_ids": ids,
 	})
-	return chat.ToolResult{AgentContent: string(encoded), Summary: summary, NoSubmission: true}, nil
+	unpresented := tool.refusal(command, cropCodeNotPresented,
+		"the reply could not show every crop as a picture with its own handle", 0)
+	return chat.ToolResult{
+		AgentContent:       string(encoded),
+		Summary:            summary,
+		NoSubmission:       true,
+		ImageURLs:          imageURLs,
+		PresentedEntries:   cropEntriesField,
+		UnpresentedContent: unpresented.AgentContent,
+	}, nil
+}
+
+// unpresentable says why the crops could not be shown to the person as
+// handled pictures of the reply, or is empty when they can: picture handles
+// must be on, the result must be able to carry them and the Schema must name
+// the route a crop picture is served by.
+func (tool *CropTool) unpresentable() string {
+	switch {
+	case !chat.NewHandlePolicy(tool.context).Enabled():
+		return "picture handles are off in this session"
+	case strings.TrimSpace(tool.context.ResultHandlesField) == "":
+		return "the result cannot carry picture handles"
+	case !strings.Contains(tool.assetItemRoute, "{"):
+		return "no picture route is configured for the crops"
+	}
+	return ""
+}
+
+// assetURL renders the platform URL of one stored crop from the Schema's
+// input asset route, so the reply shows it like any input picture.
+func (tool *CropTool) assetURL(id generation.AssetID) string {
+	parts := strings.Split(tool.assetItemRoute, "/")
+	for index, part := range parts {
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+			parts[index] = string(id)
+			break
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 // arguments decodes the declared object strictly. Unknown keys are refused
@@ -291,6 +363,10 @@ func (tool *CropTool) text(code string) string {
 		return tool.schema.Texts.CropLimitReached
 	case cropCodeImageNotFound:
 		return tool.schema.Texts.ImageNotFound
+	case cropCodeNotPresentable:
+		return tool.schema.Texts.NotPresentable
+	case cropCodeNotPresented:
+		return tool.schema.Texts.NotPresented
 	default:
 		return tool.schema.Texts.ImageUnavailable
 	}

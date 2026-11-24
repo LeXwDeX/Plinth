@@ -364,6 +364,18 @@ Catalog 加载时统一检查 URL 产物映射（`provider_options.result_assets
 
 **装配与回退。** 装配在 Catalog 声明 `application.asset_list`（并同时声明 `application.project`、`application.step_policy`）时进行；`application.model_delivery` 未声明时整批 ZIP 退回纯数字命名（`model.obj`、`model.mtl`、`texture-N`）。没有项目服务或资产读取端口的部署仍可读看板，通过时不登记项目资产，归档路由不注册。功能尚未在 dev-test 验收，验收记录见 #329。
 
+### 对话裁图作为会话图片交付（#552；源码已实现，本机 Go 与前端测试覆盖，未部署验收）
+
+`crop_image_regions`（`implementation_key: image.crop`，#331）原本只把裁图存成本人的 `list_crop` 输入资产并返回 `input_asset_id` 与几何信息，供 `propose_asset_list` 的 `reference_input_asset_ids` 引用。对话里直接调用时这些裁图没有任何呈现：助手消息的 `image_urls`、`attachments` 为空，没有 `@imgN`，界面看不到、拿不到，Agent 却会把它讲成交付。现在的契约：
+
+- **沿用回复图片通道。** `agenttools.CropTool` 成功时在 `ToolResult.ImageURLs` 里按请求顺序返回每张裁图的输入资产 URL（由 Schema 的 `runtime.http.routes.asset_item` 渲染，`app` 装配时注入），和 `create_selection_mask`、模型渲染一样经 `recordTurnResult → AttachResults → VerifyAttachment` 挂成回复附件并分配句柄。`references.Resolver.verifyInputAsset` 按 `input_asset_crops` 的存储来源把裁图标成 `crop` 角色（与清单项子会话的裁图引用一致），不再标成「用户上传」；角色只来自服务端记录，不接受客户端声明。前端不新增展示通道：消息图片进入普通结果卡（缩略图、句柄标签），点开后结果详情为没有 Task 的图片提供下载。
+- **句柄逐项回填。** `chat.ToolResult` 新增两个只在服务端使用的字段：`PresentedEntries` 指明结果 JSON 里与图片一一对应的数组（裁图为 `crops`），`UnpresentedContent` 是有图没拿到句柄时 Agent 改读的结果。编排器的 `withPresentedHandles` 按本次调用的图片槽位（`AttachmentForSlot`）逐张核对：全部拿到句柄时照常写 `chat.context.result_handles_field`，并用 `bindViewHandles` 把句柄写进每个 `crops[]` 条目；任一张没有句柄时整条结果换成 `UnpresentedContent`（`not_presented`，不报告成功、不带 `crops`/`handles`）。判断只看确定性的附件事实，不解析 Agent 的回复文字。没有声明这两个字段的工具行为不变。
+- **结果文字如实。** 成功结果的每项带 `handle`、`label`、`width`、`height` 与原有的 `input_asset_id`、几何和 `sha256`，`note` 取 `application.chat.image_crop.texts.presented_note`（`{count}`）：裁图已作为本条回复的会话图片展示、用户看得到的才算交付、提到哪张就写它的句柄。提示放在工具结果里，不进系统提示词。
+- **不可呈现就不裁。** 句柄语法关闭、`result_handles_field` 为空或资产路由缺占位符时，工具在调用裁图服务之前返回 `not_presentable`，不存任何资产。三条新文案（`presented_note`、`not_presentable`、`not_presented`）由 Catalog 校验非空与占位符，英文包成对提供。
+- **边界。** `listcrop` 服务、清单 HTTP 裁图编辑、清单项子会话的 `crop`/`source_scene` 附件都不变。场景拆解（#331）回合里调用同一工具时，裁图同样作为该回复的会话图片出现；清单项仍按 `input_asset_id` 引用。`UnpresentedContent` 生效时已挂上的裁图仍留在消息里（它们确实可见），未挂上的那张也仍在 `image_urls` 中但没有句柄；Agent 读到的是失败结果。裁图是否适合作为多视图 3D 输入不在本节范围。
+
+验证：`internal/chat/agenttools/crop_test.go`（返回图片 URL、逐项尺寸与提示、不可呈现时不写任何资产）、`internal/chat/orchestrator_crop_presented_test.go`（真实裁图工具、`find_history_images` 与 `refine_image` 串成一回合：最终消息带四张 `crop` 角色附件 `@img2`–`@img5`，结果逐项带句柄，同回合查历史能列出、`reference_handles` 能解析；一张未通过附件校验时 Agent 读到 `not_presented`）、`internal/chat/references/item_reference_test.go`（裁图 crop 角色）、`internal/catalog/chat_image_crop_schema_test.go`、`src/components/chat/chat-message-crops.test.tsx`。未在 dev-test 部署验收。
+
 ### 凭据种类与个人访问 Key（#332；源码已实现，本机 Go 与前端测试覆盖；第 1–5 步已在 dev-test 验收，第 6 步的部署验收记录见 #332；管理端 API、每 Key 用量统计、整体开关与管理页面已实现，管理端未部署验收）
 
 - **凭据种类。** `access.Principal` 带一个明确的凭据种类（`access.Credential`）：`browser_session`（已登录的浏览器 Cookie）、`deployment_token`（`auth_mode=bearer` 的部署级静态令牌）、`development`（开发身份，以及非生产环境不带 Cookie 的 mock 用户）、`access_key`（个人访问 Key）；没有经过身份解析器构造的 Principal（测试等）种类为空，任何代码都不得把它当作真人。此前“是不是真人”由各路由自己看请求头判断，`taskHumanPrincipal`（真实 Cookie 且不带 `Authorization` 头）仍是需要真人的路由的判据，种类字段是额外的明确事实，不替代它。种类由 `authentication.Service.Identify`、`BearerIdentity`、`DevelopmentIdentity` 在构造 Principal 处设置。

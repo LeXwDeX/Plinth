@@ -38,4 +38,15 @@ type ChatImageCropTexts struct {
 	// ImageUnavailable refuses a source that cannot be read or decoded right
 	// now. {detail}
 	ImageUnavailable string `json:"image_unavailable"`
+	// PresentedNote rides in a successful result: the crops are session
+	// pictures of the reply, each with its handle, and only what the person
+	// can see counts as delivered (#552). {count}
+	PresentedNote string `json:"presented_note"`
+	// NotPresentable refuses a call before any crop is stored when the
+	// session cannot show crops to the person as handled pictures (#552).
+	// {detail}
+	NotPresentable string `json:"not_presentable"`
+	// NotPresented replaces the result when the stored crops did not all
+	// become handled pictures of the reply (#552). {detail}
+	NotPresented string `json:"not_presented"`
 }
