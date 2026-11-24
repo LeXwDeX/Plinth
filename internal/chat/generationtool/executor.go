@@ -1585,12 +1585,16 @@ func (executor *Executor) buildInput(
 	// one per Offering (Offerings name the parameter they price by
 	// differently, n or max_images). It sits on the person's own layer, above a
 	// stale per-Offering value and below an explicit turn parameter, while a
-	// concept sketch's fixed value, applied last, still wins.
+	// concept sketch's fixed value, applied last, still wins. #564: the one
+	// session value meets each Offering's own declared range here, so a count
+	// set on a model with a wider range runs at a narrower model's maximum
+	// instead of being refused at normalization, where the Agent cannot fix it.
 	if executor.imageCount != nil && offering.EstimatedCreditsUnitParameter != "" {
 		if parameter, declared := allowed[offering.EstimatedCreditsUnitParameter]; declared &&
 			offering.UserParameterAllowed(parameter) {
 			if count, ok := executor.imageCount(command.OwnerID, command.SessionID); ok {
-				parameters[offering.EstimatedCreditsUnitParameter] = json.RawMessage(strconv.Itoa(count))
+				parameters[offering.EstimatedCreditsUnitParameter] = json.RawMessage(
+					strconv.Itoa(parameter.ClampedCount(count)))
 			}
 		}
 	}

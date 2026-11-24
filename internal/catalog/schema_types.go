@@ -3321,6 +3321,10 @@ type ChatSchema struct {
 	// the person set for this session (#486). Server side only; the count is
 	// read from the session's stored settings, never from the Schema.
 	ImageCount ChatImageCountSchema `json:"image_count,omitempty"`
+	// SessionParameters declares the block that shows the Agent the
+	// parameter values the session holds per Offering before it submits
+	// (#564). Server side only; an empty template injects nothing.
+	SessionParameters ChatSessionParametersSchema `json:"session_parameters,omitempty"`
 	// Candidates declares how many parallel candidates one production-plan step
 	// may name (#242) and where they may come from. Server side only; the plan
 	// card reads the expanded steps and their candidate group.
@@ -3589,6 +3593,46 @@ type ChatConceptQuantitySchema struct {
 type ChatImageCountSchema struct {
 	// ContextTemplate is the injected block ({count}).
 	ContextTemplate string `json:"context_template"`
+	// OfferingCapabilities names the Offerings the block reports on (#564):
+	// the enabled, available Offerings of these capabilities, one line per
+	// model. Empty reports on none.
+	OfferingCapabilities []schemacontract.Capability `json:"offering_capabilities,omitempty"`
+	// LimitTemplate names a model whose declared count range does not hold the
+	// session count, with the count its calls really run ({model}, {count}).
+	LimitTemplate string `json:"limit_template,omitempty"`
+	// UncountedTemplate names the models that declare no count parameter the
+	// person sets, so the session count does not reach them ({models}).
+	UncountedTemplate string `json:"uncounted_template,omitempty"`
+	// ModelSeparator joins the model names of UncountedTemplate and the
+	// reasons of OmittedTemplate.
+	ModelSeparator string `json:"model_separator,omitempty"`
+	// OmittedTemplate names a model whose count parameter the current
+	// parameter combination omits (its omit_when matches), so the session
+	// count does not reach it ({model}, {count}, {reason}).
+	OmittedTemplate string `json:"omitted_template,omitempty"`
+	// ReasonTemplate is one matched omit_when condition of OmittedTemplate,
+	// by the controlling parameter's label and the value's option label
+	// ({parameter}, {value}).
+	ReasonTemplate string `json:"reason_template,omitempty"`
+}
+
+// ChatSessionParametersSchema is application.chat.session_parameters (#564).
+// The system prompt says the parameters a session locked are followed; this
+// block shows which values those are: one line per Offering with each value
+// and who set it (the person on the panel, or the Agent with set_params).
+// The session image count is left to the image_count block.
+type ChatSessionParametersSchema struct {
+	// ContextTemplate is the injected block ({parameters}).
+	ContextTemplate string `json:"context_template"`
+	// OfferingTemplate is one Offering's line ({model}, {capability},
+	// {parameters}).
+	OfferingTemplate string `json:"offering_template,omitempty"`
+	// ParameterTemplate is one value ({label}, {value}, {source}).
+	ParameterTemplate string `json:"parameter_template,omitempty"`
+	// Separator joins the values of one Offering.
+	Separator string `json:"separator,omitempty"`
+	// Sources names who set a value, keyed by "user" and "agent".
+	Sources map[string]string `json:"sources,omitempty"`
 }
 
 // ChatCandidatesSchema is application.chat.candidates (#242). A production
@@ -4556,6 +4600,10 @@ type ChatApprovalBudgetState struct {
 	Label string `json:"label"`
 	// Role is one of the ChatApprovalBudgetRole* values.
 	Role string `json:"role"`
+	// Note replaces the budget block's {auto_approval} sentence while a plan
+	// is in this state (#564): only a plan that may spend is approved by
+	// budget. Empty keeps auto_approval_note (completed_note for completed).
+	Note string `json:"note,omitempty"`
 }
 
 // Roles of a production plan state (#120). Pending waits for the person's
@@ -6377,6 +6425,14 @@ type ChatSkillsSchema struct {
 	// ToolDirectiveTemplate is the system-context block that tells the Agent a
 	// tool-binding Skill was chosen. It uses {name}, {prompt} and {tool}.
 	ToolDirectiveTemplate string `json:"tool_directive_template,omitempty"`
+	// StyleDirectiveTemplate tells the Agent which style Skill the turn chose
+	// (#564), with {name} and {summary}: the style itself is applied to the
+	// prompt at submission, so without it the Agent cannot tell a chosen style
+	// from none.
+	StyleDirectiveTemplate string `json:"style_directive_template,omitempty"`
+	// StyleSummaryMaxCharacters bounds {summary}: the Skill prompt's first
+	// sentence, cut to this many characters.
+	StyleSummaryMaxCharacters int `json:"style_summary_max_characters,omitempty"`
 }
 
 type ChatSkillCreationSchema struct {

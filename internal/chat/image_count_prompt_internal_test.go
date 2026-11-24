@@ -29,17 +29,17 @@ func TestImageCountPromptStatesThePersonsCount(t *testing.T) {
 			return 0, false
 		},
 	}
-	prompt := orchestrator.imageCountPrompt("owner-a", "session-1")
+	prompt := orchestrator.imageCountPrompt(nil, "owner-a", "session-1")
 	if !strings.Contains(prompt, "4 张") {
 		t.Fatalf("prompt lacks the count: %q", prompt)
 	}
 	if strings.Contains(prompt, "{count}") {
 		t.Fatalf("prompt kept the placeholder: %q", prompt)
 	}
-	if prompt := orchestrator.imageCountPrompt("owner-a", "session-2"); prompt != "" {
+	if prompt := orchestrator.imageCountPrompt(nil, "owner-a", "session-2"); prompt != "" {
 		t.Fatalf("a session without a count carries a number: %q", prompt)
 	}
-	if prompt := (&Orchestrator{schema: schema}).imageCountPrompt("owner-a", "session-1"); prompt != "" {
+	if prompt := (&Orchestrator{schema: schema}).imageCountPrompt(nil, "owner-a", "session-1"); prompt != "" {
 		t.Fatalf("a prompt without the reader carries a number: %q", prompt)
 	}
 }
