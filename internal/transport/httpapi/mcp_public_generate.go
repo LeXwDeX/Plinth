@@ -673,23 +673,12 @@ func (s *Server) mcpOffering(call *mcpCall, request mcpStartRequest) (generation
 		return s.mcpNamedOffering(call, request)
 	}
 	if request.capability == generation.ImageTo3D && len(request.images) > 1 {
-		var fallback *generation.Offering
-		for _, candidate := range s.generation.Offerings(request.capability) {
-			if !candidate.Enabled || !s.generation.OfferingAvailable(candidate.ID) || !generationtool.TakesSeveralViews(candidate) {
-				continue
-			}
-			if candidate.Default {
-				return candidate, nil
-			}
-			if fallback == nil {
-				found := candidate
-				fallback = &found
-			}
+		chosen := mcppublic.ChooseOffering(s.generation.Offerings(request.capability), s.generation.OfferingAvailable,
+			mcppublic.OfferingNeed{SeveralViews: true})
+		if outcome := s.mcpSelectionProblem(call, chosen.Code, mcppublic.Subject{}); outcome != nil {
+			return generation.Offering{}, outcome
 		}
-		if fallback != nil {
-			return *fallback, nil
-		}
-		return generation.Offering{}, s.mcpMessageProblem(call, "no_service", service.Messages.NoService, mcppublic.Subject{})
+		return chosen.Offering, nil
 	}
 	id, err := s.generation.DefaultOfferingID(request.capability)
 	if err != nil {
@@ -734,26 +723,26 @@ func (s *Server) mcpMaskOffering(call *mcpCall, request mcpStartRequest) (genera
 		}
 		return offering, nil
 	}
-	var chosen *generation.Offering
-	for _, candidate := range s.generation.Offerings(request.capability) {
-		if !candidate.Enabled || !s.generation.OfferingAvailable(candidate.ID) {
-			continue
-		}
-		if _, declared := mcpSemanticParameter(candidate, generation.SemanticMask); !declared {
-			continue
-		}
-		if candidate.Default {
-			return candidate, nil
-		}
-		if chosen == nil {
-			found := candidate
-			chosen = &found
-		}
+	chosen := mcppublic.ChooseOffering(s.generation.Offerings(request.capability), s.generation.OfferingAvailable,
+		mcppublic.OfferingNeed{Mask: true})
+	if outcome := s.mcpSelectionProblem(call, chosen.Code, mcppublic.Subject{}); outcome != nil {
+		return generation.Offering{}, outcome
 	}
-	if chosen == nil {
-		return generation.Offering{}, s.mcpMessageProblem(call, "no_service", service.Messages.NoService, mcppublic.Subject{})
+	return chosen.Offering, nil
+}
+
+// mcpSelectionProblem words why no service was chosen (#517): the selection's
+// code is the problem code, its message the Schema's. nil when one was chosen.
+func (s *Server) mcpSelectionProblem(call *mcpCall, code mcppublic.SelectionCode, subject mcppublic.Subject) *mcpOutcome {
+	messages := s.application.MCPPublic.Messages
+	switch code {
+	case mcppublic.SelectionChosen:
+		return nil
+	case mcppublic.SelectionSourceIncompatible:
+		return s.mcpMessageProblem(call, string(code), messages.SourceIncompatible, subject)
+	default:
+		return s.mcpMessageProblem(call, string(mcppublic.SelectionNoService), messages.NoService, subject)
 	}
-	return *chosen, nil
 }
 
 // mcpSemanticParameter finds the parameter an Offering declares for a semantic
@@ -836,28 +825,12 @@ func (s *Server) mcpProcessingOffering(call *mcpCall, request mcpStartRequest, s
 		}
 		return generation.Offering{}, nil, s.mcpMessageProblem(call, "source_incompatible", service.Messages.SourceIncompatible, subject)
 	}
-	var chosen *generation.Offering
-	var chosenBinding *generation.ModelSourceBinding
-	for _, candidate := range s.generation.Offerings(request.capability) {
-		if !candidate.Enabled || !s.generation.OfferingAvailable(candidate.ID) {
-			continue
-		}
-		binding := bind(candidate)
-		if binding == nil {
-			continue
-		}
-		if candidate.Default {
-			return candidate, binding, nil
-		}
-		if chosen == nil {
-			found := candidate
-			chosen, chosenBinding = &found, binding
-		}
+	chosen := mcppublic.ChooseOffering(s.generation.Offerings(request.capability), s.generation.OfferingAvailable,
+		mcppublic.OfferingNeed{Source: &source, SourceAsset: generation.AssetID(request.sourceAsset), Prefer: prefer})
+	if outcome := s.mcpSelectionProblem(call, chosen.Code, subject); outcome != nil {
+		return generation.Offering{}, nil, outcome
 	}
-	if chosen == nil {
-		return generation.Offering{}, nil, s.mcpMessageProblem(call, "source_incompatible", service.Messages.SourceIncompatible, subject)
-	}
-	return *chosen, chosenBinding, nil
+	return chosen.Offering, chosen.Binding, nil
 }
 
 // mcpBuildInput lays the call's arguments over the service's declared
