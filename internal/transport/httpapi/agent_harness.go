@@ -123,30 +123,6 @@ func (s *Server) agentParamsPut(writer http.ResponseWriter, request *http.Reques
 	writeAgentJSON(writer, s.projectAgentParameters(key, request.URL.Query().Get("offering_id")))
 }
 
-func (s *Server) agentBindPut(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
-	var body struct {
-		Session string `json:"session"`
-		Task    string `json:"task"`
-	}
-	bodyReader := boundedBodyReader(writer, request, s.application.Runtime.HTTP.JSONBodyMaxBytes)
-	if err := json.NewDecoder(bodyReader).Decode(&body); err != nil || body.Session == "" {
-		writeProblem(writer, http.StatusBadRequest, "invalid_body", agentSessionRequired)
-		return
-	}
-	if !s.ownsAgentScope(request, owner, body.Session) {
-		writeProblem(writer, http.StatusForbidden, "invalid_scope", agentScopeForbidden)
-		return
-	}
-	key := agentparams.ScopeKey(string(owner), body.Session)
-	taskJSON, _ := json.Marshal(body.Task)
-	s.agentState.Set(key, map[string]json.RawMessage{
-		"task_id": taskJSON,
-	})
-	// One session is one creative task. A new generation task ID represents a
-	// version in that session, so the user's harness overrides remain in scope.
-	writeAgentJSON(writer, map[string]any{"session": body.Session, "task": body.Task})
-}
-
 func (s *Server) agentConsentGet(writer http.ResponseWriter, request *http.Request, owner generation.OwnerID) {
 	scope := request.URL.Query().Get("scope")
 	if scope == "" {

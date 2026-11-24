@@ -13,7 +13,6 @@ import {
 const schema = structuredClone(defaultCatalog.application) as ProductSchema;
 const routes = {
   params: schema.runtime.http.routes.agent_params,
-  bind: schema.runtime.http.routes.agent_bind,
   consent: schema.runtime.http.routes.agent_consent,
 };
 
@@ -91,18 +90,11 @@ describe('createAgentHarnessClient', () => {
     });
   });
 
-  it('binds an agent session to a task', async () => {
-    const { calls, fetcher } = recordingFetcher(
-      jsonResponse({ session: 'session-1', task: 'task-9' }),
-    );
-    const client = createAgentHarnessClient({ fetcher, routes });
-    await client.bindTask('session-1', 'task-9');
-    expect(calls[0].url).toBe(routes.bind);
-    expect(calls[0].init?.method).toBe('PUT');
-    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
-      session: 'session-1',
-      task: 'task-9',
-    });
+  // #511: the server kept the bound task id without any reader; the call and its route are gone.
+  it('has no task binding call and the Schema no bind route', () => {
+    const client = createAgentHarnessClient({ fetcher: vi.fn() as unknown as typeof fetch, routes });
+    expect('bindTask' in client).toBe(false);
+    expect('agent_bind' in schema.runtime.http.routes).toBe(false);
   });
 
   it('reads consent state and submits approval decisions', async () => {
@@ -131,11 +123,9 @@ describe('createAgentHarnessClient', () => {
   it('uses every route provided by the Product Schema fixture', async () => {
     const mutatedSchema = structuredClone(defaultCatalog.application) as ProductSchema;
     mutatedSchema.runtime.http.routes.agent_params = '/schema/agent-params';
-    mutatedSchema.runtime.http.routes.agent_bind = '/schema/agent-bind';
     mutatedSchema.runtime.http.routes.agent_consent = '/schema/agent-consent';
     const customRoutes = {
       params: mutatedSchema.runtime.http.routes.agent_params,
-      bind: mutatedSchema.runtime.http.routes.agent_bind,
       consent: mutatedSchema.runtime.http.routes.agent_consent,
     };
     const { calls, fetcher } = recordingFetcher(jsonResponse({ params: {}, consent: {} }));
@@ -143,14 +133,12 @@ describe('createAgentHarnessClient', () => {
 
     await client.getParams('session-x');
     await client.putParams('session-x', { quality: 'high' });
-    await client.bindTask('session-x', 'task-x');
     await client.getConsent('session-x');
     await client.putConsent('session-x', 'request-x', false);
 
     expect(calls.map(({ url }) => url)).toEqual([
       '/schema/agent-params?scope=session-x',
       '/schema/agent-params?scope=session-x',
-      '/schema/agent-bind',
       '/schema/agent-consent?scope=session-x',
       '/schema/agent-consent?scope=session-x',
     ]);
@@ -181,25 +169,23 @@ describe('projectConsentState', () => {
     ).toEqual({
       pending: { tool: 'generate' },
       approved: false,
-      taskId: null,
       requestId: 'request-a',
     });
   });
 
-  it('projects approval and bound task state', () => {
+  it('projects approval and ignores a task id an older server left in the state', () => {
     expect(
       projectConsentState({
         consent_approved: true,
         task_id: 'task-9',
       }),
-    ).toEqual({ pending: null, approved: true, taskId: 'task-9', requestId: null });
+    ).toEqual({ pending: null, approved: true, requestId: null });
   });
 
   it('projects an empty state as no consent interaction', () => {
     expect(projectConsentState({})).toEqual({
       pending: null,
       approved: false,
-      taskId: null,
       requestId: null,
     });
   });
@@ -208,7 +194,6 @@ describe('projectConsentState', () => {
     expect(projectConsentState(null)).toEqual({
       pending: null,
       approved: false,
-      taskId: null,
       requestId: null,
     });
   });
@@ -260,7 +245,7 @@ describe('consentDecision / consentAwaitingDecision', () => {
 it('reads effective parameter sources separately from overrides and writes only explicit null/value patches', async () => {
   const payload = { params: { quality: 'detailed' }, parameter_states: { quality: { value: 'detailed', source: 'agent', reason: 'Keep the requested surface detail' }, count: { value: 1, source: 'default' } } };
   const fetcher = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify(payload), { status: 200 }));
-  const client = createAgentHarnessClient({ routes: { params: '/params', consent: '/consent', bind: '/bind' }, fetcher });
+  const client = createAgentHarnessClient({ routes: { params: '/params', consent: '/consent' }, fetcher });
   const state = await client.getParamsWithState('session', undefined, 'offering');
   expect(state.params).toEqual({ quality: 'detailed' });
   expect(state.parameterStates.quality).toEqual(payload.parameter_states.quality);

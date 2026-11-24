@@ -13,7 +13,7 @@ export interface AssetListProgressChipProps {
   projectId?: string | null;
   /** Test seam; the real chip builds its client from the Schema. */
   client?: AssetListClient;
-  /** Test seam; polling defaults to 4s. */
+  /** Test seam; polling defaults to the Schema's task polling interval. */
   intervalMs?: number;
 }
 

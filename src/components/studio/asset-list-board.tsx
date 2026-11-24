@@ -20,6 +20,7 @@ import {
   boardFilterCount,
   boardItems,
   boardPollingActive,
+  boardProducing,
   boardSlotKey,
   boardSteps,
   boardTaskID,
@@ -41,6 +42,7 @@ import {
   type AssetListBoardItem,
   type AssetListClient,
 } from '@/lib/asset-lists/client';
+import { startPoller } from '@/lib/polling';
 import { formatSchemaText, schemaCountMessage, schemaText, type ProductSchema } from '@/lib/product-schema';
 import { cn } from '@/lib/utils';
 import { isEditableTarget } from '@/lib/workspace/stage-keys';
@@ -49,15 +51,12 @@ import { useInlineModelPreviewStore } from '@/store/inline-model-preview-store';
 import { useStudioStore, type AssetBoardTarget } from '@/store/studio-store';
 import { ModelViewer3D } from '@/components/viewer/model-viewer-3d';
 
-/** #329d: the board re-reads while the run produces; five seconds keeps the grid current. */
-const DEFAULT_POLL_INTERVAL_MS = 5000;
-
 export interface AssetListBoardProps {
   target: AssetBoardTarget;
   schema: ProductSchema;
   /** The client the stage built from the Schema, or a test double. */
   client?: AssetListClient;
-  /** Test seam; polling defaults to 5s. */
+  /** Test seam; polling defaults to the Schema's `runtime.frontend.task_polling_interval_milliseconds`. */
   pollIntervalMs?: number;
   /**
    * The element the dialog is portaled into. The board still covers the stage
@@ -70,10 +69,6 @@ export interface AssetListBoardProps {
 interface BoardActionError {
   title: string;
   details: string[];
-}
-
-function documentVisible(): boolean {
-  return typeof document === 'undefined' || document.visibilityState !== 'hidden';
 }
 
 function failureText(failure: unknown): string {
@@ -91,10 +86,12 @@ function failureText(failure: unknown): string {
  * A 3D item can be rotated in place through the global single viewer slot, so
  * only one cell turns at a time. Every cell is a button that opens the detail
  * drawer; there is no hover-only action. While the list is producing the board
- * polls, pausedly while the tab is hidden.
+ * polls on the page's poller (#385, #511): not in a hidden tab, not after the
+ * login ended, and more slowly while the board stays the same and nothing in it
+ * is being made.
  */
 export function AssetListBoard({
-  target, schema, client, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS, container,
+  target, schema, client, pollIntervalMs, container,
 }: AssetListBoardProps) {
   const source = useMemo(() => client ?? assetListClient(schema), [client, schema]);
   const close = useStudioStore((state) => state.closeAssetBoard);
@@ -116,10 +113,11 @@ export function AssetListBoard({
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState('');
   const [downloadTooLarge, setDownloadTooLarge] = useState(false);
-  const [visible, setVisible] = useState(documentVisible);
   // The latest read wins: a slow first answer must not replace a newer read
   // (or land after the board is gone).
   const requestSeq = useRef(0);
+  // What the board on screen was read as: a poll that finds the same board leaves it alone and lets the wait grow.
+  const boardSignature = useRef('');
   const closeButton = useRef<HTMLButtonElement>(null);
   // The board is opened by a button on a card, not by a DialogTrigger, so the
   // dialog takes the focus before it hides the page and remembers where to put
@@ -127,7 +125,8 @@ export function AssetListBoard({
   const returnTarget = useRef<HTMLElement | null>(null);
   const restoreFocus = useCallback(() => returnTarget.current ?? true, []);
 
-  const load = useCallback(async (silent = false) => {
+  /** Reads the board; resolves whether it changed. */
+  const load = useCallback(async (silent = false): Promise<boolean> => {
     const seq = requestSeq.current + 1;
     requestSeq.current = seq;
     if (!silent) {
@@ -137,15 +136,22 @@ export function AssetListBoard({
     setRefreshError('');
     try {
       const next = await source.getBoard(target.projectId, target.listId);
-      if (requestSeq.current === seq) setBoard(next);
+      if (requestSeq.current !== seq) return false;
+      const signature = JSON.stringify(next);
+      if (signature === boardSignature.current) return false;
+      boardSignature.current = signature;
+      setBoard(next);
+      return true;
     } catch (failure) {
-      if (requestSeq.current !== seq) return;
+      if (requestSeq.current !== seq) return false;
       const message = failureText(failure);
       if (silent) setRefreshError(message);
       else {
+        boardSignature.current = '';
         setBoard(null);
         setErrorDetail(message);
       }
+      return false;
     } finally {
       if (!silent && requestSeq.current === seq) setLoading(false);
     }
@@ -159,22 +165,31 @@ export function AssetListBoard({
     };
   }, [load]);
 
-  // Poll only while the workspace is visible; a hidden tab stops the interval
-  // and a visible one starts it again. The poll is silent: a transient read
-  // failure never blanks a board that is already on screen.
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const sync = () => setVisible(documentVisible());
-    sync();
-    document.addEventListener('visibilitychange', sync);
-    return () => document.removeEventListener('visibilitychange', sync);
-  }, []);
+  // #511: the poll runs on the page's poller (#385): it stands still in a
+  // hidden tab and after the login ended and reads once as either opens again.
+  // While the run produces or an item is being made it keeps the interval;
+  // otherwise (items waiting for review) a board that stays the same is read
+  // more slowly, up to the Schema's ceiling. The poll is silent: a transient
+  // read failure never blanks a board that is already on screen.
   const polling = boardPollingActive(board);
+  const producing = useRef(false);
+  producing.current = boardProducing(board);
+  const interval = pollIntervalMs ?? schema.runtime.frontend.task_polling_interval_milliseconds;
+  const idleFactor = schema.runtime.frontend.idle_polling.backoff_factor;
+  const idleCeiling = schema.runtime.frontend.idle_polling.max_interval_milliseconds;
   useEffect(() => {
-    if (!polling || !visible) return;
-    const timer = window.setInterval(() => { void load(true); }, pollIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [polling, visible, load, pollIntervalMs]);
+    if (!polling) return;
+    // The board on screen was just read: the poller's read at start is not sent.
+    let starting = true;
+    const poller = startPoller({
+      read: () => (starting ? Promise.resolve(true) : load(true)),
+      intervalMilliseconds: interval,
+      idle: { backoff_factor: idleFactor, max_interval_milliseconds: idleCeiling },
+      busy: () => producing.current,
+    });
+    starting = false;
+    return () => poller.stop();
+  }, [polling, load, interval, idleFactor, idleCeiling]);
 
   // Drop selected ids the newest read no longer contains.
   useEffect(() => {

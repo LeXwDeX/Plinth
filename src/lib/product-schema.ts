@@ -324,7 +324,6 @@ export interface ProductSchema {
         /** #332: DELETE (`{id}`) revokes one of the person's access keys. */
         account_access_key?: string;
         agent_params: string;
-        agent_bind: string;
         agent_consent: string;
       };
       legacy_routes: {

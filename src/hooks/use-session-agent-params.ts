@@ -18,7 +18,6 @@ function client(schema: ProductSchema) {
   return createAgentHarnessClient({
     routes: {
       params: schema.runtime.http.routes.agent_params,
-      bind: schema.runtime.http.routes.agent_bind,
       consent: schema.runtime.http.routes.agent_consent,
     },
   });

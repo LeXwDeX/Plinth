@@ -39,7 +39,7 @@ describe('Administration access keys frontend Schema boundary', () => {
 
   it('mounts the page on the administration route the Catalog navigates to', () => {
     expect(routerSource).toContain(
-      `'access-keys': lazy(() => import('@/app/admin/access-keys/page'))`,
+      `'access-keys': reloadableLazy(() => import('@/app/admin/access-keys/page'))`,
     );
     expect(layoutSource).toContain('KeyRound');
   });

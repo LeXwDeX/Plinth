@@ -7013,7 +7013,6 @@ type CoreHTTPRoutesSchema struct {
 	ModelFormatsComplete    string `json:"model_formats_complete,omitempty"`
 	ModelArchive            string `json:"model_archive,omitempty"`
 	AgentParams             string `json:"agent_params"`
-	AgentBind               string `json:"agent_bind"`
 	AgentConsent            string `json:"agent_consent"`
 	TaskCancel              string `json:"task_cancel"`
 	TaskRetry               string `json:"task_retry"`

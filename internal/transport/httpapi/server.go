@@ -687,7 +687,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+legacyRoutes.AuthPassword, s.changeOwnPassword)
 	s.mux.HandleFunc("GET "+routes.AgentParams, s.withIdentity(s.agentParamsGet))
 	s.mux.HandleFunc("PUT "+routes.AgentParams, s.withIdentity(s.agentParamsPut))
-	s.mux.HandleFunc("PUT "+routes.AgentBind, s.withIdentity(s.agentBindPut))
 	s.mux.HandleFunc("GET "+routes.AgentConsent, s.withIdentity(s.agentConsentGet))
 	s.mux.HandleFunc("PUT "+routes.AgentConsent, s.withIdentity(s.agentConsentPut))
 	s.mux.HandleFunc(

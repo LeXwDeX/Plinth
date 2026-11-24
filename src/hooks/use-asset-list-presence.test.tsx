@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import defaultCatalog from '../../internal/catalog/default_catalog.json';
 import type { ProductSchema } from '@/lib/product-schema';
+import { useConnectivityStore } from '@/store/connectivity-store';
 import {
   PRESENCE_TAB_STORAGE_KEY,
   useAssetListPresence,
@@ -32,6 +33,7 @@ function harness(overrides: Partial<UseAssetListPresenceOptions> = {}) {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  useConnectivityStore.setState({ sessionExpired: false });
   window.sessionStorage.clear();
   // jsdom has no sendBeacon; every test starts on the client's leave path.
   Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: undefined });
@@ -45,17 +47,49 @@ afterEach(() => {
 });
 
 describe('use-asset-list-presence (#328)', () => {
-  it('posts present immediately and again on every heartbeat', () => {
+  it('posts present immediately and again on every heartbeat', async () => {
     const { presence, options } = harness();
     renderHook(() => useAssetListPresence(options));
     expect(presence).toHaveBeenCalledTimes(1);
     expect(presence).toHaveBeenCalledWith('prj_1', 'tab-1', 'present');
 
-    act(() => { vi.advanceTimersByTime(4999); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4999); });
     expect(presence).toHaveBeenCalledTimes(1);
-    act(() => { vi.advanceTimersByTime(1); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(presence).toHaveBeenCalledTimes(2);
     expect(presence).toHaveBeenLastCalledWith('prj_1', 'tab-1', 'present');
+  });
+
+  // #511 (#385): presence is a repeating write, so it obeys the page's polling rules: a hidden tab keeps its
+  // heartbeat (the server's grace covers a throttled tab), an ended login stops it and sends no 401-bound leave.
+  it('keeps heartbeating in a hidden tab', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const { presence, options } = harness();
+    renderHook(() => useAssetListPresence(options));
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(presence).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops once the login has ended and heartbeats again after signing in', async () => {
+    const { presence, options } = harness();
+    const { unmount } = renderHook(() => useAssetListPresence(options));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(presence).toHaveBeenCalledTimes(1);
+
+    act(() => { useConnectivityStore.setState({ sessionExpired: true }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(presence).toHaveBeenCalledTimes(1);
+
+    act(() => { useConnectivityStore.setState({ sessionExpired: false }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(presence).toHaveBeenCalledTimes(2);
+    expect(presence).toHaveBeenLastCalledWith('prj_1', 'tab-1', 'present');
+
+    act(() => { useConnectivityStore.setState({ sessionExpired: true }); });
+    presence.mockClear();
+    unmount();
+    expect(presence).not.toHaveBeenCalled();
   });
 
   it('sends nothing while disabled or without a project', () => {
@@ -128,7 +162,7 @@ describe('use-asset-list-presence (#328)', () => {
     expect(presence).toHaveBeenCalledTimes(1);
     expect(error).not.toHaveBeenCalled();
 
-    act(() => { vi.advanceTimersByTime(5000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(presence).toHaveBeenCalledTimes(2);
     await act(async () => { await Promise.resolve(); });
     expect(error).not.toHaveBeenCalled();

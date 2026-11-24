@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { AlertTriangle, Box, ChevronLeft, ChevronRight, Copy, Download, Loader2, Maximize2, RotateCw, Share2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { ResultAttachments } from './result-attachments';
 import { TaskRecoveryPanel } from './task-recovery-panel';
 import { TaskRefetchPanel } from './task-refetch-panel';
+import { reloadableLazy } from '@/components/common/reloadable-lazy';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { Action } from '@/components/ui/button';
 import { HintTooltip } from '@/components/ui/hint-tooltip';
@@ -39,7 +40,8 @@ import { canCreateGaussianSplat, gaussianSplatAvailableCount, gaussianSplatTool 
 
 type PreviewKind = 'image' | 'video' | 'model' | 'splat' | 'none';
 
-const GaussianSplatViewer = lazy(() => import('@/components/viewer/gaussian-splat-viewer').then((module) => ({ default: module.GaussianSplatViewer })));
+// #511: a refused code import is forgotten, so a later render loads it again.
+const GaussianSplatViewer = reloadableLazy(() => import('@/components/viewer/gaussian-splat-viewer').then((module) => ({ default: module.GaussianSplatViewer })));
 
 export function previewKindOf(target: Pick<ResultTarget, 'kind' | 'mediaType' | 'url'>): PreviewKind {
   if (!target.url) return 'none';

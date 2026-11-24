@@ -1,10 +1,11 @@
 'use client';
 
 import { safeAssetURL } from '@/lib/core/tasks/asset-url-rewriter';
-import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
+import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { X } from 'lucide-react';
 
 import { RegionErrorBoundary } from '@/components/common/region-error-boundary';
+import { reloadableLazy } from '@/components/common/reloadable-lazy';
 import { useProductSchema } from '@/components/product-schema-provider';
 import { AllOutputs } from '@/components/studio/all-outputs';
 import { AssetListBoard } from '@/components/studio/asset-list-board';
@@ -26,7 +27,8 @@ import { useChatStore } from '@/store/chat-store';
 import { useStudioStore } from '@/store/studio-store';
 import { useWorkspaceStore } from '@/store/workspace-store';
 
-const WorkspaceCanvasBoard = lazy(() => import('@/components/workspace/workspace-canvas-board').then((module) => ({ default: module.WorkspaceCanvasBoard })));
+// #511: a refused code import is forgotten, so the region's reload loads it again.
+const WorkspaceCanvasBoard = reloadableLazy(() => import('@/components/workspace/workspace-canvas-board').then((module) => ({ default: module.WorkspaceCanvasBoard })));
 
 /**
  * 中间的舞台：显示当前对象，按它的种类选 2D 画板还是 3D 查看器，没有任何版本时

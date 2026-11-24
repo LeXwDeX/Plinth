@@ -206,9 +206,6 @@ func validateRuntime(schema RuntimeSchema) error {
 	if httpRuntime.Routes.AgentParams == "" {
 		httpRuntime.Routes.AgentParams = "/api/v1/agent/params"
 	}
-	if httpRuntime.Routes.AgentBind == "" {
-		httpRuntime.Routes.AgentBind = "/api/v1/agent/bind"
-	}
 	if httpRuntime.Routes.AgentConsent == "" {
 		httpRuntime.Routes.AgentConsent = "/api/v1/agent/consent"
 	}
