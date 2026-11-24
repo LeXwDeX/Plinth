@@ -108,16 +108,11 @@ var knownPriceDifferences = map[string]string{
 }
 
 // knownRefusals are the Offerings whose default wire body the fake refuses, with
-// the reason. The Smart Topology image-to-3d Offering declares pose_mode with an
-// empty default and no omit_when, so the Adapter sends "pose_mode": "". The
-// Text to 3D page says to leave pose_mode out for no pose and the fake has
-// refused "" since #460 B24, yet the real text-to-3d create of 2026-11-20 sent
-// "pose_mode": "" and was accepted (202). Which of the two is right for the
-// other endpoints is not settled here: the Catalog finding is recorded in #542
-// and the fake rule is left as it was.
-var knownRefusals = map[string]string{
-	"meshy/meshy-t2.5/image-to-3d": "empty pose_mode in the default body",
-}
+// the reason. It is empty: the Smart Topology image-to-3d Offering used to send
+// "pose_mode": "" (empty default, no omit_when), which the fake has refused since
+// #460 B24; #539 gave it omit_when pose_mode == "", so the default body leaves
+// pose_mode out like the Text to 3D page says.
+var knownRefusals = map[string]string{}
 
 func credits(body map[string]any) float64 {
 	value, _ := body["consumed_credits"].(float64)
