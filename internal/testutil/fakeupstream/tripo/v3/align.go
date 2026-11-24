@@ -134,13 +134,103 @@ func drawView(view string) []byte {
 	return out.Bytes()
 }
 
+// Probe is one free negative probe of the alignment script (#577): a request the
+// official API is expected to refuse before it creates anything, and the answer the
+// fake gives it today. The fake's codes follow the error-handling page; its message
+// texts are constructed (generation.go, processing.go, convert.go, fake.go), and the
+// official run of these steps supplies the real ones, which are then written back
+// into the fake and into Want.
+type Probe struct {
+	Step align.Step
+	// WantStatus, WantCode and WantMessage are the fake's answer: the HTTP status,
+	// the envelope's code and its message ("" when the envelope is the captured
+	// 401 one, whose text is the sample's).
+	WantStatus  int
+	WantCode    int
+	WantMessage string
+	// Risk says what the official API would bill if it accepted the request after
+	// all, "" when acceptance costs nothing either.
+	Risk string
+}
+
+// probeText is the prompt of the generation probes: short and plain, so an
+// unexpected acceptance builds the cheapest model.
+const probeText = "a plain grey cube"
+
+// probeWrongKey is the dummy key of the wrong-key probe: unknown to the official API,
+// and the fake's invalid-key scenario word.
+const probeWrongKey = "fake-invalid-key"
+
+// Probes are the free negative probes, each OptIn (a routine refresh does not send
+// them; -steps names them). Those whose input is a file token run after the free
+// "upload" step, which captures file_token:
+//
+//	-steps upload,probe-upload-empty,probe-upload-text,probe-model-invalid,probe-model-retired,probe-generate-parts-texture-omitted,probe-fast-texture-v25,probe-seg-type-invalid,probe-convert-format-glb,probe-create-no-auth,probe-wrong-key,probe-input-task-not-found
+//
+// None is Paid: each is refused by the documented rule it probes. Risk names what a
+// request would cost if the official API accepted it instead.
+func Probes() []Probe {
+	optIn := func(step align.Step) align.Step { step.OptIn = true; return step }
+	text := func(extra map[string]any) map[string]any {
+		body := map[string]any{"model": "v3.1-20260211", "prompt": probeText, "texture": false, "pbr": false, "face_limit": 1000}
+		for name, value := range extra {
+			if value == nil {
+				delete(body, name)
+				continue
+			}
+			body[name] = value
+		}
+		return body
+	}
+	return []Probe{
+		{Step: optIn(align.Step{Name: "probe-upload-empty", Method: "POST", Path: "/files",
+			Multipart: &align.File{Field: "file", Filename: "empty.png", MediaType: "image/png", Data: []byte{}}}),
+			WantStatus: 400, WantCode: 2003, WantMessage: "The image file is empty"},
+		{Step: optIn(align.Step{Name: "probe-upload-text", Method: "POST", Path: "/files",
+			Multipart: &align.File{Field: "file", Filename: "notes.txt", MediaType: "text/plain", Data: []byte("not a picture or a model\n")}}),
+			WantStatus: 400, WantCode: 2004, WantMessage: "This image file type is not supported"},
+		{Step: optIn(align.Step{Name: "probe-model-invalid", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"model": "v9.9-20990101"})}),
+			WantStatus: 400, WantCode: 1004,
+			WantMessage: "model must be one of v3.1-20260211, v3.0-20250812, v2.5-20250123, P2-20260801, P1-20260311"},
+		{Step: optIn(align.Step{Name: "probe-model-retired", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"model": "v2.0-20240919"})}),
+			WantStatus: 400, WantCode: 2015, WantMessage: "The version has been deprecated, please try higher version",
+			Risk: "a geometry-only text model of a retired version, about 10 credits, if the name is still served"},
+		{Step: optIn(align.Step{Name: "probe-generate-parts-texture-omitted", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"generate_parts": true, "texture": nil})}),
+			WantStatus: 400, WantCode: 1004, WantMessage: "generate_parts requires texture=false and pbr=false",
+			Risk: "a textured text model with parts, about 40 credits (10 + texture 10 + parts 20), if an omitted texture is not taken as true"},
+		{Step: optIn(align.Step{Name: "probe-fast-texture-v25", Method: "POST", Path: "/generation/text-to-model",
+			Body: text(map[string]any{"texture": true, "texture_quality": "fast", "texture_version": "v2.5-20250123"})}),
+			WantStatus: 400, WantCode: 1004, WantMessage: "texture_quality fast requires texture_version v3.5-20260815",
+			Risk: "a fast-textured text model, about 20 credits, if fast is served with the v2.5 texture"},
+		{Step: optIn(align.Step{Name: "probe-seg-type-invalid", Method: "POST", Path: "/mesh/smartsegment", RequireVar: "file_token",
+			Body: map[string]any{"input": "{file_token}", "seg_type": "mesh", "granularity": "coarse"}}),
+			WantStatus: 400, WantCode: 1004, WantMessage: "seg_type must be image or model",
+			Risk: "a Smart Segmentation of the uploaded picture, 85 credits, if an unknown seg_type falls back to image"},
+		{Step: optIn(align.Step{Name: "probe-convert-format-glb", Method: "POST", Path: "/models/convert", RequireVar: "file_token",
+			Body: map[string]any{"input": "{file_token}", "format": "GLB"}}),
+			WantStatus: 400, WantCode: 1004, WantMessage: "format must be one of [GLTF FBX USDZ OBJ STL 3MF]",
+			Risk: "a conversion, 5 credits, if GLB were a target (its input is a picture, so the task would fail and a failed task is not billed)"},
+		{Step: optIn(align.Step{Name: "probe-create-no-auth", Method: "POST", Path: "/generation/text-to-model", NoAuth: true,
+			Body: text(nil)}),
+			WantStatus: 401},
+		{Step: optIn(align.Step{Name: "probe-wrong-key", Method: "GET", Path: "/account/balance", WrongKey: probeWrongKey}),
+			WantStatus: 401},
+		{Step: optIn(align.Step{Name: "probe-input-task-not-found", Method: "POST", Path: "/animations/rig-check",
+			Body: map[string]any{"input": "00000000-0000-4000-8000-000000000000"}}),
+			WantStatus: 404, WantCode: 2001, WantMessage: "The task is not found"},
+	}
+}
+
 // Profile is the alignment script of the Tripo v3 fake. Every paid request,
 // except the two of the multiview run at the end (#386), is the cheapest option
 // of its endpoint and is sent once. The chain mirrors what Plinth drives:
 // generation, rig check, rigging, animation, segmentation, a model export and
 // part completion.
 func Profile() align.Profile {
-	return align.Profile{
+	profile := align.Profile{
 		Provider: "tripo", API: "v3", Official: OfficialBase,
 		Steps: []align.Step{
 			{Name: "balance", Method: "GET", Path: "/account/balance"},
@@ -362,6 +452,10 @@ func Profile() align.Profile {
 		},
 		Notes: smartSegmentFailureNotes(),
 	}
+	for _, probe := range Probes() {
+		profile.Steps = append(profile.Steps, probe.Step)
+	}
+	return profile
 }
 
 // smartSegmentFailureNotes explains the differences of the one official request
