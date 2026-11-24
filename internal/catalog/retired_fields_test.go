@@ -132,3 +132,45 @@ func TestCatalogWithRetiredToolCallLimitStillLoads(t *testing.T) {
 		t.Fatalf("an unknown key is not refused: %v", err)
 	}
 }
+
+// #490, #511: a custom CATALOG_FILE of 1.8 declared a consent mode on every
+// tool's execution and an agent_bind route; neither is read any more, so the
+// document still loads, in the generation tools, the agent tools and the MCP
+// presets alike.
+func TestCatalogWithRetiredConsentAndAgentBindStillLoads(t *testing.T) {
+	source, err := os.ReadFile("default_catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(source, &document); err != nil {
+		t.Fatal(err)
+	}
+	application := document["application"].(map[string]any)
+	addConsent := func(tools any) int {
+		count := 0
+		for _, tool := range tools.([]any) {
+			execution := tool.(map[string]any)["execution"].(map[string]any)
+			execution["consent"] = "required"
+			count++
+		}
+		return count
+	}
+	chat := application["chat"].(map[string]any)
+	touched := addConsent(chat["tools"]) + addConsent(chat["agent_tools"])
+	for _, preset := range application["agent_configuration"].(map[string]any)["mcp_presets"].([]any) {
+		touched += addConsent(preset.(map[string]any)["tools"])
+	}
+	if touched == 0 {
+		t.Fatal("no tool in the default Catalog to carry a consent mode")
+	}
+	routes := application["runtime"].(map[string]any)["http"].(map[string]any)["routes"].(map[string]any)
+	routes["agent_bind"] = "/api/v1/chat/sessions/{session_id}/agent/bind"
+	legacy, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.Load(bytes.NewReader(legacy)); err != nil {
+		t.Fatalf("a Catalog with the retired consent and agent_bind keys is refused: %v", err)
+	}
+}

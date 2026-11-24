@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, progressPercent } from '@/lib/workspace/task-progress';
+import {
+  chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, nextSessionTaskBatches, progressPercent,
+} from '@/lib/workspace/task-progress';
 import type { TrackedTask } from '@/store/workspace-store';
 
 function task(patch: Partial<TrackedTask> = {}): TrackedTask {
@@ -68,5 +70,26 @@ describe('elapsedClockNeeded', () => {
     // The failure notices show no elapsed time: a running task elsewhere must not re-render them every second.
     expect(elapsedClockNeeded('failed', running)).toBe(false);
     expect(elapsedClockNeeded('running', { running: [], failed: [task({ terminal: true })] })).toBe(false);
+  });
+});
+
+describe('nextSessionTaskBatches (#565)', () => {
+  it('grows and empties each session batch on its own', () => {
+    const empty = new Map<string, ReadonlySet<string>>();
+    let batches = nextSessionTaskBatches(empty, [task({ taskId: 'a' }), task({ taskId: 'b' }), task({ taskId: 'c', sessionId: 's2' })]);
+    expect([...(batches.get('s1') ?? [])]).toEqual(['a', 'b']);
+    expect([...(batches.get('s2') ?? [])]).toEqual(['c']);
+    // a ends: s1 keeps it in its batch while b runs; s2 is untouched.
+    const same = nextSessionTaskBatches(batches, [task({ taskId: 'a', terminal: true }), task({ taskId: 'b' }), task({ taskId: 'c', sessionId: 's2' })]);
+    expect(same).toBe(batches);
+    // Everything in s2 ends: only s2 starts over.
+    batches = nextSessionTaskBatches(batches, [task({ taskId: 'b' }), task({ taskId: 'c', sessionId: 's2', terminal: true })]);
+    expect([...(batches.get('s1') ?? [])]).toEqual(['a', 'b']);
+    expect(batches.has('s2')).toBe(false);
+  });
+
+  it('ignores a task with no session', () => {
+    const batches = nextSessionTaskBatches(new Map(), [task({ taskId: 'x', sessionId: undefined })]);
+    expect(batches.size).toBe(0);
   });
 });

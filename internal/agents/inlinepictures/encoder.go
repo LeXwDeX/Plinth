@@ -11,6 +11,27 @@
 // picture that cannot be decoded, or is larger than the declared pixel bound,
 // is kept as it is. A picture is never resized.
 //
+// JPEG is declared to make the request smaller (#555), not because the model
+// or the gateway refuses other formats. So an opaque PNG or WebP, labelled as
+// such, whose JPEG would not be smaller (a flat-colour drawing, say) is kept
+// byte for byte (#565). A transparent picture is still composited and
+// encoded even then: kept, its transparent pixels would reach the model as
+// whatever the model's own decoder makes of them. GIF is not kept, because an
+// animated one may be refused and only its first frame is encoded; BMP and
+// other formats are always encoded.
+//
+// The background colour only decides what the chat model sees behind a
+// transparent picture; it does not touch the pictures a 3D or image task
+// receives (those follow their own alpha_flatten declaration, #271). A white
+// subject on a transparent ground becomes hard to make out over white: the
+// Schema may declare another colour, the code keeps whatever is declared.
+//
+// No concurrency gate bounds the decoding (#565): pictures are encoded on a
+// chat turn's own goroutine, one at a time, so the work in flight is bounded
+// by the turns running at once; each picture is bounded by the pixel limit
+// (at most a few copies of maximum_pixels × 4 bytes) and its result is cached,
+// so the next rounds of the same turn decode nothing.
+//
 // 请求体大小调查记录（#555，2026-11-24；依据是内部 LLMS 网关的访问日志与代理
 // 日志，未做网关侧配置核对）：
 //   - 现象：gpt-astra（Responses 接口）在工具调用之后的续跑轮连续返回 502 Bad
@@ -271,13 +292,36 @@ func (encoder *Encoder) transcode(url string) string {
 	if err != nil {
 		return url
 	}
+	keepable := orientation == 1 && readable(url[:comma], format) && opaque(decoded)
 	picture := imagefit.Flatten(decoded, encoder.policy.Background)
 	picture = orient(picture, orientation)
 	var encoded bytes.Buffer
 	if err := jpeg.Encode(&encoded, picture, &jpeg.Options{Quality: encoder.policy.Quality}); err != nil {
 		return url
 	}
+	if keepable && encoded.Len() >= len(data) {
+		// The JPEG would only make the request larger (#565).
+		return url
+	}
 	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(encoded.Bytes())
+}
+
+// readable reports whether a picture may reach the model as it is: a PNG or
+// WebP whose data URI says so. The model reads the declared media type.
+func readable(header, format string) bool {
+	switch format {
+	case "png", "webp":
+		mediaType, _, _ := strings.Cut(strings.TrimPrefix(strings.ToLower(header), "data:"), ";")
+		return mediaType == "image/"+format
+	}
+	return false
+}
+
+// opaque reports whether no pixel is see-through. Every decoder registered
+// here returns an image that answers it; any other counts as transparent.
+func opaque(picture image.Image) bool {
+	checker, ok := picture.(interface{ Opaque() bool })
+	return ok && checker.Opaque()
 }
 
 // orient applies an EXIF orientation (1–8) to an upright copy.

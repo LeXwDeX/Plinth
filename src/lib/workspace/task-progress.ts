@@ -84,6 +84,31 @@ export function nextTaskBatch(previous: ReadonlySet<string>, running: readonly P
   return next;
 }
 
+/**
+ * #565: one batch per session, each grown and emptied by `nextTaskBatch` from that session's running tasks only, so
+ * switching between two sessions that both run tasks neither counts nor lists the other session's tasks. A task with
+ * no session belongs to no batch. Returns `previous` itself when no session's batch changed.
+ */
+export function nextSessionTaskBatches(
+  previous: ReadonlyMap<string, ReadonlySet<string>>,
+  tasks: readonly Pick<TrackedTask, 'taskId' | 'sessionId' | 'terminal' | 'notFound'>[],
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const running = new Map<string, Pick<TrackedTask, 'taskId'>[]>();
+  for (const task of tasks) {
+    if (!task.sessionId || !isRunning(task)) continue;
+    running.set(task.sessionId, [...(running.get(task.sessionId) ?? []), task]);
+  }
+  let changed = false;
+  const next = new Map<string, ReadonlySet<string>>();
+  for (const sessionId of new Set([...previous.keys(), ...running.keys()])) {
+    const before = previous.get(sessionId) ?? new Set<string>();
+    const after = nextTaskBatch(before, running.get(sessionId) ?? []);
+    if (after !== before || !previous.has(sessionId)) changed = true;
+    if (after.size > 0) next.set(sessionId, after);
+  }
+  return changed ? next : previous;
+}
+
 export interface TaskBatchProgress {
   /** Tasks of the batch that are no longer running (finished, failed or gone). */
   done: number;
