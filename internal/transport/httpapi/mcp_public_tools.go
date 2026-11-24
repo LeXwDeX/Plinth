@@ -11,6 +11,7 @@ import (
 	"github.com/LeXwDeX/Plinth/internal/accesskeys"
 	"github.com/LeXwDeX/Plinth/internal/adapters/mcphttp"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 	"github.com/LeXwDeX/Plinth/internal/mcppublic"
 	"github.com/LeXwDeX/Plinth/internal/routing"
@@ -439,7 +440,7 @@ type mcpTaskView struct {
 
 // mcpTaskView projects a Task the way the web API does: the public state and
 // its label come from the Schema's task states, the failure is the platform's
-// own attribution (generation.ClassifyFailure) with the Schema's advice, and no
+// own attribution (generationtool.TaskFailureReport) with the Schema's advice, and no
 // internal detail, upstream text or storage key is shown.
 func (s *Server) mcpTaskView(locale string, task generation.Task) (mcpTaskView, *mcppublic.Failure) {
 	presentation := catalog.TaskStatePresentation{
@@ -481,7 +482,8 @@ func (s *Server) mcpTaskView(locale string, task generation.Task) (mcpTaskView, 
 	}
 	var attribution *mcppublic.Failure
 	if task.Failure != nil {
-		report := generation.ClassifyFailure(task.Failure.Class, task.Failure.Retryable, task.Failure.Ambiguous)
+		// #517: the platform's one attribution, metered override included.
+		report, _ := generationtool.TaskFailureReport(s.application.Chat, task)
 		advice := s.application.Chat.Processing.Failures.Advice[string(report.Category)]
 		if advice == "" {
 			advice = s.application.Chat.Processing.Failures.Actions[string(report.Action)]
