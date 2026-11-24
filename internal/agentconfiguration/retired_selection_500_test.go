@@ -81,7 +81,9 @@ func TestStoredConfigurationWithRetiredSelectionsStaysReadable(t *testing.T) {
 		if slices.Contains(c.EnabledMCPPresetIDs, retiredPresetID) {
 			t.Fatalf("%s still enables retired preset: %v", label, c.EnabledMCPPresetIDs)
 		}
-		if !slices.Equal(c.EnabledToolNames, base.Configuration.EnabledToolNames) {
+		// Only an effective configuration lists every tool; a stored format 2
+		// version keeps a mirror and the turned-off list (checked below).
+		if c.Format == 0 && !slices.Equal(c.EnabledToolNames, base.Configuration.EnabledToolNames) {
 			t.Fatalf("%s dropped more than the retired tools: %v", label, c.EnabledToolNames)
 		}
 	}
@@ -115,6 +117,16 @@ func TestStoredConfigurationWithRetiredSelectionsStaysReadable(t *testing.T) {
 		t.Fatal("startup reconcile did not publish a cleaned version")
 	}
 	assertClean("reconciled version", reconciled.Configuration)
+	// The cleaned version is stored in the current form (#525) and turns
+	// nothing off: it reads back as the same tools the stored one resolved to.
+	if reconciled.Configuration.Format != agentconfiguration.ConfigurationFormat || len(reconciled.Configuration.DisabledToolNames) != 0 {
+		t.Fatalf("reconciled version is not format 2 with no tool turned off: %#v", reconciled.Configuration)
+	}
+	afterReconcile, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertClean("Snapshot after reconcile", afterReconcile.Configuration)
 	original, err := repo.AgentConfigurationVersion(ctx, stored.Revision)
 	if err != nil {
 		t.Fatal(err)

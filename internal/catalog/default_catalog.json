@@ -1,7 +1,7 @@
 {
   "version": 1,
   "application": {
-    "revision": "2026-11-24.521.1",
+    "revision": "2026-11-24.19.1",
     "terminology": {
       "user_facing": [
         {
@@ -17139,6 +17139,9 @@
         "mcp_unavailable": "当前接线不可执行",
         "mcp_tools": "MCP 工具",
         "mcp_default_off": "默认不启用（与内置工具重复）",
+        "prompt_following": "提示词未自定义，随版本升级自动更新",
+        "prompt_customized": "提示词已自定义，不随版本升级更新",
+        "follow_default": "恢复跟随默认",
         "configuration_source": "配置来源",
         "image_to_image_template": "图生图模板（保留 {user_input} 与 {skill_prompt}）",
         "invalid_configuration": "配置文档无效",
@@ -20973,6 +20976,9 @@
             "agent_configuration.ui.mcp_unavailable": "The current wiring cannot be executed",
             "agent_configuration.ui.mcp_tools": "MCP tools",
             "agent_configuration.ui.mcp_default_off": "Off by default (repeats built-in tools)",
+            "agent_configuration.ui.prompt_following": "Prompts are not customized and update automatically with new versions",
+            "agent_configuration.ui.prompt_customized": "Prompts are customized and do not change with new versions",
+            "agent_configuration.ui.follow_default": "Restore default (follow updates)",
             "agent_configuration.ui.configuration_source": "Configuration source",
             "agent_configuration.ui.image_to_image_template": "Image-to-image template (keep {user_input} and {skill_prompt})",
             "agent_configuration.ui.invalid_configuration": "Invalid configuration document",
