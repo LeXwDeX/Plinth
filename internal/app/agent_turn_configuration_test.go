@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/adapters/sqlite/sqlitetest"
 	"github.com/LeXwDeX/Plinth/internal/agentconfiguration"
@@ -158,4 +159,63 @@ func TestAgentTurnConfigurationOffersAssetListToolsOnlyWithExecution(t *testing.
 			t.Fatal("the gate removed an unrelated Agent tool")
 		}
 	}
+}
+
+// #500: a configuration published before #491 still enables observe_task and
+// request_consent. A turn must still start, and its tool table must not offer
+// the two names the Catalog no longer declares.
+func TestAgentTurnConfigurationSkipsToolsTheCatalogRetired(t *testing.T) {
+	ctx := context.Background()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := sqlitetest.Open(filepath.Join(t.TempDir(), "agent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	skills, err := catalog.LoadDefaultSkillCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := agentconfiguration.New(repository, product.Application(), skills, product.List(""), agentconfiguration.WithRetiredBuiltInSkills())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpService, err := buildWorkspaceMCP(product, &generation.Module{}, &chat.Service{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := service.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := base.Configuration
+	legacy.EnabledToolNames = append(append([]string{}, legacy.EnabledToolNames...), "observe_task", "request_consent")
+	if _, err := repository.AppendAgentConfiguration(ctx, base.Revision, agentconfiguration.Version{Snapshot: agentconfiguration.Snapshot{Configuration: legacy}, CreatedAt: time.Now().UTC(), ActorID: "admin", Source: "publish"}); err != nil {
+		t.Fatal(err)
+	}
+	check := func(label string) {
+		t.Helper()
+		frozen, err := agentTurnConfiguration(ctx, "owner-a", service, product.Application(), mcpService)
+		if err != nil {
+			t.Fatalf("%s: turn configuration failed: %v", label, err)
+		}
+		names := map[string]bool{}
+		for _, tool := range frozen.AgentTools {
+			names[tool.Name] = true
+		}
+		if names["observe_task"] || names["request_consent"] {
+			t.Fatalf("%s: tool table offers a retired tool: %v", label, names)
+		}
+		if !names["get_task"] {
+			t.Fatalf("%s: tool table lost a declared tool: %v", label, names)
+		}
+	}
+	check("stored version")
+	if err := service.ReconcileRetiredBuiltInSkills(ctx); err != nil {
+		t.Fatalf("startup reconcile: %v", err)
+	}
+	check("reconciled version")
 }

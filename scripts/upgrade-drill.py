@@ -7,6 +7,11 @@ image against a *copy* of a database that already holds data, inside a one-shot
 directory: start the container, let it apply every migration, check health, then
 read the migrated database back without writing to it.
 
+Before the start it publishes, in the copy only, one Agent configuration version
+that still enables tools the Catalog has retired (#500), the shape any
+deployment that published a configuration before #491 holds. The candidate must
+start over it and its startup reconcile must publish a version without them.
+
 It never writes to the source and never talks to a running instance. By default
 it refuses to read a path that belongs to an environment (a release root from the
 environments file, or a database that still has -wal/-shm sidecars); pointing it
@@ -21,6 +26,7 @@ Exit codes: 0 the drill passed, 1 it ran and a check failed, 2 usage, guard or
 environment error (nothing was started).
 """
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -58,6 +64,10 @@ SMOKE_TABLES = (
     "asset_lists",
     "asset_list_items",
 )
+# Agent tools the Catalog removed (#491). A configuration published before then
+# still enables them; the candidate must read it rather than fail to start (#500).
+RETIRED_AGENT_TOOLS = ("observe_task", "request_consent")
+DRILL_ACTOR = "upgrade-drill"
 
 
 class DrillError(Exception):
@@ -112,6 +122,78 @@ def copy_database(source, data_dir):
             shutil.copyfile(sidecar, target.with_name(target.name + suffix))
             notes.append("同时复制了 %s" % sidecar.name)
     return target, notes
+
+
+def seed_legacy_agent_configuration(db_path):
+    """Publish, in the drill copy, a version enabling the retired Agent tools.
+
+    It extends the copy's latest version (or a minimal one when nothing was
+    published) the way the service appends one. Returns the seeded revision, or
+    None and why it could not be seeded.
+    """
+    try:
+        connection = sqlite3.connect(str(db_path))
+    except sqlite3.Error as error:
+        raise DrillError("演练副本打不开，无法注入旧 Agent 配置（%s）：%s" % (db_path, error))
+    try:
+        present = connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+            ("agent_configuration_versions",)).fetchone()[0]
+        if not present:
+            return None, "副本没有 agent_configuration_versions 表（早于 0041），无法注入"
+        row = connection.execute(
+            "SELECT revision, configuration_json FROM agent_configuration_versions"
+            " ORDER BY revision DESC LIMIT 1").fetchone()
+        if row:
+            revision, configuration = row[0], json.loads(row[1])
+        else:
+            revision, configuration = 0, {
+                "system_prompt": "升级演练（#500）", "domain_context": {}, "skills": [],
+                "enabled_tool_names": [], "enabled_mcp_preset_ids": []}
+        names = list(configuration.get("enabled_tool_names") or [])
+        names += [name for name in RETIRED_AGENT_TOOLS if name not in names]
+        configuration["enabled_tool_names"] = names
+        created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        connection.execute(
+            "INSERT INTO agent_configuration_versions"
+            "(revision, configuration_json, actor_id, source, created_at) VALUES (?, ?, ?, ?, ?)",
+            (revision + 1, json.dumps(configuration, ensure_ascii=False), DRILL_ACTOR, "publish", created))
+        connection.commit()
+    except (sqlite3.Error, ValueError) as error:
+        raise DrillError("向演练副本注入旧 Agent 配置失败：%s" % error)
+    finally:
+        connection.close()
+    return revision + 1, "基于 revision %d 注入 revision %d，启用 %s" % (
+        revision, revision + 1, "、".join(RETIRED_AGENT_TOOLS))
+
+
+def check_legacy_agent_configuration(db_path, seeded):
+    """After startup the seeded version is intact and a newer one drops the
+    retired tools. Read-only; returns (name, ok, detail) entries."""
+    connection = connect_readonly(db_path)
+    try:
+        row = connection.execute(
+            "SELECT configuration_json FROM agent_configuration_versions WHERE revision = ?",
+            (seeded,)).fetchone()
+        kept = bool(row) and all(name in json.loads(row[0]).get("enabled_tool_names", [])
+                                 for name in RETIRED_AGENT_TOOLS)
+        latest = connection.execute(
+            "SELECT revision, configuration_json, source FROM agent_configuration_versions"
+            " ORDER BY revision DESC LIMIT 1").fetchone()
+    finally:
+        connection.close()
+    results = [("旧 Agent 配置保留", kept,
+                "revision %d 原样保留" % seeded if kept else "revision %d 缺失或被改写" % seeded)]
+    if not latest or latest[0] <= seeded:
+        results.append(("旧 Agent 配置可读", False, "启动后没有发布清理版本（最新 revision %s）"
+                        % (latest[0] if latest else "无")))
+        return results
+    left = [name for name in RETIRED_AGENT_TOOLS
+            if name in json.loads(latest[1]).get("enabled_tool_names", [])]
+    results.append(("旧 Agent 配置可读", not left,
+                    "启动对账发布 revision %d（%s），不含已退役工具" % (latest[0], latest[2])
+                    if not left else "revision %d 仍启用 %s" % (latest[0], "、".join(left))))
+    return results
 
 
 def connect_readonly(path):
@@ -296,6 +378,8 @@ def drill(args):
                 os.chown(workdir / name, 100, 101)
             os.chown(workdir, 100, 101)
         target, notes = copy_database(source, workdir / "data")
+        seeded, seed_detail = seed_legacy_agent_configuration(target)
+        notes.append("旧 Agent 配置：%s" % seed_detail)
         before = read_state(target)
         port = args.port or free_port()
         started = time.time()
@@ -310,7 +394,11 @@ def drill(args):
             checks.append(("/healthz", health, "200" if health else "无响应"))
             try:
                 checks += smoke_readonly(target)
-            except sqlite3.Error as error:
+                if seeded is None:
+                    checks.append(("旧 Agent 配置可读", False, seed_detail))
+                else:
+                    checks += check_legacy_agent_configuration(target, seeded)
+            except (sqlite3.Error, ValueError) as error:
                 checks.append(("只读冒烟", False, "读回失败：%s" % error))
         else:
             checks.append(("容器启动", False, "在 %.0fs 内没有就绪" % args.timeout))
