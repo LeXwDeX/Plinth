@@ -68,6 +68,7 @@ fake 上游（`internal/testutil/fakeupstream` 与 fake 栈）模拟各 Provider
 - **脚本默认 fake**：开发过程中涉及上游的脚本（测试、冒烟、对齐、采集、回放等）默认连接 fake，不需要任何参数；连接真实上游必须显式打开开关（如 `--live` / `ART_AI_LIVE_ACK=1`），缺省或只设一半时拒绝执行。新增脚本必须遵守同样的默认值。
 - **真实调用须先问**：确需真实上游时（核对官方行为、采集真实样本、发布前真实验收等），每次发起前在当前对话说明目的、Provider、次数与预计费用，取得用户明确同意后才能打开真实开关。历史授权、本文件其他条款或任何记忆中的常设授权都不能替代当次同意。
 - **真实结果回灌 fake**：经同意的真实调用完成后，在同一任务内用脱敏样本（wire capture 流程）更新 fake 的响应结构、状态机与错误码，并补回归测试；fake 暂时无法覆盖的差异记录在 Issue。
+- **fake 验证登记表同步**：`internal/testutil/fakeupstream/register/register.json`（生成 `docs/fake-register.md`）逐行为记录 fake 是 `real`（引用已提交的脱敏样本、真实调用日期与 revision）、`constructed`（官方依据与核对日期）还是 `gap`（计划与 Issue）。改 fake 行为或新增端点必须在同一改动里更新登记表并重新生成文档；真实调用回灌后更新对应条目的状态、样本与日期；不得把 `constructed` 写成已对齐，也不得引用尚未入库的样本标 `real`。
 - **TDD 与 CI 只用 fake**：单测、集成测试与门禁不得依赖真实上游或真实密钥；新增或修改 Adapter 的测试基于 fake 与 testkit 编写，不手写 stub。
 - **先对齐 fake，再改实现**：接口与 fake 不一致时，先核对官方接口与文档，检查 fake 是否与官方契约对齐；fake 有偏差时先修复 fake，再改项目实现。不得绕过 fake 直接以便利方式改项目或加 stub。
 - **线上问题同时补 fake**：线上日志出现接口问题时，同时修复 fake 与项目实现，保持 fake 作为该类问题的回归基线。
