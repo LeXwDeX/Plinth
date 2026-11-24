@@ -106,9 +106,7 @@ func run(args []string) error {
 	}
 	stem := strings.ReplaceAll(*version, "/", "-")
 	allSteps := profile.Steps
-	if *only != "" && command != "fake" && command != "compare" {
-		profile.Steps = filterSteps(profile.Steps, strings.Split(*only, ","))
-	}
+	profile.Steps = selectSteps(command, profile.Steps, *only)
 	switch command {
 	case "official":
 		vars := seedVars(*seed)
@@ -150,6 +148,27 @@ func tagSuffix(tag string) string {
 		return ""
 	}
 	return "." + tag
+}
+
+// selectSteps is the script an official or export run executes. -steps picks
+// steps by name, opt-in steps included; without it the opt-in steps (the
+// costlier acceptance-round requests) are left out, so a routine refresh keeps
+// its usual cost and its -confirm-paid list. The fake and compare commands keep
+// every step: the fake is free and compare reads the official bundle.
+func selectSteps(command string, steps []align.Step, only string) []align.Step {
+	if command == "fake" || command == "compare" {
+		return steps
+	}
+	if only != "" {
+		return filterSteps(steps, strings.Split(only, ","))
+	}
+	var out []align.Step
+	for _, step := range steps {
+		if !step.OptIn {
+			out = append(out, step)
+		}
+	}
+	return out
 }
 
 func filterSteps(steps []align.Step, names []string) []align.Step {
