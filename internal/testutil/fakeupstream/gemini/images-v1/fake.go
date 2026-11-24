@@ -41,9 +41,12 @@ const (
 	docsRoot = "https://doc.model-store.ai/ai-gateway/model/api-detail?code=api-chat-completions1"
 	// docsChecked is the date the documentation links and the public Gemini API
 	// errors page were checked.
-	docsChecked = "2026-11-08"
-	// errorsURL is the public page the fault answers' error vocabulary follows.
-	errorsURL = "https://ai.google.dev/gemini-api/docs/api-errors"
+	docsChecked = "2026-11-25"
+	// errorsURL is the public page the fault answers' error vocabulary follows
+	// (moved from ai.google.dev to aistudio.google.com).
+	errorsURL = "https://aistudio.google.com/docs/api-errors"
+	// imageDocsURL is the public image generation guide the size table follows.
+	imageDocsURL = "https://aistudio.google.com/docs/image-generation"
 )
 
 // Test-only error selectors. X-Fake-Error-Code makes the next request answer
@@ -75,10 +78,11 @@ const maxReferences = 14
 
 // pictureSizes is the output size of each aspect ratio at 1K, 2K and 4K for
 // gemini-3-pro-image. The ten ratios and the three uppercase sizes are
-// documented (Gemini image generation guide; "1k" is rejected); the exact
-// pixel table is the published one, recalled rather than re-read from the
-// documents on 2026-11-24, and unverified against the gateway until the real
-// 16:9 4K and 3:4 1K probes run, so the sizes are constructed.
+// documented (imageDocsURL; "1k" is rejected). The pixel table was checked
+// against the official table on 2026-11-25: the page publishes it for Nano
+// Banana 2.1 and says 3.1 Flash Image and 3 Pro Image share the same sizes.
+// It is still unverified against the gateway until the real 16:9 4K and 3:4
+// 1K probes run, so the sizes stay constructed.
 var pictureSizes = map[string][3][2]int{
 	"1:1":  {{1024, 1024}, {2048, 2048}, {4096, 4096}},
 	"2:3":  {{848, 1264}, {1696, 2528}, {3392, 5056}},
@@ -104,7 +108,7 @@ const unauthorizedBody = "unauthorized\n"
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/chat/completions", Evidence: fakeupstream.EvidenceReal, Sample: "POST /v1/chat/completions",
 		DocURL: docsRoot, CheckedAt: docsChecked,
-		Note: "the gateway's OpenAI-compatible chat completion with modalities [text,image]: the picture comes back as a data URI in choices[0].message.content[].image_url.url. The real text-to-image sample is a JPEG, the image-to-image one a PNG, and the fake answers the same formats at the size eca_image_config names (aspect_ratio among the ten ratios 1:1 2:3 3:2 3:4 4:3 4:5 5:4 9:16 16:9 21:9 and image_size 1K, 2K or 4K with an upper-case K, default 1:1 at 1K; the pixel table of each pair is constructed, see pictureSizes). A value outside those sets and more than 14 reference pictures answer a constructed 400 invalid_argument: whether the real gateway refuses or silently ignores them is not recorded (the free probe is planned), so the refusal is a conservative guess to be settled by the real round. " + ResponseBytesHeader + " (or the key fake-response-bytes-<n>) pads the picture to a real 4K weight for response-limit and timeout tests. 400 invalid_text_request and 401 text/plain are real samples. No public official documentation exists for this gateway contract (the vendor page at DocURL is login-gated and redirects to its catalog); the only structural evidence is the committed real gateway samples. The fault answers (quota-exceeded, forbidden, permission-denied, model-not-found, service-unavailable, content-filtered, the 402/500 vocabulary and the " + ErrorCodeHeader + "/" + ErrorStatusHeader + " override) are constructed-from-docs from " + errorsURL + " (checked " + docsChecked + ") and the real gateway envelope; none was observed on the gateway"},
+		Note: "the gateway's OpenAI-compatible chat completion with modalities [text,image]: the picture comes back as a data URI in choices[0].message.content[].image_url.url. The real text-to-image sample is a JPEG, the image-to-image one a PNG, and the fake answers the same formats at the size eca_image_config names (aspect_ratio among the ten ratios 1:1 2:3 3:2 3:4 4:3 4:5 5:4 9:16 16:9 21:9 and image_size 1K, 2K or 4K with an upper-case K, default 1:1 at 1K; the pixel table of each pair matches the official table of " + imageDocsURL + " (checked " + docsChecked + ") but is constructed for the gateway, see pictureSizes). A value outside those sets answers a constructed 400 invalid_request and more than 14 reference pictures a constructed 416 out_of_range (the official codes of " + errorsURL + "): whether the real gateway refuses or silently ignores them is not recorded (the free probe is planned), so the refusal is a conservative guess to be settled by the real round. " + ResponseBytesHeader + " (or the key fake-response-bytes-<n>) pads the picture to a real 4K weight for response-limit and timeout tests. 400 invalid_text_request and 401 text/plain are real samples. No public official documentation exists for this gateway contract (the vendor page at DocURL is login-gated and redirects to its catalog); the only structural evidence is the committed real gateway samples. The fault answers (quota-exceeded, forbidden and permission-denied as 403 permission_denied, model-not-found, service-unavailable, task-failed as the generation-blocked code prohibited_content at 400, the 402/500 vocabulary and the " + ErrorCodeHeader + "/" + ErrorStatusHeader + " override) are constructed-from-docs from " + errorsURL + " (checked " + docsChecked + ") and the real gateway envelope; none was observed on the gateway. The page gives the generation-blocked codes no HTTP status, so the 400 is the fake's own; content-filtered (a 200 with finish_reason content_filter) is not on the page and cannot be confirmed from the documents"},
 }
 
 // Version is the Gemini image (OpenAI-compatible gateway) /v1 fake.
@@ -173,18 +177,26 @@ func (h *handler) errorBody(code, message string) map[string]any {
 }
 
 // errorMessages are the documented descriptions of the codes the fake answers
-// (https://ai.google.dev/gemini-api/docs/api-errors, checked 2026-11-08);
+// (errorsURL, checked docsChecked);
 // insufficient_quota uses OpenAI's wording because the gateway is
 // OpenAI-compatible. Other codes get a fixed message of the fake's own.
 var errorMessages = map[string]string{
 	"api_error":           "Unexpected server-side error.",
+	"cancelled":           "The client cancelled the request before it completed.",
 	"deadline_exceeded":   "Request did not finish within its deadline.",
 	"insufficient_quota":  "You exceeded your current quota, please check your plan and billing details.",
+	"invalid_request":     "The request is malformed or has invalid parameters.",
+	"model_not_found":     "The specified model does not exist.",
+	"out_of_range":        "A parameter is outside its allowed range.",
+	"parameter_unknown":   "The request includes an unrecognized parameter.",
 	"payment_required":    "Prepay credit balance is exhausted.",
 	"permission_denied":   "Your API key lacks permission for this resource, or your project is restricted or requires verification or billing changes.",
+	"prohibited_content":  "The request was blocked for prohibited content.",
 	"quota_exceeded":      "You have exceeded your daily quota.",
 	"rate_limit_exceeded": "You have exceeded the per-minute or per-second request or token limit.",
 	"service_unavailable": "Service temporarily overloaded or down.",
+	"too_many_requests":   "Too many requests were made in a short period.",
+	"unimplemented":       "The operation or feature is not supported.",
 }
 
 func errorMessage(code string) string {
@@ -310,8 +322,9 @@ func (r completionRequest) referenceCount() int {
 //
 // Whether the real gateway refuses such a value or silently ignores it is not
 // recorded (the free probe with aspect_ratio 7:1 is planned, matrix I18), so
-// the refusal and its wording are constructed; the vocabulary follows Google's
-// status words, which the Catalog's error_mapping already reads.
+// the refusal and its wording are constructed; the codes are the official
+// invalid_request (400) and out_of_range (416) of errorsURL, which the
+// Catalog's error_mapping reads as invalid input.
 func (r completionRequest) imageConfig() (aspect string, sizeIndex int, bad *refusal) {
 	aspect, sizeIndex = "1:1", 0
 	read := func(name string) (string, bool, *refusal) {
@@ -321,7 +334,7 @@ func (r completionRequest) imageConfig() (aspect string, sizeIndex int, bad *ref
 		}
 		var value string
 		if json.Unmarshal(raw, &value) != nil {
-			return "", true, &refusal{"invalid_argument", "Invalid value at 'eca_image_config." + name + "': expected a string.", name}
+			return "", true, &refusal{http.StatusBadRequest, "invalid_request", "Invalid value at 'eca_image_config." + name + "': expected a string.", name}
 		}
 		return value, true, nil
 	}
@@ -331,7 +344,7 @@ func (r completionRequest) imageConfig() (aspect string, sizeIndex int, bad *ref
 	}
 	if present {
 		if _, known := pictureSizes[ratio]; !known {
-			return "", 0, &refusal{"invalid_argument", "Invalid value '" + ratio + "' at 'eca_image_config.aspect_ratio': supported values are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 and 21:9.", "aspect_ratio"}
+			return "", 0, &refusal{http.StatusBadRequest, "invalid_request", "Invalid value '" + ratio + "' at 'eca_image_config.aspect_ratio': supported values are 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9 and 21:9.", "aspect_ratio"}
 		}
 		aspect = ratio
 	}
@@ -347,15 +360,19 @@ func (r completionRequest) imageConfig() (aspect string, sizeIndex int, bad *ref
 			}
 		}
 		if sizeIndex < 0 {
-			return "", 0, &refusal{"invalid_argument", "Invalid value '" + size + "' at 'eca_image_config.image_size': supported values are 1K, 2K and 4K (the K is upper-case).", "image_size"}
+			return "", 0, &refusal{http.StatusBadRequest, "invalid_request", "Invalid value '" + size + "' at 'eca_image_config.image_size': supported values are 1K, 2K and 4K (the K is upper-case).", "image_size"}
 		}
 	}
 	return aspect, sizeIndex, nil
 }
 
-// refusal is a constructed gateway 400 for a value the documented contract
-// rejects.
-type refusal struct{ code, message, param string }
+// refusal is a constructed gateway error for a value the documented contract
+// rejects: 400 invalid_request for a value outside a set, 416 out_of_range for
+// a count beyond its limit.
+type refusal struct {
+	status               int
+	code, message, param string
+}
 
 // requestedWeight reads the test-only weight selector, in bytes (0 when none).
 func requestedWeight(r *http.Request) int {
@@ -402,10 +419,10 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 	}
 	aspect, sizeIndex, bad := request.imageConfig()
 	if bad == nil && request.referenceCount() > maxReferences {
-		bad = &refusal{"invalid_argument", fmt.Sprintf("Too many reference images: at most %d are accepted, got %d.", maxReferences, request.referenceCount()), "messages"}
+		bad = &refusal{http.StatusRequestedRangeNotSatisfiable, "out_of_range", fmt.Sprintf("Too many reference images: at most %d are accepted, got %d.", maxReferences, request.referenceCount()), "messages"}
 	}
 	if bad != nil {
-		writeJSON(w, http.StatusBadRequest, h.errorBody(bad.code, bad.message))
+		writeJSON(w, bad.status, h.errorBody(bad.code, bad.message))
 		return
 	}
 	scenario := fakeupstream.ScenarioOf(r)
@@ -413,10 +430,8 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 	case fakeupstream.ScenarioQuotaExceeded:
 		writeJSON(w, http.StatusTooManyRequests, quotaExceededBody())
 		return
-	case fakeupstream.ScenarioForbidden:
-		writeJSON(w, http.StatusForbidden, h.errorBody("forbidden", errorMessage("forbidden")))
-		return
-	case fakeupstream.ScenarioPermissionDenied:
+	case fakeupstream.ScenarioForbidden, fakeupstream.ScenarioPermissionDenied:
+		// The official 403 code is permission_denied; the page has no forbidden.
 		writeJSON(w, http.StatusForbidden, h.errorBody("permission_denied", errorMessage("permission_denied")))
 		return
 	case fakeupstream.ScenarioModelNotFound:
@@ -429,7 +444,10 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 		fakeupstream.AbortConnection(w)
 		return
 	case fakeupstream.ScenarioTaskFailed:
-		writeJSON(w, http.StatusBadRequest, h.errorBody("content_policy_violation", "The request was blocked by the safety system."))
+		// prohibited_content is the official generation-blocked code (the page
+		// has no content_policy_violation, OpenAI's word). The page gives the
+		// blocked codes no HTTP status; 400 is the fake's own.
+		writeJSON(w, http.StatusBadRequest, h.errorBody("prohibited_content", errorMessage("prohibited_content")))
 		return
 	}
 	template := h.ok
@@ -444,7 +462,8 @@ func (h *handler) complete(w http.ResponseWriter, r *http.Request) {
 	}
 	// A filtered answer is a successful completion without a picture: the
 	// gateway reports it in finish_reason (OpenAI vocabulary) instead of an
-	// error status (#139).
+	// error status (#139). The official errors page does not mention
+	// finish_reason content_filter, so the documents cannot confirm it.
 	if scenario == fakeupstream.ScenarioContentFiltered {
 		if choice, ok := fakeupstream.DigMap(body, "choices", 0); ok {
 			choice["finish_reason"] = "content_filter"

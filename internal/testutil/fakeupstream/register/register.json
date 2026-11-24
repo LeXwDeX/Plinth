@@ -3958,14 +3958,18 @@
       ],
       "category": "artifact-shape",
       "status": "constructed",
-      "behavior": "按 eca_image_config 的十种 aspect_ratio 与 1K/2K/4K 出图（默认 1:1 的 1K），像素表为构造值（pictureSizes）。",
+      "behavior": "按 eca_image_config 的十种 aspect_ratio 与 1K/2K/4K 出图（默认 1:1 的 1K），像素表（pictureSizes）已于 2026-11-25 对照官方表核对一致（官方表标注为 Nano Banana 2.1，页面称 3.1 Flash Image 与 3 Pro Image 尺寸相同），对网关仍是构造值。",
       "basis": [
         {
           "source": "https://doc.model-store.ai/ai-gateway/model/api-detail?code=api-chat-completions1",
           "section": "Chat completions（网关）"
+        },
+        {
+          "source": "https://aistudio.google.com/docs/image-generation",
+          "section": "Image generation：宽高比与分辨率表"
         }
       ],
-      "checked_at": "2026-11-24",
+      "checked_at": "2026-11-25",
       "why_not_real": "样本只请求过 1K 1:1"
     },
     {
@@ -3977,14 +3981,14 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "比例或尺寸不在集合内、小写 1k、超过 14 张参考图答 400 invalid_argument。",
+      "behavior": "比例或尺寸不在集合内、小写 1k、非字符串值答 400 invalid_request；超过 14 张参考图答 416 out_of_range（#579 按官方错误码表改，原为官方词表没有的 invalid_argument）。",
       "basis": [
         {
-          "source": "https://ai.google.dev/gemini-api/docs/api-errors",
-          "section": "API errors"
+          "source": "https://aistudio.google.com/docs/api-errors",
+          "section": "Standard API error codes：invalid_request 400、out_of_range 416"
         }
       ],
-      "checked_at": "2026-11-24",
+      "checked_at": "2026-11-25",
       "why_not_real": "真实网关是拒绝还是静默忽略没有记录；免费探针待做"
     },
     {
@@ -3996,14 +4000,14 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "内容审核拒绝、内容过滤（沿用成功信封改 finish_reason）、402/403/404/429/5xx。",
+      "behavior": "forbidden 与 permission-denied 场景都答 403 permission_denied（官方没有 forbidden）；内容审核拒绝答 400 prohibited_content（官方拦截码，原为 OpenAI 词汇 content_policy_violation，官方页不给拦截码 HTTP 状态，400 是 fake 自定）；内容过滤沿用成功信封改 finish_reason=content_filter，文档无法确认，保持；402/404/429/5xx；X-Fake-Error-Code 通道可答官方 too_many_requests、unimplemented 501、cancelled 499 等码。",
       "basis": [
         {
-          "source": "https://ai.google.dev/gemini-api/docs/api-errors",
-          "section": "API errors"
+          "source": "https://aistudio.google.com/docs/api-errors",
+          "section": "Standard API error codes 与 Generation blocked codes"
         }
       ],
-      "checked_at": "2026-10-29",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -4062,14 +4066,14 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "size（WxH 总像素 3686400–16777216、比例至多 16，或 2K/4K）、response_format、sequential_image_generation、max_images 1–15、参考图至多 14 张与逐张尺寸，非法值答 400 InvalidParameter（param 指明字段）（#543）。",
+      "behavior": "size 按请求 model 取规则：Seedream 4.0（doubao-seedream-4-0-*）WxH 总像素 921600–16777216 或 1K/2K/4K；其余模型（含 Catalog 的 4.5）总像素 3686400–16777216 或 2K/4K（4.5 的规则仅二手来源，官方页已不含 4.5）；比例至多 16。response_format、sequential_image_generation、max_images 1–15、参考图至多 14 张（4.0/4.5）与逐张尺寸（30MB、36M 像素），非法值答 400 InvalidParameter（param 指明字段；错误体 param 与措辞文档无法确认）（#543、#579）。",
       "basis": [
         {
-          "source": "https://www.volcengine.com/docs/82379/1541523",
-          "section": "Seedream 图片生成 API"
+          "source": "https://docs.volcengine.com/docs/82379/1541523",
+          "section": "Seedream 图片生成 API：size 与 image 参数（Seedream 4.0）"
         }
       ],
-      "checked_at": "2026-11-24",
+      "checked_at": "2026-11-25",
       "why_not_real": "样本只请求过 2048x2048；真实措辞未记录，免费探针待做"
     },
     {
@@ -4081,14 +4085,18 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "内容安全、风险检测、ContentSecurityDetectionError、模型访问码与 RequestBurstTooFast；429 类带 Retry-After；欠费与限流。",
+      "behavior": "内容安全、风险检测、ContentSecurityDetectionError、模型访问码（官方全名 InvalidEndpointOrModel.ModelIDAccessDisabled，#579 前误为无前缀）、OperationDenied.ServiceOverdue（403 欠费）与 RequestBurstTooFast；欠费与限流。429 类带 Retry-After，文档无法确认；usage.generated_images 的取值文档无法确认。",
       "basis": [
         {
           "source": "https://docs.volcengine.com/docs/82379/1299023",
           "section": "错误码"
+        },
+        {
+          "source": "https://docs.volcengine.com/docs/82379/1541523",
+          "section": "Seedream 图片生成 API：组图字段"
         }
       ],
-      "checked_at": "2026-11-24",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -4100,14 +4108,14 @@
       ],
       "category": "artifact-shape",
       "status": "constructed",
-      "behavior": "签名图片主机不属于 API；提供 response_format=url 指向的固定 JPEG。",
+      "behavior": "签名图片主机不属于 API；提供 response_format=url 指向的固定 JPEG。文件主机行为文档无法确认。",
       "basis": [
         {
-          "source": "https://www.volcengine.com/docs/82379/1541523",
+          "source": "https://docs.volcengine.com/docs/82379/1541523",
           "section": "Seedream 图片生成 API"
         }
       ],
-      "checked_at": "2026-10-29",
+      "checked_at": "2026-11-25",
       "why_not_real": "文件主机不在 API 样本里，媒体字节按 recipe 替换"
     },
     {
@@ -4126,8 +4134,9 @@
           "section": "2026-10-29"
         }
       ],
-      "checked_at": "2026-10-29",
-      "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；不是自然过期"
+      "checked_at": "2026-11-25",
+      "why_not_real": "真实调用观测到了，但原始请求与响应没有作为脱敏样本入库；不是自然过期",
+      "note": "文档无法确认：官方文档不描述签名 URL 过期后的响应（2026-11-25 核对），行为保持观测结果。"
     },
     {
       "id": "matting-api-v1/jobs-shape",

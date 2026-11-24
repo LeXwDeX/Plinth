@@ -43,16 +43,16 @@ const Prefix = "/jimeng/api/v3"
 const samplePrefix = "/api/v3"
 
 const (
-	docsRoot      = "https://www.volcengine.com/docs/82379/1541523"
+	docsRoot      = "https://docs.volcengine.com/docs/82379/1541523"
 	errorDocsRoot = "https://docs.volcengine.com/docs/82379/1299023"
 	captured      = "2026-10-29"
-	docsChecked   = "2026-11-24"
+	docsChecked   = "2026-11-25"
 )
 
 var endpoints = []fakeupstream.Endpoint{
 	{Method: "POST", Path: "/images/generations", Evidence: fakeupstream.EvidenceReal, Sample: "POST /api/v3/images/generations",
 		DocURL: docsRoot, CheckedAt: docsChecked,
-		Note: "response_format b64_json answers an inline picture, url a signed TOS URL (both real samples); 401 AuthenticationError and 400 MissingParameter are real samples. The picture is a JPEG drawn at the requested size (an explicit WxH, the 2K and 4K words as squares, 2048x2048 when omitted) and data[].size reports it; the committed samples only ask for 2048x2048, so other sizes are constructed. The documented parameter contract is enforced with constructed 400 InvalidParameter answers that reuse the real envelope (param names the field; the real wording is not recorded, the free probe with size 1024x1024 is planned): size (WxH with 3686400 to 16777216 total pixels and a ratio of at most 16, or 2K or 4K), response_format (url or b64_json), sequential_image_generation (auto or disabled), max_images (1 to 15, never clamped, only checked for group generation), at most 14 reference images, reference plus generated pictures at most 15 (the default max_images shrinks to the room left), and every readable reference picture (data URI) at least 15 pixels on each side, ratio at most 16, at most 6000x6000 pixels and 30 MB. The sequential generation fields (sequential_image_generation, sequential_image_generation_options.max_images, usage.generated_images) and the per-picture data[].error follow " + docsRoot + " (checked " + docsChecked + "); a content-policy refusal, the 403/404/408/429/5xx answers and the documented-code channel (" + UpstreamCodeHeader + ", now including the reason-suffixed content-safety, risk-detection, model-access and RequestBurstTooFast codes; 429 codes carry a constructed Retry-After) are constructed from " + errorDocsRoot + " (checked " + docsChecked + ") and reuse the real error envelope. " + GeneratedImagesHeader + " makes a group answer carry fewer pictures than max_images (constructed)"},
+		Note: "response_format b64_json answers an inline picture, url a signed TOS URL (both real samples); 401 AuthenticationError and 400 MissingParameter are real samples. The picture is a JPEG drawn at the requested size (an explicit WxH, the model's resolution words as squares, 2048x2048 when omitted) and data[].size reports it; the committed samples only ask for 2048x2048, so other sizes are constructed. The documented parameter contract is enforced with constructed 400 InvalidParameter answers that reuse the real envelope (param names the field; the real wording is not recorded, the free probe with size 1024x1024 is planned): size per model (Seedream 4.0 as documented: WxH with 921600 to 16777216 total pixels, or 1K, 2K or 4K; every other model keeps the 4.5 rules, which the current page no longer covers and only a secondary source gives: 3686400 to 16777216 total pixels, or 2K or 4K; both with a ratio of at most 16), response_format (url or b64_json), sequential_image_generation (auto or disabled), max_images (1 to 15, never clamped, only checked for group generation), at most 14 reference images (4.0 and 4.5), reference plus generated pictures at most 15 (the default max_images shrinks to the room left), and every readable reference picture (data URI) at least 15 pixels on each side, ratio at most 16, at most 6000x6000 pixels and 30 MB. The sequential generation fields (sequential_image_generation, sequential_image_generation_options.max_images, usage.generated_images) and the per-picture data[].error follow " + docsRoot + " (checked " + docsChecked + "); a content-policy refusal, the 403/404/408/429/5xx answers and the documented-code channel (" + UpstreamCodeHeader + ", now including the reason-suffixed content-safety, risk-detection, model-access (InvalidEndpointOrModel.ModelIDAccessDisabled), OperationDenied.ServiceOverdue and RequestBurstTooFast codes; 429 codes carry a constructed Retry-After the documents do not confirm) are constructed from " + errorDocsRoot + " (checked " + docsChecked + ") and reuse the real error envelope. " + GeneratedImagesHeader + " makes a group answer carry fewer pictures than max_images (constructed)"},
 	{Method: "GET", Path: "/files/{name}", Evidence: fakeupstream.EvidenceConstructed, DocURL: docsRoot, CheckedAt: captured,
 		Note: "the signed picture host is not part of the API; this route serves the fixed JPEG a response_format=url answer names. An expired URL answers the 403 JSON body the official TOS host returned for a URL past its X-Tos-Expires (observed 2026-10-29 by moving X-Tos-Date into the past)"},
 }
@@ -79,20 +79,22 @@ var documentedCodes = map[string]struct {
 	status int
 	kind   string
 }{
-	"AccountOverdueError":                       {http.StatusForbidden, "Forbidden"},
-	"QuotaExceeded":                             {http.StatusTooManyRequests, "TooManyRequests"},
-	"SetLimitExceeded":                          {http.StatusTooManyRequests, "TooManyRequests"},
-	"InputTextSensitiveContentDetected":         {http.StatusBadRequest, "BadRequest"},
-	"InputImageSensitiveContentDetected":        {http.StatusBadRequest, "BadRequest"},
-	"OutputTextSensitiveContentDetected":        {http.StatusBadRequest, "BadRequest"},
-	"OutputImageSensitiveContentDetected":       {http.StatusBadRequest, "BadRequest"},
-	"SensitiveContentDetected":                  {http.StatusBadRequest, "BadRequest"},
-	"AuthenticationError":                       {http.StatusUnauthorized, "Unauthorized"},
-	"InvalidParameter":                          {http.StatusBadRequest, "BadRequest"},
-	"InvalidEndpointOrModel.NotFound":           {http.StatusNotFound, "NotFound"},
-	"ModelNotOpen":                              {http.StatusNotFound, "NotFound"},
-	"RequestTimeout":                            {http.StatusRequestTimeout, "RequestTimeout"},
-	"OperationDenied.ServiceNotOpen":            {http.StatusForbidden, "Forbidden"},
+	"AccountOverdueError":                 {http.StatusForbidden, "Forbidden"},
+	"QuotaExceeded":                       {http.StatusTooManyRequests, "TooManyRequests"},
+	"SetLimitExceeded":                    {http.StatusTooManyRequests, "TooManyRequests"},
+	"InputTextSensitiveContentDetected":   {http.StatusBadRequest, "BadRequest"},
+	"InputImageSensitiveContentDetected":  {http.StatusBadRequest, "BadRequest"},
+	"OutputTextSensitiveContentDetected":  {http.StatusBadRequest, "BadRequest"},
+	"OutputImageSensitiveContentDetected": {http.StatusBadRequest, "BadRequest"},
+	"SensitiveContentDetected":            {http.StatusBadRequest, "BadRequest"},
+	"AuthenticationError":                 {http.StatusUnauthorized, "Unauthorized"},
+	"InvalidParameter":                    {http.StatusBadRequest, "BadRequest"},
+	"InvalidEndpointOrModel.NotFound":     {http.StatusNotFound, "NotFound"},
+	"ModelNotOpen":                        {http.StatusNotFound, "NotFound"},
+	"RequestTimeout":                      {http.StatusRequestTimeout, "RequestTimeout"},
+	"OperationDenied.ServiceNotOpen":      {http.StatusForbidden, "Forbidden"},
+	// An overdue account balance; the Catalog reads it like AccountOverdueError.
+	"OperationDenied.ServiceOverdue":            {http.StatusForbidden, "Forbidden"},
 	"AccessDenied":                              {http.StatusForbidden, "Forbidden"},
 	"ServiceConnectionRefused":                  {http.StatusServiceUnavailable, "ServiceUnavailable"},
 	"NoAvailableService":                        {http.StatusServiceUnavailable, "ServiceUnavailable"},
@@ -117,8 +119,10 @@ var documentedCodes = map[string]struct {
 	// The risk-detection service itself failed (message "Internal error."):
 	// the Catalog reads it as a retryable upstream failure.
 	"ContentSecurityDetectionError": {http.StatusBadRequest, "BadRequest"},
-	"ModelIDAccessDisabled":         {http.StatusNotFound, "NotFound"},
-	"UnsupportedModel":              {http.StatusNotFound, "NotFound"},
+	// The official table names the model-ID access refusal with its
+	// InvalidEndpointOrModel prefix (checked 2026-11-25).
+	"InvalidEndpointOrModel.ModelIDAccessDisabled": {http.StatusNotFound, "NotFound"},
+	"UnsupportedModel": {http.StatusNotFound, "NotFound"},
 	// The 429 family of the official table. RequestBurstTooFast (a sudden
 	// request burst tripped the protection) is the newest; the others are the
 	// per-account limits an image request can meet (IPM is images per minute).
@@ -265,15 +269,14 @@ const (
 	// bound of sequential_image_generation_options.max_images (range [1, 15]).
 	defaultMaxImages = 15
 	maxImagesLimit   = 15
-	// maxReferenceImages is the documented limit of reference pictures (14);
-	// reference pictures plus generated pictures total at most 15.
-	maxReferenceImages = 14
-	maxTotalImages     = 15
-	// The documented bounds of a WxH size: total pixels 3686400 (2560x1440) to
-	// 16777216 (4096x4096) and an aspect ratio between 1/16 and 16. 2K and 4K
-	// are the documented resolution words; the model picks the aspect ratio
+	// Reference pictures plus generated pictures total at most 15; the limit of
+	// reference pictures alone depends on the model (modelLimits).
+	maxTotalImages = 15
+	// The documented upper bounds of a WxH size, shared by Seedream 4.0 and
+	// 4.5: total pixels at most 16777216 (4096x4096) and an aspect ratio
+	// between 1/16 and 16. The lower bound and the resolution words depend on
+	// the model (modelLimits); the model picks the aspect ratio of a word
 	// itself, which the fake draws as a square.
-	minSizePixels = 3_686_400
 	maxSizePixels = 16_777_216
 	maxSizeRatio  = 16
 	defaultSize   = "2048x2048"
@@ -289,24 +292,59 @@ const (
 // free probe with size 1024x1024 is planned); the envelope is the real 400's.
 type refusal struct{ param, detail string }
 
+// modelLimits are the size and reference rules that differ between the
+// Seedream models the Catalog registers. The official page (docsRoot, checked
+// docsChecked) gives Seedream 4.0 the words 1K, 2K and 4K, a WxH of at least
+// 921600 pixels (1280x720) and at most 14 reference pictures. The page no
+// longer covers 4.5: its rules (the words 2K and 4K, at least 3686400 pixels,
+// that is 2560x1440, and 14 reference pictures) come from a secondary source
+// only, and they stay the fake's rules for every model that is not 4.0.
+type modelLimits struct {
+	// words maps each resolution word to the side of the square the fake draws.
+	words              map[string]int
+	wordList           string
+	minSizePixels      int
+	maxReferenceImages int
+}
+
+var (
+	seedream40Limits = modelLimits{
+		words: map[string]int{"1K": 1024, "2K": 2048, "4K": 4096}, wordList: "1K, 2K, 4K",
+		minSizePixels: 921_600, maxReferenceImages: 14,
+	}
+	seedream45Limits = modelLimits{
+		words: map[string]int{"2K": 2048, "4K": 4096}, wordList: "2K, 4K",
+		minSizePixels: 3_686_400, maxReferenceImages: 14,
+	}
+)
+
+// limitsFor picks the rules of the requested model: Seedream 4.0 by its model
+// ID (doubao-seedream-4-0-<date>), the 4.5 rules for every other model.
+func limitsFor(model string) modelLimits {
+	if strings.Contains(model, "seedream-4-0") {
+		return seedream40Limits
+	}
+	return seedream45Limits
+}
+
 // resolveSize turns the size parameter into the pixel size of the picture: an
-// explicit WxH, the 2K/4K words (squares) or the documented default.
-func resolveSize(value string) (width, height int, bad *refusal) {
-	switch strings.TrimSpace(value) {
-	case "":
+// explicit WxH, a resolution word of the model (a square) or the documented
+// default.
+func (limits modelLimits) resolveSize(value string) (width, height int, bad *refusal) {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		width, height, _ = fakeupstream.ParseSize(defaultSize)
 		return width, height, nil
-	case "2K":
-		return 2048, 2048, nil
-	case "4K":
-		return 4096, 4096, nil
+	}
+	if side, ok := limits.words[value]; ok {
+		return side, side, nil
 	}
 	width, height, ok := fakeupstream.ParseSize(value)
 	switch {
 	case !ok:
-		return 0, 0, &refusal{"size", "size must be 2K, 4K or WIDTHxHEIGHT in pixels"}
-	case width*height < minSizePixels || width*height > maxSizePixels:
-		return 0, 0, &refusal{"size", fmt.Sprintf("the total pixels of %dx%d must be between %d and %d", width, height, minSizePixels, maxSizePixels)}
+		return 0, 0, &refusal{"size", "size must be one of " + limits.wordList + " or WIDTHxHEIGHT in pixels"}
+	case width*height < limits.minSizePixels || width*height > maxSizePixels:
+		return 0, 0, &refusal{"size", fmt.Sprintf("the total pixels of %dx%d must be between %d and %d", width, height, limits.minSizePixels, maxSizePixels)}
 	case width > maxSizeRatio*height || height > maxSizeRatio*width:
 		return 0, 0, &refusal{"size", fmt.Sprintf("the aspect ratio of %dx%d must be between 1/%d and %d", width, height, maxSizeRatio, maxSizeRatio)}
 	}
@@ -317,7 +355,7 @@ func resolveSize(value string) (width, height int, bad *refusal) {
 // and applies the documented limits to every reference picture it can read.
 // A URL is not fetched; a data URI is decoded far enough to read its size. A
 // picture whose format the fake cannot read is accepted as it is.
-func referenceImages(raw json.RawMessage) (count int, bad *refusal) {
+func referenceImages(raw json.RawMessage, maxReferenceImages int) (count int, bad *refusal) {
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
 		return 0, nil
 	}
@@ -387,11 +425,12 @@ func (request generationRequest) validate() (width, height, count int, bad *refu
 	if mode := request.SequentialImageGeneration; mode != "" && mode != "auto" && mode != "disabled" {
 		return 0, 0, 0, &refusal{"sequential_image_generation", "sequential_image_generation must be auto or disabled"}
 	}
-	width, height, bad = resolveSize(request.Size)
+	limits := limitsFor(request.Model)
+	width, height, bad = limits.resolveSize(request.Size)
 	if bad != nil {
 		return 0, 0, 0, bad
 	}
-	references, bad := referenceImages(request.Image)
+	references, bad := referenceImages(request.Image, limits.maxReferenceImages)
 	if bad != nil {
 		return 0, 0, 0, bad
 	}

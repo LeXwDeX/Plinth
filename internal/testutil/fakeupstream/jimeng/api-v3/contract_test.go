@@ -153,6 +153,51 @@ func TestSizeOutsideTheDocumentedBoundsIsRefused(t *testing.T) {
 	}
 }
 
+// #579: the official page (checked 2026-11-25) gives Seedream 4.0 a lower
+// size floor than 4.5 (921600 pixels, 1280x720) and the word 1K. The fake
+// picks the rules by the requested model, so a 4.0 request for 1024x1024 is
+// drawn while the same size for 4.5 stays refused.
+func TestSizeBoundsFollowTheRequestedModel(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{})
+	const seedream40 = "doubao-seedream-4-0-250828"
+	for size, want := range map[string][2]int{
+		"1024x1024": {1024, 1024},
+		"1280x720":  {1280, 720},
+		"1600x600":  {1600, 600},
+		"1K":        {1024, 1024},
+		"2K":        {2048, 2048},
+		"4K":        {4096, 4096},
+		"4096x4096": {4096, 4096},
+	} {
+		request := body("a cube", "b64_json", map[string]any{"model": seedream40, "size": size})
+		status, decoded := generateRequest(f, request)
+		if status != http.StatusOK {
+			t.Fatalf("4.0 size %s: %d %v", size, status, decoded)
+		}
+		if got := testkit.Field(t, decoded, "data", 0, "size"); got != fmt.Sprintf("%dx%d", want[0], want[1]) {
+			t.Fatalf("4.0 size %s answered %v", size, got)
+		}
+	}
+	for _, size := range []string{"800x800", "1279x720", "4097x4096", "9000x500", "1k"} {
+		request := body("a cube", "b64_json", map[string]any{"model": seedream40, "size": size})
+		status, decoded := generateRequest(f, request)
+		refusedParam(t, status, decoded, "size")
+	}
+	// The 4.5 Offering the Catalog sends keeps its higher floor and no 1K.
+	for _, size := range []string{"1024x1024", "1K"} {
+		status, decoded := generateRequest(f, body("a cube", "b64_json", map[string]any{"size": size}))
+		refusedParam(t, status, decoded, "size")
+	}
+	// Both models accept at most 14 reference pictures.
+	for _, model := range []string{seedream40, Model} {
+		status, decoded := generateRequest(f, body("blend", "b64_json", map[string]any{"model": model, "image": references(t, 15)}))
+		refusedParam(t, status, decoded, "image")
+		if status, decoded = generateRequest(f, body("blend", "b64_json", map[string]any{"model": model, "image": references(t, 14)})); status != http.StatusOK {
+			t.Fatalf("%s with 14 references: %d %v", model, status, decoded)
+		}
+	}
+}
+
 func TestEnumValuesAreChecked(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
 	status, decoded := generateRequest(f, body("a cube", "base64", nil))
