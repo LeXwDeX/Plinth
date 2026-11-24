@@ -28,7 +28,7 @@ import time
 # production-list, preference, concept-candidate, automatic-completion and visual-anchor scenarios and two fault
 # scenarios; the rest (Tripo chains, Hyper3D direct, five more faults) stay in the full
 # `smoke-fake-stack.py` run, which takes about 15 minutes.
-FAKE_STACK_SCENARIOS = 'balance,meshy,images,model-convert,model-parts,p2,project,agent,agent-background,three-view,four-view,plan-checkpoint,concept-candidates,reroll,image-purpose,next-step,mask-selection,vision-budget,visual-anchors,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults'
+FAKE_STACK_SCENARIOS = 'balance,meshy,images,model-convert,model-parts,p2,project,agent,agent-background,three-view,four-view,multiview-text,plan-checkpoint,concept-candidates,reroll,image-purpose,next-step,mask-selection,vision-budget,visual-anchors,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults'
 # `--only self-check` (#246) is a separate, longer scenario with its own stack and
 # private Catalog; it is registered in dev_test.md §2 item 10 but kept out of the
 # gate subset to preserve the roughly five-minute budget.

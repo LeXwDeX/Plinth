@@ -53,12 +53,14 @@ func TestPersonalSkillsPersistAndKeepSharedRevisionIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The Schema's system Skill (three-view) always comes first, then the owner's.
-	if !strings.HasPrefix(ownerA.Revision, base.Revision+":system:") || !strings.Contains(ownerA.Revision, ":personal:") || len(ownerA.Configuration.Skills) != 2 || ownerA.Configuration.Skills[0].Tool != "create_three_view" || ownerA.Configuration.Skills[1].ID != first.ID || first.Category != "" || ownerA.Configuration.Skills[1].Category != "" {
+	// The Schema's system Skills (three-view and four-view, #550) always come
+	// first, then the owner's.
+	system := systemSkillCount(t)
+	if !strings.HasPrefix(ownerA.Revision, base.Revision+":system:") || !strings.Contains(ownerA.Revision, ":personal:") || len(ownerA.Configuration.Skills) != system+1 || ownerA.Configuration.Skills[0].Tool != "create_three_view" || ownerA.Configuration.Skills[system].ID != first.ID || first.Category != "" || ownerA.Configuration.Skills[system].Category != "" {
 		t.Fatalf("owner snapshot: %#v", ownerA)
 	}
 	ownerB, err := service.SnapshotForOwner(ctx, "owner-b")
-	if err != nil || strings.Contains(ownerB.Revision, ":personal:") || len(ownerB.Configuration.Skills) != 1 || ownerB.Configuration.Skills[0].Tool == "" {
+	if err != nil || strings.Contains(ownerB.Revision, ":personal:") || len(ownerB.Configuration.Skills) != system || ownerB.Configuration.Skills[0].Tool == "" {
 		t.Fatalf("cross-owner snapshot: %#v %v", ownerB, err)
 	}
 	shared, err := service.Snapshot(ctx)
@@ -71,7 +73,7 @@ func TestPersonalSkillsPersistAndKeepSharedRevisionIndependent(t *testing.T) {
 	repo, service = open()
 	defer repo.Close()
 	reopened, err := service.SnapshotForOwner(ctx, "owner-a")
-	if err != nil || reopened.Revision != ownerA.Revision || len(reopened.Configuration.Skills) != 2 || reopened.Configuration.Skills[1].Category != "" {
+	if err != nil || reopened.Revision != ownerA.Revision || len(reopened.Configuration.Skills) != system+1 || reopened.Configuration.Skills[system].Category != "" {
 		t.Fatalf("database reopen lost personal Skill: %#v %v", reopened, err)
 	}
 	legacy := input
@@ -81,7 +83,7 @@ func TestPersonalSkillsPersistAndKeepSharedRevisionIndependent(t *testing.T) {
 		t.Fatal(err)
 	}
 	latest, err := service.SnapshotForOwner(ctx, "owner-a")
-	if err != nil || latest.Revision == reopened.Revision || len(latest.Configuration.Skills) != 3 {
+	if err != nil || latest.Revision == reopened.Revision || len(latest.Configuration.Skills) != system+2 {
 		t.Fatalf("creation did not change effective revision: %#v %v", latest, err)
 	}
 }
@@ -591,4 +593,15 @@ func declaredToolNames(t *testing.T, application catalog.ApplicationSchema) []st
 		names = append(names, tool.Name)
 	}
 	return names
+}
+
+// systemSkillCount is the number of Skills the default Product Schema declares
+// itself; every owner snapshot lists them before shared and personal Skills.
+func systemSkillCount(t *testing.T) int {
+	t.Helper()
+	product, err := catalog.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(product.Application().Chat.Skills.SystemSkills)
 }

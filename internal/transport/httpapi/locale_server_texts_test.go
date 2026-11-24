@@ -326,7 +326,7 @@ func TestSystemSkillCatalogFollowsTheLocale(t *testing.T) {
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)), mux: http.NewServeMux(),
 	}
 	server.mux.HandleFunc("GET "+schema.Runtime.HTTP.Routes.ChatSkills, server.skillCatalogSchema)
-	read := func(locale string) map[string]any {
+	read := func(locale, id string) map[string]any {
 		request := httptest.NewRequest(http.MethodGet, schema.Runtime.HTTP.Routes.ChatSkills, nil)
 		request = request.WithContext(catalog.WithLocale(context.Background(), locale))
 		response := httptest.NewRecorder()
@@ -339,24 +339,27 @@ func TestSystemSkillCatalogFollowsTheLocale(t *testing.T) {
 		}
 		decodeTestJSON(t, response.Body.Bytes(), &payload)
 		for _, skill := range payload.Skills {
-			if skill["id"] == "system-three-view" {
+			if skill["id"] == id {
 				return skill
 			}
 		}
-		t.Fatalf("system-three-view missing for %q", locale)
+		t.Fatalf("%s missing for %q", id, locale)
 		return nil
 	}
 	fields := schema.Chat.Skills.Fields
-	english, chinese := read("en"), read("")
-	for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
-		value, _ := english[key].(string)
-		if value == "" || serverChineseText.MatchString(value) {
-			t.Fatalf("en %s = %q", key, value)
+	// #550: the four-view Skill is localized like the three-view one.
+	for _, id := range []string{"system-three-view", "system-four-view"} {
+		english, chinese := read("en", id), read("", id)
+		for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
+			value, _ := english[key].(string)
+			if value == "" || serverChineseText.MatchString(value) {
+				t.Fatalf("%s en %s = %q", id, key, value)
+			}
 		}
-	}
-	for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
-		if value, _ := chinese[key].(string); !serverChineseText.MatchString(value) {
-			t.Fatalf("default %s = %q", key, value)
+		for _, key := range []string{fields.NameZH, fields.Prompt, fields.DefaultMessage} {
+			if value, _ := chinese[key].(string); !serverChineseText.MatchString(value) {
+				t.Fatalf("%s default %s = %q", id, key, value)
+			}
 		}
 	}
 

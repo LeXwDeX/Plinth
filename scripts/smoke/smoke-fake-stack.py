@@ -2528,6 +2528,85 @@ def running_replies(api, session):
     return found
 
 
+def scenario_multiview_text(work, api, offerings):
+    """#550: "生成一个圣母玛丽亚的4视图" with no picture. The Agent is told the
+    one-picture-per-view rule, draws one front source with refine_image, starts
+    create_three_view from it, and the four views end as four separate pictures:
+    no second refine_image draws the views into one composite. Auto approval (the
+    default) submits only the front view; the person starts left, back and right
+    on the three-view card, as the card's buttons do. No 2D model is picked for
+    the source, so the purpose recommendation chooses it and no model conflict
+    card opens."""
+    session = new_session(api)
+    ask = "生成一个圣母玛丽亚的4视图 [[fake:system-contains 四视图再加右侧]]"
+    if not _visual_anchor_turn(api, session, ask, domain="image"):
+        record("multiview-text: the four-view rule reaches the Agent", False, "turn did not finish")
+        return
+    reply = str((_quality_final_reply(_quality_messages(api, session)) or {}).get("content") or "")
+    record("multiview-text: the four-view rule reaches the Agent", "present: 四视图再加右侧" in reply,
+           f"reply={reply[:120]!r}")
+
+    # The front source: one refine_image, no picture of several views.
+    source = ('[[fake:tool:refine_image {"prompt":"Full-body front view of the Virgin Mary, one subject, '
+              'plain light background"}]]')
+    if not _image_message(api, session, "生成一个圣母玛丽亚的4视图 " + source):
+        record("multiview-text: draw the front source", False, "turn did not finish")
+        return
+    end = time.time() + 90
+    while time.time() < end and not [task for task in session_tasks(api, session)
+                                     if task.get("state") == "SUCCEEDED"]:
+        time.sleep(0.4)
+    # The views start from that source. The image-to-image model is picked the
+    # way the three-view Skill needs one (the purpose's recommended family).
+    views = '[[fake:tool:create_three_view {"reference_handles":["@img1"],"purpose":"design_sheet"}]]'
+    status, _ = _send_chat(api, session, {"content": "用这张正面图出四视图 " + views, "creative_domain": "image",
+                                          "ai_model": IMAGE_OFFERINGS["gemini"][1]})
+    if status not in (200, 201, 202):
+        record("multiview-text: start the views", False, f"send {status}")
+        return
+    group, end = None, time.time() + 120
+    while time.time() < end:
+        group = _three_view_group(api, session)
+        front = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}.get("front") or {}
+        if front.get("status") in ("succeeded", "failed", "rejected", "denied", "canceled"):
+            break
+        time.sleep(0.4)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    started = bool(group) and slots.get("front", {}).get("status") == "succeeded"
+    detail = f"slots={ {k: v.get('status') for k, v in slots.items()} }"
+    if not started:
+        replies = [str(message.get("content") or "")[:160] for message in _quality_messages(api, session)
+                   if message.get("role") == "assistant"]
+        tasks = [(task.get("capability"), task.get("state")) for task in session_tasks(api, session)]
+        detail += f" replies={replies} tasks={tasks}"
+    record("multiview-text: create_three_view starts from the drawn source and finishes the front view",
+           started, detail)
+    if not started:
+        return
+    run_id = (group or {}).get("run_id") or ""
+    for key in ("left", "back", "right"):
+        slot = slots.get(key) or {}
+        status, _ = api.json("POST", f"/api/v1/chat/sessions/{session}/three-views/{run_id}/views/{key}",
+                             {"action": "start", "attempt": slot.get("attempt", 0)})
+        if status != 200:
+            record(f"multiview-text: the person starts the {key} view", False, f"POST {status}")
+            return
+        group = _four_view_group(api, session, (key,), 120)
+    slots = {slot.get("key"): slot for slot in (group or {}).get("slots") or []}
+    outputs = [slots.get(key, {}).get("output_asset_id") or "" for key in FOUR_VIEW_KEYS]
+    record("multiview-text: front, left, back and right are four separate pictures",
+           all(slots.get(key, {}).get("status") == "succeeded" for key in FOUR_VIEW_KEYS)
+           and all(outputs) and len(set(outputs)) == 4,
+           f"slots={ {k: v.get('status') for k, v in slots.items()} } outputs={outputs}")
+    refines = _tool_call_arguments(work, "main", session, "refine_image")
+    tasks = [task for task in session_tasks(api, session) if task.get("state") != "CANCELED"]
+    text_tasks = [task for task in tasks if task.get("capability") == "text-to-image"]
+    view_tasks = [task for task in tasks if task.get("capability") == "image-to-image"]
+    record("multiview-text: one refine_image draws only the front source, the views are four image tasks",
+           len(refines) == 1 and len(text_tasks) == 1 and len(view_tasks) == 4,
+           f"refine_image calls {len(refines)}, text-to-image {len(text_tasks)}, image-to-image {len(view_tasks)}")
+
+
 def scenario_agent_background(api, offerings):
     """#189: one assistant completion submits a generation step and the
     three-view SkillRun. With the session in auto mode both submit in that one
@@ -8770,7 +8849,7 @@ def scenario_auto_completion(work, stack_binary, processes):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,l5-direct")
+    parser.add_argument("--only", default="", help="comma-separated: balance,chain,meshy,hyper3d,hyper3d-agent,images,matting-faults,model-parts,model-convert,tripo,p2,project,agent,agent-background,agent-quality,image-self-check,image-purpose,next-step,mask-selection,offering-knowledge,work-ledger,self-check,vision-budget,three-view,four-view,multiview-text,visual-anchors,auto-approval,plan-checkpoint,plan-state,concept-candidates,reroll,preferences,mcp,asset-list,asset-list-crops,asset-list-run,asset-list-review,auto-completion,faults,meshy-endpoints,hyper3d-endpoints,l5-direct")
     # #241/#238: the preferences-off arm disables the feature in the private
     # Catalog (maximum_entries=0) without changing the revision.
     parser.add_argument("--preferences", choices=("on", "off"), default="on",
@@ -8796,7 +8875,7 @@ def main():
             raise RuntimeError(f"the fake upstream did not listen; see {work}/fake.log")
         print(f"# work {work}; fake on :{FAKE_PORT}, stack on :{STACK_PORT}, MCP on :{MCP_PORT}", flush=True)
 
-        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints"}:
+        if selected & {"balance", "chain", "meshy", "hyper3d", "hyper3d-agent", "images", "matting-faults", "l5-direct", "model-parts", "model-convert", "tripo", "p2", "project", "agent", "agent-background", "agent-quality", "image-self-check", "image-purpose", "next-step", "work-ledger", "vision-budget", "three-view", "four-view", "multiview-text", "visual-anchors", "auto-approval", "plan-checkpoint", "concept-candidates", "reroll", "mcp", "meshy-endpoints", "hyper3d-endpoints"}:
             child, api = start_stack(processes, stack_binary, work, "main", catalog, GOOD_KEY)
             offerings = {o["id"]: o for o in api.json("GET", "/api/v1/offerings")[1]["offerings"]}
             if "balance" in selected:
@@ -8839,6 +8918,8 @@ def main():
                 scenario_three_view(work, api, offerings)
             if "four-view" in selected:
                 scenario_four_view(work, api, offerings)
+            if "multiview-text" in selected:
+                scenario_multiview_text(work, api, offerings)
             if "auto-approval" in selected:
                 scenario_auto_approval(work, api, offerings)
             if "plan-checkpoint" in selected:

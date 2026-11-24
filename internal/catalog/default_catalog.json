@@ -7171,7 +7171,7 @@
               "create_multiview_images",
               "create_model_3d_from_views"
             ],
-            "text": "【三视图制作要领】\n逐张三视图、四视图和多视角设定图都只用 create_three_view：一个视角一张独立图片，绝不出横排合图或九宫格，也不要把四个视角画进同一张图。先出正面并自检，再用「原图 + 已通过的正面图」依次出左、背和可选的右侧；每一张都是独立任务，因此可以只重做或替换有问题的那一张。\n按目的选 purpose：\n- model_input（缺省）用于要给 3D 做输入的同一主体：正交投影、中性均匀光、统一姿态/比例/画幅；主体类型（generic、humanoid、quadruped、hard_surface）决定姿态与硬表面约束，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图的姿态、画风和画幅比例，不强制 A/T 姿态；四张图的主体描述与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n两种用途里，每张完成后都用 inspect_image 比较主体占比、背景和轮廓高度；model_input 的画幅按源图主体的高宽比选择（竖版角色不会落进 1:1），design_sheet 的画幅直接取源图整张比例。服务端的一致性检查还会比对轮廓高度、配件等独立部件数量和左右镜像（design_sheet 停用主体占比差、主色和部件数），这些数字看不出款式和语义，所以完成后要对照正面图逐张复核服装、配色、配件和左右（回执里附有清单），发现问题如实告诉用户并建议重试或替换那一张。\n一步出四视角（create_multiview_images）用于只需要一张多视角图片资产、或不要求逐视角控制和单视角重做时：它一次生成正面、左侧、背面、右侧四张图，不能替代逐张三视图的源图控制与一致性检查，也不是 3D 步骤。\n用已经完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型的能力与价格以 list_offerings 为准。"
+            "text": "【三视图制作要领】\n用户说三视图、四视图（3 视图、4 视图、三视角、四视角）就是每个视角一张独立图片：三视图是正面、左侧、背面，四视图再加右侧。张数由视图数定，不开概念图数量卡、不再问几张，模型选择照常。一律用 create_three_view，不用 refine_image 把几个视角画进一张图；只有用户明确要一张图、拼图或 character sheet 时才出一张。只说设定图、没说视图数时照常处理。没有源图时先用 refine_image 出一张单主体正面源图，再以它为源调用。开工前一句话说明将出几张独立图，以及按 list_offerings 的 estimated_credits 计的预计总积分（没有源图时含源图那张），不自行估价。\ncreate_three_view 先出正面并自检，再以已通过的正面为源依次出左、背、右；每张是独立任务，可单独重做或替换。\n按目的选 purpose：\n- model_input（缺省）给 3D 做输入：正交投影、中性均匀光、统一姿态/比例/画幅，主体类型决定姿态，人形用 A-pose 或 T-pose。\n- design_sheet 用于设定图：保持原图姿态、画风和画幅比例；各张主体与风格描述逐字相同，只改视角句，朝向写成画面方向并写明该视角看得见和看不见什么。\n每张完成后用 inspect_image 比较主体占比、背景和轮廓高度。服务端一致性检查看不出款式和语义，要对照正面逐张复核服装、配色、配件和左右（回执附清单），有问题如实告诉用户并建议重试或替换那一张。\ncreate_multiview_images 一次出正面、左侧、背面、右侧四张，只在只要一组多视角图片资产、不要逐视角控制和单张重做时用，不替代逐张三视图，也不是 3D 步骤。\n用完成的三视图生成 3D 时调用 create_model_3d_from_views 并传 three_view_group；模型能力与价格以 list_offerings 为准。"
           },
           {
             "id": "image2d",
@@ -8677,7 +8677,7 @@
         {
           "name": "create_three_view",
           "execution": {"implementation_key":"skill.prepare","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":[],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Start the image-three-view recipe from exactly one user-selected image and the image-to-image model the session's model choice picks. Pick purpose: model_input (the default) renders an orthographic set for 3D, where the subject_type class decides the pose and the frame; design_sheet renders a design sheet that keeps the source's own pose, art style and aspect ratio. Each view is one picture of its own: never a row or a grid of several views, and never one horizontal composite. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, with the original picture as a second reference for a design sheet, so clothing, proportions and colors stay consistent. For model_input, pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. For design_sheet the source's pose is kept as it is. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, or the source picture's own shape for a design sheet, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
+          "description": "Start the image-three-view recipe from exactly one image of this chat (one the user selected or attached, or one generated earlier, such as a front source picture drawn first) and the image-to-image model the session's model choice picks. Pick purpose: model_input (the default) renders an orthographic set for 3D, where the subject_type class decides the pose and the frame; design_sheet renders a design sheet that keeps the source's own pose, art style and aspect ratio. Each view is one picture of its own: never a row or a grid of several views, and never one horizontal composite. Each view is an orthographic render: the front view uses the selected image as its identity anchor, and the left, back and right views use the approved front view, with the original picture as a second reference for a design sheet, so clothing, proportions and colors stay consistent. For model_input, pick subject_type from these declared classes: generic, humanoid, quadruped, hard_surface; humanoid uses a neutral A-pose or T-pose. For design_sheet the source's pose is kept as it is. This prepares the first (front) view and requests approval by the session approval mode. In strict and auto modes the later views do not start by themselves: the user starts each one from the three-view card, and a failed or inconsistent view can be retried or replaced alone. In budget mode, when the approved production plan covers every required view, the server authorizes and submits the remaining views one at a time in the same turn, and automatically redraws only a view whose consistency check failed (size, background, dominant colors, detached parts such as a weapon or a pet, and mirrored left and right sides, all compared with the front view). The frame of every view follows the shape of the source subject, or the source picture's own shape for a design sheet, instead of defaulting to a square. When the result lists the finished views, compare each one with the front view item by item before you say they are consistent. The views form one group whose run ID the result names. To make one 3D model from the finished views, call create_model_3d_from_views with three_view_group set to that run ID. Making a 3D model from the front view alone uses create_model_3d_from_image. Never claim all views are complete after this call unless its result says the required views are accepted.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8815,7 +8815,7 @@
           "selection_mask": "bind",
           "reference_size": "single",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["image"],"capabilities":["image-to-image","text-to-image"],"idempotency":"required","cancellation":"task","agent_scope":"2d"},
-          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count.",
+          "description": "Generate or edit a 2D image. The model comes from the four layers: the person's explicit pick in this session, your model argument with a reason, the session's 2D purpose recommendation, and the Offering default. Use reference_handles (or reference_image_indices) for existing images; when several references serve different purposes (pose, outfit, style...), say which in reference_purposes. With exactly one reference picture and no output size set, the output keeps that picture's aspect ratio (the closest size the model supports); call set_params first only when the user asks for another size or shape. The number of images is the person's own setting for this session (one value across models), not yours and not an upstream limit: do not try to change it and do not submit extra calls to make up a count. Several views of one subject (a three-view or four-view request) go to create_three_view, one picture per view, as the three-view craft brief says.",
           "cross_domain_model_fallback": true,
           "model_argument": "model",
           "model_choices": {"from": "available_offerings"},
@@ -10486,10 +10486,24 @@
             "recommended_size": "",
             "thumbnail_path": "",
             "raw_image_url": "",
-            "prompt": "用选中的或随消息附上的那一张图生成三视图：先出正面图，左侧、背面（和可选的右侧）由用户在对话里的三视图卡片上继续。",
+            "prompt": "用选中的或随消息附上的那一张图出三视图：正面、左侧、背面各一张独立图，按【三视图制作要领】以正面为源逐视角生成。先出正面，其余视角在对话里的三视图卡片上继续。",
             "tool": "create_three_view",
             "requires_image": true,
             "default_message": "用这张图生成三视图",
+            "one_shot": true
+          },
+          {
+            "id": "system-four-view",
+            "name": "Four-view",
+            "name_zh": "四视图",
+            "category": "",
+            "recommended_size": "",
+            "thumbnail_path": "",
+            "raw_image_url": "",
+            "prompt": "用选中的或随消息附上的那一张图出四视图：正面、左侧、背面、右侧各一张独立图，按【三视图制作要领】以正面为源逐视角生成。先出正面，其余视角（含右侧）在对话里的三视图卡片上继续。",
+            "tool": "create_three_view",
+            "requires_image": true,
+            "default_message": "用这张图生成四视图",
             "one_shot": true
           }
         ],
@@ -21804,8 +21818,11 @@
             "chat.presentation.status.preparing_tool": "Preparing to call a tool…",
             "chat.skills.tool_directive_template": "\n\n[Selected Skill] The user selected the Skill \"{name}\": {prompt}\nThis turn must be completed with the tool {tool}. The input image is the image selected in the workspace or the image the user attached to the message. Do not substitute another tool, and do not just describe the result in text.",
             "chat.skills.system_skills[id=system-three-view].name_zh": "Three views",
-            "chat.skills.system_skills[id=system-three-view].prompt": "Generate three views from the single selected image or the image attached to the message: first produce the front view; the user then continues with the left, back (and optional right) views from the three-view card in the chat.",
+            "chat.skills.system_skills[id=system-three-view].prompt": "Make three views from the single selected image or the image attached to the message: the front, left and back views, one separate picture each, generated view by view from the front view as the three-view craft brief says. The front view comes first; the other views continue from the three-view card in the chat.",
             "chat.skills.system_skills[id=system-three-view].default_message": "Generate three views from this image",
+            "chat.skills.system_skills[id=system-four-view].name_zh": "Four views",
+            "chat.skills.system_skills[id=system-four-view].prompt": "Make four views from the single selected image or the image attached to the message: the front, left, back and right views, one separate picture each, generated view by view from the front view as the three-view craft brief says. The front view comes first; the other views, the right view included, continue from the three-view card in the chat.",
+            "chat.skills.system_skills[id=system-four-view].default_message": "Generate four views from this image",
             "chat.skills.categories[id=anime].label": "Anime & manga",
             "chat.skills.categories[id=game].label": "Games",
             "chat.skills.categories[id=cinematic].label": "Film & animation",
