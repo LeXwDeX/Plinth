@@ -320,11 +320,14 @@ type MCPPublicMessages struct {
 	UploadInvalid        string `json:"upload_invalid"`
 	UploadTypeNotAllowed string `json:"upload_type_not_allowed"`
 	// The mask of an image-to-image call (#332). MaskInvalid carries {max};
-	// MaskSizeMismatch carries the four pixel sizes; MaskNotSupported words a
+	// MaskSizeMismatch carries the four pixel sizes; MaskFormatMismatch
+	// carries {mask_format} and {image_format}, the formats the bytes of the
+	// mask and of the first picture are (#582); MaskNotSupported words a
 	// service without a mask parameter and a mask given without a picture.
-	MaskInvalid      string `json:"mask_invalid"`
-	MaskSizeMismatch string `json:"mask_size_mismatch"`
-	MaskNotSupported string `json:"mask_not_supported"`
+	MaskInvalid        string `json:"mask_invalid"`
+	MaskSizeMismatch   string `json:"mask_size_mismatch"`
+	MaskFormatMismatch string `json:"mask_format_mismatch"`
+	MaskNotSupported   string `json:"mask_not_supported"`
 	// SignedDownloadUnavailable answers a signed:true tool result when the
 	// server has no signing key configured.
 	SignedDownloadUnavailable string `json:"signed_download_unavailable"`

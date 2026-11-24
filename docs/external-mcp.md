@@ -446,7 +446,7 @@ Key 的持有人必须是平台里真实存在且可用的用户；只存在于�
 
 图生图的 `images` 可以是 `upload_image` 返回的图片 ID，也可以是本人成功任务的图片产物 ID。2D 步骤不设 3D 步数限制，`step_counted` 为 `false`。
 
-蒙版相关错误：`mask_invalid`、`mask_size_mismatch`、`mask_not_supported`、`image_not_found`；校验在准备、授权与建任务之前完成，失败不建任务、不计费。
+蒙版相关错误：`mask_invalid`、`mask_size_mismatch`、`mask_format_mismatch`、`mask_not_supported`、`image_not_found`；校验在准备、授权与建任务之前完成，失败不建任务、不计费。
 
 #### 4.3.3 `remove_background`
 
@@ -513,6 +513,7 @@ Key 的持有人必须是平台里真实存在且可用的用户；只存在于�
 - 必须与 `images` **同传**；`mask` 是图片 ID，来源同 `images`。
 - 必须是 PNG；字节数不超过该服务 `mask` 参数声明的 `max_bytes`。
 - 与 `images` 的**第一张图**同尺寸。
+- 与 `images` 的**第一张图**同格式（#582，图片编辑接口的规则“要编辑的图与蒙版必须同格式同尺寸”）：蒙版只能是 PNG，所以第一张图也必须是 PNG；两者的格式都按文件内容判断，不看文件名或声明的类型。不一致时返回 `mask_format_mismatch`，文案写明两者的格式，并请先把第一张图转成同尺寸的 PNG 重新上传；服务端不静默转码，也不发到上游才失败。
 - 至少有一块透明区域；透明区域就是要重绘的区域。
 - 只有 `list_services` 里 `inputs` 含 `mask` 的服务支持。不传 `service` 时，服务端会选一个支持蒙版的图生图服务；指定的服务不支持时返回 `mask_not_supported`。
 - 校验在准备、授权与建任务之前完成；失败不建任务、不计费。
@@ -819,7 +820,7 @@ Key 的持有人必须是平台里真实存在且可用的用户；只存在于�
 | `asset_name_invalid` / `asset_project_mismatch` / `project_not_found` | 资产名与项目问题 |
 | `idempotency_conflict` / `in_progress` | 幂等键冲突 / 同键请求处理中 |
 | `upload_too_large` / `upload_invalid` / `upload_type_not_allowed` | 上传问题 |
-| `mask_invalid` / `mask_size_mismatch` / `mask_not_supported` | 蒙版问题 |
+| `mask_invalid` / `mask_size_mismatch` / `mask_format_mismatch` / `mask_not_supported` | 蒙版问题 |
 | `signed_download_unavailable` | 服务端没有配置签名密钥 |
 | `model_not_ready` / `model_not_glb` / `model_too_large` / `model_unreadable` / `model_unavailable` | 模型检查问题 |
 | `image_not_ready` / `image_unreadable` / `image_too_large` / `image_unavailable` / `image_busy` | 图片检查问题（任务产物存在但不是图片时，code 是 `asset_not_found`，Message 用 `asset_not_image` 文案） |

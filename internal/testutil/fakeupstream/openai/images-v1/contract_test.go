@@ -510,18 +510,18 @@ func TestEditRefusesAPictureOrMaskOf50MB(t *testing.T) {
 	}
 }
 
-// #579: an edit that is no multipart form gets a 400 that names the content
-// type, not a missing model (the fake models only the multipart edit).
-func TestEditRefusesARequestThatIsNoMultipartForm(t *testing.T) {
+// #579/#582: an edit that is neither a multipart form nor JSON gets a 400
+// that names the content type, not a missing model.
+func TestEditRefusesARequestThatIsNeitherMultipartNorJSON(t *testing.T) {
 	f := newFixture(t, fakeupstream.Config{})
-	status, body := edit(f, testkit.Body{ContentType: "application/json", Data: []byte(`{"model":"` + Model + `","prompt":"x"}`)})
+	status, body := edit(f, testkit.Body{ContentType: "text/plain", Data: []byte("model=" + Model + "&prompt=x")})
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d %v", status, body)
 	}
 	object, _ := body["error"].(map[string]any)
 	message, _ := object["message"].(string)
 	if object["type"] != "invalid_request_error" || object["code"] != nil || object["param"] != nil ||
-		!strings.Contains(message, "multipart/form-data") || !strings.Contains(message, "application/json") ||
+		!strings.Contains(message, "multipart/form-data or application/json") || !strings.Contains(message, "text/plain") ||
 		strings.Contains(message, "'model'") {
 		t.Fatalf("body = %v", body)
 	}
