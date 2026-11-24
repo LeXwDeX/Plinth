@@ -216,10 +216,12 @@ type kind struct {
 var kinds = []kind{
 	{Path: "/generation/text-to-model", Type: "text_to_model", Base: "text_to_model", Required: []string{"model", "prompt"}, Real: true, DocPage: "generation-text-to-model/standard"},
 	{Path: "/animations/rig-check", Type: "animate_prerigcheck", Base: "animate_prerigcheck", Required: []string{"input"}, Real: true, DocPage: "animations-rig-check"},
-	{Path: "/animations/rig", Type: "animate_rig", Base: "animate_rig", Required: []string{"input", "model"}, Real: true, DocPage: "animations-rig"},
+	// model is optional on the rig, segment and complete pages (re-read 2026-11-25, #579): the rig
+	// defaults to v1.0-20240301 (rig.go), segment and complete to v1.0-20250506 (processing.go).
+	{Path: "/animations/rig", Type: "animate_rig", Base: "animate_rig", Required: []string{"input"}, Real: true, DocPage: "animations-rig"},
 	{Path: "/animations/retarget", Type: "animate_retarget", Base: "animate_retarget", Required: []string{"input"}, Real: true, DocPage: "animations-retarget"},
-	{Path: "/mesh/segment", Type: "mesh_segmentation", Base: "mesh_segmentation", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-segment"},
-	{Path: "/mesh/complete", Type: "mesh_completion", Base: "mesh_completion", Required: []string{"input", "model"}, Real: true, DocPage: "mesh-complete"},
+	{Path: "/mesh/segment", Type: "mesh_segmentation", Base: "mesh_segmentation", Required: []string{"input"}, Real: true, DocPage: "mesh-segment"},
+	{Path: "/mesh/complete", Type: "mesh_completion", Base: "mesh_completion", Required: []string{"input"}, Real: true, DocPage: "mesh-complete"},
 	{Path: "/models/convert", Type: "convert_model", Base: "convert_model", Required: []string{"input", "format"}, Real: true, DocPage: "models-convert"},
 	{Path: "/generation/image-to-model", Type: "image_to_model", Base: "image_to_model", Required: []string{"model", "input"}, Real: true, DocPage: "generation-image-to-model/standard"},
 	{Path: "/generation/image-to-splat", Type: "image_to_splat", Base: "image_to_splat", Required: []string{"input"}, Real: true, DocPage: "generation-image-to-splat"},
@@ -1434,7 +1436,8 @@ const (
 // positional array of exactly four strings in the order front, left, back, right with ""
 // for a view that is skipped, the front one never skipped and at least two views given;
 // each image is a file token (or a URL). The two forms are never mixed. The task_id form
-// is multiviewTaskInput.
+// is multiviewTaskInput. A view-key value may also be nested (multiview page, re-read
+// 2026-11-25, #579): {url}, {file_token} or {object:{bucket,key}}, multiviewViewImage.
 func multiviewInputsError(body map[string]any) string {
 	if _, legacy := body["input"]; legacy {
 		return "input is not accepted; use inputs"
@@ -1458,9 +1461,11 @@ func multiviewInputsError(body map[string]any) string {
 			return "each inputs item must hold exactly one view key"
 		}
 		for key, value := range view {
-			token, _ := value.(string)
-			if !slices.Contains([]string{"front", "left", "back", "right"}, key) || strings.TrimSpace(token) == "" || seen[key] {
+			if !slices.Contains([]string{"front", "left", "back", "right"}, key) || seen[key] {
 				return "inputs view keys must be unique front/left/back/right with a file token"
+			}
+			if _, _, ok := multiviewViewImage(value); !ok {
+				return "each view must be a URL, a file token, {url}, {file_token} or {object:{bucket,key}}"
 			}
 			seen[key] = true
 		}
@@ -1469,6 +1474,38 @@ func multiviewInputsError(body map[string]any) string {
 		return "inputs must include the front view"
 	}
 	return ""
+}
+
+// multiviewViewImage reads one view-key value of the multiview inputs: a plain string
+// (a URL or a file token, as before), or one of the documented nested objects with
+// exactly one key: {url} (an http(s) URL, isHTTP), {file_token} (a non-empty token)
+// or {object:{bucket,key}} (two non-empty strings). ref is the URL or token, object
+// the stored object a nested object names; ok is false for anything else. The page
+// gives no example of the nested forms and says nothing of what the poll shows for
+// them, so the poll's files entry is constructed (multiviewFiles).
+func multiviewViewImage(value any) (ref string, object map[string]any, ok bool) {
+	if text, isString := value.(string); isString {
+		return text, nil, strings.TrimSpace(text) != ""
+	}
+	nested, isObject := value.(map[string]any)
+	if !isObject || len(nested) != 1 {
+		return "", nil, false
+	}
+	if link, present := nested["url"]; present {
+		text, _ := link.(string)
+		return text, nil, isHTTP(text)
+	}
+	if token, present := nested["file_token"]; present {
+		text, _ := token.(string)
+		return text, nil, strings.TrimSpace(text) != ""
+	}
+	stored, _ := nested["object"].(map[string]any)
+	bucket, _ := stored["bucket"].(string)
+	name, _ := stored["key"].(string)
+	if len(stored) != 2 || strings.TrimSpace(bucket) == "" || strings.TrimSpace(name) == "" {
+		return "", nil, false
+	}
+	return "", map[string]any{"bucket": bucket, "key": name}, true
 }
 
 // multiviewPositionalError checks the legacy positional inputs array.
