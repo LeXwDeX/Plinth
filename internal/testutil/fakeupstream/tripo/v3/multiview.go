@@ -44,30 +44,41 @@ func (t *task) echoMultiviewInput(input map[string]any) {
 // multiviewViews, the stored upload for a view the request carries and null for
 // the others.
 func (t *task) multiviewFiles() []any {
-	tokens := map[string]string{}
+	stored := map[string]map[string]any{}
 	inputs, _ := t.request["inputs"].([]any)
 	for index, entry := range inputs {
 		if token, positional := entry.(string); positional && index < len(multiviewViews) && token != "" {
-			tokens[multiviewViews[index]] = token // the legacy positional form (#541)
+			stored[multiviewViews[index]] = fakeStoredObject(token) // the legacy positional form (#541)
 			continue
 		}
 		view, _ := entry.(map[string]any)
 		for name, value := range view {
-			if token, ok := value.(string); ok && slices.Contains(multiviewViews, name) {
-				tokens[name] = token
+			ref, object, ok := multiviewViewImage(value)
+			if !ok || !slices.Contains(multiviewViews, name) {
+				continue
 			}
+			if object == nil {
+				object = fakeStoredObject(ref)
+			}
+			stored[name] = object
 		}
 	}
 	files := make([]any, 0, len(multiviewViews))
 	for _, view := range multiviewViews {
-		token, sent := tokens[view]
+		object, sent := stored[view]
 		if !sent {
 			files = append(files, nil)
 			continue
 		}
-		// The real key is the account's storage path (tcli_<account>/<date>/…); the
-		// fake's names the upload token and nothing else.
-		files = append(files, map[string]any{"object": map[string]any{"bucket": "tripo-data", "key": "fake/" + token}})
+		files = append(files, map[string]any{"object": object})
 	}
 	return files
+}
+
+// fakeStoredObject is the stored object the poll names for a view sent as a URL or
+// a file token. The real key is the account's storage path (tcli_<account>/<date>/…);
+// the fake's names the reference and nothing else. A view sent as
+// {object:{bucket,key}} is shown as sent (constructed: no real poll of that form).
+func fakeStoredObject(ref string) map[string]any {
+	return map[string]any{"bucket": "tripo-data", "key": "fake/" + ref}
 }

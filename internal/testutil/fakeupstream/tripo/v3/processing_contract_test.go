@@ -390,3 +390,37 @@ func TestPricesFollowTheOfficialTable(t *testing.T) {
 		t.Fatalf("edit multiview of three views = %v, want 15 (5 per edited image)", edit)
 	}
 }
+
+// #579: model is optional on the rig, segment and complete pages (re-read
+// 2026-11-25). An omitted model is accepted and stands for the page's default: the
+// rig's v1.0-20240301, which takes the v1.0 preset:biped: names on a retarget and
+// no v3.0 preset; segment's and complete's v1.0-20250506. A model that is sent is
+// still checked against the page's list.
+func TestRigSegmentCompleteTakeTheDefaultModel(t *testing.T) {
+	f := newFixture(t, fakeupstream.Config{AccountConcurrencyLimit: -1})
+	text := f.generated()
+
+	rig := f.create("/animations/rig", map[string]any{"input": text}, key)
+	if statuses, done := f.finish(rig, key); statuses[len(statuses)-1] != statusSuccess {
+		t.Fatalf("a rig without a model ended %v %v", statuses, done)
+	}
+	v1 := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:biped:wave_goodbye_01"}, key)
+	if statuses, _ := f.finish(v1, key); statuses[len(statuses)-1] != statusSuccess {
+		t.Fatalf("a v1.0 preset on the default rig ended %v", statuses)
+	}
+	v3 := f.create("/animations/retarget", map[string]any{"input": rig, "animation": "preset:walk"}, key)
+	if statuses, _ := f.finish(v3, key); statuses[len(statuses)-1] != statusFailed {
+		t.Fatalf("a v3.0 preset on the default (v1.0) rig ended %v", statuses)
+	}
+
+	segment := f.create("/mesh/segment", map[string]any{"input": text}, key)
+	if statuses, done := f.finish(segment, key); statuses[len(statuses)-1] != statusSuccess {
+		t.Fatalf("a segmentation without a model ended %v %v", statuses, done)
+	}
+	f.expect("/mesh/complete", map[string]any{"input": segment}, http.StatusOK, 0)
+
+	f.expect("/animations/rig", map[string]any{"input": text, "model": "v9.9"}, http.StatusBadRequest, 1004)
+	f.expect("/animations/rig", map[string]any{"input": text, "model": 3}, http.StatusBadRequest, 1004)
+	f.expect("/mesh/segment", map[string]any{"input": text, "model": "v9.9"}, http.StatusBadRequest, 1004)
+	f.expect("/mesh/complete", map[string]any{"input": segment, "model": "v2.0-20260430"}, http.StatusBadRequest, 1004)
+}

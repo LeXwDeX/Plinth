@@ -91,9 +91,15 @@ func optionalString(body map[string]any, name string) (value string, present, ok
 	return text, true, isString && strings.TrimSpace(text) != ""
 }
 
-// rigModelOf is the model a rig request names; the fake requires it.
+// rigModelOf is the model a rig request names, the page's default
+// v1.0-20240301 when it names none (the rig page, re-read 2026-11-25, #579: model
+// is optional). A model that is present but not a string is kept as "" and refused.
 func rigModelOf(body map[string]any) string {
-	model, _ := body["model"].(string)
+	raw, present := body["model"]
+	if !present {
+		return rigModelV1
+	}
+	model, _ := raw.(string)
 	return model
 }
 
@@ -107,8 +113,7 @@ func rigTypeOf(body map[string]any) string {
 }
 
 // rigRequestError checks the documented fields of POST /animations/rig (model
-// is required by this fake because Plinth always sends it). An empty answer
-// means the request is valid.
+// is optional, rigModelOf). An empty answer means the request is valid.
 func rigRequestError(body map[string]any) string {
 	model := rigModelOf(body)
 	if !choice(model, rigModels) {
