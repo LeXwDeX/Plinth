@@ -513,7 +513,7 @@ Catalog 加载时校验：`options` 必须恰为 `"false"` 与 `"true"` 两项�
 
 - `mode` 为 `fixed: true`、hidden，默认 `preview`。调用方传 `refine` 也会被规范化为 `preview`。`options` 仍保留 `refine`，因为 `texture_resolution` 的 `omit_when` 引用它，而且精细化阶段由 Adapter 用同一套 Schema 投影生成请求体。
 - `preview_task_id` 在 `mode=preview` 时省略：调用方经 `/api/v1/tasks` 传入 `mode=refine` 加 `preview_task_id` 时，`mode` 被规范化为 `preview`，传入的预览任务不进入上游请求，结果是一个新的完整任务（预览加精细化）。旧 `/api/meshy/*` 写入路由不是准入路径（返回 403，见 `legacy_admission_regression_test.go`），没有单独的 refine 兼容入口。
-- `provider_options.refine_after_preview` 打开 Adapter 的两阶段私有子作业（`internal/providers/meshy/refine.go`）。精细化请求的覆盖值和预览任务引用都由它声明：`{"set": {"mode": "refine"}, "source_parameter": "preview_task_id"}`，Adapter 不写死 Meshy 参数名。旧任务快照里的布尔形式 `true` 仍按同样含义读取。
+- `provider_options.refine_after_preview` 打开 Adapter 的两阶段私有子作业（`internal/providers/meshy/refine.go`）。精细化请求的覆盖值和预览任务引用都由它声明：`{"set": {"mode": "refine"}, "source_parameter": "preview_task_id", "rate_limit_retries": 5}`，Adapter 不写死 Meshy 参数名。`rate_limit_retries` 是精细化创建被 Meshy 明确 429 拒绝后最多重发的次数（#504，非负整数，加载期校验）；没有这个字段的旧快照与布尔形式 `true` 按 0 处理，即 429 时直接以限流失败结束，不重发。旧任务快照里的布尔形式 `true` 仍按同样含义读取。
 - `estimated_credits` 为 40：预览 20 + 4K 几何 5 + 8K 精细化 15。
 
 一个公开 Task 内的执行顺序：
@@ -522,8 +522,9 @@ Catalog 加载时校验：`options` 必须恰为 `"false"` 与 `"true"` 两项�
 2. `Observe` 轮询预览。进度按 0–50 显示。
 3. 预览成功后，Adapter 先经私有派发许可把意图写入 Opaque 检查点，再提交 refine（`mode=refine`、`preview_task_id`、`texture_resolution=8k`、`enable_pbr=true`，不带 `geometry_resolution`）。返回的 refine remote ID 只存在 Opaque 检查点里。
 4. 之后 `Observe` 轮询 refine，进度按 50–100 显示。refine 成功时的产物就是公开任务的产物；refine 失败即公开任务失败。
-5. 如果检查点停在“已写意图、未记录 refine ID”（付费 POST 结果不明），Adapter 让任务失败，绝不重发付费请求。
-6. 成功后观察期（`PostSuccess`）不会补交 refine。
+5. 如果检查点停在“已写意图、未记录 refine ID”（付费 POST 结果不明，例如 408、5xx、连接中断），Adapter 让任务失败，绝不重发付费请求。
+6. 精细化创建收到明确的 HTTP 429（`rate_limited`、可重试、非含糊；Meshy Rate Limits 页的每秒请求数超限带 `Retry-After`，并发任务数超限的消息以 `NoMorePendingTasks` 开头、不带 `Retry-After`）时，上游没有受理也没有扣费（#504）：Adapter 把这次私有派发许可结算为 `not_dispatched`，检查点去掉意图、只记被拒次数（`rate_limit_refusals`），公开 Task 保持运行，下一轮 `Observe` 在 `Retry-After` 之后（没有时按 Offering `retry` 的 `initial_backoff` 起翻倍、封顶 `max_backoff`）以新许可重发同一精细化请求。被拒次数超过 `rate_limit_retries` 时任务以 `rate_limited`、不可重试失败（“Meshy 精细化提交持续被限流，有限重试已用尽”），不会被当成“结果不明”，也不会再发请求。限流重发不消耗 `retry.max_attempts`。fake 的 `rate-limit` 与 `concurrency-limit` 场景按该页给出这两种 429。
+7. 成功后观察期（`PostSuccess`）不会补交 refine。
 
 该 Offering 的 Meshy webhook 返回 `generation.ErrWebhookNotApplicable`。内核确认收到并丢弃，不改任务状态，因为预览 webhook 不能完成两阶段任务，也不带私有检查点。两阶段任务只由轮询推进。删除上游任务时只删公开 Attempt 记录的预览任务；refine 任务留在 Meshy 账户。
 

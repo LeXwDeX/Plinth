@@ -277,6 +277,27 @@ func TestFaultsShareTheMeshyEnvelope(t *testing.T) {
 	}
 }
 
+// #504: the two documented 429s of the Rate Limits page. The requests-per-second
+// one carries Retry-After; the concurrency one refuses only a create and carries
+// none. A refine refused this way created no task.
+func TestRateLimitAnswersFollowTheRateLimitsPage(t *testing.T) {
+	f := newFixture(t)
+	status, header, body := f.Do("POST", Prefix+"/text-to-3d", key, map[string]any{"mode": "preview", "prompt": "p"}, "X-Fake-Scenario", "rate-limit")
+	if status != http.StatusTooManyRequests || body["message"] != "Rate limit exceeded." || header.Get("Retry-After") == "" {
+		t.Fatalf("rate limit: %d %v %v", status, header, body)
+	}
+	preview := create(t, f, map[string]any{"mode": "preview", "prompt": "p"})
+	finish(t, f, preview)
+	status, header, body = f.Do("POST", Prefix+"/text-to-3d", key, map[string]any{"mode": "refine", "preview_task_id": preview}, "X-Fake-Scenario", "concurrency-limit")
+	message, _ := body["message"].(string)
+	if status != http.StatusTooManyRequests || !strings.HasPrefix(message, "NoMorePendingTasks") || header.Get("Retry-After") != "" {
+		t.Fatalf("concurrency limit: %d %v %v", status, header, body)
+	}
+	if status, _, _ := f.Do("GET", Prefix+"/text-to-3d/"+preview, key, nil, "X-Fake-Scenario", "concurrency-limit"); status != http.StatusOK {
+		t.Fatalf("a poll does not count against the concurrency limit: %d", status)
+	}
+}
+
 // The fake keeps the structure of the real samples for both task types, for
 // the create envelope and the errors.
 func TestDriftFakeResponsesMatchTheRealSamples(t *testing.T) {

@@ -3,6 +3,7 @@ package meshy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -58,8 +59,11 @@ func (a *Adapter) ResolveDependencyJob(request generation.DependencyJobRequest) 
 }
 
 // refineState is the private opaque checkpoint of a two-stage task.
+// RateLimitRefusals counts the refine creates Meshy refused with an explicit
+// 429 (#504); it survives in the checkpoint until a refine is accepted.
 type refineState struct {
-	RefineTaskID string `json:"refine_task_id,omitempty"`
+	RefineTaskID      string `json:"refine_task_id,omitempty"`
+	RateLimitRefusals int    `json:"rate_limit_refusals,omitempty"`
 }
 
 // refineDeclaration is provider_options.refine_after_preview. Set holds the
@@ -67,9 +71,12 @@ type refineState struct {
 // (Meshy: mode=refine); SourceParameter names the parameter that carries the
 // preview task's remote ID (Meshy: preview_task_id). Both come from the
 // Product Schema, so the adapter holds no Meshy parameter names.
+// RateLimitRetries bounds how often a refine create that Meshy refused with an
+// explicit 429 is sent again (#504); absent (older snapshots) means never.
 type refineDeclaration struct {
-	Set             map[string]any `json:"set"`
-	SourceParameter string         `json:"source_parameter"`
+	Set              map[string]any `json:"set"`
+	SourceParameter  string         `json:"source_parameter"`
+	RateLimitRetries int            `json:"rate_limit_retries,omitempty"`
 }
 
 // UnmarshalJSON also accepts the boolean form frozen into task snapshots
@@ -98,7 +105,7 @@ func refineDeclarationOf(offering generation.Offering) (refineDeclaration, bool)
 	}
 	declaration := *options.RefineAfterPreview
 	declaration.SourceParameter = strings.TrimSpace(declaration.SourceParameter)
-	if len(declaration.Set) == 0 || declaration.SourceParameter == "" {
+	if len(declaration.Set) == 0 || declaration.SourceParameter == "" || declaration.RateLimitRetries < 0 {
 		return refineDeclaration{}, false
 	}
 	return declaration, true
@@ -213,7 +220,15 @@ func (a *Adapter) observePreviewStage(
 	default:
 		return observation, nil
 	}
+	current, _ := parseRefineState(request.Opaque)
+	if declaration, _ := refineDeclarationOf(request.Offering); current.RateLimitRefusals > declaration.RateLimitRetries {
+		// The budget was spent in an earlier round: never post again.
+		return refineRateLimitFailure(request, current, nil, nil), nil
+	}
 	refineID, permit, err := a.submitRefine(ctx, request)
+	if retryAfter, refused := explicitRateLimit(err); refused {
+		return refusedRefine(request, current, permit, retryAfter, err), nil
+	}
 	if err != nil {
 		return generation.Observation{}, err
 	}
@@ -231,6 +246,99 @@ func (a *Adapter) observePreviewStage(
 		Opaque:     opaque,
 		Dispatch:   permit,
 	}, nil
+}
+
+// refusedRefine answers a refine create Meshy refused with an explicit 429
+// (#504). Meshy accepted nothing, so the permit is settled not_dispatched and
+// the checkpoint drops the intent: the next observation sends the same refine
+// again under a new permit, after Retry-After or the Offering's retry backoff.
+// The refusals are bounded by refine_after_preview.rate_limit_retries; past it
+// the task fails as rate limited, never as an unknown submission.
+func refusedRefine(
+	request generation.ObserveRequest,
+	current refineState,
+	permit *generation.DispatchReceipt,
+	retryAfter time.Duration,
+	cause error,
+) generation.Observation {
+	if permit != nil {
+		permit.Result = generation.DispatchResultNotDispatched
+	}
+	current.RateLimitRefusals++
+	if declaration, _ := refineDeclarationOf(request.Offering); current.RateLimitRefusals > declaration.RateLimitRetries {
+		return refineRateLimitFailure(request, current, permit, cause)
+	}
+	opaque, _ := json.Marshal(refineState{RateLimitRefusals: current.RateLimitRefusals})
+	return generation.Observation{
+		Job:        &request.Job,
+		Phase:      generation.UpstreamRunning,
+		Progress:   50,
+		ObservedAt: time.Now().UTC(),
+		PollAfter:  refineRateLimitWait(request.Offering.Retry, current.RateLimitRefusals, retryAfter),
+		DedupeKey:  fmt.Sprintf("refine:rate-limited:%d", current.RateLimitRefusals),
+		Opaque:     opaque,
+		Dispatch:   permit,
+	}
+}
+
+// refineRateLimitFailure is the definite, non-retryable failure of a task
+// whose refine creates kept being refused with 429: no new Attempt repeats the
+// paid preview. The upstream evidence of the last refusal is kept.
+func refineRateLimitFailure(
+	request generation.ObserveRequest,
+	current refineState,
+	permit *generation.DispatchReceipt,
+	cause error,
+) generation.Observation {
+	failure := &generation.Failure{
+		Class:      generation.FailureRateLimited,
+		SafeDetail: "Meshy 精细化提交持续被限流，有限重试已用尽",
+	}
+	var provider *generation.ProviderError
+	if errors.As(cause, &provider) && provider.Failure != nil {
+		failure.UpstreamStatus = provider.Failure.UpstreamStatus
+		failure.UpstreamCode = provider.Failure.UpstreamCode
+	}
+	opaque, _ := json.Marshal(refineState{RateLimitRefusals: current.RateLimitRefusals})
+	return generation.Observation{
+		Job:        &request.Job,
+		Phase:      generation.UpstreamFailed,
+		ObservedAt: time.Now().UTC(),
+		DedupeKey:  "refine:rate-limit-exhausted",
+		Opaque:     opaque,
+		Failure:    failure,
+		Dispatch:   permit,
+	}
+}
+
+// refineRateLimitWait is Retry-After when Meshy sent one (requests-per-second
+// 429), else the Offering's retry backoff doubling from InitialBackoff
+// (concurrency 429, which has none); both stop at MaxBackoff.
+func refineRateLimitWait(policy generation.RetryPolicy, refusals int, retryAfter time.Duration) time.Duration {
+	wait := retryAfter
+	if wait <= 0 && policy.InitialBackoff > 0 {
+		wait = policy.InitialBackoff
+		for step := 1; step < refusals && (policy.MaxBackoff <= 0 || wait < policy.MaxBackoff); step++ {
+			wait *= 2
+		}
+	}
+	if policy.MaxBackoff > 0 && wait > policy.MaxBackoff {
+		wait = policy.MaxBackoff
+	}
+	return wait
+}
+
+// explicitRateLimit reports an unambiguous HTTP 429 refusal and its Retry-After.
+func explicitRateLimit(err error) (time.Duration, bool) {
+	var provider *generation.ProviderError
+	if !errors.As(err, &provider) || provider.Failure == nil {
+		return 0, false
+	}
+	failure := provider.Failure
+	if failure.Ambiguous || failure.UpstreamStatus != http.StatusTooManyRequests || failure.Class != generation.FailureRateLimited {
+		return 0, false
+	}
+	return failure.RetryAfter, true
 }
 
 // submitRefine builds the refine body from the frozen input through the same
@@ -291,7 +399,9 @@ func (a *Adapter) submitRefine(
 		&response,
 		true,
 	); err != nil {
-		return "", nil, err
+		// The permit goes back with the error so that an explicit 429 can be
+		// settled not_dispatched; every other error leaves it unsettled.
+		return "", permit, err
 	}
 	refineID := strings.TrimSpace(response.Result)
 	if refineID == "" {

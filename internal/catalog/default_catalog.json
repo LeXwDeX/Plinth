@@ -27725,7 +27725,8 @@
           "set": {
             "mode": "refine"
           },
-          "source_parameter": "preview_task_id"
+          "source_parameter": "preview_task_id",
+          "rate_limit_retries": 5
         },
         "model_parameter": "ai_model",
         "result_assets": [
@@ -28178,7 +28179,8 @@
           "set": {
             "mode": "refine"
           },
-          "source_parameter": "preview_task_id"
+          "source_parameter": "preview_task_id",
+          "rate_limit_retries": 5
         },
         "result_assets": [
           {

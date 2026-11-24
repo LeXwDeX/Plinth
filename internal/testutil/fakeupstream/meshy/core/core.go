@@ -353,8 +353,11 @@ func (e *engine) render(w http.ResponseWriter, _ *http.Request, scenario fakeups
 	case fakeupstream.ScenarioKeyQuota:
 		e.fail(w, http.StatusPaymentRequired, "API key credit limit reached")
 	case fakeupstream.ScenarioRateLimit:
+		// The requests-per-second 429 of https://docs.meshy.ai/en/api/rate-limits
+		// (read 2026-11-24): message "Rate limit exceeded." with Retry-After.
+		// The concurrency 429 (ScenarioConcurrencyLimit) is answered by create.
 		w.Header().Set("Retry-After", e.cfg.Env.RetryAfterSeconds())
-		e.fail(w, http.StatusTooManyRequests, "Too many requests")
+		e.fail(w, http.StatusTooManyRequests, "Rate limit exceeded.")
 	case fakeupstream.ScenarioForbidden:
 		// The official 403 (moderation, plan/IP restriction) answers the same
 		// {message} Error schema as the 400 sample; constructed from
@@ -467,6 +470,12 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		scenario := fakeupstream.ScenarioOf(r)
 		if !e.auth(w, r) || e.cfg.Env.Intercept(w, r, fakeupstream.PhaseCreate, e.render) {
+			return
+		}
+		if scenario == fakeupstream.ScenarioConcurrencyLimit {
+			// Only task creation counts against the concurrency limit, and its
+			// 429 carries no Retry-After (Rate Limits page, read 2026-11-24).
+			e.fail(w, http.StatusTooManyRequests, "NoMorePendingTasks: too many tasks are pending or in progress")
 			return
 		}
 		var request map[string]any
