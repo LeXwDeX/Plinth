@@ -11,13 +11,14 @@ import { useTaskRetry } from '@/hooks/use-task-retry';
 import { canRetryTask } from '@/lib/workspace/task-retry';
 import { resolveErrorText } from '@/lib/workspace/task-projection';
 import {
-  chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, nextTaskBatch, progressPercent, taskBatchProgress,
+  chatTaskCards, elapsedClockNeeded, elapsedSeconds, formatElapsed, nextSessionTaskBatches, progressPercent, taskBatchProgress,
 } from '@/lib/workspace/task-progress';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/store/chat-store';
 import { useWorkspaceStore, type TrackedTask } from '@/store/workspace-store';
 
 const CLOCK_MILLISECONDS = 1000;
+const NO_BATCH: ReadonlySet<string> = new Set();
 
 /**
  * 对话里的任务进度：每个进行中的任务一条进度（百分比和已用时间，3D 这样的长任务
@@ -45,9 +46,11 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
   }
   const watched = useMemo(() => new Set(seen.current.keys()), [tracked]); // eslint-disable-line react-hooks/exhaustive-deps -- `seen` is filled above on every render
   const cards = useMemo(() => chatTaskCards(tracked, sessionId, watched, dismissed), [tracked, sessionId, watched, dismissed]);
-  // The tasks the float counts as one "x/y": all seen running since none ran (nextTaskBatch); kept like `seen`, per render.
-  const batch = useRef<ReadonlySet<string>>(new Set());
-  batch.current = nextTaskBatch(batch.current, cards.running);
+  // The tasks the block counts as one "x/y": all seen running since none ran (nextTaskBatch); kept like `seen`, per
+  // render, and per session (#565) so switching between two sessions that both run tasks keeps their batches apart.
+  const batches = useRef<ReadonlyMap<string, ReadonlySet<string>>>(new Map());
+  batches.current = nextSessionTaskBatches(batches.current, tracked);
+  const batch = (sessionId && batches.current.get(sessionId)) || NO_BATCH;
 
   const clockNeeded = elapsedClockNeeded(part, cards);
   useEffect(() => {
@@ -69,9 +72,9 @@ export function TaskStatusCards({ part }: { part: 'running' | 'failed' }) {
   if (part === 'running') {
     if (cards.running.length === 0) return null;
     const multiplier = schema.runtime.frontend.percentage_multiplier;
-    const batchProgress = taskBatchProgress(batch.current, cards.running, multiplier);
+    const batchProgress = taskBatchProgress(batch, cards.running, multiplier);
     const runningIds = new Set(cards.running.map((task) => task.taskId));
-    const ended = tracked.filter((task) => batch.current.has(task.taskId) && !runningIds.has(task.taskId));
+    const ended = tracked.filter((task) => task.sessionId === sessionId && batch.has(task.taskId) && !runningIds.has(task.taskId));
     return (
       // #546: one light block in the conversation, right after the reply text and above its credit line: a single
       // "任务进行中 x/y" heading, then one thin bar per running task (name, percent, time used) and one line of text per
