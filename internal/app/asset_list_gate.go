@@ -3,10 +3,13 @@ package app
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
 	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
+	"github.com/LeXwDeX/Plinth/internal/chat/generationtool"
+	"github.com/LeXwDeX/Plinth/internal/executiongrant"
 	"github.com/LeXwDeX/Plinth/internal/generation"
 )
 
@@ -136,4 +139,27 @@ func assetListUnavailableCopy(application catalog.ApplicationSchema) string {
 		return ""
 	}
 	return application.Chat.Presentation.Messages.ToolUnavailable
+}
+
+// assetListPendingApprovals tells the asset-list runner whether an item's
+// sub-session still has an undecided approval card (#508). It reads the same
+// detached-operation query the pending-approval list uses, with the grant
+// expiry cutoff, so an expired card no longer holds the item.
+type assetListPendingApprovals struct {
+	operations interface {
+		ListPendingDetached(ctx context.Context, owner, session string, limit int, pendingAfter time.Time) ([]generationtool.Operation, error)
+	}
+	grants *executiongrant.Service
+}
+
+func (approvals assetListPendingApprovals) PendingApproval(ctx context.Context, ownerID, sessionID string) (bool, error) {
+	var cutoff time.Time
+	if approvals.grants != nil {
+		cutoff = approvals.grants.ExpiryCutoff()
+	}
+	pending, err := approvals.operations.ListPendingDetached(ctx, ownerID, sessionID, 1, cutoff)
+	if err != nil {
+		return false, err
+	}
+	return len(pending) > 0, nil
 }

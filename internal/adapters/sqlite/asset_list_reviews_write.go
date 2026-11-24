@@ -79,10 +79,16 @@ func (r *AssetListRepository) DecideItems(ctx context.Context, batch assetlist.D
 				}
 				// return_count is the rework limit's counter; round stays the
 				// item's Agent-turn count and work_round restarts at the claim.
+				// The reported result is cleared (#508): it names the returned
+				// Task, and a rework session that reports nothing must not
+				// carry it back into review. review_json keeps the previous
+				// version's snapshot, which the rework turn and get_asset_list
+				// read.
 				result, err := conn.ExecContext(ctx, `
 					UPDATE asset_list_items SET state = ?, round = round + 1,
 						return_count = return_count + 1, return_reason = ?, return_note = ?,
-						work_round = 0, next_action_at = '',
+						work_round = 0, next_action_at = '', result_json = '{}',
+						delivery_deferred = 0,
 						block = '', version = version + 1, updated_at = ?
 					WHERE id = ? AND state = ?`,
 					assetlist.StateReturned, decision.Reason, decision.Note,

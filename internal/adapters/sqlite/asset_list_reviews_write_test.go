@@ -211,3 +211,39 @@ func TestAssetListDecideItemsSerializesConcurrentSameVersionDecisions(t *testing
 		}
 	}
 }
+
+// #508 asset-list-03: a return clears the reported result. Without that, the
+// rework session's stored result still names the returned Task, and a rework
+// turn that reports nothing re-enters review with the version the person just
+// sent back. The review snapshot stays: it is the previous version the rework
+// turn and get_asset_list read.
+func TestAssetListDecideItemsReturnClearsTheReportedResult(t *testing.T) {
+	repository, lists := newAssetListRepository(t)
+	list := seedReviewList(t, repository, lists)
+	itemID := list.Items[0].ID
+	if _, err := repository.db.Exec(
+		`UPDATE asset_list_items SET result_json = ?, review_json = ? WHERE id = ?`,
+		`{"task_id":"task_old","assets":[]}`, `{"task_id":"task_old"}`, itemID); err != nil {
+		t.Fatalf("seed reported result: %v", err)
+	}
+	stored, err := lists.GetList(context.Background(), "owner-a", "prj_1", list.ID)
+	if err != nil {
+		t.Fatalf("read seeded list: %v", err)
+	}
+
+	updated, err := lists.DecideItems(context.Background(),
+		reviewBatch(stored, itemID, assetlist.ReviewVerdictReturned, "arev_return"))
+	if err != nil {
+		t.Fatalf("return: %v", err)
+	}
+	returned := updated.Items[0]
+	if returned.State != assetlist.StateReturned {
+		t.Fatalf("returned item state = %q", returned.State)
+	}
+	if string(returned.Result) != "{}" {
+		t.Fatalf("returned item result = %s; want the reported result cleared", returned.Result)
+	}
+	if string(returned.Review) != `{"task_id":"task_old"}` {
+		t.Fatalf("returned item review = %s; want the previous review snapshot kept", returned.Review)
+	}
+}

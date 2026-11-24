@@ -7,6 +7,7 @@ import (
 
 	"github.com/LeXwDeX/Plinth/internal/agents"
 	"github.com/LeXwDeX/Plinth/internal/assetlist"
+	"github.com/LeXwDeX/Plinth/internal/catalog"
 	"github.com/LeXwDeX/Plinth/internal/chat"
 )
 
@@ -21,6 +22,9 @@ type decomposePromptCase struct {
 	// assetList wires the list workflow. The shipped Schema declares
 	// application.asset_list.decompose.
 	assetList bool
+	// automatic turns application.asset_list.execution on; the shipped
+	// Schema keeps it off (#494).
+	automatic bool
 }
 
 // decomposePromptSystem runs one turn with the shipped Chat Schema and
@@ -45,6 +49,9 @@ func decomposePromptSystem(t *testing.T, testCase decomposePromptCase) string {
 	}
 	if testCase.assetList {
 		listSchema := defaultAssetListSchema(t)
+		if testCase.automatic {
+			listSchema = automaticAssetListSchema(t, listSchema)
+		}
 		listService, err := assetlist.New(assetlist.Config{
 			Repository:      newAssetListRepo(),
 			Schema:          listSchema,
@@ -126,4 +133,40 @@ func TestDecomposePromptIsOmittedWhereItCannotAct(t *testing.T) {
 			t.Errorf("%s: the decompose block is present", name)
 		}
 	}
+}
+
+// #508 asset-list-01: with automatic production off (the shipped default), a
+// confirmed list starts nothing. The decompose guidance then ends with the
+// Schema's manual-production note, so the Agent makes the items itself after
+// the confirmation instead of waiting for a run that never starts. With
+// production on, the note is absent.
+func TestDecomposePromptSaysHowAConfirmedListIsProduced508(t *testing.T) {
+	manual := defaultAssetListSchema(t).Messages.ManualProduction
+	if manual == "" {
+		t.Fatal("the shipped Schema declares no manual-production note")
+	}
+	system := decomposePromptSystem(t, decomposePromptCase{project: true, picture: true, assetList: true})
+	if !strings.Contains(system, manual) {
+		t.Errorf("the decompose block omits the manual-production note")
+	}
+	system = decomposePromptSystem(t, decomposePromptCase{
+		project: true, picture: true, assetList: true, automatic: true,
+	})
+	if !strings.Contains(system, decomposeBlockHead) || strings.Contains(system, manual) {
+		t.Errorf("automatic production: decompose block present=%v, manual note present=%v",
+			strings.Contains(system, decomposeBlockHead), strings.Contains(system, manual))
+	}
+}
+
+// automaticAssetListSchema turns automatic production on in a copy of the
+// shipped Schema.
+func automaticAssetListSchema(t *testing.T, schema catalog.AssetListSchema) catalog.AssetListSchema {
+	t.Helper()
+	if schema.Execution == nil {
+		t.Fatal("the shipped Schema declares no execution section")
+	}
+	execution := *schema.Execution
+	execution.Enabled = true
+	schema.Execution = &execution
+	return schema
 }

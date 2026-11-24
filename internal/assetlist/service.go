@@ -443,8 +443,9 @@ func (service *Service) Decide(ctx context.Context, input DecideInput) (List, er
 		return List{}, err
 	}
 	// A confirmed list gets its run here, best-effort: failing to store the run
-	// must not undo the person's decision. The runner creates it lazily anyway
-	// (#328), so a lost write only delays automatic production.
+	// must not undo the person's decision. The runner backfills a missing run
+	// as idle (BackfillIdleRuns, #508), so a lost write leaves the list waiting
+	// for the person's start instead of without any start control.
 	if stored.Status == StatusConfirmed && service.executionEnabled {
 		if _, err := service.EnsureRun(ctx, ownerID, projectID, stored.ID); err != nil {
 			slog.Warn("asset list run was not created after confirm",

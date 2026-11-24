@@ -351,6 +351,10 @@ func (chatService *fakeChat) Tasks(
 func (chatService *fakeChat) SettleReportedItem(
 	_ context.Context, input chat.SettleReportedItemInput,
 ) (assetlist.Item, bool, error) {
+	// Like the chat service, only a deferred report is settled (#508).
+	if !input.Item.DeliveryDeferred {
+		return input.Item, false, nil
+	}
 	var snapshot struct {
 		TaskID string `json:"task_id"`
 	}
@@ -1567,6 +1571,7 @@ func TestAdvanceLeavesADoneReportWaitingForItsDelivery459(t *testing.T) {
 	item.Round = 1
 	item.SessionID = "ses_1"
 	item.Result = json.RawMessage(`{"task_id":"task-1","assets":[]}`)
+	item.DeliveryDeferred = true
 	fixture.seedRun(assetlist.RunRunning, item)
 	fixture.chat.sessions["ses_1"] = chat.Session{
 		ID: "ses_1", OwnerID: testOwner, ProjectID: testProject,
@@ -1606,5 +1611,106 @@ func TestAdvanceLeavesADoneReportWaitingForItsDelivery459(t *testing.T) {
 	}
 	if len(fixture.runs.finishes) != 1 || fixture.runs.finishes[0].State != assetlist.StateReview {
 		t.Fatalf("finishes = %+v", fixture.runs.finishes)
+	}
+}
+
+// fakeBackfill counts the runner's run backfill calls (#508).
+type fakeBackfill struct {
+	calls int
+	err   error
+}
+
+func (backfill *fakeBackfill) BackfillIdleRuns(context.Context) (int, error) {
+	backfill.calls++
+	return 0, backfill.err
+}
+
+// #508 asset-list-04: every tick backfills the idle run of confirmed lists that
+// have none, so a lost run write at confirm (or a list confirmed while
+// automatic production was off) gets the card's start control. A backfill
+// failure does not stop the tick from advancing the running lists.
+func TestAdvanceBackfillsMissingRuns508(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	backfill := &fakeBackfill{err: errors.New("store down")}
+	config := fixture.config
+	config.Backfill = backfill
+	fixture.runner = assetlistrunner.New(config)
+	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"))
+
+	err := fixture.runner.Advance(context.Background())
+	if backfill.calls != 1 {
+		t.Fatalf("backfill calls = %d; want one per tick", backfill.calls)
+	}
+	if err == nil || !strings.Contains(err.Error(), "store down") {
+		t.Fatalf("tick error = %v; want the backfill failure reported", err)
+	}
+	if claimed := fixture.item(t, "aitem_1"); claimed.State != assetlist.StateWorking {
+		t.Fatalf("item = %s; want the running list still advanced", claimed.State)
+	}
+}
+
+// turnAwaitingApproval is the fake end reason of a turn that left an approval
+// card (#508).
+const turnAwaitingApproval = "awaiting_approval"
+
+func (chatService *fakeChat) TurnEndedAwaitingApproval(turn chat.Turn) bool {
+	return turn.EndReason == turnAwaitingApproval
+}
+
+// fakeApprovals answers whether a sub-session still has an undecided
+// approval card (#508).
+type fakeApprovals struct{ pending map[string]bool }
+
+func (approvals *fakeApprovals) PendingApproval(_ context.Context, _, sessionID string) (bool, error) {
+	return approvals.pending[sessionID], nil
+}
+
+// #508 asset-list-06: a turn that ended on an approval card blocks its item as
+// awaiting_approval instead of opening continuation turns until the round
+// limit. The block releases the parallel slot, so the next item is claimed;
+// once the card is decided (or expired) the block clears and the item
+// continues from a fresh turn.
+func TestAdvanceBlocksAnItemWaitingForApprovalUntilTheCardIsDecided508(t *testing.T) {
+	fixture := newFixture(t, 1, 3)
+	approvals := &fakeApprovals{pending: map[string]bool{}}
+	config := fixture.config
+	config.Approvals = approvals
+	fixture.runner = assetlistrunner.New(config)
+	fixture.seedRun(assetlist.RunRunning, newItem("aitem_1", "角色"), newItem("aitem_2", "武器"))
+
+	fixture.advance(t)
+	first := fixture.item(t, "aitem_1")
+	fixture.chat.finishTurn(first.SessionID, turnDone)
+	turns := fixture.chat.turns[first.SessionID]
+	turns[len(turns)-1].EndReason = turnAwaitingApproval
+	approvals.pending[first.SessionID] = true
+
+	fixture.advance(t)
+	blocked := fixture.item(t, "aitem_1")
+	if blocked.State != assetlist.StateWorking || blocked.Block != assetlist.BlockAwaitingApproval ||
+		blocked.WorkRound != 1 {
+		t.Fatalf("item = %+v; want working, blocked awaiting approval, still round 1", blocked)
+	}
+	if second := fixture.item(t, "aitem_2"); second.State != assetlist.StateWorking {
+		t.Fatalf("second item = %s; want it claimed into the released slot", second.State)
+	}
+	fixture.advance(t)
+	if again := fixture.item(t, "aitem_1"); again.Block != assetlist.BlockAwaitingApproval ||
+		again.WorkRound != 1 {
+		t.Fatalf("item = %+v; want it still waiting for the card", again)
+	}
+	if got := len(fixture.chat.turns[first.SessionID]); got != 1 {
+		t.Fatalf("turns of the waiting item = %d; want no continuation while the card waits", got)
+	}
+
+	// The person decided the card: the block clears and the item continues.
+	approvals.pending[first.SessionID] = false
+	fixture.advance(t)
+	continued := fixture.item(t, "aitem_1")
+	if continued.Block != assetlist.BlockNone || continued.WorkRound != 2 {
+		t.Fatalf("item = %+v; want the block cleared and the next round opened", continued)
+	}
+	if got := len(fixture.chat.turns[first.SessionID]); got != 2 {
+		t.Fatalf("turns of the continued item = %d; want one fresh turn", got)
 	}
 }

@@ -1534,6 +1534,10 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Scheduler: chatAgent,
 			Presence:  repository.AssetListPresenceRepository(),
 			StepCaps:  repository,
+			// #508: a confirmed list without a run gets an idle one.
+			Backfill: assetListService,
+			// #508: an item whose turn left an approval card waits for it.
+			Approvals: assetListPendingApprovals{operations: repository, grants: executionGrants},
 			// #329f: the list-end summary words each item's actual consumption
 			// with the same per-asset step standing the board reads, and takes
 			// its copy from the Catalog.

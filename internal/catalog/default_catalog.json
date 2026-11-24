@@ -3053,7 +3053,7 @@
       "ui.asset_list.run_stop_confirm": "确定要停止自动制作吗？已完成的清单项会保留。",
       "ui.asset_list.run_skip": "跳过",
       "ui.asset_list.run_start": "开始制作",
-      "ui.asset_list.run_waiting": "等待前一份清单完成",
+      "ui.asset_list.run_waiting": "尚未开始制作",
       "ui.asset_list.item_awaiting_approval": "等待审批",
       "ui.asset_list.item_step_cap": "步数上限",
       "ui.asset_list.item_round_limit": "达到轮数上限",
@@ -5872,7 +5872,6 @@
       ],
       "item_blocks": [
         {"value": "awaiting_approval", "label": "等待审批"},
-        {"value": "paused", "label": "已暂停"},
         {"value": "step_cap", "label": "步数上限"}
       ],
       "review": {
@@ -5888,8 +5887,8 @@
         ],
         "max_rework_rounds": 3,
         "messages": {
-          "rework_message": "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请先看上一版结果，只修正被指出的问题；能用加工步骤修正的不要整体重新生成，修正后重新自检并调用 report_list_item 重新申报。",
-          "return_limit": "清单项「{name}」已经重做 {round} 轮，达到上限；只能通过、跳过或从头重试。",
+          "rework_message": "清单项「{name}」（{description}）被打回，这是第 {round} 轮重做。打回原因：{reasons}。说明：{note}。请先看上一版结果，只修正被指出的问题；能用加工步骤修正的不要整体重新生成。修正后重新自检，等新的任务成功后调用 submit_asset_list_item（status=done）重新申报；被打回的上一版不能再次申报。确实做不成时用 status=failed 并写明原因。",
+          "return_limit": "清单项「{name}」已经重做 {round} 轮，达到上限，不能再打回。",
           "asset_limit": "项目资产已达上限 {maximum} 个，未能把清单项「{name}」登记为项目资产；请先清理项目资产再通过。",
           "item_not_found": "这个清单项不在当前清单里。",
           "item_not_awaiting_review": "这个清单项已经不在待验收状态。",
@@ -5982,10 +5981,10 @@
         "awaiting_review": "有 {count} 项待验收。",
         "needs_you": "有 {count} 项需要你处理。",
         "item_failed": "清单项「{name}」制作失败。",
-        "item_failed_input": "清单项「{name}」失败：输入或参数不合法，请检查后重试。",
-        "item_failed_capacity": "清单项「{name}」失败：供应商容量不足，稍后重试。",
+        "item_failed_input": "清单项「{name}」失败：输入或参数不合法。",
+        "item_failed_capacity": "清单项「{name}」失败：供应商容量不足。",
         "item_failed_refused": "清单项「{name}」失败：供应商拒绝执行。",
-        "item_failed_internal": "清单项「{name}」失败：内部错误，请稍后重试。",
+        "item_failed_internal": "清单项「{name}」失败：内部错误。",
         "step_cap_blocked": "清单项「{name}」的 3D 步数已用完，这一步没有执行。",
         "needs_approval": "清单项「{name}」在等你审批这一步。",
         "run_waiting": "制作清单「{title}」在等待前一份清单完成。",
@@ -6003,6 +6002,8 @@
         "item_not_in_session": "这个工具只在制作清单项的会话里可用。",
         "item_not_working": "清单项当前不在制作中，无法报告结果。",
         "item_no_successful_task": "本会话没有成功的任务，不能报告完成；请先让生成任务成功。",
+        "manual_production": "自动制作未开启：用户确认清单不会自动开始制作。用户确认后，由你在本对话里按清单逐项制作，每一步照常走生成与批准流程；不要等待平台自动制作。",
+        "item_no_new_task": "被打回的上一版不能再次报告完成；请先按打回原因修正，让新的任务成功后再报告。",
         "item_delivery_pending": "清单项「{name}」的模型还在后台转换格式，交付尚未稳定，暂时不进入待验收；格式全部落地后会自动转入待验收，无需重新制作。",
         "item_report_failed": "清单项结果提交失败：清单可能已停止或完成，或服务暂时不可用，请稍后重试。"
       },
@@ -6021,7 +6022,7 @@
         "max_rounds_per_item": 3,
         "max_capacity_retries": 0,
         "presence": {"heartbeat_seconds": 15, "grace_seconds": 120},
-        "continuation": {"message": "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。先检查已有结果，不要重复提交已完成的步骤。"}
+        "continuation": {"message": "继续制作清单项「{name}」（{description}），路线 {route}，这是第 {round} 轮。先检查已有结果，不要重复提交已完成的步骤。产物成功并自检后，调用 submit_asset_list_item（status=done）报告这一项；确实做不成时用 status=failed 并写明原因。不报告的话，轮次用完后这一项会记为失败。"}
       }
     },
     "step_policy": {
@@ -8680,7 +8681,7 @@
         {
           "name": "propose_asset_list",
           "execution": {"implementation_key":"assetlist.propose","effects":["SESSION_WRITE"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"required","cancellation":"none","agent_scope":"utility"},
-          "description": "Propose a production list of assets for the current project. The user must confirm the list before any work starts. Returns the list id, item count, planned steps and availability warnings.",
+          "description": "Propose a production list of assets for the current project. The user confirms or rejects it, and nothing is produced before the confirmation; the result's message says whether a confirmed list is produced automatically or by you, item by item, in this conversation. Returns the list id, item count, planned steps and availability warnings.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -8723,11 +8724,11 @@
         {
           "name": "get_asset_list",
           "execution": {"implementation_key":"assetlist.read","effects":["READ"],"scope":"session","domains":["image","model-3d"],"capabilities":[],"idempotency":"none","cancellation":"none","agent_scope":"utility"},
-          "description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
+          "description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Without list_id it reads, in this order: the item's own list inside a list item's session, the newest list this session proposed (it may still be a draft, or rejected), the project's confirmed list, or else the project's newest list; check the returned status. Pass list_id to read one named list; an unknown or foreign list reads as not found.",
           "parameters": {
             "type": "object",
             "properties": {
-              "list_id": {"type": "string", "description": "Optional list id; omit it to read the current list of this session's project."}
+              "list_id": {"type": "string", "description": "Optional list id; omit it to read the list resolved as the description says (this item's list, the session's newest proposal, or the project's confirmed list)."}
             },
             "additionalProperties": false
           }
@@ -17511,7 +17512,7 @@
             "ui.asset_list.run_stop_confirm": "Stop automatic production? Finished items are kept.",
             "ui.asset_list.run_skip": "Skip",
             "ui.asset_list.run_start": "Start production",
-            "ui.asset_list.run_waiting": "Waiting for the previous list to finish",
+            "ui.asset_list.run_waiting": "Not started yet",
             "ui.asset_list.item_awaiting_approval": "Awaiting approval",
             "ui.asset_list.item_step_cap": "Step limit reached",
             "ui.asset_list.item_round_limit": "Round limit reached",
@@ -21100,7 +21101,6 @@
             "asset_list.item_states[id=failed].label": "Failed",
             "asset_list.item_states[id=skipped].label": "Skipped",
             "asset_list.item_blocks[value=awaiting_approval].label": "Awaiting approval",
-            "asset_list.item_blocks[value=paused].label": "Paused",
             "asset_list.item_blocks[value=step_cap].label": "Step limit reached",
             "asset_list.review.return_reasons[id=style].label": "The style is off",
             "asset_list.review.return_reasons[id=proportion].label": "The proportions are off",
@@ -21110,8 +21110,8 @@
             "asset_list.review.return_reasons[id=texture].label": "Textures have problems",
             "asset_list.review.return_reasons[id=rig].label": "Skeleton or pose has problems",
             "asset_list.review.return_reasons[id=other].label": "Other",
-            "asset_list.review.messages.rework_message": "List item \"{name}\" ({description}) was returned; this is rework round {round}. Reasons: {reasons}. Note: {note}. Look at the previous result first and fix only what was pointed out; when a processing step can fix it, do not regenerate everything. After fixing, self-check again and call report_list_item to report the item again.",
-            "asset_list.review.messages.return_limit": "List item \"{name}\" has used its {round} rework rounds; it can only be accepted, skipped or retried from scratch.",
+            "asset_list.review.messages.rework_message": "List item \"{name}\" ({description}) was returned; this is rework round {round}. Reasons: {reasons}. Note: {note}. Look at the previous result first and fix only what was pointed out; when a processing step can fix it, do not regenerate everything. After fixing, self-check again and, once a new task succeeded, call submit_asset_list_item with status=done to report the item again; the returned version cannot be reported again. If it really cannot be done, report status=failed with the reason.",
+            "asset_list.review.messages.return_limit": "List item \"{name}\" has used its {round} rework rounds and cannot be returned again.",
             "asset_list.review.messages.asset_limit": "The project already has its maximum of {maximum} assets, so list item \"{name}\" could not be registered as a project asset; clean up project assets before accepting.",
             "asset_list.review.messages.item_not_found": "This item is not part of the current list.",
             "asset_list.review.messages.item_not_awaiting_review": "This item is no longer awaiting review.",
@@ -21180,10 +21180,10 @@
             "asset_list.messages.awaiting_review": "{count} items are awaiting review.",
             "asset_list.messages.needs_you": "{count} items need you.",
             "asset_list.messages.item_failed": "Item \"{name}\" failed.",
-            "asset_list.messages.item_failed_input": "Item \"{name}\" failed: the input or arguments are invalid; check them and try again.",
-            "asset_list.messages.item_failed_capacity": "Item \"{name}\" failed: the provider has no capacity; try again later.",
+            "asset_list.messages.item_failed_input": "Item \"{name}\" failed: the input or arguments are invalid.",
+            "asset_list.messages.item_failed_capacity": "Item \"{name}\" failed: the provider has no capacity.",
             "asset_list.messages.item_failed_refused": "Item \"{name}\" failed: the provider refused to run it.",
-            "asset_list.messages.item_failed_internal": "Item \"{name}\" failed: internal error; try again later.",
+            "asset_list.messages.item_failed_internal": "Item \"{name}\" failed: internal error.",
             "asset_list.messages.step_cap_blocked": "Item \"{name}\" used up its 3D steps, so this step did not run.",
             "asset_list.messages.needs_approval": "Item \"{name}\" is waiting for your approval of this step.",
             "asset_list.messages.run_waiting": "The list \"{title}\" is waiting for the previous list to finish.",
@@ -21201,6 +21201,8 @@
             "asset_list.messages.item_not_in_session": "This tool is only available inside a production-list item's own session.",
             "asset_list.messages.item_not_working": "The list item is not in progress, so no result can be reported.",
             "asset_list.messages.item_no_successful_task": "This session has no successful task, so it cannot report done; let the generation task succeed first.",
+            "asset_list.messages.item_no_new_task": "The version that was returned cannot be reported done again; fix what the return pointed out and report once a new task succeeded.",
+            "asset_list.messages.manual_production": "Automatic production is off: confirming the list does not start any work. After the user confirms it, make the items one by one in this conversation, each step through the normal generation and approval flow; do not wait for the platform to produce them.",
             "asset_list.messages.item_delivery_pending": "The formats of item \"{name}\" are still converting in the background, so its delivery is not stable and it does not enter review yet; it moves to review on its own once every format has landed, with nothing to remake.",
             "asset_list.messages.item_report_failed": "The item report could not be stored: the list may be stopped or completed, or the service is temporarily unavailable; try again later.",
             "asset_list.ui.card_title": "Work list",
@@ -21209,7 +21211,7 @@
             "asset_list.ui.reject_button": "Reject",
             "asset_list.ui.replace_button": "Replace current list",
             "asset_list.ui.empty_text": "No work list yet. Ask the Agent for one in a chat; it shows here once confirmed.",
-            "asset_list.execution.continuation.message": "Continue working on list item \"{name}\" ({description}) along route {route}; this is round {round}. Check the existing results first and do not resubmit steps that already finished.",
+            "asset_list.execution.continuation.message": "Continue working on list item \"{name}\" ({description}) along route {route}; this is round {round}. Check the existing results first and do not resubmit steps that already finished. Once the result succeeded and passed your self-check, call submit_asset_list_item with status=done to report the item; if it really cannot be done, report status=failed with the reason. An item that is never reported fails when its rounds run out.",
             "mcp_public.instructions": "Plinth's external MCP service. Call it with your own access key as the Bearer token. Every tool response carries a status block (status in structuredContent): the 3D step mode, the 3D steps used by this asset and in total, the balances of the three 3D providers, and a failure attribution with a suggested action. By default you decide whether to continue with 3D steps; the platform does not block. A balance that could not be read says unknown, which does not mean zero.",
             "mcp_public.service_groups[id=image].label": "Images",
             "mcp_public.service_groups[id=model].label": "3D models",
@@ -21781,7 +21783,7 @@
             "chat.tools[name=create_gaussian_splat].description": "Generate Gaussian Splat (image to Gaussian Splat) from exactly one explicitly selected owned image. This distinct representation supports preview and raw .splat download, not mesh processing or mesh export. Never substitute a mesh model or silently choose one of several images.",
             "chat.tools[name=refine_image].model_required_message": "Select a generation model in the workspace first.",
             "chat.tools[name=create_gaussian_splat].model_required_message": "Select a Gaussian Splat generation model first.",
-            "chat.agent_tools[name=get_asset_list].description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Pass list_id to read one named list instead of the project's current one; an unknown or foreign list reads as not found.",
+            "chat.agent_tools[name=get_asset_list].description": "Read the production list of this session's project: the list's id, title and status, and every item's id, kind, name, state, state reason, rework count, produced artifacts (asset id, role and media type) and the persisted self-check conclusion (status, summary, remaining problems) with the acceptance checks the review recorded. Use it to see what is already accepted, returned or failed before you continue work; the item ids are what the acceptance board and the rework rounds use. Read-only: it creates no task, charges nothing, decides nothing and never accepts or returns an item. Without list_id it reads, in this order: the item's own list inside a list item's session, the newest list this session proposed (it may still be a draft, or rejected), the project's confirmed list, or else the project's newest list; check the returned status. Pass list_id to read one named list; an unknown or foreign list reads as not found.",
             "chat.tools[name=create_creative_lab_design].model_required_message": "Select a Creative Lab template first.",
             "chat.tools[name=build_creative_lab_item].model_required_message": "Select a Creative Lab design preview first.",
             "chat.three_view.label": "Three views",

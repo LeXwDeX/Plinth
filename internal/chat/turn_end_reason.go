@@ -66,6 +66,14 @@ func (service *Service) TurnEndedInError(turn Turn) bool {
 	return reason != "" && turn.EndReason == reason
 }
 
+// TurnEndedAwaitingApproval reports whether the turn recorded the Schema's
+// awaiting-approval reason: it left an approval card the person has to decide
+// (#508). The asset-list runner blocks the item instead of continuing it.
+func (service *Service) TurnEndedAwaitingApproval(turn Turn) bool {
+	reason := strings.TrimSpace(service.turnEndReasons.AwaitingApproval)
+	return reason != "" && turn.EndReason == reason
+}
+
 // proposedPendingPlan reports whether the turn proposed a production plan that
 // still waits for the person: the session's unexpired undecided plans are read
 // once, and the plan's proposing assistant message names the turn (#328).
