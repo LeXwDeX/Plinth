@@ -41,9 +41,9 @@ type Config struct {
 	// Empty means os.TempDir(); production passes the storage volume's tmp
 	// directory because the container's /tmp is a small tmpfs (#321 A).
 	ScratchDir string
-	// RetrySubmitServerError is the connection-level declaration that a 5xx
-	// answer to a create may be retried (#460 C25). The upstream may have
-	// accepted the create before failing, so the retry can charge twice.
+	// RetrySubmitServerError is the connection-level declaration that a 503
+	// with Retry-After to a create may be resent (#460 C25, narrowed by #563);
+	// any other 5xx stays "unknown, never resend" (httpjson).
 	RetrySubmitServerError bool
 }
 

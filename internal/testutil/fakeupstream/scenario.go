@@ -33,6 +33,11 @@ const (
 	// ScenarioLostResponse accepts the task creation (the work exists
 	// upstream) and drops the connection before the response.
 	ScenarioLostResponse Scenario = "lost-response"
+	// ScenarioAcceptedServerError accepts the task creation (the work exists
+	// upstream and is billed) and then answers HTTP 502, as a gateway that
+	// failed after the upstream took the request (#563): a client must not
+	// read the 5xx as a refusal and resend.
+	ScenarioAcceptedServerError Scenario = "accepted-502"
 	// ScenarioTaskFailed makes the created task end in the provider's failed
 	// state.
 	ScenarioTaskFailed Scenario = "task-failed"
@@ -121,7 +126,7 @@ const (
 // Scenarios lists every injectable scenario.
 var Scenarios = []Scenario{
 	ScenarioInsufficientBalance, ScenarioKeyQuota, ScenarioRateLimit, ScenarioServerError,
-	ScenarioTimeout, ScenarioLostResponse, ScenarioTaskFailed, ScenarioArtifactNotFound, ScenarioArtifactCorrupt,
+	ScenarioTimeout, ScenarioLostResponse, ScenarioAcceptedServerError, ScenarioTaskFailed, ScenarioArtifactNotFound, ScenarioArtifactCorrupt,
 	ScenarioArtifactMislabeled, ScenarioArtifactExpired, ScenarioPartialFormats,
 	ScenarioInvalidKey, ScenarioForbidden, ScenarioModelNotFound, ScenarioServiceUnavailable,
 	ScenarioQuotaExceeded, ScenarioTaskCanceled, ScenarioTaskUnknown, ScenarioContentFiltered, ScenarioPartialImages,

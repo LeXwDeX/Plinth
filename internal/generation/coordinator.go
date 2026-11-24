@@ -246,6 +246,12 @@ func (m *Module) startAttempt(ctx context.Context, lease Lease) error {
 	})
 	if err != nil {
 		failure := providerFailure(err, true)
+		// 连接声明可重发的提交拒绝（503 + Retry-After）在重试不再放行时按
+		// 「提交结果不明」收尾：5xx 不能证明上游没有受理和计费（#563）。
+		if errors.Is(err, ErrDeclaredSubmitRetry) && failure.Retryable && !failure.Ambiguous &&
+			!task.Offering.Retry.Allows(failure.Class, attempt.Ordinal+1-attempt.RateLimitQueued) {
+			failure.Ambiguous = true
+		}
 		// 只有 Start 的明确限流拒绝可以排队（上游未受理、不计费）；
 		// 其余路径沿用 handleAttemptFailure 的原有重试规则。
 		var refused *DispatchReceiptSettlement
