@@ -1118,6 +1118,8 @@ func newWithDependencies(config Config, logger *slog.Logger, overrides assemblyO
 			Schema:   applicationSchema.Chat.ImageCrop,
 			Crops:    cropService,
 			Localize: texts.Text,
+			// #552: every crop is shown to the person as a reply picture.
+			AssetItemRoute: applicationSchema.Runtime.HTTP.Routes.AssetItem,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("裁剪工具: %w", err)

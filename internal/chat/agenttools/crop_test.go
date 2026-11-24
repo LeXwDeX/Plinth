@@ -305,28 +305,44 @@ func newCropToolFixture(t *testing.T, configure func(*listcrop.Config)) *cropToo
 		t.Fatalf("new crop service: %v", err)
 	}
 	tool, err := NewCropTool(CropToolConfig{
-		Context: catalog.ChatContextSchema{
-			HandlePrefixes: map[string]string{"image": "@img", "model": "@model"},
-			SelectionAlias: "@selected",
-		},
-		Schema: catalog.ChatImageCropSchema{
-			Tool: "crop_image_regions",
-			Texts: catalog.ChatImageCropTexts{
-				InvalidArguments: "invalid arguments: {detail}",
-				InvalidRegion:    "invalid region: {detail}",
-				ImageTooSmall:    "too small: {detail}",
-				ImageTooLarge:    "too large: {detail}",
-				CropLimitReached: "crop limit {limit}",
-				ImageNotFound:    "not found: {detail}",
-				ImageUnavailable: "unavailable: {detail}",
-			},
-		},
-		Crops: service,
+		Context:        cropToolContext(),
+		Schema:         cropToolSchema(),
+		Crops:          service,
+		AssetItemRoute: cropAssetItemRoute,
 	})
 	if err != nil {
 		t.Fatalf("new crop tool: %v", err)
 	}
 	return &cropToolFixture{tool: tool, inputs: inputs, tasks: tasks, crops: crops}
+}
+
+// cropAssetItemRoute is the Schema's input asset route the crops are shown by.
+const cropAssetItemRoute = "/api/v1/assets/{assetID}"
+
+func cropToolContext() catalog.ChatContextSchema {
+	return catalog.ChatContextSchema{
+		HandlePrefixes:     map[string]string{"image": "@img", "model": "@model"},
+		SelectionAlias:     "@selected",
+		ResultHandlesField: "handles",
+	}
+}
+
+func cropToolSchema() catalog.ChatImageCropSchema {
+	return catalog.ChatImageCropSchema{
+		Tool: "crop_image_regions",
+		Texts: catalog.ChatImageCropTexts{
+			InvalidArguments: "invalid arguments: {detail}",
+			InvalidRegion:    "invalid region: {detail}",
+			ImageTooSmall:    "too small: {detail}",
+			ImageTooLarge:    "too large: {detail}",
+			CropLimitReached: "crop limit {limit}",
+			ImageNotFound:    "not found: {detail}",
+			ImageUnavailable: "unavailable: {detail}",
+			PresentedNote:    "{count} crops are shown to the user",
+			NotPresentable:   "not presentable: {detail}",
+			NotPresented:     "not presented: {detail}",
+		},
+	}
 }
 
 func solidPicture(t *testing.T, width, height int) []byte {
@@ -360,11 +376,14 @@ func cropCommand(owner, image string, regions string) chat.ToolCommand {
 }
 
 type cropContentResult struct {
-	Success      bool `json:"success"`
-	SourceWidth  int  `json:"source_width"`
-	SourceHeight int  `json:"source_height"`
+	Success      bool   `json:"success"`
+	SourceWidth  int    `json:"source_width"`
+	SourceHeight int    `json:"source_height"`
+	Note         string `json:"note"`
 	Crops        []struct {
 		Label            string             `json:"label"`
+		Width            int                `json:"width"`
+		Height           int                `json:"height"`
 		InputAssetID     string             `json:"input_asset_id"`
 		NormalizedRegion listcrop.Region    `json:"normalized_region"`
 		PixelRect        listcrop.PixelRect `json:"pixel_rect"`
@@ -410,15 +429,32 @@ func TestCropImageRegionsCropsHandleAndAssetSources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !result.NoSubmission || result.TaskID != "" || len(result.ImageURLs) != 0 {
-				t.Fatalf("result is not a read-only refusal-free result: %+v", result)
+			// #552: every crop is shown to the person as a picture of the reply,
+			// in request order, and its result entry is where its handle goes.
+			if !result.NoSubmission || result.TaskID != "" ||
+				strings.Join(result.ImageURLs, ",") != "/api/v1/assets/upload_1,/api/v1/assets/upload_2" ||
+				result.PresentedEntries != "crops" {
+				t.Fatalf("result does not present the crops: %+v", result)
 			}
 			content := decodeCrop[cropContentResult](t, result.AgentContent)
 			if !content.Success || content.SourceWidth != 200 || content.SourceHeight != 200 ||
 				len(content.Crops) != 2 {
 				t.Fatalf("content = %+v", content)
 			}
+			if content.Note != "2 crops are shown to the user" {
+				t.Fatalf("note = %q", content.Note)
+			}
 			first, second := content.Crops[0], content.Crops[1]
+			if first.Width != 100 || first.Height != 100 || second.Width != 100 || second.Height != 100 {
+				t.Fatalf("crop sizes = %+v", content.Crops)
+			}
+			// The result the Agent reads instead when a crop gets no handle
+			// says so; it never claims success.
+			unpresented := decodeCrop[cropRefusalResult](t, result.UnpresentedContent)
+			if unpresented.Success || unpresented.Code != cropCodeNotPresented ||
+				!strings.HasPrefix(unpresented.Error, "not presented: ") {
+				t.Fatalf("unpresented result = %+v", unpresented)
+			}
 			if first.Label != "sword" || first.InputAssetID != "upload_1" ||
 				first.PixelRect != (listcrop.PixelRect{X0: 0, Y0: 0, X1: 100, Y1: 100}) ||
 				first.NormalizedRegion != (listcrop.Region{X: 0, Y: 0, Width: 0.5, Height: 0.5}) ||
@@ -626,5 +662,52 @@ func TestCropImageRegionsDispatchesThroughTheExecutor(t *testing.T) {
 	result, err = unwired.Execute(context.Background(), command, nil)
 	if err != nil || !result.NoSubmission || result.Error != "image crop unavailable" {
 		t.Fatalf("unwired crop tool = %+v, %v", result, err)
+	}
+}
+
+// #552: a session that cannot show the crops to the person as handled
+// pictures refuses the call before cutting anything, so no asset the person
+// cannot see is ever stored.
+func TestCropImageRegionsRefusesWhenTheCropsCannotBeShown(t *testing.T) {
+	cases := map[string]func(*CropToolConfig){
+		"handles off":         func(config *CropToolConfig) { config.Context.HandlePrefixes = nil },
+		"no result handles":   func(config *CropToolConfig) { config.Context.ResultHandlesField = "" },
+		"no asset item route": func(config *CropToolConfig) { config.AssetItemRoute = "" },
+		"route without id":    func(config *CropToolConfig) { config.AssetItemRoute = "/api/v1/assets" },
+	}
+	for name, adjust := range cases {
+		t.Run(name, func(t *testing.T) {
+			fixture := newCropToolFixture(t, nil)
+			fixture.inputs.addInputAsset("owner-a", "source_1", "image", "image/png",
+				solidPicture(t, 200, 200))
+			config := CropToolConfig{
+				Context:        cropToolContext(),
+				Schema:         cropToolSchema(),
+				Crops:          fixture.tool.crops,
+				AssetItemRoute: cropAssetItemRoute,
+			}
+			adjust(&config)
+			tool, err := NewCropTool(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := tool.Execute(context.Background(), cropCommand("owner-a", "source_1",
+				`{"region":{"x":0,"y":0,"width":0.5,"height":0.5}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			refusal := decodeCrop[cropRefusalResult](t, result.AgentContent)
+			if refusal.Success || refusal.Code != cropCodeNotPresentable ||
+				!strings.HasPrefix(refusal.Error, "not presentable: ") || !result.NoSubmission ||
+				len(result.ImageURLs) != 0 {
+				t.Fatalf("refusal = %+v result = %+v", refusal, result)
+			}
+			if uploads := fixture.inputs.uploads(); len(uploads) != 0 {
+				t.Fatalf("uploads = %d; an unpresentable call must store nothing", len(uploads))
+			}
+			if rows := fixture.crops.rowsSnapshot(); len(rows) != 0 {
+				t.Fatalf("provenance rows = %d; an unpresentable call must store nothing", len(rows))
+			}
+		})
 	}
 }
