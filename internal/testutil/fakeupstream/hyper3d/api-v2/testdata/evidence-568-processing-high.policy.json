@@ -1,0 +1,43 @@
+{
+  "MaxBodyBytes": 0,
+  "Keys": {
+    "jobs": true,
+    "list": true,
+    "name": true,
+    "status": true,
+    "subscription_key": true,
+    "task_uuid": true,
+    "url": true,
+    "uuid": true
+  },
+  "Allowed": {
+    "Done": true,
+    "Generating": true,
+    "Waiting": true,
+    "api": true,
+    "application/json": true,
+    "assets": true,
+    "base_high_pbr.glb": true,
+    "download": true,
+    "glb": true,
+    "id-27": true,
+    "id-28": true,
+    "id-29": true,
+    "id-30": true,
+    "id-31": true,
+    "id-32": true,
+    "id-33": true,
+    "id-44": true,
+    "id-45": true,
+    "id-46": true,
+    "id-47": true,
+    "id-48": true,
+    "pack": true,
+    "status": true,
+    "v2": true
+  },
+  "Aliases": null,
+  "PublicHosts": null,
+  "Projection": null,
+  "QueryKeys": null
+}
