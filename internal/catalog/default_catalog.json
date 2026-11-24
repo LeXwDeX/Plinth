@@ -9256,7 +9256,7 @@
           "canvas_source": "ignore",
           "selection_mask": "ignore",
           "execution": {"implementation_key":"generation.execute","effects":["PAID_TASK"],"scope":"session","domains":["model-3d"],"capabilities":["retexture"],"idempotency":"required","cancellation":"task","agent_scope":"3d"},
-          "description": "Re-texture a finished 3D model of this session from an English text prompt, one reference image or both, as the selected service's inputs in list_offerings allow. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
+          "description": "Re-texture a finished 3D model of this session from an English text prompt or one reference image, exactly as the selected service's inputs and input_rules in list_offerings allow: some services require both, others take a prompt or an image but not both (an input_rules entry over prompt and the image input with maximum 1), and then you give only one of them. An input with supply=chat_image is a picture from this chat, passed in reference_handles (such as @img1); when it has required=true the step cannot run without it, so ask the person to attach one image instead of trying other arguments. The service must accept the model as its source (see list_offerings). In manual approval mode the user must approve before it runs. When several available services can run the step on this model and the person named none, the tool shows an in-chat choice card instead of choosing; call again with offering_id only after the person chose (or use_default_offering=true when they said the default is fine). When the person named a service that cannot take this model, or this call would run a service they did not choose, nothing runs: the result has service_confirmation_required, the reason and the workable options; ask the person, and do not call again without a service or with another one.",
           "ignore_user_model": true,
           "capability": "retexture",
           "fallback_capability": "retexture",
@@ -9276,7 +9276,7 @@
               },
               "prompt": {
                 "type": "string",
-                "description": "Concise English description of the new texture. Use it only if the selected service lists a prompt input in list_offerings; some services also require a reference image beside it, others accept a prompt or an image but not both."
+                "description": "Concise English description of the new texture. Use it only if the selected service lists a prompt input in list_offerings; some services also require a reference image beside it, others take a prompt or an image but not both (input_rules maximum 1): then send only the one the person wants."
               },
               "reference_handles": {
                 "type": "array",
@@ -9290,7 +9290,7 @@
                   "minimum": 1
                 },
                 "maxItems": 1,
-                "description": "One 1-indexed historical chat image used as the style reference instead of a prompt."
+                "description": "One 1-indexed historical chat image used as the style reference; send it beside a prompt only when the service's input_rules in list_offerings allow both."
               },
               "negative_prompt": {
                 "type": "string",
@@ -9326,7 +9326,7 @@
               "step_unknown": "Unknown step \"{step}\". Use one of the declared step values.",
               "argument_unsupported": "The argument \"{argument}\" is not supported by this step or by the offering that would run it. Remove it and retry.",
               "reference_required": "This service requires exactly one reference image and none (or more than one) was available: the call named none, this turn attached none or several, and nothing is selected. Nothing was submitted and nothing was charged. Ask the person to attach exactly one image to their next message (or select one in the workspace), then call this tool again with the same service. Do not switch service, drop the requirement or invent an image.",
-              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and without a text prompt.",
+              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and beside a text prompt only when the service's input_rules in list_offerings allow both.",
               "no_offering": "No available offering can run {step} right now.",
               "invalid_input": "The request was rejected before submission: {detail}",
               "unavailable": "Model processing is not available in this deployment.",
@@ -9808,7 +9808,7 @@
                 "model-split",
                 "retexture",
                 "format-conversion"
-              ]},"offering_id":{"type":"string","description":"Optional available compatible Offering from list_offerings."},"parameters":{"type":"object","description":"Offering parameter names and values. No source-task/source-asset/consent parameter; defaults are applied by Catalog."}},"required":["capability","parameters"],"additionalProperties":false}}
+              ]},"offering_id":{"type":"string","description":"Optional available compatible Offering from list_offerings."},"parameters":{"type":"object","description":"Offering parameter names and values. No source-task/source-asset/consent parameter; defaults are applied by Catalog. Respect the Offering's input_rules in list_offerings: of the parameters a rule names, give at least minimum and at most maximum."}},"required":["capability","parameters"],"additionalProperties":false}}
             },
             "required": ["source_task_id","steps"],
             "additionalProperties": false
@@ -9918,7 +9918,7 @@
               "source_expired": "No available {step} offering can use this model: the provider no longer keeps its original task (past the provider's retention), and the offerings that need that task take no model file. Nothing was submitted. Tell the person why; the source must be generated again (for animation, rig the model again) before this step.",
               "step_unknown": "Unknown step \"{step}\". Use one of the declared step values.",
               "argument_unsupported": "The argument \"{argument}\" is not supported by this step or by the offering that would run it. Remove it and retry.",
-              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and without a text prompt.",
+              "reference_unsupported": "A style reference image cannot be used here. Use it only with retexture, with one image, and beside a text prompt only when the service's input_rules in list_offerings allow both.",
               "no_offering": "No available offering can run {step} right now.",
               "invalid_input": "The request was rejected before submission: {detail}",
               "unavailable": "Model processing is not available in this deployment.",
@@ -10801,7 +10801,11 @@
           "input_shape_list": "{name}=列表（{count} 项）",
           "input_shape_boolean": "{name}=布尔值",
           "input_shape_number": "{name}=数字",
-          "input_shape_value": "{name}=值"
+          "input_shape_value": "{name}=值",
+          "input_rule_too_many": "该服务的输入 {inputs} 至多只能给 {maximum} 项{reason}，本次给了 {given} 项；请只保留其中 {maximum} 项后重试。本次没有提交，也没有扣费",
+          "input_rule_too_few": "该服务的输入 {inputs} 至少要给 {minimum} 项{reason}，本次给了 {given} 项；请补上后重试。本次没有提交，也没有扣费",
+          "input_rule_member": "{name}（工具参数 {argument}）",
+          "input_rule_reason": "（{reason}）"
         },
         "status": {
           "generating": "正在生成…",
@@ -21763,6 +21767,10 @@
             "chat.presentation.messages.input_shape_boolean": "{name}=boolean",
             "chat.presentation.messages.input_shape_number": "{name}=number",
             "chat.presentation.messages.input_shape_value": "{name}=value",
+            "chat.presentation.messages.input_rule_too_many": "this service takes at most {maximum} of the inputs {inputs}{reason}, and this call gave {given}; keep only {maximum} of them and call again. Nothing was submitted or charged",
+            "chat.presentation.messages.input_rule_too_few": "this service needs at least {minimum} of the inputs {inputs}{reason}, and this call gave {given}; supply what is missing and call again. Nothing was submitted or charged",
+            "chat.presentation.messages.input_rule_member": "{name} (tool argument {argument})",
+            "chat.presentation.messages.input_rule_reason": " ({reason})",
             "chat.presentation.status.generating": "Generating…",
             "chat.presentation.status.thinking": "Thinking…",
             "chat.presentation.status.compacting": "Compacting context…",
@@ -22221,6 +22229,7 @@
             "去除背景": "Remove background",
             "参考图": "Reference image",
             "参考图与生成图片合计最多15张": "Reference images and generated images combined are limited to 15",
+            "Meshy 同时收到两者时只用参考图、忽略提示词": "Meshy uses only the picture and ignores the prompt when it gets both",
             "参考图片": "Reference image",
             "参考图（1–4 张，首张正面）": "Reference images (1–4, first is front)",
             "叉腰手势 (Hand_on_Hip_Gesture)": "Hand on hip gesture",
@@ -35720,7 +35729,8 @@
             "style_asset"
           ],
           "minimum": 1,
-          "maximum": 1
+          "maximum": 1,
+          "message": "Meshy 同时收到两者时只用参考图、忽略提示词"
         }
       ],
       "outputs": [

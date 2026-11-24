@@ -2677,6 +2677,10 @@ func validateInputGapTexts(messages ChatMessageTexts) error {
 		"input_shape_boolean":          {messages.InputShapeBoolean, []string{"{name}"}},
 		"input_shape_number":           {messages.InputShapeNumber, []string{"{name}"}},
 		"input_shape_value":            {messages.InputShapeValue, []string{"{name}"}},
+		"input_rule_too_many":          {messages.InputRuleTooMany, []string{"{inputs}", "{maximum}", "{given}", "{reason}"}},
+		"input_rule_too_few":           {messages.InputRuleTooFew, []string{"{inputs}", "{minimum}", "{given}", "{reason}"}},
+		"input_rule_member":            {messages.InputRuleMember, []string{"{name}", "{argument}"}},
+		"input_rule_reason":            {messages.InputRuleReason, []string{"{reason}"}},
 	} {
 		if strings.TrimSpace(check.text) == "" {
 			return fmt.Errorf("presentation.%s 不能为空", name)

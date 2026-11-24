@@ -799,7 +799,9 @@ const minimalApplication = `"application":{
 				"input_gap_labeled":"{label}, {type}","input_gap_options":" 可选 {values}","input_gap_supply_reference":"用 {argument}",
 				"input_gap_supply_argument":"用 {argument}","input_gap_supply_unavailable":"不可设置","input_shape":"字段 {fields}",
 				"input_shape_text":"{name}={count}","input_shape_list":"{name}[{count}]","input_shape_boolean":"{name}=布尔",
-				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值"
+				"input_shape_number":"{name}=数字","input_shape_value":"{name}=值",
+				"input_rule_too_many":"{inputs} 至多 {maximum} 项{reason}，给了 {given} 项","input_rule_too_few":"{inputs} 至少 {minimum} 项{reason}，给了 {given} 项",
+				"input_rule_member":"{name}（{argument}）","input_rule_reason":"（{reason}）"
 			},
 			"status":{"generating":"正在生成","queued_submission":"排队等待提交","preparing_tool":"正在准备调用工具"}
 		},

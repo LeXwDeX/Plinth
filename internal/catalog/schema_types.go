@@ -6673,6 +6673,18 @@ type ChatMessageTexts struct {
 	InputShapeBoolean         string `json:"input_shape_boolean"`
 	InputShapeNumber          string `json:"input_shape_number"`
 	InputShapeValue           string `json:"input_shape_value"`
+	// The InputRule* texts say which count input rule of the Offering a call
+	// broke (an input group that takes at most or at least some of its
+	// members, such as a prompt or a style picture but not both): TooMany
+	// ({inputs}, {maximum}, {given}, {reason}) and TooFew ({inputs},
+	// {minimum}, {given}, {reason}). {inputs} joins InputRuleMember ({name},
+	// {argument}: the tool argument that carries it) or the bare parameter
+	// name; {reason} is InputRuleReason ({reason}) around the rule's own
+	// Schema message, or empty. Only Schema facts are filled, never a value.
+	InputRuleTooMany string `json:"input_rule_too_many"`
+	InputRuleTooFew  string `json:"input_rule_too_few"`
+	InputRuleMember  string `json:"input_rule_member"`
+	InputRuleReason  string `json:"input_rule_reason"`
 	// GenerationFailedByClass replaces GenerationFailed in the tool result
 	// when the Task failed with one of these failure classes, so the Agent and
 	// the user hear the real cause (for example an exhausted provider balance)

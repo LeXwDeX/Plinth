@@ -43,6 +43,42 @@ type agentOfferingView struct {
 	// refused before any step is paid, so the Agent picks compatible
 	// parameters up front (#121).
 	ChainLimits []agentChainLimitView `json:"chain_limits,omitempty"`
+	// InputRules are the Offering's input groups across its inputs: of the
+	// parameters it names, at least minimum and at most maximum may be given
+	// (for example a prompt or a style picture, but not both), or their items
+	// together stay within max_total_items. The Agent reads them before a call
+	// instead of learning them from a refusal; the kernel enforces them.
+	InputRules []agentInputRuleView `json:"input_rules,omitempty"`
+}
+
+// agentInputRuleView is one count or total input rule of an Offering. The
+// parameter names are those of inputs and sources; message is the rule's own
+// Schema reason, when declared.
+type agentInputRuleView struct {
+	Parameters    []string `json:"parameters"`
+	Minimum       int      `json:"minimum,omitempty"`
+	Maximum       int      `json:"maximum,omitempty"`
+	MaxTotalItems int      `json:"max_total_items,omitempty"`
+	Message       string   `json:"message,omitempty"`
+}
+
+// agentInputRules projects the Offering's count and total input rules. A
+// conditional forbidden_when rule is not an input group and stays server-side.
+func agentInputRules(offering generation.Offering) []agentInputRuleView {
+	var views []agentInputRuleView
+	for _, rule := range offering.InputRules {
+		if len(rule.ForbiddenWhen) > 0 || len(rule.Parameters) == 0 {
+			continue
+		}
+		view := agentInputRuleView{Parameters: append([]string(nil), rule.Parameters...), Message: rule.Message}
+		if rule.MaxTotalItems > 0 {
+			view.MaxTotalItems = rule.MaxTotalItems
+		} else {
+			view.Minimum, view.Maximum = rule.Minimum, rule.Maximum
+		}
+		views = append(views, view)
+	}
+	return views
 }
 
 // agentOfferingKnowledgeView is the Agent-facing part of Offering knowledge:
@@ -271,6 +307,7 @@ func buildAgentOfferingsProjection(
 				offeringView.UpperNativeQuote, _ = offering.UpperNativeQuote()
 			}
 			offeringView.Inputs = agentInputViews(offering)
+			offeringView.InputRules = agentInputRules(offering)
 			if capabilityPresentation.Domain == generation.DomainProcessing {
 				offeringView.Inputs = append(offeringView.Inputs, agentImageInputViews(offering)...)
 				if offering.NativePricing == nil {
