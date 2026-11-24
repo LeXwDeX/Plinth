@@ -51,8 +51,8 @@ export interface AssetBoardTarget {
 export interface GenerationReferenceContext {
   sessionId: string;
   hasReference: boolean;
-  /** The chip of the object on the stage was dismissed: the turn carries neither it nor the artboard. */
-  objectSkipped?: boolean;
+  /** The object on the stage was deselected (#557): the turn carries neither it nor the artboard. */
+  objectDeselected?: boolean;
 }
 
 interface StudioPrefs {

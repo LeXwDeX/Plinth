@@ -36,7 +36,7 @@ vi.mock('@/hooks/use-asset-url-rewriter', () => ({ useAssetURLRewriter: () => ({
 const noop = () => undefined;
 const props: ComposerProps = {
   value: '', onChange: noop, onSend: noop, onStop: noop, streaming: false, locked: false, canSend: true,
-  chip: null, chipSkipped: false, onToggleChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
+  chip: null, onDeselectChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
   acceptedImages: undefined, onFiles: noop, onPasteImages: noop, editing: false, onCancelEdit: noop, sendCredits: null, mentions: [],
   params: {} as ComposerProps['params'],
   skill: { sessionId: 's1', catalog: null, effective: null, selectedId: null, unavailable: false, loading: false, failed: false, disabled: false, onSelect: noop, onCreated: noop },
@@ -70,7 +70,7 @@ describe('chipLines', () => {
 
 describe('one chip', () => {
   const chip = (extra: Partial<React.ComponentProps<typeof ContextChip>> = {}) => render(
-    <ContextChip testId="chip" accent square={<ChipSquare>x</ChipSquare>} title="当前：画布" subtitle="画布" remove={{ label: '本轮不带这个对象', onClick: noop }} {...extra} />,
+    <ContextChip testId="chip" accent square={<ChipSquare>x</ChipSquare>} title="当前：画布" subtitle="画布" remove={{ label: '取消选中', onClick: noop }} {...extra} />,
   );
 
   it('fills the grid cell it is in, whichever element is the outermost one', () => {
@@ -99,7 +99,7 @@ describe('one chip', () => {
     const frame = screen.getByTestId('chip');
     expect(frame.querySelector('.truncate.font-medium')?.parentElement?.className).toMatch(/\bflex-1\b/);
     expect(frame.lastElementChild?.tagName).toBe('SPAN');
-    expect(within(frame).getByRole('button', { name: '本轮不带这个对象' })).toBeTruthy();
+    expect(within(frame).getByRole('button', { name: '取消选中' })).toBeTruthy();
     cleanup();
     chip({ open: { label: '预览附件 1', onClick: noop, testId: 'open' } });
     expect(screen.getByTestId('open').className).toMatch(/\bflex-1\b/);
@@ -114,7 +114,7 @@ describe('one chip', () => {
     expect(frame.querySelectorAll('.truncate.text-\\[11px\\]')).toHaveLength(0);
     expect(frame.textContent).toBe('x2D当前：画布');
     expect(within(frame).getByTestId('badge')).toBeTruthy();
-    expect(within(frame).getByRole('button', { name: '本轮不带这个对象' })).toBeTruthy();
+    expect(within(frame).getByRole('button', { name: '取消选中' })).toBeTruthy();
   });
 
   it('keeps two lines when the second one says something else', () => {
@@ -220,7 +220,7 @@ describe('the strips above the box', () => {
     expect(chip.textContent?.match(new RegExp(messages['ui.studio.composer.chip.canvas'], 'g'))).toHaveLength(1);
     // Hovering the chip names it.
     expect(chip.parentElement?.getAttribute('data-name')).toBe('当前：画布');
-    expect(within(chip).getByRole('button', { name: messages['ui.studio.composer.chip.skip'] })).toBeTruthy();
+    expect(within(chip).getByRole('button', { name: messages['ui.studio.composer.chip.deselect'] })).toBeTruthy();
   });
 
   it('keeps the whole kind badge, its icon included, now that no name shares the chip', () => {

@@ -22,7 +22,7 @@ vi.mock('@/components/ui/hint-tooltip', () => ({ HintTooltip: ({ name, reason, c
 const noop = () => undefined;
 const props: ComposerProps = {
   value: 'Continue', onChange: noop, onSend: noop, onStop: noop, streaming: false, locked: false, canSend: true,
-  chip: null, chipSkipped: false, onToggleChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
+  chip: null, onDeselectChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
   acceptedImages: undefined, onFiles: noop, onPasteImages: noop, editing: false, onCancelEdit: noop, sendCredits: null, mentions: [],
   params: {} as ComposerProps['params'],
   skill: { sessionId: 's1', catalog: null, effective: null, selectedId: null, unavailable: false, loading: false, failed: false, disabled: false, onSelect: noop, onCreated: noop },

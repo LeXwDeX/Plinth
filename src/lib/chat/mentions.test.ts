@@ -78,7 +78,10 @@ describe('typedHandles and overridingHandle', () => {
     expect(overridingHandle('改一下 @img5', '@img5')).toBe('');
     expect(overridingHandle('把 @img5 和 @img1 合起来', '@img5')).toBe('');
     expect(overridingHandle('换成红黑配色', '@img5')).toBe('');
-    expect(overridingHandle('用 @img1 去背景', '')).toBe('');
+    // #557: an object without a handle of its own (the board, a capture not sent yet) cannot be the one typed,
+    // so the typed handle wins over it as well.
+    expect(overridingHandle('用 @img1 去背景', '')).toBe('@img1');
+    expect(overridingHandle('换成红黑配色', '')).toBe('');
     expect(overridingHandle('@img1_x', '@model1')).toBe('');
   });
 

@@ -155,10 +155,12 @@ func (service *Service) verifyTurnAttachments(ctx context.Context, command Start
 			result.selection = append(result.selection, attachment)
 		}
 	}
-	if len(result.selection) == 0 && len(command.Selection) == 0 {
-		// Nothing is selected on the workspace: the candidate the user picked
-		// ("选用") is the current object. It is verified like any selection, so a
-		// pick whose Task is gone is simply not used.
+	if len(result.selection) == 0 && len(command.Selection) == 0 && len(command.Mentions) == 0 && !policy.NamesHandle(command.Content) {
+		// Nothing is selected on the workspace and nothing is named: the
+		// candidate the user picked ("选用") is the current object. A handle
+		// written in the text or an `@` reference is the turn's target and wins
+		// over any selection (#557), so the pick does not stand in then. It is
+		// verified like any selection, so a pick whose Task is gone is not used.
 		if pick, ok, err := service.SessionPick(ctx, command.OwnerID, command.SessionID); err == nil && ok {
 			pick.Handle = ""
 			result.selection = append(result.selection, pick)

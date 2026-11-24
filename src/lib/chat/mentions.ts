@@ -300,13 +300,14 @@ export function typedHandles(text: string): string[] {
 }
 
 /**
- * The handle that takes the turn from the current object: the last handle written in the
- * text when it is not the current object's own. Empty when nothing is written, when the
- * text names the current object, or when the current object has no known handle.
+ * The handle that takes the turn from the selected object: the last handle written in the text when
+ * it is not the selected object's own. A written handle is the turn's target and wins over the
+ * selection (#557), also when the selected object has no handle of its own (the board, a capture not
+ * sent yet): such an object cannot be the one written. Empty when nothing is written or when the
+ * text names the selected object.
  */
 export function overridingHandle(text: string, currentHandle: string): string {
-  if (!currentHandle) return '';
   const typed = typedHandles(text);
-  if (typed.length === 0 || typed.includes(currentHandle)) return '';
+  if (typed.length === 0 || (currentHandle !== '' && typed.includes(currentHandle))) return '';
   return typed[typed.length - 1];
 }

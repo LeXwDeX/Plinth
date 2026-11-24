@@ -26,7 +26,7 @@ vi.mock('@/components/studio/chat-model-picker', () => ({ ChatModelNotice: () =>
 const noop = () => undefined;
 const props: ComposerProps = {
   value: '', onChange: noop, onSend: noop, onStop: noop, streaming: true, locked: false, canSend: false,
-  chip: null, chipSkipped: false, onToggleChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
+  chip: null, onDeselectChip: noop, images: [], onRemoveImage: noop, pinnedImage: null, onUnpin: noop,
   acceptedImages: undefined, onFiles: noop, onPasteImages: noop, editing: false, onCancelEdit: noop, sendCredits: null, mentions: [],
   params: {} as ComposerProps['params'],
   skill: { sessionId: 's1', catalog: null, effective: null, selectedId: null, unavailable: false, loading: false, failed: false, disabled: false, onSelect: noop, onCreated: noop },
