@@ -111,6 +111,12 @@ DECIMATE_FACES = 1000
 # A face bound the real service keeps within a few percent; the fake's model is one fixed fixture, so the bound is
 # enforced against a real upstream only (the count is recorded either way).
 BOUND_SLACK = 1.05
+# Tripo's decimation takes face_limit as a target, not a ceiling. The real round of 2026-11-24 (#577) sent face_limit 1000
+# (v3.0, quad false, bake, smart_uv; the task repeated face_limit 1000) for a 2,814-triangle source and got 1,566
+# triangles, 57% over. The bound is twice the target, which leaves room for that overshoot on another source and still
+# fails a decimation that kept the source (text_geo is capped at GEOMETRY_FACES); a decimation must also come out with
+# fewer triangles than its source. Both are enforced on a real upstream only, like BOUND_SLACK.
+DECIMATE_SLACK = 2.0
 DEFAULT_UPLOAD_LIMIT = 10 << 20
 PICTURE_EDGE = 512
 
@@ -289,7 +295,7 @@ def model_path(ctx, name):
     return ctx.file(name, "model", "glb") or ctx.file(name, "model")
 
 
-def glb_checks(ctx, name, bound=None, textured=False, parts=False):
+def glb_checks(ctx, name, bound=None, textured=False, parts=False, slack=BOUND_SLACK, source=None):
     path = model_path(ctx, name)
     summary = engine.glb_summary(path) if path else None
     checks = [("GLB readable", summary is not None, "GLB 2.0 read from its own bytes" if summary else "no readable GLB")]
@@ -300,9 +306,17 @@ def glb_checks(ctx, name, bound=None, textured=False, parts=False):
         checks.append(("GLB textured", summary["materials"] > 0 and summary["images"] > 0,
                        f"{summary['materials']} material(s), {summary['images']} image(s), edges {summary['texture_edges']}"))
     if bound is not None:
-        within = summary["triangles"] <= bound * BOUND_SLACK
+        within = summary["triangles"] <= bound * slack
         checks.append(("GLB triangles", within or ctx.fake, f"{summary['triangles']} triangles, limit {bound}"
+                       + (f" (x{slack:g})" if slack != BOUND_SLACK else "")
                        + ("" if within else " (recorded; enforced on a real upstream only)")))
+    if source is not None:
+        source_path = model_path(ctx, source)
+        before = engine.glb_summary(source_path) if source_path else None
+        if before:
+            fewer = summary["triangles"] < before["triangles"]
+            checks.append(("GLB reduced", fewer or ctx.fake, f"{summary['triangles']} triangles from {before['triangles']}"
+                           + ("" if fewer else " (recorded; enforced on a real upstream only)")))
     if parts:
         split = summary["meshes"] >= 2
         checks.append(("GLB in parts", split or ctx.fake, f"{summary['meshes']} mesh(es)"
@@ -384,9 +398,11 @@ def verify_retarget(ctx, task):
         + glb_checks(ctx, "retarget")
 
 
-def verify_processed(name, formats=("glb", "fbx", "obj", "stl", "usdz", "3mf"), bound=None, textured=False, parts=False):
+def verify_processed(name, formats=("glb", "fbx", "obj", "stl", "usdz", "3mf"), bound=None, textured=False, parts=False,
+                     slack=BOUND_SLACK, source=None):
     def verify(ctx, task):
-        return [check_formats(task, formats)] + glb_checks(ctx, name, bound=bound, textured=textured, parts=parts)
+        return [check_formats(task, formats)] + glb_checks(ctx, name, bound=bound, textured=textured, parts=parts,
+                                                           slack=slack, source=source)
     return verify
 
 
@@ -479,7 +495,7 @@ def steps():
         step("retarget", ANIMATION, "animation", source("rig_v3", {"animation_action": "preset:walk"}),
              needs=("rig_v3",), verify=verify_retarget),
         step("decimate", DECIMATE, "remesh", source("text_geo", {"face_limit": DECIMATE_FACES}), needs=geo,
-             verify=verify_processed("decimate", bound=DECIMATE_FACES)),
+             verify=verify_processed("decimate", bound=DECIMATE_FACES, slack=DECIMATE_SLACK, source="text_geo")),
         step("segment", SEGMENT, "mesh-segmentation", source("text_geo"), needs=geo,
              verify=verify_processed("segment", parts=True)),
         step("quick_cap", QUICK_CAP, "mesh-completion", source("segment"), needs=("segment",),
