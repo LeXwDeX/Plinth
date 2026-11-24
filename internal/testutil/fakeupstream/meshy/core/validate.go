@@ -221,7 +221,58 @@ func textTo3DRefineError(request map[string]any) string {
 		return message
 	}
 	known := append(append(slices.Clone(standardModels), smartModels...), "meshy-n1")
-	return enumError(request, "ai_model", known)
+	if message := enumError(request, "ai_model", known); message != "" {
+		return message
+	}
+	return refineTextureError(request)
+}
+
+// refineHighResolutionModels are the refine ai_model values that make a 4K or
+// 8K texture: the page's "4k and 8k need ai_model meshy-6, meshy-7, or latest",
+// plus meshy-7.1, which the page does not list as a refine model but a real
+// refine of 2026-11-20 sent and had accepted; what it does at 4k or 8k is
+// unknown, so the fake does not refuse it.
+var refineHighResolutionModels = []string{"meshy-6", "meshy-7", "latest", "meshy-7.1"}
+
+// refineTextureError holds the refine texture conflicts of the Text to 3D page
+// (read 2026-11-25), each stated as a 400 there: texture_resolution 4k or 8k
+// (or hd_texture true, which is 4k) with an explicit ai_model other than the
+// models above; with meshy-n1, enable_pbr true, a texture_prompt or
+// remove_lighting true; and remove_lighting with meshy-6-lite. A refine without
+// ai_model textures with the preview's model and is not judged (the Adapter
+// sends none, and a real 8k refine without it was accepted on 2026-11-22). The
+// refusal texts are constructed.
+func refineTextureError(request map[string]any) string {
+	model := stringOf(request, "ai_model")
+	if model == "" {
+		return ""
+	}
+	resolution := stringOf(request, "texture_resolution")
+	if resolution == "" {
+		if hd, _ := request["hd_texture"].(bool); hd {
+			resolution = "4k"
+		}
+	}
+	if (resolution == "4k" || resolution == "8k") && !slices.Contains(refineHighResolutionModels, model) {
+		return "texture_resolution " + resolution + " needs ai_model meshy-6, meshy-7 or latest, not " + model
+	}
+	switch model {
+	case "meshy-n1":
+		if request["enable_pbr"] == true {
+			return "enable_pbr cannot be true with ai_model meshy-n1"
+		}
+		if has(request, "texture_prompt") {
+			return "texture_prompt cannot be sent with ai_model meshy-n1"
+		}
+		if request["remove_lighting"] == true {
+			return "remove_lighting cannot be true with ai_model meshy-n1"
+		}
+	case "meshy-6-lite":
+		if _, present := request["remove_lighting"]; present {
+			return "remove_lighting cannot be sent with ai_model meshy-6-lite"
+		}
+	}
+	return ""
 }
 
 // textureModelValues are the texture_model values of the Image to 3D and Multi
@@ -307,23 +358,44 @@ func ImageTo3DRequestError(request map[string]any, multi bool) string {
 			return "enable_pbr cannot be true with texture_model meshy-n1"
 		}
 	}
-	if multi {
-		return multiImageError(request, texture, textured)
+	if message := textureOptionError(request, texture, !multi); message != "" {
+		return message
 	}
-	return ""
+	if multi {
+		return multiImageError(request, textured)
+	}
+	// surface_mode is a single-image option: "Accepted values are organic and
+	// hard. Any other value returns 400." (Image to 3D page, read 2026-11-25).
+	return enumError(request, "surface_mode", []string{"organic", "hard"})
 }
 
-// multiImageError is what only the Multi Image to 3D page states.
-func multiImageError(request map[string]any, texture string, textured bool) string {
-	if message := listError(request, "image_urls", 1, 4); message != "" {
-		return message
-	}
-	if message := listError(request, "texture_image_urls", 1, 4); message != "" {
-		return message
-	}
+// smartTopologyRequest reports a request that runs a Smart Topology model
+// (model_type smart-topology, or a meshy-t2 / meshy-t2.5 ai_model).
+func smartTopologyRequest(request map[string]any) bool {
+	return stringOf(request, "model_type") == "smart-topology" || slices.Contains(smartModels, stringOf(request, "ai_model"))
+}
+
+// textureOptionError holds the texture-option conflicts the Image to 3D and
+// Multi Image to 3D pages (read 2026-11-25) both state as a 400:
+// image_enhancement with meshy-6-lite (and, single image only, with Smart
+// Topology); with texture_model meshy-n1, a texture_prompt, remove_lighting
+// true, or topology quad on a remeshed model ("which meshy-6-lite does by
+// default"); and remove_lighting with meshy-6-lite and its default texture model
+// (or, single image only, with Smart Topology). The refusal texts are
+// constructed. The pages also say enable_pbr true with should_texture false
+// answers 400, which is not checked: the Catalog sends its enable_pbr default
+// whatever should_texture is, so the rule would refuse a request the platform
+// builds; it is a register gap until the Catalog omits enable_pbr there (#579).
+func textureOptionError(request map[string]any, texture string, single bool) string {
 	model := stringOf(request, "ai_model")
-	if model == "meshy-6-lite" && request["image_enhancement"] != nil {
-		return "image_enhancement is not supported with ai_model meshy-6-lite"
+	smart := single && smartTopologyRequest(request)
+	if has(request, "image_enhancement") {
+		if model == "meshy-6-lite" {
+			return "image_enhancement is not supported with ai_model meshy-6-lite"
+		}
+		if smart {
+			return "image_enhancement is not supported with model_type smart-topology"
+		}
 	}
 	if texture == "meshy-n1" {
 		if has(request, "texture_prompt") {
@@ -332,7 +404,31 @@ func multiImageError(request map[string]any, texture string, textured bool) stri
 		if request["remove_lighting"] == true {
 			return "remove_lighting cannot be true with texture_model meshy-n1"
 		}
+		remeshed := request["should_remesh"] == true || (model == "meshy-6-lite" && request["should_remesh"] != false)
+		if stringOf(request, "topology") == "quad" && remeshed {
+			return "topology quad is not supported with texture_model meshy-n1 on a remeshed model"
+		}
 	}
+	if _, present := request["remove_lighting"]; present {
+		if smart {
+			return "remove_lighting is not supported with model_type smart-topology"
+		}
+		if model == "meshy-6-lite" && texture == "" {
+			return "remove_lighting is not supported with ai_model meshy-6-lite and its default texture model"
+		}
+	}
+	return ""
+}
+
+// multiImageError is what only the Multi Image to 3D page states.
+func multiImageError(request map[string]any, textured bool) string {
+	if message := listError(request, "image_urls", 1, 4); message != "" {
+		return message
+	}
+	if message := listError(request, "texture_image_urls", 1, 4); message != "" {
+		return message
+	}
+	texture := stringOf(request, "texture_model")
 	if has(request, "texture_image_urls") {
 		for _, conflict := range []string{"texture_image_url", "texture_prompt"} {
 			if has(request, conflict) {
@@ -533,6 +629,89 @@ func AnimationRequestError(request map[string]any) string {
 	if process, ok := request["post_process"].(map[string]any); ok {
 		if message := enumError(process, "operation_type", []string{"change_fps", "fbx2usdz", "extract_armature"}); message != "" {
 			return "post_process." + message
+		}
+		// "The frame rate to change to, one of 24, 25, 30, or 60 ... Any other
+		// value returns 400" (read 2026-11-25). The page says fps "applies only
+		// when operation_type is change_fps", so beside another operation it is
+		// ignored, not refused; its value is still checked (constructed).
+		if value, present := process["fps"]; present {
+			number, isNumber := value.(json.Number)
+			if !isNumber || !slices.Contains([]string{"24", "25", "30", "60"}, number.String()) {
+				return "post_process.fps must be one of 24, 25, 30, 60"
+			}
+		}
+	}
+	return ""
+}
+
+// AnimationSourceError is the Animation page's "Unsupported rig" 400 (read
+// 2026-11-25): "motion_task_id needs a biped rig, and Meshy rejects a quadruped
+// rig." The rig's kind is the animation_type of the rigging request behind
+// rig_task_id (default biped). Whether an action_id's rig_type matches the rig
+// needs the animation library, which the fake does not hold, so that 400 is not
+// modelled. The refusal text is constructed.
+func AnimationSourceError(request map[string]any, field string, source map[string]any) string {
+	if field == "rig_task_id" && has(request, "motion_task_id") && stringOf(source, "animation_type") == "quadruped" {
+		return "motion_task_id needs a biped rig; the rig_task_id task is a quadruped rig"
+	}
+	return ""
+}
+
+// remeshTargetFormats are the target_formats of the Remesh page, which also
+// lists blend (read 2026-11-25); the generation pages list the six above.
+var remeshTargetFormats = append(slices.Clone(targetFormats), "blend")
+
+// RemeshRequestError is the create validation of the Remesh page
+// (https://docs.meshy.ai/en/api/remesh, read 2026-11-25), each rule stated as a
+// 400 there: target_formats from its seven formats; topology quad or triangle
+// ("Invalid topology"); target_polycount from 100 to 300000 ("A value outside
+// the range returns 400"); more than one of resize_height, resize_longest_side
+// and auto_size ("Mutually exclusive parameters"); and, with
+// convert_format_only true, an empty or null target_formats. auto_size counts
+// as sent only when true and the two sizes when present, so a body naming
+// auto_size false beside a size is not refused (the page does not say how it
+// reads an explicit false). The refusal texts are constructed.
+func RemeshRequestError(request map[string]any) string {
+	if value, present := request["target_formats"]; present && value != nil {
+		list, ok := value.([]any)
+		if !ok {
+			return "target_formats must be an array"
+		}
+		for _, item := range list {
+			if text, ok := item.(string); !ok || !slices.Contains(remeshTargetFormats, text) {
+				return "target_formats must only list " + strings.Join(remeshTargetFormats, ", ")
+			}
+		}
+	}
+	if message := enumError(request, "topology", []string{"quad", "triangle"}); message != "" {
+		return message
+	}
+	if value, present := request["target_polycount"]; present {
+		count, ok := integerOf(value)
+		if !ok || count < targetFloor || count > standardTargetCeiling {
+			return "target_polycount must be an integer between " + strconv.Itoa(targetFloor) + " and " + strconv.Itoa(standardTargetCeiling)
+		}
+	}
+	if message := boolError(request, "auto_size", "convert_format_only"); message != "" {
+		return message
+	}
+	modes := 0
+	for _, field := range []string{"resize_height", "resize_longest_side"} {
+		if _, present := request[field]; present {
+			modes++
+		}
+	}
+	if request["auto_size"] == true {
+		modes++
+	}
+	if modes > 1 {
+		return "send at most one of resize_height, resize_longest_side and auto_size"
+	}
+	if request["convert_format_only"] == true {
+		if list, _ := request["target_formats"].([]any); len(list) == 0 {
+			if _, present := request["target_formats"]; present {
+				return "target_formats must list at least one format when convert_format_only is true"
+			}
 		}
 	}
 	return ""

@@ -1697,7 +1697,8 @@
           "app_revision": "unknown",
           "catalog_revision": "unknown"
         }
-      ]
+      ],
+      "note": "2026-11-25 文档复核：状态码与 {message} 信封一致。"
     },
     {
       "id": "meshy-openapi-v1/assets-route",
@@ -2170,14 +2171,18 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "删除运行中任务的 409。",
+      "behavior": "删除运行中（IN_PROGRESS）任务答 409，文案取 Text to 3D 页 DELETE 的原文 \"Task is IN_PROGRESS and cannot be deleted.\"（#579）。",
       "basis": [
         {
           "source": "https://docs.meshy.ai/en/api/errors",
           "section": "Errors"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/text-to-3d",
+          "section": "Delete：409"
         }
       ],
-      "checked_at": "2026-11-08",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -2209,8 +2214,9 @@
           "section": "各端点的任务对象字段说明"
         }
       ],
-      "checked_at": "2026-11-08",
-      "why_not_real": "真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED（rigging 另有 FAILED）"
+      "checked_at": "2026-11-25",
+      "why_not_real": "真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED（rigging 另有 FAILED）",
+      "note": "2026-11-25 核对：PENDING 下 started_at/finished_at 的形状文档前后不一（v1 写缺省、v2 写 0、v2 创建对象为 null），只有 IN_PROGRESS/SUCCEEDED 的真实样本，文档无法确认，保持不动。"
     },
     {
       "id": "meshy-openapi-v1/rigging-failed-oversize",
@@ -2231,7 +2237,8 @@
           "app_revision": "unknown",
           "catalog_revision": "unknown"
         }
-      ]
+      ],
+      "note": "2026-11-25 文档写 38 万三角形以上提交即答 400，与 2026-10-29 实测（受理后 FAILED）不同，保留实测。"
     },
     {
       "id": "meshy-openapi-v1/poll-failed-other-kinds",
@@ -2262,8 +2269,9 @@
           "section": "Errors"
         }
       ],
-      "checked_at": "2026-11-08",
-      "why_not_real": "只有 rigging 观测到过 FAILED"
+      "checked_at": "2026-11-25",
+      "why_not_real": "只有 rigging 观测到过 FAILED",
+      "note": "2026-11-25 复核 task_error 类型与状态集与文档一致。"
     },
     {
       "id": "meshy-openapi-v1/image-models-request",
@@ -2286,8 +2294,9 @@
           "section": "Image to image"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "拒绝从未向真实 API 请求过，拒绝文案为构造"
+      "checked_at": "2026-11-25",
+      "why_not_real": "拒绝从未向真实 API 请求过，拒绝文案为构造",
+      "note": "2026-11-25 复核与 Text to image、Image to image 页一致。"
     },
     {
       "id": "meshy-openapi-v1/image-to-3d-request",
@@ -2299,7 +2308,7 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "geometry_resolution 2k/4k 与模型的组合、texture_model、4k/8k 贴图与 meshy-6-lite/meshy-n1（定价表 NS 格读作 400）、meshy-n1 不配 PBR；多图 1–4 张、不收 4k、texture_image_urls 的互斥（core.ImageTo3DRequestError，#542）。",
+      "behavior": "geometry_resolution 2k/4k 与模型的组合、texture_model、4k/8k 贴图与 meshy-6-lite/meshy-n1（定价表 NS 格读作 400）、meshy-n1 不配 PBR；多图 1–4 张、不收 4k、texture_image_urls 的互斥（core.ImageTo3DRequestError，#542）。2026-11-25 起两图共用 core.textureOptionError（#579）：image_enhancement 不配 meshy-6-lite（单图另不配 smart-topology），texture_model meshy-n1 不配 texture_prompt、remove_lighting true 与重拓扑后的 quad，remove_lighting 不配 meshy-6-lite 默认纹理模型（单图另不配 smart-topology）；单图 surface_mode 只收 organic、hard。",
       "basis": [
         {
           "source": "https://docs.meshy.ai/en/api/image-to-3d",
@@ -2314,8 +2323,9 @@
           "section": "Pricing"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "组合拒绝没有真实请求过"
+      "checked_at": "2026-11-25",
+      "why_not_real": "组合拒绝没有真实请求过",
+      "note": "文档另写单图 enable_pbr true 配 should_texture false 答 400，fake 未实现：Catalog 在 should_texture 为 false 时仍发 enable_pbr 默认值，校验会拒绝平台实际可发的请求，见 gap 条目 image-to-3d-pbr-without-texture。"
     },
     {
       "id": "meshy-openapi-v1/image-to-3d-rich-success",
@@ -2353,8 +2363,9 @@
           "section": "Retexture"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "页面没写枚举外取值的结果，待零费用探测定稿"
+      "checked_at": "2026-11-25",
+      "why_not_real": "页面没写枚举外取值的结果，待零费用探测定稿",
+      "note": "2026-11-25 复核与 Retexture 页一致。"
     },
     {
       "id": "meshy-openapi-v1/rigging-request",
@@ -2365,7 +2376,7 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "skeleton_template（九种）、include_fingers（不与 texture_image_url 同用）、height_meters（非负）按官方页校验（riggingRequestError）；rig-non-humanoid 场景答文档的 422。",
+      "behavior": "skeleton_template（九种）、include_fingers（不与 texture_image_url 同用）、height_meters（非负）按官方页校验（riggingRequestError）；rig-non-humanoid 场景答文档的 422。2026-11-25 补（#579）：animation_type 只收 biped、quadruped；quadruped 不收 skeleton_template 与 include_fingers true；texture_image_url 非 PNG（data URI 的媒体类型或 URL 扩展名，无扩展名放行）答 400。",
       "basis": [
         {
           "source": "https://docs.meshy.ai/en/api/rigging",
@@ -2374,9 +2385,13 @@
         {
           "source": "https://docs.meshy.ai/en/api/rigging-and-animation",
           "section": "Rigging and animation"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/rigging",
+          "section": "Quadruped / Failure modes（2026-11-25）"
         }
       ],
-      "checked_at": "2026-11-12",
+      "checked_at": "2026-11-25",
       "why_not_real": "取值未真实请求过"
     },
     {
@@ -2408,7 +2423,7 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "动画三种动作来源恰好一个（action_ids 至多 10 个、不重复）；text-to-motion 的 prompt 至多 400 字符、mode 为 prime 或 swift、duration 2–10 秒半秒步进（#542）。",
+      "behavior": "动画三种动作来源恰好一个（action_ids 至多 10 个、不重复）；text-to-motion 的 prompt 至多 400 字符、mode 为 prime 或 swift、duration 2–10 秒半秒步进（#542）。2026-11-25 补（#579）：post_process.fps 只收 24、25、30、60（非 change_fps 时忽略、不拒绝）；motion_task_id 配 quadruped 骨骼（来源 rigging 请求的 animation_type）答 400。",
       "basis": [
         {
           "source": "https://docs.meshy.ai/en/api/animation",
@@ -2419,8 +2434,9 @@
           "section": "Text to motion"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "拒绝从未向真实 API 请求过"
+      "checked_at": "2026-11-25",
+      "why_not_real": "拒绝从未向真实 API 请求过",
+      "note": "action_id 的 rig_type 与骨骼不符答 400 未建模，见 gap 条目 animation-rig-type。"
     },
     {
       "id": "meshy-openapi-v1/resize-request",
@@ -2431,14 +2447,14 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "resize_height、resize_longest_side、auto_size 恰好一个，否则答文档的 400（resizeRequestError）。",
+      "behavior": "resize_height、resize_longest_side、auto_size 恰好一个，否则答文档的 400（resizeRequestError）。resize_height、resize_longest_side 须为大于 0 的数，负值与 0 答 400（#579）。",
       "basis": [
         {
           "source": "https://docs.meshy.ai/en/api/resize",
           "section": "Resize"
         }
       ],
-      "checked_at": "2026-11-08",
+      "checked_at": "2026-11-25",
       "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
@@ -2474,7 +2490,8 @@
           "app_revision": "unknown",
           "catalog_revision": "unknown"
         }
-      ]
+      ],
+      "note": "2026-11-25 文档复核：价格与 Pricing 页一致。"
     },
     {
       "id": "meshy-openapi-v1/pricing-table",
@@ -2505,8 +2522,9 @@
           "section": "Pricing"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "只有上一条所列组合被真实扣费过"
+      "checked_at": "2026-11-25",
+      "why_not_real": "只有上一条所列组合被真实扣费过",
+      "note": "2026-11-25 复核积分表与 Pricing 页一致。"
     },
     {
       "id": "meshy-openapi-v1/fault-scenarios",
@@ -2530,7 +2548,7 @@
       ],
       "category": "error-code-and-text",
       "status": "constructed",
-      "behavior": "403 forbidden（{message}）、余额不足（非 Key 额度）、429、5xx、超时与丢响应；402 API key credit limit reached 沿用 #73 的观测。",
+      "behavior": "403 forbidden（{message}）、余额不足（非 Key 额度）、429、5xx、超时与丢响应；402 API key credit limit reached 沿用 #73 的观测。rigging 与 animations 的 403 用页面文案 \"This model type does not support this operation\"（#579），其余路由沿用 Errors 页的通用文案。",
       "basis": [
         {
           "source": "https://docs.meshy.ai/en/api/errors",
@@ -2538,10 +2556,19 @@
         },
         {
           "source": "#73 的 402 Key 额度观测（未入库）"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/rigging",
+          "section": "403"
+        },
+        {
+          "source": "https://docs.meshy.ai/en/api/animation",
+          "section": "403"
         }
       ],
-      "checked_at": "2026-11-08",
-      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
+      "checked_at": "2026-11-25",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本",
+      "note": "2026-11-25 核对：Errors 页没有给 402 与 429 的示例文案（429 文案的句号沿用 Rate limits 页），文档无法确认，保持不动。"
     },
     {
       "id": "meshy-openapi-v1/rate-limit",
@@ -2572,8 +2599,9 @@
           "section": "Rate limits"
         }
       ],
-      "checked_at": "2026-11-08",
-      "why_not_real": "429 没有在官方 API 上触发；Retry-After: 5 在轮询中已观测，但未单独断言为样本"
+      "checked_at": "2026-11-25",
+      "why_not_real": "429 没有在官方 API 上触发；Retry-After: 5 在轮询中已观测，但未单独断言为样本",
+      "note": "2026-11-25 核对：429 头与 Rate limits 页一致；并发 429 只建模 NoMorePendingTasks，NoMoreConcurrentTasks 未建模。"
     },
     {
       "id": "meshy-openapi-v1/partial-formats",
@@ -2622,8 +2650,9 @@
           "section": "Webhooks"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "真实投递需要公网 https 地址并会影响账号下其他应用，未做真实验证"
+      "checked_at": "2026-11-25",
+      "why_not_real": "真实投递需要公网 https 地址并会影响账号下其他应用，未做真实验证",
+      "note": "2026-11-25 核对：文档要求 webhook 地址为 https，fake 放行 http（webhook.go 自述，供本地测试）；重试间隔文档未给，文档无法确认。"
     },
     {
       "id": "meshy-openapi-v1/t25-image-to-3d",
@@ -2796,6 +2825,87 @@
       "why_not_real": "真实文件名只在运行记录里，样本的 URL 已脱敏；Adapter 按字段取 URL，不依赖文件名，所以 fake 未改"
     },
     {
+      "id": "meshy-openapi-v1/remesh-request",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /remesh"
+      ],
+      "category": "request-validation",
+      "status": "constructed",
+      "behavior": "target_formats 取七种（含 blend），topology 只收 quad、triangle，target_polycount 100–300000，resize_height、resize_longest_side、auto_size true 至多一个，convert_format_only true 时 target_formats 为空或 null 答 400（core.RemeshRequestError，#579）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/remesh",
+          "section": "Remesh：参数与 400 failure modes"
+        }
+      ],
+      "checked_at": "2026-11-25",
+      "why_not_real": "拒绝从未向真实 API 请求过，拒绝文案为构造",
+      "note": "auto_size 只在为 true 时计入互斥（页面没说显式 false 如何处理）；真实 remesh 样本（300000 quad、5800/10000 triangle、六种格式）都被放行。"
+    },
+    {
+      "id": "meshy-openapi-v1/list-and-stream",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "GET /text-to-image/{id}",
+        "GET /image-to-image/{id}",
+        "GET /image-to-3d/{id}",
+        "GET /multi-image-to-3d/{id}",
+        "GET /remesh/{id}",
+        "GET /convert/{id}",
+        "GET /retexture/{id}",
+        "GET /rigging/{id}",
+        "GET /animations/{id}",
+        "GET /uv-unwrap/{id}",
+        "GET /resize/{id}",
+        "GET /print/analyze/{id}",
+        "GET /print/multi-color/{id}",
+        "GET /text-to-motion/{id}"
+      ],
+      "category": "other",
+      "status": "gap",
+      "behavior": "官方各任务族另有列表端点（GET /<族>）与 SSE 流端点（GET /<族>/{id}/stream），fake 只实现单任务轮询（本条挂在轮询端点上）。",
+      "plan": "Adapter 只用单任务轮询与 webhook，暂不实现；Adapter 改用列表或流时再按文档补 fake。",
+      "issues": [
+        579
+      ],
+      "checked_at": "2026-11-25"
+    },
+    {
+      "id": "meshy-openapi-v1/image-to-3d-pbr-without-texture",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /image-to-3d"
+      ],
+      "category": "request-validation",
+      "status": "gap",
+      "behavior": "Image to 3D 页写 enable_pbr true 配 should_texture false 答 400，fake 放行。",
+      "plan": "Catalog 的图生 3D Offering 先在 should_texture 为 false 时省略 enable_pbr（现在会发默认值 true），再在 fake 补这条 400 与回归测试。",
+      "issues": [
+        579
+      ],
+      "checked_at": "2026-11-25"
+    },
+    {
+      "id": "meshy-openapi-v1/animation-rig-type",
+      "provider": "meshy",
+      "api": "openapi-v1",
+      "endpoints": [
+        "POST /animations"
+      ],
+      "category": "request-validation",
+      "status": "gap",
+      "behavior": "Animation 页写 action_id / action_ids 的 rig_type 与骨骼不符答 400，fake 不判断（没有动作库的 rig_type）。",
+      "plan": "需要时把动作库的 rig_type 表放进 fake 再校验；Catalog 当前只给人形动作。",
+      "issues": [
+        579
+      ],
+      "checked_at": "2026-11-25"
+    },
+    {
       "id": "meshy-openapi-v2/text-to-3d-shape",
       "provider": "meshy",
       "api": "openapi-v2",
@@ -2901,8 +3011,9 @@
           "section": "Text to 3D：任务对象"
         }
       ],
-      "checked_at": "2026-11-08",
-      "why_not_real": "真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED"
+      "checked_at": "2026-11-25",
+      "why_not_real": "真实轮询只观测到 IN_PROGRESS 与 SUCCEEDED",
+      "note": "2026-11-25 核对：PENDING 时间戳形状同 v1 条目，文档自相矛盾，保持不动。"
     },
     {
       "id": "meshy-openapi-v2/text-to-3d-request",
@@ -2913,15 +3024,15 @@
       ],
       "category": "request-validation",
       "status": "constructed",
-      "behavior": "preview 需要不超过 800 字符的 prompt，refine 需要指向本账号已成功 preview 的 preview_task_id（否则 400），2k/4k 几何与模型的组合，模型、mode、格式枚举（#542）；refine 的任意已知模型名都接受。",
-      "note": "refine 带 meshy-7.1 被接受是 2026-11-20 的真实观测。",
+      "behavior": "preview 需要不超过 800 字符的 prompt，refine 需要指向本账号已成功 preview 的 preview_task_id（否则 400），2k/4k 几何与模型的组合，模型、mode、格式枚举（#542）；refine 的任意已知模型名都接受。refine 显式带 ai_model 时按页面答 400（#579）：4k/8k 贴图（或 hd_texture true）须 meshy-6、meshy-7、latest（meshy-7.1 按实测放行）；meshy-n1 不配 enable_pbr true、texture_prompt、remove_lighting true；meshy-6-lite 不配 remove_lighting。不带 ai_model 的 refine 不判断。",
+      "note": "refine 带 meshy-7.1 被接受是 2026-11-20 的真实观测。 2026-11-25 核对：ai_model 枚举不收紧，meshy-7.1 在 4k/8k 下的真实行为未知，fake 放行。",
       "basis": [
         {
           "source": "https://docs.meshy.ai/en/api/text-to-3d",
           "section": "Text to 3D"
         }
       ],
-      "checked_at": "2026-11-24",
+      "checked_at": "2026-11-25",
       "why_not_real": "拒绝文案为构造，参数层面的拒绝没有真实请求过"
     },
     {
@@ -2949,7 +3060,8 @@
           "app_revision": "unknown",
           "catalog_revision": "2026-11-22.456-460.1"
         }
-      ]
+      ],
+      "note": "2026-11-25 文档复核：价格与 Pricing 页一致。"
     },
     {
       "id": "meshy-openapi-v2/pricing-table",
@@ -2967,8 +3079,9 @@
           "section": "Pricing"
         }
       ],
-      "checked_at": "2026-11-24",
-      "why_not_real": "只有上一条的组合被真实扣费过"
+      "checked_at": "2026-11-25",
+      "why_not_real": "只有上一条的组合被真实扣费过",
+      "note": "2026-11-25 复核积分表与 Pricing 页一致。"
     },
     {
       "id": "meshy-openapi-v2/assets-route",
@@ -3052,6 +3165,25 @@
           "catalog_revision": "unknown"
         }
       ]
+    },
+    {
+      "id": "meshy-openapi-v2/delete-running-409",
+      "provider": "meshy",
+      "api": "openapi-v2",
+      "endpoints": [
+        "DELETE /text-to-3d/{id}"
+      ],
+      "category": "error-code-and-text",
+      "status": "constructed",
+      "behavior": "删除运行中（IN_PROGRESS）任务答 409，文案为页面原文 \"Task is IN_PROGRESS and cannot be deleted.\"（#579）。",
+      "basis": [
+        {
+          "source": "https://docs.meshy.ai/en/api/text-to-3d",
+          "section": "Delete：409"
+        }
+      ],
+      "checked_at": "2026-11-25",
+      "why_not_real": "官方 API 上没有触发过这种情况，没有已提交的样本"
     },
     {
       "id": "hyper3d-api-v2/check-balance",

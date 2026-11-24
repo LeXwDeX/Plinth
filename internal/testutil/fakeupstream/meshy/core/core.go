@@ -120,6 +120,14 @@ type Kind struct {
 	// Store.topologyOf) and runs for each source field that names a task, once
 	// the task exists and has succeeded.
 	ValidateSource func(request map[string]any, sourceTopology string) string
+	// ValidateSourceRequest, when set, checks the request against the create
+	// request of the source task named by field (the animation's rig_task_id
+	// rig kind, for one) and answers the text of the 400 refusal, or "". It runs
+	// where ValidateSource does.
+	ValidateSourceRequest func(request map[string]any, field string, source map[string]any) string
+	// ForbiddenMessage, when set, is the text of the forbidden scenario's 403 on
+	// a create of this kind, in place of the generic one.
+	ForbiddenMessage string
 }
 
 // Config assembles one version's handler.
@@ -518,6 +526,10 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 			}
 		}
 		if scenario == fakeupstream.ScenarioForbidden {
+			if kind.ForbiddenMessage != "" {
+				e.fail(w, http.StatusForbidden, kind.ForbiddenMessage)
+				return
+			}
 			e.render(w, r, scenario)
 			return
 		}
@@ -555,6 +567,12 @@ func (e *engine) create(kind Kind) http.HandlerFunc {
 			}
 			if kind.ValidateSource != nil {
 				if message := kind.ValidateSource(request, store.topologyOf(found)); message != "" {
+					e.fail(w, http.StatusBadRequest, message)
+					return
+				}
+			}
+			if kind.ValidateSourceRequest != nil {
+				if message := kind.ValidateSourceRequest(request, field, found.request); message != "" {
 					e.fail(w, http.StatusBadRequest, message)
 					return
 				}
@@ -726,9 +744,11 @@ func (e *engine) delete(kind Kind) http.HandlerFunc {
 			return
 		}
 		// A task that is running cannot be deleted (documented; not provoked in the
-		// alignment run, which deleted finished tasks only).
+		// alignment run, which deleted finished tasks only). The text is the 409
+		// message of the Text to 3D page's DELETE (read 2026-11-25); no real 409
+		// was captured.
 		if e.statusOf(t) == StatusInProgress {
-			e.fail(w, http.StatusConflict, "The task is in progress and cannot be deleted")
+			e.fail(w, http.StatusConflict, "Task is IN_PROGRESS and cannot be deleted.")
 			return
 		}
 		e.cfg.Store.mu.Lock()
