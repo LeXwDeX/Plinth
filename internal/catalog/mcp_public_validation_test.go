@@ -103,6 +103,14 @@ func TestDefaultMCPGenerateImageMaskDeclaration(t *testing.T) {
 			t.Fatalf("mask_size_mismatch = %q lacks %s", service.Messages.MaskSizeMismatch, holder)
 		}
 	}
+	for _, holder := range []string{"{mask_format}", "{image_format}"} {
+		if !strings.Contains(service.Messages.MaskFormatMismatch, holder) {
+			t.Fatalf("mask_format_mismatch = %q lacks %s", service.Messages.MaskFormatMismatch, holder)
+		}
+	}
+	if !strings.Contains(service.Messages.MaskFormatMismatch, "PNG") || !strings.Contains(service.Messages.MaskFormatMismatch, "upload_image") {
+		t.Fatalf("mask_format_mismatch does not say what to do: %q", service.Messages.MaskFormatMismatch)
+	}
 	if strings.TrimSpace(service.Messages.MaskNotSupported) == "" {
 		t.Fatal("mcp_public.messages.mask_not_supported is empty")
 	}

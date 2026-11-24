@@ -934,10 +934,14 @@ func (s *Server) mcpBuildInput(call *mcpCall, offering generation.Offering, requ
 
 // mcpMaskProblem checks a mask before anything is prepared or paid for (#332):
 // the picture must be the caller's, a PNG within the Offering's byte cap, hold
-// at least one transparent (redrawn) pixel, and be exactly the size of the
-// first picture the wire sends. A missing picture is image_not_found; the mask
-// itself is checked with the platform's own mask decoder, so the rule cannot
-// drift from the canvas's.
+// at least one transparent (redrawn) pixel, and have exactly the format and
+// the size of the first picture the wire sends. A missing picture is
+// image_not_found; the mask itself is checked with the platform's own mask
+// decoder, so the rule cannot drift from the canvas's. The format rule (#582)
+// is the image-edit wire's: "The image to edit and mask must be of the same
+// format and size". Both formats are read from the bytes, and a picture of
+// another format is refused here with what to do, never converted silently
+// nor sent to fail upstream.
 func (s *Server) mcpMaskProblem(call *mcpCall, request mcpStartRequest, parameter generation.Parameter) *mcpOutcome {
 	service := s.application.MCPPublic
 	limit := parameter.MaxBytes
@@ -959,9 +963,14 @@ func (s *Server) mcpMaskProblem(call *mcpCall, request mcpStartRequest, paramete
 		return s.mcpMessageProblem(call, "mask_invalid", service.Messages.MaskInvalid, mcppublic.Subject{},
 			"{max}", strconv.FormatInt(limit, 10))
 	}
-	width, height, outcome, err := s.mcpPictureSize(call, request.images[0])
+	width, height, format, outcome, err := s.mcpPictureSize(call, request.images[0])
 	if err != nil || outcome != nil {
 		return outcome
+	}
+	// MeasureMask reads only a PNG, so the mask's format is png here.
+	if format != "png" {
+		return s.mcpMessageProblem(call, "mask_format_mismatch", service.Messages.MaskFormatMismatch, mcppublic.Subject{},
+			"{mask_format}", "PNG", "{image_format}", strings.ToUpper(format))
 	}
 	if report.Width != width || report.Height != height {
 		return s.mcpMessageProblem(call, "mask_size_mismatch", service.Messages.MaskSizeMismatch, mcppublic.Subject{},
@@ -971,22 +980,23 @@ func (s *Server) mcpMaskProblem(call *mcpCall, request mcpStartRequest, paramete
 	return nil
 }
 
-// mcpPictureSize reads the pixel size of a picture the caller names, an upload
-// or a saved Task output.
-func (s *Server) mcpPictureSize(call *mcpCall, id string) (int, int, *mcpOutcome, error) {
+// mcpPictureSize reads the pixel size and the format (sniffed from the bytes
+// by the registered decoders: png, jpeg, webp) of a picture the caller names,
+// an upload or a saved Task output.
+func (s *Server) mcpPictureSize(call *mcpCall, id string) (int, int, string, *mcpOutcome, error) {
 	_, body, outcome, err := s.mcpOpenPicture(call, id)
 	if err != nil || outcome != nil {
-		return 0, 0, outcome, err
+		return 0, 0, "", outcome, err
 	}
 	defer body.Close()
-	config, _, err := image.DecodeConfig(body)
+	config, format, err := image.DecodeConfig(body)
 	if err != nil || config.Width <= 0 || config.Height <= 0 {
 		// The kernel would refuse the same picture before dispatch; the mask is
 		// the reason this call had to read it.
 		service := s.application.MCPPublic
-		return 0, 0, s.mcpMessageProblem(call, "input_refused", service.Messages.InputRefused, mcppublic.Subject{}), nil
+		return 0, 0, "", s.mcpMessageProblem(call, "input_refused", service.Messages.InputRefused, mcppublic.Subject{}), nil
 	}
-	return config.Width, config.Height, nil, nil
+	return config.Width, config.Height, format, nil, nil
 }
 
 // mcpPictureBytes reads at most max bytes of a picture the caller names plus

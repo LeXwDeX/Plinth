@@ -1109,6 +1109,8 @@ func TestMCPGenerateImageMaskIsRefusedBeforeStarting(t *testing.T) {
 	opaque := f.upload(key, testPNG(t, 64))
 	jpeg := f.upload(key, testJPEG(t, 64))
 	foreign := f.upload(other, testMaskPNG(t, 64))
+	mask := f.upload(key, testMaskPNG(t, 64))
+	jpegReference := f.upload(key, testJPEG(t, 64))
 	before := f.countRows(`SELECT COUNT(*) FROM generation_tasks`)
 	for name, test := range map[string]struct {
 		args map[string]any
@@ -1117,6 +1119,7 @@ func TestMCPGenerateImageMaskIsRefusedBeforeStarting(t *testing.T) {
 		"size mismatch":          {map[string]any{"prompt": "x", "images": []any{reference}, "mask": small}, "mask_size_mismatch"},
 		"opaque mask":            {map[string]any{"prompt": "x", "images": []any{reference}, "mask": opaque}, "mask_invalid"},
 		"jpeg mask":              {map[string]any{"prompt": "x", "images": []any{reference}, "mask": jpeg}, "mask_invalid"},
+		"jpeg first picture":     {map[string]any{"prompt": "x", "images": []any{jpegReference, reference}, "mask": mask}, "mask_format_mismatch"},
 		"another owner's mask":   {map[string]any{"prompt": "x", "images": []any{reference}, "mask": foreign}, "image_not_found"},
 		"no picture":             {map[string]any{"prompt": "x", "mask": small}, "mask_not_supported"},
 		"service without a mask": {map[string]any{"prompt": "x", "images": []any{reference}, "mask": small, "service": "meshy/nano-banana-pro/image-to-image"}, "mask_not_supported"},
@@ -1130,5 +1133,41 @@ func TestMCPGenerateImageMaskIsRefusedBeforeStarting(t *testing.T) {
 	}
 	if after := f.countRows(`SELECT COUNT(*) FROM generation_tasks`); after != before {
 		t.Fatalf("a refused mask started %d tasks", after-before)
+	}
+}
+
+// #582: the image-edit wire takes a mask of the first picture's format only
+// ("The image to edit and mask must be of the same format and size"). A
+// first picture that is no PNG is refused before anything starts, with the
+// sniffed formats and what to do; a PNG first picture beside a JPEG second one
+// is taken, since the mask applies to the first.
+func TestMCPGenerateImageMaskOfAnotherFormatIsRefused(t *testing.T) {
+	t.Parallel()
+	f := newMCPFixture(t, nil)
+	key := f.issueKey("owner-a", "generate")
+	mask := f.upload(key, testMaskPNG(t, 64))
+	jpegReference := f.upload(key, testJPEG(t, 64))
+	before := f.countRows(`SELECT COUNT(*) FROM generation_tasks`)
+	result := f.call(key, "generate_image", map[string]any{
+		"prompt": "x", "images": []any{jpegReference}, "mask": mask, "idempotency_key": idem("mask-format"),
+	})
+	if !result.isError || result.problemCode() != "mask_format_mismatch" {
+		t.Fatalf("a JPEG first picture with a PNG mask = %s", result.raw)
+	}
+	want := strings.NewReplacer("{mask_format}", "PNG", "{image_format}", "JPEG").
+		Replace(f.application.MCPPublic.Messages.MaskFormatMismatch)
+	problem, _ := result.structured["error"].(map[string]any)
+	if message, _ := problem["message"].(string); message != want {
+		t.Fatalf("message = %q, want %q", message, want)
+	}
+	if after := f.countRows(`SELECT COUNT(*) FROM generation_tasks`); after != before {
+		t.Fatalf("a refused mask started %d tasks", after-before)
+	}
+	png := f.upload(key, testPNG(t, 64))
+	accepted := f.call(key, "generate_image", map[string]any{
+		"prompt": "x", "images": []any{png, jpegReference}, "mask": mask, "idempotency_key": idem("mask-format-ok"),
+	})
+	if accepted.isError {
+		t.Fatalf("a PNG first picture with a JPEG second one = %s", accepted.raw)
 	}
 }
